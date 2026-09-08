@@ -1158,34 +1158,22 @@ export function AnewLeadContactDialog({
 
             let resourceId: string | null = null;
             if (resourceUserId) {
+              // Só usar um recurso EXISTENTE do tipo "user". Se o responsável
+              // ainda não tem recurso de agendamento, NÃO se cria aqui: criar
+              // exige a permissão scheduling.resources.create (que quem trata de
+              // leads não tem) e fazia a RLS recusar (42501), rebentando todo o
+              // registo de contacto. Sem recurso -> a visita fica criada sem
+              // responsável no agendamento, em vez de dar erro.
               const { data: existingResource } = await supabase
                 .from("schedule_resources")
                 .select("id")
                 .eq("user_id", resourceUserId)
                 .eq("organization_id", companyId)
+                .eq("resource_type", "user")
                 .maybeSingle();
 
               if (existingResource?.id) {
                 resourceId = existingResource.id;
-              } else {
-                const assignedUser = users.find((u) => u.id === assignedTo);
-                const { data: newResource, error: newResourceError } = await supabase
-                  .from("schedule_resources")
-                  .insert({
-                    organization_id: companyId,
-                    name: assignedUser?.name || assignedUser?.email || "Utilizador",
-                    resource_type: "user",
-                    user_id: resourceUserId,
-                    is_active: true,
-                    color: "#10b981",
-                    metadata: {},
-                    created_by: currentAnewUserId,
-                  })
-                  .select("id")
-                  .single();
-
-                if (newResourceError) throw newResourceError;
-                resourceId = newResource?.id || null;
               }
             }
 
