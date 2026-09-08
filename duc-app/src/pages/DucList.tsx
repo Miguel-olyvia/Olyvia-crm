@@ -15,8 +15,9 @@ import {
   Spinner,
   cx,
 } from "../components/ui";
-import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle, ClientSketch, X, ExternalLink } from "../components/icons";
+import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle, ClientSketch, X, ExternalLink, CheckCircle } from "../components/icons";
 import { DucKanban } from "../components/DucKanban";
+import { fetchMyTasks, type MyTask } from "../lib/tasks";
 import { StatusSelect } from "../components/StatusSelect";
 import { Celebration } from "../components/Celebration";
 import { fetchDismissedClientIds, dismissClient, restoreClient } from "../lib/dismissed";
@@ -158,81 +159,77 @@ function OpenBadge({ duc }: { duc: DucRecord }) {
 }
 
 /**
- * Clientes da organização COM contrato válido (assinado/ativo). Visibilidade por
- * ÁREA: mostra todos os clientes com contrato da org a que o utilizador tem
- * acesso — não apenas os que lhe estão associados. Arranca dos próprios
- * `client_contracts` (a RLS por membership é a fronteira real de segurança).
+ * Propostas comerciais ACEITES da organização que ainda NÃO têm DUC — o ponto de
+ * partida do fluxo (o DUC nasce da proposta, antes do contrato). Visibilidade por
+ * ÁREA: todas as propostas aceites da org a que o utilizador tem acesso (a RLS por
+ * membership é a fronteira real de segurança). Uma entrada por proposta.
  */
-async function fetchValidContractClients(orgId: string): Promise<ClientOption[]> {
-  const { data: contracts } = await supabase
-    .from("client_contracts")
-    .select("client_id, entity_id, assigned_to, signature_date, created_at")
+async function fetchAcceptedProposals(orgId: string): Promise<ClientOption[]> {
+  const { data: proposals } = await supabase
+    .from("proposals")
+    .select("id, client_id, entity_id, assigned_to, accepted_at, created_at")
     .eq("organization_id", orgId)
-    .in("status", ["signed", "active"])
+    .eq("status", "accepted")
     .is("deleted_at", null)
-    .not("client_id", "is", null)
     .limit(1000);
 
-  // Um registo por cliente (dedupe), guardando entity_id/assigned_to/data do contrato.
-  const byClient = new Map<
-    string,
-    { entity_id: string | null; assigned_to: string | null; since: string | null }
-  >();
-  (contracts ?? []).forEach((c) => {
-    const cid = c.client_id as string;
-    if (!cid) return;
-    if (!byClient.has(cid)) {
-      byClient.set(cid, {
-        entity_id: (c.entity_id as string) ?? null,
-        assigned_to: (c.assigned_to as string) ?? null,
-        since: ((c.signature_date as string) ?? (c.created_at as string)) ?? null,
-      });
-    }
+  const rows = (proposals ?? []).filter((p) => p.id);
+  if (rows.length === 0) return [];
+
+  // Propostas que JÁ têm DUC — para não duplicar (uma proposta = um DUC).
+  const { data: withDuc } = await supabase
+    .from("anew_client_ducs")
+    .select("proposal_id")
+    .eq("organization_id", orgId)
+    .is("deleted_at", null)
+    .not("proposal_id", "is", null)
+    .limit(5000);
+  const used = new Set((withDuc ?? []).map((r) => r.proposal_id as string));
+
+  const pending = rows.filter((p) => !used.has(p.id as string));
+  if (pending.length === 0) return [];
+
+  // Resolve nomes por entity_id da proposta; quando falta, cai no entity do cliente.
+  const entityIds = new Set<string>();
+  const missingEntityClientIds: string[] = [];
+  pending.forEach((p) => {
+    if (p.entity_id) entityIds.add(p.entity_id as string);
+    else if (p.client_id) missingEntityClientIds.push(p.client_id as string);
   });
-
-  const clientIds = Array.from(byClient.keys());
-  if (clientIds.length === 0) return [];
-
-  // Preenche entity_id/assigned_to em falta a partir de anew_clients (best-effort).
-  const missingEntity = clientIds.filter((id) => !byClient.get(id)!.entity_id);
-  if (missingEntity.length > 0) {
+  const entityByClient = new Map<string, string>();
+  if (missingEntityClientIds.length > 0) {
     const { data: clients } = await supabase
       .from("anew_clients")
-      .select("id, entity_id, assigned_to")
-      .in("id", missingEntity);
+      .select("id, entity_id")
+      .in("id", Array.from(new Set(missingEntityClientIds)));
     (clients ?? []).forEach((c) => {
-      const rec = byClient.get(c.id as string);
-      if (rec) {
-        rec.entity_id = rec.entity_id ?? ((c.entity_id as string) ?? null);
-        rec.assigned_to = rec.assigned_to ?? ((c.assigned_to as string) ?? null);
+      if (c.entity_id) {
+        entityByClient.set(c.id as string, c.entity_id as string);
+        entityIds.add(c.entity_id as string);
       }
     });
   }
 
-  const entityIds = Array.from(
-    new Set(
-      Array.from(byClient.values())
-        .map((v) => v.entity_id)
-        .filter(Boolean) as string[]
-    )
-  );
   const nameByEntity = new Map<string, string>();
-  if (entityIds.length > 0) {
+  if (entityIds.size > 0) {
     const { data: ents } = await supabase
       .from("anew_entities")
       .select("id, display_name, first_name, last_name")
-      .in("id", entityIds);
+      .in("id", Array.from(entityIds));
     (ents ?? []).forEach((e) => nameByEntity.set(e.id as string, entityName(e)));
   }
 
-  return clientIds.map((id) => {
-    const rec = byClient.get(id)!;
+  return pending.map((p) => {
+    const entityId =
+      (p.entity_id as string) ??
+      (p.client_id ? entityByClient.get(p.client_id as string) ?? null : null);
     return {
-      id,
-      entity_id: rec.entity_id,
-      assigned_to: rec.assigned_to,
-      since: rec.since,
-      name: (rec.entity_id ? nameByEntity.get(rec.entity_id) : undefined) ?? "Cliente sem nome",
+      id: (p.client_id as string) ?? "",
+      entity_id: entityId,
+      assigned_to: (p.assigned_to as string) ?? null,
+      since: ((p.accepted_at as string) ?? (p.created_at as string)) ?? null,
+      proposalId: p.id as string,
+      name: (entityId ? nameByEntity.get(entityId) : undefined) ?? "Cliente sem nome",
     };
   });
 }
@@ -271,7 +268,7 @@ async function resolveClientNames(rows: DucRecord[]): Promise<Map<string, string
   return map;
 }
 
-type View = "ducs" | "pending" | "kanban";
+type View = "ducs" | "pending" | "kanban" | "mine";
 
 export default function DucList() {
   const { businessUserId, activeOrgId, orgs } = useAuth();
@@ -304,6 +301,8 @@ export default function DucList() {
   // Kanban: etapas efetivas da variante da org (full, para validar obrigatórios)
   // + movimento pendente + movimento bloqueado por campos obrigatórios em falta.
   const [kanbanStages, setKanbanStages] = useState<DucStage[]>([]);
+  // "As minhas tarefas": etapas ativas atribuídas ao utilizador (nesta e noutras orgs).
+  const [myTasks, setMyTasks] = useState<MyTask[] | null>(null);
   const [pendingMove, setPendingMove] = useState<{ duc: DucRecord; targetStage: number } | null>(
     null
   );
@@ -323,7 +322,7 @@ export default function DucList() {
     const { data, error, count } = await supabase
       .from("anew_client_ducs")
       .select(
-        "id, organization_id, root_organization_id, client_id, duc_number, title, variant, current_stage, status, assigned_to, blocks, tracking, created_by, created_at, updated_at, deleted_at",
+        "id, organization_id, root_organization_id, client_id, proposal_id, duc_number, title, variant, current_stage, status, assigned_to, blocks, tracking, created_by, created_at, updated_at, deleted_at",
         { count: "exact" }
       )
       .eq("organization_id", activeOrgId)
@@ -360,7 +359,7 @@ export default function DucList() {
     const { data, error } = await supabase
       .from("anew_client_ducs")
       .select(
-        "id, organization_id, root_organization_id, client_id, duc_number, title, variant, current_stage, status, assigned_to, blocks, tracking, created_by, created_at, updated_at, deleted_at"
+        "id, organization_id, root_organization_id, client_id, proposal_id, duc_number, title, variant, current_stage, status, assigned_to, blocks, tracking, created_by, created_at, updated_at, deleted_at"
       )
       .eq("organization_id", activeOrgId)
       .is("deleted_at", null)
@@ -393,29 +392,20 @@ export default function DucList() {
       return;
     }
     setLoadingPending(true);
-    const valid = await fetchValidContractClients(activeOrgId);
-    // Client_ids que JÁ têm DUC — consulta server-side (não depende da paginação).
-    const { data: withDucRows, error: withDucErr } = await supabase
-      .from("anew_client_ducs")
-      .select("client_id")
+    // Propostas aceites SEM DUC (a exclusão dos que já têm DUC é feita dentro de
+    // fetchAcceptedProposals, por proposta).
+    const notDocumented = await fetchAcceptedProposals(activeOrgId);
+    // Total de propostas aceites (com e sem DUC) — para a estatística "Com DUC"
+    // (= total − por documentar) e a barra de cobertura baterem certo.
+    const { count: totalAccepted } = await supabase
+      .from("proposals")
+      .select("id", { count: "exact", head: true })
       .eq("organization_id", activeOrgId)
-      .is("deleted_at", null)
-      .not("client_id", "is", null)
-      .limit(5000);
-    if (withDucErr) {
-      // Não mostrar todos como "por documentar" por causa de um erro de query.
-      // eslint-disable-next-line no-console
-      console.error("[DUC] erro a apurar DUCs existentes:", withDucErr);
-      setContractCount(valid.length);
-      setPending([]);
-      setLoadingPending(false);
-      return;
-    }
-    const withDuc = new Set((withDucRows ?? []).map((r) => r.client_id as string));
-    setContractCount(valid.length);
+      .eq("status", "accepted")
+      .is("deleted_at", null);
+    setContractCount(totalAccepted ?? notDocumented.length);
     // Exclui os "dispensados" (não precisam de DUC) da lista de por documentar.
     const dismissed = await fetchDismissedClientIds(activeOrgId);
-    const notDocumented = valid.filter((c) => !withDuc.has(c.id));
     setPending(notDocumented.filter((c) => !dismissed.has(c.id)));
     setDismissedClients(notDocumented.filter((c) => dismissed.has(c.id)));
     setLoadingPending(false);
@@ -441,6 +431,19 @@ export default function DucList() {
   useEffect(() => {
     if (view === "pending") void loadPending();
   }, [view, loadPending]);
+
+  // Carrega "As minhas tarefas" ao entrar nessa aba (etapas ativas atribuídas a mim).
+  useEffect(() => {
+    if (view !== "mine" || !businessUserId) return;
+    let alive = true;
+    setMyTasks(null);
+    void fetchMyTasks(businessUserId).then((t) => {
+      if (alive) setMyTasks(t);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [view, businessUserId]);
 
   // Carrega as etapas (colunas do Kanban) para a variante da organização ativa.
   useEffect(() => {
@@ -585,7 +588,7 @@ export default function DucList() {
             Documento Único de Cliente
           </h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            Vês os clientes da tua área com contrato assinado.
+            Vês as propostas aceites da tua área.
           </p>
         </div>
         <Button
@@ -627,6 +630,17 @@ export default function DucList() {
           <Building width={15} height={15} className="shrink-0" />{" "}
           <span className="sm:hidden">Pendentes</span>
           <span className="hidden sm:inline">Por documentar</span>
+        </button>
+        <button
+          onClick={() => setView("mine")}
+          className={
+            "inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-3.5 " +
+            (view === "mine" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
+          }
+        >
+          <CheckCircle width={15} height={15} className="shrink-0" />
+          <span className="sm:hidden">Tarefas</span>
+          <span className="hidden sm:inline">As minhas tarefas</span>
         </button>
       </div>
 
@@ -696,7 +710,7 @@ export default function DucList() {
             </>
           )}
         </div>
-      ) : (
+      ) : view === "pending" ? (
         <PendingView
           loading={loadingPending}
           pending={pending}
@@ -707,6 +721,8 @@ export default function DucList() {
           onDismiss={handleDismiss}
           onRestore={handleRestore}
         />
+      ) : (
+        <MyTasksTab tasks={myTasks} onOpen={(id) => navigate(`/duc/${id}`)} />
       )}
 
       {showCreate && (
@@ -918,7 +934,7 @@ function DucsView({
             title={ducs.length === 0 ? "Ainda não há DUCs" : "Sem resultados"}
             description={
               ducs.length === 0
-                ? "Cria o primeiro DUC para um cliente da área com contrato."
+                ? "Cria o primeiro DUC a partir de uma proposta aceite da área."
                 : "Nenhum DUC corresponde aos filtros aplicados."
             }
             action={
@@ -1147,7 +1163,7 @@ function StatRow({
     iconBg: string; // fundo do ícone
   }> = [
     {
-      label: "Clientes com contrato",
+      label: "Propostas aceites",
       value: contractCount,
       icon: <Building width={16} height={16} />,
       accent: "text-slate-800",
@@ -1316,7 +1332,7 @@ function PendingView({
           <EmptyState
             icon={<ClientSketch width={24} height={24} />}
             title="Nada por documentar"
-            description="Todos os clientes da área com contrato válido já têm DUC."
+            description="Todas as propostas aceites da área já têm DUC."
           />
         </Card>
       ) : (
@@ -1350,7 +1366,7 @@ function PendingView({
                         documentar.
                       </p>
                     ) : (
-                      <p className="text-sm text-slate-500">Contratos válidos ainda sem DUC.</p>
+                      <p className="text-sm text-slate-500">Propostas aceites ainda sem DUC.</p>
                     )}
                   </div>
                 </div>
@@ -1395,7 +1411,7 @@ function PendingView({
                 const tone = urgencyTone(days ?? 0);
                 const daysLabel =
                   days === null
-                    ? "sem data de contrato"
+                    ? "sem data de aceitação"
                     : days === 0
                       ? "hoje"
                       : days === 1
@@ -1551,7 +1567,7 @@ function CreateDucModal({
   useEffect(() => {
     (async () => {
       setLoadingClients(true);
-      const list = await fetchValidContractClients(orgId);
+      const list = await fetchAcceptedProposals(orgId);
       setClients(list);
       setLoadingClients(false);
     })();
@@ -1579,15 +1595,19 @@ function CreateDucModal({
     const eff = await fetchEffectiveStages(orgId, variant);
     const tracking = eff.stages.map((s) => ({ stage: s.no, state: "pending" as const }));
 
-    // Pré-preenche os blocos com os dados que já existem na Olyvia.
-    const info = await fetchClientOlyviaInfo(selected.id);
+    // Pré-preenche os blocos com os dados que já existem na Olyvia, a partir da
+    // PROPOSTA de origem (âmbito + contactos). O contrato entra depois.
+    const info = selected.id
+      ? await fetchClientOlyviaInfo(selected.id, { proposalId: selected.proposalId })
+      : null;
     const blocks = info ? prefillBlocksFromInfo(info) : {};
 
     const { data, error: insertError } = await supabase
       .from("anew_client_ducs")
       .insert({
         organization_id: orgId,
-        client_id: selected.id,
+        client_id: selected.id || null,
+        proposal_id: selected.proposalId ?? null,
         duc_number: ducNumber,
         title: selected.name,
         variant,
@@ -1625,7 +1645,7 @@ function CreateDucModal({
       }
     >
       <div className="space-y-4">
-        <Field label="Cliente" hint="Clientes da área com contrato válido (assinado ou ativo).">
+        <Field label="Cliente" hint="Propostas aceites da área ainda sem DUC.">
           <Input
             placeholder="Pesquisar cliente…"
             value={selected ? selected.name : search}
@@ -1642,7 +1662,7 @@ function CreateDucModal({
               <Spinner label="A carregar clientes…" />
             ) : filtered.length === 0 ? (
               <p className="p-4 text-center text-sm text-slate-400">
-                Sem clientes com contrato válido nesta área.
+                Sem propostas aceites por documentar nesta área.
               </p>
             ) : (
               filtered.map((c) => (
@@ -1678,5 +1698,89 @@ function CreateDucModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+// ------------------------------------------------------- As minhas tarefas --
+
+/** Dias desde que a etapa ficou ativa (para o "há N dias"). */
+function taskDaysOpen(enteredAt: string | null): number {
+  if (!enteredAt) return 0;
+  const t = new Date(enteredAt).getTime();
+  return Number.isNaN(t) ? 0 : Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+
+/**
+ * Aba "As minhas tarefas": etapas ATIVAS atribuídas ao utilizador em todos os
+ * DUCs (a sua fila de trabalho). Mesma origem da página /tarefas.
+ */
+function MyTasksTab({
+  tasks,
+  onOpen,
+}: {
+  tasks: MyTask[] | null;
+  onOpen: (id: string) => void;
+}) {
+  if (tasks === null) {
+    return (
+      <Card>
+        <Spinner label="A carregar as tuas tarefas…" />
+      </Card>
+    );
+  }
+  if (tasks.length === 0) {
+    return (
+      <Card className="p-8">
+        <EmptyState
+          icon={<CheckCircle width={22} height={22} />}
+          title="Sem tarefas pendentes"
+          description="Quando uma etapa te for atribuída e ficar ativa, aparece aqui."
+        />
+      </Card>
+    );
+  }
+  return (
+    <div className="space-y-2.5">
+      {tasks.map((t) => {
+        const d = taskDaysOpen(t.enteredAt);
+        const stale = d >= 7;
+        return (
+          <button
+            key={t.ducId}
+            type="button"
+            onClick={() => onOpen(t.ducId)}
+            className="group flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand text-sm font-bold tabular-nums text-white ring-1 ring-inset ring-brand">
+              {t.stageNo}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-slate-900">{t.stageTitle}</p>
+              <p className="truncate text-xs text-slate-500">
+                <span className="font-mono text-slate-400">{t.ducNumber ?? "DUC"}</span>
+                {t.clientName ? ` · ${t.clientName}` : ""}
+                {t.responsible ? ` · ${t.responsible}` : ""}
+              </p>
+            </div>
+            <span
+              className={cx(
+                "hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium sm:inline-flex",
+                stale
+                  ? "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-100"
+                  : "bg-slate-50 text-slate-500 ring-1 ring-inset ring-slate-100"
+              )}
+            >
+              <Clock width={12} height={12} />
+              {d === 0 ? "hoje" : `há ${d}d`}
+            </span>
+            <ChevronRight
+              width={18}
+              height={18}
+              className="shrink-0 text-slate-300 transition-colors group-hover:text-brand"
+            />
+          </button>
+        );
+      })}
+    </div>
   );
 }

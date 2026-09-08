@@ -44,10 +44,28 @@ export interface AddressValue {
   district?: string;
 }
 
+/**
+ * Função/role da organização: um conjunto nomeado de membros (ex.: "Financeiro"
+ * = [Ana, Rui]). Definido uma vez por organização (guardado em
+ * `anew_client_duc_configs.config.roles`) e reutilizado como destinatário de
+ * notificações em qualquer etapa — resolve automaticamente para os membros.
+ */
+export interface DucRole {
+  /** Chave estável (id) da role dentro da organização. */
+  key: string;
+  /** Nome legível (ex.: "Financeiro"). */
+  label: string;
+  /** `anew_users.id` dos membros que pertencem a esta role. */
+  memberIds: string[];
+}
+
 /** Destinatário de notificação de uma etapa. */
 export interface StageRecipient {
-  /** "member" → anew_users.id da organização; "email" → endereço livre (externo). */
-  type: "member" | "email";
+  /**
+   * "member" → anew_users.id da organização; "email" → endereço livre (externo);
+   * "role" → chave de uma role (resolve para os membros dessa role).
+   */
+  type: "member" | "email" | "role";
   value: string;
   label?: string;
 }
@@ -64,6 +82,12 @@ export interface StageNotify {
    * (ex.: 7 = "etapa parada há mais de uma semana"). 0/vazio = sem alerta.
    */
   alertAfterDays?: number;
+  /**
+   * Lembrete ANTECIPADO: avisar N dias ANTES de `alertAfterDays` estourar
+   * (ex.: alertAfterDays=7, remindBeforeDays=2 → lembra ao 5.º dia). Requer
+   * `alertAfterDays` definido. 0/vazio = sem lembrete antecipado.
+   */
+  remindBeforeDays?: number;
 }
 
 export interface DucField {

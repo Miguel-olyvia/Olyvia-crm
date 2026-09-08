@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS public.anew_client_ducs (
   organization_id      uuid        NOT NULL,
   root_organization_id uuid,
   client_id            uuid        REFERENCES public.anew_clients (id) ON DELETE SET NULL,
+  proposal_id          uuid        REFERENCES public.proposals (id) ON DELETE SET NULL,
   duc_number           text,
   title                text,
   variant              text        NOT NULL DEFAULT 'universal'
@@ -56,6 +57,8 @@ CREATE INDEX IF NOT EXISTS idx_client_ducs_org
   ON public.anew_client_ducs (organization_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_client_ducs_client
   ON public.anew_client_ducs (client_id) WHERE deleted_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_client_ducs_proposal
+  ON public.anew_client_ducs (proposal_id) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_client_ducs_assigned
   ON public.anew_client_ducs (assigned_to) WHERE deleted_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_client_ducs_created_by
@@ -68,6 +71,12 @@ ALTER TABLE public.anew_client_ducs
   DROP CONSTRAINT IF EXISTS anew_client_ducs_current_stage_check;
 ALTER TABLE public.anew_client_ducs
   ADD CONSTRAINT anew_client_ducs_current_stage_check CHECK (current_stage >= 1);
+
+-- Migração idempotente: origem do DUC passa a ser a PROPOSTA comercial aceite
+-- (antes era o contrato assinado). Guarda a proposta de origem para deep-link e
+-- para o prefill; o contrato entra depois (proposals.client_contract_id).
+ALTER TABLE public.anew_client_ducs
+  ADD COLUMN IF NOT EXISTS proposal_id uuid REFERENCES public.proposals (id) ON DELETE SET NULL;
 
 -- ============================================================
 -- 2. anew_client_duc_items — linhas tabulares genéricas

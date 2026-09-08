@@ -14,6 +14,7 @@ import {
   Chart,
   FileText,
   Building,
+  CheckCircle,
 } from "./icons";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
@@ -48,15 +49,16 @@ export function DucLayout() {
   // Itens da bottom nav (mobile)
   const navItems = [
     { to: "/", label: "Início", Icon: FileText, active: location.pathname === "/" },
+    { to: "/tarefas", label: "Tarefas", Icon: CheckCircle, active: location.pathname === "/tarefas" },
     { to: "/dashboard", label: "Dashboard", Icon: Chart, active: location.pathname === "/dashboard" },
     { to: "/notificacoes", label: "Notif.", Icon: Bell, active: location.pathname === "/notificacoes" },
     { to: "/config", label: "Config", Icon: Settings, active: location.pathname === "/config" },
-    { to: "/ajuda", label: "Ajuda", Icon: Help, active: location.pathname === "/ajuda" },
   ];
 
   // Links do rodapé (desktop) — todos os destinos da app, com rótulos completos.
   const footerLinks = [
     { to: "/", label: "DUCs", Icon: FileText },
+    { to: "/tarefas", label: "As minhas tarefas", Icon: CheckCircle },
     { to: "/dashboard", label: "Dashboard", Icon: Chart },
     { to: "/notificacoes", label: "Notificações", Icon: Bell },
     { to: "/config", label: "Configurações", Icon: Settings },
@@ -132,6 +134,7 @@ export function DucLayout() {
                 </div>
 
                 {[
+                  { to: "/tarefas", label: "As minhas tarefas", Icon: CheckCircle },
                   { to: "/dashboard", label: "Dashboard", Icon: Chart },
                   { to: "/notificacoes", label: "Notificações", Icon: Bell },
                   { to: "/ajuda", label: "Ajuda", Icon: Help },
