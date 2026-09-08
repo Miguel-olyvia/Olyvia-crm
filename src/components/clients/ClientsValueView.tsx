@@ -12,6 +12,7 @@ import { toast } from "@/lib/toast";
 import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { format, subMonths, startOfMonth, endOfMonth, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import type { ClientHealthScore, ClientContractInfo, ClientTag, ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 
 interface ClientsValueViewProps {
@@ -116,6 +117,7 @@ export function ClientsValueView({
             const { data, error } = await q;
             if (error) {
               console.error("Error loading contracts batch for value view:", error);
+              captureFlowError(error, "db-error-leaked-to-ui");
               continue;
             }
             if (data) all.push(...(data as FullContract[]));
@@ -134,6 +136,7 @@ export function ClientsValueView({
         const { data: orgWideData, error: orgWideError } = await orgWideQuery;
         if (orgWideError) {
           console.error("Error loading org-wide revenue contracts for value view:", orgWideError);
+          captureFlowError(orgWideError, "db-error-leaked-to-ui");
           if (!cancelled) setOrgWideRevenueContracts([]);
         } else if (!cancelled) {
           setOrgWideRevenueContracts((orgWideData as FullContract[]) || []);

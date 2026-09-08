@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Search, Plus, Trash2, Package, Wrench } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { escapeIlike } from "@/lib/clientSearch";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // Results are capped — this is a compact "type to search" dropdown, not a
 // paginated list, so there is no affordance to page past this many rows.
@@ -60,7 +61,7 @@ export const CatalogItemPicker = ({ items, onChange, organizationId }: CatalogIt
             }
           }
         }
-      } catch (_) { /* ignore hierarchy errors */ }
+      } catch (hierErr) { /* ignore hierarchy errors (scope still works with just the active org) */ captureFlowError(hierErr, "db-error-leaked-to-ui"); }
 
       const orgFilter = orgIds.map(id => `organization_id.eq.${id}`).join(',');
       let fetched: any[] = [];

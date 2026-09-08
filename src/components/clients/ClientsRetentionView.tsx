@@ -9,6 +9,7 @@ import { toast } from "@/lib/toast";
 import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { differenceInDays, format } from "date-fns";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 import type { ClientHealthScore, ClientContractInfo, ClientTag, ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 
@@ -171,6 +172,7 @@ export function ClientsRetentionView({
           const { data, error } = await q;
           if (error) {
             console.error("Error loading contracts batch for retention view:", error);
+            captureFlowError(error, "db-error-leaked-to-ui");
             continue;
           }
           if (data) all.push(...(data as FullContract[]));

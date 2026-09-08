@@ -79,8 +79,12 @@ export function WorkflowFlowchart({ stages, companyId }: Props) {
 
   const loadEdges = useCallback(async () => {
     if (!companyId) return;
-    const { data } = await (supabase.from("lead_stage_transitions" as any) as any)
+    const { data, error } = await (supabase.from("lead_stage_transitions" as any) as any)
       .select("*").eq("organization_id", companyId).eq("is_active", true);
+    if (error) {
+      console.error("Error loading lead stage transitions:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
+    }
     if (data) {
       setEdges((data as any[]).map((t: any) => ({
         id: t.id, source: t.from_stage_id, target: t.to_stage_id,

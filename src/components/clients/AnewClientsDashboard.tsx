@@ -12,6 +12,7 @@ import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope"
 import { formatCurrency } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const NEUTRAL_ORIGIN_COLOR = "#94a3b8";
 
@@ -410,6 +411,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
           const { data, error } = await scopedQuery;
           if (error) {
             console.error("Error loading contracts batch for clients dashboard:", error);
+            captureFlowError(error, "db-error-leaked-to-ui");
             return [];
           }
           return data || [];
@@ -470,7 +472,10 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
             .select("entity_id, interaction_at")
             .in("entity_id", batch)
             .order("interaction_at", { ascending: false });
-          if (error) console.error("Error loading interactions batch for clients dashboard:", error);
+          if (error) {
+            console.error("Error loading interactions batch for clients dashboard:", error);
+            captureFlowError(error, "db-error-leaked-to-ui");
+          }
           return data || [];
         });
         const interactionResults = await runWithLimit(interactionTasks, 4);
@@ -535,6 +540,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       };
     } catch (error) {
       console.error("Error loading clients dashboard:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
       throw error;
     }
   };

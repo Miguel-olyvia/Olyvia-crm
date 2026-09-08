@@ -310,6 +310,7 @@ export function AnewLeadContactDialog({
         .order("is_primary", { ascending: false })
         .limit(1);
 
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       if (error || !data || data.length === 0) return "";
 
       const addr = (data[0] as any)?.address;
@@ -322,7 +323,8 @@ export function AnewLeadContactDialog({
       ].filter(Boolean);
 
       return parts.join(", ");
-    } catch {
+    } catch (addrErr) {
+      captureFlowError(addrErr, "db-error-leaked-to-ui");
       return "";
     }
   };
@@ -385,7 +387,7 @@ export function AnewLeadContactDialog({
       .eq("id", lead.id)
       .maybeSingle();
 
-    if (error) return null;
+    if (error) { captureFlowError(error, "db-error-leaked-to-ui"); return null; }
     return data?.campaign_id ?? null;
   };
 
@@ -424,6 +426,7 @@ export function AnewLeadContactDialog({
       setRefLookup((prev) => ({ ...prev, ...lookup }));
     } catch (error) {
       console.error("Error loading field definitions:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
       setFieldDefinitions([]);
     }
   };
@@ -438,6 +441,9 @@ export function AnewLeadContactDialog({
 
     if (!error && data) {
       setContactResults(data);
+    } else if (error) {
+      console.error("Error loading contact results:", error);
+      captureFlowError(error, "lead-contact-results-load");
     }
   };
 
@@ -469,6 +475,7 @@ export function AnewLeadContactDialog({
       .eq("interaction_type", "call")
       .order("created_at", { ascending: false });
 
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     if (!error && data) {
       // Map entity_interactions rows onto the ContactHistory shape consumed by
       // the history UI. callback_scheduled_at maps to the interaction's
@@ -503,6 +510,7 @@ export function AnewLeadContactDialog({
 
       if (membershipsError) {
         console.error("Error loading memberships:", membershipsError);
+        captureFlowError(membershipsError, "db-error-leaked-to-ui");
         setUsers([]);
         return;
       }
@@ -538,6 +546,7 @@ export function AnewLeadContactDialog({
 
       if (usersError) {
         console.error("Error loading users:", usersError);
+        captureFlowError(usersError, "db-error-leaked-to-ui");
         setUsers([]);
         return;
       }
@@ -551,6 +560,7 @@ export function AnewLeadContactDialog({
       );
     } catch (error) {
       console.error("Error loading users:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
       setUsers([]);
     } finally {
       setLoadingUsers(false);
@@ -808,6 +818,7 @@ export function AnewLeadContactDialog({
       
     } catch (error) {
       console.error("Error checking conflicts:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
     } finally {
       setLoadingConflicts(false);
     }
