@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/accordion";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -200,12 +201,13 @@ export default function AttributeOptionPalettesDialog({
         }
 
         // Reload groups after auto-creation
-        const { data: reloadedGroups } = await (supabase as any)
+        const { data: reloadedGroups, error: reloadedGroupsError } = await (supabase as any)
           .from('attribute_option_groups')
           .select('*')
           .eq('attribute_id', attributeId)
           .eq('organization_id', activeCompany.id)
           .order('sort_order');
+        if (reloadedGroupsError) captureFlowError(reloadedGroupsError, 'db-error-leaked-to-ui');
         groupsData = reloadedGroups || [];
       }
 
@@ -307,12 +309,13 @@ export default function AttributeOptionPalettesDialog({
       setNewGroupName("");
       setNewGroupDescription("");
       // Reload and auto-select the new group
-      const { data: updatedGroups } = await (supabase as any)
+      const { data: updatedGroups, error: updatedGroupsError } = await (supabase as any)
         .from('attribute_option_groups')
         .select('*')
         .eq('attribute_id', attributeId)
         .eq('organization_id', activeCompany.id)
         .order('sort_order');
+      if (updatedGroupsError) captureFlowError(updatedGroupsError, 'db-error-leaked-to-ui');
       if (updatedGroups && updatedGroups.length > 0) {
         const newestGroup = updatedGroups[updatedGroups.length - 1];
         setSelectedGroupId(newestGroup.id);

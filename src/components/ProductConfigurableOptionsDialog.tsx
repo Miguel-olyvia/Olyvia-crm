@@ -185,11 +185,12 @@ export default function ProductConfigurableOptionsDialog({
 
       if (fixedAttrs.length > 0) {
         const attrIds = fixedAttrs.map(a => a.id);
-        const { data: existingProductPrices } = await supabase
+        const { data: existingProductPrices, error: existingProductPricesErr } = await supabase
           .from("product_attribute_value_prices")
           .select("id, attribute_id, value_option")
           .eq("product_id", productId)
           .in("attribute_id", attrIds);
+        if (existingProductPricesErr) captureFlowError(existingProductPricesErr, "db-error-leaked-to-ui");
 
         const existingMap = new Map<string, string>();
         (existingProductPrices || []).forEach((ep: any) => {
@@ -197,10 +198,11 @@ export default function ProductConfigurableOptionsDialog({
         });
 
         for (const attr of fixedAttrs) {
-          const { data: resolved } = await supabase.rpc("resolve_product_attribute_options", {
+          const { data: resolved, error: resolvedErr } = await supabase.rpc("resolve_product_attribute_options", {
             p_product_id: productId,
             p_attribute_id: attr.id,
           });
+          if (resolvedErr) captureFlowError(resolvedErr, "db-error-leaked-to-ui");
 
           if (resolved && resolved.length > 0) {
             sources[attr.id] = resolved[0]?.source || "global";

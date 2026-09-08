@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from 'xlsx';
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ProductExport {
   sku: string;
@@ -418,7 +419,7 @@ export const parseProductsCSV = async ({
     try {
       const { data, error } = await (supabase.from('product_categories' as any) as any)
         .insert({ name: name.trim(), slug, path: slug, organization_id: targetOrg, created_by: userId }).select().limit(1);
-      if (error) warnings.push(`Falha ao criar categoria "${name.trim()}": ${error.message}`);
+      if (error) { captureFlowError(error, "record-export-import"); warnings.push(`Falha ao criar categoria "${name.trim()}": ${error.message}`); }
       created = data?.[0] ?? null;
     } finally {
       try { await supabase.rpc('clear_audit_context'); } catch { /* intentional */ }
@@ -443,7 +444,7 @@ export const parseProductsCSV = async ({
     try {
       const { data, error } = await (supabase.from('product_categories' as any) as any)
         .insert({ name: name.trim(), slug, path: slug, parent_id: parentId || null, organization_id: targetOrg, created_by: userId }).select().limit(1);
-      if (error) warnings.push(`Falha ao criar subcategoria "${name.trim()}": ${error.message}`);
+      if (error) { captureFlowError(error, "record-export-import"); warnings.push(`Falha ao criar subcategoria "${name.trim()}": ${error.message}`); }
       created = data?.[0] ?? null;
     } finally {
       try { await supabase.rpc('clear_audit_context'); } catch { /* intentional */ }
@@ -464,7 +465,7 @@ export const parseProductsCSV = async ({
     if (fromDb) { _createdBrands.set(key, fromDb); (brands as any[]).push(fromDb); return fromDb; }
     const { data, error } = await (supabase.from('brands' as any) as any)
       .insert({ name: name.trim(), organization_id: targetOrg }).select().limit(1);
-    if (error) warnings.push(`Falha ao criar marca "${name.trim()}": ${error.message}`);
+    if (error) { captureFlowError(error, "record-export-import"); warnings.push(`Falha ao criar marca "${name.trim()}": ${error.message}`); }
     const created = data?.[0] ?? null;
     if (created) { _createdBrands.set(key, created); (brands as any[]).push(created); }
     return created;
@@ -482,7 +483,7 @@ export const parseProductsCSV = async ({
     if (fromDb) { _createdSuppliers.set(key, fromDb); (suppliers as any[]).push(fromDb); return fromDb; }
     const { data, error } = await (supabase.from('suppliers' as any) as any)
       .insert({ name: name.trim(), organization_id: targetOrg }).select().limit(1);
-    if (error) warnings.push(`Falha ao criar fornecedor "${name.trim()}": ${error.message}`);
+    if (error) { captureFlowError(error, "record-export-import"); warnings.push(`Falha ao criar fornecedor "${name.trim()}": ${error.message}`); }
     const created = data?.[0] ?? null;
     if (created) { _createdSuppliers.set(key, created); (suppliers as any[]).push(created); }
     return created;

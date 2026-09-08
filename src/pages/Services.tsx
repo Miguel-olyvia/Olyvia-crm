@@ -273,10 +273,11 @@ export default function Services() {
       const serviceIds = loadedServices.map((s: any) => s.id);
       let serviceOrgsMap = new Map<string, string[]>();
       if (serviceIds.length > 0) {
-        const { data: serviceOrgs } = await supabase
+        const { data: serviceOrgs, error: serviceOrgsListError } = await supabase
           .from("service_organizations")
           .select("service_id, organization_id")
           .in("service_id", serviceIds);
+        if (serviceOrgsListError) captureFlowError(serviceOrgsListError, "db-error-leaked-to-ui");
         (serviceOrgs || []).forEach((so: any) => {
           const arr = serviceOrgsMap.get(so.service_id) || [];
           arr.push(so.organization_id);
@@ -758,10 +759,11 @@ export default function Services() {
       }
 
       // Fetch prices
-      const { data: pricesData } = await supabase
+      const { data: pricesData, error: pricesDataError } = await supabase
         .from("service_prices")
         .select("price_type, price, currency, vat_rate")
         .eq("service_id", lastService.id);
+      if (pricesDataError) captureFlowError(pricesDataError, "db-error-leaked-to-ui");
 
       // Set form data (with empty SKU - user must provide new one)
       setFormData({

@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from 'xlsx';
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // CSV column headers (aligned with import template)
 const CSV_HEADERS = [
@@ -499,6 +500,7 @@ export async function parseServicesCSV(
         }
       }
     } catch (err: any) {
+      captureFlowError(err, "record-export-import");
       report.errors.push({
         row: i + 1,
         sku,

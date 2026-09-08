@@ -484,17 +484,19 @@ export default function Products() {
         // Get active company + all descendants via anew_hierarchy
         companiesPromise = (async () => {
           // Get active org
-          const { data: activeOrg } = await supabase
+          const { data: activeOrg, error: activeOrgError } = await supabase
             .from("anew_organizations")
             .select("id, name, type")
             .eq("id", activeCompany.id)
             .single();
+          if (activeOrgError) captureFlowError(activeOrgError, "db-error-leaked-to-ui");
 
           // Get all descendants recursively
-          const { data: hierarchy } = await supabase
+          const { data: hierarchy, error: hierarchyError } = await supabase
             .from("anew_hierarchy")
             .select("parent_org_id, child_org_id, anew_organizations!anew_hierarchy_child_org_id_fkey(id, name, type)")
             .order("created_at");
+          if (hierarchyError) captureFlowError(hierarchyError, "db-error-leaked-to-ui");
 
           // Build tree structure
           const allOrgs: { id: string; name: string; type: string; parent_id: string | null; depth: number }[] = [];
@@ -938,11 +940,12 @@ export default function Products() {
       // Fetch parent org for tenant context
       let tenantId = "";
       if (primaryCompanyId) {
-        const { data: orgData } = await supabase
+        const { data: orgData, error: orgDataError } = await supabase
           .from("anew_organizations")
           .select("id")
           .eq("id", primaryCompanyId)
           .single();
+        if (orgDataError) captureFlowError(orgDataError, "db-error-leaked-to-ui");
         tenantId = orgData?.id || "";
       }
       
@@ -1643,6 +1646,7 @@ export default function Products() {
         totalSkipped += stats.skippedCount + failedInFile;
         totalPrices += pricesToInsert.length;
       } catch (error: any) {
+        captureFlowError(error, "record-export-import");
         failedFiles.push(`${file.name}: ${error.message}`);
       }
     }
