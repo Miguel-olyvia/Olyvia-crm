@@ -1726,6 +1726,9 @@ function CollaboratorsPanel({
   const [role, setRole] = useState<"viewer" | "editor">("viewer");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Confirmações de remoção (colaborador externo / link público).
+  const [confirmRemove, setConfirmRemove] = useState<DucCollaborator | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState<PublicShare | null>(null);
 
   // Links públicos (só leitura, por token).
   const [shares, setShares] = useState<PublicShare[]>([]);
@@ -1838,7 +1841,7 @@ function CollaboratorsPanel({
               </div>
               <button
                 type="button"
-                onClick={() => void remove(c.id)}
+                onClick={() => setConfirmRemove(c)}
                 className="text-slate-300 transition-colors hover:text-red-500"
                 title="Remover colaborador"
               >
@@ -1889,7 +1892,7 @@ function CollaboratorsPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void revokeShare(s.id).then(load)}
+                  onClick={() => setConfirmRevoke(s)}
                   title="Revogar link"
                   className="shrink-0 text-slate-300 transition-colors hover:text-red-500"
                 >
@@ -1905,6 +1908,50 @@ function CollaboratorsPanel({
         Requer as tabelas aplicadas no Supabase (duc-app/db/schema.sql §9 colaboradores, §11 links
         públicos) e o magic link ativo no Auth.
       </p>
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Remover colaborador"
+          tone="danger"
+          confirmLabel="Remover"
+          icon={<Trash width={18} height={18} />}
+          message={
+            <>
+              Remover o acesso de{" "}
+              <span className="font-medium text-slate-800">{confirmRemove.email}</span> a este DUC?
+              Perde de imediato a permissão de {confirmRemove.role === "editor" ? "edição" : "leitura"}.
+            </>
+          }
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={async () => {
+            const c = confirmRemove;
+            setConfirmRemove(null);
+            await removeCollaborator(c.id);
+            load();
+          }}
+        />
+      )}
+
+      {confirmRevoke && (
+        <ConfirmDialog
+          title="Revogar link público"
+          tone="danger"
+          confirmLabel="Revogar"
+          icon={<Trash width={18} height={18} />}
+          message={
+            <>
+              Revogar este link público? Quem já o tiver deixa de conseguir abrir o documento.
+            </>
+          }
+          onCancel={() => setConfirmRevoke(null)}
+          onConfirm={async () => {
+            const s = confirmRevoke;
+            setConfirmRevoke(null);
+            await revokeShare(s.id);
+            load();
+          }}
+        />
+      )}
     </Card>
   );
 }

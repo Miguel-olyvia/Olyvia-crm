@@ -15,8 +15,9 @@ import {
   Spinner,
   cx,
 } from "../components/ui";
-import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle, ClientSketch, X, ExternalLink } from "../components/icons";
+import { Plus, Search, Trash, FileText, Building, ChevronRight, Sheet, Clock, AlertTriangle, ClientSketch, X, ExternalLink, CheckCircle } from "../components/icons";
 import { DucKanban } from "../components/DucKanban";
+import { fetchMyTasks, type MyTask } from "../lib/tasks";
 import { StatusSelect } from "../components/StatusSelect";
 import { Celebration } from "../components/Celebration";
 import { fetchDismissedClientIds, dismissClient, restoreClient } from "../lib/dismissed";
@@ -267,7 +268,7 @@ async function resolveClientNames(rows: DucRecord[]): Promise<Map<string, string
   return map;
 }
 
-type View = "ducs" | "pending" | "kanban";
+type View = "ducs" | "pending" | "kanban" | "mine";
 
 export default function DucList() {
   const { businessUserId, activeOrgId, orgs } = useAuth();
@@ -300,6 +301,8 @@ export default function DucList() {
   // Kanban: etapas efetivas da variante da org (full, para validar obrigatórios)
   // + movimento pendente + movimento bloqueado por campos obrigatórios em falta.
   const [kanbanStages, setKanbanStages] = useState<DucStage[]>([]);
+  // "As minhas tarefas": etapas ativas atribuídas ao utilizador (nesta e noutras orgs).
+  const [myTasks, setMyTasks] = useState<MyTask[] | null>(null);
   const [pendingMove, setPendingMove] = useState<{ duc: DucRecord; targetStage: number } | null>(
     null
   );
@@ -428,6 +431,19 @@ export default function DucList() {
   useEffect(() => {
     if (view === "pending") void loadPending();
   }, [view, loadPending]);
+
+  // Carrega "As minhas tarefas" ao entrar nessa aba (etapas ativas atribuídas a mim).
+  useEffect(() => {
+    if (view !== "mine" || !businessUserId) return;
+    let alive = true;
+    setMyTasks(null);
+    void fetchMyTasks(businessUserId).then((t) => {
+      if (alive) setMyTasks(t);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [view, businessUserId]);
 
   // Carrega as etapas (colunas do Kanban) para a variante da organização ativa.
   useEffect(() => {
@@ -615,6 +631,17 @@ export default function DucList() {
           <span className="sm:hidden">Pendentes</span>
           <span className="hidden sm:inline">Por documentar</span>
         </button>
+        <button
+          onClick={() => setView("mine")}
+          className={
+            "inline-flex min-h-[40px] flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-3.5 " +
+            (view === "mine" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:bg-slate-50")
+          }
+        >
+          <CheckCircle width={15} height={15} className="shrink-0" />
+          <span className="sm:hidden">Tarefas</span>
+          <span className="hidden sm:inline">As minhas tarefas</span>
+        </button>
       </div>
 
       {view === "ducs" ? (
@@ -683,7 +710,7 @@ export default function DucList() {
             </>
           )}
         </div>
-      ) : (
+      ) : view === "pending" ? (
         <PendingView
           loading={loadingPending}
           pending={pending}
@@ -694,6 +721,8 @@ export default function DucList() {
           onDismiss={handleDismiss}
           onRestore={handleRestore}
         />
+      ) : (
+        <MyTasksTab tasks={myTasks} onOpen={(id) => navigate(`/duc/${id}`)} />
       )}
 
       {showCreate && (
@@ -1669,5 +1698,89 @@ function CreateDucModal({
         )}
       </div>
     </Modal>
+  );
+}
+
+// ------------------------------------------------------- As minhas tarefas --
+
+/** Dias desde que a etapa ficou ativa (para o "há N dias"). */
+function taskDaysOpen(enteredAt: string | null): number {
+  if (!enteredAt) return 0;
+  const t = new Date(enteredAt).getTime();
+  return Number.isNaN(t) ? 0 : Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
+
+/**
+ * Aba "As minhas tarefas": etapas ATIVAS atribuídas ao utilizador em todos os
+ * DUCs (a sua fila de trabalho). Mesma origem da página /tarefas.
+ */
+function MyTasksTab({
+  tasks,
+  onOpen,
+}: {
+  tasks: MyTask[] | null;
+  onOpen: (id: string) => void;
+}) {
+  if (tasks === null) {
+    return (
+      <Card>
+        <Spinner label="A carregar as tuas tarefas…" />
+      </Card>
+    );
+  }
+  if (tasks.length === 0) {
+    return (
+      <Card className="p-8">
+        <EmptyState
+          icon={<CheckCircle width={22} height={22} />}
+          title="Sem tarefas pendentes"
+          description="Quando uma etapa te for atribuída e ficar ativa, aparece aqui."
+        />
+      </Card>
+    );
+  }
+  return (
+    <div className="space-y-2.5">
+      {tasks.map((t) => {
+        const d = taskDaysOpen(t.enteredAt);
+        const stale = d >= 7;
+        return (
+          <button
+            key={t.ducId}
+            type="button"
+            onClick={() => onOpen(t.ducId)}
+            className="group flex w-full items-center gap-4 rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-brand-200 hover:shadow-md"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-brand text-sm font-bold tabular-nums text-white ring-1 ring-inset ring-brand">
+              {t.stageNo}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-slate-900">{t.stageTitle}</p>
+              <p className="truncate text-xs text-slate-500">
+                <span className="font-mono text-slate-400">{t.ducNumber ?? "DUC"}</span>
+                {t.clientName ? ` · ${t.clientName}` : ""}
+                {t.responsible ? ` · ${t.responsible}` : ""}
+              </p>
+            </div>
+            <span
+              className={cx(
+                "hidden shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium sm:inline-flex",
+                stale
+                  ? "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-100"
+                  : "bg-slate-50 text-slate-500 ring-1 ring-inset ring-slate-100"
+              )}
+            >
+              <Clock width={12} height={12} />
+              {d === 0 ? "hoje" : `há ${d}d`}
+            </span>
+            <ChevronRight
+              width={18}
+              height={18}
+              className="shrink-0 text-slate-300 transition-colors group-hover:text-brand"
+            />
+          </button>
+        );
+      })}
+    </div>
   );
 }

@@ -872,6 +872,8 @@ function RolesManager({
   onClose: () => void;
 }) {
   const memberName = (id: string) => members.find((m) => m.id === id)?.name ?? "Membro";
+  // Índice da função a eliminar, a aguardar confirmação (null = sem diálogo).
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
 
   const addRole = () => {
     onChange([
@@ -934,7 +936,7 @@ function RolesManager({
                 </span>
                 <button
                   type="button"
-                  onClick={() => removeRole(idx)}
+                  onClick={() => setConfirmDelete(idx)}
                   title="Eliminar função"
                   className="shrink-0 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
                 >
@@ -969,6 +971,31 @@ function RolesManager({
             </div>
           ))}
         </div>
+      )}
+
+      {confirmDelete !== null && (
+        <ConfirmDialog
+          title="Eliminar função"
+          tone="danger"
+          confirmLabel="Eliminar"
+          icon={<Trash width={18} height={18} />}
+          message={
+            <>
+              Eliminar a função{" "}
+              <span className="font-medium text-slate-800">
+                {roles[confirmDelete]?.label || "sem nome"}
+              </span>
+              ? Deixa de estar disponível como destinatário nas etapas. (Só é permanente após
+              Guardar a configuração.)
+            </>
+          }
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            const idx = confirmDelete;
+            setConfirmDelete(null);
+            removeRole(idx);
+          }}
+        />
       )}
     </Modal>
   );
