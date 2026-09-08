@@ -85,6 +85,29 @@ export type BusinessFlow =
   | "db-error-leaked-to-ui";
 
 /**
+ * A Supabase/PostgREST error: a plain object carrying a `message` (and usually
+ * `code`/`details`/`hint`) but NOT an `Error` instance. `Sentry.captureException`
+ * cannot pull a title out of such an object, so it falls back to the useless
+ * "Object captured as exception with keys: code, details, hint, message" —
+ * hiding the real cause (e.g. 42501 RLS on schedule_resources, 57014 timeout).
+ */
+interface SupabaseLikeError {
+  message: string;
+  code?: unknown;
+  details?: unknown;
+  hint?: unknown;
+}
+
+function isSupabaseLikeError(error: unknown): error is SupabaseLikeError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof (error as { message: unknown }).message === "string"
+  );
+}
+
+/**
  * Reports an error that the calling code deliberately swallows.
  *
  * Purely additive: callers keep their own `console.error` for local debugging
@@ -93,6 +116,27 @@ export type BusinessFlow =
  */
 export function captureFlowError(error: unknown, flow: BusinessFlow): void {
   try {
+    // A real `Error` already reports with its message as the title. A plain
+    // Supabase-shaped object does not — so wrap it in a real `Error` that
+    // carries the readable `message`, and stash the structured fields in a
+    // dedicated context. Both the Error message and the `supabase` context
+    // still pass through Sentry's `beforeSend` scrubber (see lib/sentry/scrub),
+    // so any PII in `message`/`details`/`hint` is redacted there, not here.
+    if (!(error instanceof Error) && isSupabaseLikeError(error)) {
+      const realError = new Error(error.message);
+      realError.name = "SupabaseError";
+      Sentry.captureException(realError, {
+        tags: { flow },
+        contexts: {
+          supabase: {
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+          },
+        },
+      });
+      return;
+    }
     Sentry.captureException(error, { tags: { flow } });
   } catch {
     // Sentry not initialised (tests, local dev without DSN) or transport
