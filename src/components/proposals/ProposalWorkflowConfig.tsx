@@ -158,6 +158,7 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
     setAllStages([...((allOrgData || []) as any[]), ...((allGlobalData || []) as any[])]);
     const { data, error } = await supabase.from("proposal_workflow_stages" as any).select("*").eq("organization_id", companyId).eq("is_active", true).order("stage_order");
     if (!error) { setStages((data || []) as any[]); setIsUsingTemplate(((data || []) as any[]).length === 0); }
+    else { toast({ title: "Erro", description: "Não foi possível carregar as fases do workflow.", variant: "destructive" }); }
     setLoading(false);
   };
 
@@ -168,7 +169,8 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
 
   const loadProposalCounts = async () => {
     if (!companyId) return;
-    const { data } = await supabase.from("proposals").select("stage_id").eq("organization_id", companyId);
+    const { data, error } = await supabase.from("proposals").select("stage_id").eq("organization_id", companyId);
+    if (error) { toast({ title: "Erro", description: "Não foi possível carregar os contadores por fase.", variant: "destructive" }); return; }
     if (data) {
       const counts: Record<string, number> = {};
       data.forEach((p: any) => { if (p.stage_id) counts[p.stage_id] = (counts[p.stage_id] || 0) + 1; });
@@ -227,23 +229,34 @@ export function ProposalWorkflowConfig({ open, onOpenChange, companyId, onStages
     const newIndex = stages.findIndex(s => s.id === over.id);
     const reordered = arrayMove(stages, oldIndex, newIndex);
     setStages(reordered);
-    for (let i = 0; i < reordered.length; i++) {
-      await (supabase.from("proposal_workflow_stages" as any) as any).update({ stage_order: i + 1 }).eq("id", reordered[i].id);
+    try {
+      for (let i = 0; i < reordered.length; i++) {
+        await (supabase.from("proposal_workflow_stages" as any) as any).update({ stage_order: i + 1 }).eq("id", reordered[i].id).throwOnError();
+      }
+      onStagesUpdated?.();
+    } catch (err: any) {
+      captureFlowError(err, "proposal-lifecycle");
+      toast({ title: "Erro ao reordenar fases", description: err.message, variant: "destructive" });
+      loadStages();
     }
-    onStagesUpdated?.();
   };
 
   const copyTemplateToCompany = async () => {
     if (!companyId || templateStages.length === 0) return;
-    for (const stage of templateStages) {
-      await (supabase.from("proposal_workflow_stages" as any) as any).insert({
-        name: stage.name, label: stage.label, color: stage.color, stage_order: stage.stage_order,
-        is_final: stage.is_final, is_won: stage.is_won, is_lost: stage.is_lost,
-        organization_id: companyId,
-      });
+    try {
+      for (const stage of templateStages) {
+        await (supabase.from("proposal_workflow_stages" as any) as any).insert({
+          name: stage.name, label: stage.label, color: stage.color, stage_order: stage.stage_order,
+          is_final: stage.is_final, is_won: stage.is_won, is_lost: stage.is_lost,
+          organization_id: companyId,
+        }).throwOnError();
+      }
+      toast({ title: "Template copiado", description: "Pode agora personalizar as fases." });
+      loadStages(); loadProposalCounts(); onStagesUpdated?.();
+    } catch (err: any) {
+      captureFlowError(err, "proposal-lifecycle");
+      toast({ title: "Erro ao copiar template", description: err.message, variant: "destructive" });
     }
-    toast({ title: "Template copiado", description: "Pode agora personalizar as fases." });
-    loadStages(); loadProposalCounts(); onStagesUpdated?.();
   };
 
   const displayStages = stages.length > 0 ? stages : templateStages;

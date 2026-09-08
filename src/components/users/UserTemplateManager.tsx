@@ -37,6 +37,7 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useCompany } from "@/contexts/CompanyContext";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -286,11 +287,12 @@ export function UserTemplateManager({
     setFormName(template.name);
     setFormDescription(template.description || "");
     // Load organizations from junction table
-    const { data: orgData } = await supabase
+    const { data: orgData, error: orgError } = await supabase
       .from("user_template_organizations")
       .select("organization_id")
       .eq("template_id", template.id)
       .order("sort_order");
+    if (orgError) captureFlowError(orgError, "db-error-leaked-to-ui");
     setFormOrgIds(orgData?.map(o => o.organization_id) || []);
     await loadTemplateDetails(template.id);
     setIsEditing(true);
@@ -302,11 +304,12 @@ export function UserTemplateManager({
     setFormName(`${template.name} (Cópia)`);
     setFormDescription(template.description || "");
     // Load organizations from junction table
-    const { data: orgData } = await supabase
+    const { data: orgData, error: orgError } = await supabase
       .from("user_template_organizations")
       .select("organization_id")
       .eq("template_id", template.id)
       .order("sort_order");
+    if (orgError) captureFlowError(orgError, "db-error-leaked-to-ui");
     setFormOrgIds(orgData?.map(o => o.organization_id) || []);
     await loadTemplateDetails(template.id);
     setIsEditing(true);
@@ -377,7 +380,7 @@ export function UserTemplateManager({
             organization_id: orgId,
             sort_order: index,
           }));
-          await supabase.from("user_template_organizations").insert(orgsToInsert as any);
+          await supabase.from("user_template_organizations").insert(orgsToInsert as any).throwOnError();
         }
 
         // Insert fields

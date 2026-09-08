@@ -418,6 +418,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         }
       }
     } catch (err: any) {
+      captureFlowError(err, "db-error-leaked-to-ui");
       console.error("Error loading deal needs:", err);
     } finally {
       hasLoadedOnceRef.current = true;
@@ -544,7 +545,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
             }
           }
         }
-      } catch (_) { /* ignore hierarchy errors */ }
+      } catch (e) { captureFlowError(e, "db-error-leaked-to-ui"); /* best-effort: hierarchy scope */ }
 
       const orgFilter = orgIds.map(id => `organization_id.eq.${id}`).join(',');
 
@@ -577,7 +578,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         id: s.id, name: s.name, sku: s.sku,
         price: s.service_prices?.find((sp: any) => sp.price_type === 'retail')?.price ?? s.service_prices?.[0]?.price,
       })));
-    } catch (err) { console.error("Search error:", err); }
+    } catch (err) { captureFlowError(err, "db-error-leaked-to-ui"); console.error("Search error:", err); }
     finally { setSearchingItems(false); }
   }, [organizationId]);
 
@@ -742,8 +743,8 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     if (!cfgFieldName.trim() || !organizationId) return;
     const options = cfgFieldType === "dropdown" ? cfgFieldOptions.split(",").map(o => o.trim()).filter(Boolean) : [];
     try {
-      if (cfgEditingField) { await supabase.from("needs_assessment_field_configs").update({ name: cfgFieldName.trim(), field_type: cfgFieldType, options, is_required: cfgFieldRequired, updated_at: new Date().toISOString() }).eq("id", cfgEditingField.id); }
-      else { await supabase.from("needs_assessment_field_configs").insert({ organization_id: organizationId, name: cfgFieldName.trim(), field_type: cfgFieldType, options, is_required: cfgFieldRequired, sort_order: companyFields.length }); }
+      if (cfgEditingField) { await supabase.from("needs_assessment_field_configs").update({ name: cfgFieldName.trim(), field_type: cfgFieldType, options, is_required: cfgFieldRequired, updated_at: new Date().toISOString() }).eq("id", cfgEditingField.id).throwOnError(); }
+      else { await supabase.from("needs_assessment_field_configs").insert({ organization_id: organizationId, name: cfgFieldName.trim(), field_type: cfgFieldType, options, is_required: cfgFieldRequired, sort_order: companyFields.length }).throwOnError(); }
       toast({ title: cfgEditingField ? "Campo atualizado" : "Campo criado" });
       setCfgFieldDialogOpen(false);
       loadData();
@@ -756,7 +757,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
       await withAuditContext(supabase, businessUserId, () =>
-        supabase.from("needs_assessment_field_configs").delete().eq("id", id).eq("organization_id", organizationId)
+        supabase.from("needs_assessment_field_configs").delete().eq("id", id).eq("organization_id", organizationId).throwOnError()
       );
       toast({ title: "Campo eliminado" });
       loadData();
@@ -806,9 +807,9 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       if (!businessUserId) throw new Error("Business user not resolved");
       let templateId: string;
       if (cfgEditingTemplate) {
-        await supabase.from("needs_assessment_templates").update({ name: cfgTemplateName.trim(), description: cfgTemplateDescription || null, show_measurements_tab: cfgTemplateShowMeasurements, show_items_tab: cfgTemplateShowItems, icon: cfgTemplateIcon, color: cfgTemplateColor, sector: cfgTemplateSector || null, default_priority: cfgTemplateDefaultPriority, estimate_min: parseFloat(cfgTemplateEstimateMin) || 0, estimate_max: parseFloat(cfgTemplateEstimateMax) || 0, checklist: cfgTemplateChecklist as unknown as any, measurement_field_ids: Array.from(cfgTemplateMeasurementFieldIds) as unknown as any, updated_at: new Date().toISOString() } as any).eq("id", cfgEditingTemplate.id);
+        await supabase.from("needs_assessment_templates").update({ name: cfgTemplateName.trim(), description: cfgTemplateDescription || null, show_measurements_tab: cfgTemplateShowMeasurements, show_items_tab: cfgTemplateShowItems, icon: cfgTemplateIcon, color: cfgTemplateColor, sector: cfgTemplateSector || null, default_priority: cfgTemplateDefaultPriority, estimate_min: parseFloat(cfgTemplateEstimateMin) || 0, estimate_max: parseFloat(cfgTemplateEstimateMax) || 0, checklist: cfgTemplateChecklist as unknown as any, measurement_field_ids: Array.from(cfgTemplateMeasurementFieldIds) as unknown as any, updated_at: new Date().toISOString() } as any).eq("id", cfgEditingTemplate.id).throwOnError();
         templateId = cfgEditingTemplate.id;
-        await supabase.from("needs_assessment_template_fields").delete().eq("template_id", templateId);
+        await supabase.from("needs_assessment_template_fields").delete().eq("template_id", templateId).throwOnError();
       } else {
         const { data, error } = await supabase.from("needs_assessment_templates").insert({ organization_id: organizationId, name: cfgTemplateName.trim(), description: cfgTemplateDescription || null, created_by: businessUserId, show_measurements_tab: cfgTemplateShowMeasurements, show_items_tab: cfgTemplateShowItems, icon: cfgTemplateIcon, color: cfgTemplateColor, sector: cfgTemplateSector || null, default_priority: cfgTemplateDefaultPriority, estimate_min: parseFloat(cfgTemplateEstimateMin) || 0, estimate_max: parseFloat(cfgTemplateEstimateMax) || 0, checklist: cfgTemplateChecklist as unknown as any, measurement_field_ids: Array.from(cfgTemplateMeasurementFieldIds) as unknown as any } as any).select("id").single();
         if (error) throw error;
@@ -816,7 +817,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       }
       if (cfgTemplateFieldIds.size > 0) {
         const rows = Array.from(cfgTemplateFieldIds).map((fid, idx) => ({ template_id: templateId, field_id: fid, sort_order: idx }));
-        await supabase.from("needs_assessment_template_fields").insert(rows);
+        await supabase.from("needs_assessment_template_fields").insert(rows).throwOnError();
       }
       toast({ title: cfgEditingTemplate ? "Template atualizado" : "Template criado" });
       setCfgTemplateDialogOpen(false);
@@ -830,7 +831,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
       await withAuditContext(supabase, businessUserId, () =>
-        supabase.from("needs_assessment_templates").delete().eq("id", id).eq("organization_id", organizationId)
+        supabase.from("needs_assessment_templates").delete().eq("id", id).eq("organization_id", organizationId).throwOnError()
       );
       toast({ title: "Template eliminado" });
       loadData();

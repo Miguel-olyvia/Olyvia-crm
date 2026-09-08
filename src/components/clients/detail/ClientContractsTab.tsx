@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,6 +39,7 @@ export function ClientContractsTab({ entityId, clientId, organizationId }: Clien
   const navigate = useNavigate();
   const [contracts, setContracts] = useState<ContractRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const { toast } = useToast();
 
   useEffect(() => {
     loadContracts();
@@ -55,6 +57,7 @@ export function ClientContractsTab({ entityId, clientId, organizationId }: Clien
       setContracts(data || []);
     } catch (e) {
       console.error("Error loading contracts:", e);
+      toast({ title: "Erro", description: "Não foi possível carregar os contratos.", variant: "destructive" });
     } finally {
       setLoading(false);
     }

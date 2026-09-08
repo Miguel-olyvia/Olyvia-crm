@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { Loader2, MapPin } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { formLocationConfigSchema } from "@/lib/validations";
@@ -101,19 +102,21 @@ export function FormLocationConfig({
       }
     } catch (error) {
       console.error("Error loading data:", error);
+      toast.error("Não foi possível carregar a configuração de localização.");
     } finally {
       setLoading(false);
     }
   };
 
   const loadDistricts = async (countryCode: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("administrative_divisions")
       .select("id, name, country_code")
       .eq("country_code", countryCode)
       .eq("admin_level", 1)
       .order("name");
 
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     setDistricts(data || []);
   };
 

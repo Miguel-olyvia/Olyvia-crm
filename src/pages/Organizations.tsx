@@ -14,6 +14,7 @@ import { OrganizationsHelpDialog } from "@/components/organizations/Organization
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { assignCreatorAsAdminToHierarchy } from "@/utils/organizationCreation";
 import { upsertOrgFiscalEntity, loadOrgFiscalEntity } from "@/utils/orgFiscalEntity";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -354,7 +355,7 @@ export default function Organizations() {
 
         for (const addr of formData.addresses) {
           if (addr.street && addr.number && addr.city && addr.postal_code) {
-            await withAuditContext(supabase, businessUserId, () =>
+            const { error: addrError } = await withAuditContext(supabase, businessUserId, () =>
               (supabase as any).rpc("assign_address_to_org", {
                 p_org_id: initialOrgId, p_street: addr.street, p_number: addr.number,
                 p_floor: addr.floor || null, p_unit: addr.unit || null, p_postal_code: addr.postal_code,
@@ -362,6 +363,7 @@ export default function Organizations() {
                 p_extra: addr.extra || null, p_is_fiscal: addr.isFiscal || false, p_created_by: businessUserId,
               })
             );
+            if (addrError) captureFlowError(addrError, "org-structure-partial-write");
           }
         }
 
@@ -563,7 +565,7 @@ export default function Organizations() {
         for (const m of usersToAdd) {
           if (seenUsers.has(m.user_id)) continue;
           seenUsers.add(m.user_id);
-          await withAuditContext(supabase, businessUserId, () =>
+          const { error: insertError } = await withAuditContext(supabase, businessUserId, () =>
             supabase.from("anew_memberships").insert({
               user_id: m.user_id,
               organization_id: orgToUnlink.id,
@@ -571,6 +573,7 @@ export default function Organizations() {
               status: "active",
             })
           );
+          if (insertError) throw insertError;
         }
       }
 
@@ -632,6 +635,7 @@ export default function Organizations() {
       if (hd?.parent_org_id) currentParentId = hd.parent_org_id;
     } catch (error) {
       console.error("Error fetching organization parent:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
     }
 
     let fiscalNif = "", fiscalCommercialName = "";
@@ -671,6 +675,7 @@ export default function Organizations() {
       }
     } catch (error) {
       console.error("Error fetching organization addresses:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
     }
 
     setFormData({

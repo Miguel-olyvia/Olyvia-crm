@@ -46,6 +46,7 @@ import { resolveLineDetails, type LineResolution } from "@/utils/quoteCostResolv
 import { getDisplayAttributes } from "@/utils/lineAttributes";
 import { usePermissions } from "@/hooks/usePermissions";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const CALL_RESULT_LABELS: Record<string, string> = {
   answered: "Chamada atendida",
@@ -306,6 +307,7 @@ export function ProposalDetailsDialog({
         }
       } catch (e) {
         console.error("[ProposalDetailsDialog] resolveLineDetails failed", e);
+        captureFlowError(e, "proposal-lifecycle");
         setLineCostMap({});
       }
       setExtendedData(extendedRes.data);
@@ -423,6 +425,7 @@ export function ProposalDetailsDialog({
       setPipelineJourney(journey);
     } catch (error) {
       console.error("Error loading proposal details:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar os detalhes da proposta.", variant: "destructive" });
     } finally {
       setLoading(false);
     }

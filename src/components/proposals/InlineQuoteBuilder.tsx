@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +18,7 @@ import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { calculateInlineQuoteTotals, getLineBundleComponents } from "@/utils/quotes/inlineQuoteVatCalculation";
 import { getLineUnitPrice, getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface InlineQuoteLine {
   id: string;
@@ -193,6 +195,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         }));
       } catch (error) {
         console.error("Error loading catalog:", error);
+        toast.error("Não foi possível carregar o catálogo.");
       } finally {
         setCatalogLoading(false);
       }
@@ -278,6 +281,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
       setTemplates(data || []);
     } catch (e) {
       console.error("Error fetching templates:", e);
+      toast.error("Não foi possível carregar os modelos.");
     }
   };
 
@@ -557,6 +561,8 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
       });
     } catch (e) {
       console.error("Error loading template:", e);
+      captureFlowError(e, "quote-lifecycle");
+      toast.error("Não foi possível carregar o modelo de orçamento.");
     }
   };
 

@@ -146,17 +146,19 @@ export default function ProductConfigurableOptionsDialog({
     setLoading(true);
     try {
       // 1. Load ALL available attributes
-      const { data: allAttrsData } = await supabase
+      const { data: allAttrsData, error: allAttrsErr } = await supabase
         .from("product_attributes")
         .select("id, code, label, pricing_type, value_type, allowed_values, is_variant_option, has_hex_color, is_measurement, valorization_type, pricing_dimension")
         .eq("organization_id", companyId)
         .order("label");
+      if (allAttrsErr) throw allAttrsErr;
 
       // 2. Load assigned attributes for this product
-      const { data: assignedData } = await supabase
+      const { data: assignedData, error: assignedErr } = await supabase
         .from("product_attribute_values")
         .select("id, attribute_id")
         .eq("product_id", productId);
+      if (assignedErr) throw assignedErr;
 
       const assignedMap = new Map<string, string>();
       (assignedData || []).forEach((a: any) => {
@@ -183,11 +185,12 @@ export default function ProductConfigurableOptionsDialog({
 
       if (fixedAttrs.length > 0) {
         const attrIds = fixedAttrs.map(a => a.id);
-        const { data: existingProductPrices } = await supabase
+        const { data: existingProductPrices, error: existingProductPricesErr } = await supabase
           .from("product_attribute_value_prices")
           .select("id, attribute_id, value_option")
           .eq("product_id", productId)
           .in("attribute_id", attrIds);
+        if (existingProductPricesErr) captureFlowError(existingProductPricesErr, "db-error-leaked-to-ui");
 
         const existingMap = new Map<string, string>();
         (existingProductPrices || []).forEach((ep: any) => {
@@ -195,10 +198,11 @@ export default function ProductConfigurableOptionsDialog({
         });
 
         for (const attr of fixedAttrs) {
-          const { data: resolved } = await supabase.rpc("resolve_product_attribute_options", {
+          const { data: resolved, error: resolvedErr } = await supabase.rpc("resolve_product_attribute_options", {
             p_product_id: productId,
             p_attribute_id: attr.id,
           });
+          if (resolvedErr) captureFlowError(resolvedErr, "db-error-leaked-to-ui");
 
           if (resolved && resolved.length > 0) {
             sources[attr.id] = resolved[0]?.source || "global";
@@ -298,11 +302,12 @@ export default function ProductConfigurableOptionsDialog({
         .delete()
         .eq("id", attr.assignedValueId);
       if (error) throw error;
-      await supabase
+      const { error: priceDeleteError } = await supabase
         .from("product_attribute_value_prices")
         .delete()
         .eq("product_id", productId)
         .eq("attribute_id", attrId);
+      if (priceDeleteError) throw priceDeleteError;
 
       if (selectedAttrId === attrId) setSelectedAttrId(null);
       toast({ title: "Atributo removido" });
@@ -453,11 +458,12 @@ export default function ProductConfigurableOptionsDialog({
         if (!hasDirtyTiers) continue;
 
         // Delete existing product-level ranges and re-insert
-        await (supabase as any)
+        const { error: rangeDeleteError } = await (supabase as any)
           .from("product_attribute_price_ranges")
           .delete()
           .eq("product_id", productId)
           .eq("attribute_id", attrId);
+        if (rangeDeleteError) throw rangeDeleteError;
 
         if (tiers.length > 0) {
           const rangeInserts = tiers.map(t => {

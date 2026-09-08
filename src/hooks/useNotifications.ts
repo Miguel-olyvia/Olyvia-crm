@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { getCachedAuthUser } from '@/lib/cachedAuth';
 import { toast } from '@/lib/toast';
+import { captureFlowError } from '@/lib/observability/captureFlowError';
 import { resolveOrgSubtree } from '@/lib/orgSubtree';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
@@ -109,7 +110,9 @@ export function useNotifications(activeOrgId?: string | null) {
       // Execute in parallel
       const [countResult, dataResult] = await Promise.all([countQuery, dataQuery]);
 
-      if (!countResult.error && countResult.count !== null) {
+      if (countResult.error) {
+        captureFlowError(countResult.error, 'db-error-leaked-to-ui');
+      } else if (countResult.count !== null) {
         setUnreadCount(countResult.count);
       }
 
@@ -119,6 +122,7 @@ export function useNotifications(activeOrgId?: string | null) {
       setNotifications(notifs);
     } catch (error: any) {
       console.error('Error fetching notifications:', error);
+      toast.error('Não foi possível carregar as notificações.');
     } finally {
       setLoading(false);
     }
@@ -142,6 +146,7 @@ export function useNotifications(activeOrgId?: string | null) {
       });
     } catch (error: any) {
       console.error('Error marking notification as read:', error);
+      captureFlowError(error, 'db-error-leaked-to-ui');
     }
   }, [computeUnreadCount]);
 
@@ -182,6 +187,7 @@ export function useNotifications(activeOrgId?: string | null) {
       setUnreadCount(0);
     } catch (error: any) {
       console.error('Error marking all notifications as read:', error);
+      captureFlowError(error, 'db-error-leaked-to-ui');
     }
   }, []);
 
@@ -201,6 +207,7 @@ export function useNotifications(activeOrgId?: string | null) {
       });
     } catch (error: any) {
       console.error('Error dismissing notification:', error);
+      captureFlowError(error, 'db-error-leaked-to-ui');
     }
   }, [computeUnreadCount]);
 

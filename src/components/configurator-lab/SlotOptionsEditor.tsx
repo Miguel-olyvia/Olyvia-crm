@@ -13,6 +13,7 @@ import {
 import { Trash2, Plus } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { EditableLabel } from "./EditableLabel";
 import { MeasureSlotPanel } from "./MeasureSlotPanel";
 import type { CSlot, CSlotOption } from "./hooks/useConfigTemplate";
@@ -74,11 +75,12 @@ export function SlotOptionsEditor({ slot, options, organizationId, productId, on
     if (slot.slot_type === "attribute_value" && slot.attribute_id) {
       (async () => {
         // 1) attribute definition: allowed_values (jsonb array of strings)
-        const { data: attr } = await supabase
+        const { data: attr, error: attrError } = await supabase
           .from("product_attributes")
           .select("allowed_values, options, value_type, pricing_type, is_measurement")
           .eq("id", slot.attribute_id)
           .maybeSingle();
+        if (attrError) captureFlowError(attrError, "db-error-leaked-to-ui");
 
         const attrMeta = attr as AttributeMeta & { allowed_values?: unknown; options?: unknown } | null;
         const isNonSelectableAttribute =
@@ -116,20 +118,22 @@ export function SlotOptionsEditor({ slot, options, organizationId, productId, on
         }
 
         // 2) attribute_option_groups → attribute_option_group_values
-        const { data: groups } = await supabase
+        const { data: groups, error: groupsError } = await supabase
           .from("attribute_option_groups")
           .select("id")
           .eq("attribute_id", slot.attribute_id)
           .eq("is_active", true);
+        if (groupsError) captureFlowError(groupsError, "db-error-leaked-to-ui");
 
         const groupIds = (groups ?? []).map((g: any) => g.id);
         if (groupIds.length) {
-          const { data: gvals } = await supabase
+          const { data: gvals, error: gErr } = await supabase
             .from("attribute_option_group_values")
             .select("value_text, display_name, hex_color, sort_order")
             .in("group_id", groupIds)
             .eq("is_active", true)
             .order("sort_order", { ascending: true });
+          if (gErr) toast({ title: "Erro", description: "Não foi possível carregar as opções.", variant: "destructive" });
           for (const gv of gvals ?? []) {
             pushVal((gv as any).value_text, (gv as any).hex_color, (gv as any).display_name);
           }
@@ -140,7 +144,7 @@ export function SlotOptionsEditor({ slot, options, organizationId, productId, on
     }
     if (slot.slot_type === "component_product" && organizationId) {
       (async () => {
-        const { data } = await supabase
+        const { data, error } = await supabase
           .from("products")
           .select("id, name, sku, product_organizations!inner(organization_id)")
           .eq("product_kind", "component")
@@ -148,6 +152,7 @@ export function SlotOptionsEditor({ slot, options, organizationId, productId, on
           .is("deleted_at", null)
           .order("name")
           .limit(100);
+        if (error) toast({ title: "Erro", description: "Não foi possível carregar os componentes.", variant: "destructive" });
         setComponents((data ?? []) as unknown as ProductRow[]);
       })();
     }

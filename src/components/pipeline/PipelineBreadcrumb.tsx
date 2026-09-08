@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { cn } from "@/lib/utils";
 import { 
   Users, Target, FileText, Calculator, FileSignature, UserCheck,
@@ -124,6 +126,7 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
         setPipelineData(resolved);
       } catch (err) {
         console.error("Pipeline breadcrumb error:", err);
+        toast.error("Não foi possível carregar o percurso do pipeline.");
       } finally {
         setLoading(false);
       }
@@ -200,7 +203,8 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
           }
         }
       } catch (e) {
-        // graceful degradation
+        // graceful degradation — best-effort read, mas o erro cru vai ao Sentry
+        captureFlowError(e, "db-error-leaked-to-ui");
       }
     };
 
@@ -230,7 +234,8 @@ export function PipelineBreadcrumb({ entityType, entityId }: PipelineBreadcrumbP
 
         if (lead?.id) resolved.lead = lead.id;
       } catch (e) {
-        // graceful degradation
+        // graceful degradation — best-effort read, mas o erro cru vai ao Sentry
+        captureFlowError(e, "db-error-leaked-to-ui");
       }
     };
 

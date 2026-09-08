@@ -5,9 +5,11 @@ import { Badge } from "@/components/ui/badge";
 import { formatCurrency } from "@/lib/utils";
 import { Phone, Mail, UserPlus, Pencil, Send, Check, AlertTriangle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope";
 import { differenceInDays, format } from "date-fns";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 import type { ClientHealthScore, ClientContractInfo, ClientTag, ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 
@@ -170,6 +172,7 @@ export function ClientsRetentionView({
           const { data, error } = await q;
           if (error) {
             console.error("Error loading contracts batch for retention view:", error);
+            captureFlowError(error, "db-error-leaked-to-ui");
             continue;
           }
           if (data) all.push(...(data as FullContract[]));
@@ -177,6 +180,7 @@ export function ClientsRetentionView({
         if (!cancelled) setAllContracts(all);
       } catch (err) {
         console.error("Error loading contracts for retention view:", err);
+        toast.error("Não foi possível carregar os contratos.");
       } finally {
         if (!cancelled) setLoadingContracts(false);
       }

@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
@@ -140,11 +141,12 @@ export function MemberEditDialog({
       setAvailableRoles([]);
       return;
     }
-    const { data } = await (supabase as any)
+    const { data, error } = await (supabase as any)
       .from("anew_roles")
       .select("id, name, code")
       .eq("organization_id", organizationId)
       .order("name");
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     setAvailableRoles((data || []) as { id: string; name: string; code: string }[]);
   };
 
@@ -362,7 +364,8 @@ export function MemberEditDialog({
             await (supabase as any)
               .from("anew_entity_fiscal_entities")
               .update({ fiscal_entity_id: fiscalEntityId })
-              .eq("id", existingLink.id);
+              .eq("id", existingLink.id)
+              .throwOnError();
           } else {
             await (supabase as any)
               .from("anew_entity_fiscal_entities")
@@ -370,7 +373,8 @@ export function MemberEditDialog({
                 entity_id: entityIdForFiscal,
                 fiscal_entity_id: fiscalEntityId,
                 is_primary: true,
-              });
+              })
+              .throwOnError();
           }
         }
       }

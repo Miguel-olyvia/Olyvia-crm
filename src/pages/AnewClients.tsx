@@ -591,7 +591,7 @@ const AnewClients = () => {
         buildTree(activeCompany.id, 0);
         setOrgOptions(treeOrdered);
         setScopeOrgIds(Array.from(scopeIds));
-      } catch (err) { console.error("Error loading organizations:", err); }
+      } catch (err) { console.error("Error loading organizations:", err); toast({ title: "Erro", description: "Não foi possível carregar as organizações.", variant: "destructive" }); }
     };
     loadOrgs();
   }, [activeCompany?.id]);
@@ -992,6 +992,7 @@ const AnewClients = () => {
       }
     } catch (err) {
       console.error("Error loading all clients for analytics:", err);
+      toast({ title: "Erro", description: "Não foi possível carregar os clientes.", variant: "destructive" });
     }
   }, [companyFilter, scopeOrgIds, activeCompany?.id, getPermissionScope, scopeAnewUserId, scopedUserIds, resolveEntities, effectiveSearch, dateFrom, dateTo]);
 
@@ -1132,7 +1133,7 @@ const AnewClients = () => {
     const orgIds = [orgId];
     if (rootOrgId && rootOrgId !== orgId) orgIds.push(rootOrgId);
     await supabase.from("anew_entity_roles").update({ status: "inactive" })
-      .eq("entity_id", entityId).eq("role", "client").in("organization_id", orgIds);
+      .eq("entity_id", entityId).eq("role", "client").in("organization_id", orgIds).throwOnError();
   };
 
   const resolveClientNotifications = async (clientIds: string[]) => {
@@ -1143,7 +1144,7 @@ const AnewClients = () => {
         .eq("entity_type", "client")
         .eq("kind", "alert")
         .eq("is_resolved", false);
-    } catch (e) { console.error("Failed to resolve client notifications", e); }
+    } catch (e) { console.error("Failed to resolve client notifications", e); captureFlowError(e, "client-lifecycle"); }
   };
 
   const handleDeleteConfirm = async () => {
@@ -1195,7 +1196,7 @@ const AnewClients = () => {
           const orgIds = [c.organization_id || ''];
           if (c.root_organization_id && c.root_organization_id !== c.organization_id) orgIds.push(c.root_organization_id);
           await supabase.from("anew_entity_roles").update({ status: "active" })
-            .eq("entity_id", c.entity_id).eq("role", "client").in("organization_id", orgIds);
+            .eq("entity_id", c.entity_id).eq("role", "client").in("organization_id", orgIds).throwOnError();
         }
       }
       // Auto-resolve notifications for inactive/lost clients
@@ -1270,6 +1271,7 @@ const AnewClients = () => {
         });
         if (error) {
           console.error("Error marking client as VIP:", client.id, error);
+          captureFlowError(error, "bulk-record-action");
           continue;
         }
         successCount++;
@@ -1324,6 +1326,7 @@ const AnewClients = () => {
         } as any);
         if (error) {
           console.error("Error creating bulk deal for client:", client.id, error);
+          captureFlowError(error, "bulk-record-action");
           continue;
         }
         successCount++;
@@ -1412,7 +1415,7 @@ const AnewClients = () => {
       if (entityResolved) {
         try {
           await ensureEntityOrgLink({ entityId, organizationId, isPrimary: false });
-        } catch (e) { console.warn('[org-link] non-fatal', e); }
+        } catch (e) { console.warn('[org-link] non-fatal', e); captureFlowError(e, "client-lifecycle"); }
         // NOTE: display_name update on the reused entity is deferred until
         // after the duplicate check (see below) so duplicates surface with
         // the entity's real existing name, not the freshly typed one.
@@ -1498,7 +1501,7 @@ const AnewClients = () => {
 
       // Sem duplicado — agora sim podemos sincronizar o display_name na entidade reutilizada.
       if (entityResolved) {
-        await supabase.from("anew_entities").update({ display_name: displayName, first_name: firstName, last_name: lastName } as any).eq("id", entityId);
+        await supabase.from("anew_entities").update({ display_name: displayName, first_name: firstName, last_name: lastName } as any).eq("id", entityId).throwOnError();
       }
       // No duplicates — proceed with creation
       await createClientRecord(entityId, status, organizationId, internalUserId, entityType, addressData, {
@@ -1610,10 +1613,10 @@ const AnewClients = () => {
       .limit(1)
       .maybeSingle();
     if (clientRow?.id) {
-      await (supabase as any).from("anew_contacts").update({ status: "inactive", converted_to_client_id: clientRow.id, converted_at: new Date().toISOString() }).eq("id", match.id).eq("organization_id", pendingClientData.organizationId);
+      await (supabase as any).from("anew_contacts").update({ status: "inactive", converted_to_client_id: clientRow.id, converted_at: new Date().toISOString() }).eq("id", match.id).eq("organization_id", pendingClientData.organizationId).throwOnError();
     }
-    await supabase.from("anew_entity_roles").update({ status: "inactive" } as any).eq("entity_id", pendingClientData.entityId).eq("role", "contact").eq("organization_id", pendingClientData.organizationId);
-    await supabase.from("anew_entity_roles").update({ status: "active" } as any).eq("entity_id", pendingClientData.entityId).eq("role", "client").eq("organization_id", pendingClientData.organizationId);
+    await supabase.from("anew_entity_roles").update({ status: "inactive" } as any).eq("entity_id", pendingClientData.entityId).eq("role", "contact").eq("organization_id", pendingClientData.organizationId).throwOnError();
+    await supabase.from("anew_entity_roles").update({ status: "active" } as any).eq("entity_id", pendingClientData.entityId).eq("role", "client").eq("organization_id", pendingClientData.organizationId).throwOnError();
   };
 
   const handleClientDuplicateUpdateExisting = async (match: DuplicateMatch) => {
@@ -1635,8 +1638,8 @@ const AnewClients = () => {
     }
     setSavingClient(true);
     try {
-      await (supabase as any).from("anew_clients").update({ status: pendingClientData.status, organization_id: pendingClientData.organizationId }).eq("id", match.id).eq("organization_id", pendingClientData.organizationId);
-      await supabase.from("anew_entity_roles").update({ status: pendingClientData.status } as any).eq("entity_id", pendingClientData.entityId).eq("role", "client").eq("organization_id", pendingClientData.organizationId);
+      await (supabase as any).from("anew_clients").update({ status: pendingClientData.status, organization_id: pendingClientData.organizationId }).eq("id", match.id).eq("organization_id", pendingClientData.organizationId).throwOnError();
+      await supabase.from("anew_entity_roles").update({ status: pendingClientData.status } as any).eq("entity_id", pendingClientData.entityId).eq("role", "client").eq("organization_id", pendingClientData.organizationId).throwOnError();
       toast({ title: t('clients.toast.clientUpdated'), description: t('clients.toast.duplicateUpdateDesc', { name: match.displayName }) });
       setClientDuplicateDialogOpen(false); setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
@@ -1686,6 +1689,7 @@ const AnewClients = () => {
       }
     } catch (revErr) {
       console.warn('[client-create-anyway] pre-write revalidation failed (non-fatal)', revErr);
+      captureFlowError(revErr, "client-lifecycle");
     }
     setClientDuplicateDialogOpen(false);
     setSavingClient(true);

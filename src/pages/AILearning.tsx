@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -101,10 +102,11 @@ export default function AILearning() {
   }, [selectedOrganization]);
 
   const loadOrganizations = async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("anew_organizations")
       .select("id, name")
       .order("name");
+    if (error) captureFlowError(error, "ai-assistant");
     setOrganizations(data || []);
   };
 
@@ -135,6 +137,7 @@ export default function AILearning() {
     const { data, error } = await query;
     if (error) {
       console.error("Error loading conversations:", error);
+      captureFlowError(error, "ai-assistant");
       return;
     }
     setConversations((data as any[]) || []);
@@ -154,6 +157,7 @@ export default function AILearning() {
     const { data, error } = await query;
     if (error) {
       console.error("Error loading ratings:", error);
+      captureFlowError(error, "ai-assistant");
       return;
     }
     setRatings((data as AIRating[]) || []);
@@ -168,7 +172,8 @@ export default function AILearning() {
       if (selectedOrganization !== "all") {
         convQuery = convQuery.eq("organization_id", selectedOrganization);
       }
-      const { count: convCount } = await convQuery;
+      const { count: convCount, error: convError } = await convQuery;
+      if (convError) captureFlowError(convError, "ai-assistant");
 
       // Get ratings data
       let ratingsQuery = supabase
@@ -177,7 +182,8 @@ export default function AILearning() {
       if (selectedOrganization !== "all") {
         ratingsQuery = ratingsQuery.eq("organization_id", selectedOrganization);
       }
-      const { data: ratingsData } = await ratingsQuery;
+      const { data: ratingsData, error: ratingsError } = await ratingsQuery;
+      if (ratingsError) captureFlowError(ratingsError, "ai-assistant");
 
       if (!ratingsData || ratingsData.length === 0) {
         setStats({
@@ -230,6 +236,7 @@ export default function AILearning() {
       });
     } catch (error) {
       console.error("Error loading stats:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar as estatísticas.", variant: "destructive" });
     }
   };
 

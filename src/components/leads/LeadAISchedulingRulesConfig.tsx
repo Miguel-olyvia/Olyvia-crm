@@ -247,7 +247,8 @@ export function LeadAISchedulingRulesConfig({
         await supabase
           .from("campaigns")
           .update({ has_ai_scheduling: true })
-          .eq("id", selectedCampaignId);
+          .eq("id", selectedCampaignId)
+          .throwOnError();
 
       } else {
         // Update existing rules
@@ -291,23 +292,29 @@ export function LeadAISchedulingRulesConfig({
 
   const handleDisableScheduling = async () => {
     if (!selectedCampaignId) return;
-    
-    // Deactivate rules for this campaign
-    await supabase
-      .from("lead_ai_scheduling_rules")
-      .update({ is_active: false })
-      .eq("campaign_id", selectedCampaignId);
-    
-    // Update campaign flag
-    await supabase
-      .from("campaigns")
-      .update({ has_ai_scheduling: false })
-      .eq("id", selectedCampaignId);
-    
-    toast({ title: "Agendamento AI desativado para esta campanha" });
-    loadCampaigns();
-    setRules(null);
-    setSelectedCampaignId(null);
+
+    try {
+      // Deactivate rules for this campaign
+      await supabase
+        .from("lead_ai_scheduling_rules")
+        .update({ is_active: false })
+        .eq("campaign_id", selectedCampaignId)
+        .throwOnError();
+
+      // Update campaign flag
+      await supabase
+        .from("campaigns")
+        .update({ has_ai_scheduling: false })
+        .eq("id", selectedCampaignId)
+        .throwOnError();
+
+      toast({ title: "Agendamento AI desativado para esta campanha" });
+      loadCampaigns();
+      setRules(null);
+      setSelectedCampaignId(null);
+    } catch (error: any) {
+      toast({ title: "Erro ao desativar agendamento", description: error.message, variant: "destructive" });
+    }
   };
 
   const addConsideration = () => {

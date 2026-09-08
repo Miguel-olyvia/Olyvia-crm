@@ -135,6 +135,7 @@ export default function ServiceFees() {
       setAllCompanies(data || []);
     } catch (error: any) {
       console.error("Error fetching companies:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar as empresas.", variant: "destructive" });
     }
   };
 
@@ -151,6 +152,7 @@ export default function ServiceFees() {
       setServices(data || []);
     } catch (error: any) {
       console.error("Error fetching services:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar os serviços.", variant: "destructive" });
     }
   };
 

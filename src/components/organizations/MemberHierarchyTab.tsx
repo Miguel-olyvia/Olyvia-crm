@@ -39,6 +39,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { supabase } from "@/integrations/supabase/client";
 import {
   Users, Plus, ChevronRight, ChevronDown, User, GripVertical,
@@ -132,7 +133,8 @@ export function MemberHierarchyTab({ orgId, orgName, orgType, canManage }: Membe
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) return;
-      const { data } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", session.user.id).maybeSingle();
+      const { data, error } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", session.user.id).maybeSingle();
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       setCurrentAnewUserId(data?.id || null);
     })();
   }, []);
@@ -440,6 +442,7 @@ export function MemberHierarchyTab({ orgId, orgName, orgType, canManage }: Membe
         setMemberActivities(data || []);
       } catch (e) {
         console.error(e);
+        toast.error("Não foi possível carregar as atividades do membro.");
       } finally {
         setLoadingActivities(false);
       }

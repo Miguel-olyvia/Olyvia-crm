@@ -116,6 +116,7 @@ export function QuoteAIAssistant({ onAddSuggestion }: Props) {
         });
       } catch (saveError) {
         console.error("Error saving conversation:", saveError);
+        captureFlowError(saveError, "ai-assistant");
       }
 
       setResponse(data);
@@ -166,14 +167,19 @@ export function QuoteAIAssistant({ onAddSuggestion }: Props) {
         suggestion_type: suggestion.type || "product",
         rating,
         query_context: messages.find(m => m.role === 'user')?.content || "",
-      });
-      
+      }).throwOnError();
+
       toast({
         title: "Avaliação guardada",
         description: `Obrigado pelo feedback! Ajuda-me a melhorar.`,
       });
-    } catch (error) {
-      console.error("Error saving rating:", error);
+    } catch (error: any) {
+      captureFlowError(error, "ai-assistant");
+      toast({
+        title: "Erro ao guardar avaliação",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 

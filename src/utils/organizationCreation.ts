@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const BASE_ROLES = [
   {
@@ -64,13 +65,14 @@ async function ensureBaseRoles(
 
       const filtered = allPermissions.filter(p => roleDef.permissionFilter(p.code));
       if (filtered.length > 0) {
-        await supabase.from("anew_role_permissions").insert(
+        const { error: permError } = await supabase.from("anew_role_permissions").insert(
           filtered.map(p => ({
             role_id: roleId,
             permission_code: p.code,
             created_by: creatorBusinessUserId,
           }))
         );
+        if (permError) throw permError;
       }
     }
 
@@ -133,6 +135,7 @@ export async function assignCreatorAsOrgAdmin(
     return { success: true };
   } catch (error: any) {
     console.error("Error assigning creator as org admin:", error);
+    captureFlowError(error, "org-structure-partial-write");
     return { success: false, error: error.message };
   }
 }
@@ -183,6 +186,7 @@ export async function assignCreatorAsAdminToHierarchy(
       : { success: true };
   } catch (error: any) {
     console.error("Error assigning creator to hierarchy:", error);
+    captureFlowError(error, "org-structure-partial-write");
     return { success: false, error: error.message };
   }
 }
