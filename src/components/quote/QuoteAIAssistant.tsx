@@ -116,6 +116,7 @@ export function QuoteAIAssistant({ onAddSuggestion }: Props) {
         });
       } catch (saveError) {
         console.error("Error saving conversation:", saveError);
+        captureFlowError(saveError, "ai-assistant");
       }
 
       setResponse(data);

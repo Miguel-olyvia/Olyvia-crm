@@ -23,6 +23,7 @@ export function ProposalManualItemsEditor({ proposalId, readOnly = false, onTota
     setLoading(true);
     const { data, error } = await (supabase as any).from("proposal_manual_items").select("*").eq("proposal_id", proposalId).order("sort_order");
     if (!error && data) setItems(data.map((d: any) => ({ ...d, _isNew: false, _isDirty: false })));
+    else if (error) captureFlowError(error, "proposal-lifecycle");
     setLoading(false);
   }, [proposalId]);
 

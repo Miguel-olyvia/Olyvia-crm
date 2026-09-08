@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { escapeIlike } from "@/lib/clientSearch";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // Results are capped — this is a compact "type to search" dropdown, not a
 // paginated list, so there is no affordance to page past this many rows.
@@ -67,6 +68,7 @@ export default function ProposalItemsEditor({
         if (children) children.forEach(c => { if (c.child_org_id && !orgIds.includes(c.child_org_id)) orgIds.push(c.child_org_id); });
       } catch (err) {
         console.warn("Could not load child organizations for proposal catalog search:", err);
+        captureFlowError(err, "db-error-leaked-to-ui");
       }
 
       const orgFilter = orgIds.map(id => `organization_id.eq.${id}`).join(',');

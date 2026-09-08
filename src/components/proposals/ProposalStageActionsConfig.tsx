@@ -25,6 +25,7 @@ import {
   ChevronDown, ChevronUp, Zap, CheckCircle2, XCircle, FileSignature,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface WorkflowStage {
   id: string;
@@ -204,7 +205,12 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
     const { error } = await (supabase.from("proposal_stage_actions" as any) as any)
       .update({ is_active: !action.is_active })
       .eq("id", action.id);
-    if (!error) loadActions();
+    if (!error) {
+      loadActions();
+    } else {
+      captureFlowError(error, "proposal-lifecycle");
+      toast({ title: "Erro ao alterar acção", description: "Não foi possível atualizar o estado da acção.", variant: "destructive" });
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -212,6 +218,9 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
     if (!error) {
       toast({ title: "Acção removida" });
       loadActions();
+    } else {
+      captureFlowError(error, "proposal-lifecycle");
+      toast({ title: "Erro ao remover acção", description: "Não foi possível remover a acção.", variant: "destructive" });
     }
   };
 

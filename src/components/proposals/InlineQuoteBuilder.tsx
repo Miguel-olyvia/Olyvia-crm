@@ -18,6 +18,7 @@ import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { calculateInlineQuoteTotals, getLineBundleComponents } from "@/utils/quotes/inlineQuoteVatCalculation";
 import { getLineUnitPrice, getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface InlineQuoteLine {
   id: string;
@@ -560,6 +561,8 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
       });
     } catch (e) {
       console.error("Error loading template:", e);
+      captureFlowError(e, "quote-lifecycle");
+      toast.error("Não foi possível carregar o modelo de orçamento.");
     }
   };
 
