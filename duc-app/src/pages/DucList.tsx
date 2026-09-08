@@ -158,81 +158,77 @@ function OpenBadge({ duc }: { duc: DucRecord }) {
 }
 
 /**
- * Clientes da organização COM contrato válido (assinado/ativo). Visibilidade por
- * ÁREA: mostra todos os clientes com contrato da org a que o utilizador tem
- * acesso — não apenas os que lhe estão associados. Arranca dos próprios
- * `client_contracts` (a RLS por membership é a fronteira real de segurança).
+ * Propostas comerciais ACEITES da organização que ainda NÃO têm DUC — o ponto de
+ * partida do fluxo (o DUC nasce da proposta, antes do contrato). Visibilidade por
+ * ÁREA: todas as propostas aceites da org a que o utilizador tem acesso (a RLS por
+ * membership é a fronteira real de segurança). Uma entrada por proposta.
  */
-async function fetchValidContractClients(orgId: string): Promise<ClientOption[]> {
-  const { data: contracts } = await supabase
-    .from("client_contracts")
-    .select("client_id, entity_id, assigned_to, signature_date, created_at")
+async function fetchAcceptedProposals(orgId: string): Promise<ClientOption[]> {
+  const { data: proposals } = await supabase
+    .from("proposals")
+    .select("id, client_id, entity_id, assigned_to, accepted_at, created_at")
     .eq("organization_id", orgId)
-    .in("status", ["signed", "active"])
+    .eq("status", "accepted")
     .is("deleted_at", null)
-    .not("client_id", "is", null)
     .limit(1000);
 
-  // Um registo por cliente (dedupe), guardando entity_id/assigned_to/data do contrato.
-  const byClient = new Map<
-    string,
-    { entity_id: string | null; assigned_to: string | null; since: string | null }
-  >();
-  (contracts ?? []).forEach((c) => {
-    const cid = c.client_id as string;
-    if (!cid) return;
-    if (!byClient.has(cid)) {
-      byClient.set(cid, {
-        entity_id: (c.entity_id as string) ?? null,
-        assigned_to: (c.assigned_to as string) ?? null,
-        since: ((c.signature_date as string) ?? (c.created_at as string)) ?? null,
-      });
-    }
+  const rows = (proposals ?? []).filter((p) => p.id);
+  if (rows.length === 0) return [];
+
+  // Propostas que JÁ têm DUC — para não duplicar (uma proposta = um DUC).
+  const { data: withDuc } = await supabase
+    .from("anew_client_ducs")
+    .select("proposal_id")
+    .eq("organization_id", orgId)
+    .is("deleted_at", null)
+    .not("proposal_id", "is", null)
+    .limit(5000);
+  const used = new Set((withDuc ?? []).map((r) => r.proposal_id as string));
+
+  const pending = rows.filter((p) => !used.has(p.id as string));
+  if (pending.length === 0) return [];
+
+  // Resolve nomes por entity_id da proposta; quando falta, cai no entity do cliente.
+  const entityIds = new Set<string>();
+  const missingEntityClientIds: string[] = [];
+  pending.forEach((p) => {
+    if (p.entity_id) entityIds.add(p.entity_id as string);
+    else if (p.client_id) missingEntityClientIds.push(p.client_id as string);
   });
-
-  const clientIds = Array.from(byClient.keys());
-  if (clientIds.length === 0) return [];
-
-  // Preenche entity_id/assigned_to em falta a partir de anew_clients (best-effort).
-  const missingEntity = clientIds.filter((id) => !byClient.get(id)!.entity_id);
-  if (missingEntity.length > 0) {
+  const entityByClient = new Map<string, string>();
+  if (missingEntityClientIds.length > 0) {
     const { data: clients } = await supabase
       .from("anew_clients")
-      .select("id, entity_id, assigned_to")
-      .in("id", missingEntity);
+      .select("id, entity_id")
+      .in("id", Array.from(new Set(missingEntityClientIds)));
     (clients ?? []).forEach((c) => {
-      const rec = byClient.get(c.id as string);
-      if (rec) {
-        rec.entity_id = rec.entity_id ?? ((c.entity_id as string) ?? null);
-        rec.assigned_to = rec.assigned_to ?? ((c.assigned_to as string) ?? null);
+      if (c.entity_id) {
+        entityByClient.set(c.id as string, c.entity_id as string);
+        entityIds.add(c.entity_id as string);
       }
     });
   }
 
-  const entityIds = Array.from(
-    new Set(
-      Array.from(byClient.values())
-        .map((v) => v.entity_id)
-        .filter(Boolean) as string[]
-    )
-  );
   const nameByEntity = new Map<string, string>();
-  if (entityIds.length > 0) {
+  if (entityIds.size > 0) {
     const { data: ents } = await supabase
       .from("anew_entities")
       .select("id, display_name, first_name, last_name")
-      .in("id", entityIds);
+      .in("id", Array.from(entityIds));
     (ents ?? []).forEach((e) => nameByEntity.set(e.id as string, entityName(e)));
   }
 
-  return clientIds.map((id) => {
-    const rec = byClient.get(id)!;
+  return pending.map((p) => {
+    const entityId =
+      (p.entity_id as string) ??
+      (p.client_id ? entityByClient.get(p.client_id as string) ?? null : null);
     return {
-      id,
-      entity_id: rec.entity_id,
-      assigned_to: rec.assigned_to,
-      since: rec.since,
-      name: (rec.entity_id ? nameByEntity.get(rec.entity_id) : undefined) ?? "Cliente sem nome",
+      id: (p.client_id as string) ?? "",
+      entity_id: entityId,
+      assigned_to: (p.assigned_to as string) ?? null,
+      since: ((p.accepted_at as string) ?? (p.created_at as string)) ?? null,
+      proposalId: p.id as string,
+      name: (entityId ? nameByEntity.get(entityId) : undefined) ?? "Cliente sem nome",
     };
   });
 }
@@ -323,7 +319,7 @@ export default function DucList() {
     const { data, error, count } = await supabase
       .from("anew_client_ducs")
       .select(
-        "id, organization_id, root_organization_id, client_id, duc_number, title, variant, current_stage, status, assigned_to, blocks, tracking, created_by, created_at, updated_at, deleted_at",
+        "id, organization_id, root_organization_id, client_id, proposal_id, duc_number, title, variant, current_stage, status, assigned_to, blocks, tracking, created_by, created_at, updated_at, deleted_at",
         { count: "exact" }
       )
       .eq("organization_id", activeOrgId)
@@ -360,7 +356,7 @@ export default function DucList() {
     const { data, error } = await supabase
       .from("anew_client_ducs")
       .select(
-        "id, organization_id, root_organization_id, client_id, duc_number, title, variant, current_stage, status, assigned_to, blocks, tracking, created_by, created_at, updated_at, deleted_at"
+        "id, organization_id, root_organization_id, client_id, proposal_id, duc_number, title, variant, current_stage, status, assigned_to, blocks, tracking, created_by, created_at, updated_at, deleted_at"
       )
       .eq("organization_id", activeOrgId)
       .is("deleted_at", null)
@@ -393,29 +389,20 @@ export default function DucList() {
       return;
     }
     setLoadingPending(true);
-    const valid = await fetchValidContractClients(activeOrgId);
-    // Client_ids que JÁ têm DUC — consulta server-side (não depende da paginação).
-    const { data: withDucRows, error: withDucErr } = await supabase
-      .from("anew_client_ducs")
-      .select("client_id")
+    // Propostas aceites SEM DUC (a exclusão dos que já têm DUC é feita dentro de
+    // fetchAcceptedProposals, por proposta).
+    const notDocumented = await fetchAcceptedProposals(activeOrgId);
+    // Total de propostas aceites (com e sem DUC) — para a estatística "Com DUC"
+    // (= total − por documentar) e a barra de cobertura baterem certo.
+    const { count: totalAccepted } = await supabase
+      .from("proposals")
+      .select("id", { count: "exact", head: true })
       .eq("organization_id", activeOrgId)
-      .is("deleted_at", null)
-      .not("client_id", "is", null)
-      .limit(5000);
-    if (withDucErr) {
-      // Não mostrar todos como "por documentar" por causa de um erro de query.
-      // eslint-disable-next-line no-console
-      console.error("[DUC] erro a apurar DUCs existentes:", withDucErr);
-      setContractCount(valid.length);
-      setPending([]);
-      setLoadingPending(false);
-      return;
-    }
-    const withDuc = new Set((withDucRows ?? []).map((r) => r.client_id as string));
-    setContractCount(valid.length);
+      .eq("status", "accepted")
+      .is("deleted_at", null);
+    setContractCount(totalAccepted ?? notDocumented.length);
     // Exclui os "dispensados" (não precisam de DUC) da lista de por documentar.
     const dismissed = await fetchDismissedClientIds(activeOrgId);
-    const notDocumented = valid.filter((c) => !withDuc.has(c.id));
     setPending(notDocumented.filter((c) => !dismissed.has(c.id)));
     setDismissedClients(notDocumented.filter((c) => dismissed.has(c.id)));
     setLoadingPending(false);
@@ -585,7 +572,7 @@ export default function DucList() {
             Documento Único de Cliente
           </h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            Vês os clientes da tua área com contrato assinado.
+            Vês as propostas aceites da tua área.
           </p>
         </div>
         <Button
@@ -918,7 +905,7 @@ function DucsView({
             title={ducs.length === 0 ? "Ainda não há DUCs" : "Sem resultados"}
             description={
               ducs.length === 0
-                ? "Cria o primeiro DUC para um cliente da área com contrato."
+                ? "Cria o primeiro DUC a partir de uma proposta aceite da área."
                 : "Nenhum DUC corresponde aos filtros aplicados."
             }
             action={
@@ -1147,7 +1134,7 @@ function StatRow({
     iconBg: string; // fundo do ícone
   }> = [
     {
-      label: "Clientes com contrato",
+      label: "Propostas aceites",
       value: contractCount,
       icon: <Building width={16} height={16} />,
       accent: "text-slate-800",
@@ -1316,7 +1303,7 @@ function PendingView({
           <EmptyState
             icon={<ClientSketch width={24} height={24} />}
             title="Nada por documentar"
-            description="Todos os clientes da área com contrato válido já têm DUC."
+            description="Todas as propostas aceites da área já têm DUC."
           />
         </Card>
       ) : (
@@ -1350,7 +1337,7 @@ function PendingView({
                         documentar.
                       </p>
                     ) : (
-                      <p className="text-sm text-slate-500">Contratos válidos ainda sem DUC.</p>
+                      <p className="text-sm text-slate-500">Propostas aceites ainda sem DUC.</p>
                     )}
                   </div>
                 </div>
@@ -1395,7 +1382,7 @@ function PendingView({
                 const tone = urgencyTone(days ?? 0);
                 const daysLabel =
                   days === null
-                    ? "sem data de contrato"
+                    ? "sem data de aceitação"
                     : days === 0
                       ? "hoje"
                       : days === 1
@@ -1551,7 +1538,7 @@ function CreateDucModal({
   useEffect(() => {
     (async () => {
       setLoadingClients(true);
-      const list = await fetchValidContractClients(orgId);
+      const list = await fetchAcceptedProposals(orgId);
       setClients(list);
       setLoadingClients(false);
     })();
@@ -1579,15 +1566,19 @@ function CreateDucModal({
     const eff = await fetchEffectiveStages(orgId, variant);
     const tracking = eff.stages.map((s) => ({ stage: s.no, state: "pending" as const }));
 
-    // Pré-preenche os blocos com os dados que já existem na Olyvia.
-    const info = await fetchClientOlyviaInfo(selected.id);
+    // Pré-preenche os blocos com os dados que já existem na Olyvia, a partir da
+    // PROPOSTA de origem (âmbito + contactos). O contrato entra depois.
+    const info = selected.id
+      ? await fetchClientOlyviaInfo(selected.id, { proposalId: selected.proposalId })
+      : null;
     const blocks = info ? prefillBlocksFromInfo(info) : {};
 
     const { data, error: insertError } = await supabase
       .from("anew_client_ducs")
       .insert({
         organization_id: orgId,
-        client_id: selected.id,
+        client_id: selected.id || null,
+        proposal_id: selected.proposalId ?? null,
         duc_number: ducNumber,
         title: selected.name,
         variant,
@@ -1625,7 +1616,7 @@ function CreateDucModal({
       }
     >
       <div className="space-y-4">
-        <Field label="Cliente" hint="Clientes da área com contrato válido (assinado ou ativo).">
+        <Field label="Cliente" hint="Propostas aceites da área ainda sem DUC.">
           <Input
             placeholder="Pesquisar cliente…"
             value={selected ? selected.name : search}
@@ -1642,7 +1633,7 @@ function CreateDucModal({
               <Spinner label="A carregar clientes…" />
             ) : filtered.length === 0 ? (
               <p className="p-4 text-center text-sm text-slate-400">
-                Sem clientes com contrato válido nesta área.
+                Sem propostas aceites por documentar nesta área.
               </p>
             ) : (
               filtered.map((c) => (
