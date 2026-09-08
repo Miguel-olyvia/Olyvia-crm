@@ -1,5 +1,6 @@
 import { createBrowserClient } from '@supabase/ssr';
 import type { Database } from './types';
+import { createSafeStorage } from './safeStorage';
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
@@ -17,7 +18,11 @@ export const supabase = createBrowserClient<Database>(
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
   {
     auth: {
-      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+      // Adaptador tolerante: cai para memória quando o browser bloqueia o
+      // localStorage (form embebido em iframe de terceiros, Firefox/Safari com
+      // proteção de rastreio, cookies desativados). Evita o Security: "the
+      // operation is insecure" que rebentava o arranque do formulário público.
+      storage: createSafeStorage(),
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: true,
