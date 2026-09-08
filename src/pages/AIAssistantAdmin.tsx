@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import Layout from "@/components/Layout";
@@ -150,13 +151,15 @@ export default function AIAssistantAdmin() {
 
   const loadStats = async () => {
     try {
-      const { count: convCount } = await supabase
+      const { count: convCount, error: convError } = await supabase
         .from("ai_assistant_conversations")
         .select("*", { count: "exact", head: true });
+      if (convError) captureFlowError(convError, "ai-assistant");
 
-      const { data: msgData } = await supabase
+      const { data: msgData, error: msgError } = await supabase
         .from("ai_assistant_messages")
         .select("rating");
+      if (msgError) captureFlowError(msgError, "ai-assistant");
 
       const totalMessages = msgData?.length || 0;
       const ratedMessages = msgData?.filter(m => m.rating !== null) || [];

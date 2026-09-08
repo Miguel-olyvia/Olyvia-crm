@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const BASE_ROLES = [
   {
@@ -134,6 +135,7 @@ export async function assignCreatorAsOrgAdmin(
     return { success: true };
   } catch (error: any) {
     console.error("Error assigning creator as org admin:", error);
+    captureFlowError(error, "org-structure-partial-write");
     return { success: false, error: error.message };
   }
 }
@@ -184,6 +186,7 @@ export async function assignCreatorAsAdminToHierarchy(
       : { success: true };
   } catch (error: any) {
     console.error("Error assigning creator to hierarchy:", error);
+    captureFlowError(error, "org-structure-partial-write");
     return { success: false, error: error.message };
   }
 }

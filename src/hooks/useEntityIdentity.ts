@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { captureFlowError } from '@/lib/observability/captureFlowError';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 import { callFiscalEntityResolve } from '@/lib/nif/callFiscalEntityResolve';
 import { callNifReveal, callNifRevealSingle } from '@/lib/nif/callNifReveal';
@@ -158,6 +159,7 @@ export function useEntityIdentity() {
       return map;
     } catch (error) {
       console.error('Error resolving entity identities:', error);
+      captureFlowError(error, 'db-error-leaked-to-ui');
       return {};
     } finally {
       setLoading(false);

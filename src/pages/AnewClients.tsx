@@ -1144,7 +1144,7 @@ const AnewClients = () => {
         .eq("entity_type", "client")
         .eq("kind", "alert")
         .eq("is_resolved", false);
-    } catch (e) { console.error("Failed to resolve client notifications", e); }
+    } catch (e) { console.error("Failed to resolve client notifications", e); captureFlowError(e, "client-lifecycle"); }
   };
 
   const handleDeleteConfirm = async () => {
@@ -1271,6 +1271,7 @@ const AnewClients = () => {
         });
         if (error) {
           console.error("Error marking client as VIP:", client.id, error);
+          captureFlowError(error, "bulk-record-action");
           continue;
         }
         successCount++;
@@ -1325,6 +1326,7 @@ const AnewClients = () => {
         } as any);
         if (error) {
           console.error("Error creating bulk deal for client:", client.id, error);
+          captureFlowError(error, "bulk-record-action");
           continue;
         }
         successCount++;
@@ -1413,7 +1415,7 @@ const AnewClients = () => {
       if (entityResolved) {
         try {
           await ensureEntityOrgLink({ entityId, organizationId, isPrimary: false });
-        } catch (e) { console.warn('[org-link] non-fatal', e); }
+        } catch (e) { console.warn('[org-link] non-fatal', e); captureFlowError(e, "client-lifecycle"); }
         // NOTE: display_name update on the reused entity is deferred until
         // after the duplicate check (see below) so duplicates surface with
         // the entity's real existing name, not the freshly typed one.
@@ -1687,6 +1689,7 @@ const AnewClients = () => {
       }
     } catch (revErr) {
       console.warn('[client-create-anyway] pre-write revalidation failed (non-fatal)', revErr);
+      captureFlowError(revErr, "client-lifecycle");
     }
     setClientDuplicateDialogOpen(false);
     setSavingClient(true);

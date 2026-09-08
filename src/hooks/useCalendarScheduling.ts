@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/lib/toast';
+import { captureFlowError } from '@/lib/observability/captureFlowError';
 import type { ScheduleItem, ScheduleBoard, ScheduleResource } from '@/types/scheduling';
 import { extractLeadContactInfo } from '@/utils/leadContactInfo';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
@@ -104,6 +105,7 @@ export function useCalendarScheduling(companyId?: string) {
       return newBoard as ScheduleBoard;
     } catch (error: any) {
       console.error('Error ensuring visits board:', error);
+      captureFlowError(error, 'db-error-leaked-to-ui');
       return null;
     }
   }, [companyId, visitsBoard, hasPermission]);
@@ -126,6 +128,7 @@ export function useCalendarScheduling(companyId?: string) {
       return (data || []) as ScheduleBoard[];
     } catch (error: any) {
       console.error('Error fetching boards:', error);
+      captureFlowError(error, 'db-error-leaked-to-ui');
       return [];
     }
   }, [companyId]);
@@ -212,6 +215,7 @@ export function useCalendarScheduling(companyId?: string) {
         } else if (leadsError) {
           // Don't block calendar rendering if user doesn't have lead access
           console.warn('[useCalendarScheduling] Unable to fetch leads for visits:', leadsError.message);
+          captureFlowError(leadsError, 'db-error-leaked-to-ui');
         }
       }
 
@@ -349,7 +353,10 @@ export function useCalendarScheduling(companyId?: string) {
           .from('anew_leads')
           .update({ scheduled_visit_id: item.id })
           .eq('id', visitData.lead_id);
-        if (leadLinkError) console.warn('[useCalendarScheduling] Failed to link scheduled_visit_id to lead', leadLinkError);
+        if (leadLinkError) {
+          console.warn('[useCalendarScheduling] Failed to link scheduled_visit_id to lead', leadLinkError);
+          captureFlowError(leadLinkError, 'lead-lifecycle');
+        }
       }
 
       // Find or create resource for assigned user and add as assignee
@@ -393,6 +400,9 @@ export function useCalendarScheduling(companyId?: string) {
 
         if (!resourceError) {
           resource = newResource;
+        } else {
+          console.error('Error creating schedule resource for assignee:', resourceError);
+          captureFlowError(resourceError, 'db-error-leaked-to-ui');
         }
       }
 

@@ -131,6 +131,7 @@ export default function NeedsAssessmentConfig() {
       }
     } catch (err: any) {
       console.error(err);
+      captureFlowError(err, "db-error-leaked-to-ui");
     } finally {
       setLoading(false);
     }
@@ -152,13 +153,15 @@ export default function NeedsAssessmentConfig() {
       };
       const { data: existing } = await supabase.from("needs_assessment_settings")
         .select("id").eq("organization_id", organizationId).maybeSingle();
-      if (existing) {
-        await supabase.from("needs_assessment_settings")
-          .update(payload)
-          .eq("organization_id", organizationId);
-      } else {
-        await supabase.from("needs_assessment_settings")
-          .insert([{ organization_id: organizationId, ...payload }]);
+      const { error: saveError } = existing
+        ? await supabase.from("needs_assessment_settings")
+            .update(payload)
+            .eq("organization_id", organizationId)
+        : await supabase.from("needs_assessment_settings")
+            .insert([{ organization_id: organizationId, ...payload }]);
+      if (saveError) {
+        captureFlowError(saveError, "config-partial-write");
+        toast({ title: "Erro ao guardar", description: "Não foi possível guardar as definições.", variant: "destructive" });
       }
     } catch (err: any) {
       toast({ title: "Erro ao guardar", description: err.message, variant: "destructive" });
@@ -217,8 +220,12 @@ export default function NeedsAssessmentConfig() {
   };
 
   const toggleFieldActive = async (field: FieldConfig) => {
-    await supabase.from("needs_assessment_field_configs")
+    const { error } = await supabase.from("needs_assessment_field_configs")
       .update({ is_active: !field.is_active }).eq("id", field.id);
+    if (error) {
+      captureFlowError(error, "config-partial-write");
+      toast({ title: "Erro", description: "Não foi possível atualizar o campo.", variant: "destructive" });
+    }
     loadData();
   };
 

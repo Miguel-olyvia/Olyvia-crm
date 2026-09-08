@@ -206,10 +206,11 @@ export default function Forms() {
       if (activeCompany) {
         setOrganizations([{ id: activeCompany.id, name: activeCompany.name }]);
       } else {
-        const { data: organizationsData } = await supabase
+        const { data: organizationsData, error: organizationsError } = await supabase
           .from("anew_organizations")
           .select("id, name")
           .in("type", ["empresa"])
+        if (organizationsError) captureFlowError(organizationsError, "db-error-leaked-to-ui");
         setOrganizations(organizationsData || []);
       }
     } catch (error) {
@@ -347,7 +348,7 @@ export default function Forms() {
         if (formData.form_type === "lead" && newForm?.id) {
           try {
             // Create default step
-            const { data: newStep } = await supabase
+            const { data: newStep, error: newStepError } = await supabase
               .from("form_steps")
               .insert({
                 form_id: newForm.id,
@@ -359,6 +360,8 @@ export default function Forms() {
               })
               .select("id")
               .single();
+
+            if (newStepError) captureFlowError(newStepError, "form-submission-intake");
 
             if (newStep) {
               const { LEAD_FORM_BASE_FIELDS } = await import("@/constants/fieldMappings");
@@ -375,10 +378,12 @@ export default function Forms() {
                 contact_field_mapping: f.contact_field_mapping,
               }));
 
-              await supabase.from("form_fields").insert(baseFields);
+              const { error: baseFieldsError } = await supabase.from("form_fields").insert(baseFields);
+              if (baseFieldsError) captureFlowError(baseFieldsError, "form-submission-intake");
             }
           } catch (seedError) {
             console.error("Error seeding base fields:", seedError);
+            captureFlowError(seedError, "form-submission-intake");
           }
         }
 

@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Mail, Plus, Pencil, Trash2, Loader2, Star, CheckCircle, XCircle, Send, Building2, User, ArrowRight, Globe, AlertTriangle } from "lucide-react";
@@ -95,20 +96,22 @@ export default function SmtpManagement() {
       if (!user) return;
 
       // Load user SMTPs
-      const { data: userConfigs } = await (supabase as any)
+      const { data: userConfigs, error: userConfigsError } = await (supabase as any)
         .from("user_smtp_settings")
         .select("*")
         .eq("user_id", user.id)
         .order("is_default", { ascending: false });
+      if (userConfigsError) captureFlowError(userConfigsError, "db-error-leaked-to-ui");
       setUserSmtps(userConfigs || []);
 
       // Load org SMTPs
       if (activeCompany) {
-        const { data: orgConfigs } = await (supabase as any)
+        const { data: orgConfigs, error: orgConfigsError } = await (supabase as any)
           .from("organization_smtp_settings")
           .select("*")
           .eq("organization_id", activeCompany.id)
           .order("is_default", { ascending: false });
+        if (orgConfigsError) captureFlowError(orgConfigsError, "db-error-leaked-to-ui");
         setOrgSmtps(orgConfigs || []);
       }
     } catch (error) {
@@ -282,7 +285,11 @@ export default function SmtpManagement() {
 
   const handleToggleActive = async (smtp: SmtpConfig, mode: "user" | "org") => {
     const table = mode === "user" ? "user_smtp_settings" : "organization_smtp_settings";
-    await (supabase as any).from(table).update({ is_active: !smtp.is_active }).eq("id", smtp.id);
+    const { error } = await (supabase as any).from(table).update({ is_active: !smtp.is_active }).eq("id", smtp.id);
+    if (error) {
+      captureFlowError(error, "config-partial-write");
+      toast({ title: "Erro", description: "Não foi possível atualizar o estado do SMTP.", variant: "destructive" });
+    }
     loadSmtpConfigs();
   };
 

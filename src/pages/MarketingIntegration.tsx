@@ -45,6 +45,7 @@ import {
 import * as LucideIcons from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { HelpButton } from "@/components/HelpButton";
@@ -120,12 +121,13 @@ export default function MarketingIntegration() {
   }, [activeCompany?.id]);
 
   const fetchCampaigns = async () => {
-    const { data } = await (supabase as any)
+    const { data, error } = await (supabase as any)
       .from("campaigns")
       .select("id, name, status, iframe_enabled")
       .eq("organization_id", activeCompany?.id)
       .order("name");
-    
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
+
     setCampaigns(data || []);
   };
 
@@ -136,10 +138,10 @@ export default function MarketingIntegration() {
   const fetchTokens = async () => {
     setLoading(true);
     try {
-      const { data } = await supabase
+      const { data, error: tokensError } = await supabase
         .from("scoped_api_tokens")
         .select(`
-          id, 
+          id,
           token_key, 
           token_name, 
           is_active, 
@@ -151,6 +153,8 @@ export default function MarketingIntegration() {
         `)
         .eq("organization_id", activeCompany?.id)
         .order("created_at", { ascending: false });
+
+      if (tokensError) captureFlowError(tokensError, "db-error-leaked-to-ui");
 
       const mappedTokens: CampaignToken[] = (data || []).map((t: any) => {
         // Extract campaign_id from scopes array (format: "campaign:uuid")
