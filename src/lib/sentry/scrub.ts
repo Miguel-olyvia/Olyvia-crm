@@ -34,8 +34,18 @@ export function scrubPii(value: unknown, depth = 0): unknown {
 export const isModuleLoadError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error ?? "");
   return (
+    // Todas variantes do MESMO sintoma: um chunk lazy com hash antigo deixou de
+    // existir apos um deploy e o alojamento (Vercel) devolve index.html no lugar
+    // do .js. Cada browser redige a falha de forma diferente -- Chrome/Firefox
+    // "is not a valid JavaScript MIME type" / "Failed to load module script",
+    // Safari "Importing a module script failed", etc. Todas se resolvem com um
+    // reload que vai buscar o index.html fresco, por isso todas sao "recuperaveis".
     message.includes("Failed to fetch dynamically imported module") ||
-    message.includes("Importing a module script failed")
+    message.includes("error loading dynamically imported module") ||
+    message.includes("Importing a module script failed") ||
+    message.includes("Failed to load module script") ||
+    message.includes("is not a valid JavaScript MIME type") ||
+    message.includes("Expected a JavaScript module script")
   );
 };
 
