@@ -167,6 +167,7 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
       setConversations(summaries);
     } catch (e) {
       console.error("Error loading history:", e);
+      captureFlowError(e, "ai-assistant");
       toast({ title: "Erro ao carregar histórico", variant: "destructive" });
     } finally {
       setLoadingHistory(false);
@@ -199,6 +200,7 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
       setShowHistory(false);
     } catch (e) {
       console.error("Error loading conversation:", e);
+      captureFlowError(e, "ai-assistant");
       toast({ title: "Erro ao carregar conversa", variant: "destructive" });
     } finally {
       setLoadingConversation(false);
@@ -234,6 +236,7 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
       toast({ title: "Conversa eliminada" });
     } catch (err) {
       console.error("Error deleting conversation:", err);
+      captureFlowError(err, "ai-assistant");
       toast({ title: "Erro ao eliminar", variant: "destructive" });
     }
   };
@@ -258,6 +261,7 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
 
     if (error) {
       console.error("Error creating conversation:", error);
+      captureFlowError(error, "ai-assistant");
       return null;
     }
 
@@ -280,14 +284,20 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
 
     if (error) {
       console.error("Error saving message:", error);
+      captureFlowError(error, "ai-assistant");
       return null;
     }
 
     // Touch conversation updated_at so history is sorted by recency
-    await supabase
+    const { error: touchError } = await supabase
       .from("ai_assistant_conversations")
       .update({ updated_at: new Date().toISOString() })
       .eq("id", convId);
+
+    if (touchError) {
+      console.error("Error touching conversation:", touchError);
+      captureFlowError(touchError, "ai-assistant");
+    }
 
     return data.id;
   };
@@ -465,6 +475,7 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
             if (Array.isArray(parsed.toolCalls)) applyToolCalls(parsed.toolCalls as ToolCallView[]);
           } catch (e) {
             console.error("Bad tool_calls frame:", e);
+            captureFlowError(e, "ai-assistant");
           }
           return;
         }
@@ -578,6 +589,7 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
       .eq("id", messageId);
 
     if (error) {
+      captureFlowError(error, "ai-assistant");
       toast({ title: "Erro ao guardar avaliação", variant: "destructive" });
     } else {
       setMessages(prev => prev.map(m => m.id === messageId ? { ...m, rating } : m));
