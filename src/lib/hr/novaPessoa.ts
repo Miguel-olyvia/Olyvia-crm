@@ -25,9 +25,16 @@ import {
   horarioVazio,
   minutosDe,
 } from "@/lib/hr/horario";
+import { contaValida, normalizarConta } from "@/lib/hr/conta";
+import {
+  problemasDosNumerosDoContrato,
+  type CampoNumericoContrato,
+} from "@/lib/hr/contrato";
+import { horasImplausiveis } from "@/lib/hr/horas";
 import type {
   DiaSemana,
   EstadoCivil,
+  FormatoConta,
   Genero,
   HorasFrequencia,
   Periodicidade,
@@ -51,7 +58,7 @@ export const SECCOES: readonly SeccaoId[] = [
 export interface RascunhoGeral {
   primeiro_nome: string;
   apelido: string;
-  nome_social: string;
+  /** O futuro identificador de entrada, se se vier a autenticar por aqui. */
   email_trabalho: string;
   telefone_trabalho: string;
   numero_interno: string;
@@ -61,7 +68,7 @@ export interface RascunhoPessoais {
   data_nascimento: string;
   ocultar_aniversario: boolean;
   genero: Genero | "";
-  pronomes: string;
+  /** Codigo ISO 3166-1 alpha-2, nunca o nome do pais. */
   nacionalidade: string;
   estado_civil: EstadoCivil | "";
   dependentes: string;
@@ -80,6 +87,13 @@ export interface RascunhoPessoais {
   morada_localidade: string;
   morada_distrito: string;
   morada_pais: string;
+  /**
+   * A conta bancaria. NAO vai por insert: `pessoas_dados_bancarios` tem a
+   * escrita revogada e o unico caminho e `rpc_hr_definir_conta`, depois de a
+   * pessoa existir. O numero acaba no Vault e a aplicacao nunca o volta a ver.
+   */
+  conta_formato: FormatoConta;
+  conta_numero: string;
   emergencia_nome: string;
   emergencia_relacao: string;
   emergencia_telefone: string;
@@ -96,6 +110,14 @@ export interface RascunhoLaborais {
 export interface RascunhoContrato {
   tipo_contrato: TipoContrato | "";
   regime: RegimeTrabalho;
+  /**
+   * UI, nao dados: `regime` nasce a `tempo_inteiro` e por isso nao se distingue
+   * de uma escolha. Este sinalizador guarda o que a base nao consegue guardar
+   * -- se o regime foi escolhido A MAO -- para o ecra saber quando pode deixa-lo
+   * seguir o tipo de contrato e quando tem de se limitar a avisar. Nunca vai
+   * para a base: o payload de escrita enumera os campos um a um.
+   */
+  regime_manual: boolean;
   data_inicio: string;
   data_fim: string;
   tem_periodo_experimental: boolean;
@@ -135,7 +157,6 @@ export function rascunhoInicial(): RascunhoPessoa {
     geral: {
       primeiro_nome: "",
       apelido: "",
-      nome_social: "",
       email_trabalho: "",
       telefone_trabalho: "",
       numero_interno: "",
@@ -144,7 +165,6 @@ export function rascunhoInicial(): RascunhoPessoa {
       data_nascimento: "",
       ocultar_aniversario: false,
       genero: "",
-      pronomes: "",
       nacionalidade: "",
       estado_civil: "",
       dependentes: "",
@@ -161,6 +181,8 @@ export function rascunhoInicial(): RascunhoPessoa {
       morada_localidade: "",
       morada_distrito: "",
       morada_pais: "PT",
+      conta_formato: "iban",
+      conta_numero: "",
       emergencia_nome: "",
       emergencia_relacao: "",
       emergencia_telefone: "",
@@ -175,6 +197,7 @@ export function rascunhoInicial(): RascunhoPessoa {
     contrato: {
       tipo_contrato: "",
       regime: "tempo_inteiro",
+      regime_manual: false,
       data_inicio: "",
       data_fim: "",
       tem_periodo_experimental: false,
@@ -209,6 +232,27 @@ export interface ProblemaCampo {
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Onde vive, NESTE formulario, cada numero validado por `lib/hr/contrato`. */
+const CAMPOS_NUMERICOS_DO_CONTRATO: Record<
+  CampoNumericoContrato,
+  { campoId: string; rotuloKey: string }
+> = {
+  horas: { campoId: "hr-novo-horas-trabalho", rotuloKey: "hr.contrato.horasTrabalho" },
+  maximoSemanal: {
+    campoId: "hr-novo-horas-semanais-maximas",
+    rotuloKey: "hr.contrato.horasSemanaisMaximas",
+  },
+  maximoAnual: {
+    campoId: "hr-novo-horas-anuais-maximas",
+    rotuloKey: "hr.contrato.horasAnuaisMaximas",
+  },
+  fte: { campoId: "hr-novo-tempo-trabalho-pct", rotuloKey: "hr.contrato.tempoTrabalhoPct" },
+  experimental: {
+    campoId: "hr-novo-periodo-experimental-dias",
+    rotuloKey: "hr.contrato.periodoExperimentalDias",
+  },
+};
 
 function numeroDe(valor: string): number | null {
   const limpo = valor.trim().replace(",", ".");
@@ -276,6 +320,20 @@ export function problemasDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
       mensagemKey: "hr.form.erroNiss",
     });
   }
+  if (
+    pessoais.conta_numero.trim() !== "" &&
+    !contaValida(pessoais.conta_formato, pessoais.conta_numero)
+  ) {
+    problemas.push({
+      seccao: "pessoais",
+      campoId: "hr-novo-conta-numero",
+      rotuloKey: "hr.campos.numeroConta",
+      // A mensagem distingue os dois ramos porque o remedio e diferente: num
+      // IBAN falha o digito de controlo, nos outros o proprio formato.
+      mensagemKey:
+        pessoais.conta_formato === "iban" ? "hr.form.erroIban" : "hr.form.erroConta",
+    });
+  }
   const dependentes = numeroDe(pessoais.dependentes);
   if (pessoais.dependentes.trim() !== "" && (dependentes === null || dependentes < 0)) {
     problemas.push({
@@ -296,59 +354,26 @@ export function problemasDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
       mensagemKey: "hr.form.erroNumero",
     });
   }
-  const pct = numeroDe(contrato.tempo_trabalho_pct);
-  if (contrato.tempo_trabalho_pct.trim() !== "" && (pct === null || pct < 0 || pct > 100)) {
+  // Os cinco numeros do contrato -- e o cruzamento entre dois deles -- estao
+  // em `lib/hr/contrato.ts`, porque o separador Contratos da ficha edita
+  // exactamente os mesmos e nao podem divergir. Aqui so se traduz o campo
+  // abstracto para o `id` deste formulario.
+  for (const problema of problemasDosNumerosDoContrato({
+    horas: contrato.horas_trabalho,
+    horas_frequencia: contrato.horas_frequencia,
+    horas_semanais_maximas: contrato.horas_semanais_maximas,
+    horas_anuais_maximas: contrato.horas_anuais_maximas,
+    tempo_trabalho_pct: contrato.tempo_trabalho_pct,
+    periodo_experimental_dias: contrato.tem_periodo_experimental
+      ? contrato.periodo_experimental_dias
+      : "",
+  })) {
+    const onde = CAMPOS_NUMERICOS_DO_CONTRATO[problema.campo];
     problemas.push({
       seccao: "contrato",
-      campoId: "hr-novo-tempo-trabalho-pct",
-      rotuloKey: "hr.contrato.tempoTrabalhoPct",
-      mensagemKey: "hr.form.erroPercentagem",
-    });
-  }
-  const horas = numeroDe(contrato.horas_trabalho);
-  if (contrato.horas_trabalho.trim() !== "" && (horas === null || horas < 0 || horas > 80)) {
-    problemas.push({
-      seccao: "contrato",
-      campoId: "hr-novo-horas-trabalho",
-      rotuloKey: "hr.contrato.horasTrabalho",
-      mensagemKey: "hr.form.erroHoras",
-    });
-  }
-  const maxSemanal = numeroDe(contrato.horas_semanais_maximas);
-  if (
-    contrato.horas_semanais_maximas.trim() !== "" &&
-    (maxSemanal === null || maxSemanal < 0 || maxSemanal > 80)
-  ) {
-    problemas.push({
-      seccao: "contrato",
-      campoId: "hr-novo-horas-semanais-maximas",
-      rotuloKey: "hr.contrato.horasSemanaisMaximas",
-      mensagemKey: "hr.form.erroHoras",
-    });
-  }
-  const maxAnual = numeroDe(contrato.horas_anuais_maximas);
-  if (
-    contrato.horas_anuais_maximas.trim() !== "" &&
-    (maxAnual === null || maxAnual < 0 || maxAnual > 4000)
-  ) {
-    problemas.push({
-      seccao: "contrato",
-      campoId: "hr-novo-horas-anuais-maximas",
-      rotuloKey: "hr.contrato.horasAnuaisMaximas",
-      mensagemKey: "hr.form.erroNumero",
-    });
-  }
-  const experimental = numeroDe(contrato.periodo_experimental_dias);
-  if (
-    contrato.tem_periodo_experimental &&
-    contrato.periodo_experimental_dias.trim() !== "" &&
-    (experimental === null || experimental < 0 || experimental > 1095)
-  ) {
-    problemas.push({
-      seccao: "contrato",
-      campoId: "hr-novo-periodo-experimental-dias",
-      rotuloKey: "hr.contrato.periodoExperimentalDias",
-      mensagemKey: "hr.form.erroDias",
+      campoId: onde.campoId,
+      rotuloKey: onde.rotuloKey,
+      mensagemKey: problema.mensagemKey,
     });
   }
 
@@ -365,15 +390,6 @@ export function problemasDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
       mensagemKey: "hr.form.erroDataFim",
     });
   }
-  if (maxSemanal !== null && horas !== null && maxSemanal < horas) {
-    problemas.push({
-      seccao: "contrato",
-      campoId: "hr-novo-horas-semanais-maximas",
-      rotuloKey: "hr.contrato.horasSemanaisMaximas",
-      mensagemKey: "hr.form.erroMaximoSemanal",
-    });
-  }
-
   // -- Acesso ---------------------------------------------------------------
   if (rascunho.acesso.enviar_convite) {
     const email = rascunho.acesso.email_convite.trim() || geral.email_trabalho.trim();
@@ -390,6 +406,33 @@ export function problemasDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
   return problemas;
 }
 
+/**
+ * O que e legal mas provavelmente errado.
+ *
+ * NAO bloqueia a gravacao, e a distincao importa: um contrato de 3h por semana
+ * e legal e existe. O que isto apanha e a UNIDADE TROCADA -- "40 mensais" da
+ * 9,2h por semana, passa o tecto de 80h e nao passa por plausivel. Nenhum
+ * CHECK consegue distinguir isso de um contrato real de 9h, porque as duas
+ * linhas sao identicas; quem consegue e quem esta a preencher, se lhe
+ * dissermos.
+ */
+export function avisosDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
+  const avisos: ProblemaCampo[] = [];
+  const { contrato } = rascunho;
+
+  const horas = numeroDe(contrato.horas_trabalho);
+  if (horasImplausiveis(horas, contrato.horas_frequencia)) {
+    avisos.push({
+      seccao: "contrato",
+      campoId: "hr-novo-horas-trabalho",
+      rotuloKey: "hr.contrato.horasTrabalho",
+      mensagemKey: "hr.form.avisoHorasImplausiveis",
+    });
+  }
+
+  return avisos;
+}
+
 /** A seccao tem algum valor preenchido? Alimenta o estado na lista de passos. */
 export function seccaoPreenchida(rascunho: RascunhoPessoa, seccao: SeccaoId): boolean {
   switch (seccao) {
@@ -398,7 +441,9 @@ export function seccaoPreenchida(rascunho: RascunhoPessoa, seccao: SeccaoId): bo
     case "pessoais":
       return Object.entries(rascunho.pessoais).some(([chave, valor]) => {
         if (chave === "ocultar_aniversario") return valor === true;
-        if (chave === "morada_pais") return false;
+        // Estes dois nascem preenchidos por omissao e nao contam como seccao
+        // preenchida: senao os Detalhes pessoais nasciam com visto.
+        if (chave === "morada_pais" || chave === "conta_formato") return false;
         return String(valor).trim() !== "";
       });
     case "laborais":
@@ -429,7 +474,6 @@ export interface NovaPessoaPayload {
   nucleo: {
     primeiro_nome: string;
     apelido: string;
-    nome_social: string | null;
     email_trabalho: string | null;
     email_pessoal: string | null;
     telefone_trabalho: string | null;
@@ -445,6 +489,11 @@ export interface NovaPessoaPayload {
   /** Vai por `rpc_hr_definir_niss`, nunca por insert. */
   niss: string | null;
   morada: Record<string, unknown> | null;
+  /**
+   * Vai por `rpc_hr_definir_conta`, nunca por insert: a tabela tem a escrita
+   * revogada. Como o NISS, pode falhar sozinha -- e a ficha fica criada.
+   */
+  conta: { formato: FormatoConta; numero: string } | null;
   emergencia: Record<string, unknown> | null;
   vinculo: Record<string, unknown> | null;
   retribuicao: { valor_base: number; moeda: string; periodicidade: Periodicidade } | null;
@@ -492,7 +541,6 @@ export function payloadDoRascunho(
   const temPessoais =
     texto(pessoais.data_nascimento) !== null ||
     pessoais.genero !== "" ||
-    texto(pessoais.pronomes) !== null ||
     texto(pessoais.nacionalidade) !== null ||
     pessoais.estado_civil !== "" ||
     texto(pessoais.dependentes) !== null ||
@@ -522,7 +570,6 @@ export function payloadDoRascunho(
     nucleo: {
       primeiro_nome: geral.primeiro_nome.trim(),
       apelido: geral.apelido.trim(),
-      nome_social: texto(geral.nome_social),
       email_trabalho: texto(geral.email_trabalho),
       email_pessoal: texto(pessoais.email_pessoal),
       telefone_trabalho: texto(geral.telefone_trabalho),
@@ -538,8 +585,7 @@ export function payloadDoRascunho(
           data_nascimento: texto(pessoais.data_nascimento),
           ocultar_aniversario: pessoais.ocultar_aniversario,
           genero: pessoais.genero === "" ? null : pessoais.genero,
-          pronomes: texto(pessoais.pronomes),
-          nacionalidade: texto(pessoais.nacionalidade),
+          nacionalidade: texto(pessoais.nacionalidade)?.toUpperCase() ?? null,
           estado_civil: pessoais.estado_civil === "" ? null : pessoais.estado_civil,
           dependentes: numero(pessoais.dependentes),
           telefone_pessoal: texto(pessoais.telefone_pessoal),
@@ -564,8 +610,15 @@ export function payloadDoRascunho(
             codigo_postal: texto(pessoais.morada_codigo_postal),
             localidade: texto(pessoais.morada_localidade),
             distrito: texto(pessoais.morada_distrito),
-            pais: pessoais.morada_pais.trim() || "PT",
+            pais: pessoais.morada_pais.trim().toUpperCase() || "PT",
             is_principal: true,
+          }
+        : null,
+    conta:
+      normalizarConta(pessoais.conta_numero) !== ""
+        ? {
+            formato: pessoais.conta_formato,
+            numero: normalizarConta(pessoais.conta_numero),
           }
         : null,
     emergencia:
@@ -581,7 +634,7 @@ export function payloadDoRascunho(
       ? {
           tipo_contrato: contrato.tipo_contrato === "" ? "sem_termo" : contrato.tipo_contrato,
           regime: contrato.regime,
-          horas_semanais: numero(contrato.horas_trabalho),
+          horas_periodo: numero(contrato.horas_trabalho),
           horas_frequencia: contrato.horas_frequencia,
           data_inicio: texto(contrato.data_inicio) ?? texto(laborais.data_admissao) ?? hoje(),
           data_fim: texto(contrato.data_fim),

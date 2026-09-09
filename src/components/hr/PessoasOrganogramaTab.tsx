@@ -106,7 +106,7 @@ function No({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">
-            {no.pessoa.nome_social || no.pessoa.nome_completo}
+            {no.pessoa.nome_completo}
           </span>
           <span className="block truncate text-xs text-muted-foreground">
             {no.pessoa.cargo ?? "—"}

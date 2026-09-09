@@ -31,7 +31,7 @@ export function hrFrom(table: string) {
   return untyped.from(table);
 }
 
-/** RPCs de RH (`rpc_hr_revelar_niss`, `rpc_hr_definir_iban`, ...). */
+/** RPCs de RH (`rpc_hr_revelar_niss`, `rpc_hr_definir_conta`, ...). */
 export function hrRpc(fn: string, args?: Record<string, unknown>) {
   return untyped.rpc(fn, args);
 }

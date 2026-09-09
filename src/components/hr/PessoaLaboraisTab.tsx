@@ -61,7 +61,6 @@ interface PessoaLaboraisTabProps {
 }
 
 type Rascunho = {
-  nome_social: string;
   email_trabalho: string;
   email_pessoal: string;
   telefone_trabalho: string;
@@ -77,7 +76,6 @@ type Rascunho = {
 
 function rascunhoDe(pessoa: Pessoa): Rascunho {
   return {
-    nome_social: pessoa.nome_social ?? "",
     email_trabalho: pessoa.email_trabalho ?? "",
     email_pessoal: pessoa.email_pessoal ?? "",
     telefone_trabalho: pessoa.telefone_trabalho ?? "",
@@ -122,7 +120,6 @@ export function PessoaLaboraisTab({
 
   const gravar = async () => {
     const erro = await onGuardar({
-      nome_social: vazioParaNull(rascunho.nome_social),
       email_trabalho: vazioParaNull(rascunho.email_trabalho),
       email_pessoal: vazioParaNull(rascunho.email_pessoal),
       telefone_trabalho: vazioParaNull(rascunho.telefone_trabalho),
@@ -146,7 +143,6 @@ export function PessoaLaboraisTab({
   const campos: Array<{ id: keyof Rascunho; labelKey: string; tipo?: "date" | "email" | "text" }> = [
     { id: "numero_interno", labelKey: "hr.laborais.numeroInterno" },
     { id: "cargo", labelKey: "hr.columns.cargo" },
-    { id: "nome_social", labelKey: "hr.laborais.nomeSocial" },
     { id: "email_trabalho", labelKey: "hr.laborais.emailTrabalho", tipo: "email" },
     { id: "email_pessoal", labelKey: "hr.laborais.emailPessoal", tipo: "email" },
     { id: "telefone_trabalho", labelKey: "hr.laborais.telefoneTrabalho" },

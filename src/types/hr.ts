@@ -31,16 +31,47 @@ export type EstadoCivil =
 export type TipoDocumento = "cartao_cidadao" | "passaporte" | "titulo_residencia" | "outro";
 export type TipoMorada = "residencia" | "fiscal" | "correspondencia";
 
+/**
+ * Dominio de `pessoas_vinculos.tipo_contrato` (20261120200000).
+ *
+ * `estagio` e `prestacao_servicos` continuam LEGAIS na base e por isso
+ * continuam aqui -- o que muda e `TIPOS_CONTRATO`, a lista que os ecras
+ * oferecem, que deixou de os propor. Encolher o dominio tornaria ilegais linhas
+ * que ja estivessem gravadas.
+ *
+ * `tempo_parcial` e o SEXTO tipo, pedido e confirmado pelo utilizador. Repete a
+ * palavra de `RegimeTrabalho` mas e outra coluna: aqui e a natureza do
+ * contrato, la e quanto se trabalha.
+ */
 export type TipoContrato =
   | "sem_termo"
   | "termo_certo"
   | "termo_incerto"
+  | "duracao_muito_curta"
   | "estagio"
   | "prestacao_servicos"
-  | "temporario";
+  | "temporario"
+  | "tempo_parcial";
 export type RegimeTrabalho = "tempo_inteiro" | "tempo_parcial";
 export type EstadoVinculo = "activo" | "terminado" | "futuro";
-export type Periodicidade = "mensal" | "anual" | "hora";
+/** Dominio de `pessoas_retribuicoes.periodicidade` (20261120200000). */
+export type Periodicidade = "hora" | "diaria" | "semanal" | "mensal" | "anual";
+
+/**
+ * Formato da conta bancaria (`pessoas_dados_bancarios.formato_conta`,
+ * 20261120220000).
+ *
+ * O formato NAO abre um segundo caminho de dados: o numero da conta vai sempre
+ * para o Vault pela mesma RPC, qualquer que seja o formato. O que ele muda e a
+ * validacao -- so `iban` passa pelo mod-97.
+ */
+export type FormatoConta =
+  | "iban"
+  | "conta_mais_sort_code"
+  | "conta_mais_routing"
+  | "clabe"
+  | "banco_mais_conta"
+  | "outro";
 
 /**
  * Modalidade de trabalho (`pessoas_vinculos.tipo_trabalho`, 20261120140000).
@@ -51,14 +82,15 @@ export type Periodicidade = "mensal" | "anual" | "hora";
  */
 export type TipoTrabalho = "presencial" | "remoto" | "hibrido";
 /**
- * Unidade das `horas_semanais`. A base SO ACEITA "semanal"
- * (`pessoas_vinculos_horas_frequencia_valida`, 20261120140000): `horas_semanais`
- * esta limitada a 0..80 desde 20261120060000, e com unidade mensal ou anual
- * qualquer valor realista violaria esse limite. As outras duas hipoteses ficam
- * no tipo para se poder LER uma linha antiga, nunca para escrever -- ver
- * `HORAS_FREQUENCIAS`, que e a lista que o formulario oferece.
+ * Unidade de `horas_periodo` (`pessoas_vinculos.horas_frequencia`).
+ *
+ * As quatro hipoteses sao escreviveis desde 20261120190000: o tecto de 80h
+ * deixou de estar na quantidade crua e passou para
+ * `horas_semanais_equivalentes`, a coluna gerada que converte tudo para semana.
+ * Os factores de conversao vivem em `src/lib/hr/horas.ts` e sao os mesmos que
+ * a base usa.
  */
-export type HorasFrequencia = "semanal" | "mensal" | "anual";
+export type HorasFrequencia = "diaria" | "semanal" | "mensal" | "anual";
 export type PoliticaFeriados = "nao_laboral" | "trabalho_habitual";
 
 /** Tipo de local de trabalho (`hr_locais_trabalho.tipo`, 20261120130000). */
@@ -101,30 +133,50 @@ export const TIPOS_DOCUMENTO: readonly TipoDocumento[] = [
   "outro",
 ];
 export const ESTADOS_CONTRATO: readonly EstadoContrato[] = ["em_curso", "suspenso", "terminado"];
+/**
+ * Os SEIS tipos que os ecras OFERECEM, nesta ordem -- a que o utilizador
+ * escreveu e confirmou.
+ *
+ * Nao e o dominio da base: `estagio` e `prestacao_servicos` continuam legais
+ * e leem-se sem problema; simplesmente nao se propoem. Devolve-los e
+ * acrescentar uma linha aqui, nao uma migration.
+ */
 export const TIPOS_CONTRATO: readonly TipoContrato[] = [
-  "sem_termo",
   "termo_certo",
+  "sem_termo",
   "termo_incerto",
-  "estagio",
-  "prestacao_servicos",
+  "duracao_muito_curta",
   "temporario",
+  "tempo_parcial",
 ];
 export const REGIMES_TRABALHO: readonly RegimeTrabalho[] = ["tempo_inteiro", "tempo_parcial"];
 export const TIPOS_TRABALHO: readonly TipoTrabalho[] = ["presencial", "remoto", "hibrido"];
-/**
- * So "semanal": e o unico valor que o CHECK
- * `pessoas_vinculos_horas_frequencia_valida` (20261120140000) aceita. Oferecer
- * "mensal" ou "anual" no ecra daria um erro de constraint na gravacao, porque
- * `horas_semanais` continua limitada a 0..80 -- e as validacoes 0..80 do
- * formulario (novaPessoa.ts, SeccaoContrato.tsx, PessoaContratoTab.tsx) tambem
- * as tratam como semanais. Acrescentar hipoteses aqui obriga a mexer nas tres.
- */
-export const HORAS_FREQUENCIAS: readonly HorasFrequencia[] = ["semanal"];
+/** Dia, semana, mes, ano -- na ordem pedida. */
+export const HORAS_FREQUENCIAS: readonly HorasFrequencia[] = [
+  "diaria",
+  "semanal",
+  "mensal",
+  "anual",
+];
 export const POLITICAS_FERIADOS: readonly PoliticaFeriados[] = [
   "nao_laboral",
   "trabalho_habitual",
 ];
-export const PERIODICIDADES: readonly Periodicidade[] = ["mensal", "anual", "hora"];
+export const PERIODICIDADES: readonly Periodicidade[] = [
+  "hora",
+  "diaria",
+  "semanal",
+  "mensal",
+  "anual",
+];
+export const FORMATOS_CONTA: readonly FormatoConta[] = [
+  "iban",
+  "conta_mais_sort_code",
+  "conta_mais_routing",
+  "clabe",
+  "banco_mais_conta",
+  "outro",
+];
 export const TIPOS_LOCAL: readonly TipoLocal[] = [
   "sede",
   "escritorio",
@@ -162,7 +214,6 @@ export interface Pessoa {
   apelido: string;
   /** Coluna gerada na base: nunca se escreve. */
   nome_completo: string;
-  nome_social: string | null;
   email_trabalho: string | null;
   email_pessoal: string | null;
   telefone_trabalho: string | null;
@@ -202,7 +253,6 @@ export interface PessoaDadosPessoais {
   data_nascimento: string | null;
   ocultar_aniversario: boolean;
   genero: Genero | null;
-  pronomes: string | null;
   nacionalidade: string | null;
   telefone_pessoal: string | null;
   email_comunicacoes: string | null;
@@ -262,7 +312,13 @@ export interface PessoaVinculo {
   organization_id: string;
   tipo_contrato: TipoContrato;
   regime: RegimeTrabalho;
-  horas_semanais: number | null;
+  /**
+   * A QUANTIDADE de horas, na unidade de `horas_frequencia` -- e nao
+   * necessariamente por semana. Chamava-se `horas_semanais` ate
+   * 20261120190000. Nunca comparar directamente com `horas_semanais_maximas`:
+   * podem estar em unidades diferentes. Comparar sempre a equivalente.
+   */
+  horas_periodo: number | null;
   data_inicio: string;
   data_fim: string | null;
   motivo_termo: string | null;
@@ -272,8 +328,14 @@ export interface PessoaVinculo {
 
   // -- Camada de tempo de trabalho (20261120140000) -------------------------
   tipo_trabalho: TipoTrabalho | null;
-  /** Da unidade a `horas_semanais`. Nunca nulo na base (default 'semanal'). */
+  /** Da unidade a `horas_periodo`. Nunca nulo na base (default 'semanal'). */
   horas_frequencia: HorasFrequencia;
+  /**
+   * Coluna GERADA na base: nunca se escreve. `horas_periodo` convertida para
+   * semana pelos factores de `src/lib/hr/horas.ts`. E a unica grandeza de horas
+   * comparavel entre contratos, e a que leva o tecto de 80h.
+   */
+  horas_semanais_equivalentes: number | null;
   /** FTE em percentagem, 0..100. */
   tempo_trabalho_pct: number | null;
   /** Dias uteis do CONTRATO. `pessoas.dias_trabalho` e agora legenda legada. */
@@ -301,20 +363,26 @@ export interface PessoaRetribuicao {
 }
 
 /**
- * Dados bancarios SEM IBAN em claro.
+ * Dados bancarios SEM o numero da conta em claro.
  *
- * Na base nao existe coluna de IBAN: existe `iban_secret_id` (Vault) e a
- * mascara. Nao ha RPC de leitura em claro nesta ronda, por isso a aplicacao
- * nunca ve o numero completo -- so os ultimos quatro digitos.
+ * Na base nao existe coluna com o numero: existe `conta_secret_id` (Vault) e a
+ * mascara. Nao ha RPC de leitura em claro -- por decisao escrita, nao por
+ * esquecimento -- e por isso a aplicacao nunca ve o numero completo, em formato
+ * nenhum. So os ultimos quatro caracteres.
+ *
+ * `conta_pais` so existe quando `formato_conta` e `iban`: nos outros formatos
+ * nao ha pais derivavel do numero, e o CHECK
+ * `pessoas_dados_bancarios_pais_so_para_iban` obriga a NULL.
  */
 export interface PessoaDadosBancarios {
   id: string;
   pessoa_id: string;
   organization_id: string;
+  formato_conta: FormatoConta;
   titular: string | null;
   banco: string | null;
-  iban_ultimos4: string | null;
-  iban_pais: string | null;
+  conta_ultimos4: string | null;
+  conta_pais: string | null;
   swift: string | null;
   is_principal: boolean;
 }

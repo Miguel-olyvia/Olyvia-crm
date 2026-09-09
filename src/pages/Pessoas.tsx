@@ -85,7 +85,7 @@ export default function Pessoas() {
     const termo = procura.trim().toLowerCase();
     if (termo === "") return pessoas;
     return pessoas.filter((pessoa) =>
-      [pessoa.nome_completo, pessoa.nome_social, pessoa.cargo, pessoa.numero_interno]
+      [pessoa.nome_completo, pessoa.cargo, pessoa.numero_interno]
         .filter(Boolean)
         .some((campo) => (campo as string).toLowerCase().includes(termo)),
     );
@@ -210,7 +210,7 @@ export default function Pessoas() {
                         >
                           <TableCell>
                             <div className="font-medium">
-                              {pessoa.nome_social || pessoa.nome_completo}
+                              {pessoa.nome_completo}
                             </div>
                             {pessoa.email_trabalho && (
                               <div className="text-xs text-muted-foreground">

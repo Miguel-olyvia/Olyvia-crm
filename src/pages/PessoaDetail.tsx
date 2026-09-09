@@ -155,7 +155,7 @@ export default function PessoaDetail() {
         </Button>
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-2xl font-bold">{pessoa.nome_social || pessoa.nome_completo}</h1>
+            <h1 className="text-2xl font-bold">{pessoa.nome_completo}</h1>
             <Badge
               variant={pessoa.estado_contrato === "em_curso" ? "secondary" : "outline"}
               className="font-normal"
@@ -255,7 +255,7 @@ export default function PessoaDetail() {
             onGuardarSaude={ficha.saveSaude}
             onRevelarNiss={ficha.revelarNiss}
             onDefinirNiss={ficha.definirNiss}
-            onDefinirIban={ficha.definirIban}
+            onDefinirConta={ficha.definirConta}
           />
         </TabsContent>
 

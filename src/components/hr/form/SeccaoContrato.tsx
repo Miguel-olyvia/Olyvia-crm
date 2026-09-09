@@ -5,11 +5,21 @@
  * experimental), a RETRIBUICAO (montante, moeda, periodicidade) e o TEMPO DE
  * TRABALHO (modalidade, horas, FTE, dias uteis, feriados, maximos).
  *
- * "Modalidade" e "Regime" NAO sao o mesmo campo e por isso nao aparecem lado a
- * lado sem legenda: modalidade e presencial/remoto/hibrido
- * (`pessoas_vinculos.tipo_trabalho`), regime e tempo inteiro/parcial
- * (`pessoas_vinculos.regime`). A migration 20261120140000 tem um COMMENT a
- * dizer isto, porque foi confundido uma vez.
+ * "Tipo de trabalho" e "Modalidade" NAO sao o mesmo campo e por isso nao
+ * aparecem lado a lado sem legenda:
+ *   - TIPO DE TRABALHO e tempo integral / tempo parcial. Na base chama-se
+ *     `pessoas_vinculos.regime` -- o nome de coluna nao mudou, so o rotulo;
+ *   - MODALIDADE e presencial / remoto / hibrido, e na base e
+ *     `pessoas_vinculos.tipo_trabalho`.
+ * O nome de ecra do segundo TEVE de mudar quando o primeiro passou a chamar-se
+ * "tipo de trabalho": ficariam dois campos com o mesmo nome no mesmo passo. A
+ * migration 20261120140000 tem um COMMENT a avisar que as duas colunas sao
+ * ortogonais (ha tempo parcial em remoto), porque foram confundidas uma vez.
+ *
+ * "Tempo parcial" e tambem um dos seis TIPOS DE CONTRATO, e por isso os dois
+ * campos podem contradizer-se. Ao escolher esse tipo, o regime segue -- excepto
+ * se a pessoa ja o tiver escolhido a mao, caso em que a escolha dela fica e
+ * aparece um aviso. A regra vive em `lib/hr/contrato`, com a justificacao.
  *
  * No fim, a escolha que abre o horario variavel: "horas iguais todas as
  * semanas" ou "horario variavel por dia e por local". A segunda abre o mesmo
@@ -27,6 +37,15 @@ import { CampoInterruptor, CampoSelect, CampoTexto } from "@/components/hr/form/
 import { HorarioEditor } from "@/components/hr/HorarioEditor";
 import { type HorarioRascunho } from "@/lib/hr/horario";
 import { dataDoPeriodoExperimental, type RascunhoContrato } from "@/lib/hr/novaPessoa";
+import {
+  regimeAoMudarTipoContrato,
+  regimeContradizTipoContrato,
+} from "@/lib/hr/contrato";
+import {
+  equivalenteParaMostrar,
+  horasImplausiveis,
+  maximoDaFrequencia,
+} from "@/lib/hr/horas";
 import {
   DIAS_SEMANA,
   HORAS_FREQUENCIAS,
@@ -73,6 +92,26 @@ export function SeccaoContrato({
       ? dataDoPeriodoExperimental(inicioEfectivo, dias)
       : null;
 
+  /**
+   * O tecto do campo de horas depende da UNIDADE escolhida: 16 por dia, 80 por
+   * semana, 346,67 por mes, 4160 por ano. Nenhum destes numeros esta escrito
+   * aqui -- saem todos do mesmo factor que a coluna gerada da base usa.
+   */
+  const maximoDeHoras = maximoDaFrequencia(valor.horas_frequencia);
+  const horasNumero = Number(valor.horas_trabalho.replace(",", "."));
+  const horasValidas = valor.horas_trabalho.trim() !== "" && Number.isFinite(horasNumero);
+  const equivalente = horasValidas
+    ? equivalenteParaMostrar(horasNumero, valor.horas_frequencia)
+    : null;
+  // Aviso, nao erro: 9,2h/semana e legal. O que isto apanha e "40 mensais".
+  const horasSuspeitas = horasValidas && horasImplausiveis(horasNumero, valor.horas_frequencia);
+
+  /**
+   * So aparece quando a pessoa escolheu o regime A MAO e ele contradiz o tipo:
+   * quando ninguem lhe tocou, o regime ja seguiu o tipo e nao ha nada a avisar.
+   */
+  const regimeContradiz = regimeContradizTipoContrato(valor.tipo_contrato, valor.regime);
+
   const alternarDiaUtil = (dia: DiaSemana, marcado: boolean) =>
     onPatch({
       dias_uteis: marcado
@@ -92,19 +131,33 @@ export function SeccaoContrato({
             value: tipo,
             label: t(`hr.tipoContrato.${tipo}`),
           }))}
-          onChange={(v) => onPatch({ tipo_contrato: v as TipoContrato | "" })}
+          onChange={(v) => {
+            const tipo = v as TipoContrato | "";
+            onPatch({
+              tipo_contrato: tipo,
+              regime: regimeAoMudarTipoContrato(tipo, valor.regime, valor.regime_manual),
+            });
+          }}
         />
-        <CampoSelect
-          id="hr-novo-regime"
-          label={t("hr.contrato.regime")}
-          ajuda={t("hr.contrato.ajudaRegime")}
-          valor={valor.regime}
-          opcoes={REGIMES_TRABALHO.map((regime) => ({
-            value: regime,
-            label: t(`hr.regime.${regime}`),
-          }))}
-          onChange={(v) => onPatch({ regime: v as RegimeTrabalho })}
-        />
+        {/* `regime` na base; "Tipo de trabalho" no ecra. Ver cabecalho. */}
+        <div className="space-y-1.5">
+          <CampoSelect
+            id="hr-novo-regime"
+            label={t("hr.contrato.regime")}
+            ajuda={t("hr.contrato.ajudaRegime")}
+            valor={valor.regime}
+            opcoes={REGIMES_TRABALHO.map((regime) => ({
+              value: regime,
+              label: t(`hr.regime.${regime}`),
+            }))}
+            onChange={(v) => onPatch({ regime: v as RegimeTrabalho, regime_manual: true })}
+          />
+          {regimeContradiz && (
+            <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
+              {t("hr.form.avisoRegimeContradizTipoContrato")}
+            </p>
+          )}
+        </div>
         <CampoTexto
           id="hr-novo-data-inicio"
           label={t("hr.contrato.dataInicio")}
@@ -189,6 +242,7 @@ export function SeccaoContrato({
       <div className="space-y-3 rounded-md border p-3">
         <p className="text-sm font-medium">{t("hr.contrato.tempoTrabalho")}</p>
         <div className="grid gap-4 sm:grid-cols-2">
+          {/* `tipo_trabalho` na base; "Modalidade" no ecra. Ver cabecalho. */}
           <CampoSelect
             id="hr-novo-tipo-trabalho"
             label={t("hr.contrato.tipoTrabalho")}
@@ -205,9 +259,14 @@ export function SeccaoContrato({
             <CampoTexto
               id="hr-novo-horas-trabalho"
               label={t("hr.contrato.horasTrabalho")}
+              ajuda={
+                equivalente
+                  ? t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })
+                  : undefined
+              }
               tipo="number"
               min={0}
-              max={80}
+              max={maximoDeHoras}
               step="0.5"
               valor={valor.horas_trabalho}
               erro={erroDe("hr-novo-horas-trabalho")}
@@ -223,6 +282,14 @@ export function SeccaoContrato({
               }))}
               onChange={(v) => onPatch({ horas_frequencia: v as HorasFrequencia })}
             />
+            {horasSuspeitas && (
+              <p
+                className="col-span-2 text-xs text-amber-600 dark:text-amber-500"
+                role="status"
+              >
+                {t("hr.form.avisoHorasImplausiveis", { horas: equivalente ?? "" })}
+              </p>
+            )}
           </div>
           <CampoTexto
             id="hr-novo-tempo-trabalho-pct"

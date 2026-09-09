@@ -32,7 +32,8 @@ import {
 import { CreditCard, IdCard, Loader2, MapPin, Phone, Receipt, User } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { PessoaIbanField } from "@/components/hr/PessoaIbanField";
+import { PessoaContaBancariaField } from "@/components/hr/PessoaContaBancariaField";
+import { CountrySelect } from "@/components/CountrySelect";
 import { PessoaNissField } from "@/components/hr/PessoaNissField";
 import { PessoaSaudeCard } from "@/components/hr/PessoaSaudeCard";
 import {
@@ -46,6 +47,7 @@ import {
   type PessoaDadosPessoais,
   type PessoaDadosSaude,
   type PessoaIdentificacao,
+  type FormatoConta,
   type PessoaMorada,
   type TipoDocumento,
 } from "@/types/hr";
@@ -85,8 +87,9 @@ interface PessoaPessoaisTabProps {
   onGuardarSaude: (patch: Partial<PessoaDadosSaude>) => Promise<string | null>;
   onRevelarNiss: () => Promise<string | null>;
   onDefinirNiss: (niss: string) => Promise<string | null>;
-  onDefinirIban: (args: {
-    iban: string;
+  onDefinirConta: (args: {
+    formato: FormatoConta;
+    conta: string;
     titular?: string | null;
     banco?: string | null;
     swift?: string | null;
@@ -147,7 +150,7 @@ export function PessoaPessoaisTab({
   onGuardarSaude,
   onRevelarNiss,
   onDefinirNiss,
-  onDefinirIban,
+  onDefinirConta,
 }: PessoaPessoaisTabProps) {
   const { t } = useTranslation();
 
@@ -157,7 +160,6 @@ export function PessoaPessoaisTab({
       data_nascimento: dadosPessoais?.data_nascimento ?? "",
       ocultar_aniversario: dadosPessoais?.ocultar_aniversario ?? false,
       genero: dadosPessoais?.genero ?? SEM_ESCOLHA,
-      pronomes: dadosPessoais?.pronomes ?? "",
       nacionalidade: dadosPessoais?.nacionalidade ?? "",
       telefone_pessoal: dadosPessoais?.telefone_pessoal ?? "",
       email_comunicacoes: dadosPessoais?.email_comunicacoes ?? "",
@@ -186,7 +188,6 @@ export function PessoaPessoaisTab({
       data_nascimento: ouNull(geral.data_nascimento),
       ocultar_aniversario: geral.ocultar_aniversario,
       genero: geral.genero === SEM_ESCOLHA ? null : (geral.genero as Genero),
-      pronomes: ouNull(geral.pronomes),
       nacionalidade: ouNull(geral.nacionalidade)?.toUpperCase() ?? null,
       telefone_pessoal: ouNull(geral.telefone_pessoal),
       email_comunicacoes: ouNull(geral.email_comunicacoes),
@@ -343,15 +344,6 @@ export function PessoaPessoaisTab({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="hr-pronomes">{t("hr.campos.pronomes")}</Label>
-                <Input
-                  id="hr-pronomes"
-                  value={geral.pronomes}
-                  disabled={!permissoes.pessoaisEdit}
-                  onChange={(e) => setGeral({ ...geral, pronomes: e.target.value })}
-                />
-              </div>
-              <div className="space-y-1.5">
                 <Label htmlFor="hr-genero">{t("hr.campos.genero")}</Label>
                 <Select
                   value={geral.genero}
@@ -373,12 +365,13 @@ export function PessoaPessoaisTab({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="hr-nacionalidade">{t("hr.campos.nacionalidade")}</Label>
-                <Input
+                {/* A mesma fonte e o mesmo componente do pais da morada: para
+                    a base ambos sao duas letras maiusculas. */}
+                <CountrySelect
                   id="hr-nacionalidade"
-                  maxLength={2}
                   value={geral.nacionalidade}
                   disabled={!permissoes.pessoaisEdit}
-                  onChange={(e) => setGeral({ ...geral, nacionalidade: e.target.value })}
+                  onChange={(codigo) => setGeral({ ...geral, nacionalidade: codigo })}
                 />
               </div>
               <div className="space-y-1.5">
@@ -579,12 +572,11 @@ export function PessoaPessoaisTab({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="hr-pais">{t("employees.form.country")}</Label>
-                <Input
+                <CountrySelect
                   id="hr-pais"
-                  maxLength={2}
                   value={moradaDraft.pais}
                   disabled={!permissoes.moradaEdit}
-                  onChange={(e) => setMoradaDraft({ ...moradaDraft, pais: e.target.value })}
+                  onChange={(codigo) => setMoradaDraft({ ...moradaDraft, pais: codigo })}
                 />
               </div>
             </div>
@@ -691,11 +683,11 @@ export function PessoaPessoaisTab({
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <PessoaIbanField
+            <PessoaContaBancariaField
               bancarios={bancarios}
               podeEditar={permissoes.bancariosEdit}
               saving={saving}
-              onDefinir={onDefinirIban}
+              onDefinir={onDefinirConta}
             />
           </CardContent>
         </Card>

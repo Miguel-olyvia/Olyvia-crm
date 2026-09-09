@@ -13,8 +13,22 @@
  * maximos) vive na MESMA linha do contrato, e nao numa tabela ao lado, por
  * isso mesmo: se vivesse noutra tabela, uma alteracao de jornada nao criava
  * versao nova de contrato.
+ *
+ * DOIS ROTULOS QUE NAO CORRESPONDEM AO NOME DA COLUNA
+ * ---------------------------------------------------
+ * "Tipo de trabalho" e `regime` (tempo integral / parcial) e "Modalidade" e
+ * `tipo_trabalho` (presencial / remoto / hibrido). Sao os nomes que o
+ * utilizador usa; as colunas nao mudaram de nome.
+ *
+ * E ESTE ECRA VALIDA NO CLIENTE
+ * -----------------------------
+ * Ate agora `gravar()` so verificava a data de inicio: os numeros iam
+ * directos, e o `max` dos inputs e um atributo HTML que nao impede colagem
+ * nem entrada programatica. A unica barreira real era o CHECK da base, que
+ * devolve uma mensagem que ninguem entende. As validacoes sao AS MESMAS do
+ * assistente, importadas de `lib/hr/contrato` -- nao uma segunda copia.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,7 +45,22 @@ import {
 import { FileText, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { CampoSelect, CampoTexto } from "@/components/hr/form/Campos";
+import {
+  CamposTocadosProvider,
+  CampoSelect,
+  CampoTexto,
+} from "@/components/hr/form/Campos";
+import {
+  problemasDosNumerosDoContrato,
+  regimeAoMudarTipoContrato,
+  regimeContradizTipoContrato,
+  type CampoNumericoContrato,
+} from "@/lib/hr/contrato";
+import {
+  equivalenteParaMostrar,
+  horasImplausiveis,
+  maximoDaFrequencia,
+} from "@/lib/hr/horas";
 import {
   DIAS_SEMANA,
   HORAS_FREQUENCIAS,
@@ -67,13 +96,20 @@ interface PessoaContratoTabProps {
 type Rascunho = {
   tipo_contrato: TipoContrato;
   regime: RegimeTrabalho;
+  /**
+   * UI, nao dados: se o regime foi escolhido A MAO nesta sessao de edicao. E o
+   * que a base nao consegue saber (`regime` e NOT NULL DEFAULT 'tempo_inteiro')
+   * e o que decide se o regime pode seguir o tipo de contrato. Nao e gravado.
+   */
+  regime_manual: boolean;
   data_inicio: string;
   data_fim: string;
   motivo_termo: string;
   periodo_experimental_dias: string;
   periodo_experimental_ate: string;
   tipo_trabalho: string;
-  horas_semanais: string;
+  /** A quantidade, na unidade de `horas_frequencia`. Nao necessariamente semanal. */
+  horas_periodo: string;
   horas_frequencia: HorasFrequencia;
   tempo_trabalho_pct: string;
   politica_feriados: PoliticaFeriados;
@@ -86,6 +122,7 @@ function rascunhoDe(vinculo: PessoaVinculo | null): Rascunho {
   return {
     tipo_contrato: vinculo?.tipo_contrato ?? "sem_termo",
     regime: vinculo?.regime ?? "tempo_inteiro",
+    regime_manual: false,
     data_inicio: vinculo?.data_inicio ?? "",
     data_fim: vinculo?.data_fim ?? "",
     motivo_termo: vinculo?.motivo_termo ?? "",
@@ -93,7 +130,7 @@ function rascunhoDe(vinculo: PessoaVinculo | null): Rascunho {
       vinculo?.periodo_experimental_dias == null ? "" : String(vinculo.periodo_experimental_dias),
     periodo_experimental_ate: vinculo?.periodo_experimental_ate ?? "",
     tipo_trabalho: vinculo?.tipo_trabalho ?? "",
-    horas_semanais: vinculo?.horas_semanais == null ? "" : String(vinculo.horas_semanais),
+    horas_periodo: vinculo?.horas_periodo == null ? "" : String(vinculo.horas_periodo),
     horas_frequencia: vinculo?.horas_frequencia ?? "semanal",
     tempo_trabalho_pct:
       vinculo?.tempo_trabalho_pct == null ? "" : String(vinculo.tempo_trabalho_pct),
@@ -105,6 +142,15 @@ function rascunhoDe(vinculo: PessoaVinculo | null): Rascunho {
     dias_uteis: vinculo?.dias_uteis ?? [],
   };
 }
+
+/** Onde vive, NESTE ecra, cada numero validado por `lib/hr/contrato`. */
+const CAMPOS_NUMERICOS: Record<CampoNumericoContrato, string> = {
+  horas: "hr-contrato-horas-periodo",
+  maximoSemanal: "hr-contrato-horas-semanais-maximas",
+  maximoAnual: "hr-contrato-horas-anuais-maximas",
+  fte: "hr-contrato-tempo-trabalho-pct",
+  experimental: "hr-contrato-periodo-experimental-dias",
+};
 
 function numeroOuNull(valor: string): number | null {
   const limpo = valor.trim().replace(",", ".");
@@ -140,12 +186,79 @@ export function PessoaContratoTab({
     setRascunho(rascunhoDe(activo));
   }, [activo]);
 
+  /** Campos de que se saiu: o erro de formato so aparece depois disso. */
+  const [tocados, setTocados] = useState<ReadonlySet<string>>(() => new Set());
+  const tocar = useCallback((campoId: string) => {
+    setTocados((anteriores) => {
+      if (anteriores.has(campoId)) return anteriores;
+      return new Set(anteriores).add(campoId);
+    });
+  }, []);
+  /** Ao submeter mostram-se todos, mesmo os campos em que ninguem entrou. */
+  const [mostrarTodos, setMostrarTodos] = useState(false);
+
   const definir = <K extends keyof Rascunho>(campo: K, valor: Rascunho[K]) =>
     setRascunho((anterior) => ({ ...anterior, [campo]: valor }));
 
+  /**
+   * "Tempo parcial" e tipo de contrato E regime: escolher o tipo leva o regime
+   * atras, a menos que ele ja tenha sido escolhido a mao -- ai fica como esta e
+   * o aviso encarrega-se do resto. Ver `lib/hr/contrato`.
+   */
+  const escolherTipoContrato = (tipo: TipoContrato) =>
+    setRascunho((anterior) => ({
+      ...anterior,
+      tipo_contrato: tipo,
+      regime: regimeAoMudarTipoContrato(tipo, anterior.regime, anterior.regime_manual),
+    }));
+
+  const regimeContradiz = regimeContradizTipoContrato(rascunho.tipo_contrato, rascunho.regime);
+
+  const problemasNumericos = useMemo(
+    () =>
+      problemasDosNumerosDoContrato({
+        horas: rascunho.horas_periodo,
+        horas_frequencia: rascunho.horas_frequencia,
+        horas_semanais_maximas: rascunho.horas_semanais_maximas,
+        horas_anuais_maximas: rascunho.horas_anuais_maximas,
+        tempo_trabalho_pct: rascunho.tempo_trabalho_pct,
+        periodo_experimental_dias: rascunho.periodo_experimental_dias,
+      }),
+    [rascunho],
+  );
+
+  const erroDe = (campoId: string): string | null => {
+    const problema = problemasNumericos.find(
+      (candidato) => CAMPOS_NUMERICOS[candidato.campo] === campoId,
+    );
+    if (!problema) return null;
+    if (!mostrarTodos && !tocados.has(campoId)) return null;
+    return t(problema.mensagemKey);
+  };
+
+  // O tecto do campo de horas segue a UNIDADE escolhida: 16 por dia, 80 por
+  // semana, 346,67 por mes, 4160 por ano -- todos derivados do mesmo factor
+  // que a coluna gerada da base usa.
+  const maximoDeHoras = maximoDaFrequencia(rascunho.horas_frequencia);
+  const horasNumero = Number(rascunho.horas_periodo.replace(",", "."));
+  const horasLegiveis = rascunho.horas_periodo.trim() !== "" && Number.isFinite(horasNumero);
+  const equivalente = horasLegiveis
+    ? equivalenteParaMostrar(horasNumero, rascunho.horas_frequencia)
+    : null;
+  const horasSuspeitas =
+    horasLegiveis && horasImplausiveis(horasNumero, rascunho.horas_frequencia);
+
   const gravar = async () => {
     if (rascunho.data_inicio.trim() === "") {
+      setMostrarTodos(true);
       toast.error(t("hr.contrato.erroSemDataInicio"));
+      return;
+    }
+    // Nao se manda a base o que ela vai recusar: a mensagem de um CHECK nao
+    // diz a ninguem qual o campo nem qual o limite.
+    if (problemasNumericos.length > 0) {
+      setMostrarTodos(true);
+      toast.error(t(problemasNumericos[0].mensagemKey));
       return;
     }
     const erro = await onGuardarVinculo(activo?.id ?? null, {
@@ -158,7 +271,7 @@ export function PessoaContratoTab({
       periodo_experimental_ate: textoOuNull(rascunho.periodo_experimental_ate),
       tipo_trabalho:
         rascunho.tipo_trabalho === "" ? null : (rascunho.tipo_trabalho as TipoTrabalho),
-      horas_semanais: numeroOuNull(rascunho.horas_semanais),
+      horas_periodo: numeroOuNull(rascunho.horas_periodo),
       horas_frequencia: rascunho.horas_frequencia,
       tempo_trabalho_pct: numeroOuNull(rascunho.tempo_trabalho_pct),
       politica_feriados: rascunho.politica_feriados,
@@ -192,6 +305,7 @@ export function PessoaContratoTab({
           )}
         </CardHeader>
         <CardContent className="space-y-4">
+          <CamposTocadosProvider onTocar={tocar}>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             <CampoSelect
               id="hr-contrato-tipo"
@@ -202,20 +316,35 @@ export function PessoaContratoTab({
                 value: tipo,
                 label: t(`hr.tipoContrato.${tipo}`),
               }))}
-              onChange={(v) => definir("tipo_contrato", v as TipoContrato)}
+              onChange={(v) => escolherTipoContrato(v as TipoContrato)}
             />
-            <CampoSelect
-              id="hr-contrato-regime"
-              label={t("hr.contrato.regime")}
-              ajuda={t("hr.contrato.ajudaRegime")}
-              valor={rascunho.regime}
-              disabled={!podeEditar}
-              opcoes={REGIMES_TRABALHO.map((regime) => ({
-                value: regime,
-                label: t(`hr.regime.${regime}`),
-              }))}
-              onChange={(v) => definir("regime", v as RegimeTrabalho)}
-            />
+            {/* `regime` na base; "Tipo de trabalho" no ecra. Ver cabecalho. */}
+            <div className="space-y-1.5">
+              <CampoSelect
+                id="hr-contrato-regime"
+                label={t("hr.contrato.regime")}
+                ajuda={t("hr.contrato.ajudaRegime")}
+                valor={rascunho.regime}
+                disabled={!podeEditar}
+                opcoes={REGIMES_TRABALHO.map((regime) => ({
+                  value: regime,
+                  label: t(`hr.regime.${regime}`),
+                }))}
+                onChange={(v) =>
+                  setRascunho((anterior) => ({
+                    ...anterior,
+                    regime: v as RegimeTrabalho,
+                    regime_manual: true,
+                  }))
+                }
+              />
+              {regimeContradiz && (
+                <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
+                  {t("hr.form.avisoRegimeContradizTipoContrato")}
+                </p>
+              )}
+            </div>
+            {/* `tipo_trabalho` na base; "Modalidade" no ecra. Ver cabecalho. */}
             <CampoSelect
               id="hr-contrato-tipo-trabalho"
               label={t("hr.contrato.tipoTrabalho")}
@@ -255,6 +384,7 @@ export function PessoaContratoTab({
             <CampoTexto
               id="hr-contrato-periodo-experimental-dias"
               label={t("hr.contrato.periodoExperimentalDias")}
+              erro={erroDe("hr-contrato-periodo-experimental-dias")}
               tipo="number"
               min={0}
               max={1095}
@@ -272,15 +402,21 @@ export function PessoaContratoTab({
               onChange={(v) => definir("periodo_experimental_ate", v)}
             />
             <CampoTexto
-              id="hr-contrato-horas-semanais"
+              id="hr-contrato-horas-periodo"
               label={t("hr.contrato.horasTrabalho")}
+              erro={erroDe("hr-contrato-horas-periodo")}
+              ajuda={
+                equivalente
+                  ? t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })
+                  : undefined
+              }
               tipo="number"
               min={0}
-              max={80}
+              max={maximoDeHoras}
               step="0.5"
-              valor={rascunho.horas_semanais}
+              valor={rascunho.horas_periodo}
               disabled={!podeEditar}
-              onChange={(v) => definir("horas_semanais", v)}
+              onChange={(v) => definir("horas_periodo", v)}
             />
             <CampoSelect
               id="hr-contrato-horas-frequencia"
@@ -293,9 +429,15 @@ export function PessoaContratoTab({
               }))}
               onChange={(v) => definir("horas_frequencia", v as HorasFrequencia)}
             />
+            {horasSuspeitas && (
+              <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
+                {t("hr.form.avisoHorasImplausiveis", { horas: equivalente ?? "" })}
+              </p>
+            )}
             <CampoTexto
               id="hr-contrato-tempo-trabalho-pct"
               label={t("hr.contrato.tempoTrabalhoPct")}
+              erro={erroDe("hr-contrato-tempo-trabalho-pct")}
               tipo="number"
               min={0}
               max={100}
@@ -317,6 +459,7 @@ export function PessoaContratoTab({
             <CampoTexto
               id="hr-contrato-horas-anuais-maximas"
               label={t("hr.contrato.horasAnuaisMaximas")}
+              erro={erroDe("hr-contrato-horas-anuais-maximas")}
               tipo="number"
               min={0}
               max={4000}
@@ -327,6 +470,7 @@ export function PessoaContratoTab({
             <CampoTexto
               id="hr-contrato-horas-semanais-maximas"
               label={t("hr.contrato.horasSemanaisMaximas")}
+              erro={erroDe("hr-contrato-horas-semanais-maximas")}
               tipo="number"
               min={0}
               max={80}
@@ -372,6 +516,7 @@ export function PessoaContratoTab({
               {activo ? t("employees.form.update") : t("employees.form.create")}
             </Button>
           )}
+          </CamposTocadosProvider>
         </CardContent>
       </Card>
 

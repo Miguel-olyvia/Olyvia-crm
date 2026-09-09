@@ -8,6 +8,8 @@ import { test, expect } from '@playwright/test'
 //   - sem "Entidade legal" nem "Grupo de colaboradores": a entidade legal e a
 //     da organizacao activa e nao se escolhe
 //   - fechar com dados preenchidos pede confirmacao em vez de descartar
+//   - a primeira seccao comeca pelo e-mail de trabalho, e depois nome e apelido
+//   - "Nome social" e "Pronomes" deixaram de existir (colunas largadas)
 //
 // Nao escreve nada na base: preenche e fecha, nunca submete.
 
@@ -88,13 +90,70 @@ test.describe('RH — Pessoas', () => {
     await expect(dialogo.getByText(/grupo de colaboradores|employee group/i)).toHaveCount(0)
   })
 
+  test('a seccao 1 comeca pelo e-mail de trabalho, depois nome e apelido', async ({ page }) => {
+    await page.getByRole('button', { name: /nova pessoa|new person|adicionar pessoa/i }).first().click()
+    const dialogo = page.getByRole('dialog')
+    await expect(dialogo).toBeVisible()
+
+    // A ordem foi pedida por escrito, e a razao esta no componente: o e-mail
+    // de trabalho e o futuro identificador de entrada.
+    for (const etiqueta of [
+      /e-mail de trabalho|work email/i,
+      /primeiro nome|first name/i,
+      /apelido|last name/i,
+    ]) {
+      await expect(dialogo.getByLabel(etiqueta).first()).toBeVisible()
+    }
+
+    // A ordem prova-se pela ordem NO DOCUMENTO, nao pela geometria. O primeiro
+    // nome e o apelido estao lado a lado numa grelha de duas colunas: tem o
+    // mesmo y, e compara-los por altura nao prova nada -- fazia o teste falhar
+    // com o ecra correcto, por uma diferenca de sub-pixel entre dois campos da
+    // mesma linha.
+    const nomesAcessiveis = await dialogo
+      .getByRole('textbox')
+      .evaluateAll(campos =>
+        campos.map(c => (c as HTMLElement).getAttribute('aria-label')
+          ?? (c.id ? document.querySelector(`label[for="${c.id}"]`)?.textContent : null)
+          ?? ''),
+      )
+
+    const indiceDe = (padrao: RegExp) => nomesAcessiveis.findIndex(n => padrao.test(n.trim()))
+    const iEmail = indiceDe(/e-mail de trabalho|work email/i)
+    const iNome = indiceDe(/primeiro nome|first name/i)
+    const iApelido = indiceDe(/apelido|last name/i)
+
+    expect(iEmail, `e-mail de trabalho nao encontrado; vi: ${nomesAcessiveis.join(' | ')}`).toBeGreaterThanOrEqual(0)
+    expect(iNome, 'primeiro nome nao encontrado').toBeGreaterThanOrEqual(0)
+    expect(iApelido, 'apelido nao encontrado').toBeGreaterThanOrEqual(0)
+    expect(iEmail, 'o e-mail de trabalho vem primeiro').toBeLessThan(iNome)
+    expect(iNome, 'o primeiro nome vem antes do apelido').toBeLessThan(iApelido)
+
+    // "ID do colaborador" FICA: sobre ele o utilizador disse "nsei", e isso
+    // nao e uma decisao.
+    await expect(dialogo.getByLabel(/id do colaborador|employee id/i)).toHaveCount(1)
+  })
+
+  test('nome social e pronomes deixaram de existir', async ({ page }) => {
+    await page.getByRole('button', { name: /nova pessoa|new person|adicionar pessoa/i }).first().click()
+    const dialogo = page.getByRole('dialog')
+    await expect(dialogo).toBeVisible()
+
+    // As colunas foram largadas em 20261120210000: nao ha campo, e nao ha
+    // rotulo nenhum a falar deles em lado nenhum do formulario.
+    await expect(dialogo.getByLabel(/nome social|preferred name|rufname/i)).toHaveCount(0)
+    await expect(dialogo.getByLabel(/pronomes|pronouns/i)).toHaveCount(0)
+  })
+
   test('fechar com dados preenchidos pede confirmacao antes de descartar', async ({ page }) => {
     await page.getByRole('button', { name: /nova pessoa|new person|adicionar pessoa/i }).first().click()
     const dialogo = page.getByRole('dialog')
     await expect(dialogo).toBeVisible()
 
-    // Um campo preenchido basta para haver algo a perder.
-    const primeiro = dialogo.getByRole('textbox').first()
+    // Um campo preenchido basta para haver algo a perder. Por ETIQUETA e nao
+    // por posicao: a ordem da seccao 1 mudou e um selector posicional
+    // passaria a apontar para outro campo sem falhar.
+    const primeiro = dialogo.getByLabel(/primeiro nome|first name/i).first()
     await primeiro.fill('Teste')
     await primeiro.blur()
 

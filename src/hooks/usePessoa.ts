@@ -37,18 +37,19 @@ import type {
   PessoaVinculo,
   HorarioPlaneado,
   HorarioRealizado,
+  FormatoConta,
 } from "@/types/hr";
 import type { LinhaPlaneadoParaGravar } from "@/lib/hr/horario";
 
 const COLUNAS_PESSOA =
-  "id, organization_id, numero_interno, primeiro_nome, apelido, nome_completo, nome_social, " +
+  "id, organization_id, numero_interno, primeiro_nome, apelido, nome_completo, " +
   "email_trabalho, email_pessoal, telefone_trabalho, cargo, local_trabalho, " +
   "local_id, entidade_legal_org_id, reporta_a_pessoa_id, data_admissao, data_antiguidade, " +
   "data_saida, " +
   "estado_contrato, estado_registo, dias_trabalho, notas, created_at, updated_at";
 
 const COLUNAS_DADOS_PESSOAIS =
-  "id, pessoa_id, organization_id, data_nascimento, ocultar_aniversario, genero, pronomes, " +
+  "id, pessoa_id, organization_id, data_nascimento, ocultar_aniversario, genero, " +
   "nacionalidade, telefone_pessoal, email_comunicacoes, estado_civil, dependentes, " +
   "irs_retencao_percentagem";
 
@@ -66,10 +67,12 @@ const COLUNAS_EMERGENCIA =
   "id, pessoa_id, organization_id, nome, relacao, telefone, telefone_alternativo, email, ordem";
 
 const COLUNAS_VINCULO =
-  "id, pessoa_id, organization_id, tipo_contrato, regime, horas_semanais, data_inicio, " +
+  "id, pessoa_id, organization_id, tipo_contrato, regime, horas_periodo, data_inicio, " +
   "data_fim, motivo_termo, periodo_experimental_ate, entidade_legal_org_id, estado, " +
   // Camada de tempo de trabalho, 20261120140000.
   "tipo_trabalho, horas_frequencia, tempo_trabalho_pct, dias_uteis, politica_feriados, " +
+  // Coluna GERADA (20261120190000): le-se, nunca se escreve.
+  "horas_semanais_equivalentes, " +
   "horas_anuais_maximas, horas_semanais_maximas, periodo_experimental_dias";
 
 const COLUNAS_RETRIBUICAO =
@@ -84,9 +87,11 @@ const COLUNAS_HORARIO_REALIZADO =
   "id, pessoa_id, organization_id, vinculo_id, local_id, planeado_id, data, hora_inicio, " +
   "hora_fim, minutos, origem, estado, validado_por, validado_em, motivo_rejeicao, notas";
 
-// Sem coluna de IBAN: na base ela nao existe.
+// Sem o numero da conta: na base nao existe coluna com ele em claro. Le-se o
+// formato, a mascara e -- so no caso do IBAN -- o pais.
 const COLUNAS_BANCARIOS =
-  "id, pessoa_id, organization_id, titular, banco, iban_ultimos4, iban_pais, swift, is_principal";
+  "id, pessoa_id, organization_id, formato_conta, titular, banco, conta_ultimos4, " +
+  "conta_pais, swift, is_principal";
 
 const COLUNAS_SAUDE =
   "id, pessoa_id, organization_id, incapacidade_percentagem, " +
@@ -499,12 +504,27 @@ export function usePessoa(pessoaId: string | undefined) {
     [guardar, pessoaId],
   );
 
-  const definirIban = useCallback(
-    (args: { iban: string; titular?: string | null; banco?: string | null; swift?: string | null }) =>
+  /**
+   * A conta bancaria, em qualquer dos seis formatos.
+   *
+   * `rpc_hr_definir_conta` substituiu `rpc_hr_definir_iban` e a antiga foi
+   * largada na mesma migration (20261120220000): duas funcoes com o mesmo
+   * proposito e assinaturas diferentes deixam o PostgREST sem saber qual
+   * escolher -- ja parou um botao neste projecto.
+   */
+  const definirConta = useCallback(
+    (args: {
+      formato: FormatoConta;
+      conta: string;
+      titular?: string | null;
+      banco?: string | null;
+      swift?: string | null;
+    }) =>
       guardar(async () =>
-        hrRpc("rpc_hr_definir_iban", {
+        hrRpc("rpc_hr_definir_conta", {
           p_pessoa_id: pessoaId,
-          p_iban: args.iban,
+          p_formato: args.formato,
+          p_conta: args.conta,
           p_titular: args.titular ?? null,
           p_banco: args.banco ?? null,
           p_swift: args.swift ?? null,
@@ -546,7 +566,7 @@ export function usePessoa(pessoaId: string | undefined) {
     savePlaneado,
     revelarNiss,
     definirNiss,
-    definirIban,
+    definirConta,
     ligarConta,
     revogarConta,
   };

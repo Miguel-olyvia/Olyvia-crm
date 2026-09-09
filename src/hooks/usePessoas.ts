@@ -42,7 +42,17 @@ import type { EstadoAcesso, Pessoa, PessoaListItem } from "@/types/hr";
  * meia-pessoa silenciosa.
  */
 export interface SeccaoFalhada {
-  seccao: "pessoais" | "identificacao" | "niss" | "morada" | "emergencia" | "vinculo" | "retribuicao" | "horario" | "acesso";
+  seccao:
+    | "pessoais"
+    | "identificacao"
+    | "niss"
+    | "morada"
+    | "bancarios"
+    | "emergencia"
+    | "vinculo"
+    | "retribuicao"
+    | "horario"
+    | "acesso";
   mensagem: string;
 }
 
@@ -59,7 +69,6 @@ const COLUNAS_LISTA = [
   "primeiro_nome",
   "apelido",
   "nome_completo",
-  "nome_social",
   "email_trabalho",
   "email_pessoal",
   "telefone_trabalho",
@@ -245,6 +254,19 @@ export function usePessoas() {
       if (payload.morada) {
         await gravar("morada", () =>
           hrFrom("pessoas_moradas").insert({ ...base, ...payload.morada }),
+        );
+      }
+      // A conta bancaria NAO pode ir num insert: `pessoas_dados_bancarios` tem
+      // a escrita revogada a `authenticated` e tres politicas restritivas a
+      // false (20261120070000). O unico caminho e a RPC, depois de a pessoa
+      // existir -- e como o NISS, pode falhar sozinha sem levar a ficha atras.
+      if (payload.conta) {
+        await gravar("bancarios", async () =>
+          hrRpc("rpc_hr_definir_conta", {
+            p_pessoa_id: pessoaId,
+            p_formato: payload.conta!.formato,
+            p_conta: payload.conta!.numero,
+          }),
         );
       }
       if (payload.emergencia) {

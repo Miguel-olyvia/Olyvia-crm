@@ -1,5 +1,5 @@
 /**
- * Os tres campos de que as cinco seccoes do assistente sao feitas.
+ * Os quatro campos de que as cinco seccoes do assistente sao feitas.
  *
  * PORQUE EXISTEM
  * --------------
@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { CountrySelect } from "@/components/CountrySelect";
 import { cn } from "@/lib/utils";
 
 /**
@@ -187,6 +188,47 @@ export function CampoSelect({
           ))}
         </SelectContent>
       </Select>
+    </Envolvente>
+  );
+}
+
+interface CampoPaisProps extends CampoBaseProps {
+  /** Codigo ISO 3166-1 alpha-2. String vazia = sem escolha. */
+  valor: string;
+  onChange: (codigo: string) => void;
+  disabled?: boolean;
+}
+
+/**
+ * O pais, com pesquisa, sobre a tabela `countries`.
+ *
+ * Existe para que a nacionalidade e o pais da morada usem A MESMA fonte e o
+ * MESMO componente: sao dois campos e um sitio para corrigir. Para a base
+ * ambos sao duas letras maiusculas, e nenhum dos dois tem logica propria.
+ */
+export function CampoPais({
+  id,
+  label,
+  ajuda,
+  erro,
+  className,
+  valor,
+  onChange,
+  disabled,
+}: CampoPaisProps) {
+  const tocar = useContext(CamposTocadosContext);
+  return (
+    <Envolvente id={id} label={label} ajuda={ajuda} erro={erro} className={className}>
+      <CountrySelect
+        id={id}
+        value={valor}
+        disabled={disabled}
+        aria-invalid={erro ? true : undefined}
+        aria-describedby={erro ? `${id}-erro` : ajuda ? `${id}-ajuda` : undefined}
+        className={cn(erro && "border-destructive")}
+        onChange={onChange}
+        onBlur={() => tocar(id)}
+      />
     </Envolvente>
   );
 }

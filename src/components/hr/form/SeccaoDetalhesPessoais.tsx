@@ -7,24 +7,41 @@
  * fronteira mental de quem escreve e "o que esta no documento", nao a tabela
  * de destino.
  *
- * A morada e o contacto de emergencia ficam no fim, recolhidos, porque sao o
- * que mais vezes nao se tem no momento da admissao.
+ * O endereco, as informacoes bancarias e o contacto de emergencia ficam no
+ * fim, recolhidos, porque sao o que mais vezes nao se tem no momento da
+ * admissao.
  *
- * O NISS NAO SE GRAVA POR INSERT. A coluna esta revogada ao `authenticated`
- * (20261120040000) e o unico caminho e `rpc_hr_definir_niss` -- uma chamada
- * separada, que pode falhar sozinha sem levar o resto da ficha atras.
+ * DOIS CAMPOS NAO SE GRAVAM POR INSERT
+ * ------------------------------------
+ * O NISS (coluna revogada ao `authenticated`, 20261120040000) e o numero da
+ * CONTA BANCARIA (tabela com a escrita revogada e tres politicas restritivas,
+ * 20261120070000). Cada um tem a sua RPC -- `rpc_hr_definir_niss` e
+ * `rpc_hr_definir_conta` -- e cada um pode falhar sozinho sem levar o resto da
+ * ficha atras. E de proposito: o numero da conta vai para o Vault e a
+ * aplicacao nunca o volta a ver.
+ *
+ * "Pronomes" saiu por decisao do utilizador e a coluna foi largada em
+ * 20261120210000.
  */
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { ChevronDown } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { CampoInterruptor, CampoSelect, CampoTexto } from "@/components/hr/form/Campos";
+import {
+  CampoInterruptor,
+  CampoPais,
+  CampoSelect,
+  CampoTexto,
+} from "@/components/hr/form/Campos";
+import { chaveDoRotuloDaConta } from "@/lib/hr/conta";
 import type { RascunhoPessoais } from "@/lib/hr/novaPessoa";
 import {
   ESTADOS_CIVIS,
+  FORMATOS_CONTA,
   GENEROS,
   TIPOS_DOCUMENTO,
   type EstadoCivil,
+  type FormatoConta,
   type Genero,
   type TipoDocumento,
 } from "@/types/hr";
@@ -60,13 +77,9 @@ export function SeccaoDetalhesPessoais({
           opcoes={GENEROS.map((g) => ({ value: g, label: t(`hr.genero.${g}`) }))}
           onChange={(v) => onPatch({ genero: v as Genero | "" })}
         />
-        <CampoTexto
-          id="hr-novo-pronomes"
-          label={t("hr.campos.pronomes")}
-          valor={valor.pronomes}
-          onChange={(v) => onPatch({ pronomes: v })}
-        />
-        <CampoTexto
+        {/* Nacionalidade e pais da morada usam o MESMO componente e a mesma
+            fonte (`countries`): para a base ambos sao duas letras maiusculas. */}
+        <CampoPais
           id="hr-novo-nacionalidade"
           label={t("hr.campos.nacionalidade")}
           valor={valor.nacionalidade}
@@ -163,13 +176,16 @@ export function SeccaoDetalhesPessoais({
         <CollapsibleTrigger asChild>
           <Button type="button" variant="ghost" size="sm" className="gap-1.5">
             <ChevronDown className="h-4 w-4" />
-            {t("hr.pessoais.morada")}
+            {t("hr.pessoais.endereco")}
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 grid gap-4 sm:grid-cols-2">
+          {/* A morada e de linhas livres na base (`linha1`/`linha2`): nao ha
+              colunas separadas de rua e numero, e por isso o rotulo pede as
+              duas coisas na mesma linha. */}
           <CampoTexto
             id="hr-novo-morada-linha1"
-            label={t("hr.campos.linha1")}
+            label={t("hr.campos.enderecoRua")}
             className="sm:col-span-2"
             valor={valor.morada_linha1}
             onChange={(v) => onPatch({ morada_linha1: v })}
@@ -182,28 +198,59 @@ export function SeccaoDetalhesPessoais({
             onChange={(v) => onPatch({ morada_linha2: v })}
           />
           <CampoTexto
+            id="hr-novo-morada-localidade"
+            label={t("hr.campos.cidade")}
+            valor={valor.morada_localidade}
+            onChange={(v) => onPatch({ morada_localidade: v })}
+          />
+          <CampoTexto
             id="hr-novo-morada-codigo-postal"
             label={t("employees.form.postalCode")}
             valor={valor.morada_codigo_postal}
             onChange={(v) => onPatch({ morada_codigo_postal: v })}
           />
           <CampoTexto
-            id="hr-novo-morada-localidade"
-            label={t("hr.campos.localidade")}
-            valor={valor.morada_localidade}
-            onChange={(v) => onPatch({ morada_localidade: v })}
-          />
-          <CampoTexto
             id="hr-novo-morada-distrito"
-            label={t("employees.form.district")}
+            label={t("hr.campos.provincia")}
             valor={valor.morada_distrito}
             onChange={(v) => onPatch({ morada_distrito: v })}
           />
-          <CampoTexto
+          <CampoPais
             id="hr-novo-morada-pais"
             label={t("employees.form.country")}
             valor={valor.morada_pais}
             onChange={(v) => onPatch({ morada_pais: v })}
+          />
+        </CollapsibleContent>
+      </Collapsible>
+
+      <Collapsible>
+        <CollapsibleTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" className="gap-1.5">
+            <ChevronDown className="h-4 w-4" />
+            {t("hr.pessoais.bancarios")}
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="mt-2 grid gap-4 sm:grid-cols-2">
+          <CampoSelect
+            id="hr-novo-conta-formato"
+            label={t("hr.campos.formatoConta")}
+            valor={valor.conta_formato}
+            opcoes={FORMATOS_CONTA.map((formato) => ({
+              value: formato,
+              label: t(`hr.formatoConta.${formato}`),
+            }))}
+            onChange={(v) => onPatch({ conta_formato: v as FormatoConta })}
+          />
+          {/* O rotulo acompanha o formato: quem escolheu CLABE nao devia estar
+              a ler "IBAN" em cima do campo. */}
+          <CampoTexto
+            id="hr-novo-conta-numero"
+            label={t(chaveDoRotuloDaConta(valor.conta_formato))}
+            ajuda={t("hr.form.ajudaConta")}
+            valor={valor.conta_numero}
+            erro={erroDe("hr-novo-conta-numero")}
+            onChange={(v) => onPatch({ conta_numero: v })}
           />
         </CollapsibleContent>
       </Collapsible>
