@@ -42,6 +42,13 @@ docs/
 # ...menos os do modulo de Operacoes, que fazem parte dele e sao ligados
 # a partir do operacao-app/README.md.
 !operacao-app/docs/
+# ...e menos a doc do Orcamento V2, que a equipa toda precisa de alcancar por
+# git antes de o trabalho comecar. O git nao desce a uma pasta ja excluida, por
+# isso a raiz docs/ tem de ser reaberta e o conteudo dela excluido a seguir --
+# so assim a negacao de uma subpasta chega a ser avaliada.
+!/docs/
+/docs/*
+!/docs/orcamento-v2/
 ficheiros/
 
 .env
