@@ -140,7 +140,20 @@ export function ScheduleCalendarView({
     return colors[status] || colors.scheduled;
   };
 
+  /**
+   * Uma marcacao de ausencia e a PROJECCAO de um pedido aprovado, nao a coisa
+   * em si: o trigger `trg_schedule_items_desviar_ausencia` recusa qualquer
+   * update a uma linha com `ausencia_pedido_id`. Um item que se deixa arrastar
+   * e depois estoura e a pior versao disto -- por isso nao se arrasta.
+   */
+  const ehAusenciaProjectada = (item: ScheduleItem) =>
+    Boolean((item as { ausencia_pedido_id?: string }).ausencia_pedido_id);
+
   const handleDragStart = (e: React.DragEvent, item: ScheduleItem) => {
+    if (ehAusenciaProjectada(item)) {
+      e.preventDefault();
+      return;
+    }
     setDraggedItem(item);
     e.dataTransfer.setData('text/plain', item.id);
     e.dataTransfer.effectAllowed = 'move';
@@ -321,7 +334,7 @@ export function ScheduleCalendarView({
                     {(expandedDays.has(dayKey) ? dayItems : dayItems.slice(0, 3)).map(item => (
                       <div
                         key={item.id}
-                        draggable
+                        draggable={!ehAusenciaProjectada(item)}
                         onDragStart={(e) => handleDragStart(e, item)}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -439,7 +452,7 @@ export function ScheduleCalendarView({
                     {dayItems.map(item => (
                       <div
                         key={item.id}
-                        draggable
+                        draggable={!ehAusenciaProjectada(item)}
                         onDragStart={(e) => handleDragStart(e, item)}
                         onClick={(e) => {
                           e.stopPropagation();
@@ -526,7 +539,7 @@ export function ScheduleCalendarView({
                       {hourItems.map(item => (
                         <div
                           key={item.id}
-                          draggable
+                          draggable={!ehAusenciaProjectada(item)}
                           onDragStart={(e) => handleDragStart(e, item)}
                           onClick={(e) => {
                             e.stopPropagation();

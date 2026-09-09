@@ -95,7 +95,15 @@ export type BusinessFlow =
   // aqui; uma falha de rede vem, porque sem locais o horario perde o "onde".
   | "hr-locais-load"
   | "hr-locais-write"
-  | "hr-papeis-load";
+  | "hr-papeis-load"
+  // Ausencias e ferias. A leitura falhada deixa o contador a zeros e o zero
+  // e indistinguivel de "nao tem direito nenhum" -- por isso um defeito de
+  // leitura tem de ser visto. A escrita falhada perde um pedido ou uma
+  // decisao de aprovacao, que sao o registo de quem autorizou o que.
+  | "hr-ausencias-load"
+  | "hr-ausencias-write"
+  | "hr-assiduidade-load"
+  | "hr-assiduidade-write";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually

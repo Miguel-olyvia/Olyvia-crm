@@ -76,3 +76,5 @@ eliminar.md
 bun.lock
 bun.lockb
 src (2).zip
+test-results/
+playwright-report/

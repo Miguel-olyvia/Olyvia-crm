@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { format, setHours, setMinutes, addHours } from 'date-fns';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -63,6 +64,7 @@ export function ScheduleItemDialog({
   onDelete,
 }: ScheduleItemDialogProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { hasPermission, isSystemAdmin } = usePermissions();
   const { userType } = useCompany();
   const [loading, setLoading] = useState(false);
@@ -375,6 +377,47 @@ export function ScheduleItemDialog({
 
   // View-only mode for non-owners
   const isViewOnly = item && !canEditItem;
+
+  // AUSENCIAS: um quadro de "time_off" deixou de aceitar marcacao directa.
+  // O trigger `trg_schedule_items_desviar_ausencia` (migration 20261121130000)
+  // recusa qualquer insert que nao venha de `rpc_hr_ausencia_pedir`, e recusa
+  // qualquer update a uma linha ja projectada. Guardar aqui daria sempre erro,
+  // por isso este formulario nao se mostra: encaminha-se para o sitio certo.
+  // Nao e um aviso de erro -- e o formulario certo em vez do errado.
+  const ehItemProjectado = Boolean((item as { ausencia_pedido_id?: string } | undefined)?.ausencia_pedido_id);
+  const ausenciaPassaPorPedido = isTimeOffBoard && (!item || ehItemProjectado);
+
+  if (ausenciaPassaPorPedido) {
+    return (
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t('hr.ausencias.pedir.titulo')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {ehItemProjectado
+                ? t('hr.ausencias.erroRpc.itemProjectado')
+                : t('hr.ausencias.pedir.descricaoBoard')}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                onClick={() => {
+                  onOpenChange(false);
+                  navigate('/rh/ausencias');
+                }}
+              >
+                {t('hr.ausencias.board.irParaAusencias')}
+              </Button>
+              <Button variant="ghost" onClick={() => onOpenChange(false)}>
+                {t('common.cancel')}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    );
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

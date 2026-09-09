@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { PessoaContratoTab } from "@/components/hr/PessoaContratoTab";
 import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
+import { PessoaAusenciasTab } from "@/components/hr/PessoaAusenciasTab";
 import { PessoaHorarioTab } from "@/components/hr/PessoaHorarioTab";
 import { PessoaLaboraisTab } from "@/components/hr/PessoaLaboraisTab";
 import {
@@ -48,6 +49,8 @@ import { PessoaVisaoGeralTab } from "@/components/hr/PessoaVisaoGeralTab";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
+import { usePermissoesAssiduidade } from "@/hooks/usePermissoesAssiduidade";
 import { usePessoa } from "@/hooks/usePessoa";
 import { usePessoas } from "@/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -55,7 +58,6 @@ import { useTranslation } from "@/hooks/useTranslation";
 /** Os separadores que ficam visiveis mas vazios nesta ronda. */
 const TABS_EM_CONSTRUCAO = [
   { value: "documentos", labelKey: "hr.pessoa.tabs.documentos", icon: FolderOpen },
-  { value: "ausencias", labelKey: "hr.pessoa.tabs.ausencias", icon: CalendarClock },
   { value: "desempenho", labelKey: "hr.pessoa.tabs.desempenho", icon: TrendingUp },
   { value: "tarefas", labelKey: "hr.pessoa.tabs.tarefas", icon: ListChecks },
   { value: "competencias", labelKey: "hr.pessoa.tabs.competencias", icon: Award },
@@ -106,7 +108,31 @@ export default function PessoaDetail() {
   const podeEditarHorario = hasPermission("hr.pessoas.horario.edit");
   const podeVerRealizado = hasPermission("hr.pessoas.horario_realizado.view");
 
+  // Ausencias: oito permissoes distintas. `pedir` e para si, `pedir.outros` e
+  // na ficha de outra pessoa, e sao mesmo duas -- a base verifica-as em ramos
+  // diferentes da mesma RPC.
+  const permissoesAusencias = useMemo(
+    () => ({
+      view: hasPermission("hr.ausencias.view"),
+      pedir: hasPermission("hr.ausencias.pedir"),
+      pedirOutros: hasPermission("hr.ausencias.pedir.outros"),
+      aprovarChefia: hasPermission("hr.ausencias.aprovar.chefia"),
+      aprovarRh: hasPermission("hr.ausencias.aprovar.rh"),
+      direitosView: hasPermission("hr.ausencias.direitos.view"),
+      ajustar: hasPermission("hr.ausencias.ajustar"),
+      historicoEditar: hasPermission("hr.ausencias.historico.editar"),
+      justificacaoView: hasPermission("hr.ausencias.justificacao.view"),
+    }),
+    [hasPermission],
+  );
+
+  // Assiduidade: catorze codigos resolvidos num hook proprio, para nao os
+  // reescrever em cada um dos quatro ecras do modulo.
+  const { permissoes: permissoesAssiduidade } = usePermissoesAssiduidade();
+
   const { locais, loading: locaisALoad } = useLocaisTrabalho();
+  // Para saber se quem abre a ficha e a propria pessoa: muda o que pode pedir.
+  const { pessoaId: minhaPessoaId } = useMinhaPessoa();
 
   const pessoa = ficha.pessoa;
 
@@ -114,6 +140,11 @@ export default function PessoaDetail() {
     if (!pessoa?.reporta_a_pessoa_id) return null;
     return colegas.find((c) => c.id === pessoa.reporta_a_pessoa_id)?.nome_completo ?? null;
   }, [pessoa?.reporta_a_pessoa_id, colegas]);
+
+  const nomePorPessoaId = useMemo(
+    () => new Map(colegas.map((colega) => [colega.id, colega.nome_completo])),
+    [colegas],
+  );
 
   const entidadeLegalNome = useMemo(() => {
     if (!pessoa?.entidade_legal_org_id) return null;
@@ -199,6 +230,10 @@ export default function PessoaDetail() {
             <TabsTrigger value="planeamento" className="gap-2">
               <CalendarRange className="h-4 w-4" />
               {t("hr.pessoa.tabs.planeamento")}
+            </TabsTrigger>
+            <TabsTrigger value="ausencias" className="gap-2">
+              <CalendarClock className="h-4 w-4" />
+              {t("hr.pessoa.tabs.ausencias")}
             </TabsTrigger>
             {TABS_EM_CONSTRUCAO.map(({ value, labelKey, icon: Icon }) => (
               <TabsTrigger key={value} value={value} className="gap-2">
@@ -289,6 +324,21 @@ export default function PessoaDetail() {
             podeVerRealizado={podeVerRealizado}
             saving={ficha.saving}
             onGuardarPlaneado={ficha.savePlaneado}
+            pessoaId={pessoa.id}
+            pessoaNome={pessoa.nome_completo}
+            souAPessoa={minhaPessoaId === pessoa.id}
+            permissoesAssiduidade={permissoesAssiduidade}
+          />
+        </TabsContent>
+
+        <TabsContent value="ausencias">
+          <PessoaAusenciasTab
+            pessoaId={pessoa.id}
+            pessoaNome={pessoa.nome_completo}
+            souAPessoa={minhaPessoaId === pessoa.id}
+            aprovadorChefiaNome={reportaANome}
+            nomePorPessoaId={nomePorPessoaId}
+            permissoes={permissoesAusencias}
           />
         </TabsContent>
 

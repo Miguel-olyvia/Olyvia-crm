@@ -36,6 +36,12 @@ import {
   ShieldAlert,
   ListChecks,
   IdCard,
+  CalendarDays,
+  Clock,
+  MonitorSmartphone,
+  CalendarRange,
+  CheckSquare,
+  Tags,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -171,9 +177,21 @@ export const menuSections: MenuSection[] = [
     icon: IdCard,
     labelKey: "sidebar.hrModule",
     paths: ["/rh"],
-    permissions: ["hr.module.access", "hr.pessoas.view"],
+    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view.own", "hr.ausencias.view", "hr.assiduidade.view.own", "hr.assiduidade.view"],
     items: [
       { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
+      // Ausencias: tres entradas porque sao tres AUDIENCIAS diferentes, nao
+      // tres vistas da mesma lista. Quem so tem "view.own" ve uma so.
+      { to: "/rh/ausencias", icon: CalendarDays, labelKey: "sidebar.hrAusencias", permission: "hr.ausencias.view.own" },
+      { to: "/rh/ausencias/aprovacoes", icon: CheckSquare, labelKey: "sidebar.hrAusenciasAprovacoes", permissions: ["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"] },
+      { to: "/rh/ausencias/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAusenciasOrganizacao", permission: "hr.ausencias.view" },
+      { to: "/rh/definicoes/ausencias-tipos", icon: Tags, labelKey: "sidebar.hrAusenciasTipos", permission: "hr.ausencias.tipos.view" },
+      // Assiduidade: o mesmo eixo. "O meu ponto" e a entrada que quase toda a
+      // gente ve; as outras tres so aparecem a quem tem a permissao.
+      { to: "/rh/assiduidade", icon: Clock, labelKey: "sidebar.hrAssiduidade", permission: "hr.assiduidade.view.own" },
+      { to: "/rh/assiduidade/equipa", icon: UsersRound, labelKey: "sidebar.hrAssiduidadeEquipa", permission: "hr.assiduidade.equipa.view" },
+      { to: "/rh/assiduidade/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAssiduidadeOrganizacao", permission: "hr.assiduidade.view" },
+      { to: "/rh/definicoes/assiduidade-dispositivos", icon: MonitorSmartphone, labelKey: "sidebar.hrAssiduidadeDispositivos", permission: "hr.assiduidade.dispositivos.view" },
     ],
   },
   {

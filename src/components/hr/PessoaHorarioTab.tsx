@@ -1,7 +1,7 @@
 /**
- * O separador Horario da ficha: Planeado (editavel) e Realizado (leitura).
+ * O separador Horario da ficha: Planeado, Realizado e Assiduidade.
  *
- * DUAS ABAS, PORQUE SAO DUAS COISAS
+ * TRES ABAS, PORQUE SAO TRES COISAS
  * ---------------------------------
  * Planeado e o que se combinou; realizado e o que aconteceu. Sao tabelas
  * diferentes na base (`pessoas_horario_planeado` e
@@ -9,10 +9,15 @@
  * na mesma vista -- misturados, ninguem sabe se esta a olhar para uma
  * intencao ou para um facto.
  *
- * O REALIZADO E SO LEITURA NESTA RONDA: nao ha picagens nem RPC de validacao.
- * A permissao `hr.pessoas.horario_realizado.validar` existe no catalogo mas
- * hoje nao e verificada por nada -- e por isso que nao ha botao de validar
- * aqui: um botao que nao valida nada e pior do que a sua ausencia.
+ * O REALIZADO CONTINUA SO LEITURA AQUI, e isso agora e uma escolha e nao uma
+ * falta: com as picagens ja existe `rpc_hr_realizado_validar`, mas validar e
+ * corrigir sao gestos DE UM DIA, e vivem no painel do dia da aba Assiduidade,
+ * ao lado das picagens que os originaram. Uma tabela do mes inteiro com
+ * botoes de validar linha a linha convidava a validar sem olhar.
+ *
+ * A terceira aba, Assiduidade, e o dia a dia: picagens, faltas, desvios e
+ * correccoes. Fica aqui e nao num separador novo da ficha porque "o tempo
+ * desta pessoa" deve estar num sitio so.
  *
  * O editor e O MESMO componente do passo 4 do assistente.
  */
@@ -33,6 +38,7 @@ import { CalendarClock, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { HorarioEditor, corDoLocal } from "@/components/hr/HorarioEditor";
+import { PessoaAssiduidadeTab } from "@/components/hr/PessoaAssiduidadeTab";
 import {
   type HorarioRascunho,
   type LinhaPlaneadoParaGravar,
@@ -42,6 +48,7 @@ import {
   rascunhoDeLinhas,
 } from "@/lib/hr/horario";
 import type { HorarioPlaneado, HorarioRealizado, LocalTrabalho } from "@/types/hr";
+import type { PermissoesAssiduidade } from "@/types/hrAssiduidade";
 
 interface PessoaHorarioTabProps {
   planeado: HorarioPlaneado[];
@@ -54,6 +61,11 @@ interface PessoaHorarioTabProps {
   saving: boolean;
   /** Substitui o horario planeado da pessoa pelas linhas dadas. */
   onGuardarPlaneado: (linhas: LinhaPlaneadoParaGravar[]) => Promise<string | null>;
+  /** A aba Assiduidade. Sem isto o separador continua com duas abas. */
+  pessoaId?: string;
+  pessoaNome?: string;
+  souAPessoa?: boolean;
+  permissoesAssiduidade?: PermissoesAssiduidade;
 }
 
 export function PessoaHorarioTab({
@@ -66,6 +78,10 @@ export function PessoaHorarioTab({
   podeVerRealizado,
   saving,
   onGuardarPlaneado,
+  pessoaId,
+  pessoaNome,
+  souAPessoa = false,
+  permissoesAssiduidade,
 }: PessoaHorarioTabProps) {
   const { t } = useTranslation();
   const [rascunho, setRascunho] = useState<HorarioRascunho>(() => rascunhoDeLinhas(planeado));
@@ -93,7 +109,15 @@ export function PessoaHorarioTab({
     toast.success(t("hr.sucesso.guardado"));
   };
 
-  if (!podeVerPlaneado && !podeVerRealizado) {
+  const podeVerAssiduidade =
+    Boolean(pessoaId && permissoesAssiduidade) &&
+    Boolean(
+      permissoesAssiduidade?.view ||
+        permissoesAssiduidade?.equipaView ||
+        (souAPessoa && permissoesAssiduidade?.viewOwn),
+    );
+
+  if (!podeVerPlaneado && !podeVerRealizado && !podeVerAssiduidade) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-muted-foreground">
@@ -119,6 +143,9 @@ export function PessoaHorarioTab({
             </TabsTrigger>
             <TabsTrigger value="realizado" disabled={!podeVerRealizado}>
               {t("hr.horario.realizado")}
+            </TabsTrigger>
+            <TabsTrigger value="assiduidade" disabled={!podeVerAssiduidade}>
+              {t("hr.horario.assiduidade")}
             </TabsTrigger>
           </TabsList>
 
@@ -207,6 +234,19 @@ export function PessoaHorarioTab({
                   </TableBody>
                 </Table>
               </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="assiduidade">
+            {podeVerAssiduidade && pessoaId && permissoesAssiduidade ? (
+              <PessoaAssiduidadeTab
+                pessoaId={pessoaId}
+                pessoaNome={pessoaNome ?? ""}
+                souAPessoa={souAPessoa}
+                permissoes={permissoesAssiduidade}
+              />
+            ) : (
+              <p className="py-8 text-center text-muted-foreground">{t("hr.semAcesso")}</p>
             )}
           </TabsContent>
         </Tabs>
