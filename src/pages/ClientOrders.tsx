@@ -57,7 +57,7 @@ interface ClientOrderDocumentLine {
   product_name: string;
   product_sku: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'sem_fornecedor';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor';
   stock_movement_id: string | null;
   purchase_order_id: string | null;
   purchase_order_number: string | null;
@@ -302,6 +302,7 @@ const ClientOrders = () => {
       servido_por_stock: "bg-success/10 text-success",
       recebido: "bg-teal-500/10 text-teal-600",
       a_aguardar_encomenda: "bg-info/10 text-info",
+      stock_disponivel_confirmar: "bg-warning/10 text-warning",
       sem_fornecedor: "bg-destructive/10 text-destructive",
     };
     return colors[status] || colors.sem_fornecedor;
@@ -315,6 +316,8 @@ const ClientOrders = () => {
         return t('clientOrders.lineStatus.received');
       case 'a_aguardar_encomenda':
         return t('clientOrders.lineStatus.awaitingOrder', { number: line.purchase_order_number || '' });
+      case 'stock_disponivel_confirmar':
+        return t('clientOrders.lineStatus.stockAvailableConfirm');
       case 'sem_fornecedor':
         return t('clientOrders.lineStatus.noSupplier');
       default:
