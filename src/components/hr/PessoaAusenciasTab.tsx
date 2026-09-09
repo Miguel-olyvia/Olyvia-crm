@@ -301,6 +301,7 @@ export function PessoaAusenciasTab({
           onRevelarJustificacao={
             permissoes.justificacaoView ? dados.revelarJustificacao : undefined
           }
+          onVerMotivo={dados.verMotivo}
         />
       )}
 

@@ -20,9 +20,12 @@ import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import type { AusenciaDecisao, AusenciaDia, AusenciaPedido } from "@/types/hrAusencias";
 
+// SEM `motivo`: a coluna fica sem SELECT directo para authenticated (migration
+// 20261122050000). Le-se so por `rpc_hr_ausencia_ver_motivo`, chamada a pedido
+// quando o detalhe abre -- nunca aqui, que carrega a lista e o mapa inteiros.
 const COLUNAS_PEDIDO =
   "id, organization_id, pessoa_id, tipo_id, vinculo_id, data_inicio, data_fim, " +
-  "meio_dia_inicio, meio_dia_fim, hora_inicio, hora_fim, dias_solicitados, motivo, estado, " +
+  "meio_dia_inicio, meio_dia_fim, hora_inicio, hora_fim, dias_solicitados, estado, " +
   "aprovador_chefia_pessoa_id, criado_por_pessoa_id, origem, schedule_item_id, " +
   "periodo_inicio, periodo_fim, created_at";
 
@@ -179,6 +182,20 @@ export function useAusenciasDaOrganizacao(opcoes: OpcoesOrganizacao = {}) {
     [executar],
   );
 
+  /**
+   * O motivo em claro, uma vez, por pedido. NUNCA chamar ao carregar a lista
+   * ou o mapa -- so quando o detalhe de UM pedido abre. Nos tipos sensiveis a
+   * RPC regista a revelacao; nos triviais devolve sem registar nada.
+   */
+  const verMotivo = useCallback(async (pedidoId: string): Promise<string | null> => {
+    const { data, error } = await hrRpc("rpc_hr_ausencia_ver_motivo", { _pedido_id: pedidoId });
+    if (error) {
+      if (!isPermissionError(error)) captureFlowError(error, "hr-ausencias-write");
+      throw error;
+    }
+    return (data ?? null) as string | null;
+  }, []);
+
   const decisoesPorPedido = useMemo(() => {
     const mapa = new Map<string, AusenciaDecisao[]>();
     for (const decisao of decisoes) {
@@ -210,5 +227,6 @@ export function useAusenciasDaOrganizacao(opcoes: OpcoesOrganizacao = {}) {
     decidirRh,
     cancelar,
     corrigirAprovado,
+    verMotivo,
   };
 }

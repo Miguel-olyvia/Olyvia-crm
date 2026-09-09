@@ -487,3 +487,58 @@ export function formatarDias(valor: number, locale?: string): string {
     arredondarDias(valor),
   );
 }
+
+/**
+ * Os onze codigos fixos de `hr_ausencias_tipos` (semeados pela migration
+ * `20261122010000`, escrita fechada pela `20261122020000`) traduzidos em
+ * chave de i18n.
+ *
+ * PORQUE HA UM MAPA E NAO SO `hr.ausencias.tipoNome.${codigo}` DIRECTO
+ * ----------------------------------------------------------------------
+ * A coluna `nome` da base vem sempre em portugues e e a UNICA fonte para um
+ * codigo que este mapa nao conheca -- um tipo semeado numa organizacao antes
+ * de a traducao chegar aqui, por exemplo. Sem a lista fechada nao ha como
+ * distinguir "nao tem traducao ainda" de "traduziu para a propria chave",
+ * porque `useTranslation` devolve a chave em bruto quando nao encontra nada
+ * em nenhuma lingua.
+ */
+/**
+ * Exportado para o teste que garante as cinco linguas cobrirem os onze --
+ * sem lista fechada em ambos os lados, um codigo esquecido numa traducao
+ * so aparece quando alguem repara no ecra na lingua errada.
+ */
+export const CODIGOS_TIPO_AUSENCIA = [
+  "FERIAS",
+  "ASSIST_FAMILIA",
+  "BAIXA_MEDICA",
+  "CASAMENTO",
+  "CONGRESSO",
+  "DOENCA_FAMILIAR",
+  "EXAMES",
+  "LICENCA_PARENTAL",
+  "MOTIVOS_FAMILIARES",
+  "OUTRO",
+  "TELETRABALHO",
+] as const;
+
+const CODIGOS_TIPO_AUSENCIA_TRADUZIDOS: ReadonlySet<string> = new Set(CODIGOS_TIPO_AUSENCIA);
+
+/** A chave de traducao de um codigo de tipo, ou `null` se nao for um dos onze fixos. */
+export function chaveNomeTipoAusencia(codigo: string): string | null {
+  return CODIGOS_TIPO_AUSENCIA_TRADUZIDOS.has(codigo)
+    ? `hr.ausencias.tipoNome.${codigo}`
+    : null;
+}
+
+/**
+ * O nome a mostrar de um tipo de ausencia: traduzido quando o codigo e um dos
+ * onze fixos, e o `nome` gravado na base -- o recurso -- para qualquer outro.
+ * Nunca a chave em bruto, nunca uma string vazia.
+ */
+export function nomeTipoAusencia(
+  tipo: Pick<AusenciaTipo, "codigo" | "nome">,
+  t: (chave: string) => string,
+): string {
+  const chave = chaveNomeTipoAusencia(tipo.codigo);
+  return chave ? t(chave) : tipo.nome;
+}

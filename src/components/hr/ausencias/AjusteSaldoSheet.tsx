@@ -38,6 +38,7 @@ import {
   MINIMO_LEGAL_DIAS,
   avaliarAjuste,
   formatarDias,
+  nomeTipoAusencia,
   sentidoObrigatorio,
 } from "@/lib/hr/ausencias";
 import type {
@@ -239,7 +240,7 @@ export function AjusteSaldoSheet({
               onChange={setTipoId}
               erro={erroTipo}
               placeholder={t("hr.ausencias.campo.tipoPlaceholder")}
-              opcoes={tipos.map((opcao) => ({ value: opcao.id, label: opcao.nome }))}
+              opcoes={tipos.map((opcao) => ({ value: opcao.id, label: nomeTipoAusencia(opcao, t) }))}
             />
 
             <div className="grid gap-3 sm:grid-cols-2">

@@ -51,6 +51,7 @@ import {
   efeitoNoSaldo,
   formatarDias,
   hojeIso,
+  nomeTipoAusencia,
   problemasDoPedido,
   type IndiceFeriados,
 } from "@/lib/hr/ausencias";
@@ -281,7 +282,7 @@ export function PedirAusenciaSheet({
                 onChange={setTipoId}
                 erro={erroDe("tipo", idTipo)}
                 placeholder={t("hr.ausencias.campo.tipoPlaceholder")}
-                opcoes={tipos.map((opcao) => ({ value: opcao.id, label: opcao.nome }))}
+                opcoes={tipos.map((opcao) => ({ value: opcao.id, label: nomeTipoAusencia(opcao, t) }))}
               />
 
               <div className="grid gap-3 sm:grid-cols-2">

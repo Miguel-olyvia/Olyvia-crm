@@ -109,12 +109,21 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
 
   // Find which section the current route belongs to
   const activeSectionId = useMemo(() => {
+    // Escolhe o PREFIXO MAIS LONGO, nao o primeiro que bate certo: desde que
+    // "A minha area" e "Recursos Humanos" partilham o mesmo troco "/rh/...",
+    // o caminho mais especifico e que decide -- senao a ordem no array (so
+    // visual) mudava qual seccao abre ao entrar por URL directo.
+    let melhorId: string | null = null;
+    let melhorComprimento = -1;
     for (const section of visibleSections) {
-      if (section.paths.some((p) => location.pathname.startsWith(p))) {
-        return section.id;
+      for (const p of section.paths) {
+        if (location.pathname.startsWith(p) && p.length > melhorComprimento) {
+          melhorComprimento = p.length;
+          melhorId = section.id;
+        }
       }
     }
-    return null;
+    return melhorId;
   }, [location.pathname, visibleSections]);
 
   // Auto-open section based on route (only if not manually closed)
@@ -170,11 +179,6 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
   // Check if item is active
   const isItemActive = (to: string) => {
     return location.pathname === to || location.pathname.startsWith(to + "/");
-  };
-
-  // Check if section is active
-  const isSectionActive = (section: MenuSection) => {
-    return section.paths.some((p) => location.pathname.startsWith(p));
   };
 
   // Handle skeleton visibility - AFTER all hooks
@@ -248,7 +252,12 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
               {/* Grouped sections */}
               {visibleSections.map((section) => {
                 const Icon = section.icon;
-                const isActive = isSectionActive(section);
+                // Usa o mesmo calculo de `activeSectionId` (prefixo mais
+                // longo), nao um `isSectionActive` por seccao -- com "A minha
+                // area" e "Recursos Humanos" a partilharem o troco "/rh/...",
+                // duas seccoes bateriam certo ao mesmo tempo e acendiam os
+                // dois icones.
+                const isActive = activeSectionId === section.id;
                 const isOpen = openSectionId === section.id;
                 return (
                   <Tooltip key={section.id}>

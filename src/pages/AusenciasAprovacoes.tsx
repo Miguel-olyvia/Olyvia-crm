@@ -163,6 +163,7 @@ export default function AusenciasAprovacoes() {
           onDecidirRh={dados.decidirRh}
           onCancelar={dados.cancelar}
           onCorrigirAprovado={dados.corrigirAprovado}
+          onVerMotivo={dados.verMotivo}
         />
       )}
     </div>

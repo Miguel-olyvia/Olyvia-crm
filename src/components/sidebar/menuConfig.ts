@@ -38,10 +38,8 @@ import {
   IdCard,
   CalendarDays,
   Clock,
-  MonitorSmartphone,
   CalendarRange,
   CheckSquare,
-  Tags,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -168,30 +166,44 @@ export const menuSections: MenuSection[] = [
     ],
   },
   {
-    // Recursos Humanos -- modulo 1 (Colaboradores). Sem `adminOnly`: a
+    // A minha area -- ausencias e assiduidade da PROPRIA pessoa. Publico:
+    // qualquer colaborador com ficha, nao so quem trabalha em RH. Separada da
+    // seccao de Recursos Humanos por pedido explicito: quem so quer marcar
+    // ferias ou ver o proprio ponto nao deve ter de abrir o menu do RH para
+    // isso -- sao AUDIENCIAS diferentes, nao papeis exclusivos.
+    id: "rh-eu",
+    icon: CalendarDays,
+    labelKey: "sidebar.myArea",
+    paths: ["/rh/ausencias", "/rh/assiduidade"],
+    permissions: ["hr.ausencias.view.own", "hr.assiduidade.view.own"],
+    items: [
+      { to: "/rh/ausencias", icon: CalendarDays, labelKey: "sidebar.hrAusencias", permission: "hr.ausencias.view.own" },
+      { to: "/rh/assiduidade", icon: Clock, labelKey: "sidebar.hrAssiduidade", permission: "hr.assiduidade.view.own" },
+    ],
+  },
+  {
+    // Recursos Humanos -- modulo 1 (Colaboradores) mais a gestao de
+    // ausencias/assiduidade de toda a organizacao. Sem `adminOnly`: a
     // permissao `hr.pessoas.view` ja esconde o item de quem nao a tem, e
     // nenhum papel a recebe por omissao (a migration do catalogo nao faz
     // atribuicao nenhuma). Os sub-separadores do ecra (Atividade, Equipas,
     // Organograma, Funcoes) vivem dentro da pagina e nao no menu.
+    //
+    // Aprovacoes fica aqui, e nao em "A minha area", por decisao explicita:
+    // quem controla o acesso e a PERMISSAO (aprovar.chefia / aprovar.rh), nao
+    // a seccao -- a seccao e so organizacao visual. `paths` usa as quatro
+    // rotas exactas (nao o prefixo "/rh") para nao ser prefixo das rotas de
+    // "A minha area".
     id: "rh",
     icon: IdCard,
     labelKey: "sidebar.hrModule",
-    paths: ["/rh"],
-    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view.own", "hr.ausencias.view", "hr.assiduidade.view.own", "hr.assiduidade.view"],
+    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao"],
+    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"],
     items: [
       { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
-      // Ausencias: tres entradas porque sao tres AUDIENCIAS diferentes, nao
-      // tres vistas da mesma lista. Quem so tem "view.own" ve uma so.
-      { to: "/rh/ausencias", icon: CalendarDays, labelKey: "sidebar.hrAusencias", permission: "hr.ausencias.view.own" },
       { to: "/rh/ausencias/aprovacoes", icon: CheckSquare, labelKey: "sidebar.hrAusenciasAprovacoes", permissions: ["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"] },
       { to: "/rh/ausencias/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAusenciasOrganizacao", permission: "hr.ausencias.view" },
-      { to: "/rh/definicoes/ausencias-tipos", icon: Tags, labelKey: "sidebar.hrAusenciasTipos", permission: "hr.ausencias.tipos.view" },
-      // Assiduidade: o mesmo eixo. "O meu ponto" e a entrada que quase toda a
-      // gente ve; as outras tres so aparecem a quem tem a permissao.
-      { to: "/rh/assiduidade", icon: Clock, labelKey: "sidebar.hrAssiduidade", permission: "hr.assiduidade.view.own" },
-      { to: "/rh/assiduidade/equipa", icon: UsersRound, labelKey: "sidebar.hrAssiduidadeEquipa", permission: "hr.assiduidade.equipa.view" },
       { to: "/rh/assiduidade/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAssiduidadeOrganizacao", permission: "hr.assiduidade.view" },
-      { to: "/rh/definicoes/assiduidade-dispositivos", icon: MonitorSmartphone, labelKey: "sidebar.hrAssiduidadeDispositivos", permission: "hr.assiduidade.dispositivos.view" },
     ],
   },
   {

@@ -38,7 +38,7 @@ import { de, enUS, es, fr, pt } from "date-fns/locale";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { corDoTipo } from "@/components/hr/ausencias/TipoEtiqueta";
-import { eFeriado, eFimDeSemana, type IndiceFeriados } from "@/lib/hr/ausencias";
+import { eFeriado, eFimDeSemana, nomeTipoAusencia, type IndiceFeriados } from "@/lib/hr/ausencias";
 import type { AusenciaDia, AusenciaTipo } from "@/types/hrAusencias";
 
 const LOCALES: Record<string, Locale> = { en: enUS, pt, es, fr, de };
@@ -90,8 +90,8 @@ export function CalendarioAnual({
     return [...ids]
       .map((id) => tiposPorId.get(id))
       .filter((tipo): tipo is AusenciaTipo => Boolean(tipo))
-      .sort((a, b) => a.nome.localeCompare(b.nome));
-  }, [porData, tiposPorId]);
+      .sort((a, b) => nomeTipoAusencia(a, t).localeCompare(nomeTipoAusencia(b, t)));
+  }, [porData, tiposPorId, t]);
 
   const mover = useCallback(
     (deIso: string, passo: number) => {
@@ -153,7 +153,7 @@ export function CalendarioAnual({
               className="h-2.5 w-2.5 rounded-full"
               style={{ backgroundColor: corDoTipo(tipo) }}
             />
-            {tipo.nome}
+            {nomeTipoAusencia(tipo, t)}
           </li>
         ))}
         <li className="inline-flex items-center gap-1.5">
@@ -211,7 +211,7 @@ export function CalendarioAnual({
                   const descricao = marca
                     ? t("hr.ausencias.calendario.diaComAusencia", {
                         data: format(data, "PP", { locale }),
-                        tipo: tipo?.nome ?? t("hr.ausencias.tipoDesconhecido"),
+                        tipo: tipo ? nomeTipoAusencia(tipo, t) : t("hr.ausencias.tipoDesconhecido"),
                         estado: t(`hr.ausencias.estadoDia.${marca.estado}`),
                       })
                     : t("hr.ausencias.calendario.diaLivre", {

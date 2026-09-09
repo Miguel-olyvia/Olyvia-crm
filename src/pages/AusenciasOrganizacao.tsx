@@ -27,7 +27,7 @@ import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePessoas } from "@/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
-import { indexarFeriados, type FeriadoOrg } from "@/lib/hr/ausencias";
+import { indexarFeriados, nomeTipoAusencia, type FeriadoOrg } from "@/lib/hr/ausencias";
 import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useEffect } from "react";
@@ -184,7 +184,7 @@ export default function AusenciasOrganizacao() {
                     valor={filtroTipo}
                     onChange={setFiltroTipo}
                     vazioLabel={t("hr.ausencias.organizacao.todos")}
-                    opcoes={tipos.tipos.map((tipo) => ({ value: tipo.id, label: tipo.nome }))}
+                    opcoes={tipos.tipos.map((tipo) => ({ value: tipo.id, label: nomeTipoAusencia(tipo, t) }))}
                   />
                 </div>
                 <PedidosLista
@@ -220,6 +220,7 @@ export default function AusenciasOrganizacao() {
             onDecidirRh={dados.decidirRh}
             onCancelar={dados.cancelar}
             onCorrigirAprovado={dados.corrigirAprovado}
+            onVerMotivo={dados.verMotivo}
             onIrParaFicha={() => navigate(`/rh/pessoas/${pedidoSeleccionado.pessoa_id}`)}
           />
       )}

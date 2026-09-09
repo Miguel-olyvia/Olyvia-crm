@@ -22,7 +22,7 @@
  * Nao ha botao de anexar justificacao: nao existe RPC nem politica de insert em
  * `pessoas_ausencias_justificacoes` -- um botao que falhava sempre.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Sheet,
   SheetContent,
@@ -39,6 +39,8 @@ import { MotivoDialog, type ResultadoMotivo } from "@/components/hr/ausencias/Mo
 import { TipoEtiqueta } from "@/components/hr/ausencias/TipoEtiqueta";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { isPermissionError } from "@/lib/hr/hrDb";
 import { accoesDoPedido, formatarDias, lerPedido } from "@/lib/hr/ausencias";
 import type {
   AusenciaDecisao,
@@ -81,11 +83,28 @@ interface PedidoDetalheSheetProps {
   onCancelar: (pedidoId: string, motivo: string) => Promise<string | null>;
   onCorrigirAprovado: (pedidoId: string, motivo: string) => Promise<string | null>;
   onRevelarJustificacao?: (pedidoId: string) => Promise<AusenciaJustificacaoRevelada[]>;
+  /**
+   * O motivo do pedido ja nao vem na leitura da lista: la-se so por esta RPC,
+   * uma vez por pedido, quando o detalhe abre. Ver `rpc_hr_ausencia_ver_motivo`.
+   */
+  onVerMotivo: (pedidoId: string) => Promise<string | null>;
   /** Presente nas vistas de organizacao: salta para a ficha da pessoa. */
   onIrParaFicha?: () => void;
 }
 
 type Accao = "recusarChefia" | "ajustar" | "recusarRh" | "devolver" | "cancelar" | "corrigir";
+
+/**
+ * Os quatro desfechos de `rpc_hr_ausencia_ver_motivo`: a carregar, visivel,
+ * sem motivo escrito, oculto por ser sensivel sem permissao, ou uma falha real
+ * (rede, sessao) que nao e uma recusa de acesso e por isso vai ao Sentry.
+ */
+type EstadoMotivo =
+  | { tipo: "carregando" }
+  | { tipo: "visivel"; texto: string }
+  | { tipo: "vazio" }
+  | { tipo: "oculto" }
+  | { tipo: "erro" };
 
 function BlocoPasso({ passo, nome }: { passo: PassoLido; nome: string | null }) {
   const { t } = useTranslation();
@@ -124,6 +143,37 @@ export function PedidoDetalheSheet(props: PedidoDetalheSheetProps) {
   const [accao, setAccao] = useState<Accao | null>(null);
   const [justificacoes, setJustificacoes] = useState<AusenciaJustificacaoRevelada[] | null>(null);
   const [aRevelar, setARevelar] = useState(false);
+  const [motivo, setMotivo] = useState<EstadoMotivo>({ tipo: "carregando" });
+
+  // So aqui: uma vez por pedido, quando o detalhe abre -- nunca na lista nem
+  // no mapa. `onVerMotivo` decide na base se o tipo e sensivel; um erro de
+  // permissao e a resposta CORRECTA (oculta o motivo), qualquer outro erro e
+  // um defeito e vai ao Sentry.
+  useEffect(() => {
+    if (!pedido) return;
+    let cancelado = false;
+    setMotivo({ tipo: "carregando" });
+    props
+      .onVerMotivo(pedido.id)
+      .then((texto) => {
+        if (cancelado) return;
+        setMotivo(texto ? { tipo: "visivel", texto } : { tipo: "vazio" });
+      })
+      .catch((erro: unknown) => {
+        if (cancelado) return;
+        if (isPermissionError(erro)) {
+          setMotivo({ tipo: "oculto" });
+          return;
+        }
+        captureFlowError(erro, "hr-ausencias-load");
+        setMotivo({ tipo: "erro" });
+        toast.error(t("hr.ausencias.campo.motivoErro"));
+      });
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pedido?.id]);
 
   const leitura: LeituraDoPedido | null = useMemo(
     () => (pedido ? lerPedido(pedido.estado, decisoes) : null),
@@ -324,18 +374,32 @@ export function PedidoDetalheSheet(props: PedidoDetalheSheetProps) {
 
             {/* Um tipo sensivel pode ter motivo escrito na mesma -- o campo
                 nao bloqueia texto, so deixou de o exigir. Por isso o texto
-                livre segue a MESMA guarda que o documento: so quem tem
+                livre segue a MESMA guarda que o documento, agora decidida na
+                BASE por `rpc_hr_ausencia_ver_motivo`: so quem tem
                 hr.ausencias.justificacao.view o ve. A chefia continua a
                 aprovar sem o ler. */}
-            {pedido.motivo && (!tipo?.justificacao_sensivel || permissoes.verJustificacao) && (
-              <div className="rounded-md border p-3 text-sm">
-                <p className="text-xs text-muted-foreground">{t("hr.ausencias.campo.motivo")}</p>
-                <p>{pedido.motivo}</p>
+            {motivo.tipo === "carregando" && (
+              <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                {t("hr.ausencias.campo.motivoACarregar")}
               </div>
             )}
-            {pedido.motivo && tipo?.justificacao_sensivel && !permissoes.verJustificacao && (
+            {motivo.tipo === "visivel" && (
+              <div className="rounded-md border p-3 text-sm">
+                <p className="text-xs text-muted-foreground">{t("hr.ausencias.campo.motivo")}</p>
+                <p>{motivo.texto}</p>
+              </div>
+            )}
+            {motivo.tipo === "vazio" && (
+              <p className="text-xs text-muted-foreground">{t("hr.ausencias.campo.semMotivo")}</p>
+            )}
+            {motivo.tipo === "oculto" && (
               <div className="rounded-md border p-3 text-sm text-muted-foreground">
                 {t("hr.ausencias.campo.motivoOculto")}
+              </div>
+            )}
+            {motivo.tipo === "erro" && (
+              <div className="rounded-md border p-3 text-sm text-destructive">
+                {t("hr.ausencias.campo.motivoErro")}
               </div>
             )}
 

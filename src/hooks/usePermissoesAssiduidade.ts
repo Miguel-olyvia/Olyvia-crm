@@ -1,5 +1,5 @@
 /**
- * As catorze permissoes de assiduidade, resolvidas num sitio so.
+ * As doze permissoes de assiduidade, resolvidas num sitio so.
  *
  * Existe para nao haver quatro ecras a escrever a mesma lista de `hasPermission`
  * com uma diferenca por distraccao -- foi assim que, noutro modulo, a leitura
@@ -33,8 +33,6 @@ export function usePermissoesAssiduidade(): {
       faltasEdit: hasPermission("hr.assiduidade.faltas.edit"),
       justificacaoView: hasPermission("hr.assiduidade.justificacao.view"),
       justificacaoEdit: hasPermission("hr.assiduidade.justificacao.edit"),
-      dispositivosView: hasPermission("hr.assiduidade.dispositivos.view"),
-      dispositivosEdit: hasPermission("hr.assiduidade.dispositivos.edit"),
       validarRealizado: hasPermission("hr.pessoas.horario_realizado.validar"),
     }),
     [hasPermission],

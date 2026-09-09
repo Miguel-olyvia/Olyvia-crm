@@ -107,7 +107,9 @@ export interface AusenciaPedido {
   hora_fim: string | null;
   /** GRAVADO pela RPC. Nunca recalcular na interface para o mostrar. */
   dias_solicitados: number;
-  motivo: string | null;
+  // SEM `motivo`: a coluna nao tem SELECT directo para authenticated desde a
+  // migration 20261122050000. Le-se so por `rpc_hr_ausencia_ver_motivo`
+  // (ver useAusenciasDaOrganizacao/useAusenciasDaPessoa `verMotivo`).
   estado: EstadoPedido;
   aprovador_chefia_pessoa_id: string | null;
   criado_por_pessoa_id: string | null;

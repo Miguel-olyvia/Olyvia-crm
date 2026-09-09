@@ -117,11 +117,8 @@ const PessoaDetail = lazy(() => import("./pages/PessoaDetail"));
 const Ausencias = lazy(() => import("./pages/Ausencias"));
 const AusenciasAprovacoes = lazy(() => import("./pages/AusenciasAprovacoes"));
 const AusenciasOrganizacao = lazy(() => import("./pages/AusenciasOrganizacao"));
-const AusenciasTipos = lazy(() => import("./pages/AusenciasTipos"));
 const Assiduidade = lazy(() => import("./pages/Assiduidade"));
-const AssiduidadeEquipa = lazy(() => import("./pages/AssiduidadeEquipa"));
 const AssiduidadeOrganizacao = lazy(() => import("./pages/AssiduidadeOrganizacao"));
-const AssiduidadeDispositivos = lazy(() => import("./pages/AssiduidadeDispositivos"));
 const OrgTemplates = lazy(() => import("./pages/OrgTemplates"));
 const OrgHelp = lazy(() => import("./pages/OrgHelp"));
 const NeedsAssessmentConfig = lazy(() => import("./pages/NeedsAssessmentConfig"));
@@ -287,14 +284,10 @@ const App = () => (
                       <Route path="/rh/ausencias" element={<ProtectedRoute permissions={["hr.ausencias.view.own", "hr.ausencias.view"]}><Ausencias /></ProtectedRoute>} />
                       <Route path="/rh/ausencias/aprovacoes" element={<ProtectedRoute permissions={["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"]}><AusenciasAprovacoes /></ProtectedRoute>} />
                       <Route path="/rh/ausencias/organizacao" element={<ProtectedRoute permission="hr.ausencias.view"><AusenciasOrganizacao /></ProtectedRoute>} />
-                      <Route path="/rh/definicoes/ausencias-tipos" element={<ProtectedRoute permission="hr.ausencias.tipos.view"><AusenciasTipos /></ProtectedRoute>} />
                       {/* Assiduidade e picagens -- o mesmo eixo de audiencia:
-                          o meu ponto, o da equipa, o de toda a gente, e o
-                          catalogo de dispositivos nas definicoes. */}
+                          o meu ponto, e o mapa de toda a gente. */}
                       <Route path="/rh/assiduidade" element={<ProtectedRoute permissions={["hr.assiduidade.view.own", "hr.assiduidade.view"]}><Assiduidade /></ProtectedRoute>} />
-                      <Route path="/rh/assiduidade/equipa" element={<ProtectedRoute permission="hr.assiduidade.equipa.view"><AssiduidadeEquipa /></ProtectedRoute>} />
                       <Route path="/rh/assiduidade/organizacao" element={<ProtectedRoute permission="hr.assiduidade.view"><AssiduidadeOrganizacao /></ProtectedRoute>} />
-                      <Route path="/rh/definicoes/assiduidade-dispositivos" element={<ProtectedRoute permission="hr.assiduidade.dispositivos.view"><AssiduidadeDispositivos /></ProtectedRoute>} />
                       <Route path="/organizations" element={<Organizations />} />
                       <Route path="/organizations/:id" element={<OrganizationDetail />} />
                       <Route path="/org-templates" element={<OrgTemplates />} />

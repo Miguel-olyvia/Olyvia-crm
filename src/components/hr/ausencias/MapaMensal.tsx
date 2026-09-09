@@ -24,7 +24,7 @@ import { eachDayOfInterval, endOfMonth, format, startOfMonth } from "date-fns";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { corDoTipo } from "@/components/hr/ausencias/TipoEtiqueta";
-import { eFeriado, eFimDeSemana, type IndiceFeriados } from "@/lib/hr/ausencias";
+import { eFeriado, eFimDeSemana, nomeTipoAusencia, type IndiceFeriados } from "@/lib/hr/ausencias";
 import type { AusenciaDia, AusenciaTipo } from "@/types/hrAusencias";
 
 interface MapaMensalProps {
@@ -183,7 +183,7 @@ export function MapaMensal({
                 const pintar = Boolean(marca) && !naoUtil;
                 const accionavel = Boolean(marca) && Boolean(onAbrirPedido);
                 const descricao = marca
-                  ? `${nomePorPessoaId.get(pessoaId) ?? ""} · ${data} · ${tipo?.nome ?? t("hr.ausencias.tipoDesconhecido")} · ${t(`hr.ausencias.estadoDia.${marca.estado}`)}`
+                  ? `${nomePorPessoaId.get(pessoaId) ?? ""} · ${data} · ${tipo ? nomeTipoAusencia(tipo, t) : t("hr.ausencias.tipoDesconhecido")} · ${t(`hr.ausencias.estadoDia.${marca.estado}`)}`
                   : `${nomePorPessoaId.get(pessoaId) ?? ""} · ${data}`;
                 const activa = focada.linha === linha && focada.coluna === coluna;
                 return (

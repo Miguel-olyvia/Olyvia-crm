@@ -47,7 +47,7 @@ import type { HorarioPlaneado, HorarioRealizado } from "@/types/hr";
  */
 const COLUNAS_PICAGEM =
   "id, pessoa_id, organization_id, momento, data_local, hora_local, sentido, local_id, " +
-  "vinculo_id, planeado_id, origem, dispositivo_id, dispositivo_ref_externa, estado, " +
+  "vinculo_id, planeado_id, origem, estado, " +
   "realizado_id, corrige_picagem_id, correccao_tipo, correccao_motivo, " +
   "registado_por_pessoa_id, anulado_em, anulacao_motivo, created_at";
 
@@ -230,7 +230,6 @@ export function useAssiduidadeDaPessoa(pessoaId: string | undefined, janela: Jan
       sentido: SentidoPicagem;
       momento?: string | null;
       localId?: string | null;
-      dispositivoId?: string | null;
       latitude?: number | null;
       longitude?: number | null;
       precisaoMetros?: number | null;
@@ -245,7 +244,6 @@ export function useAssiduidadeDaPessoa(pessoaId: string | undefined, janela: Jan
           // Sem momento, a base usa `now()` -- e o caso do botao de picar.
           ...(args.momento ? { _momento: args.momento } : {}),
           _local_id: args.localId ?? null,
-          _dispositivo_id: args.dispositivoId ?? null,
           _latitude: args.latitude ?? null,
           _longitude: args.longitude ?? null,
           _precisao_metros: args.precisaoMetros ?? null,

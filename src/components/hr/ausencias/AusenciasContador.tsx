@@ -25,7 +25,7 @@ import { Button } from "@/components/ui/button";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
 import { TipoEtiqueta, corDoTipo } from "@/components/hr/ausencias/TipoEtiqueta";
 import { useTranslation } from "@/hooks/useTranslation";
-import { formatarDias } from "@/lib/hr/ausencias";
+import { formatarDias, nomeTipoAusencia } from "@/lib/hr/ausencias";
 import { SlidersHorizontal } from "lucide-react";
 import type { AusenciaSaldo, AusenciaTipo } from "@/types/hrAusencias";
 
@@ -93,7 +93,9 @@ export function AusenciasContador({
     const pesoA = tipoA?.desconta_saldo ? 0 : 1;
     const pesoB = tipoB?.desconta_saldo ? 0 : 1;
     if (pesoA !== pesoB) return pesoA - pesoB;
-    return (tipoA?.nome ?? "").localeCompare(tipoB?.nome ?? "");
+    const nomeA = tipoA ? nomeTipoAusencia(tipoA, t) : "";
+    const nomeB = tipoB ? nomeTipoAusencia(tipoB, t) : "";
+    return nomeA.localeCompare(nomeB);
   });
 
   if (ordenados.length === 0) {

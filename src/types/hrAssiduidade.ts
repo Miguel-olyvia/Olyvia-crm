@@ -28,8 +28,6 @@ export interface Picagem {
   vinculo_id: string | null;
   planeado_id: string | null;
   origem: OrigemPicagem;
-  dispositivo_id: string | null;
-  dispositivo_ref_externa: string | null;
   latitude: number | null;
   longitude: number | null;
   precisao_metros: number | null;
@@ -49,7 +47,6 @@ export type SentidoPicagem = "entrada" | "saida";
 export type EstadoPicagem = "valida" | "corrigida" | "anulada";
 
 export const ORIGENS_PICAGEM = [
-  "dispositivo",
   "app",
   "web",
   "importacao",
@@ -150,37 +147,6 @@ export interface JustificacaoFaltaRevelada {
   ficheiro_bytes: number | null;
 }
 
-/** `hr_picagens_dispositivos` (20261121150000). A UNICA tabela do modulo com escrita directa. */
-export interface Dispositivo {
-  id: string;
-  organization_id: string;
-  codigo: string;
-  nome: string;
-  tipo: TipoDispositivo;
-  local_id: string | null;
-  /**
-   * O HASH. A chave em claro nunca chega ao cliente e nunca se pede num
-   * formulario -- so a data em que foi rodada e visivel.
-   */
-  chave_rodada_em: string | null;
-  ref_externa: string | null;
-  fabricante: string | null;
-  modelo: string | null;
-  notas: string | null;
-  activo: boolean;
-  ultima_picagem_em: string | null;
-}
-
-export const TIPOS_DISPOSITIVO = [
-  "quiosque",
-  "leitor_biometrico",
-  "leitor_cartao",
-  "relogio_ponto",
-  "app_movel",
-  "web",
-] as const;
-export type TipoDispositivo = (typeof TIPOS_DISPOSITIVO)[number];
-
 /**
  * Uma linha de `hr_assiduidade_desvios(org, de, ate)`.
  *
@@ -215,11 +181,15 @@ export type TipoDesvio = (typeof TIPOS_DESVIO)[number];
  * As permissoes do modulo, resolvidas UMA vez pela pagina e passadas para
  * baixo -- nenhum componente chama `usePermissions` por sua conta.
  *
- * Sao catorze codigos `hr.assiduidade.*` mais um de emprestimo: validar horas
+ * Sao doze codigos `hr.assiduidade.*` mais um de emprestimo: validar horas
  * e `hr.pessoas.horario_realizado.validar`, da ronda anterior.
  * `hr.assiduidade.validar` NAO existe e nao se cria.
  *
- * AVISO PARA QUEM FOR TESTAR: nenhuma das catorze esta atribuida a papel
+ * `hr.assiduidade.equipa.view` fica mesmo sem ecra dedicado ("o ponto da
+ * equipa" saiu do menu): continua a decidir o ambito da leitura de
+ * `pessoas_picagens` na RLS e a mostrar/esconder blocos na ficha da pessoa.
+ *
+ * AVISO PARA QUEM FOR TESTAR: nenhuma das doze esta atribuida a papel
  * nenhum -- a propria migration do catalogo falha se estiver. Enquanto isso
  * nao mudar, todos estes ecras aparecem vazios ou recusam tudo, inclusive ao
  * super admin. E configuracao, nao defeito da interface.
@@ -236,8 +206,6 @@ export interface PermissoesAssiduidade {
   faltasEdit: boolean;
   justificacaoView: boolean;
   justificacaoEdit: boolean;
-  dispositivosView: boolean;
-  dispositivosEdit: boolean;
   /** `hr.pessoas.horario_realizado.validar`, da ronda 2. */
   validarRealizado: boolean;
 }

@@ -7,6 +7,8 @@
  * azul para coisas diferentes.
  */
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/hooks/useTranslation";
+import { nomeTipoAusencia } from "@/lib/hr/ausencias";
 import type { AusenciaTipo } from "@/types/hrAusencias";
 
 /** A cor de recurso quando o tipo nao tem nenhuma definida. */
@@ -17,13 +19,16 @@ export function corDoTipo(tipo: Pick<AusenciaTipo, "cor"> | null | undefined): s
 }
 
 interface TipoEtiquetaProps {
-  tipo: Pick<AusenciaTipo, "cor" | "nome"> | null | undefined;
+  tipo: Pick<AusenciaTipo, "cor" | "codigo" | "nome"> | null | undefined;
   /** Usado quando o tipo nao foi encontrado (apagado, ou sem permissao). */
   nomeAlternativo?: string;
   className?: string;
 }
 
 export function TipoEtiqueta({ tipo, nomeAlternativo = "—", className }: TipoEtiquetaProps) {
+  const { t } = useTranslation();
+  const nome = tipo ? nomeTipoAusencia(tipo, t) : nomeAlternativo;
+
   return (
     <span className={cn("inline-flex items-center gap-1.5", className)}>
       <span
@@ -31,7 +36,7 @@ export function TipoEtiqueta({ tipo, nomeAlternativo = "—", className }: TipoE
         className="h-2.5 w-2.5 shrink-0 rounded-full"
         style={{ backgroundColor: corDoTipo(tipo) }}
       />
-      <span>{tipo?.nome ?? nomeAlternativo}</span>
+      <span>{nome}</span>
     </span>
   );
 }

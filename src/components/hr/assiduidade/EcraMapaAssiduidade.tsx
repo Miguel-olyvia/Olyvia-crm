@@ -1,14 +1,16 @@
 /**
- * O mes de assiduidade de muita gente -- o corpo partilhado por dois ecras.
+ * O mes de assiduidade de muita gente -- o mapa da organizacao.
  *
- * PORQUE E QUE SAO DOIS ECRAS E UM SO COMPONENTE
- * ----------------------------------------------
- * "O ponto da equipa" e "o mapa da organizacao" mostram a mesma coisa a duas
- * AUDIENCIAS diferentes -- e a audiencia e o eixo do menu, como nas ausencias.
- * O que muda entre eles nao e o conteudo: e QUEM la aparece, e disso trata a
- * RLS sozinha. `hr.assiduidade.equipa.view` faz a base devolver a cadeia de
- * chefia abaixo; `hr.assiduidade.view` faz devolver a organizacao inteira. A
- * interface nao replica a regra, nem tenta.
+ * SO HA UM CONSUMIDOR, DE PROPOSITO
+ * ----------------------------------
+ * Ate esta ronda havia dois ecras sobre este mesmo componente ("o ponto da
+ * equipa" e "o mapa da organizacao"), separados pela AUDIENCIA -- a RLS de
+ * `pessoas_picagens` sozinha decidia quem aparecia consoante a permissao
+ * (`hr.assiduidade.equipa.view` para a cadeia de chefia, `hr.assiduidade.view`
+ * para a organizacao inteira). "O ponto da equipa" saiu por nao fazer
+ * sentido como ecra proprio; a permissao `hr.assiduidade.equipa.view` fica
+ * viva -- continua a decidir o ambito na RLS e em dois separadores da ficha
+ * da pessoa (`PessoaAssiduidadeTab`, `PessoaHorarioTab`).
  *
  * UMA LISTA VAZIA NUNCA PROVA AUSENCIA DE DADOS: os tres ramos da RLS das
  * picagens sao permissao-dependentes. Quando a leitura foi recusada mostra-se
