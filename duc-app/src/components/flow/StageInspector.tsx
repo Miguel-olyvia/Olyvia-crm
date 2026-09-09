@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import {
   type DucField,
   type DucItemSection,
+  type DucRole,
   type DucStage,
   type FieldType,
   type StageNotify,
@@ -104,6 +105,7 @@ export function StageInspector({
   stageIdx,
   keyErrors,
   members,
+  roles,
   onClose,
   onDelete,
   handlers,
@@ -112,6 +114,7 @@ export function StageInspector({
   stageIdx: number;
   keyErrors: Set<string> | undefined;
   members: OrgMember[];
+  roles: DucRole[];
   onClose: () => void;
   onDelete: () => void;
   handlers: StageInspectorHandlers;
@@ -249,6 +252,7 @@ export function StageInspector({
         <NotifySection
           notify={stage.notify}
           members={members}
+          roles={roles}
           onChange={(n) => handlers.onPatchNotify(stageIdx, n)}
         />
       </div>
@@ -268,10 +272,12 @@ export function StageInspector({
 function NotifySection({
   notify,
   members,
+  roles,
   onChange,
 }: {
   notify: StageNotify | undefined;
   members: OrgMember[];
+  roles: DucRole[];
   onChange: (n: StageNotify) => void;
 }) {
   const [emailInput, setEmailInput] = useState("");
@@ -291,6 +297,10 @@ function NotifySection({
   const availableMembers = members.filter(
     (m) => !recipients.some((r) => r.type === "member" && r.value === m.id)
   );
+  const availableRoles = roles.filter(
+    (role) => !recipients.some((r) => r.type === "role" && r.value === role.key)
+  );
+  const roleLabel = (key: string) => roles.find((r) => r.key === key)?.label ?? "Função";
 
   const addEmail = () => {
     const v = emailInput.trim();
@@ -308,8 +318,8 @@ function NotifySection({
         </h3>
       </div>
       <p className="mb-3 text-xs text-slate-400">
-        Quem recebe email quando esta etapa entra ou fecha — membros da organização ou emails
-        externos.
+        Quem recebe email quando esta etapa entra ou fecha — funções (roles), membros da
+        organização ou emails externos.
       </p>
 
       {recipients.length > 0 && (
@@ -321,10 +331,16 @@ function NotifySection({
                 "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
                 r.type === "member"
                   ? "bg-brand-50 text-brand-800 ring-brand-100"
-                  : "bg-amber-50 text-amber-700 ring-amber-100"
+                  : r.type === "role"
+                    ? "bg-violet-50 text-violet-700 ring-violet-100"
+                    : "bg-amber-50 text-amber-700 ring-amber-100"
               )}
             >
-              {r.type === "member" ? r.label ?? "Membro" : r.value}
+              {r.type === "member"
+                ? r.label ?? "Membro"
+                : r.type === "role"
+                  ? `${roleLabel(r.value)} (função)`
+                  : r.value}
               <button
                 type="button"
                 onClick={() => removeRecipient(i)}
@@ -339,6 +355,22 @@ function NotifySection({
       )}
 
       <div className="space-y-2">
+        {availableRoles.length > 0 && (
+          <Combobox
+            value=""
+            onChange={(key) => {
+              const role = roles.find((x) => x.key === key);
+              if (role) addRecipient({ type: "role", value: role.key, label: role.label });
+            }}
+            placeholder="Adicionar função (role)…"
+            searchPlaceholder="Pesquisar função…"
+            options={availableRoles.map((r) => ({
+              value: r.key,
+              label: `${r.label} · ${r.memberIds.length} membro(s)`,
+            }))}
+          />
+        )}
+
         {availableMembers.length > 0 && (
           <Combobox
             value=""
@@ -407,6 +439,30 @@ function NotifySection({
         <p className="mt-1 text-[11px] text-slate-400">
           Ex.: 7 → alerta os destinatários se a etapa não fechar numa semana. Vazio/0 = sem alerta.
         </p>
+
+        {/* Lembrete antecipado — só faz sentido com um limite de alerta definido. */}
+        {Boolean(current.alertAfterDays) && (
+          <label className="mt-3 flex items-center justify-between gap-3 border-t border-amber-200/70 pt-3">
+            <span className="text-sm text-slate-700">Lembrar antes, faltando</span>
+            <span className="flex items-center gap-1.5">
+              <input
+                type="number"
+                min={0}
+                max={current.alertAfterDays ?? undefined}
+                value={current.remindBeforeDays ?? ""}
+                onChange={(e) =>
+                  patch({
+                    remindBeforeDays:
+                      e.target.value === "" ? undefined : Math.max(0, Number(e.target.value)),
+                  })
+                }
+                placeholder="0"
+                className="w-16 rounded-md border border-slate-300 bg-white px-2 py-1 text-right text-sm outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+              />
+              <span className="text-sm text-slate-500">dias</span>
+            </span>
+          </label>
+        )}
       </div>
     </section>
   );

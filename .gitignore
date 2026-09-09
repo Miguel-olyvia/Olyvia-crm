@@ -76,3 +76,7 @@ eliminar.md
 bun.lock
 bun.lockb
 src (2).zip
+
+# Supabase Personal Access Token (temporário, nunca commitar)
+.supabase-pat
+duc-app/deno.lock

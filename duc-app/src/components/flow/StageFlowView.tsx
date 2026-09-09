@@ -23,6 +23,8 @@ interface ProgressData extends Record<string, unknown> {
   no: number;
   title: string;
   responsible: string;
+  /** Responsável atribuído (user Olyvia), quando definido no tracking. */
+  assignedName?: string | null;
   status: StageStatus;
   isFirst: boolean;
   isLast: boolean;
@@ -81,6 +83,11 @@ function ProgressNodeImpl({ data }: NodeProps<ProgressNode>) {
             {status === "skipped" ? "Não precisa" : data.responsible || "—"}
             {status === "current" && " · em curso"}
           </p>
+          {data.assignedName && status !== "skipped" && (
+            <p className="truncate text-xs font-medium text-brand-700">
+              {data.assignedName}
+            </p>
+          )}
         </div>
       </div>
       {!data.isLast && <Handle type="source" position={Position.Bottom} className="!opacity-0" />}
@@ -144,6 +151,7 @@ export function StageFlowView({
             no: s.no,
             title: s.title.split(" — ")[0],
             responsible: s.responsible,
+            assignedName: tracking.find((t) => t.stage === s.no)?.assigned_name ?? null,
             status,
             isFirst: i === 0,
             isLast: i === stages.length - 1,

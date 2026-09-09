@@ -18,7 +18,8 @@ import {
   type ScopeLine,
 } from "../lib/clientInfo";
 import { fetchEffectiveStages } from "../lib/ducConfig";
-import { notifyStage } from "../lib/notify";
+import { notifyStage, notifyAssignee } from "../lib/notify";
+import { fetchOrgMembers, type OrgMember } from "../lib/members";
 import { logDucEvent, fetchDucEvents, type DucEvent } from "../lib/events";
 import {
   fetchCollaborators,
@@ -86,9 +87,13 @@ export default function DucDetail() {
   const [clientName, setClientName] = useState<string | null>(null);
   // Id da proposta ligada (para o deep-link "Ver proposta" na Olyvia).
   const [proposalId, setProposalId] = useState<string | null>(null);
+  // Já existe contrato assinado/ativo? (o DUC nasce da proposta, antes do contrato).
+  const [hasContract, setHasContract] = useState(false);
   // Estrutura efetiva das etapas para esta organização (config dinâmica por
   // entidade; cai no template base quando a org não tem override guardado).
   const [configStages, setConfigStages] = useState<DucStage[]>([]);
+  // Membros da organização — para atribuir um responsável (assignee) a cada etapa.
+  const [members, setMembers] = useState<OrgMember[]>([]);
 
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -154,6 +159,8 @@ export default function DucDetail() {
     // guardado na área de Configurações, ou o template base da variante.
     const eff = await fetchEffectiveStages(row.organization_id, row.variant);
     setConfigStages(eff.stages);
+    // Membros da org para o seletor de responsável por etapa (best-effort).
+    void fetchOrgMembers(row.organization_id).then(setMembers);
     // Rastreio: uma entrada por etapa da configuração efetiva (nº de etapas é
     // dinâmico por organização, não fixo em 9). DUCs já criados usam o que têm.
     setTracking(
@@ -182,12 +189,16 @@ export default function DucDetail() {
       }))
     );
 
+    // Proposta de origem já conhecida pela ficha (funciona mesmo sem cliente).
+    setProposalId(row.proposal_id ?? null);
+
     // Puxa os dados que já existem na Olyvia e pré-preenche campos vazios.
     if (row.client_id) {
-      const info = await fetchClientOlyviaInfo(row.client_id);
+      const info = await fetchClientOlyviaInfo(row.client_id, { proposalId: row.proposal_id });
       if (info) {
         setClientName(info.name);
-        setProposalId(info.proposalId);
+        setProposalId(info.proposalId ?? row.proposal_id ?? null);
+        setHasContract(info.hasContract);
         setBlocks(mergePrefill(row.blocks ?? {}, prefillBlocksFromInfo(info)));
         // Semeia itens a partir das linhas do orçamento assinado nas secções que
         // a configuração desta organização tem — âmbito ("o que foi VENDIDO"),
@@ -323,6 +334,55 @@ export default function DucDetail() {
       });
     }
     return true;
+  };
+  // Atribui (ou limpa, com userId=null) o responsável de uma etapa. Persiste já
+  // — a atribuição alimenta "As minhas tarefas" e as notificações de fecho, não
+  // pode depender do autosave. Guarda id + nome (desnormalizado) e regista evento.
+  const setStageAssignee = async (stage: number, userId: string | null): Promise<void> => {
+    const name = userId ? members.find((m) => m.id === userId)?.name ?? null : null;
+    const patch = { assigned_to: userId, assigned_name: name };
+    const newTracking: TrackingEntry[] = tracking.some((t) => t.stage === stage)
+      ? tracking.map((t) => (t.stage === stage ? { ...t, ...patch } : t))
+      : [...tracking, { stage, state: "pending", ...patch }];
+    setTracking(newTracking);
+    if (!id) return;
+    const { error: upErr } = await supabase
+      .from("anew_client_ducs")
+      .update({ tracking: newTracking })
+      .eq("id", id);
+    if (upErr) {
+      setError(upErr.message);
+      return;
+    }
+    setSavedAt(new Date().toLocaleTimeString("pt-PT"));
+    if (duc) {
+      void logDucEvent({
+        duc_id: id,
+        organization_id: duc.organization_id,
+        event_type: "assignee_changed",
+        stage_no: stage,
+        detail: userId
+          ? `Etapa ${stage} atribuída a ${name ?? "membro"}`
+          : `Etapa ${stage} sem responsável`,
+        actor_id: businessUserId,
+        actor_name: userName ?? null,
+      });
+    }
+    // Se a etapa atribuída é a que está ativa, avisa logo o novo responsável.
+    if (userId && stage === currentStage && duc) {
+      const st = configStages.find((s) => s.no === stage);
+      if (st) {
+        void notifyAssignee(userId, {
+          organizationId: duc.organization_id,
+          ducNumber: duc.duc_number,
+          clientName: clientName ?? duc.title,
+          stageNo: st.no,
+          stageTitle: st.title.split(" — ")[0],
+          event: "enter",
+          ducUrl: window.location.href,
+        });
+      }
+    }
   };
   // Dispensar pede confirmação (fica registada); reativar é direto.
   const requestSkip = (stage: number, skip: boolean) => {
@@ -673,6 +733,17 @@ export default function DucDetail() {
                 {duc.duc_number}
               </span>
               <Badge className="bg-brand-50 text-brand-800 ring-brand-100">{VARIANT_LABELS[variant]}</Badge>
+              {/* Estado do contrato — o DUC nasce da proposta; mostra sempre se
+                  já há contrato assinado ou se ainda está pendente. */}
+              {hasContract ? (
+                <Badge className="bg-emerald-100 text-emerald-700 ring-emerald-200">
+                  <Check width={12} height={12} /> Contrato assinado
+                </Badge>
+              ) : (
+                <Badge className="bg-amber-100 text-amber-700 ring-amber-200">
+                  <AlertTriangle width={12} height={12} /> Sem contrato ainda
+                </Badge>
+              )}
             </div>
             <h1 className="mt-2 break-words text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
               {clientName ?? duc.title ?? "DUC"}
@@ -881,6 +952,8 @@ export default function DucDetail() {
                 blocks={blocks}
                 items={items}
                 entry={tracking.find((t) => t.stage === stage.no) ?? null}
+                members={members}
+                onAssign={setStageAssignee}
                 isCurrent={stage.no === currentStage}
                 enteredAt={
                   (stage.no > 1
@@ -992,9 +1065,10 @@ export default function DucDetail() {
           }
           onCancel={() => setConfirmingClose(null)}
           onConfirm={async () => {
-            const st = visibleStages.find((s) => s.no === confirmingClose);
+            const closedNo = confirmingClose;
+            const st = visibleStages.find((s) => s.no === closedNo);
             // Notifica SÓ depois de a gravação ter tido sucesso.
-            const ok = await closeStage(confirmingClose, true);
+            const ok = await closeStage(closedNo, true);
             if (ok && st && duc) {
               void notifyStage(st, {
                 organizationId: duc.organization_id,
@@ -1006,6 +1080,34 @@ export default function DucDetail() {
                 signedBy: userName ?? businessUserId,
                 ducUrl: window.location.href,
               });
+            }
+            // Fecho da etapa ATUAL → linha de montagem: avança para a próxima
+            // etapa por tratar (salta as dispensadas/fechadas), o que persiste o
+            // current_stage, arranca o relógio de SLA (enteredAt = data deste
+            // fecho) e notifica os destinatários `onEnter` da próxima. Além disso
+            // avisa o RESPONSÁVEL atribuído dessa próxima etapa ("é a tua vez").
+            if (ok && closedNo === currentStage) {
+              const next = visibleStages
+                .filter((s) => s.no > closedNo)
+                .find((s) => {
+                  const stt = tracking.find((t) => t.stage === s.no)?.state;
+                  return stt !== "done" && stt !== "skipped";
+                });
+              if (next && duc) {
+                changeStage(next.no);
+                const nextAssignee = tracking.find((t) => t.stage === next.no)?.assigned_to;
+                if (nextAssignee) {
+                  void notifyAssignee(nextAssignee, {
+                    organizationId: duc.organization_id,
+                    ducNumber: duc.duc_number,
+                    clientName: clientName ?? duc.title,
+                    stageNo: next.no,
+                    stageTitle: next.title.split(" — ")[0],
+                    event: "enter",
+                    ducUrl: window.location.href,
+                  });
+                }
+              }
             }
             setConfirmingClose(null);
           }}
@@ -1255,6 +1357,8 @@ function StageCard({
   blocks,
   items,
   entry,
+  members,
+  onAssign,
   isCurrent,
   enteredAt,
   onField,
@@ -1269,6 +1373,8 @@ function StageCard({
   blocks: Record<string, Record<string, unknown>>;
   items: LocalItem[];
   entry: TrackingEntry | null;
+  members: OrgMember[];
+  onAssign: (stageNo: number, userId: string | null) => void;
   isCurrent: boolean;
   enteredAt: string | null;
   onField: (stageKey: string, fieldKey: string, value: unknown) => void;
@@ -1316,7 +1422,26 @@ function StageCard({
             </h2>
             {stage.responsible && (
               <p className="mt-0.5 text-xs text-slate-400">
-                Responsável: <span className="font-medium text-slate-500">{stage.responsible}</span>
+                Função: <span className="font-medium text-slate-500">{stage.responsible}</span>
+              </p>
+            )}
+            {/* Responsável atribuído (user Olyvia): quem trata desta etapa e a vê
+                em "As minhas tarefas". Vazio = por atribuir. */}
+            <div className="mt-2 print:hidden">
+              <Combobox
+                className="w-full sm:w-56"
+                value={entry?.assigned_to ?? ""}
+                onChange={(v) => onAssign(stage.no, v || null)}
+                placeholder="Atribuir responsável…"
+                options={[
+                  { value: "", label: "— Sem responsável —" },
+                  ...members.map((m) => ({ value: m.id, label: m.name })),
+                ]}
+              />
+            </div>
+            {entry?.assigned_name && (
+              <p className="mt-1 hidden text-xs text-slate-500 print:block">
+                Responsável: {entry.assigned_name}
               </p>
             )}
           </div>
@@ -1601,6 +1726,9 @@ function CollaboratorsPanel({
   const [role, setRole] = useState<"viewer" | "editor">("viewer");
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Confirmações de remoção (colaborador externo / link público).
+  const [confirmRemove, setConfirmRemove] = useState<DucCollaborator | null>(null);
+  const [confirmRevoke, setConfirmRevoke] = useState<PublicShare | null>(null);
 
   // Links públicos (só leitura, por token).
   const [shares, setShares] = useState<PublicShare[]>([]);
@@ -1713,7 +1841,7 @@ function CollaboratorsPanel({
               </div>
               <button
                 type="button"
-                onClick={() => void remove(c.id)}
+                onClick={() => setConfirmRemove(c)}
                 className="text-slate-300 transition-colors hover:text-red-500"
                 title="Remover colaborador"
               >
@@ -1764,7 +1892,7 @@ function CollaboratorsPanel({
                 </button>
                 <button
                   type="button"
-                  onClick={() => void revokeShare(s.id).then(load)}
+                  onClick={() => setConfirmRevoke(s)}
                   title="Revogar link"
                   className="shrink-0 text-slate-300 transition-colors hover:text-red-500"
                 >
@@ -1780,6 +1908,50 @@ function CollaboratorsPanel({
         Requer as tabelas aplicadas no Supabase (duc-app/db/schema.sql §9 colaboradores, §11 links
         públicos) e o magic link ativo no Auth.
       </p>
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title="Remover colaborador"
+          tone="danger"
+          confirmLabel="Remover"
+          icon={<Trash width={18} height={18} />}
+          message={
+            <>
+              Remover o acesso de{" "}
+              <span className="font-medium text-slate-800">{confirmRemove.email}</span> a este DUC?
+              Perde de imediato a permissão de {confirmRemove.role === "editor" ? "edição" : "leitura"}.
+            </>
+          }
+          onCancel={() => setConfirmRemove(null)}
+          onConfirm={async () => {
+            const c = confirmRemove;
+            setConfirmRemove(null);
+            await removeCollaborator(c.id);
+            load();
+          }}
+        />
+      )}
+
+      {confirmRevoke && (
+        <ConfirmDialog
+          title="Revogar link público"
+          tone="danger"
+          confirmLabel="Revogar"
+          icon={<Trash width={18} height={18} />}
+          message={
+            <>
+              Revogar este link público? Quem já o tiver deixa de conseguir abrir o documento.
+            </>
+          }
+          onCancel={() => setConfirmRevoke(null)}
+          onConfirm={async () => {
+            const s = confirmRevoke;
+            setConfirmRevoke(null);
+            await revokeShare(s.id);
+            load();
+          }}
+        />
+      )}
     </Card>
   );
 }

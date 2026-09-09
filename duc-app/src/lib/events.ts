@@ -8,6 +8,7 @@ export type DucEventType =
   | "stage_unskipped"
   | "status_changed"
   | "stage_moved"
+  | "assignee_changed"
   | "field_changed"
   | "note";
 
