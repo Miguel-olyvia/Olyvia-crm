@@ -131,7 +131,7 @@ interface ClientOrderDocumentPDFLine {
   product_name: string;
   product_sku: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'sem_fornecedor';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor';
   purchase_order_number: string | null;
 }
 
@@ -162,6 +162,8 @@ const getLineStatusText = (line: ClientOrderDocumentPDFLine): string => {
       return line.purchase_order_number ? `Recebido (${line.purchase_order_number})` : 'Recebido';
     case 'a_aguardar_encomenda':
       return line.purchase_order_number ? `A aguardar Encomenda ${line.purchase_order_number}` : 'A aguardar Encomenda';
+    case 'stock_disponivel_confirmar':
+      return 'Stock disponível — confirmar saída';
     case 'sem_fornecedor':
       return 'Sem fornecedor preferencial';
     default:
