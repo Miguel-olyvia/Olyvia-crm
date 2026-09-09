@@ -152,6 +152,13 @@ export default function InventoryCountDetailDialog({
   const scanControlsRef = useRef<IScannerControls | null>(null);
   const quantityInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
+  // O painel de scan fica aberto para ler vários produtos seguidos — sem
+  // isto, o mesmo código continuaria a ser decodificado em quase todos os
+  // frames enquanto estivesse à frente da câmara, somando +1 dezenas de
+  // vezes por segundo. Ignora qualquer leitura nos SCAN_COOLDOWN_MS a
+  // seguir à última processada (encontrada ou não).
+  const SCAN_COOLDOWN_MS = 1500;
+  const lastScanAtRef = useRef(0);
 
   const isActive = header?.status === "em_contagem";
 
@@ -262,7 +269,44 @@ export default function InventoryCountDetailDialog({
     });
   }, [lines]);
 
+  // Grava a quantidade contada de uma linha (RPC + estado local) — partilhado
+  // entre a gravação manual (onBlur do campo) e o incremento automático por
+  // scan, para as duas vias atualizarem exatamente da mesma forma (Diferença
+  // e Resolução dependem deste mesmo `lines`).
+  const persistQuantity = useCallback(async (lineId: string, qty: number) => {
+    const { data, error } = await supabase.rpc('rpc_update_inventory_count_line_quantity', {
+      p_line_id: lineId,
+      p_counted_quantity: qty,
+    } as any);
+    if (error) throw error;
+    const result = data as any;
+    setLines((prev) => prev.map((l) => (l.id === lineId
+      ? {
+        ...l,
+        counted_quantity: result.counted_quantity,
+        moved_during_count: result.moved_during_count,
+        discrepancy_resolution: result.resolution_cleared ? null : l.discrepancy_resolution,
+        resolution_notes: result.resolution_cleared ? null : l.resolution_notes,
+        stock_movement_id: result.resolution_cleared ? null : l.stock_movement_id,
+      }
+      : l)));
+    if (result.resolution_cleared) {
+      setResolutionDrafts((prev) => ({ ...prev, [lineId]: { resolution: "", notes: "" } }));
+    }
+    setQuantityDrafts((prev) => ({ ...prev, [lineId]: String(result.counted_quantity) }));
+    // Ao contrário de handleResolveLine/handleFinalize, esta gravação nunca
+    // avisava o pai — o contador "X/Y" e o badge de discrepâncias na lista
+    // (StockCounts.tsx) ficavam presos ao valor com que a página tinha
+    // aberto até haver refresh por outra via.
+    onChanged();
+    return result;
+  }, [onChanged]);
+
   const handleScanResult = useCallback((code: string) => {
+    const now = Date.now();
+    if (now - lastScanAtRef.current < SCAN_COOLDOWN_MS) return;
+    lastScanAtRef.current = now;
+
     const match = findLineByCode(code);
     if (!match) {
       toast({
@@ -272,15 +316,21 @@ export default function InventoryCountDetailDialog({
       });
       return;
     }
-    setScanOpen(false);
-    toast({ title: t('stockCounts.scan.foundTitle'), description: match.products?.name || code });
-    // Dá tempo ao painel de scan fechar e à tabela existir no DOM antes de
-    // fazer scroll/focus na linha encontrada.
-    window.setTimeout(() => {
-      rowRefs.current[match.id]?.scrollIntoView({ behavior: "smooth", block: "center" });
-      quantityInputRefs.current[match.id]?.focus();
-    }, 150);
-  }, [findLineByCode, t, toast]);
+    const newQty = (match.counted_quantity ?? 0) + 1;
+    persistQuantity(match.id, newQty)
+      .then(() => {
+        toast({
+          title: t('stockCounts.scan.foundTitle'),
+          description: t('stockCounts.scan.foundCountDescription', {
+            name: match.products?.name || code,
+            qty: newQty,
+          }),
+        });
+      })
+      .catch((error: any) => {
+        toast({ title: t('stockCounts.toast.quantityError'), description: error.message, variant: "destructive" });
+      });
+  }, [findLineByCode, persistQuantity, t, toast]);
 
   // Mantido em ref para o efeito da câmara (abaixo) não precisar reiniciar o
   // stream sempre que `lines`/`t`/`toast` mudam — só quando scanOpen muda.
@@ -403,30 +453,7 @@ export default function InventoryCountDetailDialog({
 
     setSavingLineId(lineId);
     try {
-      const { data, error } = await supabase.rpc('rpc_update_inventory_count_line_quantity', {
-        p_line_id: lineId,
-        p_counted_quantity: qty,
-      } as any);
-      if (error) throw error;
-      const result = data as any;
-      setLines((prev) => prev.map((l) => (l.id === lineId
-        ? {
-          ...l,
-          counted_quantity: result.counted_quantity,
-          moved_during_count: result.moved_during_count,
-          discrepancy_resolution: result.resolution_cleared ? null : l.discrepancy_resolution,
-          resolution_notes: result.resolution_cleared ? null : l.resolution_notes,
-          stock_movement_id: result.resolution_cleared ? null : l.stock_movement_id,
-        }
-        : l)));
-      if (result.resolution_cleared) {
-        setResolutionDrafts((prev) => ({ ...prev, [lineId]: { resolution: "", notes: "" } }));
-      }
-      // Ao contrário de handleResolveLine/handleFinalize, esta gravação nunca
-      // avisava o pai — o contador "X/Y" e o badge de discrepâncias na lista
-      // (StockCounts.tsx) ficavam presos ao valor com que a página tinha
-      // aberto até haver refresh por outra via.
-      onChanged();
+      await persistQuantity(lineId, qty);
     } catch (error: any) {
       toast({ title: t('stockCounts.toast.quantityError'), description: error.message, variant: "destructive" });
       setQuantityDrafts((prev) => ({ ...prev, [lineId]: line.counted_quantity != null ? String(line.counted_quantity) : "" }));
