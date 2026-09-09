@@ -58,7 +58,10 @@ export async function generateQuotePdfBlob(
     if (quoteError) throw quoteError;
     quoteData = fetchedQuote;
 
-    const { data: fetchedLines } = await supabase.from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quoteId).order('ordem');
+    // visible_to_client=true exclui linhas internas da Fase 1 de diagnóstico
+    // (sugeridas por regra/IA) — nunca podem ser vistas pelo cliente.
+    // TODO: remover cast após regenerar types.ts.
+    const { data: fetchedLines } = await (supabase as any).from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quoteId).eq('visible_to_client', true).order('ordem');
     const { data: fetchedFees } = await supabase.from('quote_fees').select(`*, service_fee_types (name, calculation_type, percentage, fixed_amount)`).eq('quote_id', quoteId);
     linesData = fetchedLines;
     feesData = fetchedFees;

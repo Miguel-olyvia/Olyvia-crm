@@ -19,9 +19,24 @@ const RATE_LIMIT_MAX_ATTEMPTS = 30;
 const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 const requestSchema = z.object({
-  query: z.string(),
+  // NOTE: relaxed from required to optional — mode="diagnostic_suggestions"
+  // has no free-text query. mode="chat" (default) is unaffected: every real
+  // chat caller still sends `query`, so this is a widening, not a behaviour
+  // change, for the existing flow.
+  query: z.string().optional(),
   company_id: z.string().optional(),
   organization_id: z.string().optional(),
+  mode: z.enum(["chat", "diagnostic_suggestions"]).optional().default("chat"),
+  diagnostic_context: z
+    .object({
+      source_field: z.enum(["area_m2", "demolir", "proteger", "intervencao"]),
+      area_m2: z.number().nullable().optional(),
+      demolir_descricao: z.string().nullable().optional(),
+      proteger_descricao: z.string().nullable().optional(),
+      intervencao_tipo: z.string().nullable().optional(),
+      intervencao_descricao: z.string().nullable().optional(),
+    })
+    .optional(),
 });
 
 serve(async (req) => {
@@ -66,7 +81,7 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    const { query, company_id, organization_id: org_id } = parsed.data;
+    const { query, company_id, organization_id: org_id, mode, diagnostic_context } = parsed.data;
     const effective_org_id = org_id || company_id;
 
     // Scope check: caller must belong to the organization
@@ -89,6 +104,250 @@ serve(async (req) => {
       return rateLimitResponse(rateLimit, corsHeaders);
     }
     await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_BUCKET, effective_org_id || caller.anewUserId);
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Mode: diagnostic_suggestions — IA fallback (2ª via) para a Fase 1 do
+    // diagnóstico de orçamento, usada quando rpc_preview_diagnostic_suggestions
+    // (regras determinísticas) não devolveu nada. O catálogo é pré-filtrado por
+    // palavras-chave ANTES de chamar o modelo, e o modelo só pode escolher
+    // ids dentro dessa pré-filtragem — nunca pode inventar um produto/serviço.
+    // Reaproveita resolveCallerIdentity/validateOrgScope/checkRateLimit/
+    // recordRateLimitAttempt já executados acima (mesmo bucket, sem contagem
+    // paralela) e chama checkAndConsumeAiCredits/refundAiCredits tal como o
+    // modo chat mais abaixo (mesmo AI_CREDIT_COSTS["quote-ai-assistant"]).
+    // ────────────────────────────────────────────────────────────────────────
+    if (mode === "diagnostic_suggestions") {
+      if (!diagnostic_context) {
+        return new Response(
+          JSON.stringify({ error: "diagnostic_context é obrigatório para mode=diagnostic_suggestions" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const {
+        source_field,
+        area_m2,
+        demolir_descricao,
+        proteger_descricao,
+        intervencao_tipo,
+        intervencao_descricao,
+      } = diagnostic_context;
+
+      // Stopwords PT comuns — mantém apenas termos com carga semântica para a
+      // pesquisa ilike sobre name/sku.
+      const PT_STOPWORDS = new Set([
+        "de", "da", "do", "das", "dos", "e", "a", "o", "as", "os", "para", "com",
+        "em", "no", "na", "nos", "nas", "um", "uma", "uns", "umas", "por", "que",
+        "se", "ao", "aos", "à", "às", "é", "ou",
+      ]);
+
+      const extractKeywords = (text: string | null | undefined): string[] => {
+        if (!text) return [];
+        return text
+          .toLowerCase()
+          .split(/[^\p{L}\p{N}]+/u)
+          .map((t) => t.trim())
+          .filter((t) => t.length >= 3 && !PT_STOPWORDS.has(t));
+      };
+
+      // Pequeno mapa estático de sinónimos por source_field (complementa a
+      // extração de palavras-chave do texto livre).
+      const FIELD_SYNONYMS: Record<string, string[]> = {
+        demolir: ["demolição", "entulho"],
+        proteger: ["proteção", "proteccao"],
+        intervencao: ["sanitário", "impermeabilização", "duche", "base de duche"],
+      };
+
+      const relevantText =
+        source_field === "intervencao"
+          ? [intervencao_tipo, intervencao_descricao].filter(Boolean).join(" ")
+          : source_field === "demolir"
+          ? demolir_descricao
+          : source_field === "proteger"
+          ? proteger_descricao
+          : null; // area_m2: sem campo de texto associado — só sinónimos (nenhum definido)
+
+      const terms = Array.from(
+        new Set([...extractKeywords(relevantText), ...(FIELD_SYNONYMS[source_field] || [])])
+      );
+
+      // Sem termos de pesquisa: não há forma de filtrar candidatos com segurança
+      // (evitar mandar o catálogo inteiro para o modelo) — devolve [] sem chamar
+      // a IA nem consumir créditos.
+      if (terms.length === 0) {
+        return new Response(
+          JSON.stringify({ suggestions: [] }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const orFilter = terms.flatMap((t) => [`name.ilike.%${t}%`, `sku.ilike.%${t}%`]).join(",");
+
+      const [{ data: candidateProductsRaw, error: candidateProductsError },
+             { data: candidateServicesRaw, error: candidateServicesError }] = await Promise.all([
+        supabase
+          .from("products")
+          .select("id, name, sku")
+          .eq("organization_id", effective_org_id)
+          .eq("is_active", true)
+          .eq("is_deleted", false)
+          .or(orFilter)
+          .limit(40),
+        supabase
+          .from("services")
+          .select("id, name, sku")
+          .eq("organization_id", effective_org_id)
+          .eq("is_active", true)
+          .eq("is_deleted", false)
+          .or(orFilter)
+          .limit(40),
+      ]);
+
+      if (candidateProductsError) console.error("Error fetching candidate products:", candidateProductsError);
+      if (candidateServicesError) console.error("Error fetching candidate services:", candidateServicesError);
+
+      const candidateProducts = candidateProductsRaw || [];
+      const candidateServices = candidateServicesRaw || [];
+
+      // Sem candidatos: nada para o modelo escolher — devolve [] sem chamar a
+      // IA nem consumir créditos.
+      if (candidateProducts.length === 0 && candidateServices.length === 0) {
+        return new Response(
+          JSON.stringify({ suggestions: [] }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const validProductIds = new Set(candidateProducts.map((p: any) => p.id));
+      const validServiceIds = new Set(candidateServices.map((s: any) => s.id));
+
+      const candidatesForPrompt = [
+        ...candidateProducts.map((p: any) => ({ id: p.id, type: "product", name: p.name, sku: p.sku })),
+        ...candidateServices.map((s: any) => ({ id: s.id, type: "service", name: s.name, sku: s.sku })),
+      ];
+
+      const diagnosticSystemPrompt = `Tu és um assistente que sugere produtos e serviços de um catálogo já filtrado, no contexto do diagnóstico de uma obra de remodelação (Fase 1 do orçamento).
+
+CAMPO EM ANÁLISE: ${source_field}
+DADOS DA ÁREA:
+- área (m2): ${area_m2 ?? "não indicada"}
+- demolir: ${demolir_descricao ?? "não indicado"}
+- proteger: ${proteger_descricao ?? "não indicado"}
+- tipo de intervenção: ${intervencao_tipo ?? "não indicado"}
+- descrição da intervenção: ${intervencao_descricao ?? "não indicada"}
+
+CATÁLOGO DISPONÍVEL (escolhe exclusivamente destes, usa o id exato):
+${JSON.stringify(candidatesForPrompt, null, 2)}
+
+INSTRUÇÕES:
+1. Escolhe só produtos/serviços da lista acima que sejam relevantes para o campo em análise.
+2. NUNCA inventes um id ou um produto/serviço que não esteja na lista.
+3. Se nenhum for adequado, devolve suggestions: [].
+4. Responde SEMPRE em português e SÓ com um JSON válido, neste formato:
+{
+  "suggestions": [
+    { "product_id": "uuid ou null", "service_id": "uuid ou null", "name": "nome exato do catálogo", "reason": "razão da sugestão", "confidence": 0.0 }
+  ]
+}`;
+
+      // AI credits — mesmo gate/bucket de custo do modo chat (AI_CREDIT_COSTS["quote-ai-assistant"]).
+      const creditsResultDiag = await checkAndConsumeAiCredits(
+        supabaseAdmin,
+        effective_org_id as string,
+        AI_CREDIT_COSTS["quote-ai-assistant"],
+      );
+      if (creditsResultDiag.blocked) {
+        return aiCreditsBlockedResponse(creditsResultDiag, corsHeaders);
+      }
+
+      let diagResponse;
+      try {
+        diagResponse = await callAiGateway({
+          model: "gemini-3.5-flash-lite",
+          messages: [
+            { role: "system", content: diagnosticSystemPrompt },
+            { role: "user", content: "Sugere produtos/serviços para este campo do diagnóstico." },
+          ],
+          temperature: 0.7,
+          response_format: { type: "json_object" },
+        });
+      } catch (gatewayError) {
+        await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
+        throw gatewayError;
+      }
+
+      if (!diagResponse.ok) {
+        const errorText = await diagResponse.text();
+        console.error("AI Gateway error (diagnostic_suggestions):", diagResponse.status, errorText);
+
+        if (diagResponse.status === 429) {
+          await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
+          return new Response(
+            JSON.stringify({ error: "Rate limit exceeded, please try again later" }),
+            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        if (diagResponse.status === 402) {
+          await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
+          return new Response(
+            JSON.stringify({ error: "Payment required, please add credits" }),
+            { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
+        throw new Error(`AI gateway error: ${diagResponse.status}`);
+      }
+
+      const diagAiResponse = await diagResponse.json();
+      const diagContent = diagAiResponse.choices?.[0]?.message?.content || "";
+
+      // Mesma abordagem de extração de JSON já usada no modo chat abaixo
+      // (regex de salvaguarda, além do response_format:{type:"json_object"}).
+      let parsedDiagnostic: any;
+      try {
+        const jsonMatch = diagContent.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsedDiagnostic = JSON.parse(jsonMatch[0]);
+        } else {
+          parsedDiagnostic = { suggestions: [] };
+        }
+      } catch (parseError) {
+        console.error("Error parsing AI response (diagnostic_suggestions):", parseError);
+        parsedDiagnostic = { suggestions: [] };
+      }
+
+      const rawSuggestions = Array.isArray(parsedDiagnostic?.suggestions) ? parsedDiagnostic.suggestions : [];
+
+      // Validação anti-alucinação obrigatória: só passam sugestões cujo
+      // product_id/service_id esteja no conjunto de candidatos devolvidos
+      // pela query desta chamada. Descarta silenciosamente o resto (sem erro
+      // visível ao utilizador), registando um aviso via captureError.
+      const filteredSuggestions = rawSuggestions.filter((s: any) => {
+        const pid = s?.product_id || null;
+        const sid = s?.service_id || null;
+        if (pid && validProductIds.has(pid)) return true;
+        if (sid && validServiceIds.has(sid)) return true;
+        return false;
+      });
+
+      if (filteredSuggestions.length !== rawSuggestions.length) {
+        await captureError(
+          new Error("quote-ai-assistant diagnostic_suggestions: modelo devolveu id fora do catálogo filtrado"),
+          {
+            function: "quote-ai-assistant",
+            mode: "diagnostic_suggestions",
+            organization_id: effective_org_id,
+            discarded_count: rawSuggestions.length - filteredSuggestions.length,
+          },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ suggestions: filteredSuggestions }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Fetch historical quote data for context
     const { data: recentQuotes, error: quotesError } = await supabase

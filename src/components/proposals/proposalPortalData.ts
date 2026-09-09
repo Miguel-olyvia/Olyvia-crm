@@ -229,10 +229,14 @@ export async function loadProposalPortalData(
     const quoteIds = quotes.map((quote) => quote.id);
 
     const [linesResult, feesResult] = await Promise.all([
-      supabase
+      // visible_to_client=true exclui linhas internas da Fase 1 de
+      // diagnóstico (sugeridas por regra/IA) — nunca podem ser vistas pelo
+      // cliente. TODO: remover cast após regenerar types.ts.
+      (supabase as any)
         .from("quote_lines")
         .select("id, quote_id, descricao_snapshot, item_description, qt, unidade, total_sem_iva, total_com_iva, section_name, ordem, iva_percent")
         .in("quote_id", quoteIds)
+        .eq("visible_to_client", true)
         .order("ordem", { ascending: true }),
       (supabase as any)
         .from("quote_fees")

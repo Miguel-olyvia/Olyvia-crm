@@ -1,0 +1,168 @@
+import { useCallback, useRef, useState } from "react";
+import { useMutation } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
+
+// TODO: remover cast após regenerar types.ts — `rpc_preview_diagnostic_suggestions`
+// ainda não existe em src/integrations/supabase/types.ts (migração em curso,
+// em paralelo, noutro agente).
+const sb = supabase as any;
+
+export type DiagnosticSourceField = "area_m2" | "demolir" | "proteger" | "intervencao";
+export type DiagnosticSuggestionTargetType = "product" | "service" | "catalog_item";
+
+export interface DiagnosticSuggestion {
+  /** Chave estável para listas/aceitar/rejeitar — gerada no cliente. */
+  client_id: string;
+  source: "rule" | "ai";
+  rule_id?: string | null;
+  target_type: DiagnosticSuggestionTargetType;
+  product_id?: string | null;
+  service_id?: string | null;
+  catalog_item_id?: string | null;
+  descricao: string;
+  qty: number;
+  unidade?: string | null;
+  rationale?: string | null;
+  confidence?: number | null;
+}
+
+export interface GetDiagnosticSuggestionsInput {
+  diagnosticAreaId: string;
+  sourceField: DiagnosticSourceField;
+  organizationId: string | null | undefined;
+  areaData: {
+    area_m2?: number | null;
+    demolir_descricao?: string | null;
+    proteger_descricao?: string | null;
+    intervencao_tipo?: string | null;
+    intervencao_descricao?: string | null;
+  };
+}
+
+export interface GetDiagnosticSuggestionsResult {
+  suggestions: DiagnosticSuggestion[];
+  aiFailed: boolean;
+}
+
+let clientIdCounter = 0;
+const nextClientId = (prefix: string) => `${prefix}_${Date.now()}_${++clientIdCounter}`;
+
+/**
+ * Procura sugestões para um campo do diagnóstico: primeiro por regras
+ * (rpc_preview_diagnostic_suggestions, instantâneo), e só se não houver
+ * nenhuma é que recorre à IA (edge function quote-ai-assistant). A falha da
+ * IA nunca bloqueia o resto do formulário — é capturada e devolvida como
+ * `{ suggestions: [], aiFailed: true }`.
+ */
+export function useQuoteDiagnosticSuggestions() {
+  const [isLoadingRules, setIsLoadingRules] = useState(false);
+  const [isLoadingAiFallback, setIsLoadingAiFallback] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  // Cancela a chamada de IA anterior se uma nova for disparada antes de a
+  // resposta anterior chegar (mesmo padrão de useBundleCatalogItems.ts: um
+  // AbortController por pedido, abortado no arranque do seguinte).
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const mutation = useMutation({
+    mutationFn: async (input: GetDiagnosticSuggestionsInput): Promise<GetDiagnosticSuggestionsResult> => {
+      setAiError(null);
+
+      setIsLoadingRules(true);
+      let ruleSuggestions: DiagnosticSuggestion[] = [];
+      try {
+        const { data, error } = await sb.rpc("rpc_preview_diagnostic_suggestions", {
+          p_diagnostic_area_id: input.diagnosticAreaId,
+          p_source_field: input.sourceField,
+        });
+        if (error) throw error;
+        ruleSuggestions = ((data || []) as any[]).map((s) => ({
+          client_id: nextClientId("rule"),
+          source: "rule" as const,
+          rule_id: s.rule_id ?? null,
+          target_type: s.target_type,
+          product_id: s.product_id ?? null,
+          service_id: s.service_id ?? null,
+          catalog_item_id: s.catalog_item_id ?? null,
+          descricao: s.descricao,
+          qty: Number(s.qty) || 0,
+          unidade: s.unidade ?? null,
+        }));
+      } finally {
+        setIsLoadingRules(false);
+      }
+
+      if (ruleSuggestions.length > 0) {
+        return { suggestions: ruleSuggestions, aiFailed: false };
+      }
+
+      // Sem regras a corresponder — recorre à IA. Falha na etapa de regras
+      // (acima) é inesperada e propaga normalmente; falha aqui é esperada e
+      // não pode travar o formulário.
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      setIsLoadingAiFallback(true);
+      try {
+        const { data, error } = await supabase.functions.invoke("quote-ai-assistant", {
+          body: {
+            mode: "diagnostic_suggestions",
+            organization_id: input.organizationId,
+            diagnostic_context: {
+              source_field: input.sourceField,
+              ...input.areaData,
+            },
+          },
+          signal: controller.signal,
+        });
+        if (error) throw error;
+
+        const aiSuggestions: DiagnosticSuggestion[] = ((data?.suggestions || []) as any[]).map((s) => ({
+          client_id: nextClientId("ai"),
+          source: "ai" as const,
+          target_type: s.target_type,
+          product_id: s.product_id ?? null,
+          service_id: s.service_id ?? null,
+          catalog_item_id: s.catalog_item_id ?? null,
+          descricao: s.descricao,
+          qty: Number(s.qty) || 0,
+          unidade: s.unidade ?? null,
+          rationale: s.rationale ?? null,
+          confidence: typeof s.confidence === "number" ? s.confidence : null,
+        }));
+        return { suggestions: aiSuggestions, aiFailed: false };
+      } catch (err: any) {
+        if (err?.name === "AbortError") {
+          // Um pedido mais recente já assumiu — não é um erro a mostrar.
+          return { suggestions: [], aiFailed: false };
+        }
+        console.error("[useQuoteDiagnosticSuggestions] AI fallback failed:", err);
+        setAiError(err?.message || String(err));
+        return { suggestions: [], aiFailed: true };
+      } finally {
+        if (abortControllerRef.current === controller) {
+          abortControllerRef.current = null;
+        }
+        setIsLoadingAiFallback(false);
+      }
+    },
+  });
+
+  const getSuggestions = useCallback(
+    (input: GetDiagnosticSuggestionsInput) => mutation.mutateAsync(input),
+    [mutation],
+  );
+
+  return {
+    getSuggestions,
+    suggestions: mutation.data?.suggestions ?? [],
+    aiFailed: mutation.data?.aiFailed ?? false,
+    isLoadingRules,
+    isLoadingAiFallback,
+    aiError,
+    reset: mutation.reset,
+  };
+}

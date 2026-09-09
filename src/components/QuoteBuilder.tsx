@@ -55,6 +55,7 @@ import { InlineQuoteBuilder, InlineQuoteData, createEmptyInlineQuote } from "@/c
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { BundleEditAttributesDialog } from "@/components/quote/BundleEditAttributesDialog";
 import { InlineProductSelector } from "@/components/quote/InlineProductSelector";
+import { QuoteDiagnosticPhase, type AcceptedDiagnosticLine } from "@/components/quote/QuoteDiagnosticPhase";
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { calculateQuoteFees, type LineForFees } from "../../supabase/functions/_shared/calculateQuoteFees";
@@ -236,6 +237,24 @@ interface QuoteLine {
   ordem: number;
   retail_price_unit?: number;
   section_name: string;
+  // Fase 1 (diagnóstico) — linhas sugeridas por regra/IA nascem com `false` e
+  // nunca podem ser vistas pelo cliente (PDF, portal). Linhas manuais mantêm
+  // `true` por omissão (comportamento inalterado).
+  visible_to_client?: boolean;
+  // Só serve para construir o `p_diagnostic_suggestions` enviado a
+  // rpc_save_quote — NUNCA enviar dentro do objeto de `p_lines`/linesToInsert,
+  // a coluna não existe em `quote_lines`. Presente só em linhas nascidas de
+  // uma sugestão aceite na Fase 1 (ver QuoteDiagnosticPhase).
+  _diagnosticProvenance?: {
+    diagnostic_area_id: string;
+    source_field: string;
+    source: "rule" | "ai";
+    rule_id?: string | null;
+    ai_rationale?: string | null;
+    ai_confidence?: number | null;
+    suggested_qty: number;
+    was_edited_by_user: boolean;
+  };
 }
 
 const NEW_QUOTE_DRAFT_VERSION = 1;
@@ -254,6 +273,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [products, setProducts] = useState<ProductCatalogItem[]>([]);
   const [services, setServices] = useState<ProductCatalogItem[]>([]);
   const [lines, setLines] = useState<QuoteLine[]>([]);
+  // Fase 1 (diagnóstico): timestamp lido de quotes.diagnostic_phase1_completed_at
+  // em fetchQuote() — NULL/undefined = fase 1 por concluir (ou orçamento novo,
+  // que nem sequer mostra o ecrã de diagnóstico, ver guarda mais abaixo).
+  const [diagnosticPhase1CompletedAt, setDiagnosticPhase1CompletedAt] = useState<string | null>(null);
+  // Reabre o ecrã de diagnóstico por cima do editor já preenchido, sem apagar
+  // linhas existentes — acionado pelo botão "Rever diagnóstico".
+  const [showDiagnosticReview, setShowDiagnosticReview] = useState(false);
   const [sections, setSections] = useState<string[]>(["Geral"]);
   const [activeSection, setActiveSection] = useState<string>("Geral");
   const [loading, setLoading] = useState(false);
@@ -1773,6 +1799,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       setAssignedToTouched(true);
       
       setQuoteNumber(quote.quote_number || null);
+      // TODO: remover cast após regenerar types.ts — diagnostic_phase1_completed_at
+      // ainda não existe em src/integrations/supabase/types.ts (migração em
+      // curso, em paralelo, noutro agente).
+      setDiagnosticPhase1CompletedAt((quote as any).diagnostic_phase1_completed_at || null);
       
       // Set selected deal for display with lead info
       if (quote.deals) {
@@ -1883,6 +1913,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             : Number((line as any).retail_price_unit),
           ordem: line.ordem,
           section_name: (line as any).section_name || "Geral",
+          // TODO: remover cast após regenerar types.ts — visible_to_client
+          // ainda não existe em src/integrations/supabase/types.ts.
+          visible_to_client: (line as any).visible_to_client ?? true,
         }))
       );
       
@@ -2201,8 +2234,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       // Build the fully-computed lines/fees/totals payloads exactly as before —
       // the RPC persists them verbatim (business math stays in JS, single-transaction
       // persistence + single audit row happens server-side).
-      const linesToInsert = lines
-        .filter((line) => line.qt > 0)
+      // Filtrado primeiro, guardado à parte: `line_index` em
+      // p_diagnostic_suggestions tem de apontar para a posição dentro deste
+      // MESMO array filtrado (o que é de facto enviado como p_lines) — nunca
+      // para o índice em `lines` antes do filtro.
+      const linesForInsert = lines.filter((line) => line.qt > 0);
+      const linesToInsert = linesForInsert
         .map((line) => {
           // Preço unitário e subtotal vêm da fonte única de preço da linha:
           // o preço de venda definido manda, e o unitário é fechado ao cêntimo
@@ -2240,8 +2277,48 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             // O preço de venda definido manda no preço unitário. Sem ele gravado,
             // o preço é reconstruído do custo arredondado e perde milésimos.
             retail_price_unit: (line.retail_price_unit ?? null) || null,
+            // Linhas manuais mantêm `true` (comportamento inalterado); linhas
+            // aceites na Fase 1 de diagnóstico chegam ao estado `lines` já
+            // com `false` (ver QuoteDiagnosticPhase/onAcceptSuggestionLine).
+            visible_to_client: line.visible_to_client ?? true,
+            // NOTA: `_diagnosticProvenance` propositadamente NÃO entra aqui —
+            // não é coluna de `quote_lines`. Só alimenta
+            // `diagnosticSuggestionsToInsert` (p_diagnostic_suggestions),
+            // construído a seguir a partir do mesmo `linesForInsert`.
           };
         });
+
+      // Proveniência das linhas nascidas de sugestões da Fase 1 (diagnóstico),
+      // para rpc_save_quote gravar em quote_diagnostic_area_suggestions.
+      // `line_index` é a posição em `linesForInsert`/`linesToInsert` (0-based),
+      // que é exatamente o array enviado como `p_lines` — tem de ser calculado
+      // sobre o mesmo array filtrado, nunca sobre `lines` antes do filtro.
+      const diagnosticSuggestionsToInsert = linesForInsert.reduce<Array<{
+        line_index: number;
+        diagnostic_area_id: string;
+        source_field: string;
+        source: "rule" | "ai";
+        rule_id: string | null;
+        ai_rationale: string | null;
+        ai_confidence: number | null;
+        suggested_qty: number;
+        was_edited_by_user: boolean;
+      }>>((acc, line, index) => {
+        if (line._diagnosticProvenance) {
+          acc.push({
+            line_index: index,
+            diagnostic_area_id: line._diagnosticProvenance.diagnostic_area_id,
+            source_field: line._diagnosticProvenance.source_field,
+            source: line._diagnosticProvenance.source,
+            rule_id: line._diagnosticProvenance.rule_id ?? null,
+            ai_rationale: line._diagnosticProvenance.ai_rationale ?? null,
+            ai_confidence: line._diagnosticProvenance.ai_confidence ?? null,
+            suggested_qty: line._diagnosticProvenance.suggested_qty,
+            was_edited_by_user: line._diagnosticProvenance.was_edited_by_user,
+          });
+        }
+        return acc;
+      }, []);
 
       const feesToInsert = (totals.fees && totals.fees.length > 0)
         ? totals.fees.map(fee => ({
@@ -2344,7 +2421,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         p_fees: feesToInsert,
         p_totals: totalsPayload,
         p_inline_quotes: inlineQuotesPayload,
-      });
+        // 7º parâmetro (DEFAULT '[]'::jsonb no lado do backend, em curso em
+        // paralelo) — ainda não está no tipo gerado de Args de rpc_save_quote,
+        // daí o cast. TODO: remover cast após regenerar types.ts.
+        p_diagnostic_suggestions: diagnosticSuggestionsToInsert,
+      } as any);
 
       if (saveError) throw saveError;
 
@@ -2409,10 +2490,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       if (existingIndex >= 0) {
         const updated = [...prev];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          [field]: value,
-        };
+        const current = updated[existingIndex];
+        const next: QuoteLine = { ...current, [field]: value };
+        // Edição manual da quantidade de uma linha nascida de uma sugestão
+        // aceite na Fase 1 — marca para rpc_save_quote (via
+        // p_diagnostic_suggestions.was_edited_by_user).
+        if (field === "qt" && current._diagnosticProvenance) {
+          next._diagnosticProvenance = { ...current._diagnosticProvenance, was_edited_by_user: true };
+        }
+        updated[existingIndex] = next;
         return updated;
       } else {
         const item = catalogItems.find((i) => i.id === itemId);
@@ -3362,6 +3448,53 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     );
   };
 
+  // Fase 1 (diagnóstico): organização do orçamento, no mesmo padrão de
+  // resolução já usado em handleSave (deal > formData > empresa ativa).
+  const diagnosticOrganizationId = formData.organization_id || activeCompany?.id || "";
+
+  // Sugestão aceite na Fase 1 vira uma linha normal no estado `lines` (ainda
+  // por gravar — só passa a existir em `quote_lines` no próximo "Guardar
+  // Orçamento", tal como qualquer outra linha adicionada manualmente), mas já
+  // marcada como não visível ao cliente.
+  const handleAcceptDiagnosticSuggestionLine = (line: AcceptedDiagnosticLine) => {
+    setLines((prev) => [
+      ...prev,
+      {
+        catalog_item_id: line.catalog_item_id,
+        product_id: line.product_id,
+        service_id: line.service_id,
+        bundle_id: null,
+        categoria: "",
+        descricao_snapshot: line.descricao_snapshot,
+        unidade: line.unidade || undefined,
+        qt: line.qt,
+        custo_material_unit: 0,
+        custo_mao_obra_unit: 0,
+        margem_percent: 0,
+        iva_percent: formData.iva_rate ?? 23,
+        int_percent: 0,
+        discount_percent: 0,
+        ordem: prev.length,
+        section_name: activeSection || "Geral",
+        visible_to_client: false,
+        _diagnosticProvenance: {
+          diagnostic_area_id: line.diagnostic_area_id,
+          source_field: line.source_field,
+          source: line.source,
+          rule_id: line.rule_id ?? null,
+          ai_rationale: line.ai_rationale ?? null,
+          ai_confidence: line.ai_confidence ?? null,
+          suggested_qty: line.qt,
+          was_edited_by_user: false,
+        },
+      },
+    ]);
+    toast({
+      title: "Item adicionado ao orçamento",
+      description: `${line.descricao_snapshot} — reveja o preço na secção "${activeSection || "Geral"}" antes de enviar ao cliente.`,
+    });
+  };
+
   // Guard: require active company for non-system-admins
   if (!activeCompany?.id && !isSystemAdmin) {
     return (
@@ -3382,6 +3515,24 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           </CardContent>
         </Card>
       </div>
+    );
+  }
+
+  // Fase 1 (diagnóstico): orçamento já existe (tem quoteId) e ou ainda não
+  // concluiu a fase 1, ou o utilizador pediu para a rever ("Rever
+  // diagnóstico" na toolbar) — mostra este ecrã em vez do corpo normal, sem
+  // apagar quote_lines já existentes.
+  if (quoteId && (!diagnosticPhase1CompletedAt || showDiagnosticReview)) {
+    return (
+      <QuoteDiagnosticPhase
+        quoteId={quoteId}
+        organizationId={diagnosticOrganizationId}
+        onPhase1Complete={() => {
+          setDiagnosticPhase1CompletedAt(new Date().toISOString());
+          setShowDiagnosticReview(false);
+        }}
+        onAcceptSuggestionLine={handleAcceptDiagnosticSuggestionLine}
+      />
     );
   }
 
@@ -3407,6 +3558,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           })()}
         </div>
         <div className="flex items-center gap-2">
+
+          {quoteId && diagnosticPhase1CompletedAt && (
+            <Button variant="outline" size="sm" onClick={() => setShowDiagnosticReview(true)}>
+              Rever diagnóstico
+            </Button>
+          )}
 
           <TooltipProvider>
             <Tooltip>
@@ -4151,7 +4308,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                     <Input type="number" min="0" step="1" value={line.qt}
                                       onChange={(e) => {
                                         const updated = [...lines];
-                                        updated[globalLineIndex] = { ...line, qt: Number(e.target.value) };
+                                        const nextLine: QuoteLine = { ...line, qt: Number(e.target.value) };
+                                        // Edição manual da quantidade de uma linha nascida de uma
+                                        // sugestão aceite na Fase 1 — marca para rpc_save_quote
+                                        // (via p_diagnostic_suggestions.was_edited_by_user).
+                                        if (line._diagnosticProvenance) {
+                                          nextLine._diagnosticProvenance = { ...line._diagnosticProvenance, was_edited_by_user: true };
+                                        }
+                                        updated[globalLineIndex] = nextLine;
                                         setLines(updated);
                                       }}
                                       className="w-16 mx-auto text-center h-8" />
