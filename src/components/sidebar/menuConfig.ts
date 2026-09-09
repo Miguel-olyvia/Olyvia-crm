@@ -35,6 +35,7 @@ import {
   FileDown,
   ShieldAlert,
   ListChecks,
+  IdCard,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -158,6 +159,21 @@ export const menuSections: MenuSection[] = [
       { to: "/leads", icon: Target, labelKey: "sidebar.leads", permission: "leads.view" },
       { to: "/leads/pending-submissions", icon: FileText, labelKey: "sidebar.pendingSubmissions", permission: "platform.pending_submissions.view" },
       { to: "/clients", icon: Building, labelKey: "sidebar.clients", permission: "clients.view" },
+    ],
+  },
+  {
+    // Recursos Humanos -- modulo 1 (Colaboradores). Sem `adminOnly`: a
+    // permissao `hr.pessoas.view` ja esconde o item de quem nao a tem, e
+    // nenhum papel a recebe por omissao (a migration do catalogo nao faz
+    // atribuicao nenhuma). Os sub-separadores do ecra (Atividade, Equipas,
+    // Organograma, Funcoes) vivem dentro da pagina e nao no menu.
+    id: "rh",
+    icon: IdCard,
+    labelKey: "sidebar.hrModule",
+    paths: ["/rh"],
+    permissions: ["hr.module.access", "hr.pessoas.view"],
+    items: [
+      { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
     ],
   },
   {

@@ -82,7 +82,14 @@ export type BusinessFlow =
   // which of the ~500 uninstrumented toast sites still leak technical text,
   // instead of someone having to guess or grep for it. See
   // vault/ficheiros/infraestrutura-seguranca/classificacao-erros-toast.md.
-  | "db-error-leaked-to-ui";
+  | "db-error-leaked-to-ui"
+  // Recursos Humanos, modulo 1 (Colaboradores). A ficha de RH e a unica copia
+  // de dados que ninguem mais tem: se a leitura falhar por defeito (nao por
+  // falta de permissao, que e resposta legitima e nao vem para aqui) a pessoa
+  // aparece incompleta sem ninguem saber, e se a escrita falhar o utilizador
+  // perde o que escreveu no formulario.
+  | "hr-pessoas-load"
+  | "hr-pessoa-write";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually

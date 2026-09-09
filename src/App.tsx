@@ -112,6 +112,8 @@ const DocsEmbedWidget = lazy(() => import("./pages/docs/DocsEmbedWidget"));
 const Landing = lazy(() => import("./pages/Landing"));
 const Organizations = lazy(() => import("./pages/Organizations"));
 const OrganizationDetail = lazy(() => import("./pages/OrganizationDetail"));
+const Pessoas = lazy(() => import("./pages/Pessoas"));
+const PessoaDetail = lazy(() => import("./pages/PessoaDetail"));
 const OrgTemplates = lazy(() => import("./pages/OrgTemplates"));
 const OrgHelp = lazy(() => import("./pages/OrgHelp"));
 const NeedsAssessmentConfig = lazy(() => import("./pages/NeedsAssessmentConfig"));
@@ -268,6 +270,10 @@ const App = () => (
                       <Route path="/marketing-api" element={<MarketingApi />} />
                       <Route path="/marketing-integration" element={<MarketingIntegration />} />
                       <Route path="/marketing-help" element={<MarketingHelp />} />
+                      {/* Recursos Humanos -- modulo 1 (Colaboradores). RH exige organizacao
+                          activa, por isso NAO entra em NO_ORG_EXEMPT_ROUTES. */}
+                      <Route path="/rh/pessoas" element={<ProtectedRoute permission="hr.pessoas.view"><Pessoas /></ProtectedRoute>} />
+                      <Route path="/rh/pessoas/:id" element={<ProtectedRoute permission="hr.pessoas.view"><PessoaDetail /></ProtectedRoute>} />
                       <Route path="/organizations" element={<Organizations />} />
                       <Route path="/organizations/:id" element={<OrganizationDetail />} />
                       <Route path="/org-templates" element={<OrgTemplates />} />

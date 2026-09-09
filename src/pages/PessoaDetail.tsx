@@ -1,0 +1,250 @@
+/**
+ * A ficha da pessoa. Doze separadores, tres com conteudo.
+ *
+ * Esta pagina SO orquestra: resolve permissoes, resolve nomes (chefia,
+ * entidade legal) e distribui a ficha pelos separadores. Cada separador e um
+ * componente proprio em `src/components/hr/` -- que e o que impede este
+ * ficheiro de crescer para as mil linhas quando os nove separadores em
+ * construcao forem construidos.
+ *
+ * Visao geral, Detalhes laborais e Detalhes pessoais tem conteudo real. Os
+ * outros nove ficam visiveis com o mesmo estado vazio: a moldura ja mostra o
+ * caminho do produto sem prometer nada que nao exista.
+ *
+ * O separador vai no URL (`?tab=`) para o link ser partilhavel.
+ */
+import { useMemo } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { OlyviaLoader } from "@/components/ui/olyvia-loader";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  ArrowLeft,
+  Award,
+  BookOpen,
+  Briefcase,
+  CalendarClock,
+  CalendarRange,
+  FileText,
+  FolderOpen,
+  LayoutDashboard,
+  ListChecks,
+  MoreHorizontal,
+  TrendingUp,
+  User,
+} from "lucide-react";
+import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
+import { PessoaLaboraisTab } from "@/components/hr/PessoaLaboraisTab";
+import {
+  PessoaPessoaisTab,
+  type PessoaPessoaisPermissoes,
+} from "@/components/hr/PessoaPessoaisTab";
+import { PessoaVisaoGeralTab } from "@/components/hr/PessoaVisaoGeralTab";
+import { useCompany } from "@/contexts/CompanyContext";
+import { usePermissions } from "@/hooks/usePermissions";
+import { usePessoa } from "@/hooks/usePessoa";
+import { usePessoas } from "@/hooks/usePessoas";
+import { useTranslation } from "@/hooks/useTranslation";
+
+/** Os nove separadores que ficam visiveis mas vazios nesta ronda. */
+const TABS_EM_CONSTRUCAO = [
+  { value: "contratos", labelKey: "hr.pessoa.tabs.contratos", icon: FileText },
+  { value: "documentos", labelKey: "hr.pessoa.tabs.documentos", icon: FolderOpen },
+  { value: "planeamento", labelKey: "hr.pessoa.tabs.planeamento", icon: CalendarRange },
+  { value: "ausencias", labelKey: "hr.pessoa.tabs.ausencias", icon: CalendarClock },
+  { value: "desempenho", labelKey: "hr.pessoa.tabs.desempenho", icon: TrendingUp },
+  { value: "tarefas", labelKey: "hr.pessoa.tabs.tarefas", icon: ListChecks },
+  { value: "competencias", labelKey: "hr.pessoa.tabs.competencias", icon: Award },
+  { value: "cursos", labelKey: "hr.pessoa.tabs.cursos", icon: BookOpen },
+  { value: "outros", labelKey: "hr.pessoa.tabs.outros", icon: MoreHorizontal },
+] as const;
+
+export default function PessoaDetail() {
+  const { t } = useTranslation();
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "visaoGeral";
+
+  const { companies } = useCompany();
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
+
+  const ficha = usePessoa(id);
+  // A lista da organizacao serve duas coisas: resolver o nome de quem a pessoa
+  // reporta, e alimentar o selector de chefia nos detalhes laborais.
+  const { pessoas: colegas } = usePessoas();
+
+  const permissoes: PessoaPessoaisPermissoes = useMemo(
+    () => ({
+      pessoaisView: hasPermission("hr.pessoas.pessoais.view"),
+      pessoaisEdit: hasPermission("hr.pessoas.pessoais.edit"),
+      identificacaoView: hasPermission("hr.pessoas.identificacao.view"),
+      identificacaoEdit: hasPermission("hr.pessoas.identificacao.edit"),
+      identificacaoReveal: hasPermission("hr.pessoas.identificacao.reveal"),
+      moradaView: hasPermission("hr.pessoas.morada.view"),
+      moradaEdit: hasPermission("hr.pessoas.morada.edit"),
+      emergenciaView: hasPermission("hr.pessoas.emergencia.view"),
+      emergenciaEdit: hasPermission("hr.pessoas.emergencia.edit"),
+      bancariosView: hasPermission("hr.pessoas.bancarios.view"),
+      bancariosEdit: hasPermission("hr.pessoas.bancarios.edit"),
+      saudeView: hasPermission("hr.pessoas.saude.view"),
+      saudeEdit: hasPermission("hr.pessoas.saude.edit"),
+    }),
+    [hasPermission],
+  );
+
+  const podeVerLaborais = hasPermission("hr.pessoas.laborais.view");
+  const podeEditarLaborais = hasPermission("hr.pessoas.laborais.edit");
+
+  const pessoa = ficha.pessoa;
+
+  const reportaANome = useMemo(() => {
+    if (!pessoa?.reporta_a_pessoa_id) return null;
+    return colegas.find((c) => c.id === pessoa.reporta_a_pessoa_id)?.nome_completo ?? null;
+  }, [pessoa?.reporta_a_pessoa_id, colegas]);
+
+  const entidadeLegalNome = useMemo(() => {
+    if (!pessoa?.entidade_legal_org_id) return null;
+    return companies.find((e) => e.id === pessoa.entidade_legal_org_id)?.name ?? null;
+  }, [pessoa?.entidade_legal_org_id, companies]);
+
+  const mudarTab = (valor: string) =>
+    setSearchParams(
+      (anterior) => {
+        const proximos = new URLSearchParams(anterior);
+        proximos.set("tab", valor);
+        return proximos;
+      },
+      { replace: true },
+    );
+
+  if (ficha.loading || permissionsLoading) {
+    return <OlyviaLoader />;
+  }
+
+  if (ficha.notFound || !pessoa) {
+    return (
+      <div className="flex h-64 flex-col items-center justify-center gap-4 text-center">
+        <p className="text-lg font-medium">{t("hr.pessoa.notFound")}</p>
+        {ficha.error && <p className="text-sm text-muted-foreground">{ficha.error}</p>}
+        <Button variant="outline" onClick={() => navigate("/rh/pessoas")}>
+          {t("common.back")}
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Cabecalho */}
+      <div className="flex flex-wrap items-start gap-4">
+        <Button variant="ghost" size="icon" onClick={() => navigate("/rh/pessoas")}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold">{pessoa.nome_social || pessoa.nome_completo}</h1>
+            <Badge
+              variant={pessoa.estado_contrato === "em_curso" ? "secondary" : "outline"}
+              className="font-normal"
+            >
+              {t(`hr.estadoContrato.${pessoa.estado_contrato}`)}
+            </Badge>
+            <Badge variant={ficha.conta ? "default" : "outline"} className="font-normal">
+              {t(ficha.conta ? "hr.estadoAcesso.ativo" : "hr.estadoAcesso.semConta")}
+            </Badge>
+            {pessoa.estado_registo === "arquivado" && (
+              <Badge variant="outline" className="font-normal">
+                {t("hr.estadoRegisto.arquivado")}
+              </Badge>
+            )}
+          </div>
+          <p className="mt-1 text-muted-foreground">
+            {[pessoa.cargo, pessoa.local_trabalho].filter(Boolean).join(" · ") || "—"}
+          </p>
+        </div>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
+        <div className="overflow-x-auto">
+          <TabsList className="w-max">
+            <TabsTrigger value="visaoGeral" className="gap-2">
+              <LayoutDashboard className="h-4 w-4" />
+              {t("hr.pessoa.tabs.visaoGeral")}
+            </TabsTrigger>
+            <TabsTrigger value="laborais" className="gap-2">
+              <Briefcase className="h-4 w-4" />
+              {t("hr.pessoa.tabs.laborais")}
+            </TabsTrigger>
+            <TabsTrigger value="pessoais" className="gap-2">
+              <User className="h-4 w-4" />
+              {t("hr.pessoa.tabs.pessoais")}
+            </TabsTrigger>
+            {TABS_EM_CONSTRUCAO.map(({ value, labelKey, icon: Icon }) => (
+              <TabsTrigger key={value} value={value} className="gap-2">
+                <Icon className="h-4 w-4" />
+                {t(labelKey)}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+
+        <TabsContent value="visaoGeral">
+          <PessoaVisaoGeralTab
+            pessoa={pessoa}
+            reportaANome={reportaANome}
+            entidadeLegalNome={entidadeLegalNome}
+          />
+        </TabsContent>
+
+        <TabsContent value="laborais">
+          {podeVerLaborais ? (
+            <PessoaLaboraisTab
+              pessoa={pessoa}
+              colegas={colegas.map((c) => ({ id: c.id, nome_completo: c.nome_completo }))}
+              organizacoes={companies.map((e) => ({ id: e.id, name: e.name }))}
+              podeEditar={podeEditarLaborais}
+              saving={ficha.saving}
+              onGuardar={ficha.savePessoa}
+            />
+          ) : (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                {t("hr.semAcesso")}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="pessoais">
+          <PessoaPessoaisTab
+            dadosPessoais={ficha.dadosPessoais}
+            identificacao={ficha.identificacao}
+            morada={ficha.morada}
+            emergencia={ficha.emergencia}
+            bancarios={ficha.bancarios}
+            saude={ficha.saude}
+            permissoes={permissoes}
+            saving={ficha.saving}
+            onGuardarDadosPessoais={ficha.saveDadosPessoais}
+            onGuardarIdentificacao={ficha.saveIdentificacao}
+            onGuardarMorada={ficha.saveMorada}
+            onGuardarEmergencia={ficha.saveEmergencia}
+            onGuardarSaude={ficha.saveSaude}
+            onRevelarNiss={ficha.revelarNiss}
+            onDefinirNiss={ficha.definirNiss}
+            onDefinirIban={ficha.definirIban}
+          />
+        </TabsContent>
+
+        {TABS_EM_CONSTRUCAO.map(({ value, labelKey, icon }) => (
+          <TabsContent key={value} value={value}>
+            <PessoaEmConstrucaoTab titulo={t(labelKey)} icon={icon} />
+          </TabsContent>
+        ))}
+      </Tabs>
+    </div>
+  );
+}
