@@ -323,7 +323,12 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
                         // foram fundidos no ciclo de vida de Leads (merge 2026-07-15). A
                         // entrada fica em ACTION_LABELS só para continuar a rotular
                         // corretamente ações já configuradas antigamente (agora desativadas).
-                        .filter(([key]) => key !== "convert_to_contact")
+                        //
+                        // "Criar Tarefa" (create_task) também retirado das opções novas:
+                        // como automação de fase criaria sempre uma tarefa com o mesmo
+                        // título/tipo configurado, sem valor. Fica em ACTION_LABELS só
+                        // para rotular linhas já existentes; o motor ignora-a em silêncio.
+                        .filter(([key]) => key !== "convert_to_contact" && key !== "create_task")
                         .map(([key, meta]) => (
                         <SelectItem key={key} value={key}>
                           <div className="flex items-center gap-2">
