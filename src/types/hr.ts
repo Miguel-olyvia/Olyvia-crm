@@ -41,6 +41,40 @@ export type TipoContrato =
 export type RegimeTrabalho = "tempo_inteiro" | "tempo_parcial";
 export type EstadoVinculo = "activo" | "terminado" | "futuro";
 export type Periodicidade = "mensal" | "anual" | "hora";
+
+/**
+ * Modalidade de trabalho (`pessoas_vinculos.tipo_trabalho`, 20261120140000).
+ *
+ * NAO e o mesmo que `RegimeTrabalho`: esse diz quanto se trabalha (tempo
+ * inteiro / parcial), este diz DONDE se trabalha. A migration tem um COMMENT a
+ * dizer exactamente isto, porque foi confundido uma vez.
+ */
+export type TipoTrabalho = "presencial" | "remoto" | "hibrido";
+/**
+ * Unidade das `horas_semanais`. A base SO ACEITA "semanal"
+ * (`pessoas_vinculos_horas_frequencia_valida`, 20261120140000): `horas_semanais`
+ * esta limitada a 0..80 desde 20261120060000, e com unidade mensal ou anual
+ * qualquer valor realista violaria esse limite. As outras duas hipoteses ficam
+ * no tipo para se poder LER uma linha antiga, nunca para escrever -- ver
+ * `HORAS_FREQUENCIAS`, que e a lista que o formulario oferece.
+ */
+export type HorasFrequencia = "semanal" | "mensal" | "anual";
+export type PoliticaFeriados = "nao_laboral" | "trabalho_habitual";
+
+/** Tipo de local de trabalho (`hr_locais_trabalho.tipo`, 20261120130000). */
+export type TipoLocal =
+  | "sede"
+  | "escritorio"
+  | "loja"
+  | "armazem"
+  | "obra"
+  | "cliente"
+  | "remoto"
+  | "outro";
+
+/** Origem de um intervalo realizado. `picagem` existe no dominio; a ingestao nao. */
+export type OrigemRealizado = "manual" | "picagem" | "importacao";
+export type EstadoRealizado = "registado" | "validado" | "rejeitado";
 export type SubsidioAlimentacaoModo = "dinheiro" | "cartao";
 export type EstadoConta = "activa" | "revogada";
 
@@ -67,6 +101,47 @@ export const TIPOS_DOCUMENTO: readonly TipoDocumento[] = [
   "outro",
 ];
 export const ESTADOS_CONTRATO: readonly EstadoContrato[] = ["em_curso", "suspenso", "terminado"];
+export const TIPOS_CONTRATO: readonly TipoContrato[] = [
+  "sem_termo",
+  "termo_certo",
+  "termo_incerto",
+  "estagio",
+  "prestacao_servicos",
+  "temporario",
+];
+export const REGIMES_TRABALHO: readonly RegimeTrabalho[] = ["tempo_inteiro", "tempo_parcial"];
+export const TIPOS_TRABALHO: readonly TipoTrabalho[] = ["presencial", "remoto", "hibrido"];
+/**
+ * So "semanal": e o unico valor que o CHECK
+ * `pessoas_vinculos_horas_frequencia_valida` (20261120140000) aceita. Oferecer
+ * "mensal" ou "anual" no ecra daria um erro de constraint na gravacao, porque
+ * `horas_semanais` continua limitada a 0..80 -- e as validacoes 0..80 do
+ * formulario (novaPessoa.ts, SeccaoContrato.tsx, PessoaContratoTab.tsx) tambem
+ * as tratam como semanais. Acrescentar hipoteses aqui obriga a mexer nas tres.
+ */
+export const HORAS_FREQUENCIAS: readonly HorasFrequencia[] = ["semanal"];
+export const POLITICAS_FERIADOS: readonly PoliticaFeriados[] = [
+  "nao_laboral",
+  "trabalho_habitual",
+];
+export const PERIODICIDADES: readonly Periodicidade[] = ["mensal", "anual", "hora"];
+export const TIPOS_LOCAL: readonly TipoLocal[] = [
+  "sede",
+  "escritorio",
+  "loja",
+  "armazem",
+  "obra",
+  "cliente",
+  "remoto",
+  "outro",
+];
+
+/**
+ * Os sete dias por indice, na convencao da BASE (`dia_semana` 0 = domingo),
+ * que e a mesma de `resource_availability_rules`. O ecra mostra segunda
+ * primeiro; o indice guardado nao muda por causa disso.
+ */
+export const DIAS_SEMANA_INDICES: readonly number[] = [1, 2, 3, 4, 5, 6, 0];
 
 /**
  * Estado do acesso, mostrado na lista ao lado do estado do contrato.
@@ -92,7 +167,14 @@ export interface Pessoa {
   email_pessoal: string | null;
   telefone_trabalho: string | null;
   cargo: string | null;
+  /**
+   * LEGADO. Texto livre da ronda 1, mantido por `20261120170000` como legenda.
+   * A fonte de verdade do local passou a ser `local_id`.
+   */
   local_trabalho: string | null;
+  /** Local predefinido da pessoa (`hr_locais_trabalho`), usado quando um
+   * intervalo de horario nao indica local. */
+  local_id: string | null;
   entidade_legal_org_id: string | null;
   reporta_a_pessoa_id: string | null;
   data_admissao: string | null;
@@ -187,6 +269,20 @@ export interface PessoaVinculo {
   periodo_experimental_ate: string | null;
   entidade_legal_org_id: string | null;
   estado: EstadoVinculo;
+
+  // -- Camada de tempo de trabalho (20261120140000) -------------------------
+  tipo_trabalho: TipoTrabalho | null;
+  /** Da unidade a `horas_semanais`. Nunca nulo na base (default 'semanal'). */
+  horas_frequencia: HorasFrequencia;
+  /** FTE em percentagem, 0..100. */
+  tempo_trabalho_pct: number | null;
+  /** Dias uteis do CONTRATO. `pessoas.dias_trabalho` e agora legenda legada. */
+  dias_uteis: DiaSemana[] | null;
+  politica_feriados: PoliticaFeriados;
+  horas_anuais_maximas: number | null;
+  horas_semanais_maximas: number | null;
+  /** Duracao explicita, ao lado de `periodo_experimental_ate`. Nao a substitui. */
+  periodo_experimental_dias: number | null;
 }
 
 export interface PessoaRetribuicao {
@@ -242,4 +338,80 @@ export interface PessoaConta {
   estado: EstadoConta;
   ligada_em: string;
   revogada_em: string | null;
+}
+
+// -- Locais de trabalho e horario (ronda 2) ---------------------------------
+
+/** `hr_locais_trabalho` (20261120130000). Org-scoped, com nome unico por org. */
+export interface LocalTrabalho {
+  id: string;
+  organization_id: string;
+  nome: string;
+  codigo: string | null;
+  tipo: TipoLocal;
+  /**
+   * Referencia OPCIONAL a uma organizacao. E o que permite dizer "das 9 as 14
+   * naquela empresa": o local aponta para ela. Nulo na maioria dos casos.
+   */
+  organizacao_ref_id: string | null;
+  morada: string | null;
+  cidade: string | null;
+  codigo_postal: string | null;
+  pais: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  activo: boolean;
+  notas: string | null;
+}
+
+/**
+ * `pessoas_horario_planeado` (20261120150000). UMA LINHA = UM INTERVALO.
+ *
+ * Dois intervalos no mesmo dia em locais diferentes sao DUAS linhas, cada uma
+ * com o seu `local_id` -- e o requisito central do modulo.
+ *
+ * Cada linha e OU regra recorrente (`dia_semana` preenchido) OU excepcao por
+ * data (`data` preenchida), nunca as duas (CHECK de ou-exclusivo na base).
+ *
+ * PRECEDENCIA: se existir qualquer linha viva com `data = D`, essa data e
+ * definida EXCLUSIVAMENTE por essas linhas; o padrao semanal e ignorado nesse
+ * dia. Uma excepcao com `nao_trabalha` e folga nessa data.
+ */
+export interface HorarioPlaneado {
+  id: string;
+  pessoa_id: string;
+  organization_id: string;
+  vinculo_id: string | null;
+  local_id: string | null;
+  /** 0 = domingo .. 6 = sabado. Nulo numa excepcao por data. */
+  dia_semana: number | null;
+  data: string | null;
+  hora_inicio: string | null;
+  hora_fim: string | null;
+  nao_trabalha: boolean;
+  ordem: number;
+  valido_de: string | null;
+  valido_ate: string | null;
+  notas: string | null;
+}
+
+/** `pessoas_horario_realizado` (20261120160000). O que aconteceu, por data. */
+export interface HorarioRealizado {
+  id: string;
+  pessoa_id: string;
+  organization_id: string;
+  vinculo_id: string | null;
+  local_id: string | null;
+  planeado_id: string | null;
+  data: string;
+  hora_inicio: string;
+  hora_fim: string;
+  /** Coluna GERADA na base: nunca se escreve. */
+  minutos: number;
+  origem: OrigemRealizado;
+  estado: EstadoRealizado;
+  validado_por: string | null;
+  validado_em: string | null;
+  motivo_rejeicao: string | null;
+  notas: string | null;
 }

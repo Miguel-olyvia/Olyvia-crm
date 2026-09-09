@@ -33,13 +33,18 @@ import type {
   PessoaDadosSaude,
   PessoaIdentificacao,
   PessoaMorada,
+  PessoaRetribuicao,
   PessoaVinculo,
+  HorarioPlaneado,
+  HorarioRealizado,
 } from "@/types/hr";
+import type { LinhaPlaneadoParaGravar } from "@/lib/hr/horario";
 
 const COLUNAS_PESSOA =
   "id, organization_id, numero_interno, primeiro_nome, apelido, nome_completo, nome_social, " +
   "email_trabalho, email_pessoal, telefone_trabalho, cargo, local_trabalho, " +
-  "entidade_legal_org_id, reporta_a_pessoa_id, data_admissao, data_antiguidade, data_saida, " +
+  "local_id, entidade_legal_org_id, reporta_a_pessoa_id, data_admissao, data_antiguidade, " +
+  "data_saida, " +
   "estado_contrato, estado_registo, dias_trabalho, notas, created_at, updated_at";
 
 const COLUNAS_DADOS_PESSOAIS =
@@ -62,7 +67,22 @@ const COLUNAS_EMERGENCIA =
 
 const COLUNAS_VINCULO =
   "id, pessoa_id, organization_id, tipo_contrato, regime, horas_semanais, data_inicio, " +
-  "data_fim, motivo_termo, periodo_experimental_ate, entidade_legal_org_id, estado";
+  "data_fim, motivo_termo, periodo_experimental_ate, entidade_legal_org_id, estado, " +
+  // Camada de tempo de trabalho, 20261120140000.
+  "tipo_trabalho, horas_frequencia, tempo_trabalho_pct, dias_uteis, politica_feriados, " +
+  "horas_anuais_maximas, horas_semanais_maximas, periodo_experimental_dias";
+
+const COLUNAS_RETRIBUICAO =
+  "id, pessoa_id, organization_id, vinculo_id, valor_base, moeda, periodicidade, " +
+  "subsidio_alimentacao, subsidio_alimentacao_modo, valido_de, valido_ate, motivo";
+
+const COLUNAS_HORARIO_PLANEADO =
+  "id, pessoa_id, organization_id, vinculo_id, local_id, dia_semana, data, hora_inicio, " +
+  "hora_fim, nao_trabalha, ordem, valido_de, valido_ate, notas";
+
+const COLUNAS_HORARIO_REALIZADO =
+  "id, pessoa_id, organization_id, vinculo_id, local_id, planeado_id, data, hora_inicio, " +
+  "hora_fim, minutos, origem, estado, validado_por, validado_em, motivo_rejeicao, notas";
 
 // Sem coluna de IBAN: na base ela nao existe.
 const COLUNAS_BANCARIOS =
@@ -82,6 +102,9 @@ export interface PessoaFicha {
   morada: PessoaMorada | null;
   emergencia: PessoaContactoEmergencia | null;
   vinculos: PessoaVinculo[];
+  retribuicao: PessoaRetribuicao | null;
+  horarioPlaneado: HorarioPlaneado[];
+  horarioRealizado: HorarioRealizado[];
   bancarios: PessoaDadosBancarios | null;
   saude: PessoaDadosSaude | null;
   conta: PessoaConta | null;
@@ -94,6 +117,9 @@ const FICHA_VAZIA: PessoaFicha = {
   morada: null,
   emergencia: null,
   vinculos: [],
+  retribuicao: null,
+  horarioPlaneado: [],
+  horarioRealizado: [],
   bancarios: null,
   saude: null,
   conta: null,
@@ -169,8 +195,19 @@ export function usePessoa(pessoaId: string | undefined) {
         return;
       }
 
-      const [dadosPessoais, identificacao, morada, emergencia, vinculos, bancarios, saude, conta] =
-        await Promise.all([
+      const [
+        dadosPessoais,
+        identificacao,
+        morada,
+        emergencia,
+        vinculos,
+        retribuicao,
+        horarioPlaneado,
+        horarioRealizado,
+        bancarios,
+        saude,
+        conta,
+      ] = await Promise.all([
           carregarUm<PessoaDadosPessoais>("pessoas_dados_pessoais", COLUNAS_DADOS_PESSOAIS, pessoaId),
           carregarUm<PessoaIdentificacao>("pessoas_identificacao", COLUNAS_IDENTIFICACAO, pessoaId),
           carregarUm<PessoaMorada>("pessoas_moradas", COLUNAS_MORADA, pessoaId, (q) =>
@@ -184,6 +221,28 @@ export function usePessoa(pessoaId: string | undefined) {
           ),
           carregarMuitos<PessoaVinculo>("pessoas_vinculos", COLUNAS_VINCULO, pessoaId, (q) =>
             q.is("deleted_at", null).order("data_inicio", { ascending: false }),
+          ),
+          carregarUm<PessoaRetribuicao>(
+            "pessoas_retribuicoes",
+            COLUNAS_RETRIBUICAO,
+            pessoaId,
+            (q) => q.is("deleted_at", null).order("valido_de", { ascending: false }),
+          ),
+          carregarMuitos<HorarioPlaneado>(
+            "pessoas_horario_planeado",
+            COLUNAS_HORARIO_PLANEADO,
+            pessoaId,
+            (q) =>
+              q
+                .is("deleted_at", null)
+                .order("data", { ascending: true })
+                .order("ordem", { ascending: true }),
+          ),
+          carregarMuitos<HorarioRealizado>(
+            "pessoas_horario_realizado",
+            COLUNAS_HORARIO_REALIZADO,
+            pessoaId,
+            (q) => q.is("deleted_at", null).order("data", { ascending: false }).limit(200),
           ),
           carregarUm<PessoaDadosBancarios>(
             "pessoas_dados_bancarios",
@@ -203,6 +262,9 @@ export function usePessoa(pessoaId: string | undefined) {
         morada,
         emergencia,
         vinculos,
+        retribuicao,
+        horarioPlaneado,
+        horarioRealizado,
         bancarios,
         saude,
         conta,
@@ -342,6 +404,81 @@ export function usePessoa(pessoaId: string | undefined) {
   );
 
   /**
+   * Grava o contrato: actualiza o vinculo activo, ou cria o primeiro.
+   *
+   * NAO ha caminho para apagar: o DELETE de `pessoas_vinculos` esta bloqueado
+   * por politica restritiva, e e assim que se quer -- o historico de contratos
+   * nao se apaga. Terminar um contrato e por-lhe `estado = terminado` e abrir
+   * outro, nao apagar a linha.
+   */
+  const saveVinculo = useCallback(
+    (vinculoId: string | null, patch: Partial<PessoaVinculo>) =>
+      guardar(async (autorId) => {
+        const orgId = ficha.pessoa?.organization_id;
+        if (!orgId || !pessoaId) return { error: new Error("Ficha sem organizacao resolvida") };
+        if (vinculoId) {
+          return hrFrom("pessoas_vinculos")
+            .update({ ...patch, updated_by: autorId })
+            .eq("id", vinculoId);
+        }
+        return hrFrom("pessoas_vinculos").insert({
+          ...patch,
+          pessoa_id: pessoaId,
+          organization_id: orgId,
+          estado: patch.estado ?? "activo",
+          created_by: autorId,
+          updated_by: autorId,
+        });
+      }),
+    [guardar, ficha.pessoa?.organization_id, pessoaId],
+  );
+
+  /**
+   * Substitui o horario PLANEADO da pessoa pelas linhas dadas.
+   *
+   * PORQUE E SUBSTITUICAO E NAO DIFERENCA
+   * -------------------------------------
+   * O editor manipula intervalos livremente -- acrescenta, remove, parte em
+   * dois, copia para outros dias. Calcular a diferenca linha a linha daria
+   * dezenas de casos e um erro silencioso em cada um. Marcar as linhas vivas
+   * como apagadas e inserir as novas e uma operacao que ou corre inteira ou
+   * falha visivelmente.
+   *
+   * O soft delete e um UPDATE, nao um DELETE: o DELETE esta bloqueado por
+   * politica e a politica de UPDATE nao exige `deleted_at IS NULL` no USING,
+   * exactamente para isto ser possivel.
+   */
+  const savePlaneado = useCallback(
+    (linhas: LinhaPlaneadoParaGravar[]) =>
+      guardar(async (autorId) => {
+        const orgId = ficha.pessoa?.organization_id;
+        if (!orgId || !pessoaId) return { error: new Error("Ficha sem organizacao resolvida") };
+        const agora = new Date().toISOString();
+
+        const { error: erroApagar } = await hrFrom("pessoas_horario_planeado")
+          .update({ deleted_at: agora, deleted_by: autorId, updated_by: autorId })
+          .eq("pessoa_id", pessoaId)
+          .is("deleted_at", null);
+        if (erroApagar) return { error: erroApagar };
+
+        if (linhas.length === 0) return { error: null };
+
+        const vinculoActivo = ficha.vinculos.find((vinculo) => vinculo.estado === "activo");
+        return hrFrom("pessoas_horario_planeado").insert(
+          linhas.map((linha) => ({
+            ...linha,
+            pessoa_id: pessoaId,
+            organization_id: orgId,
+            vinculo_id: vinculoActivo?.id ?? null,
+            created_by: autorId,
+            updated_by: autorId,
+          })),
+        );
+      }),
+    [guardar, ficha.pessoa?.organization_id, ficha.vinculos, pessoaId],
+  );
+
+  /**
    * O NISS em claro, uma vez, por RPC auditada. Devolve o valor ou lanca --
    * quem chama mostra a mensagem. NUNCA guardar o retorno em estado que
    * sobreviva ao ecra.
@@ -405,6 +542,8 @@ export function usePessoa(pessoaId: string | undefined) {
     saveMorada,
     saveEmergencia,
     saveSaude,
+    saveVinculo,
+    savePlaneado,
     revelarNiss,
     definirNiss,
     definirIban,

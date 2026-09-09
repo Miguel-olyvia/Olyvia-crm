@@ -7,9 +7,10 @@
  * ficheiro de crescer para as mil linhas quando os nove separadores em
  * construcao forem construidos.
  *
- * Visao geral, Detalhes laborais e Detalhes pessoais tem conteudo real. Os
- * outros nove ficam visiveis com o mesmo estado vazio: a moldura ja mostra o
- * caminho do produto sem prometer nada que nao exista.
+ * Visao geral, Detalhes laborais, Detalhes pessoais, Contratos e Planeamento
+ * de tempo tem conteudo real. Os outros ficam visiveis com o mesmo estado
+ * vazio: a moldura ja mostra o caminho do produto sem prometer nada que nao
+ * exista.
  *
  * O separador vai no URL (`?tab=`) para o link ser partilhavel.
  */
@@ -35,7 +36,9 @@ import {
   TrendingUp,
   User,
 } from "lucide-react";
+import { PessoaContratoTab } from "@/components/hr/PessoaContratoTab";
 import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
+import { PessoaHorarioTab } from "@/components/hr/PessoaHorarioTab";
 import { PessoaLaboraisTab } from "@/components/hr/PessoaLaboraisTab";
 import {
   PessoaPessoaisTab,
@@ -43,16 +46,15 @@ import {
 } from "@/components/hr/PessoaPessoaisTab";
 import { PessoaVisaoGeralTab } from "@/components/hr/PessoaVisaoGeralTab";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePessoa } from "@/hooks/usePessoa";
 import { usePessoas } from "@/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
 
-/** Os nove separadores que ficam visiveis mas vazios nesta ronda. */
+/** Os separadores que ficam visiveis mas vazios nesta ronda. */
 const TABS_EM_CONSTRUCAO = [
-  { value: "contratos", labelKey: "hr.pessoa.tabs.contratos", icon: FileText },
   { value: "documentos", labelKey: "hr.pessoa.tabs.documentos", icon: FolderOpen },
-  { value: "planeamento", labelKey: "hr.pessoa.tabs.planeamento", icon: CalendarRange },
   { value: "ausencias", labelKey: "hr.pessoa.tabs.ausencias", icon: CalendarClock },
   { value: "desempenho", labelKey: "hr.pessoa.tabs.desempenho", icon: TrendingUp },
   { value: "tarefas", labelKey: "hr.pessoa.tabs.tarefas", icon: ListChecks },
@@ -68,7 +70,7 @@ export default function PessoaDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "visaoGeral";
 
-  const { companies } = useCompany();
+  const { companies, activeCompany } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
 
   const ficha = usePessoa(id);
@@ -97,6 +99,14 @@ export default function PessoaDetail() {
 
   const podeVerLaborais = hasPermission("hr.pessoas.laborais.view");
   const podeEditarLaborais = hasPermission("hr.pessoas.laborais.edit");
+  const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
+  const podeEditarVinculos = hasPermission("hr.pessoas.vinculos.edit");
+  const podeVerRetribuicao = hasPermission("hr.pessoas.retribuicao.view");
+  const podeVerHorario = hasPermission("hr.pessoas.horario.view");
+  const podeEditarHorario = hasPermission("hr.pessoas.horario.edit");
+  const podeVerRealizado = hasPermission("hr.pessoas.horario_realizado.view");
+
+  const { locais, loading: locaisALoad } = useLocaisTrabalho();
 
   const pessoa = ficha.pessoa;
 
@@ -182,6 +192,14 @@ export default function PessoaDetail() {
               <User className="h-4 w-4" />
               {t("hr.pessoa.tabs.pessoais")}
             </TabsTrigger>
+            <TabsTrigger value="contratos" className="gap-2">
+              <FileText className="h-4 w-4" />
+              {t("hr.pessoa.tabs.contratos")}
+            </TabsTrigger>
+            <TabsTrigger value="planeamento" className="gap-2">
+              <CalendarRange className="h-4 w-4" />
+              {t("hr.pessoa.tabs.planeamento")}
+            </TabsTrigger>
             {TABS_EM_CONSTRUCAO.map(({ value, labelKey, icon: Icon }) => (
               <TabsTrigger key={value} value={value} className="gap-2">
                 <Icon className="h-4 w-4" />
@@ -204,7 +222,9 @@ export default function PessoaDetail() {
             <PessoaLaboraisTab
               pessoa={pessoa}
               colegas={colegas.map((c) => ({ id: c.id, nome_completo: c.nome_completo }))}
-              organizacoes={companies.map((e) => ({ id: e.id, name: e.name }))}
+              locais={locais}
+              locaisALoad={locaisALoad}
+              entidadeLegalNome={entidadeLegalNome ?? activeCompany?.name ?? null}
               podeEditar={podeEditarLaborais}
               saving={ficha.saving}
               onGuardar={ficha.savePessoa}
@@ -236,6 +256,39 @@ export default function PessoaDetail() {
             onRevelarNiss={ficha.revelarNiss}
             onDefinirNiss={ficha.definirNiss}
             onDefinirIban={ficha.definirIban}
+          />
+        </TabsContent>
+
+        <TabsContent value="contratos">
+          {podeVerVinculos ? (
+            <PessoaContratoTab
+              vinculos={ficha.vinculos}
+              retribuicao={ficha.retribuicao}
+              podeEditar={podeEditarVinculos}
+              podeVerRetribuicao={podeVerRetribuicao}
+              saving={ficha.saving}
+              onGuardarVinculo={ficha.saveVinculo}
+            />
+          ) : (
+            <Card>
+              <CardContent className="py-12 text-center text-muted-foreground">
+                {t("hr.semAcesso")}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="planeamento">
+          <PessoaHorarioTab
+            planeado={ficha.horarioPlaneado}
+            realizado={ficha.horarioRealizado}
+            locais={locais}
+            locaisALoad={locaisALoad}
+            podeVerPlaneado={podeVerHorario}
+            podeEditarPlaneado={podeEditarHorario}
+            podeVerRealizado={podeVerRealizado}
+            saving={ficha.saving}
+            onGuardarPlaneado={ficha.savePlaneado}
           />
         </TabsContent>
 

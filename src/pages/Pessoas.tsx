@@ -1,10 +1,13 @@
 /**
  * A lista de pessoas -- o ecra "Organizacao" do modulo de RH.
  *
- * Sub-separadores no molde observado no Factorial: Pessoas, Atividade, Equipas,
- * Organograma, Funcoes. Nesta ronda so Pessoas tem conteudo; os outros quatro
- * ficam visiveis em estado vazio, porque e assim que se ve para onde o modulo
- * vai sem prometer o que ainda nao existe.
+ * Tres sub-separadores: Pessoas, Organograma e Funcoes.
+ *
+ * "Atividade" e "Equipas" NAO existem: nao foram pedidos e foram retirados.
+ * Organograma e Funcoes deixaram de ser estados vazios -- o primeiro desenha a
+ * arvore de chefia sobre `pessoas.reporta_a_pessoa_id` e remete para o
+ * organograma de EMPRESAS que ja existe (`/org-chart`); o segundo lista os
+ * cargos em uso e remete para o ecra de Papeis que ja existe (`/roles`).
  *
  * O separador vive no URL (`?tab=`), no padrao de CampaignDetail: recarregar a
  * pagina ou partilhar o link nao perde o separador aberto -- que e a regra de
@@ -33,30 +36,20 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Activity,
-  IdCard,
-  Network,
-  Plus,
-  Search,
-  UserMinus,
-  UserPlus,
-  Users,
-  UsersRound,
-} from "lucide-react";
+import { IdCard, Network, Plus, Search, UserMinus, UserPlus, Users } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
-import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
 import { PessoaFormDialog } from "@/components/hr/PessoaFormDialog";
+import { PessoasFuncoesTab } from "@/components/hr/PessoasFuncoesTab";
+import { PessoasOrganogramaTab } from "@/components/hr/PessoasOrganogramaTab";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { usePessoas } from "@/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { PessoaListItem } from "@/types/hr";
 
 const SUBTABS = [
   { value: "pessoas", labelKey: "hr.subtabs.pessoas", icon: Users },
-  { value: "atividade", labelKey: "hr.subtabs.atividade", icon: Activity },
-  { value: "equipas", labelKey: "hr.subtabs.equipas", icon: UsersRound },
   { value: "organograma", labelKey: "hr.subtabs.organograma", icon: Network },
   { value: "funcoes", labelKey: "hr.subtabs.funcoes", icon: IdCard },
 ] as const;
@@ -77,11 +70,14 @@ export default function Pessoas() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "pessoas";
 
-  const { activeCompany, companies, isLoading: companyLoading } = useCompany();
+  const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const canCreate = hasPermission("hr.pessoas.create");
 
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
+  const { locais } = useLocaisTrabalho();
+  const nomeDoLocal = (localId: string | null) =>
+    localId ? (locais.find((local) => local.id === localId)?.nome ?? null) : null;
   const [procura, setProcura] = useState("");
   const [dialogoAberto, setDialogoAberto] = useState(false);
 
@@ -223,7 +219,12 @@ export default function Pessoas() {
                             )}
                           </TableCell>
                           <TableCell>{pessoa.cargo ?? "—"}</TableCell>
-                          <TableCell>{pessoa.local_trabalho ?? "—"}</TableCell>
+                          {/* `local_id` e a fonte de verdade; `local_trabalho`
+                              e a legenda legada da ronda 1 e serve de recurso
+                              enquanto nao houver local escolhido. */}
+                          <TableCell>
+                            {nomeDoLocal(pessoa.local_id) ?? pessoa.local_trabalho ?? "—"}
+                          </TableCell>
                           <TableCell className="tabular-nums">
                             {pessoa.data_admissao ?? "—"}
                           </TableCell>
@@ -250,18 +251,23 @@ export default function Pessoas() {
           )}
         </TabsContent>
 
-        {SUBTABS.filter((tab) => tab.value !== "pessoas").map(({ value, labelKey, icon }) => (
-          <TabsContent key={value} value={value}>
-            <PessoaEmConstrucaoTab titulo={t(labelKey)} icon={icon} />
-          </TabsContent>
-        ))}
+        <TabsContent value="organograma">
+          <PessoasOrganogramaTab pessoas={pessoas} loading={loading} error={error} />
+        </TabsContent>
+
+        <TabsContent value="funcoes">
+          <PessoasFuncoesTab pessoas={pessoas} loading={loading} />
+        </TabsContent>
       </Tabs>
 
       {canCreate && (
         <PessoaFormDialog
           open={dialogoAberto}
           onOpenChange={setDialogoAberto}
-          organizacoes={companies.map((empresa) => ({ id: empresa.id, name: empresa.name }))}
+          colegas={pessoas.map((pessoa) => ({
+            id: pessoa.id,
+            nome_completo: pessoa.nome_completo,
+          }))}
           onCriar={criarPessoa}
           onCriada={(id) => navigate(`/rh/pessoas/${id}`)}
         />

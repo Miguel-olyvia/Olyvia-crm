@@ -232,6 +232,11 @@ export default function Roles() {
     'scheduling',
     'users', 'roles',
     'settings', 'smtp', 'email_templates',
+    // Sem 'hr' aqui, as 34 permissoes hr.* eram filtradas fora deste ecra
+    // (o filtro por sidebarCategories, abaixo) e nao havia onde as atribuir:
+    // so o super_admin, que as recebeu por migration, conseguia entrar no
+    // modulo de RH.
+    'hr',
   ]);
 
   // Category label map for human-readable module names
@@ -273,6 +278,7 @@ export default function Roles() {
     settings: 'Definições',
     smtp: 'SMTP',
     email_templates: 'Templates de Email',
+    hr: 'Recursos Humanos',
   };
 
   // Permission name translations (for DB names in English)

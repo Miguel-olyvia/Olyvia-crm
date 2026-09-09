@@ -6,6 +6,16 @@
  * `.edit`). Sem a permissao de edicao os campos ficam em leitura, e nao
  * escondidos: quem ve os detalhes laborais tem de os poder ler inteiros.
  *
+ * A ENTIDADE LEGAL NAO SE ESCOLHE. E sempre a da organizacao activa e mostra-se
+ * como texto: o selector que aqui existia deixava escolher uma organizacao
+ * diferente daquela em que a ficha vive, e isso nao e uma escolha que se deva
+ * poder fazer.
+ *
+ * O LOCAL DE TRABALHO e um selector sobre `hr_locais_trabalho` (`local_id`).
+ * `local_trabalho`, o texto livre da ronda 1, fica visivel em leitura como
+ * legenda legada enquanto nao houver local escolhido -- nao se apaga e nao se
+ * migra por iniciativa do ecra.
+ *
  * "Reporta a" so oferece pessoas da MESMA organizacao. Isso e garantido pela
  * base (a chave estrangeira e composta, `(reporta_a_pessoa_id, organization_id)`),
  * e aqui a lista ja vem filtrada pela organizacao activa -- as duas coisas de
@@ -26,7 +36,12 @@ import {
 import { Briefcase, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { ESTADOS_CONTRATO, type EstadoContrato, type Pessoa } from "@/types/hr";
+import {
+  ESTADOS_CONTRATO,
+  type EstadoContrato,
+  type LocalTrabalho,
+  type Pessoa,
+} from "@/types/hr";
 
 /** Valor do Select quando nao ha escolha. O Radix nao aceita `value=""`. */
 const SEM_ESCOLHA = "__sem_escolha__";
@@ -35,8 +50,11 @@ interface PessoaLaboraisTabProps {
   pessoa: Pessoa;
   /** Pessoas da organizacao activa, para o selector de chefia. */
   colegas: Array<{ id: string; nome_completo: string }>;
-  /** Organizacoes a que o utilizador pertence, para a entidade legal. */
-  organizacoes: Array<{ id: string; name: string }>;
+  /** Locais de trabalho da organizacao activa, para o selector de local. */
+  locais: LocalTrabalho[];
+  locaisALoad: boolean;
+  /** Nome da organizacao activa: a entidade legal, mostrada e nao escolhida. */
+  entidadeLegalNome: string | null;
   podeEditar: boolean;
   saving: boolean;
   onGuardar: (patch: Partial<Pessoa>) => Promise<string | null>;
@@ -49,13 +67,12 @@ type Rascunho = {
   telefone_trabalho: string;
   numero_interno: string;
   cargo: string;
-  local_trabalho: string;
+  local_id: string;
   data_admissao: string;
   data_antiguidade: string;
   data_saida: string;
   estado_contrato: EstadoContrato;
   reporta_a_pessoa_id: string;
-  entidade_legal_org_id: string;
 };
 
 function rascunhoDe(pessoa: Pessoa): Rascunho {
@@ -66,20 +83,21 @@ function rascunhoDe(pessoa: Pessoa): Rascunho {
     telefone_trabalho: pessoa.telefone_trabalho ?? "",
     numero_interno: pessoa.numero_interno ?? "",
     cargo: pessoa.cargo ?? "",
-    local_trabalho: pessoa.local_trabalho ?? "",
+    local_id: pessoa.local_id ?? SEM_ESCOLHA,
     data_admissao: pessoa.data_admissao ?? "",
     data_antiguidade: pessoa.data_antiguidade ?? "",
     data_saida: pessoa.data_saida ?? "",
     estado_contrato: pessoa.estado_contrato,
     reporta_a_pessoa_id: pessoa.reporta_a_pessoa_id ?? SEM_ESCOLHA,
-    entidade_legal_org_id: pessoa.entidade_legal_org_id ?? SEM_ESCOLHA,
   };
 }
 
 export function PessoaLaboraisTab({
   pessoa,
   colegas,
-  organizacoes,
+  locais,
+  locaisALoad,
+  entidadeLegalNome,
   podeEditar,
   saving,
   onGuardar,
@@ -110,15 +128,13 @@ export function PessoaLaboraisTab({
       telefone_trabalho: vazioParaNull(rascunho.telefone_trabalho),
       numero_interno: vazioParaNull(rascunho.numero_interno),
       cargo: vazioParaNull(rascunho.cargo),
-      local_trabalho: vazioParaNull(rascunho.local_trabalho),
+      local_id: rascunho.local_id === SEM_ESCOLHA ? null : rascunho.local_id,
       data_admissao: vazioParaNull(rascunho.data_admissao),
       data_antiguidade: vazioParaNull(rascunho.data_antiguidade),
       data_saida: vazioParaNull(rascunho.data_saida),
       estado_contrato: rascunho.estado_contrato,
       reporta_a_pessoa_id:
         rascunho.reporta_a_pessoa_id === SEM_ESCOLHA ? null : rascunho.reporta_a_pessoa_id,
-      entidade_legal_org_id:
-        rascunho.entidade_legal_org_id === SEM_ESCOLHA ? null : rascunho.entidade_legal_org_id,
     });
     if (erro) {
       toast.error(erro);
@@ -130,7 +146,6 @@ export function PessoaLaboraisTab({
   const campos: Array<{ id: keyof Rascunho; labelKey: string; tipo?: "date" | "email" | "text" }> = [
     { id: "numero_interno", labelKey: "hr.laborais.numeroInterno" },
     { id: "cargo", labelKey: "hr.columns.cargo" },
-    { id: "local_trabalho", labelKey: "hr.laborais.local" },
     { id: "nome_social", labelKey: "hr.laborais.nomeSocial" },
     { id: "email_trabalho", labelKey: "hr.laborais.emailTrabalho", tipo: "email" },
     { id: "email_pessoal", labelKey: "hr.laborais.emailPessoal", tipo: "email" },
@@ -187,24 +202,40 @@ export function PessoaLaboraisTab({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="hr-laborais-entidade-legal">{t("hr.detalhes.entidadeLegal")}</Label>
+            <Label htmlFor="hr-laborais-local">{t("hr.laborais.local")}</Label>
             <Select
-              value={rascunho.entidade_legal_org_id}
-              disabled={!podeEditar}
-              onValueChange={(v) => definir("entidade_legal_org_id", v)}
+              value={rascunho.local_id}
+              disabled={!podeEditar || locaisALoad}
+              onValueChange={(v) => definir("local_id", v)}
             >
-              <SelectTrigger id="hr-laborais-entidade-legal">
-                <SelectValue />
+              <SelectTrigger id="hr-laborais-local">
+                <SelectValue placeholder={locaisALoad ? t("common.loading") : undefined} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
-                {organizacoes.map((org) => (
-                  <SelectItem key={org.id} value={org.id}>
-                    {org.name}
+                {locais.map((local) => (
+                  <SelectItem key={local.id} value={local.id}>
+                    {local.nome}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {rascunho.local_id === SEM_ESCOLHA && pessoa.local_trabalho && (
+              <p className="text-xs text-muted-foreground">
+                {t("hr.laborais.localLegado")}: {pessoa.local_trabalho}
+              </p>
+            )}
+          </div>
+
+          {/* A entidade legal e a da organizacao activa. Texto, nao selector. */}
+          <div className="space-y-1.5">
+            <Label htmlFor="hr-laborais-entidade-legal">{t("hr.detalhes.entidadeLegal")}</Label>
+            <Input
+              id="hr-laborais-entidade-legal"
+              value={entidadeLegalNome ?? t("hr.campos.semValor")}
+              readOnly
+              disabled
+            />
           </div>
 
           <div className="space-y-1.5">

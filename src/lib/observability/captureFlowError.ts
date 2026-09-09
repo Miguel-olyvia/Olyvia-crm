@@ -89,7 +89,13 @@ export type BusinessFlow =
   // aparece incompleta sem ninguem saber, e se a escrita falhar o utilizador
   // perde o que escreveu no formulario.
   | "hr-pessoas-load"
-  | "hr-pessoa-write";
+  | "hr-pessoa-write"
+  // Locais de trabalho e papeis de acesso, lidos pelo assistente de criacao de
+  // pessoa e pelo editor de horario. Uma recusa por permissao nao vem para
+  // aqui; uma falha de rede vem, porque sem locais o horario perde o "onde".
+  | "hr-locais-load"
+  | "hr-locais-write"
+  | "hr-papeis-load";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually
