@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -17,7 +17,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { ArrowRightLeft } from "lucide-react";
+import { ArrowRightLeft, ScanLine } from "lucide-react";
+import { BrowserMultiFormatReader } from "@zxing/browser";
+import type { IScannerControls } from "@zxing/browser";
+import { NotFoundException } from "@zxing/library";
 
 // Fase 5.4 do plano de inventário: diálogo de detalhe/contagem de uma sessão
 // de public.inventory_counts. Consome as 3 RPCs de escrita já aplicadas
@@ -53,7 +56,7 @@ interface InventoryCountLineRow {
   resolution_notes: string | null;
   moved_during_count: boolean;
   stock_movement_id: string | null;
-  products?: { name: string; sku: string | null } | null;
+  products?: { name: string; sku: string | null; barcode: string | null } | null;
 }
 
 interface MovementRow {
@@ -112,7 +115,11 @@ export default function InventoryCountDetailDialog({
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
 
-  const canCount = hasPermission("inventory.count") || hasPermission("inventory.edit");
+  // Estrito a "inventory.count": a RPC rpc_update_inventory_count_line_quantity
+  // exige exatamente esta permissão (ver migration 20261116020000). Mostrar o
+  // campo a quem só tem "inventory.edit" deixava-o escrever um valor que a BD
+  // rejeitava em silêncio (toast de erro fácil de não notar, campo revertia).
+  const canCount = hasPermission("inventory.count");
   const canEdit = hasPermission("inventory.edit");
 
   const [loading, setLoading] = useState(false);
@@ -126,6 +133,17 @@ export default function InventoryCountDetailDialog({
 
   const [movements, setMovements] = useState<MovementRow[]>([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
+
+  // Leitor de código de barras (Fase 5.4 — localizar linha por câmara). As
+  // etiquetas físicas dos produtos codificam o SKU (products.barcode está
+  // vazio em toda a BD hoje) — comparamos primeiro por sku e, como fallback
+  // preparado para o futuro, também por barcode.
+  const [scanOpen, setScanOpen] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const scanControlsRef = useRef<IScannerControls | null>(null);
+  const quantityInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const rowRefs = useRef<Record<string, HTMLTableRowElement | null>>({});
 
   const isActive = header?.status === "em_contagem";
 
@@ -144,7 +162,7 @@ export default function InventoryCountDetailDialog({
       const { data: lineData, error: lineError } = await fetchAllRows(() =>
         supabase
           .from("inventory_count_lines")
-          .select("id, product_id, system_quantity_at_start, counted_quantity, counted_at, discrepancy_resolution, resolution_notes, moved_during_count, stock_movement_id, products(name, sku)")
+          .select("id, product_id, system_quantity_at_start, counted_quantity, counted_at, discrepancy_resolution, resolution_notes, moved_during_count, stock_movement_id, products(name, sku, barcode)")
           .eq("inventory_count_id", countId)
           .order("name", { foreignTable: "products", ascending: true })
       );
@@ -217,6 +235,106 @@ export default function InventoryCountDetailDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, lines]);
 
+  // Se o diálogo principal fechar enquanto o leitor de código está aberto,
+  // fecha-o também — o efeito da câmara (abaixo) trata de libertar o stream.
+  useEffect(() => {
+    if (!open) setScanOpen(false);
+  }, [open]);
+
+  const findLineByCode = useCallback((code: string): InventoryCountLineRow | undefined => {
+    const trimmed = code.trim();
+    if (!trimmed) return undefined;
+    const exact = lines.find((l) => l.products?.sku === trimmed || l.products?.barcode === trimmed);
+    if (exact) return exact;
+    const normalized = trimmed.toLowerCase();
+    return lines.find((l) => {
+      const sku = l.products?.sku?.trim().toLowerCase();
+      const barcode = l.products?.barcode?.trim().toLowerCase();
+      return sku === normalized || barcode === normalized;
+    });
+  }, [lines]);
+
+  const handleScanResult = useCallback((code: string) => {
+    const match = findLineByCode(code);
+    if (!match) {
+      toast({
+        title: t('stockCounts.scan.notFoundTitle'),
+        description: t('stockCounts.scan.notFoundDescription', { code }),
+        variant: "destructive",
+      });
+      return;
+    }
+    setScanOpen(false);
+    toast({ title: t('stockCounts.scan.foundTitle'), description: match.products?.name || code });
+    // Dá tempo ao painel de scan fechar e à tabela existir no DOM antes de
+    // fazer scroll/focus na linha encontrada.
+    window.setTimeout(() => {
+      rowRefs.current[match.id]?.scrollIntoView({ behavior: "smooth", block: "center" });
+      quantityInputRefs.current[match.id]?.focus();
+    }, 150);
+  }, [findLineByCode, t, toast]);
+
+  // Mantido em ref para o efeito da câmara (abaixo) não precisar reiniciar o
+  // stream sempre que `lines`/`t`/`toast` mudam — só quando scanOpen muda.
+  const handleScanResultRef = useRef(handleScanResult);
+  useEffect(() => {
+    handleScanResultRef.current = handleScanResult;
+  }, [handleScanResult]);
+
+  useEffect(() => {
+    if (!scanOpen) return;
+    let cancelled = false;
+    setScanError(null);
+    const reader = new BrowserMultiFormatReader();
+
+    const start = async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) {
+          throw new Error(t('stockCounts.scan.unsupportedError'));
+        }
+        const controls = await reader.decodeFromVideoDevice(
+          undefined,
+          videoRef.current ?? undefined,
+          (result, error) => {
+            if (cancelled) return;
+            if (result) {
+              handleScanResultRef.current(result.getText());
+              return;
+            }
+            // NotFoundException é disparada em quase todos os frames sem
+            // código visível — comportamento normal do decode contínuo, não
+            // é um erro a reportar ao utilizador. Outros erros são raros e
+            // transitórios (frame ilegível); ignoramos silenciosamente para
+            // não interromper o scan contínuo.
+            if (error && !(error instanceof NotFoundException)) {
+              // eslint-disable-next-line no-console
+              console.debug("[InventoryCountDetailDialog] scan decode error", error);
+            }
+          },
+        );
+        if (cancelled) {
+          controls.stop();
+          return;
+        }
+        scanControlsRef.current = controls;
+      } catch (err: any) {
+        if (cancelled) return;
+        const isPermissionError = err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError";
+        setScanError(isPermissionError
+          ? t('stockCounts.scan.permissionError')
+          : (err?.message || t('stockCounts.scan.genericError')));
+      }
+    };
+
+    start();
+
+    return () => {
+      cancelled = true;
+      scanControlsRef.current?.stop();
+      scanControlsRef.current = null;
+    };
+  }, [scanOpen, t]);
+
   const handleSaveQuantity = async (lineId: string) => {
     const raw = quantityDrafts[lineId];
     const line = lines.find((l) => l.id === lineId);
@@ -253,6 +371,11 @@ export default function InventoryCountDetailDialog({
       if (result.resolution_cleared) {
         setResolutionDrafts((prev) => ({ ...prev, [lineId]: { resolution: "", notes: "" } }));
       }
+      // Ao contrário de handleResolveLine/handleFinalize, esta gravação nunca
+      // avisava o pai — o contador "X/Y" e o badge de discrepâncias na lista
+      // (StockCounts.tsx) ficavam presos ao valor com que a página tinha
+      // aberto até haver refresh por outra via.
+      onChanged();
     } catch (error: any) {
       toast({ title: t('stockCounts.toast.quantityError'), description: error.message, variant: "destructive" });
       setQuantityDrafts((prev) => ({ ...prev, [lineId]: line.counted_quantity != null ? String(line.counted_quantity) : "" }));
@@ -400,7 +523,21 @@ export default function InventoryCountDetailDialog({
             )}
 
             <div>
-              <h3 className="text-sm font-semibold mb-2">{t('stockCounts.detail.lines.title')}</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold">{t('stockCounts.detail.lines.title')}</h3>
+                {canCount && isActive && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={() => setScanOpen(true)}
+                  >
+                    <ScanLine className="w-4 h-4" />
+                    {t('stockCounts.scan.button')}
+                  </Button>
+                )}
+              </div>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -425,7 +562,7 @@ export default function InventoryCountDetailDialog({
                       const needsResolution = diff !== null && diff !== 0 && !line.discrepancy_resolution;
                       const draft = resolutionDrafts[line.id] || { resolution: "" as const, notes: "" };
                       return (
-                        <TableRow key={line.id}>
+                        <TableRow key={line.id} ref={(el) => { rowRefs.current[line.id] = el; }}>
                           <TableCell className="font-medium">
                             <div>{line.products?.name || '-'}</div>
                             {line.products?.sku && (
@@ -436,6 +573,7 @@ export default function InventoryCountDetailDialog({
                           <TableCell className="text-right">
                             {canCount && isActive ? (
                               <Input
+                                ref={(el) => { quantityInputRefs.current[line.id] = el; }}
                                 type="number"
                                 min={0}
                                 className="w-24 ml-auto text-right"
@@ -576,6 +714,32 @@ export default function InventoryCountDetailDialog({
           </DialogFooter>
         )}
       </DialogContent>
+
+      <Dialog open={scanOpen} onOpenChange={setScanOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t('stockCounts.scan.title')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            {scanError ? (
+              <p className="text-sm text-destructive border rounded-md p-3 bg-destructive/10">
+                {scanError}
+              </p>
+            ) : (
+              <div className="relative rounded-md overflow-hidden bg-black">
+                <video
+                  ref={videoRef}
+                  className="w-full aspect-video"
+                  muted
+                  playsInline
+                  autoPlay
+                />
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">{t('stockCounts.scan.hint')}</p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }
