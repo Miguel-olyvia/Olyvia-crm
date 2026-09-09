@@ -31,8 +31,6 @@ interface LeadJourneyTabProps {
   // (see LEADS_LIST_COLUMNS) — no separate shared Lead interface exists to
   // extend here.
   lead: any;
-  hasClient: boolean;
-  clientCreatedAt: string | null;
   interactionCount: number;
   dealCount: number;
   dealValue: number;
@@ -40,12 +38,16 @@ interface LeadJourneyTabProps {
   // only needs the lead id.
   organizationId?: string | null;
   userId?: string;
+  // Repassado tal e qual para o LeadQualificationCard: avisa a página que a
+  // qualificação da lead foi gravada, para que a linha da lista e os
+  // contadores sejam refrescados sem recarregar a página.
+  onQualificationUpdated?: (qualificationType: "mql" | "sql") => void;
 }
 
 export function LeadJourneyTab({
-  lead, hasClient, clientCreatedAt,
+  lead,
   interactionCount, dealCount, dealValue,
-  organizationId, userId,
+  organizationId, userId, onQualificationUpdated,
 }: LeadJourneyTabProps) {
   const [resolvedStages, setResolvedStages] = useState<ResolvedStageResponse | null>(null);
   const [stagesLoading, setStagesLoading] = useState(false);
@@ -161,6 +163,7 @@ export function LeadJourneyTab({
         lead={lead}
         qualificationHint={resolvedStages?.resolved_stage?.qualification_hint ?? null}
         userId={userId ?? ""}
+        onQualificationUpdated={onQualificationUpdated}
       />
 
       {/* Summary */}

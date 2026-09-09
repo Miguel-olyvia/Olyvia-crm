@@ -27,13 +27,15 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { resolveQuoteAssignedTo } from "@/utils/quotes/resolveQuoteAssignedTo";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw, AlertTriangle } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { QuotePipelineBar } from "@/components/quote/QuotePipelineBar";
 import { QuoteDealCard } from "@/components/quote/QuoteDealCard";
 import { QuoteEntityPreview } from "@/components/quote/QuoteEntityPreview";
 import { EntitySearchInput } from "@/components/EntitySearchInput";
 import { QuoteBuilderSidebar } from "@/components/quote/QuoteBuilderSidebar";
+import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+import { usePermissions } from "@/hooks/usePermissions";
 import { generateQuotePdfBlob } from "@/utils/generateQuotePdfBlob";
 import { downloadBlob } from "@/utils/generateProposalPdfBlob";
 import { QuoteConditions } from "@/components/quote/QuoteConditions";
@@ -41,6 +43,7 @@ import { QuotePdfPreviewDialog } from "@/components/quote/QuotePdfPreviewDialog"
 import { SendQuoteDialog } from "@/components/quotes/SendQuoteDialog";
 import { QuoteRejectReasonDialog } from "@/components/quotes/QuoteRejectReasonDialog";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
+import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
@@ -55,6 +58,12 @@ import { InlineProductSelector } from "@/components/quote/InlineProductSelector"
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { calculateQuoteFees, type LineForFees } from "../../supabase/functions/_shared/calculateQuoteFees";
+import {
+  getLineUnitCost,
+  getLineUnitPrice,
+  getLineSubtotal,
+  markupFromCostAndPrice,
+} from "@/utils/quotes/quoteLinePricing";
 import {
   Dialog,
   DialogContent,
@@ -88,6 +97,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // Sortable row wrapper for quote items
 function SortableQuoteRow({ id, children }: { id: string; children: (args: { setNodeRef: (el: HTMLElement | null) => void; style: React.CSSProperties; attributes: any; listeners: any; isDragging: boolean }) => React.ReactNode }) {
@@ -184,7 +194,6 @@ interface ServiceFeeType {
   apply_vat?: boolean;
   vat_rate?: number | null;
 }
-
 
 // Bundle component line (for expanded view)
 interface BundleComponentLine {
@@ -311,6 +320,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const { t } = useTranslation();
   const { activeCompany, companies: userCompanies, userType: companyUserType } = useCompany();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
+  const { hasPermission } = usePermissions();
+  // Ver custos/margens segue a MESMA regra do resto da app (Quotes/Proposals):
+  // quotes.manage ou super-admin. O construtor so protegia a EDICAO
+  // (canEditCosts/canEditMargins); os numeros de margem calculados eram mostrados
+  // so por existirem dados de custo, sem permissao. Tem de vir DEPOIS de
+  // hasPermission ser declarado, senao rebenta com "before initialization".
+  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
   const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
     viewerScope: getPermissionScope("quotes.view"),
     viewerAnewUserId: scopeAnewUserId,
@@ -804,6 +820,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       await fetchTemplates();
     } catch (error: any) {
       console.error("Error saving quote as template:", error);
+      captureFlowError(error, "quote-lifecycle");
       toast({
         title: "Erro ao guardar template",
         description: error?.message || "Não foi possível guardar o template. Tente novamente.",
@@ -983,7 +1000,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         });
       }
 
-
       // Helper functions for attribute price calculation
       const parseDimension = (value: string): { depth: number; width: number } | null => {
         const match = value.match(/(\d+(?:\.\d+)?)\s*[xX]\s*(\d+(?:\.\d+)?)/);
@@ -1131,6 +1147,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
               margem_percent: defaultMargin,
+              // O preço de venda definido fica sempre na linha e manda no preço unitário.
+              retail_price_unit: retailPrice,
               iva_percent: vatRate,
               attribute_price_addon: attributePriceAddon,
               int_percent: 0,
@@ -1157,6 +1175,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
               margem_percent: defaultMargin,
+              // O preço de venda definido fica sempre na linha e manda no preço unitário.
+              retail_price_unit: retailPrice,
               iva_percent: vatRate,
               int_percent: 0,
               discount_percent: 0,
@@ -1255,6 +1275,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
               margem_percent: defaultMargin,
+              // O preço total do bundle é o preço de venda da linha.
+              retail_price_unit: unitTotalPrice,
               iva_percent: 23,
               int_percent: defaultInt,
               discount_percent: 0,
@@ -1274,6 +1296,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       });
     } catch (error: any) {
       console.error("Error loading template items:", error);
+      captureFlowError(error, "quote-lifecycle");
       toast({
         title: t('quoteBuilder.toast.errorLoadingTemplate'),
         description: error.message,
@@ -1858,6 +1881,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           iva_percent: Number(line.iva_percent),
           int_percent: Number(line.int_percent),
           discount_percent: Number((line as any).discount_percent) || 0,
+          // Preço de venda definido gravado. Sem isto, reabrir o orçamento voltava
+          // a reconstruir o preço a partir do custo, mesmo já estando na base.
+          retail_price_unit: (line as any).retail_price_unit === null || (line as any).retail_price_unit === undefined
+            ? undefined
+            : Number((line as any).retail_price_unit),
           ordem: line.ordem,
           section_name: (line as any).section_name || "Geral",
         }))
@@ -1903,6 +1931,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         setFeeVatOverrides(overrides);
       }
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({
         title: t('quoteBuilder.toast.errorLoadingQuote'),
         description: error.message,
@@ -1930,13 +1959,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
 
       if (entityId) {
-        const [entityRes, phoneRes] = await Promise.all([
-          supabase.from("anew_entities").select("display_name").eq("id", entityId).single(),
-          supabase.from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", entityId).eq("is_primary", true).maybeSingle(),
-        ]);
-        recipientName = entityRes.data?.display_name || "";
-        recipientPhone = phoneRes.data?.phone_number || "";
-        recipientPhoneCountryCode = phoneRes.data?.country_code || "";
+        // O contacto viaja COM o documento: resolve_quote_contact confirma que
+        // o utilizador pode ler este orcamento e devolve nome/telefone
+        // primarios com privilegios de definer. A 2a consulta directa a
+        // anew_entity_phones pelo entity_id era negada pela RLS de ambito de
+        // dono a quem ve o orcamento mas nao e dono da lead.
+        const { data: contact } = await (supabase as any)
+          .rpc("resolve_quote_contact", { _quote_id: quoteIdForCtx })
+          .maybeSingle();
+        recipientName = contact?.display_name || "";
+        recipientPhone = contact?.phone_number || "";
+        recipientPhoneCountryCode = contact?.country_code || "";
       }
 
       const ctx: WhatsAppContext = {
@@ -1968,6 +2001,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const { blob, fileName } = await generateQuotePdfBlob(quoteId);
       downloadBlob(blob, fileName);
     } catch (e: any) {
+      captureFlowError(e, "quote-document-export");
       toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });
     } finally {
       setDownloadingPdf(false);
@@ -1984,12 +2018,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     handleSave();
   };
 
-
-
-
   // handleSave doubles as an onClick handler (<Button onClick={handleSave}>), so its
   // first argument may be a React MouseEvent — only treat it as a reject-reason
   // override when it is actually a string (the value passed from the confirm dialog).
+  const [missingTemplateOpen, setMissingTemplateOpen] = useState(false);
+  const missingTemplateOkRef = useRef(false);
+  const pendingSaveArgRef = useRef<unknown>(undefined);
+
   const handleSave = async (rejectReasonOverride?: unknown) => {
     if (saveLockRef.current || loading) return;
 
@@ -2077,6 +2112,19 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
     }
 
+    // Ultima porta antes de gravar: sem template escolhido, confirmar. Fica DEPOIS
+    // de todas as validacoes de proposito -- nao vale a pena perguntar "guardar
+    // assim?" a quem vai levar com um erro de validacao a seguir. E, sobretudo,
+    // porque outras confirmacoes (motivo de rejeicao, total nulo) reentram neste
+    // handler: se esta guarda corresse antes delas, o `ok` era reposto a false na
+    // primeira passagem e o aviso reaparecia depois de ja ter sido confirmado.
+    if (!formData.pdf_template_id && !missingTemplateOkRef.current) {
+      pendingSaveArgRef.current = rejectReasonOverride;
+      setMissingTemplateOpen(true);
+      return;
+    }
+    missingTemplateOkRef.current = false;
+
     saveLockRef.current = true;
     setLoading(true);
     try {
@@ -2161,13 +2209,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const linesToInsert = lines
         .filter((line) => line.qt > 0)
         .map((line) => {
-          const custoUnit =
-            line.custo_material_unit + line.custo_mao_obra_unit;
-          const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
-          const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-          const precoSemIvaBase = unitPrice * line.qt;
+          // Preço unitário e subtotal vêm da fonte única de preço da linha:
+          // o preço de venda definido manda, e o unitário é fechado ao cêntimo
+          // antes de multiplicar pela quantidade.
           const lineDiscount = line.discount_percent || 0;
-          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const precoSemIva = getLineSubtotal(line);
           const ivaValor = precoSemIva * (line.iva_percent / 100);
           const totalComIva = precoSemIva + ivaValor;
           const totalComDesconto =
@@ -2197,6 +2243,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             unidade: line.unidade || null,
             item_description: line.item_description || null,
             cost_price: line.cost_price || 0,
+            // O preço de venda definido manda no preço unitário. Sem ele gravado,
+            // o preço é reconstruído do custo arredondado e perde milésimos.
+            retail_price_unit: (line.retail_price_unit ?? null) || null,
           };
         });
 
@@ -2239,12 +2288,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           const iqLinesToInsert = iq.lines
             .filter(l => l.qt > 0)
             .map(l => {
-              const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
-              const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
-              const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
-              const precoSemIvaBase = unitPrice * l.qt;
+              // Mesma fonte única de preço usada no orçamento principal.
               const lineDiscount = l.discount_percent || 0;
-              const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+              const precoSemIva = getLineSubtotal(l);
               const ivaValor = precoSemIva * (l.iva_percent / 100);
               const totalComIva = precoSemIva + ivaValor;
               const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
@@ -2273,6 +2319,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 unidade: l.unidade || null,
                 item_description: l.item_description || null,
                 cost_price: l.cost_price || 0,
+                retail_price_unit: (l.retail_price_unit ?? null) || null,
               };
             });
 
@@ -2345,6 +2392,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         onClose();
       }
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({
         title: t('quoteBuilder.toast.errorSavingQuote'),
         description: error.message,
@@ -2416,6 +2464,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     name: string;
     sku: string | null;
     retail_price: number | null;
+    /** Preço de compra definido do artigo, quando existe. */
+    cost_price?: number | null;
     vat_rate: number | null;
     uom_symbol: string | null;
     uom_name: string | null;
@@ -2433,10 +2483,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const defaultMargin = currentLine.margem_percent || 30;
     const defaultInt = currentLine.int_percent || 0;
     
-    // Calculate material cost to maintain margin structure
-    const materialCost = retailPrice > 0 
-      ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) - currentLine.custo_mao_obra_unit
-      : 0;
+    // Custo real do artigo (preço de compra), quando existe. Só na sua ausência
+    // é que se deriva um custo a partir do preço de venda.
+    const realCost = Number(newProduct.cost_price) > 0 ? Number(newProduct.cost_price) : 0;
+    const materialCost = realCost > 0
+      ? realCost
+      : (retailPrice > 0
+        ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) - currentLine.custo_mao_obra_unit
+        : 0);
     
     const isProduct = newProduct.type === "product" || (!newProduct.type && !!currentLine.product_id);
     
@@ -2451,6 +2505,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       unidade: newProduct.uom_symbol || newProduct.uom_name || null,
       item_description: newProduct.description ?? currentLine.item_description ?? "",
       custo_material_unit: Math.max(0, materialCost),
+      cost_price: realCost > 0 ? realCost : currentLine.cost_price,
+      margem_percent: realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice) : currentLine.margem_percent,
+      // O preço de venda definido fica sempre na linha e manda no preço unitário.
+      retail_price_unit: retailPrice,
       iva_percent: vatRate,
       selected_attributes: selectedAttributes || {},
       attribute_price_addon: addonPrice,
@@ -2477,6 +2535,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       sku: string | null;
       category_name: string | null;
       retail_price: number | null;
+      /** Preço de compra definido do artigo, quando existe. */
+      cost_price?: number | null;
       vat_rate: number | null;
       organization_id: string | null;
       type: "product" | "service";
@@ -2539,6 +2599,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         unidade: null,
         item_description: bundleInfo.bundle_description ?? currentLine.item_description ?? "",
         custo_material_unit: Math.max(0, materialCost),
+        // O preço total do bundle é o preço de venda da linha.
+        retail_price_unit: retailPrice,
         selected_attributes: bundleSelectedAttributes,
         categoria: "Bundles",
         // Bundles are out of scope for supplier-reference tracking (known limitation).
@@ -2557,6 +2619,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         name: item.name,
         sku: item.sku,
         retail_price: item.retail_price,
+        cost_price: item.cost_price ?? null,
         vat_rate: item.vat_rate,
         uom_symbol: item.uom_symbol || null,
         uom_name: item.uom_name || null,
@@ -2675,6 +2738,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         custo_material_unit: materialCost,
         custo_mao_obra_unit: 0,
         margem_percent: defaultMargin,
+        // O preço de venda definido fica sempre na linha e manda no preço unitário.
+        retail_price_unit: retailPrice,
         iva_percent: vatRate,
         int_percent: defaultInt,
         discount_percent: 0,
@@ -2713,6 +2778,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       sku: string | null;
       category_name: string | null;
       retail_price: number | null;
+      /** Preço de compra definido do artigo, quando existe. */
+      cost_price?: number | null;
       vat_rate: number | null;
       organization_id: string | null;
       type: "product" | "service";
@@ -2766,9 +2833,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         return;
       }
       
-      const materialCost = retailPrice > 0 
-        ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)
-        : 0;
+      // Custo real do artigo (preço de compra), quando existe; só sem ele é que
+      // se deriva um custo a partir do preço de venda.
+      const realCost = Number(item.cost_price) > 0 ? Number(item.cost_price) : 0;
+      const materialCost = realCost > 0
+        ? realCost
+        : (retailPrice > 0
+          ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)
+          : 0);
+      const lineMarkup = realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice) : defaultMargin;
       
       // Use fullAttributes if available (enriched data from AddItemsDialog)
       // This includes attribute_code, label, value_type, unit, and value
@@ -2795,7 +2868,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           qt: quantity,
           custo_material_unit: materialCost,
           custo_mao_obra_unit: 0,
-          margem_percent: defaultMargin,
+          margem_percent: lineMarkup,
+          cost_price: realCost > 0 ? realCost : undefined,
+          // O preço de venda definido fica sempre na linha e manda no preço unitário.
+          retail_price_unit: retailPrice,
           iva_percent: vatRate,
           int_percent: defaultInt,
           discount_percent: 0,
@@ -2817,7 +2893,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           qt: quantity,
           custo_material_unit: materialCost,
           custo_mao_obra_unit: 0,
-          margem_percent: defaultMargin,
+          margem_percent: lineMarkup,
+          cost_price: realCost > 0 ? realCost : undefined,
+          // O preço de venda definido fica sempre na linha e manda no preço unitário.
+          retail_price_unit: retailPrice,
           iva_percent: vatRate,
           int_percent: defaultInt,
           discount_percent: 0,
@@ -2951,6 +3030,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
               margem_percent: defaultMargin,
+              // O preço de venda apurado fica sempre na linha e manda no preço unitário.
+              retail_price_unit: retailPrice,
               iva_percent: vatRate,
               int_percent: defaultInt,
               discount_percent: 0,
@@ -2986,6 +3067,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             custo_material_unit: materialCost,
             custo_mao_obra_unit: 0,
             margem_percent: defaultMargin,
+            // O valor do negócio é o preço de venda da linha.
+            retail_price_unit: dealValue,
             iva_percent: 23,
             int_percent: defaultInt,
             discount_percent: 0,
@@ -3013,7 +3096,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   // Removed handleSaveAttributes - now using LineAttributesDialog
 
-
   const calculateTotals = () => {
     let totalSemIva = 0;
     let totalIva = 0;
@@ -3031,12 +3113,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     lines
       .filter((line) => line.qt > 0)
       .forEach((line) => {
-        const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-        const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
-        const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-        const precoSemIvaBase = unitPrice * line.qt;
+        // Preço unitário e subtotal vêm da fonte única de preço da linha.
         const lineDiscount = line.discount_percent || 0;
-        const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+        const precoSemIva = getLineSubtotal(line);
 
         // Bundle lines may have components with mixed VAT rates — split the
         // line base across components by their share of the gross components
@@ -3154,12 +3233,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     );
     
     const total = categoryLines.reduce((sum, line) => {
-      const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-      const precoSemIva =
-        custoUnit *
-        (1 + line.margem_percent / 100) *
-        (1 + line.int_percent / 100) *
-        line.qt;
+      // Passa pela fonte única: esta variante ignorava o preço de venda definido.
+      const precoSemIva = getLineUnitPrice(line) * line.qt;
       const ivaValor = precoSemIva * (line.iva_percent / 100);
       return sum + precoSemIva + ivaValor;
     }, 0);
@@ -3205,9 +3280,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               const int = getLineValue(item.id, "int_percent") || item.int_default;
               const iva = getLineValue(item.id, "iva_percent") || item.iva_default;
 
-              const custoUnit = item.custo_material + item.custo_mao_obra;
               const precoSemIva = qt > 0
-                ? custoUnit * (1 + margem / 100) * (1 + int / 100) * qt
+                ? getLineUnitPrice({
+                    custo_material_unit: item.custo_material,
+                    custo_mao_obra_unit: item.custo_mao_obra,
+                    margem_percent: margem,
+                    int_percent: int,
+                  }) * qt
                 : 0;
               const ivaValor = precoSemIva * (iva / 100);
               const total = precoSemIva + ivaValor;
@@ -3347,7 +3426,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           })()}
         </div>
         <div className="flex items-center gap-2">
-
 
           <TooltipProvider>
             <Tooltip>
@@ -3569,7 +3647,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         </Button>
                       </div>
                     </div>
-                    <QuoteEntityPreview entityId={selectedSource.entity_id} />
+                    <QuoteEntityPreview entityId={selectedSource.entity_id} quoteId={quoteId} />
                   </div>
                   ) : (
                     <EntitySearchInput
@@ -3662,9 +3740,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                     value={formData.pdf_template_id || "__default__"}
                     onValueChange={(v) => setFormData({ ...formData, pdf_template_id: v === "__default__" ? "" : v })}
                   >
-                    <SelectTrigger><SelectValue placeholder="Layout padrão" /></SelectTrigger>
+                    <SelectTrigger><SelectValue placeholder="Escolher layout" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__default__">Layout padrão</SelectItem>
+                      <SelectItem value="__default__">Nenhum</SelectItem>
                       {pdfTemplates.map((tpl: any) => (
                         <SelectItem key={tpl.id} value={tpl.id}>
                           {tpl.name}{tpl.template_type === "quote" ? " · Orçamento" : tpl.template_type === "proposal" ? " · Proposta" : ""}
@@ -3672,7 +3750,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">Aplicado no preview e no PDF gerado</p>
+                  {formData.pdf_template_id ? (
+                    <p className="text-xs text-muted-foreground">Aplicado no preview e no PDF gerado</p>
+                  ) : (
+                    <p className="text-xs text-amber-600 flex items-start gap-1.5">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                      <span>Nenhum template escolhido.</span>
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -3831,12 +3916,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 let sectionCost = 0;
                 let hasSectionCostData = false;
                 sectionLines.filter(l => l.qt > 0).forEach(line => {
-                  const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-                  const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
-                  const unitPrice = isManual ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-                  const preco = unitPrice * line.qt;
-                  const ld = line.discount_percent || 0;
-                  sectionSubtotal += preco * (1 - ld / 100);
+                  sectionSubtotal += getLineSubtotal(line);
                   if (line.cost_price && line.cost_price > 0) {
                     hasSectionCostData = true;
                     sectionCost += line.cost_price * line.qt;
@@ -3866,7 +3946,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="font-bold text-primary">{formatCurrency(sectionSubtotal)}</span>
-                        {hasSectionCostData && sectionLines.length > 0 && (
+                        {canViewCosts && hasSectionCostData && sectionLines.length > 0 && (
                           <Badge variant="secondary" className={`text-xs ${marginColor}`}>
                             Margem: {sectionMargin.toFixed(0)}%
                           </Badge>
@@ -3927,11 +4007,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         <TableBody>
                           <SortableContext items={sectionItemIds} strategy={verticalListSortingStrategy}>
                           {sectionLines.map((line, lineIndex) => {
-                            const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-                            const isManualPrice = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
-                            const precoVenda = isManualPrice ? (line.retail_price_unit || 0) : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
+                            const custoUnit = getLineUnitCost(line);
+                            const precoVenda = getLineUnitPrice(line);
                             const lineDiscount = line.discount_percent || 0;
-                            const subtotalComDesconto = precoVenda * line.qt * (1 - lineDiscount / 100);
+                            const subtotalComDesconto = getLineSubtotal(line);
                             const costPrice = line.cost_price || custoUnit;
                             const itemMargin = precoVenda > 0 ? ((precoVenda - costPrice) / precoVenda) * 100 : 0;
                             const itemMarginColor = itemMargin > 30 ? "text-green-600 bg-green-50" : itemMargin >= 15 ? "text-yellow-600 bg-yellow-50" : "text-red-600 bg-red-50";
@@ -4115,12 +4194,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                       onChange={(e) => {
                                         const newPrice = Number(e.target.value);
                                         const updated = [...lines];
-                                        if (custoUnit > 0 && newPrice > 0) {
-                                          const newMargin = ((newPrice / custoUnit) - 1) * 100 / (1 + line.int_percent / 100);
-                                          updated[globalLineIndex] = { ...line, margem_percent: Math.max(0, newMargin) };
-                                        } else {
-                                          updated[globalLineIndex] = { ...line, retail_price_unit: newPrice };
-                                        }
+                                        // O preço escrito à mão manda sempre: fica em retail_price_unit.
+                                        // Com custo conhecido guarda-se também o markup equivalente, para a
+                                        // linha continuar coerente quando for recarregada da base de dados.
+                                        updated[globalLineIndex] = custoUnit > 0 && newPrice > 0
+                                          ? { ...line, retail_price_unit: newPrice, margem_percent: markupFromCostAndPrice(custoUnit, newPrice, line.int_percent) }
+                                          : { ...line, retail_price_unit: newPrice };
                                         setLines(updated);
                                       }}
                                       className="w-20 mx-auto text-center h-8 text-xs font-medium" />
@@ -4378,6 +4457,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               downloadingPdf={downloadingPdf}
               inlineQuotes={inlineQuotes}
               onSaveAsTemplate={handleOpenSaveAsTemplateDialog}
+              canViewCosts={canViewCosts}
             />
           </div>
         </div>
@@ -4432,7 +4512,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               const newMaterialCost = newRetailPrice > 0
                 ? (newRetailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)) - laborCost
                 : 0;
-              updatedLines[editingLineIndex] = { ...line, selected_attributes: attributes, custo_material_unit: Math.max(0, newMaterialCost) };
+              // O novo preço de venda fica na linha e manda no preço unitário.
+              updatedLines[editingLineIndex] = { ...line, selected_attributes: attributes, custo_material_unit: Math.max(0, newMaterialCost), retail_price_unit: newRetailPrice };
               setLines(updatedLines);
               toast({ title: "Atributos atualizados", description: `Preço atualizado: €${newRetailPrice.toFixed(2)}` });
             }
@@ -4505,6 +4586,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               targetLine.custo_material_unit = newTotal > 0
                 ? newTotal / (1 + margin / 100) / (1 + intPct / 100) - (targetLine.custo_mao_obra_unit || 0)
                 : 0;
+              // O novo total dos componentes é o preço de venda do bundle.
+              targetLine.retail_price_unit = newTotal;
               updated[editingBundleLineIndex!] = targetLine;
               setLines(updated);
               toast({ title: "Componente substituído", description: `${opt.name} associado ao bundle.` });
@@ -4723,6 +4806,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           // reflete no closure de handleSave numa próxima renderização).
           handleSave(reason);
         }}
+      />
+
+      <MissingTemplateDialog
+        open={missingTemplateOpen}
+        kind="quote"
+        onCancel={() => setMissingTemplateOpen(false)}
+        onConfirm={() => { setMissingTemplateOpen(false); missingTemplateOkRef.current = true; handleSave(pendingSaveArgRef.current); }}
       />
     </div>
   );

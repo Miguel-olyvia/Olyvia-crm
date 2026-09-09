@@ -76,16 +76,31 @@ const ENTITY_LABELS: Record<string, string> = {
   deal: "Negócio",
 };
 
+/**
+ * ATENÇÃO — não voltar a acrescentar opções a estes dois mapas sem antes
+ * implementar o ramo correspondente no motor.
+ *
+ * O motor destas regras é `supabase/functions/execute-workflow`, que lê a
+ * tabela `workflow_automation_rules` e sabe comparar exactamente:
+ *   - trigger_type === "stage_change"
+ *   - action_type  === "change_stage"
+ * Não há mais nenhum ramo, em edge function, migração ou trigger de BD.
+ *
+ * Estavam aqui oferecidos, além dos acima, os triggers `create` ("Quando
+ * Criado") e `update` ("Quando Atualizado") e as acções `update_field`
+ * ("Atualizar Campo") e `send_notification` ("Enviar Notificação"). Nenhum
+ * deles era executado: só existiam nesta lista de UI. Uma regra guardada com
+ * qualquer um deles ficava com aspecto de activa na interface e nunca corria.
+ * Foram retirados para a interface passar a dizer a verdade sobre o produto —
+ * não por serem indesejáveis. Se forem mesmo precisos, o trabalho é no motor
+ * primeiro; a entrada na lista é o último passo, não o primeiro.
+ */
 const TRIGGER_TYPES: Record<string, string> = {
   stage_change: "Mudança de Fase",
-  create: "Quando Criado",
-  update: "Quando Atualizado",
 };
 
 const ACTION_TYPES: Record<string, string> = {
   change_stage: "Mudar Fase",
-  update_field: "Atualizar Campo",
-  send_notification: "Enviar Notificação",
 };
 
 const RELATIONSHIP_FIELDS: Record<string, Record<string, string>> = {

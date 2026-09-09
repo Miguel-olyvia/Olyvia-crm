@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useToast } from '@/hooks/use-toast';
@@ -57,6 +58,7 @@ export function ScheduleResourceDialog({
     employee_id: '',
     color: '#10b981',
     max_daily_capacity: 8,
+    is_active: true,
   });
 
   // Reset form when dialog opens or resource changes
@@ -69,6 +71,9 @@ export function ScheduleResourceDialog({
         employee_id: resource?.employee_id || '',
         color: resource?.color || '#10b981',
         max_daily_capacity: resource?.max_daily_capacity || 8,
+        // Recursos antigos podem ter a coluna a null; nesse caso contam como
+        // activos, que e o que a base assume por omissao.
+        is_active: resource?.is_active ?? true,
       });
       setFieldErrors({});
     }
@@ -330,6 +335,27 @@ export function ScheduleResourceDialog({
           </div>
 
           <ResourceServiceAreas resourceId={resource?.id} disabled={isViewOnly} />
+
+          {/* Desactivar em vez de apagar.
+              Apagar um recurso e em cascata: leva as atribuicoes dele nas
+              visitas, e perde-se o registo de quem fez o que. Para quem sai da
+              empresa a saida certa e esta -- o historico fica, e a pessoa
+              deixa de aparecer para marcacoes novas. */}
+          {resource && canEdit && (
+            <div className="flex items-center justify-between">
+              <Label htmlFor="resource-active">
+                {formData.is_active
+                  ? t('scheduling.resourceActive')
+                  : t('scheduling.resourceInactive')}
+              </Label>
+              <Switch
+                id="resource-active"
+                checked={formData.is_active}
+                disabled={loading}
+                onCheckedChange={(v) => setFormData(f => ({ ...f, is_active: v }))}
+              />
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 pt-4">
             <Button

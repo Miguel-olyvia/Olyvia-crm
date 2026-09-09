@@ -44,6 +44,7 @@ import {
 import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/location";
 import { leadContactSchema } from "@/lib/validations";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Lead {
   id: string;
@@ -309,6 +310,7 @@ export function AnewLeadContactDialog({
         .order("is_primary", { ascending: false })
         .limit(1);
 
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       if (error || !data || data.length === 0) return "";
 
       const addr = (data[0] as any)?.address;
@@ -321,7 +323,8 @@ export function AnewLeadContactDialog({
       ].filter(Boolean);
 
       return parts.join(", ");
-    } catch {
+    } catch (addrErr) {
+      captureFlowError(addrErr, "db-error-leaked-to-ui");
       return "";
     }
   };
@@ -384,7 +387,7 @@ export function AnewLeadContactDialog({
       .eq("id", lead.id)
       .maybeSingle();
 
-    if (error) return null;
+    if (error) { captureFlowError(error, "db-error-leaked-to-ui"); return null; }
     return data?.campaign_id ?? null;
   };
 
@@ -423,6 +426,7 @@ export function AnewLeadContactDialog({
       setRefLookup((prev) => ({ ...prev, ...lookup }));
     } catch (error) {
       console.error("Error loading field definitions:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
       setFieldDefinitions([]);
     }
   };
@@ -437,6 +441,9 @@ export function AnewLeadContactDialog({
 
     if (!error && data) {
       setContactResults(data);
+    } else if (error) {
+      console.error("Error loading contact results:", error);
+      captureFlowError(error, "lead-contact-results-load");
     }
   };
 
@@ -468,6 +475,7 @@ export function AnewLeadContactDialog({
       .eq("interaction_type", "call")
       .order("created_at", { ascending: false });
 
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     if (!error && data) {
       // Map entity_interactions rows onto the ContactHistory shape consumed by
       // the history UI. callback_scheduled_at maps to the interaction's
@@ -502,6 +510,7 @@ export function AnewLeadContactDialog({
 
       if (membershipsError) {
         console.error("Error loading memberships:", membershipsError);
+        captureFlowError(membershipsError, "db-error-leaked-to-ui");
         setUsers([]);
         return;
       }
@@ -537,6 +546,7 @@ export function AnewLeadContactDialog({
 
       if (usersError) {
         console.error("Error loading users:", usersError);
+        captureFlowError(usersError, "db-error-leaked-to-ui");
         setUsers([]);
         return;
       }
@@ -550,6 +560,7 @@ export function AnewLeadContactDialog({
       );
     } catch (error) {
       console.error("Error loading users:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
       setUsers([]);
     } finally {
       setLoadingUsers(false);
@@ -807,6 +818,7 @@ export function AnewLeadContactDialog({
       
     } catch (error) {
       console.error("Error checking conflicts:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
     } finally {
       setLoadingConflicts(false);
     }
@@ -907,7 +919,8 @@ export function AnewLeadContactDialog({
               : {}),
             created_by: interactionCreatedBy,
             organization_id: companyId,
-          });
+          })
+          .throwOnError();
 
         // Emit event for timeline refresh
         window.dispatchEvent(
@@ -1157,34 +1170,22 @@ export function AnewLeadContactDialog({
 
             let resourceId: string | null = null;
             if (resourceUserId) {
+              // Só usar um recurso EXISTENTE do tipo "user". Se o responsável
+              // ainda não tem recurso de agendamento, NÃO se cria aqui: criar
+              // exige a permissão scheduling.resources.create (que quem trata de
+              // leads não tem) e fazia a RLS recusar (42501), rebentando todo o
+              // registo de contacto. Sem recurso -> a visita fica criada sem
+              // responsável no agendamento, em vez de dar erro.
               const { data: existingResource } = await supabase
                 .from("schedule_resources")
                 .select("id")
                 .eq("user_id", resourceUserId)
                 .eq("organization_id", companyId)
+                .eq("resource_type", "user")
                 .maybeSingle();
 
               if (existingResource?.id) {
                 resourceId = existingResource.id;
-              } else {
-                const assignedUser = users.find((u) => u.id === assignedTo);
-                const { data: newResource, error: newResourceError } = await supabase
-                  .from("schedule_resources")
-                  .insert({
-                    organization_id: companyId,
-                    name: assignedUser?.name || assignedUser?.email || "Utilizador",
-                    resource_type: "user",
-                    user_id: resourceUserId,
-                    is_active: true,
-                    color: "#10b981",
-                    metadata: {},
-                    created_by: currentAnewUserId,
-                  })
-                  .select("id")
-                  .single();
-
-                if (newResourceError) throw newResourceError;
-                resourceId = newResource?.id || null;
               }
             }
 
@@ -1201,10 +1202,12 @@ export function AnewLeadContactDialog({
 
               // Sync lead assigned_to with visit assignee
               if (assignedTo && assignedTo !== lead.assigned_to) {
-                await supabase
+                const { error: syncAssignedError } = await supabase
                   .from("anew_leads")
                   .update({ assigned_to: assignedTo })
                   .eq("id", lead.id);
+
+                if (syncAssignedError) throw syncAssignedError;
               }
             }
           }
@@ -1229,6 +1232,7 @@ export function AnewLeadContactDialog({
 
     } catch (error: any) {
       console.error("[AnewLeadContactDialog] Error:", error);
+      captureFlowError(error, "lead-contact-update");
       toast({ 
         title: "Erro ao registar contacto", 
         description: error.message || "Erro desconhecido",

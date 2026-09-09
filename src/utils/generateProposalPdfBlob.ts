@@ -1,8 +1,9 @@
 import { PDFDocument } from 'pdf-lib';
 import { supabase } from '@/integrations/supabase/client';
 import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
-import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate } from '@/utils/quotePdfTemplate';
+import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate } from '@/utils/quotePdfTemplate';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
+import { captureFlowError } from '@/lib/observability/captureFlowError';
 
 // Proposal-type templates ("Templates de Proposta") use a different section
 // layout convention (client_info/company_info as "card"/"inline" blocks)
@@ -51,7 +52,14 @@ function mergeProposalBranding(structuralTemplate: any | null, proposalTemplate:
  * produce the same document.
  */
 export interface ProposalPdfPrefetch {
-  proposal: { id: string; proposal_number?: string | null; title?: string | null; template_id?: string | null; organization_id?: string | null } | null;
+  proposal: {
+    id: string;
+    proposal_number?: string | null;
+    title?: string | null;
+    template_id?: string | null;
+    template_snapshot?: unknown;
+    organization_id?: string | null;
+  } | null;
   quotes: Array<{ quote: any; lines: any[]; fees: any[] }>;
 }
 
@@ -64,7 +72,7 @@ async function generateFromQuotePdfs(
     // Fetch proposal basic data for filename + template resolution
     const { data, error: propErr } = await (supabase as any)
       .from('proposals')
-      .select('id, proposal_number, title, template_id, organization_id')
+      .select('id, proposal_number, title, template_id, template_snapshot, organization_id')
       .eq('id', proposalId)
       .maybeSingle();
     if (propErr) throw propErr;
@@ -73,7 +81,9 @@ async function generateFromQuotePdfs(
 
   // Template explicitly selected on the proposal — used for branding only
   // (see mergeProposalBranding above), never as the structural template.
-  const explicitProposalTemplate = await fetchQuotePdfTemplateById(proposal?.template_id);
+  // A copia congelada na proposta manda sobre o modelo vivo -- ver
+  // resolveProposalBrandingTemplate.
+  const explicitProposalTemplate = await resolveProposalBrandingTemplate(proposal);
   const orgDefaultTemplate = await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null);
 
   // Resolve quote ids linked to this proposal
@@ -160,6 +170,16 @@ async function generateFromQuotePdfs(
 
   const merged = await PDFDocument.create();
   const lastQuoteId = resolvedQuotes[resolvedQuotes.length - 1]?.id;
+  // Continua-se a tentar os orcamentos seguintes -- um partido nao deve levar
+  // os outros atras. O motivo de cada falha vai para a consola e para o
+  // Sentry; ao utilizador nao se mostra o erro cru, mostra-se o que ele pode
+  // fazer.
+  let houveFalha = false;
+  // Uma falha a CARREGAR o gerador (e nao a executa-lo) quer dizer que a
+  // pagina esta aberta desde antes de uma publicacao e pede um pedaco de
+  // codigo que ja nao existe. Nada tem a ver com esta proposta, e recarregar
+  // resolve -- por isso e a unica classe que merece mensagem propria.
+  let versaoDesactualizada = false;
 
   for (const quote of resolvedQuotes) {
     try {
@@ -195,11 +215,25 @@ async function generateFromQuotePdfs(
       copied.forEach((page) => merged.addPage(page));
     } catch (e) {
       console.error(`[generateProposalPdfBlob] Failed quote ${quote.id}:`, e);
+      captureFlowError(e, 'proposal-document-export');
+      houveFalha = true;
+      const motivo = e instanceof Error ? e.message : String(e);
+      if (/dynamically imported module|Importing a module script failed|error loading dynamically/i.test(motivo)) {
+        versaoDesactualizada = true;
+      }
     }
   }
 
   if (merged.getPageCount() === 0) {
-    throw new Error('Não foi possível gerar nenhuma página para esta proposta.');
+    // A mensagem antiga dizia so "nao foi possivel gerar nenhuma pagina": o
+    // motivo morria na consola e quem a lia ficava sem saber o que fazer.
+    // Agora distingue-se o unico caso em que o utilizador PODE resolver.
+    if (versaoDesactualizada) {
+      throw new Error(
+        'Há uma versão nova da aplicação. Recarregue a página (Ctrl+F5) e tente novamente.'
+      );
+    }
+    throw new Error('Não foi possível produzir o documento desta proposta.');
   }
 
   const bytes = await merged.save();

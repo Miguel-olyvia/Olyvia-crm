@@ -2,6 +2,7 @@ import * as React from "react";
 import * as Sentry from "@sentry/react";
 
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
+import { sanitizeDbErrorForDisplay } from "@/utils/sanitizeDbErrorForDisplay";
 
 const TOAST_LIMIT = 1;
 const TOAST_REMOVE_DELAY = 1000000;
@@ -135,18 +136,44 @@ function dispatch(action: Action) {
 
 type Toast = Omit<ToasterToast, "id">;
 
+// Applies the shared sanitizer (`src/utils/sanitizeDbErrorForDisplay.ts`) to a
+// toast's `title`/`description` before it is shown. Only touches string
+// values — a raw database error never leaks in as anything else here — and
+// is itself wrapped so a sanitizer failure can never break a toast.
+function sanitizeToastField<T>(value: T): T {
+  if (typeof value !== "string") return value;
+  try {
+    return sanitizeDbErrorForDisplay(value).text as unknown as T;
+  } catch {
+    return value;
+  }
+}
+
 function toast({ ...props }: Toast) {
   const id = genId();
 
   // "destructive" toasts are the de facto error-surfacing convention across the
   // app's ~100 scattered try/catch call sites — piping them to Sentry gives
   // near-total error coverage without touching each call site individually.
+  // This uses the ORIGINAL, unsanitized text on purpose: Sentry must always
+  // see the full technical error regardless of what the sanitizer decides to
+  // show on screen.
   if (props.variant === "destructive") {
     Sentry.captureMessage(
       typeof props.title === "string" ? props.title : "Destructive toast",
       { level: "error", extra: { description: typeof props.description === "string" ? props.description : undefined } }
     );
   }
+
+  // Hides raw database/PostgREST text from what the user sees. Applied here,
+  // in the single choke point used by all 167 files that call `toast()`,
+  // instead of at each call site. See sanitizeDbErrorForDisplay.ts for the
+  // recognition rule and why it reports separately to Sentry when it fires.
+  const sanitizedProps: Toast = {
+    ...props,
+    title: sanitizeToastField(props.title),
+    description: sanitizeToastField(props.description),
+  };
 
   const update = (props: ToasterToast) =>
     dispatch({
@@ -158,7 +185,7 @@ function toast({ ...props }: Toast) {
   dispatch({
     type: "ADD_TOAST",
     toast: {
-      ...props,
+      ...sanitizedProps,
       id,
       open: true,
       onOpenChange: (open) => {

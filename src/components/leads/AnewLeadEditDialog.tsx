@@ -345,6 +345,24 @@ export function AnewLeadEditDialog({
         ...(existingMeta ? { _meta: existingMeta } : {}),
       };
 
+      // Normalizar os campos base no snapshot antes de guardar. O formulario le
+      // um campo base (Email, Telefone, Morada...) pela chave da campanha quando
+      // ela existe (po_email, po_telefone...), mas a escrita podia deixar a
+      // chave da campanha com o valor ANTIGO enquanto o valor novo ficava so
+      // noutra chave -- ao reabrir, a leitura ia buscar a po_email antiga e o
+      // Editar parecia ter revertido (embora a entidade/Info ja mostrasse o
+      // valor novo). Aqui escrevemos o valor de cada campo base -- o MESMO que
+      // e sincronizado para a entidade -- tanto na chave padrao como na chave da
+      // campanha, para as duas nunca divergirem. NAO toca em form_submissions
+      // (a submissao original vive noutra tabela e mantem-se).
+      for (const generalKey of GENERAL_FIELD_KEYS) {
+        const canonical = readGeneralField(generalKey, updatedFieldValues);
+        if (canonical === "" || canonical === null || canonical === undefined) continue;
+        updatedFieldValues[generalKey] = canonical;
+        const mappedKey = generalKeyToFormKey[generalKey];
+        if (mappedKey) updatedFieldValues[mappedKey] = canonical;
+      }
+
       const statusChanged = status !== lead.status;
       const qualificationChanged = qualificationType !== (lead.qualification_type ?? null);
 
@@ -476,7 +494,7 @@ export function AnewLeadEditDialog({
         const city = readGeneralField("city", updatedFieldValues);
         if (street && postalCode) {
           try {
-            await linkEntityAddress(lead.entity_id, street, postalCode, city, userId);
+            await linkEntityAddress(lead.entity_id, companyId, street, postalCode, city, userId);
           } catch (addressError) {
             console.error("Error linking lead's address:", addressError);
             const description = await getFriendlyErrorMessage(addressError);

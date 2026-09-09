@@ -22,9 +22,10 @@ import {
 } from "@/components/ui/collapsible";
 import {
   Plus, Trash2, ClipboardList, Mail, Send,
-  ChevronDown, ChevronUp, Zap, CheckCircle2, XCircle,
+  ChevronDown, ChevronUp, Zap, CheckCircle2, XCircle, FileSignature,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface WorkflowStage {
   id: string;
@@ -60,17 +61,70 @@ const ACTION_LABELS: Record<string, { label: string; icon: React.ReactNode; desc
     icon: <ClipboardList className="w-4 h-4 text-amber-600" />,
     description: "Cria uma atividade/tarefa automaticamente",
   },
+  // Mantido apenas para rotular linhas já existentes na tabela (ver
+  // SELECTABLE_ACTION_TYPES abaixo) — deixou de ser oferecido como opção nova.
   send_notification: {
     label: "Enviar Notificação",
     icon: <Send className="w-4 h-4 text-blue-600" />,
     description: "Envia uma notificação interna",
   },
+  // Mantido apenas para rotular linhas já existentes na tabela (ver
+  // SELECTABLE_ACTION_TYPES abaixo) — deixou de ser oferecido como opção nova:
+  // o motor já dispara templates de email a cada mudança de fase da proposta
+  // (execute-workflow → trigger-email-template, moduleMap proposal→proposals),
+  // ter as duas portas duplicava envios para quem configurasse nas duas, e não
+  // explicava nada para quem configurasse só aqui.
   send_email: {
     label: "Enviar Email",
     icon: <Mail className="w-4 h-4 text-purple-600" />,
     description: "Envia um email automático",
   },
+  // Legacy/informational entry: the actual "aceite → cria contrato"
+  // automation is hardcoded in execute-workflow (triggered by the stage's
+  // is_won flag) and does not read this table — this row only labels it.
+  create_contract: {
+    label: "Criar Contrato",
+    icon: <FileSignature className="w-4 h-4 text-emerald-600" />,
+    description: "Regista a criação automática de contrato (executada pelo motor de workflow ao aceitar a proposta)",
+  },
 };
+
+/**
+ * Tipos de acção oferecidos ao criar uma acção NOVA. `ACTION_LABELS` acima é o
+ * dicionário de apresentação (tem de continuar a cobrir tudo o que já exista
+ * guardado na tabela, senão a lista passa a mostrar o `action_type` em cru);
+ * esta é a lista do que pode ser escolhido.
+ *
+ * `send_notification` foi retirado da escolha: a string não aparece em lado
+ * nenhum de `supabase/` — nem edge function, nem migração, nem trigger de BD.
+ * Não existe nada que a execute, aqui ou noutro módulo.
+ *
+ * `send_email` foi retirado da escolha por uma razão diferente: existe, mas
+ * está a mais. O motor (`supabase/functions/execute-workflow`) já chama
+ * `trigger-email-template` a cada mudança de fase (moduleMap inclui
+ * proposal→proposals) — uma proposta que muda de fase já dispara templates de
+ * email por si só. Ter `send_email` escolhível aqui dava duas portas para a
+ * mesma casa: configurar nos dois lados duplicava o envio, configurar só
+ * aqui não fazia nada (esta tabela não é lida pelo motor para este tipo).
+ *
+ * `create_task` foi retirado da escolha pela razão original: o motor NÃO lê
+ * esta tabela. Lê `lead_stage_actions`, `deal_stage_actions`,
+ * `quote_stage_actions` e `contract_stage_actions` — nunca
+ * `proposal_stage_actions`. Uma tarefa configurada aqui era gravada e nunca
+ * criada. O `ai-assistant/tools/stage_actions.ts` já o dizia por escrito:
+ * "proposal → proposal_stage_actions (READ-ONLY via agente — executor NÃO lê
+ * esta tabela)".
+ *
+ * Sobra `create_contract`, e é o único que faz sentido oferecer: funciona, mas
+ * NÃO por esta tabela — está fixo no código pela flag is_won da fase. As duas
+ * regras guardadas hoje (uma delas numa organização com dados reais) são desse
+ * tipo e continuam a funcionar como sempre funcionaram.
+ *
+ * Retirou-se a promessa, não se implementou a funcionalidade. Ligar esta
+ * superfície ao motor é decisão de produto por tomar, não uma correcção — e
+ * enquanto não for tomada, a interface passa a dizer a verdade sobre o que faz.
+ */
+const SELECTABLE_ACTION_TYPES = ["create_contract"] as const;
 
 export function ProposalStageActionsConfig({ stages, companyId }: Props) {
   const { toast } = useToast();
@@ -100,6 +154,8 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
           action_config: (a.action_config || {}) as Record<string, unknown>,
         }))
       );
+    } else {
+      toast({ title: "Erro", description: "Não foi possível carregar as ações da fase.", variant: "destructive" });
     }
     hasLoadedOnceRef.current = true;
       setLoading(false);
@@ -149,7 +205,12 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
     const { error } = await (supabase.from("proposal_stage_actions" as any) as any)
       .update({ is_active: !action.is_active })
       .eq("id", action.id);
-    if (!error) loadActions();
+    if (!error) {
+      loadActions();
+    } else {
+      captureFlowError(error, "proposal-lifecycle");
+      toast({ title: "Erro ao alterar acção", description: "Não foi possível atualizar o estado da acção.", variant: "destructive" });
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -157,6 +218,9 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
     if (!error) {
       toast({ title: "Acção removida" });
       loadActions();
+    } else {
+      captureFlowError(error, "proposal-lifecycle");
+      toast({ title: "Erro ao remover acção", description: "Não foi possível remover a acção.", variant: "destructive" });
     }
   };
 
@@ -168,8 +232,12 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
     setIsFormOpen(false);
   };
 
-  const getStageName = (stageId: string) => stages.find((s) => s.id === stageId)?.label || stageId;
+  const getStageName = (stageId: string) => stages.find((s) => s.id === stageId)?.label || "Fase removida";
   const getStageColor = (stageId: string) => stages.find((s) => s.id === stageId)?.color || "#6b7280";
+  // Only offer active stages as a target for a NEW action — stages is the
+  // full (active + inactive) list, needed above just to resolve labels for
+  // actions already tied to a deactivated stage.
+  const activeStages = stages.filter((s) => s.is_active);
 
   const actionsByStage = actions.reduce<Record<string, StageAction[]>>((acc, a) => {
     acc[a.stage_id] = acc[a.stage_id] || [];
@@ -284,7 +352,7 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
                       <SelectValue placeholder="Selecionar fase..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {stages.map((s) => (
+                      {activeStages.map((s) => (
                         <SelectItem key={s.id} value={s.id}>
                           <div className="flex items-center gap-2">
                             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: s.color }} />
@@ -302,11 +370,11 @@ export function ProposalStageActionsConfig({ stages, companyId }: Props) {
                       <SelectValue placeholder="Selecionar acção..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {Object.entries(ACTION_LABELS).map(([key, meta]) => (
+                      {SELECTABLE_ACTION_TYPES.map((key) => (
                         <SelectItem key={key} value={key}>
                           <div className="flex items-center gap-2">
-                            {meta.icon}
-                            {meta.label}
+                            {ACTION_LABELS[key].icon}
+                            {ACTION_LABELS[key].label}
                           </div>
                         </SelectItem>
                       ))}

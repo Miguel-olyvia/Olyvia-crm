@@ -1,7 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
-import { requireServiceRole, getServiceRoleKey } from "../_shared/auth.ts";
+import { requireServiceRoleOrCronSecret, getServiceRoleKey } from "../_shared/auth.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { chooseEscalatingTier } from "./alertTiers.ts";
 
 initSentry();
 // Notification engine — runs via cron (service_role required)
@@ -153,7 +154,7 @@ Deno.serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
   }
 
-  if (!requireServiceRole(req)) {
+  if (!requireServiceRoleOrCronSecret(req)) {
     return new Response(
       JSON.stringify({ error: "Service role required" }),
       { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -524,11 +525,16 @@ Deno.serve(async (req) => {
     const queuedNotificationKeys = new Set<string>();
 
     // ★ OPTIMIZATION: Batch preload ALL active notifications for dedup
-    // Instead of N individual queries, one single query loads all active notification keys
+    // Instead of N individual queries, one single query loads all active notification keys.
+    // The filter here MUST mirror the "notifications_dedup" unique index
+    // (type, entity_id, user_id) WHERE is_resolved = false — which does NOT
+    // exclude dismissed rows. Filtering on is_dismissed here made every
+    // dismissed-but-unresolved alert invisible to shouldSkip(), so it was
+    // re-queued on every run and hit the index with a 23505 forever.
     const activeNotifs = await fetchAll<any>(
       supabase,
       "notifications",
-      (q) => q.eq("kind", "alert").eq("is_resolved", false).eq("is_dismissed", false),
+      (q) => q.eq("kind", "alert").eq("is_resolved", false),
       "entity_id, type, user_id",
     );
 
@@ -595,7 +601,17 @@ Deno.serve(async (req) => {
           const cfgUrg = getAlertConfig(orgId, "proposal_no_response_urgent");
           const cfgNorm = getAlertConfig(orgId, "proposal_no_response");
 
-          if (cfgUrg.is_active && cfgUrg.days_threshold && daysSinceSent >= cfgUrg.days_threshold && !shouldSkip(p.id, "proposal_no_response_urgent", userId)) {
+          // See alertTiers.ts: once the urgent threshold is met the normal alert
+          // is retired by the resolver above ("superseded_by_urgent"), so the
+          // normal tier must be out of the picture entirely — falling through
+          // to it here re-created the alert on every run, forever.
+          const proposalTier = chooseEscalatingTier({
+            urgentApplies: Boolean(cfgUrg.is_active && cfgUrg.days_threshold && daysSinceSent >= cfgUrg.days_threshold),
+            urgentAlreadyActive: shouldSkip(p.id, "proposal_no_response_urgent", userId),
+            normalApplies: Boolean(cfgNorm.is_active && cfgNorm.days_threshold && daysSinceSent >= cfgNorm.days_threshold),
+            normalAlreadyActive: shouldSkip(p.id, "proposal_no_response", userId),
+          });
+          if (proposalTier === "urgent") {
             queueNotification({
               user_id: userId, organization_id: orgId, kind: "alert",
               type: "proposal_no_response_urgent", entity_type: "proposal", entity_id: p.id,
@@ -604,7 +620,7 @@ Deno.serve(async (req) => {
               priority: "high", action_type: "send_followup",
               action_config: { proposal_id: p.id },
             });
-          } else if (cfgNorm.is_active && cfgNorm.days_threshold && daysSinceSent >= cfgNorm.days_threshold && !shouldSkip(p.id, "proposal_no_response", userId)) {
+          } else if (proposalTier === "normal") {
             queueNotification({
               user_id: userId, organization_id: orgId, kind: "alert",
               type: "proposal_no_response", entity_type: "proposal", entity_id: p.id,
@@ -704,7 +720,14 @@ Deno.serve(async (req) => {
           const cfgExp = getAlertConfig(orgId, "contract_expiring");
           const ELIGIBLE_FOR_EXPIRING = ["signed", "active", "pending_signature"];
           if (!ELIGIBLE_FOR_EXPIRING.includes(ct.status)) continue;
-          if (cfgExpUrg.is_active && cfgExpUrg.days_threshold && daysUntilEnd >= 0 && daysUntilEnd <= cfgExpUrg.days_threshold && !shouldSkip(ct.id, "contract_expiring_urgent", userId)) {
+          // Same "superseded_by_urgent" churn as proposals — see alertTiers.ts.
+          const contractTier = chooseEscalatingTier({
+            urgentApplies: Boolean(cfgExpUrg.is_active && cfgExpUrg.days_threshold && daysUntilEnd >= 0 && daysUntilEnd <= cfgExpUrg.days_threshold),
+            urgentAlreadyActive: shouldSkip(ct.id, "contract_expiring_urgent", userId),
+            normalApplies: Boolean(cfgExp.is_active && cfgExp.days_threshold && daysUntilEnd >= 0 && daysUntilEnd <= cfgExp.days_threshold),
+            normalAlreadyActive: shouldSkip(ct.id, "contract_expiring", userId),
+          });
+          if (contractTier === "urgent") {
             queueNotification({
               user_id: userId, organization_id: orgId, kind: "alert",
               type: "contract_expiring_urgent", entity_type: "contract", entity_id: ct.id,
@@ -713,7 +736,7 @@ Deno.serve(async (req) => {
               priority: "high", action_type: "send_renewal",
               action_config: { contract_id: ct.id },
             });
-          } else if (cfgExp.is_active && cfgExp.days_threshold && daysUntilEnd >= 0 && daysUntilEnd <= cfgExp.days_threshold && !shouldSkip(ct.id, "contract_expiring", userId)) {
+          } else if (contractTier === "normal") {
             queueNotification({
               user_id: userId, organization_id: orgId, kind: "alert",
               type: "contract_expiring", entity_type: "contract", entity_id: ct.id,
@@ -1305,10 +1328,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "lead_no_contact_urgent");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "lead_no_contact_urgent", entity_type: "lead", entity_id: userId,
+            type: "lead_no_contact_urgent", entity_type: "lead", entity_id: group.urgent[0],
             title: `${pl(group.urgent.length, "lead", "leads")} sem contacto há +${cfg.days_threshold} dias`,
             message: `Tem ${pl(group.urgent.length, "lead", "leads")} que ${group.urgent.length === 1 ? "precisa" : "precisam"} de atenção urgente.`,
-            priority: "high", action_type: "call_now", link: "/leads",
+            priority: "high", action_type: "call_now", link: `/leads?open=${group.urgent[0]}`,
             action_config: { entity_ids: group.urgent, count: group.urgent.length },
           });
         }
@@ -1316,10 +1339,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "lead_no_contact");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "lead_no_contact", entity_type: "lead", entity_id: userId,
+            type: "lead_no_contact", entity_type: "lead", entity_id: group.normal[0],
             title: `${pl(group.normal.length, "lead", "leads")} sem contacto há +${cfg.days_threshold} dias`,
             message: `Considere contactar ${group.normal.length === 1 ? "este lead" : `estes ${group.normal.length} leads`}.`,
-            priority: "medium", link: "/leads",
+            priority: "medium", link: `/leads?open=${group.normal[0]}`,
             action_config: { entity_ids: group.normal, count: group.normal.length },
           });
         }
@@ -1398,10 +1421,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "contact_no_contact_urgent");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "contact_no_contact_urgent", entity_type: "contact", entity_id: userId,
+            type: "contact_no_contact_urgent", entity_type: "contact", entity_id: group.urgent[0],
             title: `${pl(group.urgent.length, "contacto", "contactos")} sem interação há +${cfg.days_threshold} dias`,
             message: `Tem ${pl(group.urgent.length, "contacto", "contactos")} que ${group.urgent.length === 1 ? "precisa" : "precisam"} de atenção urgente.`,
-            priority: "high", action_type: "call_now", link: "/contacts",
+            priority: "high", action_type: "call_now", link: `/contacts?open=${group.urgent[0]}`,
             action_config: { entity_ids: group.urgent, count: group.urgent.length },
           });
         }
@@ -1409,10 +1432,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "contact_no_contact");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "contact_no_contact", entity_type: "contact", entity_id: userId,
+            type: "contact_no_contact", entity_type: "contact", entity_id: group.normal[0],
             title: `${pl(group.normal.length, "contacto", "contactos")} sem interação há +${cfg.days_threshold} dias`,
             message: `Considere fazer follow-up com ${group.normal.length === 1 ? "este contacto" : `estes ${group.normal.length} contactos`}.`,
-            priority: "medium", link: "/contacts",
+            priority: "medium", link: `/contacts?open=${group.normal[0]}`,
             action_config: { entity_ids: group.normal, count: group.normal.length },
           });
         }
@@ -1420,10 +1443,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "contact_no_deal");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "contact_no_deal", entity_type: "contact", entity_id: userId,
+            type: "contact_no_deal", entity_type: "contact", entity_id: group.noDeal[0],
             title: `${pl(group.noDeal.length, "contacto", "contactos")} sem pedido de proposta há +${cfg.days_threshold} dias`,
             message: `${group.noDeal.length === 1 ? "Este contacto foi convertido" : "Estes contactos foram convertidos"} mas não ${group.noDeal.length === 1 ? "tem" : "têm"} pedido de proposta criado.`,
-            priority: "medium", link: "/contacts",
+            priority: "medium", link: `/contacts?open=${group.noDeal[0]}`,
             action_config: { entity_ids: group.noDeal, count: group.noDeal.length },
           });
         }
@@ -1480,10 +1503,10 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "client_no_contact_urgent");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "client_no_contact_urgent", entity_type: "client", entity_id: userId,
+            type: "client_no_contact_urgent", entity_type: "client", entity_id: group.urgent[0],
             title: `${pl(group.urgent.length, "cliente", "clientes")} sem contacto há +${cfg.days_threshold} dias`,
             message: `Tem ${pl(group.urgent.length, "cliente", "clientes")} que ${group.urgent.length === 1 ? "precisa" : "precisam"} de atenção urgente.`,
-            priority: "high", action_type: "call_now", link: "/clients",
+            priority: "high", action_type: "call_now", link: `/clients?open=${group.urgent[0]}`,
             action_config: { entity_ids: group.urgent, count: group.urgent.length },
           });
         }
@@ -1491,20 +1514,20 @@ Deno.serve(async (req) => {
           const cfg = getAlertConfig(group.orgId, "client_no_contact");
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "client_no_contact", entity_type: "client", entity_id: userId,
+            type: "client_no_contact", entity_type: "client", entity_id: group.normal[0],
             title: `${pl(group.normal.length, "cliente", "clientes")} sem contacto há +${cfg.days_threshold} dias`,
             message: `Considere contactar ${group.normal.length === 1 ? "este cliente" : `estes ${group.normal.length} clientes`}.`,
-            priority: "medium", link: "/clients",
+            priority: "medium", link: `/clients?open=${group.normal[0]}`,
             action_config: { entity_ids: group.normal, count: group.normal.length },
           });
         }
         if (group.missingNif.length > 0) {
           notifications.push({
             user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "client_missing_nif", entity_type: "client", entity_id: userId,
+            type: "client_missing_nif", entity_type: "client", entity_id: group.missingNif[0],
             title: `${pl(group.missingNif.length, "cliente", "clientes")} sem NIF`,
             message: `Tem ${pl(group.missingNif.length, "cliente", "clientes")} sem informação fiscal.`,
-            priority: "low", link: "/clients",
+            priority: "low", link: `/clients?open=${group.missingNif[0]}`,
             action_config: { entity_ids: group.missingNif, count: group.missingNif.length },
           });
         }

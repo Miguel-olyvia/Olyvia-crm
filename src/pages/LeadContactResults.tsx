@@ -49,6 +49,7 @@ import {
 } from "lucide-react";
 import { HelpButton } from "@/components/HelpButton";
 import { leadContactResultConfigSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ContactResult {
   id: string;
@@ -79,6 +80,7 @@ export default function LeadContactResults() {
   const selectedCompanyId = activeCompany?.id;
   const [results, setResults] = useState<ContactResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingResult, setEditingResult] = useState<ContactResult | null>(null);
@@ -128,18 +130,37 @@ export default function LeadContactResults() {
     loadResults();
   }, [selectedCompanyId]);
 
+  // A failed load used to leave `results` empty and say nothing: an outage
+  // (RLS change, network) was indistinguishable from "this org has no contact
+  // results configured", and the error reached neither the user nor any log.
+  // Now it is reported to Sentry AND shown in place of the empty state, so
+  // nobody edits a list they cannot actually see.
   const loadResults = async () => {
     setLoading(true);
-    const { data, error } = await (supabase as any)
-      .from("lead_contact_results")
-      .select("*")
-      .or(`organization_id.is.null,organization_id.eq.${selectedCompanyId}`)
-      .order("sort_order", { ascending: true });
+    try {
+      const { data, error } = await (supabase as any)
+        .from("lead_contact_results")
+        .select("*")
+        .or(`organization_id.is.null,organization_id.eq.${selectedCompanyId}`)
+        .order("sort_order", { ascending: true });
 
-    if (!error && data) {
-      setResults(data);
+      if (error) throw error;
+
+      setResults(data ?? []);
+      setLoadFailed(false);
+    } catch (error: any) {
+      console.error("[lead-contact-results] load failed", error);
+      captureFlowError(error, "lead-contact-results-load");
+      setResults([]);
+      setLoadFailed(true);
+      toast({
+        title: t('contactResults.toast.loadError'),
+        description: error?.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const handleOpenDialog = (result?: ContactResult) => {
@@ -291,6 +312,25 @@ export default function LeadContactResults() {
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-8">
                     {t('contactResults.loading')}
+                  </TableCell>
+                </TableRow>
+              ) : loadFailed ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center py-8">
+                    <p className="text-destructive font-medium">
+                      {t('contactResults.loadErrorTitle')}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      {t('contactResults.loadErrorDescription')}
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-4"
+                      onClick={() => void loadResults()}
+                    >
+                      {t('contactResults.retry')}
+                    </Button>
                   </TableCell>
                 </TableRow>
               ) : results.length === 0 ? (

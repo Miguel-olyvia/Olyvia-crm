@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { Plus, Settings2, Clock, MapPin, Users, Zap, Pencil, Trash2, Loader2 } from 'lucide-react';
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { AutoScheduleRuleDialog } from './AutoScheduleRuleDialog';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';

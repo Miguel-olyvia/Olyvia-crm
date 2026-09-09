@@ -12,6 +12,7 @@ import { ProposalPortalDocument } from "@/components/proposals/ProposalPortalDoc
 import { loadProposalPortalData, type ProposalPortalData } from "@/components/proposals/proposalPortalData";
 import { generateProposalPdfBlob, downloadBlob } from "@/utils/generateProposalPdfBlob";
 import { useToast } from "@/hooks/use-toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ProposalPortalPreviewProps {
   open: boolean;
@@ -29,6 +30,7 @@ export function ProposalPortalPreview({ open, onOpenChange, proposalId }: Propos
       const { blob, fileName } = await generateProposalPdfBlob(proposalId);
       downloadBlob(blob, fileName);
     } catch (e: any) {
+      captureFlowError(e, "proposal-document-export");
       toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });
     }
   };

@@ -43,6 +43,19 @@ verify_jwt = false
 [functions.book-slot]
 verify_jwt = false
 
+# Chamada por um visitante ANONIMO no site de um cliente: o passo de
+# agendamento do formulario embebido pergunta-lhe que dias e horas estao livres,
+# antes de o `book-slot` marcar.
+#
+# Sem esta entrada o deploy assume o default (true) e o gateway rejeita com
+# UNAUTHORIZED_INVALID_JWT_FORMAT antes de a funcao arrancar -- a mesma omissao
+# que deixou o cron das notificacoes KO a 31/08. As outras seis funcoes publicas
+# do formulario ja estavam declaradas; esta ficou de fora.
+#
+# Nao fica desprotegida: limita a 30 pedidos por minuto por IP.
+[functions.public-availability]
+verify_jwt = false
+
 
 [functions.get-campaign-form]
 verify_jwt = false
@@ -80,10 +93,15 @@ verify_jwt = false
 [functions.process-scheduled-emails]
 verify_jwt = false
 
-[functions.trigger-email-template]
+# Chamada por pg_cron (job 15) com a service_role key do Vault, que não é um
+# JWT — com verify_jwt o gateway rejeita-a com UNAUTHORIZED_INVALID_JWT_FORMAT
+# antes de a função sequer arrancar. A função autentica-se sozinha via
+# requireServiceRole(). Sem esta entrada o deploy assume o default (true) e
+# deixa o cron KO, como aconteceu a 31/08.
+[functions.generate-notifications]
 verify_jwt = false
 
-[functions.generate-notifications]
+[functions.trigger-email-template]
 verify_jwt = false
 
 [functions.export-data]

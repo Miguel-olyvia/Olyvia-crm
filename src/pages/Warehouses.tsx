@@ -36,6 +36,7 @@ import { exportWarehousesToCSV, parseWarehousesCSV } from "@/utils/warehousesExp
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { warehouseSchema } from "@/lib/validations";
 import StockMovementDialog from "@/components/inventory/StockMovementDialog";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   entrada: "Entrada",
@@ -330,6 +331,7 @@ const Warehouses = () => {
       setImportDialogOpen(false);
       fetchWarehouses();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t("warehouses.toast.importError"),
         description: error.message,

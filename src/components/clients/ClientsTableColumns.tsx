@@ -10,7 +10,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Settings2, RotateCcw, Save } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 export interface ClientColumnConfig {
   id: string;

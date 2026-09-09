@@ -4,6 +4,7 @@ import {
   XCircle, Globe, Calendar, User
 } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
+import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +53,8 @@ export function QuoteSendHistory({
   const [sends, setSends] = useState<QuoteSend[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const { toast } = useToast();
+
   useEffect(() => {
     if (open && quoteId) {
       loadSendHistory();
@@ -73,6 +76,7 @@ export function QuoteSendHistory({
       setSends(data || []);
     } catch (error) {
       console.error("Error loading quote send history:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar o histórico de envios.", variant: "destructive" });
     } finally {
       setLoading(false);
     }

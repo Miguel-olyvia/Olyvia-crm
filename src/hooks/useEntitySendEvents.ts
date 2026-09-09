@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 
 export interface SendEvent {
   id: string;
@@ -247,7 +248,7 @@ export function useEntitySendEvents(entityId: string | null | undefined) {
         if (!cancelled) setEvents(out);
       } catch (e) {
         console.error("[useEntitySendEvents] error:", e);
-        if (!cancelled) setEvents([]);
+        if (!cancelled) { setEvents([]); toast.error("Não foi possível carregar o histórico de envios."); }
       } finally {
         if (!cancelled) setLoading(false);
       }

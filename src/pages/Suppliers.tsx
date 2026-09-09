@@ -30,6 +30,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
 import SupplierCatalogDialog from "@/components/SupplierCatalogDialog";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
 
@@ -767,6 +768,7 @@ const Suppliers = () => {
         try { await supabase.rpc('clear_audit_context'); } catch { /* intentional */ }
       }
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t("suppliers.toast.importError"),
         description: error.message,

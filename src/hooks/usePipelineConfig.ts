@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { normalizeModuleOrder } from "@/lib/pipeline/moduleOrder";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface PipelineModule {
   id: string;
@@ -10,6 +12,8 @@ export interface PipelineModule {
   icon: string;
   color: string;
   enabled: boolean;
+  /** Passo terminal da cadeia (o Cliente). Ver `isTerminal` em lib/pipeline/moduleOrder. */
+  terminal?: boolean;
 }
 
 export interface PipelineTemplate {
@@ -45,23 +49,28 @@ export function usePipelineConfig(companyId: string | null) {
   const [loading, setLoading] = useState(true);
 
   const loadTemplates = useCallback(async () => {
-    const { data } = await (supabase.from("pipeline_templates") as any)
+    const { data, error } = await (supabase.from("pipeline_templates") as any)
       .select("id, name, description, industry, icon, modules, is_default")
       .order("is_default", { ascending: false });
+    if (error) captureFlowError(error, 'db-error-leaked-to-ui');
     if (data) setTemplates(data.map((t: any) => ({ ...t, modules: t.modules || [] })));
   }, []);
 
   const loadConfig = useCallback(async () => {
     if (!companyId) { setLoading(false); return; }
     setLoading(true);
-    const { data } = await (supabase.from("organization_pipeline_config") as any)
+    const { data, error } = await (supabase.from("organization_pipeline_config") as any)
       .select("id, organization_id, template_id, modules")
       .eq("organization_id", companyId)
       .maybeSingle();
 
+    if (error) captureFlowError(error, 'db-error-leaked-to-ui');
+
     if (data) {
       setConfig(data);
-      setModules(data.modules || DEFAULT_MODULES);
+      // Normalizar a LER corrige, sem migração e sem escrever em dados alheios,
+      // qualquer configuração que já tenha o passo terminal fora do fim.
+      setModules(normalizeModuleOrder(data.modules || DEFAULT_MODULES));
     } else {
       setConfig(null);
       setModules(DEFAULT_MODULES);
@@ -89,20 +98,28 @@ export function usePipelineConfig(companyId: string | null) {
       updated_at: new Date().toISOString(),
     };
 
-    if (config) {
-      await (supabase.from("organization_pipeline_config") as any)
-        .update({ template_id: template.id, modules: template.modules, updated_at: new Date().toISOString() })
-        .eq("organization_id", companyId);
-    } else {
-      await (supabase.from("organization_pipeline_config") as any).insert([payload]);
+    try {
+      if (config) {
+        await (supabase.from("organization_pipeline_config") as any)
+          .update({ template_id: template.id, modules: template.modules, updated_at: new Date().toISOString() })
+          .eq("organization_id", companyId)
+          .throwOnError();
+      } else {
+        await (supabase.from("organization_pipeline_config") as any).insert([payload]).throwOnError();
+      }
+    } catch (error: any) {
+      toast({ title: "Erro ao aplicar template", description: error.message, variant: "destructive" });
+      return;
     }
 
     toast({ title: `Template "${template.name}" aplicado` });
     await loadConfig();
   }, [companyId, config, toast, loadConfig]);
 
-  const saveModules = useCallback(async (newModules: PipelineModule[]) => {
+  const saveModules = useCallback(async (newModulesRaw: PipelineModule[]) => {
     if (!companyId) return;
+    // ...e normalizar a ESCREVER impede que volte a entrar torta por outro caminho.
+    const newModules = normalizeModuleOrder(newModulesRaw);
     const { data: userData } = await supabase.auth.getUser();
     if (!userData?.user) return;
     const businessUserId = await resolveCurrentBusinessUserId();
@@ -111,13 +128,14 @@ export function usePipelineConfig(companyId: string | null) {
     if (config) {
       await (supabase.from("organization_pipeline_config") as any)
         .update({ modules: newModules, updated_at: new Date().toISOString() })
-        .eq("organization_id", companyId);
+        .eq("organization_id", companyId)
+        .throwOnError();
     } else {
       await (supabase.from("organization_pipeline_config") as any).insert([{
         organization_id: companyId,
         modules: newModules,
         created_by: businessUserId,
-      }]);
+      }]).throwOnError();
     }
 
     setModules(newModules);

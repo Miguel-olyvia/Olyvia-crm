@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { Eye, UserCheck, UserX, TrendingUp, FileText, AlertTriangle, ShieldCheck, HeartPulse, DollarSign, Clock } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -11,6 +12,7 @@ import { usePermissionScope, type ScopeLevel } from "@/hooks/usePermissionScope"
 import { formatCurrency } from "@/lib/utils";
 import { differenceInDays } from "date-fns";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const NEUTRAL_ORIGIN_COLOR = "#94a3b8";
 
@@ -245,6 +247,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       });
       if (error) {
         console.error("Error loading rpc_client_origin_distribution:", error);
+        toast.error("Não foi possível carregar a distribuição por origem.");
         return DEFAULT_ORIGIN;
       }
       const row = Array.isArray(data) ? data[0] : data;
@@ -408,6 +411,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
           const { data, error } = await scopedQuery;
           if (error) {
             console.error("Error loading contracts batch for clients dashboard:", error);
+            captureFlowError(error, "db-error-leaked-to-ui");
             return [];
           }
           return data || [];
@@ -440,6 +444,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         });
         if (rpcError) {
           console.error("Error loading rpc_client_contract_stats for clients dashboard:", rpcError);
+          toast.error("Não foi possível carregar as estatísticas de contratos.");
         } else {
           const row: any = Array.isArray(rpcStats) ? rpcStats[0] : rpcStats;
           if (row) {
@@ -463,10 +468,14 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         }
         const lastInteractionMap = new Map<string, string>();
         const interactionTasks = interactionBatches.map((batch) => async () => {
-          const { data } = await supabase.from("entity_interactions")
+          const { data, error } = await supabase.from("entity_interactions")
             .select("entity_id, interaction_at")
             .in("entity_id", batch)
             .order("interaction_at", { ascending: false });
+          if (error) {
+            console.error("Error loading interactions batch for clients dashboard:", error);
+            captureFlowError(error, "db-error-leaked-to-ui");
+          }
           return data || [];
         });
         const interactionResults = await runWithLimit(interactionTasks, 4);
@@ -531,6 +540,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       };
     } catch (error) {
       console.error("Error loading clients dashboard:", error);
+      captureFlowError(error, "db-error-leaked-to-ui");
       throw error;
     }
   };

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useTranslation } from "@/hooks/useTranslation";
 import DashboardCard from "./DashboardCard";
 import DashboardGrid from "./DashboardGrid";
@@ -46,16 +48,29 @@ const WorkerDashboard = () => {
         const client = supabase as any;
         const filterId = businessUserId || user.id;
 
-        const tasksResult = await client.from("activities").select("id").eq("assigned_to", filterId);
+        // As tarefas da pessoa sao as `activities` que ela criou: o modulo de
+        // Atividades e de ambito proprio, quem cria e o dono (20261116180000).
+        // Antes isto filtrava por `assigned_to`, uma coluna que deixou de
+        // existir -- e a tabela tinha 4 linhas, portanto o cartao dizia zero a
+        // toda a gente desde sempre.
+        const tasksResult = await client
+          .from("activities")
+          .select("id")
+          .eq("created_by", filterId)
+          .neq("completed", true);
         const dealsResult = await client.from("deals").select("id").eq("assigned_to", filterId);
         const quotesResult = await client.from("quotes").select("id").eq("created_by", filterId);
 
+        if (tasksResult.error || dealsResult.error || quotesResult.error) {
+          toast.error("Não foi possível carregar as estatísticas.");
+        }
         setStats({
           pendingTasks: tasksResult.data?.length ?? 0,
           assignedDeals: dealsResult.data?.length ?? 0,
           createdQuotes: quotesResult.data?.length ?? 0,
         });
       } catch (error) {
+        captureFlowError(error, "db-error-leaked-to-ui");
         console.error("Error loading worker stats:", error);
       } finally {
         setLoading(false);

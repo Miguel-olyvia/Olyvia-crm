@@ -35,36 +35,53 @@ export async function resolveOrgTenantIds(orgId: string): Promise<string[]> {
 }
 
 /**
- * Resolve all descendant organization IDs for a given root org via iterative BFS
- * on anew_hierarchy. Each round fetches only rows whose parent_org_id is in the
- * current frontier — no full-table scan, no cross-tenant rows are returned to the
- * client.
+ * In-flight calls, keyed by root org. Several hooks that resolve the same
+ * subtree mount together in the app layout (useDescendantOrgIds,
+ * useNotifications, useSidebarAlertCounts, useModuleAlerts), so the same
+ * traversal used to be requested four or five times concurrently. Sharing the
+ * pending promise collapses that burst into one request.
  *
- * Returns [rootOrgId, ...allDescendantIds].
+ * Entries are removed as soon as the call settles, so nothing is ever served
+ * from a stale cache — this dedupes concurrency, it does not memoize results.
+ */
+const inFlightSubtrees = new Map<string, Promise<string[]>>();
+
+/**
+ * Resolve all descendant organization IDs for a given root org.
+ *
+ * The traversal runs in Postgres via the `get_org_subtree_ids` recursive CTE —
+ * one round trip instead of one per depth level, which is what the previous
+ * client-side BFS cost. The RPC is SECURITY INVOKER, so anew_hierarchy RLS
+ * still applies and the resulting set matches what the BFS returned.
+ *
+ * Returns [rootOrgId, ...allDescendantIds]. A failed traversal degrades to
+ * [rootOrgId] rather than an empty array, which a caller could misread as
+ * "no filter" — same fail-closed behaviour as before.
  */
 export async function resolveOrgSubtree(rootOrgId: string): Promise<string[]> {
-  const ids: string[] = [rootOrgId];
-  const visited = new Set<string>([rootOrgId]);
-  let frontier: string[] = [rootOrgId];
+  const pending = inFlightSubtrees.get(rootOrgId);
+  if (pending) return pending;
 
-  while (frontier.length > 0) {
-    const { data: batch } = await supabase
-      .from('anew_hierarchy')
-      .select('parent_org_id, child_org_id')
-      .in('parent_org_id', frontier);
+  const request = (async (): Promise<string[]> => {
+    const { data, error } = await supabase.rpc('get_org_subtree_ids', {
+      _root_org_id: rootOrgId,
+    });
 
-    if (!batch || batch.length === 0) break;
-
-    const next: string[] = [];
-    for (const h of batch) {
-      if (!visited.has(h.child_org_id)) {
-        visited.add(h.child_org_id);
-        ids.push(h.child_org_id);
-        next.push(h.child_org_id);
-      }
+    if (error) {
+      console.error('[resolveOrgSubtree] subtree RPC failed:', error);
+      return [rootOrgId];
     }
-    frontier = next;
-  }
 
-  return ids;
+    const returned = (data ?? []) as string[];
+    // Keep the root first, as the previous BFS did; callers treat the rest as
+    // an unordered set.
+    return [rootOrgId, ...returned.filter(id => id && id !== rootOrgId)];
+  })();
+
+  inFlightSubtrees.set(rootOrgId, request);
+  try {
+    return await request;
+  } finally {
+    inFlightSubtrees.delete(rootOrgId);
+  }
 }

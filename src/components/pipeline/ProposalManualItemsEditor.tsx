@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableFoo
 import { Plus, Trash2, GripVertical, Package, Save, Loader2 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/hooks/use-toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ManualItem { id?: string; proposal_id: string; description: string; quantity: number; unit_price: number; sort_order: number; notes: string | null; _isNew?: boolean; _isDirty?: boolean; }
 
@@ -22,6 +23,7 @@ export function ProposalManualItemsEditor({ proposalId, readOnly = false, onTota
     setLoading(true);
     const { data, error } = await (supabase as any).from("proposal_manual_items").select("*").eq("proposal_id", proposalId).order("sort_order");
     if (!error && data) setItems(data.map((d: any) => ({ ...d, _isNew: false, _isDirty: false })));
+    else if (error) captureFlowError(error, "proposal-lifecycle");
     setLoading(false);
   }, [proposalId]);
 
@@ -30,19 +32,19 @@ export function ProposalManualItemsEditor({ proposalId, readOnly = false, onTota
 
   const addItem = () => setItems(prev => [...prev, { proposal_id: proposalId, description: "", quantity: 1, unit_price: 0, sort_order: prev.length, notes: null, _isNew: true, _isDirty: true }]);
   const updateItem = (index: number, field: keyof ManualItem, value: any) => setItems(prev => prev.map((item, i) => i === index ? { ...item, [field]: value, _isDirty: true } : item));
-  const removeItem = async (index: number) => { const item = items[index]; if (item.id && !item._isNew) await (supabase as any).from("proposal_manual_items").delete().eq("id", item.id); setItems(prev => prev.filter((_, i) => i !== index)); };
+  const removeItem = async (index: number) => { const item = items[index]; if (item.id && !item._isNew) { try { await (supabase as any).from("proposal_manual_items").delete().eq("id", item.id).throwOnError(); } catch (err: any) { captureFlowError(err, "proposal-lifecycle"); toast({ title: "Erro ao remover", description: err.message, variant: "destructive" }); return; } } setItems(prev => prev.filter((_, i) => i !== index)); };
 
   const saveAll = async () => {
     setSaving(true);
     try {
       for (const item of items.filter(i => i._isDirty)) {
         const payload = { proposal_id: item.proposal_id, description: item.description, quantity: item.quantity, unit_price: item.unit_price, sort_order: item.sort_order, notes: item.notes };
-        if (item._isNew) { await (supabase as any).from("proposal_manual_items").insert(payload).select().single(); }
-        else if (item.id) { await (supabase as any).from("proposal_manual_items").update(payload).eq("id", item.id); }
+        if (item._isNew) { await (supabase as any).from("proposal_manual_items").insert(payload).select().single().throwOnError(); }
+        else if (item.id) { await (supabase as any).from("proposal_manual_items").update(payload).eq("id", item.id).throwOnError(); }
       }
       toast({ title: "Itens guardados com sucesso" });
       await fetchItems();
-    } catch (err: any) { toast({ title: "Erro ao guardar", description: err.message, variant: "destructive" }); } finally { setSaving(false); }
+    } catch (err: any) { captureFlowError(err, "proposal-lifecycle"); toast({ title: "Erro ao guardar", description: err.message, variant: "destructive" }); } finally { setSaving(false); }
   };
 
   const grandTotal = items.reduce((sum, item) => sum + (item.quantity * item.unit_price), 0);

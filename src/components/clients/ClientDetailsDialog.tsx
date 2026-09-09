@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2, Plus, FileText, MapPin, ListPlus, Trash2, Undo2 } from "lucide-react";
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
-import { useConversionRevert } from "@/hooks/useConversionRevert";
+import { useConversionRevert, revertToLeadConfirmationText } from "@/hooks/useConversionRevert";
 import { Separator } from "@/components/ui/separator";
 import { contactSchema, contactCompanySchema, dealSchema, proposalSchema } from "@/lib/validations";
 import { PhoneInput } from "@/components/PhoneInput";
@@ -28,6 +28,7 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { differenceInDays } from "date-fns";
 import { calculateClientHealth, type ClientContractInfo, type ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 import { RequestErasureButton } from "@/components/RequestErasureButton";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 /**
  * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
@@ -167,7 +168,8 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [canRevert, setCanRevert] = useState(false);
-  const { revertContactToClient, canRevertClientToContact } = useConversionRevert();
+  const [revertPreviousStatus, setRevertPreviousStatus] = useState<string | null>(null);
+  const { revertClientToLead, getClientRevertPreview } = useConversionRevert();
 
   const [editFormData, setEditFormData] = useState({
     first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351",
@@ -206,7 +208,13 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     loadEnrichedData();
     loadGroupCompanies();
     setActiveTab("summary");
-    canRevertClientToContact(client.id).then(v => { if (!isCancelled) setCanRevert(v); });
+    // Uma leitura só serve as duas coisas: se o botão aparece, e o que o
+    // diálogo de confirmação promete quanto ao estado em que a lead fica.
+    getClientRevertPreview(client.id).then(preview => {
+      if (isCancelled) return;
+      setCanRevert(preview.canRevert);
+      setRevertPreviousStatus(preview.previousStatus);
+    });
     setEditFormData({
       first_name: client.first_name || "", last_name: client.last_name || "",
       email: client.email || "", phone: client.phone || "", phone_country_code: client.phone_country_code || "+351",
@@ -221,14 +229,14 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     const fetchEntityType = async () => {
       if (!client.entity_id) return;
       const { data, error } = await supabase.from("anew_entities").select("type").eq("id", client.entity_id).maybeSingle();
-      if (error) console.error("Error fetching entity type:", error);
+      if (error) { console.error("Error fetching entity type:", error); captureFlowError(error, "db-error-leaked-to-ui"); }
       if (!isCancelled) setEntityType(data?.type || "person");
     };
 
     const fetchOrgUsers = async () => {
       if (!client.organization_id) return;
       const { data: clientRoles, error: rolesError } = await supabase.from("anew_roles").select("id").eq("code", "client");
-      if (rolesError) { console.error("Error fetching client roles:", rolesError); return; }
+      if (rolesError) { console.error("Error fetching client roles:", rolesError); captureFlowError(rolesError, "db-error-leaked-to-ui"); return; }
       if (isCancelled) return;
       const clientRoleIds = (clientRoles || []).map((r: any) => r.id);
 
@@ -236,7 +244,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         .select("user_id, role_id")
         .eq("organization_id", client.organization_id)
         .eq("status", "active");
-      if (membersError) { console.error("Error fetching memberships:", membersError); return; }
+      if (membersError) { console.error("Error fetching memberships:", membersError); captureFlowError(membersError, "db-error-leaked-to-ui"); return; }
       if (isCancelled) return;
 
       if (members && members.length > 0) {
@@ -246,7 +254,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         if (nonClientMembers.length > 0) {
           const userIds = [...new Set(nonClientMembers.map((m: any) => m.user_id))];
           const { data: users, error: usersError } = await supabase.from("anew_users").select("id, name").in("id", userIds);
-          if (usersError) { console.error("Error fetching org users:", usersError); return; }
+          if (usersError) { console.error("Error fetching org users:", usersError); captureFlowError(usersError, "db-error-leaked-to-ui"); return; }
           if (!isCancelled) setOrgUsers((users || []).filter((u: any) => u.name));
         } else {
           if (!isCancelled) setOrgUsers([]);
@@ -290,6 +298,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         (supabase as any).from("client_contracts").select("id, title:contract_number, status, total_value, start_date, end_date, payment_terms").eq("entity_id", entityId).eq("organization_id", organizationId).order("created_at", { ascending: false }),
       ]);
 
+      if (interactionsRes.error || tagsRes.error || contractsRes.error) {
+        toast({ title: "Erro", description: "Não foi possível carregar os dados do cliente.", variant: "destructive" });
+      }
       setInteractions(interactionsRes.data || []);
       setTags(tagsRes.data || []);
       setContracts(contractsRes.data || []);
@@ -419,6 +430,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       setUserMap(userMapLocal);
     } catch (e) {
       console.error("Error loading enriched data:", e);
+      captureFlowError(e, "db-error-leaked-to-ui");
     }
   };
 
@@ -581,7 +593,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const stages = data || [];
       setDealStages(stages);
       setDealFormData(prev => prev.stage_id ? prev : { ...prev, stage_id: stages[0]?.id || "" });
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error(e); toast({ title: "Erro", description: "Não foi possível carregar as fases de negócio.", variant: "destructive" }); }
   };
 
   const loadClientDetails = async () => {
@@ -614,12 +626,13 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         setAddresses([]);
       }
 
-      const { data: dealsData } = await supabase
+      const { data: dealsData, error: dealsErr } = await supabase
         .from("deals")
         .select("id, title, value, stage_id, probability, created_at, assigned_to, stages:deal_stages(name, color)")
         .eq("entity_id", client?.entity_id || client?.id)
         .eq("organization_id", organizationId || "")
         .order("created_at", { ascending: false });
+      if (dealsErr) throw dealsErr;
       setDeals(dealsData || []);
 
       const dealIds = (dealsData || []).map(d => d.id);
@@ -646,6 +659,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
       setProposals(mergedProposals as Proposal[]);
     } catch (error: any) {
+      captureFlowError(error, "client-lifecycle");
       toast({ title: "Erro ao carregar dados", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -756,6 +770,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       onOpenChange(false);
       onClientUpdated?.();
     } catch (error: any) {
+      captureFlowError(error, "client-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
@@ -842,7 +857,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           organization_id: client.organization_id,
           root_organization_id: client.root_organization_id || client.organization_id,
           status: "active",
-        } as any);
+        } as any).throwOnError();
 
         // Save catalog line items as deal_needs + deal_need_items
         if (dealLineItems.length > 0) {
@@ -852,7 +867,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
             status: "pending",
             created_by: businessUserId,
             sort_order: 0,
-          }).select("id").single();
+          }).select("id").single().throwOnError();
 
           if (dealNeed?.id) {
             const needItems = dealLineItems.map((item, idx) => ({
@@ -864,7 +879,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               notes: item.name,
               sort_order: idx,
             }));
-            await (supabase as any).from("deal_need_items").insert(needItems);
+            await (supabase as any).from("deal_need_items").insert(needItems).throwOnError();
           }
         }
       }
@@ -902,6 +917,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       setDealLineItems([]);
       loadClientDetails();
     } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setCreatingDeal(false);
@@ -943,7 +959,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           unit_price: item.unit_price,
           sort_order: idx,
         }));
-        await (supabase as any).from("proposal_manual_items").insert(manualItems);
+        await (supabase as any).from("proposal_manual_items").insert(manualItems).throwOnError();
       }
 
       toast({ title: "Proposta criada com sucesso" });
@@ -953,6 +969,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       setSelectedDeal("");
       loadClientDetails();
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setCreatingProposal(false);
@@ -1019,7 +1036,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               onWhatsApp={handleWhatsApp}
               onEdit={() => setActiveTab("edit")}
               onClose={() => onOpenChange(false)}
-              onRevertToContact={() => setRevertDialogOpen(true)}
+              onRevertToLead={() => setRevertDialogOpen(true)}
               canRevert={canRevert}
             />
 
@@ -1302,7 +1319,11 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           entityId={client.entity_id} entityName={fullName}
           organizationId={client.organization_id || ""}
           onInteractionSaved={async (now) => {
-            await supabase.from("anew_clients").update({ last_interaction_at: now } as any).eq("id", client.id);
+            const { error } = await supabase.from("anew_clients").update({ last_interaction_at: now } as any).eq("id", client.id);
+            if (error) {
+              console.error("Error updating last_interaction_at:", error);
+              captureFlowError(error, "entity-interaction-tracking");
+            }
           }}
           onCallRegistered={handleRefresh}
           onOpenWhatsApp={() => { setShowCallDialog(false); handleWhatsApp(); }}
@@ -1350,7 +1371,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           onSaved={handleRefresh}
         />
       )}
-      {/* Revert to Contact Confirmation */}
+      {/* Confirmação da reversão de cliente para lead */}
       <AlertDialog open={revertDialogOpen} onOpenChange={setRevertDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1361,7 +1382,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               Reverter para Lead
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Esta ação vai reverter este cliente para lead (em negociação). O registo de cliente será desativado.
+              {revertToLeadConfirmationText(revertPreviousStatus)}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1372,7 +1393,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                 e.preventDefault();
                 setReverting(true);
                 try {
-                  const success = await revertContactToClient(client.id);
+                  const success = await revertClientToLead(client.id);
                   if (success) {
                     setRevertDialogOpen(false);
                     onOpenChange(false);

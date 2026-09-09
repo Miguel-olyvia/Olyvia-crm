@@ -31,6 +31,7 @@ import { OrganizationFormSection, OrganizationSelection } from "@/components/Org
 import { pdf } from '@react-pdf/renderer';
 import { PurchaseOrderPDFDocument } from "@/components/PurchaseOrderPDFDocument";
 import { purchaseOrderSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
@@ -239,9 +240,10 @@ const PurchaseOrders = () => {
   // Resolve which products/services the SELECTED supplier can actually supply, via
   // item_suppliers (Fase 1 do plano de fornecedores) — substitui o antigo
   // products.supplier_id/services.supplier_id (deprecated, só guarda 1 fornecedor
-  // por artigo). products/services em si continuam a vir de loadData(), que já
-  // carrega o catálogo completo da organização; este efeito só resolve, para o
-  // fornecedor escolhido no cabeçalho da encomenda, QUAIS desses artigos ele
+  // por artigo). O catálogo em si (produtos/serviços/preços/atributos) vem de
+  // loadCatalog() (ver mais abaixo), carregado à parte, uma vez por empresa,
+  // quando o diálogo de nova/editar encomenda abre; este efeito só resolve, para
+  // o fornecedor escolhido no cabeçalho da encomenda, QUAIS desses artigos ele
   // fornece e a que preço/referência — não volta a fazer fetch de products/services.
   useEffect(() => {
     const loadSupplierItemRefs = async () => {
@@ -356,6 +358,12 @@ const PurchaseOrders = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams, orders, loading]);
 
+  // Só orders + suppliers — o catálogo (produtos/serviços/preços/atributos)
+  // carrega à parte, sob demanda, só quando o diálogo de nova/editar encomenda
+  // abre (ver loadCatalog() abaixo). Antes este loadData() também carregava o
+  // catálogo inteiro da organização em TODO o carregamento da lista — dezenas de
+  // pedidos de rede por visita à página, o que tornava a página lenta e
+  // aumentava a probabilidade de um desses pedidos falhar com "Failed to fetch".
   const loadData = async () => {
     if (!activeCompany?.id) {
       console.log("loadData: No activeCompany");
@@ -401,6 +409,7 @@ const PurchaseOrders = () => {
       setSuppliers(suppliersRes.data || []);
     } catch (error: any) {
       if (loadRequestRef.current !== requestId) return;
+      captureFlowError(error, "purchase-order-lifecycle");
       toast({
         title: t('purchaseOrders.toast.loadError'),
         description: error.message,
@@ -729,6 +738,7 @@ const PurchaseOrders = () => {
 
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
       toast({
         title: t('purchaseOrders.toast.deleteError'),
         description: error.message,
@@ -746,6 +756,7 @@ const PurchaseOrders = () => {
 
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
       toast({
         title: t('purchaseOrders.toast.deleteError'),
         description: error.message,
@@ -1277,6 +1288,7 @@ const PurchaseOrders = () => {
       setOrderItems([]);
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
       toast({
         title: editingId ? t('purchaseOrders.toast.updateError') : t('purchaseOrders.toast.createError'),
         description: error.message,
@@ -1395,6 +1407,7 @@ const PurchaseOrders = () => {
         title: t('purchaseOrders.toast.pdfSuccess'),
       });
     } catch (error: any) {
+      captureFlowError(error, "purchase-order-document");
       toast({
         title: t('purchaseOrders.toast.pdfError'),
         description: error.message,
@@ -1477,6 +1490,7 @@ const PurchaseOrders = () => {
       setImportDialogOpen(false);
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t('purchaseOrders.toast.importError'),
         description: error.message,

@@ -9,11 +9,12 @@ import {
   useSensor, useSensors, type DragEndEvent,
 } from "@dnd-kit/core";
 import {
-  arrayMove, SortableContext, verticalListSortingStrategy, useSortable,
+  SortableContext, verticalListSortingStrategy, useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { isTerminal, reorderPipelineModules } from "@/lib/pipeline/moduleOrder";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   Briefcase, FileText, Receipt, FileSignature, Users,
@@ -31,7 +32,13 @@ function SortableModuleRow({ module, onToggle, onUpdateLabel }: {
   onToggle: (id: string) => void;
   onUpdateLabel: (id: string, label: string, sublabel?: string) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: module.id });
+  // O passo terminal (Cliente) nao se arrasta -- nada vem depois de converter.
+  // A guarda em `reorderPipelineModules` ja recusava o gesto, mas a pega
+  // continuava aqui a convidar a tenta-lo: o utilizador arrastava e via a linha
+  // voltar ao sitio, sem explicacao. Foi corrigido na tira do fluxo e esquecido
+  // nesta lista.
+  const terminal = isTerminal(module);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: module.id, disabled: terminal });
   const style = { transform: CSS.Transform.toString(transform), transition };
   const Icon = ICON_MAP[module.icon] || Briefcase;
   const [editing, setEditing] = useState(false);
@@ -55,9 +62,14 @@ function SortableModuleRow({ module, onToggle, onUpdateLabel }: {
         !module.enabled && "opacity-60"
       )}
     >
-      <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
-        <GripVertical className="w-4 h-4 text-muted-foreground" />
-      </div>
+      {terminal ? (
+        // Espaco reservado: sem a pega, as linhas desalinhavam-se.
+        <div className="w-4 h-4 shrink-0" aria-hidden="true" />
+      ) : (
+        <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
+          <GripVertical className="w-4 h-4 text-muted-foreground" />
+        </div>
+      )}
       <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0"
         style={{ backgroundColor: module.color + '20', color: module.color }}>
         <Icon className="w-4 h-4" />
@@ -103,9 +115,11 @@ export function PipelineModuleToggle({ modules, onToggle, onReorder, onUpdateLab
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
-    const oldIndex = modules.findIndex(m => m.id === active.id);
-    const newIndex = modules.findIndex(m => m.id === over.id);
-    onReorder(arrayMove(modules, oldIndex, newIndex));
+    // Mesma guarda do manípulo do fluxo: eram dois, e guardar só um deixava
+    // este aberto para arrastar o Cliente para fora do fim.
+    const reordered = reorderPipelineModules(modules, String(active.id), String(over.id));
+    if (reordered === modules) return;
+    onReorder(reordered);
   };
 
   return (

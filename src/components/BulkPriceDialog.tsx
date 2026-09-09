@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface BulkPriceDialogProps {
   open: boolean;
@@ -144,6 +145,7 @@ export function BulkPriceDialog({
       onOpenChange(false);
       onSuccess();
     } catch (error: unknown) {
+      captureFlowError(error, "pricing-partial-write");
       toast({
         title: t('common.error'),
         description: error instanceof Error ? error.message : String(error),

@@ -3,6 +3,7 @@ import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 
 type QuotePdfClientInput = {
   entityId?: string | null;
+  quoteId?: string | null;
   dealId?: string | null;
   proposalId?: string | null;
   clienteId?: string | null;
@@ -69,7 +70,7 @@ export async function resolveQuotePdfEntityId(input: QuotePdfClientInput) {
   );
 }
 
-async function buildEntityClientForPdf(entityId: string) {
+async function buildEntityClientForPdf(entityId: string, quoteId?: string | null) {
   const [entityRes, emailsRes, phonesRes, fiscalRes, addressesRes] = await Promise.all([
     (supabase as any).from("anew_entities").select("id, display_name, first_name, last_name, type").eq("id", entityId).maybeSingle(),
     (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", entityId).eq("is_primary", true).limit(1),
@@ -80,6 +81,27 @@ async function buildEntityClientForPdf(entityId: string) {
 
   const entity = entityRes.data;
   if (!entity) return null;
+
+  // Contacto primario PELO documento quando o orcamento ja existe: a RLS de
+  // ambito de dono nos contactos nega a 2a consulta directa a
+  // anew_entity_emails/phones a quem ve o documento mas nao e dono da lead. A
+  // RPC SECURITY DEFINER confirma a visibilidade do orcamento e devolve
+  // email/telefone primarios. Sem quoteId (pre-visualizacao de um rascunho
+  // ainda por gravar) mantem-se a leitura directa, limitada ao ambito de quem
+  // esta a criar. (A morada/NIF nao viajam na RPC e ficam na leitura directa.)
+  let contactEmail = firstValue<any>(emailsRes.data)?.email || "";
+  let contactPhone = firstValue<any>(phonesRes.data)?.phone_number || "";
+  let contactCountryCode = firstValue<any>(phonesRes.data)?.country_code || "";
+  if (quoteId) {
+    const { data: contact } = await (supabase as any)
+      .rpc("resolve_quote_contact", { _quote_id: quoteId })
+      .maybeSingle();
+    if (contact) {
+      contactEmail = contact.email || "";
+      contactPhone = contact.phone_number || "";
+      contactCountryCode = contact.country_code || "";
+    }
+  }
 
   let vat = "";
   const fiscalLink = firstValue<any>(fiscalRes.data);
@@ -104,9 +126,9 @@ async function buildEntityClientForPdf(entityId: string) {
     last_name: entity.last_name || "",
     company_name: entity.type === "company" ? displayName : "",
     client_type: entity.type === "company" ? "company" : "individual",
-    email: firstValue<any>(emailsRes.data)?.email || "",
-    phone: firstValue<any>(phonesRes.data)?.phone_number || "",
-    phone_country_code: firstValue<any>(phonesRes.data)?.country_code || "",
+    email: contactEmail,
+    phone: contactPhone,
+    phone_country_code: contactCountryCode,
     vat,
     client_addresses: clientAddresses,
     contact_addresses: clientAddresses,
@@ -116,7 +138,7 @@ async function buildEntityClientForPdf(entityId: string) {
 export async function resolveQuotePdfClient(input: QuotePdfClientInput) {
   const entityId = await resolveQuotePdfEntityId(input);
   if (entityId) {
-    return { entityId, client: await buildEntityClientForPdf(entityId) };
+    return { entityId, client: await buildEntityClientForPdf(entityId, input.quoteId ?? null) };
   }
   return { entityId: null, client: null };
 }

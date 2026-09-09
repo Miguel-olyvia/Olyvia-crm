@@ -263,9 +263,11 @@ serve(async (req) => {
     // stripe_checkout_session_id.
     // ------------------------------------------------------------------
     const appUrl = resolveAppUrl();
+    // A rota real de definições é /settings (ver src/App.tsx) — /definicoes
+    // não existe e dava 404 a qualquer pagamento Stripe bem-sucedido.
     const successUrl =
-      `${appUrl}/definicoes?checkout=success&session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${appUrl}/definicoes?checkout=cancel`;
+      `${appUrl}/settings?checkout=success&session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${appUrl}/settings?checkout=cancel`;
 
     if (type === "creditos") {
       let invoiceId: string;

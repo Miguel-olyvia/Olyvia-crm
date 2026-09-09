@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { formatCurrency } from "@/lib/utils";
 import { getEffectiveContractValue } from "@/utils/contractValue";
+import { useDebounce } from "@/hooks/useDebounce";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,6 +9,9 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope, canActOnEntity, type ScopeLevel } from "@/hooks/usePermissionScope";
+import { resolveContractsScopeUserIds, canActOnContract } from "@/lib/contracts/scope";
+import { contractHasQuotes, contractQuotesRoute } from "@/lib/contracts/quoteNavigation";
+import { useComercialUsers } from "@/hooks/useComercialUsers";
 import { useTranslation } from "@/hooks/useTranslation";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -15,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Plus, Pencil, Trash2, Eye, Loader2, FileText, ShieldAlert, Send, Download, FileSignature, Settings, CheckCheck, Phone, Mail, RotateCcw, User, MoreHorizontal, Search, Sparkles, Filter, ListChecks, BarChart3, RefreshCw, PenTool, ExternalLink, CalendarIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
@@ -45,9 +49,9 @@ import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
-import { buildContractPrintHtml, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
+import { downloadContractDocumentPdf, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { substituteVariables } from "@/utils/contractVariables";
-import { exportClientContractsToXlsx } from "@/utils/contractsExportImport";
+import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -96,6 +100,64 @@ const statusColors: Record<string, string> = {
   cancelled: "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400",
 };
 
+/**
+ * Comercial efectivo de um contrato, para o filtro "Comercial".
+ *
+ * Tem de devolver EXACTAMENTE o mesmo dono que a coluna COMERCIAL mostra: essa
+ * coluna resolve `assigned_to_name` como `assigned_to` com recurso a
+ * `created_by` quando nao ha atribuicao (ver a query de contratos). Se o filtro
+ * olhasse so para `assigned_to`, uma linha que mostra "Joao" (herdado de
+ * created_by) desaparecia ao filtrar por Joao e aparecia em "Sem comercial" —
+ * a lista contradiria a propria coluna.
+ *
+ * "Sem comercial atribuido" e portanto o caso em que nem ha `assigned_to` nem
+ * `created_by`, que e tambem quando a coluna mostra "—".
+ */
+/**
+ * Subarvore de organizacoes da pagina de Contratos: empresa ativa + todos os
+ * descendentes em `anew_hierarchy`.
+ *
+ * Esta e a travessia que a query da lista ja fazia inline — foi extraida sem
+ * lhe mudar uma linha (mesmos `relationship_type`, mesmo BFS, mesmo fallback)
+ * para que a query das metricas possa usar EXACTAMENTE o mesmo conjunto de
+ * organizacoes. Se a lista e os cartoes resolverem o ambito por caminhos
+ * diferentes, contam sobre universos diferentes sem ninguem dar por isso.
+ *
+ * Deliberadamente NAO usa `resolveOrgSubtree` de "@/lib/orgSubtree": esse
+ * helper resolve a subarvore pela RPC `get_org_subtree_ids` e nao pelos
+ * `relationship_type` filtrados aqui. Trocar um pelo outro pode mudar o que a
+ * lista mostra, e isso e outra alteracao — nao esta.
+ */
+async function resolveContractsOrgSubtree(activeCompanyId: string): Promise<string[]> {
+  const subtreeIds = [activeCompanyId];
+  try {
+    const { data: allHierarchy } = await supabase
+      .from("anew_hierarchy")
+      .select("parent_org_id, child_org_id")
+      .in("relationship_type", ["PARENT_OF", "parent_of", "parent_child"]);
+    const childrenMap = new Map<string, string[]>();
+    (allHierarchy || []).forEach((h: any) => {
+      if (!childrenMap.has(h.parent_org_id)) childrenMap.set(h.parent_org_id, []);
+      childrenMap.get(h.parent_org_id)!.push(h.child_org_id);
+    });
+    const queue = [activeCompanyId];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const children = childrenMap.get(current) || [];
+      for (const child of children) {
+        if (!subtreeIds.includes(child)) {
+          subtreeIds.push(child);
+          queue.push(child);
+        }
+      }
+    }
+  } catch { /* fallback to just activeCompany */ }
+  return subtreeIds;
+}
+
+const getContractComercialId = (contract: ClientContract): string | null =>
+  (contract.assigned_to as string | null | undefined) || (contract.created_by ?? null) || null;
+
 const statusEmojis: Record<string, string> = {
   draft: "📝", pending_signature: "📨", signed: "✅", active: "✅", expired: "❌", cancelled: "🚫",
 };
@@ -126,6 +188,7 @@ const ClientContracts = () => {
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
   const [onlyMine, setOnlyMine] = useState(false);
+  const [comercialFilter, setComercialFilter] = useState<string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [isSignConfirmOpen, setIsSignConfirmOpen] = useState(false);
   const [signingContractId, setSigningContractId] = useState<string | null>(null);
@@ -137,6 +200,7 @@ const ClientContracts = () => {
   const [showEmailDialog, setShowEmailDialog] = useState(false);
   const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
   const [contractPortalStatuses, setContractPortalStatuses] = useState<Record<string, string>>({});
+  const [exportingContracts, setExportingContracts] = useState(false);
   const [isReassignDialogOpen, setIsReassignDialogOpen] = useState(false);
   const [reassigningContract, setReassigningContract] = useState<ClientContract | null>(null);
   const [reassignOwnerId, setReassignOwnerId] = useState<string>("");
@@ -202,6 +266,9 @@ const ClientContracts = () => {
     setShowWhatsAppDialog(true);
   };
 
+  // Delega no gerador partilhado (contractDocument.downloadContractDocumentPdf).
+  // Antes havia aqui uma cópia integral do pipeline html2pdf: as duas divergiram
+  // e o portal do cliente passou a produzir um PDF diferente do da aplicação.
   const handleDownloadPdf = async (contract: any) => {
     if (!activeCompany?.id) {
       toast.error(t('clientContracts.toast.noActiveOrg'));
@@ -209,7 +276,6 @@ const ClientContracts = () => {
     }
 
     const loadingToast = toast.loading(t('clientContracts.toast.generatingPdf'));
-    let iframe: HTMLIFrameElement | null = null;
 
     try {
       const resolved = await resolveContractDocument(contract, activeCompany.id, activeCompany.name);
@@ -218,118 +284,14 @@ const ClientContracts = () => {
         return;
       }
 
-      const html2pdfModule = await import("html2pdf.js");
-      const html2pdf = (html2pdfModule.default || html2pdfModule) as any;
-      const html = buildContractPrintHtml(resolved, contract.contract_number || "Contrato");
-
-      const parser = new DOMParser();
-      const parsed = parser.parseFromString(html, "text/html");
-      parsed.querySelectorAll("script").forEach((script) => script.remove());
-
-      iframe = document.createElement("iframe");
-      iframe.setAttribute("aria-hidden", "true");
-      iframe.style.position = "fixed";
-      iframe.style.right = "0";
-      iframe.style.bottom = "0";
-      // Dar dimensões reais ao iframe (CSS mm depende de DPI/viewport).
-      // Sem isto, html2canvas captura o `.page` com tamanhos inconsistentes
-      // e as margens/larguras do PDF saem distorcidas.
-      iframe.style.width = resolved.pageWidth;
-      iframe.style.height = resolved.pageHeight;
-      iframe.style.border = "0";
-      iframe.style.opacity = "0";
-      iframe.style.pointerEvents = "none";
-      document.body.appendChild(iframe);
-
-      const preparedHtml = `<!doctype html>${parsed.documentElement.outerHTML}`;
-
-      await new Promise<void>((resolve, reject) => {
-        iframe!.onload = () => resolve();
-        iframe!.onerror = () => reject(new Error("Falha ao preparar o documento para PDF"));
-        iframe!.srcdoc = preparedHtml;
-      });
-
-      const iframeDocument = iframe.contentDocument;
-      if (!iframeDocument) {
-        throw new Error("Não foi possível carregar o documento do contrato");
-      }
-
-      if (iframeDocument.fonts?.ready) {
-        await iframeDocument.fonts.ready;
-      }
-
-      const images = Array.from(iframeDocument.images || []);
-      await Promise.all(
-        images.map((image) => {
-          if (image.complete) return Promise.resolve();
-          return new Promise<void>((resolve) => {
-            image.onload = () => resolve();
-            image.onerror = () => resolve();
-          });
-        })
-      );
-
-      const pageElement = iframeDocument.querySelector(".page") as HTMLElement | null;
-      if (!pageElement) {
-        throw new Error("Não foi possível encontrar o conteúdo do contrato");
-      }
-
-      const safeFileName = `${contract.contract_number || contract.title || "contrato"}`
-        .trim()
-        .replace(/[^a-zA-Z0-9-_]+/g, "_")
-        .replace(/^_+|_+$/g, "") || "contrato";
-
-      const s = resolved.settings;
-      const marginTop = Number(s.margin_top ?? 20) || 20;
-      const marginRight = Number(s.margin_right ?? 20) || 20;
-      const marginBottomBase = Number(s.margin_bottom ?? 20) || 20;
-      const marginLeft = Number(s.margin_left ?? 20) || 20;
-      // Reserva extra para evitar que o rodapé (renderizado como conteúdo
-      // pelo html2pdf) encavalite o último parágrafo da página.
-      const marginBottom = s.footer_text ? marginBottomBase + 4 : marginBottomBase;
-
-      const pdfWorker = html2pdf()
-        .set({
-          margin: [marginTop, marginRight, marginBottom, marginLeft],
-
-          filename: `${safeFileName}.pdf`,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: "#ffffff",
-          },
-          jsPDF: {
-            unit: "mm",
-            format: resolved.settings.page_size === "LETTER" ? "letter" : "a4",
-            orientation: resolved.settings.page_orientation === "landscape" ? "landscape" : "portrait",
-          },
-          pagebreak: {
-            mode: ["css", "legacy"],
-            avoid: [
-              ".content p",
-              ".content li",
-              ".content h1", ".content h2", ".content h3",
-              ".content h4", ".content h5", ".content h6",
-              ".content tr",
-              ".content img",
-              ".content blockquote",
-              ".content div",
-              ".content font",
-              "[data-pdf-section='header']",
-            ],
-          },
-        })
-        .from(pageElement);
-
-      await pdfWorker.save();
+      const label = contract.contract_number || "Contrato";
+      await downloadContractDocumentPdf(resolved, label, label);
       toast.success(t('clientContracts.toast.pdfDownloaded'));
     } catch (error: any) {
       const description = await getFriendlyErrorMessage(error);
       toast.error(t('clientContracts.toast.pdfGenerationError'), { description });
     } finally {
       toast.dismiss(loadingToast);
-      iframe?.remove();
     }
   };
 
@@ -362,79 +324,79 @@ const ClientContracts = () => {
   const viewScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.view");
   const teamMemberIdsKey = teamMemberIds.join(",");
 
+  // Roster do filtro "Comercial". Usa o MESMO ambito da listagem (viewScope),
+  // para o dropdown nunca revelar comerciais cujos contratos o utilizador
+  // nem sequer consegue ver na lista.
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: viewScope,
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
+
   const { data: contracts = [], isLoading, isFetched } = useQuery({
     queryKey: ["client-contracts", activeCompany?.id, viewScope, scopeAnewUserId, teamMemberIdsKey],
     queryFn: async () => {
       if (!activeCompany?.id) return [];
       if (viewScope === "NONE") return [];
 
-      // Build subtree: activeCompany + all descendants
-      const subtreeIds = [activeCompany.id];
-      try {
-        const { data: allHierarchy } = await supabase
-          .from("anew_hierarchy")
-          .select("parent_org_id, child_org_id")
-          .in("relationship_type", ["PARENT_OF", "parent_of", "parent_child"]);
-        const childrenMap = new Map<string, string[]>();
-        (allHierarchy || []).forEach((h: any) => {
-          if (!childrenMap.has(h.parent_org_id)) childrenMap.set(h.parent_org_id, []);
-          childrenMap.get(h.parent_org_id)!.push(h.child_org_id);
-        });
-        const queue = [activeCompany.id];
-        while (queue.length > 0) {
-          const current = queue.shift()!;
-          const children = childrenMap.get(current) || [];
-          for (const child of children) {
-            if (!subtreeIds.includes(child)) {
-              subtreeIds.push(child);
-              queue.push(child);
-            }
-          }
-        }
-      } catch { /* fallback to just activeCompany */ }
+      // Subarvore: empresa ativa + descendentes. Partilhada com a query de
+      // metricas (resolveOrgSubtree) para que os cartoes de KPI e a lista
+      // contem sempre sobre o MESMO conjunto de organizacoes.
+      const subtreeIds = await resolveContractsOrgSubtree(activeCompany.id);
 
-      // Resolve allowed creator IDs by scope. OWNED → self; TEAM → self + subordinates.
-      let creatorBatches: string[][] | null = null;
-      if (viewScope === "OWNED") {
-        if (!scopeAnewUserId) return [];
-        creatorBatches = [[scopeAnewUserId]];
-      } else if (viewScope === "TEAM") {
-        const allowed = new Set<string>();
-        if (scopeAnewUserId) allowed.add(scopeAnewUserId);
-        teamMemberIds.forEach(id => allowed.add(id));
-        if (allowed.size === 0) return [];
-        const all = Array.from(allowed);
-        const BATCH = 200;
-        creatorBatches = [];
-        for (let i = 0; i < all.length; i += BATCH) creatorBatches.push(all.slice(i, i + BATCH));
+      // Ambito de client_contracts.view: ORG ve toda a subarvore; TEAM/OWNED
+      // restringem por `created_by` OU `assigned_to`.
+      //
+      // A uniao dos dois campos e deliberada, e nao o `created_by` isolado que
+      // o commit 54d65378 tinha antes de o remover. Medido na Mudelar: a Sonia
+      // criou 8 contratos e tem 9 atribuidos — ha um que lhe foi ATRIBUIDO sem
+      // ela o ter criado. So com `created_by` esse desaparecia-lhe do ecra,
+      // apesar de a coluna COMERCIAL o mostrar como dela (essa coluna usa
+      // `assigned_to ?? created_by`, ver getContractComercialId). O produto
+      // diria "este contrato e da Sonia" e escondia-lho, e reatribuir um
+      // contrato a alguem deixava de lhe dar acesso.
+      //
+      // E a mesma regra das Leads (`assigned_to.in.(...) OR created_by.in.(...)`
+      // em anewLeadsHelpers.applyLeadVisibilityFilter). Repoe o predicado que o
+      // commit 54d65378 ("visibilidade por area em vez de por criador",
+      // 22/08) removeu — essa decisao foi revertida pelo dono do produto.
+      // Isto e uma convencao aplicada AQUI, no cliente — tal como nos outros
+      // modulos — e NAO uma fronteira de seguranca: a RLS
+      // `client_contracts_select` continua a isolar apenas por organizacao +
+      // permissao binaria, sem clausula por dono.
+      // `scopeUserIds === null` significa "sem restricao" (ORG); um array
+      // vazio significa "nao mostrar nada" (NONE, ou OWNED/TEAM antes do id
+      // do utilizador estar resolvido).
+      const scopeUserIds = resolveContractsScopeUserIds(viewScope, scopeAnewUserId, teamMemberIds);
+      if (scopeUserIds !== null && scopeUserIds.length === 0) return [];
+
+      let contractsQuery = (supabase as any)
+        .from("client_contracts")
+        .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees, deleted_at) )`)
+        .in("organization_id", subtreeIds)
+        .is("deleted_at", null);
+      if (scopeUserIds !== null) {
+        const ids = scopeUserIds.join(",");
+        contractsQuery = contractsQuery.or(`created_by.in.(${ids}),assigned_to.in.(${ids})`);
       }
+      const { data: rows, error } = await contractsQuery.order("created_at", { ascending: false });
+      if (error) throw error;
+      let data: any[] = rows || [];
 
-      const runBaseQuery = (creatorBatch: string[] | null) => {
-        let q: any = (supabase as any)
-          .from("client_contracts")
-          .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees) )`)
-          .in("organization_id", subtreeIds)
-          .is("deleted_at", null)
-          .order("created_at", { ascending: false });
-        if (creatorBatch) q = q.in("created_by", creatorBatch);
-        return q;
-      };
-
-      let data: any[] = [];
-      if (creatorBatches === null) {
-        const { data: rows, error } = await runBaseQuery(null);
-        if (error) throw error;
-        data = rows || [];
-      } else {
-        const dedup = new Map<string, any>();
-        for (const batch of creatorBatches) {
-          const { data: rows, error } = await runBaseQuery(batch);
-          if (error) throw error;
-          (rows || []).forEach((r: any) => { if (!dedup.has(r.id)) dedup.set(r.id, r); });
-        }
-        data = Array.from(dedup.values()).sort((a, b) =>
-          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
+      // O `quote_id` do contrato pode apontar a um orcamento entretanto
+      // apagado — nesse caso a accao "Ver orcamentos" nao o deve abrir, porque
+      // a ficha ja nao existe. Os orcamentos que vem pela proposta ja trazem o
+      // `deleted_at`, o do contrato nao, por isso resolve-se aqui.
+      const contractQuoteIds = [...new Set(data.map((c: any) => c.quote_id).filter(Boolean))];
+      if (contractQuoteIds.length > 0) {
+        const { data: liveQuotes } = await (supabase as any)
+          .from("quotes")
+          .select("id")
+          .in("id", contractQuoteIds)
+          .is("deleted_at", null);
+        const liveQuoteIds = new Set((liveQuotes || []).map((q: any) => q.id));
+        data.forEach((c: any) => { c._contractQuoteAlive = !c.quote_id || liveQuoteIds.has(c.quote_id); });
       }
 
       const entityIds = data.map((c: any) => c.entity_id).filter(Boolean);
@@ -733,6 +695,16 @@ const ClientContracts = () => {
     if (onlyMine && currentUserId) {
       result = result.filter(c => c.created_by === currentUserId);
     }
+    // Filtro "Comercial". ESTE e o unico sitio onde ele e aplicado: os cartoes
+    // de KPI leem de `filteredContracts`, por isso acompanham-no automaticamente.
+    // Nao duplicar este predicado numa query ao servidor nem noutro `.filter()`
+    // — dois predicados sobre a mesma coisa foi o que fez os KPI divergirem da
+    // lista nos Orcamentos.
+    if (comercialFilter === "none") {
+      result = result.filter(c => getContractComercialId(c) === null);
+    } else if (comercialFilter !== "all") {
+      result = result.filter(c => getContractComercialId(c) === comercialFilter);
+    }
     if (statusFilter !== "all") {
       if (statusFilter === "expiring") {
         result = result.filter(c => {
@@ -743,7 +715,8 @@ const ClientContracts = () => {
       } else if (statusFilter === "signed") {
         // "Assinado" KPI/filter option represents both "signed" and "active"
         // statuses (there is no separate "active" option in the Estado dropdown)
-        // — keep this in sync with the kpis.signed definition above.
+        // — keep this in sync with the signed_count definition in
+        // client_contracts_list_metrics (supabase/migrations/20261115010000).
         result = result.filter(c => c.status === "signed" || c.status === "active");
       } else {
         result = result.filter(c => c.status === statusFilter);
@@ -766,43 +739,80 @@ const ClientContracts = () => {
       });
     }
     return result;
-  }, [contracts, statusFilter, searchQuery, onlyMine, currentUserId, dateFrom, dateTo]);
+  }, [contracts, statusFilter, searchQuery, onlyMine, currentUserId, dateFrom, dateTo, comercialFilter]);
 
-  // KPIs — computed over filteredContracts so cards reflect active filters
-  const kpis = useMemo(() => {
-    const now = new Date();
-    const total = filteredContracts.length;
-    const totalValue = filteredContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
-    const drafts = filteredContracts.filter(c => c.status === "draft");
-    const sent = filteredContracts.filter(c => c.status === "pending_signature");
-    const signed = filteredContracts.filter(c => c.status === "signed" || c.status === "active");
-    const expired = filteredContracts.filter(c => c.status === "expired" || (c.end_date && new Date(c.end_date) < now && c.status !== "cancelled"));
-    const activeContracts = signed.filter(c => !c.end_date || new Date(c.end_date) >= now);
-    const activeValue = activeContracts.reduce((s, c) => s + getEffectiveContractValue(c), 0);
-    const avgValue = total > 0 ? totalValue / total : 0;
-    const signRate = sent.length + signed.length > 0 ? Math.round((signed.length / (sent.length + signed.length)) * 100) : 0;
-    const expiring90 = filteredContracts.filter(c => {
-      if (!c.end_date || c.status === "expired" || c.status === "cancelled") return false;
-      const d = Math.ceil((new Date(c.end_date).getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-      return d > 0 && d <= 90;
-    });
-    // Avg sign time
-    let avgSignDays = 0;
-    const signedWithDates = signed.filter(c => c.updated_at && c.created_at);
-    if (signedWithDates.length > 0) {
-      const totalDays = signedWithDates.reduce((s, c) => {
-        return s + Math.max(1, Math.ceil((new Date(c.updated_at).getTime() - new Date(c.created_at).getTime()) / (1000 * 60 * 60 * 24)));
-      }, 0);
-      avgSignDays = Math.round(totalDays / signedWithDates.length);
-    }
-    return {
-      total, totalValue, drafts, sent, signed, expired, activeValue, avgValue, signRate, expiring90, avgSignDays,
-      draftValue: drafts.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      sentValue: sent.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      signedValue: signed.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-      expiredValue: expired.reduce((s, c) => s + getEffectiveContractValue(c), 0),
-    };
-  }, [filteredContracts]);
+  // KPIs — calculados NO SERVIDOR (client_contracts_list_metrics).
+  //
+  // Antes eram somados no browser sobre `filteredContracts`. Isso so estava
+  // certo porque esta lista carrega todos os contratos da subarvore de uma vez
+  // (sem .range()/.limit()): no dia em que ganhar paginacao, os cartoes
+  // passariam a contar apenas a pagina visivel — foi exactamente este padrao
+  // que fez os graficos de Orcamentos mostrarem 48 ganhos com o cartao ao lado
+  // a dizer 113.
+  //
+  // Ambito: a RPC NAO decide autorizacao. Recebe a mesma subarvore de
+  // organizacoes que a query da lista (resolveOrgSubtree) e o mesmo conjunto
+  // de `created_by` permitidos (resolveContractsScopeUserIds,
+  // `_allowed_user_ids`) — NULL para ORG (sem restricao), lista vazia para
+  // NONE/OWNED-TEAM sem id resolvido — a MESMA regra de dono que a query da
+  // lista aplica (`created_by` OU `assigned_to`). E SECURITY INVOKER, por isso a
+  // RLS de client_contracts continua a aplicar-se por baixo: esta funcao
+  // filtra convencao de ambito, nao decide autorizacao. `viewScope ===
+  // "NONE"` desliga a query, tal como desliga a lista.
+  //
+  // Os predicados dos filtros estao duplicados entre `filteredContracts` (aqui)
+  // e a RPC (no SQL). Sao duas copias da MESMA regra: qualquer filtro novo tem
+  // de ser adicionado nos dois sitios, ou os cartoes deixam de bater com a lista.
+  const debouncedSearch = useDebounce(searchQuery, 300);
+  const { data: metrics, isLoading: metricsLoading } = useQuery({
+    queryKey: [
+      "client-contracts-metrics", activeCompany?.id, viewScope, scopeAnewUserId, teamMemberIdsKey,
+      statusFilter, debouncedSearch.trim(), onlyMine, currentUserId,
+      dateFrom?.toISOString() ?? null, dateTo?.toISOString() ?? null, comercialFilter,
+    ],
+    queryFn: async () => {
+      if (!activeCompany?.id) return null;
+      const organizationIds = await resolveContractsOrgSubtree(activeCompany.id);
+      const scopeUserIds = resolveContractsScopeUserIds(viewScope, scopeAnewUserId, teamMemberIds);
+      if (scopeUserIds !== null && scopeUserIds.length === 0) return null;
+      const { data, error } = await (supabase as any).rpc("client_contracts_list_metrics", {
+        _organization_ids: organizationIds,
+        _status_filter: statusFilter,
+        _search: debouncedSearch.trim() || null,
+        _date_from: dateFrom ? startOfDay(dateFrom).toISOString() : null,
+        _date_to: dateTo ? endOfDay(dateTo).toISOString() : null,
+        _only_mine: onlyMine && currentUserId ? currentUserId : null,
+        _comercial: comercialFilter !== "all" && comercialFilter !== "none" ? comercialFilter : null,
+        _comercial_none: comercialFilter === "none",
+        _allowed_user_ids: scopeUserIds,
+        // Calculado a cada execucao (e nao incluido na queryKey) para os cartoes
+        // "a expirar"/"expirado" usarem sempre a hora do fetch sem invalidar a
+        // cache a cada render.
+        _now: new Date().toISOString(),
+      });
+      if (error) throw error;
+      return (Array.isArray(data) ? data[0] : data) ?? null;
+    },
+    enabled: !!activeCompany?.id && viewScope !== "NONE",
+  });
+
+  const kpis = useMemo(() => ({
+    total: metrics?.total_count ?? 0,
+    totalValue: Number(metrics?.total_value ?? 0),
+    draftCount: metrics?.draft_count ?? 0,
+    draftValue: Number(metrics?.draft_value ?? 0),
+    sentCount: metrics?.sent_count ?? 0,
+    sentValue: Number(metrics?.sent_value ?? 0),
+    signedCount: metrics?.signed_count ?? 0,
+    signedValue: Number(metrics?.signed_value ?? 0),
+    expiredCount: metrics?.expired_count ?? 0,
+    expiredValue: Number(metrics?.expired_value ?? 0),
+    activeValue: Number(metrics?.active_value ?? 0),
+    avgValue: Number(metrics?.avg_value ?? 0),
+    signRate: metrics?.sign_rate ?? 0,
+    expiring90Count: metrics?.expiring90_count ?? 0,
+    avgSignDays: metrics?.avg_sign_days ?? 0,
+  }), [metrics]);
 
   // Smart suggestion
   const smartSuggestion = useMemo(() => {
@@ -967,10 +977,30 @@ const ClientContracts = () => {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
       const selectedProposal = proposals.find(p => p.id === data.proposal_id);
-      if (!selectedProposal) throw new Error("Proposal not found");
+      if (!selectedProposal) throw new Error("A proposta escolhida já não está disponível. Feche e volte a abrir o diálogo.");
       const resolvedEntityId = selectedProposal.entity_id || selectedProposal._resolvedEntityId;
-      const clientId = selectedProposal._resolvedClientId;
-      if (!clientId) throw new Error("Client not found.");
+      // Um contrato precisa de saber A QUEM se faz -- e isso e a entidade, nao o
+      // papel de cliente. Exigir que a entidade ja fosse cliente recusava tres em
+      // cada quatro propostas: medido a 2026-09-02 no remoto, de 624 propostas
+      // activas ha 474 com entidade que nunca foi convertida em cliente. E o
+      // papel de cliente costuma vir DEPOIS do contrato, nao antes -- assinar
+      // converte automaticamente (ver o aviso no dialogo de assinatura).
+      //
+      // client_id fica nulo quando ainda nao existe: a coluna e anulavel, e a
+      // rpc_create_client_contract nao o exige (20260814010000) -- limita-se a
+      // inserir o que recebe, depois de verificar identidade, permissao e
+      // organizacao.
+      //
+      // O unico caso que continua recusado e nao haver ninguem: sem entidade e
+      // sem cliente nao ha a quem fazer o contrato. Eram 15 das 624.
+      const clientId = selectedProposal._resolvedClientId ?? null;
+      if (!clientId && !resolvedEntityId) {
+        // Em portugues de proposito: o mapFriendly devolve o texto cru quando
+        // nenhuma regra bate, e nenhuma bate nesta.
+        throw new Error(
+          "Esta proposta não tem entidade nem pedido associado, por isso não há a quem fazer o contrato."
+        );
+      }
       const totalValue = selectedProposal.quotes?.reduce((sum: number, q: any) => sum + (q.total || 0), 0) || 0;
       let rootOrgId = activeCompany.id;
       try {
@@ -1206,8 +1236,15 @@ const ClientContracts = () => {
   // Scope-aware guards. Returns true if the user can edit/delete the given contract.
   const editScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.edit");
   const deleteScope: ScopeLevel = isSystemAdmin ? "ORG" : getPermissionScope("client_contracts.delete");
-  const canEditContract = (c: { created_by?: string | null }) =>
-    isSystemAdmin || canActOnEntity(editScope, c, scopeAnewUserId, null, teamMemberIds);
+  // Product decision (2026-08-29): edit scope is aligned with the list's view
+  // scope — a contract ASSIGNED to someone (assigned_to), not just one they
+  // CREATED (created_by), is now editable by them. canActOnEntity stays
+  // untouched (shared with leads/proposals/quotes); this uses the
+  // contracts-only canActOnContract (src/lib/contracts/scope.ts) instead.
+  // Delete intentionally keeps the narrower created_by-only rule — this task
+  // only asked to align EDIT with view.
+  const canEditContract = (c: { created_by?: string | null; assigned_to?: string | null }) =>
+    isSystemAdmin || canActOnContract(editScope, c, scopeAnewUserId, teamMemberIds);
   const canDeleteContract = (c: { created_by?: string | null }) =>
     isSystemAdmin || canActOnEntity(deleteScope, c, scopeAnewUserId, null, teamMemberIds);
 
@@ -1404,6 +1441,20 @@ const ClientContracts = () => {
   const getSignatureBadge = (contract: ClientContract) => {
     if (contract.status === "signed" || contract.status === "active") {
       const date = contract.updated_at ? new Date(contract.updated_at).toLocaleDateString("pt-PT", { day: "2-digit", month: "2-digit" }) : "";
+      // Um contrato pode ficar "signed"/"active" por duas vias muito diferentes:
+      // o cliente assinou de facto no portal (signed_by_name preenchido, com
+      // IP/data/imagem) ou alguém do CRM aceitou internamente pelo botão de
+      // mudar estado (só company_signed_by_name preenchido). Mostrar as duas
+      // como "Assinado" sem distinção esconde que o cliente, de facto, não
+      // assinou — por isso quando não há assinatura do cliente mas há
+      // aceitação interna, o rótulo tem de o dizer, e por quem.
+      if (!contract.signed_by_name && contract.company_signed_by_name) {
+        return (
+          <span className="text-xs text-blue-600 font-medium">
+            ✔️ Aceite internamente por {contract.company_signed_by_name} {date}
+          </span>
+        );
+      }
       return <span className="text-xs text-green-600 font-medium">✍️ Assinado {date}</span>;
     }
     if (contract.status === "pending_signature") return <span className="text-xs text-yellow-600 font-medium">✍️ A aguardar assinatura</span>;
@@ -1413,6 +1464,51 @@ const ClientContracts = () => {
     // the portal status badge with "Não enviado".
     if (contractPortalStatuses[contract.id]) return <span className="text-xs text-blue-600 font-medium">✍️ Enviado</span>;
     return <span className="text-xs text-muted-foreground">✍️ Não enviado</span>;
+  };
+
+  // No contract column is gated as sensitive (product decision — EMAIL is
+  // already visible in this table to anyone with client_contracts.view, so
+  // exporting it reveals nothing new): unlike clients/contacts/quotes, this
+  // never shows a "com/sem dados sensíveis" dialog.
+  const handleExportContracts = async () => {
+    if (!activeCompany?.id) {
+      toast.error("Selecione uma organização.");
+      return;
+    }
+    setExportingContracts(true);
+    try {
+      const result = await requestControlledExport({
+        module: "client_contracts",
+        organizationId: activeCompany.id,
+      });
+      toast.success(`${result.rowCount} contratos exportados.`);
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setExportingContracts(false);
+    }
+  };
+
+  // "Exportar apenas a seleção" — same request as handleExportContracts, but
+  // scoped to the checked rows via filters.ids. This is always an ADDITIONAL
+  // filter on top of the organization/owner scope the server already
+  // enforces (see supabase/functions/export-data/requestScoping.ts) — never
+  // a way to widen access.
+  const handleExportSelectedContracts = async () => {
+    if (!activeCompany?.id || selectedIds.size === 0) return;
+    setExportingContracts(true);
+    try {
+      const result = await requestControlledExport({
+        module: "client_contracts",
+        organizationId: activeCompany.id,
+        filters: { ids: Array.from(selectedIds) },
+      });
+      toast.success(`${result.rowCount} contratos exportados.`);
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setExportingContracts(false);
+    }
   };
 
   // Redirect when user lacks view permission. Must be in an effect — calling
@@ -1482,9 +1578,11 @@ const ClientContracts = () => {
               <Button variant="outline" size="sm" onClick={() => navigate("/contract-templates")}>
                 <Settings className="h-4 w-4 mr-2" /> Templates
               </Button>
-              <Button variant="outline" size="sm" onClick={() => exportClientContractsToXlsx(filteredContracts)}>
-                <Download className="h-4 w-4 mr-2" /> Exportar
-              </Button>
+              <PermissionGate permission="client_contracts.export">
+                <Button variant="outline" size="sm" onClick={handleExportContracts} disabled={exportingContracts}>
+                  <Download className="h-4 w-4 mr-2" /> Exportar
+                </Button>
+              </PermissionGate>
               <PermissionGate permission="client_contracts.create">
                 <Button size="sm" onClick={() => setIsDialogOpen(true)}>
                   <Plus className="h-4 w-4 mr-2" /> Novo Contrato
@@ -1538,7 +1636,9 @@ const ClientContracts = () => {
 
         {/* KPIs */}
         <div className="flex-shrink-0 p-4 md:px-6">
-          <div className="flex flex-wrap gap-3">
+          {/* Os cartoes esbatem enquanto as metricas do servidor recarregam,
+              para nunca dar a impressao de um numero final enquanto ainda muda. */}
+          <div className={`flex flex-wrap gap-3 transition-opacity ${metricsLoading ? "opacity-60" : ""}`}>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "all" ? "ring-2 ring-primary" : ""}`} onClick={() => setStatusFilter("all")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">TOTAL CONTRATOS</p>
@@ -1549,28 +1649,28 @@ const ClientContracts = () => {
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "draft" ? "ring-2 ring-yellow-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "draft" ? "all" : "draft")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-yellow-600 tracking-wider">DRAFT</p>
-              <p className="text-2xl font-black text-yellow-600">{kpis.drafts.length}</p>
+              <p className="text-2xl font-black text-yellow-600">{kpis.draftCount}</p>
               <p className="text-[10px] text-muted-foreground">{formatCurrency(kpis.draftValue)}</p>
             </CardContent>
           </Card>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "sent" ? "ring-2 ring-blue-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "sent" ? "all" : "sent")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-blue-600 tracking-wider">ENVIADO</p>
-              <p className="text-2xl font-black text-blue-600">{kpis.sent.length}</p>
+              <p className="text-2xl font-black text-blue-600">{kpis.sentCount}</p>
               <p className="text-[10px] text-muted-foreground">{formatCurrency(kpis.sentValue)}</p>
             </CardContent>
           </Card>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "signed" ? "ring-2 ring-green-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "signed" ? "all" : "signed")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-green-600 tracking-wider">ASSINADO</p>
-              <p className="text-2xl font-black text-green-600">{kpis.signed.length}</p>
+              <p className="text-2xl font-black text-green-600">{kpis.signedCount}</p>
               <p className="text-[10px] text-muted-foreground">{formatCurrency(kpis.signedValue)}</p>
             </CardContent>
           </Card>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "expired" ? "ring-2 ring-red-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "expired" ? "all" : "expired")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-red-600 tracking-wider">EXPIRADO</p>
-              <p className="text-2xl font-black text-red-600">{kpis.expired.length}</p>
+              <p className="text-2xl font-black text-red-600">{kpis.expiredCount}</p>
               <p className="text-[10px] text-muted-foreground">{formatCurrency(kpis.expiredValue)}</p>
             </CardContent>
           </Card>
@@ -1591,14 +1691,14 @@ const ClientContracts = () => {
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">TAXA ASSINATURA</p>
               <p className="text-2xl font-black text-primary">{kpis.signRate}%</p>
-              <p className="text-[10px] text-muted-foreground">{kpis.signed.length}/{kpis.sent.length + kpis.signed.length} assinados</p>
+              <p className="text-[10px] text-muted-foreground">{kpis.signedCount}/{kpis.sentCount + kpis.signedCount} assinados</p>
             </CardContent>
           </Card>
           <Card className={`min-w-[120px] flex-1 cursor-pointer transition-all hover:shadow-md ${statusFilter === "expiring" ? "ring-2 ring-orange-400" : ""}`} onClick={() => setStatusFilter(statusFilter === "expiring" ? "all" : "expiring")}>
             <CardContent className="p-3">
               <p className="text-[10px] uppercase font-semibold text-muted-foreground tracking-wider">A EXPIRAR (90D)</p>
-              <p className={`text-2xl font-black ${kpis.expiring90.length > 0 ? "text-orange-600" : ""}`}>{kpis.expiring90.length}</p>
-              <p className="text-[10px] text-muted-foreground">{kpis.expiring90.length === 0 ? "Sem urgentes" : "Renovações urgentes"}</p>
+              <p className={`text-2xl font-black ${kpis.expiring90Count > 0 ? "text-orange-600" : ""}`}>{kpis.expiring90Count}</p>
+              <p className="text-[10px] text-muted-foreground">{kpis.expiring90Count === 0 ? "Sem urgentes" : "Renovações urgentes"}</p>
             </CardContent>
           </Card>
           <Card className="min-w-[120px] flex-1">
@@ -1665,6 +1765,18 @@ const ClientContracts = () => {
                   <SelectItem value="expired">Expirado</SelectItem>
                   <SelectItem value="cancelled">Anulado</SelectItem>
                   <SelectItem value="expiring">A expirar</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={comercialFilter} onValueChange={setComercialFilter}>
+                <SelectTrigger className="w-[160px] h-9">
+                  <SelectValue placeholder={t('clientContracts.filters.comercial')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('clientContracts.filters.allComercials')}</SelectItem>
+                  <SelectItem value="none">{t('clientContracts.filters.noComercial')}</SelectItem>
+                  {comercialUsers.map(u => (
+                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <Button
@@ -1738,7 +1850,11 @@ const ClientContracts = () => {
                   const first = contracts.find(c => selectedIds.has(c.id));
                   if (first) handleOpenSendChannel(first);
                 }}><Send className="h-3 w-3 mr-1" /> Enviar</Button>
-                <Button size="sm" variant="outline" onClick={() => exportClientContractsToXlsx(filteredContracts.filter(c => selectedIds.has(c.id)))}><Download className="h-3 w-3 mr-1" /> Exportar</Button>
+                <PermissionGate permission="client_contracts.export">
+                  <Button size="sm" variant="outline" disabled={exportingContracts} onClick={handleExportSelectedContracts}>
+                    <Download className="h-3 w-3 mr-1" /> Exportar seleção ({selectedIds.size})
+                  </Button>
+                </PermissionGate>
                 <Button size="sm" variant="ghost" onClick={() => setSelectedIds(new Set())}>Limpar</Button>
               </div>
             )}
@@ -1834,7 +1950,7 @@ const ClientContracts = () => {
                       </TableCell>
                       <TableCell>
                         {contract.proposals ? (
-                          <Badge variant="outline" className="text-xs cursor-pointer hover:bg-primary/10" onClick={() => navigate("/proposals")}>
+                          <Badge variant="outline" className="text-xs cursor-pointer hover:bg-primary/10" onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}>
                             {contract.proposals.title || "Proposta"}
                           </Badge>
                         ) : <span className="text-xs text-muted-foreground">—</span>}
@@ -1978,8 +2094,25 @@ const ClientContracts = () => {
                                    <DropdownMenuItem onClick={() => handleOpenReassign(contract)}>👤 Reatribuir comercial</DropdownMenuItem>
                                    <DropdownMenuSeparator />
                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
+                                  {/* Levam o registo consigo. Navegavam para a lista inteira sem
+                                      identificador nenhum: o menu prometia "ver a proposta deste
+                                      contrato" e entregava a lista de todas, deixando a pessoa a
+                                      procurar o que já tinha à frente. As duas páginas já sabiam
+                                      abrir um registo por `?open=`; faltava passar-lho.
+                                      "Ver orçamentos" só fica activo se houver mesmo orçamentos
+                                      para mostrar: ou um ligado ao contrato, ou a proposta dele a
+                                      ter algum. Ligá-lo a "tem proposta" deixava-o activo em 135
+                                      contratos cuja proposta não tem orçamento nenhum, e abria
+                                      uma lista vazia sem dizer que estava filtrada — quem lá
+                                      chegava concluía que os orçamentos tinham desaparecido. */}
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contractHasQuotes(contract)}
+                                    onClick={() => navigate(contractQuotesRoute(contract))}
+                                  >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem className="text-muted-foreground">👤 Ver cliente (não criado)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   {(isSystemAdmin || canEdit) && (
@@ -1987,9 +2120,13 @@ const ClientContracts = () => {
                                       🚫 Anular contrato
                                     </DropdownMenuItem>
                                   )}
-                                  <DropdownMenuItem className="text-destructive" onClick={() => { setDeleteId(contract.id); setIsDeleteOpen(true); }}>
-                                    🗑 Eliminar
-                                  </DropdownMenuItem>
+                                  {canDelete && canDeleteContract(contract) ? (
+                                    <DropdownMenuItem className="text-destructive" onClick={() => { setDeleteId(contract.id); setIsDeleteOpen(true); }}>
+                                      🗑 Eliminar
+                                    </DropdownMenuItem>
+                                  ) : (
+                                    <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (sem permissão)</DropdownMenuItem>
+                                  )}
                                 </>
                               )}
                               {(contract.status === "signed" || contract.status === "active") && (
@@ -2018,8 +2155,14 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => { toast.info(t('clientContracts.toast.createNewProposalHint')); navigate("/proposals"); }}>📊 Novo Pedido de Proposta (upselling)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contractHasQuotes(contract)}
+                                    onClick={() => navigate(contractQuotesRoute(contract))}
+                                  >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   {(isSystemAdmin || canEdit) && (
@@ -2055,8 +2198,14 @@ const ClientContracts = () => {
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/quotes")}>📊 Ver orçamentos</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contractHasQuotes(contract)}
+                                    onClick={() => navigate(contractQuotesRoute(contract))}
+                                  >📊 Ver orçamentos</DropdownMenuItem>
                                 </>
                               )}
                               {contract.status === "expired" && (
@@ -2072,10 +2221,39 @@ const ClientContracts = () => {
                                   <DropdownMenuItem disabled className="text-muted-foreground">📜 Ver histórico completo (em breve)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => navigate("/proposals")}>📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (expirado mantém histórico)</DropdownMenuItem>
+                                </>
+                              )}
+                              {contract.status === "cancelled" && (
+                                <>
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                  <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
+                                  <DropdownMenuItem
+                                    disabled={!contract.proposal_id}
+                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
+                                  >📑 Ver proposta</DropdownMenuItem>
+                                  <DropdownMenuItem
+                                    disabled={!contractHasQuotes(contract)}
+                                    onClick={() => navigate(contractQuotesRoute(contract))}
+                                  >📊 Ver orçamentos</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
+                                  <DropdownMenuSeparator />
+                                  {canDelete && canDeleteContract(contract) ? (
+                                    <DropdownMenuItem className="text-destructive" onClick={() => { setDeleteId(contract.id); setIsDeleteOpen(true); }}>
+                                      🗑 Eliminar
+                                    </DropdownMenuItem>
+                                  ) : (
+                                    <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (sem permissão)</DropdownMenuItem>
+                                  )}
                                 </>
                               )}
                             </DropdownMenuContent>

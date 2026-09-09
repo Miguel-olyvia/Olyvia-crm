@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface ProposalPortalCommercial {
   name: string;
@@ -46,6 +47,7 @@ async function loadTemplate(proposal: any) {
 
     if (error) {
       console.error("[proposalPortalData] loadTemplate by id", error);
+      captureFlowError(error, "client-portal-proposal");
       return null;
     }
     if (data) return data;
@@ -63,6 +65,7 @@ async function loadTemplate(proposal: any) {
 
     if (error) {
       console.error("[proposalPortalData] loadTemplate default", error);
+      captureFlowError(error, "client-portal-proposal");
       return null;
     }
     return data ?? null;
@@ -80,6 +83,7 @@ async function loadCommercial(
   const { data, error } = await supabase.rpc("get_commercial_info", { p_user_id: createdBy });
   if (error) {
     console.error("[proposalPortalData] get_commercial_info", error);
+    captureFlowError(error, "client-portal-proposal");
     return null;
   }
   const info = data as CommercialInfoRow | null;
@@ -109,9 +113,11 @@ async function resolveCommercialForProposal(
 
   if (clientRes.error) {
     console.error("[proposalPortalData] proposal client lookup", clientRes.error);
+    captureFlowError(clientRes.error, "client-portal-proposal");
   }
   if (dealRes.error) {
     console.error("[proposalPortalData] deal lookup", dealRes.error);
+    captureFlowError(dealRes.error, "client-portal-proposal");
   }
 
   let dealClientAssignedTo: string | null = null;
@@ -123,6 +129,7 @@ async function resolveCommercialForProposal(
       .maybeSingle();
     if (dealClientErr) {
       console.error("[proposalPortalData] deal client lookup", dealClientErr);
+      captureFlowError(dealClientErr, "client-portal-proposal");
     }
     dealClientAssignedTo = dealClient?.assigned_to ?? null;
   }
@@ -152,6 +159,7 @@ export async function loadProposalPortalData(
     // A real query failure must not be confused with "proposal not found":
     // throw so the caller can distinguish a transient/DB error from a genuine 404.
     console.error("[proposalPortalData] proposal lookup", proposalErr);
+    captureFlowError(proposalErr, "client-portal-proposal");
     throw proposalErr;
   }
   if (!proposal) return null;
@@ -175,9 +183,11 @@ export async function loadProposalPortalData(
 
   if (companyResult.error) {
     console.error("[proposalPortalData] company lookup", companyResult.error);
+    captureFlowError(companyResult.error, "client-portal-proposal");
   }
   if (quotesResult.error) {
     console.error("[proposalPortalData] quotes lookup", quotesResult.error);
+    captureFlowError(quotesResult.error, "client-portal-proposal");
   }
 
   let quotes = quotesResult.data || [];
@@ -193,6 +203,7 @@ export async function loadProposalPortalData(
 
     if (pLinksErr) {
       console.error("[proposalPortalData] pipeline_links lookup", pLinksErr);
+      captureFlowError(pLinksErr, "client-portal-proposal");
     }
 
     if (pLinks && pLinks.length > 0) {
@@ -204,6 +215,7 @@ export async function loadProposalPortalData(
           .in("id", quoteIds);
         if (linkedErr) {
           console.error("[proposalPortalData] linked quotes lookup", linkedErr);
+          captureFlowError(linkedErr, "client-portal-proposal");
         }
         quotes = linkedQuotes || [];
       }
@@ -230,9 +242,11 @@ export async function loadProposalPortalData(
 
     if (linesResult.error) {
       console.error("[proposalPortalData] quote_lines lookup", linesResult.error);
+      captureFlowError(linesResult.error, "client-portal-proposal");
     }
     if (feesResult.error) {
       console.error("[proposalPortalData] quote_fees lookup", feesResult.error);
+      captureFlowError(feesResult.error, "client-portal-proposal");
     }
 
     (linesResult.data || []).forEach((line: any) => {

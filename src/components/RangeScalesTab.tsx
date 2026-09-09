@@ -21,6 +21,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface RangeScalesTabProps {
   attributeId: string;
@@ -97,19 +98,21 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
     if (!activeCompany?.id) return;
 
     if (contextType === 'category') {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('product_categories')
         .select('id, name, parent_id')
         .is('parent_id', null)
         .order('name');
 
+      if (error) toast({ title: 'Erro', description: 'Não foi possível carregar as categorias.', variant: 'destructive' });
       setEntities((data || []).map(c => ({ id: c.id, name: c.name, parent_id: null })));
     } else if (contextType === 'subcategory') {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('product_categories')
         .select('id, name, parent_id')
         .not('parent_id', 'is', null)
         .order('name');
+      if (error) captureFlowError(error, 'db-error-leaked-to-ui');
 
       setEntities((data || []).map(c => ({ id: c.id, name: c.name, parent_id: c.parent_id })));
     } else if (contextType === 'product') {
@@ -124,7 +127,7 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
           .eq('organization_id', activeCompany.id)
           .order('name')
           .range(from, from + pageSize - 1);
-        if (error) break;
+        if (error) { captureFlowError(error, 'db-error-leaked-to-ui'); break; }
         all.push(...(data || []));
         if (!data || data.length < pageSize) break;
         from += pageSize;
@@ -156,11 +159,12 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
 
     // For product: try subcategory → category → global
     if (contextType === 'product' && contextEntityId) {
-      const { data: product } = await supabase
+      const { data: product, error: productError } = await supabase
         .from('products')
         .select('category_id')
         .eq('id', contextEntityId)
         .single();
+      if (productError) captureFlowError(productError, 'db-error-leaked-to-ui');
 
       if (product?.category_id) {
         // Try product's direct category (subcategory)
@@ -174,11 +178,12 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
         }
 
         // Try parent category
-        const { data: catInfo } = await supabase
+        const { data: catInfo, error: catInfoError } = await supabase
           .from('product_categories')
           .select('parent_category_id, name')
           .eq('id', product.category_id)
           .single();
+        if (catInfoError) captureFlowError(catInfoError, 'db-error-leaked-to-ui');
 
         const parentCatId = catInfo?.parent_category_id;
         if (parentCatId) {
@@ -203,11 +208,12 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
           applyRanges(parentData);
           setIsInherited(true);
           setHasOwnScales(false);
-          const { data: parentCat } = await supabase
+          const { data: parentCat, error: parentCatError } = await supabase
             .from('product_categories')
             .select('name')
             .eq('id', entity.parent_id)
             .single();
+          if (parentCatError) captureFlowError(parentCatError, 'db-error-leaked-to-ui');
           setInheritedFromName(parentCat?.name || 'Categoria');
           return;
         }
@@ -259,7 +265,8 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
       query = query.eq('product_id', entityId);
     }
 
-    const { data } = await query;
+    const { data, error } = await query;
+    if (error) toast({ title: 'Erro', description: 'Não foi possível carregar os intervalos.', variant: 'destructive' });
     return data;
   };
 
@@ -331,6 +338,7 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
       setHasOwnScales(contextType !== 'global');
       setInheritedFromName(null);
     } catch (error: any) {
+      captureFlowError(error, "pricing-partial-write");
       toast({ title: "Erro ao guardar escalões", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);
@@ -351,10 +359,12 @@ export default function RangeScalesTab({ attributeId }: RangeScalesTabProps) {
         deleteQuery = deleteQuery.eq('product_id', contextEntityId);
       }
 
-      await deleteQuery;
+      const { error } = await deleteQuery;
+      if (error) throw error;
       toast({ title: "Escalões próprios removidos — a herdar do nível superior" });
       loadRangesWithInheritance();
     } catch (error: any) {
+      captureFlowError(error, "pricing-partial-write");
       toast({ title: "Erro ao reverter", description: error.message, variant: "destructive" });
     } finally {
       setLoading(false);

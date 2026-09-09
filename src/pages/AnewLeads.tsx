@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo, Fragment } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
 import { withAuditContext } from "@/utils/auditContext";
 import { sanitizeFieldValue } from "@/utils/sanitize";
 import {
@@ -8,8 +8,11 @@ import {
   type LeadDialogFieldDefinition,
 } from "@/lib/leads/fieldDefinitions";
 import { humanizeFormFieldKey } from "@/lib/leads/fieldLabels";
+import { isBaseFieldCoveredByCampaignFields, stripCampaignCoveredBaseValues } from "@/lib/leads/campaignFieldCoverage";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { validateLeadFieldValues } from "@/utils/leadFieldValidation";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Layout from "@/components/Layout";
 import { useModuleAlerts } from "@/hooks/useModuleAlerts";
@@ -19,9 +22,10 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { supabase } from "@/integrations/supabase/client";
 import { searchEntityIds } from "@/lib/clientSearch";
+import { splitSearchWords, applySearchTextFilter } from "@/lib/searchTextFilter";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { useToast } from "@/hooks/use-toast";
-import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
+import { useSentinelInView } from "@/hooks/useSentinelInView";
 import { useDebounce } from "@/hooks/useDebounce";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -53,8 +57,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   Search, Plus, RefreshCw, Eye, Trash2, Pencil, GripVertical,
   Workflow, Phone, ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, MessageCircle,
-  LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Unlink,
-  Clock, Settings2, AlertCircle, BellRing, CheckCircle2, Sparkles, FileText, Mail, MapPin, Hash, Briefcase,
+  LayoutDashboard, List, Filter, BarChart3, User, Building2, Link, Link2, Unlink,
+  Clock, Settings2, AlertCircle, BellRing, CheckCircle2, Sparkles, FileText, Mail, MapPin, Hash,
   Target, MoreHorizontal, Star, Copy, ExternalLink, Globe, StickyNote, Heart, Download, Upload, Columns3
 } from "lucide-react";
 import {
@@ -75,7 +79,7 @@ import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog"
 import { ScheduleLeadVisitDialog } from "@/components/leads/ScheduleLeadVisitDialog";
 import { RegisterCallDialog } from "@/components/contacts/RegisterCallDialog";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { LeadsDashboard } from "@/components/leads/LeadsDashboard";
+import { LeadsDashboard, LEADS_DASHBOARD_QUERY_KEY_PREFIXES } from "@/components/leads/LeadsDashboard";
 import { LeadsKanbanView } from "@/components/leads/LeadsKanbanView";
 import { LeadsTableColumns, ColumnConfig, DEFAULT_SYSTEM_COLUMNS } from "@/components/leads/LeadsTableColumns";
 import { LeadsAIOrganization } from "@/components/leads/LeadsAIOrganization";
@@ -94,7 +98,7 @@ import { cn } from "@/lib/utils";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useEntityIdentity, resolveEntityByIdentity, validateEntityCoherence } from "@/hooks/useEntityIdentity";
+import { useEntityIdentity, resolveEntityByIdentity, validateEntityCoherence, type EntityIdentity } from "@/hooks/useEntityIdentity";
 import { NativeSelect } from "@/components/ui/native-select";
 import { usePipelineAutomation } from "@/hooks/usePipelineAutomation";
 import { DuplicateEntityDialog } from "@/components/shared/DuplicateEntityDialog";
@@ -128,68 +132,23 @@ import { checkNameDuplicatesBeforeInsert } from "@/lib/leadDuplicateCheck";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import {
-  getLeadScopeUserIds,
+  applyLeadVisibilityFilter,
+  filterUsersByLeadScope,
   mapWithConcurrency,
   normalizeLeadScope,
   reconcileRefreshedLead,
 } from "./anewLeadsHelpers";
 
 
-interface Lead {
-  id: string;
-  organization_id: string;
-  campaign_id: string | null;
-  field_values: Record<string, any> | null;
-  status: string;
-  source: string | null;
-  notes: string | null;
-  tags: string[] | null;
-  created_at: string;
-  created_by: string | null;
-  converted_to_contact_id: string | null;
-  converted_at: string | null;
-  assigned_to: string | null;
-  entity_id?: string | null;
-  campaigns?: { id: string; name: string } | null;
-  last_contact_result?: string;
-  last_contact_at?: string | null;
-  converted_to_client_id?: string | null;
-  callback_scheduled_at?: string | null;
-  callback_notes?: string | null;
-  profiles?: { name: string | null } | null;
-  assigned_user?: { id: string; name: string | null } | null;
-  [key: string]: any;
-}
+// Lead e FieldDefinition vivem em @/types/leads. Leia o cabecalho desse
+// ficheiro antes de lhes tocar: ambos terminam em `[key: string]: any`.
+import type { Lead, FieldDefinition } from "@/types/leads";
 
 interface ContactResultConfig {
   id: string;
   name: string;
   icon: string;
   color: string;
-}
-
-interface FieldDefinition {
-  id: string;
-  campaign_id: string | null;
-  organization_id?: string | null;
-  field_key: string;
-  field_label: string;
-  field_type: string;
-  is_required: boolean;
-  is_unique: boolean;
-  options: any;
-  sort_order: number;
-  contact_field_mapping: string | null;
-  client_field_mapping: string | null;
-  placeholder?: string;
-  help_text?: string;
-  display_style?: string;
-  [key: string]: any;
-}
-
-interface ClientOption {
-  id: string;
-  entity_id: string | null;
 }
 
 // Contact fields available for mapping - labels will be translated via t()
@@ -236,6 +195,13 @@ interface Campaign {
 
 // Canonical column list for a leads list/kanban fetch — shared so both call sites
 // always request (and therefore can filter/display) the exact same shape.
+//
+// `search_text` NAO consta aqui de proposito. E uma coluna denormalizada de
+// pesquisa (nome + email + telefone concatenados), usada apenas no `.ilike()`
+// do lado do servidor — nada no cliente a le. Vinha na resposta e custava,
+// medido nesta organizacao, 6081 bytes por pagina de 25 leads, ~24% do peso
+// das colunas de texto da pagina. O mesmo raciocinio ja estava escrito em
+// refreshSingleLead; faltava aplica-lo a lista.
 const LEADS_LIST_COLUMNS = `
   id, entity_id, campaign_id,
   status, workflow_stage_id, assigned_to, created_by,
@@ -244,11 +210,45 @@ const LEADS_LIST_COLUMNS = `
   converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
   field_values, notes, source, source_id,
   last_contact_at, last_contact_result, contact_attempts,
+  last_activity_at,
   callback_scheduled_at, callback_notes,
-  tags, search_text,
+  tags,
   qualification_type, qualified_at,
   campaigns(id, name)
 `;
+
+// Coluna pela qual a lista de Leads ordena. NAO e `created_at`: e a coluna
+// GERADA `list_sort_at` (= GREATEST(created_at, last_activity_at), criada em
+// supabase/migrations/20261119010000_leads_ordenacao_por_actividade.sql).
+// Quem ja era lead e volta a preencher o formulario publico nao gera ficha
+// nova -- carimba-se `last_activity_at` na ficha que ja ca estava --, e sem
+// esta chave a ficha continuava enterrada na data em que nasceu, que e o
+// oposto do que se quer: a lead ocupa a posicao do dia em que a pessoa
+// voltou a contactar. Quem nunca voltou ordena exactamente como antes
+// (GREATEST com last_activity_at NULL devolve created_at).
+//
+// DEPENDENCIA DE SCHEMA: sem essa migracao aplicada ao ambiente, o PostgREST
+// responde 42703 (`column anew_leads.list_sort_at does not exist`) e a lista
+// fica vazia com erro. Codigo e migracao andam juntos.
+const LEADS_LIST_SORT_COLUMN = "list_sort_at";
+
+// O mesmo GREATEST, do lado do cliente. A tabela re-ordena em memoria as
+// paginas ja carregadas (ver `filteredLeads`), por isso a ordenacao por
+// defeito do cliente tem de usar a MESMA chave que o servidor -- caso
+// contrario a ordem que o servidor entregou era desfeita aqui e a lead que
+// voltou a contactar caia outra vez para a data em que nasceu.
+// `list_sort_at` nao vem no SELECT (nada mais no ecra a le); calcula-se a
+// partir das duas colunas que vem.
+function leadListSortValue(
+  lead: { created_at?: string | null; last_activity_at?: string | null },
+): number {
+  const toMs = (value?: string | null) => {
+    if (!value) return 0;
+    const ms = new Date(value).getTime();
+    return Number.isNaN(ms) ? 0 : ms;
+  };
+  return Math.max(toMs(lead.created_at), toMs(lead.last_activity_at));
+}
 
 interface LeadsQueryFilters {
   statusFilter: string;
@@ -314,7 +314,16 @@ function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
   }
   if (dateFrom) q = q.gte("created_at", startOfDay(dateFrom).toISOString());
   if (dateTo) q = q.lte("created_at", endOfDay(dateTo).toISOString());
-  if (effectiveSearch) q = q.ilike("search_text", `%${effectiveSearch}%`);
+  // Palavra a palavra, nao a frase seguida: um `.ilike("search_text", "%joao silva%")`
+  // exigia que as palavras fossem contiguas, por isso "joao silva" nunca
+  // encontrava "Joao Pedro Silva". `applySearchTextFilter` encadeia um
+  // `.ilike()` por palavra (o PostgREST junta-os com AND na mesma coluna), e
+  // cada um continua a usar o indice GIN trgm de `search_text`. Vive aqui,
+  // dentro das clausulas partilhadas, para que lista e kanban recebam
+  // exactamente o mesmo filtro. A regra e byte a byte a mesma que
+  // get_scoped_leads_base aplica no SQL, para os contadores de estado nao
+  // divergirem da lista.
+  if (effectiveSearch) q = applySearchTextFilter(q, splitSearchWords(effectiveSearch));
   if (sourceFilter === "none") {
     q = q.is("source", null);
   } else if (sourceFilter !== "all") {
@@ -351,13 +360,13 @@ function buildLeadsBaseQuery(params: {
 
   query = query.eq("organization_id", params.organizationId);
 
-  if (params.requestedScope === "OWNED" && params.scopeAnewUserId) {
-    const ownerIds = getLeadScopeUserIds(params.scopeAnewUserId, params.scopeAuthUserId);
-    query = query.or(`assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`);
-  } else if (params.requestedScope === "TEAM" && params.scopeAnewUserId) {
-    const visibleUserIds = getLeadScopeUserIds(params.scopeAnewUserId, params.scopeAuthUserId, params.teamMemberIds);
-    query = query.or(`assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`);
-  }
+  query = applyLeadVisibilityFilter(
+    query,
+    params.requestedScope as "ORG" | "TEAM" | "OWNED",
+    params.scopeAnewUserId,
+    params.scopeAuthUserId,
+    params.teamMemberIds,
+  );
 
   return applyLeadsServerFilters(query, params.filters);
 }
@@ -375,11 +384,161 @@ const leadFormsFieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefi
 // Case) rather than ever shown raw. Extracted to src/lib/leads/fieldLabels.ts
 // so other surfaces (pending form_submissions review page) share it.
 
+// --- "Formulários" tab: um cartão por submissão, vindo de DUAS fontes ---
+// Desde a deteccao de duplicados, quem já existe na organização deixa de gerar
+// lead nova: a submissão acumula em public.form_submissions. Ler só anew_leads
+// faria essas submissões DESAPARECER deste separador. Os dois tipos de cartão
+// partilham os campos submetidos e distinguem-se pelo estado que mostram: uma
+// lead tem fase do funil, uma submissão tem estado de revisão.
+type LeadFormCardKind = "lead" | "submission";
+/** Estado de revisão de uma linha de form_submissions (ver PendingFormSubmissions.tsx). */
+type LeadFormReviewState = "pending" | "merged" | "new_lead" | "resolved";
+interface LeadFormConflictEntity {
+  id: string;
+  name: string;
+}
+interface LeadFormCard {
+  /** Único entre as duas fontes: os ids vivem em tabelas diferentes. */
+  key: string;
+  kind: LeadFormCardKind;
+  id: string;
+  createdAt: string | null;
+  campaignName: string | null;
+  source: string | null;
+  fieldValues: Record<string, unknown>;
+  fieldLabels: Record<string, string>;
+  districtFieldKeys: Set<string>;
+  districtNameById: Record<string, string>;
+  /** Só nas leads: fase do funil. */
+  stageLabel: string | null;
+  /** Só nas submissões. */
+  reviewState: LeadFormReviewState | null;
+  /** CONFLITO (06): as duas entidades candidatas, com nome. */
+  conflictEntities: readonly LeadFormConflictEntity[] | null;
+  /** Dado novo que NUNCA foi gravado na ficha da pessoa. */
+  unsavedEmail: string | null;
+  unsavedPhone: string | null;
+  /**
+   * Porque e que esta submissao nao criou lead: o que coincidiu e com que
+   * registo. Sem isto o cartao mostra o que a pessoa preencheu e deixa quem
+   * la chega sem perceber porque e que nao ha lead nova.
+   */
+  matchReason: string | null;
+}
+
+/**
+ * Frase que diz porque e que uma submissao nao virou lead nova.
+ *
+ * Le o que a deteccao de duplicados deixou em `field_values._meta.dedup`:
+ * `por` diz o que coincidiu (email, telefone, ou os dois) e `registo` diz com
+ * que tipo de ficha coincidiu. Devolve null quando nao ha nada guardado --
+ * submissoes anteriores a isto, que ficam sem explicacao em vez de inventarem
+ * uma.
+ */
+function describeFormSubmissionMatch(dedupMeta: any): string | null {
+  const por = dedupMeta?.por;
+  if (!por) return null;
+
+  const registo = dedupMeta?.registo === "client" ? "um cliente" : "uma lead";
+
+  if (por === "conflito") {
+    return "Não entrou como lead nova: o email e o telefone apontam para pessoas diferentes.";
+  }
+
+  // Dizer "o email e igual" sem dizer QUAL obriga quem le a ir procurar.
+  const email = dedupMeta?.email_igual ? ` (${dedupMeta.email_igual})` : "";
+  const telefone = dedupMeta?.telefone_igual ? ` (${dedupMeta.telefone_igual})` : "";
+
+  const coincidencia = por === "ambos"
+    ? `o email${email} e o telefone${telefone} são os mesmos`
+    : por === "email"
+      ? `o email${email} é o mesmo`
+      : `o telefone${telefone} é o mesmo`;
+
+  return `Não entrou como lead nova: já existe ${registo} em que ${coincidencia}.`;
+}
+
+// Fase do funil por status da lead. Ao nivel do modulo porque a query do
+// separador "Formularios" (acima do corpo do componente) tambem a usa.
+const statusToStageMap: Record<string, string> = {
+  new: "novo",
+  contacted: "contactado",
+  qualified: "qualificado",
+  proposal_sent: "proposta",
+  converted: "ganho",
+  won: "ganho",
+  lost: "perdido",
+  rejected: "perdido",
+  callback_scheduled: "contactado",
+  visit_scheduled: "contactado",
+  negotiation: "proposta",
+  no_answer: "contactado",
+  incomplete: "novo",
+};
+
+const LEAD_FORM_SUBMISSION_COLUMNS =
+  "id, campaign_id, field_values, status, resolution, resolved_at, created_at, entity_id, campaigns(id, name)";
+
+/**
+ * Submissões de formulário da entidade. `conflicting_entity_id` só existe a
+ * partir da migration 20261116050000; enquanto ela não estiver aplicada o
+ * PostgREST recusa a coluna, e o separador tem de continuar a funcionar sem a
+ * marca de conflito em vez de ficar vazio.
+ */
+async function fetchEntityFormSubmissions(entityId: string, organizationId: string | null): Promise<any[]> {
+  // Sem organização não há como isolar o inquilino: devolve-se vazio em vez de
+  // arriscar mostrar a submissão de outra organização.
+  if (!organizationId) return [];
+
+  // Cast deliberado: `conflicting_entity_id` ainda nao existe nos tipos
+  // gerados (a migration esta por aplicar), e a query tem de compilar na mesma.
+  const withConflict = await (supabase as any)
+    .from("form_submissions")
+    .select(`${LEAD_FORM_SUBMISSION_COLUMNS}, conflicting_entity_id`)
+    .eq("entity_id", entityId)
+    .eq("organization_id", organizationId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (!withConflict.error) return withConflict.data || [];
+
+  const missingColumn =
+    withConflict.error.code === "42703" ||
+    withConflict.error.code === "PGRST204" ||
+    /conflicting_entity_id/.test(withConflict.error.message || "");
+  if (!missingColumn) throw withConflict.error;
+
+  const { data, error } = await supabase
+    .from("form_submissions")
+    .select(LEAD_FORM_SUBMISSION_COLUMNS)
+    .eq("entity_id", entityId)
+    .eq("organization_id", organizationId)
+    .is("deleted_at", null)
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) throw error;
+  return data || [];
+}
+
+function resolveLeadFormReviewState(row: { resolution?: string | null; resolved_at?: string | null }): LeadFormReviewState {
+  if (!row.resolved_at) return "pending";
+  if (row.resolution === "merged" || row.resolution === "new_lead") return row.resolution;
+  return "resolved";
+}
+
+const LEAD_FORM_REVIEW_LABELS: Record<LeadFormReviewState, string> = {
+  pending: "Por rever",
+  merged: "Associada ao registo",
+  new_lead: "Virou lead nova",
+  resolved: "Revista",
+};
+
 export default function AnewLeads() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const navigate = useNavigate();
-  const { resolveEntities, getIdentity } = useEntityIdentity();
+  const { resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
   const queryClient = useQueryClient();
   
   // Create translated field arrays (memoized to prevent re-creation every render)
@@ -396,24 +555,23 @@ export default function AnewLeads() {
     teamMemberIds,
     loading: scopeLoading,
   } = usePermissionScope();
-  const { hasPermission } = usePermissions();
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
   
-  const [leads, setLeads] = useState<Lead[]>([]);
+
   const [kanbanLeads, setKanbanLeads] = useState<Lead[]>([]);
   const [kanbanLoading, setKanbanLoading] = useState(false);
   const [kanbanTruncated, setKanbanTruncated] = useState(false);
   const [fieldDefs, setFieldDefs] = useState<FieldDefinition[]>([]);
   const [contactResults, setContactResults] = useState<ContactResultConfig[]>([]);
   const [referenceData, setReferenceData] = useState<Record<string, Record<string, string>>>({});
-  const [loading, setLoading] = useState(true);
+
   
   // Infinite scroll / pagination state
   const PAGE_SIZE = 25;
+  /** Chave da cache da lista de leads. Ver `leadsQuery`. */
+  const LEADS_LIST_QUERY_KEY = "anew-leads-list";
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
-  const [hasMore, setHasMore] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const currentPageRef = useRef(0);
-  const isLoadingRef = useRef(false);
+
   const descendantCacheRef = useRef<{ key: string; ids: string[]; hierarchy: any[] } | null>(null);
   const leadsTableScrollRef = useRef<HTMLDivElement | null>(null);
   const leadsTableScrollbarRef = useRef<HTMLDivElement | null>(null);
@@ -451,88 +609,9 @@ export default function AnewLeads() {
     }
   }, [searchParams, setSearchParams]);
 
-  // Deep-link: ?open=<leadId> opens the details dialog (Olyvia chat links)
-  useEffect(() => {
-    const openId = searchParams.get("open");
-    if (!openId || !activeCompanyId || selectedLead) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const found = leads.find((l) => l.id === openId);
-        if (found) {
-          if (!cancelled) {
-            setSelectedLead(found);
-            setDetailTab("info");
-            setShowDetails(true);
-          }
-        } else {
-          let openQuery = (supabase as any)
-            .from("anew_leads")
-            .select(`
-              id, entity_id, campaign_id,
-              status, workflow_stage_id, assigned_to, created_by,
-              organization_id, root_organization_id,
-              created_at, updated_at, converted_at,
-              converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-              field_values, notes, source, source_id,
-              last_contact_at, last_contact_result, contact_attempts,
-              callback_scheduled_at, callback_notes, tags,
-              qualification_type, qualified_at,
-              campaigns(id, name)
-            `)
-            .eq("id", openId)
-            .eq("organization_id", activeCompanyId)
-            .is("deleted_at", null);
-          const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
-          if (requestedScope === "OWNED" && scopeAnewUserId) {
-            const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
-            openQuery = openQuery.or(
-              `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
-            );
-          } else if (requestedScope === "TEAM" && scopeAnewUserId) {
-            const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
-            openQuery = openQuery.or(
-              `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
-            );
-          }
-          const { data } = await openQuery.maybeSingle();
-          if (!cancelled && data) {
-            setSelectedLead({
-              ...data,
-              field_values: data.field_values && typeof data.field_values === "object"
-                ? data.field_values
-                : {},
-            } as Lead);
-            setDetailTab("info");
-            setShowDetails(true);
-          } else if (!cancelled) {
-            toast({ title: t('leads.toast.notFound'), description: t('leads.toast.notFoundDesc'), variant: "destructive" });
-          }
-        }
-      } finally {
-        if (!cancelled) {
-          const next = new URLSearchParams(searchParams);
-          next.delete("open");
-          setSearchParams(next, { replace: true });
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    // selectedLead is intentionally excluded: re-running when a dialog is already
-    // open would clobber the in-flight open state. The effect must only fire when
-    // the ?open= param or org/scope context changes, not when the user navigates
-    // within the already-open detail dialog.
-  }, [
-    searchParams,
-    activeCompanyId,
-    leads,
-    getPermissionScope,
-    onlyMine,
-    scopeAnewUserId,
-    scopeAuthUserId,
-    teamMemberIds,
-  ]);
+  // Deep-link: ?open=<leadId> opens the details dialog (Olyvia chat links).
+  // ?open_lead=<uuid> is the equivalent used by notification alert links and
+  // requires a valid UUID before it is honoured.
 
   // Derive totals from statusCounts (single source of truth from RPC)
   const globalTotal = useMemo(() => 
@@ -554,7 +633,12 @@ export default function AnewLeads() {
   // temporal-dead-zone ReferenceError — see their definitions near comercialUsers/assignOrgTree.
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
-  const [sortColumn, setSortColumn] = useState<string>("created_at");
+  // Por defeito, a mesma chave que o servidor usa (ver LEADS_LIST_SORT_COLUMN).
+  // Se ficasse em "created_at", `filteredLeads` re-ordenava as paginas ja
+  // carregadas por data de criacao e anulava a ordenacao do servidor. A coluna
+  // "Criado" continua a existir e a ordenar por `created_at` exacto quando se
+  // clica nela.
+  const [sortColumn, setSortColumn] = useState<string>(LEADS_LIST_SORT_COLUMN);
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
   const [selectedLead, setSelectedLead] = useState<Lead | null>(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -595,8 +679,6 @@ export default function AnewLeads() {
   const [editingField, setEditingField] = useState<FieldDefinition | null>(null);
   
   // Contact/Client association state
-  const [clientOptions, setClientOptions] = useState<ClientOption[]>([]);
-  const [searchingClients, setSearchingClients] = useState(false);
   
   // Column customization state — initialized from the default set (rather
   // than []) so the table doesn't render with only the fixed checkbox/Ações
@@ -643,6 +725,12 @@ export default function AnewLeads() {
   const [conversionLead, setConversionLead] = useState<Lead | null>(null);
   const [conversionType, setConversionType] = useState<'client'>('client');
   const [conversionCampaignId, setConversionCampaignId] = useState<string>("");
+  // A ficha da pessoa que o dialogo de conversao mostra. Guardada em estado
+  // proprio -- e nao lida do formulario -- porque e a ficha que sobrevive a
+  // conversao: a rpc_convert_lead_to_client nao escreve nome, email nem
+  // telefone em lado nenhum.
+  const [conversionIdentity, setConversionIdentity] = useState<EntityIdentity | null>(null);
+  const [conversionIdentityLoading, setConversionIdentityLoading] = useState(false);
   const [isConverting, setIsConverting] = useState(false);
   const conversionLockRef = useRef(false);
 
@@ -698,22 +786,6 @@ export default function AnewLeads() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!activeCompanyId || showContactDialog || selectedLead) return;
-    try {
-      const raw = localStorage.getItem(LEAD_CONTACT_DIALOG_STATE_KEY);
-      if (!raw) return;
-      const saved = JSON.parse(raw) as { leadId?: string; companyId?: string | null };
-      if (!saved.leadId || saved.companyId !== activeCompanyId) return;
-      const existing = leads.find((lead) => lead.id === saved.leadId);
-      if (existing) {
-        setSelectedLead(existing);
-        setShowContactDialog(true);
-      }
-    } catch {
-      localStorage.removeItem(LEAD_CONTACT_DIALOG_STATE_KEY);
-    }
-  }, [activeCompanyId, leads, selectedLead, showContactDialog]);
 
   // Cleanup effect to reset any lingering pointer-events blocks from Radix components on unmount
   useEffect(() => {
@@ -786,36 +858,42 @@ export default function AnewLeads() {
   const leadDetailProposals = leadDetailFinanceData?.proposals || [];
   const leadDetailQuotes = leadDetailFinanceData?.quotes || [];
 
-  // "Formulários" tab — every anew_leads row sharing this lead's entity_id
-  // that carries actual submitted field_values (i.e. one card per form
-  // submission tied to the same underlying person/entity, including this
-  // lead's own submission). Read-only, scoped by entity_id + RLS, same
-  // convention as the deals/proposals/quotes query above.
-  const { data: leadDetailFormSubmissions = [], isLoading: leadDetailFormsLoading } = useQuery({
+  // "Formulários" tab — um cartão por submissão, lido de DUAS fontes:
+  //  1. anew_leads da entidade que carregam field_values submetidos (como antes);
+  //  2. form_submissions da entidade — onde passam a acumular as submissões de
+  //     quem já existia na organização e por isso NÃO gerou lead nova.
+  // Sem a segunda fonte, essas submissões desapareciam deste ecrã.
+  // Read-only, scoped by entity_id + RLS, same convention as the
+  // deals/proposals/quotes query above.
+  const { data: leadDetailFormSubmissions = [], isLoading: leadDetailFormsLoading } = useQuery<LeadFormCard[]>({
     queryKey: ["lead-detail-form-submissions", leadDetailEntityId, leadDetailOrganizationId],
     queryFn: async () => {
       const entityId = leadDetailEntityId as string;
 
-      const { data } = await supabase
-        .from("anew_leads")
-        .select("id, campaign_id, field_values, source, status, created_at, campaigns(id, name)")
-        .eq("entity_id", entityId)
-        .is("deleted_at", null)
-        .not("field_values", "is", null)
-        .order("created_at", { ascending: false })
-        .limit(20);
+      const [leadsRes, submissionRows] = await Promise.all([
+        supabase
+          .from("anew_leads")
+          .select("id, campaign_id, field_values, source, status, created_at, campaigns(id, name)")
+          .eq("entity_id", entityId)
+          .is("deleted_at", null)
+          .not("field_values", "is", null)
+          .order("created_at", { ascending: false })
+          .limit(20),
+        fetchEntityFormSubmissions(entityId, leadDetailOrganizationId),
+      ]);
 
-      const submissions = (data || []).filter((row: any) => {
-        const keys = Object.keys(row.field_values || {}).filter((key) => key !== "_meta");
-        return keys.length > 0;
-      });
+      const hasSubmittedValues = (row: any) =>
+        Object.keys(row.field_values || {}).filter((key) => key !== "_meta").length > 0;
+      const leadRows = (leadsRes.data || []).filter(hasSubmittedValues);
+      const submissions = (submissionRows || []).filter(hasSubmittedValues);
+      const allRows = [...leadRows, ...submissions];
 
       const campaignIds = Array.from(
-        new Set(submissions.map((row: any) => row.campaign_id).filter(Boolean)),
+        new Set(allRows.map((row: any) => row.campaign_id).filter(Boolean)),
       ) as string[];
       // Manual-source submissions carry no campaign_id - resolve those against
       // the org's own field definitions instead of leaving them unlabeled.
-      const hasNoCampaignSubmission = submissions.some((row: any) => !row.campaign_id);
+      const hasNoCampaignSubmission = allRows.some((row: any) => !row.campaign_id);
 
       const definitionsByCampaign: Record<string, LeadDialogFieldDefinition[]> = {};
       await Promise.all([
@@ -850,13 +928,87 @@ export default function AnewLeads() {
         districtNameById = Object.fromEntries((districts || []).map((d: any) => [d.id, d.name]));
       }
 
-      return submissions.map((row: any) => {
-        const definitions = row.campaign_id
-          ? definitionsByCampaign[row.campaign_id] || []
+      // CONFLITO (06): mostram-se AS DUAS entidades candidatas, com nome, para
+      // quem lê perceber a dúvida. Uma delas é a própria entidade da submissão.
+      const conflictEntityIds = Array.from(
+        new Set(
+          submissions
+            .flatMap((row: any) => [row.conflicting_entity_id, row.conflicting_entity_id ? row.entity_id : null])
+            .filter(Boolean),
+        ),
+      ) as string[];
+      let entityNameById: Record<string, string> = {};
+      if (conflictEntityIds.length > 0) {
+        const { data: entities } = await supabase
+          .from("anew_entities")
+          .select("id, display_name")
+          .in("id", conflictEntityIds);
+        entityNameById = Object.fromEntries(
+          (entities || []).map((e: any) => [e.id, e.display_name || "Sem nome"]),
+        );
+      }
+
+      const labelsFor = (campaignId: string | null): Record<string, string> => {
+        const definitions = campaignId
+          ? definitionsByCampaign[campaignId] || []
           : definitionsByCampaign["__org__"] || [];
-        const fieldLabels = Object.fromEntries(definitions.map((d) => [d.field_key, d.field_label]));
-        return { ...row, fieldLabels, districtFieldKeys, districtNameById };
+        return Object.fromEntries(definitions.map((d) => [d.field_key, d.field_label]));
+      };
+
+      const leadCards: LeadFormCard[] = leadRows.map((row: any) => ({
+        key: `lead:${row.id}`,
+        kind: "lead",
+        id: row.id,
+        createdAt: row.created_at ?? null,
+        campaignName: row.campaigns?.name ?? null,
+        source: row.source ?? null,
+        fieldValues: row.field_values || {},
+        fieldLabels: labelsFor(row.campaign_id),
+        districtFieldKeys,
+        districtNameById,
+        stageLabel: statusToStageMap[row.status] || row.status || null,
+        reviewState: null,
+        conflictEntities: null,
+        unsavedEmail: null,
+        unsavedPhone: null,
+        matchReason: null,
+      }));
+
+      const submissionCards: LeadFormCard[] = submissions.map((row: any) => {
+        // Dado novo assinalado pela detecção de duplicados. NUNCA foi gravado
+        // na ficha da pessoa: vive apenas aqui, em _meta.dedup.
+        const dedupMeta = (row.field_values as any)?._meta?.dedup || null;
+        const conflictingEntityId = row.conflicting_entity_id || null;
+        return {
+          key: `submission:${row.id}`,
+          kind: "submission",
+          id: row.id,
+          createdAt: row.created_at ?? null,
+          campaignName: row.campaigns?.name ?? null,
+          source: null,
+          fieldValues: row.field_values || {},
+          fieldLabels: labelsFor(row.campaign_id),
+          districtFieldKeys,
+          districtNameById,
+          stageLabel: null,
+          reviewState: resolveLeadFormReviewState(row),
+          conflictEntities: conflictingEntityId
+            ? [
+                { id: row.entity_id, name: entityNameById[row.entity_id] || "Entidade sem nome" },
+                { id: conflictingEntityId, name: entityNameById[conflictingEntityId] || "Entidade sem nome" },
+              ]
+            : null,
+          unsavedEmail: dedupMeta?.novo_email ?? null,
+          unsavedPhone: dedupMeta?.novo_telefone ?? null,
+          matchReason: describeFormSubmissionMatch(dedupMeta),
+        };
       });
+
+      // As duas fontes são tabelas distintas, mas a chave composta protege
+      // contra qualquer id repetido dentro da mesma fonte.
+      return Array.from(
+        new Map([...leadCards, ...submissionCards].map((card) => [card.key, card])).values(),
+      ).sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
     },
     enabled: showDetails && !!leadDetailEntityId,
   });
@@ -879,17 +1031,13 @@ export default function AnewLeads() {
         .lte("callback_scheduled_at", todayEnd.toISOString());
       callbacksQuery = callbacksQuery.eq("organization_id", activeCompanyId as string);
 
-      if (callbacksScope === "OWNED" && scopeAnewUserId) {
-        const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
-        callbacksQuery = callbacksQuery.or(
-          `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
-        );
-      } else if (callbacksScope === "TEAM" && scopeAnewUserId) {
-        const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
-        callbacksQuery = callbacksQuery.or(
-          `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
-        );
-      }
+      callbacksQuery = applyLeadVisibilityFilter(
+        callbacksQuery,
+        callbacksScope,
+        scopeAnewUserId,
+        scopeAuthUserId,
+        teamMemberIds,
+      );
 
       const { data } = await callbacksQuery;
       return (data || []) as unknown as Lead[];
@@ -931,9 +1079,12 @@ export default function AnewLeads() {
       // campaigns, lead sources, workflow stages, forms, company users, and
       // comercial users are fetched via useQuery (see below) and no longer
       // orchestrated from here.
+      //
+      // A LISTA de leads ja nao e pedida aqui: os filtros fazem parte da chave
+      // da cache, por isso mudar um filtro re-le sozinho. Este efeito trata so
+      // dos contadores, que vem de um RPC separado.
       initialLoadDoneRef.current = true;
       loadStatusCounts();
-      loadLeads();
 
       // Defer secondary loads so critical path renders first
       const timer = setTimeout(() => {
@@ -941,8 +1092,6 @@ export default function AnewLeads() {
       }, 200);
       return () => clearTimeout(timer);
     } else {
-      // Subsequent renders: only reload leads + counts (filters/search changed)
-      loadLeads();
       loadStatusCounts();
     }
     // loadContactResults is intentionally excluded from the dep array. This
@@ -956,28 +1105,26 @@ export default function AnewLeads() {
 
 
 
-  const statusToStageMap: Record<string, string> = {
-    new: "novo",
-    contacted: "contactado",
-    qualified: "qualificado",
-    proposal_sent: "proposta",
-    converted: "ganho",
-    won: "ganho",
-    lost: "perdido",
-    rejected: "perdido",
-    callback_scheduled: "contactado",
-    visit_scheduled: "contactado",
-    negotiation: "proposta",
-    no_answer: "contactado",
-    incomplete: "novo",
-  };
-
   // Load status counts directly from database (independent of pagination)
   // Uses server-side GROUP BY for maximum performance
   // Now accepts the same filters as the UI to keep counters synchronized
   const loadStatusCounts = useCallback(async () => {
     if (!activeCompanyId) return;
-    
+
+    // Single funnel-in point for "the lead data changed, re-read the
+    // aggregates": every mutation path on this page (create, edit, status
+    // change, assign, bulk actions, delete, kanban drop, convert to client)
+    // already calls loadStatusCounts afterwards, so invalidating the
+    // Dashboard tab's react-query caches here keeps its cards in sync without
+    // repeating the call at a dozen sites. Those queries use staleTime 60s
+    // with no polling/refocus refetch, and react-query keeps their data while
+    // the Dashboard tab is unmounted, so nothing else would refresh them.
+    // While the List tab is open these queries are inactive, so this only
+    // marks them stale — no refetch cascade.
+    LEADS_DASHBOARD_QUERY_KEY_PREFIXES.forEach((prefix) => {
+      queryClient.invalidateQueries({ queryKey: [prefix] });
+    });
+
     const viewScope = getPermissionScope("leads.view");
     if (viewScope === "NONE") { setStatusCounts({}); return; }
     
@@ -1011,6 +1158,7 @@ export default function AnewLeads() {
 
       if (error) {
         console.error("Error loading status counts:", error);
+        captureFlowError(error, "lead-lifecycle");
         return;
       }
 
@@ -1023,8 +1171,9 @@ export default function AnewLeads() {
       setStatusCounts(counts);
     } catch (error) {
       console.error("Error loading status counts:", error);
+      captureFlowError(error, "lead-lifecycle");
     }
-  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, queryClient, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
 
   const dashboardQuery = useMemo(() => {
     if (!activeCompanyId || scopeLoading) return null;
@@ -1387,24 +1536,14 @@ export default function AnewLeads() {
 
   // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
   // ORG sees the full roster; TEAM sees only their own teammates; OWNED/NONE see only themselves.
-  // teamMemberIds is session-global and must never be used outside the TEAM branch.
+  // filterUsersByLeadScope's TEAM branch is the only place allowed to read
+  // teamMemberIds -- it is session-global and must never leak into the
+  // OWNED/NONE fallback (same rule enforced in applyLeadVisibilityFilter).
   const assignableCompanyUsers = useMemo(() => {
-    const scope = getPermissionScope("leads.view");
-    if (scope === "ORG") return companyUsers;
-    if (scope === "TEAM") {
-      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
-      return companyUsers.filter(u => allowedIds.has(u.id));
-    }
-    return companyUsers.filter(u => u.id === scopeAnewUserId);
+    return filterUsersByLeadScope(companyUsers, getPermissionScope("leads.view"), scopeAnewUserId, teamMemberIds);
   }, [companyUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
   const assignableComercialUsers = useMemo(() => {
-    const scope = getPermissionScope("leads.view");
-    if (scope === "ORG") return comercialUsers;
-    if (scope === "TEAM") {
-      const allowedIds = new Set([scopeAnewUserId, ...teamMemberIds].filter(Boolean));
-      return comercialUsers.filter(u => allowedIds.has(u.id));
-    }
-    return comercialUsers.filter(u => u.id === scopeAnewUserId);
+    return filterUsersByLeadScope(comercialUsers, getPermissionScope("leads.view"), scopeAnewUserId, teamMemberIds);
   }, [comercialUsers, getPermissionScope, scopeAnewUserId, teamMemberIds]);
 
 
@@ -1480,7 +1619,14 @@ export default function AnewLeads() {
       });
       toast({
         title: "Exportação concluída",
-        description: `${result.rowCount} leads exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
+        description: result.includesSensitive
+          ? `${result.rowCount} leads exportados em XLSX com campos sensíveis autorizados.`
+          : hasPermission("leads.export_sensitive")
+            // Chose not to include them: nothing was withheld from this user.
+            ? `${result.rowCount} leads exportados em XLSX sem campos sensíveis.`
+            // Withheld by permission — say so, or the user distributes an
+            // incomplete file believing it is complete.
+            : `${result.rowCount} leads exportados em XLSX. ${t('leads.toast.exportNoSensitive')}`,
       });
     } catch (error: unknown) {
       const description = await getFriendlyErrorMessage(error);
@@ -1493,6 +1639,15 @@ export default function AnewLeads() {
   const handleExport = () => {
     if (!activeCompanyId) {
       toast({ title: t('leads.toast.noActiveOrg'), variant: "destructive" });
+      return;
+    }
+    // Until permissions resolve, hasPermission answers false for everything.
+    // Falling through here would silently produce a file stripped of email,
+    // phone and NIF — no dialog, and nothing telling the user their export was
+    // reduced. That is exactly what happened while the permission bootstrap
+    // took a couple of seconds. Wait instead of downgrading.
+    if (permissionsLoading) {
+      toast({ title: t('leads.toast.permissionsLoading'), description: t('leads.toast.permissionsLoadingDesc') });
       return;
     }
     if (hasPermission("leads.export_sensitive")) {
@@ -1550,7 +1705,7 @@ export default function AnewLeads() {
               "create_lead_entity_for_org",
               { p_organization_id: activeCompanyId, p_display_name: name },
             );
-            if (entityError || !entityId) { skipped++; return; }
+            if (entityError || !entityId) { captureFlowError(entityError, "record-export-import"); skipped++; return; }
 
             const { data: newLead, error: leadError } = await (supabase.from("anew_leads") as any)
               .insert({
@@ -1564,7 +1719,7 @@ export default function AnewLeads() {
               })
               .select("id")
               .single();
-            if (leadError || !newLead) { skipped++; return; }
+            if (leadError || !newLead) { captureFlowError(leadError, "record-export-import"); skipped++; return; }
 
             await (supabase.from("anew_entity_roles") as any).upsert({
               organization_id: activeCompanyId,
@@ -1574,11 +1729,12 @@ export default function AnewLeads() {
               source_type: "lead",
               source_id: newLead.id,
               created_by: createdBy,
-            });
+            }).throwOnError();
 
             imported++;
           });
-        } catch {
+        } catch (rowError) {
+          captureFlowError(rowError, "record-export-import");
           skipped++;
         }
       }
@@ -1618,6 +1774,7 @@ export default function AnewLeads() {
         const globalStages = allStages.filter(s => !s.organization_id);
         return (orgStages.length > 0 ? orgStages : globalStages).map(mapStage);
       }
+      if (error) captureFlowError(error, "lead-lifecycle");
       return [];
     },
     enabled: !!activeCompanyId,
@@ -1635,7 +1792,10 @@ export default function AnewLeads() {
       const { data, error } = await supabase.rpc("get_lead_resolved_stage", {
         p_lead_id: selectedLead!.id,
       });
-      if (error) return null;
+      if (error) {
+        captureFlowError(error, "lead-lifecycle");
+        return null;
+      }
       return data as { resolved_stage_id: string | null; furthest_progress_stage_id: string | null } | null;
     },
     enabled: !!selectedLead?.id,
@@ -1801,6 +1961,7 @@ export default function AnewLeads() {
 
     if (error) {
       console.error("Error loading field definitions:", error);
+      captureFlowError(error, "campaign-lead-intake");
     } else {
       setFieldDefs(data || []);
       loadReferenceData(data || []);
@@ -1833,6 +1994,7 @@ export default function AnewLeads() {
 
       if (error) {
         console.error("Error loading campaigns:", error);
+        captureFlowError(error, "campaign-lead-intake");
         return [];
       }
       return (data || []).map(c => ({ id: c.id, name: c.name, form_id: c.form_id }));
@@ -1866,34 +2028,22 @@ export default function AnewLeads() {
   });
 
 
-  // Load leads with server-side pagination
-  const loadLeads = useCallback(async (append = false) => {
-    if (!activeCompanyId) return;
-    
-    if (append) {
-      if (isLoadingRef.current) return;
-      setLoadingMore(true);
-    } else {
-      setLoading(true);
-      currentPageRef.current = 0;
-    }
-    isLoadingRef.current = true;
-    
-    const from = currentPageRef.current * PAGE_SIZE;
+  /**
+   * Le UMA pagina de leads. Nao toca em estado nenhum: devolve o que leu, e
+   * quem manda na lista e a cache (ver `leadsQuery` a seguir).
+   *
+   * Era daqui que vinha a divergencia: a lista era sincronizada a mao em
+   * catorze sitios, e bastava um caminho novo esquecer-se de a recarregar para
+   * o ecra passar a mostrar algo que ja nao esta na base. Agora os filtros
+   * fazem parte da chave da cache -- mudar um filtro RE-LE, sem ninguem se ter
+   * de lembrar disso.
+   */
+  const fetchLeadsPage = useCallback(async (page: number) => {
+    const append = page > 0;
+    const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
-    
-    const viewScope = getPermissionScope("leads.view");
-    if (viewScope === "NONE") {
-      setLeads([]);
-      setHasMore(false);
-      setLoading(false);
-      setLoadingMore(false);
-      isLoadingRef.current = false;
-      return;
-    }
-    
-    // Total count is now derived from statusCounts (loaded via RPC) — no separate count query needed
 
+    const viewScope = getPermissionScope("leads.view");
     const requestedScope = normalizeLeadScope(viewScope, onlyMine);
     const query = buildLeadsBaseQuery({
       organizationId: activeCompanyId,
@@ -1907,15 +2057,36 @@ export default function AnewLeads() {
       },
     });
 
+    // Ordena por actividade e nao por data de criacao (ver
+    // LEADS_LIST_SORT_COLUMN): quem volta a contactar sobe para o dia em que
+    // voltou. O desempate por `id` mantem-se, para duas leads com o mesmo
+    // instante nao trocarem de lugar entre paginas.
+    //
+    // PAGINACAO -- risco conhecido, decidido e aceite, nao esquecido: isto
+    // pagina por deslocamento (`.range`, PAGE_SIZE de 25, scroll infinito) e
+    // a chave de ordenacao passou a poder MUDAR sozinha enquanto se percorre
+    // a lista: basta chegar uma re-submissao do formulario publico e essa
+    // lead salta para o topo. Se isso acontecer entre dois carregamentos do
+    // scroll, uma linha pode aparecer repetida ou ser saltada nessa sessao.
+    // Com `created_at` isso nunca acontecia, porque a chave era imutavel.
+    // Decidiu-se NAO reconstruir a paginacao nesta tarefa: a chave so muda
+    // numa re-submissao (raro) e o dano dura ate ao proximo recarregamento.
+    // Quem vier a seguir e quiser eliminar isto de vez: paginar por keyset,
+    // pedindo (list_sort_at, id) < ultimo par lido em vez de um offset.
     const { data, error } = await query
-      .order("created_at", { ascending: false })
+      .order(LEADS_LIST_SORT_COLUMN, { ascending: false })
       .order("id", { ascending: false })
       .range(from, to);
 
-    if (error) {
-      const description = await getFriendlyErrorMessage(error);
-      toast({ title: t('leads.toast.loadError'), description, variant: "destructive" });
-    } else {
+    // O erro sobe: quem o apanha e a cache, e o efeito que a observa mostra o
+    // aviso. Antes era engolido aqui, e a lista ficava simplesmente vazia.
+    if (error) throw error;
+
+    {
+      // Agregados da primeira pagina (saude e pipeline). Sao devolvidos em vez
+      // de escritos no estado, para a cache poder guardar a pagina inteira.
+      let saude: { counts: Record<string, number>; dealSet: Set<string> } | null = null;
+      let pipeline: Record<string, LeadPipelineEntry> | null = null;
       const allUserIds = new Set<string>();
       for (const d of (data || [])) {
         if (d.created_by && d.source !== 'web' && d.source !== 'api' && d.source !== 'import') {
@@ -1992,6 +2163,7 @@ export default function AnewLeads() {
         const dealSet = new Set<string>();
         if (healthError) {
           console.error("Error loading lead health aggregates:", healthError);
+          captureFlowError(healthError, "lead-lifecycle");
         } else {
           (healthData || []).forEach((row: {
             entity_id: string;
@@ -2002,8 +2174,7 @@ export default function AnewLeads() {
             if (row.has_open_deal) dealSet.add(row.entity_id);
           });
         }
-        setLeadInteractionCounts(counts);
-        setLeadDealEntityIds(dealSet);
+        saude = { counts, dealSet };
 
         // Pipeline (Deals/Propostas/Orçamentos) aggregate for the new
         // "Pipeline" column — same aggregate-RPC pattern as the health call
@@ -2017,6 +2188,7 @@ export default function AnewLeads() {
 
         if (pipelineError) {
           console.error("Error loading lead pipeline aggregates:", pipelineError);
+          captureFlowError(pipelineError, "lead-lifecycle");
         } else {
           const pipelineMap: Record<string, LeadPipelineEntry> = {};
           (pipelineRows || []).forEach((row: {
@@ -2041,7 +2213,7 @@ export default function AnewLeads() {
               quote_value_with_iva: Number(row.quote_value_with_iva) || 0,
             };
           });
-          setLeadPipelineData(pipelineMap);
+          pipeline = pipelineMap;
         }
       }
 
@@ -2059,24 +2231,223 @@ export default function AnewLeads() {
         // So we keep all results (server already filtered) — no extra exclusion needed
       }
       
-      if (append) {
-        setLeads(prev => {
-          const existingIds = new Set(prev.map(l => l.id));
-          const newLeads = finalLeads.filter(l => !existingIds.has(l.id));
-          return [...prev, ...newLeads];
-        });
-      } else {
-        setLeads(finalLeads);
-      }
-      
-      setHasMore(mappedLeads.length === PAGE_SIZE);
-      currentPageRef.current += 1;
+      // A pagina vai inteira para a cache. A juncao das paginas e a remocao de
+      // repetidos passam a ser feitas ao ler (ver `leads`, mais abaixo).
+      return {
+        leads: finalLeads,
+        cheia: mappedLeads.length === PAGE_SIZE,
+        saude,
+        pipeline,
+      };
     }
-    
-    isLoadingRef.current = false;
-    setLoading(false);
-    setLoadingMore(false);
-  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
+
+  /**
+   * A lista de leads, gerida pela cache. A chave inclui a organizacao, o ambito
+   * do utilizador e TODOS os filtros: mudar qualquer um deles e uma chave nova,
+   * e uma chave nova le da base. E por isso que a lista deixa de poder ficar
+   * diferente do que la esta -- ja nao depende de alguem se lembrar de a mandar
+   * recarregar.
+   */
+  const leadsQuery = useInfiniteQuery({
+    queryKey: [
+      LEADS_LIST_QUERY_KEY, activeCompanyId, normalizeLeadScope(getPermissionScope("leads.view"), onlyMine),
+      scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter,
+      assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo,
+    ],
+    queryFn: ({ pageParam }) => fetchLeadsPage(pageParam as number),
+    initialPageParam: 0,
+    getNextPageParam: (ultima, todas) => (ultima?.cheia ? todas.length : undefined),
+    enabled: Boolean(activeCompanyId) && !scopeLoading && getPermissionScope("leads.view") !== "NONE",
+    staleTime: 30 * 1000,
+  });
+
+  // Paginas juntas, sem repetidos. Uma lead pode aparecer em duas paginas se
+  // outra for criada entretanto e empurrar a lista.
+  const leads = useMemo(() => {
+    const vistos = new Set<string>();
+    const juntas: Lead[] = [];
+    for (const pagina of leadsQuery.data?.pages ?? []) {
+      for (const lead of pagina?.leads ?? []) {
+        if (vistos.has(lead.id)) continue;
+        vistos.add(lead.id);
+        juntas.push(lead);
+      }
+    }
+    return juntas;
+  }, [leadsQuery.data]);
+
+  // `scopeLoading` entra aqui de proposito: enquanto o ambito do utilizador nao
+  // estiver resolvido a consulta esta parada, e sem isto a pagina piscava "sem
+  // leads" antes de sequer tentar ler. Com a permissao a NONE, `scopeLoading` ja
+  // e falso e o vazio e o correcto.
+  const loading = scopeLoading || (leadsQuery.isPending && leadsQuery.fetchStatus !== "idle");
+  const loadingMore = leadsQuery.isFetchingNextPage;
+  const hasMore = Boolean(leadsQuery.hasNextPage);
+
+  // Estes dois efeitos leem a lista (`leads`) e tem-na nas dependencias, que
+  // sao avaliadas durante o render. Por isso vivem AQUI, depois de a lista
+  // existir, e nao la em cima junto aos outros efeitos: la, a lista ainda nao
+  // esta inicializada e o ecra rebentava ao abrir.
+
+  useEffect(() => {
+    const openIdParam = searchParams.get("open");
+    const openLeadParam = searchParams.get("open_lead");
+    const openLeadIsValidUuid = !!openLeadParam && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(openLeadParam);
+    const openId = openIdParam || (openLeadIsValidUuid ? openLeadParam : null);
+    if (!openId || !activeCompanyId || selectedLead) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const found = leads.find((l) => l.id === openId);
+        if (found) {
+          if (!cancelled) {
+            setSelectedLead(found);
+            setDetailTab("info");
+            setShowDetails(true);
+          }
+        } else {
+          let openQuery = (supabase as any)
+            .from("anew_leads")
+            .select(`
+              id, entity_id, campaign_id,
+              status, workflow_stage_id, assigned_to, created_by,
+              organization_id, root_organization_id,
+              created_at, updated_at, converted_at,
+              converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
+              field_values, notes, source, source_id,
+              last_contact_at, last_contact_result, contact_attempts,
+              callback_scheduled_at, callback_notes, tags,
+              qualification_type, qualified_at,
+              campaigns(id, name)
+            `)
+            .eq("id", openId)
+            .eq("organization_id", activeCompanyId)
+            .is("deleted_at", null);
+          const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
+          openQuery = applyLeadVisibilityFilter(
+            openQuery,
+            requestedScope,
+            scopeAnewUserId,
+            scopeAuthUserId,
+            teamMemberIds,
+          );
+          const { data } = await openQuery.maybeSingle();
+          if (!cancelled && data) {
+            setSelectedLead({
+              ...data,
+              field_values: data.field_values && typeof data.field_values === "object"
+                ? data.field_values
+                : {},
+            } as Lead);
+            setDetailTab("info");
+            setShowDetails(true);
+          } else if (!cancelled) {
+            toast({ title: t('leads.toast.notFound'), description: t('leads.toast.notFoundDesc'), variant: "destructive" });
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          const next = new URLSearchParams(searchParams);
+          next.delete("open");
+          next.delete("open_lead");
+          setSearchParams(next, { replace: true });
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // selectedLead is intentionally excluded: re-running when a dialog is already
+    // open would clobber the in-flight open state. The effect must only fire when
+    // the ?open= param or org/scope context changes, not when the user navigates
+    // within the already-open detail dialog.
+  }, [
+    searchParams,
+    activeCompanyId,
+    leads,
+    getPermissionScope,
+    onlyMine,
+    scopeAnewUserId,
+    scopeAuthUserId,
+    teamMemberIds,
+  ]);
+
+  useEffect(() => {
+    if (!activeCompanyId || showContactDialog || selectedLead) return;
+    try {
+      const raw = localStorage.getItem(LEAD_CONTACT_DIALOG_STATE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as { leadId?: string; companyId?: string | null };
+      if (!saved.leadId || saved.companyId !== activeCompanyId) return;
+      const existing = leads.find((lead) => lead.id === saved.leadId);
+      if (existing) {
+        setSelectedLead(existing);
+        setShowContactDialog(true);
+      }
+    } catch {
+      localStorage.removeItem(LEAD_CONTACT_DIALOG_STATE_KEY);
+    }
+  }, [activeCompanyId, leads, selectedLead, showContactDialog]);
+
+  // Os agregados da primeira pagina alimentam as colunas de saude e pipeline.
+  const primeiraPagina = leadsQuery.data?.pages?.[0];
+  useEffect(() => {
+    if (!primeiraPagina) return;
+    if (primeiraPagina.saude) {
+      setLeadInteractionCounts(primeiraPagina.saude.counts);
+      setLeadDealEntityIds(primeiraPagina.saude.dealSet);
+    }
+    if (primeiraPagina.pipeline) setLeadPipelineData(primeiraPagina.pipeline);
+  }, [primeiraPagina]);
+
+  // O erro de leitura deixou de ser engolido: se a lista nao carregar, diz-se.
+  useEffect(() => {
+    if (!leadsQuery.error) return;
+    let cancelado = false;
+    void (async () => {
+      const description = await getFriendlyErrorMessage(leadsQuery.error);
+      if (!cancelado) toast({ title: t('leads.toast.loadError'), description, variant: "destructive" });
+    })();
+    return () => { cancelado = true; };
+  }, [leadsQuery.error, toast, t]);
+
+  /**
+   * Ponto unico de "os dados mudaram, re-le". Os catorze sitios que antes
+   * sincronizavam a lista a mao continuam a chamar isto, mas agora limitam-se a
+   * marcar a cache como velha -- quem re-le e a cache.
+   */
+  const loadLeads = useCallback((append = false) => {
+    if (append) { void leadsQuery.fetchNextPage(); return; }
+    void queryClient.invalidateQueries({ queryKey: [LEADS_LIST_QUERY_KEY] });
+    // `fetchNextPage` tem identidade estavel na react-query v5; depender do
+    // objecto `leadsQuery` inteiro recriaria esta funcao a cada leitura.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryClient, leadsQuery.fetchNextPage]);
+
+  /**
+   * Actualizacoes imediatas da lista, para o ecra responder sem esperar pela
+   * base. Antes escreviam num `useState` proprio; agora escrevem na cache, que
+   * e o mesmo sitio de onde a lista e lida -- e por isso nao ha duas versoes da
+   * verdade a poder divergir.
+   *
+   * A transformacao e aplicada pagina a pagina, o que so e correcto porque
+   * nenhuma delas ACRESCENTA leads (substituem ou removem, sempre por id).
+   * Acrescentar tem funcao propria, que escreve so na primeira pagina.
+   */
+  const transformarListaEmCache = useCallback((fn: (leads: Lead[]) => Lead[]) => {
+    queryClient.setQueriesData({ queryKey: [LEADS_LIST_QUERY_KEY] }, (antigo: any) => {
+      if (!antigo?.pages) return antigo;
+      return { ...antigo, pages: antigo.pages.map((pagina: any) => ({ ...pagina, leads: fn(pagina?.leads ?? []) })) };
+    });
+  }, [queryClient]);
+
+  const acrescentarLeadEmCache = useCallback((lead: Lead) => {
+    queryClient.setQueriesData({ queryKey: [LEADS_LIST_QUERY_KEY] }, (antigo: any) => {
+      if (!antigo?.pages?.length) return antigo;
+      const [primeira, ...restantes] = antigo.pages;
+      return { ...antigo, pages: [{ ...primeira, leads: [lead, ...(primeira?.leads ?? [])] }, ...restantes] };
+    });
+  }, [queryClient]);
 
   const KANBAN_LEADS_LIMIT = 500;
 
@@ -2109,8 +2480,13 @@ export default function AnewLeads() {
         },
       });
 
+      // Mesma chave de ordenacao da lista (ver LEADS_LIST_SORT_COLUMN): lista
+      // e kanban partilham `buildLeadsBaseQuery` de proposito, e ordenar por
+      // chaves diferentes fa-los-ia divergir -- com o tecto de
+      // KANBAN_LEADS_LIMIT, seriam 500 leads escolhidas por criterios
+      // diferentes dos das primeiras paginas da lista.
       const { data, error } = await query
-        .order("created_at", { ascending: false })
+        .order(LEADS_LIST_SORT_COLUMN, { ascending: false })
         .limit(KANBAN_LEADS_LIMIT);
 
       if (error) {
@@ -2274,6 +2650,7 @@ export default function AnewLeads() {
         converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
         field_values, notes, source, source_id,
         last_contact_at, last_contact_result, contact_attempts,
+        last_activity_at,
         callback_scheduled_at, callback_notes,
         tags,
         qualification_type, qualified_at,
@@ -2285,28 +2662,25 @@ export default function AnewLeads() {
     refreshQuery = refreshQuery.eq("organization_id", activeCompanyId);
 
     const requestedScope = normalizeLeadScope(getPermissionScope("leads.view"), onlyMine);
-    if (requestedScope === "OWNED" && scopeAnewUserId) {
-      const ownerIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId);
-      refreshQuery = refreshQuery.or(
-        `assigned_to.in.(${ownerIds.join(",")}),created_by.in.(${ownerIds.join(",")})`,
-      );
-    } else if (requestedScope === "TEAM" && scopeAnewUserId) {
-      const visibleUserIds = getLeadScopeUserIds(scopeAnewUserId, scopeAuthUserId, teamMemberIds);
-      refreshQuery = refreshQuery.or(
-        `assigned_to.in.(${visibleUserIds.join(",")}),created_by.in.(${visibleUserIds.join(",")})`,
-      );
-    }
+    refreshQuery = applyLeadVisibilityFilter(
+      refreshQuery,
+      requestedScope,
+      scopeAnewUserId,
+      scopeAuthUserId,
+      teamMemberIds,
+    );
 
     const { data: d, error } = await refreshQuery.maybeSingle();
 
     if (error) {
       console.error("Error refreshing lead:", error);
+      captureFlowError(error, "lead-lifecycle");
       return;
     }
 
     if (!d) {
       // Lead was deleted — remove from local state
-      setLeads((previous) =>
+      transformarListaEmCache((previous) =>
         reconcileRefreshedLead(previous, selectedLead, leadId, null).leads
       );
       if (selectedLead?.id === leadId) {
@@ -2342,6 +2716,11 @@ export default function AnewLeads() {
 
     const mapped: Lead = {
       ...d,
+      // Ponto de fronteira: `d` vem do gerador de tipos do Supabase, que nao
+      // conhece a CHECK constraint de qualification_type e o declara `string`.
+      // A base garante 'sql' | 'mql'; o cast e so aqui, uma vez, e nao no resto
+      // do ficheiro.
+      qualification_type: (d.qualification_type ?? null) as 'sql' | 'mql' | null,
       field_values: (d.field_values && typeof d.field_values === 'object' && !Array.isArray(d.field_values))
         ? d.field_values as Record<string, any>
         : {},
@@ -2360,7 +2739,7 @@ export default function AnewLeads() {
       await resolveEntities(entityIds);
     }
 
-    setLeads((previous) =>
+    transformarListaEmCache((previous) =>
       reconcileRefreshedLead(previous, selectedLead, leadId, mapped).leads
     );
     setSelectedLead((previous) => previous?.id === leadId ? mapped : previous);
@@ -2374,6 +2753,7 @@ export default function AnewLeads() {
     queryClient.invalidateQueries({ queryKey: ["lead-resolved-stage", leadId] });
     return mapped;
   }, [
+    transformarListaEmCache,
     activeCompanyId,
     getPermissionScope,
     loadStatusCounts,
@@ -2385,6 +2765,44 @@ export default function AnewLeads() {
     teamMemberIds,
   ]);
 
+  /**
+   * Single entry point for "a dialog just wrote to this lead".
+   *
+   * Both AnewLeadEditDialog and AnewLeadContactDialog can change the entity's
+   * identity (first/last name, email, phone, VAT) and both report the affected
+   * `entityId` in their callback payload. Refreshing the lead row alone is not
+   * enough: the name/email/phone shown in the table row, in the detail header,
+   * in the schedule-visit dialog and in RegisterCallDialog all come from
+   * useEntityIdentity's cache, and resolveEntities() deliberately skips ids it
+   * already holds — so the pre-edit values survived until a full page reload.
+   * Dropping the cached entry first makes refreshSingleLead's resolveEntities()
+   * re-fetch it.
+   *
+   * Callbacks that carry no payload (schedule visit, register call) fall back
+   * to the selected lead and skip the identity invalidation, keeping their
+   * previous behavior.
+   */
+  const handleLeadDialogUpdate = useCallback((payload?: { leadId?: string; entityId?: string | null }) => {
+    const leadId = payload?.leadId ?? selectedLead?.id;
+    if (!leadId) return;
+    invalidateEntities([payload?.entityId ?? null]);
+    void refreshSingleLead(leadId);
+  }, [invalidateEntities, refreshSingleLead, selectedLead]);
+
+  /**
+   * O cartao de qualificacao do separador Percurso acabou de gravar MQL/SQL.
+   *
+   * Reutiliza o mesmo ponto de entrada dos dialogos em vez de um caminho
+   * paralelo. Chamado sem payload de proposito: a qualificacao nao altera a
+   * identidade da entidade (nome/email/telefone/NIF), por isso nao ha cache de
+   * identidades para invalidar — basta o refreshSingleLead, que re-le a linha
+   * (incluindo qualification_type) e chama loadStatusCounts, onde os queryKeys
+   * do painel sao invalidados para os cartoes de qualificacao acompanharem.
+   */
+  const handleLeadQualificationUpdated = useCallback(() => {
+    handleLeadDialogUpdate();
+  }, [handleLeadDialogUpdate]);
+
   // Load more leads for infinite scroll
   const loadMoreLeads = useCallback(() => {
     if (!loading && !loadingMore && hasMore) {
@@ -2395,83 +2813,23 @@ export default function AnewLeads() {
   // Effective hasMore: stop loading when we've reached the RPC total
   const effectiveHasMore = hasMore && leads.length < paginationTotal;
 
-  // Setup infinite scroll
-  const { loadMoreRef } = useInfiniteScroll({
-    onLoadMore: loadMoreLeads,
-    hasMore: effectiveHasMore,
-    isLoading: loading || loadingMore
+  // Scroll infinito por IntersectionObserver, o mesmo que /proposals usa.
+  //
+  // O hook anterior (useInfiniteScroll) decidia pela GEOMETRIA do primeiro
+  // antepassado com overflow: auto|scroll. Aqui a sentinela esta de facto
+  // dentro do contentor que rola, por isso nao havia o disparo em cadeia que
+  // se viu nas Propostas — mas isso depende de a arvore de DOM se manter tal
+  // como esta hoje, e o proximo wrapper com `overflow` entre a tabela e a
+  // sentinela reintroduzia o defeito em silencio. O IntersectionObserver
+  // pergunta ao browser se o elemento esta realmente visivel e ja tem em conta
+  // o recorte de TODOS os antepassados, seja qual for o que rola.
+  const { sentinelRef: loadMoreRef } = useSentinelInView({
+    onVisible: loadMoreLeads,
+    enabled: effectiveHasMore,
+    isLoading: loading || loadingMore,
   });
 
   // Debounce timers for search inputs (300ms) — cancels pending query on each keystroke
-  const searchClientsTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Search clients for association
-  const searchClients = (query: string) => {
-    if (searchClientsTimer.current) clearTimeout(searchClientsTimer.current);
-    if (!query || query.length < 2) {
-      setClientOptions([]);
-      return;
-    }
-    searchClientsTimer.current = setTimeout(async () => {
-      setSearchingClients(true);
-      // First resolve entity IDs matching the query, then find associated clients
-      const { ids: matchingEntityIds } = await searchEntityIds(query);
-      if (matchingEntityIds.length === 0) {
-        setClientOptions([]);
-        setSearchingClients(false);
-        return;
-      }
-      const { data } = await supabase
-        .from("anew_clients")
-        .select("id, entity_id")
-        .eq("organization_id", activeCompanyId)
-        .in("entity_id", matchingEntityIds)
-        .limit(10);
-      const results = (data || []).map((c: any) => ({ id: c.id, entity_id: c.entity_id }));
-      const eIds = results.map((r: any) => r.entity_id).filter(Boolean);
-      if (eIds.length > 0) await resolveEntities(eIds);
-      setClientOptions(results as ClientOption[]);
-      setSearchingClients(false);
-    }, 300);
-  };
-
-  // Associate lead with contact (uses converted_to_contact_id → anew_contacts).
-  const handleAssociateContact = async (leadId: string, contactId: string | null) => {
-    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
-    try {
-      await withAuditContext(supabase, auditUserId, async () => {
-        const { error } = await supabase
-          .from("anew_leads")
-          .update({ converted_to_contact_id: contactId } as any)
-          .eq("id", leadId);
-        if (error) throw error;
-      });
-      toast({ title: contactId ? t('leads.toast.contactAssociated') : t('leads.toast.contactRemoved') });
-      refreshSingleLead(leadId);
-    } catch (error: any) {
-      toast({ title: t('leads.toast.associateContactError'), description: error.message, variant: "destructive" });
-    }
-  };
-
-  // Associate lead with client (uses converted_to_client_id → anew_clients).
-  // Legacy column client_id references the deprecated `clients` table and must not be used.
-  const handleAssociateClient = async (leadId: string, clientId: string | null) => {
-    const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
-    try {
-      await withAuditContext(supabase, auditUserId, async () => {
-        const { error } = await supabase
-          .from("anew_leads")
-          .update({ converted_to_client_id: clientId } as any)
-          .eq("id", leadId);
-        if (error) throw error;
-      });
-      toast({ title: clientId ? t('leads.toast.clientAssociated') : t('leads.toast.clientRemoved') });
-      refreshSingleLead(leadId);
-    } catch (error: any) {
-      toast({ title: t('leads.toast.associateClientError'), description: error.message, variant: "destructive" });
-    }
-  };
-
   // Load reference data for fields that store IDs (ref_district, ref_company, etc.)
   const loadReferenceData = async (fields: FieldDefinition[]) => {
     const refFields = fields.filter(f => f.field_type.startsWith('ref_'));
@@ -2676,59 +3034,31 @@ export default function AnewLeads() {
   };
 
   // Auto-mapping aliases for common field names
-  const FIELD_ALIASES: Record<string, string[]> = {
-    first_name: ['first_name', 'nome', 'firstName', 'primeiro_nome', 'name', 'nome_completo', 'primeironome'],
-    last_name: ['last_name', 'apelido', 'lastName', 'ultimo_nome', 'surname', 'sobrenome', 'ultimonome'],
-    email: ['email', 'e-mail', 'e_mail', 'mail', 'correio_eletronico', 'correio'],
-    phone: ['phone', 'telefone', 'telemovel', 'mobile', 'cel', 'telemóvel', 'cellphone', 'contacto', 'celular'],
-    phone_country_code: ['phone_country_code', 'codigo_pais', 'country_code', 'indicativo', 'ddi'],
-    company_name: ['company_name', 'empresa', 'company', 'nome_empresa', 'organizacao', 'companyname'],
-    vat: ['vat', 'nif', 'contribuinte', 'fiscal', 'tax_id', 'taxid', 'numero_contribuinte'],
-    position: ['position', 'cargo', 'funcao', 'job_title', 'profissao', 'jobtitle'],
-    address: ['address', 'morada', 'endereco', 'rua', 'endereço', 'street'],
-    city: ['city', 'cidade', 'localidade'],
-    postal_code: ['postal_code', 'codigo_postal', 'cp', 'cep', 'postalcode', 'zip', 'zipcode'],
-    district: ['district', 'distrito', 'regiao', 'região', 'provincia', 'estado'],
-    notes: ['notes', 'notas', 'observacoes', 'observações', 'comentarios', 'obs'],
-    website: ['website', 'site', 'url', 'pagina', 'web'],
-    industry: ['industry', 'industria', 'setor', 'ramo', 'sector'],
-  };
+  // A tabela de sinonimos que adivinhava campos (FIELD_ALIASES) e a
+  // extractFieldsWithAutoMapping foram removidas: eram usadas SO pela conversao
+  // em cliente, que deixou de recalcular a identidade da entidade. Ficam ainda
+  // outras copias desta heuristica noutros pontos do ficheiro, para APRESENTACAO
+  // -- essas nao escrevem nada.
 
-  // Extract fields using automatic mapping (aliases)
-  const extractFieldsWithAutoMapping = (fieldValues: Record<string, any> | null, targetType: 'contact' | 'client'): Record<string, any> => {
-    const result: Record<string, any> = {};
-    if (!fieldValues) return result;
-
-    const targetFields = targetType === 'contact' 
-      ? ['first_name', 'last_name', 'email', 'phone', 'phone_country_code', 'vat', 'position', 'address', 'city', 'postal_code', 'district', 'notes', 'website']
-      : ['first_name', 'last_name', 'email', 'phone', 'phone_country_code', 'company_name', 'vat', 'position', 'industry', 'website', 'address', 'city', 'postal_code', 'district', 'notes'];
-
-    for (const targetField of targetFields) {
-      const aliases = FIELD_ALIASES[targetField] || [targetField];
-      
-      for (const key of Object.keys(fieldValues)) {
-        if (key === '_meta') continue;
-        const keyLower = key.toLowerCase().replace(/[-_\s]/g, '');
-        
-        if (aliases.some(alias => keyLower === alias.toLowerCase().replace(/[-_\s]/g, '') || keyLower.includes(alias.toLowerCase().replace(/[-_\s]/g, '')))) {
-          const value = fieldValues[key];
-          if (value && value !== '') {
-            result[targetField] = value;
-            break; // Found a match, move to next target field
-          }
-        }
-      }
-    }
-
-    return result;
-  };
-
-  // Opens the conversion dialog to ask about campaign association
   const openConversionDialog = (lead: Lead, type: 'client') => {
     setConversionLead(lead);
     setConversionType(type);
     setConversionCampaignId(lead.campaign_id || "");
+
+    const cached = lead.entity_id ? getIdentity(lead.entity_id) : null;
+    setConversionIdentity(cached);
     setShowConversionDialog(true);
+
+    // A ficha pode ainda nao estar em cache (lead aberta por link directo, por
+    // exemplo). Vale a pena ir busca-la: dizer "sem nome na ficha" por falta de
+    // leitura seria a mesma mentira que adivinhar o nome pelo formulario.
+    if (lead.entity_id && !cached) {
+      const entityId = lead.entity_id;
+      setConversionIdentityLoading(true);
+      resolveEntities([entityId])
+        .then(map => setConversionIdentity(map[entityId] || null))
+        .finally(() => setConversionIdentityLoading(false));
+    }
   };
 
   // Execute the actual conversion to client (converting to "contact" no longer
@@ -2750,30 +3080,27 @@ export default function AnewLeads() {
   };
 
   const doConvertToClient = async (lead: Lead, selectedCampaignId: string | null) => {
-    let clientData: Record<string, any> = {};
-
-    const campaignToUse = selectedCampaignId || lead.campaign_id;
-    if (campaignToUse) {
-      const { data: fieldDefsForConvert } = await supabase
-        .from("lead_field_definitions")
-        .select("*")
-        .eq("campaign_id", campaignToUse)
-        .eq("is_active", true);
-
-      const fieldsWithMapping = (fieldDefsForConvert || []).filter(f => f.client_field_mapping);
-      if (fieldsWithMapping.length > 0) {
-        for (const field of fieldsWithMapping) {
-          const leadValue = lead.field_values?.[field.field_key];
-          if (leadValue && field.client_field_mapping) {
-            clientData[field.client_field_mapping] = leadValue;
-          }
-        }
-      } else {
-        clientData = extractFieldsWithAutoMapping(lead.field_values, 'client');
-      }
-    } else {
-      clientData = extractFieldsWithAutoMapping(lead.field_values, 'client');
-    }
+    // Converter em cliente e dar um PAPEL a uma entidade que ja existe. Nao e
+    // recalcular quem ela e.
+    //
+    // Ate 2026-09-02 este caminho reconstruia a identidade a partir dos
+    // `field_values` da lead -- ou pelo `client_field_mapping` da campanha, ou
+    // por uma tabela de sinonimos que adivinhava pelo nome da chave -- e
+    // escrevia o resultado por cima de `anew_entities.first_name/last_name`.
+    //
+    // Tres razoes para sair:
+    //   1. `anew_clients` nao tem nome, email nem telefone. O unico uso daqueles
+    //      valores eram tres campos da ENTIDADE, que ja estavam la escritos
+    //      correctamente pelo create-lead, com normalizacao e tudo.
+    //   2. Escrevia por cima do que estava certo (`CASE WHEN o novo nao for
+    //      nulo`, nao `CASE WHEN o actual estiver vazio`).
+    //   3. O ramo do mapeamento era tudo-ou-nada: bastava UM campo mapeado para
+    //      os outros serem ignorados em silencio, e lia de
+    //      `lead_field_definitions` quando o mapeamento dos formularios vive em
+    //      `form_fields`.
+    //
+    // O tipo de cliente continua a ser decidido -- mas pela entidade, que sabe
+    // o que e, e nao por adivinhacao sobre os campos do formulario.
 
     const authUserId = scopeAuthUserId;
     if (!authUserId) throw new Error('Utilizador não autenticado');
@@ -2798,19 +3125,14 @@ export default function AnewLeads() {
       }
     }
 
-    const hasCompanyName = !!clientData.company_name;
-    const clientType: "company" | "person" = hasCompanyName ? 'company' : 'person';
-
-    let firstName = clientData.first_name;
-    let lastName = clientData.last_name;
-    let companyName = clientData.company_name;
-
-    if (clientType === 'person') {
-      firstName = firstName || null;
-      lastName = lastName || null;
-    } else {
-      companyName = companyName || null;
-    }
+    // O tipo vem da entidade -- `anew_entities.type` -- e nao de haver ou nao um
+    // campo chamado "empresa" no formulario.
+    const entityIdentity = lead.entity_id ? getIdentity(lead.entity_id) : null;
+    const clientType: "company" | "person" =
+      entityIdentity?.type === 'company' ? 'company' : 'person';
+    const companyName = clientType === 'company'
+      ? (entityIdentity?.display_name || null)
+      : null;
 
     const rootOrgId = await resolveRootOrgId(lead.organization_id);
     const orgIdsToSync = Array.from(new Set([lead.organization_id, rootOrgId].filter(Boolean)));
@@ -2848,12 +3170,10 @@ export default function AnewLeads() {
 
     const newCampaignId = selectedCampaignId && !lead.campaign_id ? selectedCampaignId : null;
 
-    const clientDataForRpc = {
-      ...clientData,
-      first_name: firstName,
-      last_name: lastName,
-      company_name: companyName,
-    };
+    // So o que a RPC precisa para decidir o tipo de cliente. `first_name` e
+    // `last_name` NAO vao de proposito: a RPC usa-os para escrever na entidade,
+    // e a identidade da entidade nao se toca numa conversao.
+    const clientDataForRpc = { company_name: companyName };
 
     let client: any = null;
     try {
@@ -2895,15 +3215,30 @@ export default function AnewLeads() {
       toast({ title: t('leads.toast.createError'), description: 'Sem organização ativa', variant: "destructive" });
       return;
     }
-    // Merge base + extra campaign fields for validation
-    const allFieldDefs = [...createLeadFieldDefs, ...extraCampaignFieldDefs];
-    // Validate required fields
-    const missingRequired = allFieldDefs
-      .filter(f => f.is_required && !newLeadValues[f.field_key])
-      .map(f => f.field_label);
+    // Merge base + extra campaign fields for validation. Os campos base que a
+    // campanha cobre não são desenhados no diálogo, por isso também não entram
+    // na validação — exigi-los obrigaria a preencher uma caixa invisível.
+    const visibleBaseFieldDefs = createLeadFieldDefs.filter(
+      baseField => !isBaseFieldCoveredByCampaignFields(baseField.field_key, extraCampaignFieldDefs)
+    );
+    const allFieldDefs = [...visibleBaseFieldDefs, ...extraCampaignFieldDefs];
+    // Descarta os valores dos campos base que a campanha já cobre. O diálogo
+    // esconde-os quando a campanha é escolhida, mas o que a pessoa (ou o
+    // preenchimento automático do browser) escreveu ANTES dessa escolha ficava
+    // em memória e era gravado na mesma — foi assim que uma lead ficou com o
+    // email/telefone de outra cliente ao lado do po_email/po_telefone certos.
+    // A partir daqui trabalha-se só com leadValues, nunca com newLeadValues.
+    const leadValues = stripCampaignCoveredBaseValues(newLeadValues, createLeadFieldDefs, extraCampaignFieldDefs);
+    // "Required" means valid, not merely non-empty: a lone "-" used to satisfy
+    // every required text field, producing leads with po_codigo_postal = "-".
+    const fieldErrors = validateLeadFieldValues(allFieldDefs as any, leadValues);
 
-    if (missingRequired.length > 0) {
-      toast({ title: t('leads.toast.missingRequiredFields'), description: missingRequired.join(", "), variant: "destructive" });
+    if (fieldErrors.length > 0) {
+      toast({
+        title: t('leads.toast.missingRequiredFields'),
+        description: fieldErrors.map(e => e.message).join(", "),
+        variant: "destructive",
+      });
       return;
     }
 
@@ -2972,10 +3307,9 @@ export default function AnewLeads() {
         let emailValue = '';
         let phoneValue = '';
         let vatValue = '';
-        let addressData: Record<string, any> | null = null;
 
         for (const fieldDef of allFieldDefs) {
-          const val = newLeadValues[fieldDef.field_key];
+          const val = leadValues[fieldDef.field_key];
           if (!val) continue;
 
           const mapping = (fieldDef as any).contact_field_mapping;
@@ -2999,10 +3333,9 @@ export default function AnewLeads() {
           if (mapping === 'vat' || key.includes('vat') || key.includes('nif')) {
             vatValue = String(val);
           }
-          // Address detection
-          if (fType === 'address' || mapping === 'address' || key.includes('morada') || key.includes('address')) {
-            addressData = typeof val === 'object' ? val : { address_line1: String(val) };
-          }
+          // Address fields are intentionally NOT collected here: the address is
+          // persisted post-commit by syncEntityPrimaryAddressFromLead(), which
+          // reads them straight from field_values.
         }
 
         emailValue = emailValue.trim().toLowerCase();
@@ -3178,8 +3511,8 @@ export default function AnewLeads() {
             setDuplicateMatches(allMatches);
             setPendingLeadData({
               entityId: null,
-              fieldValues: newLeadValues,
-              assignedTo: newLeadValues._assigned_to || null,
+              fieldValues: leadValues,
+              assignedTo: leadValues._assigned_to || null,
               resolvedRootOrgId,
               createdBy: createdByResolved,
               displayName,
@@ -3196,14 +3529,14 @@ export default function AnewLeads() {
           const firstName = (() => {
             for (const fd of allFieldDefs) {
               const m = (fd as any).contact_field_mapping;
-              if (m === 'first_name' && newLeadValues[fd.field_key]) return String(newLeadValues[fd.field_key]);
+              if (m === 'first_name' && leadValues[fd.field_key]) return String(leadValues[fd.field_key]);
             }
             return displayName.trim().split(' ')[0] || null;
           })();
           const lastName = (() => {
             for (const fd of allFieldDefs) {
               const m = (fd as any).contact_field_mapping;
-              if (m === 'last_name' && newLeadValues[fd.field_key]) return String(newLeadValues[fd.field_key]);
+              if (m === 'last_name' && leadValues[fd.field_key]) return String(leadValues[fd.field_key]);
             }
             const parts = displayName.trim().split(' ');
             return parts.length > 1 ? parts.slice(1).join(' ') : null;
@@ -3272,6 +3605,7 @@ export default function AnewLeads() {
           });
         } catch (linkErr) {
           console.warn('[org-link] non-fatal failure', linkErr);
+          captureFlowError(linkErr, "lead-lifecycle");
         }
 
         // --- DUPLICATE CHECK: existing leads/contacts/clients with same entity in same org ---
@@ -3366,6 +3700,7 @@ export default function AnewLeads() {
           orgId: activeCompanyId!, email: emailValue || null, phone: phoneValue || null, nif: vatValue || null,
         }).catch((err) => {
           console.warn("[duplicate-check] findEntityMatches failed (non-fatal)", err);
+          captureFlowError(err, "lead-lifecycle");
           return [] as Awaited<ReturnType<typeof findEntityMatches>>;
         });
 
@@ -3409,8 +3744,8 @@ export default function AnewLeads() {
           setDuplicateMatches(allMatches);
           setPendingLeadData({
             entityId,
-            fieldValues: newLeadValues,
-            assignedTo: newLeadValues._assigned_to || null,
+            fieldValues: leadValues,
+            assignedTo: leadValues._assigned_to || null,
             resolvedRootOrgId,
             createdBy: createdByResolved,
             displayName,
@@ -3423,8 +3758,8 @@ export default function AnewLeads() {
         }
 
         // ─── Critical writes: single atomic RPC (email + phone + lead + role) ───
-        const assignedTo = newLeadValues._assigned_to || null;
-        const { _assigned_to, ...cleanFieldValues } = newLeadValues;
+        const assignedTo = leadValues._assigned_to || null;
+        const { _assigned_to, ...cleanFieldValues } = leadValues;
         const resolvedSourceName = (createLeadSourceId && createLeadSourceId !== "none")
           ? (leadSources.find(s => s.id === createLeadSourceId)?.name || "manual")
           : "manual";
@@ -3467,8 +3802,8 @@ export default function AnewLeads() {
           const nameUpdate: Record<string, any> = { display_name: displayName.trim() };
           for (const fd of allFieldDefs) {
             const m = (fd as any).contact_field_mapping;
-            if (m === 'first_name' && newLeadValues[fd.field_key]) nameUpdate.first_name = String(newLeadValues[fd.field_key]);
-            if (m === 'last_name' && newLeadValues[fd.field_key]) nameUpdate.last_name = String(newLeadValues[fd.field_key]);
+            if (m === 'first_name' && leadValues[fd.field_key]) nameUpdate.first_name = String(leadValues[fd.field_key]);
+            if (m === 'last_name' && leadValues[fd.field_key]) nameUpdate.last_name = String(leadValues[fd.field_key]);
           }
           entityRenamePayloadForPostCommit = nameUpdate;
         }
@@ -3490,12 +3825,14 @@ export default function AnewLeads() {
         const addr = await syncEntityPrimaryAddressFromLead({
           supabase,
           entityId: entityIdForPostCommit,
-          fieldValues: newLeadValues,
+          organizationId: activeCompanyId,
+          fieldValues: leadValues,
           actorId: createdByResolved,
           allowOverwriteValid: false,
         });
         if (addr.decision === "error") {
           console.warn("[post-commit] address sync failed", addr.reason);
+          captureFlowError(new Error(addr.reason ?? "post-commit address sync failed"), "lead-lifecycle");
           toast({
             title: t('leads.toast.addressSyncFailed'),
             description: addr.reason ?? undefined,
@@ -3503,6 +3840,7 @@ export default function AnewLeads() {
         }
       } catch (e) {
         console.warn("[post-commit] address sync threw", e);
+        captureFlowError(e, "lead-lifecycle");
         const description = await getFriendlyErrorMessage(e);
         toast({
           title: t('leads.toast.addressSyncFailed'),
@@ -3522,6 +3860,7 @@ export default function AnewLeads() {
             .maybeSingle();
           if (fetchErr) {
             console.warn("[post-commit] entity rename: fetch current name failed", fetchErr.message);
+            captureFlowError(fetchErr, "lead-lifecycle");
           } else {
             const safeUpdate: Record<string, any> = {};
             if (!currentEntity?.first_name && entityRenamePayloadForPostCommit.first_name) {
@@ -3537,11 +3876,15 @@ export default function AnewLeads() {
               const { error } = await (supabase.from("anew_entities") as any)
                 .update(safeUpdate)
                 .eq("id", entityIdForPostCommit);
-              if (error) console.warn("[post-commit] entity rename failed", error.message);
+              if (error) {
+                console.warn("[post-commit] entity rename failed", error.message);
+                captureFlowError(error, "lead-lifecycle");
+              }
             }
           }
         } catch (e) {
           console.warn("[post-commit] entity rename threw", e);
+          captureFlowError(e, "lead-lifecycle");
         }
       }
 
@@ -3558,7 +3901,7 @@ export default function AnewLeads() {
       setCreateLeadCampaignId("");
       setCreateLeadSourceId("");
       if (newLeadIdForPostCommit) {
-        setLeads(prev => [{
+        acrescentarLeadEmCache({
           id: newLeadIdForPostCommit!,
           organization_id: activeCompanyId!,
           campaign_id: createLeadCampaignId || null,
@@ -3573,7 +3916,7 @@ export default function AnewLeads() {
           converted_at: null,
           assigned_to: assignedToForPostCommit,
           entity_id: entityIdForPostCommit,
-        } as Lead, ...prev]);
+        } as Lead);
       }
       await loadStatusCounts();
     } finally {
@@ -3623,6 +3966,7 @@ export default function AnewLeads() {
         }
       } catch (revErr) {
         console.warn('[create-anyway] pre-write revalidation failed (non-fatal)', revErr);
+        captureFlowError(revErr, "lead-lifecycle");
       }
     }
 
@@ -3714,6 +4058,7 @@ export default function AnewLeads() {
             });
           } catch (linkErr) {
             console.warn('[org-link/create-anyway] non-fatal failure', linkErr);
+            captureFlowError(linkErr, "lead-lifecycle");
           }
         }
 
@@ -3762,14 +4107,16 @@ export default function AnewLeads() {
 
       try {
         const addr = await syncEntityPrimaryAddressFromLead({
-          supabase, entityId: entityIdForPostCommit, fieldValues, actorId: createdBy, allowOverwriteValid: false,
+          supabase, entityId: entityIdForPostCommit, organizationId: activeCompanyId, fieldValues, actorId: createdBy, allowOverwriteValid: false,
         });
         if (addr.decision === "error") {
           console.warn("[post-commit/create-anyway] address sync failed", addr.reason);
+          captureFlowError(new Error(addr.reason ?? "post-commit address sync failed"), "lead-lifecycle");
           toast({ title: t('leads.toast.addressSyncFailed'), description: addr.reason ?? undefined });
         }
       } catch (e) {
         console.warn("[post-commit/create-anyway] address sync threw", e);
+        captureFlowError(e, "lead-lifecycle");
         const description = await getFriendlyErrorMessage(e);
         toast({ title: t('leads.toast.addressSyncFailed'), description });
       }
@@ -3777,13 +4124,13 @@ export default function AnewLeads() {
       toast({ title: t('leads.toast.createSuccess') });
       setShowCreateLead(false); setNewLeadValues({}); setCreateLeadCampaignId(""); setCreateLeadSourceId("");
       if (newLeadIdForPostCommit) {
-        setLeads(prev => [{
+        acrescentarLeadEmCache({
           id: newLeadIdForPostCommit!, organization_id: activeCompanyId!,
           campaign_id: createLeadCampaignId || null, field_values: cleanFieldValuesForPostCommit,
           status: 'new', source: "manual", notes: null, tags: null, created_at: new Date().toISOString(),
           created_by: createdBy, converted_to_contact_id: null, converted_at: null,
           assigned_to: assignedTo, entity_id: entityIdForPostCommit,
-        } as Lead, ...prev]);
+        } as Lead);
       }
       await loadStatusCounts();
     } finally {
@@ -3861,7 +4208,7 @@ export default function AnewLeads() {
       const { data: existingLead } = await (supabase as any).from("anew_leads").select("field_values, status").eq("id", match.id).eq("organization_id", activeCompanyId).single();
       const mergedValues = { ...(existingLead?.field_values || {}), ...cleanFieldValues };
       const newStatus = ["lost", "rejected"].includes(existingLead?.status) ? "new" : existingLead?.status;
-      await (supabase as any).from("anew_leads").update({ field_values: mergedValues, status: newStatus, ...(fieldValues._assigned_to ? { assigned_to: fieldValues._assigned_to } : {}) }).eq("id", match.id).eq("organization_id", activeCompanyId);
+      await (supabase as any).from("anew_leads").update({ field_values: mergedValues, status: newStatus, ...(fieldValues._assigned_to ? { assigned_to: fieldValues._assigned_to } : {}) }).eq("id", match.id).eq("organization_id", activeCompanyId).throwOnError();
       toast({
         title: t('leads.toast.leadUpdated'),
         description: t('leads.toast.leadUpdatedDesc', { name: match.displayName }),
@@ -3871,7 +4218,7 @@ export default function AnewLeads() {
       setPendingLeadData(null);
       setDuplicateMatches([]);
       setNewLeadValues({});
-      setLeads([]); setHasMore(true); loadLeads();
+      loadLeads();
       loadStatusCounts();
     } catch (err: unknown) {
       const description = await getFriendlyErrorMessage(err);
@@ -3982,6 +4329,13 @@ export default function AnewLeads() {
           placeholder: f.placeholder,
           help_text: f.help_text,
           display_style: f.display_style,
+          // Validation constraints must survive the mapping — dropping them is
+          // what let a lone "-" pass as a valid required postal code here while
+          // the public form rejected it.
+          pattern: f.pattern,
+          pattern_message: f.pattern_message,
+          min_length: f.min_length,
+          max_length: f.max_length,
         }));
 
       setExtraCampaignFieldDefs(mappedFields);
@@ -4005,10 +4359,10 @@ export default function AnewLeads() {
       toast({ title: t('leads.toast.deleteError'), description: rpcError.message, variant: "destructive" });
     } else {
       toast({ title: t('leads.toast.deleteSuccess') });
-      setLeads(prev => prev.filter(l => l.id !== id));
+      transformarListaEmCache(prev => prev.filter(l => l.id !== id));
       loadStatusCounts();
     }
-  }, [toast, t, loadStatusCounts, scopeAnewUserId, scopeAuthUserId]);
+  }, [toast, t, loadStatusCounts, scopeAnewUserId, scopeAuthUserId, transformarListaEmCache]);
 
   // Assign lead to user
   const handleAssignLead = async (leadId: string, userId: string | null) => {
@@ -4226,7 +4580,8 @@ export default function AnewLeads() {
             .map((row: { source?: string | null }) => row.source?.trim() || "")
             .filter(Boolean),
         );
-      } catch {
+      } catch (sourceErr) {
+        captureFlowError(sourceErr, "lead-lifecycle");
         if (!cancelled) setSourceOptions([]);
       }
     })();
@@ -4245,6 +4600,10 @@ export default function AnewLeads() {
       let aVal: any, bVal: any;
       
       switch (sortColumn) {
+        case LEADS_LIST_SORT_COLUMN:
+          aVal = leadListSortValue(a);
+          bVal = leadListSortValue(b);
+          break;
         case "created_at":
           aVal = new Date(a.created_at).getTime();
           bVal = new Date(b.created_at).getTime();
@@ -4484,6 +4843,7 @@ export default function AnewLeads() {
         }
       } catch (e) {
         console.error("[AnewLeads] Failed to load entity email/name for row email action:", e);
+        captureFlowError(e, "entity-email-send");
       }
     }
     // Fallback to lead field_values aliases (po_email, nome, etc.)
@@ -4549,7 +4909,45 @@ export default function AnewLeads() {
         </div>
       ) : (
       <div className="space-y-6">
-        <ModuleAlertsBanner alerts={leadAlerts} onDismiss={dismissLeadAlert} onAction={() => {}} onAlertClick={(alert) => {
+        <ModuleAlertsBanner alerts={leadAlerts} onDismiss={dismissLeadAlert} onAction={async (alert) => {
+          // "Ligar agora" — mirrors the phone-resolution pattern used in AnewClients.tsx.
+          // Lead alerts are grouped per-user, so action_config.entity_ids holds one or
+          // more anew_leads.id values; the button acts on the first one in the list.
+          const callTargetIds = alert.action_config?.entity_ids as string[] | undefined;
+          const callTargetRef = callTargetIds?.[0];
+          if (!callTargetRef) return;
+
+          let callTargetLead: Lead | undefined = leads.find(
+            (l) => l.id === callTargetRef || l.entity_id === callTargetRef
+          );
+
+          if (!callTargetLead) {
+            const { data: fetchedLeadForCall } = await supabase
+              .from("anew_leads")
+              .select("id, entity_id, organization_id")
+              .eq("organization_id", activeCompanyId)
+              .or(`id.eq.${callTargetRef},entity_id.eq.${callTargetRef}`)
+              .maybeSingle();
+
+            if (fetchedLeadForCall?.entity_id) {
+              await resolveEntities([fetchedLeadForCall.entity_id]);
+              callTargetLead = fetchedLeadForCall as unknown as Lead;
+            }
+          }
+
+          if (!callTargetLead?.entity_id) {
+            toast({ title: t('leads.toast.notFound'), description: t('leads.toast.notFoundDesc'), variant: "destructive" });
+            return;
+          }
+
+          const callIdentity = getIdentity(callTargetLead.entity_id);
+          if (callIdentity?.phone) {
+            const callPhoneNumber = `${(callIdentity.phone_country_code || '+351').replace(/\s/g, '')}${callIdentity.phone.replace(/\s/g, '')}`;
+            window.location.href = `tel:${callPhoneNumber}`;
+          } else {
+            toast({ title: "Sem telefone", description: "Este lead não tem telefone associado.", variant: "destructive" });
+          }
+        }} onAlertClick={(alert) => {
           const entityIds = alert.action_config?.entity_ids as string[] | undefined;
           const alertRef = entityIds?.[0] || alert.entity_id;
           if (!alertRef) return;
@@ -5794,9 +6192,6 @@ export default function AnewLeads() {
                         resolveFieldValue={resolveFieldValue}
                         deals={leadDetailDeals}
                         nextAction={nextAction}
-                        contactAssociation={selectedLead.contacts}
-                        clientAssociation={selectedLead.clients}
-                        getIdentity={getIdentity}
                         onCreateDeal={async () => {
                           if (!selectedLead || !activeCompanyId) return;
                           const result = await createDealFromLead({
@@ -5815,12 +6210,6 @@ export default function AnewLeads() {
                           setShowDetails(false);
                           openContactDialogForLead(selectedLead);
                         }}
-                        clientOptions={clientOptions}
-                        searchingClients={searchingClients}
-                        onSearchClients={searchClients}
-                        onAssociateContact={handleAssociateContact}
-                        onAssociateClient={handleAssociateClient}
-                        leadId={selectedLead.id}
                       />
                     </TabsContent>
 
@@ -5832,34 +6221,105 @@ export default function AnewLeads() {
                         <p className="text-sm text-muted-foreground text-center py-8">Sem submissões de formulário associadas a esta lead</p>
                       ) : (
                         <div className="space-y-3">
-                          {leadDetailFormSubmissions.map((submission: any) => {
-                            const entries = Object.entries(submission.field_values || {}).filter(
+                          {leadDetailFormSubmissions.map((card: LeadFormCard) => {
+                            const entries = Object.entries(card.fieldValues || {}).filter(
                               ([key]) => key !== "_meta",
                             );
-                            const statusLabel = statusToStageMap[submission.status] || submission.status;
+                            const isSubmission = card.kind === "submission";
                             return (
-                              <Card key={submission.id}>
+                              <Card
+                                key={card.key}
+                                className="border-l-4"
+                                style={{ borderLeftColor: isSubmission ? "hsl(var(--muted-foreground))" : "hsl(var(--primary))" }}
+                              >
                                 <CardContent className="py-3 px-4 space-y-2">
                                   <div className="flex flex-wrap items-center justify-between gap-2">
-                                    <p className="text-sm font-medium">{submission.campaigns?.name || "Sem campanha"}</p>
+                                    <p className="text-sm font-medium flex items-center gap-1.5">
+                                      {isSubmission
+                                        ? <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+                                        : <Workflow className="w-3.5 h-3.5 text-primary" />}
+                                      {card.campaignName || "Sem campanha"}
+                                    </p>
                                     <div className="flex items-center gap-2">
-                                      {submission.source && <span className="text-[10px] text-muted-foreground">{submission.source}</span>}
-                                      {statusLabel && <Badge variant="outline" className="text-[10px] capitalize">{statusLabel}</Badge>}
-                                      {submission.created_at && (
+                                      {card.source && <span className="text-[10px] text-muted-foreground">{card.source}</span>}
+                                      {/* Uma lead tem fase do funil; uma submissão tem estado de revisão. */}
+                                      {isSubmission ? (
+                                        <>
+                                          <Badge variant="secondary" className="text-[10px]">Submissão</Badge>
+                                          {card.reviewState && (
+                                            <Badge
+                                              variant={card.reviewState === "pending" ? "destructive" : "outline"}
+                                              className="text-[10px]"
+                                            >
+                                              {LEAD_FORM_REVIEW_LABELS[card.reviewState]}
+                                            </Badge>
+                                          )}
+                                        </>
+                                      ) : (
+                                        card.stageLabel && <Badge variant="outline" className="text-[10px] capitalize">{card.stageLabel}</Badge>
+                                      )}
+                                      {card.createdAt && (
                                         <span className="text-[10px] text-muted-foreground">
-                                          {new Date(submission.created_at).toLocaleString("pt-PT")}
+                                          {new Date(card.createdAt).toLocaleString("pt-PT")}
                                         </span>
                                       )}
                                     </div>
                                   </div>
+
+                                  {/* Porque é que isto não criou lead nova. Sem esta linha o
+                                      cartão mostra o que a pessoa preencheu e não explica nada. */}
+                                  {card.matchReason && !card.conflictEntities && (
+                                    <p className="text-[11px] text-muted-foreground flex items-start gap-1.5">
+                                      <Link2 className="w-3.5 h-3.5 shrink-0 mt-px" />
+                                      <span>{card.matchReason}</span>
+                                    </p>
+                                  )}
+
+                                  {/* CONFLITO (06): o email aponta para uma entidade e o telefone para outra. */}
+                                  {card.conflictEntities && (
+                                    <div className="rounded-md border border-dashed border-amber-500/60 bg-amber-500/5 px-3 py-2 space-y-1">
+                                      <p className="text-[11px] font-medium text-amber-700 flex items-center gap-1.5">
+                                        <AlertCircle className="w-3.5 h-3.5" />
+                                        Conflito: o email e o telefone apontam para pessoas diferentes
+                                      </p>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {card.conflictEntities.map((entity) => (
+                                          <Badge key={entity.id} variant="outline" className="text-[10px] border-amber-500/60">
+                                            {entity.name}
+                                          </Badge>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Dado novo que a submissão trouxe e que NUNCA foi gravado na ficha. */}
+                                  {(card.unsavedEmail || card.unsavedPhone) && (
+                                    <div className="rounded-md border border-dashed px-3 py-2 space-y-1">
+                                      {card.unsavedEmail && (
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <Mail className="w-3.5 h-3.5 text-muted-foreground" />
+                                          <span className="font-medium">{sanitizeFieldValue(card.unsavedEmail)}</span>
+                                          <Badge variant="outline" className="text-[10px]">não gravado</Badge>
+                                        </div>
+                                      )}
+                                      {card.unsavedPhone && (
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <Phone className="w-3.5 h-3.5 text-muted-foreground" />
+                                          <span className="font-medium">{sanitizeFieldValue(card.unsavedPhone)}</span>
+                                          <Badge variant="outline" className="text-[10px]">não gravado</Badge>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
                                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
                                     {entries.map(([key, value]) => {
-                                      const resolvedValue = submission.districtFieldKeys?.has(key)
-                                        ? submission.districtNameById?.[value as string] ?? value
+                                      const resolvedValue = card.districtFieldKeys?.has(key)
+                                        ? card.districtNameById?.[value as string] ?? value
                                         : value;
                                       return (
                                         <div key={key} className="flex items-baseline justify-between gap-2 text-xs border-b border-dashed py-1">
-                                          <span className="text-muted-foreground">{submission.fieldLabels?.[key] || humanizeFormFieldKey(key)}</span>
+                                          <span className="text-muted-foreground">{card.fieldLabels?.[key] || humanizeFormFieldKey(key)}</span>
                                           <span className="font-medium text-right">{sanitizeFieldValue(resolvedValue)}</span>
                                         </div>
                                       );
@@ -6059,13 +6519,12 @@ export default function AnewLeads() {
                     <TabsContent value="journey" className="mt-4">
                       <LeadJourneyTab
                         lead={selectedLead}
-                        hasClient={!!selectedLead.clients}
-                        clientCreatedAt={null}
                         interactionCount={leadInteractionCounts[selectedEntityId] || 0}
                         dealCount={0}
                         dealValue={0}
                         organizationId={selectedLead.organization_id}
                         userId={scopeAnewUserId || scopeAuthUserId || ""}
+                        onQualificationUpdated={handleLeadQualificationUpdated}
                       />
                     </TabsContent>
 
@@ -6156,6 +6615,7 @@ export default function AnewLeads() {
           if (!open) {
             setShowConversionDialog(false);
             setConversionLead(null);
+            setConversionIdentity(null);
           }
         }}>
           <DialogContent className="max-w-md">
@@ -6165,88 +6625,86 @@ export default function AnewLeads() {
             
             <div className="space-y-4 py-4">
               <p className="text-sm text-muted-foreground">
-                Os seguintes dados serão utilizados na conversão:
+                Estes são os dados da ficha da pessoa. A conversão muda o papel — não altera nenhum deles:
               </p>
 
               {conversionLead && (() => {
-                // Extract the data that will be converted using auto-mapping
-                const fieldValues = conversionLead.field_values || {};
-                const CONV_ALIASES: Record<string, string[]> = {
-                  name: ['name', 'nome', 'full_name', 'nome_completo', 'first_name', 'primeiro_nome', 'client_name', 'nome_cliente', 'contacto', 'contact_name', 'first_name', 'last_name', 'primeironome', 'ultimonome', 'firstname', 'lastname'],
-                  email: ['email', 'e-mail', 'email_address', 'endereco_email', 'correio_eletronico', 'mail', 'e_mail', 'correio'],
-                  phone: ['phone', 'telefone', 'phone_number', 'numero_telefone', 'tel', 'telemovel', 'mobile', 'celular', 'contacto_telefonico', 'telemóvel', 'cellphone', 'cel', 'contacto'],
-                  vat: ['vat', 'nif', 'contribuinte', 'fiscal', 'tax_id', 'taxid', 'numero_contribuinte'],
-                  address: ['address', 'morada', 'endereco', 'rua', 'endereço', 'street'],
-                  city: ['city', 'cidade', 'localidade', 'concelho'],
-                  postal_code: ['postal_code', 'codigo_postal', 'cp', 'cep', 'postalcode', 'zip', 'zipcode'],
-                  district: ['district', 'distrito', 'regiao', 'região', 'provincia'],
-                  position: ['position', 'cargo', 'funcao', 'job_title', 'profissao'],
-                };
-                
-                const normalize = (str: string): string => str.toLowerCase().replace(/[-_\s]/g, '');
-                
-                const findFieldValue = (aliases: string[]): string | null => {
-                  const normalizedAliases = aliases.map(normalize);
-                  for (const key of Object.keys(fieldValues)) {
-                    if (key === '_meta') continue;
-                    const normalizedKey = normalize(key);
-                    if (normalizedAliases.some(alias => normalizedKey === alias || normalizedKey.includes(alias) || alias.includes(normalizedKey))) {
-                      const value = fieldValues[key];
-                      if (value && typeof value === 'object' && !Array.isArray(value)) {
-                        // Format address objects
-                        const addr = value as Record<string, any>;
-                        const parts = [
-                          [addr.street || addr.rua, addr.number || addr.numero].filter(Boolean).join(' '),
-                          addr.floor || addr.andar || null,
-                          [addr.postal_code || addr.codigo_postal, addr.city || addr.cidade].filter(Boolean).join(' '),
-                        ].filter(Boolean);
-                        return parts.join(', ') || null;
-                      }
-                      if (value && typeof value === 'string' && value.trim()) {
-                        return value.trim();
-                      }
-                    }
-                  }
-                  return null;
-                };
-                
-                const extractedName = findFieldValue(CONV_ALIASES.name);
-                const extractedEmail = findFieldValue(CONV_ALIASES.email);
-                const extractedPhone = findFieldValue(CONV_ALIASES.phone);
-                const extractedVat = findFieldValue(CONV_ALIASES.vat);
-                const extractedAddress = findFieldValue(CONV_ALIASES.address);
-                const extractedCity = findFieldValue(CONV_ALIASES.city);
-                const extractedPostalCode = findFieldValue(CONV_ALIASES.postal_code);
-                const extractedDistrict = findFieldValue(CONV_ALIASES.district);
-                const extractedPosition = findFieldValue(CONV_ALIASES.position);
-                
-                const hasAddressInfo = extractedAddress || extractedCity || extractedPostalCode;
-                const fullAddress = [extractedAddress, extractedPostalCode, extractedCity].filter(Boolean).join(', ');
+                // O que aqui aparece TEM de ser o que fica gravado. Ate 2026-09-03
+                // este bloco adivinhava nome, email, telefone e morada a partir dos
+                // `field_values` do formulario, com listas de sinonimos. Isso deixou
+                // de ser verdade quando a conversao deixou de escrever na pessoa: o
+                // dialogo mostrava "EmbedTracking" e a ficha mantinha outro nome. Um
+                // pedido de confirmacao que mostra o valor errado e pior do que nao
+                // mostrar nada -- da confianca falsa a quem confirma.
+                const identity = conversionIdentity;
 
-                const InfoRow = ({ icon: Icon, label, value }: { icon: any; label: string; value: string | null }) => (
+                // O nome da ficha: `display_name` primeiro, com first/last como
+                // recurso para fichas antigas onde o display ficou por preencher.
+                const nomeDaFicha =
+                  identity?.display_name?.trim() ||
+                  [identity?.first_name, identity?.last_name].filter(Boolean).join(' ').trim() ||
+                  null;
+
+                const telefoneDaFicha = identity?.phone
+                  ? [identity.phone_country_code, identity.phone].filter(Boolean).join(' ')
+                  : null;
+
+                const moradaDaFicha =
+                  [identity?.address, identity?.postal_code, identity?.city]
+                    .filter(Boolean)
+                    .join(', ') || null;
+
+                const isEmpresa = identity?.type === 'company';
+
+                const InfoRow = ({ icon: Icon, label, value, emptyLabel }: { icon: any; label: string; value: string | null; emptyLabel: string }) => (
                   <div className="flex items-center gap-3">
                     <Icon className="w-4 h-4 text-muted-foreground flex-shrink-0" />
                     <div>
                       <p className="text-xs text-muted-foreground">{label}</p>
-                      <p className="text-sm font-medium">{value || <span className="text-muted-foreground italic">Não encontrado</span>}</p>
+                      <p className="text-sm font-medium">
+                        {value || <span className="text-muted-foreground italic">{emptyLabel}</span>}
+                      </p>
                     </div>
                   </div>
                 );
-                
+
+                if (conversionIdentityLoading) {
+                  return (
+                    <div className="p-4 bg-muted rounded-lg">
+                      <p className="text-sm text-muted-foreground">A ler a ficha da pessoa...</p>
+                    </div>
+                  );
+                }
+
+                // Sem entidade nao ha ficha nenhuma para mostrar. Dizemo-lo, em vez
+                // de cair para o formulario.
+                if (!conversionLead.entity_id || !identity) {
+                  return (
+                    <div className="p-4 bg-muted rounded-lg">
+                      <p className="text-sm text-muted-foreground italic">
+                        Esta lead não tem ficha de pessoa associada.
+                      </p>
+                    </div>
+                  );
+                }
+
                 return (
                   <div className="p-4 bg-muted rounded-lg space-y-3">
-                    <InfoRow icon={User} label="Nome" value={extractedName} />
-                    <InfoRow icon={Mail} label="Email" value={extractedEmail} />
-                    <InfoRow icon={Phone} label="Telefone" value={extractedPhone} />
-                    {extractedVat && <InfoRow icon={Hash} label="NIF" value={extractedVat} />}
-                    {extractedPosition && <InfoRow icon={Briefcase} label="Cargo" value={extractedPosition} />}
-                    {hasAddressInfo && <InfoRow icon={MapPin} label="Morada" value={fullAddress} />}
-                    {extractedDistrict && <InfoRow icon={MapPin} label="Distrito" value={extractedDistrict} />}
-                    
+                    <InfoRow
+                      icon={isEmpresa ? Building2 : User}
+                      label={isEmpresa ? 'Empresa' : 'Nome'}
+                      value={nomeDaFicha}
+                      emptyLabel="sem nome na ficha"
+                    />
+                    <InfoRow icon={Mail} label="Email" value={identity.email} emptyLabel="sem email na ficha" />
+                    <InfoRow icon={Phone} label="Telefone" value={telefoneDaFicha} emptyLabel="sem telefone na ficha" />
+                    {identity.vat && <InfoRow icon={Hash} label="NIF" value={identity.vat} emptyLabel="sem NIF na ficha" />}
+                    {moradaDaFicha && <InfoRow icon={MapPin} label="Morada" value={moradaDaFicha} emptyLabel="sem morada na ficha" />}
+
                     {conversionLead.campaign_id && (
                       <div className="pt-2 mt-2 border-t">
                         <p className="text-xs text-muted-foreground">
-                          Campanha associada: será usado o mapeamento configurado
+                          Campanha associada: será registada na origem do cliente
                         </p>
                       </div>
                     )}
@@ -6689,17 +7147,11 @@ export default function AnewLeads() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {createLeadFieldDefs
-                .filter(baseField => {
-                  // Hide base fields that are already covered by a mapped form/campaign field
-                  if (extraCampaignFieldDefs.length === 0) return true;
-                  const baseKey = baseField.field_key.toLowerCase();
-                  return !extraCampaignFieldDefs.some(ef => {
-                    const cm = (ef.contact_field_mapping || '').toLowerCase();
-                    const clm = (ef.client_field_mapping || '').toLowerCase();
-                    const efKey = (ef.field_key || '').toLowerCase();
-                    return cm === baseKey || clm === baseKey || efKey === baseKey;
-                  });
-                })
+                // Esconde os campos base que a campanha/formulário já recolhe.
+                // Mesma regra usada em handleCreateLead ao montar field_values:
+                // esconder sem descartar deixava passar o valor escrito antes de
+                // a campanha ser escolhida.
+                .filter(baseField => !isBaseFieldCoveredByCampaignFields(baseField.field_key, extraCampaignFieldDefs))
                 .map(field => (
                 <div key={field.id} className={field.field_type === 'textarea' || field.field_type === 'composite_address' ? 'md:col-span-2' : ''}>
                   <DynamicFormField
@@ -6889,7 +7341,7 @@ export default function AnewLeads() {
           onOpenChange={handleContactDialogOpenChange}
           lead={selectedLead as any}
           companyId={activeCompanyId || null}
-          onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          onLeadUpdated={handleLeadDialogUpdate}
         />
 
         <ScheduleLeadVisitDialog
@@ -6898,7 +7350,7 @@ export default function AnewLeads() {
           lead={selectedLead as any}
           leadName={selectedLead ? (getIdentity(selectedLead.entity_id)?.display_name || extractLeadContactInfo(selectedLead.field_values).name || "Lead") : ""}
           companyId={activeCompanyId || null}
-          onScheduled={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          onScheduled={handleLeadDialogUpdate}
         />
 
         {/* Compact "Registar atividade" dialog, opened from the lead detail's Timeline
@@ -6925,7 +7377,7 @@ export default function AnewLeads() {
                 .eq("id", lead.id);
               refreshSingleLead(lead.id);
             }}
-            onCallRegistered={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+            onCallRegistered={handleLeadDialogUpdate}
           />
         )}
 
@@ -6950,7 +7402,7 @@ export default function AnewLeads() {
           lead={selectedLead as any}
           companyId={activeCompanyId || ""}
           companyUsers={assignableCompanyUsers}
-          onLeadUpdated={() => { if (selectedLead) refreshSingleLead(selectedLead.id); }}
+          onLeadUpdated={handleLeadDialogUpdate}
           userId={scopeAnewUserId || scopeAuthUserId || ""}
         />
 

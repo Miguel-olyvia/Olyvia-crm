@@ -1,4 +1,5 @@
 import type { InlineQuoteData, InlineQuoteLine } from "@/components/proposals/InlineQuoteBuilder";
+import { getLineSubtotal, round2 as round2Shared } from "./quoteLinePricing";
 
 export interface VatBreakdownEntry {
   rate: number;
@@ -21,7 +22,8 @@ export interface InlineQuoteCalcResult {
   vatBreakdown: VatBreakdownEntry[];
 }
 
-export const round2 = (n: number): number => Math.round(n * 100) / 100;
+/** Reexportado da fonte única de preço, para não haver dois arredondamentos. */
+export const round2 = round2Shared;
 
 // Extract bundle components from a quote line, regardless of where they live
 // (top-level, selected_attributes, or selected_attributes.bundle_components_data).
@@ -44,14 +46,10 @@ export function calculateInlineQuoteTotals(iq: Pick<InlineQuoteData, "lines" | "
   const vatByRate: Record<number, { base: number; vat: number }> = {};
 
   iq.lines.filter((l: InlineQuoteLine) => l.qt > 0).forEach((line: InlineQuoteLine) => {
-    const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-    const isManual = custoUnit === 0 && line.retail_price_unit != null;
-    const unitPrice = isManual
-      ? (line.retail_price_unit || 0)
-      : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-    const precoBase = unitPrice * line.qt;
-    const lineDiscount = line.discount_percent || 0;
-    const precoSemIva = precoBase * (1 - lineDiscount / 100);
+    // Preço unitário e subtotal vêm da fonte única: o preço de venda definido
+    // manda, e o unitário é fechado ao cêntimo antes de multiplicar pela
+    // quantidade, para que o subtotal feche com o que está no ecrã.
+    const precoSemIva = getLineSubtotal(line);
 
     const bundleComponents = getLineBundleComponents(line);
     const componentsTotal = bundleComponents.reduce(

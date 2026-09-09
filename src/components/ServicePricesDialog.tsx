@@ -12,6 +12,7 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TrendingUp, TrendingDown, DollarSign, AlertTriangle, Percent } from "lucide-react";
 import { calculateMargin, formatMarginBadge } from "@/utils/productsExportImport";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ServicePricesDialogProps {
   open: boolean;
@@ -183,6 +184,7 @@ export default function ServicePricesDialog({
 
       onOpenChange(false);
     } catch (error: any) {
+      captureFlowError(error, "pricing-partial-write");
       toast({
         title: "Erro ao atualizar preços",
         description: error.message,

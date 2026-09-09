@@ -41,7 +41,7 @@ import {
 import { resolveBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 import { resolveOrganizationEntityId } from '@/utils/orgEntity';
 import { withAuditContext } from '@/utils/auditContext';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 interface Organization {
   id: string;

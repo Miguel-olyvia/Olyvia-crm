@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from 'xlsx';
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // CSV column headers (aligned with import template)
 const CSV_HEADERS = [
@@ -383,7 +384,8 @@ export async function parseServicesCSV(
               .insert({ name: catName, organization_id: organizationId, created_by: businessUserId })
               .select('id')
               .single();
-            if (!catErr && newCat) {
+            if (catErr) throw catErr;
+            if (newCat) {
               categoryId = newCat.id;
               catMap.set(catKey, newCat.id);
               createdCatCache.set(catKey, newCat.id);
@@ -404,7 +406,8 @@ export async function parseServicesCSV(
               .insert({ name: subName, organization_id: organizationId, created_by: businessUserId })
               .select('id')
               .single();
-            if (!subErr && newSub) {
+            if (subErr) throw subErr;
+            if (newSub) {
               subcategoryId = newSub.id;
               subMap.set(subKey, newSub.id);
               createdCatCache.set(subKey, newSub.id);
@@ -497,6 +500,7 @@ export async function parseServicesCSV(
         }
       }
     } catch (err: any) {
+      captureFlowError(err, "record-export-import");
       report.errors.push({
         row: i + 1,
         sku,

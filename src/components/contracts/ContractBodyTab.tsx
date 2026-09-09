@@ -8,13 +8,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { RichTextEditor } from "@/components/RichTextEditor";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { Eye, RefreshCw, Pencil, FileText, Loader2, ShieldCheck, PenTool, Smartphone } from "lucide-react";
 import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/utils/contractVariables";
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
-import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock } from "@/components/contracts/contractDocument";
+import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock, UNFREEZE_CONTRACT_COLUMNS, isContractInForce } from "@/components/contracts/contractDocument";
 import { renderContractHeaderHtml } from "@/components/contracts/contractHeader";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -54,7 +55,15 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     setGeneratedFromName(null);
   }, [contract?.id, contract?.contract_body_html]);
 
+  // Um contrato em vigor nao se edita a mao: o texto livre fica trancado.
   const isLocked = readOnly || ["signed", "active"].includes(contract?.status);
+
+  // Regenerar NAO se abre a contratos em vigor, de proposito: um documento
+  // assinado nao muda -- nem pela minuta, nem por quem o abre, nem por quem o
+  // manda gerar outra vez. O caminho de descongelamento existe no codigo e
+  // continua a servir contratos ainda por assinar; para os assinados nao ha
+  // porta, e e essa a intencao.
+  const contratoEmVigor = isContractInForce(contract);
 
   const { data: templates = [] } = useQuery({
     queryKey: ["contract-templates-for-body", activeCompany?.id],
@@ -66,6 +75,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
         .eq("organization_id", activeCompany.id)
         .eq("is_active", true)
         .order("is_default", { ascending: false });
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       return data || [];
     },
     enabled: !!activeCompany?.id,
@@ -81,11 +91,12 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   const { data: templateSignatoryUser } = useQuery({
     queryKey: ["contract-template-signatory-user", currentTemplate?.signatory_user_id],
     queryFn: async () => {
-      const { data } = await (supabase as any)
+      const { data, error } = await (supabase as any)
         .from("anew_users")
         .select("id, name")
         .eq("id", currentTemplate!.signatory_user_id)
         .maybeSingle();
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       return data;
     },
     enabled: !!currentTemplate?.signatory_user_id,
@@ -105,7 +116,8 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     queryKey: ["contract-org", activeCompany?.id],
     queryFn: async () => {
       if (!activeCompany?.id) return null;
-      const { data } = await (supabase as any).from("anew_organizations").select("name, metadata, logo_url").eq("id", activeCompany.id).single();
+      const { data, error } = await (supabase as any).from("anew_organizations").select("name, metadata, logo_url").eq("id", activeCompany.id).single();
+      if (error) captureFlowError(error, "db-error-leaked-to-ui");
       return data;
     },
     enabled: !!activeCompany?.id,
@@ -120,7 +132,10 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       }
       const { error } = await (supabase as any)
         .from("client_contracts")
-        .update({ contract_body_html: html })
+        // Regenerar (ou guardar o corpo a mao) e a UNICA forma de mudar um
+        // contrato assinado, e tem de ser pedida por alguem. Descongela-se: a
+        // proxima leitura produz o documento de novo e volta a congela-lo.
+        .update({ contract_body_html: html, ...UNFREEZE_CONTRACT_COLUMNS })
         .eq("id", contract.id);
       if (error) throw error;
     },
@@ -160,8 +175,14 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           .from("client_contracts")
           .update(updatePayload)
           .eq("id", contract.id)
-          .then(() => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }))
-          .catch((e: unknown) => console.error('[ContractBodyTab] finalizeGeneration update failed', e));
+          .then(({ error }: { error: unknown }) => {
+            if (error) throw error;
+            queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+          })
+          .catch((e: any) => {
+            console.error('[ContractBodyTab] finalizeGeneration update failed', e);
+            toast.error("Contrato gerado, mas não foi possível guardar a minuta/valores: " + (e?.message ?? e));
+          });
       if (uid) {
         supabase.rpc('set_audit_context', { p_user_id: uid, p_source: 'ui' }).then(doUpdate);
       } else {
@@ -204,6 +225,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
         }
       }
     } catch (e) {
+      captureFlowError(e, "db-error-leaked-to-ui");
       console.error("Falha a detectar variáveis a preencher:", e);
     }
 
@@ -279,6 +301,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       // Sign the contract after OTP verification
       await handleCompanySignAfterOtp();
     } catch (err: any) {
+      captureFlowError(err, "db-error-leaked-to-ui");
       setOtpError(err.message);
       setOtpStep("input");
       setOtpCode("");
@@ -308,8 +331,14 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           company_signature_date: new Date().toISOString(),
           company_signed_by_name: signerName,
           company_signed_by_id: anewUser?.id || user.id,
+          // Assinar MUDA o documento (a assinatura passa a fazer parte dele).
+          // Descongela-se para a proxima leitura o reconstruir ja com ela --
+          // sem isto, uma empresa que assine depois do cliente ficaria com a
+          // sua assinatura de fora do documento congelado.
+          ...UNFREEZE_CONTRACT_COLUMNS,
         })
-        .eq("id", contract.id);
+        .eq("id", contract.id)
+        .throwOnError();
 
       queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
       toast.success("Contrato assinado pela empresa via SMS OTP!");
@@ -343,8 +372,10 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
           company_signature_date: new Date().toISOString(),
           company_signed_by_name: templateSignatoryUser.name || "Representante",
           company_signed_by_id: templateSignatoryUser.id,
+          ...UNFREEZE_CONTRACT_COLUMNS,
         })
-        .eq("id", contract.id);
+        .eq("id", contract.id)
+        .throwOnError();
 
       queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
       toast.success(`Contrato assinado por ${templateSignatoryUser.name} (signatário já verificado nesta minuta).`);
@@ -510,7 +541,14 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
               <PenTool className="h-3 w-3" /> Assinado pela empresa
             </Badge>
           )}
-          <Button variant="outline" size="sm" onClick={() => setIsGenerateOpen(true)} disabled={isLocked} className="gap-1.5">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsGenerateOpen(true)}
+            disabled={isLocked}
+            className="gap-1.5"
+            title={contratoEmVigor ? "Um contrato assinado não pode ser regenerado." : undefined}
+          >
             <RefreshCw className="h-3.5 w-3.5" />
             {bodyHtml ? "Regenerar" : "Gerar de Minuta"}
           </Button>

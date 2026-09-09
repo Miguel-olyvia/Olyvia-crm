@@ -63,6 +63,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { getSafeFileExtension } from "@/utils/secureFileUpload";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -1050,6 +1051,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
       toast({ title: templateId ? "Template atualizado" : "Template criado" });
       onClose();
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro ao guardar", description: error.message, variant: "destructive" });
     } finally {
       setSaving(false);

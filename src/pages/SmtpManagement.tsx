@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Mail, Plus, Pencil, Trash2, Loader2, Star, CheckCircle, XCircle, Send, Building2, User, ArrowRight, Globe, AlertTriangle } from "lucide-react";
@@ -95,24 +96,27 @@ export default function SmtpManagement() {
       if (!user) return;
 
       // Load user SMTPs
-      const { data: userConfigs } = await (supabase as any)
+      const { data: userConfigs, error: userConfigsError } = await (supabase as any)
         .from("user_smtp_settings")
         .select("*")
         .eq("user_id", user.id)
         .order("is_default", { ascending: false });
+      if (userConfigsError) captureFlowError(userConfigsError, "db-error-leaked-to-ui");
       setUserSmtps(userConfigs || []);
 
       // Load org SMTPs
       if (activeCompany) {
-        const { data: orgConfigs } = await (supabase as any)
+        const { data: orgConfigs, error: orgConfigsError } = await (supabase as any)
           .from("organization_smtp_settings")
           .select("*")
           .eq("organization_id", activeCompany.id)
           .order("is_default", { ascending: false });
+        if (orgConfigsError) captureFlowError(orgConfigsError, "db-error-leaked-to-ui");
         setOrgSmtps(orgConfigs || []);
       }
     } catch (error) {
       console.error("Error loading SMTP configs:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar as configurações SMTP.", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -281,31 +285,48 @@ export default function SmtpManagement() {
 
   const handleToggleActive = async (smtp: SmtpConfig, mode: "user" | "org") => {
     const table = mode === "user" ? "user_smtp_settings" : "organization_smtp_settings";
-    await (supabase as any).from(table).update({ is_active: !smtp.is_active }).eq("id", smtp.id);
+    const { error } = await (supabase as any).from(table).update({ is_active: !smtp.is_active }).eq("id", smtp.id);
+    if (error) {
+      captureFlowError(error, "config-partial-write");
+      toast({ title: "Erro", description: "Não foi possível atualizar o estado do SMTP.", variant: "destructive" });
+    }
     loadSmtpConfigs();
   };
 
   const handleSetDefault = async (smtp: SmtpConfig, mode: "user" | "org") => {
     const table = mode === "user" ? "user_smtp_settings" : "organization_smtp_settings";
-    const { data: { user } } = await supabase.auth.getUser();
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
 
-    // Unset all defaults
-    if (mode === "user") {
-      await (supabase as any).from(table).update({ is_default: false }).eq("user_id", user?.id);
-    } else {
-      await (supabase as any).from(table).update({ is_default: false }).eq("organization_id", activeCompany?.id);
+      // Unset all defaults
+      if (mode === "user") {
+        const { error } = await (supabase as any).from(table).update({ is_default: false }).eq("user_id", user?.id);
+        if (error) throw error;
+      } else {
+        const { error } = await (supabase as any).from(table).update({ is_default: false }).eq("organization_id", activeCompany?.id);
+        if (error) throw error;
+      }
+      // Set this as default
+      const { error: setError } = await (supabase as any).from(table).update({ is_default: true }).eq("id", smtp.id);
+      if (setError) throw setError;
+      loadSmtpConfigs();
+      toast({ title: "Atualizado", description: `"${smtp.name || smtp.from_email}" definido como SMTP padrão` });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      loadSmtpConfigs();
     }
-    // Set this as default
-    await (supabase as any).from(table).update({ is_default: true }).eq("id", smtp.id);
-    loadSmtpConfigs();
-    toast({ title: "Atualizado", description: `"${smtp.name || smtp.from_email}" definido como SMTP padrão` });
   };
 
   const handleDelete = async (smtp: SmtpConfig, mode: "user" | "org") => {
     const table = mode === "user" ? "user_smtp_settings" : "organization_smtp_settings";
-    await (supabase as any).from(table).delete().eq("id", smtp.id);
-    loadSmtpConfigs();
-    toast({ title: "Eliminado", description: "Configuração SMTP eliminada" });
+    try {
+      const { error } = await (supabase as any).from(table).delete().eq("id", smtp.id);
+      if (error) throw error;
+      loadSmtpConfigs();
+      toast({ title: "Eliminado", description: "Configuração SMTP eliminada" });
+    } catch (error: any) {
+      toast({ title: "Erro", description: error.message, variant: "destructive" });
+    }
   };
 
   const SmtpCard = ({ smtp, mode }: { smtp: SmtpConfig; mode: "user" | "org" }) => (

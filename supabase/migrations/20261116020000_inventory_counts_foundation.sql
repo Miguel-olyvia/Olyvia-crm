@@ -1,3 +1,8 @@
+-- Reposto a partir do historico da base (supabase_migrations.schema_migrations)
+-- em 2026-09-02: esta migration estava aplicada no remoto sem ficheiro no
+-- repositorio, o que impedia qualquer 'db push' e faria uma base reconstruida
+-- do zero sair diferente da de producao. O SQL abaixo e o que correu de facto.
+
 -- Fase 5.4A do plano de inventário (plano-fornecedores-multi-stock-execucao.md,
 -- secção "Fase 5.4 — Contagem física de Inventário (Stocktake)"): fundação de
 -- dados + RPCs da Contagem Física de Inventário ("Stocktake"). Sem UI/ecrã —
@@ -164,23 +169,27 @@ COMMENT ON TABLE public.inventory_counts IS
   '(INV-NNNN) gerado por fn_next_inventory_count_number(), MAX+1 por organização, '
   'nunca sequência global. Escrita só através das RPCs rpc_create_inventory_count/'
   'rpc_finalize_inventory_count — RLS bloqueia UPDATE/DELETE diretos (ver secção 5).';
+
 COMMENT ON COLUMN public.inventory_counts.category_id IS
   'Filtro opcional usado só no momento de semear as linhas (rpc_create_inventory_count) '
   '— não restringe nada depois de criada a sessão.';
+
 COMMENT ON COLUMN public.inventory_counts.status IS
   'em_contagem (default) -> finalizada (rpc_finalize_inventory_count, bloqueada se '
   'sobrar discrepância sem discrepancy_resolution) ou cancelada (fora do âmbito '
   'desta migration — sem RPC de cancelamento ainda).';
 
 CREATE INDEX idx_inventory_counts_org        ON public.inventory_counts (organization_id);
+
 CREATE INDEX idx_inventory_counts_warehouse  ON public.inventory_counts (warehouse_id);
+
 CREATE INDEX idx_inventory_counts_status     ON public.inventory_counts (organization_id, status);
 
 DROP TRIGGER IF EXISTS trg_inventory_counts_updated_at ON public.inventory_counts;
+
 CREATE TRIGGER trg_inventory_counts_updated_at
   BEFORE UPDATE ON public.inventory_counts
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
 
 -- ============================================================
 -- 2. public.inventory_count_lines — 1 linha por produto contado.
@@ -217,16 +226,19 @@ COMMENT ON TABLE public.inventory_count_lines IS
   'inventory.count). Diferenças resolvidas linha a linha por '
   'rpc_resolve_inventory_count_line (permissão inventory.edit). Escrita só '
   'através das RPCs — RLS bloqueia UPDATE/DELETE diretos (ver secção 5).';
+
 COMMENT ON COLUMN public.inventory_count_lines.system_quantity_at_start IS
   'Snapshot de stocks.quantity no momento em que a linha foi semeada — nunca '
   'atualizado depois. Usado só como referência informativa; a resolução '
   '''ajustado'' lê o saldo AO VIVO de stocks, não este snapshot.';
+
 COMMENT ON COLUMN public.inventory_count_lines.moved_during_count IS
   'true assim que o saldo ao vivo de stocks divergir do snapshot original em '
   'qualquer momento entre a criação da sessão e a resolução da linha — '
   'cumulativo (nunca volta a false sozinho). Sinaliza possível timing '
   '(produto vendido/comprado durante a contagem); a decisão final continua '
   'humana via discrepancy_resolution.';
+
 COMMENT ON COLUMN public.inventory_count_lines.stock_movement_id IS
   'Preenchido só quando discrepancy_resolution=''ajustado'' e o ajuste gerou '
   'de facto um movimento (diferença != 0 face ao saldo ao vivo no momento da '
@@ -234,15 +246,17 @@ COMMENT ON COLUMN public.inventory_count_lines.stock_movement_id IS
   'saldo ao vivo já coincidia com a contagem.';
 
 CREATE INDEX idx_inventory_count_lines_count    ON public.inventory_count_lines (inventory_count_id);
+
 CREATE INDEX idx_inventory_count_lines_product  ON public.inventory_count_lines (product_id);
+
 CREATE INDEX idx_inventory_count_lines_pending  ON public.inventory_count_lines (inventory_count_id)
   WHERE discrepancy_resolution IS NULL AND counted_quantity IS NOT NULL;
 
 DROP TRIGGER IF EXISTS trg_inventory_count_lines_updated_at ON public.inventory_count_lines;
+
 CREATE TRIGGER trg_inventory_count_lines_updated_at
   BEFORE UPDATE ON public.inventory_count_lines
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
-
 
 -- ============================================================
 -- 3. fn_next_inventory_count_number — INV-NNNN por organização (MAX+1,
@@ -283,7 +297,6 @@ COMMENT ON FUNCTION public.fn_next_inventory_count_number IS
   'inventory_counts_org_document_unique (UNIQUE), que rejeita com erro claro em '
   'vez de silenciosamente duplicar o número.';
 
-
 -- ============================================================
 -- 4. Permissão nova `inventory.count` + backfill aditivo (mesmo padrão exato
 --    da Fase 4E, 20261113290000).
@@ -308,7 +321,6 @@ BEGIN
   WHERE permission_code = 'inventory.edit'
   ON CONFLICT (role_id, permission_code) DO NOTHING;
 END $$;
-
 
 -- ============================================================
 -- 5. RLS — reaproveita inventory.view/.count/.edit (nenhuma permissão de
@@ -394,12 +406,12 @@ CREATE POLICY inventory_count_lines_no_delete ON public.inventory_count_lines
   TO authenticated
   USING (false);
 
-
 -- ============================================================
 -- 6. Audit triggers.
 -- ============================================================
 
 DROP TRIGGER IF EXISTS trg_audit_inventory_counts ON public.inventory_counts;
+
 CREATE TRIGGER trg_audit_inventory_counts
   AFTER INSERT OR UPDATE OR DELETE ON public.inventory_counts
   FOR EACH ROW EXECUTE FUNCTION public.fn_generic_entity_audit();
@@ -517,13 +529,14 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.fn_audit_inventory_count_lines_via_parent() FROM PUBLIC, anon;
+
 GRANT EXECUTE ON FUNCTION public.fn_audit_inventory_count_lines_via_parent() TO service_role;
 
 DROP TRIGGER IF EXISTS trg_audit_inventory_count_lines ON public.inventory_count_lines;
+
 CREATE TRIGGER trg_audit_inventory_count_lines
   AFTER INSERT OR UPDATE OR DELETE ON public.inventory_count_lines
   FOR EACH ROW EXECUTE FUNCTION public.fn_audit_inventory_count_lines_via_parent();
-
 
 -- ============================================================
 -- 7. rpc_create_inventory_count — cria o cabeçalho + semeia linhas a partir
@@ -612,8 +625,8 @@ COMMENT ON FUNCTION public.rpc_create_inventory_count IS
   'inventory.count OU inventory.edit.';
 
 REVOKE ALL ON FUNCTION public.rpc_create_inventory_count FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.rpc_create_inventory_count TO authenticated;
 
+GRANT EXECUTE ON FUNCTION public.rpc_create_inventory_count TO authenticated;
 
 -- ============================================================
 -- 8. rpc_update_inventory_count_line_quantity — só contagem em si (sem
@@ -708,8 +721,8 @@ COMMENT ON FUNCTION public.rpc_update_inventory_count_line_quantity IS
   'inventory.count — resolver/finalizar continua a exigir inventory.edit.';
 
 REVOKE ALL ON FUNCTION public.rpc_update_inventory_count_line_quantity FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.rpc_update_inventory_count_line_quantity TO authenticated;
 
+GRANT EXECUTE ON FUNCTION public.rpc_update_inventory_count_line_quantity TO authenticated;
 
 -- ============================================================
 -- 9. rpc_resolve_inventory_count_line — ajustado / aceite_sem_ajuste /
@@ -865,8 +878,8 @@ COMMENT ON FUNCTION public.rpc_resolve_inventory_count_line IS
   'count_line_quantity), que só regista a quantidade contada.';
 
 REVOKE ALL ON FUNCTION public.rpc_resolve_inventory_count_line FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.rpc_resolve_inventory_count_line TO authenticated;
 
+GRANT EXECUTE ON FUNCTION public.rpc_resolve_inventory_count_line TO authenticated;
 
 -- ============================================================
 -- 10. rpc_finalize_inventory_count — bloqueia se sobrar diferença sem
@@ -970,8 +983,8 @@ COMMENT ON FUNCTION public.rpc_finalize_inventory_count IS
   'warehouse_id) contados nesta sessão. Exige inventory.edit.';
 
 REVOKE ALL ON FUNCTION public.rpc_finalize_inventory_count FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.rpc_finalize_inventory_count TO authenticated;
 
+GRANT EXECUTE ON FUNCTION public.rpc_finalize_inventory_count TO authenticated;
 
 -- ============================================================
 -- Verification notes (para revisão humana, não executadas)
@@ -1007,4 +1020,4 @@ GRANT EXECUTE ON FUNCTION public.rpc_finalize_inventory_count TO authenticated;
 -- 6. RLS: um utilizador sem inventory.view não lê nenhuma das duas tabelas;
 --    tentativa de UPDATE/DELETE direto (fora das RPCs) em qualquer uma das
 --    duas tabelas é sempre rejeitada (RESTRICTIVE USING false), mesmo por
---    quem tem inventory.edit.
+--    quem tem inventory.edit.;

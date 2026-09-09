@@ -1,9 +1,15 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { sanitizeTracking } from '../_shared/leadTracking.ts';
+import { resolveOriginWithoutUtmSource } from '../_shared/paidClickSource.ts';
 
 const requestSchema = z.object({
-  campaign_id: z.string().uuid(),
+  // Optional: forms without an associated campaign must still create a lead
+  // instead of 400ing (confirmed live: the recommended embed snippet never
+  // sends campaign_id for such forms). When absent, the campaign is resolved
+  // from campaigns.form_id below; if none exists either, the lead is created
+  // without a campaign.
+  campaign_id: z.string().uuid().optional(),
   form_id: z.string().uuid().optional(),
   business_unit_id: z.string().uuid().optional(),
   step_number: z.number().optional(),
@@ -30,11 +36,16 @@ import { sendLeadConfirmationEmail, queueSchedulingInviteRecovery } from '../_sh
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
 import {
   findLocalEntityForOrg,
+  collectDedupCandidatesForOrg,
   classifyEntityInOrg,
   emitFormResubmissionAlert,
+  emitDedupSubmissionNotification,
+  type DedupNotificationTarget,
   mergeFieldValuesNonDestructive,
   ensureEntityOrgLinkSR,
 } from '../_shared/entityScopedLookup.ts';
+import { classifyDedupOutcome, type DedupOutcome } from '../_shared/leadDedup.ts';
+import { resolveLeadToStamp, stampLeadActivity } from './leadActivityStamp.ts';
 import { deriveKeyFromEnv, hashNif } from '../_shared/nifCrypto.ts';
 import {
   sanitizeEmail,
@@ -187,37 +198,92 @@ Deno.serve(async (req) => {
       from_chat_widget, field_count: Object.keys(field_values || {}).length
     }));
 
-    // Get campaign and its company
-    const { data: campaign, error: campaignError } = await supabase
-      .from('campaigns')
-      .select('id, name, organization_id, status, form_id, location_required')
-      .eq('id', campaign_id)
-      .single();
-
-    if (campaignError || !campaign) {
+    if (!campaign_id && !form_id) {
       return new Response(
-        JSON.stringify({ error: 'Campaign not found' }),
-        { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Check if campaign is active
-    if (campaign.status !== 'active') {
-      return new Response(
-        JSON.stringify({ error: 'Campaign is not active', status: campaign.status }),
+        JSON.stringify({ error: 'campaign_id or form_id is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    const organization_id = campaign.organization_id;
-    const canonicalForm = resolveCanonicalFormId(form_id, campaign.form_id);
-    if (canonicalForm.error) {
-      return new Response(
-        JSON.stringify({ error: canonicalForm.error }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+    type CampaignRow = {
+      id: string;
+      name: string | null;
+      organization_id: string;
+      status: string;
+      form_id: string | null;
+      location_required: boolean | null;
+    };
+
+    let campaign: CampaignRow | null = null;
+
+    if (campaign_id) {
+      // Explicit campaign_id: existing, unchanged behavior — 404 when it
+      // doesn't exist, 400 when it isn't active.
+      const { data, error: campaignError } = await supabase
+        .from('campaigns')
+        .select('id, name, organization_id, status, form_id, location_required')
+        .eq('id', campaign_id)
+        .single();
+
+      if (campaignError || !data) {
+        return new Response(
+          JSON.stringify({ error: 'Campaign not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      if (data.status !== 'active') {
+        return new Response(
+          JSON.stringify({ error: 'Campaign is not active', status: data.status }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      campaign = data;
+    } else if (form_id) {
+      // No campaign_id supplied — resolve the campaign that owns this form
+      // (campaigns.form_id), preferring an active one. A form with no
+      // campaign at all (or none active) is valid: the lead is still
+      // created below, just without campaign attribution.
+      const { data: campaignsForForm } = await supabase
+        .from('campaigns')
+        .select('id, name, organization_id, status, form_id, location_required')
+        .eq('form_id', form_id)
+        .order('created_at', { ascending: true });
+      campaign = (campaignsForForm || []).find((c: CampaignRow) => c.status === 'active') || null;
     }
-    const canonicalFormId = canonicalForm.formId;
+
+    // Resolved campaign id used for every downstream campaign-scoped
+    // read/write below (null when this submission has no campaign).
+    const resolvedCampaignId: string | null = campaign?.id ?? null;
+
+    let organization_id: string;
+    let canonicalFormId: string | null;
+
+    if (campaign) {
+      organization_id = campaign.organization_id;
+      const canonicalForm = resolveCanonicalFormId(form_id, campaign.form_id);
+      if (canonicalForm.error) {
+        return new Response(
+          JSON.stringify({ error: canonicalForm.error }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      canonicalFormId = canonicalForm.formId;
+    } else {
+      // No campaign at all — organization comes from the form itself.
+      const { data: formRow, error: formRowError } = await supabase
+        .from('forms')
+        .select('id, organization_id')
+        .eq('id', form_id)
+        .maybeSingle();
+      if (formRowError || !formRow?.organization_id) {
+        return new Response(
+          JSON.stringify({ error: 'Form not found' }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      organization_id = formRow.organization_id;
+      canonicalFormId = form_id as string;
+    }
 
     if (!field_values || typeof field_values !== 'object') {
       return new Response(
@@ -240,6 +306,10 @@ Deno.serve(async (req) => {
     let totalSteps = 1;
     let definitions: any[] = [];
     let formLocationRequired = false;
+    // Nome do formulario, so para o texto da notificacao do comercial
+    // ("...voltou a submeter o formulario <NOME>."). Sem nome o texto cai para
+    // a variante curta; nunca bloqueia nada.
+    let formName: string | null = campaign?.name ?? null;
 
     if (canonicalFormId) {
       // Fetch location_required alongside the form-level tables — needed for
@@ -247,10 +317,11 @@ Deno.serve(async (req) => {
       // public and must not trust the client-side location check alone).
       const { data: formLocationData } = await supabase
         .from('forms')
-        .select('location_required')
+        .select('name, location_required')
         .eq('id', canonicalFormId)
         .maybeSingle();
       formLocationRequired = !!formLocationData?.location_required;
+      formName = formLocationData?.name ?? formName;
 
       // Use form-level tables
       const { data: formStepsData } = await supabase
@@ -273,11 +344,12 @@ Deno.serve(async (req) => {
       definitions = formFieldDefs || [];
       console.log('Using form-level steps/fields. form_id:', canonicalFormId, 'totalSteps:', totalSteps, 'fields:', definitions.length);
     } else {
-      // Fallback: use campaign-level tables
+      // Fallback: use campaign-level tables (only reachable when a campaign
+      // was resolved above, so resolvedCampaignId is guaranteed non-null here).
       const { data: stepsData } = await supabase
         .from('campaign_form_steps')
         .select('step_number')
-        .eq('campaign_id', campaign_id)
+        .eq('campaign_id', resolvedCampaignId)
         .order('step_number', { ascending: false })
         .limit(1);
       totalSteps = stepsData?.[0]?.step_number || 1;
@@ -285,7 +357,7 @@ Deno.serve(async (req) => {
       const { data: fieldDefs, error: fieldDefsError } = await supabase
         .from('lead_field_definitions')
         .select('*')
-        .eq('campaign_id', campaign_id)
+        .eq('campaign_id', resolvedCampaignId)
         .eq('is_active', true)
         .order('sort_order');
       if (fieldDefsError) {
@@ -367,12 +439,18 @@ Deno.serve(async (req) => {
     for (const def of uniqueFields) {
       const value = field_values[def.field_key];
       if (value) {
-        const { data: existing } = await supabase
+        // Scope dedup by campaign when there is one; otherwise scope by
+        // organization + "no campaign" so a campaignless form still only
+        // dedups against its own kind of submissions, never cross-org.
+        let dedupQuery = supabase
           .from('anew_leads')
           .select('id')
-          .eq('campaign_id', campaign_id)
-          .filter('field_values->>'+def.field_key, 'eq', value)
-          .maybeSingle();
+          .eq('organization_id', organization_id)
+          .filter('field_values->>'+def.field_key, 'eq', value);
+        dedupQuery = resolvedCampaignId
+          ? dedupQuery.eq('campaign_id', resolvedCampaignId)
+          : dedupQuery.is('campaign_id', null);
+        const { data: existing } = await dedupQuery.maybeSingle();
 
         if (existing) {
           return new Response(
@@ -393,8 +471,8 @@ Deno.serve(async (req) => {
     // must be rejected here, mirroring the calculation in get-form-data.
     const locationValidation = await validateLocationDistrict({
       supabase,
-      campaignId: campaign_id,
-      campaignLocationRequired: campaign.location_required,
+      campaignId: resolvedCampaignId,
+      campaignLocationRequired: campaign?.location_required ?? false,
       formId: canonicalFormId,
       formLocationRequired,
       definitions,
@@ -567,31 +645,75 @@ Deno.serve(async (req) => {
       nifHash: rawVatHash,
     });
 
-    // When classifyEntityInOrg resolves the entity to an already-active
-    // contact/client in this org, we short-circuit the whole anew_leads path
-    // below and instead upsert into form_submissions. Populated only when
-    // scopedHit + classification produce targetType "contact"/"client".
-    let contactOrClientTarget: { targetType: 'contact' | 'client'; targetId: string } | null = null;
+    // --- Detecao de duplicados: os 8 resultados (ver _shared/leadDedup.ts) ---
+    // Compara-se SO email e telefone, lidos pelo mapeamento do formulario.
+    // Falhar aqui e fail-soft: sem quadro de deduplicacao seguimos o caminho
+    // antigo (o `scopedHit` acima), nunca se bloqueia o visitante.
+    let dedupOutcome: DedupOutcome | null = null;
+    try {
+      const dedupCandidates = await collectDedupCandidatesForOrg({
+        supabase,
+        organizationId: organization_id,
+        email: leadEmail,
+        phone: leadPhone,
+      });
+      dedupOutcome = classifyDedupOutcome(dedupCandidates, { email: leadEmail, phone: leadPhone });
+    } catch (dedupErr) {
+      console.error('[create-lead] dedup classification failed (continuing):', dedupErr);
+    }
 
-    if (scopedHit?.entityId) {
-      entityId = scopedHit.entityId;
-      console.log('[create-lead] reusing local entity via', scopedHit.matchField, entityId);
+    // Entidade escolhida pela deteccao (casos 01 a 06). No CONFLITO (06) manda
+    // a do email e a do telefone fica registada em `conflicting_entity_id` — e
+    // essa marca que leva a submissao a fila de revisao.
+    const dedupEntityId =
+      dedupOutcome && (dedupOutcome.kind === 'MATCH_FORTE' || dedupOutcome.kind === 'MATCH_EMAIL' || dedupOutcome.kind === 'MATCH_TELEFONE')
+        ? dedupOutcome.entityId
+        : dedupOutcome?.kind === 'CONFLITO'
+          ? dedupOutcome.entityIdEmail
+          : null;
+    const conflictingEntityId = dedupOutcome?.kind === 'CONFLITO' ? dedupOutcome.entityIdTelefone : null;
 
-      // Classify entity in the receiving org. If it is already a contact /
-      // client / has an active lead, emit an internal alert for the responsible
-      // commercial and merge new field values into the existing record — but
-      // NEVER block the visitor: the multi-step form must flow exactly like a
-      // new entity (create-lead -> update-lead -> success).
-      // For targetType "contact"/"client" we do NOT fall through to the
-      // anew_leads insert below — a real client/contact resubmitting the
-      // public form must not spawn a bogus new Lead in the pipeline; instead
-      // their step progress accumulates in form_submissions.
-      // Classification determines whether this entity is a lead/contact/client
-      // in this org. This result MUST survive even if the merge/alert side
-      // effects below fail — otherwise a transient error would silently fall
-      // through to the anew_leads insert path for an entity that is already
-      // a real contact/client, reproducing the exact bug this branch exists
-      // to prevent. Keep classification outside the side-effects try/catch.
+    // A deteccao manda sobre o `scopedHit` quando encontrou alguem: email e
+    // telefone sao a autoridade acordada. Sem match (07/08) o `scopedHit` ainda
+    // pode reaproveitar a entidade por NIF — isso e reutilizacao de entidade,
+    // nao deduplicacao de lead.
+    entityId = dedupEntityId ?? scopedHit?.entityId ?? null;
+
+    // INVARIANTE: uma lead so nasce quando a entidade NAO tem nenhuma. Quando
+    // a entidade ja tem lead activa (ou e cliente), a submissao acumula em
+    // form_submissions apontada a esse registo, e nao nasce lead nenhuma.
+    let existingTarget: { targetType: 'lead' | 'client'; targetId: string } | null = null;
+    // A lead activa que vai receber o carimbo de `last_activity_at`, se
+    // existir. Nao nasce registo nenhum: quem ja ca estava fica marcado como
+    // "voltou a contactar" na ficha que ja tem.
+    let existingActiveLeadId: string | null = null;
+    // Comercial responsavel pelo registo que recebeu a submissao
+    // (`assigned_to ?? created_by`), guardado aqui porque o `summary` do
+    // classify vive num bloco interno e a notificacao so e escrita la a
+    // baixo, depois de a submissao estar mesmo gravada. `null` significa
+    // exactamente "sem dono": nao se notifica ninguem.
+    let existingTargetAssigneeAnewUserId: string | null = null;
+
+    if (entityId) {
+      console.log(
+        '[create-lead] reusing local entity via',
+        dedupEntityId ? `dedup:${dedupOutcome?.kind}` : scopedHit?.matchField,
+        entityId,
+      );
+
+      // Classify entity in the receiving org. If it already has an active lead
+      // or is a client, emit an internal alert for the responsible commercial
+      // and merge new field values into the existing record — but NEVER block
+      // the visitor: the multi-step form must flow exactly like a new entity
+      // (create-lead -> update-lead -> success).
+      // Quando ha registo existente NAO se cai no insert em anew_leads abaixo:
+      // e essa queda que estava a criar leads repetidas para quem ja tinha uma.
+      // O progresso dos passos acumula em form_submissions.
+      // This result MUST survive even if the merge/alert side effects below
+      // fail — otherwise a transient error would silently fall through to the
+      // anew_leads insert path for an entity that already has a lead,
+      // reproducing the exact bug this branch exists to prevent. Keep
+      // classification outside the side-effects try/catch.
       let classifySummary: Awaited<ReturnType<typeof classifyEntityInOrg>> | null = null;
       try {
         classifySummary = await classifyEntityInOrg({ supabase, entityId, organizationId: organization_id });
@@ -599,35 +721,63 @@ Deno.serve(async (req) => {
         console.error('[create-lead] classifyEntityInOrg failed:', classifyErr);
       }
 
-      if (classifySummary?.targetType && classifySummary.targetId) {
+      if (classifySummary) {
         const summary = classifySummary;
-        if (summary.targetType === 'contact' || summary.targetType === 'client') {
-          contactOrClientTarget = { targetType: summary.targetType, targetId: summary.targetId };
+        // 'contact' esta FORA de proposito: o modulo de Contactos foi retirado
+        // e o teste do contacto vinha ANTES do da lead, pelo que quem era
+        // contacto E lead nunca chegava ao teste certo — e ganhava lead nova.
+        // Quem e so contacto e nao tem lead nenhuma cai no caminho normal e
+        // ganha a primeira lead, que e exactamente a invariante acordada.
+        if (summary.clientId) {
+          existingTarget = { targetType: 'client', targetId: summary.clientId };
+          existingTargetAssigneeAnewUserId = summary.clientAssigneeAnewUserId ?? null;
+        } else if (summary.activeLeadId) {
+          existingTarget = { targetType: 'lead', targetId: summary.activeLeadId };
+          existingTargetAssigneeAnewUserId = summary.activeLeadAssigneeAnewUserId ?? null;
         }
+
+        // Fora do if/else de proposito: `activeLeadId` vem preenchido mesmo
+        // quando quem ganha o `targetType` e o CLIENTE (ver entityScopedLookup),
+        // e e a lead que aparece na lista de Leads. Antes so se carimbava a
+        // lead SEM comercial nenhum, e por isso o aviso nunca chegava a quem
+        // tem comercial atribuido — 8 das 11 leads da nike que ja receberam
+        // submissoes ficaram sem marca nenhuma.
+        existingActiveLeadId = resolveLeadToStamp(summary);
 
         // Best-effort side effects: merge new field values into the existing
         // record and notify the responsible commercial. A failure here must
-        // NOT unset contactOrClientTarget (already captured above) and must
-        // NOT block the visitor's form flow.
-        try {
-          const targetTable =
-            summary.targetType === 'lead' ? 'anew_leads' :
-            summary.targetType === 'contact' ? 'anew_contacts' : 'anew_clients';
-          const diff = await mergeFieldValuesNonDestructive({
-            supabase, table: targetTable as any, rowId: summary.targetId, newFieldValues: fieldValuesWithMeta,
-          });
-          await emitFormResubmissionAlert({
-            supabase,
-            organizationId: organization_id,
-            entityId,
-            summary,
-            campaignId: campaign_id ?? null,
-            formId: canonicalFormId ?? null,
-            fieldValuesDiff: diff,
-            displayName: composeDisplayName(leadFirstName, leadLastName) || null,
-          });
-        } catch (alertErr) {
-          console.error('[create-lead] duplicate-entity alert side-effect failed (continuing):', alertErr);
+        // NOT unset existingTarget (already captured above) and must NOT block
+        // the visitor's form flow.
+        if (existingTarget) {
+          const target = existingTarget;
+          try {
+            const targetTable = target.targetType === 'lead' ? 'anew_leads' : 'anew_clients';
+            const diff = await mergeFieldValuesNonDestructive({
+              supabase, table: targetTable as any, rowId: target.targetId, newFieldValues: fieldValuesWithMeta,
+            });
+            // A notificacao tem de apontar ao registo que recebeu a submissao,
+            // nao ao `targetType` historico do classify (que da o contacto como
+            // vencedor mesmo quando e a lead que manda aqui).
+            await emitFormResubmissionAlert({
+              supabase,
+              organizationId: organization_id,
+              entityId,
+              summary: {
+                ...summary,
+                targetType: target.targetType,
+                targetId: target.targetId,
+                assigneeAnewUserId: target.targetType === 'client'
+                  ? (summary.clientAssigneeAnewUserId ?? summary.assigneeAnewUserId)
+                  : (summary.activeLeadAssigneeAnewUserId ?? summary.assigneeAnewUserId),
+              },
+              campaignId: resolvedCampaignId,
+              formId: canonicalFormId ?? null,
+              fieldValuesDiff: diff,
+              displayName: composeDisplayName(leadFirstName, leadLastName) || null,
+            });
+          } catch (alertErr) {
+            console.error('[create-lead] duplicate-entity alert side-effect failed (continuing):', alertErr);
+          }
         }
       }
 
@@ -652,7 +802,11 @@ Deno.serve(async (req) => {
       // success response, so each is wrapped in its own try/catch and only
       // logged via console.error (same pattern as emitFormResubmissionAlert
       // and the post-completion emails below).
-      if (leadEmail) {
+      // `!existingTarget`: quando a submissao vai acumular em form_submissions,
+      // NUNCA se escreve na ficha da pessoa. Email novo / telefone novo ficam
+      // so assinalados na submissao. O backfill continua a valer para a
+      // entidade reaproveitada que vai mesmo ganhar a primeira lead.
+      if (leadEmail && !existingTarget) {
         try {
           const { count: emailCount, error: emailCountError } = await supabase
             .from('anew_entity_emails')
@@ -678,7 +832,7 @@ Deno.serve(async (req) => {
         }
       }
 
-      if (leadPhone) {
+      if (leadPhone && !existingTarget) {
         try {
           const { count: phoneCount, error: phoneCountError } = await supabase
             .from('anew_entity_phones')
@@ -710,7 +864,7 @@ Deno.serve(async (req) => {
       const backfillStreet = String(resolveContact('address', 'po_morada', 'morada') || '').trim();
       const backfillPostal = String(resolveContact('postal_code', 'po_codigo_postal', 'codigo_postal') || '').trim();
       const backfillCity = String(resolveContact('city', 'po_localidade', 'localidade', 'cidade') || '').trim();
-      if (backfillStreet && backfillPostal) {
+      if (backfillStreet && backfillPostal && !existingTarget) {
         try {
           const { count: addressCount, error: addressCountError } = await supabase
             .from('anew_entity_addresses')
@@ -775,8 +929,62 @@ Deno.serve(async (req) => {
       }
     }
 
-    // --- Contact/client target: skip anew_leads entirely, upsert form_submissions ---
-    if (contactOrClientTarget) {
+    // --- Registo existente: nao se toca em anew_leads, acumula-se em form_submissions ---
+    if (existingTarget) {
+      // 03/05 — a submissao trouxe um telefone ou um email que a ficha nao
+      // tem. NUNCA se escreve na ficha da pessoa: o dado novo fica assinalado
+      // aqui, em `_meta.dedup`, e o separador "Formularios" mostra-o marcado
+      // como "nao gravado". E JSON dentro de `field_values`, por isso nao
+      // depende de nenhuma coluna nova.
+      // POR QUE bateu — guardado SEMPRE, nao so quando ha dado novo.
+      // Sem isto, o separador Formularios mostra o que a pessoa preencheu mas
+      // nao diz porque e que ela nao virou lead: quem la chega ve um cartao
+      // sem explicacao. `por` diz o que coincidiu (email, telefone, ou os
+      // dois) e `registo` diz com o que coincidiu (lead ou cliente).
+      const dedupPor =
+        dedupOutcome?.kind === 'MATCH_FORTE'
+          ? 'ambos'
+          : dedupOutcome?.kind === 'MATCH_EMAIL'
+            ? 'email'
+            : dedupOutcome?.kind === 'MATCH_TELEFONE'
+              ? 'telefone'
+              : dedupOutcome?.kind === 'CONFLITO'
+                ? 'conflito'
+                : null;
+
+      const dedupMeta = dedupPor
+        ? {
+          kind: dedupOutcome!.kind,
+          por: dedupPor,
+          registo: existingTarget.targetType,
+          // OS VALORES que coincidiram. Dizer "o email e igual" sem dizer qual
+          // obriga quem le a ir procurar. Guarda-se so o que bateu: no match
+          // por email nao se guarda o telefone, porque esse nao coincidiu.
+          // No CONFLITO os DOIS bateram -- so em pessoas diferentes. Guardam-se
+          // os dois na mesma: e por eles que a interface consegue marcar, na
+          // lista do que foi submetido, quais os valores que fizeram o match.
+          ...(dedupPor === 'ambos' || dedupPor === 'email' || dedupPor === 'conflito'
+            ? { email_igual: leadEmail ?? null }
+            : {}),
+          ...(dedupPor === 'ambos' || dedupPor === 'telefone' || dedupPor === 'conflito'
+            ? { telefone_igual: leadPhone ?? null }
+            : {}),
+          // 03/05 — a submissao trouxe um telefone ou um email que a ficha nao
+          // tem. NUNCA se escreve na ficha da pessoa: fica assinalado aqui, e
+          // o separador mostra-o marcado como "nao gravado".
+          ...(dedupOutcome?.kind === 'MATCH_EMAIL' && dedupOutcome.novoTelefone
+            ? { novo_telefone: dedupOutcome.novoTelefone }
+            : {}),
+          ...(dedupOutcome?.kind === 'MATCH_TELEFONE' && dedupOutcome.novoEmail
+            ? { novo_email: dedupOutcome.novoEmail }
+            : {}),
+        }
+        : null;
+
+      const submissionFieldValues = dedupMeta
+        ? { ...fieldValuesWithMeta, _meta: { ...fieldValuesWithMeta._meta, dedup: dedupMeta } }
+        : fieldValuesWithMeta;
+
       // form_submissions' real uniqueness guarantee is an EXPRESSION-based
       // unique index (COALESCE(form_id,...), COALESCE(campaign_id,...)) —
       // the JS client's .upsert({onConflict: '...'}) only supports a bare
@@ -789,10 +997,10 @@ Deno.serve(async (req) => {
         p_root_organization_id: rootOrgId,
         p_entity_id: entityId,
         p_form_id: canonicalFormId ?? null,
-        p_campaign_id: campaign_id ?? null,
-        p_target_type: contactOrClientTarget.targetType,
-        p_target_id: contactOrClientTarget.targetId,
-        p_field_values: fieldValuesWithMeta,
+        p_campaign_id: resolvedCampaignId,
+        p_target_type: existingTarget.targetType,
+        p_target_id: existingTarget.targetId,
+        p_field_values: submissionFieldValues,
         p_status: isComplete ? 'complete' : 'in_progress',
         p_is_complete: isComplete,
         p_current_step: currentStep,
@@ -800,32 +1008,157 @@ Deno.serve(async (req) => {
       });
 
       if (submissionError || !submissionId) {
-        console.error('Error upserting form_submissions:', submissionError);
+        // `form_submissions.target_type` so passou a aceitar 'lead' na
+        // migration 20261116060000. Enquanto ela nao estiver aplicada no
+        // remoto, o insert e recusado pelo CHECK — e o visitante NAO pode
+        // ficar bloqueado por isso: cai-se no caminho antigo (lead nova, o
+        // comportamento de hoje) com o erro bem visivel no log.
+        const submissionMessage = submissionError?.message ?? '';
+        const targetTypeCheckRejected = existingTarget.targetType === 'lead'
+          && (submissionError?.code === '23514' || submissionMessage.includes('form_submissions_target_type_check'));
+        if (targetTypeCheckRejected) {
+          console.error(
+            '[create-lead] form_submissions ainda nao aceita target_type=lead (migration 20261116060000 por aplicar); a criar lead como antes:',
+            submissionMessage,
+          );
+          existingTarget = null;
+        } else {
+          console.error('Error upserting form_submissions:', submissionError);
+          return new Response(
+            JSON.stringify({ error: 'Failed to record form submission', details: submissionError?.message }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+          );
+        }
+      }
+
+      if (existingTarget && submissionId) {
+        // CONFLITO (06): a segunda entidade fica marcada na submissao — e essa
+        // marca que a manda para a fila de revisao. Best-effort: a coluna pode
+        // ainda nao existir no remoto (migration 20261116050000 por aplicar),
+        // caso em que o PostgREST devolve PGRST204 e a submissao fica na mesma
+        // ligada ao registo existente, apenas sem a marca de conflito.
+        if (conflictingEntityId) {
+          const { error: conflictError } = await supabase
+            .from('form_submissions')
+            .update({ conflicting_entity_id: conflictingEntityId })
+            .eq('id', submissionId);
+          if (conflictError) {
+            console.error(
+              '[create-lead] nao foi possivel gravar conflicting_entity_id (a coluna pode nao existir ainda; continuando):',
+              conflictError.message,
+            );
+          }
+        }
+
+        // Quem ja era lead voltou a contactar: carimba-se `last_activity_at`
+        // na ficha que ja existe, e e isso que poe o aviso na lista e a faz
+        // subir. Best-effort e DEPOIS da submissao ja estar gravada — falhar
+        // aqui so custa o aviso, nunca a submissao nem o visitante. Ver
+        // `leadActivityStamp.ts` (e os testes ao lado) para a regra exacta.
+        if (existingActiveLeadId) {
+          await stampLeadActivity(supabase, existingActiveLeadId);
+        }
+
+        // --- Notificacao do comercial (01 a 06) ---
+        // So aqui, DEPOIS de a submissao estar mesmo gravada: se o upsert
+        // tivesse sido recusado caia-se no caminho antigo (lead nova) e a
+        // notificacao seria falsa. Fail-soft: falhar a notificar nunca bloqueia
+        // o visitante nem a submissao ja escrita.
+        try {
+          if (dedupOutcome) {
+            const notifyTarget: DedupNotificationTarget = {
+              targetType: existingTarget.targetType,
+              targetId: existingTarget.targetId,
+              assigneeAnewUserId: existingTargetAssigneeAnewUserId,
+            };
+
+            // CONFLITO (06): a segunda entidade pode ter OUTRO comercial, e a
+            // regra e notificar os dois. E preciso classifica-la para lhe
+            // chegar ao responsavel — o `summary` de cima e so o da entidade
+            // do email.
+            let conflictTarget: DedupNotificationTarget | null = null;
+            if (conflictingEntityId) {
+              const conflictSummary = await classifyEntityInOrg({
+                supabase, entityId: conflictingEntityId, organizationId: organization_id,
+              });
+              if (conflictSummary.clientId) {
+                conflictTarget = {
+                  targetType: 'client',
+                  targetId: conflictSummary.clientId,
+                  assigneeAnewUserId: conflictSummary.clientAssigneeAnewUserId ?? null,
+                };
+              } else if (conflictSummary.activeLeadId) {
+                conflictTarget = {
+                  targetType: 'lead',
+                  targetId: conflictSummary.activeLeadId,
+                  assigneeAnewUserId: conflictSummary.activeLeadAssigneeAnewUserId ?? null,
+                };
+              }
+            }
+
+            await emitDedupSubmissionNotification({
+              supabase,
+              organizationId: organization_id,
+              entityId: entityId as string,
+              outcome: dedupOutcome,
+              target: notifyTarget,
+              conflictTarget,
+              submissionId: submissionId as string,
+              formId: canonicalFormId ?? null,
+              campaignId: resolvedCampaignId,
+              displayName: composeDisplayName(leadFirstName, leadLastName) || null,
+              formName,
+            });
+          }
+        } catch (notifyErr) {
+          console.error('[create-lead] notificacao de submissao associada falhou (continuando):', notifyErr);
+        }
+
+        // A RESPOSTA e sempre igual, tenha-se reconhecido a pessoa ou nao.
+        //
+        // Isto e uma regra de privacidade, nao um detalhe: se aqui saisse
+        // 'submission' quando ha match e 'lead' quando nao ha, qualquer pessoa
+        // que soubesse o email de outra descobria, submetendo o formulario e
+        // olhando para a resposta, se ela e lead ou cliente desta organizacao.
+        // Quem esta do lado de fora do formulario nao deve saber nada.
+        //
+        // O `target_id` continua a ser o id da submissao -- um UUID, que nao
+        // revela nada. O update-lead resolve a tabela certa pelo proprio id,
+        // sem confiar neste rotulo.
+        const wireTargetType = 'lead';
+
         return new Response(
-          JSON.stringify({ error: 'Failed to record form submission', details: submissionError?.message }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
+          JSON.stringify({
+            success: true,
+            target_type: wireTargetType,
+            target_id: submissionId,
+            current_step: currentStep,
+            total_steps: totalSteps,
+            is_complete: isComplete,
+            next_step: isComplete ? null : currentStep + 1,
+            sanitized: sanitizeReport,
+            message: isComplete
+              ? 'Form submission recorded successfully'
+              : `Step ${currentStep} completed. Continue with update-lead API.`,
+          }),
+          { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
         );
       }
-      const submission = { id: submissionId };
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          target_type: contactOrClientTarget.targetType,
-          target_id: submission.id,
-          current_step: currentStep,
-          total_steps: totalSteps,
-          is_complete: isComplete,
-          next_step: isComplete ? null : currentStep + 1,
-          sanitized: sanitizeReport,
-          message: isComplete
-            ? 'Form submission recorded successfully'
-            : `Step ${currentStep} completed. Continue with update-lead API.`,
-        }),
-        { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } },
-      );
     }
 
+    // CONFLITO (06) sem registo existente onde acumular: as duas entidades
+    // batem mas nenhuma delas tem lead activa nem e cliente, por isso nao ha
+    // linha em form_submissions e a marca de conflito nao tem onde ficar. A
+    // invariante manda criar a lead (a entidade escolhida nao tem nenhuma), e
+    // o conflito fica so no log. Medido no remoto: 0 a 3 conflitos em 5724
+    // leads, e este e um subconjunto desses.
+    if (conflictingEntityId && !existingTarget) {
+      console.warn(
+        '[create-lead] CONFLITO sem registo existente: email->%s, telefone->%s. A criar lead nova; conflito nao vai a fila de revisao.',
+        dedupOutcome?.kind === 'CONFLITO' ? dedupOutcome.entityIdEmail : null,
+        conflictingEntityId,
+      );
+    }
 
     if (!entityId) {
       // L3 + L19: Atomically create entity + emails + phones + addresses + roles
@@ -1007,13 +1340,31 @@ Deno.serve(async (req) => {
         }
       }
 
+      // 3b. Click-id + referrer fallback (GA-style, only a resource): when
+      // there is no utm_source at all and no already-validated source_id,
+      // derive the origin name from the ad-platform click id (gclid ->
+      // "Google Ads", fbclid -> the Meta property) and, failing that, from the
+      // referrer's domain (e.g. "Instagram") — so the lead reflects reality
+      // instead of the generic "public_form" text, and paid is not silently
+      // reported as organic.
+      // Never overrides an explicit utm_source (step 3, above) or a locked
+      // source_id. Unknown domains resolve to null and change nothing.
+      // source_id resolution for this candidate happens asynchronously in
+      // marketingAttribution.ts (same as the utm_source path above).
+      if (embedKind === 'utm' && !sourceIdLocked && !safeTracking?.utm_source) {
+        const derivedOrigin = resolveOriginWithoutUtmSource(safeTracking);
+        if (derivedOrigin) {
+          resolvedSource = derivedOrigin;
+          console.log('Resolved source without utm_source:', derivedOrigin);
+        }
+      }
 
       // 4. Fallback: campaign_sources.is_default (only if nothing resolved).
-      if (!sourceIdLocked && !resolvedSourceId && resolvedSource === 'public_api' && campaign_id) {
+      if (!sourceIdLocked && !resolvedSourceId && resolvedSource === 'public_api' && resolvedCampaignId) {
         const { data: defaultCampaignSource } = await supabase
           .from('campaign_sources')
           .select('source_id')
-          .eq('campaign_id', campaign_id)
+          .eq('campaign_id', resolvedCampaignId)
           .eq('is_default', true)
           .maybeSingle();
         if (defaultCampaignSource?.source_id) {
@@ -1037,7 +1388,7 @@ Deno.serve(async (req) => {
     const { data: lead, error: insertError } = await supabase
       .from('anew_leads')
       .insert({
-        campaign_id,
+        campaign_id: resolvedCampaignId,
         organization_id,
         root_organization_id: rootOrgId,
         entity_id: entityId,

@@ -31,6 +31,7 @@ import {
   Briefcase,
   UserPlus,
   MessageCircle,
+  Phone,
 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -42,6 +43,18 @@ import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { ProposalPortalPreview } from "@/components/proposals/ProposalPortalPreview";
 import { resolveLineDetails, type LineResolution } from "@/utils/quoteCostResolver";
+import { getDisplayAttributes } from "@/utils/lineAttributes";
+import { usePermissions } from "@/hooks/usePermissions";
+import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
+
+const CALL_RESULT_LABELS: Record<string, string> = {
+  answered: "Chamada atendida",
+  no_answer: "Chamada não atendida",
+  busy: "Chamada — ocupado",
+  voicemail: "Chamada — voicemail",
+  wrong_number: "Chamada — número errado",
+};
 
 interface ProposalItem {
   id: string;
@@ -206,6 +219,11 @@ export function ProposalDetailsDialog({
   const [portalPreviewOpen, setPortalPreviewOpen] = useState(false);
   const { toast } = useToast();
   const { t } = useTranslation();
+  const { hasPermission, isSystemAdmin } = usePermissions();
+  // A proposal carries its originating quote's lines, so the same restriction
+  // Quotes.tsx applies to cost/margin figures must apply here too — otherwise
+  // the Quotes-side gate is bypassed simply by opening the proposal instead.
+  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
 
   useEffect(() => {
     if (open && proposal?.id) {
@@ -219,7 +237,7 @@ export function ProposalDetailsDialog({
 
     try {
       // Load all details in parallel
-      const [itemsRes, quotesRes, extendedRes, sendsRes] = await Promise.all([
+      const [itemsRes, quotesRes, extendedRes, sendsRes, proposalInteractionsRes] = await Promise.all([
         supabase
           .from("proposal_items")
           .select("*")
@@ -243,6 +261,11 @@ export function ProposalDetailsDialog({
           .eq("proposal_id", proposal.id)
           .order("sent_at", { ascending: false })
           .limit(5),
+        (supabase as any)
+          .from("entity_interactions")
+          .select("id, interaction_type, result, subject, notes, interaction_at")
+          .eq("proposal_id", proposal.id)
+          .order("interaction_at", { ascending: false }),
       ]);
 
       const loadedItems: ProposalItem[] = itemsRes.data || [];
@@ -284,30 +307,27 @@ export function ProposalDetailsDialog({
         }
       } catch (e) {
         console.error("[ProposalDetailsDialog] resolveLineDetails failed", e);
+        captureFlowError(e, "proposal-lifecycle");
         setLineCostMap({});
       }
       setExtendedData(extendedRes.data);
       
-      // Resolve client/entity info via entity_id
-      const entityId = (extendedRes.data as any)?.entity_id;
-      if (entityId) {
-        const [entityRes, emailRes, phoneRes] = await Promise.all([
-          supabase.from("anew_entities").select("id, display_name, first_name, last_name, type").eq("id", entityId).single(),
-          supabase.from("anew_entity_emails").select("email").eq("entity_id", entityId).eq("is_primary", true).maybeSingle(),
-          (supabase as any).from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", entityId).eq("is_primary", true).maybeSingle(),
-        ]);
-        if (entityRes.data) {
-          setClient({
-            id: entityRes.data.id,
-            first_name: entityRes.data.first_name,
-            last_name: entityRes.data.last_name,
-            company_name: entityRes.data.type === 'organization' ? entityRes.data.display_name : null,
-            email: emailRes.data?.email || null,
-            phone: phoneRes?.data?.phone_number || null,
-          });
-        } else {
-          setClient(null);
-        }
+      // O contacto viaja COM o documento: resolve_proposal_contact confirma que
+      // o utilizador pode ler esta proposta e devolve o contacto primario com
+      // privilegios de definer. A RLS de ambito de dono nos contactos deixa de
+      // esconder email/telefone a quem ve a proposta mas nao e dono da lead.
+      const { data: contact } = await (supabase as any)
+        .rpc("resolve_proposal_contact", { _proposal_id: proposal.id })
+        .maybeSingle();
+      if (contact) {
+        setClient({
+          id: contact.entity_id,
+          first_name: contact.first_name,
+          last_name: contact.last_name,
+          company_name: contact.entity_type === 'organization' ? contact.display_name : null,
+          email: contact.email || null,
+          phone: contact.phone_number || null,
+        });
       } else {
         setClient(null);
       }
@@ -388,11 +408,24 @@ export function ProposalDetailsDialog({
         journey.push({ label: "Proposta rejeitada", date: extendedRes.data.rejected_at, icon: "x", color: "text-red-600" });
       }
 
+      // Calls registered from this proposal (via entity_interactions.proposal_id)
+      const proposalCalls = (proposalInteractionsRes as any)?.data || [];
+      proposalCalls.forEach((call: any) => {
+        const resultLabel = CALL_RESULT_LABELS[call.result as string] || "Chamada registada";
+        journey.push({
+          label: call.subject ? `${resultLabel}: ${call.subject}` : resultLabel,
+          date: call.interaction_at,
+          icon: "call",
+          color: "text-teal-600",
+        });
+      });
+
       // Sort by date
       journey.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       setPipelineJourney(journey);
     } catch (error) {
       console.error("Error loading proposal details:", error);
+      toast({ title: "Erro", description: "Não foi possível carregar os detalhes da proposta.", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -436,7 +469,7 @@ export function ProposalDetailsDialog({
   return (
     <>
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader className="pb-4">
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2 text-xl">
@@ -453,7 +486,7 @@ export function ProposalDetailsDialog({
           </div>
         </DialogHeader>
 
-        <ScrollArea className="flex-1 -mx-6 px-6 overflow-auto" style={{ maxHeight: 'calc(90vh - 120px)' }}>
+        <ScrollArea className="flex-1 -mx-6 px-6 overflow-auto [&_[data-radix-scroll-area-viewport]>div]:!block" style={{ maxHeight: 'calc(90vh - 120px)' }}>
           <div className="space-y-6 pb-4">
             {/* Header Info */}
             <div className="flex flex-wrap items-center justify-between gap-4">
@@ -646,8 +679,8 @@ export function ProposalDetailsDialog({
 
                           {/* Quote Lines Table */}
                           {group.lines.length > 0 && (
-                            <div className="border rounded-md overflow-hidden">
-                              <table className="w-full text-xs">
+                            <div className="border rounded-md overflow-x-auto max-w-full">
+                              <table className="w-full min-w-[560px] text-xs">
                                 <thead>
                                   <tr className="bg-muted/50 text-muted-foreground uppercase tracking-wider">
                                     <th className="text-left p-2 font-medium">Descrição</th>
@@ -655,7 +688,7 @@ export function ProposalDetailsDialog({
                                     <th className="text-right p-2 font-medium w-20">Preço Unit.</th>
                                     <th className="text-center p-2 font-medium w-12">IVA</th>
                                     <th className="text-center p-2 font-medium w-12">Desc.</th>
-                                    <th className="text-center p-2 font-medium w-16">Margem</th>
+                                    {canViewCosts && <th className="text-center p-2 font-medium w-16">Margem</th>}
                                     <th className="text-right p-2 font-medium w-24">Total</th>
                                   </tr>
                                 </thead>
@@ -669,8 +702,7 @@ export function ProposalDetailsDialog({
                                       ? ((unitPriceVal - costVal) / unitPriceVal) * 100
                                       : 0;
                                     const hasCostVal = costVal > 0;
-                                    const attrs = line.selected_attributes as Record<string, any> | null;
-                                    const attrEntries = attrs ? Object.entries(attrs).filter(([_, v]) => v && v !== '') : [];
+                                    const attrEntries = getDisplayAttributes(line.selected_attributes);
 
                                     return (
                                       <tr key={line.id} className="border-t border-muted/30 align-top">
@@ -678,9 +710,9 @@ export function ProposalDetailsDialog({
                                           <span className="font-medium">{line.descricao_snapshot || "-"}</span>
                                           {attrEntries.length > 0 && (
                                             <div className="flex flex-wrap gap-1 mt-1">
-                                              {attrEntries.map(([key, val]) => (
-                                                <span key={key} className="text-[10px] text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
-                                                  {key}: {typeof val === 'object' ? (val.label || val.value || JSON.stringify(val)) : String(val)}
+                                              {attrEntries.map((attr) => (
+                                                <span key={attr.key} className="text-[10px] text-muted-foreground bg-muted/50 px-1.5 py-0.5 rounded">
+                                                  {attr.label}: {attr.text}
                                                 </span>
                                               ))}
                                             </div>
@@ -698,15 +730,17 @@ export function ProposalDetailsDialog({
                                             <span className="text-muted-foreground">—</span>
                                           )}
                                         </td>
-                                        <td className="p-2 text-center">
-                                          {hasCostVal ? (
-                                            <span className={`font-medium ${margin >= 30 ? 'text-green-600 dark:text-green-400' : margin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
-                                              {margin.toFixed(1)}%
-                                            </span>
-                                          ) : (
-                                            <span className="text-muted-foreground">—</span>
-                                          )}
-                                        </td>
+                                        {canViewCosts && (
+                                          <td className="p-2 text-center">
+                                            {hasCostVal ? (
+                                              <span className={`font-medium ${margin >= 30 ? 'text-green-600 dark:text-green-400' : margin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
+                                                {margin.toFixed(1)}%
+                                              </span>
+                                            ) : (
+                                              <span className="text-muted-foreground">—</span>
+                                            )}
+                                          </td>
+                                        )}
                                         <td className="p-2 text-right">
                                           <p className="font-semibold">{formatCurrency(line.total_com_iva)}</p>
                                           <p className="text-[10px] text-muted-foreground">{formatCurrency(line.total_sem_iva)} s/IVA</p>
@@ -834,8 +868,8 @@ export function ProposalDetailsDialog({
                             <div className="col-span-2 text-right">Preço Unit.</div>
                             <div className="col-span-1 text-center">IVA</div>
                             <div className="col-span-1 text-center">Desc.</div>
-                            <div className="col-span-1 text-center">Margem</div>
-                            <div className="col-span-2 text-right">Total</div>
+                            {canViewCosts && <div className="col-span-1 text-center">Margem</div>}
+                            <div className={canViewCosts ? "col-span-2 text-right" : "col-span-3 text-right"}>Total</div>
                           </div>
                           {[...quote.quote_lines]
                             .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
@@ -855,8 +889,7 @@ export function ProposalDetailsDialog({
                               const hasCost = custoUnit > 0;
 
                               // Parse selected attributes
-                              const attrs = line.selected_attributes as Record<string, any> | null;
-                              const attrEntries = attrs ? Object.entries(attrs).filter(([_, v]) => v && v !== '') : [];
+                              const attrEntries = getDisplayAttributes(line.selected_attributes);
                               
                               return (
                                 <div key={line.id} className="space-y-0">
@@ -883,25 +916,27 @@ export function ProposalDetailsDialog({
                                         <span className="text-muted-foreground">—</span>
                                       )}
                                     </div>
-                                    <div className="col-span-1 text-center">
-                                      {hasCost ? (
-                                        <span className={`font-medium ${profitMargin >= 30 ? 'text-green-600 dark:text-green-400' : profitMargin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
-                                          {profitMargin.toFixed(1)}%
-                                        </span>
-                                      ) : (
-                                        <span className="text-muted-foreground">—</span>
-                                      )}
-                                    </div>
-                                    <div className="col-span-2 text-right">
+                                    {canViewCosts && (
+                                      <div className="col-span-1 text-center">
+                                        {hasCost ? (
+                                          <span className={`font-medium ${profitMargin >= 30 ? 'text-green-600 dark:text-green-400' : profitMargin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
+                                            {profitMargin.toFixed(1)}%
+                                          </span>
+                                        ) : (
+                                          <span className="text-muted-foreground">—</span>
+                                        )}
+                                      </div>
+                                    )}
+                                    <div className={canViewCosts ? "col-span-2 text-right" : "col-span-3 text-right"}>
                                       <p className="font-semibold">{formatCurrency(line.total_com_iva)}</p>
                                       <p className="text-[10px] text-muted-foreground">{formatCurrency(line.total_sem_iva)} s/ IVA</p>
                                     </div>
                                   </div>
                                   {attrEntries.length > 0 && (
                                     <div className="px-3 py-1.5 bg-muted/15 rounded-b-lg border-t border-border/30 flex flex-wrap gap-x-3 gap-y-1">
-                                      {attrEntries.map(([key, val]) => (
-                                        <span key={key} className="text-[11px] text-muted-foreground">
-                                          <span className="font-medium">{key}:</span> {typeof val === 'object' ? (val.label || val.value || JSON.stringify(val)) : String(val)}
+                                      {attrEntries.map((attr) => (
+                                        <span key={attr.key} className="text-[11px] text-muted-foreground">
+                                          <span className="font-medium">{attr.label}:</span> {attr.text}
                                         </span>
                                       ))}
                                     </div>
@@ -945,6 +980,7 @@ export function ProposalDetailsDialog({
                           : step.icon === "eye" ? Eye
                           : step.icon === "check" ? CheckCircle2
                           : step.icon === "x" ? XCircle
+                          : step.icon === "call" ? Phone
                           : Clock;
                         
                         return (

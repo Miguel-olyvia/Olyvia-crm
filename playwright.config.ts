@@ -11,7 +11,10 @@ export default defineConfig({
     ['list'],
   ],
   use: {
-    baseURL: 'http://localhost:8080',
+    // Configurável para se poder correr a suite contra outro ambiente sem editar
+    // este ficheiro -- por exemplo o servidor apontado ao ramo de testes da base
+    // de dados, que o Vite abre noutra porta quando a 8080 está ocupada.
+    baseURL: process.env.E2E_BASE_URL || 'http://localhost:8080',
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

@@ -31,6 +31,7 @@ import {
 } from "@/components/ui/accordion";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -192,19 +193,21 @@ export default function AttributeOptionPalettesDialog({
             sort_order: i
           }));
           await withAuditContext(supabase, businessUserId, async () => {
-            await (supabase as any)
+            const { error } = await (supabase as any)
               .from('attribute_option_group_values')
               .insert(valuesToInsert);
+            if (error) throw error;
           });
         }
 
         // Reload groups after auto-creation
-        const { data: reloadedGroups } = await (supabase as any)
+        const { data: reloadedGroups, error: reloadedGroupsError } = await (supabase as any)
           .from('attribute_option_groups')
           .select('*')
           .eq('attribute_id', attributeId)
           .eq('organization_id', activeCompany.id)
           .order('sort_order');
+        if (reloadedGroupsError) captureFlowError(reloadedGroupsError, 'db-error-leaked-to-ui');
         groupsData = reloadedGroups || [];
       }
 
@@ -218,21 +221,23 @@ export default function AttributeOptionPalettesDialog({
       // Load values for each group
       const valuesMap: Record<string, GroupValue[]> = {};
       for (const group of groupsData || []) {
-        const { data: valuesData } = await (supabase as any)
+        const { data: valuesData, error: valuesErr } = await (supabase as any)
           .from('attribute_option_group_values')
           .select('*')
           .eq('group_id', group.id)
           .order('sort_order');
+        if (valuesErr) throw valuesErr;
         valuesMap[group.id] = valuesData || [];
       }
       setGroupValues(valuesMap);
 
       // Load categories (hierarchy)
-      const { data: categoriesData } = await supabase
+      const { data: categoriesData, error: categoriesErr } = await supabase
         .from('product_categories')
         .select('id, name, parent_category_id, parent_id')
         .eq('organization_id', activeCompany.id)
         .order('name');
+      if (categoriesErr) throw categoriesErr;
       
       // Build hierarchy with levels, supporting both legacy parent_category_id and current parent_id
       const buildHierarchy = (cats: Category[], parentId: string | null = null, level = 0): Category[] => {
@@ -248,10 +253,11 @@ export default function AttributeOptionPalettesDialog({
       setCategories(buildHierarchy(categoriesData || []));
 
       // Load category palettes for this attribute
-      const { data: palettesData } = await (supabase as any)
+      const { data: palettesData, error: palettesErr } = await (supabase as any)
         .from('category_attribute_palettes')
         .select('*')
         .eq('attribute_id', attributeId);
+      if (palettesErr) throw palettesErr;
       
       const palettesMap: Record<string, CategoryPalette> = {};
       for (const p of palettesData || []) {
@@ -303,12 +309,13 @@ export default function AttributeOptionPalettesDialog({
       setNewGroupName("");
       setNewGroupDescription("");
       // Reload and auto-select the new group
-      const { data: updatedGroups } = await (supabase as any)
+      const { data: updatedGroups, error: updatedGroupsError } = await (supabase as any)
         .from('attribute_option_groups')
         .select('*')
         .eq('attribute_id', attributeId)
         .eq('organization_id', activeCompany.id)
         .order('sort_order');
+      if (updatedGroupsError) captureFlowError(updatedGroupsError, 'db-error-leaked-to-ui');
       if (updatedGroups && updatedGroups.length > 0) {
         const newestGroup = updatedGroups[updatedGroups.length - 1];
         setSelectedGroupId(newestGroup.id);
@@ -403,9 +410,10 @@ export default function AttributeOptionPalettesDialog({
           is_active: v.is_active,
         }));
         await withAuditContext(supabase, businessUserId, async () => {
-          await (supabase as any)
+          const { error } = await (supabase as any)
             .from('attribute_option_group_values')
             .insert(valuesToInsert);
+          if (error) throw error;
         });
       }
 

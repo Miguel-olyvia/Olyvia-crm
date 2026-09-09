@@ -38,6 +38,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface MediaAsset {
   id: string;
@@ -286,6 +287,7 @@ export default function Gallery() {
     } catch (error: unknown) {
       console.error("Error loading assets:", error);
       setAssets([]);
+      toast({ title: "Erro", description: "Não foi possível carregar os ficheiros.", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -415,6 +417,7 @@ export default function Gallery() {
       toast({ title: t('gallery.toast.deleteSuccess') });
       loadAssets();
     } catch (error: unknown) {
+      captureFlowError(error, "media-asset-delete");
       toast({ title: t('gallery.toast.deleteError'), description: (error as Error).message, variant: "destructive" });
     }
   };

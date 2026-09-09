@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
+import { detectClientIp, detectUserAgent } from "../_shared/clientIp.ts";
+import { checkRateLimit, recordRateLimitAttempt, getClientIp, rateLimitResponse } from "../_shared/rateLimit.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -186,6 +188,17 @@ const handler = async (req: Request): Promise<Response> => {
         throw new Error("Missing required fields: proposal_id, code");
       }
 
+      // Rate limit (a8): trava a forca-bruta do codigo de 6 digitos.
+      const ipVer = getClientIp(req);
+      const rlVer = await checkRateLimit(supabaseClient, {
+        bucket: "send-verification-code:verify",
+        identifier: `${ipVer}:${proposal_id}`,
+        maxAttempts: 5,
+        windowMinutes: 15,
+      });
+      if (!rlVer.allowed) return rateLimitResponse(rlVer, corsHeaders);
+      await recordRateLimitAttempt(supabaseClient, "send-verification-code:verify", `${ipVer}:${proposal_id}`);
+
       // Find valid code
       const { data: verificationData, error: verifyError } = await supabaseClient
         .from("proposal_verification_codes")
@@ -222,15 +235,18 @@ const handler = async (req: Request): Promise<Response> => {
           .select("organization_id")
           .eq("id", proposal_id)
           .maybeSingle();
-        const acceptedStageId = await resolveProposalStageId(supabaseClient, proposalRow?.organization_id, ["accepted", "aceite"]);
+        const acceptedStageId = await resolveProposalStageId(supabaseClient, proposalRow?.organization_id, "is_won");
 
         await supabaseClient
           .from("proposals")
           .update({
             status: "accepted",
             accepted_at: new Date().toISOString(),
-            acceptance_ip: req.headers.get("x-forwarded-for") || "unknown",
-            acceptance_user_agent: req.headers.get("user-agent") || "unknown",
+            // NUNCA "unknown": um placeholder num campo de prova e
+            // indistinguivel de uma deteccao real. Ausente => NULL.
+            // O header cru e uma cadeia "cliente, proxy1, proxy2" — nao um IP.
+            acceptance_ip: detectClientIp(req),
+            acceptance_user_agent: detectUserAgent(req),
             ...(acceptedStageId ? { stage_id: acceptedStageId } : {}),
           })
           .eq("id", proposal_id);
@@ -280,6 +296,43 @@ const handler = async (req: Request): Promise<Response> => {
         throw new Error("Proposal not found");
       }
 
+      // Rate limit (a8): trava spam de envio pelo SMTP do cliente e escrita ilimitada.
+      const ipSend = getClientIp(req);
+      const rlSend = await checkRateLimit(supabaseClient, {
+        bucket: "send-verification-code",
+        identifier: `${ipSend}:${proposal_id}`,
+        maxAttempts: 3,
+        windowMinutes: 15,
+      });
+      if (!rlSend.allowed) return rateLimitResponse(rlSend, corsHeaders);
+      await recordRateLimitAttempt(supabaseClient, "send-verification-code", `${ipSend}:${proposal_id}`);
+
+      // SEGURANCA (a1): o destinatario do codigo e resolvido no SERVIDOR, a partir
+      // do email primario da ficha da proposta -- NUNCA o "destination" do corpo,
+      // que o chamador controla. Sem isto, qualquer um que abrisse o link publico
+      // punha o seu proprio email, recebia o OTP e aceitava/recusava a proposta.
+      const { data: primaryEmail } = await supabaseClient
+        .from("anew_entity_emails")
+        .select("email")
+        .eq("entity_id", proposal.entity_id)
+        .eq("is_primary", true)
+        .limit(1)
+        .maybeSingle();
+      const recipient = (primaryEmail?.email || "").trim();
+      if (!recipient) {
+        return new Response(
+          JSON.stringify({ error: "no_contact", message: "A proposta nao tem email de contacto na ficha." }),
+          { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+      // Se o corpo indicar um destino, tem de ser exactamente o da ficha.
+      if (destination && destination.trim().toLowerCase() !== recipient.toLowerCase()) {
+        return new Response(
+          JSON.stringify({ error: "email_mismatch", message: "O email indicado nao corresponde ao contacto da proposta." }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+        );
+      }
+
       // Get rejection reason label if rejecting
       let rejectionReasonLabel: string | null = null;
       if (action === "reject" && rejection_reason_code) {
@@ -301,7 +354,7 @@ const handler = async (req: Request): Promise<Response> => {
         proposal_id,
         code,
         method,
-        destination,
+        destination: recipient,
         expires_at: expiresAt.toISOString(),
         action: action || "accept",
         rejection_reason_code: rejection_reason_code || null,
@@ -319,10 +372,14 @@ const handler = async (req: Request): Promise<Response> => {
       // Get client name from entity if available
       const clientName = "Cliente";
 
-      // Get template body if available
-      const templateBody = proposal.proposal_templates?.verification_email_body || null;
-      const emailSubject = proposal.proposal_templates?.verification_email_subject 
-        ? proposal.proposal_templates.verification_email_subject
+      // Get template body if available.
+      // A copia congelada da proposta manda sobre o modelo vivo, pela mesma
+      // razao que o PDF e o portal: editar o modelo partilhado nao deve mudar
+      // o que e mandado a proposito de uma proposta ja enviada.
+      const emailTemplate = proposal.template_snapshot || proposal.proposal_templates;
+      const templateBody = emailTemplate?.verification_email_body || null;
+      const emailSubject = emailTemplate?.verification_email_subject
+        ? emailTemplate.verification_email_subject
             .replace(/\{\{titulo_proposta\}\}/g, proposal.title)
         : `Código de Verificação - ${action === "accept" ? "Aceitar" : "Recusar"} Proposta`;
 
@@ -337,12 +394,12 @@ const handler = async (req: Request): Promise<Response> => {
       
       await sendEmailViaSMTP(
         smtpConfig,
-        destination,
+        recipient,
         emailSubject,
         emailHtml
       );
 
-      console.log("Verification code sent via email to:", destination, "for action:", action);
+      console.log("Verification code sent via email to:", recipient, "for action:", action);
 
       return new Response(
         JSON.stringify({ 

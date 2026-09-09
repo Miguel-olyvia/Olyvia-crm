@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Ruler, Info } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import type { CSlot } from "./hooks/useConfigTemplate";
 
 interface PriceRange {
@@ -53,7 +54,7 @@ export function MeasureSlotPanel({ slot }: { slot: CSlot }) {
     if (!slot.attribute_id) return;
     setLoading(true);
     (async () => {
-      const [{ data: a }, { data: rs }] = await Promise.all([
+      const [{ data: a, error: ea }, { data: rs, error: er }] = await Promise.all([
         supabase
           .from("product_attributes")
           .select("label, unit, pricing_type")
@@ -65,6 +66,7 @@ export function MeasureSlotPanel({ slot }: { slot: CSlot }) {
           .eq("attribute_id", slot.attribute_id!)
           .order("min_value", { ascending: true }),
       ]);
+      if (ea || er) toast.error("Não foi possível carregar a configuração da medida.");
       if (a) setAttr(a as unknown as AttrInfo);
       setRanges((rs ?? []) as unknown as PriceRange[]);
       setLoading(false);

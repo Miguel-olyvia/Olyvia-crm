@@ -4,6 +4,7 @@ import { z } from "npm:zod";
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { withRetryResult } from "../_shared/retry.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
+import { detectClientIp } from "../_shared/clientIp.ts";
 
 const requestSchema = z.object({
   action: z.string(),
@@ -234,9 +235,11 @@ serve(async (req) => {
     }
 
 
-    // Server-side IP detection (do not trust client-provided IP)
-    const xff = req.headers.get("x-forwarded-for") || "";
-    const detectedIp = xff.split(",")[0]?.trim() || req.headers.get("x-real-ip") || null;
+    // Server-side IP detection (do not trust client-provided IP).
+    // Was inlined here; now in _shared/clientIp.ts so the public-link accept
+    // path and the OTP path derive the evidence IP the exact same way instead
+    // of each inventing their own (one of them wrote the literal "client").
+    const detectedIp = detectClientIp(req);
 
     // Validate rejection reason text (10..500 chars, basic HTML strip)
     function sanitizeReason(text: unknown): string | null {
@@ -479,7 +482,10 @@ serve(async (req) => {
 
         const { data: proposal } = await supabase
           .from("proposals")
-          .select("id, proposal_number, title, template_id, organization_id")
+          // template_snapshot vai junto: e ele que manda no aspecto do PDF
+          // (generateProposalPdfBlob), para o documento do portal nao mudar
+          // quando alguem edita o modelo partilhado.
+          .select("id, proposal_number, title, template_id, template_snapshot, organization_id")
           .eq("id", proposal_id)
           .maybeSingle();
 
@@ -587,7 +593,7 @@ serve(async (req) => {
 
         const now = new Date().toISOString();
         const { data: proposalOrgForAccept } = await supabase.from("proposals").select("organization_id").eq("id", proposal_id).maybeSingle();
-        const acceptedStageId = await resolveProposalStageId(supabase, proposalOrgForAccept?.organization_id ?? null, ["accepted", "aceite"]);
+        const acceptedStageId = await resolveProposalStageId(supabase, proposalOrgForAccept?.organization_id ?? null, "is_won");
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await withRetryResult(() => supabase.from("proposals").update({
           status: "accepted",
@@ -649,15 +655,24 @@ serve(async (req) => {
                 .from("pipeline_links").select("quote_id").eq("proposal_id", proposal_id).eq("status", "active").maybeSingle();
               if (pLink?.quote_id) linkedQuoteId = pLink.quote_id;
 
-              const { data: pi } = await supabase.from("proposal_items").select("*").eq("proposal_id", proposal_id).order("sort_order");
-              let contractValue = fullProposal.value || 0;
-              if (pi && pi.length > 0) {
-                contractValue = pi.reduce((s: number, i: any) => s + (Number(i.total) || (Number(i.quantity) * Number(i.unit_price) * (1 + (Number(i.vat_rate) || 0) / 100))), 0);
-              }
-              if ((!pi || pi.length === 0) && linkedQuoteId) {
+              // contractValue: proposals.value é a fonte de verdade sincronizada
+              // (trigger trg_sync_proposal_value_from_quote / calculate_proposal_value_from_quotes,
+              // ver migration 20261113060000_fix_proposal_value_trigger_estado.sql). Só recorremos
+              // a outras fontes se vier vazio/zero — nunca prevalecem sobre um valor já sincronizado
+              // (proposal_items é só um snapshot estático e pode divergir por arredondamento).
+              let contractValue = Number(fullProposal.value) || 0;
+
+              if (!contractValue && linkedQuoteId) {
                 const { data: ql } = await supabase.from("quote_lines").select("total_com_iva").eq("quote_id", linkedQuoteId);
                 if (ql && ql.length > 0) {
                   contractValue = ql.reduce((s: number, l: any) => s + (Number(l.total_com_iva) || 0), 0);
+                }
+              }
+
+              if (!contractValue) {
+                const { data: pi } = await supabase.from("proposal_items").select("*").eq("proposal_id", proposal_id).order("sort_order");
+                if (pi && pi.length > 0) {
+                  contractValue = pi.reduce((s: number, i: any) => s + (Number(i.total) || (Number(i.quantity) * Number(i.unit_price) * (1 + (Number(i.vat_rate) || 0) / 100))), 0);
                 }
               }
 
@@ -747,7 +762,7 @@ serve(async (req) => {
 
         const now = new Date().toISOString();
         const { data: proposalOrgForReject } = await supabase.from("proposals").select("organization_id").eq("id", proposal_id).maybeSingle();
-        const rejectedStageId = await resolveProposalStageId(supabase, proposalOrgForReject?.organization_id ?? null, ["rejected", "rejeitada"]);
+        const rejectedStageId = await resolveProposalStageId(supabase, proposalOrgForReject?.organization_id ?? null, "is_lost");
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await withRetryResult(() => supabase.from("proposals").update({
           status: "rejected",
@@ -817,6 +832,12 @@ serve(async (req) => {
           signature_ip: detectedIp,
           accepted_at: now,
           signed_by_name: clientName,
+          // Assinar muda o documento: a assinatura passa a fazer parte dele.
+          // Qualquer copia congelada anterior fica desactualizada, por isso e
+          // limpa -- a proxima leitura reconstroi o documento ja assinado e
+          // volta a congela-lo. A partir dai deixa de mudar por alguem o abrir.
+          contract_body_frozen_html: null,
+          contract_frozen_at: null,
         }).eq("id", contract_id));
 
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });

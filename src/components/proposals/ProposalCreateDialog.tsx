@@ -22,11 +22,14 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { proposalSchema } from "@/lib/validations";
 import { formatCurrency } from "@/lib/utils";
-import { Plus, X, Palette } from "lucide-react";
+import { Plus, X, Palette, AlertTriangle } from "lucide-react";
 import { InlineQuoteBuilder, InlineQuoteData, createEmptyInlineQuote, calcInlineQuoteTotal } from "@/components/proposals/InlineQuoteBuilder";
 import { calculateProposalItemsTotal, ProposalItem } from "@/components/proposals/ProposalItemsEditor";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
+import { getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 
 /**
  * Freezes the resolved template's full config into the new proposal at
@@ -125,6 +128,8 @@ export function ProposalCreateDialog({
 
   const [savingProposal, setSavingProposal] = useState(false);
   const submitLockRef = useRef(false);
+  const [missingTemplateOpen, setMissingTemplateOpen] = useState(false);
+  const missingTemplateOkRef = useRef(false);
 
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
   const [proposalTemplates, setProposalTemplates] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
@@ -149,6 +154,12 @@ export function ProposalCreateDialog({
   const [contactSearchResults, setContactSearchResults] = useState<ContactSearchResult[]>([]);
   const [showContactDropdown, setShowContactDropdown] = useState(false);
   const [selectedContact, setSelectedContact] = useState<ContactSearchResult | null>(null);
+
+  // Nome de quem já vem escolhido de fora (menu de três pontos do cliente).
+  // Lido da ficha da entidade e não de campos do formulário: é a mesma linha
+  // que depois vai gravada em proposals.entity_id, por isso o ecrã tem de
+  // mostrar exactamente essa pessoa e não uma aproximação.
+  const [presetEntityName, setPresetEntityName] = useState<string | null>(null);
 
   const [proposalItems, setProposalItems] = useState<ProposalItem[]>([]);
   const [inlineQuotes, setInlineQuotes] = useState<InlineQuoteData[]>([]);
@@ -180,6 +191,25 @@ export function ProposalCreateDialog({
       })),
     );
   }, [scopedDealResults]);
+
+  // Nome da pessoa pré-escolhida. Só enquanto o diálogo está aberto, para não
+  // ficar preso o nome de um cliente anterior quando se abre o menu de outro.
+  useEffect(() => {
+    if (!open || !presetEntityId) {
+      setPresetEntityName(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("anew_entities")
+        .select("display_name")
+        .eq("id", presetEntityId)
+        .maybeSingle();
+      if (!cancelled) setPresetEntityName(data?.display_name ?? null);
+    })();
+    return () => { cancelled = true; };
+  }, [open, presetEntityId]);
 
   // Load workflow stages + templates
   const loadStagesAndTemplates = useCallback(async () => {
@@ -324,8 +354,10 @@ export function ProposalCreateDialog({
       }
 
       const stage = workflowStages.find(s => s.id === formData.stage_id);
-      const defaultTemplate = proposalTemplates.find(tt => tt.is_default);
-      const templateId = formData.template_id || defaultTemplate?.id || null;
+      // Sem default silencioso: o template e o que a pessoa escolheu, ou nenhum.
+      // Cair para um default que a organizacao pode nao ter fazia o PDF sair com
+      // o layout de outro documento (P-2026-0616 saiu com "Orcamento" no titulo).
+      const templateId = formData.template_id || null;
       const probability = selectedDeal?.probability ?? 50;
       const rootOrgId = await resolveRootOrgId(activeCompany.id);
 
@@ -361,6 +393,7 @@ export function ProposalCreateDialog({
       onSaved?.(data.id);
       navigate(`/quotes?new=1&proposal_id=${data.id}${formData.deal_id ? `&deal_id=${formData.deal_id}` : ""}`);
     } catch (err: any) {
+      captureFlowError(err, "proposal-lifecycle");
       toast({ title: "Erro ao criar proposta", description: err.message, variant: "destructive" });
     } finally {
       submitLockRef.current = false;
@@ -370,6 +403,7 @@ export function ProposalCreateDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (submitLockRef.current || savingProposal) return;
 
     const quotesTotal = selectedQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
@@ -389,6 +423,18 @@ export function ProposalCreateDialog({
       toast({ title: t('proposals.toast.validationError'), description: validation.error.errors[0].message, variant: "destructive" });
       return;
     }
+    // Ultima porta antes de gravar: sem template escolhido, confirmar. Fica DEPOIS
+    // de todas as validacoes de proposito -- nao vale a pena perguntar "guardar
+    // assim?" a quem vai levar com um erro de validacao a seguir. E, sobretudo,
+    // porque uma guarda destas, posta antes de outras confirmacoes que reentrem
+    // neste handler, repoe o `ok` a false na primeira passagem e faz o aviso
+    // reaparecer depois de ja ter sido confirmado.
+    if (!formData.template_id && !missingTemplateOkRef.current) {
+      setMissingTemplateOpen(true);
+      return;
+    }
+    missingTemplateOkRef.current = false;
+
     setFieldErrors({});
 
     try {
@@ -400,8 +446,7 @@ export function ProposalCreateDialog({
 
       const stage = workflowStages.find(s => s.id === formData.stage_id);
       const probability = selectedDeal?.probability ?? 50;
-      const defaultTemplate = proposalTemplates.find(t => t.is_default);
-      const templateId = formData.template_id || defaultTemplate?.id || null;
+      const templateId = formData.template_id || null;
       const rootOrgId = await resolveRootOrgId(activeCompany.id);
 
       const proposalData = {
@@ -432,12 +477,9 @@ export function ProposalCreateDialog({
         if (validLines.length === 0) continue;
 
         const linesToInsert = validLines.map(l => {
-          const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
-          const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
-          const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
-          const precoSemIvaBase = unitPrice * l.qt;
+          // Subtotal gravado pela fonte única do preço da linha.
           const lineDiscount = l.discount_percent || 0;
-          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const precoSemIva = getLineSubtotal(l);
           const ivaValor = precoSemIva * (l.iva_percent / 100);
           const totalComIva = precoSemIva + ivaValor;
           const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
@@ -453,6 +495,9 @@ export function ProposalCreateDialog({
             ordem: l.ordem, section_name: l.section_name || "Geral",
             unidade: l.unidade || null, item_description: l.item_description || null,
             cost_price: l.cost_price || 0,
+            // O preço de venda definido manda no preço unitário; sem ele gravado,
+            // o preço é reconstruído do custo arredondado e perde milésimos.
+            retail_price_unit: (l.retail_price_unit ?? null) || null,
           };
         });
 
@@ -536,6 +581,7 @@ export function ProposalCreateDialog({
       resetForm();
       if (savedProposalId && onSaved) onSaved(savedProposalId);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description: error.message, variant: "destructive" });
     } finally {
       submitLockRef.current = false;
@@ -658,7 +704,7 @@ export function ProposalCreateDialog({
             } else if (manualPrice) {
               retailPrice = manualPrice;
             }
-            const margin = costPrice > 0 && retailPrice > 0 ? ((retailPrice - costPrice) / costPrice) * 100 : 30;
+            const margin = costPrice > 0 && retailPrice > 0 ? markupFromCostAndPrice(costPrice, retailPrice) : 30;
             return {
               id: `temp_deal_${Date.now()}_${idx}`, section_name: "Geral",
               descricao_snapshot: name, item_description: "",
@@ -702,6 +748,7 @@ export function ProposalCreateDialog({
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -745,74 +792,90 @@ export function ProposalCreateDialog({
                 </SelectContent>
               </Select>
             </div>
-            {proposalTemplates.length > 0 && (
-              <div className="col-span-2 space-y-2">
-                <Label className="flex items-center gap-2">
-                  <Palette className="h-4 w-4" /> Template de Proposta
-                </Label>
-                <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
-                  <SelectTrigger><SelectValue placeholder="Template default" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum (usa default)</SelectItem>
-                    {proposalTemplates.map((tmpl) => (
-                      <SelectItem key={tmpl.id} value={tmpl.id}>
-                        <div className="flex items-center gap-2">
-                          {tmpl.name}
-                          {tmpl.is_default && <Badge variant="secondary" className="text-xs ml-1">Default</Badge>}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">Define o design da proposta no portal e no PDF</p>
-              </div>
-            )}
-
-            {/* Contact search */}
             <div className="col-span-2 space-y-2">
-              <Label>Contacto</Label>
-              <div className="relative">
-                {selectedContact ? (
-                  <div className="flex items-start gap-2 p-3 border rounded-md bg-muted/30">
-                    <Badge variant="secondary" className="shrink-0 mt-0.5">Contacto</Badge>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-medium">{selectedContact.display_name}</span>
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
-                        {selectedContact.email && <span className="text-xs text-muted-foreground">{selectedContact.email}</span>}
-                        {selectedContact.phone && <span className="text-xs text-muted-foreground">{selectedContact.phone}</span>}
+              <Label className="flex items-center gap-2">
+                <Palette className="h-4 w-4" /> Template de Proposta
+              </Label>
+              <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+                <SelectTrigger><SelectValue placeholder="Escolher template" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nenhum</SelectItem>
+                  {proposalTemplates.map((tmpl) => (
+                    <SelectItem key={tmpl.id} value={tmpl.id}>
+                      <div className="flex items-center gap-2">
+                        {tmpl.name}
+                        {tmpl.is_default && <Badge variant="secondary" className="text-xs ml-1">Default</Badge>}
                       </div>
-                    </div>
-                    <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { setSelectedContact(null); setSelectedQuotes([]); }}>
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <>
-                    <Input
-                      placeholder="Pesquisar contacto pelo nome..."
-                      value={contactSearch}
-                      onChange={(e) => handleContactSearch(e.target.value)}
-                      onFocus={() => { if (contactSearchResults.length > 0) setShowContactDropdown(true); }}
-                      onBlur={() => { setTimeout(() => setShowContactDropdown(false), 200); }}
-                    />
-                    {showContactDropdown && contactSearchResults.length > 0 && (
-                      <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-[280px] overflow-y-auto">
-                        {contactSearchResults.map((contact) => (
-                          <button key={contact.entity_id} type="button" className="w-full px-3 py-3 text-left hover:bg-muted border-b last:border-b-0"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => handleSelectContact(contact)}>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="secondary" className="text-xs shrink-0">Contacto</Badge>
-                              <span className="text-sm font-medium truncate">{contact.display_name}</span>
-                            </div>
-                            {contact.email && <div className="text-xs text-muted-foreground mt-1 ml-[52px]">{contact.email}</div>}
-                          </button>
-                        ))}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {formData.template_id ? (
+                <p className="text-xs text-muted-foreground">Define o design da proposta no portal e no PDF</p>
+              ) : (
+                <p className="text-xs text-amber-600 flex items-start gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                  <span>Nenhum template escolhido.</span>
+                </p>
+              )}
+            </div>
+
+            {/* Pessoa da proposta. Com presetEntityId não há nada a escolher: a
+                cascata de entity_id dá-lhe sempre prioridade, por isso um campo
+                de procura aqui aceitava um nome e ignorava-o. */}
+            <div className="col-span-2 space-y-2">
+              {presetEntityId ? (
+                <div className="flex items-center gap-2 p-3 border rounded-md bg-muted/30">
+                  <span className="text-sm text-muted-foreground">Proposta para:</span>
+                  <span className="text-sm font-medium truncate">{presetEntityName ?? "—"}</span>
+                </div>
+              ) : (
+                <>
+                  <Label>Lead ou cliente</Label>
+                  <div className="relative">
+                    {selectedContact ? (
+                      <div className="flex items-start gap-2 p-3 border rounded-md bg-muted/30">
+                        <Badge variant="secondary" className="shrink-0 mt-0.5">Pessoa</Badge>
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-medium">{selectedContact.display_name}</span>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1">
+                            {selectedContact.email && <span className="text-xs text-muted-foreground">{selectedContact.email}</span>}
+                            {selectedContact.phone && <span className="text-xs text-muted-foreground">{selectedContact.phone}</span>}
+                          </div>
+                        </div>
+                        <Button type="button" variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => { setSelectedContact(null); setSelectedQuotes([]); }}>
+                          <X className="h-4 w-4" />
+                        </Button>
                       </div>
+                    ) : (
+                      <>
+                        <Input
+                          placeholder="Pesquisar lead ou cliente pelo nome..."
+                          value={contactSearch}
+                          onChange={(e) => handleContactSearch(e.target.value)}
+                          onFocus={() => { if (contactSearchResults.length > 0) setShowContactDropdown(true); }}
+                          onBlur={() => { setTimeout(() => setShowContactDropdown(false), 200); }}
+                        />
+                        {showContactDropdown && contactSearchResults.length > 0 && (
+                          <div className="absolute top-full left-0 right-0 mt-1 bg-popover border rounded-md shadow-lg z-50 max-h-[280px] overflow-y-auto">
+                            {contactSearchResults.map((contact) => (
+                              <button key={contact.entity_id} type="button" className="w-full px-3 py-3 text-left hover:bg-muted border-b last:border-b-0"
+                                onMouseDown={(e) => e.preventDefault()}
+                                onClick={() => handleSelectContact(contact)}>
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="secondary" className="text-xs shrink-0">Pessoa</Badge>
+                                  <span className="text-sm font-medium truncate">{contact.display_name}</span>
+                                </div>
+                                {contact.email && <div className="text-xs text-muted-foreground mt-1 ml-[52px]">{contact.email}</div>}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
                     )}
-                  </>
-                )}
-              </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Deal search */}
@@ -837,7 +900,7 @@ export function ProposalCreateDialog({
                 ) : (
                   <>
                     <Input
-                      placeholder={presetEntityId ? "Pesquisar pedidos deste contacto..." : (t('proposals.form.searchDealPlaceholder') || "Pesquisar pedidos de proposta...")}
+                      placeholder={presetEntityId ? "Pesquisar pedidos desta pessoa..." : (t('proposals.form.searchDealPlaceholder') || "Pesquisar pedidos de proposta...")}
                       value={dealSearch}
                       onChange={(e) => handleDealSearch(e.target.value)}
                       onFocus={() => { if (dealSearchResults.length > 0) setShowDealDropdown(true); }}
@@ -1012,5 +1075,16 @@ export function ProposalCreateDialog({
         </form>
       </DialogContent>
     </Dialog>
+    <MissingTemplateDialog
+      open={missingTemplateOpen}
+      kind="proposal"
+      onCancel={() => setMissingTemplateOpen(false)}
+      onConfirm={() => {
+        setMissingTemplateOpen(false);
+        missingTemplateOkRef.current = true;
+        handleSubmit({ preventDefault: () => {} } as React.FormEvent);
+      }}
+    />
+    </>
   );
 }

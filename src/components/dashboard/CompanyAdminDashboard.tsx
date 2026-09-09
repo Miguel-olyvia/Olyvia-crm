@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import DashboardCard from "./DashboardCard";
@@ -64,8 +66,12 @@ const CompanyAdminDashboard = () => {
           client.from("anew_clients").select("id").in("organization_id", companyIds).is("deleted_at", null),
           client.from("deals").select("id, value").in("organization_id", companyIds),
           client.from("quotes").select("id").in("organization_id", companyIds),
-          client.from("activities").select("id").in("organization_id", companyIds),
+          client.from("activities").select("id").in("organization_id", companyIds).neq("completed", true),
         ]);
+
+        if (membershipsResult.error || qualifiedLeadsResult.error || clientsResult.error || dealsResult.error || quotesResult.error || activitiesResult.error) {
+          toast.error("Não foi possível carregar as estatísticas.");
+        }
 
         const totalValue = dealsResult.data?.reduce((sum: number, deal: any) => sum + (Number(deal.value) || 0), 0) || 0;
 
@@ -80,6 +86,7 @@ const CompanyAdminDashboard = () => {
           activities: activitiesResult.data?.length ?? 0,
         });
       } catch (error) {
+        captureFlowError(error, "db-error-leaked-to-ui");
         console.error("Error loading company admin stats:", error);
       } finally {
         setLoading(false);

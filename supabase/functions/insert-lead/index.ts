@@ -385,7 +385,7 @@ Deno.serve(async (req) => {
       entityId = scopedHit.entityId;
       const summary = await classifyEntityInOrg({ supabase, entityId, organizationId });
       if (summary.targetType && summary.targetId) {
-        const targetTable = summary.targetType === 'lead' ? 'anew_leads' : summary.targetType === 'contact' ? 'anew_contacts' : 'anew_clients';
+        const targetTable = summary.targetType === 'lead' ? 'anew_leads' : 'anew_clients';
         const diff = await mergeFieldValuesNonDestructive({
           supabase, table: targetTable as any, rowId: summary.targetId, newFieldValues: fieldValues,
         });

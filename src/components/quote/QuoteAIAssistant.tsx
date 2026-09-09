@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface AISuggestion {
   product_id: string;
@@ -115,6 +116,7 @@ export function QuoteAIAssistant({ onAddSuggestion }: Props) {
         });
       } catch (saveError) {
         console.error("Error saving conversation:", saveError);
+        captureFlowError(saveError, "ai-assistant");
       }
 
       setResponse(data);
@@ -125,6 +127,7 @@ export function QuoteAIAssistant({ onAddSuggestion }: Props) {
 
     } catch (error: any) {
       console.error("AI Assistant error:", error);
+      captureFlowError(error, "ai-assistant");
       toast({
         title: "Erro ao consultar assistente",
         description: error.message,
@@ -164,14 +167,19 @@ export function QuoteAIAssistant({ onAddSuggestion }: Props) {
         suggestion_type: suggestion.type || "product",
         rating,
         query_context: messages.find(m => m.role === 'user')?.content || "",
-      });
-      
+      }).throwOnError();
+
       toast({
         title: "Avaliação guardada",
         description: `Obrigado pelo feedback! Ajuda-me a melhorar.`,
       });
-    } catch (error) {
-      console.error("Error saving rating:", error);
+    } catch (error: any) {
+      captureFlowError(error, "ai-assistant");
+      toast({
+        title: "Erro ao guardar avaliação",
+        description: error.message,
+        variant: "destructive",
+      });
     }
   };
 

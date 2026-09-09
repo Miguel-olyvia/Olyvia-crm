@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select";
 import { Trash2, Plus, Pencil } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { toast } from "@/lib/toast";
 import { SlotEditDialog } from "./SlotEditDialog";
 import type { CSlot, CSlotOption } from "./hooks/useConfigTemplate";
 
@@ -136,6 +137,8 @@ export function SlotsEditor({
           ? all.filter((attr) => attr.is_measurement || attr.pricing_type === "range" || attr.value_type === "number")
           : all.filter((attr) => !(attr.is_measurement || attr.pricing_type === "range" || attr.value_type === "number"));
         setAttributes(filtered);
+      } else if (error) {
+        toast.error("Não foi possível carregar os atributos.");
       }
     })();
   }, [slotType, organizationId]);

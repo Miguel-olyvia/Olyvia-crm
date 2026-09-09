@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { QuoteBuilder } from "@/components/QuoteBuilder";
@@ -79,10 +80,12 @@ import { resolveLineUnitCosts, resolveLineDetails, type LineResolution } from "@
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { applySearchTextFilter, splitSearchWords } from "@/lib/searchTextFilter";
+import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
+import { getLineUnitPrice, marginOnPrice } from "@/utils/quotes/quoteLinePricing";
 
-// Escape user input for PostgREST ilike filters ("," ")" "%" break the parser).
-const escapePostgrestIlike = (v: string) =>
-  v.replace(/[\\%_,()]/g, (c) => (c === '%' || c === '_' ? `\\${c}` : ''));
+// Abaixo deste comprimento a pesquisa nao e aplicada (nem na lista nem nos KPIs).
+const MIN_QUOTE_SEARCH_LENGTH = 2;
 
 interface Quote {
   id: string;
@@ -191,6 +194,26 @@ async function fetchInBatches<T>(
   return out;
 }
 
+// O `db-max-rows` do PostgREST e 1000 e trunca em SILENCIO: pedir `.limit(5000)`
+// a uma org com 1488 orcamentos devolve exactamente 1000 linhas sem erro nem
+// aviso. Por isso qualquer leitura que queira o conjunto completo tem de pedir
+// paginas explicitas com `.range()` ate uma pagina vir incompleta.
+const PAGE_ROWS = 1000;
+const MAX_PAGES = 50;
+
+async function fetchAllPages<T>(
+  fetchPage: (from: number, to: number) => Promise<T[]>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const from = page * PAGE_ROWS;
+    const rows = await fetchPage(from, from + PAGE_ROWS - 1);
+    out.push(...rows);
+    if (rows.length < PAGE_ROWS) return out;
+  }
+  return out;
+}
+
 
 
 export default function Quotes() {
@@ -245,6 +268,18 @@ export default function Quotes() {
   
   // Filter states
   const [searchTerm, setSearchTerm] = useState("");
+  // Filtro por proposta, vindo do endereco (?proposal=...). Nao e um filtro do
+  // ecra: e o contexto de quem chegou aqui a partir de um contrato.
+  const proposalFilter = searchParams.get("proposal");
+  // A pesquisa e agora um filtro da query (e do RPC dos KPIs), portanto cada
+  // tecla premida disparava uma consulta a lista, uma contagem e o
+  // get_quotes_kpi_stats. Debounce igual ao da pagina de Propostas: o valor
+  // que vai para o servidor so muda 400ms depois de o utilizador parar.
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 400);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
@@ -291,6 +326,39 @@ export default function Quotes() {
     scopeLoading,
   });
 
+  // ─── Filtros dos orçamentos: UM filtro, UM sítio ──────────────────────────
+  // Este é o único sítio onde o predicado de estado/pesquisa/datas/comercial é
+  // escrito. É consumido pela lista (fetchQuotes), pela contagem que decide a
+  // paginação, pelos cartões de KPI (get_quotes_kpi_stats) e pelos gráficos do
+  // Dashboard, para que os quatro descrevam sempre exactamente o mesmo conjunto
+  // de linhas. Duplicar este predicado já custou caro neste ficheiro: uma
+  // segunda cópia em JS divergiu da do servidor e fez a lista esconder linhas
+  // que os cartões continuavam a contar.
+  const quoteFilters = useMemo(() => {
+    const rawSearch = debouncedSearchTerm.trim();
+    return {
+      status: statusFilter !== "all" ? statusFilter : null,
+      // Mesmo limiar em todo o lado: com 1 caracter ninguém filtra.
+      search: rawSearch.length >= MIN_QUOTE_SEARCH_LENGTH ? rawSearch : "",
+      dateFromIso: dateFrom ? startOfDay(dateFrom).toISOString() : null,
+      dateToIso: dateTo ? endOfDay(dateTo).toISOString() : null,
+      comercial: comercialFilter !== "all" ? comercialFilter : null,
+    };
+  }, [statusFilter, debouncedSearchTerm, dateFrom, dateTo, comercialFilter]);
+
+  const applyQuoteFilters = useCallback(<T,>(query: T): T => {
+    const { status, search, dateFromIso, dateToIso, comercial } = quoteFilters;
+    let q = query as any;
+    if (status) q = q.eq("estado", status);
+    const searchWords = search ? splitSearchWords(search) : [];
+    if (searchWords.length > 0) q = applySearchTextFilter(q, searchWords);
+    if (dateFromIso) q = q.gte("created_at", dateFromIso);
+    if (dateToIso) q = q.lte("created_at", dateToIso);
+    if (comercial === "none") q = q.is("assigned_to", null);
+    else if (comercial) q = q.eq("assigned_to", comercial);
+    return q as T;
+  }, [quoteFilters]);
+
   // Fetch dashboard stats via RPC (KPIs sempre correctos) + query separada para visualizacoes
   // scopeIds: null = full ORG scope (isFullScope/system admin); array = restrict to these visible quote ids (OWNED/TEAM).
   const fetchDashboardStats = useCallback(async (scopeIds: string[] | null) => {
@@ -312,16 +380,18 @@ export default function Quotes() {
       // datas e comercial na própria query, portanto os cartões têm de usar o
       // mesmo conjunto — senão deixam de bater certo com o que está no ecrã,
       // que é exactamente a queixa que trouxe isto aqui.
-      const trimmedSearch = searchTerm.trim();
+      // Os valores vêm de `quoteFilters` — a mesma fonte que a lista e os
+      // gráficos usam — para que o limiar de pesquisa e o resto dos predicados
+      // não possam divergir.
       const { data: kpiData, error: kpiError } = await supabase.rpc("get_quotes_kpi_stats", {
         p_org_id: activeCompany.id,
         p_filters: {
           visible_ids: scopeIds,
-          status: statusFilter !== "all" ? statusFilter : undefined,
-          search: trimmedSearch || undefined,
-          date_from: dateFrom ? startOfDay(dateFrom).toISOString() : undefined,
-          date_to: dateTo ? endOfDay(dateTo).toISOString() : undefined,
-          comercial_id: comercialFilter !== "all" ? comercialFilter : undefined,
+          status: quoteFilters.status ?? undefined,
+          search: quoteFilters.search || undefined,
+          date_from: quoteFilters.dateFromIso ?? undefined,
+          date_to: quoteFilters.dateToIso ?? undefined,
+          comercial_id: quoteFilters.comercial ?? undefined,
         },
       });
       if (kpiError) throw kpiError;
@@ -351,32 +421,52 @@ export default function Quotes() {
         aceiteValueWithVat: kpi.aceiteValueWithVat ?? 0,
       });
 
-      // Query separada com limite para graficos/visualizacoes no dashboard
+      // Linhas que alimentam os gráficos do Dashboard.
+      //
+      // Antes: esta query não passava pelos filtros activos e tinha `.limit(500)`.
+      // Filtrar por comercial, estado ou data mudava a lista e os cartões e não
+      // mexia nos gráficos, e numa org com 1488 orçamentos os gráficos eram
+      // desenhados sobre os 500 mais recentes sem o dizer no ecrã.
+      //
+      // Agora passa por `applyQuoteFilters` — o mesmo predicado da lista e dos
+      // cartões — e lê o conjunto completo com `fetchAllPages`, porque o
+      // `db-max-rows` do PostgREST (1000) trunca em silêncio. Medido em Mudelar
+      // como `authenticated` com RLS: 1488 linhas em ~0,82 s (2 pedidos), muito
+      // abaixo do `statement_timeout` de 8 s, portanto não justifica trocar as
+      // linhas por uma RPC de agregados.
+      const VIZ_COLS = "id, estado, total, subtotal, total_fees, created_at, accepted_at, validade_dias, assigned_to";
       let vizRows: any[] = [];
       if (scopeIds === null) {
-        const { data: vizData, error: vizError } = await supabase
-          .from("quotes")
-          .select("id, estado, total, subtotal, total_fees, created_at, accepted_at, validade_dias, assigned_to")
-          .is("deleted_at", null)
-          .eq("organization_id", activeCompany.id)
-          .order("created_at", { ascending: false })
-          .limit(500);
-        if (vizError) throw vizError;
-        vizRows = vizData || [];
-      } else if (scopeIds.length > 0) {
-        vizRows = await fetchInBatches(scopeIds, async (chunk) => {
-          const { data, error } = await supabase
+        vizRows = await fetchAllPages(async (from, to) => {
+          let vizQuery = supabase
             .from("quotes")
-            .select("id, estado, total, subtotal, total_fees, created_at, accepted_at, validade_dias, assigned_to")
+            .select(VIZ_COLS)
+            .is("deleted_at", null)
+            .eq("organization_id", activeCompany.id);
+          vizQuery = applyQuoteFilters(vizQuery);
+          const { data, error } = await vizQuery
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .range(from, to);
+          if (error) throw error;
+          return (data as any[]) || [];
+        });
+      } else if (scopeIds.length > 0) {
+        // Âmbito OWNED/TEAM: os ids visíveis vêm em lotes de 30 para não
+        // rebentar o tamanho do URL, e cada lote leva os mesmos filtros.
+        vizRows = await fetchInBatches(scopeIds, async (chunk) => {
+          let chunkQuery = supabase
+            .from("quotes")
+            .select(VIZ_COLS)
             .is("deleted_at", null)
             .eq("organization_id", activeCompany.id)
             .in("id", chunk);
+          chunkQuery = applyQuoteFilters(chunkQuery);
+          const { data, error } = await chunkQuery;
           if (error) throw error;
           return (data as any[]) || [];
         }, 30);
-        vizRows = vizRows
-          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-          .slice(0, 500);
+        vizRows = vizRows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       }
       if (fetchRequestIdRef.current !== requestId) return;
       setAllQuotesForDashboard(vizRows.map((q: any) => ({
@@ -394,7 +484,7 @@ export default function Quotes() {
         setStatsLoading(false);
       }
     }
-  }, [activeCompany?.id, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
+  }, [activeCompany?.id, quoteFilters, applyQuoteFilters]);
 
   useEffect(() => {
     if (!permissionsLoading && activeCompany && !hasPermission("quotes.view")) {
@@ -473,8 +563,17 @@ export default function Quotes() {
     const { data: { user } } = await supabase.auth.getUser();
     const viewScope = getPermissionScope("quotes.view");
     const isFullScope = viewScope === "ORG" || isSystemAdmin;
-    const searchQuoteNumber = searchTerm.trim().length >= 2 ? escapePostgrestIlike(searchTerm.trim()) : null;
-
+    // Pesquisa: uma palavra de cada vez contra `quotes.search_text` (numero do
+    // orcamento + titulo + nome/email/telefone do cliente ligado), AND entre
+    // palavras e independente da ordem — ver
+    // supabase/migrations/20261113170000_quotes_search_text.sql.
+    //
+    // Substitui `quote_number ILIKE %termo%`, que era a UNICA pesquisa feita no
+    // servidor: tudo o resto (nome do cliente) vinha de um efeito separado que
+    // ia buscar entidades com `.limit(200)` sem ORDER BY e injectava os
+    // resultados na lista ja carregada, por fora dos filtros de estado/data/
+    // comercial e por fora da paginacao. Agora a pesquisa e um filtro da propria
+    // query, portanto a contagem, a paginacao e os KPIs veem o mesmo conjunto.
     // Server-side filters. The list is paginated 20 at a time, so a filter that
     // only runs in the browser can never see past the current page: picking a
     // status or a date range appeared to do nothing because it was narrowing
@@ -486,17 +585,11 @@ export default function Quotes() {
     // Scope is untouched: these conditions are added on top of each branch's
     // own visibility rules (organization, and for OWNED/TEAM the resolved set
     // of visible quote ids), never instead of them.
-    const dateFromIso = dateFrom ? startOfDay(dateFrom).toISOString() : null;
-    const dateToIso = dateTo ? endOfDay(dateTo).toISOString() : null;
-    const applyServerFilters = (q: any) => {
-      if (statusFilter !== "all") q = q.eq("estado", statusFilter);
-      if (searchQuoteNumber) q = q.ilike("quote_number", `%${searchQuoteNumber}%`);
-      if (dateFromIso) q = q.gte("created_at", dateFromIso);
-      if (dateToIso) q = q.lte("created_at", dateToIso);
-      if (comercialFilter === "none") q = q.is("assigned_to", null);
-      else if (comercialFilter !== "all") q = q.eq("assigned_to", comercialFilter);
-      return q;
-    };
+    //
+    // O predicado em si vive em `applyQuoteFilters`, ao pé do estado dos
+    // filtros, porque os gráficos do Dashboard e os cartões de KPI têm de usar
+    // exactamente o mesmo — ver a nota em "UM filtro, UM sítio".
+    const applyServerFilters = applyQuoteFilters;
 
     if (!append) {
       let stagesQuery = supabase
@@ -729,6 +822,7 @@ export default function Quotes() {
         }
       }
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('quotes.toast.loadError'), description: error.message, variant: "destructive" });
     } finally {
       if (fetchRequestIdRef.current === requestId) {
@@ -736,7 +830,7 @@ export default function Quotes() {
         setLoadingMore(false);
       }
     }
-  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
+  }, [activeCompany?.id, toast, t, isSystemAdmin, companyUserType, getPermissionScope, scopeAnewUserId, teamMemberIds, scopeLoading, fetchDashboardStats, applyQuoteFilters]);
 
   // Resolve entity names
   useEffect(() => {
@@ -766,95 +860,17 @@ export default function Quotes() {
     resolveEntityNames();
   }, [quotes]);
 
-  // Server-side search: the paginated list only loads PAGE_SIZE quotes, so
-  // when the user types a search term we fetch matching quotes (by number,
-  // entity name/email/phone, or related deal entity) and merge them into the
-  // in-memory list so the existing client-side filter can find them.
-  // RLS still scopes results to what the user is allowed to see.
-  useEffect(() => {
-    if (!activeCompany?.id) return;
-    const term = searchTerm.trim();
-    if (term.length < 2) return;
-    const handle = setTimeout(async () => {
-      try {
-        const like = `%${escapePostgrestIlike(term)}%`;
-        const [byName, byEmail, byPhone] = await Promise.all([
-          supabase.from("anew_entities").select("id").ilike("display_name", like).limit(200),
-          supabase.from("anew_entity_emails").select("entity_id").ilike("email", like).limit(200),
-          supabase.from("anew_entity_phones").select("entity_id").ilike("phone_number", like).limit(200),
-        ]);
-        const entityIds = Array.from(new Set([
-          ...((byName.data || []).map((e: any) => e.id)),
-          ...((byEmail.data || []).map((e: any) => e.entity_id)),
-          ...((byPhone.data || []).map((e: any) => e.entity_id)),
-        ])).filter(Boolean) as string[];
-
-        // dealIds via entityIds, batched ≤30
-        let dealIds: string[] = [];
-        if (entityIds.length) {
-          const dealsData = await fetchInBatches(entityIds, async (chunk) => {
-            const { data, error } = await (supabase as any)
-              .from("deals").select("id")
-              .eq("organization_id", activeCompany.id)
-              .in("entity_id", chunk).limit(500);
-            if (error) throw error;
-            return (data as any[]) || [];
-          }, 30);
-          dealIds = Array.from(new Set(dealsData.map((d: any) => d.id)));
-        }
-
-        const baseQuery = () => {
-          let q = (supabase as any)
-            .from("quotes")
-            .select(`*, deals!deal_id (id, title, entity_id), proposals!proposal_id (id, title, stage_id)`)
-            .is("deleted_at", null)
-            .limit(100);
-          q = q.eq("organization_id", activeCompany.id);
-          return q;
-        };
-
-        const merged = new Map<string, Quote>();
-
-        // 1) by quote_number
-        {
-          const { data, error } = await baseQuery().ilike("quote_number", like);
-          if (error) throw error;
-          (data as any[] | null)?.forEach(d => merged.set(d.id, d as Quote));
-        }
-
-        // 2) by entity_id, chunked ≤30 (single field → .in)
-        if (entityIds.length) {
-          const entityResults = await fetchInBatches(entityIds, async (chunk) => {
-            const { data, error } = await baseQuery().in("entity_id", chunk);
-            if (error) throw error;
-            return (data as any[]) || [];
-          }, 30);
-          entityResults.forEach(d => merged.set(d.id, d as Quote));
-        }
-
-        // 3) by deal_id, chunked ≤30 (single field → .in)
-        if (dealIds.length) {
-          const dealResults = await fetchInBatches(dealIds, async (chunk) => {
-            const { data, error } = await baseQuery().in("deal_id", chunk);
-            if (error) throw error;
-            return (data as any[]) || [];
-          }, 30);
-          dealResults.forEach(d => merged.set(d.id, d as Quote));
-        }
-
-        if (merged.size > 0) {
-          setQuotes(prev => {
-            const map = new Map(prev.map(p => [p.id, p]));
-            merged.forEach((d, id) => { if (!map.has(id)) map.set(id, d); });
-            return Array.from(map.values());
-          });
-        }
-      } catch (err) {
-        console.error("Quote server-side search error:", err);
-      }
-    }, 350);
-    return () => clearTimeout(handle);
-  }, [searchTerm, activeCompany?.id]);
+  // NOTA: aqui existia um segundo efeito de "pesquisa no servidor" que ia
+  // buscar entidades por display_name/email/telefone com `.limit(200)` sem
+  // ORDER BY (truncava em silencio: qualquer palavra com mais de 200
+  // correspondencias perdia clientes de forma arbitraria), resolvia os deals
+  // dessas entidades e injectava ate 100 orcamentos por consulta na lista ja
+  // carregada — por fora dos filtros de estado/data/comercial da query e por
+  // fora da paginacao e da contagem.
+  //
+  // Foi removido: a pesquisa passou a ser um filtro da propria query de
+  // orcamentos, por `search_text` (ver applyServerFilters em fetchQuotes),
+  // exactamente o mesmo predicado que get_quotes_kpi_stats aplica.
 
   // Resolve commercial (assigned_to) user names — covers both the paginated
   // `quotes` and the full `allQuotesForDashboard` so the Dashboard view always
@@ -880,7 +896,7 @@ export default function Quotes() {
       }
     };
     resolveComercialNames();
-  }, [quotes, allQuotesForDashboard]);
+  }, [quotes, allQuotesForDashboard, proposalFilter]);
 
   // Aggregate quote lines for all loaded quotes (for margin, cost, items columns).
   // Costs resolved in REAL-TIME via shared resolver (handles products, services,
@@ -962,7 +978,7 @@ export default function Quotes() {
   // refetches (and resets to page 0) whenever one of them changes.
   useEffect(() => {
     if (activeCompany?.id) fetchQuotes();
-  }, [activeCompany?.id, fetchQuotes, statusFilter, searchTerm, dateFrom, dateTo, comercialFilter]);
+  }, [activeCompany?.id, fetchQuotes]);
 
   // Limpa qualquer rascunho de novo orçamento ao entrar na página de listagem
   // (evita reabrir o Quote Builder automaticamente).
@@ -1053,12 +1069,10 @@ export default function Quotes() {
   }, [quotes, linesAgg]);
 
   // Check if any quote has actual cost data
-  // "quotes.view_costs" is not a real permission code in anew_permissions (phantom
-  // permission, unreachable by any real role). "quotes.manage" is the real DB write
-  // gate for the quotes domain and is already used elsewhere to protect sensitive
-  // quote data (see 20260627050000_quotes_security_fixes.sql), which matches the
-  // sensitivity of cost/margin figures here.
-  const canViewCosts = hasPermission("quotes.manage") || isSystemAdmin;
+  // See canViewQuoteCosts() for why "quotes.manage" (not "quotes.view_costs")
+  // is the gate, and why it must stay identical to the one ProposalDetailsDialog
+  // uses — a proposal carries its quote's lines, so this is the same data.
+  const canViewCosts = canViewQuoteCosts(hasPermission, isSystemAdmin);
   const hasCostData = useMemo(() => {
     return canViewCosts && Object.values(linesAgg).some(a => a.hasCostData);
   }, [linesAgg, canViewCosts]);
@@ -1066,13 +1080,17 @@ export default function Quotes() {
   // Filtered quotes
   const filteredQuotes = useMemo(() => {
     const result = quotes.filter((quote) => {
-      if (searchTerm) {
-        const search = searchTerm.toLowerCase();
-        const quoteNumber = quote.quote_number?.toLowerCase() || "";
-        const clientName = getClientNameString(quote).toLowerCase();
-        const location = getClientAddress(quote).toLowerCase();
-        if (!quoteNumber.includes(search) && !clientName.includes(search) && !location.includes(search)) return false;
-      }
+      // A pesquisa NAO e reaplicada aqui de proposito. Era um segundo predicado
+      // — frase unica contra quote_number/nome do cliente/morada — que corria
+      // por cima do conjunto ja filtrado no servidor e discordava dele: para
+      // \"maria silva\" o servidor (e os cartoes de KPI) davam as linhas cujo
+      // cliente e \"Maria da Silva\", e este filtro voltava a escondê-las porque
+      // o nome nao contem a frase seguida. Era essa a divergencia entre os
+      // cartoes e a lista. A pesquisa e agora feita uma unica vez, na query.
+      // Vindo de um contrato: mostrar so os orcamentos da proposta dele. O
+      // contrato quase nunca aponta a um orcamento directamente -- 16 em 244 --
+      // mas aponta a proposta, e e a proposta que os conhece.
+      if (proposalFilter && quote.proposal_id !== proposalFilter) return false;
       if (statusFilter !== "all" && quote.estado !== statusFilter) return false;
       if (dateFrom || dateTo) {
         const quoteDate = parseISO(quote.created_at);
@@ -1096,11 +1114,12 @@ export default function Quotes() {
           return false;
         }
       }
-      if (comercialFilter !== "all") {
-        if (comercialFilter === "none") {
-          if (quote.assigned_to) return false;
-        } else if (quote.assigned_to !== comercialFilter) return false;
-      }
+      // NOTA: o filtro de comercial NAO e repetido aqui. Vivia tambem neste
+      // sitio, com um predicado logicamente identico ao do servidor, e tudo o
+      // que esta em `quotes` ja veio de queries que passaram pelo
+      // `applyQuoteFilters`. Era redundancia, nao um bug activo — mas foi
+      // exactamente uma duplicacao destas (a da pesquisa) que divergiu e fez os
+      // cartoes de KPI deixarem de bater certo com a lista. Um filtro, um sitio.
       return true;
     });
     
@@ -1120,7 +1139,7 @@ export default function Quotes() {
 
     
     return result;
-  }, [quotes, searchTerm, statusFilter, dateFrom, dateTo, sortColumn, sortDirection, linesAgg, marginFilter, onlyMine, scopeAnewUserId, myQuoteIds, comercialFilter]);
+  }, [quotes, statusFilter, dateFrom, dateTo, sortColumn, sortDirection, linesAgg, marginFilter, onlyMine, scopeAnewUserId, myQuoteIds]);
 
   const clearFilters = () => {
     setSearchTerm(""); setStatusFilter("all"); setDateFrom(undefined); setDateTo(undefined); setMarginFilter("all"); setOnlyMine(false); setComercialFilter("all");
@@ -1155,6 +1174,7 @@ export default function Quotes() {
       toast({ title: t('quotes.toast.deleteSuccess'), description: t('quotes.toast.deleteDescription') });
       fetchQuotes();
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('quotes.toast.deleteError'), description: error.message, variant: "destructive" });
     } finally {
       setDeleteQuoteId(null);
@@ -1186,6 +1206,7 @@ export default function Quotes() {
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.size} ${t('quotes.records')} ${t('common.updated')}.` });
       clearSelection(); setBulkStatusDialogOpen(false); setBulkLostReason(""); fetchQuotes();
     } catch (error: any) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
       setProcessing(false);
@@ -1219,6 +1240,7 @@ export default function Quotes() {
         description: `${result.rowCount} orçamentos exportados em XLSX${result.includesSensitive ? " com campos sensíveis autorizados" : ""}.`,
       });
     } catch (error: any) {
+      captureFlowError(error, "quote-document-export");
       toast({ title: t('quotes.toast.exportError'), description: error.message, variant: "destructive" });
     } finally {
       setExporting(false);
@@ -1261,6 +1283,7 @@ export default function Quotes() {
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'aceite', accepted_at: new Date().toISOString() } as any).eq("id", quote.id);
     if (error) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
     }
@@ -1270,16 +1293,27 @@ export default function Quotes() {
       });
       console.log("[execute-workflow] quote aceite response:", JSON.stringify(wfData), wfError);
       if (wfError) {
+        captureFlowError(wfError, "quote-acceptance-workflow");
         toast({ title: t('quotes.toast.accepted'), description: t('quotes.toast.workflowErrorDesc', { message: wfError.message }), variant: "destructive" });
       } else if (wfData && (wfData as any).stageActions === 0) {
         const logs = (wfData as any).logs as Array<{type: string; status: string; message: string}> | undefined;
         const errLog = logs?.find(l => l.status === "error");
+        // There is no thrown error here: the workflow reported success but ran
+        // zero stage actions, so the proposal was never created. Synthesise an
+        // Error so Sentry gets a real event instead of `undefined`.
+        captureFlowError(
+          errLog
+            ? new Error(`Quote accepted but workflow reported an error: ${errLog.message}`)
+            : new Error("Quote accepted but workflow ran zero stage actions"),
+          "quote-acceptance-workflow",
+        );
         toast({ title: t('quotes.toast.accepted'), description: errLog ? t('quotes.toast.proposalNotCreatedDesc', { message: errLog.message }) : t('quotes.toast.workflowNoActionsDesc'), variant: "destructive" });
       } else {
         toast({ title: t('quotes.toast.accepted'), description: t('quotes.toast.proposalCreatedDesc') });
       }
     } catch (wfErr: any) {
       console.error("Quote workflow error:", wfErr);
+      captureFlowError(wfErr, "quote-acceptance-workflow");
       toast({ title: t('quotes.toast.accepted'), description: t('quotes.toast.workflowExceptionDesc', { message: wfErr?.message || wfErr }), variant: "destructive" });
     }
     fetchQuotes();
@@ -1294,6 +1328,7 @@ export default function Quotes() {
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'perdido', lost_reason: reason } as any).eq("id", quoteId);
     if (error) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
     }
@@ -1314,6 +1349,7 @@ export default function Quotes() {
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ lost_reason: reason } as any).eq("id", quoteId);
     if (error) {
+      captureFlowError(error, "quote-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
       return;
     }
@@ -1342,6 +1378,7 @@ export default function Quotes() {
       }
     } catch (e: any) {
       console.error("[duplicate-quote] error", e);
+      captureFlowError(e, "quote-lifecycle");
       toast({ title: t('quotes.toast.duplicateError'), description: e?.message || String(e), variant: "destructive" });
     }
   };
@@ -1354,7 +1391,7 @@ export default function Quotes() {
     }
     await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
     const { error } = await supabase.from("quotes").update({ estado: 'enviado' }).eq("id", quoteId);
-    if (error) { toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
+    if (error) { captureFlowError(error, "quote-lifecycle"); toast({ title: "Erro", description: error.message, variant: "destructive" }); return; }
 
     // Register a manual send event so it shows up in the contact/client timeline & emails tab
     try {
@@ -1368,13 +1405,16 @@ export default function Quotes() {
       // Resolve recipient via entity emails when available
       let recipientEmail = "—";
       let recipientName: string | null = null;
-      const entityId: string | null = (quote as any)?.entity_id ?? null;
-      if (entityId) {
-        const { data: emailRow } = await supabase.from("anew_entity_emails").select("email").eq("entity_id", entityId).order("is_primary", { ascending: false }).limit(1).maybeSingle();
-        if (emailRow?.email) recipientEmail = emailRow.email;
-        const { data: ent } = await supabase.from("anew_entities").select("display_name").eq("id", entityId).maybeSingle();
-        recipientName = ent?.display_name ?? null;
-      }
+      // O contacto viaja COM o documento: resolve_quote_contact confirma que o
+      // utilizador pode ler este orcamento e devolve o contacto primario com
+      // privilegios de definer. A 2a consulta directa a anew_entity_emails pelo
+      // entity_id era negada pela RLS de ambito de dono a quem ve o orcamento
+      // mas nao e dono da lead, deixando o envio manual sem destinatario.
+      const { data: contact } = await (supabase as any)
+        .rpc("resolve_quote_contact", { _quote_id: quoteId })
+        .maybeSingle();
+      if (contact?.email) recipientEmail = contact.email;
+      if (contact?.display_name) recipientName = contact.display_name;
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       await (supabase as any).from("quote_sends").insert({
         quote_id: quoteId,
@@ -1408,6 +1448,7 @@ export default function Quotes() {
       URL.revokeObjectURL(url);
       toast({ title: t('quotes.toast.pdfSuccess'), description: t('quotes.toast.pdfDescription') });
     } catch (error: any) {
+      captureFlowError(error, "quote-document-export");
       toast({ title: t('quotes.toast.pdfError'), description: error.message, variant: "destructive" });
     }
   };
@@ -1758,7 +1799,14 @@ export default function Quotes() {
             isLoading={statsLoading}
             hasError={!!statsError}
             errorMessage={statsError ?? undefined}
-            totalQuotes={stats.total}
+            /* Total REAL do conjunto filtrado, vindo do mesmo RPC que alimenta os
+               cartões. O QuotesDashboardView compara-o com o número de linhas que
+               recebeu e avisa no ecrã se forem diferentes ("apenas amostra").
+               Passava aqui `stats.total`, que é `quotes.length` — o tamanho da
+               página da lista (20) — portanto a comparação era 20 > 500 e o aviso
+               NUNCA podia disparar: o corte aos 500 era mesmo silencioso. Com o
+               total verdadeiro, qualquer truncatura futura aparece no ecrã. */
+            totalQuotes={dashboardStats?.total ?? totalCount}
           />
         ) : viewMode === 'margens' && canViewCosts ? (
           <QuotesMarginsView
@@ -2297,15 +2345,15 @@ export default function Quotes() {
                             </TableHeader>
                             <TableBody>
                               {detailLines.map((line) => {
-                                const materialCost = parseFloat(String(line.custo_material_unit || 0));
-                                const laborCost = parseFloat(String(line.custo_mao_obra_unit || 0));
-                                const margin = parseFloat(String(line.margem_percent || 0));
-                                const unitPrice = (materialCost + laborCost) * (1 + margin / 100);
+                                // Preço unitário pela fonte única: passa a incluir a
+                                // comissão de intermediação e o preço de venda definido,
+                                // que esta tabela ignorava.
+                                const unitPrice = getLineUnitPrice(line);
                                 const qty = parseFloat(String(line.qt || 0));
                                 const subtotalLine = parseFloat(String(line.total_sem_iva || 0));
                                 const unitCost = detailLineCosts[line.id] ?? 0;
                                 const lineMargin = unitPrice > 0 && unitCost > 0
-                                  ? ((unitPrice - unitCost) / unitPrice) * 100
+                                  ? marginOnPrice(unitCost, unitPrice)
                                   : null;
                                 const marginColor = lineMargin == null
                                   ? "text-muted-foreground"

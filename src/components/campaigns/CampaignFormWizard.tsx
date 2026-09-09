@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Progress } from "@/components/ui/progress";
 import { ChevronLeft, ChevronRight, Check, MapPin, CalendarDays, Building2, Briefcase, Target, FileText, Link2, Copy, CheckCheck, Star } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { campaignWizardSetupSchema } from "@/lib/validations";

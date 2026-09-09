@@ -1,5 +1,8 @@
 import { useTheme } from "next-themes";
-import { Toaster as Sonner, toast } from "sonner";
+import { Toaster as Sonner } from "sonner";
+// `Toaster` is a component and must come from the library; `toast` is a
+// notification and goes through the sanitizing wrapper (see src/lib/toast.ts).
+import { toast } from "@/lib/toast";
 
 type ToasterProps = React.ComponentProps<typeof Sonner>;
 

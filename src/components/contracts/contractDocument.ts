@@ -353,6 +353,16 @@ export function injectSignaturesIntoBlock(
 }
 
 /**
+ * A linha da minuta congelada no contrato (`template_snapshot`), ou null se o
+ * contrato nao tem copia -- feito antes do congelamento, ou sem minuta.
+ */
+export function contractTemplateSnapshot(contract: any): Record<string, any> | null {
+  const snap = contract?.template_snapshot;
+  if (!snap || typeof snap !== "object" || Array.isArray(snap)) return null;
+  return snap as Record<string, any>;
+}
+
+/**
  * Carrega nome + cargo do signatário escolhido numa minuta (`signatory_user_id`,
  * `signatory_role_id`). Devolve null se a minuta não tem signatário definido.
  */
@@ -363,6 +373,18 @@ export async function fetchTemplateSignatory(templateId: string | null | undefin
     .select("signatory_user_id, signatory_role_id")
     .eq("id", templateId)
     .maybeSingle();
+  return resolveSignatoryFromTemplateRow(tpl);
+}
+
+/**
+ * O mesmo, partindo de uma linha de minuta ja em maos -- em particular a copia
+ * congelada no contrato. Quem assina pela empresa foi decidido quando o
+ * contrato foi feito; trocar hoje o signatario na minuta nao pode reescrever o
+ * documento de um contrato antigo.
+ */
+export async function resolveSignatoryFromTemplateRow(
+  tpl: { signatory_user_id?: string | null; signatory_role_id?: string | null } | null | undefined,
+): Promise<{ name: string; roleName: string } | null> {
   if (!tpl?.signatory_user_id) return null;
   const [{ data: u }, { data: r }] = await Promise.all([
     (supabase as any).from("anew_users").select("name").eq("id", tpl.signatory_user_id).maybeSingle(),
@@ -450,6 +472,20 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
     contrato_valor: parseNumericAmount(contract.total_value) ?? 0,
     contrato_data_inicio: contract.start_date,
     contrato_data_fim: contract.end_date,
+    // A data do documento e a de CRIACAO do contrato, nao a de hoje. Todos os
+    // caminhos que geram o texto -- o PDF, o portal do cliente e as
+    // pre-visualizacoes -- passam por aqui, por isso basta dize-lo uma vez.
+    //
+    // Sao DUAS as portas por onde a data de hoje entrava, e por isso ha aqui
+    // dois campos: `data_documento` alimenta o marcador {{data_atual}}, que as
+    // minutas usam junto as assinaturas; `data` alimenta o bloco "Data:" do
+    // CABECALHO (contractHeader.ts), que ninguem preenchia e caia sempre em
+    // todayPt(). Era esta segunda que punha a data de hoje no topo da primeira
+    // pagina de contratos assinados ha meses -- e a que se via no ecra.
+    data_documento: contract.created_at || undefined,
+    data: contract.created_at
+      ? new Date(contract.created_at).toLocaleDateString("pt-PT")
+      : undefined,
   };
 
 
@@ -764,9 +800,14 @@ export async function gatherContractData(contract: any, orgId?: string): Promise
   }
 
   // Signatário escolhido na minuta — usado pelo bloco final do contrato.
+  // Havendo cópia congelada da minuta, é dela que sai: quem assinava pela
+  // empresa no momento em que o contrato foi feito.
+  const snapshot = contractTemplateSnapshot(contract);
   const tplId = contract.contract_template_id || contract.template_id || null;
-  if (tplId) {
-    const sig = await fetchTemplateSignatory(tplId);
+  if (snapshot || tplId) {
+    const sig = snapshot
+      ? await resolveSignatoryFromTemplateRow(snapshot as any)
+      : await fetchTemplateSignatory(tplId);
     if (sig?.name) {
       data.signatario_nome = sig.name;
       data.signatario_cargo = sig.roleName || "";
@@ -1178,10 +1219,72 @@ export function applyQuoteItemsToken(
   return applyDataTableTokens(baseHtml, variableData, templateDocSettings, primaryColor, autoAppendIfMissing);
 }
 
+/**
+ * Um contrato assinado esta CONGELADO?
+ *
+ * O congelamento so acontece depois de o cliente assinar: e ai que o documento
+ * passa a ter valor legal e deixa de poder mudar. Antes disso ainda esta a ser
+ * trabalhado, e reflectir a minuta viva e o comportamento certo.
+ */
+export function hasFrozenBody(contract: any): boolean {
+  return typeof contract?.contract_body_frozen_html === "string"
+    && contract.contract_body_frozen_html.trim().length > 0;
+}
+
+/**
+ * Colunas a escrever para DESCONGELAR um contrato.
+ *
+ * Usado por quem altera legitimamente um contrato assinado -- assinar e
+ * regenerar. A proxima leitura volta a produzir o documento e a congela-lo,
+ * agora ja com a alteracao. Abrir NAO e uma alteracao, e por isso nunca passa
+ * por aqui.
+ */
+/**
+ * O contrato esta EM VIGOR, e por isso o seu documento nao pode continuar a
+ * mudar sozinho?
+ *
+ * A data de assinatura do cliente nao chega: medido no remoto, 14 contratos
+ * estao marcados como assinados ou activos SEM essa data -- assinou so a
+ * empresa. Sem os incluir ficavam de fora do congelamento e continuavam a mudar
+ * com a minuta, ao mesmo tempo que o ecra os trancava por estarem assinados.
+ */
+export function isContractInForce(contract: { signature_date?: string | null; status?: string | null } | null | undefined): boolean {
+  if (!contract) return false;
+  return !!contract.signature_date || ["signed", "active"].includes(contract.status ?? "");
+}
+
+/**
+ * A copia congelada da minuta que o contrato usou (`template_snapshot`), na
+ * mesma forma em que a minuta viva e lida.
+ *
+ * A coluna guarda a linha inteira de `client_contract_templates` do momento em
+ * que o contrato foi feito, por isso traz as mesmas chaves. Aqui devolvem-se so
+ * as duas que montam o documento -- o texto e as definicoes de aspecto --, para
+ * o caminho congelado e o caminho vivo produzirem exactamente a mesma coisa.
+ *
+ * Devolve null quando nao ha copia (contratos anteriores ao congelamento, ou
+ * sem minuta nenhuma): so nesse caso se vai ler a minuta viva.
+ */
+export function templateSnapshotAsTemplate(contract: any): { body_html: any; doc_settings: any } | null {
+  const snap = contractTemplateSnapshot(contract);
+  if (!snap) return null;
+  return { body_html: snap.body_html ?? null, doc_settings: snap.doc_settings ?? null };
+}
+
+export const UNFREEZE_CONTRACT_COLUMNS = {
+  contract_body_frozen_html: null,
+  contract_frozen_at: null,
+} as const;
+
 export async function resolveContractDocument(contract: any, orgId: string, activeCompanyName?: string): Promise<ResolvedContractDocument | null> {
   if (!contract || !orgId) return null;
 
-  const templateId = contract.contract_template_id || contract.template_id || null;
+  // A minuta que ESTE contrato usou, congelada no momento em que foi criado.
+  // Havendo-a, e ela que manda: a minuta viva nem chega a ser lida, e por isso
+  // editar hoje o texto partilhado ja nao muda o documento de um contrato feito
+  // no mes passado.
+  const snapshot = templateSnapshotAsTemplate(contract);
+  const templateId = snapshot ? null : (contract.contract_template_id || contract.template_id || null);
   const [variableData, organizationRes, settingsRes, templateRes] = await Promise.all([
     gatherContractData(contract, orgId),
     (supabase as any).from("anew_organizations").select("name, logo_url, metadata").eq("id", orgId).single(),
@@ -1195,10 +1298,12 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
   if (settingsRes.error) throw settingsRes.error;
   if (templateRes?.error) throw templateRes.error;
 
-  let templateData = templateRes?.data || null;
+  let templateData = snapshot || templateRes?.data || null;
 
-  // Fallback: if contract has neither own body nor a linked template, try the
-  // organization's default contract template so the PDF can still be produced.
+  // Ultimo recurso: o contrato nao tem corpo proprio NEM minuta com texto (nem
+  // viva nem congelada). Vai-se buscar a minuta por omissao da organizacao para
+  // ainda assim haver documento. Um contrato com copia congelada com texto
+  // nunca passa por aqui.
   if (!contract.contract_body_html && !templateData?.body_html) {
     const { data: defaultTpl, error: defaultErr } = await (supabase as any)
       .from("client_contract_templates")
@@ -1235,17 +1340,31 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
   if (emailOverride) (variableData as any).empresa_email = emailOverride;
   if (trim(settings.company_website)) (variableData as any).empresa_website = trim(settings.company_website);
 
+  // ── Descarregar e LER, nao produzir ────────────────────────────────────
+  // Havendo copia congelada, e ela que e servida, tal e qual. Nao se substitui
+  // nada, nao se resolve nada, nao se injecta assinatura nenhuma: tudo isso ja
+  // esta la dentro, do momento em que foi congelada. E o que impede um contrato
+  // assinado em Julho de mudar hoje porque alguem editou a minuta -- ou porque
+  // alguem simplesmente o abriu.
+  const congelado = hasFrozenBody(contract);
+
   const usingContractBody = !!contract.contract_body_html;
-  let baseHtml = contract.contract_body_html || templateData?.body_html || "";
+  let baseHtml = congelado
+    ? (contract.contract_body_frozen_html as string)
+    : (contract.contract_body_html || templateData?.body_html || "");
   if (!baseHtml) return null;
 
+  let bodyHtml: string;
+  if (congelado) {
+    bodyHtml = baseHtml;
+  } else {
   // Pre-substitution: alias and quote items (must run BEFORE substituteVariables
   // so the fixed handler in contractVariables.ts cannot inject the default table).
   // Quando o body vem do contrato (já renderizado na geração), NÃO voltamos a
   // anexar a tabela de produtos no fim — evita duplicado no PDF.
   baseHtml = applyQuoteItemsToken(baseHtml, variableData, tplFlat, settings.primary_color || "#7C3AED", !usingContractBody);
 
-  let bodyHtml = substituteVariables(baseHtml, variableData);
+  bodyHtml = substituteVariables(baseHtml, variableData);
   // Safety net (should be a no-op).
   bodyHtml = bodyHtml.replace(/\{\{(orcamento_itens|tabela_artigos)\}\}/gi, "");
   // Resolver fórmulas inseridas em células de tabelas manuais (Corte 2C).
@@ -1269,6 +1388,31 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
       showOtpBadge: true,
     },
   );
+
+    // Assinado pelo cliente e ainda sem copia congelada: congela-se AGORA, na
+    // primeira vez que for lido. E assim que os contratos ja assinados passam a
+    // estar protegidos, sem precisarem de ser tocados um a um.
+    //
+    // Guardado sem esperar (nem falhar por isso): o documento devolvido a quem
+    // pediu e exactamente este, quer a gravacao resulte quer nao. Falhar a
+    // gravacao significa que se volta a tentar na leitura seguinte -- nunca que
+    // o utilizador fica sem documento.
+    // "Em vigor" por qualquer dos dois sinais, e nao so pela data de assinatura
+    // do cliente: medido no remoto, 14 contratos estao marcados como assinados
+    // ou activos SEM data de assinatura -- assinou so a empresa. Sem os incluir,
+    // ficavam de fora do congelamento e continuavam a mudar com a minuta, ao
+    // mesmo tempo que o ecra os trancava por estarem assinados.
+    if (isContractInForce(contract) && contract.id) {
+      void (supabase as any)
+        .from("client_contracts")
+        .update({ contract_body_frozen_html: bodyHtml, contract_frozen_at: new Date().toISOString() })
+        .eq("id", contract.id)
+        .is("contract_body_frozen_html", null)
+        .then(({ error }: { error: unknown }) => {
+          if (error) console.error("Nao foi possivel congelar o contrato assinado:", error);
+        });
+    }
+  }
 
   const companyName = settings.company_name_override || variableData.empresa_nome || organization?.name || activeCompanyName || "";
   const headerLineOne = [
@@ -1318,6 +1462,9 @@ export async function downloadContractDocumentPdf(
     const parser = new DOMParser();
     const parsed = parser.parseFromString(html, "text/html");
     parsed.querySelectorAll("script").forEach((script) => script.remove());
+    // O rodapé é desenhado por página com o jsPDF (drawContractPdfFooters);
+    // mantê-lo no corpo do documento voltaria a imprimi-lo só no fim.
+    parsed.querySelectorAll(".footer").forEach((node) => node.remove());
 
     iframe = window.document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -1361,6 +1508,15 @@ export async function downloadContractDocumentPdf(
     const pageElement = iframeDocument.querySelector(".page") as HTMLElement | null;
     if (!pageElement) throw new Error("Não foi possível encontrar o conteúdo do contrato");
 
+    // O html2canvas fecha o canvas alguns pixéis acima do fim real do conteúdo
+    // e corta a última linha do documento ao meio (visível já antes desta
+    // alteração, onde a vítima era o rodapé em vez do texto). Um espaçador
+    // final garante que a linha sacrificada é sempre espaço em branco.
+    const bottomSpacer = iframeDocument.createElement("div");
+    bottomSpacer.setAttribute("aria-hidden", "true");
+    bottomSpacer.style.height = `${CANVAS_BOTTOM_SPACER_PX}px`;
+    pageElement.appendChild(bottomSpacer);
+
     const safeFileName = `${fileNameBase}`
       .trim()
       .replace(/[^a-zA-Z0-9-_]+/g, "_")
@@ -1371,21 +1527,28 @@ export async function downloadContractDocumentPdf(
     const marginRight = Number(s.margin_right ?? 20) || 20;
     const marginBottomBase = Number(s.margin_bottom ?? 20) || 20;
     const marginLeft = Number(s.margin_left ?? 20) || 20;
-    // Reserva extra para evitar que o rodapé (renderizado como conteúdo
-    // pelo html2pdf) encavalite o último parágrafo da página.
-    const marginBottom = s.footer_text ? marginBottomBase + 4 : marginBottomBase;
 
-    await html2pdf()
+    // O rodapé (texto + "Página X de Y") deixou de ser conteúdo do documento e
+    // passou a ser desenhado com jsPDF em TODAS as páginas — ver
+    // `drawContractPdfFooters`. Reservamos-lhe espaço alargando a margem
+    // inferior usada na paginação, para o conteúdo nunca lhe encavalitar.
+    const jsPdfOptions = {
+      unit: "mm" as const,
+      format: s.page_size === "LETTER" ? "letter" : "a4",
+      orientation: (s.page_orientation === "landscape" ? "landscape" : "portrait") as "landscape" | "portrait",
+    };
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF(jsPdfOptions);
+    const footerLayout = computeFooterLayout(s, pdf);
+    const marginBottom = Math.max(marginBottomBase, footerLayout.reservedMm);
+
+    const pdfWorker = html2pdf()
       .set({
         margin: [marginTop, marginRight, marginBottom, marginLeft],
         filename: `${safeFileName}.pdf`,
         image: { type: "jpeg", quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-        jsPDF: {
-          unit: "mm",
-          format: s.page_size === "LETTER" ? "letter" : "a4",
-          orientation: s.page_orientation === "landscape" ? "landscape" : "portrait",
-        },
+        jsPDF: jsPdfOptions,
         pagebreak: {
           mode: ["css", "legacy"],
           avoid: [
@@ -1402,11 +1565,238 @@ export async function downloadContractDocumentPdf(
           ],
         },
       })
-      .from(pageElement)
-      .save();
+      .from(pageElement);
+
+    await paginateWorkerCanvasToPdf(pdfWorker, pdf, { marginTop, marginLeft });
+    drawContractPdfFooters(pdf, s, footerLayout);
+    pdf.save(`${safeFileName}.pdf`);
   } finally {
     iframe?.remove();
   }
+}
+
+/** Espaçador (px CSS) no fim do documento, para o html2canvas não cortar a última linha. */
+const CANVAS_BOTTOM_SPACER_PX = 24;
+
+/** Corpo de letra (pt) do rodapé desenhado pelo jsPDF. */
+const FOOTER_FONT_PT = 9;
+const PT_TO_MM = 25.4 / 72;
+/** Espaço em branco (mm) entre o rodapé e o limite físico da folha. */
+const FOOTER_BOTTOM_PADDING_MM = 4;
+/** Espaço em branco (mm) entre o texto do rodapé e a numeração. */
+const FOOTER_PAGE_NUM_GAP_MM = 2.5;
+/** Espaço em branco (mm) entre o divisor e a primeira linha do rodapé. */
+const FOOTER_DIVIDER_GAP_MM = 2;
+/** Folga (mm) entre o fim do conteúdo e o divisor do rodapé. */
+const FOOTER_CONTENT_CLEARANCE_MM = 4;
+
+interface ContractFooterLayout {
+  showFooterText: boolean;
+  showPageNumbers: boolean;
+  /** Texto do rodapé já partido nas linhas que cabem na largura útil. */
+  textLines: string[];
+  lineHeightMm: number;
+  /** Margem inferior mínima que a paginação tem de respeitar. */
+  reservedMm: number;
+}
+
+/**
+ * Calcula, a partir das definições do documento, quanto espaço o rodapé ocupa.
+ * Feito ANTES da paginação: o conteúdo tem de parar acima desta zona.
+ *
+ * `pdf` é usado só para medir a quebra de linha do texto do rodapé com a mesma
+ * fonte com que ele vai ser desenhado.
+ */
+function computeFooterLayout(settings: Record<string, any>, pdf: any): ContractFooterLayout {
+  const showFooter = settings.show_footer !== false;
+  const footerText = String(settings.footer_text || "");
+  const showFooterText = showFooter && footerText.length > 0;
+  const showPageNumbers = showFooter && settings.show_page_numbers !== false;
+  const lineHeightMm = FOOTER_FONT_PT * PT_TO_MM * 1.25;
+
+  const pageWidthMm = pdf.internal.pageSize.getWidth();
+  const marginLeft = Number(settings.margin_left ?? 20) || 20;
+  const marginRight = Number(settings.margin_right ?? 20) || 20;
+  const contentWidthMm = Math.max(20, pageWidthMm - marginLeft - marginRight);
+
+  pdf.setFontSize(FOOTER_FONT_PT);
+  const textLines: string[] = showFooterText ? pdf.splitTextToSize(footerText, contentWidthMm) : [];
+
+  const reservedMm =
+    FOOTER_BOTTOM_PADDING_MM +
+    (showPageNumbers ? lineHeightMm + FOOTER_PAGE_NUM_GAP_MM : 0) +
+    (showFooterText ? textLines.length * lineHeightMm + FOOTER_DIVIDER_GAP_MM : 0) +
+    FOOTER_CONTENT_CLEARANCE_MM;
+
+  return { showFooterText, showPageNumbers, textLines, lineHeightMm, reservedMm };
+}
+
+/**
+ * Escreve o rodapé (texto + "Página X de Y") em TODAS as páginas do PDF.
+ *
+ * Substitui o rodapé que era injetado como conteúdo do documento e que, por
+ * isso, (a) só aparecia no fim da última página e (b) dizia sempre
+ * "Página 1 de 1" — uma constante literal, independente do nº real de páginas.
+ * Mesmo padrão já usado no export de minutas (TemplateExportButtons).
+ */
+export function drawContractPdfFooters(
+  pdf: any,
+  settings: Record<string, any>,
+  layout: ContractFooterLayout = computeFooterLayout(settings, pdf),
+): void {
+  if (!layout.showFooterText && !layout.showPageNumbers) return;
+
+  const pageWidthMm = pdf.internal.pageSize.getWidth();
+  const pageHeightMm = pdf.internal.pageSize.getHeight();
+  const marginLeft = Number(settings.margin_left ?? 20) || 20;
+  const marginRight = Number(settings.margin_right ?? 20) || 20;
+  const contentWidthMm = Math.max(20, pageWidthMm - marginLeft - marginRight);
+
+  const total = pdf.getNumberOfPages();
+  const textLines = layout.textLines;
+  const textBlockHeightMm = textLines.length * layout.lineHeightMm;
+
+  const pageNumBaselineY = pageHeightMm - FOOTER_BOTTOM_PADDING_MM;
+  const textFirstBaselineY =
+    (layout.showPageNumbers ? pageNumBaselineY - FOOTER_PAGE_NUM_GAP_MM : pageNumBaselineY) -
+    textBlockHeightMm +
+    layout.lineHeightMm * 0.85;
+  const dividerY = textFirstBaselineY - layout.lineHeightMm * 0.85 - FOOTER_DIVIDER_GAP_MM;
+
+  for (let i = 1; i <= total; i++) {
+    pdf.setPage(i);
+    pdf.setFontSize(FOOTER_FONT_PT);
+    pdf.setTextColor(107, 114, 128);
+
+    if (layout.showFooterText) {
+      pdf.setDrawColor(229, 231, 235);
+      pdf.setLineWidth(0.2);
+      pdf.line(marginLeft, dividerY, pageWidthMm - marginRight, dividerY);
+      textLines.forEach((line, idx) => {
+        pdf.text(line, pageWidthMm / 2, textFirstBaselineY + idx * layout.lineHeightMm, { align: "center" });
+      });
+    }
+    if (layout.showPageNumbers) {
+      pdf.text(`Página ${i} de ${total}`, pageWidthMm / 2, pageNumBaselineY, { align: "center" });
+    }
+  }
+}
+
+/**
+ * Fatia o canvas do html2pdf em páginas, cortando sempre numa faixa sem tinta.
+ *
+ * Porquê não usar o `toPdf()` do html2pdf: a paginação dele acontece em dois
+ * sítios que não concordam entre si. O plugin `pagebreak` insere os "pads" com
+ * base no layout do DOM vivo, mas o `toPdf()` corta o canvas produzido pelo
+ * html2canvas — e o html2canvas re-faz o layout num clone, com diferenças de
+ * alguns pixéis. Onde um bloco acaba encostado ao limite da página, esse desvio
+ * chega para a última linha ficar partida ao meio: metade no fundo de uma
+ * página, metade no topo da seguinte (medido: 317 pixéis com tinta exatamente
+ * na linha de corte do CC-2026-0011).
+ *
+ * Aqui o corte é decidido sobre os pixéis que vão mesmo para o PDF: procura-se,
+ * a partir da altura nominal e para cima, a primeira linha de pixéis sem tinta.
+ * Isto é indiferente à causa do desvio e cobre também texto solto e blocos que
+ * o `pagebreak.avoid` não protege.
+ */
+async function paginateWorkerCanvasToPdf(
+  worker: any,
+  pdf: any,
+  offsets: { marginTop: number; marginLeft: number },
+): Promise<void> {
+  await worker.toContainer();
+  await worker.toCanvas();
+
+  const canvas: HTMLCanvasElement = worker.prop.canvas;
+  const pageSize = worker.prop.pageSize;
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const pxPageHeight = Math.max(1, Math.floor(canvas.width * pageSize.inner.ratio));
+  const mmPerPx = pageSize.inner.width / canvas.width;
+
+  const pageCanvas = document.createElement("canvas");
+  pageCanvas.width = canvas.width;
+  const pageContext = pageCanvas.getContext("2d");
+
+  let top = 0;
+  let isFirstPage = true;
+  while (top < canvas.height) {
+    const nominalCut = Math.min(top + pxPageHeight, canvas.height);
+    const cut =
+      nominalCut >= canvas.height
+        ? canvas.height
+        : findInkFreeCut(context, canvas.width, top, nominalCut, pxPageHeight);
+    const sliceHeight = cut - top;
+    if (sliceHeight <= 0) break;
+
+    pageCanvas.height = sliceHeight;
+    if (pageContext) {
+      pageContext.fillStyle = "#ffffff";
+      pageContext.fillRect(0, 0, canvas.width, sliceHeight);
+      pageContext.drawImage(canvas, 0, top, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+    }
+
+    if (!isFirstPage) pdf.addPage();
+    pdf.addImage(
+      pageCanvas.toDataURL("image/jpeg", 0.98),
+      "JPEG",
+      offsets.marginLeft,
+      offsets.marginTop,
+      pageSize.inner.width,
+      sliceHeight * mmPerPx,
+    );
+
+    isFirstPage = false;
+    top = cut;
+  }
+}
+
+/** Fração máxima de uma página que se aceita perder para fugir de uma linha de texto. */
+const INK_SCAN_FRACTION = 0.14;
+/** Um pixel conta como "tinta" abaixo deste valor em qualquer canal. */
+const INK_THRESHOLD = 235;
+
+/**
+ * Devolve a maior altura <= `nominalCut` cuja linha de pixéis não tem tinta.
+ * Se não houver nenhuma dentro da janela de procura, devolve `nominalCut`
+ * (cortar no sítio nominal é melhor do que produzir uma página vazia).
+ */
+function findInkFreeCut(
+  context: CanvasRenderingContext2D | null,
+  width: number,
+  top: number,
+  nominalCut: number,
+  pxPageHeight: number,
+): number {
+  if (!context) return nominalCut;
+  const maxScan = Math.min(Math.round(pxPageHeight * INK_SCAN_FRACTION), nominalCut - top - 1);
+  if (maxScan <= 0) return nominalCut;
+
+  let band: ImageData;
+  try {
+    band = context.getImageData(0, nominalCut - maxScan, width, maxScan);
+  } catch {
+    // Canvas contaminado por imagem cross-origin: sem leitura de pixéis,
+    // mantém-se o corte nominal.
+    return nominalCut;
+  }
+
+  for (let row = maxScan - 1; row >= 0; row--) {
+    let hasInk = false;
+    for (let x = 0; x < width; x++) {
+      const offset = (row * width + x) * 4;
+      if (
+        band.data[offset] < INK_THRESHOLD ||
+        band.data[offset + 1] < INK_THRESHOLD ||
+        band.data[offset + 2] < INK_THRESHOLD
+      ) {
+        hasInk = true;
+        break;
+      }
+    }
+    if (!hasInk) return nominalCut - maxScan + row;
+  }
+  return nominalCut;
 }
 
 export function buildContractPrintHtml(document: ResolvedContractDocument, title: string) {
@@ -1564,7 +1954,7 @@ export function buildContractPrintHtml(document: ResolvedContractDocument, title
     <div class="page">
       ${renderContractHeaderHtml(document.settings as any, document.variableData as any)}
       <div class="content">${sanitizedBody}</div>
-      ${document.settings.show_footer !== false ? `<div class="footer">${footerText ? `<p>${escapeHtml(footerText)}</p>` : ""}${document.settings.show_page_numbers !== false ? `<p>${escapeHtml("Página 1 de 1")}</p>` : ""}</div>` : ""}
+      ${document.settings.show_footer !== false && footerText ? `<div class="footer"><p>${escapeHtml(footerText)}</p></div>` : ""}
     </div>
     <script>
       window.addEventListener('load', () => {

@@ -7,7 +7,13 @@ import {
   type StandardExportPayload,
 } from "./xlsxExport";
 
-export type ControlledExportModule = "clients" | "contacts" | "quotes" | "leads";
+export type ControlledExportModule =
+  | "clients"
+  | "contacts"
+  | "quotes"
+  | "leads"
+  | "proposals"
+  | "client_contracts";
 
 interface ControlledExportResponse {
   filename: string;
@@ -42,6 +48,13 @@ export interface RequestControlledExportOptions {
     assignedTo?: string;
     /** Restrict to quotes created by or assigned to the calling user (mirrors the "só os meus" toggle). */
     onlyMine?: boolean;
+    /**
+     * Explicit row id allow-list for "exportar apenas a seleção" — an
+     * ADDITIONAL filter on top of the module's normal org/owner scope, never
+     * a substitute for it (enforced server-side, see
+     * supabase/functions/export-data/requestScoping.ts).
+     */
+    ids?: string[];
   };
   download?: (payload: StandardExportPayload, filename: string) => void;
 }
@@ -73,8 +86,13 @@ export async function requestControlledExport(
   });
 
   if (error || !isControlledExportResponse(data)) {
-    const message = await getFriendlyErrorMessage(error, getLocalizedFallback("friendlyError.exportFailed"));
-    throw new Error(message);
+    const exportFailed = getLocalizedFallback("friendlyError.exportFailed");
+    const message = await getFriendlyErrorMessage(error, exportFailed);
+    // A bare non-2xx maps to the generic "server error", which tells the user
+    // less than knowing the export itself failed. Anything more specific the
+    // function reported — a row limit, an authorization refusal — is kept.
+    const generic = getLocalizedFallback("friendlyError.serverError");
+    throw new Error(message === generic ? exportFailed : message);
   }
 
   download(

@@ -21,7 +21,7 @@ import {
   ChevronRight,
   ExternalLink
 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { HelpButton } from "@/components/HelpButton";
 

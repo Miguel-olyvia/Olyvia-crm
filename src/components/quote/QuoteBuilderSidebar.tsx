@@ -14,6 +14,7 @@ import { formatCurrency } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import type { InlineQuoteData } from "@/components/proposals/InlineQuoteBuilder";
 import { calculateInlineQuoteTotals } from "@/utils/quotes/inlineQuoteVatCalculation";
+import { getLineSubtotal } from "@/utils/quotes/quoteLinePricing";
 
 interface SectionSummary {
   name: string;
@@ -50,6 +51,9 @@ interface QuoteBuilderSidebarProps {
   downloadingPdf?: boolean;
   inlineQuotes?: InlineQuoteData[];
   onSaveAsTemplate?: () => void;
+  /** Mesma regra do resto da app: so quem pode ver custos/margens (quotes.manage
+   *  ou super-admin) ve o cartao de Margem Global / Custo / Lucro. */
+  canViewCosts: boolean;
 }
 
 function MarginBadge({ margin }: { margin: number }) {
@@ -75,6 +79,7 @@ export function QuoteBuilderSidebar({
   downloadingPdf = false,
   inlineQuotes = [],
   onSaveAsTemplate,
+  canViewCosts,
 }: QuoteBuilderSidebarProps) {
   const [dealBudget, setDealBudget] = useState<number | null>(null);
   const [dealEntityName, setDealEntityName] = useState<string>("");
@@ -104,16 +109,9 @@ export function QuoteBuilderSidebar({
   // Calculate section summaries for main quote
   const sectionSummaries: SectionSummary[] = sections.map(sectionName => {
     const sectionLines = lines.filter(l => l.section_name === sectionName && l.qt > 0);
-    const subtotal = sectionLines.reduce((sum: number, line: any) => {
-      const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-      const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
-      const unitPrice = isManual
-        ? (line.retail_price_unit || 0)
-        : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-      const preco = unitPrice * line.qt;
-      const lineDiscount = line.discount_percent || 0;
-      return sum + preco * (1 - lineDiscount / 100);
-    }, 0);
+    // Subtotal da secção pela fonte única: o preço de venda definido manda e o
+    // preço unitário é fechado ao cêntimo antes de multiplicar pela quantidade.
+    const subtotal = sectionLines.reduce((sum: number, line: any) => sum + getLineSubtotal(line), 0);
     return { name: sectionName, itemCount: sectionLines.length, subtotal };
   }).filter(s => s.itemCount > 0);
 
@@ -127,19 +125,12 @@ export function QuoteBuilderSidebar({
   if (hasCostData) {
     // Only lines that actually carry cost data participate in the margin
     // calculation — a no-cost line's full sale price must never be counted
-    // as 100%-margin revenue. Use the same retail-price fallback as
-    // sectionSummaries/calcLinePrice so manually-priced lines aren't
-    // treated as €0 revenue here.
+    // as 100%-margin revenue. A receita usa o mesmo subtotal da fonte única,
+    // para que linhas com preço de venda definido não contem como €0.
     linesWithCost.forEach((line: any) => {
       const costUnit = line.cost_price || 0;
       totalCost += costUnit * line.qt;
-      const custoUnit = line.custo_material_unit + line.custo_mao_obra_unit;
-      const isManual = custoUnit === 0 && (line.retail_price_unit !== undefined && line.retail_price_unit !== null);
-      const unitPrice = isManual
-        ? (line.retail_price_unit || 0)
-        : custoUnit * (1 + line.margem_percent / 100) * (1 + line.int_percent / 100);
-      const precoDesc = unitPrice * (1 - (line.discount_percent || 0) / 100);
-      totalSales += precoDesc * line.qt;
+      totalSales += getLineSubtotal(line);
     });
   }
   // totalSales above only applies each LINE's own discount_percent — it never
@@ -330,8 +321,8 @@ export function QuoteBuilderSidebar({
               </div>
             )}
           </div>
-          {/* Margin Card - only shown when cost data exists */}
-          {hasCostData && (
+          {/* Margin Card - only for who may view costs, and only when cost data exists */}
+          {canViewCosts && hasCostData && (
             <div className={`rounded-lg p-4 text-center border ${globalMargin > 30 ? "bg-green-50 border-green-200" : globalMargin >= 15 ? "bg-yellow-50 border-yellow-200" : "bg-red-50 border-red-200"}`}>
               <p className="text-xs font-semibold uppercase text-muted-foreground tracking-wider">Margem Global</p>
               <p className={`text-3xl font-bold ${globalMargin > 30 ? "text-green-600" : globalMargin >= 15 ? "text-yellow-600" : "text-red-600"}`}>

@@ -1,5 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { captureFlowError } from '@/lib/observability/captureFlowError';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 import { callFiscalEntityResolve } from '@/lib/nif/callFiscalEntityResolve';
 import { callNifReveal, callNifRevealSingle } from '@/lib/nif/callNifReveal';
@@ -38,6 +39,20 @@ export async function selectInBatches<T>(
   runQuery: (batch: string[]) => Promise<{ data: T[] | null }>,
 ): Promise<T[]> {
   const results = await Promise.all(chunk(ids, ID_BATCH_SIZE).map(runQuery));
+  return results.flatMap(r => r.data || []);
+}
+
+// Same batching, but a failed batch is an error and not an empty list.
+// Use this when the caller DECIDES something from the result: a listing that
+// filters its rows by what came back here will quietly show nothing at all if
+// the query failed, and look like a permission problem instead of a bug.
+export async function selectInBatchesOrThrow<T>(
+  ids: string[],
+  runQuery: (batch: string[]) => Promise<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<T[]> {
+  const results = await Promise.all(chunk(ids, ID_BATCH_SIZE).map(runQuery));
+  const failed = results.find(r => r.error);
+  if (failed?.error) throw new Error(failed.error.message);
   return results.flatMap(r => r.data || []);
 }
 
@@ -144,6 +159,7 @@ export function useEntityIdentity() {
       return map;
     } catch (error) {
       console.error('Error resolving entity identities:', error);
+      captureFlowError(error, 'db-error-leaked-to-ui');
       return {};
     } finally {
       setLoading(false);
@@ -155,7 +171,39 @@ export function useEntityIdentity() {
     return identityMapRef.current[entityId] || null;
   }, []);
 
-  return { identityMap, resolveEntities, getIdentity, loading };
+  /**
+   * Drop entities from the cache so the next resolveEntities() fetches them
+   * again.
+   *
+   * Call this after writing to anew_entities / anew_entity_emails /
+   * anew_entity_phones / the fiscal link for an entity. Reloading the list
+   * that owns the row is NOT enough: name, email, phone and VAT are served
+   * from this cache, and resolveEntities() skips any id already in it, so the
+   * screen kept showing the pre-edit values until a full page reload.
+   *
+   * The ref is updated synchronously as well as the state: a resolveEntities()
+   * called in the same tick reads the ref, not the state, and would otherwise
+   * still see the stale entries and skip the refetch.
+   */
+  const invalidateEntities = useCallback((entityIds: (string | null | undefined)[]) => {
+    const ids = entityIds.filter((id): id is string => !!id);
+    if (ids.length === 0) return;
+
+    const next = { ...identityMapRef.current };
+    let removed = false;
+    for (const id of ids) {
+      if (id in next) {
+        delete next[id];
+        removed = true;
+      }
+    }
+    if (!removed) return;
+
+    identityMapRef.current = next;
+    setIdentityMap(next);
+  }, []);
+
+  return { identityMap, resolveEntities, getIdentity, invalidateEntities, loading };
 }
 
 /**
@@ -355,11 +403,11 @@ export async function createEntityWithIdentity(params: {
   const entityId = entity.id;
 
   if (email) {
-    await supabase.from('anew_entity_emails').insert({ entity_id: entityId, email, email_type: 'work', is_primary: true, created_by: createdBy });
+    await supabase.from('anew_entity_emails').insert({ entity_id: entityId, email, email_type: 'work', is_primary: true, created_by: createdBy }).throwOnError();
   }
 
   if (phone) {
-    await supabase.from('anew_entity_phones').insert({ entity_id: entityId, phone_number: phone, country_code: phoneCountryCode || '+351', phone_type: 'work', is_primary: true, created_by: createdBy });
+    await supabase.from('anew_entity_phones').insert({ entity_id: entityId, phone_number: phone, country_code: phoneCountryCode || '+351', phone_type: 'work', is_primary: true, created_by: createdBy }).throwOnError();
   }
 
   if (vat) {
@@ -369,7 +417,7 @@ export async function createEntityWithIdentity(params: {
     });
     if (resolveError) throw resolveError;
     if (resolved) {
-      await supabase.from('anew_entity_fiscal_entities').insert({ entity_id: entityId, fiscal_entity_id: resolved.fiscalEntityId, is_primary: true, created_by: createdBy });
+      await supabase.from('anew_entity_fiscal_entities').insert({ entity_id: entityId, fiscal_entity_id: resolved.fiscalEntityId, is_primary: true, created_by: createdBy }).throwOnError();
     }
   }
 

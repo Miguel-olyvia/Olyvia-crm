@@ -16,6 +16,7 @@ import { useToast } from "@/hooks/use-toast";
 import { generateQuotePdfBlob, blobToBase64 } from "@/utils/generateQuotePdfBlob";
 import { resolveBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { contactCallSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface DealProposalOption {
   id: string;
@@ -42,6 +43,13 @@ interface RegisterCallDialogProps {
   entityId: string;
   entityName: string;
   organizationId: string;
+  /**
+   * When the dialog is opened from a proposal's context (e.g. the Proposals
+   * page "Registar atividade" action), the interaction is linked to that
+   * proposal so it also shows up in the proposal's tracking timeline. The
+   * link to the entity/client is unaffected either way.
+   */
+  proposalId?: string | null;
   /**
    * Called after the interaction row is inserted, so the caller can perform
    * any entity-specific bookkeeping (e.g. updating `anew_contacts.last_interaction_at`
@@ -70,7 +78,7 @@ const NEXT_ACTIONS = [
 ];
 
 export function RegisterCallDialog({
-  open, onOpenChange, entityId, entityName, organizationId, onInteractionSaved, onCallRegistered, onOpenWhatsApp, onOpenEmail,
+  open, onOpenChange, entityId, entityName, organizationId, proposalId, onInteractionSaved, onCallRegistered, onOpenWhatsApp, onOpenEmail,
 }: RegisterCallDialogProps) {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
@@ -233,6 +241,7 @@ export function RegisterCallDialog({
         next_action_channel: isAnswered && nextAction && needsChannel ? nextActionChannel : null,
         interaction_at: now,
         created_by: businessUserId,
+        proposal_id: proposalId || null,
       });
       if (error) throw error;
 
@@ -255,6 +264,7 @@ export function RegisterCallDialog({
         openChannel(selectedChannel);
       }
     } catch (err: any) {
+      captureFlowError(err, "entity-interaction-tracking");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     } finally {
       setSaving(false);

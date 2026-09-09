@@ -42,6 +42,10 @@ export default function PublicProposal() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [accepting, setAccepting] = useState(false);
+  // Distinto de `error`, que faz o short-circuit da pagina inteira para
+  // "Proposta nao disponivel". Uma aceitacao falhada nao pode fazer a proposta
+  // desaparecer do ecra — o cliente tem de a continuar a ver e poder tentar de novo.
+  const [acceptError, setAcceptError] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState(false);
   
   // Verification states
@@ -150,63 +154,41 @@ export default function PublicProposal() {
     if (data) setRejectionReasons(data);
   };
 
-  const resolveAcceptedStageId = async (organizationId: string | null | undefined): Promise<string | null> => {
-    try {
-      if (organizationId) {
-        const { data: orgStage } = await (supabase
-          .from("proposal_workflow_stages") as any)
-          .select("id")
-          .eq("organization_id", organizationId)
-          .eq("is_active", true)
-          .in("name", ["accepted", "aceite"])
-          .limit(1)
-          .maybeSingle();
-        if (orgStage?.id) return orgStage.id;
-      }
-      const { data: globalStage } = await (supabase
-        .from("proposal_workflow_stages") as any)
-        .select("id")
-        .is("organization_id", null)
-        .eq("is_active", true)
-        .in("name", ["accepted", "aceite"])
-        .limit(1)
-        .maybeSingle();
-      return globalStage?.id ?? null;
-    } catch (e) {
-      console.error("Error resolving accepted stage:", e);
-      return null;
-    }
-  };
-
+  /**
+   * Aceitacao sem verificacao (template com `accept_verification_method: "none"`).
+   *
+   * Delega no edge function `accept-proposal`, espelho do `reject-proposal` que
+   * o botao de recusa ja usa. NAO faz o UPDATE aqui por duas razoes:
+   *
+   *  1. `acceptance_ip` e um campo de prova. O browser nao consegue saber o seu
+   *     IP publico, e esta funcao gravava por isso a constante `"client"` — um
+   *     valor com aspeto de prova que nao prova nada. So o servidor ve o IP.
+   *  2. Nao existe politica de RLS que permita ao papel anon fazer UPDATE em
+   *     `proposals`, por isso este UPDATE nunca escrevia nada e o erro era
+   *     engolido: o botao aparentava funcionar e nao funcionava.
+   */
   const handleDirectAccept = async () => {
-    if (!portalData?.proposal) return;
+    if (!portalData?.proposal || !token) return;
     setAccepting(true);
+    setAcceptError(null);
     try {
-      const acceptedStageId = await resolveAcceptedStageId(portalData.proposal.organization_id);
-      const { data, error } = await supabase
-        .from("proposals")
-        .update({
-          status: "accepted",
-          accepted_at: new Date().toISOString(),
-          acceptance_ip: "client",
-          acceptance_user_agent: navigator.userAgent,
-          ...(acceptedStageId ? { stage_id: acceptedStageId } : {}),
-        })
-        .eq("id", portalData.proposal.id)
-        .in("status", ["draft", "sent", "pending"])
-        .select("id");
-      
-      if (error) throw error;
-      if (!data || data.length === 0) {
-        console.warn("Proposal already actioned — no rows updated");
-        return;
+      const { data, error: fnError } = await supabase.functions.invoke("accept-proposal", {
+        body: { proposal_id: portalData.proposal.id, public_token: token },
+      });
+
+      if (fnError) throw fnError;
+      if (data?.error) throw new Error(data.error);
+      if (data?.result && data.result.success === false) {
+        throw new Error("Esta proposta já não pode ser aceite.");
       }
+
       setPortalData({
         ...portalData,
         proposal: { ...portalData.proposal, status: "accepted" },
       });
     } catch (err: any) {
       console.error("Error accepting proposal:", err);
+      setAcceptError(err?.message || "Não foi possível registar a aceitação. Tente novamente.");
     } finally {
       setAccepting(false);
     }
@@ -420,6 +402,15 @@ export default function PublicProposal() {
             }
           }}
         />
+        {acceptError && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+          >
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>{acceptError}</span>
+          </div>
+        )}
       </div>
 
       {/* Verification Dialog */}

@@ -107,7 +107,6 @@ export type Database = {
       }
       activities: {
         Row: {
-          assigned_to: string | null
           client_id: string | null
           completed: boolean | null
           completed_at: string | null
@@ -125,7 +124,6 @@ export type Database = {
           updated_at: string
         }
         Insert: {
-          assigned_to?: string | null
           client_id?: string | null
           completed?: boolean | null
           completed_at?: string | null
@@ -139,11 +137,10 @@ export type Database = {
           lead_id?: string | null
           organization_id?: string | null
           title: string
-          type: string
+          type?: string
           updated_at?: string
         }
         Update: {
-          assigned_to?: string | null
           client_id?: string | null
           completed?: boolean | null
           completed_at?: string | null
@@ -161,6 +158,20 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "activities_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "activities_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
           {
             foreignKeyName: "activities_deal_id_fkey"
             columns: ["deal_id"]
@@ -934,6 +945,7 @@ export type Database = {
           duc_number: string | null
           id: string
           organization_id: string
+          proposal_id: string | null
           root_organization_id: string | null
           status: string
           title: string | null
@@ -953,6 +965,7 @@ export type Database = {
           duc_number?: string | null
           id?: string
           organization_id: string
+          proposal_id?: string | null
           root_organization_id?: string | null
           status?: string
           title?: string | null
@@ -972,6 +985,7 @@ export type Database = {
           duc_number?: string | null
           id?: string
           organization_id?: string
+          proposal_id?: string | null
           root_organization_id?: string | null
           status?: string
           title?: string | null
@@ -1021,6 +1035,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "ops_v_morada_cliente"
             referencedColumns: ["cliente_id"]
+          },
+          {
+            foreignKeyName: "anew_client_ducs_proposal_id_fkey"
+            columns: ["proposal_id"]
+            isOneToOne: false
+            referencedRelation: "proposals"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -1346,6 +1367,51 @@ export type Database = {
         }
         Relationships: []
       }
+      anew_entities_apagadas_backup: {
+        Row: {
+          backup_em: string
+          backup_motivo: string
+          created_at: string
+          created_by: string | null
+          display_name: string
+          first_name: string | null
+          id: string
+          last_name: string | null
+          search_text: string | null
+          status: string
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          backup_em?: string
+          backup_motivo?: string
+          created_at?: string
+          created_by?: string | null
+          display_name: string
+          first_name?: string | null
+          id?: string
+          last_name?: string | null
+          search_text?: string | null
+          status?: string
+          type: string
+          updated_at?: string
+        }
+        Update: {
+          backup_em?: string
+          backup_motivo?: string
+          created_at?: string
+          created_by?: string | null
+          display_name?: string
+          first_name?: string | null
+          id?: string
+          last_name?: string | null
+          search_text?: string | null
+          status?: string
+          type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       anew_entity_addresses: {
         Row: {
           address_id: string
@@ -1436,6 +1502,45 @@ export type Database = {
           is_verified?: boolean | null
         }
         Update: {
+          created_at?: string
+          created_by?: string | null
+          email?: string
+          email_type?: string | null
+          entity_id?: string
+          id?: string
+          is_primary?: boolean | null
+          is_verified?: boolean | null
+        }
+        Relationships: []
+      }
+      anew_entity_emails_apagados_backup: {
+        Row: {
+          backup_em: string
+          backup_motivo: string
+          created_at: string
+          created_by: string | null
+          email: string
+          email_type: string | null
+          entity_id: string
+          id: string
+          is_primary: boolean | null
+          is_verified: boolean | null
+        }
+        Insert: {
+          backup_em?: string
+          backup_motivo?: string
+          created_at?: string
+          created_by?: string | null
+          email: string
+          email_type?: string | null
+          entity_id: string
+          id?: string
+          is_primary?: boolean | null
+          is_verified?: boolean | null
+        }
+        Update: {
+          backup_em?: string
+          backup_motivo?: string
           created_at?: string
           created_by?: string | null
           email?: string
@@ -1797,10 +1902,12 @@ export type Database = {
           entity_is_client: boolean | null
           field_values: Json
           id: string
+          last_activity_at: string | null
           last_contact_at: string | null
           last_contact_by: string | null
           last_contact_result: string | null
           lead_district_id: string | null
+          list_sort_at: string | null
           locale: string | null
           lost_reason: string | null
           needs_manual_scheduling: boolean
@@ -1821,6 +1928,7 @@ export type Database = {
           source_id: string | null
           source_note: string | null
           status: string | null
+          status_before_conversion: string | null
           tags: string[] | null
           updated_at: string
           workflow_stage_id: string | null
@@ -1844,10 +1952,12 @@ export type Database = {
           entity_is_client?: boolean | null
           field_values?: Json
           id?: string
+          last_activity_at?: string | null
           last_contact_at?: string | null
           last_contact_by?: string | null
           last_contact_result?: string | null
           lead_district_id?: string | null
+          list_sort_at?: string | null
           locale?: string | null
           lost_reason?: string | null
           needs_manual_scheduling?: boolean
@@ -1868,6 +1978,7 @@ export type Database = {
           source_id?: string | null
           source_note?: string | null
           status?: string | null
+          status_before_conversion?: string | null
           tags?: string[] | null
           updated_at?: string
           workflow_stage_id?: string | null
@@ -1891,10 +2002,12 @@ export type Database = {
           entity_is_client?: boolean | null
           field_values?: Json
           id?: string
+          last_activity_at?: string | null
           last_contact_at?: string | null
           last_contact_by?: string | null
           last_contact_result?: string | null
           lead_district_id?: string | null
+          list_sort_at?: string | null
           locale?: string | null
           lost_reason?: string | null
           needs_manual_scheduling?: boolean
@@ -1915,6 +2028,7 @@ export type Database = {
           source_id?: string | null
           source_note?: string | null
           status?: string | null
+          status_before_conversion?: string | null
           tags?: string[] | null
           updated_at?: string
           workflow_stage_id?: string | null
@@ -2117,6 +2231,7 @@ export type Database = {
           organization_id: string
           relationship_type: string
           role_id: string
+          role_is_client: boolean
           start_date: string | null
           status: string
           updated_at: string
@@ -2135,6 +2250,7 @@ export type Database = {
           organization_id: string
           relationship_type?: string
           role_id: string
+          role_is_client?: boolean
           start_date?: string | null
           status?: string
           updated_at?: string
@@ -2153,6 +2269,7 @@ export type Database = {
           organization_id?: string
           relationship_type?: string
           role_id?: string
+          role_is_client?: boolean
           start_date?: string | null
           status?: string
           updated_at?: string
@@ -2619,6 +2736,90 @@ export type Database = {
           email?: string
           email_signature?: string | null
           entity_id?: string | null
+          has_completed_welcome?: boolean | null
+          id?: string
+          location?: string | null
+          name?: string
+          phone?: string | null
+          position?: string | null
+          registration_origin?: string
+          status?: string
+          template_id?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      anew_users_ligacao_ficha_backup: {
+        Row: {
+          a_corrigir: boolean
+          auth_user_id: string | null
+          avatar_url: string | null
+          backup_em: string
+          backup_motivo: string
+          created_at: string
+          created_by: string | null
+          custom_attributes: Json | null
+          deleted_at: string | null
+          description: string | null
+          email: string
+          email_signature: string | null
+          entity_id: string | null
+          entity_id_anterior: string | null
+          entity_id_original: string | null
+          has_completed_welcome: boolean | null
+          id: string
+          location: string | null
+          name: string
+          phone: string | null
+          position: string | null
+          registration_origin: string
+          status: string
+          template_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          a_corrigir?: boolean
+          auth_user_id?: string | null
+          avatar_url?: string | null
+          backup_em?: string
+          backup_motivo?: string
+          created_at?: string
+          created_by?: string | null
+          custom_attributes?: Json | null
+          deleted_at?: string | null
+          description?: string | null
+          email: string
+          email_signature?: string | null
+          entity_id?: string | null
+          entity_id_anterior?: string | null
+          entity_id_original?: string | null
+          has_completed_welcome?: boolean | null
+          id?: string
+          location?: string | null
+          name: string
+          phone?: string | null
+          position?: string | null
+          registration_origin?: string
+          status?: string
+          template_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          a_corrigir?: boolean
+          auth_user_id?: string | null
+          avatar_url?: string | null
+          backup_em?: string
+          backup_motivo?: string
+          created_at?: string
+          created_by?: string | null
+          custom_attributes?: Json | null
+          deleted_at?: string | null
+          description?: string | null
+          email?: string
+          email_signature?: string | null
+          entity_id?: string | null
+          entity_id_anterior?: string | null
+          entity_id_original?: string | null
           has_completed_welcome?: boolean | null
           id?: string
           location?: string | null
@@ -5342,7 +5543,9 @@ export type Database = {
           company_signature_date: string | null
           company_signed_by_id: string | null
           company_signed_by_name: string | null
+          contract_body_frozen_html: string | null
           contract_body_html: string | null
+          contract_frozen_at: string | null
           contract_number: string | null
           contract_template_id: string | null
           created_at: string
@@ -5372,6 +5575,7 @@ export type Database = {
           status_changed_at: string | null
           status_changed_by: string | null
           template_id: string | null
+          template_snapshot: Json | null
           total_value: number | null
           total_value_sem_iva: number | null
           updated_at: string
@@ -5386,7 +5590,9 @@ export type Database = {
           company_signature_date?: string | null
           company_signed_by_id?: string | null
           company_signed_by_name?: string | null
+          contract_body_frozen_html?: string | null
           contract_body_html?: string | null
+          contract_frozen_at?: string | null
           contract_number?: string | null
           contract_template_id?: string | null
           created_at?: string
@@ -5416,6 +5622,7 @@ export type Database = {
           status_changed_at?: string | null
           status_changed_by?: string | null
           template_id?: string | null
+          template_snapshot?: Json | null
           total_value?: number | null
           total_value_sem_iva?: number | null
           updated_at?: string
@@ -5430,7 +5637,9 @@ export type Database = {
           company_signature_date?: string | null
           company_signed_by_id?: string | null
           company_signed_by_name?: string | null
+          contract_body_frozen_html?: string | null
           contract_body_html?: string | null
+          contract_frozen_at?: string | null
           contract_number?: string | null
           contract_template_id?: string | null
           created_at?: string
@@ -5460,6 +5669,7 @@ export type Database = {
           status_changed_at?: string | null
           status_changed_by?: string | null
           template_id?: string | null
+          template_snapshot?: Json | null
           total_value?: number | null
           total_value_sem_iva?: number | null
           updated_at?: string
@@ -8059,6 +8269,7 @@ export type Database = {
       form_submissions: {
         Row: {
           campaign_id: string | null
+          conflicting_entity_id: string | null
           created_at: string
           created_by: string | null
           current_step: number | null
@@ -8082,6 +8293,7 @@ export type Database = {
         }
         Insert: {
           campaign_id?: string | null
+          conflicting_entity_id?: string | null
           created_at?: string
           created_by?: string | null
           current_step?: number | null
@@ -8105,6 +8317,7 @@ export type Database = {
         }
         Update: {
           campaign_id?: string | null
+          conflicting_entity_id?: string | null
           created_at?: string
           created_by?: string | null
           current_step?: number | null
@@ -8132,6 +8345,13 @@ export type Database = {
             columns: ["campaign_id"]
             isOneToOne: false
             referencedRelation: "campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_submissions_conflicting_entity_id_fkey"
+            columns: ["conflicting_entity_id"]
+            isOneToOne: false
+            referencedRelation: "anew_entities"
             referencedColumns: ["id"]
           },
           {
@@ -15369,6 +15589,7 @@ export type Database = {
           product_id: string | null
           qt: number | null
           quote_id: string
+          retail_price_unit: number | null
           section_name: string | null
           selected_attributes: Json | null
           service_id: string | null
@@ -15397,6 +15618,7 @@ export type Database = {
           product_id?: string | null
           qt?: number | null
           quote_id: string
+          retail_price_unit?: number | null
           section_name?: string | null
           selected_attributes?: Json | null
           service_id?: string | null
@@ -15425,6 +15647,7 @@ export type Database = {
           product_id?: string | null
           qt?: number | null
           quote_id?: string
+          retail_price_unit?: number | null
           section_name?: string | null
           selected_attributes?: Json | null
           service_id?: string | null
@@ -19457,6 +19680,7 @@ export type Database = {
         Args: { p_custom_fields: Json; p_entity_id: string }
         Returns: string
       }
+      anew_current_user_ids: { Args: never; Returns: string[] }
       anew_entities_compute_search_text: {
         Args: {
           p_display_name: string
@@ -19672,6 +19896,7 @@ export type Database = {
         Args: { _created_by: string; _tenant_id: string }
         Returns: undefined
       }
+      crm_scope_keys: { Args: { p_permission_code: string }; Returns: string[] }
       current_business_user_id: { Args: never; Returns: string }
       delete_organization_subtree: {
         Args: { p_root_org_id: string }
@@ -20392,6 +20617,14 @@ export type Database = {
         Args: { p_duc_id: string }
         Returns: boolean
       }
+      is_entity_contact_in_owner_scope: {
+        Args: {
+          _client_scope_keys: string[]
+          _entity_id: string
+          _lead_scope_keys: string[]
+        }
+        Returns: boolean
+      }
       is_entity_in_user_scope: {
         Args: { _auth_uid: string; _entity_id: string }
         Returns: boolean
@@ -20824,6 +21057,15 @@ export type Database = {
           visible_org_ids: string[]
         }[]
       }
+      resolve_contract_template_snapshot: {
+        Args: {
+          p_contract_template_id: string
+          p_organization_id: string
+          p_tem_corpo_proprio: boolean
+          p_template_id: string
+        }
+        Returns: Json
+      }
       resolve_effective_work_org: {
         Args: { org_id: string }
         Returns: {
@@ -20901,6 +21143,36 @@ export type Database = {
           p_org_id: string
         }
         Returns: string
+      }
+      resolve_proposal_contact: {
+        Args: { _proposal_id: string }
+        Returns: {
+          country_code: string
+          display_name: string
+          email: string
+          entity_id: string
+          entity_type: string
+          first_name: string
+          last_name: string
+          phone_number: string
+        }[]
+      }
+      resolve_proposal_template_snapshot: {
+        Args: { p_organization_id: string; p_template_id: string }
+        Returns: Json
+      }
+      resolve_quote_contact: {
+        Args: { _quote_id: string }
+        Returns: {
+          country_code: string
+          display_name: string
+          email: string
+          entity_id: string
+          entity_type: string
+          first_name: string
+          last_name: string
+          phone_number: string
+        }[]
       }
       resolve_root_organization_id: {
         Args: { p_org_id: string }
@@ -21481,10 +21753,12 @@ export type Database = {
           entity_is_client: boolean | null
           field_values: Json
           id: string
+          last_activity_at: string | null
           last_contact_at: string | null
           last_contact_by: string | null
           last_contact_result: string | null
           lead_district_id: string | null
+          list_sort_at: string | null
           locale: string | null
           lost_reason: string | null
           needs_manual_scheduling: boolean
@@ -21505,6 +21779,7 @@ export type Database = {
           source_id: string | null
           source_note: string | null
           status: string | null
+          status_before_conversion: string | null
           tags: string[] | null
           updated_at: string
           workflow_stage_id: string | null
@@ -21549,10 +21824,12 @@ export type Database = {
           entity_is_client: boolean | null
           field_values: Json
           id: string
+          last_activity_at: string | null
           last_contact_at: string | null
           last_contact_by: string | null
           last_contact_result: string | null
           lead_district_id: string | null
+          list_sort_at: string | null
           locale: string | null
           lost_reason: string | null
           needs_manual_scheduling: boolean
@@ -21573,6 +21850,7 @@ export type Database = {
           source_id: string | null
           source_note: string | null
           status: string | null
+          status_before_conversion: string | null
           tags: string[] | null
           updated_at: string
           workflow_stage_id: string | null
@@ -22972,6 +23250,7 @@ export type Database = {
       rpc_resolve_form_submission: {
         Args: {
           p_action: string
+          p_entity_id?: string
           p_field_overrides?: Json
           p_submission_id: string
         }
@@ -23025,6 +23304,10 @@ export type Database = {
       rpc_restore_supplier: { Args: { p_id: string }; Returns: undefined }
       rpc_restore_user: { Args: { p_user_id: string }; Returns: undefined }
       rpc_restore_warehouse: { Args: { p_id: string }; Returns: undefined }
+      rpc_revert_client_to_lead: {
+        Args: { p_client_id: string }
+        Returns: Json
+      }
       rpc_save_lead_workflow_automation: {
         Args: {
           p_action_stage_id: string
@@ -23615,10 +23898,12 @@ export type Database = {
           entity_is_client: boolean | null
           field_values: Json
           id: string
+          last_activity_at: string | null
           last_contact_at: string | null
           last_contact_by: string | null
           last_contact_result: string | null
           lead_district_id: string | null
+          list_sort_at: string | null
           locale: string | null
           lost_reason: string | null
           needs_manual_scheduling: boolean
@@ -23639,6 +23924,7 @@ export type Database = {
           source_id: string | null
           source_note: string | null
           status: string | null
+          status_before_conversion: string | null
           tags: string[] | null
           updated_at: string
           workflow_stage_id: string | null

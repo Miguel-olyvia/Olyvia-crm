@@ -109,6 +109,12 @@ export function getCorsHeaders(req: Request): Record<string, string> {
   const { origin, isDynamic } = resolveAllowedOrigin(req);
 
   return {
+    // Sem Content-Type, as respostas construidas com JSON.stringify + estes
+    // cabecalhos saem como text/plain;charset=UTF-8. O
+    // supabase.functions.invoke escolhe o descodificador pelo content-type,
+    // portanto devolvia a string JSON em bruto em vez de um objecto -- foi
+    // isso que partiu o download do PDF da proposta no portal do cliente.
+    "Content-Type": "application/json",
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers":
@@ -125,6 +131,9 @@ export function getCorsHeadersExtended(req: Request): Record<string, string> {
   const { origin, isDynamic } = resolveAllowedOrigin(req);
 
   return {
+    // Ver a nota em getCorsHeaders: sem isto as respostas saem como
+    // text/plain e o invoke devolve a string JSON em bruto.
+    "Content-Type": "application/json",
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Access-Control-Allow-Headers":

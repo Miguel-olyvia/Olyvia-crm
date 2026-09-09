@@ -12,7 +12,7 @@ import { Plus, Trash2, MapPin, ChevronDown, ChevronUp, Loader2 } from 'lucide-re
 import { cn } from '@/lib/utils';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { supabase } from '@/integrations/supabase/client';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useCountries } from '@/hooks/useCountries';
 import { useAdministrativeDivisions } from '@/hooks/useAdministrativeDivisions';

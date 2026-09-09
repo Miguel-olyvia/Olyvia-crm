@@ -1,0 +1,80 @@
+/* n8n-style canvas theming for the DUC flow editor. */
+
+.duc-flow {
+  --duc-dot: #cbd5e1;
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #f0fdfa 0%, transparent 55%),
+    linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+/* Edges: subtle, brand-tinted, with an animated dash flowing along the pipe. */
+.duc-flow .react-flow__edge-path {
+  stroke: #94a3b8;
+  stroke-width: 2;
+}
+.duc-flow .react-flow__edge.animated .react-flow__edge-path {
+  stroke: #14b8a6;
+  stroke-dasharray: 6 6;
+  animation: duc-dash 0.8s linear infinite;
+}
+@keyframes duc-dash {
+  to {
+    stroke-dashoffset: -12;
+  }
+}
+
+/* Handles: small brand dots that light up on hover of the node. */
+.duc-flow .react-flow__handle {
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border: 2px solid #94a3b8;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+.duc-flow .duc-node:hover .react-flow__handle,
+.duc-flow .react-flow__node.selected .react-flow__handle {
+  border-color: #0f766e;
+}
+.duc-flow .react-flow__handle:hover {
+  transform: scale(1.25);
+  border-color: #0f766e;
+}
+
+/* Controls + MiniMap: rounded, soft-shadowed to match the app cards. */
+.duc-flow .react-flow__controls {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.25);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+.duc-flow .react-flow__controls-button {
+  background: #ffffff;
+  border-bottom: 1px solid #f1f5f9;
+  color: #475569;
+}
+.duc-flow .react-flow__controls-button:hover {
+  background: #f0fdfa;
+  color: #0f766e;
+}
+.duc-flow .react-flow__minimap {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px -12px rgba(15, 23, 42, 0.25);
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+/* Remove the default node box so our card owns the visuals. */
+.duc-flow .react-flow__node-ducStage {
+  background: transparent;
+  border: none;
+  padding: 0;
+  width: auto;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* Selection ring is handled in the card, kill the default outline. */
+.duc-flow .react-flow__node.selected {
+  outline: none;
+  box-shadow: none;
+}

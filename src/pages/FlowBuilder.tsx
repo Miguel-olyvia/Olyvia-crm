@@ -65,7 +65,7 @@ import { TemplatesModal } from "@/components/flow-builder/TemplatesModal";
 import { createFlowExportJson, parseImportedFlowJson } from "@/components/flow-builder/flowImportExport";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { toPng } from "html-to-image";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 /* ─────────────── Node types for ReactFlow ─────────────── */
 

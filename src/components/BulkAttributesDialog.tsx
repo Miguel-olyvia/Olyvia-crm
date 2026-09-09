@@ -25,6 +25,7 @@ import { useToast } from "@/hooks/use-toast";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
 import { useTranslation } from "@/hooks/useTranslation";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface ProductAttribute {
   id: string;
@@ -173,6 +174,7 @@ export function BulkAttributesDialog({
       onOpenChange(false);
       onSuccess();
     } catch (error: any) {
+      captureFlowError(error, "bulk-record-action");
       toast({
         title: t('common.error'),
         description: error.message,

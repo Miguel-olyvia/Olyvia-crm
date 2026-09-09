@@ -8,7 +8,7 @@ initSentry();
 
 const requestSchema = z.object({
   lead_id: z.string().uuid().optional(),
-  target_type: z.enum(["lead", "contact", "client"]).optional(),
+  target_type: z.enum(["lead", "contact", "client", "submission"]).optional(),
   target_id: z.string().uuid().optional(),
   campaign_id: z.string().uuid(),
   step_number: z.number().optional(),
@@ -60,13 +60,19 @@ function validateFieldValues(field_values: Record<string, unknown>): string | nu
  * PATCH /update-lead
  * Body: { target_type?, target_id?, lead_id?, campaign_id, step_number, field_values, form_id?, from_chat_widget? }
  *
- * Polymorphic on target_type ("lead" | "contact" | "client"):
+ * Polymorphic on target_type ("lead" | "contact" | "client" | "submission"):
  * - "lead" (default, or inferred from a bare lead_id for backwards
  *   compatibility with already-deployed frontends): updates anew_leads as before.
- * - "contact" | "client": updates the form_submissions row (by its own id,
- *   passed as target_id) instead — never writes to anew_leads/anew_contacts/
- *   anew_clients. The one-time non-destructive custom_fields merge into the
- *   contact/client already happened in create-lead's step 1 classification.
+ * - "submission" | "contact" | "client": updates the form_submissions row (by
+ *   its own id, passed as target_id) instead — never writes to anew_leads/
+ *   anew_contacts/anew_clients. The one-time non-destructive custom_fields
+ *   merge into the existing record already happened in create-lead's step 1
+ *   classification.
+ *   "submission" is what create-lead now returns when the submission was
+ *   attached to an ALREADY EXISTING lead: the continuation key is the
+ *   form_submissions row id, not a lead id, so it must never fall into the
+ *   "lead" branch below. "contact"/"client" are kept only so forms already
+ *   mid-flight when this was deployed keep working.
  *
  * SECURITY: campaign_id is REQUIRED and must match the target row's campaign_id.
  * This is defense-in-depth on a public (no-auth) endpoint: it forces callers
@@ -138,8 +144,24 @@ Deno.serve(async (req) => {
       );
     }
 
-    // --- Contact/client target: update form_submissions, never anew_leads/anew_contacts/anew_clients ---
-    if (targetType === "contact" || targetType === "client") {
+    // A resposta publica do create-lead diz SEMPRE `target_type: "lead"`, quer
+    // tenha reconhecido a pessoa quer nao. Sem isso, quem soubesse o email de
+    // alguem descobria, submetendo o formulario e olhando para a resposta, se
+    // essa pessoa e lead ou cliente desta organizacao -- um canal de
+    // enumeracao aberto a qualquer visitante. Ninguem de fora deve saber nada.
+    //
+    // Por isso a continuacao NAO pode confiar no rotulo: resolve-se pelo
+    // proprio id, que e um UUID e nao revela nada. Se existir uma linha em
+    // form_submissions com este id, e uma submissao; caso contrario e lead.
+    const { data: submissionByIdRow } = await supabase
+      .from("form_submissions")
+      .select("id")
+      .eq("id", targetId)
+      .maybeSingle();
+    const isSubmissionTarget = !!submissionByIdRow?.id;
+
+    // --- Submission target: update form_submissions, never anew_leads/anew_contacts/anew_clients ---
+    if (isSubmissionTarget || targetType === "contact" || targetType === "client" || targetType === "submission") {
       const { data: existingSubmission, error: submissionError } = await supabase
         .from("form_submissions")
         .select("*")

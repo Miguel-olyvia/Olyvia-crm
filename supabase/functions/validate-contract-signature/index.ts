@@ -8,6 +8,7 @@ const requestSchema = z.object({
 });
 
 import { getCorsHeaders } from "../_shared/cors.ts";
+import { detectClientIp, detectUserAgent } from "../_shared/clientIp.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
@@ -235,9 +236,12 @@ const handler = async (req: Request): Promise<Response> => {
         .eq('id', signatureToken.contract_party_id)
         .single();
 
-      // Get client IP and user agent
-      const clientIp = req.headers.get('x-forwarded-for') || req.headers.get('x-real-ip') || 'unknown';
-      const userAgent = req.headers.get('user-agent') || 'unknown';
+      // Get client IP and user agent.
+      // NUNCA 'unknown': signature_ip e prova legal de quem assinou e de onde.
+      // Um placeholder e indistinguivel de uma deteccao genuina; NULL nao e.
+      // O x-forwarded-for cru e uma cadeia com hops de proxy, nao um endereco.
+      const clientIp = detectClientIp(req);
+      const userAgent = detectUserAgent(req);
 
       // Update the party as signed
       const { error: partyError } = await supabase

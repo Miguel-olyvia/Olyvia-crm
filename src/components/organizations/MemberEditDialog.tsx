@@ -33,9 +33,11 @@ import {
   Pencil,
 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePermissions } from "@/hooks/usePermissions";
+import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { PhoneInput } from "@/components/PhoneInput";
 import { memberEditSchema } from "@/lib/validations";
 import { callFiscalEntityResolve } from "@/lib/nif/callFiscalEntityResolve";
@@ -103,6 +105,11 @@ export function MemberEditDialog({
     status: "active",
   });
 
+  const { anewUserId } = usePermissionScope();
+  // Ninguem muda o seu proprio cargo nem o seu proprio estado -- a base recusa
+  // (trigger trg_anew_memberships_no_self_promotion); aqui so evitamos o erro.
+  const isSelfMember = !!anewUserId && anewUserId === userId;
+
   // Membership data
   const [relationshipType, setRelationshipType] = useState(membershipType);
   const [selectedRoleId, setSelectedRoleId] = useState<string>(membershipRoleId || "");
@@ -134,11 +141,12 @@ export function MemberEditDialog({
       setAvailableRoles([]);
       return;
     }
-    const { data } = await (supabase as any)
+    const { data, error } = await (supabase as any)
       .from("anew_roles")
       .select("id, name, code")
       .eq("organization_id", organizationId)
       .order("name");
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     setAvailableRoles((data || []) as { id: string; name: string; code: string }[]);
   };
 
@@ -356,7 +364,8 @@ export function MemberEditDialog({
             await (supabase as any)
               .from("anew_entity_fiscal_entities")
               .update({ fiscal_entity_id: fiscalEntityId })
-              .eq("id", existingLink.id);
+              .eq("id", existingLink.id)
+              .throwOnError();
           } else {
             await (supabase as any)
               .from("anew_entity_fiscal_entities")
@@ -364,7 +373,8 @@ export function MemberEditDialog({
                 entity_id: entityIdForFiscal,
                 fiscal_entity_id: fiscalEntityId,
                 is_primary: true,
-              });
+              })
+              .throwOnError();
           }
         }
       }
@@ -478,6 +488,7 @@ export function MemberEditDialog({
                     <Select
                       value={formData.status}
                       onValueChange={(v) => setFormData({ ...formData, status: v })}
+                      disabled={isSelfMember}
                     >
                       <SelectTrigger>
                         <SelectValue />
@@ -723,7 +734,7 @@ export function MemberEditDialog({
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label>{t("organizations.relationshipType")}</Label>
-                      <Select value={relationshipType} onValueChange={setRelationshipType}>
+                      <Select value={relationshipType} onValueChange={setRelationshipType} disabled={isSelfMember}>
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
@@ -735,7 +746,7 @@ export function MemberEditDialog({
                     </div>
                     <div className="space-y-2">
                       <Label>{t("organizations.role")}</Label>
-                      <Select value={selectedRoleId} onValueChange={setSelectedRoleId}>
+                      <Select value={selectedRoleId} onValueChange={setSelectedRoleId} disabled={isSelfMember}>
                         <SelectTrigger>
                           <SelectValue placeholder={t("users.selectRole")} />
                         </SelectTrigger>

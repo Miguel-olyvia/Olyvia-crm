@@ -147,6 +147,29 @@ function formatDate(dateStr: string | null): string {
 }
 
 export interface ContractVariableData {
+  /**
+   * Data do DOCUMENTO — a de criação do contrato, não a de hoje.
+   *
+   * `{{data_atual}}` resolvia sempre para `new Date()`, o instante em que
+   * alguém carregava em descarregar. Num contrato assinado isso punha no
+   * cabeçalho uma data posterior à própria assinatura — e, pior, uma data que
+   * MUDAVA: como o documento é gerado de novo a cada descarga, duas descargas
+   * do mesmo contrato assinado davam dois documentos com datas diferentes.
+   *
+   * Quem preenche isto passa a data de criação do contrato. Sem ela — nas
+   * pré-visualizações de minutas, que não pertencem a contrato nenhum — cai-se
+   * em "hoje", que aí é o que faz sentido.
+   */
+  data_documento?: string;
+  /**
+   * Data mostrada no bloco "Data:" do CABEÇALHO (contractHeader.ts).
+   *
+   * É a segunda porta por onde a data de hoje entrava: o cabeçalho lê
+   * `sampleData.data` e, quando ninguém lho passa — o que era sempre —, cai em
+   * `todayPt()`. Ficava a data de hoje, em formato ISO, no topo da primeira
+   * página de contratos assinados há meses.
+   */
+  data?: string;
   empresa_nome?: string;
   empresa_nif?: string;
   empresa_morada?: string;
@@ -264,7 +287,7 @@ export function substituteVariables(html: string, data: ContractVariableData, hi
     "{{proposta_data}}": data.proposta_data
       ? filledWrap(formatDate(data.proposta_data))
       : missingPlaceholder("Data da proposta"),
-    "{{data_atual}}": filledWrap(formatDate(new Date().toISOString())),
+    "{{data_atual}}": filledWrap(formatDate(data.data_documento || new Date().toISOString())),
     "{{cliente_localidade}}": resolveValue((data as any).cliente_localidade, "Localidade"),
   };
 

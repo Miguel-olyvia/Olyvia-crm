@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 const PAGE_SIZE = 50;
 const USER_AGENT_TRUNCATE_LENGTH = 60;

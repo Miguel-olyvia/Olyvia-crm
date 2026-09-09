@@ -10,7 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Loader2, Palette, Type, Layout, CheckCircle, Image, Code, Sliders, ImageIcon, ExternalLink } from "lucide-react";
 import { ColorPickerInput, SliderInput, ElementPreview, PaddingInput } from "./ElementStyleInput";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";

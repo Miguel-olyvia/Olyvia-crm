@@ -1,4 +1,4 @@
-export type ExportModule = "clients" | "contacts" | "quotes" | "leads";
+export type ExportModule = "clients" | "contacts" | "quotes" | "leads" | "proposals" | "client_contracts";
 export type ExportCellType = "text" | "number" | "date" | "boolean";
 
 export interface ExportColumnDefinition {
@@ -31,6 +31,7 @@ const DEFINITIONS: Record<ExportModule, ExportDefinition> = {
       { key: "name", header: "Nome", width: 30 },
       { key: "status", header: "Estado", width: 16 },
       { key: "clientType", header: "Tipo", width: 16 },
+      { key: "assignedTo", header: "Comercial", width: 24 },
       { key: "createdAt", header: "Criado em", type: "date", width: 14 },
       { key: "email", header: "Email", width: 30, sensitive: true },
       { key: "phone", header: "Telefone", width: 18, sensitive: true },
@@ -90,6 +91,59 @@ const DEFINITIONS: Record<ExportModule, ExportDefinition> = {
       { key: "email", header: "Email", width: 30, sensitive: true },
       { key: "phone", header: "Telefone", width: 18, sensitive: true },
       { key: "vat", header: "NIF", width: 16, sensitive: true },
+    ],
+  },
+  // Neither proposals nor client_contracts have a column marked `sensitive`
+  // (product decision — see task notes: no proposal column is personal data,
+  // and the contracts EMAIL column is already visible to anyone with
+  // `client_contracts.view` in the UI, so exporting it reveals nothing new).
+  // `sensitivePermission` is set equal to `basePermission` rather than minted
+  // as a separate, never-checked permission: since no column carries
+  // `sensitive: true`, `getEffectiveColumns` always returns every column
+  // regardless of `includeSensitive`, so a distinct sensitive permission would
+  // never gate anything real. This also means the frontend never needs to show
+  // the "com ou sem dados sensíveis" dialog for these two modules.
+  proposals: {
+    module: "proposals",
+    sheetName: "Propostas",
+    filenamePrefix: "propostas",
+    basePermission: "proposals.export",
+    sensitivePermission: "proposals.export",
+    viewPermission: "proposals.view",
+    columns: [
+      { key: "title", header: "Título", width: 30 },
+      { key: "client", header: "Cliente", width: 30 },
+      { key: "assignedTo", header: "Comercial", width: 24 },
+      { key: "deal", header: "Pedido", width: 24 },
+      { key: "value", header: "Valor", type: "number", width: 16 },
+      { key: "status", header: "Estado", width: 18 },
+      { key: "validUntil", header: "Válido até", type: "date", width: 14 },
+      { key: "pipeline", header: "Pipeline", width: 36 },
+      { key: "portal", header: "Portal", width: 16 },
+      { key: "createdAt", header: "Criado em", type: "date", width: 14 },
+    ],
+  },
+  client_contracts: {
+    module: "client_contracts",
+    sheetName: "Contratos",
+    filenamePrefix: "contratos",
+    basePermission: "client_contracts.export",
+    sensitivePermission: "client_contracts.export",
+    viewPermission: "client_contracts.view",
+    columns: [
+      { key: "number", header: "Número", width: 18 },
+      { key: "client", header: "Cliente", width: 30 },
+      { key: "proposal", header: "Proposta", width: 30 },
+      { key: "value", header: "Valor", type: "number", width: 16 },
+      { key: "period", header: "Período", width: 24 },
+      { key: "progress", header: "Progresso", width: 20 },
+      { key: "renewal", header: "Renovação", width: 18 },
+      { key: "status", header: "Estado", width: 18 },
+      { key: "signature", header: "Assinatura", width: 24 },
+      { key: "email", header: "Email", width: 30 },
+      { key: "pipeline", header: "Pipeline", width: 24 },
+      { key: "portal", header: "Portal", width: 16 },
+      { key: "assignedTo", header: "Comercial", width: 24 },
     ],
   },
 };

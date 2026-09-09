@@ -117,18 +117,25 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     })();
   }, [activeCompany?.id, userType, refreshCounter]);
 
+  // `isSystemAdmin` identifies the role; it does not grant anything. The
+  // System Admin role holds every permission explicitly in the database
+  // (20261112060000_grant_all_permissions_system_admin_role.sql), so the four
+  // current system admins each resolve 304 permission codes through the normal
+  // path and lose nothing by this. What the short-circuit did grant was
+  // permissions nobody ever created — a check for a code absent from
+  // anew_permissions answered true purely because of who was asking.
+  //
+  // Locked down by PermissionsContext.rpc.test.tsx: "is_system_admin from RPC
+  // identifies the role but does not bypass permissions".
   const hasPermission = useCallback((permissionCode: string): boolean => {
-    if (isSystemAdmin) return true;
     return permissionSetHas(permissionSet, permissionCode);
-  }, [permissionSet, isSystemAdmin]);
+  }, [permissionSet]);
 
   const hasAnyPermission = useCallback((permissionCodes: string[]): boolean => {
-    if (isSystemAdmin) return true;
     return permissionCodes.some(code => permissionSetHas(permissionSet, code));
-  }, [permissionSet, isSystemAdmin]);
+  }, [permissionSet]);
 
   const hasModuleAccess = useCallback((module: string): boolean => {
-    if (isSystemAdmin) return true;
     for (const p of permissionSet) {
       if (p.startsWith(module)) return true;
     }

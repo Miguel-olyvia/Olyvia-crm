@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const FIELD_TYPES = [
   { value: "text", label: "Texto", icon: Type },
@@ -112,6 +113,9 @@ export default function NeedsAssessmentConfig() {
           .select("*").eq("organization_id", organizationId).maybeSingle(),
       ]);
 
+      if (fieldsRes.error || templatesRes.error || settingsRes.error) {
+        toast({ title: "Erro", description: "Não foi possível carregar a configuração.", variant: "destructive" });
+      }
       setFields((fieldsRes.data || []).map((f: any) => ({ ...f, options: Array.isArray(f.options) ? f.options : [] })));
       setTemplates((templatesRes.data || []).map((t: any) => ({
         ...t,
@@ -127,6 +131,7 @@ export default function NeedsAssessmentConfig() {
       }
     } catch (err: any) {
       console.error(err);
+      captureFlowError(err, "db-error-leaked-to-ui");
     } finally {
       setLoading(false);
     }
@@ -148,13 +153,15 @@ export default function NeedsAssessmentConfig() {
       };
       const { data: existing } = await supabase.from("needs_assessment_settings")
         .select("id").eq("organization_id", organizationId).maybeSingle();
-      if (existing) {
-        await supabase.from("needs_assessment_settings")
-          .update(payload)
-          .eq("organization_id", organizationId);
-      } else {
-        await supabase.from("needs_assessment_settings")
-          .insert([{ organization_id: organizationId, ...payload }]);
+      const { error: saveError } = existing
+        ? await supabase.from("needs_assessment_settings")
+            .update(payload)
+            .eq("organization_id", organizationId)
+        : await supabase.from("needs_assessment_settings")
+            .insert([{ organization_id: organizationId, ...payload }]);
+      if (saveError) {
+        captureFlowError(saveError, "config-partial-write");
+        toast({ title: "Erro ao guardar", description: "Não foi possível guardar as definições.", variant: "destructive" });
       }
     } catch (err: any) {
       toast({ title: "Erro ao guardar", description: err.message, variant: "destructive" });
@@ -184,12 +191,14 @@ export default function NeedsAssessmentConfig() {
     const options = fieldType === "dropdown" ? fieldOptions.split(",").map(o => o.trim()).filter(Boolean) : [];
     try {
       if (editingField) {
-        await supabase.from("needs_assessment_field_configs")
+        const { error } = await supabase.from("needs_assessment_field_configs")
           .update({ name: fieldName.trim(), field_type: fieldType, options, is_required: fieldRequired, updated_at: new Date().toISOString() })
           .eq("id", editingField.id);
+        if (error) throw error;
       } else {
-        await supabase.from("needs_assessment_field_configs")
+        const { error } = await supabase.from("needs_assessment_field_configs")
           .insert({ organization_id: organizationId, name: fieldName.trim(), field_type: fieldType, options, is_required: fieldRequired, sort_order: fields.length });
+        if (error) throw error;
       }
       toast({ title: editingField ? "Campo atualizado" : "Campo criado" });
       setFieldDialogOpen(false);
@@ -201,7 +210,8 @@ export default function NeedsAssessmentConfig() {
 
   const deleteField = async (id: string) => {
     try {
-      await supabase.from("needs_assessment_field_configs").delete().eq("id", id);
+      const { error } = await supabase.from("needs_assessment_field_configs").delete().eq("id", id);
+      if (error) throw error;
       toast({ title: "Campo eliminado" });
       loadData();
     } catch (err: any) {
@@ -210,8 +220,12 @@ export default function NeedsAssessmentConfig() {
   };
 
   const toggleFieldActive = async (field: FieldConfig) => {
-    await supabase.from("needs_assessment_field_configs")
+    const { error } = await supabase.from("needs_assessment_field_configs")
       .update({ is_active: !field.is_active }).eq("id", field.id);
+    if (error) {
+      captureFlowError(error, "config-partial-write");
+      toast({ title: "Erro", description: "Não foi possível atualizar o campo.", variant: "destructive" });
+    }
     loadData();
   };
 
@@ -243,15 +257,17 @@ export default function NeedsAssessmentConfig() {
       let templateId: string;
 
       if (editingTemplate) {
-        await supabase.from("needs_assessment_templates")
+        const { error: updateError } = await supabase.from("needs_assessment_templates")
           .update({
             name: templateName.trim(), description: templateDescription || null,
             show_measurements_tab: templateShowMeasurements, show_items_tab: templateShowItems,
             updated_at: new Date().toISOString()
           })
           .eq("id", editingTemplate.id);
+        if (updateError) throw updateError;
         templateId = editingTemplate.id;
-        await supabase.from("needs_assessment_template_fields").delete().eq("template_id", templateId);
+        const { error: deleteError } = await supabase.from("needs_assessment_template_fields").delete().eq("template_id", templateId);
+        if (deleteError) throw deleteError;
       } else {
         const { data, error } = await supabase.from("needs_assessment_templates")
           .insert({
@@ -267,20 +283,23 @@ export default function NeedsAssessmentConfig() {
         const rows = Array.from(templateFieldIds).map((fid, idx) => ({
           template_id: templateId, field_id: fid, sort_order: idx,
         }));
-        await (supabase.from("needs_assessment_template_fields") as any).insert(rows);
+        const { error: insertFieldsError } = await (supabase.from("needs_assessment_template_fields") as any).insert(rows);
+        if (insertFieldsError) throw insertFieldsError;
       }
 
       toast({ title: editingTemplate ? "Template atualizado" : "Template criado" });
       setTemplateDialogOpen(false);
       loadData();
     } catch (err: any) {
+      captureFlowError(err, "config-partial-write");
       toast({ title: "Erro", description: err.message, variant: "destructive" });
     }
   };
 
   const deleteTemplate = async (id: string) => {
     try {
-      await supabase.from("needs_assessment_templates").delete().eq("id", id);
+      const { error } = await supabase.from("needs_assessment_templates").delete().eq("id", id);
+      if (error) throw error;
       toast({ title: "Template eliminado" });
       loadData();
     } catch (err: any) {

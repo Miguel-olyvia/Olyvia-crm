@@ -15,11 +15,20 @@
  *
  * These tests lock down the client side:
  *
- *  1. Scope overrides are read ONLY from memberships in the ACTIVE organization.
+ *  1. Overrides carried on a non-active-organization membership are ignored.
  *  2. An ORG scope held on a PARENT organization's membership does not raise the
  *     scope inside a child organization — it stays OWNED.
  *  3. An ORG scope held on the ACTIVE organization's own membership does apply.
  *  4. Role permissions still resolve across the ancestor chain (unchanged).
+ *
+ * The hook now reads its inputs from the `get_permission_scope_context` RPC
+ * (20261112490000) instead of running 11 separate table queries. That RPC is a
+ * data collector: it returns the whole ancestor chain's override rows, each
+ * tagged with the membership's organization_id, and the hook filters them down
+ * to the active organization. The filter — not the SQL — is what enforces the
+ * rule, which is why these tests still reach it. Assertion 1 is therefore
+ * behavioural now (the override has no effect) rather than a check on which
+ * membership ids were queried, and it is the stronger claim of the two.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
@@ -32,16 +41,23 @@ const ACTIVE_ROLE = "role-active";
 const PARENT_ROLE = "role-parent";
 const ANEW_USER = "user-1";
 
-/** Scope rows keyed by membership id — the test's stand-in for the table. */
-let scopeRows: { membership_id: string; permission_code: string; scope_level: string }[] = [];
+interface ScopeRow {
+  membership_id: string;
+  organization_id: string;
+  permission_code: string;
+  scope_level: string;
+}
 
-/** Membership ids the hook actually asked scopes for. The core assertion. */
-let scopeQueryMembershipIds: string[] = [];
+/** Override rows the RPC reports for the whole ancestor chain. */
+let scopeRows: ScopeRow[] = [];
 
-const fromMock = vi.fn();
+/** Arguments the hook passed to the RPC. */
+let rpcCalls: { name: string; args: Record<string, unknown> }[] = [];
+
+const rpcMock = vi.fn();
 
 vi.mock("@/integrations/supabase/client", () => ({
-  supabase: { from: (...a: any[]) => fromMock(...a) },
+  supabase: { rpc: (...a: any[]) => rpcMock(...a) },
 }));
 
 vi.mock("@/lib/cachedAuth", () => ({
@@ -58,117 +74,76 @@ vi.mock("@/contexts/CompanyContext", () => {
 
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 
-type Call = {
-  table: string;
-  select?: string;
-  eqs: Record<string, unknown>;
-  ins: Record<string, unknown[]>;
-};
-
-function resultFor(call: Call): { data: unknown } {
-  switch (call.table) {
-    case "anew_users":
-      return { data: { id: ANEW_USER } };
-
-    case "anew_hierarchy":
-      // Active org has a parent; the parent is the root.
-      return call.eqs.child_org_id === ACTIVE_ORG
-        ? { data: { parent_org_id: PARENT_ORG } }
-        : { data: null };
-
-    case "anew_memberships":
-      // First call selects only role_id (global admin probe); the second
-      // selects the full row for the ancestor chain.
-      if (call.select === "role_id") {
-        return { data: [{ role_id: ACTIVE_ROLE }, { role_id: PARENT_ROLE }] };
-      }
-      return {
-        data: [
-          { id: ACTIVE_MEMBERSHIP, role_id: ACTIVE_ROLE, organization_id: ACTIVE_ORG },
-          { id: PARENT_MEMBERSHIP, role_id: PARENT_ROLE, organization_id: PARENT_ORG },
-        ],
-      };
-
-    case "anew_roles":
-      // Neither role is a global admin, so no full-access short-circuit.
-      return call.select === "code"
-        ? { data: [{ code: "org_admin" }, { code: "org_admin" }] }
-        : {
-            data: [
-              { id: ACTIVE_ROLE, code: "org_admin" },
-              { id: PARENT_ROLE, code: "org_admin" },
-            ],
-          };
-
-    case "anew_role_permissions":
-      // leads.view comes from the ACTIVE org role; clients.view only from the
-      // PARENT role — proving permissions still resolve across the chain.
-      return { data: [{ permission_code: "leads.view" }, { permission_code: "clients.view" }] };
-
-    case "anew_membership_permission_scopes": {
-      const asked = (call.ins.membership_id ?? []) as string[];
-      scopeQueryMembershipIds = asked;
-      return {
-        data: scopeRows
-          .filter(r => asked.includes(r.membership_id))
-          .map(r => ({ permission_code: r.permission_code, scope_level: r.scope_level })),
-      };
-    }
-
-    case "anew_permissions":
-      // No binary (non-scoped) permissions in these tests.
-      return { data: [] };
-
-    default:
-      throw new Error(`Unexpected table access: ${call.table}`);
-  }
-}
-
-function buildChain(table: string) {
-  const call: Call = { table, eqs: {}, ins: {} };
-  const chain: any = {
-    select: (s: string) => {
-      call.select = s;
-      return chain;
-    },
-    eq: (col: string, val: unknown) => {
-      call.eqs[col] = val;
-      return chain;
-    },
-    in: (col: string, vals: unknown[]) => {
-      call.ins[col] = vals;
-      return chain;
-    },
-    maybeSingle: () => Promise.resolve(resultFor(call)),
-    then: (onFulfilled: any, onRejected: any) =>
-      Promise.resolve(resultFor(call)).then(onFulfilled, onRejected),
+/**
+ * The context the RPC returns. Neither role is a global admin, so no
+ * full-access short-circuit fires. `leads.view` comes from the ACTIVE org's
+ * role and `clients.view` only from the PARENT role, which is what proves
+ * permission inheritance across the chain still works.
+ */
+function scopeContext() {
+  return {
+    anew_user_id: ANEW_USER,
+    is_global_system_admin: false,
+    org_chain: [ACTIVE_ORG, PARENT_ORG],
+    memberships: [
+      { id: ACTIVE_MEMBERSHIP, role_id: ACTIVE_ROLE, organization_id: ACTIVE_ORG, role_code: "org_admin" },
+      { id: PARENT_MEMBERSHIP, role_id: PARENT_ROLE, organization_id: PARENT_ORG, role_code: "org_admin" },
+    ],
+    role_permissions: ["leads.view", "clients.view"],
+    scope_rows: scopeRows,
+    binary_permission_codes: [],
+    team_member_ids: [],
   };
-  return chain;
 }
 
 beforeEach(() => {
   scopeRows = [];
-  scopeQueryMembershipIds = [];
-  fromMock.mockReset();
-  fromMock.mockImplementation((table: string) => buildChain(table));
+  rpcCalls = [];
+  rpcMock.mockReset();
+  rpcMock.mockImplementation((name: string, args: Record<string, unknown>) => {
+    rpcCalls.push({ name, args });
+    if (name !== "get_permission_scope_context") {
+      throw new Error(`Unexpected RPC: ${name}`);
+    }
+    return Promise.resolve({ data: scopeContext(), error: null });
+  });
 });
 
 describe("usePermissionScope — cross-organization scope isolation", () => {
-  it("asks for scope overrides only from memberships in the active organization", async () => {
+  it("resolves its context for the active organization in a single RPC call", async () => {
+    const { result } = renderHook(() => usePermissionScope());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0].name).toBe("get_permission_scope_context");
+    expect(rpcCalls[0].args).toEqual({ _organization_id: ACTIVE_ORG });
+  });
+
+  it("ignores an override carried on a membership outside the active organization", async () => {
     scopeRows = [
-      { membership_id: PARENT_MEMBERSHIP, permission_code: "leads.view", scope_level: "ORG" },
+      {
+        membership_id: PARENT_MEMBERSHIP,
+        organization_id: PARENT_ORG,
+        permission_code: "leads.view",
+        scope_level: "ORG",
+      },
     ];
 
     const { result } = renderHook(() => usePermissionScope());
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(scopeQueryMembershipIds).toEqual([ACTIVE_MEMBERSHIP]);
-    expect(scopeQueryMembershipIds).not.toContain(PARENT_MEMBERSHIP);
+    // The row was returned by the RPC and deliberately dropped by the hook.
+    expect(result.current.getPermissionScope("leads.view")).not.toBe("ORG");
   });
 
   it("does not let an ORG scope held in a parent organization raise the scope in a child", async () => {
     scopeRows = [
-      { membership_id: PARENT_MEMBERSHIP, permission_code: "leads.view", scope_level: "ORG" },
+      {
+        membership_id: PARENT_MEMBERSHIP,
+        organization_id: PARENT_ORG,
+        permission_code: "leads.view",
+        scope_level: "ORG",
+      },
     ];
 
     const { result } = renderHook(() => usePermissionScope());
@@ -180,7 +155,12 @@ describe("usePermissionScope — cross-organization scope isolation", () => {
 
   it("applies an ORG scope held on the active organization's own membership", async () => {
     scopeRows = [
-      { membership_id: ACTIVE_MEMBERSHIP, permission_code: "leads.view", scope_level: "ORG" },
+      {
+        membership_id: ACTIVE_MEMBERSHIP,
+        organization_id: ACTIVE_ORG,
+        permission_code: "leads.view",
+        scope_level: "ORG",
+      },
     ];
 
     const { result } = renderHook(() => usePermissionScope());
@@ -198,5 +178,17 @@ describe("usePermissionScope — cross-organization scope isolation", () => {
 
     expect(result.current.getPermissionScope("clients.view")).toBe("OWNED");
     expect(result.current.getPermissionScope("unknown.permission")).toBe("NONE");
+  });
+
+  it("fails closed when the RPC errors", async () => {
+    rpcMock.mockImplementation(() =>
+      Promise.resolve({ data: null, error: { message: "boom" } })
+    );
+
+    const { result } = renderHook(() => usePermissionScope());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.getPermissionScope("leads.view")).toBe("NONE");
+    expect(result.current.hasMinimumScope("leads.view", "OWNED")).toBe(false);
   });
 });

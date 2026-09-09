@@ -1,11 +1,14 @@
-// Resolve proposal_workflow_stages.id for an organization + candidate stage names,
-// mirroring the org-scoped-then-global fallback used in src/pages/Proposals.tsx (loadWorkflowStages).
-// Fail-soft: never throws, returns null if no stage is found so callers can still update status alone.
+// Resolve proposal_workflow_stages.id for an organization by its is_won/is_lost
+// flag — never by name, so renaming or recreating the "aceite"/"accepted" (or
+// "rejeitada"/"rejected") stage in the workflow editor never breaks this.
+// Mirrors the org-scoped-then-global fallback used in src/pages/Proposals.tsx
+// (loadWorkflowStages). Fail-soft: never throws, returns null if no stage is
+// found so callers can still update status alone.
 
 export async function resolveProposalStageId(
   supabase: any,
   organizationId: string | null | undefined,
-  names: string[],
+  flag: "is_won" | "is_lost",
 ): Promise<string | null> {
   try {
     if (organizationId) {
@@ -14,7 +17,8 @@ export async function resolveProposalStageId(
         .select("id")
         .eq("organization_id", organizationId)
         .eq("is_active", true)
-        .in("name", names)
+        .eq(flag, true)
+        .order("stage_order")
         .limit(1)
         .maybeSingle();
       if (orgStage?.id) return orgStage.id;
@@ -25,7 +29,8 @@ export async function resolveProposalStageId(
       .select("id")
       .is("organization_id", null)
       .eq("is_active", true)
-      .in("name", names)
+      .eq(flag, true)
+      .order("stage_order")
       .limit(1)
       .maybeSingle();
     return globalStage?.id ?? null;

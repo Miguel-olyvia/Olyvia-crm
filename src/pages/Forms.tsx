@@ -86,6 +86,7 @@ import {
   type FormI18nConfig,
 } from "@/lib/formI18n";
 import { formMetadataSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Form {
   id: string;
@@ -205,10 +206,11 @@ export default function Forms() {
       if (activeCompany) {
         setOrganizations([{ id: activeCompany.id, name: activeCompany.name }]);
       } else {
-        const { data: organizationsData } = await supabase
+        const { data: organizationsData, error: organizationsError } = await supabase
           .from("anew_organizations")
           .select("id, name")
           .in("type", ["empresa"])
+        if (organizationsError) captureFlowError(organizationsError, "db-error-leaked-to-ui");
         setOrganizations(organizationsData || []);
       }
     } catch (error) {
@@ -267,11 +269,12 @@ export default function Forms() {
 
       // If setting as primary, unset others
       if (formData.is_primary) {
-        await supabase
+        const { error: unsetError } = await supabase
           .from("forms")
           .update({ is_primary: false })
           .eq("organization_id", formData.organization_id || activeCompany?.id)
           .eq("form_type", formData.form_type);
+        if (unsetError) throw unsetError;
       }
 
       // Build i18n payload (only persist when at least one secondary locale is enabled)
@@ -345,7 +348,7 @@ export default function Forms() {
         if (formData.form_type === "lead" && newForm?.id) {
           try {
             // Create default step
-            const { data: newStep } = await supabase
+            const { data: newStep, error: newStepError } = await supabase
               .from("form_steps")
               .insert({
                 form_id: newForm.id,
@@ -357,6 +360,8 @@ export default function Forms() {
               })
               .select("id")
               .single();
+
+            if (newStepError) captureFlowError(newStepError, "form-submission-intake");
 
             if (newStep) {
               const { LEAD_FORM_BASE_FIELDS } = await import("@/constants/fieldMappings");
@@ -373,10 +378,12 @@ export default function Forms() {
                 contact_field_mapping: f.contact_field_mapping,
               }));
 
-              await supabase.from("form_fields").insert(baseFields);
+              const { error: baseFieldsError } = await supabase.from("form_fields").insert(baseFields);
+              if (baseFieldsError) captureFlowError(baseFieldsError, "form-submission-intake");
             }
           } catch (seedError) {
             console.error("Error seeding base fields:", seedError);
+            captureFlowError(seedError, "form-submission-intake");
           }
         }
 
@@ -437,6 +444,7 @@ export default function Forms() {
       toast({ title: "Formulário definido como primário" });
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "form-submission-intake");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
@@ -484,7 +492,7 @@ export default function Forms() {
         .eq("form_id", form.id);
 
       if (steps && steps.length > 0) {
-        await supabase.from("form_steps").insert(
+        const { error: stepsError } = await supabase.from("form_steps").insert(
           steps.map(s => ({
             form_id: newForm.id,
             step_number: s.step_number,
@@ -497,6 +505,7 @@ export default function Forms() {
             sort_order: s.sort_order,
           }))
         );
+        if (stepsError) throw stepsError;
       }
 
       // Copy fields
@@ -506,7 +515,7 @@ export default function Forms() {
         .eq("form_id", form.id);
 
       if (fields && fields.length > 0) {
-        await supabase.from("form_fields").insert(
+        const { error: fieldsError } = await supabase.from("form_fields").insert(
           fields.map(f => ({
             form_id: newForm.id,
             step_number: f.step_number,
@@ -532,6 +541,7 @@ export default function Forms() {
             created_by: businessUserId,
           }))
         );
+        if (fieldsError) throw fieldsError;
       }
 
       // Copy branding
@@ -543,10 +553,11 @@ export default function Forms() {
 
       if (branding) {
         const { id, form_id, created_at, updated_at, ...brandingData } = branding;
-        await supabase.from("form_branding").insert({
+        const { error: brandingError } = await supabase.from("form_branding").insert({
           ...brandingData,
           form_id: newForm.id,
         });
+        if (brandingError) throw brandingError;
       }
 
       // Copy districts
@@ -556,18 +567,20 @@ export default function Forms() {
         .eq("form_id", form.id);
 
       if (districts && districts.length > 0) {
-        await supabase.from("form_districts").insert(
+        const { error: districtsError } = await supabase.from("form_districts").insert(
           districts.map(d => ({
             form_id: newForm.id,
             district_id: d.district_id,
           }))
         );
+        if (districtsError) throw districtsError;
       }
 
       toast({ title: "Formulário duplicado" });
       loadData();
     } catch (error: any) {
       console.error("Error duplicating form:", error);
+      captureFlowError(error, "form-submission-intake");
       toast({ title: "Erro ao duplicar", description: error.message, variant: "destructive" });
     }
   };

@@ -4,6 +4,7 @@ import { resolveField, type RenderContext } from '@/utils/documentVariables';
 import { round2 } from '@/utils/quotes/inlineQuoteVatCalculation';
 import { getBundleComponents, isBundleLine } from '@/utils/quotes/bundleComponents';
 import { computeQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
+import { getLineUnitPrice } from '@/utils/quotes/quoteLinePricing';
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -281,7 +282,16 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const quoteRowAltBg = proposalTemplate?.quote_row_alt_bg || '#f9fafb';
   const contentBlockBg = proposalTemplate?.content_block_bg || proposalTemplate?.background_color || '#ffffff';
   const secondaryTextColor = proposalTemplate?.text_secondary_color || '#374151';
-  const headerTitle = proposalTemplate?.sections?.find?.((section: any) => section?.type === 'header')?.settings?.customTitle || 'ORÇAMENTO';
+  // Numa proposta, o valor por omissao nunca deve ser a palavra "Orcamento". O
+  // documento ja sabia distinguir os dois para acertar o NUMERO (ver headerNumber
+  // mais abaixo); faltava saber para o titulo e para os rotulos das seccoes.
+  // Calculado aqui em cima, e nao junto ao numero, porque o titulo precisa dele.
+  const ehProposta = documentContext?.kind === 'proposal';
+  const rotuloDocumento = ehProposta ? 'PROPOSTA' : 'ORÇAMENTO';
+  const rotuloDetalhes = ehProposta ? 'DETALHES DA PROPOSTA' : 'DETALHES DO ORÇAMENTO';
+  const rotuloValor = ehProposta ? 'VALOR DA PROPOSTA' : 'VALOR DO ORÇAMENTO';
+
+  const headerTitle = proposalTemplate?.sections?.find?.((section: any) => section?.type === 'header')?.settings?.customTitle || rotuloDocumento;
   const showCompanyInfo = proposalTemplate?.show_company_info !== false;
   const showClientInfo = proposalTemplate?.show_client_info !== false;
   const showValidity = proposalTemplate?.show_validity !== false;
@@ -346,7 +356,13 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // passed in.
   const ownTotals = computeQuoteTotals(lines, fees, descontoPercent);
   const subtotalBruto = totalsOverride ? totalsOverride.subtotalBruto : ownTotals.subtotalBruto;
-  const discountValue = ownTotals.discountValue;
+  const discountValue = totalsOverride ? totalsOverride.discountValue : ownTotals.discountValue;
+  // Percentagem a mostrar entre parêntesis: a do orçamento único, ou — no
+  // agregado — só quando é a mesma em todos os orçamentos com desconto.
+  const discountPercentLabel = totalsOverride
+    ? totalsOverride.discountPercent
+    : (descontoPercent > 0 ? descontoPercent : null);
+  const showDiscountRow = totalsOverride ? discountValue > 0 : descontoPercent > 0;
   const vatBreakdown = totalsOverride ? totalsOverride.vatBreakdown : ownTotals.vatBreakdown;
   const roundedFeeVatBreakdown = totalsOverride ? totalsOverride.feeVatBreakdown : ownTotals.roundedFeeVatBreakdown;
   const totalIva = totalsOverride ? totalsOverride.totalIva : ownTotals.totalIva;
@@ -360,18 +376,9 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     : fees.map((fee) => ({ name: fee.service_fee_types?.name || 'Taxa', value: parseFloat(String(fee.calculated_value || 0)) }));
 
 
-  // Calculate unit price from costs and margin
-  const calculateUnitPrice = (line: any) => {
-    const materialCost = parseFloat(String(line.custo_material_unit || 0));
-    const laborCost = parseFloat(String(line.custo_mao_obra_unit || 0));
-    const margin = parseFloat(String(line.margem_percent || 0));
-    const intermediary = parseFloat(String(line.int_percent || 0));
-    const totalCost = materialCost + laborCost;
-    if (totalCost === 0 && line.retail_price_unit) {
-      return parseFloat(String(line.retail_price_unit || 0));
-    }
-    return totalCost * (1 + margin / 100) * (1 + intermediary / 100);
-  };
+  // Preço unitário pela fonte única: o preço de venda definido manda mesmo
+  // quando a linha tem custo, e o valor vem fechado ao cêntimo.
+  const calculateUnitPrice = (line: any) => getLineUnitPrice(line);
 
   // Format client address
   const primaryAddress = client?.client_addresses?.find((addr: any) => addr.is_primary) 
@@ -410,10 +417,10 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const configuredSections = Array.isArray(proposalTemplate?.sections) && proposalTemplate.sections.length > 0
     ? proposalTemplate.sections
     : [
-        { id: 'header', type: 'header', label: 'Cabeçalho', visible: true, settings: { customTitle: 'ORÇAMENTO' } },
+        { id: 'header', type: 'header', label: 'Cabeçalho', visible: true, settings: { customTitle: rotuloDocumento } },
         { id: 'client_info', type: 'client_info', label: 'Cliente', visible: true, settings: { sectionLabel: 'CLIENTE' } },
         { id: 'notes', type: 'notes', label: 'Notas', visible: true, settings: { sectionLabel: 'NOTAS' } },
-        { id: 'quote_items', type: 'quote_items', label: 'Detalhes do Orçamento', visible: true, settings: { sectionLabel: 'DETALHES DO ORÇAMENTO' } },
+        { id: 'quote_items', type: 'quote_items', label: 'Detalhes do Orçamento', visible: true, settings: { sectionLabel: rotuloDetalhes } },
         { id: 'terms', type: 'terms', label: 'Condições Gerais', visible: true, settings: { sectionLabel: 'CONDIÇÕES GERAIS' } },
         { id: 'footer', type: 'footer', label: 'Rodapé', visible: true, settings: {} },
       ];
@@ -429,7 +436,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // que está a ser renderizado por baixo. O número da proposta só entra quando
   // existe mesmo; sem ele, cair para o do orçamento é preferível a deixar o
   // documento sem qualquer identificação.
-  const isProposalDocument = documentContext?.kind === 'proposal';
+  const isProposalDocument = ehProposta;
   const headerNumber =
     (isProposalDocument ? (documentContext as { number?: string | null }).number : null)
     || quote.quote_number
@@ -511,7 +518,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const renderQuoteItems = (section: any) => (
     <View>
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'DETALHES DO ORÇAMENTO')}</Text>
+        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, rotuloDetalhes)}</Text>
         <View style={styles.table}>
           <View style={[styles.tableHeader, { backgroundColor: quoteHeaderBg, color: quoteHeaderText }]}> 
             <Text style={columnStyles.sku}>SKU</Text>
@@ -650,7 +657,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     return (
     <View style={styles.totalsSection} wrap={false} minPresenceAhead={95}>
       <View style={styles.totalsRow}><Text style={styles.totalLabel}>Subtotal Produtos (sem IVA):</Text><Text style={styles.totalValue}>€{subtotalBruto.toFixed(2)}</Text></View>
-      {!totalsOverride && descontoPercent > 0 && <View style={styles.totalsRow}><Text style={[styles.totalLabel, { color: '#dc2626' }]}>Desconto Global ({descontoPercent}%):</Text><Text style={[styles.totalValue, { color: '#dc2626' }]}>-€{discountValue.toFixed(2)}</Text></View>}
+      {showDiscountRow && <View style={styles.totalsRow}><Text style={[styles.totalLabel, { color: '#dc2626' }]}>Desconto Global{discountPercentLabel !== null ? ` (${discountPercentLabel}%)` : ''}:</Text><Text style={[styles.totalValue, { color: '#dc2626' }]}>-€{discountValue.toFixed(2)}</Text></View>}
       {feeRows.length > 0 && (() => {
         if (totalsOverride) {
           return (<View style={{ marginTop: 5, marginBottom: 3, width: '50%', alignSelf: 'flex-end' }}><Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151', textAlign: 'left' }}>Taxas de Serviço:</Text></View>);
@@ -682,7 +689,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     if (hideTotals) return null;
     return (
     <View style={styles.section} wrap={false} minPresenceAhead={115}>
-      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'VALOR DO ORÇAMENTO')}</Text>
+      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, rotuloValor)}</Text>
       {renderTotals()}
     </View>
     );

@@ -1,24 +1,43 @@
-﻿import { useEffect, useState, useMemo, useCallback, useRef } from "react";
+﻿import { useEffect, useState, useMemo, useCallback, useRef, type ReactNode } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
-import { searchEntityIds } from "@/lib/clientSearch";
+import { runProposalStageWorkflow } from "@/lib/proposals/runStageWorkflow";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { applyClientSearchTextFilter, resolveClientSearch } from "@/lib/clientSearch";
 import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
 import { useDescendantOrgIds } from "@/hooks/useDescendantOrgIds";
+import { useSentinelInView } from "@/hooks/useSentinelInView";
+import {
+  PROPOSALS_PAGE_SIZE,
+  PROPOSALS_FULL_VIEW_LIMIT,
+  PROPOSALS_ALERT_FEED_LIMIT,
+  buildProposalsRpcArgs,
+  chunkIds,
+  mapProposalAlertFeed,
+  mapProposalsListMetrics,
+  resolveBrowserTimeZone,
+  EMPTY_PROPOSALS_METRICS,
+  type ProposalAlertFeedRow,
+  type ProposalsListFilters,
+  type ProposalsListMetrics,
+  type ProposalsScope,
+} from "@/lib/proposalsListQuery";
 import { MIN_SEARCH_TERM_LENGTH, normalizeSearchTerm } from "@/lib/search/scopedEntitySearch";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
+import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StickyHorizontalScroll } from "@/components/ui/sticky-horizontal-scroll";
 import { 
   Plus, FileText, Pencil, Trash2, Search, RefreshCw, Filter,
   ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon, X, Eye, Settings2,
-  Copy, History, Link2, Paintbrush, Palette,
+  Copy, History, Link2, Paintbrush, Palette, AlertTriangle,
   CheckSquare, Send, Mail, MoreHorizontal, Phone, MessageSquare, KeyRound,
   RotateCcw, BarChart3, Columns3, LayoutList, Download, HelpCircle
 } from "lucide-react";
@@ -45,6 +64,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { proposalSchema } from "@/lib/validations";
+import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
@@ -97,6 +117,7 @@ import { Sparkles } from "lucide-react";
 import { generateProposalPdfBlob, downloadBlob } from "@/utils/generateProposalPdfBlob";
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
+import { getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 
 interface WorkflowStage {
   id: string;
@@ -136,12 +157,6 @@ interface Proposal {
   proposal_number?: string | null;
   published_at?: string | null;
   has_unpublished_changes?: boolean | null;
-}
-
-interface Deal {
-  id: string;
-  title: string;
-  probability: number | null;
 }
 
 interface DealSearchResult {
@@ -185,9 +200,30 @@ const PROPOSALS_LIST_SELECT =
 
 const Proposals = () => {
   const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [deals, setDeals] = useState<Deal[]>([]);
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
+  // Same rows as workflowStages, but WITHOUT the is_active filter — a stage
+  // deleted in the workflow editor is a soft-delete (is_active=false), and
+  // proposals/stats still reference it by stage_id. Anything that counts or
+  // labels proposals by stage must use this list, or a deactivated "Aceite"
+  // stage silently disappears from totals even though its proposals didn't.
+  const [allWorkflowStages, setAllWorkflowStages] = useState<WorkflowStage[]>([]);
   const [loading, setLoading] = useState(true);
+  // Paginacao com scroll infinito, no mesmo molde da listagem de Leads
+  // (src/pages/AnewLeads.tsx). Antes desta vaga a listagem trazia as 519 linhas
+  // da maior organizacao de uma so vez -- 1,03 MB.
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const currentPageRef = useRef(0);
+  const isLoadingRef = useRef(false);
+  // Metricas dos cartoes de KPI: passam a vir de get_proposals_list_metrics,
+  // que as calcula sobre o CONJUNTO COMPLETO do ambito e dos filtros. Calcula-las
+  // no cliente sobre o array carregado faria cada numero passar a refletir so a
+  // pagina visivel.
+  const [metrics, setMetrics] = useState<ProposalsListMetrics>(EMPTY_PROPOSALS_METRICS);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+  // Leitura magra do conjunto completo para as barras de alerta, que sempre
+  // correram sobre todas as propostas e nao sobre a pagina visivel.
+  const [alertFeed, setAlertFeed] = useState<ProposalAlertFeedRow[]>([]);
   const [savingProposal, setSavingProposal] = useState(false);
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -237,8 +273,26 @@ const Proposals = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
   const [searchEntityIdSet, setSearchEntityIdSet] = useState<Set<string> | null>(null);
-  const truncatedWarnedRef = useRef<string | null>(null);
-  // Resolve entity IDs matching the search term (covers name/email/phone/NIF)
+  // Resolve entity IDs matching the search term (covers name/email/phone/NIF).
+  //
+  // Passou a usar `anew_entities.search_text` (uma coluna denormalizada mantida
+  // por trigger, com indice GIN trigram — ver
+  // supabase/migrations/20261113150000_anew_entities_search_text.sql), o mesmo
+  // caminho que a pagina de Clientes usa.
+  //
+  // Substitui searchEntityIds(), que chamava a RPC search_entity_ids_by_word
+  // uma vez POR PALAVRA. Medido ao vivo como `authenticated` contra o remoto:
+  // "silva" e "mar" rebentavam o statement_timeout de 8s (HTTP 500, 57014) e
+  // "pinto" demorava 5,9s — ou seja, pesquisar propostas por um apelido comum
+  // nao era lento, era simplesmente vazio, porque o erro era engolido e o
+  // conjunto de entidades ficava vazio. O mesmo termo por search_text: 2,0s /
+  // 2,3s / 2,1s, sem erro. (O piso de ~2s e o RLS de anew_entities, nao a
+  // pesquisa: um `display_name ILIKE` simples mede os mesmos ~2,1s.)
+  //
+  // AND entre palavras e independente da ordem — "maria silva" encontra
+  // "Maria da Silva". O NIF continua de fora do search_text, resolvido a parte
+  // pela Edge Function search-entities (cifrado, nunca em texto claro) e unido
+  // por cima, tal como antes.
   useEffect(() => {
     const term = debouncedSearch.trim();
     if (term.length < 3) {
@@ -247,19 +301,26 @@ const Proposals = () => {
     }
     let cancelled = false;
     (async () => {
-      const { ids, truncated } = await searchEntityIds(term);
+      const { words, nifEntityIds } = await resolveClientSearch(term);
       if (cancelled) return;
-      if (truncated && truncatedWarnedRef.current !== term) {
-        truncatedWarnedRef.current = term;
-        toast({
-          title: "Demasiados resultados",
-          description: "Mais de 1000 resultados — refine a pesquisa para ver todos.",
-        });
+
+      const ids = new Set<string>(nifEntityIds);
+      if (words.length > 0) {
+        const { data, error } = await applyClientSearchTextFilter(
+          supabase.from("anew_entities").select("id"),
+          words,
+        );
+        if (cancelled) return;
+        if (error) {
+          console.error("[Proposals] anew_entities.search_text lookup error:", error);
+        } else {
+          (data || []).forEach((row: { id: string }) => ids.add(row.id));
+        }
       }
-      setSearchEntityIdSet(new Set(ids));
+      setSearchEntityIdSet(ids);
     })();
     return () => { cancelled = true; };
-  }, [debouncedSearch, toast]);
+  }, [debouncedSearch]);
   const [statusFilter, setStatusFilter] = useState<string>(stageFromUrl || "all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
@@ -334,6 +395,8 @@ const Proposals = () => {
   const [showNullTotalDialog, setShowNullTotalDialog] = useState(false);
   const [nullTotalQuoteNames, setNullTotalQuoteNames] = useState<string[]>([]);
   const nullTotalConfirmedRef = useRef(false);
+  const [missingTemplateOpen, setMissingTemplateOpen] = useState(false);
+  const missingTemplateOkRef = useRef(false);
   const proposalFormRef = useRef<HTMLFormElement>(null);
   const [suggestedQuotes, setSuggestedQuotes] = useState<QuoteItem[]>([]);
   
@@ -543,7 +606,6 @@ const Proposals = () => {
     setQuoteSearchResults(merged.map(toQuoteItem));
   }, [activeCompany?.id, toQuoteItem, formData.assigned_to]);
 
-
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
   const [bulkStatusDialogOpen, setBulkStatusDialogOpen] = useState(false);
@@ -560,7 +622,9 @@ const Proposals = () => {
   const [sendProposal, setSendProposal] = useState<any>(null);
 
   const [callDialogOpen, setCallDialogOpen] = useState(false);
-  const [callTarget, setCallTarget] = useState<{ entityId: string; name: string }>({ entityId: "", name: "" });
+  // Guarda tambem a proposta de origem: e por ela que a linha e actualizada
+  // depois de a chamada ficar registada, sem recarregar a lista.
+  const [callTarget, setCallTarget] = useState<{ entityId: string; name: string; proposalId: string | null }>({ entityId: "", name: "", proposalId: null });
 
   const [whatsAppDialogOpen, setWhatsAppDialogOpen] = useState(false);
   const [whatsAppContext, setWhatsAppContext] = useState<WhatsAppContext | null>(null);
@@ -582,6 +646,7 @@ const Proposals = () => {
   const [contractStatuses, setContractStatuses] = useState<Record<string, string>>({});
   const [proposalsWithQuotes, setProposalsWithQuotes] = useState<Set<string>>(new Set());
   const [portalStatuses, setPortalStatuses] = useState<Record<string, string>>({});
+  const [exportingProposals, setExportingProposals] = useState(false);
   const [entityNames, setEntityNames] = useState<Record<string, string>>({});
   const [entityEmails, setEntityEmails] = useState<Record<string, string>>({});
   const [entityPhones, setEntityPhones] = useState<Record<string, string>>({});
@@ -599,6 +664,11 @@ const Proposals = () => {
   // below) since those useMemo callbacks run during render and would
   // otherwise reference this const before its declaration.
   const getFollowUpThresholdDays = () => alertSettings.get("proposal_no_response", 5).days_threshold;
+  // Valor primitivo, e nao o objeto devolvido por useAlertSettings: esse e
+  // recriado a cada render, e ter o objeto nas dependencias de `listFilters`
+  // punha loadData a mudar de identidade em todas as renders -- ciclo infinito
+  // de recarregamentos.
+  const followUpThresholdDays = alertSettings.get("proposal_no_response", 5).days_threshold;
 
   // Days since whichever is more recent: the proposal being sent, or the last
   // activity logged for its entity ("Registar atividade" / calls / WhatsApp,
@@ -629,26 +699,42 @@ const Proposals = () => {
     }
   }, [permissionsLoading, hasPermission, isSystemAdmin, navigate, activeCompany]);
 
-  const loadWorkflowStages = useCallback(async () => {
-    const { data: orgStages } = await (supabase
-      .from("proposal_workflow_stages") as any)
-      .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
-      .eq("organization_id", activeCompany?.id || '')
-      .eq("is_active", true)
-      .order("stage_order");
-
-    if (orgStages && orgStages.length > 0) {
-      setWorkflowStages(orgStages);
-    } else {
-      const { data: globalStages } = await (supabase
-        .from("proposal_workflow_stages") as any)
-        .select("id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost")
+  // Devolve os estados alem de os guardar no estado do React: a RPC de
+  // paginacao precisa da lista de ids no mesmo tick, e ler `workflowStages`
+  // logo depois do setState devolveria o valor da render anterior.
+  //
+  // allWorkflowStages inclui SEMPRE as fases globais de template alem das
+  // do org, mesmo quando o org ja tem fases proprias — propostas antigas
+  // podem ter stage_id a apontar para uma fase global legada que deixou de
+  // aparecer na lista do org, fazendo essas propostas desaparecerem de
+  // qualquer agregacao client-side por is_won/is_lost (ex.: ProposalsDashboardView),
+  // apesar de a flag estar certa quando lida diretamente do embed da
+  // proposta ou pela SQL de get_proposals_list_metrics (que ja resolve por
+  // nome de fase, nao por id). O valor devolvido e workflowStages (a lista
+  // "ativa", org-preferida) exatamente como antes deste merge.
+  const loadWorkflowStages = useCallback(async (): Promise<WorkflowStage[]> => {
+    const selectCols = "id, name, label, color, stage_order, is_active, organization_id, is_final, is_won, is_lost";
+    const [{ data: orgStagesAll }, { data: globalStagesAll }] = await Promise.all([
+      (supabase.from("proposal_workflow_stages") as any)
+        .select(selectCols)
+        .eq("organization_id", activeCompany?.id || '')
+        .order("stage_order"),
+      (supabase.from("proposal_workflow_stages") as any)
+        .select(selectCols)
         .is("organization_id", null)
-        .eq("is_active", true)
-        .order("stage_order");
-      
-      setWorkflowStages(globalStages || []);
-    }
+        .order("stage_order"),
+    ]);
+
+    const org = orgStagesAll || [];
+    const global = globalStagesAll || [];
+
+    const orgIds = new Set(org.map((s: WorkflowStage) => s.id));
+    const merged = [...org, ...global.filter((s: WorkflowStage) => !orgIds.has(s.id))];
+    setAllWorkflowStages(merged);
+
+    const active = org.length > 0 ? org.filter((s: WorkflowStage) => s.is_active) : global.filter((s: WorkflowStage) => s.is_active);
+    setWorkflowStages(active);
+    return active;
   }, [activeCompany?.id]);
 
   const loadProposalTemplates = useCallback(async () => {
@@ -663,15 +749,45 @@ const Proposals = () => {
     setProposalTemplates(data || []);
   }, [activeCompany?.id]);
 
+  // Filtros da UI num objeto so, que segue tal e qual para as tres RPCs. Entra
+  // nas dependencias de loadData, por isso mexer num filtro recarrega a partir
+  // da primeira pagina -- e a lista, os cartoes e os alertas nao podem ficar a
+  // olhar para filtros diferentes.
+  const listFilters = useMemo<ProposalsListFilters>(() => ({
+    statusFilter,
+    search: debouncedSearch,
+    searchEntityIds: searchEntityIdSet ? Array.from(searchEntityIdSet) : null,
+    dateFromIso: dateFrom ? startOfDay(dateFrom).toISOString() : null,
+    dateToIso: dateTo ? endOfDay(dateTo).toISOString() : null,
+    comercialFilter,
+    onlyMineUserId: onlyMine && scopeAnewUserId ? scopeAnewUserId : null,
+    noResponse: noResponseFilter,
+    expired: expiredFilter,
+    noValidity: noValidityFilter,
+    followUpDays: followUpThresholdDays,
+  }), [
+    statusFilter, debouncedSearch, searchEntityIdSet, dateFrom, dateTo,
+    comercialFilter, onlyMine, scopeAnewUserId, noResponseFilter,
+    expiredFilter, noValidityFilter, followUpThresholdDays,
+  ]);
+
+  // Ambito resolvido na ultima vaga. Guardado para que uma actualizacao de
+  // metricas depois de gravar nao tenha de refazer auth.getUser +
+  // anew_leads -> deals so para chegar aos mesmos ids.
+  const lastScopeRef = useRef<ProposalsScope | null>(null);
+  const lastStageIdsRef = useRef<string[]>([]);
+
   // True once the first successful page load has painted; keeps later
   // refreshes from re-triggering the full-page loader.
   const hasLoadedOnceRef = useRef(false);
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (append = false) => {
     if (!activeCompany?.id || permissionsLoading || scopeLoading) {
       if (!activeCompany?.id) {
         setProposals([]);
-        setDeals([]);
+        setAlertFeed([]);
+        setMetrics(EMPTY_PROPOSALS_METRICS);
+        setMetricsLoading(false);
       }
       setLoading(!!activeCompany?.id);
       return;
@@ -681,36 +797,51 @@ const Proposals = () => {
     // full-page early return further down — so each action was unmounting the
     // whole page and remounting it, losing scroll position and flashing the
     // loader. Subsequent refreshes now update the data in place.
-    if (!hasLoadedOnceRef.current) setLoading(true);
+    if (append) {
+      if (isLoadingRef.current) return;
+      setLoadingMore(true);
+    } else {
+      if (!hasLoadedOnceRef.current) setLoading(true);
+      currentPageRef.current = 0;
+      setMetricsLoading(true);
+    }
+    isLoadingRef.current = true;
     try {
-      await Promise.all([loadWorkflowStages(), loadProposalTemplates()]);
+      // Numa vaga de "carregar mais" os estados do workflow e os modelos sao
+      // os mesmos da pagina anterior. Voltar a pedi-los custava um pedido a
+      // proposal_workflow_stages por cada pagina.
+      let stageIds: string[];
+      if (append && lastStageIdsRef.current.length > 0) {
+        stageIds = lastStageIdsRef.current;
+      } else {
+        const [stages] = await Promise.all([loadWorkflowStages(), loadProposalTemplates()]);
+        stageIds = stages.map(stage => stage.id);
+      }
 
       const { data: { user } } = await supabase.auth.getUser();
       const viewScope = getPermissionScope("proposals.view");
 
-      let proposalsData: Proposal[] = [];
-      let dealsData: Deal[] = [];
+      // Âmbito resolvido AQUI, no TypeScript, e depois entregue às RPCs. A
+      // decisão de quem vê o quê não é replicada em SQL de propósito — é onde
+      // nascem os furos de isolamento entre organizações.
+      let scope: ProposalsScope | null = null;
 
       if (viewScope === "ORG" || isSystemAdmin) {
-        // ORG scope or system admin: see all proposals in the organization
-        const [proposalsRes, dealsRes] = await Promise.all([
-          (supabase
-            .from("proposals") as any)
-            .select(PROPOSALS_LIST_SELECT)
-            .eq("organization_id", activeCompany.id)
-            .is("deleted_at", null)
-            .order("created_at", { ascending: false }),
-          supabase
-            .from("deals")
-            .select("id, title, probability")
-            .eq("organization_id", activeCompany.id),
-        ]);
-
-        if (proposalsRes.error) throw proposalsRes.error;
-        if (dealsRes.error) throw dealsRes.error;
-
-        proposalsData = proposalsRes.data || [];
-        dealsData = dealsRes.data || [];
+        // ORG scope or system admin: see all proposals in the organization.
+        //
+        // Nao ha aqui consulta a `deals`. A que existia trazia todos os deals
+        // da organizacao -- 911 linhas, ~66 kB -- para alimentar um estado
+        // `deals` que nenhuma parte desta pagina chegava a ler: o seletor de
+        // pedidos do formulario usa `dealSearchResults`, e a listagem usa o
+        // embed `deals(id, title, probability)` que ja vem em cada linha.
+        // Media 1,71 MB do payload de abertura, repetida a cada vaga.
+        scope = {
+          organizationId: activeCompany.id,
+          mode: "ORG",
+          dealIds: null,
+          createdByIds: null,
+          createdByFallbackOnly: false,
+        };
       } else if ((viewScope === "TEAM" || viewScope === "OWNED") && user?.id) {
         // Get anew user id
         const { data: anewUser } = await supabase
@@ -735,51 +866,116 @@ const Proposals = () => {
           .in("assigned_to", Array.from(allowedUserIds));
 
         const leadIds = (userLeads || []).map((l: any) => l.id);
+        let dealIds: string[] = [];
 
         if (leadIds.length > 0) {
+          // So os ids: esta consulta existe para RESOLVER O AMBITO, nao para
+          // alimentar ecra nenhum.
           const { data: userDeals } = await supabase
             .from("deals")
-            .select("id, title, probability")
+            .select("id")
             .eq("organization_id", activeCompany.id)
             .in("lead_id", leadIds);
 
-          const dealIds = (userDeals || []).map(d => d.id);
-          dealsData = userDeals || [];
-
-          if (dealIds.length > 0) {
-            const { data: proposalsRes, error } = await (supabase
-              .from("proposals") as any)
-              .select(PROPOSALS_LIST_SELECT)
-              .eq("organization_id", activeCompany.id)
-              .is("deleted_at", null)
-              .in("deal_id", dealIds)
-              .order("created_at", { ascending: false });
-
-            if (error) throw error;
-            proposalsData = proposalsRes || [];
-          }
+          dealIds = (userDeals || []).map(d => d.id);
         }
 
-        // Also include proposals created by allowed users (fallback)
-        if (proposalsData.length === 0 || viewScope === "TEAM") {
-          const { data: ownedProposals } = await (supabase
-            .from("proposals") as any)
-            .select(PROPOSALS_LIST_SELECT)
-            .eq("organization_id", activeCompany.id)
-            .is("deleted_at", null)
-            .in("created_by", Array.from(allowedUserIds))
-            .order("created_at", { ascending: false });
+        scope = {
+          organizationId: activeCompany.id,
+          mode: "IDS",
+          dealIds: dealIds.length > 0 ? dealIds : null,
+          createdByIds: Array.from(allowedUserIds),
+          // Em OWNED a união por created_by só valia quando a consulta por
+          // deal_id não devolvia nada; em TEAM valia sempre. Mantido igual.
+          createdByFallbackOnly: viewScope === "OWNED",
+        };
+      }
 
-          if (ownedProposals) {
-            const existingIds = new Set(proposalsData.map(p => p.id));
-            for (const p of ownedProposals) {
-              if (!existingIds.has(p.id)) {
-                proposalsData.push(p);
-              }
-            }
+      let proposalsData: Proposal[] = [];
+      let pageRowCount = 0;
+      // Kanban e dashboard são vistas de conjunto: continuam a carregar tudo
+      // (com tecto). A paginação aplica-se à lista, que é a vista por omissão.
+      const pageSize = viewMode === "lista" ? PROPOSALS_PAGE_SIZE : PROPOSALS_FULL_VIEW_LIMIT;
+
+      if (!scope) {
+        setMetrics(EMPTY_PROPOSALS_METRICS);
+        setMetricsLoading(false);
+        setAlertFeed([]);
+        setHasMore(false);
+      } else {
+        // Um único instante por vaga, partilhado pela página e pelos cartões:
+        // "sem resposta" e "tempo médio de fecho" dependem de agora, e com dois
+        // relógios diferentes a lista e os KPIs podiam discordar.
+        const nowIso = new Date().toISOString();
+        const timeZone = resolveBrowserTimeZone();
+        const scopeArgs = {
+          _organization_id: scope.organizationId,
+          _scope_mode: scope.mode,
+          _scope_deal_ids: scope.dealIds,
+          _scope_created_by_ids: scope.createdByIds,
+          _created_by_fallback_only: scope.createdByFallbackOnly,
+          _workflow_stage_ids: stageIds,
+        };
+        lastScopeRef.current = scope;
+        lastStageIdsRef.current = stageIds;
+        const rpcArgs = buildProposalsRpcArgs(scope, listFilters, stageIds, nowIso, timeZone);
+        const offset = currentPageRef.current * pageSize;
+
+        const [pageRes, metricsRes, alertRes] = await Promise.all([
+          (supabase as any).rpc("get_proposals_list_page", {
+            ...rpcArgs,
+            _sort_column: sortColumn,
+            _sort_direction: sortDirection,
+            _limit: pageSize,
+            _offset: offset,
+          }),
+          // As métricas e as barras de alerta cobrem o conjunto completo, não a
+          // página: só são recarregadas quando a vaga não é um "carregar mais".
+          append ? Promise.resolve(null) : (supabase as any).rpc("get_proposals_list_metrics", rpcArgs),
+          append ? Promise.resolve(null) : (supabase as any).rpc("get_proposals_alert_feed", {
+            ...scopeArgs,
+            _limit: PROPOSALS_ALERT_FEED_LIMIT,
+          }),
+        ]);
+
+        if (pageRes.error) throw pageRes.error;
+        const pageIds: string[] = (pageRes.data || []).map((row: any) => row.proposal_id);
+        pageRowCount = pageIds.length;
+
+        if (metricsRes) {
+          if (metricsRes.error) throw metricsRes.error;
+          setMetrics(mapProposalsListMetrics((metricsRes.data || [])[0]));
+          setMetricsLoading(false);
+        }
+        if (alertRes) {
+          if (alertRes.error) throw alertRes.error;
+          setAlertFeed(mapProposalAlertFeed(alertRes.data));
+        }
+
+        if (pageIds.length > 0) {
+          // A RPC devolve só ids; as linhas continuam a vir do PostgREST com o
+          // mesmo select e os mesmos embeds que a página já usava — mas 25 em
+          // vez de 519, que era o 1,03 MB.
+          const rowResults = await Promise.all(
+            chunkIds(pageIds).map(chunk =>
+              (supabase.from("proposals") as any)
+                .select(PROPOSALS_LIST_SELECT)
+                .in("id", chunk)
+            )
+          );
+          const byId = new Map<string, Proposal>();
+          for (const res of rowResults) {
+            if (res.error) throw res.error;
+            for (const row of (res.data || [])) byId.set(row.id, row);
           }
+          // A ordem é a da RPC (determinística), não a que o PostgREST devolveu.
+          proposalsData = pageIds
+            .map(id => byId.get(id))
+            .filter((row): row is Proposal => !!row);
         }
       }
+
+      setHasMore(pageRowCount === pageSize);
 
       // Load pipeline links for proposals
       if (proposalsData.length > 0) {
@@ -792,7 +988,10 @@ const Proposals = () => {
         proposalsData.forEach((p: any) => {
           if (p.quotes && p.quotes.length > 0) quotesSet.add(p.id);
         });
-        setProposalsWithQuotes(quotesSet);
+        // Em "carregar mais" o enriquecimento cobre so a pagina nova, por isso
+        // funde-se com o que ja estava. Substituir apagaria os nomes, emails e
+        // telefones das paginas anteriores, que continuam visiveis.
+        setProposalsWithQuotes(prev => (append ? new Set([...prev, ...quotesSet]) : quotesSet));
 
         // Resolve entity names for proposals (including from deals as fallback)
         const directEntityIds = proposalsData.map((p: any) => p.entity_id).filter(Boolean);
@@ -821,14 +1020,14 @@ const Proposals = () => {
         (links || []).forEach((l: any) => {
           linksMap[l.proposal_id] = l;
         });
-        setPipelineLinks(linksMap);
+        setPipelineLinks(prev => (append ? { ...prev, ...linksMap } : linksMap));
 
         const portalUsers = portalUsersRes.data;
         const statusMap: Record<string, string> = {};
         (portalUsers || []).forEach((pu: any) => {
           if (pu.proposal_id) statusMap[pu.proposal_id] = pu.portal_status;
         });
-        setPortalStatuses(statusMap);
+        setPortalStatuses(prev => (append ? { ...prev, ...statusMap } : statusMap));
 
         // Fetch deal entity_ids for proposals without entity_id
         const dealEntityMap: Record<string, string> = {};
@@ -850,15 +1049,14 @@ const Proposals = () => {
           ...Object.values(dealEntityMap),
         ])];
 
+        // One RPC replaces four parallel queries. Those queries each carried the
+        // whole id list in the query string — ~17 kB, four times over — and half
+        // of this wave's measured time was spent there rather than in the
+        // database. An RPC is a POST, so the ids travel in the body. It also
+        // resolves the latest interaction per entity server-side, which used to
+        // mean shipping every interaction row just to keep the first of each.
         const entitiesPromise = allEntityIds.length > 0
-          ? Promise.all([
-              supabase.from("anew_entities").select("id, display_name").in("id", allEntityIds),
-              supabase.from("anew_entity_emails").select("entity_id, email").in("entity_id", allEntityIds).eq("is_primary", true),
-              supabase.from("anew_entity_phones").select("entity_id, phone_number").in("entity_id", allEntityIds).eq("is_primary", true),
-              // Ordered desc so the forEach below (which only ever keeps the
-              // first value seen per entity_id) naturally keeps the latest one.
-              supabase.from("entity_interactions").select("entity_id, interaction_at").in("entity_id", allEntityIds).order("interaction_at", { ascending: false }),
-            ])
+          ? (supabase as any).rpc("get_entity_contact_summary", { _entity_ids: allEntityIds })
           : null;
 
         const [contractsRes, entityResults] = await Promise.all([
@@ -871,19 +1069,23 @@ const Proposals = () => {
         (linkedContracts || []).forEach((c: any) => {
           contractStatusMap[c.id] = c.status;
         });
-        setContractStatuses(contractStatusMap);
+        setContractStatuses(prev => (append ? { ...prev, ...contractStatusMap } : contractStatusMap));
 
         if (entityResults) {
-          const [entRes, emailRes, phoneRes, interactionRes] = entityResults;
           const nameMap: Record<string, string> = {};
           const emailMap: Record<string, string> = {};
           const phoneMap: Record<string, string> = {};
           const lastInteractionMap: Record<string, string> = {};
-          (entRes.data || []).forEach((e: any) => { nameMap[e.id] = e.display_name; });
-          (emailRes.data || []).forEach((e: any) => { emailMap[e.entity_id] = e.email; });
-          (phoneRes.data || []).forEach((e: any) => { phoneMap[e.entity_id] = e.phone_number; });
-          (interactionRes.data || []).forEach((i: any) => {
-            if (i.entity_id && !lastInteractionMap[i.entity_id]) lastInteractionMap[i.entity_id] = i.interaction_at;
+          // The RPC returns one row per visible entity. Email, phone and last
+          // interaction are only recorded when present, so an entity without
+          // them stays absent from those maps exactly as it did when each came
+          // from its own query.
+          ((entityResults as any)?.data || []).forEach((row: any) => {
+            if (!row?.entity_id) return;
+            nameMap[row.entity_id] = row.display_name;
+            if (row.email) emailMap[row.entity_id] = row.email;
+            if (row.phone_number) phoneMap[row.entity_id] = row.phone_number;
+            if (row.last_interaction_at) lastInteractionMap[row.entity_id] = row.last_interaction_at;
           });
 
           // Map deal entity data to proposal keys using deal_id
@@ -897,12 +1099,12 @@ const Proposals = () => {
             }
           });
 
-          setEntityNames(nameMap);
-          setEntityEmails(emailMap);
-          setEntityPhones(phoneMap);
-          setDealEntityIds(dealEntityMap);
-          setEntityLastInteraction(lastInteractionMap);
-        } else {
+          setEntityNames(prev => (append ? { ...prev, ...nameMap } : nameMap));
+          setEntityEmails(prev => (append ? { ...prev, ...emailMap } : emailMap));
+          setEntityPhones(prev => (append ? { ...prev, ...phoneMap } : phoneMap));
+          setDealEntityIds(prev => (append ? { ...prev, ...dealEntityMap } : dealEntityMap));
+          setEntityLastInteraction(prev => (append ? { ...prev, ...lastInteractionMap } : lastInteractionMap));
+        } else if (!append) {
           setEntityNames({});
           setEntityEmails({});
           setEntityPhones({});
@@ -915,9 +1117,17 @@ const Proposals = () => {
         new Map((proposalsData || []).map((proposal) => [proposal.id, proposal])).values()
       );
 
-      setProposals(uniqueProposals);
-      setDeals(dealsData);
+      if (append) {
+        setProposals(prev => {
+          const seen = new Set(prev.map(p => p.id));
+          return [...prev, ...uniqueProposals.filter(p => !seen.has(p.id))];
+        });
+      } else {
+        setProposals(uniqueProposals);
+      }
+      currentPageRef.current += 1;
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({
         title: t('proposals.toast.loadError'),
         description: error.message,
@@ -925,7 +1135,9 @@ const Proposals = () => {
       });
     } finally {
       hasLoadedOnceRef.current = true;
+      isLoadingRef.current = false;
       setLoading(false);
+      setLoadingMore(false);
     }
   }, [
     loadWorkflowStages,
@@ -938,7 +1150,189 @@ const Proposals = () => {
     scopeLoading,
     getPermissionScope,
     teamMemberIds,
+    viewMode,
+    sortColumn,
+    sortDirection,
+    listFilters,
   ]);
+
+  // Infinite scroll: pede a pagina seguinte.
+  const loadMoreProposals = useCallback(() => {
+    if (!loading && !loadingMore && hasMore) {
+      loadData(true);
+    }
+  }, [loading, loadingMore, hasMore, loadData]);
+
+  // Para de pedir quando ja se tem tantas linhas quantas a RPC de metricas
+  // contou para o mesmo ambito e filtros.
+  const effectiveHasMore = hasMore && proposals.length < metrics.total;
+
+  const { sentinelRef } = useSentinelInView({
+    onVisible: loadMoreProposals,
+    enabled: effectiveHasMore,
+    isLoading: loading || loadingMore,
+  });
+
+  // Só as métricas e os alertas, sem tocar na lista.
+  //
+  // Os cartões deixaram de ser calculados sobre o array em memória, por isso
+  // uma edição que mexa no valor, no estado ou na validade não se reflete
+  // sozinha neles. Volta-se a chamar a RPC — é uma chamada leve (medida em
+  // ~335 ms como `authenticated`, com RLS) e não duplica em JavaScript as
+  // fórmulas que estão espelhadas em SQL, que é o que aconteceria se se
+  // tentasse aplicar o delta da linha alterada à mão.
+  const refreshMetrics = useCallback(async () => {
+    const scope = lastScopeRef.current;
+    if (!scope) return;
+    const rpcArgs = buildProposalsRpcArgs(
+      scope, listFilters, lastStageIdsRef.current,
+      new Date().toISOString(), resolveBrowserTimeZone(),
+    );
+    const [metricsRes, alertRes] = await Promise.all([
+      (supabase as any).rpc("get_proposals_list_metrics", rpcArgs),
+      (supabase as any).rpc("get_proposals_alert_feed", {
+        _organization_id: scope.organizationId,
+        _scope_mode: scope.mode,
+        _scope_deal_ids: scope.dealIds,
+        _scope_created_by_ids: scope.createdByIds,
+        _created_by_fallback_only: scope.createdByFallbackOnly,
+        _workflow_stage_ids: lastStageIdsRef.current,
+        _limit: PROPOSALS_ALERT_FEED_LIMIT,
+      }),
+    ]);
+    if (!metricsRes?.error) setMetrics(mapProposalsListMetrics((metricsRes?.data || [])[0]));
+    if (!alertRes?.error) setAlertFeed(mapProposalAlertFeed(alertRes?.data));
+  }, [listFilters]);
+
+  // Tira linhas da lista sem refazer a página.
+  const removeProposalsFromList = useCallback((ids: string[]) => {
+    if (ids.length === 0) return;
+    const gone = new Set(ids);
+    setProposals(prev => prev.filter(p => !gone.has(p.id)));
+    setSelectedIds(prev => prev.filter(id => !gone.has(id)));
+  }, []);
+
+  // Recarrega UMA linha e substitui-a no sítio, mantendo o scroll e as páginas
+  // já carregadas — o padrão de refreshSingleLead em AnewLeads.tsx.
+  //
+  // Sempre a partir do que o servidor devolve, nunca de uma suposição do que a
+  // gravação terá feito: triggers de base de dados e workflows mexem em
+  // `value`, `status` e `sent_at` depois do update, e uma linha optimista
+  // divergiria em silêncio do que ficou realmente gravado.
+  //
+  // Limitação conhecida, igual à de refreshSingleLead: se a alteração fizer a
+  // proposta deixar de corresponder a um filtro activo, a linha continua
+  // visível (com os valores certos) até ao próximo carregamento. O filtro é
+  // avaliado no servidor e não há forma de o perguntar para um id só sem
+  // duplicar aqui o predicado que existe em proposals_list_filtered.
+  const refreshSingleProposal = useCallback(async (proposalId: string) => {
+    if (!activeCompany?.id) return;
+
+    const { data, error } = await (supabase.from("proposals") as any)
+      .select(PROPOSALS_LIST_SELECT)
+      .eq("id", proposalId)
+      .eq("organization_id", activeCompany.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (error) {
+      captureFlowError(error, "proposal-lifecycle");
+      toast({ title: t('proposals.toast.loadError'), description: error.message, variant: "destructive" });
+      return;
+    }
+
+    // Sem linha: foi apagada, ou saiu do âmbito de quem está a ver.
+    if (!data) {
+      removeProposalsFromList([proposalId]);
+      if (selectedProposal?.id === proposalId) {
+        setSelectedProposal(null);
+        setDetailsOpen(false);
+      }
+      return;
+    }
+
+    const fresh = data as Proposal;
+    setProposals(prev => prev.map(p => (p.id === proposalId ? fresh : p)));
+    if (selectedProposal?.id === proposalId) setSelectedProposal(fresh);
+
+    // O enriquecimento da linha (orçamentos ligados, elo do pipeline, estado do
+    // portal) também pode ter mudado — sobretudo numa mudança de estado, que é
+    // o que cria contratos.
+    setProposalsWithQuotes(prev => {
+      const next = new Set(prev);
+      if ((fresh as any).quotes?.length > 0) next.add(proposalId); else next.delete(proposalId);
+      return next;
+    });
+
+    const [linkRes, portalRes] = await Promise.all([
+      (supabase.from("pipeline_links") as any)
+        .select("id, proposal_id, deal_id, quote_id, contract_id, status")
+        .eq("proposal_id", proposalId)
+        .eq("organization_id", activeCompany.id)
+        .maybeSingle(),
+      (supabase as any)
+        .from("client_portal_users")
+        .select("proposal_id, portal_status")
+        .eq("organization_id", activeCompany.id)
+        .eq("proposal_id", proposalId)
+        .maybeSingle(),
+    ]);
+
+    setPipelineLinks(prev => {
+      const next = { ...prev };
+      if (linkRes?.data) next[proposalId] = linkRes.data; else delete next[proposalId];
+      return next;
+    });
+    setPortalStatuses(prev => {
+      const next = { ...prev };
+      if (portalRes?.data?.portal_status) next[proposalId] = portalRes.data.portal_status;
+      else delete next[proposalId];
+      return next;
+    });
+
+    const contractId = linkRes?.data?.contract_id;
+    if (contractId) {
+      const { data: contract } = await (supabase.from("client_contracts") as any)
+        .select("id, status").eq("id", contractId).maybeSingle();
+      if (contract) setContractStatuses(prev => ({ ...prev, [contract.id]: contract.status }));
+    }
+
+    // A última interação da entidade é o que manda no indicador "sem resposta"
+    // desta linha (getFollowUpDaysOld). Registar uma chamada tem de o apagar
+    // logo, sem esperar por um recarregamento da lista.
+    const directEntityId = (fresh as any).entity_id as string | null;
+    const entityId = directEntityId
+      || (fresh.deal_id ? dealEntityIds[fresh.deal_id] ?? null : null);
+    if (entityId) {
+      const { data: summary } = await (supabase as any)
+        .rpc("get_entity_contact_summary", { _entity_ids: [entityId] });
+      const row = (summary || [])[0];
+      if (row) {
+        const key = directEntityId || `deal:${proposalId}`;
+        setEntityLastInteraction(prev => {
+          const next = { ...prev };
+          if (row.last_interaction_at) next[key] = row.last_interaction_at;
+          else delete next[key];
+          return next;
+        });
+      }
+    }
+  }, [activeCompany?.id, removeProposalsFromList, selectedProposal?.id, dealEntityIds, toast, t]);
+
+  // Ponto único a seguir a qualquer gravação: actualiza as linhas afectadas no
+  // sítio e volta a pedir as métricas. Nenhum destes caminhos recarrega a
+  // lista, por isso a posição de scroll e as páginas já carregadas mantêm-se.
+  const afterProposalMutation = useCallback(async (
+    ids: string[],
+    options?: { removed?: boolean },
+  ) => {
+    if (options?.removed) {
+      removeProposalsFromList(ids);
+    } else {
+      for (const id of ids) await refreshSingleProposal(id);
+    }
+    await refreshMetrics();
+  }, [refreshSingleProposal, removeProposalsFromList, refreshMetrics]);
 
   useEffect(() => {
     if (!permissionsLoading && !scopeLoading) {
@@ -1034,19 +1428,22 @@ const Proposals = () => {
       // Load entity if proposal has direct entity_id (no deal)
       const propEntityId = (proposal as any).entity_id;
       if (propEntityId) {
-        const [entRes, emailRes, phoneRes] = await Promise.all([
-          supabase.from("anew_entities").select("id, display_name, type").eq("id", propEntityId).maybeSingle(),
-          supabase.from("anew_entity_emails").select("email").eq("entity_id", propEntityId).eq("is_primary", true).maybeSingle(),
-          supabase.from("anew_entity_phones").select("phone_number").eq("entity_id", propEntityId).eq("is_primary", true).maybeSingle(),
-        ]);
-        if (entRes.data) {
+        // O contacto viaja COM o documento: resolve_proposal_contact confirma
+        // que o utilizador pode ler esta proposta e devolve o contacto primario
+        // com privilegios de definer. Assim quem ve a proposta sem ambito de
+        // dono na lead continua a receber email/telefone (a 2a consulta directa
+        // a anew_entity_emails/phones e negada pela RLS de ambito de dono).
+        const { data: contact } = await (supabase as any)
+          .rpc("resolve_proposal_contact", { _proposal_id: proposal.id })
+          .maybeSingle();
+        if (contact) {
           setSelectedEntity({
-            type: entRes.data.type === "client" ? "client" : "lead",
+            type: contact.entity_type === "client" ? "client" : "lead",
             id: propEntityId,
             entityId: propEntityId,
-            name: entRes.data.display_name,
-            email: emailRes.data?.email,
-            phone: phoneRes.data?.phone_number,
+            name: contact.display_name,
+            email: contact.email ?? undefined,
+            phone: contact.phone_number ?? undefined,
           });
         } else {
           setSelectedEntity(null);
@@ -1131,8 +1528,9 @@ const Proposals = () => {
       const { error } = await (supabase as any).rpc("soft_delete_business_entity", { p_kind: "proposal", p_id: deletingId });
       if (error) throw error;
       toast({ title: t('proposals.toast.deleteSuccess'), description: t('proposals.toast.movedToTrashDesc') });
-      loadData();
+      afterProposalMutation([deletingId], { removed: true });
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('proposals.toast.deleteError'), description: error.message, variant: "destructive" });
     } finally {
       setDeleteDialogOpen(false);
@@ -1183,11 +1581,13 @@ const Proposals = () => {
         const { error: delErr } = await (supabase as any).rpc('soft_delete_business_entity', { p_kind: 'proposal', p_id: id });
         if (delErr) throw delErr;
       }
+      const deletedIds = [...selectedIds];
       toast({ title: t('common.deleteSuccess'), description: `${selectedIds.length} propostas movidas para o lixo.` });
       setSelectedIds([]);
       setBulkDeleteDialogOpen(false);
-      loadData();
+      afterProposalMutation(deletedIds, { removed: true });
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('proposals.toast.deleteError'), description: error.message, variant: "destructive" });
     } finally {
       setIsBulkDeleting(false);
@@ -1208,12 +1608,14 @@ const Proposals = () => {
         .in("id", selectedIds)
         .eq("organization_id", activeCompany.id);
       if (error) throw error;
+      const changedIds = [...selectedIds];
       toast({ title: t('common.statusUpdated'), description: `${selectedIds.length} propostas atualizadas.` });
       setSelectedIds([]);
       setBulkStatusDialogOpen(false);
       setBulkNewStatus("");
-      loadData();
+      afterProposalMutation(changedIds);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
       setIsBulkStatusChanging(false);
@@ -1239,12 +1641,14 @@ const Proposals = () => {
         title: t('common.statusUpdated'),
         description: anyWorkflowFailed ? t('proposals.toast.workflowWarning') : `${targets.length} propostas atualizadas.`,
       });
+      const rejectedIds = targets.map(p => p.id);
       setSelectedIds([]);
       setBulkStatusDialogOpen(false);
       setBulkRejectDialogOpen(false);
       setBulkNewStatus("");
-      loadData();
+      afterProposalMutation(rejectedIds);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('common.error'), description: error.message, variant: "destructive" });
     } finally {
       setIsBulkStatusChanging(false);
@@ -1286,6 +1690,7 @@ const Proposals = () => {
           successCount++;
         } catch (sendError) {
           console.error(`Error sending proposal ${id}:`, sendError);
+          captureFlowError(sendError, "proposal-bulk-send");
           failCount++;
         }
       }
@@ -1294,8 +1699,9 @@ const Proposals = () => {
         description: `${successCount} enviada(s), ${skipCount} sem email, ${failCount} com erro.`,
         variant: failCount > 0 ? "destructive" : undefined,
       });
+      const sentIds = [...selectedIds];
       setSelectedIds([]);
-      loadData();
+      afterProposalMutation(sentIds);
     } finally {
       setBulkEmailSending(false);
     }
@@ -1318,6 +1724,7 @@ const Proposals = () => {
           successCount++;
         } catch (exportError) {
           console.error(`Error exporting PDF for proposal ${id}:`, exportError);
+          captureFlowError(exportError, "proposal-bulk-pdf-export");
           failCount++;
         }
       }
@@ -1342,6 +1749,7 @@ const Proposals = () => {
       toast({ title: t('proposals.toast.duplicateSuccess'), description: t('proposals.toast.duplicateSuccessDesc') });
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: t('proposals.toast.duplicateError'), description: error.message, variant: "destructive" });
     } finally {
       setDuplicatingProposalId(null);
@@ -1403,8 +1811,10 @@ const Proposals = () => {
       }
 
       const stage = workflowStages.find(s => s.id === formData.stage_id);
-      const defaultTemplate = proposalTemplates.find(tt => tt.is_default);
-      const templateId = formData.template_id || defaultTemplate?.id || null;
+      // Sem default silencioso: o template e o que a pessoa escolheu, ou nenhum.
+      // Cair para um default que a organizacao pode nao ter fazia o PDF sair com
+      // o layout de outro documento (P-2026-0616 saiu com "Orcamento" no titulo).
+      const templateId = formData.template_id || null;
       const probability = selectedDeal?.probability ?? 50;
       const proposalEntityId = !formData.deal_id ? (selectedEntity?.entityId || null) : (selectedDeal?.entity_id || null);
       const rootOrgId = await resolveRootOrgId(activeCompany.id);
@@ -1426,7 +1836,6 @@ const Proposals = () => {
         assigned_to: formData.assigned_to || null,
       };
 
-
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { data, error } = await supabase
         .from("proposals")
@@ -1440,6 +1849,7 @@ const Proposals = () => {
       loadData();
       navigate(`/quotes?new=1&proposal_id=${data.id}${formData.deal_id ? `&deal_id=${formData.deal_id}` : ""}`);
     } catch (err: any) {
+      captureFlowError(err, "proposal-lifecycle");
       toast({ title: t('proposals.toast.createError'), description: err.message, variant: "destructive" });
     } finally {
       submitLockRef.current = false;
@@ -1449,6 +1859,7 @@ const Proposals = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
     if (submitLockRef.current || savingProposal) return;
 
     // Pre-validation: block submit if any inline quote has lines but ALL of them are invalid (qt <= 0).
@@ -1477,7 +1888,6 @@ const Proposals = () => {
       setShowNullTotalDialog(true);
       return;
     }
-    nullTotalConfirmedRef.current = false;
 
     const quotesTotal = selectedQuotes.reduce((sum, q) => sum + (q.total || 0), 0);
     const inlineQuotesTotal = inlineQuotes.reduce((sum, q) => sum + calcInlineQuoteTotal(q), 0);
@@ -1506,6 +1916,24 @@ const Proposals = () => {
       toast({ title: t('proposals.toast.validationError'), description: validation.error.errors[0].message, variant: "destructive" });
       return;
     }
+    // Ultima porta antes de gravar: sem template escolhido, confirmar. Fica DEPOIS
+    // de todas as validacoes de proposito -- nao vale a pena perguntar "guardar
+    // assim?" a quem vai levar com um erro de validacao a seguir. E, sobretudo,
+    // porque outras confirmacoes (motivo de rejeicao, total nulo) reentram neste
+    // handler: se esta guarda corresse antes delas, o `ok` era reposto a false na
+    // primeira passagem e o aviso reaparecia depois de ja ter sido confirmado.
+    if (!formData.template_id && !missingTemplateOkRef.current) {
+      setMissingTemplateOpen(true);
+      return;
+    }
+
+    // Passaram todas as guardas: e aqui, e so aqui, que as confirmacoes se
+    // consomem. Repor `nullTotalConfirmedRef` mais acima, mal a sua verificacao
+    // passava, fazia o dialogo de total nulo reaparecer quando a confirmacao do
+    // template reentrava neste handler -- ja confirmado, e a perguntar outra vez.
+    missingTemplateOkRef.current = false;
+    nullTotalConfirmedRef.current = false;
+
     setFieldErrors({});
 
     try {
@@ -1519,8 +1947,7 @@ const Proposals = () => {
       const stage = workflowStages.find(s => s.id === formData.stage_id);
       const probability = selectedDeal?.probability ?? 50;
 
-      const defaultTemplate = proposalTemplates.find(t => t.is_default);
-      const templateId = formData.template_id || defaultTemplate?.id || null;
+      const templateId = formData.template_id || null;
       const rootOrgId = await resolveRootOrgId(activeCompany.id);
 
       const proposalData = {
@@ -1570,12 +1997,9 @@ const Proposals = () => {
         }
 
         const linesToInsert = validLines.map(l => {
-          const custoUnit = l.custo_material_unit + l.custo_mao_obra_unit;
-          const isManual = custoUnit === 0 && l.retail_price_unit !== undefined && l.retail_price_unit !== null;
-          const unitPrice = isManual ? (l.retail_price_unit || 0) : custoUnit * (1 + l.margem_percent / 100) * (1 + l.int_percent / 100);
-          const precoSemIvaBase = unitPrice * l.qt;
+          // Subtotal gravado pela fonte única do preço da linha.
           const lineDiscount = l.discount_percent || 0;
-          const precoSemIva = precoSemIvaBase * (1 - lineDiscount / 100);
+          const precoSemIva = getLineSubtotal(l);
           const ivaValor = precoSemIva * (l.iva_percent / 100);
           const totalComIva = precoSemIva + ivaValor;
           const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
@@ -1601,6 +2025,9 @@ const Proposals = () => {
             unidade: l.unidade || null,
             item_description: l.item_description || null,
             cost_price: l.cost_price || 0,
+            // O preço de venda definido manda no preço unitário; sem ele gravado,
+            // o preço é reconstruído do custo arredondado e perde milésimos.
+            retail_price_unit: (l.retail_price_unit ?? null) || null,
           };
         });
 
@@ -1646,22 +2073,13 @@ const Proposals = () => {
 
         let workflowFailed = false;
         if (formData.stage_id && originalStageId && formData.stage_id !== originalStageId) {
-          try {
-            const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-              body: {
-                source_entity: 'proposal',
-                entity_id: editingId,
-                new_stage_id: formData.stage_id,
-                old_stage_id: originalStageId,
-                organization_id: activeCompany?.id,
-                triggered_by: user.id,
-              }
-            });
-            if (workflowError) throw workflowError;
-          } catch (workflowError) {
-            console.error("Workflow execution error:", workflowError);
-            workflowFailed = true;
-          }
+          workflowFailed = await runProposalStageWorkflow({
+            entityId: editingId,
+            newStageId: formData.stage_id,
+            oldStageId: originalStageId,
+            organizationId: activeCompany?.id,
+            triggeredBy: user.id,
+          });
         }
         toast({
           title: t('proposals.toast.updateSuccess'),
@@ -1696,15 +2114,19 @@ const Proposals = () => {
           description: `A proposta foi gravada mas o(s) seguinte(s) orçamento(s) foi(ram) ignorado(s):\n${list}\n\nCorrija e grave novamente.`,
           variant: "destructive",
         });
-        loadData();
+        if (editingId) afterProposalMutation([editingId]); else loadData();
         // Don't close the dialog — let user fix and re-save.
         return;
       }
 
+      // Editar actualiza a linha no sitio; criar tem mesmo de recarregar,
+      // porque a proposta nova pode cair em qualquer ponto da ordenacao.
+      const editedId = editingId;
       setOpen(false);
       resetForm();
-      loadData();
+      if (editedId) afterProposalMutation([editedId]); else loadData();
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description: error.message, variant: "destructive" });
     } finally {
       submitLockRef.current = false;
@@ -1742,12 +2164,14 @@ const Proposals = () => {
         .update({ valid_until: renewDate })
         .eq("id", renewProposalId);
       if (error) throw error;
+      const renewedId = renewProposalId;
       toast({ title: "Validade renovada com sucesso" });
       setRenewDialogOpen(false);
       setRenewProposalId(null);
       setRenewDate("");
-      loadData();
+      afterProposalMutation([renewedId]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro ao renovar validade", description: error.message, variant: "destructive" });
     }
   };
@@ -1760,7 +2184,6 @@ const Proposals = () => {
     setRenewDate(format(defaultDate, "yyyy-MM-dd"));
     setRenewDialogOpen(true);
   };
-
 
   const handleMarkAsSent = async (proposal: Proposal) => {
     try {
@@ -1778,21 +2201,20 @@ const Proposals = () => {
         .eq("id", proposal.id);
       if (error) throw error;
       let workflowFailed = false;
-      try {
-        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-          body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: sentStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-        });
-        if (workflowError) throw workflowError;
-      } catch (workflowError) {
-        console.error("Workflow execution error:", workflowError);
-        workflowFailed = true;
-      }
+      workflowFailed = await runProposalStageWorkflow({
+        entityId: proposal.id,
+        newStageId: sentStage.id,
+        oldStageId: oldStageId,
+        organizationId: activeCompany?.id,
+        triggeredBy: user.id,
+      });
       toast({
         title: "Proposta marcada como enviada",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      loadData();
+      afterProposalMutation([proposal.id]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
@@ -1806,7 +2228,9 @@ const Proposals = () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
-      const acceptedStage = workflowStages.find(s => s.name === "accepted" || s.name === "aceite");
+      // Resolve by the is_won flag, not by name — an org can rename/recreate
+      // this stage and accepting a proposal must keep working regardless.
+      const acceptedStage = workflowStages.find(s => s.is_won);
       if (!acceptedStage) { toast({ title: "Erro", description: "Estágio 'Aceite' não encontrado", variant: "destructive" }); return; }
       const oldStageId = targetProposal.stage_id;
       const businessUserIdAccept = await resolveCurrentBusinessUserId();
@@ -1815,22 +2239,21 @@ const Proposals = () => {
       const { error } = await supabase.from("proposals").update({ stage_id: acceptedStage.id, status: "accepted", accepted_at: new Date().toISOString() }).eq("id", targetProposal.id);
       if (error) throw error;
       let workflowFailed = false;
-      try {
-        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-          body: { source_entity: 'proposal', entity_id: targetProposal.id, new_stage_id: acceptedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-        });
-        if (workflowError) throw workflowError;
-      } catch (workflowError) {
-        console.error("Workflow execution error:", workflowError);
-        workflowFailed = true;
-      }
+      workflowFailed = await runProposalStageWorkflow({
+        entityId: targetProposal.id,
+        newStageId: acceptedStage.id,
+        oldStageId: oldStageId,
+        organizationId: activeCompany?.id,
+        triggeredBy: user.id,
+      });
       toast({
         title: "Proposta aceite com sucesso",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
       setDetailsOpen(false);
-      loadData();
+      afterProposalMutation([targetProposal.id]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       acceptProposalLockRef.current = false;
@@ -1855,9 +2278,10 @@ const Proposals = () => {
   ): Promise<{ workflowFailed: boolean }> => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Not authenticated");
+    // Resolve by the is_lost flag, not by name — same reasoning as accept.
     const rejectedStage = stageIdOverride
       ? workflowStages.find(s => s.id === stageIdOverride)
-      : workflowStages.find(s => s.name === "rejected" || s.name === "rejeitada");
+      : workflowStages.find(s => s.is_lost);
     if (!rejectedStage) throw new Error("Estágio 'Rejeitada' não encontrado");
     const oldStageId = proposal.stage_id;
     const businessUserIdReject = await resolveCurrentBusinessUserId();
@@ -1887,21 +2311,40 @@ const Proposals = () => {
       console.error("Erro ao rejeitar orçamentos ligados à proposta:", quotesError);
     }
 
-    let workflowFailed = false;
-    try {
-      const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-        body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: rejectedStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-      });
-      if (workflowError) throw workflowError;
-    } catch (workflowError) {
-      console.error("Workflow execution error:", workflowError);
-      workflowFailed = true;
+    // Recalcular explicitamente proposals.value: a cascata acima muda
+    // quotes.estado, que passa a disparar o trigger de sincronização, mas
+    // forçamos aqui também o recálculo imediato (defesa em profundidade,
+    // sem depender só da ordem de commits do trigger) para nunca deixar
+    // proposals.value desatualizado depois de uma rejeição.
+    //
+    // Corre ANTES de quem chamou esta função reler a linha: todos os
+    // chamadores (handleRejectProposal, rejeição em lote e o arrasto no
+    // kanban) só invocam afterProposalMutation depois de isto voltar, senão a
+    // lista e os cartões mostrariam o valor anterior ao recálculo.
+    const { error: recalcError } = await (supabase as any).rpc('recalculate_proposal_value', {
+      p_proposal_id: proposal.id,
+    });
+    if (recalcError) {
+      console.error("Erro ao recalcular valor da proposta após rejeição:", recalcError);
+      // Swallowed on purpose (the rejection itself succeeded), but the stored
+      // proposal value is now stale and nothing on screen says so.
+      captureFlowError(recalcError, "proposal-value-recalculation");
     }
+
+    let workflowFailed = false;
+    workflowFailed = await runProposalStageWorkflow({
+      entityId: proposal.id,
+      newStageId: rejectedStage.id,
+      oldStageId: oldStageId,
+      organizationId: activeCompany?.id,
+      triggeredBy: user.id,
+    });
     return { workflowFailed };
   };
 
   const handleRejectProposal = async (reason: ProposalRejectionDecision) => {
     if (!selectedProposal) return;
+    const rejectedId = selectedProposal.id;
     try {
       const { workflowFailed } = await rejectProposalCore(selectedProposal, reason);
       toast({
@@ -1910,8 +2353,9 @@ const Proposals = () => {
       });
       setRejectReasonDialogOpen(false);
       setDetailsOpen(false);
-      loadData();
+      afterProposalMutation([rejectedId]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     }
   };
@@ -1937,30 +2381,48 @@ const Proposals = () => {
         rejection_notes: null,
       }).eq("id", proposal.id);
       if (reopenError) throw reopenError;
-      let workflowFailed = false;
-      try {
-        const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
-          body: { source_entity: 'proposal', entity_id: proposal.id, new_stage_id: draftStage.id, old_stage_id: oldStageId, organization_id: activeCompany?.id, triggered_by: user.id }
-        });
-        if (workflowError) throw workflowError;
-      } catch (workflowError) {
-        console.error("Workflow execution error:", workflowError);
-        workflowFailed = true;
+
+      // Reabrir só toca colunas da proposta — nenhum quote é alterado, logo o
+      // trigger de sincronização não dispara aqui. Recalcular explicitamente
+      // proposals.value a partir dos orçamentos reais para não deixar um
+      // valor desatualizado (ex.: herdado do estado rejeitado) até à próxima
+      // associação de orçamento. Também antes de reler a linha, pela mesma
+      // razão da rejeição.
+      const { error: recalcError } = await (supabase as any).rpc('recalculate_proposal_value', {
+        p_proposal_id: proposal.id,
+      });
+      if (recalcError) {
+        console.error("Erro ao recalcular valor da proposta após reabertura:", recalcError);
+        // Same deal as the rejection path: the reopen went through, the stored
+        // value did not follow it.
+        captureFlowError(recalcError, "proposal-value-recalculation");
       }
+
+      let workflowFailed = false;
+      workflowFailed = await runProposalStageWorkflow({
+        entityId: proposal.id,
+        newStageId: draftStage.id,
+        oldStageId: oldStageId,
+        organizationId: activeCompany?.id,
+        triggeredBy: user.id,
+      });
       toast({
         title: "Proposta reaberta",
         description: workflowFailed ? t('proposals.toast.workflowWarning') : undefined,
       });
-      loadData();
+      afterProposalMutation([proposal.id]);
     } catch (error: any) {
+      captureFlowError(error, "proposal-lifecycle");
       toast({ title: "Erro ao reabrir proposta", description: error.message, variant: "destructive" });
     }
   };
 
   const getProposalStage = useCallback((proposal: Proposal): WorkflowStage | null => {
     if (proposal.proposal_workflow_stages) return proposal.proposal_workflow_stages;
-    return workflowStages.find(s => s.name === proposal.status) || null;
-  }, [workflowStages]);
+    // allWorkflowStages (not the active-only list) — a legacy proposal whose
+    // status still names a since-deactivated stage must still resolve here.
+    return allWorkflowStages.find(s => s.name === proposal.status) || null;
+  }, [allWorkflowStages]);
 
   const getStageBadge = (proposal: Proposal) => {
     const stage = getProposalStage(proposal);
@@ -1991,144 +2453,125 @@ const Proposals = () => {
     navigate(`/client-contracts?open=${contractId}&viewPdf=1`);
   };
 
-  // Filter and sort
-  const filteredProposals = useMemo(() => {
-    return proposals
-      .filter(proposal => {
-        // "Só os meus" — filter to proposals assigned to the current user.
-        // scopeAnewUserId is the anew_users.id of the current user.
-        if (onlyMine && scopeAnewUserId) {
-          if ((proposal as any).assigned_to !== scopeAnewUserId) return false;
-        }
-
-        if (statusFilter !== "all") {
-          const stage = getProposalStage(proposal);
-          if (stage?.id !== statusFilter && proposal.status !== statusFilter) return false;
-        }
-
-        if (noResponseFilter) {
-          const sn = getStageName(proposal);
-          if (!((sn === "sent" || sn === "enviada") && getFollowUpDaysOld(proposal) > getFollowUpThresholdDays())) return false;
-        }
-
-        if (expiredFilter) {
-          if (!(proposal.valid_until && isPast(parseISO(proposal.valid_until)))) return false;
-        }
-
-        if (noValidityFilter) {
-          if (proposal.valid_until) return false;
-        }
-
-        const term = debouncedSearch.trim();
-        const searchLower = term.toLowerCase();
-        const proposalDate = new Date(proposal.created_at);
-        const matchesDateFrom = !dateFrom || proposalDate >= startOfDay(dateFrom);
-        const matchesDateTo = !dateTo || proposalDate <= endOfDay(dateTo);
-
-        // Search: requires >= 3 chars; matches title, deal title, or entity (name/email/phone/NIF)
-        let matchesSearch = true;
-        if (term.length >= 3) {
-          const titleHit = proposal.title?.toLowerCase().includes(searchLower) ||
-            proposal.deals?.title?.toLowerCase().includes(searchLower);
-          const entityHit = searchEntityIdSet
-            ? ((proposal as any).entity_id && searchEntityIdSet.has((proposal as any).entity_id))
-            : false;
-          matchesSearch = !!(titleHit || entityHit);
-        }
-
-        if (comercialFilter !== "all") {
-          if (comercialFilter === "none") {
-            if ((proposal as any).assigned_to) return false;
-          } else if ((proposal as any).assigned_to !== comercialFilter) return false;
-        }
-        return matchesSearch && matchesDateFrom && matchesDateTo;
-      })
-      .sort((a, b) => {
-        let aVal: any, bVal: any;
-        switch (sortColumn) {
-          case "created_at": aVal = new Date(a.created_at).getTime(); bVal = new Date(b.created_at).getTime(); break;
-          case "title": aVal = a.title; bVal = b.title; break;
-          case "value": aVal = a.value; bVal = b.value; break;
-          case "status": aVal = getProposalStage(a)?.stage_order || 0; bVal = getProposalStage(b)?.stage_order || 0; break;
-          case "valid_until": aVal = a.valid_until ? new Date(a.valid_until).getTime() : 0; bVal = b.valid_until ? new Date(b.valid_until).getTime() : 0; break;
-          default: aVal = a.created_at; bVal = b.created_at;
-        }
-        if (typeof aVal === "string" && typeof bVal === "string") return sortDirection === "asc" ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
-        return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
+  // No proposal column is personal data (see supabase/functions/export-data/exportConfig.ts),
+  // so this never shows a "com/sem dados sensíveis" dialog — unlike clients/contacts/quotes.
+  const handleExportProposals = async () => {
+    if (!activeCompany?.id) {
+      toast({ title: "Erro ao exportar", description: "Selecione uma organização.", variant: "destructive" });
+      return;
+    }
+    setExportingProposals(true);
+    try {
+      const result = await requestControlledExport({
+        module: "proposals",
+        organizationId: activeCompany.id,
       });
-  }, [proposals, statusFilter, debouncedSearch, searchEntityIdSet, dateFrom, dateTo, sortColumn, sortDirection, noResponseFilter, expiredFilter, noValidityFilter, getProposalStage, getStageName, comercialFilter, onlyMine, scopeAnewUserId]);
+      toast({
+        title: "Exportação XLSX concluída",
+        description: `${result.rowCount} propostas exportadas.`,
+      });
+    } catch (error: any) {
+      captureFlowError(error, "proposal-document-export");
+      toast({ title: "Erro ao exportar", description: error.message, variant: "destructive" });
+    } finally {
+      setExportingProposals(false);
+    }
+  };
 
-  // Stats — computed over filteredProposals so KPI cards reflect active filters
-  const stats = useMemo(() => {
-    const now = new Date();
-    const total = filteredProposals.length;
-    const totalValue = filteredProposals.reduce((sum, p) => sum + Number(p.value), 0);
-    const totalValueExVat = filteredProposals.reduce((sum, p) => sum + Number(p.value_sem_iva ?? 0), 0);
+  // "Exportar apenas a seleção" — same request as handleExportProposals, but
+  // scoped to the checked rows via filters.ids. This is always an ADDITIONAL
+  // filter on top of the organization/owner scope the server already
+  // enforces (see supabase/functions/export-data/requestScoping.ts) — never
+  // a way to widen access.
+  const handleExportSelectedProposals = async () => {
+    if (!activeCompany?.id || selectedIds.length === 0) return;
+    setExportingProposals(true);
+    try {
+      const result = await requestControlledExport({
+        module: "proposals",
+        organizationId: activeCompany.id,
+        filters: { ids: selectedIds },
+      });
+      toast({
+        title: "Exportação XLSX concluída",
+        description: `${result.rowCount} propostas exportadas.`,
+      });
+    } catch (error: any) {
+      captureFlowError(error, "proposal-document-export");
+      toast({ title: "Erro ao exportar", description: error.message, variant: "destructive" });
+    } finally {
+      setExportingProposals(false);
+    }
+  };
 
-    const stageCounts: Record<string, number> = {};
-    const stageValues: Record<string, number> = {};
-    const stageValuesExVat: Record<string, number> = {};
+  // Filter and sort
+  // A filtragem e a ordenacao passaram para o servidor (proposals_list_filtered
+  // + get_proposals_list_page). Filtrar no cliente deixou de ser possivel: so
+  // ha 25 linhas em memoria, e filtrar dentro da pagina daria resultados
+  // errados em vez de menos resultados. `proposals` ja vem filtrado e ordenado.
+  const filteredProposals = proposals;
 
-    workflowStages.forEach(stage => {
-      stageCounts[stage.id] = 0;
-      stageValues[stage.id] = 0;
-      stageValuesExVat[stage.id] = 0;
-    });
+  // Cartoes de KPI: mesma forma de antes, mas alimentada pela RPC. Os campos
+  // que eram arrays (noResponse5d, noValidity, expired) passam a contagens --
+  // a UI so lhes lia o .length.
+  //
+  // stageCounts/stageValues/stageValuesExVat continuam indexados por
+  // stage_id em bruto (é o que get_proposals_list_metrics devolve — ver
+  // supabase/migrations/20261113070000_proposals_list_pagination_and_metrics_rpcs.sql,
+  // `per_stage` agrupa por f.stage_id). Uma fase do org e a fase global
+  // homónima têm ids diferentes para o mesmo conceito de fase — é por isso
+  // que a renderização dos cartões (stageCardGroups, abaixo) soma sobre
+  // todos os ids de cada grupo em vez de indexar direto por stage.id.
+  const stats = useMemo(() => ({
+    total: metrics.total,
+    totalValue: metrics.totalValue,
+    totalValueExVat: metrics.totalValueExVat,
+    stageCounts: metrics.stageCounts,
+    stageValues: metrics.stageValues,
+    stageValuesExVat: metrics.stageValuesExVat,
+    wonValue: metrics.wonValue,
+    wonValueExVat: metrics.wonValueExVat,
+    acceptedCount: metrics.acceptedCount,
+    conversionRate: metrics.conversionRate,
+    avgCloseTime: metrics.avgCloseTime,
+    noResponse5dCount: metrics.noResponseCount,
+    noResponse5dValue: metrics.noResponseValue,
+    noResponse5dValueExVat: metrics.noResponseValueExVat,
+    noValidityCount: metrics.noValidityCount,
+    expiredCount: metrics.expiredCount,
+  }), [metrics]);
 
-    filteredProposals.forEach(p => {
-      const stage = getProposalStage(p);
-      if (stage) {
-        stageCounts[stage.id] = (stageCounts[stage.id] || 0) + 1;
-        stageValues[stage.id] = (stageValues[stage.id] || 0) + Number(p.value);
-        stageValuesExVat[stage.id] = (stageValuesExVat[stage.id] || 0) + Number(p.value_sem_iva ?? 0);
+  // Enquanto as metricas nao chegam mostra-se o loader que a pagina ja usa, e
+  // nao zeros -- um zero num cartao de valor le-se como um numero real.
+  const kpiValue = (node: ReactNode, className?: string) =>
+    metricsLoading
+      ? <div className={cn("flex items-center h-7", className)}><OlyviaLoader size={18} inline /></div>
+      : <div className={className}>{node}</div>;
+
+  // Uma fase do org e a fase global homónima (mesmo `name`, ex.: "accepted")
+  // representam o MESMO conceito de fase — devem aparecer como UM único
+  // cartão com as contagens somadas, não dois cartões duplicados. Ver
+  // loadWorkflowStages: allWorkflowStages inclui sempre as duas fontes.
+  const stageCardGroups = useMemo(() => {
+    const byName = new Map<string, WorkflowStage & { ids: string[] }>();
+    for (const stage of allWorkflowStages) {
+      const existing = byName.get(stage.name);
+      if (!existing) {
+        byName.set(stage.name, { ...stage, ids: [stage.id] });
+      } else {
+        existing.ids.push(stage.id);
+        // A fase específica do org (organization_id preenchido) vence na
+        // apresentação (label/cor) sobre a fase global de template.
+        if ((stage as any).organization_id && !(existing as any).organization_id) {
+          existing.label = stage.label;
+          existing.color = stage.color;
+          (existing as any).organization_id = (stage as any).organization_id;
+        }
+        existing.is_active = existing.is_active || stage.is_active;
       }
-    });
-
-    const wonValue = filteredProposals
-      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
-      .reduce((sum, p) => sum + Number(p.value), 0);
-    const wonValueExVat = filteredProposals
-      .filter(p => { const stage = getProposalStage(p); return stage?.is_won; })
-      .reduce((sum, p) => sum + Number(p.value_sem_iva ?? 0), 0);
-
-    // Extra KPIs
-    const acceptedProposals = filteredProposals.filter(p => {
-      const stage = getProposalStage(p);
-      return stage?.is_won;
-    });
-    const totalSentOrLater = filteredProposals.filter(p => {
-      const stage = getProposalStage(p);
-      return stage && stage.stage_order > 1; // sent or later
-    }).length;
-    const conversionRate = totalSentOrLater > 0 ? Math.round((acceptedProposals.length / totalSentOrLater) * 100) : 0;
-
-    // Avg close time (days from created_at to accepted_at for accepted proposals)
-    const closeTimes = acceptedProposals.map(p => {
-      const accepted = (p as any).accepted_at;
-      if (accepted) return differenceInDays(parseISO(accepted), parseISO(p.created_at));
-      return differenceInDays(now, parseISO(p.created_at));
-    }).filter(d => d >= 0);
-    const avgCloseTime = closeTimes.length > 0 ? Math.round(closeTimes.reduce((s, d) => s + d, 0) / closeTimes.length) : 0;
-
-    const noResponse5d = filteredProposals.filter(p => {
-      const sn = getStageName(p);
-      return (sn === "sent" || sn === "enviada") && getFollowUpDaysOld(p) > getFollowUpThresholdDays();
-    });
-    const noResponse5dValue = noResponse5d.reduce((s, p) => s + Number(p.value), 0);
-    const noResponse5dValueExVat = noResponse5d.reduce((s, p) => s + Number(p.value_sem_iva ?? 0), 0);
-
-    const noValidity = filteredProposals.filter(p => {
-      const stage = getProposalStage(p);
-      return !p.valid_until && !stage?.is_lost;
-    });
-
-    const expired = filteredProposals.filter(p => {
-      const stage = getProposalStage(p);
-      return p.valid_until && isPast(parseISO(p.valid_until)) && !stage?.is_won && !stage?.is_lost;
-    });
-
-    return { total, totalValue, totalValueExVat, stageCounts, stageValues, stageValuesExVat, wonValue, wonValueExVat, conversionRate, avgCloseTime, noResponse5d, noResponse5dValue, noResponse5dValueExVat, noValidity, expired };
-  }, [filteredProposals, workflowStages, getProposalStage, getStageName]);
+    }
+    return Array.from(byName.values());
+  }, [allWorkflowStages]);
 
   const handleSort = (column: string) => {
     if (sortColumn === column) {
@@ -2207,7 +2650,7 @@ const Proposals = () => {
       toast({ title: "Sem entidade associada", description: "Esta proposta não tem um cliente/lead associado.", variant: "destructive" });
       return;
     }
-    setCallTarget({ entityId, name });
+    setCallTarget({ entityId, name, proposalId: proposal.id });
     setCallDialogOpen(true);
   };
 
@@ -2354,6 +2797,7 @@ const Proposals = () => {
               const { blob, fileName } = await generateProposalPdfBlob(proposal.id);
               downloadBlob(blob, fileName);
             } catch (e: any) {
+              captureFlowError(e, "proposal-document-export");
               toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });
             }
           }}
@@ -2363,7 +2807,7 @@ const Proposals = () => {
         <DropdownMenuItem
           disabled={!proposalEntityId}
           onClick={() => {
-            setCallTarget({ entityId: proposalEntityId, name: proposalEntityName });
+            setCallTarget({ entityId: proposalEntityId, name: proposalEntityName, proposalId: proposal.id });
             setCallDialogOpen(true);
           }}
         >
@@ -2570,6 +3014,11 @@ const Proposals = () => {
               <Button variant="outline" size="icon" onClick={loadData} title="Atualizar">
                 <RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} />
               </Button>
+              <PermissionGate permission="proposals.export">
+                <Button variant="outline" size="sm" onClick={handleExportProposals} disabled={exportingProposals}>
+                  <Download className="w-4 h-4 mr-2" /> Exportar
+                </Button>
+              </PermissionGate>
               <PermissionGate permission="proposals.manage">
                 <Button variant="outline" size="sm" onClick={() => navigate("/proposal-templates")}>
                   <FileText className="w-4 h-4 mr-2" /> Templates
@@ -2650,31 +3099,36 @@ const Proposals = () => {
                         </p>
                       </div>
                       {/* Template de proposta */}
-                      {proposalTemplates.length > 0 && (
-                        <div className="col-span-2 space-y-2">
-                          <Label className="flex items-center gap-2">
-                            <Palette className="h-4 w-4" />
-                            Template de Proposta
-                          </Label>
-                          <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Template default" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="none">Nenhum (usa default)</SelectItem>
-                              {proposalTemplates.map((tmpl) => (
-                                <SelectItem key={tmpl.id} value={tmpl.id}>
-                                  <div className="flex items-center gap-2">
-                                    {tmpl.name}
-                                    {tmpl.is_default && <Badge variant="secondary" className="text-xs ml-1">Default</Badge>}
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                      <div className="col-span-2 space-y-2">
+                        <Label className="flex items-center gap-2">
+                          <Palette className="h-4 w-4" />
+                          Template de Proposta
+                        </Label>
+                        <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Escolher template" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Nenhum</SelectItem>
+                            {proposalTemplates.map((tmpl) => (
+                              <SelectItem key={tmpl.id} value={tmpl.id}>
+                                <div className="flex items-center gap-2">
+                                  {tmpl.name}
+                                  {tmpl.is_default && <Badge variant="secondary" className="text-xs ml-1">Default</Badge>}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {formData.template_id ? (
                           <p className="text-xs text-muted-foreground">Define o design da proposta no portal e no PDF</p>
-                        </div>
-                      )}
+                        ) : (
+                          <p className="text-xs text-amber-600 flex items-start gap-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                            <span>Nenhum template escolhido.</span>
+                          </p>
+                        )}
+                      </div>
                       {/* Deal search */}
                       <div className="col-span-2 space-y-2">
                         <Label>{t('proposals.form.deal')}</Label>
@@ -2794,7 +3248,7 @@ const Proposals = () => {
                                                     retailPrice = manualPrice;
                                                   }
                                                   
-                                                  const margin = costPrice > 0 && retailPrice > 0 ? ((retailPrice - costPrice) / costPrice) * 100 : 30;
+                                                  const margin = costPrice > 0 && retailPrice > 0 ? markupFromCostAndPrice(costPrice, retailPrice) : 30;
                                                   
                                                   return {
                                                     id: `temp_deal_${Date.now()}_${idx}`,
@@ -3091,18 +3545,7 @@ const Proposals = () => {
         {/* Alert Bars */}
         <div className="flex-shrink-0 px-4 md:px-6 mt-2">
           <ProposalsAlertBars
-            proposals={proposals.map(p => ({
-              id: p.id,
-              title: p.title,
-              value: Number(p.value),
-              status: p.status,
-              stage_name: getProposalStage(p)?.name,
-              valid_until: p.valid_until,
-              created_at: p.created_at,
-              sent_at: (p as any).sent_at ?? null,
-              updated_at: (p as any).updated_at,
-              contract_id: pipelineLinks[p.id]?.contract_id,
-            }))}
+            proposals={alertFeed}
             noResponseDays={alertSettings.get("proposal_no_response", 5).days_threshold}
             noResponseUrgentDays={alertSettings.get("proposal_no_response_urgent", 10).days_threshold}
             noResponseEnabled={alertSettings.get("proposal_no_response", 5).is_active}
@@ -3144,70 +3587,84 @@ const Proposals = () => {
             <Card className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === "all" && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter("all")}>
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Total</div>
-                <div className="text-xl font-bold">{stats.total}</div>
-                <div className="text-xs text-muted-foreground">{formatCurrency(stats.totalValueExVat)} em pipeline</div>
-                <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.totalValue)} com IVA</div>
+                {kpiValue(stats.total, "text-xl font-bold")}
+                {kpiValue(`${formatCurrency(stats.totalValueExVat)} em pipeline`, "text-xs text-muted-foreground")}
+                {kpiValue(`${formatCurrency(stats.totalValue)} com IVA`, "text-[11px] text-muted-foreground")}
               </CardContent>
             </Card>
             
-            {workflowStages.map((stage) => (
-              <Card key={stage.id} className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === stage.id && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter(stage.id === statusFilter ? "all" : stage.id)}>
-                <CardContent className="p-3">
-                  <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
-                  <div className="text-xl font-bold" style={{ color: stage.color }}>{stats.stageCounts[stage.id] || 0}</div>
-                  <div className="text-xs text-muted-foreground">{formatCurrency(stats.stageValuesExVat[stage.id] || 0)}</div>
-                  <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.stageValues[stage.id] || 0)} com IVA</div>
-                </CardContent>
-              </Card>
-            ))}
+            {/* stageCardGroups: uma fase do org e a fase global homónima juntam-se
+               num único cartão com as contagens somadas — ver useMemo acima.
+               stats.stageCounts/stageValues continuam indexados por stage_id
+               em bruto (é o que a RPC devolve), por isso soma-se sobre todos
+               os ids do grupo em vez de indexar direto por stage.id.
+               is_active OU alguma das ids do grupo ainda tiver propostas, para
+               uma fase desativada que ainda tem propostas não desaparecer. */}
+            {stageCardGroups.filter(stage => stage.is_active || stage.ids.some(id => (stats.stageCounts[id] || 0) > 0)).map((stage) => {
+              const count = stage.ids.reduce((s, id) => s + (stats.stageCounts[id] || 0), 0);
+              const valueExVat = stage.ids.reduce((s, id) => s + (stats.stageValuesExVat[id] || 0), 0);
+              const valueWithVat = stage.ids.reduce((s, id) => s + (stats.stageValues[id] || 0), 0);
+              return (
+                <Card key={stage.name} className={cn("cursor-pointer hover:shadow-md transition-all min-w-[130px] flex-shrink-0", statusFilter === stage.name && "ring-2 ring-primary shadow-md")} onClick={() => setStatusFilter(stage.name === statusFilter ? "all" : stage.name)}>
+                  <CardContent className="p-3">
+                    <div className="text-xs font-medium uppercase" style={{ color: stage.color }}>{stage.label}</div>
+                    {metricsLoading
+                      ? <div className="flex items-center h-7"><OlyviaLoader size={18} inline /></div>
+                      : <div className="text-xl font-bold" style={{ color: stage.color }}>{count}</div>}
+                    {kpiValue(formatCurrency(valueExVat), "text-xs text-muted-foreground")}
+                    {kpiValue(`${formatCurrency(valueWithVat)} com IVA`, "text-[11px] text-muted-foreground")}
+                  </CardContent>
+                </Card>
+              );
+            })}
             
             <Card className="min-w-[160px] flex-shrink-0 bg-gradient-to-br from-green-500/10 to-green-500/5">
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Valor Aceite</div>
-                <div className="text-xl font-bold text-green-600">{formatCurrency(stats.wonValueExVat)}</div>
-                <div className="text-[11px] text-muted-foreground">{formatCurrency(stats.wonValue)} com IVA</div>
+                {kpiValue(formatCurrency(stats.wonValueExVat), "text-xl font-bold text-green-600")}
+                {kpiValue(`${formatCurrency(stats.wonValue)} com IVA`, "text-[11px] text-muted-foreground")}
               </CardContent>
             </Card>
 
             <Card className="min-w-[130px] flex-shrink-0">
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Taxa Conversão</div>
-                <div className="text-xl font-bold text-primary">{stats.conversionRate}%</div>
-                <div className="text-xs text-muted-foreground">{filteredProposals.filter(p => getProposalStage(p)?.is_won).length} aceites</div>
+                {kpiValue(`${stats.conversionRate}%`, "text-xl font-bold text-primary")}
+                {kpiValue(`${stats.acceptedCount} aceites`, "text-xs text-muted-foreground")}
               </CardContent>
             </Card>
 
             <Card className="min-w-[130px] flex-shrink-0">
               <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground font-medium uppercase">Tempo Médio Fecho</div>
-                <div className="text-xl font-bold text-primary">{stats.avgCloseTime}d</div>
+                {kpiValue(`${stats.avgCloseTime}d`, "text-xl font-bold text-primary")}
               </CardContent>
             </Card>
 
-            {stats.noResponse5d.length > 0 && (
+            {stats.noResponse5dCount > 0 && (
               <Card className="min-w-[150px] flex-shrink-0 border-orange-200 bg-orange-50/50 dark:bg-orange-950/20 cursor-pointer" onClick={() => setNoResponseFilter(!noResponseFilter)}>
                 <CardContent className="p-3">
                   <div className="text-xs text-orange-600 font-medium uppercase">Sem Resposta +5d</div>
-                  <div className="text-xl font-bold text-orange-600">{stats.noResponse5d.length}</div>
+                  <div className="text-xl font-bold text-orange-600">{stats.noResponse5dCount}</div>
                   <div className="text-xs text-orange-500">{formatCurrency(stats.noResponse5dValue)}</div>
                 </CardContent>
               </Card>
             )}
 
-            {stats.noValidity.length > 0 && (
+            {stats.noValidityCount > 0 && (
               <Card className="min-w-[130px] flex-shrink-0 border-amber-200 bg-amber-50/50 dark:bg-amber-950/20 cursor-pointer" onClick={() => setNoValidityFilter(!noValidityFilter)}>
                 <CardContent className="p-3">
                   <div className="text-xs text-amber-600 font-medium uppercase">Sem Validade</div>
-                  <div className="text-xl font-bold text-amber-600">{stats.noValidity.length}</div>
+                  <div className="text-xl font-bold text-amber-600">{stats.noValidityCount}</div>
                 </CardContent>
               </Card>
             )}
 
-            {stats.expired.length > 0 && (
+            {stats.expiredCount > 0 && (
               <Card className="min-w-[130px] flex-shrink-0 border-red-200 bg-red-50/50 dark:bg-red-950/20 cursor-pointer" onClick={() => setExpiredFilter(!expiredFilter)}>
                 <CardContent className="p-3">
                   <div className="text-xs text-red-600 font-medium uppercase">Expiradas</div>
-                  <div className="text-xl font-bold text-red-600">{stats.expired.length}</div>
+                  <div className="text-xl font-bold text-red-600">{stats.expiredCount}</div>
                 </CardContent>
               </Card>
             )}
@@ -3218,7 +3675,10 @@ const Proposals = () => {
         {viewMode === "dashboard" ? (
           <ProposalsDashboardView
             proposals={filteredProposals}
-            workflowStages={workflowStages}
+            // allWorkflowStages: its won/lost/pipeline aggregates key off this
+            // list — passing the active-only list silently dropped any
+            // proposal sitting in a deactivated stage from every total.
+            workflowStages={allWorkflowStages}
             getProposalStage={getProposalStage}
             comercialNamesMap={comercialNamesMap}
             isLoading={loading}
@@ -3241,10 +3701,11 @@ const Proposals = () => {
             onMoveStage={async (proposalId, newStageId) => {
               const { error } = await supabase.from("proposals").update({ stage_id: newStageId }).eq("id", proposalId);
               if (error) {
+                captureFlowError(error, "proposal-lifecycle");
                 toast({ title: "Erro", description: error.message, variant: "destructive" });
               } else {
                 toast({ title: "Proposta movida" });
-                loadData();
+                afterProposalMutation([proposalId]);
               }
             }}
             onLostStageDrop={(proposalId, stageId) => {
@@ -3261,7 +3722,16 @@ const Proposals = () => {
             <div className="flex flex-wrap items-center gap-2 mb-4">
               <div className="relative flex-1 min-w-[200px] max-w-md">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input placeholder="Procurar por título, cliente, pedido, valor..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
+                {/*
+                  O placeholder prometia "valor" e nao existe — nunca existiu —
+                  nenhum filtro por valor: proposals_list_filtered nao tem
+                  parametro nenhum para isso e o valor nem sequer entra no
+                  predicado de pesquisa. Corrigido o texto em vez de inventar o
+                  filtro: acrescentar um exigiria mais um parametro aquela RPC,
+                  que serve a lista, a contagem e as metricas ao mesmo tempo e
+                  ja toca ~1,8 GB de buffers para devolver 25 linhas.
+                */}
+                <Input placeholder="Procurar por título, cliente ou pedido..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="pl-10" />
               </div>
               
               <Button variant={onlyMine ? "default" : "outline"} size="sm" className="gap-1.5" onClick={() => setOnlyMine(!onlyMine)}>
@@ -3272,7 +3742,9 @@ const Proposals = () => {
                 <SelectTrigger className="w-[140px]"><SelectValue placeholder="Estado" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todos</SelectItem>
-                  {workflowStages.map((stage) => (
+                  {/* allWorkflowStages so a proposal stuck in a deactivated
+                     stage can still be filtered into view, not just counted. */}
+                  {allWorkflowStages.map((stage) => (
                     <SelectItem key={stage.id} value={stage.id}>
                       <div className="flex items-center gap-2">
                         <div className="w-3 h-3 rounded-full" style={{ backgroundColor: stage.color }} />
@@ -3357,6 +3829,11 @@ const Proposals = () => {
                   <Button variant="outline" size="sm" disabled={bulkPdfExporting} onClick={handleBulkExportPdf}>
                     <FileText className="w-3.5 h-3.5 mr-1" /> {bulkPdfExporting ? "A gerar…" : "Exportar PDF"}
                   </Button>
+                  <PermissionGate permission="proposals.export">
+                    <Button variant="outline" size="sm" disabled={exportingProposals} onClick={handleExportSelectedProposals}>
+                      <Download className="w-3.5 h-3.5 mr-1" /> Exportar seleção ({selectedIds.length})
+                    </Button>
+                  </PermissionGate>
                   <Button variant="ghost" size="sm" onClick={() => setSelectedIds([])}>
                     <X className="w-4 h-4" />
                   </Button>
@@ -3370,9 +3847,9 @@ const Proposals = () => {
                 <CardContent className="flex flex-col items-center justify-center py-12">
                   <FileText className="w-12 h-12 text-muted-foreground mb-4" />
                   <p className="text-muted-foreground mb-4">
-                    {proposals.length === 0 ? t('proposals.noProposals') : 'Nenhum resultado encontrado'}
+                    {hasActiveFilters ? 'Nenhum resultado encontrado' : t('proposals.noProposals')}
                   </p>
-                  {proposals.length === 0 && (
+                  {!hasActiveFilters && (
                     <PermissionGate permission="proposals.create">
                       <Button onClick={() => setOpen(true)}>
                         <Plus className="w-4 h-4 mr-2" /> {t('proposals.createFirst')}
@@ -3544,6 +4021,16 @@ const Proposals = () => {
                       })}
                     </TableBody>
                   </Table>
+
+                  {/* Sentinela do scroll infinito. Tem de ficar DENTRO deste
+                      `overflow-auto max-h-[...]`, que e o elemento que rola de
+                      facto: colocada fora, ficava permanentemente visivel e
+                      pedia pagina atras de pagina ate esgotar o conjunto. */}
+                  {effectiveHasMore && (
+                    <div ref={sentinelRef} className="flex justify-center py-6">
+                      {loadingMore && <OlyviaLoader size={24} inline />}
+                    </div>
+                  )}
                 </div>
               </Card>
             )}
@@ -3578,6 +4065,7 @@ const Proposals = () => {
         organizationId={activeCompany?.id ?? null}
         onConfirm={async (reason) => {
           if (!kanbanRejectTarget) return;
+          const movedId = kanbanRejectTarget.proposal.id;
           try {
             const { workflowFailed } = await rejectProposalCore(
               kanbanRejectTarget.proposal,
@@ -3590,10 +4078,29 @@ const Proposals = () => {
             });
             setKanbanRejectDialogOpen(false);
             setKanbanRejectTarget(null);
-            loadData();
+            afterProposalMutation([movedId]);
           } catch (error: any) {
+            captureFlowError(error, "proposal-lifecycle");
             toast({ title: "Erro", description: error.message, variant: "destructive" });
           }
+        }}
+      />
+
+      <MissingTemplateDialog
+        open={missingTemplateOpen}
+        kind="proposal"
+        onCancel={() => {
+          setMissingTemplateOpen(false);
+          // Cancelar abandona a gravacao, e uma gravacao abandonada nao deixa
+          // confirmacoes de pe. Sem isto, o "sim" dado ao total nulo sobrevivia
+          // ao cancelamento e valia depois para OUTRA escolha de orcamentos, que
+          // o utilizador nunca chegou a ver avisada.
+          nullTotalConfirmedRef.current = false;
+        }}
+        onConfirm={() => {
+          setMissingTemplateOpen(false);
+          missingTemplateOkRef.current = true;
+          handleSubmit({ preventDefault: () => {} } as React.FormEvent);
         }}
       />
 
@@ -3609,6 +4116,13 @@ const Proposals = () => {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
+            {/* Nao repoe `missingTemplateOkRef` aqui: a guarda do template corre
+                DEPOIS desta (:1882 antes de :1921) e o ref e consumido no mesmo
+                ciclo sincrono em que e posto a true, portanto este botao nunca e
+                clicavel com ele a true. Verificado; um reset aqui seria codigo
+                morto a fingir que protege. Se a ordem das guardas mudar, isto
+                passa a fazer falta -- e entao no `onOpenChange`, nao no onClick,
+                para cobrir tambem Escape e clique fora. */}
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => {
               nullTotalConfirmedRef.current = true;
@@ -3667,14 +4181,23 @@ const Proposals = () => {
 
       <ProposalWorkflowConfig open={showWorkflowConfig} onOpenChange={setShowWorkflowConfig} companyId={activeCompany?.id || null} onStagesUpdated={loadWorkflowStages} />
 
-      <SendProposalDialog open={sendDialogOpen} onOpenChange={setSendDialogOpen} proposal={sendProposal} onSent={() => loadData()} />
+      <SendProposalDialog
+        open={sendDialogOpen}
+        onOpenChange={setSendDialogOpen}
+        proposal={sendProposal}
+        onSent={() => { if (sendProposal?.id) afterProposalMutation([sendProposal.id]); else loadData(); }}
+      />
       <RegisterCallDialog
         open={callDialogOpen}
         onOpenChange={setCallDialogOpen}
         entityId={callTarget.entityId}
         entityName={callTarget.name}
         organizationId={activeCompany?.id || ""}
-        onCallRegistered={() => { setCallDialogOpen(false); loadData(); }}
+        proposalId={callTarget.proposalId}
+        onCallRegistered={() => {
+          setCallDialogOpen(false);
+          if (callTarget.proposalId) afterProposalMutation([callTarget.proposalId]); else loadData();
+        }}
       />
       <WhatsAppSendDialog
         open={whatsAppDialogOpen}

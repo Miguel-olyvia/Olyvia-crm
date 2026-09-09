@@ -6,7 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "@/hooks/useTranslation";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { Link2, Save, Search } from "lucide-react";
 import { getOrgTypeLabel, OrgType } from "@/components/orgchart/OrgChartCard";
@@ -109,6 +109,7 @@ export function OrgAssociationsTab({ orgId, orgName, orgType, canManage }: OrgAs
       setInitialSelected(new Set(associatedIds));
     } catch (error) {
       console.error("Error loading associations:", error);
+      toast.error("Não foi possível carregar as associações.");
     } finally {
       setLoading(false);
     }

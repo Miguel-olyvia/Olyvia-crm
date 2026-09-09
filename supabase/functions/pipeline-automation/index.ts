@@ -546,6 +546,8 @@ serve(async (req) => {
                 custo_material_unit: unitPrice,
                 custo_mao_obra_unit: 0,
                 margem_percent: 0,
+                // unitPrice é o preço de venda do artigo (preço de catálogo).
+                retail_price_unit: unitPrice,
                 iva_percent: 23,
                 int_percent: 0,
                 total_sem_iva: totalSemIva,
@@ -581,6 +583,7 @@ serve(async (req) => {
             custo_material_unit: fallbackSubtotal,
             custo_mao_obra_unit: 0,
             margem_percent: 0,
+            retail_price_unit: fallbackSubtotal,
             iva_percent: 23,
             int_percent: 0,
             total_sem_iva: fallbackSubtotal,
@@ -1051,7 +1054,41 @@ serve(async (req) => {
       if (caller.anewUserId) {
         await supabase.rpc('set_audit_context', { p_user_id: caller.anewUserId, p_source: 'pipeline' });
       }
-      await supabase.from("client_contracts").update({ status: "signed" }).eq("id", contract_id);
+      // A transicao para "signed" e a auditoria da aceitacao interna
+      // ("aceite internamente por X") tem UMA unica implementacao:
+      // rpc_update_client_contract_status (20261115100000). Esta accao
+      // chama-a em vez de repetir a regra -- duas copias da mesma regra
+      // divergem, e foi esse padrao que causou o defeito de visibilidade
+      // dos contratos.
+      //
+      // A RPC resolve o actor a partir de auth.uid()/current_business_user_id(),
+      // logo tem de ser chamada com o JWT de quem clicou, nao com a service
+      // key: com service_role auth.uid() e nulo e o registo ficaria sem autor.
+      // O JWT vem do cabecalho Authorization do pedido -- o mesmo que o
+      // resolveCallerIdentity acima ja validou.
+      const authHeader = req.headers.get("Authorization") ?? "";
+      if (!caller.isServiceRole && authHeader) {
+        const supabaseAsCaller = createClient(
+          supabaseUrl,
+          Deno.env.get("SUPABASE_ANON_KEY")!,
+          { global: { headers: { Authorization: authHeader } } },
+        );
+        const { error: statusErr } = await supabaseAsCaller.rpc(
+          "rpc_update_client_contract_status",
+          { p_id: contract_id, p_status: "signed" },
+        );
+        if (statusErr) {
+          console.error("[pipeline-automation] rpc_update_client_contract_status failed:", statusErr);
+          return new Response(
+            JSON.stringify({ success: false, message: statusErr.message || "Não foi possível assinar o contrato" }),
+            { status: 403, headers: { "Content-Type": "application/json", ...corsHeaders } }
+          );
+        }
+      } else {
+        // Chamada interna (service_role): nao ha utilizador, logo nao ha
+        // aceitacao interna para registar. So o estado muda.
+        await supabase.from("client_contracts").update({ status: "signed" }).eq("id", contract_id);
+      }
 
       // Trigger execute-workflow to handle full client conversion logic
       // (creates anew_clients, sets entity roles, converts lead, updates pipeline_links)

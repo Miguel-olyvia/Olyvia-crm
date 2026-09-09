@@ -32,6 +32,7 @@ import { Progress } from "@/components/ui/progress";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart as RechartsPieChart, Pie, Cell, Legend, AreaChart, Area } from "recharts";
 import { campaignDetailChannelSchema, campaignDetailMarketingListsSchema } from "@/lib/validations";
 import { useTranslation } from "@/hooks/useTranslation";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Campaign {
   id: string;
@@ -819,6 +820,7 @@ const CampaignDetail = () => {
       setListsDialogOpen(false);
       void loadCampaignData();
     } catch (error: any) {
+      captureFlowError(error, "campaign-lead-intake");
       toast({ title: t('campaignDetail.toast.listsError'), description: error.message, variant: "destructive" });
     }
   };
@@ -911,6 +913,7 @@ const CampaignDetail = () => {
       setLeadFormData({ channel_id: "none", source: "", medium: "", status: "new", notes: "" });
       void loadCampaignData();
     } catch (error: any) {
+      captureFlowError(error, "campaign-lead-intake");
       toast({ title: t('campaignDetail.toast.leadError'), description: error.message, variant: "destructive" });
     }
   };

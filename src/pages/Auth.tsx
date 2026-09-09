@@ -27,14 +27,27 @@ const Auth = () => {
   });
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  // Lockout state is a UX convenience only (persisted so a page refresh keeps
-  // showing the countdown). The real enforcement happens server-side in the
-  // portal-login Edge Function (see auth_login_attempts table + migration
-  // 20261103010000): even if this is cleared or bypassed, the next submit
-  // still gets rejected with 429 by the server, which repopulates it below.
-  const [lockoutUntil, setLockoutUntil] = useState<number | null>(() => {
-    const val = sessionStorage.getItem("lockoutUntil");
-    return val ? parseInt(val, 10) : null;
+  // Contagem decrescente do bloqueio: e INFORMACAO, nao uma decisao.
+  //
+  // Quem bloqueia e o servidor (funcao portal-login + tabela
+  // auth_login_attempts, migracao 20261103010000). Este ecra limita-se a
+  // repetir o que o servidor disse da ultima vez, para a pessoa saber quanto
+  // falta sem ter de tentar as cegas. NAO impede o envio nem desliga o botao:
+  // se o servidor entretanto libertar, ou se o bloqueio for de outra conta,
+  // quem esta aqui tem de conseguir entrar.
+  //
+  // Guarda-se com o email a que pertence. Sem isso, falhar numa conta
+  // trancava o formulario para TODAS as outras no mesmo separador -- e o
+  // servidor conta as tentativas por conta, nao por browser.
+  const [lockout, setLockout] = useState<{ email: string; until: number } | null>(() => {
+    try {
+      const val = sessionStorage.getItem("lockout");
+      if (!val) return null;
+      const parsed = JSON.parse(val);
+      return typeof parsed?.until === "number" && typeof parsed?.email === "string" ? parsed : null;
+    } catch {
+      return null;
+    }
   });
   const [lockoutCountdown, setLockoutCountdown] = useState(0);
   const navigate = useNavigate();
@@ -42,19 +55,19 @@ const Auth = () => {
 
   // Lockout countdown timer
   useEffect(() => {
-    if (!lockoutUntil) return;
+    if (!lockout) return;
     const interval = setInterval(() => {
-      const remaining = Math.ceil((lockoutUntil - Date.now()) / 1000);
+      const remaining = Math.ceil((lockout.until - Date.now()) / 1000);
       if (remaining <= 0) {
-        setLockoutUntil(null);
-        sessionStorage.removeItem("lockoutUntil");
+        setLockout(null);
+        sessionStorage.removeItem("lockout");
         setLockoutCountdown(0);
       } else {
         setLockoutCountdown(remaining);
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [lockoutUntil]);
+  }, [lockout]);
 
   // Privacy decision: remember me only restores the email for the current browser session.
   // Legacy localStorage values are removed so the email is not persisted across sessions.
@@ -175,15 +188,9 @@ const Auth = () => {
       return;
     }
 
-    // Check lockout
-    if (lockoutUntil && Date.now() < lockoutUntil) {
-      toast({
-        title: "Conta temporariamente bloqueada",
-        description: `Demasiadas tentativas falhadas. Tente novamente em ${lockoutCountdown}s.`,
-        variant: "destructive",
-      });
-      return;
-    }
+    // Nao se recusa o envio por causa da contagem local: quem decide e o
+    // servidor. A contagem pode estar velha, pode ser de outra conta, e o
+    // servidor pode ja ter libertado. Tenta-se sempre.
 
     setLoading(true);
 
@@ -225,8 +232,9 @@ const Auth = () => {
 
           if (typeof retryAfterSeconds === "number" && retryAfterSeconds > 0) {
             const until = Date.now() + retryAfterSeconds * 1000;
-            setLockoutUntil(until);
-            sessionStorage.setItem("lockoutUntil", until.toString());
+            const alvo = { email: email.trim().toLowerCase(), until };
+            setLockout(alvo);
+            sessionStorage.setItem("lockout", JSON.stringify(alvo));
             setLockoutCountdown(retryAfterSeconds);
           }
 
@@ -244,8 +252,8 @@ const Auth = () => {
         if (sessionError) throw sessionError;
 
         // Reset lockout UX state on success
-        setLockoutUntil(null);
-        sessionStorage.removeItem("lockoutUntil");
+        setLockout(null);
+        sessionStorage.removeItem("lockout");
 
         // Persist only for the current browser session (more privacy than localStorage)
         if (rememberMe) {
@@ -305,9 +313,9 @@ const Auth = () => {
         sessionStorage.removeItem("showWelcomeOrg");
       }
 
-      // Login lockout (429 from portal-login) already set lockoutUntil above
+      // O bloqueio (429 do portal-login) ja registou a contagem acima
       // and surfaces its own message via the thrown Error below.
-      if (mode === "login" && lockoutUntil && Date.now() < lockoutUntil) {
+      if (mode === "login" && lockout && Date.now() < lockout.until) {
         toast({
           title: "Conta temporariamente bloqueada",
           description: getErrorMessage(error, "Login"),
@@ -455,12 +463,13 @@ const Auth = () => {
                   </Label>
                 </div>
               )}
-              {lockoutUntil && Date.now() < lockoutUntil && (
+              {lockout && lockout.email === email.trim().toLowerCase() && Date.now() < lockout.until && (
                 <p className="text-sm text-destructive text-center">
-                  Conta bloqueada. Tente novamente em {lockoutCountdown}s.
+                  Demasiadas tentativas nesta conta. O servidor deve voltar a aceitar
+                  em {lockoutCountdown}s — podes tentar na mesma.
                 </p>
               )}
-              <Button type="submit" className="w-full" disabled={loading || !!(lockoutUntil && Date.now() < lockoutUntil)}>
+              <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? "A processar..." : mode === "login" ? "Entrar" : "Criar Conta"}
               </Button>
             </form>

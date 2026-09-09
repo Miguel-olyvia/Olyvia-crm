@@ -42,6 +42,7 @@ import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { escapeIlike } from "@/lib/clientSearch";
 import StockMovementDialog from "@/components/inventory/StockMovementDialog";
 import StockMovementsHistoryDialog from "@/components/inventory/StockMovementsHistoryDialog";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   products?: { name: string; category_id?: string | null; product_categories?: { name: string } | null };
@@ -268,6 +269,7 @@ const Stocks = () => {
       setHasMore(false);
       setPage(0);
     } catch (error: any) {
+      captureFlowError(error, "stock-lifecycle");
       toast({
         title: t('stocks.toast.loadError'),
         description: error.message,
@@ -476,6 +478,7 @@ const Stocks = () => {
       resetForm();
       refresh();
     } catch (error: any) {
+      captureFlowError(error, "stock-lifecycle");
       toast({
         title: t('stocks.toast.error'),
         description: error.message,
@@ -498,6 +501,7 @@ const Stocks = () => {
 
       refresh();
     } catch (error: any) {
+      captureFlowError(error, "stock-lifecycle");
       toast({
         title: t('stocks.toast.error'),
         description: error.message,
@@ -515,6 +519,7 @@ const Stocks = () => {
 
       refresh();
     } catch (error: any) {
+      captureFlowError(error, "stock-lifecycle");
       toast({
         title: t('stocks.toast.error'),
         description: error.message,
@@ -748,6 +753,7 @@ const Stocks = () => {
       setImportDialogOpen(false);
       refresh();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t('stocks.toast.importError'),
         description: error.message,

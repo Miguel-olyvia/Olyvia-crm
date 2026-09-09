@@ -37,6 +37,29 @@ export async function resolveCallerIdentity(
     return { authUid: "service_role", anewUserId: "service_role", isServiceRole: true };
   }
 
+  // Chamadas vindas da propria base de dados (gatilhos e pg_cron).
+  //
+  // Um gatilho SQL nao tem sessao de utilizador: para entregar um acontecimento
+  // a uma edge function precisa de uma credencial guardada na propria base.
+  //
+  // Usa-se o CRON_SHARED_SECRET que ja existe -- o mesmo que
+  // `requireServiceRoleOrCronSecret` aceita, e que ja esta no runtime e no Vault
+  // (guardado, confusamente, com o nome `cron_service_role_key`).
+  //
+  // Uma primeira versao disto inventou um segredo proprio,
+  // `WORKFLOW_TRIGGER_SECRET`, sem saber que este ja existia para o mesmo fim.
+  // Dois segredos a fazer a mesma coisa sao mais um para rodar, mais um para
+  // esquecer e mais um para desalinhar -- que e exactamente a doenca que deixou
+  // `auto-schedule` e `pipeline-automation` a devolver 401 durante semanas.
+  //
+  // Nao se usa a chave de servico: e a chave-mestra do projecto, e quem lesse o
+  // Vault passaria a poder fazer tudo. Este segredo autoriza uma coisa so, e
+  // mesmo essa nao faz nada sem accao configurada.
+  const cronSecret = Deno.env.get("CRON_SHARED_SECRET");
+  if (cronSecret && timingSafeEqual(token, cronSecret)) {
+    return { authUid: "db_trigger", anewUserId: "db_trigger", isServiceRole: true };
+  }
+
   // Validate user JWT
   const { data: { user }, error } = await supabaseAdmin.auth.getUser(token);
   if (error || !user) {
@@ -223,6 +246,41 @@ export function requireServiceRole(req: Request): boolean {
   if (!authHeader) return false;
   const token = authHeader.replace("Bearer ", "");
   return isServiceRoleToken(token);
+}
+
+/**
+ * Accepts a pg_cron call carrying the dedicated CRON_SHARED_SECRET, falling
+ * back to the plain service-role check.
+ *
+ * Why this exists: the cron jobs send the Vault secret 'cron_service_role_key',
+ * whose value is CRON_SHARED_SECRET — NOT the service-role key. Meanwhile the
+ * project's SUPABASE_SERVICE_ROLE_KEY no longer matches any key the project
+ * currently issues, so requireServiceRole() alone rejects every cron call with
+ * "Service role required". That is what has kept auto-schedule and
+ * pipeline-automation returning 401 on every run since late August.
+ *
+ * CRON_SHARED_SECRET is a 64-char secret that exists only in the function
+ * runtime and in Vault, is never exposed to clients, and is compared in
+ * constant time below. Rotating it means updating both sides together.
+ */
+export function requireServiceRoleOrCronSecret(req: Request): boolean {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) return false;
+  const token = authHeader.replace("Bearer ", "");
+
+  const cronSecret = Deno.env.get("CRON_SHARED_SECRET");
+  if (cronSecret && timingSafeEqual(token, cronSecret)) return true;
+
+  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  return Boolean(serviceRoleKey) && timingSafeEqual(token, serviceRoleKey!);
+}
+
+/** Length-independent constant-time string comparison. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 /**

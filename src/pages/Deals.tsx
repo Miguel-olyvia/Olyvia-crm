@@ -75,6 +75,7 @@ import {
   isLostStage,
   isClosedStage,
 } from "@/lib/dealStageUtils";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface DealStageRel {
   id: string;
@@ -315,6 +316,7 @@ const Deals = () => {
       setBulkLostReasonDialogOpen(false);
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
       toast({
         title: t('common.error'),
         description: error.message,
@@ -887,6 +889,7 @@ const Deals = () => {
       currentPageRef.current += 1;
     } catch (error: any) {
       if (requestId !== loadDataRequestIdRef.current) return;
+      captureFlowError(error, "deal-lifecycle");
       toast({
         title: t('deals.toast.loadError'),
         description: error.message,
@@ -1362,6 +1365,7 @@ const Deals = () => {
       }
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
       toast({ title: "Erro ao mover pedido", description: error.message, variant: "destructive" });
     }
   }, [activeCompany?.id, toast, loadData, t]);
@@ -1519,6 +1523,7 @@ const Deals = () => {
 
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
       toast({
         title: t('deals.toast.deleteError'),
         description: error.message,
@@ -1554,6 +1559,7 @@ const Deals = () => {
       toast({ title: "Pedido duplicado", description: "Uma cópia foi criada com sucesso." });
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
       toast({ title: "Erro ao duplicar", description: error.message, variant: "destructive" });
     }
   };
@@ -1897,6 +1903,7 @@ const Deals = () => {
       resetForm();
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
       toast({
         title: editingId ? t('deals.toast.updateError') : t('deals.toast.createError'),
         description: error.message,

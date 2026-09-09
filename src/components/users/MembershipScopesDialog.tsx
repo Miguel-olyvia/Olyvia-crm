@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Shield, AlertCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -158,6 +159,7 @@ export function MembershipScopesDialog({
       }
     } catch (error: any) {
       console.error("Error loading scopes:", error);
+      captureFlowError(error, "permissions-scope-load");
       toast({
         title: t("common.error"),
         description: t("permissions.scope") + ": " + (error.message || ""),

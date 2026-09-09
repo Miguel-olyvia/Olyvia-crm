@@ -107,21 +107,21 @@ BEGIN
     coalesce(p_title, '') || ' ' || coalesce(v_deal_title, '')
   ), '');
 END;
-$$
+$$;
 
 -- ── 2. A cascata entidade -> propostas deixa de existir ─────────────────────
-DROP TRIGGER IF EXISTS "trg_anew_entities_sync_proposals_search_text" ON "public"."anew_entities"
-
-DROP FUNCTION IF EXISTS "public"."anew_entities_sync_proposals_search_text_trigger"()
+DROP TRIGGER IF EXISTS "trg_anew_entities_sync_proposals_search_text" ON "public"."anew_entities";
+DROP FUNCTION IF EXISTS "public"."anew_entities_sync_proposals_search_text_trigger"();
 
 -- ── 3. Realinhar o campo com a nova definicao ───────────────────────────────
 UPDATE public.proposals AS p
-   SET search_text = public.proposals_compute_search_text(p.title, p.entity_id, p.deal_id)
+   SET search_text = public.proposals_compute_search_text(p.title, p.entity_id, p.deal_id);
+
 
 COMMENT ON FUNCTION public.proposals_list_filtered(uuid, text, uuid[], uuid[], boolean, uuid[], text, text, uuid[], timestamptz, timestamptz, uuid, uuid, boolean, boolean, boolean, boolean, integer, timestamptz, text) IS
-  'Listagem filtrada de propostas. A pesquisa compara cada palavra contra o search_text da proposta (titulo dela + titulo do negocio) E contra o search_text da entidade, lido do CTE visible_entities. O search_text da entidade deixou de ser copiado para proposals.search_text em 20261116010000: essa copia obrigava a um UPDATE em proposals sempre que um email ou telefone mudava, e a RLS das propostas recusava-o a quem nao fosse dono da proposta, cancelando a correccao do contacto sem aviso.'
+  'Listagem filtrada de propostas. A pesquisa compara cada palavra contra o search_text da proposta (titulo dela + titulo do negocio) E contra o search_text da entidade, lido do CTE visible_entities. O search_text da entidade deixou de ser copiado para proposals.search_text em 20261116010000: essa copia obrigava a um UPDATE em proposals sempre que um email ou telefone mudava, e a RLS das propostas recusava-o a quem nao fosse dono da proposta, cancelando a correccao do contacto sem aviso.';
 
-GRANT EXECUTE ON FUNCTION public.proposals_list_filtered(uuid, text, uuid[], uuid[], boolean, uuid[], text, text, uuid[], timestamptz, timestamptz, uuid, uuid, boolean, boolean, boolean, boolean, integer, timestamptz, text) TO authenticated
+GRANT EXECUTE ON FUNCTION public.proposals_list_filtered(uuid, text, uuid[], uuid[], boolean, uuid[], text, text, uuid[], timestamptz, timestamptz, uuid, uuid, boolean, boolean, boolean, boolean, integer, timestamptz, text) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.proposals_list_filtered(_organization_id uuid, _scope_mode text, _scope_deal_ids uuid[], _scope_created_by_ids uuid[], _created_by_fallback_only boolean, _workflow_stage_ids uuid[], _stage_filter text, _search text, _search_entity_ids uuid[], _date_from timestamp with time zone, _date_to timestamp with time zone, _only_mine uuid, _comercial uuid, _comercial_none boolean, _no_response boolean, _expired boolean, _no_validity boolean, _follow_up_days integer, _now timestamp with time zone, _tz text)
  RETURNS TABLE(id uuid, created_at timestamp with time zone, title text, value numeric, value_sem_iva numeric, valid_until date, accepted_at timestamp with time zone, stage_id uuid, stage_order integer, stage_name text, is_won boolean, is_lost boolean, is_no_response boolean, is_past_validity boolean, has_no_validity boolean)
@@ -301,8 +301,9 @@ AS $function$
     )
     AND (NOT _no_validity OR d.valid_until IS NULL)
 $function$
+;
 
 COMMENT ON FUNCTION public.proposals_list_filtered(uuid, text, uuid[], uuid[], boolean, uuid[], text, text, uuid[], timestamptz, timestamptz, uuid, uuid, boolean, boolean, boolean, boolean, integer, timestamptz, text) IS
-  'Listagem filtrada de propostas. A pesquisa compara cada palavra contra o search_text da proposta (titulo dela + titulo do negocio) E contra o search_text da entidade, lido do CTE visible_entities. O search_text da entidade deixou de ser copiado para proposals.search_text em 20261116010000: essa copia obrigava a um UPDATE em proposals sempre que um email ou telefone mudava, e a RLS das propostas recusava-o a quem nao fosse dono da proposta, cancelando a correccao do contacto sem aviso.'
+  'Listagem filtrada de propostas. A pesquisa compara cada palavra contra o search_text da proposta (titulo dela + titulo do negocio) E contra o search_text da entidade, lido do CTE visible_entities. O search_text da entidade deixou de ser copiado para proposals.search_text em 20261116010000: essa copia obrigava a um UPDATE em proposals sempre que um email ou telefone mudava, e a RLS das propostas recusava-o a quem nao fosse dono da proposta, cancelando a correccao do contacto sem aviso.';
 
-GRANT EXECUTE ON FUNCTION public.proposals_list_filtered(uuid, text, uuid[], uuid[], boolean, uuid[], text, text, uuid[], timestamptz, timestamptz, uuid, uuid, boolean, boolean, boolean, boolean, integer, timestamptz, text) TO authenticated
+GRANT EXECUTE ON FUNCTION public.proposals_list_filtered(uuid, text, uuid[], uuid[], boolean, uuid[], text, text, uuid[], timestamptz, timestamptz, uuid, uuid, boolean, boolean, boolean, boolean, integer, timestamptz, text) TO authenticated;

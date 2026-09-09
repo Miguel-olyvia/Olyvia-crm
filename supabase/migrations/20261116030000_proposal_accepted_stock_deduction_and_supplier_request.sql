@@ -1,3 +1,8 @@
+-- Reposto a partir do historico da base (supabase_migrations.schema_migrations)
+-- em 2026-09-02: esta migration estava aplicada no remoto sem ficheiro no
+-- repositorio, o que impedia qualquer 'db push' e faria uma base reconstruida
+-- do zero sair diferente da de producao. O SQL abaixo e o que correu de facto.
+
 -- ============================================================
 -- Fase 5.0C-propostas do plano de inventário
 -- (plano-fornecedores-multi-stock-execucao.md, secção "Fase 5.0 — Venda a
@@ -388,7 +393,6 @@ AFTER UPDATE OF status ON public.proposals
 FOR EACH ROW
 EXECUTE FUNCTION public.fn_proposal_stock_deduction();
 
-
 -- ============================================================
 -- 2. fn_proposal_cancelled_stock_reversal() /
 --    trg_proposal_cancelled_stock_reversal — AFTER UPDATE OF status ON
@@ -512,7 +516,6 @@ CREATE TRIGGER trg_proposal_cancelled_stock_reversal
 AFTER UPDATE OF status ON public.proposals
 FOR EACH ROW
 EXECUTE FUNCTION public.fn_proposal_cancelled_stock_reversal();
-
 
 -- ============================================================
 -- 3. fn_proposal_supplier_request() / trg_proposal_supplier_request —
@@ -815,7 +818,6 @@ AFTER UPDATE OF status ON public.proposals
 FOR EACH ROW
 EXECUTE FUNCTION public.fn_proposal_supplier_request();
 
-
 -- ============================================================
 -- 4. fn_proposal_cancelled_supplier_request_reversal() /
 --    trg_proposal_cancelled_supplier_request_reversal — AFTER UPDATE OF
@@ -938,7 +940,6 @@ AFTER UPDATE OF status ON public.proposals
 FOR EACH ROW
 EXECUTE FUNCTION public.fn_proposal_cancelled_supplier_request_reversal();
 
-
 -- ============================================================
 -- Verification notes (para revisão humana / testes em transação com
 -- ROLLBACK — não executadas nesta migration; ver relatório do agente para os
@@ -969,4 +970,4 @@ EXECUTE FUNCTION public.fn_proposal_cancelled_supplier_request_reversal();
 --    (guarda nova, sem equivalente do lado do contrato).
 -- 7. accept_proposal_atomic continua a funcionar mesmo que uma das 4
 --    triggers falhe a meio (simulável forçando um erro dentro do bloco
---    BEGIN) — a aceitação em si (UPDATE proposals) nunca é desfeita.
+--    BEGIN) — a aceitação em si (UPDATE proposals) nunca é desfeita.;

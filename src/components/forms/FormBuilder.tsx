@@ -82,6 +82,7 @@ import {
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CONTACT_FIELDS, CLIENT_FIELDS, CONTACT_FIELD_DEFAULTS, LEAD_FORM_BASE_FIELDS } from "@/constants/fieldMappings";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { IconGallery, LucideIcon, normalizeLucideIconName } from "@/components/campaigns/IconGallery";
 import { formBuilderFieldSchema, formBuilderStepTitleSchema } from "@/lib/validations";
 
@@ -696,7 +697,8 @@ export function FormBuilder({
   }, [open, formId]);
 
   const loadI18nConfig = async () => {
-    const { data } = await supabase.from("forms").select("settings").eq("id", formId).maybeSingle();
+    const { data, error } = await supabase.from("forms").select("settings").eq("id", formId).maybeSingle();
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     const cfg = readI18nConfig(data?.settings);
     setI18nConfig(cfg);
     setActiveLocale(cfg.default_locale || DEFAULT_FORM_LOCALE);
@@ -745,11 +747,12 @@ export function FormBuilder({
       .order("step_number");
 
     if (error) {
+      captureFlowError(error, "db-error-leaked-to-ui");
       console.error("Error loading steps:", error);
     } else if (data && data.length > 0) {
       setSteps(data);
     } else {
-      const { data: newStep } = await supabase
+      const { data: newStep, error: newStepError } = await supabase
         .from("form_steps")
         .insert({
           form_id: formId,
@@ -759,7 +762,8 @@ export function FormBuilder({
         })
         .select()
         .single();
-      
+
+      if (newStepError) captureFlowError(newStepError, "config-partial-write");
       if (newStep) setSteps([newStep]);
     }
   };
@@ -773,6 +777,7 @@ export function FormBuilder({
       .order("sort_order");
 
     if (error) {
+      captureFlowError(error, "db-error-leaked-to-ui");
       console.error("Error loading fields:", error);
     } else {
       setFields(data || []);
@@ -787,6 +792,7 @@ export function FormBuilder({
       .maybeSingle();
 
     if (error) {
+      captureFlowError(error, "db-error-leaked-to-ui");
       console.error("Error loading branding:", error);
     } else {
       setBranding(data);
@@ -803,7 +809,8 @@ export function FormBuilder({
       query = query.eq("organization_id", activeCompany.id);
     }
 
-    const { data } = await query.order("name");
+    const { data, error } = await query.order("name");
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     setScheduleBoards(data || []);
   };
 
@@ -866,12 +873,17 @@ export function FormBuilder({
       }
       
       const targetStep = otherSteps[0];
-      for (const f of stepFields) {
-        await supabase.from("form_fields").update({ step_number: targetStep.step_number }).eq("id", f.id);
+      try {
+        for (const f of stepFields) {
+          await supabase.from("form_fields").update({ step_number: targetStep.step_number }).eq("id", f.id).throwOnError();
+        }
+      } catch (error) {
+        toast({ title: "Erro ao mover campos", variant: "destructive" });
+        return;
       }
-      setFields(fields.map(f => 
-        stepFields.find(sf => sf.id === f.id) 
-          ? { ...f, step_number: targetStep.step_number } 
+      setFields(fields.map(f =>
+        stepFields.find(sf => sf.id === f.id)
+          ? { ...f, step_number: targetStep.step_number }
           : f
       ));
       toast({ title: `${stepFields.length} campo(s) movido(s) para "${targetStep.step_title}"` });
@@ -886,6 +898,9 @@ export function FormBuilder({
         setActiveStepId(newSteps[0].id);
       }
       toast({ title: "Passo eliminado" });
+    } else {
+      captureFlowError(error, "config-partial-write");
+      toast({ title: "Erro ao eliminar passo", variant: "destructive" });
     }
   };
 
@@ -947,6 +962,9 @@ export function FormBuilder({
       setFields(fields.filter(f => f.id !== fieldId));
       if (selectedField?.id === fieldId) setSelectedField(null);
       toast({ title: "Campo eliminado" });
+    } else {
+      captureFlowError(error, "config-partial-write");
+      toast({ title: "Erro ao eliminar campo", variant: "destructive" });
     }
   };
 
@@ -1009,7 +1027,12 @@ export function FormBuilder({
     const validatedTitle = result.data.step_title ?? "";
 
     if (isDefaultLocale) {
-      await supabase.from("form_steps").update({ step_title: validatedTitle }).eq("id", stepId);
+      const { error } = await supabase.from("form_steps").update({ step_title: validatedTitle }).eq("id", stepId);
+      if (error) {
+        captureFlowError(error, "config-partial-write");
+        toast({ title: "Erro ao guardar título", variant: "destructive" });
+        return;
+      }
       setSteps(steps.map((s) => (s.id === stepId ? { ...s, step_title: validatedTitle } : s)));
       return;
     }
@@ -1190,7 +1213,8 @@ export function FormBuilder({
     const updates = reorderedFields.map((f, i) => ({ id: f.id, sort_order: i }));
 
     for (const update of updates) {
-      await supabase.from("form_fields").update({ sort_order: update.sort_order }).eq("id", update.id);
+      const { error } = await supabase.from("form_fields").update({ sort_order: update.sort_order }).eq("id", update.id);
+      if (error) captureFlowError(error, "config-partial-write");
     }
 
     setFields(fields.map(f => {
@@ -1230,11 +1254,13 @@ export function FormBuilder({
         
         // Persist step order
         for (const step of updatedSteps) {
-          await supabase.from("form_steps").update({ step_number: step.step_number, sort_order: step.sort_order }).eq("id", step.id);
+          const { error } = await supabase.from("form_steps").update({ step_number: step.step_number, sort_order: step.sort_order }).eq("id", step.id);
+          if (error) captureFlowError(error, "config-partial-write");
         }
         // Persist field step_number updates
         for (const field of updatedFields) {
-          await supabase.from("form_fields").update({ step_number: field.step_number }).eq("id", field.id);
+          const { error } = await supabase.from("form_fields").update({ step_number: field.step_number }).eq("id", field.id);
+          if (error) captureFlowError(error, "config-partial-write");
         }
       }
     }
@@ -1681,7 +1707,8 @@ export function FormBuilder({
                       <Select
                         value={activeStep.scheduling_board_id || ''}
                         onValueChange={async (v) => {
-                          await supabase.from("form_steps").update({ scheduling_board_id: v }).eq("id", activeStep.id);
+                          const { error } = await supabase.from("form_steps").update({ scheduling_board_id: v }).eq("id", activeStep.id);
+                          if (error) captureFlowError(error, "config-partial-write");
                           setSteps(steps.map(s => s.id === activeStep.id ? { ...s, scheduling_board_id: v } : s));
                         }}
                       >
@@ -1700,7 +1727,8 @@ export function FormBuilder({
                         value={activeStep.scheduling_duration_minutes || 60}
                         onChange={async (e) => {
                           const val = parseInt(e.target.value) || 60;
-                          await supabase.from("form_steps").update({ scheduling_duration_minutes: val }).eq("id", activeStep.id);
+                          const { error } = await supabase.from("form_steps").update({ scheduling_duration_minutes: val }).eq("id", activeStep.id);
+                          if (error) captureFlowError(error, "config-partial-write");
                           setSteps(steps.map(s => s.id === activeStep.id ? { ...s, scheduling_duration_minutes: val } : s));
                         }}
                         className="h-8 text-sm"
@@ -1714,7 +1742,8 @@ export function FormBuilder({
                         value={activeStep.scheduling_postal_code_field_key || "__none__"}
                         onValueChange={async (v) => {
                           const val = v === "__none__" ? null : v;
-                          await supabase.from("form_steps").update({ scheduling_postal_code_field_key: val }).eq("id", activeStep.id);
+                          const { error } = await supabase.from("form_steps").update({ scheduling_postal_code_field_key: val }).eq("id", activeStep.id);
+                          if (error) captureFlowError(error, "config-partial-write");
                           setSteps(steps.map(s => s.id === activeStep.id ? { ...s, scheduling_postal_code_field_key: val } : s));
                         }}
                       >
@@ -1744,7 +1773,8 @@ export function FormBuilder({
                         value={activeStep.scheduling_district_field_key || "__none__"}
                         onValueChange={async (v) => {
                           const val = v === "__none__" ? null : v;
-                          await supabase.from("form_steps").update({ scheduling_district_field_key: val }).eq("id", activeStep.id);
+                          const { error } = await supabase.from("form_steps").update({ scheduling_district_field_key: val }).eq("id", activeStep.id);
+                          if (error) captureFlowError(error, "config-partial-write");
                           setSteps(steps.map(s => s.id === activeStep.id ? { ...s, scheduling_district_field_key: val } : s));
                         }}
                       >

@@ -61,6 +61,7 @@ import { BulkActionsBar } from "@/components/BulkActionsBar";
 import { BulkStatusDialog, BulkDeleteDialog } from "@/components/BulkActionDialogs";
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { OrganizationFormSection, type OrganizationSelection } from "@/components/OrganizationFormSection";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface Service {
   id: string;
@@ -202,10 +203,11 @@ export default function Services() {
       if (!user) throw new Error("User not authenticated");
 
       // Collect active company + descendants only (do not include sibling organizations)
-      const { data: hierarchy } = await supabase
+      const { data: hierarchy, error: hierarchyErr } = await supabase
         .from("anew_hierarchy")
         .select("parent_org_id, child_org_id")
         .order("created_at");
+      if (hierarchyErr) throw hierarchyErr;
 
       const childMap = new Map<string, string[]>();
       (hierarchy || []).forEach((h: any) => {
@@ -273,10 +275,11 @@ export default function Services() {
       const serviceIds = loadedServices.map((s: any) => s.id);
       let serviceOrgsMap = new Map<string, string[]>();
       if (serviceIds.length > 0) {
-        const { data: serviceOrgs } = await supabase
+        const { data: serviceOrgs, error: serviceOrgsListError } = await supabase
           .from("service_organizations")
           .select("service_id, organization_id")
           .in("service_id", serviceIds);
+        if (serviceOrgsListError) captureFlowError(serviceOrgsListError, "db-error-leaked-to-ui");
         (serviceOrgs || []).forEach((so: any) => {
           const arr = serviceOrgsMap.get(so.service_id) || [];
           arr.push(so.organization_id);
@@ -473,6 +476,7 @@ export default function Services() {
       await exportServicesToCSV(filteredServices, activeCompany?.id);
       toast({ title: t("services.toast.exportSuccess") });
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t("services.toast.exportError"),
         description: error.message,
@@ -485,6 +489,7 @@ export default function Services() {
     try {
       downloadServicesTemplate();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t("services.toast.templateError"),
         description: error.message,
@@ -534,6 +539,7 @@ export default function Services() {
       setImportDialogOpen(false);
       loadData();
     } catch (error: any) {
+      captureFlowError(error, "record-export-import");
       toast({
         title: t("services.toast.importError"),
         description: error.message,
@@ -755,10 +761,11 @@ export default function Services() {
       }
 
       // Fetch prices
-      const { data: pricesData } = await supabase
+      const { data: pricesData, error: pricesDataError } = await supabase
         .from("service_prices")
         .select("price_type, price, currency, vat_rate")
         .eq("service_id", lastService.id);
+      if (pricesDataError) captureFlowError(pricesDataError, "db-error-leaked-to-ui");
 
       // Set form data (with empty SKU - user must provide new one)
       setFormData({

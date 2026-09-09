@@ -15,7 +15,7 @@ import {
 import { PermissionGate } from "@/components/PermissionGate";
 import {
   Phone, Eye, Pencil, FileText, Mail, MessageCircle,
-  MoreHorizontal, Star, Copy, Trash2, User, CalendarIcon, Handshake, ScrollText,
+  MoreHorizontal, Star, Copy, Trash2, User, CalendarIcon, Handshake, ScrollText, RotateCcw,
 } from "lucide-react";
 import { PhoneCallDropdown } from "@/components/shared/PhoneCallDropdown";
 import { format, formatDistanceToNow } from "date-fns";
@@ -40,6 +40,37 @@ export interface LeadPipelineEntry {
 
 function formatCurrency(value: number): string {
   return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(value || 0);
+}
+
+/** Instante em milissegundos, ou null se o valor estiver vazio ou não for uma data. */
+function toInstant(value: unknown): number | null {
+  if (!value) return null;
+  const ms = new Date(value as string | number | Date).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+/**
+ * O aviso "Voltou a contactar" significa exactamente uma coisa: *este cliente
+ * procurou-nos e ainda ninguém respondeu*. Por isso caduca sozinho — mostra-se
+ * enquanto o regresso (`last_activity_at`) for MAIS RECENTE do que o último
+ * contacto registado (`last_contact_at`), ou enquanto ninguém tiver contactado
+ * de todo. Assim que o comercial regista um contacto, o aviso desaparece sem
+ * precisar de campo novo nem de botão de "marcar como lido".
+ *
+ * Comparam-se instantes, nunca textos: as datas chegam como ISO da base, mas
+ * duas cadeias ISO equivalentes podem escrever-se de formas diferentes.
+ */
+export function hasUnansweredReturn(lead: {
+  last_activity_at?: string | null;
+  last_contact_at?: string | null;
+}): boolean {
+  const returnedAt = toInstant(lead?.last_activity_at);
+  if (returnedAt === null) return false;
+
+  const contactedAt = toInstant(lead?.last_contact_at);
+  if (contactedAt === null) return true;
+
+  return returnedAt > contactedAt;
 }
 
 export interface LeadTableRowProps {
@@ -223,7 +254,39 @@ export const LeadTableRow = memo(function LeadTableRow({
           case "name":
             return (
               <TableCell key={column.id}>
-                <span className="font-medium">{name || "-"}</span>
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-medium">{name || "-"}</span>
+                  {/* Esta pessoa JA existia e voltou a preencher o formulario
+                      publico: nao nasceu ficha nenhuma, carimbou-se
+                      `last_activity_at` na ficha que ja ca estava (Edge
+                      Function create-lead). O aviso existe para o comercial
+                      perceber que o contacto e repetido, nao novo, e caduca
+                      sozinho assim que alguem registar um contacto posterior
+                      (ver hasUnansweredReturn, no topo deste ficheiro).
+
+                      LIMITACAO CONHECIDA, decidida e nao esquecida: o aviso
+                      vive so nesta celula do nome. Quem esconder a coluna
+                      "Nome" em "Personalizar Colunas" deixa de o ver, e o
+                      Kanban de Leads nao usa LeadTableRow, portanto tambem
+                      nao o mostra. Levar o aviso a esses dois sitios fica
+                      para quem vier a seguir. */}
+                  {hasUnansweredReturn(lead) && (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1 py-0 w-fit whitespace-nowrap font-semibold border-amber-300 text-amber-700 bg-amber-50 dark:border-amber-700 dark:text-amber-300 dark:bg-amber-900/30"
+                        >
+                          <RotateCcw className="h-3 w-3 mr-1" />
+                          {t('leads.returnedContact')} · {formatDistanceToNow(new Date(lead.last_activity_at), { addSuffix: true, locale: pt })}
+                        </Badge>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {format(new Date(lead.last_activity_at), "dd/MM/yyyy HH:mm")}
+                      </TooltipContent>
+                    </Tooltip>
+                  )}
+                </div>
               </TableCell>
             );
 
@@ -509,6 +572,10 @@ export const LeadTableRow = memo(function LeadTableRow({
     prev.lead.id === next.lead.id &&
     prev.lead.status === next.lead.status &&
     prev.lead.last_contact_at === next.lead.last_contact_at &&
+    // As duas datas que decidem o aviso "Voltou a contactar": sem elas aqui, a
+    // linha ficava congelada com o aviso antigo depois de uma re-submissao ou
+    // de um contacto registado.
+    prev.lead.last_activity_at === next.lead.last_activity_at &&
     prev.lead.last_contact_result === next.lead.last_contact_result &&
     prev.lead.qualification_type === next.lead.qualification_type &&
     prev.lead.assigned_user?.name === next.lead.assigned_user?.name &&

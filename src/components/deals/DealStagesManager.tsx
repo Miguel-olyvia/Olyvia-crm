@@ -34,6 +34,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export interface DealWorkflowStage {
   id: string;
@@ -170,6 +171,7 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
       .eq("organization_id", companyId)
       .eq("is_active", true)
       .order("order_index");
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     if (!error && data && data.length > 0) {
       const mapped = data.map((s: any) => ({ ...s, label: s.label || s.name }));
       setStages(mapped);
@@ -193,20 +195,22 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
   }, [companyId]);
 
   const loadTemplateStages = useCallback(async () => {
-    const { data } = await (supabase.from("deal_stages") as any)
+    const { data, error } = await (supabase.from("deal_stages") as any)
       .select("*")
       .is("organization_id", null)
       .eq("is_active", true)
       .order("order_index");
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     setTemplateStages((data || []).map((s: any) => ({ ...s, label: s.label || s.name })));
   }, []);
 
   const loadDealCounts = useCallback(async () => {
     if (!companyId) return;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("deals")
       .select("stage_id")
       .eq("organization_id", companyId);
+    if (error) captureFlowError(error, "db-error-leaked-to-ui");
     if (data) {
       const counts: Record<string, number> = {};
       data.forEach((d: any) => {
@@ -287,6 +291,7 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
         .eq("stage_id", deletingStage.id)
         .eq("organization_id", companyId as string);
       if (migrateError) {
+        captureFlowError(migrateError, "deal-lifecycle");
         toast({ title: "Erro ao migrar deals", description: migrateError.message, variant: "destructive" });
         return;
       }
@@ -296,6 +301,7 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
       .update({ is_active: false })
       .eq("id", deletingStage.id);
     if (error) {
+      captureFlowError(error, "deal-lifecycle");
       toast({ title: "Erro ao eliminar", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Estágio removido" });
@@ -342,9 +348,10 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
     const reordered = arrayMove(stages, oldIndex, newIndex);
     setStages(reordered);
     for (let i = 0; i < reordered.length; i++) {
-      await (supabase.from("deal_stages") as any)
+      const { error } = await (supabase.from("deal_stages") as any)
         .update({ order_index: i + 1 })
         .eq("id", reordered[i].id);
+      if (error) captureFlowError(error, "deal-lifecycle");
     }
     onStagesUpdated?.();
   };
@@ -355,18 +362,24 @@ export function DealStagesManager({ companyId, onStagesUpdated }: Props) {
     if (!userData?.user) throw new Error("User not authenticated");
     const businessUserId = await resolveCurrentBusinessUserId();
     if (!businessUserId) throw new Error("Business user not resolved");
-    for (const stage of templateStages) {
-      await (supabase.from("deal_stages") as any).insert({
-        name: stage.name,
-        label: stage.label,
-        color: stage.color,
-        order_index: stage.order_index,
-        is_final: stage.is_final,
-        is_won: stage.is_won,
-        is_lost: stage.is_lost,
-        organization_id: companyId,
-        created_by: businessUserId,
-      });
+    try {
+      for (const stage of templateStages) {
+        await (supabase.from("deal_stages") as any).insert({
+          name: stage.name,
+          label: stage.label,
+          color: stage.color,
+          order_index: stage.order_index,
+          is_final: stage.is_final,
+          is_won: stage.is_won,
+          is_lost: stage.is_lost,
+          organization_id: companyId,
+          created_by: businessUserId,
+        }).throwOnError();
+      }
+    } catch (error: any) {
+      captureFlowError(error, "deal-lifecycle");
+      toast({ title: "Erro ao copiar template", description: error.message, variant: "destructive" });
+      return;
     }
     toast({ title: "Template copiado" });
     loadStages();

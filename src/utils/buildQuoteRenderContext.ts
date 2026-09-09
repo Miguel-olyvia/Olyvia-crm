@@ -61,6 +61,7 @@ export async function buildQuoteRenderContext(opts: BuildOptions): Promise<Build
 
   const { entityId, client: rawClient } = await resolveQuotePdfClient({
     entityId: quoteData?.entity_id,
+    quoteId: quoteData?.id,
     dealId: quoteData?.deal_id,
     proposalId: quoteData?.proposal_id,
     clienteId: quoteData?.cliente_id,

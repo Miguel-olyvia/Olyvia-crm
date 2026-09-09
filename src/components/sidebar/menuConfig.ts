@@ -70,6 +70,18 @@ export interface TopLevelItem {
   icon: LucideIcon;
   labelKey: string;
   permissions: string[];
+  /**
+   * Destino servido por outra aplicação no mesmo domínio (ex.: /operacao).
+   * O react-router não o conhece, por isso a navegação tem de ser um
+   * carregamento de página a sério — ver AppSidebar.handleTopLevelClick.
+   */
+  external?: boolean;
+  /**
+   * Só aparece a administradores (`super_admin` / `system_admin`), qualquer que
+   * seja a permissão. Para páginas ainda não prontas para toda a gente: sem
+   * isto, o item aparecia a todos e só bloqueava ao clicar.
+   */
+  adminOnly?: boolean;
 }
 
 export const topLevelItems: TopLevelItem[] = [
@@ -79,6 +91,24 @@ export const topLevelItems: TopLevelItem[] = [
     icon: LayoutDashboard,
     labelKey: "sidebar.dashboard",
     permissions: ["dashboard.view"],
+  },
+  {
+    // Destino diário de um comercial: item plano no rail, como o Dashboard,
+    // e não um submenu.
+    id: "atividades",
+    to: "/atividades",
+    icon: ListChecks,
+    labelKey: "sidebar.activities",
+    permissions: ["scheduling.items.view"],
+    adminOnly: true,
+  },
+  {
+    id: "operacao",
+    to: "/operacao",
+    icon: Wrench,
+    labelKey: "sidebar.operations",
+    permissions: ["operations.view"],
+    external: true,
   },
 ];
 

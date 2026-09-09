@@ -19,12 +19,30 @@ interface ExportAuditEntry {
   effective_columns: string[];
   sensitive_columns: string[];
   status: string;
+  error_code: string | null;
   row_count: number | null;
   created_at: string;
   scope: string;
 }
 
 const PAGE_SIZE = 50;
+
+/**
+ * The Edge Function records why an export did not complete, but the table used
+ * to show only "Falha" with a dash. The failures that motivated this column
+ * were INTERNAL_ERROR rows from the leads export breaking on large tenants —
+ * unreadable here until the code was surfaced.
+ */
+const ERROR_LABELS: Record<string, string> = {
+  EXPORT_FORBIDDEN: "Sem permissão para exportar",
+  SENSITIVE_EXPORT_FORBIDDEN: "Sem permissão para dados sensíveis",
+  ROW_LIMIT_EXCEEDED: "Excede o limite de linhas",
+  INTERNAL_ERROR: "Erro interno",
+};
+
+function errorLabel(code: string): string {
+  return ERROR_LABELS[code] ?? code;
+}
 
 const MODULE_OPTIONS = [
   { value: "all", label: "Todos os módulos" },
@@ -80,7 +98,7 @@ export function ExportAuditLog() {
       let query = (supabase as any)
         .from("data_export_audit")
         .select(
-          "id, auth_user_id, business_user_id, module, effective_columns, sensitive_columns, status, row_count, created_at, scope"
+          "id, auth_user_id, business_user_id, module, effective_columns, sensitive_columns, status, error_code, row_count, created_at, scope"
         )
         .eq("organization_id", activeCompany.id)
         .order("created_at", { ascending: false })
@@ -204,6 +222,7 @@ export function ExportAuditLog() {
                   <TableHead>Colunas exportadas</TableHead>
                   <TableHead>Dados sensíveis</TableHead>
                   <TableHead>Resultado</TableHead>
+                  <TableHead>Motivo</TableHead>
                   <TableHead className="text-right">Nº linhas</TableHead>
                 </TableRow>
               </TableHeader>
@@ -233,6 +252,9 @@ export function ExportAuditLog() {
                       )}
                     </TableCell>
                     <TableCell>{statusBadge(entry.status)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                      {entry.error_code ? errorLabel(entry.error_code) : "—"}
+                    </TableCell>
                     <TableCell className="text-right tabular-nums text-sm">
                       {entry.row_count ?? "—"}
                     </TableCell>

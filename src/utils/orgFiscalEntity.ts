@@ -89,7 +89,8 @@ export async function removeOrgFiscalEntity(orgId: string): Promise<void> {
   const { data: org } = await (supabase as any)
     .from("anew_organizations").select("entity_id").eq("id", orgId).maybeSingle();
   if (org?.entity_id) {
-    await (supabase as any).from("anew_entity_fiscal_entities").delete().eq("entity_id", org.entity_id);
+    const { error: deleteError } = await (supabase as any).from("anew_entity_fiscal_entities").delete().eq("entity_id", org.entity_id);
+    if (deleteError) throw deleteError;
   }
 }
 

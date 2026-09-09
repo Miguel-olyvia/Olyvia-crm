@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, Trash2, Pencil, Check, X, Loader2, Variable, Link2, Edit3, Archive, RotateCcw, ChevronDown, ChevronRight } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import {
   AlertDialog,

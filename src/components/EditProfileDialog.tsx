@@ -29,6 +29,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { useTranslation } from "@/hooks/useTranslation";
 import { profileFieldsSchema, profilePasswordSchema } from "@/lib/validations";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 interface EditProfileDialogProps {
   open: boolean;
@@ -433,6 +434,7 @@ export function EditProfileDialog({ open, onOpenChange }: EditProfileDialogProps
       setHasPendingRequest(true);
       setDeletionReason("");
     } catch (error: any) {
+      captureFlowError(error, "account-deletion-request");
       toast({
         title: t("common.error"),
         description: error.message || t("profile.deletionRequestError"),

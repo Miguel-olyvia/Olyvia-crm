@@ -39,6 +39,9 @@ task-done.ps1
 
 # Documentation lives outside the Git repository in ../vault
 docs/
+# ...menos os do modulo de Operacoes, que fazem parte dele e sao ligados
+# a partir do operacao-app/README.md.
+!operacao-app/docs/
 ficheiros/
 
 .env
@@ -55,3 +58,25 @@ migrations_disabled_local/
 /_hdr*.txt
 /_body*.json
 .mcp.json
+
+# Playwright artefactos e estado de sessao (contem tokens) — nunca commitar
+test-results/
+playwright-report/
+tests/.auth/
+
+# Local secrets
+env
+
+# Arquivado no vault a 2026-08-31 (vault/ficheiros/arquivo-repositorio/).
+# Fora do repositorio, mas nao apagado: codigo morto que ninguem importa,
+# lockfiles de um gestor que o projecto nao usa, e um zip do proprio src.
+eliminar/
+eliminar.md
+.prewarm
+bun.lock
+bun.lockb
+src (2).zip
+
+# Supabase Personal Access Token (temporário, nunca commitar)
+.supabase-pat
+duc-app/deno.lock

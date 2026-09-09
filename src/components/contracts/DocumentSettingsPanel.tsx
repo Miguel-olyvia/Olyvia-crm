@@ -3,7 +3,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Save, Loader2 } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { DocumentHeaderSettings } from "./DocumentHeaderSettings";
 import { DocumentFooterSettings } from "./DocumentFooterSettings";
 import { DocumentPageSettings } from "./DocumentPageSettings";

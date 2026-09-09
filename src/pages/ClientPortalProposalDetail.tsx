@@ -5,7 +5,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { ProposalPortalDocument } from "@/components/proposals/ProposalPortalDocument";
 import { loadProposalPortalData, type ProposalPortalData } from "@/components/proposals/proposalPortalData";
-import { generateProposalPdfBlob, downloadBlob } from "@/utils/generateProposalPdfBlob";
+import { generateProposalPdfBlob, downloadBlob, type ProposalPdfPrefetch } from "@/utils/generateProposalPdfBlob";
+import { parseEdgeFunctionPayload, describeEdgeFunctionError } from "@/utils/edgeFunctionResponse";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -20,6 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const STATUS_LABELS: Record<string, string> = {
   sent: "A aguardar decisão",
@@ -102,6 +104,7 @@ const ClientPortalProposalDetail = () => {
   async function handleDownloadAttachment(att: any) {
     const { data, error } = await supabase.storage.from("documents").download(att.file_url);
     if (error || !data) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro ao descarregar", description: error?.message, variant: "destructive" });
       return;
     }
@@ -142,6 +145,7 @@ const ClientPortalProposalDetail = () => {
       toast({ title: "Orçamento aceite", description: "O orçamento foi aceite com sucesso." });
       await reloadPortalData();
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
@@ -157,6 +161,7 @@ const ClientPortalProposalDetail = () => {
       toast({ title: "Orçamento rejeitado" });
       await reloadPortalData();
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
@@ -202,6 +207,7 @@ const ClientPortalProposalDetail = () => {
     } catch (err: any) {
       setOtpError(err.message);
       setOtpStep("idle");
+      captureFlowError(err, "client-portal-proposal");
       toast({ title: "Erro ao enviar SMS", description: err.message, variant: "destructive" });
     }
   }
@@ -305,6 +311,7 @@ const ClientPortalProposalDetail = () => {
 
       await reloadPortalData();
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro ao assinar", description: error.message, variant: "destructive" });
       throw error; // M9 — let verify catch reset the OTP step
     } finally {
@@ -325,6 +332,7 @@ const ClientPortalProposalDetail = () => {
       setRejectNotes("");
       await reloadPortalData();
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
@@ -347,6 +355,7 @@ const ClientPortalProposalDetail = () => {
       setShowQuestion(false);
       setQuestionText("");
     } catch (error: any) {
+      captureFlowError(error, "client-portal-proposal");
       toast({ title: "Erro", description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
@@ -426,7 +435,18 @@ const ClientPortalProposalDetail = () => {
                 body: { action: "get_proposal_pdf_data", params: { proposal_id: proposal.id } },
               });
               if (error) throw error;
-              if (!data?.quotes?.length) {
+
+              // The function returns JSON but sets no `Content-Type`, so
+              // `invoke` hands back the raw JSON *string* and every field read
+              // off it is `undefined`. Reading `data.quotes` directly made a
+              // successful HTTP 200 look like a proposal with no quotes, and
+              // the button reported exactly that to every client.
+              // See utils/edgeFunctionResponse.ts.
+              const payload = parseEdgeFunctionPayload<ProposalPdfPrefetch>(data);
+              if (!payload) {
+                throw new Error("A resposta do servidor veio num formato inesperado. Contacta o suporte.");
+              }
+              if (!payload.quotes?.length) {
                 toast({
                   title: "Sem conteúdo para gerar o PDF",
                   description: "Esta proposta não tem orçamentos associados.",
@@ -434,10 +454,14 @@ const ClientPortalProposalDetail = () => {
                 });
                 return;
               }
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, data);
+              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload);
               downloadBlob(blob, fileName);
-            } catch (e: any) {
-              toast({ title: "Erro ao gerar PDF", description: e?.message || "Tenta novamente.", variant: "destructive" });
+            } catch (e: unknown) {
+              toast({
+                title: "Erro ao gerar PDF",
+                description: await describeEdgeFunctionError(e),
+                variant: "destructive",
+              });
             }
           }}
         />
