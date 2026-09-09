@@ -292,6 +292,7 @@ export default function InventoryCountDetailDialog({
   useEffect(() => {
     if (!scanOpen) return;
     let cancelled = false;
+    let stream: MediaStream | null = null;
     setScanError(null);
     const reader = new BrowserMultiFormatReader();
 
@@ -300,9 +301,28 @@ export default function InventoryCountDetailDialog({
         if (!navigator.mediaDevices?.getUserMedia) {
           throw new Error(t('stockCounts.scan.unsupportedError'));
         }
-        const controls = await reader.decodeFromVideoDevice(
-          selectedDeviceId,
-          videoRef.current ?? undefined,
+        // Adquirimos e ligamos o stream nós próprios (em vez de deixar
+        // decodeFromVideoDevice tratar disso) — verificado num PC real em
+        // que a câmara acendia (luz de atividade ligada, getUserMedia
+        // resolvia sem erro) mas o <video> ficava preto: a biblioteca não
+        // estava a esperar por video.play() de forma fiável em todos os
+        // browsers/drivers. Assim confirmamos explicitamente que o vídeo
+        // está mesmo a reproduzir antes de começar a decodificar.
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : true,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+        const video = videoRef.current;
+        if (!video) throw new Error(t('stockCounts.scan.genericError'));
+        video.srcObject = stream;
+        await video.play();
+        if (cancelled) return;
+
+        const controls = await reader.decodeFromVideoElement(
+          video,
           (result, error) => {
             if (cancelled) return;
             if (result) {
@@ -327,8 +347,7 @@ export default function InventoryCountDetailDialog({
         scanControlsRef.current = controls;
         // Só agora, com a permissão já concedida, é que os "label" das
         // câmaras vêm preenchidos — lista-se para mostrar o seletor caso
-        // haja mais do que uma (ex: escolheu-se a errada e o vídeo fica
-        // preto).
+        // haja mais do que uma.
         try {
           const devices = await BrowserMultiFormatReader.listVideoInputDevices();
           if (!cancelled) setVideoDevices(devices);
@@ -351,6 +370,10 @@ export default function InventoryCountDetailDialog({
       cancelled = true;
       scanControlsRef.current?.stop();
       scanControlsRef.current = null;
+      // decodeFromVideoElement não adquiriu o stream, por isso não o pára
+      // sozinho — temos de libertar a câmara nós próprios.
+      stream?.getTracks().forEach((track) => track.stop());
+      if (videoRef.current) videoRef.current.srcObject = null;
     };
   }, [scanOpen, selectedDeviceId, t]);
 
