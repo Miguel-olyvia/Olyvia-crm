@@ -15,6 +15,7 @@ import { LayoutRoute } from "@/components/Layout";
 // Critical routes loaded eagerly
 import Index from "./pages/Index";
 import Auth from "./pages/Auth";
+import ChooseAccess from "./pages/ChooseAccess";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 
@@ -165,6 +166,7 @@ const App = () => (
                   <Route path="/" element={<Index />} />
                   <Route path="/auth" element={<Auth />} />
                   <Route path="/reset-password" element={<ResetPassword />} />
+                  <Route path="/escolher-acesso" element={<ChooseAccess />} />
                   <Route path="/form" element={<PublicLeadForm />} />
                   <Route path="/form/:formId" element={<PublicLeadForm />} />
                   <Route path="/lead-form/:formId" element={<PublicLeadForm />} />

@@ -660,9 +660,11 @@ serve(async (req) => {
                 if (convertLeadError) throw convertLeadError;
                 results.stageActions++;
               } else if (action.action_type === "create_task") {
-                const config = action.action_config as Record<string, string>;
-                await supabase.from("entity_interactions").insert([{ subject: config.title || "Tarefa automática", interaction_type: "task", created_by: internalUserId, assigned_to: lead.assigned_to || internalUserId, entity_id: lead.entity_id, entity_type: "contact", organization_id: lead.organization_id, notes: "Tarefa criada automaticamente pelo workflow." }]);
-                results.stageActions++;
+                // create_task foi descontinuado como acção de workflow: criaria
+                // sempre a mesma tarefa (título/tipo fixos na config), sem valor.
+                // Deixou de ser oferecido na UI; regras já configuradas noutras
+                // organizações passam a ser ignoradas em silêncio, sem erro.
+                console.log(`Ignorada acção create_task descontinuada (lead ${entity_id}).`);
               }
             } catch (e: any) { results.logs.push({ type: action.action_type, status: "error", message: e.message }); }
           }
@@ -817,9 +819,11 @@ serve(async (req) => {
                 await upsertPipelineLink("deal_id", deal.id, { proposal_id: p!.id, organization_id: deal.organization_id });
                 results.stageActions++;
               } else if (action.action_type === "create_task") {
-                const config = action.action_config as Record<string, string>;
-                await supabase.from("entity_interactions").insert([{ subject: config.title || "Tarefa automática", interaction_type: "task", created_by: internalUserId, assigned_to: deal.assigned_to || internalUserId, entity_id: deal.entity_id, entity_type: "deal", organization_id: deal.organization_id, notes: "Tarefa criada pelo workflow." }]);
-                results.stageActions++;
+                // create_task foi descontinuado como acção de workflow (ver bloco
+                // das leads). Ignorada em silêncio, sem erro. Tem de continuar a
+                // ser um ramo explícito: sem ele, cairia no `else` abaixo e seria
+                // registada como "unimplemented" — um erro, não um no-op.
+                console.log(`Ignorada acção create_task descontinuada (deal ${deal.id}).`);
               } else {
                 // Qualquer outra accao da cadeia (create_contract, convert_to_client)
                 // passa pelos criadores genericos -- a UI pode oferece-las assim que

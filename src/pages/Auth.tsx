@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { checkIsClientRole } from "@/hooks/useClientRole";
+import { fetchAccessKind } from "@/hooks/useClientRole";
+import { getSessionContext } from "@/lib/auth/sessionContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -83,8 +84,19 @@ const Auth = () => {
   // Auth listener BEFORE getSession — prevents race conditions
   useEffect(() => {
     const redirectByRole = async (userId: string) => {
-      const isClient = await checkIsClientRole(userId);
-      navigate(isClient ? "/client-portal" : "/home");
+      const kind = await fetchAccessKind(userId);
+      if (kind === "client_only") {
+        navigate("/client-portal");
+        return;
+      }
+      if (kind === "hybrid") {
+        // Account holds both CRM and client memberships: honour a prior choice,
+        // otherwise send them to the context picker.
+        const ctx = getSessionContext(userId);
+        navigate(ctx === "portal" ? "/client-portal" : ctx === "crm" ? "/home" : "/escolher-acesso");
+        return;
+      }
+      navigate("/home");
     };
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
