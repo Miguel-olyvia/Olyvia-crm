@@ -10,6 +10,7 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
+import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { ArrowLeft, Save, Plus, Trash2, Euro, GripVertical, Pencil, ExternalLink, Search, Tag, Layers, ChevronDown, ChevronRight, Package, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
@@ -142,7 +143,7 @@ export function QuoteTemplateEditor({ templateId, onClose }: QuoteTemplateEditor
   const [expandedBundles, setExpandedBundles] = useState<Set<string>>(new Set());
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { activeCompany, userType: companyUserType } = useCompany();
+  const { activeCompany } = useCompany();
 
   const [formData, setFormData] = useState({
     name: "",
@@ -152,8 +153,11 @@ export function QuoteTemplateEditor({ templateId, onClose }: QuoteTemplateEditor
     active: true,
   });
 
-  // Use companyUserType from context instead of querying profiles
-  const isAdmin = ["system_admin", "org_admin", "super_admin"].includes(companyUserType);
+  // O papel tem de ser o da ORGANIZAÇÃO ATIVA. O `userType` do CompanyContext é
+  // só etiqueta e pode trazer o papel mais alto que a pessoa tenha noutra
+  // empresa — usá-lo aqui abria a UI de administração a quem é admin noutro sítio.
+  const { anewRoleCode } = usePermissionScope();
+  const isAdmin = ["system_admin", "org_admin", "super_admin"].includes(anewRoleCode || "");
 
   // Auto-select active organization when creating new template
   useEffect(() => {
