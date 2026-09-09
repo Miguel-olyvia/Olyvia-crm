@@ -5733,6 +5733,7 @@ export const translations = {
     'stockCounts.scan.permissionError': 'Camera access was denied. Allow camera permission in the browser to use the scanner.',
     'stockCounts.scan.unsupportedError': 'This browser or connection does not support camera access (requires HTTPS).',
     'stockCounts.scan.genericError': 'Could not start the camera.',
+    'stockCounts.scan.cameraLabel': 'Camera',
 
     // Stocks Module
     'stocks.title': 'Stocks',
@@ -13430,6 +13431,7 @@ export const translations = {
     'stockCounts.scan.permissionError': 'O acesso à câmara foi negado. Permite o acesso à câmara no browser para usar o leitor.',
     'stockCounts.scan.unsupportedError': 'Este browser ou ligação não suporta acesso à câmara (é necessário HTTPS).',
     'stockCounts.scan.genericError': 'Não foi possível iniciar a câmara.',
+    'stockCounts.scan.cameraLabel': 'Câmara',
 
     // Stocks Module
     'stocks.title': 'Stocks',
@@ -20846,6 +20848,7 @@ export const translations = {
     'stockCounts.scan.permissionError': 'Se denegó el acceso a la cámara. Permite el acceso a la cámara en el navegador para usar el escáner.',
     'stockCounts.scan.unsupportedError': 'Este navegador o conexión no admite el acceso a la cámara (se requiere HTTPS).',
     'stockCounts.scan.genericError': 'No se pudo iniciar la cámara.',
+    'stockCounts.scan.cameraLabel': 'Cámara',
 
     // Stocks Module
     'stocks.title': 'Stocks',
@@ -27897,6 +27900,7 @@ export const translations = {
     'stockCounts.scan.permissionError': "L'accès à la caméra a été refusé. Autorisez l'accès à la caméra dans le navigateur pour utiliser le scanner.",
     'stockCounts.scan.unsupportedError': "Ce navigateur ou cette connexion ne prend pas en charge l'accès à la caméra (HTTPS requis).",
     'stockCounts.scan.genericError': "Impossible de démarrer la caméra.",
+    'stockCounts.scan.cameraLabel': 'Caméra',
 
     // Stocks Module
     'stocks.title': 'Stocks',
@@ -34776,6 +34780,7 @@ export const translations = {
     'stockCounts.scan.permissionError': 'Der Kamerazugriff wurde verweigert. Erlauben Sie den Kamerazugriff im Browser, um den Scanner zu nutzen.',
     'stockCounts.scan.unsupportedError': 'Dieser Browser oder diese Verbindung unterstützt keinen Kamerazugriff (HTTPS erforderlich).',
     'stockCounts.scan.genericError': 'Die Kamera konnte nicht gestartet werden.',
+    'stockCounts.scan.cameraLabel': 'Kamera',
 
     // Stocks Module
     'stocks.title': 'Lagerbestände',

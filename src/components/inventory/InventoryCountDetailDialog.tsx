@@ -140,6 +140,14 @@ export default function InventoryCountDetailDialog({
   // preparado para o futuro, também por barcode.
   const [scanOpen, setScanOpen] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  // A escolha automática da câmara (deviceId undefined) pode apanhar o
+  // dispositivo errado quando há mais do que um (ex: câmara virtual de apps
+  // de videochamada) — sem sinal, dá um ecrã preto sem erro nenhum. Os
+  // "label" dos dispositivos só vêm preenchidos depois de a permissão já
+  // ter sido concedida uma vez, por isso a lista só é pedida depois do
+  // primeiro getUserMedia bem sucedido.
+  const [videoDevices, setVideoDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState<string | undefined>(undefined);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const scanControlsRef = useRef<IScannerControls | null>(null);
   const quantityInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -293,7 +301,7 @@ export default function InventoryCountDetailDialog({
           throw new Error(t('stockCounts.scan.unsupportedError'));
         }
         const controls = await reader.decodeFromVideoDevice(
-          undefined,
+          selectedDeviceId,
           videoRef.current ?? undefined,
           (result, error) => {
             if (cancelled) return;
@@ -317,6 +325,17 @@ export default function InventoryCountDetailDialog({
           return;
         }
         scanControlsRef.current = controls;
+        // Só agora, com a permissão já concedida, é que os "label" das
+        // câmaras vêm preenchidos — lista-se para mostrar o seletor caso
+        // haja mais do que uma (ex: escolheu-se a errada e o vídeo fica
+        // preto).
+        try {
+          const devices = await BrowserMultiFormatReader.listVideoInputDevices();
+          if (!cancelled) setVideoDevices(devices);
+        } catch {
+          // Não crítico — sem lista de dispositivos, o utilizador só não
+          // vê o seletor de câmara, o scan continua a funcionar.
+        }
       } catch (err: any) {
         if (cancelled) return;
         const isPermissionError = err?.name === "NotAllowedError" || err?.name === "PermissionDeniedError";
@@ -333,7 +352,16 @@ export default function InventoryCountDetailDialog({
       scanControlsRef.current?.stop();
       scanControlsRef.current = null;
     };
-  }, [scanOpen, t]);
+  }, [scanOpen, selectedDeviceId, t]);
+
+  // Limpa a lista/escolha de câmara ao fechar o painel — a próxima abertura
+  // volta a listar do zero (evita mostrar dispositivos obsoletos).
+  useEffect(() => {
+    if (!scanOpen) {
+      setVideoDevices([]);
+      setSelectedDeviceId(undefined);
+    }
+  }, [scanOpen]);
 
   const handleSaveQuantity = async (lineId: string) => {
     const raw = quantityDrafts[lineId];
@@ -735,6 +763,23 @@ export default function InventoryCountDetailDialog({
                   autoPlay
                 />
               </div>
+            )}
+            {videoDevices.length > 1 && (
+              <Select
+                value={selectedDeviceId ?? videoDevices[0]?.deviceId}
+                onValueChange={setSelectedDeviceId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t('stockCounts.scan.cameraLabel')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {videoDevices.map((device, index) => (
+                    <SelectItem key={device.deviceId} value={device.deviceId}>
+                      {device.label || `${t('stockCounts.scan.cameraLabel')} ${index + 1}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
             <p className="text-xs text-muted-foreground">{t('stockCounts.scan.hint')}</p>
           </div>
