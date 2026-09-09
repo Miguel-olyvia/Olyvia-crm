@@ -48,6 +48,12 @@ interface InventoryCountListRow {
   total_lines?: number;
   counted_lines?: number;
   pending_discrepancies?: number;
+  // Linhas nunca contadas (Qtd. contada vazia) mas com stock real no
+  // sistema (system_quantity_at_start > 0) — não são "discrepâncias" (não
+  // há nada para comparar), mas finalizar a contagem com produtos destes
+  // por contar não deve poder mostrar "Sem discrepâncias" como se tudo
+  // tivesse sido verificado.
+  uncounted_with_stock?: number;
 }
 
 interface WarehouseOption {
@@ -181,24 +187,35 @@ const StockCounts = () => {
       return rows;
     }
 
-    const agg = new Map<string, { total: number; counted: number; pending: number }>();
+    const agg = new Map<string, { total: number; counted: number; pending: number; uncountedWithStock: number }>();
     for (const line of (data || []) as any[]) {
-      const entry = agg.get(line.inventory_count_id) || { total: 0, counted: 0, pending: 0 };
+      const entry = agg.get(line.inventory_count_id) || { total: 0, counted: 0, pending: 0, uncountedWithStock: 0 };
       entry.total += 1;
-      if (line.counted_quantity !== null) entry.counted += 1;
-      if (
-        line.counted_quantity !== null &&
-        line.counted_quantity !== line.system_quantity_at_start &&
-        !line.discrepancy_resolution
-      ) {
-        entry.pending += 1;
+      if (line.counted_quantity !== null) {
+        entry.counted += 1;
+        if (
+          line.counted_quantity !== line.system_quantity_at_start &&
+          !line.discrepancy_resolution
+        ) {
+          entry.pending += 1;
+        }
+      } else if ((line.system_quantity_at_start ?? 0) > 0) {
+        // Nunca contada, mas o sistema diz que há stock — ninguém foi
+        // verificar fisicamente esta linha antes de a contagem terminar.
+        entry.uncountedWithStock += 1;
       }
       agg.set(line.inventory_count_id, entry);
     }
 
     return rows.map((r) => {
-      const entry = agg.get(r.id) || { total: 0, counted: 0, pending: 0 };
-      return { ...r, total_lines: entry.total, counted_lines: entry.counted, pending_discrepancies: entry.pending };
+      const entry = agg.get(r.id) || { total: 0, counted: 0, pending: 0, uncountedWithStock: 0 };
+      return {
+        ...r,
+        total_lines: entry.total,
+        counted_lines: entry.counted,
+        pending_discrepancies: entry.pending,
+        uncounted_with_stock: entry.uncountedWithStock,
+      };
     });
   };
 
@@ -470,6 +487,13 @@ const StockCounts = () => {
                     {(count.pending_discrepancies ?? 0) > 0 ? (
                       <Badge variant="destructive">
                         {t('stockCounts.discrepanciesBadge', { count: count.pending_discrepancies ?? 0 })}
+                      </Badge>
+                    ) : (count.uncounted_with_stock ?? 0) > 0 ? (
+                      // Não é uma discrepância (nada foi comparado) — mas
+                      // "Sem discrepâncias" mentiria: há produtos com stock
+                      // no sistema que ninguém foi verificar fisicamente.
+                      <Badge className="bg-warning/10 text-warning">
+                        {t('stockCounts.uncountedWithStockBadge', { count: count.uncounted_with_stock ?? 0 })}
                       </Badge>
                     ) : (
                       <Badge className="bg-success/10 text-success">{t('stockCounts.discrepanciesNone')}</Badge>
