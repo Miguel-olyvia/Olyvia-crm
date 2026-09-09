@@ -26,12 +26,22 @@ initSentry();
 // SECURITY: fails CLOSED — throws on any query error instead of returning
 // false, so callers must treat a lookup failure as "cannot verify" rather
 // than silently proceeding as if the user held no CRM role.
-async function hasNonClientRole(supabase: any, anewUserId: string): Promise<boolean> {
-  const { data: memberships, error: membershipsError } = await supabase
+async function hasNonClientRole(supabase: any, anewUserId: string, organizationId?: string): Promise<boolean> {
+  let membershipsQuery = supabase
     .from("anew_memberships")
     .select("role_id")
     .eq("user_id", anewUserId)
     .eq("status", "active");
+
+  // Portal-block decision is per-organization: only bar an email if it is a CRM
+  // user in the SAME org that is receiving portal access. Without this filter the
+  // check bled across every org the person belonged to, blocking (and revealing)
+  // portal creation for someone who is internal in an unrelated company.
+  if (organizationId) {
+    membershipsQuery = membershipsQuery.eq("organization_id", organizationId);
+  }
+
+  const { data: memberships, error: membershipsError } = await membershipsQuery;
 
   if (membershipsError) {
     console.error("hasNonClientRole: error fetching memberships:", membershipsError);
@@ -325,7 +335,7 @@ serve(async (req: Request) => {
       if (crmAnewUser?.auth_user_id) {
         let hasCrmRole: boolean;
         try {
-          hasCrmRole = await hasNonClientRole(supabase, crmAnewUser.id);
+          hasCrmRole = await hasNonClientRole(supabase, crmAnewUser.id, organization_id);
         } catch (roleCheckErr) {
           console.error("Failed to verify CRM role (pre-check), refusing to proceed:", roleCheckErr);
           return new Response(
@@ -470,10 +480,10 @@ serve(async (req: Request) => {
         }
       }
 
-      // 1a. Block CRM accounts: any active role != 'client' anywhere
+      // 1a. Block CRM accounts: any active role != 'client' in THIS organization
       let hasCrmRole: boolean;
       try {
-        hasCrmRole = await hasNonClientRole(supabase, existingAnewUser.id);
+        hasCrmRole = await hasNonClientRole(supabase, existingAnewUser.id, organization_id);
       } catch (roleCheckErr) {
         console.error("Failed to verify CRM role (existing user), refusing to proceed:", roleCheckErr);
         return new Response(
