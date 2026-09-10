@@ -4608,6 +4608,16 @@ export default function AnewLeads() {
           aVal = new Date(a.created_at).getTime();
           bVal = new Date(b.created_at).getTime();
           break;
+        // `last_contact_at` e coluna da tabela, nunca de `field_values`. Sem este
+        // caso o clique no cabecalho caia no `default`, ia procurar
+        // field_values["last_contact_at"], encontrava vazio em TODAS as linhas, e
+        // a lista ficava exactamente na mesma ordem -- parecia que nao ordenava.
+        // Quem nunca foi contactado conta como 0: fica no fim quando se ordena do
+        // contacto mais recente para o mais antigo.
+        case "last_contact_at":
+          aVal = a.last_contact_at ? new Date(a.last_contact_at).getTime() : 0;
+          bVal = b.last_contact_at ? new Date(b.last_contact_at).getTime() : 0;
+          break;
         case "status":
           aVal = a.status;
           bVal = b.status;
