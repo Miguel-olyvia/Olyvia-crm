@@ -15554,48 +15554,87 @@ export type Database = {
         Row: {
           ai_confidence: number | null
           ai_rationale: string | null
+          catalog_item_id: string | null
           created_at: string
+          descricao: string | null
           diagnostic_area_id: string
           id: string
+          product_id: string | null
           quote_line_id: string | null
           rule_id: string | null
+          service_id: string | null
           source: string
           source_field: string
           suggested_qty: number
+          target_type: string | null
+          unidade: string | null
           was_edited_by_user: boolean
         }
         Insert: {
           ai_confidence?: number | null
           ai_rationale?: string | null
+          catalog_item_id?: string | null
           created_at?: string
+          descricao?: string | null
           diagnostic_area_id: string
           id?: string
+          product_id?: string | null
           quote_line_id?: string | null
           rule_id?: string | null
+          service_id?: string | null
           source: string
           source_field: string
           suggested_qty: number
+          target_type?: string | null
+          unidade?: string | null
           was_edited_by_user?: boolean
         }
         Update: {
           ai_confidence?: number | null
           ai_rationale?: string | null
+          catalog_item_id?: string | null
           created_at?: string
+          descricao?: string | null
           diagnostic_area_id?: string
           id?: string
+          product_id?: string | null
           quote_line_id?: string | null
           rule_id?: string | null
+          service_id?: string | null
           source?: string
           source_field?: string
           suggested_qty?: number
+          target_type?: string | null
+          unidade?: string | null
           was_edited_by_user?: boolean
         }
         Relationships: [
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_catalogo"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "quote_diagnostic_area_suggestions_diagnostic_area_id_fkey"
             columns: ["diagnostic_area_id"]
             isOneToOne: false
             referencedRelation: "quote_diagnostic_areas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
             referencedColumns: ["id"]
           },
           {
@@ -15610,6 +15649,13 @@ export type Database = {
             columns: ["rule_id"]
             isOneToOne: false
             referencedRelation: "quote_suggestion_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
             referencedColumns: ["id"]
           },
         ]
@@ -23569,6 +23615,24 @@ export type Database = {
           p_warehouse_id: string
         }
         Returns: Json
+      }
+      rpc_record_diagnostic_suggestion_accepted: {
+        Args: {
+          p_ai_confidence?: number
+          p_ai_rationale?: string
+          p_catalog_item_id?: string
+          p_descricao: string
+          p_diagnostic_area_id: string
+          p_product_id?: string
+          p_qty: number
+          p_rule_id?: string
+          p_service_id?: string
+          p_source: string
+          p_source_field: string
+          p_target_type: string
+          p_unidade?: string
+        }
+        Returns: string
       }
       rpc_register_sale_stock_movement: {
         Args: {

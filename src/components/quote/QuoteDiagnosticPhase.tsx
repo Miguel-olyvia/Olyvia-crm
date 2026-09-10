@@ -30,36 +30,23 @@ import { QuoteSuggestionRulesDialog } from "@/components/quote/QuoteSuggestionRu
 
 const BLUR_DEBOUNCE_MS = 700;
 
-/** Forma mínima de uma linha aceite na Fase 1, para o QuoteBuilder anexar ao
- * seu estado `lines` (com `visible_to_client: false`). O contrato de props
- * original só previa quoteId/organizationId/onPhase1Complete — este callback
- * é uma extensão aditiva e opcional, necessária para que uma sugestão aceite
- * chegue a alguma parte (ver nota no relatório final).
- *
- * Os campos de proveniência (diagnostic_area_id/source_field/source/...)
- * alimentam o `p_diagnostic_suggestions` que o QuoteBuilder envia a
- * `rpc_save_quote` — sem eles, `quote_diagnostic_area_suggestions` nunca
- * seria escrita. */
-export interface AcceptedDiagnosticLine {
-  product_id: string | null;
-  service_id: string | null;
-  catalog_item_id: string | null;
-  descricao_snapshot: string;
-  qt: number;
-  unidade: string | null;
-  diagnostic_area_id: string;
-  source_field: DiagnosticSourceField;
+/** Uma sugestão já aceite, tal como fica gravada (auto-suficiente) em
+ * `quote_diagnostic_area_suggestions` — usada só para mostrar a lista de "já
+ * registado para a ordem de trabalho" dentro de cada área. */
+interface AcceptedSuggestionRow {
+  id: string;
   source: "rule" | "ai";
-  rule_id?: string | null;
-  ai_rationale?: string | null;
-  ai_confidence?: number | null;
+  source_field: DiagnosticSourceField;
+  target_type: "product" | "service" | "catalog_item" | null;
+  descricao: string | null;
+  unidade: string | null;
+  suggested_qty: number;
 }
 
 interface QuoteDiagnosticPhaseProps {
   quoteId: string;
   organizationId: string;
   onPhase1Complete: () => void;
-  onAcceptSuggestionLine?: (line: AcceptedDiagnosticLine) => void;
 }
 
 function isAreaComplete(area: SaveDiagnosticAreaInput): boolean {
@@ -89,7 +76,10 @@ function SuggestionSlot({
   hook: ReturnType<typeof useQuoteDiagnosticSuggestions>;
   slotKey: "demolir" | "proteger" | "intervencao";
   sourceField: DiagnosticSourceField;
-  onAccept: (suggestion: DiagnosticSuggestion) => void;
+  // Devolve se o registo foi bem sucedido — só remove da lista visível
+  // quando sim; se a gravação falhar, a sugestão mantém-se para o
+  // utilizador poder tentar aceitar outra vez (o toast de erro já avisa).
+  onAccept: (suggestion: DiagnosticSuggestion) => Promise<boolean>;
   onRetry: () => void;
 }) {
   const [visible, setVisible] = useState<DiagnosticSuggestion[]>([]);
@@ -104,9 +94,9 @@ function SuggestionSlot({
       isLoadingRules={hook.isLoadingRules}
       isLoadingAiFallback={hook.isLoadingAiFallback}
       aiError={hook.aiError}
-      onAccept={(s) => {
-        onAccept(s);
-        setVisible((prev) => prev.filter((v) => v.client_id !== s.client_id));
+      onAccept={async (s) => {
+        const ok = await onAccept(s);
+        if (ok) setVisible((prev) => prev.filter((v) => v.client_id !== s.client_id));
       }}
       onReject={(s) => setVisible((prev) => prev.filter((v) => v.client_id !== s.client_id))}
       onQtyChange={(s, newQty) =>
@@ -117,19 +107,115 @@ function SuggestionSlot({
   );
 }
 
+const ACCEPTED_SOURCE_FIELD_LABELS: Record<DiagnosticSourceField, string> = {
+  area_m2: "Área",
+  demolir: "A demolir",
+  proteger: "A proteger",
+  intervencao: "Intervenção",
+};
+
+/** Lista, só de leitura (+ remover), do que já foi registado para esta área
+ * — a fonte de dados para a futura nota de encomenda/ordem de trabalho.
+ * Nunca cria nem depende de quote_lines. */
+function AcceptedSuggestionsList({
+  areaId,
+  refreshKey,
+  onRemoved,
+}: {
+  areaId: string;
+  refreshKey: number;
+  onRemoved: () => void;
+}) {
+  const { toast } = useToast();
+  const [rows, setRows] = useState<AcceptedSuggestionRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setIsLoading(true);
+      try {
+        const { data, error } = await supabase
+          .from("quote_diagnostic_area_suggestions")
+          .select("id, source, source_field, target_type, descricao, unidade, suggested_qty")
+          .eq("diagnostic_area_id", areaId)
+          .order("created_at", { ascending: true });
+        if (error) throw error;
+        if (!cancelled) setRows((data as AcceptedSuggestionRow[] | null) || []);
+      } catch (err) {
+        captureFlowError(err, "quote-lifecycle");
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [areaId, refreshKey]);
+
+  const handleRemove = async (id: string) => {
+    try {
+      const { error } = await supabase.from("quote_diagnostic_area_suggestions").delete().eq("id", id);
+      if (error) throw error;
+      setRows((prev) => prev.filter((r) => r.id !== id));
+      onRemoved();
+    } catch (err: any) {
+      captureFlowError(err, "quote-lifecycle");
+      toast({ title: "Erro ao remover registo", description: err.message, variant: "destructive" });
+    }
+  };
+
+  if (isLoading || rows.length === 0) return null;
+
+  return (
+    <div className="space-y-1.5 rounded-md border bg-muted/30 p-2.5">
+      <p className="text-xs font-medium text-muted-foreground">
+        Já registado para a ordem de trabalho
+      </p>
+      <div className="space-y-1">
+        {rows.map((row) => (
+          <div key={row.id} className="flex items-center gap-2 text-xs">
+            <Badge variant="outline" className="shrink-0 text-[10px]">
+              {ACCEPTED_SOURCE_FIELD_LABELS[row.source_field]}
+            </Badge>
+            <span className="flex-1 truncate">{row.descricao || "(sem descrição)"}</span>
+            <span className="shrink-0 text-muted-foreground">
+              {row.suggested_qty}
+              {row.unidade ? ` ${row.unidade}` : ""}
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5 shrink-0 text-muted-foreground hover:text-destructive"
+              onClick={() => handleRemove(row.id)}
+              aria-label="Remover registo"
+            >
+              <Trash2 className="h-3 w-3" />
+            </Button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AreaCard({
   area,
   organizationId,
   onSave,
   onRemove,
-  onAcceptSuggestionLine,
 }: {
   area: QuoteDiagnosticArea;
   organizationId: string;
   onSave: (areaId: string, data: SaveDiagnosticAreaInput) => void;
   onRemove: (areaId: string) => void;
-  onAcceptSuggestionLine?: (line: AcceptedDiagnosticLine) => void;
 }) {
+  const { toast } = useToast();
+  // Incrementado sempre que uma sugestão é aceite/removida, para forçar
+  // AcceptedSuggestionsList a reler a tabela (é uma leitura direta, não um
+  // estado partilhado — mais simples do que sincronizar duas cópias).
+  const [acceptedRefreshKey, setAcceptedRefreshKey] = useState(0);
   const [form, setForm] = useState<SaveDiagnosticAreaInput>({
     nome_area: area.nome_area,
     area_m2: area.area_m2,
@@ -195,21 +281,42 @@ function AreaCard({
     [area.id, organizationId],
   );
 
-  const handleAccept = (suggestion: DiagnosticSuggestion, sourceField: DiagnosticSourceField) => {
-    onAcceptSuggestionLine?.({
-      product_id: suggestion.target_type === "product" ? suggestion.product_id ?? null : null,
-      service_id: suggestion.target_type === "service" ? suggestion.service_id ?? null : null,
-      catalog_item_id: suggestion.target_type === "catalog_item" ? suggestion.catalog_item_id ?? null : null,
-      descricao_snapshot: suggestion.descricao,
-      qt: suggestion.qty,
-      unidade: suggestion.unidade ?? null,
-      diagnostic_area_id: area.id,
-      source_field: sourceField,
-      source: suggestion.source,
-      rule_id: suggestion.rule_id ?? null,
-      ai_rationale: suggestion.rationale ?? null,
-      ai_confidence: suggestion.confidence ?? null,
-    });
+  // Aceitar já NÃO cria nenhuma linha no orçamento — os itens do orçamento
+  // continuam sempre a ser adicionados manualmente. Isto só regista a
+  // sugestão (auto-suficiente, sem depender de nenhuma quote_line) para
+  // alimentar mais tarde a nota de encomenda/ordem de trabalho.
+  const handleAccept = async (
+    suggestion: DiagnosticSuggestion,
+    sourceField: DiagnosticSourceField,
+  ): Promise<boolean> => {
+    try {
+      const { error } = await supabase.rpc("rpc_record_diagnostic_suggestion_accepted", {
+        p_diagnostic_area_id: area.id,
+        p_source: suggestion.source,
+        p_source_field: sourceField,
+        p_target_type: suggestion.target_type,
+        p_descricao: suggestion.descricao,
+        p_qty: suggestion.qty,
+        p_product_id: suggestion.target_type === "product" ? suggestion.product_id ?? null : null,
+        p_service_id: suggestion.target_type === "service" ? suggestion.service_id ?? null : null,
+        p_catalog_item_id: suggestion.target_type === "catalog_item" ? suggestion.catalog_item_id ?? null : null,
+        p_unidade: suggestion.unidade ?? null,
+        p_rule_id: suggestion.rule_id ?? null,
+        p_ai_rationale: suggestion.rationale ?? null,
+        p_ai_confidence: suggestion.confidence ?? null,
+      });
+      if (error) throw error;
+      toast({
+        title: "Registado para a ordem de trabalho",
+        description: suggestion.descricao,
+      });
+      setAcceptedRefreshKey((k) => k + 1);
+      return true;
+    } catch (err: any) {
+      captureFlowError(err, "quote-lifecycle");
+      toast({ title: "Erro ao registar sugestão", description: err.message, variant: "destructive" });
+      return false;
+    }
   };
 
   const renderSuggestionSlot = (
@@ -249,6 +356,12 @@ function AreaCard({
             <Trash2 className="h-4 w-4" />
           </Button>
         </div>
+
+        <AcceptedSuggestionsList
+          areaId={area.id}
+          refreshKey={acceptedRefreshKey}
+          onRemoved={() => setAcceptedRefreshKey((k) => k + 1)}
+        />
 
         <div className="space-y-1.5">
           <Label>Área (m²)</Label>
@@ -319,7 +432,6 @@ export function QuoteDiagnosticPhase({
   quoteId,
   organizationId,
   onPhase1Complete,
-  onAcceptSuggestionLine,
 }: QuoteDiagnosticPhaseProps) {
   const { toast } = useToast();
   const {
@@ -441,7 +553,6 @@ export function QuoteDiagnosticPhase({
                     organizationId={organizationId}
                     onSave={handleSaveArea}
                     onRemove={handleRemoveArea}
-                    onAcceptSuggestionLine={onAcceptSuggestionLine}
                   />
                 </AccordionContent>
               </AccordionItem>
