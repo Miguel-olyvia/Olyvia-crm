@@ -25,6 +25,11 @@
  * (`PessoaPessoaisTab.tsx`, bloco 1), a pedido do utilizador -- "se e detalhes
  * laborais o email pessoal n deve ser aqui". Nao voltar a propor este campo
  * neste separador.
+ *
+ * O ESTADO DO CONTRATO SAIU DAQUI TAMBEM, mas so-leitura: e derivado do
+ * vinculo (`lib/hr/estadoContrato.ts`) e o controlo real vive no separador
+ * Contratos, sobre o `estado` do vinculo activo. Mudar aqui nao mudava nada
+ * de verdade -- era um enum solto a competir com a fonte real.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -41,12 +46,8 @@ import {
 import { Briefcase, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import {
-  ESTADOS_CONTRATO,
-  type EstadoContrato,
-  type LocalTrabalho,
-  type Pessoa,
-} from "@/types/hr";
+import type { EstadoContratoDerivado } from "@/lib/hr/estadoContrato";
+import { type LocalTrabalho, type Pessoa } from "@/types/hr";
 
 /** Valor do Select quando nao ha escolha. O Radix nao aceita `value=""`. */
 const SEM_ESCOLHA = "__sem_escolha__";
@@ -60,6 +61,9 @@ interface PessoaLaboraisTabProps {
   locaisALoad: boolean;
   /** Nome da organizacao activa: a entidade legal, mostrada e nao escolhida. */
   entidadeLegalNome: string | null;
+  /** So-leitura aqui -- ver o comentario de topo. `null` quando quem olha nao
+   *  tem `hr.pessoas.vinculos.view`. */
+  estadoContratoDerivado: EstadoContratoDerivado | null;
   podeEditar: boolean;
   saving: boolean;
   onGuardar: (patch: Partial<Pessoa>) => Promise<string | null>;
@@ -74,7 +78,6 @@ type Rascunho = {
   data_admissao: string;
   data_antiguidade: string;
   data_saida: string;
-  estado_contrato: EstadoContrato;
   reporta_a_pessoa_id: string;
 };
 
@@ -88,7 +91,6 @@ function rascunhoDe(pessoa: Pessoa): Rascunho {
     data_admissao: pessoa.data_admissao ?? "",
     data_antiguidade: pessoa.data_antiguidade ?? "",
     data_saida: pessoa.data_saida ?? "",
-    estado_contrato: pessoa.estado_contrato,
     reporta_a_pessoa_id: pessoa.reporta_a_pessoa_id ?? SEM_ESCOLHA,
   };
 }
@@ -99,6 +101,7 @@ export function PessoaLaboraisTab({
   locais,
   locaisALoad,
   entidadeLegalNome,
+  estadoContratoDerivado,
   podeEditar,
   saving,
   onGuardar,
@@ -131,7 +134,6 @@ export function PessoaLaboraisTab({
       data_admissao: vazioParaNull(rascunho.data_admissao),
       data_antiguidade: vazioParaNull(rascunho.data_antiguidade),
       data_saida: vazioParaNull(rascunho.data_saida),
-      estado_contrato: rascunho.estado_contrato,
       reporta_a_pessoa_id:
         rascunho.reporta_a_pessoa_id === SEM_ESCOLHA ? null : rascunho.reporta_a_pessoa_id,
     });
@@ -237,22 +239,19 @@ export function PessoaLaboraisTab({
 
           <div className="space-y-1.5">
             <Label htmlFor="hr-laborais-estado-contrato">{t("hr.columns.estadoContrato")}</Label>
-            <Select
-              value={rascunho.estado_contrato}
-              disabled={!podeEditar}
-              onValueChange={(v) => definir("estado_contrato", v as EstadoContrato)}
-            >
-              <SelectTrigger id="hr-laborais-estado-contrato">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ESTADOS_CONTRATO.map((estado) => (
-                  <SelectItem key={estado} value={estado}>
-                    {t(`hr.estadoContrato.${estado}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Input
+              id="hr-laborais-estado-contrato"
+              value={
+                estadoContratoDerivado
+                  ? t(`hr.estadoContrato.${estadoContratoDerivado}`)
+                  : t("hr.campos.semValor")
+              }
+              readOnly
+              disabled
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("hr.detalhes.estadoContratoAjuda")}
+            </p>
           </div>
         </div>
 

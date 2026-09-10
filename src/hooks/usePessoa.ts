@@ -46,7 +46,7 @@ const COLUNAS_PESSOA =
   "email_trabalho, email_pessoal, telefone_trabalho, cargo, local_trabalho, " +
   "local_id, entidade_legal_org_id, reporta_a_pessoa_id, data_admissao, data_antiguidade, " +
   "data_saida, " +
-  "estado_contrato, estado_registo, dias_trabalho, notas, created_at, updated_at";
+  "estado_registo, dias_trabalho, notas, created_at, updated_at";
 
 const COLUNAS_DADOS_PESSOAIS =
   "id, pessoa_id, organization_id, data_nascimento, ocultar_aniversario, genero, " +
@@ -468,7 +468,12 @@ export function usePessoa(pessoaId: string | undefined) {
 
         if (linhas.length === 0) return { error: null };
 
-        const vinculoActivo = ficha.vinculos.find((vinculo) => vinculo.estado === "activo");
+        // Em vigor = activo OU suspenso. So `activo` deixava o horario
+        // planeado sem `vinculo_id` no dia em que o contrato fosse suspenso,
+        // e sem erro nenhum a dizer porque.
+        const vinculoActivo = ficha.vinculos.find(
+          (vinculo) => vinculo.estado === "activo" || vinculo.estado === "suspenso",
+        );
         return hrFrom("pessoas_horario_planeado").insert(
           linhas.map((linha) => ({
             ...linha,

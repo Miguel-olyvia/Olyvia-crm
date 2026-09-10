@@ -17,8 +17,14 @@
  * ------------------------------------
  * "Estado do acesso" (tem conta ligada?) e "Estado do contrato" sao ciclos de
  * vida separados e vem de sitios diferentes: o primeiro de `pessoas_contas`, o
- * segundo da coluna `estado_contrato`. Uma pessoa com contrato em curso pode
- * nao ter conta nenhuma, e revogar a conta nao termina contrato nenhum.
+ * segundo DERIVADO de `pessoas_vinculos` (`usePessoas.ts`, uma so consulta
+ * agregada). Uma pessoa com contrato em curso pode nao ter conta nenhuma, e
+ * revogar a conta nao termina contrato nenhum.
+ *
+ * A COLUNA DE ESTADO DO CONTRATO SO SE MOSTRA A QUEM TEM `hr.pessoas.vinculos.view`
+ * ------------------------------------------------------------------------
+ * Cabecalho e celula desaparecem juntos sem essa permissao -- nao ha "Sem
+ * contrato" a fingir resposta a quem nao pode mesmo ver vinculos.
  */
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -73,6 +79,7 @@ export default function Pessoas() {
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const canCreate = hasPermission("hr.pessoas.create");
+  const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
 
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
   const { locais } = useLocaisTrabalho();
@@ -198,7 +205,9 @@ export default function Pessoas() {
                         <TableHead>{t("hr.columns.local")}</TableHead>
                         <TableHead>{t("hr.columns.contratacao")}</TableHead>
                         <TableHead>{t("hr.columns.estadoAcesso")}</TableHead>
-                        <TableHead>{t("hr.columns.estadoContrato")}</TableHead>
+                        {podeVerVinculos && (
+                          <TableHead>{t("hr.columns.estadoContrato")}</TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -231,16 +240,22 @@ export default function Pessoas() {
                           <TableCell>
                             <EstadoAcessoBadge pessoa={pessoa} />
                           </TableCell>
-                          <TableCell>
-                            <Badge
-                              variant={
-                                pessoa.estado_contrato === "em_curso" ? "secondary" : "outline"
-                              }
-                              className="font-normal"
-                            >
-                              {t(`hr.estadoContrato.${pessoa.estado_contrato}`)}
-                            </Badge>
-                          </TableCell>
+                          {podeVerVinculos && (
+                            <TableCell>
+                              {pessoa.estado_contrato_derivado && (
+                                <Badge
+                                  variant={
+                                    pessoa.estado_contrato_derivado === "em_curso"
+                                      ? "secondary"
+                                      : "outline"
+                                  }
+                                  className="font-normal"
+                                >
+                                  {t(`hr.estadoContrato.${pessoa.estado_contrato_derivado}`)}
+                                </Badge>
+                              )}
+                            </TableCell>
+                          )}
                         </TableRow>
                       ))}
                     </TableBody>

@@ -46,6 +46,7 @@ import {
   type PessoaPessoaisPermissoes,
 } from "@/components/hr/PessoaPessoaisTab";
 import { PessoaVisaoGeralTab } from "@/components/hr/PessoaVisaoGeralTab";
+import { derivarEstadoContrato } from "@/lib/hr/estadoContrato";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -137,6 +138,12 @@ export default function PessoaDetail() {
 
   const pessoa = ficha.pessoa;
 
+  // `null` quando quem olha nao pode ver vinculos -- nao se inventa "Sem
+  // contrato" para quem simplesmente nao tem a permissao de o ler.
+  const estadoContratoDerivado = podeVerVinculos
+    ? derivarEstadoContrato(ficha.vinculos)
+    : null;
+
   const reportaANome = useMemo(() => {
     if (!pessoa?.reporta_a_pessoa_id) return null;
     return colegas.find((c) => c.id === pessoa.reporta_a_pessoa_id)?.nome_completo ?? null;
@@ -202,12 +209,14 @@ export default function PessoaDetail() {
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-bold">{pessoa.nome_completo}</h1>
-            <Badge
-              variant={pessoa.estado_contrato === "em_curso" ? "secondary" : "outline"}
-              className="font-normal"
-            >
-              {t(`hr.estadoContrato.${pessoa.estado_contrato}`)}
-            </Badge>
+            {estadoContratoDerivado && (
+              <Badge
+                variant={estadoContratoDerivado === "em_curso" ? "secondary" : "outline"}
+                className="font-normal"
+              >
+                {t(`hr.estadoContrato.${estadoContratoDerivado}`)}
+              </Badge>
+            )}
             <Badge variant={ficha.conta ? "default" : "outline"} className="font-normal">
               {t(ficha.conta ? "hr.estadoAcesso.ativo" : "hr.estadoAcesso.semConta")}
             </Badge>
@@ -275,6 +284,7 @@ export default function PessoaDetail() {
               locais={locais}
               locaisALoad={locaisALoad}
               entidadeLegalNome={entidadeLegalNome}
+              estadoContratoDerivado={estadoContratoDerivado}
               podeEditar={podeEditarLaborais}
               saving={ficha.saving}
               onGuardar={ficha.savePessoa}

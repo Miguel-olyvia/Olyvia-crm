@@ -39,6 +39,9 @@ let chamadasRpc: Array<{ fn: string; args: unknown }> = [];
 /** O que a RPC devolve neste teste. Reatribuido em cada `it`. */
 let rpcImpl: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }> =
   () => Promise.resolve({ data: null, error: null });
+/** Faz a consulta a `pessoas_vinculos` falhar, para o teste da janela de
+ * deploy / falta de permissao. Reatribuido em cada `it`. */
+let falharVinculos = false;
 
 /**
  * Amostra fixa. As datas sao calculadas a partir do momento em que a suite
@@ -59,7 +62,6 @@ const PESSOAS = [
     id: "p1",
     nome_completo: "Ana Alves",
     estado_registo: "activo",
-    estado_contrato: "em_curso",
     data_admissao: diasAtras(10),
     data_saida: null,
   },
@@ -68,7 +70,6 @@ const PESSOAS = [
     id: "p2",
     nome_completo: "Bruno Bastos",
     estado_registo: "activo",
-    estado_contrato: "em_curso",
     data_admissao: diasAtras(200),
     data_saida: null,
   },
@@ -77,7 +78,6 @@ const PESSOAS = [
     id: "p3",
     nome_completo: "Carla Costa",
     estado_registo: "activo",
-    estado_contrato: "terminado",
     data_admissao: diasAtras(400),
     data_saida: diasAtras(30),
   },
@@ -86,7 +86,6 @@ const PESSOAS = [
     id: "p4",
     nome_completo: "Duarte Dias",
     estado_registo: "arquivado",
-    estado_contrato: "terminado",
     data_admissao: diasAtras(900),
     data_saida: diasAtras(300),
   },
@@ -95,12 +94,19 @@ const PESSOAS = [
 /** Só a p1 tem conta activa ligada. */
 const CONTAS = [{ pessoa_id: "p1", estado: "activa" }];
 
+/** Só a p2 tem vinculo vivo -- p1, p3 e p4 ficam sem nenhum, para provar que
+ *  "sem_contrato" e o resultado por omissao (e nao "em_curso"). */
+const VINCULOS_BASE = [{ pessoa_id: "p2", estado: "activo" }];
+/** Mutavel: o teste da paginacao substitui-o por mais de uma pagina. */
+let VINCULOS: Array<{ pessoa_id: string; estado: string }> = [...VINCULOS_BASE];
+
 function buildChain(table: string) {
   filtros[table] = filtros[table] ?? [];
   isNulos[table] = isNulos[table] ?? [];
   inserts[table] = inserts[table] ?? [];
 
   let ultimaOperacao: "select" | "insert" = "select";
+  let intervalo: [number, number] | null = null;
 
   const chain: any = {
     select: () => chain,
@@ -113,6 +119,13 @@ function buildChain(table: string) {
       return chain;
     },
     order: () => chain,
+    // `range` FATIA mesmo, em vez de devolver tudo. Um duplo que o ignorasse
+    // deixava passar um erro de paginacao a serio -- e a paginacao existe
+    // precisamente porque o PostgREST corta nas 1000 linhas, em silencio.
+    range: (de: number, ate: number) => {
+      intervalo = [de, ate];
+      return chain;
+    },
     insert: (registo: unknown) => {
       ultimaOperacao = "insert";
       inserts[table].push(registo);
@@ -127,6 +140,12 @@ function buildChain(table: string) {
         }
         if (table === "pessoas") return { data: PESSOAS, error: null };
         if (table === "pessoas_contas") return { data: CONTAS, error: null };
+        if (table === "pessoas_vinculos") {
+          if (falharVinculos) return { data: null, error: { message: "sem permissao" } };
+          if (!intervalo) return { data: VINCULOS, error: null };
+          const [de, ate] = intervalo;
+          return { data: VINCULOS.slice(de, ate + 1), error: null };
+        }
         return { data: [], error: null };
       };
       return Promise.resolve(resolver()).then(onFulfilled, onRejected);
@@ -197,8 +216,10 @@ describe("usePessoas", () => {
     filtros = {};
     isNulos = {};
     inserts = {};
+    VINCULOS = [...VINCULOS_BASE];
     chamadasRpc = [];
     rpcImpl = () => Promise.resolve({ data: null, error: null });
+    falharVinculos = false;
   });
 
   it("filtra pela organizacao activa e ignora as fichas apagadas", async () => {
@@ -216,7 +237,9 @@ describe("usePessoas", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.pessoas).toHaveLength(4);
-    expect(result.current.stats).toEqual({ activos: 2, entradas90d: 1, saidas90d: 1 });
+    // activos conta SO estado_registo === "activo" (p1, p2, p3) -- p3 saiu ha
+    // 30 dias mas o registo continua "activo", so o estado_registo decide.
+    expect(result.current.stats).toEqual({ activos: 3, entradas90d: 1, saidas90d: 1 });
   });
 
   it("deriva o estado do acesso das contas ligadas, nao de uma coluna", async () => {
@@ -228,6 +251,40 @@ describe("usePessoas", () => {
     expect(porId.p2).toBe("semConta");
     expect(porId.p3).toBe("semConta");
     expect(porId.p4).toBe("semConta");
+  });
+
+  it("pessoa sem vinculo nenhum fica com estado_contrato_derivado 'sem_contrato'", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const porId = Object.fromEntries(
+      result.current.pessoas.map((p) => [p.id, p.estado_contrato_derivado]),
+    );
+    expect(porId.p1).toBe("sem_contrato");
+    expect(porId.p2).toBe("em_curso");
+    expect(porId.p3).toBe("sem_contrato");
+    expect(porId.p4).toBe("sem_contrato");
+  });
+
+  it("com a consulta de vinculos a falhar, a coluna fica null para todos e a lista nao parte", async () => {
+    falharVinculos = true;
+
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.error).toBeNull();
+    expect(result.current.pessoas).toHaveLength(4);
+    expect(result.current.pessoas.every((p) => p.estado_contrato_derivado === null)).toBe(true);
+  });
+
+  it("stats.activos conta so estado_registo, indiferente aos vinculos", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // p1, p2 e p3 sao "activo" no registo -- p1 e p3 estao SEM contrato
+    // (nenhum vinculo) e ainda assim contam: o cartao ja nao olha para o
+    // contrato.
+    expect(result.current.stats.activos).toBe(3);
   });
 
   it("sem contaALigar, criarPessoa NUNCA chama rpc_hr_ligar_conta", async () => {
@@ -293,5 +350,27 @@ describe("usePessoas", () => {
     expect(resultado?.id).toBe("pessoa-nova");
     expect(resultado?.falhas).toHaveLength(1);
     expect(resultado?.falhas[0].seccao).toBe("conta");
+  });
+
+  // O PostgREST corta nas 1000 linhas SEM avisar, e os vinculos sao historico:
+  // varios por pessoa. Sem paginacao, quem ficasse fora da primeira pagina
+  // aparecia como "Sem contrato" -- o proprio defeito que esta derivacao
+  // existe para corrigir, agora por outra via e mais dificil de ver.
+  //
+  // O contrato activo de p1 esta DEPOIS da milesima linha de proposito: com
+  // uma consulta unica, p1 leria "terminado".
+  it("le todas as paginas de vinculos, e nao so as primeiras mil", async () => {
+    VINCULOS = [
+      ...Array.from({ length: 1000 }, () => ({ pessoa_id: "p1", estado: "terminado" })),
+      { pessoa_id: "p1", estado: "activo" },
+    ];
+
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const porId = Object.fromEntries(
+      result.current.pessoas.map((p) => [p.id, p.estado_contrato_derivado]),
+    );
+    expect(porId.p1, "o contrato que estava na segunda pagina nao foi lido").toBe("em_curso");
   });
 });

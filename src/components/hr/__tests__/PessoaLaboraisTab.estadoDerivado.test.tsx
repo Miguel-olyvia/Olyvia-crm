@@ -1,8 +1,9 @@
 /**
- * O e-mail pessoal saiu de Detalhes laborais para Detalhes pessoais -- este
- * teste fecha o lado que a migracao nao pode provar: que o separador laboral
- * ja nao mostra o campo nem o leva no patch de gravar, mesmo que a pessoa
- * tenha um e-mail pessoal na ficha.
+ * O estado do contrato deixou de ser um enum escrito a mao neste separador:
+ * passou a texto so-leitura, derivado do vinculo. Este e o teste-ancora --
+ * fecha o defeito concreto que motivou a mudanca ("Sem contrato" nunca pode
+ * aparecer como "Em curso") e prova que o campo deixou de ser editavel e de
+ * ir no patch de gravar.
  *
  * Usa `fireEvent` e nao `user-event`: `@testing-library/user-event` nao e
  * dependencia deste projecto.
@@ -11,7 +12,16 @@ import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("@/hooks/useTranslation", () => ({
-  useTranslation: () => ({ t: (chave: string) => chave, language: "pt" }),
+  useTranslation: () => ({
+    t: (chave: string) => {
+      const traducoes: Record<string, string> = {
+        "hr.estadoContrato.sem_contrato": "Sem contrato",
+        "hr.estadoContrato.em_curso": "Em curso",
+      };
+      return traducoes[chave] ?? chave;
+    },
+    language: "pt",
+  }),
 }));
 
 vi.mock("@/lib/toast", () => ({
@@ -29,7 +39,7 @@ const PESSOA: Pessoa = {
   apelido: "Silva",
   nome_completo: "Ana Silva",
   email_trabalho: "ana@empresa.pt",
-  email_pessoal: "ana@exemplo.pt",
+  email_pessoal: null,
   telefone_trabalho: null,
   cargo: "Gestora",
   local_trabalho: null,
@@ -52,7 +62,7 @@ function montar(onGuardar = vi.fn().mockResolvedValue(null)) {
       locais={[]}
       locaisALoad={false}
       entidadeLegalNome="Organizacao Nike"
-      estadoContratoDerivado="em_curso"
+      estadoContratoDerivado="sem_contrato"
       podeEditar
       saving={false}
       onGuardar={onGuardar}
@@ -61,15 +71,23 @@ function montar(onGuardar = vi.fn().mockResolvedValue(null)) {
   return { onGuardar };
 }
 
-describe("PessoaLaboraisTab -- sem e-mail pessoal", () => {
-  it("nao mostra nenhum campo de e-mail pessoal, mesmo com a ficha preenchida", () => {
+describe("PessoaLaboraisTab -- estado do contrato derivado", () => {
+  it("uma ficha sem contrato mostra 'Sem contrato', nunca 'Em curso'", () => {
     montar();
 
-    expect(document.getElementById("hr-laborais-email_pessoal")).toBeNull();
-    expect(screen.queryByDisplayValue("ana@exemplo.pt")).toBeNull();
+    expect(screen.getByDisplayValue("Sem contrato")).toBeInTheDocument();
+    expect(screen.queryByText(/Em curso/i)).toBeNull();
   });
 
-  it("gravar o cargo nao leva email_pessoal no patch", () => {
+  it("o campo deixou de ser editavel -- nao ha combobox de estado do contrato", () => {
+    montar();
+
+    expect(
+      screen.queryByRole("combobox", { name: /estado do contrato/i }),
+    ).toBeNull();
+  });
+
+  it("gravar outro campo nao leva estado_contrato no patch", () => {
     const { onGuardar } = montar();
 
     fireEvent.change(screen.getByLabelText("hr.columns.cargo"), {
@@ -79,7 +97,6 @@ describe("PessoaLaboraisTab -- sem e-mail pessoal", () => {
 
     expect(onGuardar).toHaveBeenCalledTimes(1);
     const patch = onGuardar.mock.calls[0][0];
-    expect(patch).not.toHaveProperty("email_pessoal");
-    expect(patch).toMatchObject({ cargo: "Directora" });
+    expect(patch).not.toHaveProperty("estado_contrato");
   });
 });

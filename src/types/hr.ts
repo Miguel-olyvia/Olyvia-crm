@@ -13,10 +13,10 @@
  * como divida: depois do `db push` e da regeneracao, os selects passam a poder
  * usar os tipos gerados e este ficheiro reduz-se aos unioes de CHECK.
  */
+import type { EstadoContratoDerivado } from "@/lib/hr/estadoContrato";
 
 // -- Uniao dos CHECK da base ------------------------------------------------
 
-export type EstadoContrato = "em_curso" | "suspenso" | "terminado";
 export type EstadoRegisto = "activo" | "arquivado";
 export type DiaSemana = "seg" | "ter" | "qua" | "qui" | "sex" | "sab" | "dom";
 
@@ -53,7 +53,7 @@ export type TipoContrato =
   | "temporario"
   | "tempo_parcial";
 export type RegimeTrabalho = "tempo_inteiro" | "tempo_parcial";
-export type EstadoVinculo = "activo" | "terminado" | "futuro";
+export type EstadoVinculo = "activo" | "suspenso" | "terminado" | "futuro";
 /** Dominio de `pessoas_retribuicoes.periodicidade` (20261120200000). */
 export type Periodicidade = "hora" | "diaria" | "semanal" | "mensal" | "anual";
 
@@ -132,7 +132,17 @@ export const TIPOS_DOCUMENTO: readonly TipoDocumento[] = [
   "titulo_residencia",
   "outro",
 ];
-export const ESTADOS_CONTRATO: readonly EstadoContrato[] = ["em_curso", "suspenso", "terminado"];
+/**
+ * Os quatro estados de `pessoas_vinculos.estado`, na ordem em que os ecras os
+ * oferecem. `estado_contrato` (o do ecra de negocio) e SEMPRE derivado destes
+ * -- ver `lib/hr/estadoContrato.ts`.
+ */
+export const ESTADOS_VINCULO: readonly EstadoVinculo[] = [
+  "activo",
+  "suspenso",
+  "futuro",
+  "terminado",
+];
 /**
  * Os SEIS tipos que os ecras OFERECEM, nesta ordem -- a que o utilizador
  * escreveu e confirmou.
@@ -231,7 +241,6 @@ export interface Pessoa {
   data_admissao: string | null;
   data_antiguidade: string | null;
   data_saida: string | null;
-  estado_contrato: EstadoContrato;
   estado_registo: EstadoRegisto;
   dias_trabalho: DiaSemana[] | null;
   notas: string | null;
@@ -242,6 +251,14 @@ export interface Pessoa {
 /** Linha da lista: a pessoa mais o que se calcula em memoria para a mostrar. */
 export interface PessoaListItem extends Pessoa {
   estadoAcesso: EstadoAcesso;
+  /**
+   * Derivado de `pessoas_vinculos` numa unica consulta agregada da lista
+   * inteira (ver `usePessoas.ts`) -- nunca uma coluna. `null` significa "nao
+   * sabemos", nao "sem contrato": e o que acontece quando a consulta de
+   * vinculos falha (falta de `hr.pessoas.vinculos.view`, ou janela de
+   * deploy), e a lista tem de ficar de pe mesmo assim.
+   */
+  estado_contrato_derivado: EstadoContratoDerivado | null;
 }
 
 // -- Satelites ---------------------------------------------------------------

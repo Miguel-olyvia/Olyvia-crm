@@ -3,8 +3,9 @@
  *
  * PORQUE O HISTORICO NAO SE EDITA
  * -------------------------------
- * `pessoas_vinculos` guarda versoes: um vinculo activo por pessoa (indice
- * unico parcial `idx_pessoas_vinculos_um_activo`) e os anteriores em
+ * `pessoas_vinculos` guarda versoes: um vinculo EM VIGOR por pessoa -- activo
+ * ou suspenso, indice unico parcial `idx_pessoas_vinculos_um_em_vigor` -- e os
+ * anteriores em
  * `terminado`. Mudar de 40h para 20h nao e editar o passado -- e fechar o
  * vinculo e abrir outro. Aqui edita-se o ACTIVO; os outros mostram-se em
  * leitura, e o DELETE esta bloqueado por politica na base.
@@ -27,6 +28,15 @@
  * nem entrada programatica. A unica barreira real era o CHECK da base, que
  * devolve uma mensagem que ninguem entende. As validacoes sao AS MESMAS do
  * assistente, importadas de `lib/hr/contrato` -- nao uma segunda copia.
+ *
+ * O ESTADO DO VINCULO PASSA A EDITAR-SE AQUI
+ * -------------------------------------------
+ * `estado_contrato` (o campo de negocio, mostrado em Detalhes laborais) e
+ * agora SEMPRE derivado do `estado` do vinculo -- ver `lib/hr/estadoContrato.ts`.
+ * Quem quiser marcar um contrato como suspenso, terminado ou por iniciar muda
+ * o `estado` aqui, nao um enum solto na ficha. Sem RPC nova: grava-se pelo
+ * mesmo `onGuardarVinculo` que ja existia. Terminar sem `data_fim` bloqueia-se
+ * no cliente -- a mesma perda que a migration de backfill recusa fazer.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -64,6 +74,7 @@ import {
 } from "@/lib/hr/horas";
 import {
   DIAS_SEMANA,
+  ESTADOS_VINCULO,
   HORAS_FREQUENCIAS,
   PERIODICIDADES,
   POLITICAS_FERIADOS,
@@ -71,6 +82,7 @@ import {
   TIPOS_CONTRATO,
   TIPOS_TRABALHO,
   type DiaSemana,
+  type EstadoVinculo,
   type HorasFrequencia,
   type Periodicidade,
   type PessoaRetribuicao,
@@ -97,6 +109,7 @@ interface PessoaContratoTabProps {
 type Rascunho = {
   tipo_contrato: TipoContrato;
   regime: RegimeTrabalho;
+  estado: EstadoVinculo;
   /**
    * UI, nao dados: se o regime foi escolhido A MAO nesta sessao de edicao. E o
    * que a base nao consegue saber (`regime` e NOT NULL DEFAULT 'tempo_inteiro')
@@ -133,6 +146,7 @@ function rascunhoDe(vinculo: PessoaVinculo | null): Rascunho {
   return {
     tipo_contrato: vinculo?.tipo_contrato ?? "sem_termo",
     regime: vinculo?.regime ?? "tempo_inteiro",
+    estado: vinculo?.estado ?? "activo",
     regime_manual: false,
     data_inicio: vinculo?.data_inicio ?? "",
     data_fim: vinculo?.data_fim ?? "",
@@ -183,8 +197,19 @@ export function PessoaContratoTab({
   onGuardarVinculo,
 }: PessoaContratoTabProps) {
   const { t } = useTranslation();
+  // "Em vigor" e activo OU suspenso, e NAO so activo. Um contrato suspenso
+  // continua a ser a relacao laboral vigente -- esta parada, nao acabada.
+  //
+  // Procurar so por `activo` tinha uma consequencia que nao e cosmetica: no
+  // instante em que alguem marcasse um contrato como suspenso, ele caia para
+  // o historico, o cartao voltava a "Novo contrato", e o proximo Gravar
+  // inseria um contrato NOVO em vez de editar aquele -- indo bater no indice
+  // unico de um contrato em vigor por pessoa, com um erro cru de base.
   const activo = useMemo(
-    () => vinculos.find((vinculo) => vinculo.estado === "activo") ?? null,
+    () =>
+      vinculos.find(
+        (vinculo) => vinculo.estado === "activo" || vinculo.estado === "suspenso",
+      ) ?? null,
     [vinculos],
   );
   const historico = useMemo(
@@ -300,9 +325,16 @@ export function PessoaContratoTab({
       toast.error(t(problemasNumericos[0].mensagemKey));
       return;
     }
+    // Terminar sem data e a mesma perda que a migration de backfill recusa
+    // fazer: a data de fim e o unico registo de quando o contrato acabou.
+    if (rascunho.estado === "terminado" && rascunho.data_fim.trim() === "") {
+      toast.error(t("hr.contrato.erroTerminadoSemDataFim"));
+      return;
+    }
     const erro = await onGuardarVinculo(activo?.id ?? null, {
       tipo_contrato: rascunho.tipo_contrato,
       regime: rascunho.regime,
+      estado: rascunho.estado,
       data_inicio: rascunho.data_inicio,
       data_fim: textoOuNull(rascunho.data_fim),
       motivo_termo: textoOuNull(rascunho.motivo_termo),
@@ -396,6 +428,17 @@ export function PessoaContratoTab({
                 label: t(`hr.tipoTrabalho.${tipo}`),
               }))}
               onChange={(v) => definir("tipo_trabalho", v)}
+            />
+            <CampoSelect
+              id="hr-contrato-estado"
+              label={t("hr.contrato.estado")}
+              valor={rascunho.estado}
+              disabled={!podeEditar}
+              opcoes={ESTADOS_VINCULO.map((estado) => ({
+                value: estado,
+                label: t(`hr.estadoVinculo.${estado}`),
+              }))}
+              onChange={(v) => definir("estado", v as EstadoVinculo)}
             />
             <CampoTexto
               id="hr-contrato-data-inicio"

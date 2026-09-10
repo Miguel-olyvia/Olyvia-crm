@@ -18,11 +18,22 @@
  * ser paginada, os cartoes deixam de poder ser derivados e passam a contagens
  * proprias -- fica dito aqui para nao passar em silencio.
  *
+ * `activos` conta SO `estado_registo === "activo"` -- o registo da ficha, nao
+ * o contrato. Misturar os dois fazia o cartao herdar qualquer defeito do
+ * estado do contrato; quem quer contratos em curso tem a coluna da lista.
+ *
  * ESTADO DO ACESSO
  * ----------------
  * Nao e uma coluna de `pessoas`: vem de `pessoas_contas`, num segundo select
  * juntado em memoria. Se esse select for recusado por falta de permissao, a
  * coluna mostra "sem conta" para todos em vez de partir a lista.
+ *
+ * ESTADO DO CONTRATO
+ * ------------------
+ * Tambem nao e uma coluna: `estado_contrato_derivado` vem de uma TERCEIRA
+ * consulta agregada a `pessoas_vinculos` (uma so, para a organizacao inteira,
+ * nunca uma por pessoa), reduzida por `lib/hr/estadoContrato.ts`. Recusada ou
+ * a falhar, fica `null` para todos -- "nao sabemos", nunca "sem contrato".
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -31,7 +42,8 @@ import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import { dataDeHoje, type NovaPessoaPayload } from "@/lib/hr/novaPessoa";
-import type { EstadoAcesso, Pessoa, PessoaListItem } from "@/types/hr";
+import { derivarEstadoContrato } from "@/lib/hr/estadoContrato";
+import type { EstadoAcesso, EstadoVinculo, Pessoa, PessoaListItem } from "@/types/hr";
 
 /**
  * Uma seccao do assistente que NAO ficou gravada.
@@ -85,7 +97,6 @@ const COLUNAS_LISTA = [
   "data_admissao",
   "data_antiguidade",
   "data_saida",
-  "estado_contrato",
   "estado_registo",
   "dias_trabalho",
   "notas",
@@ -151,10 +162,64 @@ export function usePessoas() {
         contasPorPessoa.set(conta.pessoa_id, "ativo");
       }
 
+      // Estado do contrato, derivado dos vinculos vivos -- UMA consulta
+      // agregada para a organizacao inteira, nunca uma por pessoa. Tolerante
+      // a falha exactamente como `pessoas_contas`: se recusada (falta de
+      // `hr.pessoas.vinculos.view`, ou a janela de deploy antes da migracao
+      // aplicada), a coluna fica `null` para todos e a lista continua de pe.
+      const vinculosPorPessoa = new Map<string, EstadoVinculo[]>();
+
+      // PAGINADA, e nao uma consulta so. O PostgREST devolve no maximo 1000
+      // linhas por pedido, em silencio -- e os vinculos sao HISTORICO, varios
+      // por pessoa. Uma organizacao com 250 pessoas e quatro contratos cada ja
+      // passa o limite, e as pessoas cortadas apareciam como "Sem contrato":
+      // seria o proprio defeito que esta mudanca existe para corrigir, agora
+      // por outra via e mais dificil de ver.
+      const PAGINA = 1000;
+      let erroVinculos: unknown = null;
+      for (let inicio = 0; ; inicio += PAGINA) {
+        const { data: pagina, error } = await hrFrom("pessoas_vinculos")
+          .select("pessoa_id, estado")
+          .eq("organization_id", activeCompany.id)
+          .is("deleted_at", null)
+          .order("pessoa_id", { ascending: true })
+          .range(inicio, inicio + PAGINA - 1);
+
+        if (error) {
+          erroVinculos = error;
+          break;
+        }
+
+        const linhasPagina = (pagina ?? []) as Array<{
+          pessoa_id: string;
+          estado: EstadoVinculo;
+        }>;
+        for (const vinculo of linhasPagina) {
+          const lista = vinculosPorPessoa.get(vinculo.pessoa_id) ?? [];
+          lista.push(vinculo.estado);
+          vinculosPorPessoa.set(vinculo.pessoa_id, lista);
+        }
+
+        if (linhasPagina.length < PAGINA) break;
+      }
+
+      if (erroVinculos && !isPermissionError(erroVinculos)) {
+        captureFlowError(erroVinculos, "hr-pessoas-load");
+      }
+      // Uma falha a meio da paginacao invalida o mapa inteiro: as paginas ja
+      // lidas dariam "Sem contrato" a quem ficou de fora, que e pior do que
+      // nao mostrar estado nenhum.
+      if (erroVinculos) vinculosPorPessoa.clear();
+
       setPessoas(
         linhas.map((pessoa) => ({
           ...pessoa,
           estadoAcesso: contasPorPessoa.get(pessoa.id) ?? "semConta",
+          estado_contrato_derivado: erroVinculos
+            ? null
+            : derivarEstadoContrato(
+                (vinculosPorPessoa.get(pessoa.id) ?? []).map((estado) => ({ estado })),
+              ),
         })),
       );
     } catch (e) {
@@ -173,9 +238,7 @@ export function usePessoas() {
   const stats = useMemo<PessoasStats>(() => {
     const hoje = new Date();
     return {
-      activos: pessoas.filter(
-        (p) => p.estado_registo === "activo" && p.estado_contrato === "em_curso",
-      ).length,
+      activos: pessoas.filter((p) => p.estado_registo === "activo").length,
       entradas90d: pessoas.filter((p) => dentroDaJanela(p.data_admissao, hoje)).length,
       saidas90d: pessoas.filter((p) => dentroDaJanela(p.data_saida, hoje)).length,
     };

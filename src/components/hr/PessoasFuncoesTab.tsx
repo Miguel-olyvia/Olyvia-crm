@@ -52,6 +52,7 @@ export function PessoasFuncoesTab({ pessoas, loading }: PessoasFuncoesTabProps) 
   const navigate = useNavigate();
   const { hasPermission } = usePermissions();
   const podeVerPapeis = hasPermission("roles.view");
+  const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
 
   const cargos = useMemo<LinhaDeCargo[]>(() => {
     const contagem = new Map<string, LinhaDeCargo>();
@@ -60,7 +61,7 @@ export function PessoasFuncoesTab({ pessoas, loading }: PessoasFuncoesTabProps) 
       const chave = cargo === "" ? "__sem_cargo__" : cargo;
       const linha = contagem.get(chave) ?? { cargo: chave, total: 0, emCurso: 0 };
       linha.total += 1;
-      if (pessoa.estado_contrato === "em_curso") linha.emCurso += 1;
+      if (pessoa.estado_contrato_derivado === "em_curso") linha.emCurso += 1;
       contagem.set(chave, linha);
     }
     return [...contagem.values()].sort((a, b) => b.total - a.total);
@@ -89,7 +90,9 @@ export function PessoasFuncoesTab({ pessoas, loading }: PessoasFuncoesTabProps) 
                   <TableRow>
                     <TableHead>{t("hr.columns.cargo")}</TableHead>
                     <TableHead className="w-32">{t("hr.funcoes.pessoas")}</TableHead>
-                    <TableHead className="w-32">{t("hr.estadoContrato.em_curso")}</TableHead>
+                    {podeVerVinculos && (
+                      <TableHead className="w-32">{t("hr.estadoContrato.em_curso")}</TableHead>
+                    )}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -105,7 +108,9 @@ export function PessoasFuncoesTab({ pessoas, loading }: PessoasFuncoesTabProps) 
                         )}
                       </TableCell>
                       <TableCell className="tabular-nums">{linha.total}</TableCell>
-                      <TableCell className="tabular-nums">{linha.emCurso}</TableCell>
+                      {podeVerVinculos && (
+                        <TableCell className="tabular-nums">{linha.emCurso}</TableCell>
+                      )}
                     </TableRow>
                   ))}
                 </TableBody>
