@@ -3504,7 +3504,48 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   // por gravar — só passa a existir em `quote_lines` no próximo "Guardar
   // Orçamento", tal como qualquer outra linha adicionada manualmente), mas já
   // marcada como não visível ao cliente.
-  const handleAcceptDiagnosticSuggestionLine = (line: AcceptedDiagnosticLine) => {
+  const handleAcceptDiagnosticSuggestionLine = async (line: AcceptedDiagnosticLine) => {
+    // Preço de venda real do produto/serviço — mesma tabela/price_type e
+    // mesma fórmula de custo (retailPrice / (1 + margem/100)) já usadas ao
+    // adicionar um item "Do catálogo" (ver fetch de productPricesMap/
+    // servicePricesMap mais acima). Sem isto, a linha entrava sempre a
+    // €0,00 (bug: hardcoded a 0 até agora), mesmo sendo um produto/serviço
+    // real e com preço definido.
+    const defaultMargin = 30;
+    let retailPrice = 0;
+    let vatRate = formData.iva_rate ?? 23;
+    try {
+      if (line.product_id) {
+        const { data } = await supabase
+          .from("product_prices")
+          .select("price, vat_rate")
+          .eq("product_id", line.product_id)
+          .eq("price_type", "retail")
+          .maybeSingle();
+        if (data) {
+          retailPrice = (data.price as number) ?? 0;
+          vatRate = (data.vat_rate as number) ?? vatRate;
+        }
+      } else if (line.service_id) {
+        const { data } = await supabase
+          .from("service_prices")
+          .select("price, vat_rate")
+          .eq("service_id", line.service_id)
+          .eq("price_type", "retail")
+          .maybeSingle();
+        if (data) {
+          retailPrice = (data.price as number) ?? 0;
+          vatRate = (data.vat_rate as number) ?? vatRate;
+        }
+      }
+    } catch (err) {
+      // Best-effort — nunca bloqueia a aceitação da sugestão; pior caso, a
+      // linha entra a €0,00 como acontecia sempre até agora, e o preço é
+      // revisto manualmente (toast abaixo já avisa disso).
+      captureFlowError(err, "quote-lifecycle");
+    }
+    const materialCost = retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0;
+
     setLines((prev) => [
       ...prev,
       {
@@ -3516,10 +3557,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         descricao_snapshot: line.descricao_snapshot,
         unidade: line.unidade || undefined,
         qt: line.qt,
-        custo_material_unit: 0,
+        custo_material_unit: materialCost,
         custo_mao_obra_unit: 0,
-        margem_percent: 0,
-        iva_percent: formData.iva_rate ?? 23,
+        margem_percent: defaultMargin,
+        retail_price_unit: retailPrice,
+        iva_percent: vatRate,
         int_percent: 0,
         discount_percent: 0,
         ordem: prev.length,
