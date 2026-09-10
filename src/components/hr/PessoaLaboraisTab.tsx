@@ -20,6 +20,11 @@
  * base (a chave estrangeira e composta, `(reporta_a_pessoa_id, organization_id)`),
  * e aqui a lista ja vem filtrada pela organizacao activa -- as duas coisas de
  * acordo, nao uma a confiar na outra.
+ *
+ * O E-MAIL PESSOAL SAIU DAQUI. Vive agora em Detalhes pessoais
+ * (`PessoaPessoaisTab.tsx`, bloco 1), a pedido do utilizador -- "se e detalhes
+ * laborais o email pessoal n deve ser aqui". Nao voltar a propor este campo
+ * neste separador.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -62,7 +67,6 @@ interface PessoaLaboraisTabProps {
 
 type Rascunho = {
   email_trabalho: string;
-  email_pessoal: string;
   telefone_trabalho: string;
   numero_interno: string;
   cargo: string;
@@ -77,7 +81,6 @@ type Rascunho = {
 function rascunhoDe(pessoa: Pessoa): Rascunho {
   return {
     email_trabalho: pessoa.email_trabalho ?? "",
-    email_pessoal: pessoa.email_pessoal ?? "",
     telefone_trabalho: pessoa.telefone_trabalho ?? "",
     numero_interno: pessoa.numero_interno ?? "",
     cargo: pessoa.cargo ?? "",
@@ -121,7 +124,6 @@ export function PessoaLaboraisTab({
   const gravar = async () => {
     const erro = await onGuardar({
       email_trabalho: vazioParaNull(rascunho.email_trabalho),
-      email_pessoal: vazioParaNull(rascunho.email_pessoal),
       telefone_trabalho: vazioParaNull(rascunho.telefone_trabalho),
       numero_interno: vazioParaNull(rascunho.numero_interno),
       cargo: vazioParaNull(rascunho.cargo),
@@ -144,7 +146,6 @@ export function PessoaLaboraisTab({
     { id: "numero_interno", labelKey: "hr.laborais.numeroInterno" },
     { id: "cargo", labelKey: "hr.columns.cargo" },
     { id: "email_trabalho", labelKey: "hr.laborais.emailTrabalho", tipo: "email" },
-    { id: "email_pessoal", labelKey: "hr.laborais.emailPessoal", tipo: "email" },
     { id: "telefone_trabalho", labelKey: "hr.laborais.telefoneTrabalho" },
     { id: "data_admissao", labelKey: "hr.columns.contratacao", tipo: "date" },
     { id: "data_antiguidade", labelKey: "hr.laborais.dataAntiguidade", tipo: "date" },

@@ -50,7 +50,7 @@ const COLUNAS_PESSOA =
 
 const COLUNAS_DADOS_PESSOAIS =
   "id, pessoa_id, organization_id, data_nascimento, ocultar_aniversario, genero, " +
-  "nacionalidade, telefone_pessoal, email_comunicacoes, estado_civil, dependentes, " +
+  "nacionalidade, telefone_pessoal, estado_civil, dependentes, " +
   "irs_retencao_percentagem";
 
 // Sem `niss`: a coluna esta revogada a `authenticated` ao nivel da coluna.

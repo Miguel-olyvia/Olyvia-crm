@@ -255,7 +255,6 @@ export interface PessoaDadosPessoais {
   genero: Genero | null;
   nacionalidade: string | null;
   telefone_pessoal: string | null;
-  email_comunicacoes: string | null;
   estado_civil: EstadoCivil | null;
   dependentes: number | null;
   irs_retencao_percentagem: number | null;

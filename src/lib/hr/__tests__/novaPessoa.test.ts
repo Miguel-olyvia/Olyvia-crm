@@ -196,6 +196,18 @@ describe("rascunho de nova pessoa", () => {
     expect(payload.dadosPessoais).toMatchObject({ nacionalidade: "PT" });
   });
 
+  it("o e-mail pessoal vai para o nucleo, nunca para dadosPessoais", () => {
+    const rascunho = rascunhoInicial();
+    rascunho.geral.primeiro_nome = "Ana";
+    rascunho.geral.apelido = "Silva";
+    rascunho.pessoais.email_pessoal = "ana@exemplo.pt";
+    rascunho.pessoais.data_nascimento = "1990-01-01";
+
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+    expect(payload.nucleo.email_pessoal).toBe("ana@exemplo.pt");
+    expect(payload.dadosPessoais).not.toHaveProperty("email_comunicacoes");
+  });
+
     it("o estado de cada seccao segue o que esta preenchido", () => {
     const rascunho = rascunhoInicial();
     expect(seccaoPreenchida(rascunho, "geral")).toBe(false);

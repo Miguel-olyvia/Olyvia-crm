@@ -105,9 +105,18 @@ describe("LeadContactResults load failure", () => {
     render(<LeadContactResults />);
 
     await waitFor(() => expect(captureException).toHaveBeenCalled());
-    expect(captureException).toHaveBeenCalledWith(dbError, {
-      tags: { flow: "lead-contact-results-load" },
-    });
+
+    // O erro do Supabase e um objecto simples, nao um Error. Passa-lo tal e
+    // qual ao Sentry produzia o titulo inutil "Object captured as exception
+    // with keys: code, details, hint, message", que esconde a causa real.
+    // `captureFlowError` passou a embrulha-lo num Error a serio com a mesma
+    // mensagem, e a guardar os campos estruturados num contexto proprio.
+    const [erroEnviado, opcoes] = captureException.mock.calls[0];
+    expect(erroEnviado).toBeInstanceOf(Error);
+    expect((erroEnviado as Error).message).toBe(dbError.message);
+    expect((erroEnviado as Error).name).toBe("SupabaseError");
+    expect(opcoes).toMatchObject({ tags: { flow: "lead-contact-results-load" } });
+    expect(opcoes).toHaveProperty("contexts.supabase");
   });
 
   it("still shows the plain empty state when the query genuinely returns nothing", async () => {

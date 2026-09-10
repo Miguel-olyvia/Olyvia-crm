@@ -111,7 +111,7 @@ export function SeccaoDetalhesPessoais({
         />
         <CampoTexto
           id="hr-novo-email-pessoal"
-          label={t("hr.laborais.emailPessoal")}
+          label={t("hr.campos.emailPessoal")}
           tipo="email"
           valor={valor.email_pessoal}
           erro={erroDe("hr-novo-email-pessoal")}

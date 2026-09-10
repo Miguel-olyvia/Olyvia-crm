@@ -308,7 +308,7 @@ export function problemasDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
     problemas.push({
       seccao: "pessoais",
       campoId: "hr-novo-email-pessoal",
-      rotuloKey: "hr.laborais.emailPessoal",
+      rotuloKey: "hr.campos.emailPessoal",
       mensagemKey: "hr.form.erroEmail",
     });
   }
@@ -612,7 +612,6 @@ export function payloadDoRascunho(
           estado_civil: pessoais.estado_civil === "" ? null : pessoais.estado_civil,
           dependentes: numero(pessoais.dependentes),
           telefone_pessoal: texto(pessoais.telefone_pessoal),
-          email_comunicacoes: texto(pessoais.email_pessoal),
         }
       : null,
     identificacao: temIdentificacao

@@ -15,6 +15,16 @@
  *
  * O NISS e o IBAN tem componentes proprios porque nao sao campos normais: um
  * revela-se por RPC auditada, o outro nunca se revela.
+ *
+ * O BLOCO 1 GRAVA EM DUAS TABELAS. O e-mail pessoal mudou de dono: passou de
+ * `pessoas_dados_pessoais.email_comunicacoes` (largada em 20261122060000)
+ * para `pessoas.email_pessoal`, a mesma coluna que ja existia e que o
+ * separador de Detalhes laborais mostrava. As duas tabelas tem politicas de
+ * UPDATE com permissoes diferentes (`hr.pessoas.edit` para `pessoas`,
+ * `hr.pessoas.pessoais.edit` para `pessoas_dados_pessoais`), por isso
+ * `gravarGeral` so escreve a tabela cujos campos mudaram de facto -- nunca as
+ * duas incondicionalmente -- e para na primeira escrita que falhar: primeiro
+ * `pessoas_dados_pessoais`, depois `pessoas`.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -50,6 +60,7 @@ import {
   type FormatoConta,
   type PessoaMorada,
   type TipoDocumento,
+  type Pessoa,
 } from "@/types/hr";
 
 const SEM_ESCOLHA = "__sem_escolha__";
@@ -69,6 +80,8 @@ export interface PessoaPessoaisPermissoes {
   bancariosEdit: boolean;
   saudeView: boolean;
   saudeEdit: boolean;
+  /** `hr.pessoas.edit` -- o e-mail pessoal grava no nucleo `pessoas`, nao aqui. */
+  nucleoEdit: boolean;
 }
 
 interface PessoaPessoaisTabProps {
@@ -78,9 +91,12 @@ interface PessoaPessoaisTabProps {
   emergencia: PessoaContactoEmergencia | null;
   bancarios: PessoaDadosBancarios | null;
   saude: PessoaDadosSaude | null;
+  /** `pessoas.email_pessoal` -- vive no nucleo, nao em `pessoas_dados_pessoais`. */
+  emailPessoal: string | null;
   permissoes: PessoaPessoaisPermissoes;
   saving: boolean;
   onGuardarDadosPessoais: (patch: Partial<PessoaDadosPessoais>) => Promise<string | null>;
+  onGuardarPessoa: (patch: Partial<Pessoa>) => Promise<string | null>;
   onGuardarIdentificacao: (patch: Partial<PessoaIdentificacao>) => Promise<string | null>;
   onGuardarMorada: (patch: Partial<PessoaMorada>) => Promise<string | null>;
   onGuardarEmergencia: (patch: Partial<PessoaContactoEmergencia>) => Promise<string | null>;
@@ -141,9 +157,11 @@ export function PessoaPessoaisTab({
   emergencia,
   bancarios,
   saude,
+  emailPessoal,
   permissoes,
   saving,
   onGuardarDadosPessoais,
+  onGuardarPessoa,
   onGuardarIdentificacao,
   onGuardarMorada,
   onGuardarEmergencia,
@@ -162,7 +180,7 @@ export function PessoaPessoaisTab({
       genero: dadosPessoais?.genero ?? SEM_ESCOLHA,
       nacionalidade: dadosPessoais?.nacionalidade ?? "",
       telefone_pessoal: dadosPessoais?.telefone_pessoal ?? "",
-      email_comunicacoes: dadosPessoais?.email_comunicacoes ?? "",
+      email_pessoal: emailPessoal ?? "",
       estado_civil: dadosPessoais?.estado_civil ?? SEM_ESCOLHA,
       dependentes:
         dadosPessoais?.dependentes === null || dadosPessoais?.dependentes === undefined
@@ -174,7 +192,7 @@ export function PessoaPessoaisTab({
           ? ""
           : String(dadosPessoais.irs_retencao_percentagem),
     }),
-    [dadosPessoais],
+    [dadosPessoais, emailPessoal],
   );
   const [geral, setGeral] = useState(geralOriginal);
   useEffect(() => setGeral(geralOriginal), [geralOriginal]);
@@ -184,21 +202,45 @@ export function PessoaPessoaisTab({
   );
 
   const gravarGeral = async () => {
-    const erro = await onGuardarDadosPessoais({
-      data_nascimento: ouNull(geral.data_nascimento),
-      ocultar_aniversario: geral.ocultar_aniversario,
-      genero: geral.genero === SEM_ESCOLHA ? null : (geral.genero as Genero),
-      nacionalidade: ouNull(geral.nacionalidade)?.toUpperCase() ?? null,
-      telefone_pessoal: ouNull(geral.telefone_pessoal),
-      email_comunicacoes: ouNull(geral.email_comunicacoes),
-      estado_civil: geral.estado_civil === SEM_ESCOLHA ? null : (geral.estado_civil as EstadoCivil),
-      dependentes: numeroOuNull(geral.dependentes),
-      irs_retencao_percentagem: numeroOuNull(geral.irs),
-    });
-    if (erro) {
-      toast.error(erro);
-      return;
+    // Duas tabelas, duas permissoes: so se escreve a que mudou de facto, e
+    // para-se na primeira que falhar. Dados pessoais primeiro, nucleo a seguir
+    // -- ver o cabecalho do ficheiro.
+    const mudouDadosPessoais =
+      geral.data_nascimento !== geralOriginal.data_nascimento ||
+      geral.ocultar_aniversario !== geralOriginal.ocultar_aniversario ||
+      geral.genero !== geralOriginal.genero ||
+      geral.nacionalidade !== geralOriginal.nacionalidade ||
+      geral.telefone_pessoal !== geralOriginal.telefone_pessoal ||
+      geral.estado_civil !== geralOriginal.estado_civil ||
+      geral.dependentes !== geralOriginal.dependentes ||
+      geral.irs !== geralOriginal.irs;
+    const mudouEmail = ouNull(geral.email_pessoal) !== (emailPessoal ?? null);
+
+    if (mudouDadosPessoais) {
+      const erro = await onGuardarDadosPessoais({
+        data_nascimento: ouNull(geral.data_nascimento),
+        ocultar_aniversario: geral.ocultar_aniversario,
+        genero: geral.genero === SEM_ESCOLHA ? null : (geral.genero as Genero),
+        nacionalidade: ouNull(geral.nacionalidade)?.toUpperCase() ?? null,
+        telefone_pessoal: ouNull(geral.telefone_pessoal),
+        estado_civil: geral.estado_civil === SEM_ESCOLHA ? null : (geral.estado_civil as EstadoCivil),
+        dependentes: numeroOuNull(geral.dependentes),
+        irs_retencao_percentagem: numeroOuNull(geral.irs),
+      });
+      if (erro) {
+        toast.error(erro);
+        return;
+      }
     }
+
+    if (mudouEmail) {
+      const erro = await onGuardarPessoa({ email_pessoal: ouNull(geral.email_pessoal) });
+      if (erro) {
+        toast.error(erro);
+        return;
+      }
+    }
+
     toast.success(t("hr.sucesso.guardado"));
   };
 
@@ -384,13 +426,13 @@ export function PessoaPessoaisTab({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="hr-email-comunicacoes">{t("hr.campos.emailComunicacoes")}</Label>
+                <Label htmlFor="hr-email-pessoal">{t("hr.campos.emailPessoal")}</Label>
                 <Input
-                  id="hr-email-comunicacoes"
+                  id="hr-email-pessoal"
                   type="email"
-                  value={geral.email_comunicacoes}
-                  disabled={!permissoes.pessoaisEdit}
-                  onChange={(e) => setGeral({ ...geral, email_comunicacoes: e.target.value })}
+                  value={geral.email_pessoal}
+                  disabled={!permissoes.nucleoEdit}
+                  onChange={(e) => setGeral({ ...geral, email_pessoal: e.target.value })}
                 />
               </div>
             </div>
@@ -407,8 +449,16 @@ export function PessoaPessoaisTab({
               </Label>
             </div>
 
+            {/* Este bloco passou a ter campos de DUAS tabelas, com permissoes
+                diferentes: os dados gerais exigem hr.pessoas.pessoais.edit, o
+                e-mail pessoal exige hr.pessoas.edit. Exigir so a primeira
+                deixava quem tem a segunda a escrever no campo sem nunca lhe
+                aparecer o botao de gravar -- alteracao perdida, sem erro.
+                O bloco fiscal la em baixo NAO leva esta alternativa: os campos
+                dele sao todos de pessoais.edit, e um botao a aparecer sobre
+                campos desactivados seria pior do que nao aparecer. */}
             <AccoesBloco
-              visivel={permissoes.pessoaisEdit && geralAlterado}
+              visivel={(permissoes.pessoaisEdit || permissoes.nucleoEdit) && geralAlterado}
               saving={saving}
               onGravar={gravarGeral}
               onCancelar={() => setGeral(geralOriginal)}

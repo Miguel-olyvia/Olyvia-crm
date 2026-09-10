@@ -95,6 +95,7 @@ export default function PessoaDetail() {
       bancariosEdit: hasPermission("hr.pessoas.bancarios.edit"),
       saudeView: hasPermission("hr.pessoas.saude.view"),
       saudeEdit: hasPermission("hr.pessoas.saude.edit"),
+      nucleoEdit: hasPermission("hr.pessoas.edit"),
     }),
     [hasPermission],
   );
@@ -295,9 +296,11 @@ export default function PessoaDetail() {
             emergencia={ficha.emergencia}
             bancarios={ficha.bancarios}
             saude={ficha.saude}
+            emailPessoal={pessoa.email_pessoal}
             permissoes={permissoes}
             saving={ficha.saving}
             onGuardarDadosPessoais={ficha.saveDadosPessoais}
+            onGuardarPessoa={ficha.savePessoa}
             onGuardarIdentificacao={ficha.saveIdentificacao}
             onGuardarMorada={ficha.saveMorada}
             onGuardarEmergencia={ficha.saveEmergencia}
