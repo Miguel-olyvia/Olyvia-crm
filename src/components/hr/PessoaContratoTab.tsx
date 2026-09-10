@@ -72,7 +72,10 @@ import {
   horasImplausiveis,
   maximoDaFrequencia,
 } from "@/lib/hr/horas";
+import { somarDias } from "@/lib/hr/ausencias";
+import { sugerirPeriodoExperimentalDias } from "@/lib/hr/periodoExperimental";
 import {
+  CATEGORIAS_FUNCAO,
   DIAS_SEMANA,
   ESTADOS_VINCULO,
   HORAS_FREQUENCIAS,
@@ -81,10 +84,12 @@ import {
   REGIMES_TRABALHO,
   TIPOS_CONTRATO,
   TIPOS_TRABALHO,
+  type CategoriaFuncao,
   type DiaSemana,
   type EstadoVinculo,
   type HorasFrequencia,
   type Periodicidade,
+  type PeriodoExperimentalOrigem,
   type PessoaRetribuicao,
   type PessoaVinculo,
   type PoliticaFeriados,
@@ -121,6 +126,10 @@ type Rascunho = {
   motivo_termo: string;
   periodo_experimental_dias: string;
   periodo_experimental_ate: string;
+  /** `null` = ainda ninguem escolheu; alimenta so a sugestao de periodo experimental. */
+  categoria_funcao: CategoriaFuncao | null;
+  /** `null` = contrato anterior a esta funcionalidade, ou nunca gravado. */
+  periodo_experimental_origem: PeriodoExperimentalOrigem | null;
   tipo_trabalho: string;
   /** A quantidade, na unidade de `horas_frequencia`. Nao necessariamente semanal. */
   horas_periodo: string;
@@ -154,6 +163,8 @@ function rascunhoDe(vinculo: PessoaVinculo | null): Rascunho {
     periodo_experimental_dias:
       vinculo?.periodo_experimental_dias == null ? "" : String(vinculo.periodo_experimental_dias),
     periodo_experimental_ate: vinculo?.periodo_experimental_ate ?? "",
+    categoria_funcao: vinculo?.categoria_funcao ?? null,
+    periodo_experimental_origem: vinculo?.periodo_experimental_origem ?? null,
     tipo_trabalho: vinculo?.tipo_trabalho ?? "",
     horas_periodo: vinculo?.horas_periodo == null ? "" : String(vinculo.horas_periodo),
     horas_frequencia: vinculo?.horas_frequencia ?? "semanal",
@@ -246,9 +257,56 @@ export function PessoaContratoTab({
         ...anterior,
         periodo_experimental_dias: "",
         periodo_experimental_ate: "",
+        periodo_experimental_origem: null,
       }));
     }
   };
+
+  /**
+   * Preenche os dois campos com o numero legal, calculado por
+   * `lib/hr/periodoExperimental.ts` -- NUNCA escreve sozinho: so corre quando
+   * quem edita clica em "Sugerir". Marca a origem como "sugerido"; se depois
+   * disso alguem tocar em qualquer um dos dois campos a mao, `definirCampoExperimental`
+   * volta a marcar "manual".
+   */
+  const sugestaoExperimental = useMemo(
+    () =>
+      rascunho.categoria_funcao
+        ? sugerirPeriodoExperimentalDias({
+            tipoContrato: rascunho.tipo_contrato,
+            categoriaFuncao: rascunho.categoria_funcao,
+            dataInicio: rascunho.data_inicio || null,
+            dataFim: rascunho.data_fim || null,
+          })
+        : null,
+    [rascunho.categoria_funcao, rascunho.tipo_contrato, rascunho.data_inicio, rascunho.data_fim],
+  );
+
+  const aceitarSugestaoExperimental = () => {
+    if (!sugestaoExperimental) return;
+    setTemExperimental(true);
+    setRascunho((anterior) => ({
+      ...anterior,
+      periodo_experimental_dias: String(sugestaoExperimental.dias),
+      periodo_experimental_ate: anterior.data_inicio
+        ? somarDias(anterior.data_inicio, sugestaoExperimental.dias)
+        : anterior.periodo_experimental_ate,
+      periodo_experimental_origem: "sugerido",
+    }));
+  };
+
+  /** Os dois campos do periodo experimental passam por aqui: qualquer edicao
+   *  a mao desfaz a marca de "sugerido" -- ela so vale enquanto o valor for
+   *  exactamente o que a sugestao calculou. */
+  const definirCampoExperimental = (
+    campo: "periodo_experimental_dias" | "periodo_experimental_ate",
+    valor: string,
+  ) =>
+    setRascunho((anterior) => ({
+      ...anterior,
+      [campo]: valor,
+      periodo_experimental_origem: "manual",
+    }));
 
   /** Campos de que se saiu: o erro de formato so aparece depois disso. */
   const [tocados, setTocados] = useState<ReadonlySet<string>>(() => new Set());
@@ -340,6 +398,8 @@ export function PessoaContratoTab({
       motivo_termo: textoOuNull(rascunho.motivo_termo),
       periodo_experimental_dias: numeroOuNull(rascunho.periodo_experimental_dias),
       periodo_experimental_ate: textoOuNull(rascunho.periodo_experimental_ate),
+      categoria_funcao: rascunho.categoria_funcao,
+      periodo_experimental_origem: temExperimental ? rascunho.periodo_experimental_origem : null,
       tipo_trabalho:
         rascunho.tipo_trabalho === "" ? null : (rascunho.tipo_trabalho as TipoTrabalho),
       horas_periodo: numeroOuNull(rascunho.horas_periodo),
@@ -429,6 +489,24 @@ export function PessoaContratoTab({
               }))}
               onChange={(v) => definir("tipo_trabalho", v)}
             />
+            {/* So alimenta a sugestao de periodo experimental -- ver o cabecalho
+                deste ficheiro e `lib/hr/periodoExperimental.ts`. Nao vem de
+                `pessoas.cargo`, que e texto livre. */}
+            <CampoSelect
+              id="hr-contrato-categoria-funcao"
+              label={t("hr.contrato.categoriaFuncao")}
+              ajuda={t("hr.contrato.ajudaCategoriaFuncao")}
+              valor={rascunho.categoria_funcao ?? ""}
+              vazioLabel={t("hr.campos.semValor")}
+              disabled={!podeEditar}
+              opcoes={CATEGORIAS_FUNCAO.map((categoria) => ({
+                value: categoria,
+                label: t(`hr.categoriaFuncao.${categoria}`),
+              }))}
+              onChange={(v) =>
+                definir("categoria_funcao", (v || null) as CategoriaFuncao | null)
+              }
+            />
             <CampoSelect
               id="hr-contrato-estado"
               label={t("hr.contrato.estado")}
@@ -487,17 +565,40 @@ export function PessoaContratoTab({
             </div>
             {temExperimental && (
               <>
-                <CampoTexto
-                  id="hr-contrato-periodo-experimental-dias"
-                  label={t("hr.contrato.periodoExperimentalDias")}
-                  erro={erroDe("hr-contrato-periodo-experimental-dias")}
-                  tipo="number"
-                  min={0}
-                  max={1095}
-                  valor={rascunho.periodo_experimental_dias}
-                  disabled={!podeEditar}
-                  onChange={(v) => definir("periodo_experimental_dias", v)}
-                />
+                <div className="space-y-1.5">
+                  <CampoTexto
+                    id="hr-contrato-periodo-experimental-dias"
+                    label={t("hr.contrato.periodoExperimentalDias")}
+                    erro={erroDe("hr-contrato-periodo-experimental-dias")}
+                    tipo="number"
+                    min={0}
+                    max={1095}
+                    valor={rascunho.periodo_experimental_dias}
+                    disabled={!podeEditar}
+                    onChange={(v) => definirCampoExperimental("periodo_experimental_dias", v)}
+                  />
+                  {/* A sugestao NUNCA se escreve sozinha -- so aparece o botao,
+                      e so quando ha um numero legal para o tipo de contrato e a
+                      categoria escolhidos. Ver `lib/hr/periodoExperimental.ts`. */}
+                  {podeEditar && sugestaoExperimental && (
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 text-xs"
+                      onClick={aceitarSugestaoExperimental}
+                    >
+                      {t("hr.contrato.sugerirPeriodoExperimental", {
+                        dias: String(sugestaoExperimental.dias),
+                      })}
+                    </Button>
+                  )}
+                  {rascunho.periodo_experimental_origem === "sugerido" && (
+                    <p className="text-xs text-muted-foreground" role="status">
+                      {t("hr.contrato.periodoExperimentalSugerido")}
+                    </p>
+                  )}
+                </div>
                 <CampoTexto
                   id="hr-contrato-periodo-experimental-ate"
                   label={t("hr.contrato.periodoExperimentalAte")}
@@ -505,7 +606,7 @@ export function PessoaContratoTab({
                   tipo="date"
                   valor={rascunho.periodo_experimental_ate}
                   disabled={!podeEditar}
-                  onChange={(v) => definir("periodo_experimental_ate", v)}
+                  onChange={(v) => definirCampoExperimental("periodo_experimental_ate", v)}
                 />
               </>
             )}

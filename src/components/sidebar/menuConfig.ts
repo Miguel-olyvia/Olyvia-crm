@@ -38,6 +38,7 @@ import {
   IdCard,
   CalendarDays,
   Clock,
+  FolderOpen,
   CalendarRange,
   CheckSquare,
 } from "lucide-react";
@@ -174,11 +175,12 @@ export const menuSections: MenuSection[] = [
     id: "rh-eu",
     icon: CalendarDays,
     labelKey: "sidebar.myArea",
-    paths: ["/rh/ausencias", "/rh/assiduidade"],
-    permissions: ["hr.ausencias.view.own", "hr.assiduidade.view.own"],
+    paths: ["/rh/ausencias", "/rh/assiduidade", "/rh/documentos"],
+    permissions: ["hr.ausencias.view.own", "hr.assiduidade.view.own", "hr.pessoas.documentos.view.own"],
     items: [
       { to: "/rh/ausencias", icon: CalendarDays, labelKey: "sidebar.hrAusencias", permission: "hr.ausencias.view.own" },
       { to: "/rh/assiduidade", icon: Clock, labelKey: "sidebar.hrAssiduidade", permission: "hr.assiduidade.view.own" },
+      { to: "/rh/documentos", icon: FolderOpen, labelKey: "sidebar.hrDocumentos", permission: "hr.pessoas.documentos.view.own" },
     ],
   },
   {

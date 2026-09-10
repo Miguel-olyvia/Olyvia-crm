@@ -73,7 +73,9 @@ const COLUNAS_VINCULO =
   "tipo_trabalho, horas_frequencia, tempo_trabalho_pct, dias_uteis, politica_feriados, " +
   // Coluna GERADA (20261120190000): le-se, nunca se escreve.
   "horas_semanais_equivalentes, " +
-  "horas_anuais_maximas, horas_semanais_maximas, periodo_experimental_dias";
+  "horas_anuais_maximas, horas_semanais_maximas, periodo_experimental_dias, " +
+  // Documentos e periodo experimental sugerido, 20261123040000.
+  "categoria_funcao, periodo_experimental_origem";
 
 const COLUNAS_RETRIBUICAO =
   "id, pessoa_id, organization_id, vinculo_id, valor_base, moeda, periodicidade, " +

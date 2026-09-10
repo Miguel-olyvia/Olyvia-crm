@@ -54,6 +54,26 @@ export type TipoContrato =
   | "tempo_parcial";
 export type RegimeTrabalho = "tempo_inteiro" | "tempo_parcial";
 export type EstadoVinculo = "activo" | "suspenso" | "terminado" | "futuro";
+
+/**
+ * Categoria legal da funcao (`pessoas_vinculos.categoria_funcao`), usada SO
+ * para calcular a sugestao de periodo experimental -- ver
+ * `lib/hr/periodoExperimental.ts`. NAO vem de `pessoas.cargo`: essa coluna e
+ * texto livre e derivar um prazo legal de uma cadeia de caracteres escrita a
+ * mao seria inventar direito. Escolhe-se aqui, explicitamente, por quem cria
+ * o contrato.
+ */
+export type CategoriaFuncao = "geral" | "tecnica_confianca" | "direcao_quadro_superior";
+
+/**
+ * De onde veio o valor gravado em `periodo_experimental_dias` /
+ * `periodo_experimental_ate` (`pessoas_vinculos.periodo_experimental_origem`).
+ * "sugerido" = igual ao que `lib/hr/periodoExperimental.ts` calculou e aceite
+ * sem alteracao; "manual" = escolhido ou corrigido a mao (reducao por IRCT,
+ * exclusao, etc.). Nunca se infere -- so se grava quando alguem escolhe ou
+ * aceita uma sugestao.
+ */
+export type PeriodoExperimentalOrigem = "sugerido" | "manual";
 /** Dominio de `pessoas_retribuicoes.periodicidade` (20261120200000). */
 export type Periodicidade = "hora" | "diaria" | "semanal" | "mensal" | "anual";
 
@@ -160,6 +180,11 @@ export const TIPOS_CONTRATO: readonly TipoContrato[] = [
   "tempo_parcial",
 ];
 export const REGIMES_TRABALHO: readonly RegimeTrabalho[] = ["tempo_inteiro", "tempo_parcial"];
+export const CATEGORIAS_FUNCAO: readonly CategoriaFuncao[] = [
+  "geral",
+  "tecnica_confianca",
+  "direcao_quadro_superior",
+];
 export const TIPOS_TRABALHO: readonly TipoTrabalho[] = ["presencial", "remoto", "hibrido"];
 /** Dia, semana, mes, ano -- na ordem pedida. */
 export const HORAS_FREQUENCIAS: readonly HorasFrequencia[] = [
@@ -361,6 +386,10 @@ export interface PessoaVinculo {
   horas_semanais_maximas: number | null;
   /** Duracao explicita, ao lado de `periodo_experimental_ate`. Nao a substitui. */
   periodo_experimental_dias: number | null;
+  /** Escolhida por quem cria o contrato; alimenta so a sugestao de periodo experimental. */
+  categoria_funcao: CategoriaFuncao | null;
+  /** `null` = nunca foi gravado por este ecra (contrato anterior a esta funcionalidade). */
+  periodo_experimental_origem: PeriodoExperimentalOrigem | null;
 }
 
 export interface PessoaRetribuicao {
@@ -498,4 +527,62 @@ export interface HorarioRealizado {
   validado_em: string | null;
   motivo_rejeicao: string | null;
   notas: string | null;
+}
+
+// -- Documentos (20261123020000..20261123030000) -----------------------------
+
+/** Dominio de `pessoas_documentos_modelos.tipo` e `pessoas_documentos.tipo`. */
+export type TipoDocumentoRH = "contrato" | "adenda" | "declaracao" | "recibo" | "outro";
+export const TIPOS_DOCUMENTO_RH: readonly TipoDocumentoRH[] = [
+  "contrato",
+  "adenda",
+  "declaracao",
+  "recibo",
+  "outro",
+];
+
+/** Dominio de `pessoas_documentos.estado`. Uma linha `assinado` e imutavel. */
+export type EstadoDocumentoRH = "rascunho" | "a_aguardar_assinatura" | "assinado" | "anulado";
+export const ESTADOS_DOCUMENTO_RH: readonly EstadoDocumentoRH[] = [
+  "rascunho",
+  "a_aguardar_assinatura",
+  "assinado",
+  "anulado",
+];
+
+/** Um modelo de documento por organizacao. `corpo_html` tem SELECT directo
+ *  aqui -- ao contrario de `PessoaDocumento`, esta tabela nao tem grants por
+ *  coluna, so a permissao `hr.pessoas.documentos.modelos.view` na RLS. */
+export interface PessoaDocumentoModelo {
+  id: string;
+  organization_id: string;
+  nome: string;
+  tipo: TipoDocumentoRH;
+  corpo_html: string;
+  variaveis: string[];
+  activo: boolean;
+}
+
+/**
+ * Metadados de `pessoas_documentos`. NUNCA `corpo_html` nem
+ * `ficheiro_caminho`: essas colunas estao fechadas por GRANT de coluna
+ * (migration 20261123030000) e so saem pela RPC
+ * `rpc_hr_documento_ver_conteudo`. Pedi-las aqui faz o PostgREST recusar o
+ * select e perder a linha inteira -- a mesma licao do NISS.
+ */
+export interface PessoaDocumento {
+  id: string;
+  pessoa_id: string;
+  organization_id: string;
+  vinculo_id: string | null;
+  modelo_id: string | null;
+  tipo: TipoDocumentoRH;
+  titulo: string;
+  estado: EstadoDocumentoRH;
+  emitido_em: string | null;
+  emitido_por: string | null;
+  assinado_em: string | null;
+  anulado_em: string | null;
+  anulado_motivo: string | null;
+  created_at?: string;
 }

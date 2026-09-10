@@ -42,6 +42,8 @@ const VINCULO_ACTIVO: PessoaVinculo = {
   horas_anuais_maximas: null,
   horas_semanais_maximas: null,
   periodo_experimental_dias: null,
+  categoria_funcao: null,
+  periodo_experimental_origem: null,
 };
 
 beforeAll(() => {

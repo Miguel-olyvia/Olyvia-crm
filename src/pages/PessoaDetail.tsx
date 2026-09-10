@@ -37,6 +37,7 @@ import {
   User,
 } from "lucide-react";
 import { PessoaContratoTab } from "@/components/hr/PessoaContratoTab";
+import { PessoaDocumentosTab } from "@/components/hr/PessoaDocumentosTab";
 import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
 import { PessoaAusenciasTab } from "@/components/hr/PessoaAusenciasTab";
 import { PessoaHorarioTab } from "@/components/hr/PessoaHorarioTab";
@@ -58,7 +59,6 @@ import { useTranslation } from "@/hooks/useTranslation";
 
 /** Os separadores que ficam visiveis mas vazios nesta ronda. */
 const TABS_EM_CONSTRUCAO = [
-  { value: "documentos", labelKey: "hr.pessoa.tabs.documentos", icon: FolderOpen },
   { value: "desempenho", labelKey: "hr.pessoa.tabs.desempenho", icon: TrendingUp },
   { value: "tarefas", labelKey: "hr.pessoa.tabs.tarefas", icon: ListChecks },
   { value: "competencias", labelKey: "hr.pessoa.tabs.competencias", icon: Award },
@@ -131,6 +131,19 @@ export default function PessoaDetail() {
   // Assiduidade: catorze codigos resolvidos num hook proprio, para nao os
   // reescrever em cada um dos quatro ecras do modulo.
   const { permissoes: permissoesAssiduidade } = usePermissoesAssiduidade();
+
+  const permissoesDocumentos = useMemo(
+    () => ({
+      view: hasPermission("hr.pessoas.documentos.view"),
+      viewOwn: hasPermission("hr.pessoas.documentos.view.own"),
+      edit: hasPermission("hr.pessoas.documentos.edit"),
+      emitir: hasPermission("hr.pessoas.documentos.emitir"),
+      anular: hasPermission("hr.pessoas.documentos.anular"),
+      conteudoView: hasPermission("hr.pessoas.documentos.conteudo.view"),
+      modelosView: hasPermission("hr.pessoas.documentos.modelos.view"),
+    }),
+    [hasPermission],
+  );
 
   const { locais, loading: locaisALoad } = useLocaisTrabalho();
   // Para saber se quem abre a ficha e a propria pessoa: muda o que pode pedir.
@@ -255,6 +268,10 @@ export default function PessoaDetail() {
               <CalendarRange className="h-4 w-4" />
               {t("hr.pessoa.tabs.planeamento")}
             </TabsTrigger>
+            <TabsTrigger value="documentos" className="gap-2">
+              <FolderOpen className="h-4 w-4" />
+              {t("hr.pessoa.tabs.documentos")}
+            </TabsTrigger>
             <TabsTrigger value="ausencias" className="gap-2">
               <CalendarClock className="h-4 w-4" />
               {t("hr.pessoa.tabs.ausencias")}
@@ -366,6 +383,14 @@ export default function PessoaDetail() {
             aprovadorChefiaNome={reportaANome}
             nomePorPessoaId={nomePorPessoaId}
             permissoes={permissoesAusencias}
+          />
+        </TabsContent>
+
+        <TabsContent value="documentos">
+          <PessoaDocumentosTab
+            pessoaId={pessoa.id}
+            souAPessoa={minhaPessoaId === pessoa.id}
+            permissoes={permissoesDocumentos}
           />
         </TabsContent>
 

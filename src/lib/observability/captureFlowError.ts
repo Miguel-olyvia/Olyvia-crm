@@ -108,7 +108,12 @@ export type BusinessFlow =
   | "hr-ausencias-load"
   | "hr-ausencias-write"
   | "hr-assiduidade-load"
-  | "hr-assiduidade-write";
+  | "hr-assiduidade-write"
+  | "hr-documentos-load"
+  | "hr-documentos-modelos-load"
+  | "hr-documentos-emitir"
+  | "hr-documentos-ver-conteudo"
+  | "hr-documentos-assinar";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually
