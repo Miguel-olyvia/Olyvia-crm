@@ -55,7 +55,7 @@ const COLUNAS_PESSOA =
   "local_id, " +
   "entidade_legal_org_id, reporta_a_pessoa_id, data_admissao, data_antiguidade, " +
   "data_saida, " +
-  "estado_registo, dias_trabalho, notas, created_at, updated_at";
+  "estado_registo, notas, created_at, updated_at";
 
 const COLUNAS_DADOS_PESSOAIS =
   "id, pessoa_id, organization_id, data_nascimento, ocultar_aniversario, genero, " +
@@ -118,7 +118,7 @@ const COLUNAS_HORARIO_REALIZADO =
 // Sem o numero da conta: na base nao existe coluna com ele em claro. Le-se o
 // formato, a mascara e -- so no caso do IBAN -- o pais.
 const COLUNAS_BANCARIOS =
-  "id, pessoa_id, organization_id, formato_conta, titular, banco, conta_ultimos4, " +
+  "id, pessoa_id, organization_id, formato_conta, titular, banco, agencia, conta_ultimos4, " +
   "conta_pais, swift, is_principal";
 
 const COLUNAS_SAUDE =
@@ -581,6 +581,7 @@ export function usePessoa(pessoaId: string | undefined) {
       conta: string;
       titular?: string | null;
       banco?: string | null;
+      agencia?: string | null;
       swift?: string | null;
     }) =>
       guardar(async () =>
@@ -590,6 +591,7 @@ export function usePessoa(pessoaId: string | undefined) {
           p_conta: args.conta,
           p_titular: args.titular ?? null,
           p_banco: args.banco ?? null,
+          p_agencia: args.agencia ?? null,
           p_swift: args.swift ?? null,
         }),
       ),

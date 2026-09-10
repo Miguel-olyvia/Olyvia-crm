@@ -50,7 +50,6 @@ const PESSOA: Pessoa = {
   data_antiguidade: null,
   data_saida: null,
   estado_registo: "activo",
-  dias_trabalho: null,
   notas: null,
 };
 

@@ -321,7 +321,6 @@ export interface Pessoa {
   data_antiguidade: string | null;
   data_saida: string | null;
   estado_registo: EstadoRegisto;
-  dias_trabalho: DiaSemana[] | null;
   notas: string | null;
   created_at?: string;
   updated_at?: string;
@@ -516,6 +515,7 @@ export interface PessoaDadosBancarios {
   formato_conta: FormatoConta;
   titular: string | null;
   banco: string | null;
+  agencia: string | null;
   conta_ultimos4: string | null;
   conta_pais: string | null;
   swift: string | null;

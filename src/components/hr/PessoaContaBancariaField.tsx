@@ -53,6 +53,7 @@ interface PessoaContaBancariaFieldProps {
     conta: string;
     titular?: string | null;
     banco?: string | null;
+    agencia?: string | null;
     swift?: string | null;
   }) => Promise<string | null>;
 }
@@ -70,6 +71,7 @@ export function PessoaContaBancariaField({
   const [tocado, setTocado] = useState(false);
   const [titular, setTitular] = useState("");
   const [banco, setBanco] = useState("");
+  const [agencia, setAgencia] = useState("");
   const [swift, setSwift] = useState("");
 
   const formatoGravado = bancarios?.formato_conta ?? "iban";
@@ -92,6 +94,7 @@ export function PessoaContaBancariaField({
     setFormato(formatoGravado);
     setTitular(bancarios?.titular ?? "");
     setBanco(bancarios?.banco ?? "");
+    setAgencia(bancarios?.agencia ?? "");
     setSwift(bancarios?.swift ?? "");
     setAEditar(true);
   };
@@ -102,6 +105,7 @@ export function PessoaContaBancariaField({
       conta: contaNormalizada,
       titular: titular.trim() || null,
       banco: banco.trim() || null,
+      agencia: agencia.trim() || null,
       swift: swift.trim().toUpperCase() || null,
     });
     if (mensagem) {
@@ -171,6 +175,14 @@ export function PessoaContaBancariaField({
             <Input id="hr-conta-banco" value={banco} onChange={(e) => setBanco(e.target.value)} />
           </div>
           <div className="space-y-1.5">
+            <Label htmlFor="hr-conta-agencia">{t("hr.campos.agencia")}</Label>
+            <Input
+              id="hr-conta-agencia"
+              value={agencia}
+              onChange={(e) => setAgencia(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
             <Label htmlFor="hr-conta-swift">{t("hr.campos.swift")}</Label>
             <Input id="hr-conta-swift" value={swift} onChange={(e) => setSwift(e.target.value)} />
           </div>
@@ -227,7 +239,12 @@ export function PessoaContaBancariaField({
         )}
       </div>
       {bancarios?.titular && <p className="text-sm">{bancarios.titular}</p>}
-      {bancarios?.banco && <p className="text-sm text-muted-foreground">{bancarios.banco}</p>}
+      {bancarios?.banco && (
+        <p className="text-sm text-muted-foreground">
+          {bancarios.banco}
+          {bancarios.agencia && ` · ${bancarios.agencia}`}
+        </p>
+      )}
       <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
         <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
         {t("hr.conta.mascarado")}

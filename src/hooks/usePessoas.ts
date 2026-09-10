@@ -98,7 +98,6 @@ const COLUNAS_LISTA = [
   "data_antiguidade",
   "data_saida",
   "estado_registo",
-  "dias_trabalho",
   "notas",
 ].join(", ");
 

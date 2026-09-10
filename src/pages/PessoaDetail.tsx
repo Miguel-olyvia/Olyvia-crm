@@ -315,6 +315,7 @@ export default function PessoaDetail() {
             pessoa={pessoa}
             reportaANome={reportaANome}
             entidadeLegalNome={entidadeLegalNome}
+            vinculos={ficha.vinculos}
           />
         </TabsContent>
 

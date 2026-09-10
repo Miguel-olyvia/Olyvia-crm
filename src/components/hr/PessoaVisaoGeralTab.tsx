@@ -23,7 +23,7 @@ import {
   Receipt,
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { DiaSemana, Pessoa } from "@/types/hr";
+import type { DiaSemana, Pessoa, PessoaVinculo } from "@/types/hr";
 
 interface PessoaVisaoGeralTabProps {
   pessoa: Pessoa;
@@ -31,14 +31,25 @@ interface PessoaVisaoGeralTabProps {
   reportaANome: string | null;
   /** Nome da entidade legal, ja resolvido. */
   entidadeLegalNome: string | null;
+  /**
+   * Os vinculos da pessoa. Os dias de trabalho vem do EM VIGOR (activo ou
+   * suspenso) -- `pessoas.dias_trabalho` e legenda legada desde 20261120140000
+   * e a coluna foi largada em 20261125040000.
+   */
+  vinculos: PessoaVinculo[];
 }
 
 export function PessoaVisaoGeralTab({
   pessoa,
   reportaANome,
   entidadeLegalNome,
+  vinculos,
 }: PessoaVisaoGeralTabProps) {
   const { t } = useTranslation();
+
+  const vinculoEmVigor = vinculos.find(
+    (vinculo) => vinculo.estado === "activo" || vinculo.estado === "suspenso",
+  );
 
   const cartoes = [
     { key: "ponto", labelKey: "hr.visaoGeral.cards.ponto", icon: Clock },
@@ -59,8 +70,8 @@ export function PessoaVisaoGeralTab({
     {
       labelKey: "hr.detalhes.diasTrabalho",
       valor:
-        pessoa.dias_trabalho && pessoa.dias_trabalho.length > 0
-          ? pessoa.dias_trabalho.map((dia: DiaSemana) => t(`hr.dias.${dia}`)).join(" · ")
+        vinculoEmVigor?.dias_uteis && vinculoEmVigor.dias_uteis.length > 0
+          ? vinculoEmVigor.dias_uteis.map((dia: DiaSemana) => t(`hr.dias.${dia}`)).join(" · ")
           : null,
     },
   ];
