@@ -20,7 +20,7 @@
  * TODO O CAMPO TEM ETIQUETA ASSOCIADA, e os obrigatorios sao anunciados a
  * leitor de ecra (nao so a vermelho) -- ver `obrigatorio` em `form/Campos.tsx`.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -48,100 +48,37 @@ import {
   TAMANHOS_FARDAMENTO,
   TIPOS_DOCUMENTO,
 } from "@/types/hr";
+import { campoEhObrigatorio, pendenciasDoRascunho } from "@/lib/hr/admissaoObrigatorios";
+import {
+  RASCUNHO_CONVITE_VAZIO,
+  construirPayloadConvite,
+  contaDoRascunho,
+  type RascunhoConvite,
+} from "@/lib/hr/conviteAdmissaoPayload";
 
-type Rascunho = {
-  // Pagina 1 -- pessoas_dados_pessoais, pessoas_identificacao, pessoas_moradas.
-  data_nascimento: string;
-  genero: string;
-  nacionalidade: string;
-  telefone_pessoal: string;
-  email_pessoal: string;
-  estado_civil: string;
-  dependentes: string;
-  naturalidade_freguesia: string;
-  naturalidade_concelho: string;
-  naturalidade_pais: string;
-  conjuge_situacao_profissional: string;
-  dependentes_deficientes: string;
-  habilitacao_academica: string;
-  habilitacao_data_conclusao: string;
-  tipo_documento: string;
-  numero_documento: string;
-  validade_documento: string;
-  nif: string;
-  carta_conducao_numero: string;
-  carta_conducao_categorias: string;
-  carta_conducao_validade: string;
-  linha1: string;
-  linha2: string;
-  codigo_postal: string;
-  localidade: string;
-  distrito: string;
-  pais: string;
-  // Pagina 2 -- conta bancaria (nao gravada, ver cabecalho), fardamento,
-  // sindicalizacao, assinatura.
-  conta_formato: string;
-  conta_numero: string;
-  conta_titular: string;
-  conta_banco: string;
-  tamanho_cima: string;
-  tamanho_baixo: string;
-  tamanho_blazer: string;
-  sindicalizado: boolean;
-  sindicato: string;
-  assinatura_nome: string;
-  aceite: boolean;
-};
+/** Um debounce generoso: nao vale a pena gravar a cada tecla. */
+const DEBOUNCE_RASCUNHO_MS = 3000;
 
-const VAZIO: Rascunho = {
-  data_nascimento: "",
-  genero: "",
-  nacionalidade: "",
-  telefone_pessoal: "",
-  email_pessoal: "",
-  estado_civil: "",
-  dependentes: "",
-  naturalidade_freguesia: "",
-  naturalidade_concelho: "",
-  naturalidade_pais: "",
-  conjuge_situacao_profissional: "",
-  dependentes_deficientes: "",
-  habilitacao_academica: "",
-  habilitacao_data_conclusao: "",
-  tipo_documento: "",
-  numero_documento: "",
-  validade_documento: "",
-  nif: "",
-  carta_conducao_numero: "",
-  carta_conducao_categorias: "",
-  carta_conducao_validade: "",
-  linha1: "",
-  linha2: "",
-  codigo_postal: "",
-  localidade: "",
-  distrito: "",
-  pais: "PT",
-  conta_formato: "",
-  conta_numero: "",
-  conta_titular: "",
-  conta_banco: "",
-  tamanho_cima: "",
-  tamanho_baixo: "",
-  tamanho_blazer: "",
-  sindicalizado: false,
-  sindicato: "",
-  assinatura_nome: "",
-  aceite: false,
-};
-
-function ouNull(valor: string): string | null {
-  return valor.trim() === "" ? null : valor.trim();
-}
+/**
+ * O tipo do rascunho, a forma vazia e a construcao do payload vivem em
+ * `conviteAdmissaoPayload.ts` -- e la que o contrato de chaves com a Edge
+ * Function e com a RPC esta amarrado por teste.
+ */
+type Rascunho = RascunhoConvite;
+const VAZIO: Rascunho = RASCUNHO_CONVITE_VAZIO;
 
 export default function ConviteAdmissao() {
   const { t } = useTranslation();
   const { token } = useParams<{ token: string }>();
-  const { estado, loading, erroInicial, submetendo, submeter } = useConviteAdmissaoPublico(token);
+  const {
+    estado,
+    loading,
+    erroInicial,
+    submetendo,
+    submeter,
+    gravarRascunho,
+    gravarRascunhoAoFechar,
+  } = useConviteAdmissaoPublico(token);
 
   const [pagina, setPagina] = useState<1 | 2>(1);
   const [rascunho, setRascunho] = useState<Rascunho>(VAZIO);
@@ -149,6 +86,7 @@ export default function ConviteAdmissao() {
   const [mostrarTodos, setMostrarTodos] = useState(false);
   const [concluido, setConcluido] = useState<{ avisos: string[] } | null>(null);
   const [erroSubmissao, setErroSubmissao] = useState<string | null>(null);
+  const [rascunhoRestaurado, setRascunhoRestaurado] = useState(false);
 
   const tocar = (campoId: string) =>
     setTocados((anteriores) => {
@@ -159,33 +97,91 @@ export default function ConviteAdmissao() {
   const definir = <K extends keyof Rascunho>(campo: K, valor: Rascunho[K]) =>
     setRascunho((anterior) => ({ ...anterior, [campo]: valor }));
 
-  // Obrigatorios da pagina 1: o minimo para a ficha ficar utilizavel -- nao
-  // sao exigencias da base (essas ja se aplicam do lado de la), sao a
-  // fasquia deste formulario.
-  const erroPagina1 = useMemo(() => {
-    const erros: Partial<Record<keyof Rascunho, string>> = {};
-    if (rascunho.data_nascimento.trim() === "") erros.data_nascimento = t("hr.convite.erroObrigatorio");
-    if (rascunho.telefone_pessoal.trim() === "") erros.telefone_pessoal = t("hr.convite.erroObrigatorio");
-    if (rascunho.nif.trim() === "") erros.nif = t("hr.convite.erroObrigatorio");
-    if (rascunho.tipo_documento.trim() === "") erros.tipo_documento = t("hr.convite.erroObrigatorio");
-    if (rascunho.numero_documento.trim() === "") erros.numero_documento = t("hr.convite.erroObrigatorio");
-    if (rascunho.linha1.trim() === "") erros.linha1 = t("hr.convite.erroObrigatorio");
-    if (rascunho.codigo_postal.trim() === "") erros.codigo_postal = t("hr.convite.erroObrigatorio");
-    if (rascunho.localidade.trim() === "") erros.localidade = t("hr.convite.erroObrigatorio");
-    return erros;
-  }, [rascunho, t]);
+  // Restaura o rascunho gravado (accao "rascunho", ainda por publicar no
+  // lado do servidor -- ver o cabecalho do hook) assim que o token e
+  // validado. Uma so vez: depois disso e o utilizador quem manda no estado.
+  useEffect(() => {
+    if (rascunhoRestaurado || !estado) return;
+    const bruto = estado.rascunho;
+    if (bruto && typeof bruto === "object") {
+      setRascunho((anterior) => {
+        const restaurado = { ...anterior };
+        (Object.keys(VAZIO) as Array<keyof Rascunho>).forEach((campo) => {
+          // A "aceite" (declaracao de veracidade) nunca se restaura: nao se
+          // pre-assinala uma declaracao legal a partir de um rascunho.
+          if (campo === "aceite") return;
+          const valor = (bruto as Record<string, unknown>)[campo];
+          if (valor === undefined || valor === null) return;
+          if (typeof VAZIO[campo] === "boolean") {
+            (restaurado as Record<string, unknown>)[campo] = Boolean(valor);
+          } else {
+            (restaurado as Record<string, unknown>)[campo] = String(valor);
+          }
+        });
+        return restaurado;
+      });
+    }
+    setRascunhoRestaurado(true);
+  }, [estado, rascunhoRestaurado]);
+
+  // O rascunho a gravar: tudo menos a declaracao de veracidade, que e o
+  // unico campo que nunca deve sobreviver entre visitas.
+  const paraGravar = (r: Rascunho): Record<string, unknown> => {
+    const { aceite: _aceite, ...resto } = r;
+    return resto;
+  };
+
+  // Grava, com debounce, sempre que o rascunho muda -- so depois de o
+  // restauro inicial acontecer, para nao gravar de volta o que acabou de
+  // ser lido.
+  const rascunhoRef = useRef(rascunho);
+  rascunhoRef.current = rascunho;
+  useEffect(() => {
+    if (!rascunhoRestaurado || concluido) return;
+    const id = setTimeout(() => {
+      void gravarRascunho(paraGravar(rascunhoRef.current));
+    }, DEBOUNCE_RASCUNHO_MS);
+    return () => clearTimeout(id);
+  }, [rascunho, rascunhoRestaurado, concluido, gravarRascunho]);
+
+  // E ao fechar a aba -- o debounce acima pode nunca chegar a disparar.
+  useEffect(() => {
+    if (concluido) return;
+    const aoFechar = () => gravarRascunhoAoFechar(paraGravar(rascunhoRef.current));
+    const aoMudarVisibilidade = () => {
+      if (document.visibilityState === "hidden") aoFechar();
+    };
+    window.addEventListener("pagehide", aoFechar);
+    document.addEventListener("visibilitychange", aoMudarVisibilidade);
+    return () => {
+      window.removeEventListener("pagehide", aoFechar);
+      document.removeEventListener("visibilitychange", aoMudarVisibilidade);
+    };
+  }, [concluido, gravarRascunhoAoFechar]);
+
+  // Obrigatorios da pagina 1 -- a lista partilhada com a base (ver
+  // `admissaoObrigatorios.ts`; a autoridade em SQL ainda nao esta aplicada,
+  // por isso este e hoje o unico lado a exigi-los).
+  const pendencias1 = useMemo(
+    () => new Set<string>(pendenciasDoRascunho(rascunho)),
+    [rascunho],
+  );
 
   const erroDe = (campoId: keyof Rascunho): string | null => {
     if (!mostrarTodos && !tocados.has(campoId)) return null;
-    return erroPagina1[campoId] ?? null;
+    return pendencias1.has(campoId) ? t("hr.convite.erroObrigatorio") : null;
   };
 
+  const obrigatorio1 = (campoId: Parameters<typeof campoEhObrigatorio>[1]): boolean =>
+    campoEhObrigatorio(rascunho, campoId);
+
   const avancar = () => {
-    if (Object.keys(erroPagina1).length > 0) {
+    if (pendencias1.size > 0) {
       setMostrarTodos(true);
       return;
     }
     setMostrarTodos(false);
+    void gravarRascunho(paraGravar(rascunho));
     setPagina(2);
   };
 
@@ -194,57 +190,14 @@ export default function ConviteAdmissao() {
 
   const submeterFormulario = async () => {
     if (!podeSubmeter) return;
-    const dados: DadosSubmissaoConvite = {
-      data_nascimento: ouNull(rascunho.data_nascimento),
-      genero: ouNull(rascunho.genero),
-      nacionalidade: ouNull(rascunho.nacionalidade)?.toUpperCase() ?? null,
-      telefone_pessoal: ouNull(rascunho.telefone_pessoal),
-      email_pessoal: ouNull(rascunho.email_pessoal),
-      estado_civil: ouNull(rascunho.estado_civil),
-      dependentes: rascunho.dependentes.trim() === "" ? null : Number(rascunho.dependentes),
-      naturalidade_freguesia: ouNull(rascunho.naturalidade_freguesia),
-      naturalidade_concelho: ouNull(rascunho.naturalidade_concelho),
-      naturalidade_pais: ouNull(rascunho.naturalidade_pais)?.toUpperCase() ?? null,
-      conjuge_situacao_profissional: ouNull(rascunho.conjuge_situacao_profissional),
-      dependentes_deficientes:
-        rascunho.dependentes_deficientes.trim() === ""
-          ? null
-          : Number(rascunho.dependentes_deficientes),
-      habilitacao_academica: ouNull(rascunho.habilitacao_academica),
-      habilitacao_data_conclusao: ouNull(rascunho.habilitacao_data_conclusao),
-      tipo_documento: ouNull(rascunho.tipo_documento),
-      numero_documento: ouNull(rascunho.numero_documento),
-      validade_documento: ouNull(rascunho.validade_documento),
-      nif: ouNull(rascunho.nif),
-      carta_conducao_numero: ouNull(rascunho.carta_conducao_numero),
-      carta_conducao_categorias: ouNull(rascunho.carta_conducao_categorias),
-      carta_conducao_validade: ouNull(rascunho.carta_conducao_validade),
-      linha1: ouNull(rascunho.linha1),
-      linha2: ouNull(rascunho.linha2),
-      codigo_postal: ouNull(rascunho.codigo_postal),
-      localidade: ouNull(rascunho.localidade),
-      distrito: ouNull(rascunho.distrito),
-      pais: ouNull(rascunho.pais)?.toUpperCase() ?? "PT",
-      tamanho_cima: ouNull(rascunho.tamanho_cima),
-      tamanho_baixo: ouNull(rascunho.tamanho_baixo),
-      tamanho_blazer: ouNull(rascunho.tamanho_blazer),
-      sindicalizado: rascunho.sindicalizado,
-      sindicato: rascunho.sindicalizado ? ouNull(rascunho.sindicato) : null,
-      // So existe para a Edge Function detectar e avisar que nao foi gravada
-      // -- ver o cabecalho deste ficheiro.
-      conta:
-        rascunho.conta_formato.trim() !== "" || rascunho.conta_numero.trim() !== ""
-          ? {
-              formato: rascunho.conta_formato,
-              numero: rascunho.conta_numero,
-              titular: ouNull(rascunho.conta_titular),
-              banco: ouNull(rascunho.conta_banco),
-            }
-          : undefined,
-    };
+    // O payload sai inteiro do contrato partilhado -- ver
+    // `conviteAdmissaoPayload.ts`. A conta bancaria viaja a parte: a Edge
+    // Function nao a grava, so devolve o aviso.
+    const dados: DadosSubmissaoConvite = construirPayloadConvite(rascunho);
+    const conta = contaDoRascunho(rascunho);
 
     setErroSubmissao(null);
-    const resultado = await submeter(dados, rascunho.assinatura_nome.trim());
+    const resultado = await submeter(dados, rascunho.assinatura_nome.trim(), conta);
     if (!resultado.ok) {
       setErroSubmissao(resultado.erro ?? t("hr.convite.erroSubmeter"));
       return;
@@ -336,6 +289,8 @@ export default function ConviteAdmissao() {
                 <CampoPais
                   id="convite-nacionalidade"
                   label={t("hr.campos.nacionalidade")}
+                  obrigatorio
+                  erro={erroDe("nacionalidade")}
                   valor={rascunho.nacionalidade}
                   onChange={(v) => definir("nacionalidade", v)}
                 />
@@ -351,12 +306,16 @@ export default function ConviteAdmissao() {
                   id="convite-email-pessoal"
                   label={t("hr.campos.emailPessoal")}
                   tipo="email"
+                  obrigatorio
+                  erro={erroDe("email_pessoal")}
                   valor={rascunho.email_pessoal}
                   onChange={(v) => definir("email_pessoal", v)}
                 />
                 <CampoSelect
                   id="convite-estado-civil"
                   label={t("hr.campos.estadoCivil")}
+                  obrigatorio
+                  erro={erroDe("estado_civil")}
                   valor={rascunho.estado_civil}
                   vazioLabel={t("hr.campos.semValor")}
                   opcoes={ESTADOS_CIVIS.map((e) => ({ value: e, label: t(`hr.estadoCivil.${e}`) }))}
@@ -368,6 +327,9 @@ export default function ConviteAdmissao() {
                   tipo="number"
                   min={0}
                   max={30}
+                  obrigatorio
+                  erro={erroDe("dependentes")}
+                  ajuda={t("hr.convite.ajudaDependentesZero")}
                   valor={rascunho.dependentes}
                   onChange={(v) => definir("dependentes", v)}
                 />
@@ -470,6 +432,8 @@ export default function ConviteAdmissao() {
                   id="convite-validade-documento"
                   label={t("hr.campos.validadeDocumento")}
                   tipo="date"
+                  obrigatorio={obrigatorio1("validade_documento")}
+                  erro={erroDe("validade_documento")}
                   valor={rascunho.validade_documento}
                   onChange={(v) => definir("validade_documento", v)}
                 />
@@ -480,6 +444,14 @@ export default function ConviteAdmissao() {
                   erro={erroDe("nif")}
                   valor={rascunho.nif}
                   onChange={(v) => definir("nif", v)}
+                />
+                <CampoTexto
+                  id="convite-niss"
+                  label={t("hr.campos.niss")}
+                  obrigatorio
+                  erro={erroDe("niss")}
+                  valor={rascunho.niss}
+                  onChange={(v) => definir("niss", v.replace(/\s+/g, ""))}
                 />
                 <CampoTexto
                   id="convite-carta-numero"
@@ -615,6 +587,14 @@ export default function ConviteAdmissao() {
                   }))}
                   onChange={(v) => definir("tamanho_cima", v)}
                 />
+                {rascunho.tamanho_cima === "outro" && (
+                  <CampoTexto
+                    id="convite-tamanho-cima-detalhe"
+                    label={t("hr.fardamento.detalhe")}
+                    valor={rascunho.tamanho_cima_detalhe}
+                    onChange={(v) => definir("tamanho_cima_detalhe", v)}
+                  />
+                )}
                 <CampoSelect
                   id="convite-tamanho-baixo"
                   label={t("hr.fardamento.tamanhoBaixo")}
@@ -626,6 +606,14 @@ export default function ConviteAdmissao() {
                   }))}
                   onChange={(v) => definir("tamanho_baixo", v)}
                 />
+                {rascunho.tamanho_baixo === "outro" && (
+                  <CampoTexto
+                    id="convite-tamanho-baixo-detalhe"
+                    label={t("hr.fardamento.detalhe")}
+                    valor={rascunho.tamanho_baixo_detalhe}
+                    onChange={(v) => definir("tamanho_baixo_detalhe", v)}
+                  />
+                )}
                 <CampoSelect
                   id="convite-tamanho-blazer"
                   label={t("hr.fardamento.tamanhoBlazer")}
@@ -637,6 +625,14 @@ export default function ConviteAdmissao() {
                   }))}
                   onChange={(v) => definir("tamanho_blazer", v)}
                 />
+                {rascunho.tamanho_blazer === "outro" && (
+                  <CampoTexto
+                    id="convite-tamanho-blazer-detalhe"
+                    label={t("hr.fardamento.detalhe")}
+                    valor={rascunho.tamanho_blazer_detalhe}
+                    onChange={(v) => definir("tamanho_blazer_detalhe", v)}
+                  />
+                )}
               </CardContent>
             </Card>
 

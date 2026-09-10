@@ -1,16 +1,25 @@
 /**
- * O lado PUBLICO do convite de admissao: ler o estado do token e submeter o
- * formulario. Sem sessao nenhuma -- e por isso que fala com a Edge Function
- * `convite-admissao` (accoes "estado" / "submeter"), nunca directamente com a
- * base: essas duas RPCs so `service_role` as executa.
+ * O lado PUBLICO do convite de admissao: ler o estado do token, gravar o
+ * rascunho e submeter o formulario. Sem sessao nenhuma -- e por isso que fala
+ * com a Edge Function `convite-admissao` (accoes "estado" / "rascunho" /
+ * "submeter"), nunca directamente com a base: essas RPCs so `service_role`
+ * as executa.
+ *
+ * A GRAVACAO DE RASCUNHO NUNCA INTERROMPE O PREENCHIMENTO
+ * --------------------------------------------------------
+ * A accao "rascunho" existe dos dois lados (Edge Function +
+ * `rpc_hr_convite_admissao_rascunho`), mas uma falha a gravar e so
+ * registada, nunca mostrada: um rascunho e uma conveniencia e nao pode
+ * parar quem esta a preencher o formulario.
  *
  * O token em si NUNCA fica em `localStorage`/`sessionStorage`: vive so na
  * URL e no estado deste hook, e desaparece quando a aba fecha.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import type { ContaDoConvite } from "@/lib/hr/conviteAdmissaoPayload";
 
 export interface ConviteEstado {
   nome: string | null;
@@ -63,16 +72,74 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
     };
   }, [token]);
 
+  // Guarda o token mais recente para a versao "sincrona" (pagehide), que nao
+  // pode depender de recriar o callback a cada tecla.
+  const tokenRef = useRef(token);
+  useEffect(() => {
+    tokenRef.current = token;
+  }, [token]);
+
+  /**
+   * Gravar o rascunho, em segundo plano. NUNCA lanca -- uma falha aqui e so
+   * registada, nunca mostrada a quem preenche o formulario.
+   */
+  const gravarRascunho = useCallback(
+    async (rascunho: Record<string, unknown>) => {
+      if (!token) return;
+      try {
+        const { data, error } = await supabase.functions.invoke("convite-admissao", {
+          body: { action: "rascunho", token, rascunho },
+        });
+        if (error || data?.error) {
+          captureFlowError(error ?? new Error(String(data?.error)), "hr-convite-admissao-rascunho");
+        }
+      } catch (e) {
+        captureFlowError(e, "hr-convite-admissao-rascunho");
+      }
+    },
+    [token],
+  );
+
+  /**
+   * A mesma gravacao, mas disparada a fechar a aba (`pagehide` /
+   * `visibilitychange`) -- por isso nao pode ser `async/await` bloqueante
+   * nem usar `sendBeacon` (que nao deixa escolher o cabecalho `apikey`). Um
+   * `fetch` com `keepalive: true` sobrevive ao descarregamento da pagina; o
+   * pedido e disparado e esquecido, sem tratar resposta nem erro.
+   */
+  const gravarRascunhoAoFechar = useCallback((rascunho: Record<string, unknown>) => {
+    const tokenActual = tokenRef.current;
+    if (!tokenActual) return;
+    try {
+      const base = String(import.meta.env.VITE_SUPABASE_URL ?? "").replace(/\/+$/, "");
+      const anonKey = String(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "");
+      if (!base || !anonKey) return;
+      void fetch(`${base}/functions/v1/convite-admissao`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          apikey: anonKey,
+          Authorization: `Bearer ${anonKey}`,
+        },
+        body: JSON.stringify({ action: "rascunho", token: tokenActual, rascunho }),
+        keepalive: true,
+      });
+    } catch {
+      // Best-effort: a aba esta a fechar, nao ha a quem reportar.
+    }
+  }, []);
+
   const submeter = useCallback(
     async (
       dados: DadosSubmissaoConvite,
       assinaturaNome: string,
+      conta?: ContaDoConvite,
     ): Promise<{ ok: boolean; erro: string | null; avisos: string[] }> => {
       if (!token) return { ok: false, erro: "hr.convite.tokenInvalido", avisos: [] };
       setSubmetendo(true);
       try {
         const { data, error } = await supabase.functions.invoke("convite-admissao", {
-          body: { action: "submeter", token, dados, assinatura_nome: assinaturaNome },
+          body: { action: "submeter", token, dados, assinatura_nome: assinaturaNome, conta },
         });
         if (error || data?.error) {
           if (error) captureFlowError(error, "hr-convite-admissao-publico");
@@ -89,5 +156,13 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
     [token],
   );
 
-  return { estado, loading, erroInicial, submetendo, submeter };
+  return {
+    estado,
+    loading,
+    erroInicial,
+    submetendo,
+    submeter,
+    gravarRascunho,
+    gravarRascunhoAoFechar,
+  };
 }

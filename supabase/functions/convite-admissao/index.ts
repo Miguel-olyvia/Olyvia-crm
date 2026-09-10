@@ -1,16 +1,16 @@
 /**
- * O convite de admissao: a UNICA ponte entre o browser sem sessao e as tres
- * RPCs `rpc_hr_convite_admissao_*`, que sao `SECURITY DEFINER` e (duas delas)
+ * O convite de admissao: a UNICA ponte entre o browser sem sessao e as quatro
+ * RPCs `rpc_hr_convite_admissao_*`, que sao `SECURITY DEFINER` e (tres delas)
  * so executaveis por `service_role` -- ver o PLANO FECHADO, seccao 3.
  *
- * TRES ACCOES, TRES NIVEIS DE CONFIANCA
- * --------------------------------------
+ * QUATRO ACCOES, DOIS NIVEIS DE CONFIANCA
+ * ---------------------------------------
  *  - "criar": chamada por um utilizador AUTENTICADO com
  *    `hr.pessoas.convite.enviar`. Reencaminha o `Authorization` do pedido para
  *    o cliente Supabase, para que `auth.uid()` dentro da RPC resolva a pessoa
  *    certa -- a verificacao de permissao e a que ja existe na base, nao uma
  *    reimplementacao aqui.
- *  - "estado" e "submeter": SEM sessao nenhuma -- e todo o sentido de um
+ *  - "estado", "rascunho" e "submeter": SEM sessao nenhuma -- e todo o sentido de um
  *    convite. Correm com `service_role`, atras de rate limit por IP (o mesmo
  *    mecanismo de `validate-contract-signature`).
  *
@@ -34,45 +34,55 @@ initSentry();
 
 const VALIDADE_DIAS = 7;
 
-// Colunas de `pessoas_dados_pessoais`, `pessoas_identificacao`, `pessoas_moradas`,
-// `pessoas_fardamento` e `pessoas_sindicalizacao` que o convite pode escrever.
+// A LISTA BRANCA DO CONVITE -- plana, com prefixo de tabela so onde o nome
+// colidiria (`morada_*`). E EXACTAMENTE a lista de
+// `src/lib/hr/conviteAdmissaoPayload.ts` e exactamente a que
+// `rpc_hr_convite_admissao_submeter` le do jsonb: as tres estao amarradas
+// por `src/lib/hr/__tests__/conviteAdmissaoContrato.test.ts`, precisamente
+// porque ja divergiram uma vez e a divergencia apagava fichas inteiras em
+// silencio (ver o cabecalho do modulo do contrato).
+//
 // Uma lista branca explicita -- NUNCA `jsonb_populate_record` nem SQL
 // dinamico -- e o mesmo mecanismo que impede o convite de tocar
 // `pessoas_retribuicoes` / `pessoas_vinculos` / `anew_memberships`.
-const CAMPOS_DADOS_PESSOAIS = [
-  "data_nascimento",
-  "genero",
-  "nacionalidade",
-  "telefone_pessoal",
-  "estado_civil",
-  "dependentes",
-  "naturalidade_freguesia",
-  "naturalidade_concelho",
-  "naturalidade_pais",
+const CAMPOS_CONVITE = [
+  "carta_conducao_categorias",
+  "carta_conducao_numero",
+  "carta_conducao_validade",
   "conjuge_situacao_profissional",
+  "data_nascimento",
+  "dependentes",
   "dependentes_deficientes",
+  "email_pessoal",
+  "estado_civil",
+  "genero",
   "habilitacao_academica",
   "habilitacao_data_conclusao",
-] as const;
-const CAMPOS_IDENTIFICACAO = [
-  "tipo_documento",
-  "numero_documento",
-  "validade_documento",
+  "morada_codigo_postal",
+  "morada_distrito",
+  "morada_linha1",
+  "morada_linha2",
+  "morada_localidade",
+  "morada_pais",
+  "nacionalidade",
+  "naturalidade_concelho",
+  "naturalidade_freguesia",
+  "naturalidade_pais",
   "nif",
-  "carta_conducao_numero",
-  "carta_conducao_categorias",
-  "carta_conducao_validade",
-] as const;
-const CAMPOS_MORADA = ["linha1", "linha2", "codigo_postal", "localidade", "distrito", "pais"] as const;
-const CAMPOS_FARDAMENTO = [
-  "tamanho_cima",
-  "tamanho_cima_detalhe",
+  "niss",
+  "numero_documento",
+  "sindicalizado",
+  "sindicato",
   "tamanho_baixo",
   "tamanho_baixo_detalhe",
   "tamanho_blazer",
   "tamanho_blazer_detalhe",
+  "tamanho_cima",
+  "tamanho_cima_detalhe",
+  "telefone_pessoal",
+  "tipo_documento",
+  "validade_documento",
 ] as const;
-const CAMPOS_SINDICALIZACAO = ["sindicalizado", "sindicato", "quota_percentagem"] as const;
 
 function soCampos<T extends readonly string[]>(origem: Record<string, unknown>, campos: T) {
   const resultado: Record<string, unknown> = {};
@@ -172,7 +182,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
     }
 
     // -- estado / submeter: sem sessao, service_role, atras de rate limit ----
-    if (action !== "estado" && action !== "submeter") {
+    if (action !== "estado" && action !== "submeter" && action !== "rascunho") {
       return responder({ error: "accao_desconhecida" }, 400);
     }
 
@@ -186,7 +196,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const limite = await checkRateLimit(svc, {
       bucket: `convite-admissao-${action}`,
       identifier: ip,
-      maxAttempts: action === "estado" ? 30 : 10,
+      // O rascunho grava com "debounce" de 3s enquanto a pessoa escreve: um
+      // tecto de 10/hora, como o da submissao, matava o preenchimento normal.
+      maxAttempts: action === "estado" ? 30 : action === "rascunho" ? 240 : 10,
       windowMinutes: 60,
     });
     if (!limite.allowed) {
@@ -207,7 +219,35 @@ Deno.serve(async (req: Request): Promise<Response> => {
         captureError(error);
         return responder({ error: "convite_invalido" }, 401);
       }
+      // A RPC devolve o motivo EM JSONB (nao por excepcao) precisamente para
+      // o incremento de `attempts` sobreviver -- um RAISE abortava a
+      // transaccao e levava o proprio contador com ele.
+      const motivo = (data as Record<string, unknown> | null)?.erro;
+      if (typeof motivo === "string") {
+        return responder({ error: motivo }, 401);
+      }
       return responder({ ok: true, convite: data });
+    }
+
+    // -- rascunho: gravacao intermedia, melhor-esforco ------------------------
+    if (action === "rascunho") {
+      const rascunho = payload?.rascunho;
+      if (!rascunho || typeof rascunho !== "object" || Array.isArray(rascunho)) {
+        return responder({ error: "pedido_invalido" }, 400);
+      }
+      const { data, error } = await svc.rpc("rpc_hr_convite_admissao_rascunho", {
+        p_token_hash: tokenHash,
+        p_rascunho: rascunho,
+      });
+      if (error) {
+        captureError(error);
+        return responder({ error: "rascunho_nao_gravado" }, 400);
+      }
+      const motivo = (data as Record<string, unknown> | null)?.erro;
+      if (typeof motivo === "string") {
+        return responder({ error: motivo }, 401);
+      }
+      return responder({ ok: true });
     }
 
     // -- submeter --------------------------------------------------------------
@@ -220,23 +260,19 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return responder({ error: "assinatura_obrigatoria" }, 400);
     }
 
+    // A conta bancaria vem FORA de `dados` e nao e gravada -- ver o cabecalho
+    // desta funcao. So serve para devolver o aviso a quem preencheu.
     const avisos: string[] = [];
-    if ((dados as Record<string, unknown>).conta) {
+    if (payload?.conta) {
       avisos.push("conta_nao_gravada");
     }
 
     const corpo = {
       p_token_hash: tokenHash,
-      p_dados: {
-        pessoas_dados_pessoais: soCampos(dados, CAMPOS_DADOS_PESSOAIS),
-        pessoas_identificacao: soCampos(dados, CAMPOS_IDENTIFICACAO),
-        pessoas_moradas: soCampos(dados, CAMPOS_MORADA),
-        pessoas_fardamento: soCampos(dados, CAMPOS_FARDAMENTO),
-        pessoas_sindicalizacao: soCampos(dados, CAMPOS_SINDICALIZACAO),
-        email_pessoal: typeof (dados as Record<string, unknown>).email_pessoal === "string"
-          ? (dados as Record<string, unknown>).email_pessoal
-          : null,
-      },
+      // PLANO, sem reagrupar por tabela: a RPC le `p_dados ->> '<chave>'`
+      // directamente. Reagrupar aqui foi exactamente o que fez todos os `->>`
+      // resolverem NULL e apagarem as fichas.
+      p_dados: soCampos(dados as Record<string, unknown>, CAMPOS_CONVITE),
       p_assinatura_nome: assinaturaNome.trim(),
       p_ip: ip,
       p_user_agent: req.headers.get("user-agent") ?? null,

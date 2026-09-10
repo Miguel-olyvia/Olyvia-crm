@@ -278,17 +278,26 @@ export function CampoPais({
   ajuda,
   erro,
   className,
+  obrigatorio,
   valor,
   onChange,
   disabled,
 }: CampoPaisProps) {
   const tocar = useContext(CamposTocadosContext);
   return (
-    <Envolvente id={id} label={label} ajuda={ajuda} erro={erro} className={className}>
+    <Envolvente
+      id={id}
+      label={label}
+      ajuda={ajuda}
+      erro={erro}
+      className={className}
+      obrigatorio={obrigatorio}
+    >
       <CountrySelect
         id={id}
         value={valor}
         disabled={disabled}
+        aria-required={obrigatorio || undefined}
         aria-invalid={erro ? true : undefined}
         aria-describedby={erro ? `${id}-erro` : ajuda ? `${id}-ajuda` : undefined}
         className={cn(erro && "border-destructive")}

@@ -53,6 +53,7 @@ interface CountrySelectProps {
   className?: string;
   "aria-invalid"?: boolean;
   "aria-describedby"?: string;
+  "aria-required"?: boolean;
   onBlur?: () => void;
 }
 
@@ -105,6 +106,7 @@ export function CountrySelect({
           variant="outline"
           role="combobox"
           aria-expanded={aberto}
+          aria-required={aria["aria-required"]}
           aria-invalid={aria["aria-invalid"]}
           aria-describedby={aria["aria-describedby"]}
           disabled={disabled || loading}

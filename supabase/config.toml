@@ -112,3 +112,11 @@ verify_jwt = true
 
 [functions.stripe-webhook]
 verify_jwt = false
+
+# O link do convite de admissao abre-se sem sessao nenhuma: quem o abre nao
+# tem JWT para dar. Com verify_jwt o gateway rejeitava o pedido antes de a
+# funcao arrancar, e o convite nunca abria. A funcao autentica-se a si propria
+# (service_role) e trava por rate limit por IP; a accao "criar", essa, exige o
+# Authorization de quem convida e verifica a permissao na propria base.
+[functions.convite-admissao]
+verify_jwt = false

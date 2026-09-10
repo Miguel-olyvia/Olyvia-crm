@@ -96,6 +96,8 @@ export type BusinessFlow =
   // aqui -- so falha de rede, timeout ou erro de sintaxe.
   | "hr-convite-admissao-criar"
   | "hr-convite-admissao-publico"
+  | "hr-convite-admissao-rascunho"
+  | "hr-criar-acesso-pessoa"
   // Locais de trabalho e papeis de acesso, lidos pelo assistente de criacao de
   // pessoa e pelo editor de horario. Uma recusa por permissao nao vem para
   // aqui; uma falha de rede vem, porque sem locais o horario perde o "onde".

@@ -134,6 +134,7 @@ const SupportAccess = lazy(() => import("./pages/SupportAccess"));
 const AuthAuditLog = lazy(() => import("./pages/AuthAuditLog"));
 const DataErasureRequests = lazy(() => import("./pages/DataErasureRequests"));
 const BookingManage = lazy(() => import("./pages/BookingManage"));
+const ConviteAdmissao = lazy(() => import("./pages/ConviteAdmissao"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
@@ -183,6 +184,10 @@ const App = () => (
                   <Route path="/test-widget" element={<TestWidget />} />
                   <Route path="/booking/manage" element={<BookingManage />} />
                   <Route path="/booking/cancel" element={<BookingManage />} />
+                  {/* O convite de admissao abre-se SEM sessao, pelo link do e-mail:
+                      fica fora do ProtectedRoute de proposito. Quem manda e a
+                      validade do token, verificada na Edge Function. */}
+                  <Route path="/admissao/:token" element={<ConviteAdmissao />} />
 
                   {/* Client portal — guard + layout mount once for all portal routes */}
                   <Route element={<ClientRouteGuard />}>

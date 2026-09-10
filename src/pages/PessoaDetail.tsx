@@ -30,6 +30,7 @@ import {
   CalendarRange,
   FileText,
   FolderOpen,
+  KeyRound,
   LayoutDashboard,
   ListChecks,
   MoreHorizontal,
@@ -37,6 +38,7 @@ import {
   TrendingUp,
   User,
 } from "lucide-react";
+import { CriarAcessoDialog } from "@/components/hr/CriarAcessoDialog";
 import { EnviarConviteDialog } from "@/components/hr/EnviarConviteDialog";
 import { PermissionGate } from "@/components/PermissionGate";
 import { PessoaContratoTab } from "@/components/hr/PessoaContratoTab";
@@ -76,6 +78,8 @@ export default function PessoaDetail() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "visaoGeral";
   const [conviteDialogoAberto, setConviteDialogoAberto] = useState(false);
+  const [acessoDialogoAberto, setAcessoDialogoAberto] = useState(false);
+  const [acessoModo, setAcessoModo] = useState<"criar" | "reenviar">("criar");
 
   const { companies, activeCompany } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
@@ -258,8 +262,11 @@ export default function PessoaDetail() {
             {[pessoa.cargo, pessoa.local_trabalho].filter(Boolean).join(" · ") || "—"}
           </p>
         </div>
-        {/* So faz sentido convidar quem ainda nao tem conta ligada -- ver
-            `hr.estadoAcesso`. */}
+        {/* So faz sentido convidar ou criar acesso a quem ainda nao tem
+            conta ligada -- ver `hr.estadoAcesso`. Sao dois caminhos: o
+            convite deixa a PESSOA preencher a propria ficha; "criar acesso"
+            e o RH a dar-lhe login directamente, com credenciais por
+            e-mail (PLANO FECHADO, seccao 5-7). */}
         {!ficha.conta && (
           <PermissionGate permission="hr.pessoas.convite.enviar">
             <Button variant="outline" className="gap-2" onClick={() => setConviteDialogoAberto(true)}>
@@ -268,6 +275,19 @@ export default function PessoaDetail() {
             </Button>
           </PermissionGate>
         )}
+        <PermissionGate permission="hr.pessoas.conta.criar">
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => {
+              setAcessoModo(ficha.conta ? "reenviar" : "criar");
+              setAcessoDialogoAberto(true);
+            }}
+          >
+            <KeyRound className="h-4 w-4" />
+            {t(ficha.conta ? "hr.acesso.reenviar" : "hr.acesso.criar")}
+          </Button>
+        </PermissionGate>
       </div>
 
       <EnviarConviteDialog
@@ -275,6 +295,14 @@ export default function PessoaDetail() {
         onOpenChange={setConviteDialogoAberto}
         pessoaId={pessoa.id}
         emailSugerido={pessoa.email_pessoal}
+      />
+
+      <CriarAcessoDialog
+        open={acessoDialogoAberto}
+        onOpenChange={setAcessoDialogoAberto}
+        pessoaId={pessoa.id}
+        modo={acessoModo}
+        onCriado={() => void ficha.refresh()}
       />
 
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
