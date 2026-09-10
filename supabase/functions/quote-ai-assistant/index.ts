@@ -269,10 +269,11 @@ INSTRUÇÕES:
 2. Distingue sempre o objeto mencionado no texto (que já existe no espaço, ou vai ser destruído) do produto/serviço a sugerir (que serve para agir sobre esse objeto — proteger, demolir, remover). Nunca sugiras o próprio objeto como se fosse a resposta, mesmo que um produto do catálogo tenha um nome parecido ou igual.
 3. NUNCA inventes um id ou um produto/serviço que não esteja na lista.
 4. Se nenhum for adequado, devolve suggestions: [].
-5. Responde SEMPRE em português e SÓ com um JSON válido, neste formato:
+5. Se nenhum item da lista for adequado, mas souberes, pelo teu conhecimento geral de obras de remodelação, que tipo de material ou serviço seria tipicamente necessário para este campo, podes devolver UMA sugestão informativa com "product_id": null, "service_id": null, "exists_in_catalog": false, "type": "product" ou "service" (o que fizer mais sentido), e "name" com o nome genérico desse material/serviço — NUNCA inventes um id nem finjas que é um item real do catálogo. Usa isto com moderação, só quando fizer mesmo sentido; caso contrário suggestions: [] continua a ser uma resposta válida.
+6. Responde SEMPRE em português e SÓ com um JSON válido, neste formato:
 {
   "suggestions": [
-    { "product_id": "uuid ou null", "service_id": "uuid ou null", "name": "nome exato do catálogo", "reason": "razão da sugestão", "confidence": 0.0 }
+    { "product_id": "uuid ou null", "service_id": "uuid ou null", "exists_in_catalog": true ou false, "type": "product" ou "service", "name": "nome exato do catálogo OU nome genérico do que falta", "reason": "razão da sugestão", "confidence": 0.0 }
   ]
 }`;
 
@@ -352,6 +353,30 @@ INSTRUÇÕES:
       // mesmo tempo, mapeia cada sugestão válida para o contrato esperado
       // pelo frontend (AiSuggestionResponseItem em useQuoteDiagnosticSuggestions.ts).
       const mappedSuggestions = rawSuggestions.map((s: any) => {
+        // Caso B — sugestão informativa: a própria IA diz que não existe no
+        // catálogo. Ignora por completo qualquer product_id/service_id que
+        // tenha enviado (nunca confiar num id quando o modelo afirma que não
+        // é um item real) e valida só que há um nome genérico utilizável.
+        if (s?.exists_in_catalog === false) {
+          const name = typeof s?.name === "string" ? s.name.trim() : "";
+          if (!name) return null;
+
+          return {
+            target_type: (s?.type === "service" ? "service" : "product") as "product" | "service",
+            product_id: null,
+            service_id: null,
+            catalog_item_id: null,
+            descricao: name,
+            qty: 1,
+            unidade: null,
+            rationale: s?.reason ?? null,
+            confidence: typeof s?.confidence === "number" ? s.confidence : null,
+            exists_in_catalog: false,
+          };
+        }
+
+        // Caso A — comportamento atual (id undefined/true tratado da mesma
+        // forma, por compatibilidade caso o modelo omita o campo).
         const pid = s?.product_id || null;
         const sid = s?.service_id || null;
 
@@ -374,6 +399,7 @@ INSTRUÇÕES:
             unidade: null,
             rationale: s?.reason ?? null,
             confidence: typeof s?.confidence === "number" ? s.confidence : null,
+            exists_in_catalog: true,
           };
         }
 
@@ -388,6 +414,7 @@ INSTRUÇÕES:
             unidade: null,
             rationale: s?.reason ?? null,
             confidence: typeof s?.confidence === "number" ? s.confidence : null,
+            exists_in_catalog: true,
           };
         }
 
@@ -398,7 +425,7 @@ INSTRUÇÕES:
 
       if (filteredSuggestions.length !== rawSuggestions.length) {
         await captureError(
-          new Error("quote-ai-assistant diagnostic_suggestions: modelo devolveu id fora do catálogo filtrado"),
+          new Error("quote-ai-assistant diagnostic_suggestions: sugestão inválida descartada (id fora do catálogo filtrado, ou sugestão sem nome)"),
           {
             function: "quote-ai-assistant",
             mode: "diagnostic_suggestions",

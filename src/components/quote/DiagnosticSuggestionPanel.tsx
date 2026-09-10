@@ -78,7 +78,9 @@ export function DiagnosticSuggestionPanel({
   return (
     <TooltipProvider>
       <div className="space-y-1.5">
-        {suggestions.map((suggestion) => (
+        {suggestions.map((suggestion) => {
+          const isGap = suggestion.existsInCatalog === false;
+          return (
           <div
             key={suggestion.client_id}
             className="flex items-center gap-2 rounded-md border bg-background/60 px-2.5 py-1.5"
@@ -90,20 +92,30 @@ export function DiagnosticSuggestionPanel({
                 "Regra"
               )}
             </Badge>
+            {isGap && (
+              <Badge
+                variant="outline"
+                className="shrink-0 text-[10px] border-amber-500/40 bg-amber-500/10 text-amber-800"
+              >
+                Não existe no catálogo
+              </Badge>
+            )}
 
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm">{suggestion.descricao}</p>
             </div>
 
-            <Input
-              type="number"
-              min={0}
-              step="0.01"
-              value={suggestion.qty}
-              onChange={(e) => onQtyChange(suggestion, Number(e.target.value) || 0)}
-              className="h-7 w-20 text-xs"
-            />
-            {suggestion.unidade && (
+            {!isGap && (
+              <Input
+                type="number"
+                min={0}
+                step="0.01"
+                value={suggestion.qty}
+                onChange={(e) => onQtyChange(suggestion, Number(e.target.value) || 0)}
+                className="h-7 w-20 text-xs"
+              />
+            )}
+            {!isGap && suggestion.unidade && (
               <span className="w-10 shrink-0 text-xs text-muted-foreground">{suggestion.unidade}</span>
             )}
 
@@ -143,28 +155,31 @@ export function DiagnosticSuggestionPanel({
               </Tooltip>
             )}
 
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              className="h-7 w-7 shrink-0 text-green-600 hover:text-green-700 hover:bg-green-500/10"
-              onClick={() => onAccept(suggestion)}
-              aria-label="Aceitar sugestão"
-            >
-              <Check className="h-4 w-4" />
-            </Button>
+            {!isGap && (
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 shrink-0 text-green-600 hover:text-green-700 hover:bg-green-500/10"
+                onClick={() => onAccept(suggestion)}
+                aria-label="Aceitar sugestão"
+              >
+                <Check className="h-4 w-4" />
+              </Button>
+            )}
             <Button
               type="button"
               size="icon"
               variant="ghost"
               className="h-7 w-7 shrink-0 text-destructive hover:text-destructive"
               onClick={() => onReject(suggestion)}
-              aria-label="Rejeitar sugestão"
+              aria-label={isGap ? "Dispensar aviso" : "Rejeitar sugestão"}
             >
               <X className="h-4 w-4" />
             </Button>
           </div>
-        ))}
+          );
+        })}
       </div>
     </TooltipProvider>
   );

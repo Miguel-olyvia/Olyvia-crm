@@ -23,6 +23,10 @@ export interface DiagnosticSuggestion {
    * localizações). `null`/omitido quando não aplicável (target_type
    * diferente de "product") ou quando a query de stock falhar. */
   stockQtyAvailable?: number | null;
+  /** false quando é uma sugestão informativa da IA para algo que não existe
+   * no catálogo — não tem product_id/service_id reais, não pode ser aceite
+   * como linha, só mostrada como aviso; true/omitido nos casos normais. */
+  existsInCatalog?: boolean;
 }
 
 export interface GetDiagnosticSuggestionsInput {
@@ -71,6 +75,7 @@ interface AiSuggestionResponseItem {
   unidade?: string | null;
   rationale?: string | null;
   confidence?: number | null;
+  exists_in_catalog?: boolean;
 }
 
 let clientIdCounter = 0;
@@ -207,6 +212,7 @@ export function useQuoteDiagnosticSuggestions() {
           unidade: s.unidade ?? null,
           rationale: s.rationale ?? null,
           confidence: typeof s.confidence === "number" ? s.confidence : null,
+          existsInCatalog: s.exists_in_catalog === false ? false : true,
         }));
         return { suggestions: await withStockAvailability(aiSuggestions), aiFailed: false };
       } catch (err: any) {
