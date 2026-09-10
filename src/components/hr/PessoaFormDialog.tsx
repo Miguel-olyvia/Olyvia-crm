@@ -50,6 +50,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { usePapeisDaOrganizacao } from "@/hooks/usePapeisDaOrganizacao";
+import { useContasLigaveis } from "@/hooks/useContasLigaveis";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
@@ -64,6 +65,12 @@ import {
   type RascunhoPessoa,
   type SeccaoId,
 } from "@/lib/hr/novaPessoa";
+import {
+  preenchimentoDaConta,
+  reverterAutoPreenchido,
+  type AvisoPreenchimento,
+  type CamposPreenchiveis,
+} from "@/lib/hr/preenchimentoPorConta";
 import { CamposTocadosProvider } from "@/components/hr/form/Campos";
 import { SeccaoConfiguracoesGerais } from "@/components/hr/form/SeccaoConfiguracoesGerais";
 import { SeccaoContrato } from "@/components/hr/form/SeccaoContrato";
@@ -99,6 +106,7 @@ export function PessoaFormDialog({
     criarLocal,
   } = useLocaisTrabalho();
   const { papeis, loading: papeisALoad } = usePapeisDaOrganizacao();
+  const { contas, loading: contasALoad } = useContasLigaveis();
 
   const [rascunho, setRascunho] = useState<RascunhoPessoa>(() => rascunhoInicial());
   const [seccao, setSeccao] = useState<SeccaoId>("geral");
@@ -109,6 +117,12 @@ export function PessoaFormDialog({
    * ao terceiro digito do NIF. */
   const [tocados, setTocados] = useState<ReadonlySet<string>>(() => new Set());
   const [aConfirmarDescarte, setAConfirmarDescarte] = useState(false);
+  /** O que a conta escolhida escreveu em cada campo, por `campoId`. E o que
+   * distingue um palpite de uma escrita a mao -- ver preenchimentoPorConta.ts. */
+  const [autoPreenchido, setAutoPreenchido] = useState<Record<string, string>>({});
+  const [avisosConta, setAvisosConta] = useState<AvisoPreenchimento[]>([]);
+
+  const podeLigarConta = hasPermission("hr.pessoas.conta.link");
 
   const tocar = useCallback((campoId: string) => {
     setTocados((anteriores) => {
@@ -116,6 +130,97 @@ export function PessoaFormDialog({
       return new Set(anteriores).add(campoId);
     });
   }, []);
+
+  /** Os seis campos que uma conta pode preencher, lidos do rascunho actual. */
+  const camposActuais = (r: RascunhoPessoa): CamposPreenchiveis => ({
+    primeiro_nome: r.geral.primeiro_nome,
+    apelido: r.geral.apelido,
+    email_trabalho: r.geral.email_trabalho,
+    telefone_trabalho: r.geral.telefone_trabalho,
+    cargo: r.laborais.cargo,
+    local_id: r.laborais.local_id,
+  });
+
+  const valorDoCampo = (campoId: string): string => {
+    const actuais = camposActuais(rascunho);
+    switch (campoId) {
+      case "hr-novo-primeiro-nome":
+        return actuais.primeiro_nome;
+      case "hr-novo-apelido":
+        return actuais.apelido;
+      case "hr-novo-email-trabalho":
+        return actuais.email_trabalho;
+      case "hr-novo-telefone-trabalho":
+        return actuais.telefone_trabalho;
+      case "hr-novo-cargo":
+        return actuais.cargo;
+      case "hr-novo-local":
+        return actuais.local_id;
+      default:
+        return "";
+    }
+  };
+
+  /** So se marca como palpite um campo que AINDA tem exactamente o valor que
+   * a conta la pos -- editar (mesmo sem sair do campo) ou tocar ja o tira
+   * daqui, sem apagar nada. */
+  const ePalpite = (campoId: string): boolean =>
+    autoPreenchido[campoId] !== undefined &&
+    !tocados.has(campoId) &&
+    valorDoCampo(campoId) === autoPreenchido[campoId];
+
+  const ajudaDoPalpite = (campoId: string): string | null => {
+    if (tocados.has(campoId)) return null;
+    const aviso = avisosConta.find((a) => a.campoId === campoId);
+    if (!aviso) return null;
+    let mensagem = t(aviso.mensagemKey);
+    if (aviso.parametros) {
+      for (const [chave, valor] of Object.entries(aviso.parametros)) {
+        mensagem = mensagem.replace(`{${chave}}`, valor);
+      }
+    }
+    return mensagem;
+  };
+
+  /**
+   * Trocar (ou limpar) a conta escolhida: primeiro REVERTE os campos que
+   * ainda tem exactamente o palpite da conta ANTERIOR, so depois aplica o
+   * preenchimento da conta nova -- nunca ao contrario, senao o preenchimento
+   * novo seria logo desfeito pela reversao.
+   */
+  const aoEscolherConta = useCallback(
+    (contaId: string) => {
+      setRascunho((anterior) => {
+        const { patchGeral: reversaoGeral, patchLaborais: reversaoLaborais } = reverterAutoPreenchido(
+          camposActuais(anterior),
+          autoPreenchido,
+        );
+        const depoisDaReversao: RascunhoPessoa = {
+          ...anterior,
+          geral: { ...anterior.geral, ...reversaoGeral, conta_id: contaId },
+          laborais: { ...anterior.laborais, ...reversaoLaborais },
+        };
+
+        const conta = contas.find((c) => c.id === contaId);
+        if (!conta) {
+          setAutoPreenchido({});
+          setAvisosConta([]);
+          return depoisDaReversao;
+        }
+
+        const resultado = preenchimentoDaConta(conta, camposActuais(depoisDaReversao), {}, locais);
+        setAutoPreenchido(resultado.autoNovo);
+        setAvisosConta(resultado.avisos);
+
+        return {
+          ...depoisDaReversao,
+          geral: { ...depoisDaReversao.geral, ...resultado.patchGeral },
+          laborais: { ...depoisDaReversao.laborais, ...resultado.patchLaborais },
+        };
+      });
+    },
+    [autoPreenchido, contas, locais],
+  );
 
   const podeCriarLocal = hasPermission("hr.locais.edit") && !semPermissaoLocais;
   const podeVerPapeis = hasPermission("roles.view");
@@ -153,6 +258,8 @@ export function PessoaFormDialog({
     setMostrarResumo(false);
     setTocados(new Set());
     setAConfirmarDescarte(false);
+    setAutoPreenchido({});
+    setAvisosConta([]);
   };
 
   const temDados = SECCOES.some((id) => seccaoPreenchida(rascunho, id));
@@ -185,7 +292,7 @@ export function PessoaFormDialog({
     }
     setACriar(true);
     try {
-      const payload = payloadDoRascunho(rascunho, linhasParaGravar);
+      const payload = payloadDoRascunho(rascunho, linhasParaGravar, podeLigarConta);
       const { id, falhas } = await onCriar(payload);
 
       const pendenciaDeAcesso = falhas.find((falha) => falha.seccao === "acesso");
@@ -348,6 +455,12 @@ export function PessoaFormDialog({
                   <SeccaoInformacoesGerais
                     valor={rascunho.geral}
                     erroDe={erroDe}
+                    contas={contas}
+                    contasALoad={contasALoad}
+                    podeLigarConta={podeLigarConta}
+                    onEscolherConta={aoEscolherConta}
+                    ajudaDoPalpite={ajudaDoPalpite}
+                    ePalpite={ePalpite}
                     onPatch={(patch) =>
                       setRascunho((anterior) => ({
                         ...anterior,

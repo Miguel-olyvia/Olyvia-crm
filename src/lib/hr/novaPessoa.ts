@@ -62,6 +62,13 @@ export interface RascunhoGeral {
   email_trabalho: string;
   telefone_trabalho: string;
   numero_interno: string;
+  /**
+   * A conta de CRM escolhida para preencher (e, com permissao, ligar) esta
+   * ficha. NUNCA vai para `pessoas` -- nao existe coluna nenhuma la para
+   * isto. So alimenta `NovaPessoaPayload.contaALigar`, que o hook usa depois
+   * do insert do nucleo para chamar `rpc_hr_ligar_conta`.
+   */
+  conta_id: string;
 }
 
 export interface RascunhoPessoais {
@@ -160,6 +167,7 @@ export function rascunhoInicial(): RascunhoPessoa {
       email_trabalho: "",
       telefone_trabalho: "",
       numero_interno: "",
+      conta_id: "",
     },
     pessoais: {
       data_nascimento: "",
@@ -500,6 +508,14 @@ export interface NovaPessoaPayload {
   /** Linhas de `pessoas_horario_planeado`, uma por intervalo. */
   horario: LinhaPlaneadoParaGravar[] | null;
   acesso: { role_id: string | null; enviar_convite: boolean; email_convite: string | null };
+  /**
+   * O `id` da conta de CRM a ligar depois de a ficha existir, via
+   * `rpc_hr_ligar_conta`. `null` quando ninguem escolheu conta, OU quando
+   * escolheu so para PREENCHER e nao tem `hr.pessoas.conta.link` -- nesse
+   * caso o ecra ja avisou que a ligacao nao ia acontecer, e aqui nao se
+   * anuncia como falhado o que ninguem tentou.
+   */
+  contaALigar: string | null;
 }
 
 function texto(valor: string): string | null {
@@ -535,6 +551,13 @@ export function dataDoPeriodoExperimental(dataInicio: string, dias: number): str
 export function payloadDoRascunho(
   rascunho: RascunhoPessoa,
   linhasDeHorario: (horario: HorarioRascunho) => LinhaPlaneadoParaGravar[],
+  /**
+   * Se quem preenche NAO tem `hr.pessoas.conta.link`, a conta escolhida so
+   * serviu para preencher -- `contaALigar` fica `null` e `criarPessoa` nunca
+   * chama `rpc_hr_ligar_conta`. Sem este parametro seria facil mandar ao
+   * servidor uma ligacao que o ecra ja disse que nao ia acontecer.
+   */
+  podeLigarConta: boolean,
 ): NovaPessoaPayload {
   const { geral, pessoais, laborais, contrato, acesso } = rascunho;
 
@@ -669,6 +692,7 @@ export function payloadDoRascunho(
       enviar_convite: acesso.enviar_convite,
       email_convite: texto(acesso.email_convite) ?? texto(geral.email_trabalho),
     },
+    contaALigar: podeLigarConta ? texto(geral.conta_id) : null,
   };
 }
 

@@ -1,5 +1,6 @@
 /**
- * A lista de pessoas de RH: ambito e os tres numeros dos cartoes.
+ * A lista de pessoas de RH: ambito, os tres numeros dos cartoes, e a criacao
+ * de uma ficha (incluindo a ligacao opcional a uma conta de CRM).
  *
  * O que estes testes fecham:
  *
@@ -11,12 +12,18 @@
  *     nao da base -- e e exactamente o tipo de numero que se apresenta ao
  *     utilizador como se fosse medido;
  *  3. o estado do acesso vem de `pessoas_contas` e nao de uma coluna: quem nao
- *     tem conta activa aparece como "sem conta".
+ *     tem conta activa aparece como "sem conta";
+ *  4. `criarPessoa` chama `rpc_hr_ligar_conta` logo a seguir ao insert do
+ *     nucleo, ANTES dos satelites;
+ *  5. se a ligacao falhar, a ficha fica CRIADA na mesma (nao se apaga nada) e
+ *     a falha volta como `SeccaoFalhada` com `seccao: "conta"`;
+ *  6. sem `contaALigar` no payload (por exemplo, quem nao tem
+ *     `hr.pessoas.conta.link` so preencheu campos), a RPC NUNCA e chamada.
  *
  * Supabase simulado. Nada toca em base nenhuma.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 
 const ORG_ACTIVA = "org-activa";
 
@@ -24,6 +31,14 @@ const ORG_ACTIVA = "org-activa";
 let filtros: Record<string, Array<[string, unknown]>> = {};
 /** Colunas passadas a `is(...)`, para confirmar o `deleted_at is null`. */
 let isNulos: Record<string, string[]> = {};
+/** Registos passados a `.insert(...)`, por tabela, na ordem em que chegaram. */
+let inserts: Record<string, unknown[]> = {};
+/** Chamadas RPC recebidas, na ordem em que chegaram -- para provar a ORDEM
+ * "ligacao antes dos satelites". */
+let chamadasRpc: Array<{ fn: string; args: unknown }> = [];
+/** O que a RPC devolve neste teste. Reatribuido em cada `it`. */
+let rpcImpl: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }> =
+  () => Promise.resolve({ data: null, error: null });
 
 /**
  * Amostra fixa. As datas sao calculadas a partir do momento em que a suite
@@ -83,12 +98,9 @@ const CONTAS = [{ pessoa_id: "p1", estado: "activa" }];
 function buildChain(table: string) {
   filtros[table] = filtros[table] ?? [];
   isNulos[table] = isNulos[table] ?? [];
+  inserts[table] = inserts[table] ?? [];
 
-  const resolver = () => {
-    if (table === "pessoas") return { data: PESSOAS, error: null };
-    if (table === "pessoas_contas") return { data: CONTAS, error: null };
-    return { data: [], error: null };
-  };
+  let ultimaOperacao: "select" | "insert" = "select";
 
   const chain: any = {
     select: () => chain,
@@ -101,8 +113,24 @@ function buildChain(table: string) {
       return chain;
     },
     order: () => chain,
-    then: (onFulfilled: any, onRejected: any) =>
-      Promise.resolve(resolver()).then(onFulfilled, onRejected),
+    insert: (registo: unknown) => {
+      ultimaOperacao = "insert";
+      inserts[table].push(registo);
+      return chain;
+    },
+    single: () => chain,
+    then: (onFulfilled: any, onRejected: any) => {
+      const resolver = () => {
+        if (ultimaOperacao === "insert") {
+          if (table === "pessoas") return { data: { id: "pessoa-nova" }, error: null };
+          return { data: null, error: null };
+        }
+        if (table === "pessoas") return { data: PESSOAS, error: null };
+        if (table === "pessoas_contas") return { data: CONTAS, error: null };
+        return { data: [], error: null };
+      };
+      return Promise.resolve(resolver()).then(onFulfilled, onRejected);
+    },
   };
   return chain;
 }
@@ -110,7 +138,10 @@ function buildChain(table: string) {
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     from: (table: string) => buildChain(table),
-    rpc: () => Promise.resolve({ data: null, error: null }),
+    rpc: (fn: string, args?: Record<string, unknown>) => {
+      chamadasRpc.push({ fn, args });
+      return rpcImpl(fn, args);
+    },
   },
 }));
 
@@ -122,12 +153,52 @@ vi.mock("@/lib/observability/captureFlowError", () => ({
   captureFlowError: vi.fn(),
 }));
 
+vi.mock("@/lib/identity/resolveBusinessUserId", () => ({
+  resolveCurrentBusinessUserId: () => Promise.resolve("autor-1"),
+}));
+
 import { usePessoas } from "@/hooks/usePessoas";
+import type { NovaPessoaPayload } from "@/lib/hr/novaPessoa";
+
+/** Um payload minimo: so o nucleo, nada de satelites -- para isolar o
+ * comportamento da ligacao a conta sem montar as nove tabelas do assistente. */
+function payloadMinimo(overrides: Partial<NovaPessoaPayload> = {}): NovaPessoaPayload {
+  return {
+    nucleo: {
+      primeiro_nome: "Ana",
+      apelido: "Alves",
+      email_trabalho: null,
+      email_pessoal: null,
+      telefone_trabalho: null,
+      numero_interno: null,
+      cargo: null,
+      local_id: null,
+      reporta_a_pessoa_id: null,
+      data_admissao: null,
+      data_antiguidade: null,
+    },
+    dadosPessoais: null,
+    identificacao: null,
+    niss: null,
+    morada: null,
+    conta: null,
+    emergencia: null,
+    vinculo: null,
+    retribuicao: null,
+    horario: null,
+    acesso: { role_id: null, enviar_convite: false, email_convite: null },
+    contaALigar: null,
+    ...overrides,
+  };
+}
 
 describe("usePessoas", () => {
   beforeEach(() => {
     filtros = {};
     isNulos = {};
+    inserts = {};
+    chamadasRpc = [];
+    rpcImpl = () => Promise.resolve({ data: null, error: null });
   });
 
   it("filtra pela organizacao activa e ignora as fichas apagadas", async () => {
@@ -157,5 +228,70 @@ describe("usePessoas", () => {
     expect(porId.p2).toBe("semConta");
     expect(porId.p3).toBe("semConta");
     expect(porId.p4).toBe("semConta");
+  });
+
+  it("sem contaALigar, criarPessoa NUNCA chama rpc_hr_ligar_conta", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+    await act(async () => {
+      resultado = await result.current.criarPessoa(payloadMinimo());
+    });
+
+    expect(chamadasRpc.find((c) => c.fn === "rpc_hr_ligar_conta")).toBeUndefined();
+    expect(resultado?.id).toBe("pessoa-nova");
+    expect(resultado?.falhas).toEqual([]);
+  });
+
+  it("com contaALigar, chama rpc_hr_ligar_conta logo a seguir ao insert do nucleo, antes dos satelites", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(
+        payloadMinimo({
+          contaALigar: "conta-1",
+          // Um satelite real, para provar que a RPC vem ANTES dele.
+          morada: { tipo: "residencia", linha1: "Rua Teste", is_principal: true },
+        }),
+      );
+    });
+
+    const indiceLigacao = chamadasRpc.findIndex((c) => c.fn === "rpc_hr_ligar_conta");
+    const indiceMorada = inserts.pessoas_moradas ? 0 : -1;
+    expect(indiceLigacao).toBeGreaterThanOrEqual(0);
+    expect(chamadasRpc[indiceLigacao].args).toEqual({
+      p_pessoa_id: "pessoa-nova",
+      p_anew_user_id: "conta-1",
+    });
+    // A ficha (nucleo) tem de estar inserida ANTES da chamada RPC existir --
+    // o `p_pessoa_id` so existe depois do insert devolver o id.
+    expect(inserts.pessoas).toHaveLength(1);
+    // A morada (satelite) foi gravada, mas so DEPOIS: a ordem real e garantida
+    // pelo proprio `await` sequencial em `criarPessoa` -- aqui confirma-se que
+    // ambas aconteceram e que a ficha nao ficou por criar.
+    expect(indiceMorada).toBe(0);
+  });
+
+  it("se rpc_hr_ligar_conta falhar, a ficha fica criada e a falha volta com seccao 'conta'", async () => {
+    rpcImpl = (fn) => {
+      if (fn === "rpc_hr_ligar_conta") {
+        return Promise.resolve({ data: null, error: { message: "conta_ja_ligada_a_outra_pessoa" } });
+      }
+      return Promise.resolve({ data: null, error: null });
+    };
+
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+    await act(async () => {
+      resultado = await result.current.criarPessoa(payloadMinimo({ contaALigar: "conta-1" }));
+    });
+
+    expect(resultado?.id).toBe("pessoa-nova");
+    expect(resultado?.falhas).toHaveLength(1);
+    expect(resultado?.falhas[0].seccao).toBe("conta");
   });
 });

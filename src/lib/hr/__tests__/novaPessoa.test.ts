@@ -68,7 +68,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
     const chaves = Object.keys(payload.nucleo);
     expect(chaves).not.toContain("organization_id");
     expect(chaves).not.toContain("entidade_legal_org_id");
@@ -80,7 +80,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
     expect(payload.dadosPessoais).toBeNull();
     expect(payload.identificacao).toBeNull();
     expect(payload.morada).toBeNull();
@@ -98,7 +98,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.pessoais.niss = "12345678901";
     rascunho.pessoais.nif = "123456789";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
     expect(payload.niss).toBe("12345678901");
     expect(payload.identificacao).not.toBeNull();
     expect(payload.identificacao).not.toHaveProperty("niss");
@@ -115,7 +115,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.contrato.tem_periodo_experimental = true;
     rascunho.contrato.periodo_experimental_dias = "90";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
     expect(payload.vinculo).toMatchObject({
       periodo_experimental_dias: 90,
       periodo_experimental_ate: "2026-04-01",
@@ -174,7 +174,7 @@ describe("rascunho de nova pessoa", () => {
     expect(problemasDoRascunho(rascunho)).toHaveLength(0);
 
     // E vai FORA do insert -- a tabela tem a escrita revogada.
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
     expect(payload.conta).toEqual({
       formato: "clabe",
       numero: "PT51000201231234567890154",
@@ -188,7 +188,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.geral.apelido = "Silva";
     rascunho.pessoais.nacionalidade = "PT";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
     const serializado = JSON.stringify(payload);
     expect(serializado).not.toContain("nome_social");
     expect(serializado).not.toContain("pronomes");

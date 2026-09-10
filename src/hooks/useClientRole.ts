@@ -6,6 +6,7 @@ import {
   clearSessionContext,
   type SessionContext,
 } from "@/lib/auth/sessionContext";
+import { eInterno } from "@/lib/auth/papelInterno";
 
 export type ClientAccessKind = "loading" | "anonymous" | "client_only" | "crm_user" | "hybrid" | "no_profile";
 export type { SessionContext };
@@ -55,7 +56,7 @@ export async function fetchAccessKind(authUserId: string | null | undefined): Pr
 
   const roleCodes = (roles || []).map((r) => r.code).filter(Boolean) as string[];
   const hasClientRole = roleCodes.includes("client");
-  const hasNonClientRole = roleCodes.some((code) => code !== "client");
+  const hasNonClientRole = eInterno(roleCodes);
 
   if (hasClientRole && !hasNonClientRole) return "client_only";
   if (hasClientRole && hasNonClientRole) return "hybrid";

@@ -96,6 +96,11 @@ export type BusinessFlow =
   | "hr-locais-load"
   | "hr-locais-write"
   | "hr-papeis-load"
+  // Contas de CRM ligaveis a uma ficha nova (assistente de criacao de
+  // pessoa). Uma recusa por permissao nao vem para aqui -- o selector so
+  // fica sem candidatos; uma falha de rede sim, porque o preenchimento por
+  // conta desaparece em silencio sem esta instrumentacao.
+  | "hr-contas-ligaveis-load"
   // Ausencias e ferias. A leitura falhada deixa o contador a zeros e o zero
   // e indistinguivel de "nao tem direito nenhum" -- por isso um defeito de
   // leitura tem de ser visto. A escrita falhada perde um pedido ou uma

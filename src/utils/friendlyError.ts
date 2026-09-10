@@ -48,7 +48,7 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /SMTP/i, key: "friendlyError.smtpError" },
   { match: /rate limit|too many requests/i, key: "friendlyError.rateLimit" },
   { match: /unauthorized|not authenticated|jwt/i, key: "friendlyError.sessionExpired" },
-  { match: /forbidden|not allowed|permission/i, key: "friendlyError.forbidden" },
+  { match: /forbidden|not allowed|permission|insufficient_privilege/i, key: "friendlyError.forbidden" },
   { match: /not found/i, key: "friendlyError.notFound" },
   { match: /timeout|timed out/i, key: "friendlyError.timeout" },
   { match: /network|failed to fetch|load failed/i, key: "friendlyError.network" },
@@ -60,6 +60,13 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /unable to generate export/i, key: "friendlyError.exportFailed" },
   { match: /export (not authorized|exceeds)/i, key: "friendlyError.exportFailed" },
   { match: /Edge Function returned a non-2xx/i, key: "friendlyError.serverError" },
+  // `rpc_hr_ligar_conta` / `rpc_hr_revogar_conta` (20261120090000). Cada uma
+  // pede uma acao diferente de quem esta a olhar, por isso tem mensagem
+  // propria em vez de cair no generico "sem permissao" ou "duplicado".
+  { match: /conta_ja_ligada_a_outra_pessoa/i, key: "hr.conta.erroJaLigadaAOutraPessoa" },
+  { match: /pessoa_ja_tem_conta_activa/i, key: "hr.conta.erroPessoaJaTemConta" },
+  { match: /conta_sem_membership_na_organizacao/i, key: "hr.conta.erroSemMembershipNaOrganizacao" },
+  { match: /pessoa_sem_conta_activa/i, key: "hr.conta.erroSemContaActiva" },
 ];
 
 function mapFriendly(raw: string): string {

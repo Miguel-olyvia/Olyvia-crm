@@ -48,6 +48,16 @@ export function CamposTocadosProvider({
   return <CamposTocadosContext.Provider value={onTocar}>{children}</CamposTocadosContext.Provider>;
 }
 
+/**
+ * Para campos que vivem FORA deste ficheiro (por exemplo `CampoConta`, que
+ * envolve um Popover+Command proprio) mas que ainda assim tem de marcar-se
+ * como tocados no `onBlur` do seu gatilho, como `CampoSelect` faz no
+ * `SelectTrigger`. Nao exportar o contexto em si -- so este acesso.
+ */
+export function useTocarCampo(): (campoId: string) => void {
+  return useContext(CamposTocadosContext);
+}
+
 /** O Radix nao aceita `value=""` num SelectItem: e preciso um valor sentinela. */
 export const SEM_ESCOLHA = "__sem_escolha__";
 
@@ -57,6 +67,15 @@ interface CampoBaseProps {
   ajuda?: string;
   erro?: string | null;
   className?: string;
+  /**
+   * Marca visualmente o campo como um PALPITE ainda por confirmar (por
+   * exemplo, o nome partido a partir de uma conta de CRM). Desaparece assim
+   * que quem chama deixar de o considerar palpite -- normalmente ao ver o
+   * campo tocado ou editado. Nunca substitui o texto de `ajuda`: os dois
+   * convivem, e e por `ajuda` que a mensagem do palpite chega a quem usa
+   * leitor de ecra.
+   */
+  marcado?: boolean;
 }
 
 function Envolvente({
@@ -65,10 +84,17 @@ function Envolvente({
   ajuda,
   erro,
   className,
+  marcado,
   children,
 }: CampoBaseProps & { children: ReactNode }) {
   return (
-    <div className={cn("space-y-1.5", className)}>
+    <div
+      className={cn(
+        "space-y-1.5 rounded-md",
+        marcado && "ring-1 ring-amber-400/70 bg-amber-50/40 p-2 dark:bg-amber-950/20",
+        className,
+      )}
+    >
       <Label htmlFor={id}>{label}</Label>
       {children}
       {ajuda && !erro && (
@@ -102,6 +128,7 @@ export function CampoTexto({
   ajuda,
   erro,
   className,
+  marcado,
   valor,
   onChange,
   tipo = "text",
@@ -113,7 +140,7 @@ export function CampoTexto({
 }: CampoTextoProps) {
   const tocar = useContext(CamposTocadosContext);
   return (
-    <Envolvente id={id} label={label} ajuda={ajuda} erro={erro} className={className}>
+    <Envolvente id={id} label={label} ajuda={ajuda} erro={erro} className={className} marcado={marcado}>
       <Input
         id={id}
         type={tipo}

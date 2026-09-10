@@ -52,7 +52,12 @@ export interface SeccaoFalhada {
     | "vinculo"
     | "retribuicao"
     | "horario"
-    | "acesso";
+    | "acesso"
+    // A ligacao a uma conta de CRM (`rpc_hr_ligar_conta`), escolhida no passo
+    // 1 do assistente. Falhar isto NAO desfaz a ficha -- ela ja existe, e a
+    // pessoa fica editavel e ligavel a partir do proprio ecra de detalhe
+    // (`usePessoa.ligarConta`), que tenta a MESMA RPC outra vez.
+    | "conta";
   mensagem: string;
 }
 
@@ -218,6 +223,23 @@ export function usePessoas() {
         throw erro;
       }
       const pessoaId = (data as { id: string }).id;
+
+      // A ligacao a conta vai LOGO A SEGUIR ao nucleo, antes de qualquer
+      // satelite: e a chamada mais barata, e a unica cujo falhanco muda o que
+      // quem usa o assistente tem de fazer a seguir (ir ao ecra de detalhe
+      // tentar de novo). Nunca apaga a ficha se falhar -- o DELETE esta
+      // bloqueado por politica, e apagar seria pior: perdia-se o resto do
+      // formulario por causa de uma ligacao que se repete num clique.
+      if (payload.contaALigar) {
+        const { error: erroLigacao } = await hrRpc("rpc_hr_ligar_conta", {
+          p_pessoa_id: pessoaId,
+          p_anew_user_id: payload.contaALigar,
+        });
+        if (erroLigacao) {
+          if (!isPermissionError(erroLigacao)) captureFlowError(erroLigacao, "hr-pessoa-write");
+          falhas.push({ seccao: "conta", mensagem: await getFriendlyErrorMessage(erroLigacao) });
+        }
+      }
 
       const base = {
         pessoa_id: pessoaId,
