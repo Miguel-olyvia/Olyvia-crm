@@ -2,11 +2,6 @@ import { useCallback, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-// TODO: remover cast após regenerar types.ts — `rpc_preview_diagnostic_suggestions`
-// ainda não existe em src/integrations/supabase/types.ts (migração em curso,
-// em paralelo, noutro agente).
-const sb = supabase as any;
-
 export type DiagnosticSourceField = "area_m2" | "demolir" | "proteger" | "intervencao";
 export type DiagnosticSuggestionTargetType = "product" | "service" | "catalog_item";
 
@@ -44,6 +39,36 @@ export interface GetDiagnosticSuggestionsResult {
   aiFailed: boolean;
 }
 
+/** Formato de cada linha devolvida por `rpc_preview_diagnostic_suggestions`.
+ * A função tem `Returns: Json` em types.ts (retorno genérico do Postgres),
+ * por isso não há um tipo de linha gerado automaticamente — este é o
+ * contrato acordado com o backend para este RPC. */
+interface RuleSuggestionRow {
+  rule_id?: string | null;
+  target_type: DiagnosticSuggestionTargetType;
+  product_id?: string | null;
+  service_id?: string | null;
+  catalog_item_id?: string | null;
+  descricao: string;
+  qty: number | string;
+  unidade?: string | null;
+}
+
+/** Formato de cada sugestão devolvida pela edge function `quote-ai-assistant`
+ * (modo `diagnostic_suggestions`) — não vem da BD, por isso não tem tipo
+ * gerado em types.ts. */
+interface AiSuggestionResponseItem {
+  target_type: DiagnosticSuggestionTargetType;
+  product_id?: string | null;
+  service_id?: string | null;
+  catalog_item_id?: string | null;
+  descricao: string;
+  qty: number | string;
+  unidade?: string | null;
+  rationale?: string | null;
+  confidence?: number | null;
+}
+
 let clientIdCounter = 0;
 const nextClientId = (prefix: string) => `${prefix}_${Date.now()}_${++clientIdCounter}`;
 
@@ -71,12 +96,13 @@ export function useQuoteDiagnosticSuggestions() {
       setIsLoadingRules(true);
       let ruleSuggestions: DiagnosticSuggestion[] = [];
       try {
-        const { data, error } = await sb.rpc("rpc_preview_diagnostic_suggestions", {
+        const { data, error } = await supabase.rpc("rpc_preview_diagnostic_suggestions", {
           p_diagnostic_area_id: input.diagnosticAreaId,
           p_source_field: input.sourceField,
         });
         if (error) throw error;
-        ruleSuggestions = ((data || []) as any[]).map((s) => ({
+        // RPC devolve `Json` genérico em types.ts — ver RuleSuggestionRow.
+        ruleSuggestions = ((data as RuleSuggestionRow[] | null) || []).map((s) => ({
           client_id: nextClientId("rule"),
           source: "rule" as const,
           rule_id: s.rule_id ?? null,
@@ -120,7 +146,7 @@ export function useQuoteDiagnosticSuggestions() {
         });
         if (error) throw error;
 
-        const aiSuggestions: DiagnosticSuggestion[] = ((data?.suggestions || []) as any[]).map((s) => ({
+        const aiSuggestions: DiagnosticSuggestion[] = ((data?.suggestions || []) as AiSuggestionResponseItem[]).map((s) => ({
           client_id: nextClientId("ai"),
           source: "ai" as const,
           target_type: s.target_type,

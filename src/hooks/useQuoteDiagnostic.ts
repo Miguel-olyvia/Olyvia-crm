@@ -2,12 +2,6 @@ import { useCallback } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-// TODO: remover cast após regenerar types.ts — `quote_diagnostic_areas` e as
-// RPCs `rpc_save_diagnostic_area`/`rpc_complete_diagnostic_phase1` ainda não
-// existem em src/integrations/supabase/types.ts (migração em curso, em
-// paralelo, noutro agente).
-const sb = supabase as any;
-
 export type DiagnosticPhase = "fase_1" | "fase_2";
 export type DiagnosticAreaStatus = "em_preenchimento" | "completo";
 
@@ -64,7 +58,7 @@ export function useQuoteDiagnostic(quoteId: string | null | undefined) {
   const areasQuery = useQuery({
     queryKey: areasQueryKey(quoteId),
     queryFn: async (): Promise<QuoteDiagnosticArea[]> => {
-      const { data, error } = await sb
+      const { data, error } = await supabase
         .from("quote_diagnostic_areas")
         .select("*")
         .eq("quote_id", quoteId)
@@ -83,9 +77,12 @@ export function useQuoteDiagnostic(quoteId: string | null | undefined) {
     mutationFn: async (areaData: SaveDiagnosticAreaInput) => {
       if (!quoteId) throw new Error("quoteId em falta ao gravar área de diagnóstico.");
       const { id, ...rest } = areaData;
-      const { data, error } = await sb.rpc("rpc_save_diagnostic_area", {
+      const { data, error } = await supabase.rpc("rpc_save_diagnostic_area", {
         p_quote_id: quoteId,
-        p_area_id: id || null,
+        // Args gerado não inclui `null` (só `string | undefined`), mas o
+        // parâmetro SQL tem DEFAULT NULL — omitir a chave (`undefined`)
+        // produz o mesmo NULL no lado do Postgres que enviar `null` explícito.
+        p_area_id: id || undefined,
         p_area_data: rest,
       });
       if (error) throw error;
@@ -99,7 +96,7 @@ export function useQuoteDiagnostic(quoteId: string | null | undefined) {
   const completePhase1Mutation = useMutation({
     mutationFn: async () => {
       if (!quoteId) throw new Error("quoteId em falta ao concluir a fase 1.");
-      const { data, error } = await sb.rpc("rpc_complete_diagnostic_phase1", {
+      const { data, error } = await supabase.rpc("rpc_complete_diagnostic_phase1", {
         p_quote_id: quoteId,
       });
       if (error) throw error;

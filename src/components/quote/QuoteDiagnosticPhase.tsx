@@ -28,10 +28,6 @@ import {
 import { DiagnosticSuggestionPanel } from "@/components/quote/DiagnosticSuggestionPanel";
 import { QuoteSuggestionRulesDialog } from "@/components/quote/QuoteSuggestionRulesDialog";
 
-// TODO: remover cast após regenerar types.ts — `quote_diagnostic_areas` ainda
-// não existe em src/integrations/supabase/types.ts.
-const sb = supabase as any;
-
 const BLUR_DEBOUNCE_MS = 700;
 
 /** Forma mínima de uma linha aceite na Fase 1, para o QuoteBuilder anexar ao
@@ -380,7 +376,7 @@ export function QuoteDiagnosticPhase({
       // Sem RPC de eliminação no contrato desta fase — apaga diretamente,
       // assumindo que a RLS da tabela restringe à organização do orçamento
       // (ver nota no relatório final).
-      const { error } = await sb.from("quote_diagnostic_areas").delete().eq("id", areaId);
+      const { error } = await supabase.from("quote_diagnostic_areas").delete().eq("id", areaId);
       if (error) throw error;
       refetchAreas();
     } catch (err: any) {

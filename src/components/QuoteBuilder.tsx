@@ -1799,10 +1799,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       setAssignedToTouched(true);
       
       setQuoteNumber(quote.quote_number || null);
-      // TODO: remover cast após regenerar types.ts — diagnostic_phase1_completed_at
-      // ainda não existe em src/integrations/supabase/types.ts (migração em
-      // curso, em paralelo, noutro agente).
-      setDiagnosticPhase1CompletedAt((quote as any).diagnostic_phase1_completed_at || null);
+      setDiagnosticPhase1CompletedAt(quote.diagnostic_phase1_completed_at || null);
       
       // Set selected deal for display with lead info
       if (quote.deals) {
@@ -1913,9 +1910,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             : Number((line as any).retail_price_unit),
           ordem: line.ordem,
           section_name: (line as any).section_name || "Geral",
-          // TODO: remover cast após regenerar types.ts — visible_to_client
-          // ainda não existe em src/integrations/supabase/types.ts.
-          visible_to_client: (line as any).visible_to_client ?? true,
+          visible_to_client: line.visible_to_client ?? true,
         }))
       );
       
@@ -2421,11 +2416,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         p_fees: feesToInsert,
         p_totals: totalsPayload,
         p_inline_quotes: inlineQuotesPayload,
-        // 7º parâmetro (DEFAULT '[]'::jsonb no lado do backend, em curso em
-        // paralelo) — ainda não está no tipo gerado de Args de rpc_save_quote,
-        // daí o cast. TODO: remover cast após regenerar types.ts.
+        // 7º parâmetro (DEFAULT '[]'::jsonb no lado do backend).
         p_diagnostic_suggestions: diagnosticSuggestionsToInsert,
-      } as any);
+      });
 
       if (saveError) throw saveError;
 

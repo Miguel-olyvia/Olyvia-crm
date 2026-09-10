@@ -1,11 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 
-// TODO: remover cast após regenerar types.ts — `quote_suggestion_rules` ainda
-// não existe em src/integrations/supabase/types.ts (migração em curso, em
-// paralelo, noutro agente).
-const sb = supabase as any;
-
 export type SuggestionSourceField = "area_m2" | "demolir" | "proteger" | "intervencao";
 export type SuggestionQuantityFormulaType = "multiplier" | "fixed" | "per_unit_area";
 export type SuggestionRounding = "ceil" | "floor" | "round" | "none";
@@ -50,7 +45,7 @@ export function useQuoteSuggestionRulesAdmin(organizationId: string | null | und
   const rulesQuery = useQuery({
     queryKey: rulesQueryKey(organizationId),
     queryFn: async (): Promise<QuoteSuggestionRule[]> => {
-      const { data, error } = await sb
+      const { data, error } = await supabase
         .from("quote_suggestion_rules")
         .select("*")
         .eq("organization_id", organizationId)
@@ -66,7 +61,7 @@ export function useQuoteSuggestionRulesAdmin(organizationId: string | null | und
 
   const createRule = useMutation({
     mutationFn: async (rule: QuoteSuggestionRuleInput) => {
-      const { data, error } = await sb.from("quote_suggestion_rules").insert(rule).select().single();
+      const { data, error } = await supabase.from("quote_suggestion_rules").insert(rule).select().single();
       if (error) throw error;
       return data as QuoteSuggestionRule;
     },
@@ -75,7 +70,7 @@ export function useQuoteSuggestionRulesAdmin(organizationId: string | null | und
 
   const updateRule = useMutation({
     mutationFn: async ({ id, ...rule }: Partial<QuoteSuggestionRuleInput> & { id: string }) => {
-      const { data, error } = await sb.from("quote_suggestion_rules").update(rule).eq("id", id).select().single();
+      const { data, error } = await supabase.from("quote_suggestion_rules").update(rule).eq("id", id).select().single();
       if (error) throw error;
       return data as QuoteSuggestionRule;
     },
@@ -84,7 +79,7 @@ export function useQuoteSuggestionRulesAdmin(organizationId: string | null | und
 
   const deleteRule = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await sb.from("quote_suggestion_rules").delete().eq("id", id);
+      const { error } = await supabase.from("quote_suggestion_rules").delete().eq("id", id);
       if (error) throw error;
       return id;
     },

@@ -153,8 +153,8 @@ async function generateFromQuotePdfs(
             (supabase as any).from('quotes').select('desconto_global_percent').eq('id', quote.id).maybeSingle(),
             // visible_to_client=true exclui linhas internas da Fase 1 de
             // diagnóstico (sugeridas por regra/IA) — nunca podem ser vistas
-            // pelo cliente. TODO: remover cast após regenerar types.ts.
-            (supabase as any).from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quote.id).eq('visible_to_client', true).order('ordem'),
+            // pelo cliente.
+            supabase.from('quote_lines').select(`*, products (sku), services (sku)`).eq('quote_id', quote.id).eq('visible_to_client', true).order('ordem'),
             supabase.from('quote_fees').select(`*, service_fee_types (name, calculation_type, percentage, fixed_amount)`).eq('quote_id', quote.id),
           ]);
           return {
