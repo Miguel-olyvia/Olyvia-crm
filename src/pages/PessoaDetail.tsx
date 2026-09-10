@@ -14,7 +14,7 @@
  *
  * O separador vai no URL (`?tab=`) para o link ser partilhavel.
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,9 +33,12 @@ import {
   LayoutDashboard,
   ListChecks,
   MoreHorizontal,
+  Send,
   TrendingUp,
   User,
 } from "lucide-react";
+import { EnviarConviteDialog } from "@/components/hr/EnviarConviteDialog";
+import { PermissionGate } from "@/components/PermissionGate";
 import { PessoaContratoTab } from "@/components/hr/PessoaContratoTab";
 import { PessoaDocumentosTab } from "@/components/hr/PessoaDocumentosTab";
 import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
@@ -72,6 +75,7 @@ export default function PessoaDetail() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "visaoGeral";
+  const [conviteDialogoAberto, setConviteDialogoAberto] = useState(false);
 
   const { companies, activeCompany } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
@@ -97,6 +101,10 @@ export default function PessoaDetail() {
       saudeView: hasPermission("hr.pessoas.saude.view"),
       saudeEdit: hasPermission("hr.pessoas.saude.edit"),
       nucleoEdit: hasPermission("hr.pessoas.edit"),
+      laboraisView: hasPermission("hr.pessoas.laborais.view"),
+      laboraisEdit: hasPermission("hr.pessoas.laborais.edit"),
+      sindicalizacaoView: hasPermission("hr.pessoas.sindicalizacao.view"),
+      sindicalizacaoEdit: hasPermission("hr.pessoas.sindicalizacao.edit"),
     }),
     [hasPermission],
   );
@@ -243,7 +251,24 @@ export default function PessoaDetail() {
             {[pessoa.cargo, pessoa.local_trabalho].filter(Boolean).join(" · ") || "—"}
           </p>
         </div>
+        {/* So faz sentido convidar quem ainda nao tem conta ligada -- ver
+            `hr.estadoAcesso`. */}
+        {!ficha.conta && (
+          <PermissionGate permission="hr.pessoas.convite.enviar">
+            <Button variant="outline" className="gap-2" onClick={() => setConviteDialogoAberto(true)}>
+              <Send className="h-4 w-4" />
+              {t("hr.convite.enviar")}
+            </Button>
+          </PermissionGate>
+        )}
       </div>
+
+      <EnviarConviteDialog
+        open={conviteDialogoAberto}
+        onOpenChange={setConviteDialogoAberto}
+        pessoaId={pessoa.id}
+        emailSugerido={pessoa.email_pessoal}
+      />
 
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
         <div className="overflow-x-auto">
@@ -323,6 +348,8 @@ export default function PessoaDetail() {
             emergencia={ficha.emergencia}
             bancarios={ficha.bancarios}
             saude={ficha.saude}
+            fardamento={ficha.fardamento}
+            sindicalizacao={ficha.sindicalizacao}
             emailPessoal={pessoa.email_pessoal}
             permissoes={permissoes}
             saving={ficha.saving}
@@ -332,6 +359,8 @@ export default function PessoaDetail() {
             onGuardarMorada={ficha.saveMorada}
             onGuardarEmergencia={ficha.saveEmergencia}
             onGuardarSaude={ficha.saveSaude}
+            onGuardarFardamento={ficha.saveFardamento}
+            onGuardarSindicalizacao={ficha.saveSindicalizacao}
             onRevelarNiss={ficha.revelarNiss}
             onDefinirNiss={ficha.definirNiss}
             onDefinirConta={ficha.definirConta}

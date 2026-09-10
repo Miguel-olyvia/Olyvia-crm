@@ -90,6 +90,12 @@ export type BusinessFlow =
   // perde o que escreveu no formulario.
   | "hr-pessoas-load"
   | "hr-pessoa-write"
+  // Convite de admissao: enviar (autenticado), e o preenchimento publico
+  // (sem sessao) que le e submete pelo token. Uma recusa por permissao ou um
+  // token invalido/expirado/usado sao respostas legitimas e nao vem para
+  // aqui -- so falha de rede, timeout ou erro de sintaxe.
+  | "hr-convite-admissao-criar"
+  | "hr-convite-admissao-publico"
   // Locais de trabalho e papeis de acesso, lidos pelo assistente de criacao de
   // pessoa e pelo editor de horario. Uma recusa por permissao nao vem para
   // aqui; uma falha de rede vem, porque sem locais o horario perde o "onde".

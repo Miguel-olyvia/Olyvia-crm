@@ -76,6 +76,14 @@ interface CampoBaseProps {
    * leitor de ecra.
    */
   marcado?: boolean;
+  /**
+   * Obrigatorio, anunciado a quem usa leitor de ecra -- nao so a vermelho. O
+   * asterisco visual e decorativo (`aria-hidden`); o "(obrigatorio)" que o
+   * acompanha e que da o nome acessivel a exigencia, e `aria-required` no
+   * proprio controlo e o que faz um leitor de ecra dizer "obrigatorio" ao
+   * entrar no campo, antes mesmo de o tentar submeter vazio.
+   */
+  obrigatorio?: boolean;
 }
 
 function Envolvente({
@@ -85,6 +93,7 @@ function Envolvente({
   erro,
   className,
   marcado,
+  obrigatorio,
   children,
 }: CampoBaseProps & { children: ReactNode }) {
   return (
@@ -95,7 +104,17 @@ function Envolvente({
         className,
       )}
     >
-      <Label htmlFor={id}>{label}</Label>
+      <Label htmlFor={id}>
+        {label}
+        {obrigatorio && (
+          <>
+            <span aria-hidden="true" className="ml-0.5 text-destructive">
+              *
+            </span>
+            <span className="sr-only"> (obrigatorio)</span>
+          </>
+        )}
+      </Label>
       {children}
       {ajuda && !erro && (
         <p id={`${id}-ajuda`} className="text-xs text-muted-foreground">
@@ -129,6 +148,7 @@ export function CampoTexto({
   erro,
   className,
   marcado,
+  obrigatorio,
   valor,
   onChange,
   tipo = "text",
@@ -140,7 +160,15 @@ export function CampoTexto({
 }: CampoTextoProps) {
   const tocar = useContext(CamposTocadosContext);
   return (
-    <Envolvente id={id} label={label} ajuda={ajuda} erro={erro} className={className} marcado={marcado}>
+    <Envolvente
+      id={id}
+      label={label}
+      ajuda={ajuda}
+      erro={erro}
+      className={className}
+      marcado={marcado}
+      obrigatorio={obrigatorio}
+    >
       <Input
         id={id}
         type={tipo}
@@ -150,6 +178,8 @@ export function CampoTexto({
         min={min}
         max={max}
         step={step}
+        required={obrigatorio}
+        aria-required={obrigatorio || undefined}
         aria-invalid={erro ? true : undefined}
         aria-describedby={erro ? `${id}-erro` : ajuda ? `${id}-ajuda` : undefined}
         className={cn(erro && "border-destructive")}
@@ -181,6 +211,7 @@ export function CampoSelect({
   ajuda,
   erro,
   className,
+  obrigatorio,
   valor,
   onChange,
   opcoes,
@@ -190,7 +221,14 @@ export function CampoSelect({
 }: CampoSelectProps) {
   const tocar = useContext(CamposTocadosContext);
   return (
-    <Envolvente id={id} label={label} ajuda={ajuda} erro={erro} className={className}>
+    <Envolvente
+      id={id}
+      label={label}
+      ajuda={ajuda}
+      erro={erro}
+      className={className}
+      obrigatorio={obrigatorio}
+    >
       <Select
         value={valor === "" ? SEM_ESCOLHA : valor}
         disabled={disabled}
@@ -199,6 +237,7 @@ export function CampoSelect({
         {/* O `id` vai no GATILHO: e ele o controlo que a etiqueta identifica. */}
         <SelectTrigger
           id={id}
+          aria-required={obrigatorio || undefined}
           aria-invalid={erro ? true : undefined}
           aria-describedby={erro ? `${id}-erro` : ajuda ? `${id}-ajuda` : undefined}
           className={cn(erro && "border-destructive")}

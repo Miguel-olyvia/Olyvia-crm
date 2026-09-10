@@ -31,9 +31,11 @@ import type {
   PessoaDadosBancarios,
   PessoaDadosPessoais,
   PessoaDadosSaude,
+  PessoaFardamento,
   PessoaIdentificacao,
   PessoaMorada,
   PessoaRetribuicao,
+  PessoaSindicalizacao,
   PessoaVinculo,
   HorarioPlaneado,
   HorarioRealizado,
@@ -44,20 +46,27 @@ import type { LinhaPlaneadoParaGravar } from "@/lib/hr/horario";
 const COLUNAS_PESSOA =
   "id, organization_id, numero_interno, primeiro_nome, apelido, nome_completo, " +
   "email_trabalho, email_pessoal, telefone_trabalho, cargo, local_trabalho, " +
-  "local_id, entidade_legal_org_id, reporta_a_pessoa_id, data_admissao, data_antiguidade, " +
+  "local_id, departamento, estrutura, " +
+  "entidade_legal_org_id, reporta_a_pessoa_id, data_admissao, data_antiguidade, " +
   "data_saida, " +
   "estado_registo, dias_trabalho, notas, created_at, updated_at";
 
 const COLUNAS_DADOS_PESSOAIS =
   "id, pessoa_id, organization_id, data_nascimento, ocultar_aniversario, genero, " +
   "nacionalidade, telefone_pessoal, estado_civil, dependentes, " +
-  "irs_retencao_percentagem";
+  "irs_retencao_percentagem, " +
+  // Admissao, 20261124030000.
+  "naturalidade_freguesia, naturalidade_concelho, naturalidade_pais, " +
+  "conjuge_situacao_profissional, dependentes_deficientes, " +
+  "habilitacao_academica, habilitacao_data_conclusao";
 
 // Sem `niss`: a coluna esta revogada a `authenticated` ao nivel da coluna.
 // Pedi-la faz o PostgREST devolver 42501 e perder a linha inteira.
 const COLUNAS_IDENTIFICACAO =
   "id, pessoa_id, organization_id, tipo_documento, numero_documento, validade_documento, " +
-  "nif, niss_ultimos4";
+  "nif, niss_ultimos4, " +
+  // Carta de conducao, 20261124040000.
+  "carta_conducao_numero, carta_conducao_categorias, carta_conducao_validade";
 
 const COLUNAS_MORADA =
   "id, pessoa_id, organization_id, tipo, linha1, linha2, codigo_postal, localidade, distrito, " +
@@ -75,11 +84,22 @@ const COLUNAS_VINCULO =
   "horas_semanais_equivalentes, " +
   "horas_anuais_maximas, horas_semanais_maximas, periodo_experimental_dias, " +
   // Documentos e periodo experimental sugerido, 20261123040000.
-  "categoria_funcao, periodo_experimental_origem";
+  "categoria_funcao, periodo_experimental_origem, " +
+  // Admissao, 20261124080000.
+  "categoria_profissional, renovavel, isencao_horario, formacao_inicio, formacao_fim";
 
 const COLUNAS_RETRIBUICAO =
   "id, pessoa_id, organization_id, vinculo_id, valor_base, moeda, periodicidade, " +
-  "subsidio_alimentacao, subsidio_alimentacao_modo, valido_de, valido_ate, motivo";
+  "subsidio_alimentacao, subsidio_alimentacao_modo, valido_de, valido_ate, motivo, " +
+  "duodecimos_pct";
+
+const COLUNAS_FARDAMENTO =
+  "id, pessoa_id, organization_id, tamanho_cima, tamanho_cima_detalhe, " +
+  "tamanho_baixo, tamanho_baixo_detalhe, tamanho_blazer, tamanho_blazer_detalhe";
+
+// Nunca `sindicalizado` a NULL por omissao no ecra: le-se o que a base tiver.
+const COLUNAS_SINDICALIZACAO =
+  "id, pessoa_id, organization_id, sindicalizado, sindicato, quota_percentagem";
 
 const COLUNAS_HORARIO_PLANEADO =
   "id, pessoa_id, organization_id, vinculo_id, local_id, dia_semana, data, hora_inicio, " +
@@ -115,6 +135,8 @@ export interface PessoaFicha {
   bancarios: PessoaDadosBancarios | null;
   saude: PessoaDadosSaude | null;
   conta: PessoaConta | null;
+  fardamento: PessoaFardamento | null;
+  sindicalizacao: PessoaSindicalizacao | null;
 }
 
 const FICHA_VAZIA: PessoaFicha = {
@@ -130,6 +152,8 @@ const FICHA_VAZIA: PessoaFicha = {
   bancarios: null,
   saude: null,
   conta: null,
+  fardamento: null,
+  sindicalizacao: null,
 };
 
 /**
@@ -214,6 +238,8 @@ export function usePessoa(pessoaId: string | undefined) {
         bancarios,
         saude,
         conta,
+        fardamento,
+        sindicalizacao,
       ] = await Promise.all([
           carregarUm<PessoaDadosPessoais>("pessoas_dados_pessoais", COLUNAS_DADOS_PESSOAIS, pessoaId),
           carregarUm<PessoaIdentificacao>("pessoas_identificacao", COLUNAS_IDENTIFICACAO, pessoaId),
@@ -260,6 +286,12 @@ export function usePessoa(pessoaId: string | undefined) {
           carregarUm<PessoaConta>("pessoas_contas", COLUNAS_CONTA, pessoaId, (q) =>
             q.eq("estado", "activa"),
           ),
+          carregarUm<PessoaFardamento>("pessoas_fardamento", COLUNAS_FARDAMENTO, pessoaId),
+          carregarUm<PessoaSindicalizacao>(
+            "pessoas_sindicalizacao",
+            COLUNAS_SINDICALIZACAO,
+            pessoaId,
+          ),
         ]);
 
       setFicha({
@@ -275,6 +307,8 @@ export function usePessoa(pessoaId: string | undefined) {
         bancarios,
         saude,
         conta,
+        fardamento,
+        sindicalizacao,
       });
     } catch (e) {
       captureFlowError(e, "hr-pessoas-load");
@@ -357,6 +391,22 @@ export function usePessoa(pessoaId: string | undefined) {
 
   const saveSaude = useCallback(
     (patch: Partial<PessoaDadosSaude>) => upsertSatelite("pessoas_dados_saude", patch),
+    [upsertSatelite],
+  );
+
+  const saveFardamento = useCallback(
+    (patch: Partial<PessoaFardamento>) => upsertSatelite("pessoas_fardamento", patch),
+    [upsertSatelite],
+  );
+
+  /**
+   * `pessoas_sindicalizacao` -- ver o comentario do tipo em `types/hr.ts`.
+   * Mesmo caminho de escrita que qualquer outro satelite 1:1; a garantia de
+   * quem pode gravar vive so na politica de RLS (`hr.pessoas.sindicalizacao.edit`,
+   * `is_dangerous`), nao aqui.
+   */
+  const saveSindicalizacao = useCallback(
+    (patch: Partial<PessoaSindicalizacao>) => upsertSatelite("pessoas_sindicalizacao", patch),
     [upsertSatelite],
   );
 
@@ -569,6 +619,8 @@ export function usePessoa(pessoaId: string | undefined) {
     saveMorada,
     saveEmergencia,
     saveSaude,
+    saveFardamento,
+    saveSindicalizacao,
     saveVinculo,
     savePlaneado,
     revelarNiss,

@@ -139,6 +139,13 @@ type Rascunho = {
   horas_anuais_maximas: string;
   horas_semanais_maximas: string;
   dias_uteis: DiaSemana[];
+  // -- Admissao, 20261124080000 ---------------------------------------------
+  categoria_profissional: string;
+  /** "" = por decidir (`null` na base); nao e o mesmo que um booleano falso. */
+  renovavel: "" | "sim" | "nao";
+  isencao_horario: boolean;
+  formacao_inicio: string;
+  formacao_fim: string;
 };
 
 /** Um contrato "tem periodo experimental" se algum dos dois campos vier
@@ -176,6 +183,15 @@ function rascunhoDe(vinculo: PessoaVinculo | null): Rascunho {
     horas_semanais_maximas:
       vinculo?.horas_semanais_maximas == null ? "" : String(vinculo.horas_semanais_maximas),
     dias_uteis: vinculo?.dias_uteis ?? [],
+    categoria_profissional: vinculo?.categoria_profissional ?? "",
+    renovavel: vinculo?.renovavel === null || vinculo?.renovavel === undefined
+      ? ""
+      : vinculo.renovavel
+        ? "sim"
+        : "nao",
+    isencao_horario: vinculo?.isencao_horario ?? false,
+    formacao_inicio: vinculo?.formacao_inicio ?? "",
+    formacao_fim: vinculo?.formacao_fim ?? "",
   };
 }
 
@@ -389,6 +405,15 @@ export function PessoaContratoTab({
       toast.error(t("hr.contrato.erroTerminadoSemDataFim"));
       return;
     }
+    if (
+      rascunho.formacao_inicio.trim() !== "" &&
+      rascunho.formacao_fim.trim() !== "" &&
+      rascunho.formacao_fim < rascunho.formacao_inicio
+    ) {
+      setMostrarTodos(true);
+      toast.error(t("hr.contrato.erroFormacaoFimAntesInicio"));
+      return;
+    }
     const erro = await onGuardarVinculo(activo?.id ?? null, {
       tipo_contrato: rascunho.tipo_contrato,
       regime: rascunho.regime,
@@ -409,6 +434,11 @@ export function PessoaContratoTab({
       horas_anuais_maximas: numeroOuNull(rascunho.horas_anuais_maximas),
       horas_semanais_maximas: numeroOuNull(rascunho.horas_semanais_maximas),
       dias_uteis: rascunho.dias_uteis.length > 0 ? rascunho.dias_uteis : null,
+      categoria_profissional: textoOuNull(rascunho.categoria_profissional),
+      renovavel: rascunho.renovavel === "" ? null : rascunho.renovavel === "sim",
+      isencao_horario: rascunho.isencao_horario,
+      formacao_inicio: textoOuNull(rascunho.formacao_inicio),
+      formacao_fim: textoOuNull(rascunho.formacao_fim),
     });
     if (erro) {
       toast.error(erro);
@@ -507,6 +537,70 @@ export function PessoaContratoTab({
                 definir("categoria_funcao", (v || null) as CategoriaFuncao | null)
               }
             />
+            {/* Categoria do IRCT, texto livre -- NAO e `categoria_funcao`. Ver
+                o comentario do tipo em `types/hr.ts`. */}
+            <CampoTexto
+              id="hr-contrato-categoria-profissional"
+              label={t("hr.contrato.categoriaProfissional")}
+              ajuda={t("hr.contrato.ajudaCategoriaProfissional")}
+              valor={rascunho.categoria_profissional}
+              disabled={!podeEditar}
+              onChange={(v) => definir("categoria_profissional", v)}
+            />
+            <CampoSelect
+              id="hr-contrato-renovavel"
+              label={t("hr.contrato.renovavel")}
+              valor={rascunho.renovavel}
+              vazioLabel={t("hr.campos.porDecidir")}
+              disabled={!podeEditar}
+              opcoes={[
+                { value: "sim", label: t("common.yes") },
+                { value: "nao", label: t("common.no") },
+              ]}
+              onChange={(v) => definir("renovavel", v as "" | "sim" | "nao")}
+            />
+            <CampoTexto
+              id="hr-contrato-formacao-inicio"
+              label={t("hr.contrato.formacaoInicio")}
+              tipo="date"
+              valor={rascunho.formacao_inicio}
+              disabled={!podeEditar}
+              onChange={(v) => definir("formacao_inicio", v)}
+            />
+            <CampoTexto
+              id="hr-contrato-formacao-fim"
+              label={t("hr.contrato.formacaoFim")}
+              erro={
+                rascunho.formacao_fim.trim() !== "" &&
+                rascunho.formacao_inicio.trim() !== "" &&
+                rascunho.formacao_fim < rascunho.formacao_inicio
+                  ? t("hr.contrato.erroFormacaoFimAntesInicio")
+                  : null
+              }
+              tipo="date"
+              valor={rascunho.formacao_fim}
+              disabled={!podeEditar}
+              onChange={(v) => definir("formacao_fim", v)}
+            />
+            <div className="flex items-center gap-2 self-end pb-2">
+              {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um
+                  <button>, e o nome acessivel de um botao NAO vem de uma
+                  <label for>. */}
+              <Switch
+                id="hr-contrato-isencao-horario"
+                aria-labelledby="hr-contrato-isencao-horario-rotulo"
+                checked={rascunho.isencao_horario}
+                disabled={!podeEditar}
+                onCheckedChange={(v) => definir("isencao_horario", v)}
+              />
+              <Label
+                id="hr-contrato-isencao-horario-rotulo"
+                htmlFor="hr-contrato-isencao-horario"
+                className="font-normal"
+              >
+                {t("hr.contrato.isencaoHorario")}
+              </Label>
+            </div>
             <CampoSelect
               id="hr-contrato-estado"
               label={t("hr.contrato.estado")}
@@ -746,6 +840,13 @@ export function PessoaContratoTab({
                 <span className="text-muted-foreground">
                   {t("hr.contrato.validoDe")}: {retribuicao.valido_de}
                 </span>
+                {/* So-leitura nesta ronda: nao ha RPC de edicao de
+                    `pessoas_retribuicoes` -- escreve-se so na admissao. */}
+                {retribuicao.duodecimos_pct !== null && (
+                  <span className="text-muted-foreground">
+                    {t("hr.contrato.duodecimos")}: {retribuicao.duodecimos_pct}%
+                  </span>
+                )}
               </div>
             ) : (
               <p className="text-muted-foreground">{t("hr.contrato.semRetribuicao")}</p>

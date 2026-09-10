@@ -31,6 +31,28 @@ export type EstadoCivil =
 export type TipoDocumento = "cartao_cidadao" | "passaporte" | "titulo_residencia" | "outro";
 export type TipoMorada = "residencia" | "fiscal" | "correspondencia";
 
+/** Dominio de `pessoas_dados_pessoais.conjuge_situacao_profissional` (20261124030000). */
+export type ConjugeSituacaoProfissional = "trabalhador" | "nao_trabalhador";
+
+/**
+ * Dominio de `pessoas_dados_pessoais.habilitacao_academica` (20261124030000).
+ * Ordem crescente de escolaridade, a ordem em que o selector as mostra.
+ */
+export type HabilitacaoAcademica =
+  | "sem_escolaridade"
+  | "1_ciclo"
+  | "2_ciclo"
+  | "3_ciclo"
+  | "secundario"
+  | "pos_secundario"
+  | "licenciatura"
+  | "mestrado"
+  | "doutoramento"
+  | "outro";
+
+/** Dominio dos tres tamanhos de `pessoas_fardamento` (20261124070000). */
+export type TamanhoFardamento = "xs" | "s" | "m" | "l" | "xl" | "xxl" | "outro";
+
 /**
  * Dominio de `pessoas_vinculos.tipo_contrato` (20261120200000).
  *
@@ -152,6 +174,31 @@ export const TIPOS_DOCUMENTO: readonly TipoDocumento[] = [
   "titulo_residencia",
   "outro",
 ];
+export const CONJUGE_SITUACOES_PROFISSIONAIS: readonly ConjugeSituacaoProfissional[] = [
+  "trabalhador",
+  "nao_trabalhador",
+];
+export const HABILITACOES_ACADEMICAS: readonly HabilitacaoAcademica[] = [
+  "sem_escolaridade",
+  "1_ciclo",
+  "2_ciclo",
+  "3_ciclo",
+  "secundario",
+  "pos_secundario",
+  "licenciatura",
+  "mestrado",
+  "doutoramento",
+  "outro",
+];
+export const TAMANHOS_FARDAMENTO: readonly TamanhoFardamento[] = [
+  "xs",
+  "s",
+  "m",
+  "l",
+  "xl",
+  "xxl",
+  "outro",
+];
 /**
  * Os quatro estados de `pessoas_vinculos.estado`, na ordem em que os ecras os
  * oferecem. `estado_contrato` (o do ecra de negocio) e SEMPRE derivado destes
@@ -261,6 +308,12 @@ export interface Pessoa {
   /** Local predefinido da pessoa (`hr_locais_trabalho`), usado quando um
    * intervalo de horario nao indica local. */
   local_id: string | null;
+  /**
+   * Texto livre, 20261124060000 -- nao ha catalogo de departamentos nem
+   * organograma. Mesmo escalao de `cargo`: `hr.pessoas.laborais.*`.
+   */
+  departamento: string | null;
+  estrutura: string | null;
   entidade_legal_org_id: string | null;
   reporta_a_pessoa_id: string | null;
   data_admissao: string | null;
@@ -300,6 +353,16 @@ export interface PessoaDadosPessoais {
   estado_civil: EstadoCivil | null;
   dependentes: number | null;
   irs_retencao_percentagem: number | null;
+
+  // -- Admissao, 20261124030000 ---------------------------------------------
+  naturalidade_freguesia: string | null;
+  naturalidade_concelho: string | null;
+  /** ISO alpha-2, como `nacionalidade`. */
+  naturalidade_pais: string | null;
+  conjuge_situacao_profissional: ConjugeSituacaoProfissional | null;
+  dependentes_deficientes: number | null;
+  habilitacao_academica: HabilitacaoAcademica | null;
+  habilitacao_data_conclusao: string | null;
 }
 
 /**
@@ -319,6 +382,13 @@ export interface PessoaIdentificacao {
   validade_documento: string | null;
   nif: string | null;
   niss_ultimos4: string | null;
+
+  // -- Carta de conducao, 20261124040000. Grants por coluna: uma coluna nova
+  // nesta tabela nao aparece sozinha -- precisa de GRANT explicito (ver a
+  // migration e o bloco de conferir la descrito).
+  carta_conducao_numero: string | null;
+  carta_conducao_categorias: string | null;
+  carta_conducao_validade: string | null;
 }
 
 export interface PessoaMorada {
@@ -390,6 +460,19 @@ export interface PessoaVinculo {
   categoria_funcao: CategoriaFuncao | null;
   /** `null` = nunca foi gravado por este ecra (contrato anterior a esta funcionalidade). */
   periodo_experimental_origem: PeriodoExperimentalOrigem | null;
+
+  // -- Admissao, 20261124080000 ----------------------------------------------
+  /**
+   * Categoria do IRCT (ex.: "Tecnico de Manutencao de 2.a"), texto livre. NAO
+   * e `categoria_funcao`: essa e um dos tres baldes legais que determinam o
+   * periodo experimental. As duas convivem e nao se confundem.
+   */
+  categoria_profissional: string | null;
+  /** `null` = por decidir. So faz sentido em contratos a termo. */
+  renovavel: boolean | null;
+  isencao_horario: boolean;
+  formacao_inicio: string | null;
+  formacao_fim: string | null;
 }
 
 export interface PessoaRetribuicao {
@@ -405,6 +488,12 @@ export interface PessoaRetribuicao {
   valido_de: string;
   valido_ate: string | null;
   motivo: string | null;
+  /**
+   * 0, 50 ou 100 -- percentagem de duodecimos (subsidios de ferias/Natal
+   * pagos ao duodecimo). `null` = por decidir. NAO tem RPC de edicao nesta
+   * ronda: mostra-se em leitura na ficha, escreve-se so na admissao.
+   */
+  duodecimos_pct: 0 | 50 | 100 | null;
 }
 
 /**
@@ -440,6 +529,65 @@ export interface PessoaDadosSaude {
   incapacidade_comprovativo_valido_ate: string | null;
   necessidades_adaptacao: string | null;
   observacoes: string | null;
+}
+
+/**
+ * Tamanhos de farda (`pessoas_fardamento`, 20261124070000).
+ *
+ * Tabela PROPRIA, e nao colunas em `pessoas_dados_pessoais`: quem encomenda
+ * fardas precisa de ler o tamanho do blazer sem precisar de
+ * `hr.pessoas.pessoais.view`, que devolve data de nascimento, estado civil e
+ * retencao de IRS. As permissoes sao as de laborais (`hr.pessoas.laborais.*`),
+ * ja existentes -- nao ha codigo novo so para isto.
+ */
+export interface PessoaFardamento {
+  id: string;
+  pessoa_id: string;
+  organization_id: string;
+  tamanho_cima: TamanhoFardamento | null;
+  tamanho_cima_detalhe: string | null;
+  tamanho_baixo: TamanhoFardamento | null;
+  tamanho_baixo_detalhe: string | null;
+  tamanho_blazer: TamanhoFardamento | null;
+  tamanho_blazer_detalhe: string | null;
+}
+
+/**
+ * Filiacao sindical (`pessoas_sindicalizacao`, 20261124100000) -- artigo 9.o
+ * do RGPD, regime proprio, o MESMO de `pessoas_dados_saude`: tabela separada,
+ * permissao propria (`hr.pessoas.sindicalizacao.view` / `.edit`, ambas
+ * `is_dangerous`), auditada por trigger em `pessoas_acessos_sensiveis`. NAO
+ * tem forma mascarada -- ao contrario do NISS, nao ha "os ultimos 4
+ * caracteres do sindicato" que signifiquem alguma coisa. E tudo ou nada.
+ */
+export interface PessoaSindicalizacao {
+  id: string;
+  pessoa_id: string;
+  organization_id: string;
+  sindicalizado: boolean | null;
+  sindicato: string | null;
+  /** Preparado, sem calculo nesta ronda: a quota e retida no salario. */
+  quota_percentagem: number | null;
+}
+
+/**
+ * O convite de admissao (`pessoas_convites_admissao`, 20261124120000).
+ *
+ * NUNCA traz `token_hash` nem `rascunho`: sao as duas colunas excluidas do
+ * `GRANT SELECT` da migration -- a segunda porque pode conter, a meio do
+ * preenchimento, a resposta de sindicalizacao. Ler estes dois campos por aqui
+ * nao e um esquecimento do tipo; e a mesma garantia que a base impoe.
+ */
+export interface PessoaConviteAdmissao {
+  id: string;
+  pessoa_id: string;
+  organization_id: string;
+  email_destino: string;
+  valid_until: string;
+  used_at: string | null;
+  revoked_at: string | null;
+  attempts: number;
+  created_at: string;
 }
 
 export interface PessoaConta {

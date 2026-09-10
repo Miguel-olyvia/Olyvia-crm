@@ -46,19 +46,27 @@ import { PessoaContaBancariaField } from "@/components/hr/PessoaContaBancariaFie
 import { CountrySelect } from "@/components/CountrySelect";
 import { PessoaNissField } from "@/components/hr/PessoaNissField";
 import { PessoaSaudeCard } from "@/components/hr/PessoaSaudeCard";
+import { PessoaFardamentoCard } from "@/components/hr/PessoaFardamentoCard";
+import { PessoaSindicalizacaoCard } from "@/components/hr/PessoaSindicalizacaoCard";
 import {
+  CONJUGE_SITUACOES_PROFISSIONAIS,
   ESTADOS_CIVIS,
   GENEROS,
+  HABILITACOES_ACADEMICAS,
   TIPOS_DOCUMENTO,
+  type ConjugeSituacaoProfissional,
   type EstadoCivil,
   type Genero,
+  type HabilitacaoAcademica,
   type PessoaContactoEmergencia,
   type PessoaDadosBancarios,
   type PessoaDadosPessoais,
   type PessoaDadosSaude,
+  type PessoaFardamento,
   type PessoaIdentificacao,
   type FormatoConta,
   type PessoaMorada,
+  type PessoaSindicalizacao,
   type TipoDocumento,
   type Pessoa,
 } from "@/types/hr";
@@ -82,6 +90,13 @@ export interface PessoaPessoaisPermissoes {
   saudeEdit: boolean;
   /** `hr.pessoas.edit` -- o e-mail pessoal grava no nucleo `pessoas`, nao aqui. */
   nucleoEdit: boolean;
+  /** `hr.pessoas.laborais.*` -- o fardamento reusa esta permissao, ver o
+   *  comentario do tipo `PessoaFardamento`. */
+  laboraisView: boolean;
+  laboraisEdit: boolean;
+  /** `hr.pessoas.sindicalizacao.*`, ambas `is_dangerous`. */
+  sindicalizacaoView: boolean;
+  sindicalizacaoEdit: boolean;
 }
 
 interface PessoaPessoaisTabProps {
@@ -91,6 +106,8 @@ interface PessoaPessoaisTabProps {
   emergencia: PessoaContactoEmergencia | null;
   bancarios: PessoaDadosBancarios | null;
   saude: PessoaDadosSaude | null;
+  fardamento: PessoaFardamento | null;
+  sindicalizacao: PessoaSindicalizacao | null;
   /** `pessoas.email_pessoal` -- vive no nucleo, nao em `pessoas_dados_pessoais`. */
   emailPessoal: string | null;
   permissoes: PessoaPessoaisPermissoes;
@@ -101,6 +118,8 @@ interface PessoaPessoaisTabProps {
   onGuardarMorada: (patch: Partial<PessoaMorada>) => Promise<string | null>;
   onGuardarEmergencia: (patch: Partial<PessoaContactoEmergencia>) => Promise<string | null>;
   onGuardarSaude: (patch: Partial<PessoaDadosSaude>) => Promise<string | null>;
+  onGuardarFardamento: (patch: Partial<PessoaFardamento>) => Promise<string | null>;
+  onGuardarSindicalizacao: (patch: Partial<PessoaSindicalizacao>) => Promise<string | null>;
   onRevelarNiss: () => Promise<string | null>;
   onDefinirNiss: (niss: string) => Promise<string | null>;
   onDefinirConta: (args: {
@@ -157,6 +176,8 @@ export function PessoaPessoaisTab({
   emergencia,
   bancarios,
   saude,
+  fardamento,
+  sindicalizacao,
   emailPessoal,
   permissoes,
   saving,
@@ -166,6 +187,8 @@ export function PessoaPessoaisTab({
   onGuardarMorada,
   onGuardarEmergencia,
   onGuardarSaude,
+  onGuardarFardamento,
+  onGuardarSindicalizacao,
   onRevelarNiss,
   onDefinirNiss,
   onDefinirConta,
@@ -191,6 +214,17 @@ export function PessoaPessoaisTab({
         dadosPessoais?.irs_retencao_percentagem === undefined
           ? ""
           : String(dadosPessoais.irs_retencao_percentagem),
+      naturalidade_freguesia: dadosPessoais?.naturalidade_freguesia ?? "",
+      naturalidade_concelho: dadosPessoais?.naturalidade_concelho ?? "",
+      naturalidade_pais: dadosPessoais?.naturalidade_pais ?? "",
+      conjuge_situacao_profissional: dadosPessoais?.conjuge_situacao_profissional ?? SEM_ESCOLHA,
+      dependentes_deficientes:
+        dadosPessoais?.dependentes_deficientes === null ||
+        dadosPessoais?.dependentes_deficientes === undefined
+          ? ""
+          : String(dadosPessoais.dependentes_deficientes),
+      habilitacao_academica: dadosPessoais?.habilitacao_academica ?? SEM_ESCOLHA,
+      habilitacao_data_conclusao: dadosPessoais?.habilitacao_data_conclusao ?? "",
     }),
     [dadosPessoais, emailPessoal],
   );
@@ -213,7 +247,14 @@ export function PessoaPessoaisTab({
       geral.telefone_pessoal !== geralOriginal.telefone_pessoal ||
       geral.estado_civil !== geralOriginal.estado_civil ||
       geral.dependentes !== geralOriginal.dependentes ||
-      geral.irs !== geralOriginal.irs;
+      geral.irs !== geralOriginal.irs ||
+      geral.naturalidade_freguesia !== geralOriginal.naturalidade_freguesia ||
+      geral.naturalidade_concelho !== geralOriginal.naturalidade_concelho ||
+      geral.naturalidade_pais !== geralOriginal.naturalidade_pais ||
+      geral.conjuge_situacao_profissional !== geralOriginal.conjuge_situacao_profissional ||
+      geral.dependentes_deficientes !== geralOriginal.dependentes_deficientes ||
+      geral.habilitacao_academica !== geralOriginal.habilitacao_academica ||
+      geral.habilitacao_data_conclusao !== geralOriginal.habilitacao_data_conclusao;
     const mudouEmail = ouNull(geral.email_pessoal) !== (emailPessoal ?? null);
 
     if (mudouDadosPessoais) {
@@ -226,6 +267,19 @@ export function PessoaPessoaisTab({
         estado_civil: geral.estado_civil === SEM_ESCOLHA ? null : (geral.estado_civil as EstadoCivil),
         dependentes: numeroOuNull(geral.dependentes),
         irs_retencao_percentagem: numeroOuNull(geral.irs),
+        naturalidade_freguesia: ouNull(geral.naturalidade_freguesia),
+        naturalidade_concelho: ouNull(geral.naturalidade_concelho),
+        naturalidade_pais: ouNull(geral.naturalidade_pais)?.toUpperCase() ?? null,
+        conjuge_situacao_profissional:
+          geral.conjuge_situacao_profissional === SEM_ESCOLHA
+            ? null
+            : (geral.conjuge_situacao_profissional as ConjugeSituacaoProfissional),
+        dependentes_deficientes: numeroOuNull(geral.dependentes_deficientes),
+        habilitacao_academica:
+          geral.habilitacao_academica === SEM_ESCOLHA
+            ? null
+            : (geral.habilitacao_academica as HabilitacaoAcademica),
+        habilitacao_data_conclusao: ouNull(geral.habilitacao_data_conclusao),
       });
       if (erro) {
         toast.error(erro);
@@ -251,6 +305,9 @@ export function PessoaPessoaisTab({
       numero_documento: identificacao?.numero_documento ?? "",
       validade_documento: identificacao?.validade_documento ?? "",
       nif: identificacao?.nif ?? "",
+      carta_conducao_numero: identificacao?.carta_conducao_numero ?? "",
+      carta_conducao_categorias: identificacao?.carta_conducao_categorias ?? "",
+      carta_conducao_validade: identificacao?.carta_conducao_validade ?? "",
     }),
     [identificacao],
   );
@@ -269,6 +326,9 @@ export function PessoaPessoaisTab({
       numero_documento: ouNull(ident.numero_documento),
       validade_documento: ouNull(ident.validade_documento),
       nif: ouNull(ident.nif),
+      carta_conducao_numero: ouNull(ident.carta_conducao_numero),
+      carta_conducao_categorias: ouNull(ident.carta_conducao_categorias),
+      carta_conducao_validade: ouNull(ident.carta_conducao_validade),
     });
     if (erro) {
       toast.error(erro);
@@ -437,6 +497,42 @@ export function PessoaPessoaisTab({
               </div>
             </div>
 
+            {/* Naturalidade: atributo de nascimento, singular -- nao vive na
+                tabela de moradas (essa e plural e tem tipo). */}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-naturalidade-freguesia">
+                  {t("hr.campos.naturalidadeFreguesia")}
+                </Label>
+                <Input
+                  id="hr-naturalidade-freguesia"
+                  value={geral.naturalidade_freguesia}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, naturalidade_freguesia: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-naturalidade-concelho">
+                  {t("hr.campos.naturalidadeConcelho")}
+                </Label>
+                <Input
+                  id="hr-naturalidade-concelho"
+                  value={geral.naturalidade_concelho}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, naturalidade_concelho: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-naturalidade-pais">{t("hr.campos.naturalidadePais")}</Label>
+                <CountrySelect
+                  id="hr-naturalidade-pais"
+                  value={geral.naturalidade_pais}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(codigo) => setGeral({ ...geral, naturalidade_pais: codigo })}
+                />
+              </div>
+            </div>
+
             <div className="flex items-center gap-2">
               <Checkbox
                 id="hr-ocultar-aniversario"
@@ -554,6 +650,47 @@ export function PessoaPessoaisTab({
                 </Button>
               </div>
             )}
+
+            {/* Carta de conducao: coexiste com o CC/passaporte acima, nao os
+                substitui -- por isso e um bloco proprio, nao um valor de
+                `tipo_documento`. */}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-carta-numero">{t("hr.campos.cartaConducaoNumero")}</Label>
+                <Input
+                  id="hr-carta-numero"
+                  value={ident.carta_conducao_numero}
+                  disabled={!permissoes.identificacaoEdit}
+                  onChange={(e) => setIdent({ ...ident, carta_conducao_numero: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-carta-categorias">
+                  {t("hr.campos.cartaConducaoCategorias")}
+                </Label>
+                <Input
+                  id="hr-carta-categorias"
+                  placeholder="B, B1"
+                  value={ident.carta_conducao_categorias}
+                  disabled={!permissoes.identificacaoEdit}
+                  onChange={(e) =>
+                    setIdent({ ...ident, carta_conducao_categorias: e.target.value })
+                  }
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-carta-validade">{t("hr.campos.cartaConducaoValidade")}</Label>
+                <Input
+                  id="hr-carta-validade"
+                  type="date"
+                  value={ident.carta_conducao_validade}
+                  disabled={!permissoes.identificacaoEdit}
+                  onChange={(e) =>
+                    setIdent({ ...ident, carta_conducao_validade: e.target.value })
+                  }
+                />
+              </div>
+            </div>
 
             <AccoesBloco
               visivel={permissoes.identificacaoEdit && identAlterado}
@@ -798,6 +935,76 @@ export function PessoaPessoaisTab({
                   onChange={(e) => setGeral({ ...geral, irs: e.target.value })}
                 />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-conjuge-situacao">
+                  {t("hr.campos.conjugeSituacaoProfissional")}
+                </Label>
+                <Select
+                  value={geral.conjuge_situacao_profissional}
+                  disabled={!permissoes.pessoaisEdit}
+                  onValueChange={(v) => setGeral({ ...geral, conjuge_situacao_profissional: v })}
+                >
+                  <SelectTrigger id="hr-conjuge-situacao">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
+                    {CONJUGE_SITUACOES_PROFISSIONAIS.map((situacao) => (
+                      <SelectItem key={situacao} value={situacao}>
+                        {t(`hr.conjugeSituacaoProfissional.${situacao}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-dependentes-deficientes">
+                  {t("hr.campos.dependentesDeficientes")}
+                </Label>
+                <Input
+                  id="hr-dependentes-deficientes"
+                  type="number"
+                  min={0}
+                  max={30}
+                  value={geral.dependentes_deficientes}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) => setGeral({ ...geral, dependentes_deficientes: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-habilitacao">{t("hr.campos.habilitacaoAcademica")}</Label>
+                <Select
+                  value={geral.habilitacao_academica}
+                  disabled={!permissoes.pessoaisEdit}
+                  onValueChange={(v) => setGeral({ ...geral, habilitacao_academica: v })}
+                >
+                  <SelectTrigger id="hr-habilitacao">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
+                    {HABILITACOES_ACADEMICAS.map((habilitacao) => (
+                      <SelectItem key={habilitacao} value={habilitacao}>
+                        {t(`hr.habilitacaoAcademica.${habilitacao}`)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="hr-habilitacao-data">
+                  {t("hr.campos.habilitacaoDataConclusao")}
+                </Label>
+                <Input
+                  id="hr-habilitacao-data"
+                  type="date"
+                  value={geral.habilitacao_data_conclusao}
+                  disabled={!permissoes.pessoaisEdit}
+                  onChange={(e) =>
+                    setGeral({ ...geral, habilitacao_data_conclusao: e.target.value })
+                  }
+                />
+              </div>
             </div>
             <AccoesBloco
               visivel={permissoes.pessoaisEdit && geralAlterado}
@@ -807,6 +1014,24 @@ export function PessoaPessoaisTab({
             />
           </CardContent>
         </Card>
+      )}
+
+      {permissoes.laboraisView && (
+        <PessoaFardamentoCard
+          fardamento={fardamento}
+          podeEditar={permissoes.laboraisEdit}
+          saving={saving}
+          onGuardar={onGuardarFardamento}
+        />
+      )}
+
+      {permissoes.sindicalizacaoView && (
+        <PessoaSindicalizacaoCard
+          sindicalizacao={sindicalizacao}
+          podeEditar={permissoes.sindicalizacaoEdit}
+          saving={saving}
+          onGuardar={onGuardarSindicalizacao}
+        />
       )}
     </div>
   );
