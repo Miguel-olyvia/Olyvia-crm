@@ -538,7 +538,11 @@ export default function AnewLeads() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const navigate = useNavigate();
-  const { resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
+  // `identityMap` entra aqui de proposito: `getIdentity` e estavel (le de uma ref
+  // e nao tem dependencias), por isso um useMemo que so dependa dele NAO volta a
+  // correr quando as fichas das pessoas chegam. A ordenacao por Nome precisa de
+  // reagir a essa chegada, e o mapa e o unico valor que muda nesse momento.
+  const { identityMap, resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
   const queryClient = useQueryClient();
   
   // Create translated field arrays (memoized to prevent re-creation every render)
@@ -2928,7 +2932,7 @@ export default function AnewLeads() {
     if (!fieldValues) return null;
     
     const phonePatterns = ['phone', 'telefone', 'tel', 'mobile', 'telemovel', 'contacto', 'celular'];
-    
+
     for (const key of Object.keys(fieldValues)) {
       if (key === '_meta') continue;
       const keyLower = key.toLowerCase();
@@ -2938,6 +2942,30 @@ export default function AnewLeads() {
       }
     }
     return null;
+  };
+
+  /**
+   * Nome, telefone e email TAL COMO APARECEM na lista.
+   *
+   * A ordenacao tem de usar exactamente estes valores. Antes procurava-os em
+   * field_values["nome"|"telefone"|"email"] -- chaves que quase nenhuma lead tem
+   * (medido: 1 nome, 0 telefones e 171 emails em 6078 leads) -- e por isso todas
+   * as linhas empatavam e o clique no cabecalho nao mudava nada. O nome, em
+   * particular, vem da ficha da pessoa e nao das respostas do formulario.
+   *
+   * Fica numa funcao so, usada pela ordenacao E pela linha da tabela, para as
+   * duas nao voltarem a divergir.
+   */
+  const leadDisplayValues = (lead: Lead) => {
+    const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
+    const name = identity?.first_name && identity?.last_name
+      ? `${identity.first_name} ${identity.last_name}`
+      : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
+    return {
+      name: name || "",
+      phone: extractPhoneFromLead(lead.field_values) || "",
+      email: extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']) || "",
+    };
   };
 
   // Format phone for WhatsApp link (remove non-digits, add country code if needed)
@@ -4634,6 +4662,20 @@ export default function AnewLeads() {
           aVal = a.campaigns?.name || "";
           bVal = b.campaigns?.name || "";
           break;
+        // Nome, telefone e email ordenam pelo valor MOSTRADO na lista, nao pela
+        // chave crua em field_values (que quase nenhuma lead tem preenchida).
+        case "nome":
+          aVal = leadDisplayValues(a).name;
+          bVal = leadDisplayValues(b).name;
+          break;
+        case "telefone":
+          aVal = leadDisplayValues(a).phone;
+          bVal = leadDisplayValues(b).phone;
+          break;
+        case "email":
+          aVal = leadDisplayValues(a).email;
+          bVal = leadDisplayValues(b).email;
+          break;
         default:
           // For field_values columns
           aVal = a.field_values?.[sortColumn] || "";
@@ -4648,7 +4690,10 @@ export default function AnewLeads() {
       
       return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
     });
-  }, [leads, sortColumn, sortDirection, sourceFilter]);
+    // `identityMap` e dependencia real: as fichas das pessoas chegam depois da
+    // lista, e sem ela a ordenacao por Nome ficava feita com os nomes ainda por
+    // resolver e nunca mais era refeita.
+  }, [leads, sortColumn, sortDirection, sourceFilter, identityMap]);
 
   const visibleStatusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -5904,12 +5949,9 @@ export default function AnewLeads() {
                         </TableRow>
                       ) : (
                         filteredLeads.map(lead => {
-                          const phone = extractPhoneFromLead(lead.field_values);
-                          const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
-                          const name = identity?.first_name && identity?.last_name
-                            ? `${identity.first_name} ${identity.last_name}`
-                            : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
-                          const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
+                          // Mesma funcao que a ordenacao usa, para o que se ve e o
+                          // que ordena nao poderem divergir.
+                          const { name, phone, email } = leadDisplayValues(lead);
                           const isSelected = selectedLeadIds.includes(lead.id);
 
                           return (
@@ -5992,12 +6034,8 @@ export default function AnewLeads() {
                 ) : (
                   <LeadsKanbanView
                     leads={kanbanLeads.map(lead => {
-                      const phone = extractPhoneFromLead(lead.field_values);
-                      const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
-                      const name = identity?.first_name && identity?.last_name
-                        ? `${identity.first_name} ${identity.last_name}`
-                        : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
-                      const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
+                      // Mesma funcao da lista e da ordenacao.
+                      const { name, phone, email } = leadDisplayValues(lead);
                       return {
                         id: lead.id,
                         created_at: lead.created_at,
