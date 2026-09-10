@@ -146,10 +146,24 @@ export default function PessoaDetail() {
     [colegas],
   );
 
+  // A entidade legal e SEMPRE a da organizacao da ficha -- nao se escolhe, e
+  // por isso o formulario nem sequer envia `entidade_legal_org_id`: fica nulo
+  // em todas as fichas criadas por aqui.
+  //
+  // A alternativa TEM de viver neste calculo, e nao em cada sitio que mostra o
+  // valor. Estava repetida num dos dois consumidores e esquecida no outro, e o
+  // resultado era o painel de detalhes a dizer "Nao preenchido" ao lado de um
+  // separador que mostrava o nome da organizacao.
   const entidadeLegalNome = useMemo(() => {
-    if (!pessoa?.entidade_legal_org_id) return null;
-    return companies.find((e) => e.id === pessoa.entidade_legal_org_id)?.name ?? null;
-  }, [pessoa?.entidade_legal_org_id, companies]);
+    const nomeDe = (id: string | null | undefined) =>
+      id ? (companies.find((e) => e.id === id)?.name ?? null) : null;
+    return (
+      nomeDe(pessoa?.entidade_legal_org_id) ??
+      nomeDe(pessoa?.organization_id) ??
+      activeCompany?.name ??
+      null
+    );
+  }, [pessoa?.entidade_legal_org_id, pessoa?.organization_id, companies, activeCompany?.name]);
 
   const mudarTab = (valor: string) =>
     setSearchParams(
@@ -259,7 +273,7 @@ export default function PessoaDetail() {
               colegas={colegas.map((c) => ({ id: c.id, nome_completo: c.nome_completo }))}
               locais={locais}
               locaisALoad={locaisALoad}
-              entidadeLegalNome={entidadeLegalNome ?? activeCompany?.name ?? null}
+              entidadeLegalNome={entidadeLegalNome}
               podeEditar={podeEditarLaborais}
               saving={ficha.saving}
               onGuardar={ficha.savePessoa}

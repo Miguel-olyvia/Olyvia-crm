@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   Table,
   TableBody,
@@ -118,6 +119,16 @@ type Rascunho = {
   dias_uteis: DiaSemana[];
 };
 
+/** Um contrato "tem periodo experimental" se algum dos dois campos vier
+ *  preenchido. Nao ha coluna que o diga -- e derivado, e e de proposito: uma
+ *  coluna booleana podia contradizer os valores ao lado dela. */
+function temAlgumExperimental(rascunho: Rascunho): boolean {
+  return (
+    rascunho.periodo_experimental_dias.trim() !== "" ||
+    rascunho.periodo_experimental_ate.trim() !== ""
+  );
+}
+
 function rascunhoDe(vinculo: PessoaVinculo | null): Rascunho {
   return {
     tipo_contrato: vinculo?.tipo_contrato ?? "sem_termo",
@@ -185,6 +196,34 @@ export function PessoaContratoTab({
   useEffect(() => {
     setRascunho(rascunhoDe(activo));
   }, [activo]);
+
+  /**
+   * Ha contratos sem periodo experimental nenhum, e a maioria dos que se criam
+   * a mao sao esses. Dois campos sempre a vista, sempre vazios, leem-se como
+   * coisa por preencher e nao como coisa que nao se aplica.
+   *
+   * O interruptor NAO e um dado novo na base: e a leitura de haver ou nao
+   * valores. Comeca ligado se o contrato ja tiver algum dos dois -- senao
+   * abrir um contrato existente escondia o que la esta.
+   */
+  const [temExperimental, setTemExperimental] = useState(
+    () => temAlgumExperimental(rascunhoDe(activo)),
+  );
+  useEffect(() => {
+    setTemExperimental(temAlgumExperimental(rascunhoDe(activo)));
+  }, [activo]);
+
+  /** Desligar limpa os dois campos: e a unica leitura honesta de "nao tem". */
+  const alternarExperimental = (ligado: boolean) => {
+    setTemExperimental(ligado);
+    if (!ligado) {
+      setRascunho((anterior) => ({
+        ...anterior,
+        periodo_experimental_dias: "",
+        periodo_experimental_ate: "",
+      }));
+    }
+  };
 
   /** Campos de que se saiu: o erro de formato so aparece depois disso. */
   const [tocados, setTocados] = useState<ReadonlySet<string>>(() => new Set());
@@ -290,17 +329,17 @@ export function PessoaContratoTab({
     <div className="space-y-4">
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-3">
+          {/* O titulo diz o estado; a etiqueta ao lado so existe quando ha
+              mesmo contrato. Dizer "Contrato em vigor" com uma etiqueta a
+              dizer "Sem contrato" e um botao a dizer "Criar" era o mesmo
+              cartao a afirmar tres coisas incompativeis. */}
           <CardTitle className="flex items-center gap-2 text-base">
             <FileText className="h-4 w-4 text-muted-foreground" />
-            {t("hr.contrato.activoTitulo")}
+            {activo ? t("hr.contrato.activoTitulo") : t("hr.contrato.novoTitulo")}
           </CardTitle>
-          {activo ? (
+          {activo && (
             <Badge variant="secondary" className="font-normal">
               {t("hr.estadoVinculo.activo")}
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="font-normal">
-              {t("hr.contrato.semContrato")}
             </Badge>
           )}
         </CardHeader>
@@ -381,26 +420,52 @@ export function PessoaContratoTab({
               disabled={!podeEditar}
               onChange={(v) => definir("motivo_termo", v)}
             />
-            <CampoTexto
-              id="hr-contrato-periodo-experimental-dias"
-              label={t("hr.contrato.periodoExperimentalDias")}
-              erro={erroDe("hr-contrato-periodo-experimental-dias")}
-              tipo="number"
-              min={0}
-              max={1095}
-              valor={rascunho.periodo_experimental_dias}
-              disabled={!podeEditar}
-              onChange={(v) => definir("periodo_experimental_dias", v)}
-            />
-            <CampoTexto
-              id="hr-contrato-periodo-experimental-ate"
-              label={t("hr.contrato.periodoExperimentalAte")}
-              ajuda={t("hr.contrato.ajudaExperimentalDuasColunas")}
-              tipo="date"
-              valor={rascunho.periodo_experimental_ate}
-              disabled={!podeEditar}
-              onChange={(v) => definir("periodo_experimental_ate", v)}
-            />
+            {/* O interruptor ocupa uma celula da grelha; os dois campos so
+                aparecem depois dele, e so quando ha mesmo periodo. */}
+            <div className="flex items-center gap-2 self-end pb-2">
+              {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um
+                  <button>, e o nome acessivel de um botao NAO vem de uma
+                  <label for>. Sem isto o interruptor chega a quem usa leitor
+                  de ecra sem nome nenhum. */}
+              <Switch
+                id="hr-contrato-tem-experimental"
+                aria-labelledby="hr-contrato-tem-experimental-rotulo"
+                checked={temExperimental}
+                disabled={!podeEditar}
+                onCheckedChange={alternarExperimental}
+              />
+              <Label
+                id="hr-contrato-tem-experimental-rotulo"
+                htmlFor="hr-contrato-tem-experimental"
+                className="font-normal"
+              >
+                {t("hr.contrato.temExperimental")}
+              </Label>
+            </div>
+            {temExperimental && (
+              <>
+                <CampoTexto
+                  id="hr-contrato-periodo-experimental-dias"
+                  label={t("hr.contrato.periodoExperimentalDias")}
+                  erro={erroDe("hr-contrato-periodo-experimental-dias")}
+                  tipo="number"
+                  min={0}
+                  max={1095}
+                  valor={rascunho.periodo_experimental_dias}
+                  disabled={!podeEditar}
+                  onChange={(v) => definir("periodo_experimental_dias", v)}
+                />
+                <CampoTexto
+                  id="hr-contrato-periodo-experimental-ate"
+                  label={t("hr.contrato.periodoExperimentalAte")}
+                  ajuda={t("hr.contrato.ajudaExperimentalDuasColunas")}
+                  tipo="date"
+                  valor={rascunho.periodo_experimental_ate}
+                  disabled={!podeEditar}
+                  onChange={(v) => definir("periodo_experimental_ate", v)}
+                />
+              </>
+            )}
             <CampoTexto
               id="hr-contrato-horas-periodo"
               label={t("hr.contrato.horasTrabalho")}
