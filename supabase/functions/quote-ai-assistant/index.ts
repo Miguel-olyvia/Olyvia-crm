@@ -232,9 +232,28 @@ serve(async (req) => {
         ...candidateServices.map((s: any) => ({ id: s.id, type: "service", name: s.name, sku: s.sku })),
       ];
 
+      // Distinção crítica que o modelo tem de fazer: o texto de "demolir"/
+      // "proteger" descreve um OBJETO físico já existente no espaço (que vai
+      // ser destruído, ou que precisa de proteção) — não é o nome de um
+      // produto a comprar/instalar. Sem isto, a pesquisa por palavra-chave
+      // pode devolver, por coincidência, um produto do catálogo com o mesmo
+      // nome do objeto (ex.: texto "um armário" + produto real "Armário
+      // Inferior Termolaminado"), e o modelo sugere-o como se fosse a
+      // resposta — quando devia sugerir algo para proteger/demolir esse
+      // armário, nunca o próprio armário. Só "intervencao" descreve
+      // diretamente o trabalho a fazer, por isso não precisa deste aviso.
+      const FIELD_GUIDANCE: Partial<Record<typeof source_field, string>> = {
+        demolir:
+          'O texto de "demolir" descreve o elemento físico que vai ser destruído/removido (ex.: "uma parede", "um lavatório") — NÃO é o nome de um produto a comprar. Sugere só serviços de mão-de-obra de demolição, remoção/transporte de entulho, ou consumíveis de demolição. NUNCA sugiras um produto cujo nome coincida com o próprio elemento a demolir.',
+        proteger:
+          'O texto de "proteger" descreve o elemento físico já existente no espaço que precisa de ser protegido durante a obra (ex.: "um armário") — NÃO é o nome de um produto a comprar/instalar. Sugere só consumíveis ou serviços de proteção de obra (filme plástico, fita, cartão, mantas de proteção, etc.). NUNCA sugiras o próprio objeto mencionado como se fosse um produto a comprar — esse objeto já existe e só precisa de ser protegido, não substituído.',
+      };
+      const fieldGuidance = FIELD_GUIDANCE[source_field];
+
       const diagnosticSystemPrompt = `Tu és um assistente que sugere produtos e serviços de um catálogo já filtrado, no contexto do diagnóstico de uma obra de remodelação (Fase 1 do orçamento).
 
 CAMPO EM ANÁLISE: ${source_field}
+${fieldGuidance ? `CONTEXTO IMPORTANTE PARA ESTE CAMPO: ${fieldGuidance}\n` : ""}
 DADOS DA ÁREA:
 - área (m2): ${area_m2 ?? "não indicada"}
 - demolir: ${demolir_descricao ?? "não indicado"}
@@ -247,9 +266,10 @@ ${JSON.stringify(candidatesForPrompt, null, 2)}
 
 INSTRUÇÕES:
 1. Escolhe só produtos/serviços da lista acima que sejam relevantes para o campo em análise.
-2. NUNCA inventes um id ou um produto/serviço que não esteja na lista.
-3. Se nenhum for adequado, devolve suggestions: [].
-4. Responde SEMPRE em português e SÓ com um JSON válido, neste formato:
+2. Distingue sempre o objeto mencionado no texto (que já existe no espaço, ou vai ser destruído) do produto/serviço a sugerir (que serve para agir sobre esse objeto — proteger, demolir, remover). Nunca sugiras o próprio objeto como se fosse a resposta, mesmo que um produto do catálogo tenha um nome parecido ou igual.
+3. NUNCA inventes um id ou um produto/serviço que não esteja na lista.
+4. Se nenhum for adequado, devolve suggestions: [].
+5. Responde SEMPRE em português e SÓ com um JSON válido, neste formato:
 {
   "suggestions": [
     { "product_id": "uuid ou null", "service_id": "uuid ou null", "name": "nome exato do catálogo", "reason": "razão da sugestão", "confidence": 0.0 }
