@@ -796,7 +796,28 @@ export function ProposalCreateDialog({
               <Label className="flex items-center gap-2">
                 <Palette className="h-4 w-4" /> Template de Proposta
               </Label>
-              <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+              <Select
+                value={formData.template_id}
+                onValueChange={(value) => {
+                  const nextId = value === "none" ? "" : value;
+                  setFormData((prev) => {
+                    const escolhido = proposalTemplates.find((t) => t.id === nextId);
+                    const anterior = proposalTemplates.find((t) => t.id === prev.template_id);
+                    // So preenche o titulo quando ele ainda nao e da pessoa: ou esta
+                    // vazio, ou continua a ser o nome do template escolhido antes
+                    // (para trocar de template actualizar). Nunca escreve por cima
+                    // de um titulo escrito a mao, nem no ecra de edicao (onde o
+                    // titulo ja vem preenchido).
+                    const podePreencher =
+                      prev.title.trim() === "" || (!!anterior && prev.title === anterior.name);
+                    return {
+                      ...prev,
+                      template_id: nextId,
+                      title: podePreencher && escolhido ? escolhido.name : prev.title,
+                    };
+                  });
+                }}
+              >
                 <SelectTrigger><SelectValue placeholder="Escolher template" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Nenhum</SelectItem>
