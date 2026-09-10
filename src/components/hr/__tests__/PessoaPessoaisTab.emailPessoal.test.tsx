@@ -39,6 +39,10 @@ const PERMISSOES_TUDO: PessoaPessoaisPermissoes = {
   saudeView: false,
   saudeEdit: false,
   nucleoEdit: true,
+  laboraisView: false,
+  laboraisEdit: false,
+  sindicalizacaoView: false,
+  sindicalizacaoEdit: false,
 };
 
 function montar(props?: {
@@ -65,7 +69,18 @@ function montar(props?: {
         estado_civil: null,
         dependentes: null,
         irs_retencao_percentagem: null,
+    naturalidade_freguesia: null,
+    naturalidade_concelho: null,
+    naturalidade_pais: null,
+    conjuge_situacao_profissional: null,
+    dependentes_deficientes: null,
+    habilitacao_academica: null,
+    habilitacao_data_conclusao: null,
       }}
+      fardamento={null}
+      sindicalizacao={null}
+      onGuardarFardamento={vi.fn().mockResolvedValue(null)}
+      onGuardarSindicalizacao={vi.fn().mockResolvedValue(null)}
       identificacao={null}
       morada={null}
       emergencia={null}

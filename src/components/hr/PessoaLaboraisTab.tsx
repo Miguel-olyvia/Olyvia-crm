@@ -74,8 +74,6 @@ type Rascunho = {
   telefone_trabalho: string;
   numero_interno: string;
   cargo: string;
-  departamento: string;
-  estrutura: string;
   local_id: string;
   data_admissao: string;
   data_antiguidade: string;
@@ -89,8 +87,6 @@ function rascunhoDe(pessoa: Pessoa): Rascunho {
     telefone_trabalho: pessoa.telefone_trabalho ?? "",
     numero_interno: pessoa.numero_interno ?? "",
     cargo: pessoa.cargo ?? "",
-    departamento: pessoa.departamento ?? "",
-    estrutura: pessoa.estrutura ?? "",
     local_id: pessoa.local_id ?? SEM_ESCOLHA,
     data_admissao: pessoa.data_admissao ?? "",
     data_antiguidade: pessoa.data_antiguidade ?? "",
@@ -134,8 +130,6 @@ export function PessoaLaboraisTab({
       telefone_trabalho: vazioParaNull(rascunho.telefone_trabalho),
       numero_interno: vazioParaNull(rascunho.numero_interno),
       cargo: vazioParaNull(rascunho.cargo),
-      departamento: vazioParaNull(rascunho.departamento),
-      estrutura: vazioParaNull(rascunho.estrutura),
       local_id: rascunho.local_id === SEM_ESCOLHA ? null : rascunho.local_id,
       data_admissao: vazioParaNull(rascunho.data_admissao),
       data_antiguidade: vazioParaNull(rascunho.data_antiguidade),
@@ -153,8 +147,6 @@ export function PessoaLaboraisTab({
   const campos: Array<{ id: keyof Rascunho; labelKey: string; tipo?: "date" | "email" | "text" }> = [
     { id: "numero_interno", labelKey: "hr.laborais.numeroInterno" },
     { id: "cargo", labelKey: "hr.columns.cargo" },
-    { id: "departamento", labelKey: "hr.laborais.departamento" },
-    { id: "estrutura", labelKey: "hr.laborais.estrutura" },
     { id: "email_trabalho", labelKey: "hr.laborais.emailTrabalho", tipo: "email" },
     { id: "telefone_trabalho", labelKey: "hr.laborais.telefoneTrabalho" },
     { id: "data_admissao", labelKey: "hr.columns.contratacao", tipo: "date" },

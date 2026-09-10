@@ -44,6 +44,11 @@ const VINCULO_ACTIVO: PessoaVinculo = {
   periodo_experimental_dias: null,
   categoria_funcao: null,
   periodo_experimental_origem: null,
+  categoria_profissional: null,
+  renovavel: null,
+  isencao_horario: false,
+  formacao_inicio: null,
+  formacao_fim: null,
 };
 
 beforeAll(() => {

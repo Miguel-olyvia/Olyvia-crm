@@ -308,12 +308,13 @@ export interface Pessoa {
   /** Local predefinido da pessoa (`hr_locais_trabalho`), usado quando um
    * intervalo de horario nao indica local. */
   local_id: string | null;
-  /**
-   * Texto livre, 20261124060000 -- nao ha catalogo de departamentos nem
-   * organograma. Mesmo escalao de `cargo`: `hr.pessoas.laborais.*`.
-   */
-  departamento: string | null;
-  estrutura: string | null;
+  // NAO existe `departamento` nem `estrutura` aqui, e nao e omissao.
+  // "Departamento" ja e um TIPO DE ORGANIZACAO no produto -- holding,
+  // empresa, filial, departamento, equipa, divisao, projeto -- e o organograma
+  // existe e funciona (ver PessoasOrganogramaTab). A pessoa liga-se a
+  // organizacoes, e e dessa ligacao que o organograma sai. Um campo de texto
+  // livre ao lado seria uma segunda verdade sobre a mesma coisa: o erro que
+  // estado_contrato ja custou uma migration a desfazer.
   entidade_legal_org_id: string | null;
   reporta_a_pessoa_id: string | null;
   data_admissao: string | null;

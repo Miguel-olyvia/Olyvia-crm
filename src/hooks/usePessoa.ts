@@ -46,7 +46,13 @@ import type { LinhaPlaneadoParaGravar } from "@/lib/hr/horario";
 const COLUNAS_PESSOA =
   "id, organization_id, numero_interno, primeiro_nome, apelido, nome_completo, " +
   "email_trabalho, email_pessoal, telefone_trabalho, cargo, local_trabalho, " +
-  "local_id, departamento, estrutura, " +
+  // Sem `departamento` nem `estrutura`: nao existem na base, e nao vao existir
+  // como colunas de texto aqui. "Departamento" ja e um TIPO DE ORGANIZACAO no
+  // produto (holding, empresa, filial, departamento, equipa, divisao,
+  // projeto); a pessoa liga-se a organizacoes, e e dai que sai o organograma.
+  // Um campo livre ao lado seria uma segunda verdade sobre a mesma coisa --
+  // o mesmo erro de estado_contrato, que ja custou uma migration a desfazer.
+  "local_id, " +
   "entidade_legal_org_id, reporta_a_pessoa_id, data_admissao, data_antiguidade, " +
   "data_saida, " +
   "estado_registo, dias_trabalho, notas, created_at, updated_at";
