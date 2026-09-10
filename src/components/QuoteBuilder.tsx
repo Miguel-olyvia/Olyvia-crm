@@ -27,7 +27,7 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { resolveQuoteAssignedTo } from "@/utils/quotes/resolveQuoteAssignedTo";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { QuotePipelineBar } from "@/components/quote/QuotePipelineBar";
 import { QuoteDealCard } from "@/components/quote/QuoteDealCard";
@@ -266,6 +266,18 @@ const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
 
 export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null }: QuoteBuilderProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // Fluxo "Novo Orçamento": em vez de só mostrar o diagnóstico Fase 1 depois
+  // de gravar e reabrir, cria-se um rascunho silencioso (estado "rascunho",
+  // sem linhas) assim que o ecrã abre, para o diagnóstico poder aparecer já
+  // na primeira renderização. `effectiveQuoteId` é o id "real" a usar em todo
+  // o resto do componente (edição de orçamento existente OU rascunho recém-criado);
+  // `quoteId` cru só se mantém em 3 sítios muito específicos (ver comentários
+  // junto a cada um).
+  const [draftQuoteId, setDraftQuoteId] = useState<string | null>(null);
+  const effectiveQuoteId = quoteId ?? draftQuoteId;
+  const silentDraftCreationRef = useRef(false);
+  const createdBySilentDraftRef = useRef(false);
+  const [silentDraftError, setSilentDraftError] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -342,7 +354,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [resolvedQuoteEntityId, setResolvedQuoteEntityId] = useState<string | null>(null);
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { activeCompany, companies: userCompanies, userType: companyUserType } = useCompany();
+  const { activeCompany, companies: userCompanies, userType: companyUserType, isLoading: isCompanyContextLoading } = useCompany();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
   const { hasPermission } = usePermissions();
   // Ver custos/margens segue a MESMA regra do resto da app (Quotes/Proposals):
@@ -423,10 +435,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     // Editing an existing quote: wait for fetchQuote() to finish loading the
     // server state first, so a restored draft overlays it instead of being
     // overwritten by it.
-    if (quoteId && !existingQuoteLoadedRef.current) return;
+    if (effectiveQuoteId && !existingQuoteLoadedRef.current) return;
 
     draftRestoredRef.current = activeCompany.id;
-    const rawDraft = localStorage.getItem(getQuoteDraftKey(activeCompany.id, quoteId));
+    const rawDraft = localStorage.getItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId));
     if (!rawDraft) return;
 
     try {
@@ -446,7 +458,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     } catch (error) {
       console.error("Error restoring quote draft:", error);
     }
-  }, [quoteId, activeCompany?.id, quoteLoadTick]);
+  }, [effectiveQuoteId, activeCompany?.id, quoteLoadTick]);
 
   useEffect(() => {
     if (!activeCompany?.id || draftRestoredRef.current !== activeCompany.id || typeof window === "undefined") return;
@@ -458,7 +470,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     if (!hasDraftContent) return;
 
     const timeoutId = window.setTimeout(() => {
-      localStorage.setItem(getQuoteDraftKey(activeCompany.id, quoteId), JSON.stringify({
+      localStorage.setItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId), JSON.stringify({
         version: NEW_QUOTE_DRAFT_VERSION,
         savedAt: new Date().toISOString(),
         formData,
@@ -475,7 +487,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     }, 300);
 
     return () => window.clearTimeout(timeoutId);
-  }, [quoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, inlineQuotes, selectedDeal]);
+  }, [effectiveQuoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, inlineQuotes, selectedDeal]);
 
   useEffect(() => {
     if (!activeCompany?.id || typeof window === "undefined") return;
@@ -492,13 +504,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [quoteId, activeCompany?.id, formData, lines.length, inlineQuotes.length, selectedDeal]);
+  }, [effectiveQuoteId, activeCompany?.id, formData, lines.length, inlineQuotes.length, selectedDeal]);
 
   // Generate auto-reference for new quotes
   useEffect(() => {
     if (!quoteId && !autoReference) {
       const hasSavedDraft = activeCompany?.id && typeof window !== "undefined"
-        ? localStorage.getItem(getQuoteDraftKey(activeCompany.id, quoteId))
+        ? localStorage.getItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId))
         : null;
       if (hasSavedDraft) return;
 
@@ -506,7 +518,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const seq = String(Math.floor(Math.random() * 9999) + 1).padStart(4, "0");
       setAutoReference(`Q-${year}-${seq}`);
     }
-  }, [quoteId, autoReference, activeCompany?.id]);
+  }, [quoteId, effectiveQuoteId, autoReference, activeCompany?.id]);
 
   // Check if user is system admin
   useEffect(() => {
@@ -516,10 +528,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   // Auto-set organization_id when activeCompany changes (for new quotes)
   useEffect(() => {
-    if (activeCompany?.id && !quoteId && !formData.organization_id) {
+    if (activeCompany?.id && !effectiveQuoteId && !formData.organization_id) {
       setFormData(prev => ({ ...prev, organization_id: activeCompany.id }));
     }
-  }, [activeCompany?.id, quoteId]);
+  }, [activeCompany?.id, effectiveQuoteId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -616,20 +628,63 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     resolveRoot();
   }, [activeCompany?.id]);
 
+  // Cria silenciosamente um rascunho (estado "rascunho", sem linhas) assim que
+  // o ecrã de "Novo Orçamento" abre, para o diagnóstico Fase 1 poder ser
+  // mostrado já na primeira renderização, em vez de só depois de gravar e
+  // reabrir. Nunca corre ao editar um orçamento existente (quoteId já vem
+  // preenchido na prop).
+  useEffect(() => {
+    if (quoteId) return;
+    if (draftQuoteId) return;
+    if (silentDraftCreationRef.current) return;
+    if (isCompanyContextLoading || !activeCompany?.id) return;
+
+    silentDraftCreationRef.current = true;
+    (async () => {
+      try {
+        const businessUserId = await resolveCurrentBusinessUserId();
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+        const { data, error } = await supabase.rpc('rpc_save_quote', {
+          p_quote_id: null as unknown as string,
+          p_quote_data: {
+            organization_id: activeCompany.id,
+            modelo_base: '0',
+            estado: 'rascunho',
+            desconto_global_percent: 0,
+            validade_dias: 30,
+            iva_rate: 23,
+          },
+          p_lines: [],
+          p_fees: [],
+          p_totals: {},
+          p_inline_quotes: [],
+          p_diagnostic_suggestions: [],
+        });
+        if (error) throw error;
+        createdBySilentDraftRef.current = true;
+        setDraftQuoteId((data as any)?.id ?? null);
+      } catch (err) {
+        captureFlowError(err, "quote-lifecycle");
+        silentDraftCreationRef.current = false; // permite nova tentativa
+        setSilentDraftError(true);
+      }
+    })();
+  }, [quoteId, draftQuoteId, activeCompany?.id, isCompanyContextLoading]);
+
   useEffect(() => {
     if (activeCompany?.id) {
       fetchClients();
       fetchOrganizations();
       fetchCatalogItems();
       checkPermissions();
-      if (quoteId) {
+      if (effectiveQuoteId) {
         fetchQuote().finally(() => {
           existingQuoteLoadedRef.current = true;
           setQuoteLoadTick(tick => tick + 1);
         });
       }
     }
-  }, [quoteId, activeCompany?.id]);
+  }, [effectiveQuoteId, activeCompany?.id]);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -1764,7 +1819,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   };
 
   const fetchQuote = async () => {
-    if (!quoteId) return;
+    if (!effectiveQuoteId) return;
 
     try {
       const { data: quote, error: quoteError } = await supabase
@@ -1773,7 +1828,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           *,
           deals!deal_id(id, title, entity_id, organization_id, client_id, lead_id, contact_id, assigned_to)
         `)
-        .eq("id", quoteId)
+        .eq("id", effectiveQuoteId)
         .single();
 
       if (quoteError) throw quoteError;
@@ -1874,7 +1929,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           products(sku),
           services(sku)
         `)
-        .eq("quote_id", quoteId)
+        .eq("quote_id", effectiveQuoteId)
         .order("ordem");
 
       if (linesError) throw linesError;
@@ -1925,7 +1980,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const { data: quoteFees, error: feesError } = await supabase
         .from("quote_fees")
         .select("fee_type_id, vat_rate")
-        .eq("quote_id", quoteId);
+        .eq("quote_id", effectiveQuoteId);
 
       if (!feesError && quoteFees) {
         setSelectedFees(new Set(quoteFees.map(f => f.fee_type_id)));
@@ -2015,13 +2070,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const handleDownloadPdf = async () => {
-    if (!quoteId) {
+    if (!effectiveQuoteId) {
       toast({ title: "Guarda o orçamento primeiro", description: "É preciso guardar antes de fazer download do PDF.", variant: "destructive" });
       return;
     }
     try {
       setDownloadingPdf(true);
-      const { blob, fileName } = await generateQuotePdfBlob(quoteId);
+      const { blob, fileName } = await generateQuotePdfBlob(effectiveQuoteId);
       downloadBlob(blob, fileName);
     } catch (e: any) {
       captureFlowError(e, "quote-document-export");
@@ -2163,7 +2218,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         return;
       }
 
-      let savedQuoteId = quoteId;
+      let savedQuoteId = effectiveQuoteId;
 
       const dealOrgId = selectedDeal?.organization_id || formData.organization_id || activeCompany?.id;
       const dealClientId = selectedDeal?.client_id || formData.cliente_id;
@@ -2188,12 +2243,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       // Fallback chain: explicit picker selection -> async-resolved entity (deal/proposal/lead/client/contact) -> existing DB value.
       let resolvedEntityId: string | null =
         selectedDeal?.entity_id || selectedSource?.entity_id || resolvedQuoteEntityId || null;
-      if (quoteId && !resolvedEntityId) {
+      if (effectiveQuoteId && !resolvedEntityId) {
         try {
           const { data: existing } = await (supabase as any)
             .from("quotes")
             .select("entity_id")
-            .eq("id", quoteId)
+            .eq("id", effectiveQuoteId)
             .maybeSingle();
           if (existing?.entity_id) resolvedEntityId = existing.entity_id;
         } catch (e) {
@@ -2410,7 +2465,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         // p_quote_id is nullable at runtime (NULL creates a new quote, a uuid
         // updates an existing one) but the generated RPC Args type widens it
         // to `string` since the SQL parameter has no default value.
-        p_quote_id: (quoteId || null) as unknown as string,
+        p_quote_id: (effectiveQuoteId || null) as unknown as string,
         p_quote_data: quoteData,
         p_lines: linesToInsert,
         p_fees: feesToInsert,
@@ -2428,7 +2483,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       // Clear inline quotes after saving
       setInlineQuotes([]);
       if (activeCompany?.id && typeof window !== "undefined") {
-        localStorage.removeItem(getQuoteDraftKey(activeCompany.id, quoteId));
+        localStorage.removeItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId));
       }
 
       toast({
@@ -3488,6 +3543,23 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     });
   };
 
+  // Sair do ecrã de diagnóstico (botão "Voltar") sem ter concluído a Fase 1.
+  // Só descarta o rascunho quando FOI esta instância a criá-lo silenciosamente
+  // nesta sessão (fluxo "Novo Orçamento") — reabrir um orçamento antigo via
+  // "Editar" nunca passa por aqui com createdBySilentDraftRef.current a true,
+  // porque o useEffect de criação silenciosa nem chega a correr quando a prop
+  // quoteId já vem preenchida. Descartar um orçamento real seria um bug grave.
+  const handleExitDiagnosticWithoutCompleting = async () => {
+    if (createdBySilentDraftRef.current && draftQuoteId && !diagnosticPhase1CompletedAt) {
+      try {
+        await supabase.rpc('rpc_discard_draft_quote', { p_quote_id: draftQuoteId });
+      } catch (err) {
+        captureFlowError(err, "quote-lifecycle"); // best-effort — nunca bloqueia a navegação
+      }
+    }
+    onClose();
+  };
+
   // Guard: require active company for non-system-admins
   if (!activeCompany?.id && !isSystemAdmin) {
     return (
@@ -3511,21 +3583,77 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     );
   }
 
-  // Fase 1 (diagnóstico): orçamento já existe (tem quoteId) e ou ainda não
-  // concluiu a fase 1, ou o utilizador pediu para a rever ("Rever
+  // Orçamento novo: cria-se um rascunho silencioso assim que o ecrã abre (ver
+  // useEffect acima) para o diagnóstico Fase 1 poder aparecer já de início.
+  // Enquanto esse rascunho ainda não existe (draftQuoteId), mostra-se um
+  // placeholder de carregamento em vez do formulário normal ou do diagnóstico.
+  if (!quoteId && !draftQuoteId) {
+    // Caso limite: um system admin pode chegar aqui sem `activeCompany.id`
+    // (é o único perfil isento do guard de "sem empresa ativa" acima) — mas
+    // criar um orçamento novo exige sempre saber a organização, por isso a
+    // criação silenciosa nunca dispara nesse caso (nem erro, nem sucesso).
+    // Sem isto, o ecrã ficava preso no spinner para sempre, sem saída.
+    const needsCompanySelection = isSystemAdmin && !activeCompany?.id;
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-24 text-sm text-muted-foreground">
+        {needsCompanySelection ? (
+          <p>Seleciona uma empresa ativa antes de criar um orçamento novo.</p>
+        ) : silentDraftError ? (
+          <>
+            <p>Não foi possível preparar o novo orçamento.</p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { setSilentDraftError(false); silentDraftCreationRef.current = false; }}
+            >
+              Tentar novamente
+            </Button>
+          </>
+        ) : (
+          <>
+            <Loader2 className="h-5 w-5 animate-spin" />
+            A preparar novo orçamento…
+          </>
+        )}
+        {/* Nunca deixar o utilizador preso sem saída neste ecrã, seja qual
+            for o motivo (a criar, a falhar, ou à espera de escolher empresa). */}
+        <Button variant="ghost" size="sm" onClick={onClose}>
+          <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
+        </Button>
+      </div>
+    );
+  }
+
+  // Fase 1 (diagnóstico): orçamento já existe (tem effectiveQuoteId) e ou
+  // ainda não concluiu a fase 1, ou o utilizador pediu para a rever ("Rever
   // diagnóstico" na toolbar) — mostra este ecrã em vez do corpo normal, sem
   // apagar quote_lines já existentes.
-  if (quoteId && (!diagnosticPhase1CompletedAt || showDiagnosticReview)) {
+  if (effectiveQuoteId && (!diagnosticPhase1CompletedAt || showDiagnosticReview)) {
     return (
-      <QuoteDiagnosticPhase
-        quoteId={quoteId}
-        organizationId={diagnosticOrganizationId}
-        onPhase1Complete={() => {
-          setDiagnosticPhase1CompletedAt(new Date().toISOString());
-          setShowDiagnosticReview(false);
-        }}
-        onAcceptSuggestionLine={handleAcceptDiagnosticSuggestionLine}
-      />
+      <div className="container mx-auto py-4 max-w-4xl">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="mb-2"
+          onClick={
+            showDiagnosticReview
+              ? () => setShowDiagnosticReview(false)
+              : handleExitDiagnosticWithoutCompleting
+          }
+          aria-label="Voltar"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <QuoteDiagnosticPhase
+          quoteId={effectiveQuoteId}
+          organizationId={diagnosticOrganizationId}
+          onPhase1Complete={() => {
+            setDiagnosticPhase1CompletedAt(new Date().toISOString());
+            setShowDiagnosticReview(false);
+          }}
+          onAcceptSuggestionLine={handleAcceptDiagnosticSuggestionLine}
+        />
+      </div>
     );
   }
 
@@ -3552,7 +3680,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         </div>
         <div className="flex items-center gap-2">
 
-          {quoteId && diagnosticPhase1CompletedAt && (
+          {effectiveQuoteId && diagnosticPhase1CompletedAt && (
             <Button variant="outline" size="sm" onClick={() => setShowDiagnosticReview(true)}>
               Rever diagnóstico
             </Button>
@@ -3778,7 +3906,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         </Button>
                       </div>
                     </div>
-                    <QuoteEntityPreview entityId={selectedSource.entity_id} quoteId={quoteId} />
+                    <QuoteEntityPreview entityId={selectedSource.entity_id} quoteId={effectiveQuoteId} />
                   </div>
                   ) : (
                     <EntitySearchInput

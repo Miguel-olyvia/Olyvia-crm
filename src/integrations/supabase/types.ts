@@ -22860,6 +22860,10 @@ export type Database = {
       rpc_delete_supplier: { Args: { p_id: string }; Returns: undefined }
       rpc_delete_user: { Args: { p_user_id: string }; Returns: undefined }
       rpc_delete_warehouse: { Args: { p_id: string }; Returns: undefined }
+      rpc_discard_draft_quote: {
+        Args: { p_quote_id: string }
+        Returns: boolean
+      }
       rpc_duplicate_deal: {
         Args: {
           p_organization_id: string
