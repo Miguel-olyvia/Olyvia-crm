@@ -465,353 +465,396 @@ export function PessoaContratoTab({
             </Badge>
           )}
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-6">
           <CamposTocadosProvider onTocar={tocar}>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <CampoSelect
-              id="hr-contrato-tipo"
-              label={t("hr.contrato.tipoContrato")}
-              valor={rascunho.tipo_contrato}
-              disabled={!podeEditar}
-              opcoes={TIPOS_CONTRATO.map((tipo) => ({
-                value: tipo,
-                label: t(`hr.tipoContrato.${tipo}`),
-              }))}
-              onChange={(v) => escolherTipoContrato(v as TipoContrato)}
-            />
-            {/* `regime` na base; "Tipo de trabalho" no ecra. Ver cabecalho. */}
-            <div className="space-y-1.5">
+          {/* Grupo 1 -- O contrato: o que se assina e sob que categoria.
+              Continua o MESMO cartao e o MESMO botao de gravar que os outros
+              dois grupos -- so o titulo separa, para nao parecer que se
+              grava cada bloco em separado. */}
+          <div className="space-y-3">
+            <h3 id="hr-contrato-grupo-contrato" className="text-sm font-medium">
+              {t("hr.form.seccoes.vinculo")}
+            </h3>
+            <div
+              className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+              aria-labelledby="hr-contrato-grupo-contrato"
+            >
               <CampoSelect
-                id="hr-contrato-regime"
-                label={t("hr.contrato.regime")}
-                ajuda={t("hr.contrato.ajudaRegime")}
-                valor={rascunho.regime}
+                id="hr-contrato-tipo"
+                label={t("hr.contrato.tipoContrato")}
+                valor={rascunho.tipo_contrato}
                 disabled={!podeEditar}
-                opcoes={REGIMES_TRABALHO.map((regime) => ({
-                  value: regime,
-                  label: t(`hr.regime.${regime}`),
+                opcoes={TIPOS_CONTRATO.map((tipo) => ({
+                  value: tipo,
+                  label: t(`hr.tipoContrato.${tipo}`),
+                }))}
+                onChange={(v) => escolherTipoContrato(v as TipoContrato)}
+              />
+              {/* Categoria do IRCT, texto livre -- NAO e `categoria_funcao`. Ver
+                  o comentario do tipo em `types/hr.ts`. */}
+              <CampoTexto
+                id="hr-contrato-categoria-profissional"
+                label={t("hr.contrato.categoriaProfissional")}
+                ajuda={t("hr.contrato.ajudaCategoriaProfissional")}
+                valor={rascunho.categoria_profissional}
+                disabled={!podeEditar}
+                onChange={(v) => definir("categoria_profissional", v)}
+              />
+              {/* So alimenta a sugestao de periodo experimental -- ver o cabecalho
+                  deste ficheiro e `lib/hr/periodoExperimental.ts`. Nao vem de
+                  `pessoas.cargo`, que e texto livre. */}
+              <CampoSelect
+                id="hr-contrato-categoria-funcao"
+                label={t("hr.contrato.categoriaFuncao")}
+                ajuda={t("hr.contrato.ajudaCategoriaFuncao")}
+                valor={rascunho.categoria_funcao ?? ""}
+                vazioLabel={t("hr.campos.semValor")}
+                disabled={!podeEditar}
+                opcoes={CATEGORIAS_FUNCAO.map((categoria) => ({
+                  value: categoria,
+                  label: t(`hr.categoriaFuncao.${categoria}`),
                 }))}
                 onChange={(v) =>
-                  setRascunho((anterior) => ({
-                    ...anterior,
-                    regime: v as RegimeTrabalho,
-                    regime_manual: true,
-                  }))
+                  definir("categoria_funcao", (v || null) as CategoriaFuncao | null)
                 }
               />
-              {regimeContradiz && (
-                <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
-                  {t("hr.form.avisoRegimeContradizTipoContrato")}
-                </p>
-              )}
-            </div>
-            {/* `tipo_trabalho` na base; "Modalidade" no ecra. Ver cabecalho. */}
-            <CampoSelect
-              id="hr-contrato-tipo-trabalho"
-              label={t("hr.contrato.tipoTrabalho")}
-              ajuda={t("hr.contrato.ajudaTipoTrabalho")}
-              valor={rascunho.tipo_trabalho}
-              vazioLabel={t("hr.campos.semValor")}
-              disabled={!podeEditar}
-              opcoes={TIPOS_TRABALHO.map((tipo) => ({
-                value: tipo,
-                label: t(`hr.tipoTrabalho.${tipo}`),
-              }))}
-              onChange={(v) => definir("tipo_trabalho", v)}
-            />
-            {/* So alimenta a sugestao de periodo experimental -- ver o cabecalho
-                deste ficheiro e `lib/hr/periodoExperimental.ts`. Nao vem de
-                `pessoas.cargo`, que e texto livre. */}
-            <CampoSelect
-              id="hr-contrato-categoria-funcao"
-              label={t("hr.contrato.categoriaFuncao")}
-              ajuda={t("hr.contrato.ajudaCategoriaFuncao")}
-              valor={rascunho.categoria_funcao ?? ""}
-              vazioLabel={t("hr.campos.semValor")}
-              disabled={!podeEditar}
-              opcoes={CATEGORIAS_FUNCAO.map((categoria) => ({
-                value: categoria,
-                label: t(`hr.categoriaFuncao.${categoria}`),
-              }))}
-              onChange={(v) =>
-                definir("categoria_funcao", (v || null) as CategoriaFuncao | null)
-              }
-            />
-            {/* Categoria do IRCT, texto livre -- NAO e `categoria_funcao`. Ver
-                o comentario do tipo em `types/hr.ts`. */}
-            <CampoTexto
-              id="hr-contrato-categoria-profissional"
-              label={t("hr.contrato.categoriaProfissional")}
-              ajuda={t("hr.contrato.ajudaCategoriaProfissional")}
-              valor={rascunho.categoria_profissional}
-              disabled={!podeEditar}
-              onChange={(v) => definir("categoria_profissional", v)}
-            />
-            <CampoSelect
-              id="hr-contrato-renovavel"
-              label={t("hr.contrato.renovavel")}
-              valor={rascunho.renovavel}
-              vazioLabel={t("hr.campos.porDecidir")}
-              disabled={!podeEditar}
-              opcoes={[
-                { value: "sim", label: t("common.yes") },
-                { value: "nao", label: t("common.no") },
-              ]}
-              onChange={(v) => definir("renovavel", v as "" | "sim" | "nao")}
-            />
-            <CampoTexto
-              id="hr-contrato-formacao-inicio"
-              label={t("hr.contrato.formacaoInicio")}
-              tipo="date"
-              valor={rascunho.formacao_inicio}
-              disabled={!podeEditar}
-              onChange={(v) => definir("formacao_inicio", v)}
-            />
-            <CampoTexto
-              id="hr-contrato-formacao-fim"
-              label={t("hr.contrato.formacaoFim")}
-              erro={
-                rascunho.formacao_fim.trim() !== "" &&
-                rascunho.formacao_inicio.trim() !== "" &&
-                rascunho.formacao_fim < rascunho.formacao_inicio
-                  ? t("hr.contrato.erroFormacaoFimAntesInicio")
-                  : null
-              }
-              tipo="date"
-              valor={rascunho.formacao_fim}
-              disabled={!podeEditar}
-              onChange={(v) => definir("formacao_fim", v)}
-            />
-            <div className="flex items-center gap-2 self-end pb-2">
-              {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um
-                  <button>, e o nome acessivel de um botao NAO vem de uma
-                  <label for>. */}
-              <Switch
-                id="hr-contrato-isencao-horario"
-                aria-labelledby="hr-contrato-isencao-horario-rotulo"
-                checked={rascunho.isencao_horario}
+              <CampoSelect
+                id="hr-contrato-estado"
+                label={t("hr.contrato.estado")}
+                valor={rascunho.estado}
                 disabled={!podeEditar}
-                onCheckedChange={(v) => definir("isencao_horario", v)}
+                opcoes={ESTADOS_VINCULO.map((estado) => ({
+                  value: estado,
+                  label: t(`hr.estadoVinculo.${estado}`),
+                }))}
+                onChange={(v) => definir("estado", v as EstadoVinculo)}
               />
-              <Label
-                id="hr-contrato-isencao-horario-rotulo"
-                htmlFor="hr-contrato-isencao-horario"
-                className="font-normal"
-              >
-                {t("hr.contrato.isencaoHorario")}
-              </Label>
-            </div>
-            <CampoSelect
-              id="hr-contrato-estado"
-              label={t("hr.contrato.estado")}
-              valor={rascunho.estado}
-              disabled={!podeEditar}
-              opcoes={ESTADOS_VINCULO.map((estado) => ({
-                value: estado,
-                label: t(`hr.estadoVinculo.${estado}`),
-              }))}
-              onChange={(v) => definir("estado", v as EstadoVinculo)}
-            />
-            <CampoTexto
-              id="hr-contrato-data-inicio"
-              label={t("hr.contrato.dataInicio")}
-              tipo="date"
-              valor={rascunho.data_inicio}
-              disabled={!podeEditar}
-              onChange={(v) => definir("data_inicio", v)}
-            />
-            <CampoTexto
-              id="hr-contrato-data-fim"
-              label={t("hr.contrato.dataFim")}
-              tipo="date"
-              valor={rascunho.data_fim}
-              disabled={!podeEditar}
-              onChange={(v) => definir("data_fim", v)}
-            />
-            <CampoTexto
-              id="hr-contrato-motivo-termo"
-              label={t("hr.contrato.motivoTermo")}
-              valor={rascunho.motivo_termo}
-              disabled={!podeEditar}
-              onChange={(v) => definir("motivo_termo", v)}
-            />
-            {/* O interruptor ocupa uma celula da grelha; os dois campos so
-                aparecem depois dele, e so quando ha mesmo periodo. */}
-            <div className="flex items-center gap-2 self-end pb-2">
-              {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um
-                  <button>, e o nome acessivel de um botao NAO vem de uma
-                  <label for>. Sem isto o interruptor chega a quem usa leitor
-                  de ecra sem nome nenhum. */}
-              <Switch
-                id="hr-contrato-tem-experimental"
-                aria-labelledby="hr-contrato-tem-experimental-rotulo"
-                checked={temExperimental}
+              <CampoSelect
+                id="hr-contrato-renovavel"
+                label={t("hr.contrato.renovavel")}
+                valor={rascunho.renovavel}
+                vazioLabel={t("hr.campos.porDecidir")}
                 disabled={!podeEditar}
-                onCheckedChange={alternarExperimental}
+                opcoes={[
+                  { value: "sim", label: t("common.yes") },
+                  { value: "nao", label: t("common.no") },
+                ]}
+                onChange={(v) => definir("renovavel", v as "" | "sim" | "nao")}
               />
-              <Label
-                id="hr-contrato-tem-experimental-rotulo"
-                htmlFor="hr-contrato-tem-experimental"
-                className="font-normal"
-              >
-                {t("hr.contrato.temExperimental")}
-              </Label>
             </div>
-            {temExperimental && (
-              <>
-                <div className="space-y-1.5">
-                  <CampoTexto
-                    id="hr-contrato-periodo-experimental-dias"
-                    label={t("hr.contrato.periodoExperimentalDias")}
-                    erro={erroDe("hr-contrato-periodo-experimental-dias")}
-                    tipo="number"
-                    min={0}
-                    max={1095}
-                    valor={rascunho.periodo_experimental_dias}
-                    disabled={!podeEditar}
-                    onChange={(v) => definirCampoExperimental("periodo_experimental_dias", v)}
-                  />
-                  {/* A sugestao NUNCA se escreve sozinha -- so aparece o botao,
-                      e so quando ha um numero legal para o tipo de contrato e a
-                      categoria escolhidos. Ver `lib/hr/periodoExperimental.ts`. */}
-                  {podeEditar && sugestaoExperimental && (
-                    <Button
-                      type="button"
-                      variant="link"
-                      size="sm"
-                      className="h-auto p-0 text-xs"
-                      onClick={aceitarSugestaoExperimental}
-                    >
-                      {t("hr.contrato.sugerirPeriodoExperimental", {
-                        dias: String(sugestaoExperimental.dias),
-                      })}
-                    </Button>
-                  )}
-                  {rascunho.periodo_experimental_origem === "sugerido" && (
-                    <p className="text-xs text-muted-foreground" role="status">
-                      {t("hr.contrato.periodoExperimentalSugerido")}
-                    </p>
-                  )}
-                </div>
-                <CampoTexto
-                  id="hr-contrato-periodo-experimental-ate"
-                  label={t("hr.contrato.periodoExperimentalAte")}
-                  ajuda={t("hr.contrato.ajudaExperimentalDuasColunas")}
-                  tipo="date"
-                  valor={rascunho.periodo_experimental_ate}
-                  disabled={!podeEditar}
-                  onChange={(v) => definirCampoExperimental("periodo_experimental_ate", v)}
-                />
-              </>
-            )}
-            <CampoTexto
-              id="hr-contrato-horas-periodo"
-              label={t("hr.contrato.horasTrabalho")}
-              erro={erroDe("hr-contrato-horas-periodo")}
-              ajuda={
-                equivalente
-                  ? t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })
-                  : undefined
-              }
-              tipo="number"
-              min={0}
-              max={maximoDeHoras}
-              step="0.5"
-              valor={rascunho.horas_periodo}
-              disabled={!podeEditar}
-              onChange={(v) => definir("horas_periodo", v)}
-            />
-            <CampoSelect
-              id="hr-contrato-horas-frequencia"
-              label={t("hr.contrato.horasFrequencia")}
-              valor={rascunho.horas_frequencia}
-              disabled={!podeEditar}
-              opcoes={HORAS_FREQUENCIAS.map((f) => ({
-                value: f,
-                label: t(`hr.horasFrequencia.${f}`),
-              }))}
-              onChange={(v) => definir("horas_frequencia", v as HorasFrequencia)}
-            />
-            {horasSuspeitas && (
-              <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
-                {t("hr.form.avisoHorasImplausiveis", { horas: equivalente ?? "" })}
-              </p>
-            )}
-            <CampoTexto
-              id="hr-contrato-tempo-trabalho-pct"
-              label={t("hr.contrato.tempoTrabalhoPct")}
-              erro={erroDe("hr-contrato-tempo-trabalho-pct")}
-              tipo="number"
-              min={0}
-              max={100}
-              valor={rascunho.tempo_trabalho_pct}
-              disabled={!podeEditar}
-              onChange={(v) => definir("tempo_trabalho_pct", v)}
-            />
-            <CampoSelect
-              id="hr-contrato-politica-feriados"
-              label={t("hr.contrato.politicaFeriados")}
-              valor={rascunho.politica_feriados}
-              disabled={!podeEditar}
-              opcoes={POLITICAS_FERIADOS.map((p) => ({
-                value: p,
-                label: t(`hr.politicaFeriados.${p}`),
-              }))}
-              onChange={(v) => definir("politica_feriados", v as PoliticaFeriados)}
-            />
-            <CampoTexto
-              id="hr-contrato-horas-anuais-maximas"
-              label={t("hr.contrato.horasAnuaisMaximas")}
-              erro={erroDe("hr-contrato-horas-anuais-maximas")}
-              tipo="number"
-              min={0}
-              max={4000}
-              valor={rascunho.horas_anuais_maximas}
-              disabled={!podeEditar}
-              onChange={(v) => definir("horas_anuais_maximas", v)}
-            />
-            <CampoTexto
-              id="hr-contrato-horas-semanais-maximas"
-              label={t("hr.contrato.horasSemanaisMaximas")}
-              erro={erroDe("hr-contrato-horas-semanais-maximas")}
-              tipo="number"
-              min={0}
-              max={80}
-              step="0.5"
-              valor={rascunho.horas_semanais_maximas}
-              disabled={!podeEditar}
-              onChange={(v) => definir("horas_semanais_maximas", v)}
-            />
           </div>
 
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">{t("hr.contrato.diasUteis")}</legend>
-            <div className="flex flex-wrap gap-3">
-              {DIAS_SEMANA.map((dia) => {
-                const id = `hr-contrato-dia-util-${dia}`;
-                return (
-                  <div key={dia} className="flex items-center gap-1.5">
-                    <Checkbox
-                      id={id}
-                      checked={rascunho.dias_uteis.includes(dia)}
+          {/* Grupo 2 -- Datas e prazos: quando comeca, quando acaba e o que
+              lhe da forma entretanto (experimental, formacao).
+              Nao ha, nas traducoes, uma chave "datas e prazos" pronta; uso
+              aqui "hr.ausencias.lista.datas" (-> "Datas"), que ja existe em
+              todas as linguas do projecto, por ser a mais proxima do sentido
+              pedido sem inventar texto novo. Ver relatorio final. */}
+          <div className="space-y-3">
+            <h3 id="hr-contrato-grupo-datas" className="text-sm font-medium">
+              {t("hr.ausencias.lista.datas")}
+            </h3>
+            <div
+              className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+              aria-labelledby="hr-contrato-grupo-datas"
+            >
+              <CampoTexto
+                id="hr-contrato-data-inicio"
+                label={t("hr.contrato.dataInicio")}
+                tipo="date"
+                valor={rascunho.data_inicio}
+                disabled={!podeEditar}
+                onChange={(v) => definir("data_inicio", v)}
+              />
+              <CampoTexto
+                id="hr-contrato-data-fim"
+                label={t("hr.contrato.dataFim")}
+                tipo="date"
+                valor={rascunho.data_fim}
+                disabled={!podeEditar}
+                onChange={(v) => definir("data_fim", v)}
+              />
+              <CampoTexto
+                id="hr-contrato-motivo-termo"
+                label={t("hr.contrato.motivoTermo")}
+                valor={rascunho.motivo_termo}
+                disabled={!podeEditar}
+                onChange={(v) => definir("motivo_termo", v)}
+              />
+              {/* O interruptor ocupa uma celula da grelha; os dois campos so
+                  aparecem depois dele, e so quando ha mesmo periodo. */}
+              <div className="flex items-center gap-2 self-end pb-2">
+                {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um
+                    <button>, e o nome acessivel de um botao NAO vem de uma
+                    <label for>. Sem isto o interruptor chega a quem usa leitor
+                    de ecra sem nome nenhum. */}
+                <Switch
+                  id="hr-contrato-tem-experimental"
+                  aria-labelledby="hr-contrato-tem-experimental-rotulo"
+                  checked={temExperimental}
+                  disabled={!podeEditar}
+                  onCheckedChange={alternarExperimental}
+                />
+                <Label
+                  id="hr-contrato-tem-experimental-rotulo"
+                  htmlFor="hr-contrato-tem-experimental"
+                  className="font-normal"
+                >
+                  {t("hr.contrato.temExperimental")}
+                </Label>
+              </div>
+              {temExperimental && (
+                <>
+                  <div className="space-y-1.5">
+                    <CampoTexto
+                      id="hr-contrato-periodo-experimental-dias"
+                      label={t("hr.contrato.periodoExperimentalDias")}
+                      erro={erroDe("hr-contrato-periodo-experimental-dias")}
+                      tipo="number"
+                      min={0}
+                      max={1095}
+                      valor={rascunho.periodo_experimental_dias}
                       disabled={!podeEditar}
-                      onCheckedChange={(marcado) =>
-                        definir(
-                          "dias_uteis",
-                          marcado === true
-                            ? [...rascunho.dias_uteis, dia]
-                            : rascunho.dias_uteis.filter((outro) => outro !== dia),
-                        )
-                      }
+                      onChange={(v) => definirCampoExperimental("periodo_experimental_dias", v)}
                     />
-                    <Label htmlFor={id} className="text-sm font-normal">
-                      {t(`hr.dias.${dia}`)}
-                    </Label>
+                    {/* A sugestao NUNCA se escreve sozinha -- so aparece o botao,
+                        e so quando ha um numero legal para o tipo de contrato e a
+                        categoria escolhidos. Ver `lib/hr/periodoExperimental.ts`. */}
+                    {podeEditar && sugestaoExperimental && (
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="h-auto p-0 text-xs"
+                        onClick={aceitarSugestaoExperimental}
+                      >
+                        {t("hr.contrato.sugerirPeriodoExperimental", {
+                          dias: String(sugestaoExperimental.dias),
+                        })}
+                      </Button>
+                    )}
+                    {rascunho.periodo_experimental_origem === "sugerido" && (
+                      <p className="text-xs text-muted-foreground" role="status">
+                        {t("hr.contrato.periodoExperimentalSugerido")}
+                      </p>
+                    )}
                   </div>
-                );
-              })}
+                  <CampoTexto
+                    id="hr-contrato-periodo-experimental-ate"
+                    label={t("hr.contrato.periodoExperimentalAte")}
+                    ajuda={t("hr.contrato.ajudaExperimentalDuasColunas")}
+                    tipo="date"
+                    valor={rascunho.periodo_experimental_ate}
+                    disabled={!podeEditar}
+                    onChange={(v) => definirCampoExperimental("periodo_experimental_ate", v)}
+                  />
+                </>
+              )}
+              <CampoTexto
+                id="hr-contrato-formacao-inicio"
+                label={t("hr.contrato.formacaoInicio")}
+                tipo="date"
+                valor={rascunho.formacao_inicio}
+                disabled={!podeEditar}
+                onChange={(v) => definir("formacao_inicio", v)}
+              />
+              <CampoTexto
+                id="hr-contrato-formacao-fim"
+                label={t("hr.contrato.formacaoFim")}
+                erro={
+                  rascunho.formacao_fim.trim() !== "" &&
+                  rascunho.formacao_inicio.trim() !== "" &&
+                  rascunho.formacao_fim < rascunho.formacao_inicio
+                    ? t("hr.contrato.erroFormacaoFimAntesInicio")
+                    : null
+                }
+                tipo="date"
+                valor={rascunho.formacao_fim}
+                disabled={!podeEditar}
+                onChange={(v) => definir("formacao_fim", v)}
+              />
             </div>
-          </fieldset>
+          </div>
+
+          {/* Grupo 3 -- Tempo de trabalho: regime, modalidade e tudo o que
+              mede a jornada. A chave desta legenda ja existia -- e a mesma
+              usada no assistente de admissao, em `SeccaoContrato.tsx`. */}
+          <div className="space-y-3">
+            <h3 id="hr-contrato-grupo-tempo" className="text-sm font-medium">
+              {t("hr.contrato.tempoTrabalho")}
+            </h3>
+            <div
+              className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
+              aria-labelledby="hr-contrato-grupo-tempo"
+            >
+              {/* `regime` na base; "Tipo de trabalho" no ecra. Ver cabecalho. */}
+              <div className="space-y-1.5">
+                <CampoSelect
+                  id="hr-contrato-regime"
+                  label={t("hr.contrato.regime")}
+                  ajuda={t("hr.contrato.ajudaRegime")}
+                  valor={rascunho.regime}
+                  disabled={!podeEditar}
+                  opcoes={REGIMES_TRABALHO.map((regime) => ({
+                    value: regime,
+                    label: t(`hr.regime.${regime}`),
+                  }))}
+                  onChange={(v) =>
+                    setRascunho((anterior) => ({
+                      ...anterior,
+                      regime: v as RegimeTrabalho,
+                      regime_manual: true,
+                    }))
+                  }
+                />
+                {regimeContradiz && (
+                  <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
+                    {t("hr.form.avisoRegimeContradizTipoContrato")}
+                  </p>
+                )}
+              </div>
+              {/* `tipo_trabalho` na base; "Modalidade" no ecra. Ver cabecalho. */}
+              <CampoSelect
+                id="hr-contrato-tipo-trabalho"
+                label={t("hr.contrato.tipoTrabalho")}
+                ajuda={t("hr.contrato.ajudaTipoTrabalho")}
+                valor={rascunho.tipo_trabalho}
+                vazioLabel={t("hr.campos.semValor")}
+                disabled={!podeEditar}
+                opcoes={TIPOS_TRABALHO.map((tipo) => ({
+                  value: tipo,
+                  label: t(`hr.tipoTrabalho.${tipo}`),
+                }))}
+                onChange={(v) => definir("tipo_trabalho", v)}
+              />
+              <CampoTexto
+                id="hr-contrato-horas-periodo"
+                label={t("hr.contrato.horasTrabalho")}
+                erro={erroDe("hr-contrato-horas-periodo")}
+                ajuda={
+                  equivalente
+                    ? t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })
+                    : undefined
+                }
+                tipo="number"
+                min={0}
+                max={maximoDeHoras}
+                step="0.5"
+                valor={rascunho.horas_periodo}
+                disabled={!podeEditar}
+                onChange={(v) => definir("horas_periodo", v)}
+              />
+              <CampoSelect
+                id="hr-contrato-horas-frequencia"
+                label={t("hr.contrato.horasFrequencia")}
+                valor={rascunho.horas_frequencia}
+                disabled={!podeEditar}
+                opcoes={HORAS_FREQUENCIAS.map((f) => ({
+                  value: f,
+                  label: t(`hr.horasFrequencia.${f}`),
+                }))}
+                onChange={(v) => definir("horas_frequencia", v as HorasFrequencia)}
+              />
+              {horasSuspeitas && (
+                <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
+                  {t("hr.form.avisoHorasImplausiveis", { horas: equivalente ?? "" })}
+                </p>
+              )}
+              <CampoTexto
+                id="hr-contrato-tempo-trabalho-pct"
+                label={t("hr.contrato.tempoTrabalhoPct")}
+                erro={erroDe("hr-contrato-tempo-trabalho-pct")}
+                tipo="number"
+                min={0}
+                max={100}
+                valor={rascunho.tempo_trabalho_pct}
+                disabled={!podeEditar}
+                onChange={(v) => definir("tempo_trabalho_pct", v)}
+              />
+              <CampoSelect
+                id="hr-contrato-politica-feriados"
+                label={t("hr.contrato.politicaFeriados")}
+                valor={rascunho.politica_feriados}
+                disabled={!podeEditar}
+                opcoes={POLITICAS_FERIADOS.map((p) => ({
+                  value: p,
+                  label: t(`hr.politicaFeriados.${p}`),
+                }))}
+                onChange={(v) => definir("politica_feriados", v as PoliticaFeriados)}
+              />
+              <CampoTexto
+                id="hr-contrato-horas-anuais-maximas"
+                label={t("hr.contrato.horasAnuaisMaximas")}
+                erro={erroDe("hr-contrato-horas-anuais-maximas")}
+                tipo="number"
+                min={0}
+                max={4000}
+                valor={rascunho.horas_anuais_maximas}
+                disabled={!podeEditar}
+                onChange={(v) => definir("horas_anuais_maximas", v)}
+              />
+              <CampoTexto
+                id="hr-contrato-horas-semanais-maximas"
+                label={t("hr.contrato.horasSemanaisMaximas")}
+                erro={erroDe("hr-contrato-horas-semanais-maximas")}
+                tipo="number"
+                min={0}
+                max={80}
+                step="0.5"
+                valor={rascunho.horas_semanais_maximas}
+                disabled={!podeEditar}
+                onChange={(v) => definir("horas_semanais_maximas", v)}
+              />
+              <div className="flex items-center gap-2 self-end pb-2">
+                {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um
+                    <button>, e o nome acessivel de um botao NAO vem de uma
+                    <label for>. */}
+                <Switch
+                  id="hr-contrato-isencao-horario"
+                  aria-labelledby="hr-contrato-isencao-horario-rotulo"
+                  checked={rascunho.isencao_horario}
+                  disabled={!podeEditar}
+                  onCheckedChange={(v) => definir("isencao_horario", v)}
+                />
+                <Label
+                  id="hr-contrato-isencao-horario-rotulo"
+                  htmlFor="hr-contrato-isencao-horario"
+                  className="font-normal"
+                >
+                  {t("hr.contrato.isencaoHorario")}
+                </Label>
+              </div>
+            </div>
+
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">{t("hr.contrato.diasUteis")}</legend>
+              <div className="flex flex-wrap gap-3">
+                {DIAS_SEMANA.map((dia) => {
+                  const id = `hr-contrato-dia-util-${dia}`;
+                  return (
+                    <div key={dia} className="flex items-center gap-1.5">
+                      <Checkbox
+                        id={id}
+                        checked={rascunho.dias_uteis.includes(dia)}
+                        disabled={!podeEditar}
+                        onCheckedChange={(marcado) =>
+                          definir(
+                            "dias_uteis",
+                            marcado === true
+                              ? [...rascunho.dias_uteis, dia]
+                              : rascunho.dias_uteis.filter((outro) => outro !== dia),
+                          )
+                        }
+                      />
+                      <Label htmlFor={id} className="text-sm font-normal">
+                        {t(`hr.dias.${dia}`)}
+                      </Label>
+                    </div>
+                  );
+                })}
+              </div>
+            </fieldset>
+          </div>
 
           {podeEditar && (
             <Button size="sm" onClick={gravar} disabled={saving}>
