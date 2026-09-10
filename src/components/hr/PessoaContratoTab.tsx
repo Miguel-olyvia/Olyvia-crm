@@ -544,15 +544,11 @@ export function PessoaContratoTab({
             </div>
           </div>
 
-          {/* Grupo 2 -- Datas e prazos: quando comeca, quando acaba e o que
-              lhe da forma entretanto (experimental, formacao).
-              Nao ha, nas traducoes, uma chave "datas e prazos" pronta; uso
-              aqui "hr.ausencias.lista.datas" (-> "Datas"), que ja existe em
-              todas as linguas do projecto, por ser a mais proxima do sentido
-              pedido sem inventar texto novo. Ver relatorio final. */}
+          {/* Grupo 2 -- Datas e prazos: quando comeca, quando acaba, e o que
+              lhe da forma entretanto (periodo experimental, formacao). */}
           <div className="space-y-3">
             <h3 id="hr-contrato-grupo-datas" className="text-sm font-medium">
-              {t("hr.ausencias.lista.datas")}
+              {t("hr.contrato.datasPrazos")}
             </h3>
             <div
               className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"

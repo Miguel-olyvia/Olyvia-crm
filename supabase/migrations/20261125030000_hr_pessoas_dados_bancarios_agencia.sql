@@ -73,11 +73,16 @@ BEGIN
       'public.pessoas_dados_bancarios ja tem a coluna agencia. Investigar antes de aplicar -- pode ja ter sido aplicada por outra via.';
   END IF;
 
+  -- Conta-se o NUMERO de argumentos; nao se compara a lista por texto.
+  -- pg_get_function_identity_arguments devolve tambem os NOMES dos parametros
+  -- ("p_pessoa_id uuid, p_formato text, ..."), e nunca so os tipos -- por isso
+  -- a comparacao com 'uuid, text, text, text, text, text' nao batia nunca, e a
+  -- guarda dizia que a funcao nao existia quando existia mesmo.
   IF NOT EXISTS (
     SELECT 1 FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
      WHERE n.nspname = 'public' AND p.proname = 'rpc_hr_definir_conta'
-       AND pg_get_function_identity_arguments(p.oid) = 'uuid, text, text, text, text, text'
+       AND p.pronargs = 6
   ) THEN
     RAISE EXCEPTION
       'public.rpc_hr_definir_conta(uuid,text,text,text,text,text) nao existe com a assinatura esperada -- 20261120220000 tem de ir a frente na fila, ou ja foi alterada por outra migracao entretanto.';
