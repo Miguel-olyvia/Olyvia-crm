@@ -6,6 +6,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Check, X, Info, Loader2, RotateCcw, Sparkles } from "lucide-react";
 import type { DiagnosticSuggestion } from "@/hooks/useQuoteDiagnosticSuggestions";
 
+function formatStockQty(qty: number): string {
+  return Number.isInteger(qty) ? String(qty) : qty.toFixed(2);
+}
+
 interface DiagnosticSuggestionPanelProps {
   suggestions: DiagnosticSuggestion[];
   isLoadingRules: boolean;
@@ -101,6 +105,24 @@ export function DiagnosticSuggestionPanel({
             />
             {suggestion.unidade && (
               <span className="w-10 shrink-0 text-xs text-muted-foreground">{suggestion.unidade}</span>
+            )}
+
+            {suggestion.target_type === "product" && typeof suggestion.stockQtyAvailable === "number" && (
+              suggestion.stockQtyAvailable > 0 ? (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 text-[10px] border-green-500/30 bg-green-500/10 text-green-700"
+                >
+                  Em stock ({formatStockQty(suggestion.stockQtyAvailable)})
+                </Badge>
+              ) : (
+                <Badge
+                  variant="outline"
+                  className="shrink-0 text-[10px] border-amber-500/30 bg-amber-500/10 text-amber-700"
+                >
+                  Sem stock
+                </Badge>
+              )
             )}
 
             {suggestion.source === "ai" && (

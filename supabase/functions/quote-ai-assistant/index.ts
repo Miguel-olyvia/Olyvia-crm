@@ -221,6 +221,12 @@ serve(async (req) => {
       const validProductIds = new Set(candidateProducts.map((p: any) => p.id));
       const validServiceIds = new Set(candidateServices.map((s: any) => s.id));
 
+      // Nomes reais do catálogo por id — usados para preencher `descricao` na
+      // resposta final em vez do campo `name` livre que a IA devolve (mesma
+      // filosofia anti-alucinação já aplicada aos ids).
+      const productNameById = new Map<string, string>(candidateProducts.map((p: any) => [p.id, p.name]));
+      const serviceNameById = new Map<string, string>(candidateServices.map((s: any) => [s.id, s.name]));
+
       const candidatesForPrompt = [
         ...candidateProducts.map((p: any) => ({ id: p.id, type: "product", name: p.name, sku: p.sku })),
         ...candidateServices.map((s: any) => ({ id: s.id, type: "service", name: s.name, sku: s.sku })),
@@ -322,14 +328,53 @@ INSTRUÇÕES:
       // Validação anti-alucinação obrigatória: só passam sugestões cujo
       // product_id/service_id esteja no conjunto de candidatos devolvidos
       // pela query desta chamada. Descarta silenciosamente o resto (sem erro
-      // visível ao utilizador), registando um aviso via captureError.
-      const filteredSuggestions = rawSuggestions.filter((s: any) => {
+      // visível ao utilizador), registando um aviso via captureError. Ao
+      // mesmo tempo, mapeia cada sugestão válida para o contrato esperado
+      // pelo frontend (AiSuggestionResponseItem em useQuoteDiagnosticSuggestions.ts).
+      const mappedSuggestions = rawSuggestions.map((s: any) => {
         const pid = s?.product_id || null;
         const sid = s?.service_id || null;
-        if (pid && validProductIds.has(pid)) return true;
-        if (sid && validServiceIds.has(sid)) return true;
-        return false;
+
+        if (pid && validProductIds.has(pid)) {
+          return {
+            target_type: "product" as const,
+            product_id: pid,
+            service_id: null,
+            catalog_item_id: null,
+            // Nome real do catálogo, nunca o `name` livre da IA — proteção
+            // anti-alucinação extra (fallback "" nunca deve ocorrer, o id já
+            // foi validado contra validProductIds).
+            descricao: productNameById.get(pid) ?? "",
+            // A IA não estima quantidade neste modo (só a via de regras
+            // calcula por fórmula) — fixa em 1 para nunca deixar passar uma
+            // linha com qty 0 (Number(undefined) || 0 no frontend).
+            qty: 1,
+            // Nem products nem services têm coluna de unidade direta na BD
+            // (a via de regras usa default_qt_unit da própria regra).
+            unidade: null,
+            rationale: s?.reason ?? null,
+            confidence: typeof s?.confidence === "number" ? s.confidence : null,
+          };
+        }
+
+        if (sid && validServiceIds.has(sid)) {
+          return {
+            target_type: "service" as const,
+            product_id: null,
+            service_id: sid,
+            catalog_item_id: null,
+            descricao: serviceNameById.get(sid) ?? "",
+            qty: 1,
+            unidade: null,
+            rationale: s?.reason ?? null,
+            confidence: typeof s?.confidence === "number" ? s.confidence : null,
+          };
+        }
+
+        return null;
       });
+
+      const filteredSuggestions = mappedSuggestions.filter((s: any) => s !== null);
 
       if (filteredSuggestions.length !== rawSuggestions.length) {
         await captureError(

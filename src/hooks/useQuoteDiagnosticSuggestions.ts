@@ -19,6 +19,10 @@ export interface DiagnosticSuggestion {
   unidade?: string | null;
   rationale?: string | null;
   confidence?: number | null;
+  /** Soma de `product_stock.qty_available` para este produto (todas as
+   * localizações). `null`/omitido quando não aplicável (target_type
+   * diferente de "product") ou quando a query de stock falhar. */
+  stockQtyAvailable?: number | null;
 }
 
 export interface GetDiagnosticSuggestionsInput {
@@ -73,6 +77,51 @@ let clientIdCounter = 0;
 const nextClientId = (prefix: string) => `${prefix}_${Date.now()}_${++clientIdCounter}`;
 
 /**
+ * Enriquece sugestões de tipo "product" com o stock disponível
+ * (`product_stock.qty_available`, somado por produto em todas as
+ * localizações). Best-effort: nunca lança — se a query falhar, regista o
+ * erro e devolve as sugestões originais sem `stockQtyAvailable` preenchido.
+ * Único ponto de resolução de stock, usado tanto para sugestões de regra
+ * como de IA.
+ */
+async function withStockAvailability(suggestions: DiagnosticSuggestion[]): Promise<DiagnosticSuggestion[]> {
+  const productIds = Array.from(
+    new Set(
+      suggestions
+        .filter((s) => s.target_type === "product" && s.product_id)
+        .map((s) => s.product_id as string),
+    ),
+  );
+
+  if (productIds.length === 0) {
+    return suggestions;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("product_stock")
+      .select("product_id, qty_available")
+      .in("product_id", productIds);
+    if (error) throw error;
+
+    const stockByProductId = new Map<string, number>();
+    for (const row of data || []) {
+      const current = stockByProductId.get(row.product_id) ?? 0;
+      stockByProductId.set(row.product_id, current + (Number(row.qty_available) || 0));
+    }
+
+    return suggestions.map((s) =>
+      s.target_type === "product" && s.product_id
+        ? { ...s, stockQtyAvailable: stockByProductId.get(s.product_id) ?? 0 }
+        : s,
+    );
+  } catch (err) {
+    console.error("[useQuoteDiagnosticSuggestions] Stock availability lookup failed:", err);
+    return suggestions;
+  }
+}
+
+/**
  * Procura sugestões para um campo do diagnóstico: primeiro por regras
  * (rpc_preview_diagnostic_suggestions, instantâneo), e só se não houver
  * nenhuma é que recorre à IA (edge function quote-ai-assistant). A falha da
@@ -119,7 +168,7 @@ export function useQuoteDiagnosticSuggestions() {
       }
 
       if (ruleSuggestions.length > 0) {
-        return { suggestions: ruleSuggestions, aiFailed: false };
+        return { suggestions: await withStockAvailability(ruleSuggestions), aiFailed: false };
       }
 
       // Sem regras a corresponder — recorre à IA. Falha na etapa de regras
@@ -159,7 +208,7 @@ export function useQuoteDiagnosticSuggestions() {
           rationale: s.rationale ?? null,
           confidence: typeof s.confidence === "number" ? s.confidence : null,
         }));
-        return { suggestions: aiSuggestions, aiFailed: false };
+        return { suggestions: await withStockAvailability(aiSuggestions), aiFailed: false };
       } catch (err: any) {
         if (err?.name === "AbortError") {
           // Um pedido mais recente já assumiu — não é um erro a mostrar.

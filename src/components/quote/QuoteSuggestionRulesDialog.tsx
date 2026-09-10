@@ -62,7 +62,12 @@ const SOURCE_FIELD_LABELS: Record<SuggestionSourceField, string> = {
 };
 
 const FORMULA_LABELS: Record<SuggestionQuantityFormulaType, string> = {
-  multiplier: "Multiplicador (área × valor)",
+  // NOTA: apesar do nome do tipo ("multiplier"), esta fórmula NÃO multiplica
+  // pela área — usa só o valor de "Multiplicador" × 1 (equivalente, na
+  // prática, a "Quantidade fixa"). É "per_unit_area" que multiplica pela
+  // área m² (ver rpc_preview_diagnostic_suggestions). Rótulo corrigido para
+  // não sugerir que esta opção escala com a área.
+  multiplier: "Multiplicador fixo (não usa a área)",
   fixed: "Quantidade fixa",
   per_unit_area: "Por unidade de área",
 };
