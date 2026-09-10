@@ -165,6 +165,13 @@ export default function PessoaDetail() {
     ? derivarEstadoContrato(ficha.vinculos)
     : null;
 
+  // O mesmo criterio de `PessoaAusenciasTab.podeVer`, para o cartao da Visao
+  // geral so mostrar o numero de pendentes a quem o separador tambem mostra.
+  const podeVerAusenciasResumo =
+    permissoesAusencias.view ||
+    minhaPessoaId === pessoa?.id ||
+    permissoesAusencias.aprovarChefia;
+
   const reportaANome = useMemo(() => {
     if (!pessoa?.reporta_a_pessoa_id) return null;
     return colegas.find((c) => c.id === pessoa.reporta_a_pessoa_id)?.nome_completo ?? null;
@@ -316,6 +323,12 @@ export default function PessoaDetail() {
             reportaANome={reportaANome}
             entidadeLegalNome={entidadeLegalNome}
             vinculos={ficha.vinculos}
+            horarioRealizado={ficha.horarioRealizado}
+            retribuicao={ficha.retribuicao}
+            podeVerRealizado={podeVerRealizado}
+            podeVerAusencias={podeVerAusenciasResumo}
+            podeVerRetribuicao={podeVerRetribuicao}
+            onAbrirSeparador={mudarTab}
           />
         </TabsContent>
 
