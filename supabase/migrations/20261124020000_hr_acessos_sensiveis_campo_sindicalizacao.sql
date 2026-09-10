@@ -50,7 +50,11 @@ BEGIN
   SELECT c.conname, pg_get_constraintdef(c.oid) INTO v_nome_constraint, v_definicao
     FROM pg_constraint c
    WHERE c.conrelid = 'public.pessoas_acessos_sensiveis'::regclass
-     AND pg_get_constraintdef(c.oid) LIKE '%campo%IN%'
+     -- Procura-se por 'niss', um valor que o CHECK tem de conter, e NAO por
+     -- "IN": o Postgres normaliza `campo IN (...)` para
+     -- `campo = ANY (ARRAY[...])` ao guardar a definicao, por isso um LIKE
+     -- por "IN" nunca encontra nada e a guarda rebentava sempre.
+     AND pg_get_constraintdef(c.oid) LIKE '%campo%niss%'
      AND contype = 'c'
    LIMIT 1;
 

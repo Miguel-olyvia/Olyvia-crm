@@ -27,7 +27,7 @@
 -- campos (nunca to_jsonb(NEW) inteiro, para uma coluna nova nao entrar
 -- silenciosamente no historico sem decisao):
 --   pessoas               (subconjunto: email_trabalho, email_pessoal,
---                          telefone_trabalho, departamento, estrutura --
+--                          telefone_trabalho --
 --                          cargo fica de fora, ja tem o seu proprio trigger
 --                          para pessoas_vinculos_alteracoes desde 20261123050000)
 --   pessoas_dados_pessoais (todos os campos de negocio)
@@ -76,7 +76,6 @@
 --   20261120040000  pessoas_dados_pessoais, pessoas_identificacao
 --   20261120050000  pessoas_moradas
 --   20261120090000  hr_pessoa_do_utilizador
---   20261124060000  pessoas.departamento / estrutura
 --   20261124070000  pessoas_fardamento
 -- ==============================================================================
 
@@ -97,12 +96,6 @@ BEGIN
   END IF;
   IF to_regclass('public.pessoas_fardamento') IS NULL THEN
     RAISE EXCEPTION 'public.pessoas_fardamento nao existe. Aplicar 20261124070000 primeiro.';
-  END IF;
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'pessoas' AND column_name IN ('departamento','estrutura')
-  ) THEN
-    RAISE EXCEPTION 'pessoas.departamento/estrutura nao existem. Aplicar 20261124060000 primeiro.';
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -148,7 +141,7 @@ CREATE TABLE IF NOT EXISTS public.pessoas_dados_alteracoes (
 );
 
 COMMENT ON TABLE public.pessoas_dados_alteracoes IS
-'Historico de alteracoes a pessoas (subconjunto: contactos, departamento, estrutura -- cargo tem o seu proprio historico em pessoas_vinculos_alteracoes), pessoas_dados_pessoais, pessoas_identificacao, pessoas_moradas e pessoas_fardamento. Uma linha por campo alterado, escrita SO por trigger. NUNCA guarda niss nem niss_ultimos4 -- ver cabecalho da migracao que a criou.';
+'Historico de alteracoes a pessoas (subconjunto: contactos -- cargo tem o seu proprio historico em pessoas_vinculos_alteracoes), pessoas_dados_pessoais, pessoas_identificacao, pessoas_moradas e pessoas_fardamento. Uma linha por campo alterado, escrita SO por trigger. NUNCA guarda niss nem niss_ultimos4 -- ver cabecalho da migracao que a criou.';
 COMMENT ON COLUMN public.pessoas_dados_alteracoes.tabela IS
 'De onde veio a alteracao. Diferente de pessoas_vinculos_alteracoes (dedicada a uma so tabela): aqui cinco tabelas partilham o mesmo historico, por isso a origem tem de ir na linha.';
 COMMENT ON COLUMN public.pessoas_dados_alteracoes.origem IS
@@ -225,7 +218,10 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $$
 DECLARE
-  v_campos text[] := ARRAY['email_trabalho','email_pessoal','telefone_trabalho','departamento','estrutura'];
+  -- Sem 'departamento' nem 'estrutura': foram rejeitados. Departamento ja e um
+  -- TIPO DE ORGANIZACAO no produto e a pessoa liga-se a organizacoes -- nao ha
+  -- coluna de texto para auditar aqui.
+  v_campos text[] := ARRAY['email_trabalho','email_pessoal','telefone_trabalho'];
   v_old  jsonb := to_jsonb(OLD);
   v_new  jsonb := to_jsonb(NEW);
   v_campo text;
@@ -249,7 +245,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.hr_pessoas_registar_alteracao_dados() IS
-'Audita SO email_trabalho, email_pessoal, telefone_trabalho, departamento e estrutura de pessoas. cargo fica de fora: ja tem trigger proprio para pessoas_vinculos_alteracoes desde 20261123050000, e nao se duplica num segundo historico.';
+'Audita SO email_trabalho, email_pessoal e telefone_trabalho de pessoas. cargo fica de fora: ja tem trigger proprio para pessoas_vinculos_alteracoes desde 20261123050000, e nao se duplica num segundo historico.';
 
 DROP TRIGGER IF EXISTS trg_pessoas_registar_alteracao_dados ON public.pessoas;
 CREATE TRIGGER trg_pessoas_registar_alteracao_dados
@@ -308,9 +304,11 @@ LANGUAGE plpgsql VOLATILE SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $$
 DECLARE
-  -- NUNCA acrescentar 'niss' nem 'niss_ultimos4' a esta lista: e a garantia
-  -- central desta migracao, verificada no bloco de conferir por
-  -- pg_get_functiondef.
+  -- O numero da seguranca social, e a sua versao mascarada, NUNCA entram
+  -- nesta lista: e a garantia central desta migracao. O bloco de conferir
+  -- verifica-o por pg_get_functiondef -- e por isso este comentario nao
+  -- escreve o nome da coluna, senao a propria guarda apanhava-se a si
+  -- mesma e a migracao nunca aplicava.
   v_campos text[] := ARRAY[
     'tipo_documento','numero_documento','validade_documento','nif',
     'carta_conducao_numero','carta_conducao_categorias','carta_conducao_validade'
