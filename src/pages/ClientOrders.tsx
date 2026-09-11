@@ -109,6 +109,8 @@ const ClientOrders = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -134,10 +136,12 @@ const ClientOrders = () => {
     activeCompanyId: activeCompany?.id,
     debouncedSearchTerm,
     statusFilter,
+    dateFrom,
+    dateTo,
   });
   useEffect(() => {
-    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter };
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter]);
+    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo };
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
@@ -163,7 +167,9 @@ const ClientOrders = () => {
         p_status_filter: filters.statusFilter === 'all' ? null : filters.statusFilter,
         p_limit: PAGE_SIZE,
         p_offset: from,
-      });
+        p_date_from: filters.dateFrom || null,
+        p_date_to: filters.dateTo || null,
+      } as any);
 
       if (error) throw error;
       const newRows = (data as unknown as ClientOrderDocumentRow[] | null) || [];
@@ -191,7 +197,7 @@ const ClientOrders = () => {
     if (!activeCompany?.id) return;
     loadOrders(0, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter]);
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, dateFrom, dateTo]);
 
   useEffect(() => {
     if (loading) return;
@@ -577,6 +583,35 @@ const ClientOrders = () => {
               <SelectItem value="sem_fornecedor">{t('clientOrders.status.noSupplier')}</SelectItem>
             </SelectContent>
           </Select>
+          <Input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            className="w-[160px]"
+            title={t('clientOrders.filters.dateFrom')}
+            aria-label={t('clientOrders.filters.dateFrom')}
+          />
+          <Input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            className="w-[160px]"
+            title={t('clientOrders.filters.dateTo')}
+            aria-label={t('clientOrders.filters.dateTo')}
+          />
+          {(searchTerm || statusFilter !== "all" || dateFrom || dateTo) && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSearchTerm("");
+                setStatusFilter("all");
+                setDateFrom("");
+                setDateTo("");
+              }}
+            >
+              {t('clientOrders.filters.clear')}
+            </Button>
+          )}
         </div>
 
         <Table>

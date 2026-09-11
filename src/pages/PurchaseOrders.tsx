@@ -122,6 +122,14 @@ const PurchaseOrders = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleted, setShowDeleted] = useState(false);
+  // Filtros da listagem (frontend, tudo já carregado via fetchAllRows — sem
+  // paginação, ver comentário em loadData()): fornecedor, estado e intervalo
+  // de datas (aplicado a order_date ou actual_delivery_date, à escolha).
+  const [supplierFilter, setSupplierFilter] = useState("all");
+  const [statusFilterValue, setStatusFilterValue] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [dateFilterField, setDateFilterField] = useState<"order_date" | "actual_delivery_date">("order_date");
   const [catalogLoaded, setCatalogLoaded] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const loadRequestRef = useRef(0);
@@ -1510,6 +1518,39 @@ const PurchaseOrders = () => {
 
   const totals = calculateTotals();
 
+  // Filtros aplicados em memória sobre `orders` (já carregado inteiro via
+  // fetchAllRows — ver loadData()). A data é comparada como string "YYYY-MM-DD"
+  // (mesmo formato de order_date/actual_delivery_date e dos <Input type="date">),
+  // por isso a comparação lexicográfica funciona sem conversão para Date.
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      if (supplierFilter !== "all" && order.supplier_id !== supplierFilter) return false;
+      if (statusFilterValue !== "all" && order.status !== statusFilterValue) return false;
+
+      const fieldValue = dateFilterField === "order_date"
+        ? order.order_date
+        : (order as any).actual_delivery_date;
+
+      if (dateFrom || dateTo) {
+        if (!fieldValue) return false;
+        if (dateFrom && fieldValue < dateFrom) return false;
+        if (dateTo && fieldValue > dateTo) return false;
+      }
+
+      return true;
+    });
+  }, [orders, supplierFilter, statusFilterValue, dateFrom, dateTo, dateFilterField]);
+
+  const hasActiveOrderFilters = supplierFilter !== "all" || statusFilterValue !== "all" || !!dateFrom || !!dateTo;
+
+  const clearOrderFilters = () => {
+    setSupplierFilter("all");
+    setStatusFilterValue("all");
+    setDateFrom("");
+    setDateTo("");
+    setDateFilterField("order_date");
+  };
+
   if (companyLoading) {
     return (
       <>
@@ -1933,11 +1974,84 @@ const PurchaseOrders = () => {
         </div>
 
         <Card>
-          {orders.length === 0 ? (
+          <CardContent className="pt-6">
+            <div className="flex flex-col md:flex-row gap-4 flex-wrap md:items-end">
+              <div className="space-y-2 w-full md:w-[200px]">
+                <Label>{t('purchaseOrders.filters.supplier')}</Label>
+                <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('purchaseOrders.filters.all')}</SelectItem>
+                    {suppliers.map((supplier) => (
+                      <SelectItem key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 w-full md:w-[200px]">
+                <Label>{t('purchaseOrders.filters.status')}</Label>
+                <Select value={statusFilterValue} onValueChange={setStatusFilterValue}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('purchaseOrders.filters.all')}</SelectItem>
+                    <SelectItem value="pending">{getStatusLabel('pending')}</SelectItem>
+                    <SelectItem value="ordered">{getStatusLabel('ordered')}</SelectItem>
+                    <SelectItem value="partially_received">{getStatusLabel('partially_received')}</SelectItem>
+                    <SelectItem value="received">{getStatusLabel('received')}</SelectItem>
+                    <SelectItem value="cancelled">{getStatusLabel('cancelled')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 w-full md:w-[190px]">
+                <Label>{t('purchaseOrders.filters.dateField')}</Label>
+                <Select
+                  value={dateFilterField}
+                  onValueChange={(value) => setDateFilterField(value as "order_date" | "actual_delivery_date")}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="order_date">{t('purchaseOrders.filters.dateFieldOrder')}</SelectItem>
+                    <SelectItem value="actual_delivery_date">{t('purchaseOrders.filters.dateFieldDelivery')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 w-full md:w-[160px]">
+                <Label>{t('purchaseOrders.filters.dateFrom')}</Label>
+                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              </div>
+
+              <div className="space-y-2 w-full md:w-[160px]">
+                <Label>{t('purchaseOrders.filters.dateTo')}</Label>
+                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </div>
+
+              {hasActiveOrderFilters && (
+                <Button variant="outline" onClick={clearOrderFilters}>
+                  <X className="w-4 h-4 mr-2" />
+                  {t('purchaseOrders.filters.clear')}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          {filteredOrders.length === 0 ? (
             <div className="p-8 text-center space-y-4">
               <ShoppingCart className="mx-auto h-12 w-12 text-muted-foreground" />
               <p className="text-muted-foreground">
-                {t('purchaseOrders.noOrders')}
+                {hasActiveOrderFilters ? t('purchaseOrders.filters.noResults') : t('purchaseOrders.noOrders')}
               </p>
             </div>
           ) : (
@@ -1954,7 +2068,7 @@ const PurchaseOrders = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orders.map((order) => (
+                {filteredOrders.map((order) => (
                   <TableRow key={order.id}>
                     <TableCell className="font-mono font-semibold">{order.order_number}</TableCell>
                     <TableCell>{order.suppliers?.name || "N/A"}</TableCell>
