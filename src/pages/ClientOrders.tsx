@@ -13,11 +13,15 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Badge } from "@/components/ui/badge";
-import { ClipboardCheck, Eye, FileDown, ExternalLink } from "lucide-react";
+import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { pdf } from '@react-pdf/renderer';
 import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
@@ -51,6 +55,17 @@ interface ClientOrderDocumentRow {
   overall_status: string;
 }
 
+// 20261130070000: armazém(ns) com stock deste produto, só preenchido nas
+// linhas com line_status === 'stock_disponivel_confirmar' (ordenado por
+// quantity desc pela RPC). `rpc_get_client_order_document` devolve jsonb, pelo
+// que `supabase gen types` gera sempre `Returns: Json` (opaco) — a tipagem
+// desta estrutura tem de continuar manual, não é um `as any` temporário.
+interface ClientOrderAvailableWarehouse {
+  warehouse_id: string;
+  warehouse_name: string;
+  quantity: number;
+}
+
 interface ClientOrderDocumentLine {
   quote_line_id: string;
   product_id: string;
@@ -61,6 +76,7 @@ interface ClientOrderDocumentLine {
   stock_movement_id: string | null;
   purchase_order_id: string | null;
   purchase_order_number: string | null;
+  available_warehouses: ClientOrderAvailableWarehouse[] | null;
 }
 
 interface ClientOrderDocumentDetail {
@@ -77,8 +93,10 @@ const ClientOrders = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
+  const { hasPermission } = usePermissions();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const canConfirmStockExit = hasPermission('inventory.edit');
 
   const [orders, setOrders] = useState<ClientOrderDocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -96,6 +114,18 @@ const ClientOrders = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState<ClientOrderDocumentDetail | null>(null);
   const [pdfGeneratingId, setPdfGeneratingId] = useState<string | null>(null);
+
+  // Checklist de saída de stock (linhas stock_disponivel_confirmar):
+  // - checklistActiveLineIds: linhas onde o checkbox foi marcado E há mais de
+  //   1 armazém disponível, pelo que o Select + botão "Confirmar" ficam
+  //   visíveis à espera de escolha.
+  // - selectedWarehouseByLine: armazém escolhido no Select acima, por
+  //   quote_line_id.
+  // - confirmingLineId: linha atualmente a chamar
+  //   rpc_confirm_client_order_stock_exit (mostra spinner em vez do checkbox).
+  const [checklistActiveLineIds, setChecklistActiveLineIds] = useState<Set<string>>(new Set());
+  const [selectedWarehouseByLine, setSelectedWarehouseByLine] = useState<Record<string, string>>({});
+  const [confirmingLineId, setConfirmingLineId] = useState<string | null>(null);
 
   // Filtros num ref (não recria loadOrders a cada keystroke) — mesmo truque
   // já usado em Stocks.tsx para manter a identidade do IntersectionObserver
@@ -271,6 +301,70 @@ const ClientOrders = () => {
     }
   };
 
+  // Checklist de saída de stock (fase pós-20261130070000).
+  const handleConfirmStockExit = async (line: ClientOrderDocumentLine, warehouseId: string) => {
+    if (!detailData) return;
+    setConfirmingLineId(line.quote_line_id);
+    try {
+      const { error } = await supabase.rpc('rpc_confirm_client_order_stock_exit', {
+        p_contract_id: detailData.contract_id,
+        p_product_id: line.product_id,
+        p_quantity: line.quantity,
+        p_warehouse_id: warehouseId,
+      });
+      if (error) throw error;
+
+      toast({ title: t('clientOrders.dialog.stockExitSuccess') });
+      setChecklistActiveLineIds((prev) => {
+        const next = new Set(prev);
+        next.delete(line.quote_line_id);
+        return next;
+      });
+      setSelectedWarehouseByLine((prev) => {
+        const next = { ...prev };
+        delete next[line.quote_line_id];
+        return next;
+      });
+
+      // Padrão já usado no resto da página (openDetail): re-buscar o
+      // documento inteiro é a forma mais simples e segura de refletir o novo
+      // line_status, em vez de tentar recalcular a cascata no frontend.
+      const refreshed = await fetchDetail(detailData.contract_id);
+      setDetailData(refreshed);
+    } catch (error: any) {
+      toast({ title: t('clientOrders.toast.stockExitError'), description: error.message, variant: "destructive" });
+    } finally {
+      setConfirmingLineId(null);
+    }
+  };
+
+  const handleChecklistCheckboxChange = (line: ClientOrderDocumentLine, checked: boolean) => {
+    const warehouses = line.available_warehouses || [];
+
+    if (!checked) {
+      setChecklistActiveLineIds((prev) => {
+        const next = new Set(prev);
+        next.delete(line.quote_line_id);
+        return next;
+      });
+      setSelectedWarehouseByLine((prev) => {
+        const next = { ...prev };
+        delete next[line.quote_line_id];
+        return next;
+      });
+      return;
+    }
+
+    if (warehouses.length === 1) {
+      handleConfirmStockExit(line, warehouses[0].warehouse_id);
+      return;
+    }
+
+    if (warehouses.length > 1) {
+      setChecklistActiveLineIds((prev) => new Set(prev).add(line.quote_line_id));
+    }
+  };
+
   const openPurchaseOrder = (purchaseOrderId: string) => {
     // Mesmo padrão de cross-link já usado em ClientContracts.tsx
     // (?open=<id>) — replicado em PurchaseOrders.tsx para este caso.
@@ -323,6 +417,110 @@ const ClientOrders = () => {
       default:
         return line.line_status;
     }
+  };
+
+  // Indicador "Produtos Disponíveis" no cabeçalho do diálogo — recalculado a
+  // cada render a partir de detailData (sem memoização: a tabela é pequena e
+  // já recalcula badges/labels da mesma forma).
+  const getAvailableProductsProgress = () => {
+    if (!detailData) return { done: 0, total: 0, percent: 0 };
+    const total = detailData.lines.length;
+    const done = detailData.lines.filter((line) =>
+      ['servido_por_stock', 'recebido', 'stock_disponivel_confirmar'].includes(line.line_status)
+    ).length;
+    const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+    return { done, total, percent };
+  };
+
+  // Checklist inline da célula "Estado" — só para linhas
+  // stock_disponivel_confirmar (fase pós-20261130070000). Estados possíveis:
+  // 1) sem permissão inventory.edit → checkbox desativado + tooltip;
+  // 2) sem armazéns disponíveis (não devia acontecer, dado o próprio
+  //    line_status) → checkbox desativado + tooltip;
+  // 3) 1 armazém → checkbox dispara logo a confirmação;
+  // 4) 2+ armazéns → checkbox revela Select + botão "Confirmar";
+  // 5) a processar → spinner em vez do checkbox.
+  const renderStockExitChecklist = (line: ClientOrderDocumentLine) => {
+    const warehouses = line.available_warehouses || [];
+    const isProcessing = confirmingLineId === line.quote_line_id;
+
+    if (isProcessing) {
+      return <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />;
+    }
+
+    if (!canConfirmStockExit) {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Checkbox checked={false} disabled />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{t('clientOrders.dialog.noPermissionToConfirm')}</TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    if (warehouses.length === 0) {
+      return (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex">
+              <Checkbox checked={false} disabled />
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>{t('clientOrders.dialog.noWarehouseAvailable')}</TooltipContent>
+        </Tooltip>
+      );
+    }
+
+    const isActive = checklistActiveLineIds.has(line.quote_line_id);
+    const selectedWarehouseId = selectedWarehouseByLine[line.quote_line_id];
+
+    if (warehouses.length > 1 && isActive) {
+      return (
+        <div className="flex items-center gap-1.5">
+          <Checkbox
+            checked
+            onCheckedChange={(checked) => handleChecklistCheckboxChange(line, checked === true)}
+          />
+          <Select
+            value={selectedWarehouseId || ""}
+            onValueChange={(value) =>
+              setSelectedWarehouseByLine((prev) => ({ ...prev, [line.quote_line_id]: value }))
+            }
+          >
+            <SelectTrigger className="h-8 w-[190px] text-xs">
+              <SelectValue placeholder={t('clientOrders.dialog.selectWarehouse')} />
+            </SelectTrigger>
+            <SelectContent>
+              {warehouses.map((wh) => (
+                <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
+                  {wh.warehouse_name} ({wh.quantity})
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {selectedWarehouseId && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8"
+              onClick={() => handleConfirmStockExit(line, selectedWarehouseId)}
+            >
+              {t('clientOrders.dialog.confirmStockExit')}
+            </Button>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <Checkbox
+        checked={isActive}
+        onCheckedChange={(checked) => handleChecklistCheckboxChange(line, checked === true)}
+      />
+    );
   };
 
   if (companyLoading) {
@@ -490,6 +688,24 @@ const ClientOrders = () => {
                 </div>
               </div>
 
+              {(() => {
+                const { done, total, percent } = getAvailableProductsProgress();
+                const barColorClass = total === 0
+                  ? "[&>div]:bg-muted-foreground"
+                  : percent === 100
+                    ? "[&>div]:bg-success"
+                    : "[&>div]:bg-warning";
+                return (
+                  <div className="space-y-1.5 text-sm">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">{t('clientOrders.dialog.availableProducts')}</span>
+                      <span className="font-medium">{done}/{total} ({percent}%)</span>
+                    </div>
+                    <Progress value={percent} className={`h-2 ${barColorClass}`} />
+                  </div>
+                );
+              })()}
+
               <div className="flex justify-end">
                 <Button
                   variant="outline"
@@ -529,6 +745,7 @@ const ClientOrders = () => {
                             <Badge className={getLineStatusColor(line.line_status)}>
                               {getLineStatusLabel(line)}
                             </Badge>
+                            {line.line_status === 'stock_disponivel_confirmar' && renderStockExitChecklist(line)}
                             {line.purchase_order_id && (
                               <Button
                                 variant="ghost"

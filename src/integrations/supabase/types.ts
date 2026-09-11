@@ -21820,6 +21820,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_confirm_client_order_stock_exit: {
+        Args: {
+          p_contract_id: string
+          p_product_id: string
+          p_quantity: number
+          p_warehouse_id: string
+        }
+        Returns: Json
+      }
       rpc_convert_lead_to_client: {
         Args: {
           p_campaign_id: string
