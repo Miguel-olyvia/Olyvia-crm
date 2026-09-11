@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _migration_contacts_to_leads_map: {
@@ -6915,37 +6890,74 @@ export type Database = {
         Row: {
           color: string | null
           created_at: string
+          created_by: string | null
           id: string
+          is_active: boolean
           is_final: boolean
           is_lost: boolean
           is_won: boolean
+          label: string | null
           name: string
           order_index: number
+          organization_id: string | null
           stage_key: string | null
+          updated_at: string
         }
         Insert: {
           color?: string | null
           created_at?: string
+          created_by?: string | null
           id?: string
+          is_active?: boolean
           is_final?: boolean
           is_lost?: boolean
           is_won?: boolean
+          label?: string | null
           name: string
           order_index: number
+          organization_id?: string | null
           stage_key?: string | null
+          updated_at?: string
         }
         Update: {
           color?: string | null
           created_at?: string
+          created_by?: string | null
           id?: string
+          is_active?: boolean
           is_final?: boolean
           is_lost?: boolean
           is_won?: boolean
+          label?: string | null
           name?: string
           order_index?: number
+          organization_id?: string | null
           stage_key?: string | null
+          updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "deal_stages_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deal_stages_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "deal_stages_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       deals: {
         Row: {
@@ -15426,6 +15438,7 @@ export type Database = {
       }
       purchase_orders: {
         Row: {
+          actual_delivery_date: string | null
           business_unit_id: string | null
           created_at: string
           created_by: string
@@ -15445,6 +15458,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          actual_delivery_date?: string | null
           business_unit_id?: string | null
           created_at?: string
           created_by: string
@@ -15464,6 +15478,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          actual_delivery_date?: string | null
           business_unit_id?: string | null
           created_at?: string
           created_by?: string
@@ -15509,6 +15524,209 @@ export type Database = {
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_diagnostic_area_suggestions: {
+        Row: {
+          ai_confidence: number | null
+          ai_rationale: string | null
+          catalog_item_id: string | null
+          created_at: string
+          descricao: string | null
+          diagnostic_area_id: string
+          id: string
+          product_id: string | null
+          quote_line_id: string | null
+          rule_id: string | null
+          service_id: string | null
+          source: string
+          source_field: string
+          suggested_qty: number
+          target_type: string | null
+          unidade: string | null
+          was_edited_by_user: boolean
+        }
+        Insert: {
+          ai_confidence?: number | null
+          ai_rationale?: string | null
+          catalog_item_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          diagnostic_area_id: string
+          id?: string
+          product_id?: string | null
+          quote_line_id?: string | null
+          rule_id?: string | null
+          service_id?: string | null
+          source: string
+          source_field: string
+          suggested_qty: number
+          target_type?: string | null
+          unidade?: string | null
+          was_edited_by_user?: boolean
+        }
+        Update: {
+          ai_confidence?: number | null
+          ai_rationale?: string | null
+          catalog_item_id?: string | null
+          created_at?: string
+          descricao?: string | null
+          diagnostic_area_id?: string
+          id?: string
+          product_id?: string | null
+          quote_line_id?: string | null
+          rule_id?: string | null
+          service_id?: string | null
+          source?: string
+          source_field?: string
+          suggested_qty?: number
+          target_type?: string | null
+          unidade?: string | null
+          was_edited_by_user?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_catalogo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_diagnostic_area_id_fkey"
+            columns: ["diagnostic_area_id"]
+            isOneToOne: false
+            referencedRelation: "quote_diagnostic_areas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_quote_line_id_fkey"
+            columns: ["quote_line_id"]
+            isOneToOne: false
+            referencedRelation: "quote_lines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_rule_id_fkey"
+            columns: ["rule_id"]
+            isOneToOne: false
+            referencedRelation: "quote_suggestion_rules"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_area_suggestions_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_diagnostic_areas: {
+        Row: {
+          area_m2: number | null
+          created_at: string
+          created_by: string | null
+          demolir_descricao: string | null
+          demolir_m2: number | null
+          id: string
+          intervencao_descricao: string | null
+          intervencao_tipo: string | null
+          nome_area: string
+          organization_id: string
+          phase: string
+          proteger_descricao: string | null
+          quote_id: string
+          sort_order: number | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          area_m2?: number | null
+          created_at?: string
+          created_by?: string | null
+          demolir_descricao?: string | null
+          demolir_m2?: number | null
+          id?: string
+          intervencao_descricao?: string | null
+          intervencao_tipo?: string | null
+          nome_area: string
+          organization_id: string
+          phase?: string
+          proteger_descricao?: string | null
+          quote_id: string
+          sort_order?: number | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          area_m2?: number | null
+          created_at?: string
+          created_by?: string | null
+          demolir_descricao?: string | null
+          demolir_m2?: number | null
+          id?: string
+          intervencao_descricao?: string | null
+          intervencao_tipo?: string | null
+          nome_area?: string
+          organization_id?: string
+          phase?: string
+          proteger_descricao?: string | null
+          quote_id?: string
+          sort_order?: number | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_diagnostic_areas_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_areas_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_areas_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_areas_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_orcamento"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_areas_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
             referencedColumns: ["id"]
           },
         ]
@@ -15597,6 +15815,7 @@ export type Database = {
           total_com_iva: number | null
           total_sem_iva: number | null
           unidade: string | null
+          visible_to_client: boolean
         }
         Insert: {
           bundle_id?: string | null
@@ -15626,6 +15845,7 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          visible_to_client?: boolean
         }
         Update: {
           bundle_id?: string | null
@@ -15655,6 +15875,7 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          visible_to_client?: boolean
         }
         Relationships: [
           {
@@ -15850,6 +16071,128 @@ export type Database = {
             columns: ["stage_id"]
             isOneToOne: false
             referencedRelation: "quote_workflow_stages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quote_suggestion_rules: {
+        Row: {
+          catalog_item_id: string | null
+          created_at: string
+          created_by: string | null
+          default_qt_unit: string | null
+          id: string
+          intervention_type: string | null
+          is_active: boolean
+          match_keyword: string | null
+          name: string
+          organization_id: string
+          phase: string
+          priority: number
+          product_id: string | null
+          quantity_fixed: number | null
+          quantity_formula_type: string
+          quantity_multiplier: number | null
+          rounding: string
+          service_id: string | null
+          source_field: string
+          target_type: string
+          updated_at: string
+        }
+        Insert: {
+          catalog_item_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          default_qt_unit?: string | null
+          id?: string
+          intervention_type?: string | null
+          is_active?: boolean
+          match_keyword?: string | null
+          name: string
+          organization_id: string
+          phase?: string
+          priority?: number
+          product_id?: string | null
+          quantity_fixed?: number | null
+          quantity_formula_type?: string
+          quantity_multiplier?: number | null
+          rounding?: string
+          service_id?: string | null
+          source_field: string
+          target_type: string
+          updated_at?: string
+        }
+        Update: {
+          catalog_item_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          default_qt_unit?: string | null
+          id?: string
+          intervention_type?: string | null
+          is_active?: boolean
+          match_keyword?: string | null
+          name?: string
+          organization_id?: string
+          phase?: string
+          priority?: number
+          product_id?: string | null
+          quantity_fixed?: number | null
+          quantity_formula_type?: string
+          quantity_multiplier?: number | null
+          rounding?: string
+          service_id?: string | null
+          source_field?: string
+          target_type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_suggestion_rules_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_suggestion_rules_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_catalogo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_suggestion_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_suggestion_rules_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "quote_suggestion_rules_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_suggestion_rules_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_suggestion_rules_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
             referencedColumns: ["id"]
           },
         ]
@@ -16054,6 +16397,7 @@ export type Database = {
           delivered_at: string | null
           delivery_time_hours: number | null
           desconto_global_percent: number | null
+          diagnostic_phase1_completed_at: string | null
           entity_id: string | null
           estado: string | null
           id: string
@@ -16092,6 +16436,7 @@ export type Database = {
           delivered_at?: string | null
           delivery_time_hours?: number | null
           desconto_global_percent?: number | null
+          diagnostic_phase1_completed_at?: string | null
           entity_id?: string | null
           estado?: string | null
           id?: string
@@ -16130,6 +16475,7 @@ export type Database = {
           delivered_at?: string | null
           delivery_time_hours?: number | null
           desconto_global_percent?: number | null
+          diagnostic_phase1_completed_at?: string | null
           entity_id?: string | null
           estado?: string | null
           id?: string
@@ -18135,6 +18481,7 @@ export type Database = {
           created_by: string
           deleted_at: string | null
           deleted_by: string | null
+          delivery_sla_days: number | null
           department_id: string | null
           email: string | null
           id: string
@@ -18166,6 +18513,7 @@ export type Database = {
           created_by: string
           deleted_at?: string | null
           deleted_by?: string | null
+          delivery_sla_days?: number | null
           department_id?: string | null
           email?: string | null
           id?: string
@@ -18197,6 +18545,7 @@ export type Database = {
           created_by?: string
           deleted_at?: string | null
           deleted_by?: string | null
+          delivery_sla_days?: number | null
           department_id?: string | null
           email?: string | null
           id?: string
@@ -20324,6 +20673,7 @@ export type Database = {
           p_campaign_id?: string
           p_contact_result?: string
           p_contact_result_none?: boolean
+          p_date_field?: string
           p_date_from?: string
           p_date_to?: string
           p_is_root?: boolean
@@ -20527,6 +20877,7 @@ export type Database = {
           p_campaign_id?: string
           p_contact_result?: string
           p_contact_result_none?: boolean
+          p_date_field?: string
           p_date_from?: string
           p_date_to?: string
           p_is_root?: boolean
@@ -21421,6 +21772,54 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_complete_diagnostic_phase1: {
+        Args: { p_quote_id: string }
+        Returns: {
+          accepted_at: string | null
+          assigned_to: string | null
+          client_notes: string | null
+          cliente_id: string | null
+          conditions: string | null
+          created_at: string
+          created_by: string
+          deal_id: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          delivered_at: string | null
+          delivery_time_hours: number | null
+          desconto_global_percent: number | null
+          diagnostic_phase1_completed_at: string | null
+          entity_id: string | null
+          estado: string | null
+          id: string
+          iva_rate: number | null
+          lost_reason: string | null
+          modelo_base: string
+          moeda: string | null
+          obra_endereco: string | null
+          obra_notas: string | null
+          organization_id: string | null
+          proposal_id: string | null
+          quote_number: string | null
+          request_date: string | null
+          root_organization_id: string | null
+          search_text: string | null
+          site_address_id: string | null
+          subtotal: number | null
+          template_id: string | null
+          title: string | null
+          total: number | null
+          total_fees: number | null
+          updated_at: string
+          validade_dias: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quotes"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_convert_lead_to_client: {
         Args: {
           p_campaign_id: string
@@ -22172,6 +22571,7 @@ export type Database = {
       rpc_create_purchase_order: {
         Args: { p_items: Json; p_order: Json; p_organization_id: string }
         Returns: {
+          actual_delivery_date: string | null
           business_unit_id: string | null
           created_at: string
           created_by: string
@@ -22490,6 +22890,10 @@ export type Database = {
       rpc_delete_supplier: { Args: { p_id: string }; Returns: undefined }
       rpc_delete_user: { Args: { p_user_id: string }; Returns: undefined }
       rpc_delete_warehouse: { Args: { p_id: string }; Returns: undefined }
+      rpc_discard_draft_quote: {
+        Args: { p_quote_id: string }
+        Returns: boolean
+      }
       rpc_duplicate_deal: {
         Args: {
           p_organization_id: string
@@ -22587,6 +22991,7 @@ export type Database = {
           delivered_at: string | null
           delivery_time_hours: number | null
           desconto_global_percent: number | null
+          diagnostic_phase1_completed_at: string | null
           entity_id: string | null
           estado: string | null
           id: string
@@ -22719,6 +23124,30 @@ export type Database = {
       rpc_get_client_order_document: {
         Args: { p_contract_id: string }
         Returns: Json
+      }
+      rpc_get_supplier_sla_orders: {
+        Args: { p_supplier_id: string }
+        Returns: {
+          actual_delivery_date: string
+          days_taken: number
+          delivery_sla_days: number
+          expected_delivery: string
+          is_within_sla: boolean
+          order_date: string
+          order_number: string
+        }[]
+      }
+      rpc_get_supplier_sla_report: {
+        Args: { p_supplier_id?: string }
+        Returns: {
+          avg_delay_days: number
+          compliance_pct: number
+          over_sla: number
+          supplier_id: string
+          supplier_name: string
+          total_received: number
+          within_sla: number
+        }[]
       }
       rpc_import_purchase_orders_csv: {
         Args: { p_orders: Json }
@@ -23175,21 +23604,48 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_preview_diagnostic_suggestions: {
+        Args: { p_diagnostic_area_id: string; p_source_field: string }
+        Returns: Json
+      }
       rpc_reassign_client_contract: {
         Args: { p_id: string; p_new_owner_id: string }
         Returns: string
       }
       rpc_receive_purchase_order: {
-        Args: { p_purchase_order_id: string; p_warehouse_id: string }
+        Args: {
+          p_actual_delivery_date?: string
+          p_purchase_order_id: string
+          p_warehouse_id: string
+        }
         Returns: Json
       }
       rpc_receive_purchase_order_lines: {
         Args: {
+          p_actual_delivery_date?: string
           p_lines: Json
           p_purchase_order_id: string
           p_warehouse_id: string
         }
         Returns: Json
+      }
+      rpc_record_diagnostic_suggestion_accepted: {
+        Args: {
+          p_ai_confidence?: number
+          p_ai_rationale?: string
+          p_catalog_item_id?: string
+          p_descricao: string
+          p_diagnostic_area_id: string
+          p_product_id?: string
+          p_qty: number
+          p_rule_id?: string
+          p_service_id?: string
+          p_source: string
+          p_source_field: string
+          p_target_type: string
+          p_unidade?: string
+        }
+        Returns: string
       }
       rpc_register_sale_stock_movement: {
         Args: {
@@ -23308,6 +23764,33 @@ export type Database = {
         Args: { p_client_id: string }
         Returns: Json
       }
+      rpc_save_diagnostic_area: {
+        Args: { p_area_data?: Json; p_area_id?: string; p_quote_id: string }
+        Returns: {
+          area_m2: number | null
+          created_at: string
+          created_by: string | null
+          demolir_descricao: string | null
+          demolir_m2: number | null
+          id: string
+          intervencao_descricao: string | null
+          intervencao_tipo: string | null
+          nome_area: string
+          organization_id: string
+          phase: string
+          proteger_descricao: string | null
+          quote_id: string
+          sort_order: number | null
+          status: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "quote_diagnostic_areas"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_save_lead_workflow_automation: {
         Args: {
           p_action_stage_id: string
@@ -23387,6 +23870,7 @@ export type Database = {
       }
       rpc_save_quote: {
         Args: {
+          p_diagnostic_suggestions?: Json
           p_fees: Json
           p_inline_quotes?: Json
           p_lines: Json
@@ -23408,6 +23892,7 @@ export type Database = {
           delivered_at: string | null
           delivery_time_hours: number | null
           desconto_global_percent: number | null
+          diagnostic_phase1_completed_at: string | null
           entity_id: string | null
           estado: string | null
           id: string
@@ -24206,6 +24691,7 @@ export type Database = {
       rpc_update_purchase_order: {
         Args: { p_items: Json; p_order: Json; p_purchase_order_id: string }
         Returns: {
+          actual_delivery_date: string | null
           business_unit_id: string | null
           created_at: string
           created_by: string
@@ -25100,9 +25586,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       anew_scope_level: ["NONE", "OWNED", "TEAM", "ORG"],

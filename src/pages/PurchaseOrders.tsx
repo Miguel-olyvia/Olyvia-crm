@@ -138,6 +138,10 @@ const PurchaseOrders = () => {
   // vez", mas agora ajustável antes de confirmar).
   const [receiveLines, setReceiveLines] = useState<PurchaseOrderItemWithReceipt[]>([]);
   const [receiveLineQuantities, setReceiveLineQuantities] = useState<Record<string, number>>({});
+  // Data real de entrega (suppliers.delivery_sla_days / purchase_orders.actual_delivery_date,
+  // migration pendente) — só gravada quando a encomenda fica 'received', mas pedida sempre
+  // (também é usada pelo relatório de SLA mesmo em receções parciais sucessivas).
+  const [actualDeliveryDate, setActualDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
   const [receiving, setReceiving] = useState(false);
   // Fase 5.0F: link inverso — quando a encomenda foi gerada automaticamente a
   // partir de um Contrato assinado (source_type='contract'), mostra a origem
@@ -770,6 +774,7 @@ const PurchaseOrders = () => {
     setReceiveWarehouseId("");
     setReceiveLines([]);
     setReceiveLineQuantities({});
+    setActualDeliveryDate(new Date().toISOString().slice(0, 10));
     setReceiveDialogOpen(true);
 
     if (!activeCompany?.id) return;
@@ -849,6 +854,7 @@ const PurchaseOrders = () => {
         p_purchase_order_id: receivingOrder.id,
         p_warehouse_id: receiveWarehouseId,
         p_lines: linesToReceive,
+        p_actual_delivery_date: actualDeliveryDate || null,
       });
       if (error) throw error;
 
@@ -872,6 +878,7 @@ const PurchaseOrders = () => {
       setReceivingOrder(null);
       setReceiveLines([]);
       setReceiveLineQuantities({});
+      setActualDeliveryDate(new Date().toISOString().slice(0, 10));
       loadData();
     } catch (error: any) {
       toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
@@ -2213,6 +2220,15 @@ const PurchaseOrders = () => {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>{t("purchaseOrders.receive.actualDeliveryDate")}</Label>
+              <Input
+                type="date"
+                value={actualDeliveryDate}
+                onChange={(e) => setActualDeliveryDate(e.target.value)}
+              />
             </div>
 
             {receiveLines.length > 0 && (

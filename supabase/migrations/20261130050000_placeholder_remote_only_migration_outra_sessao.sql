@@ -1,0 +1,20 @@
+-- Placeholder — NÃO é o conteúdo real desta migração.
+--
+-- Esta versão (20261130050000) apareceu no histórico da BD remota
+-- (supabase_migrations.schema_migrations) sem nunca ter sido commitada em
+-- nenhum branch deste repositório (confirmado por `git log --all` em todos os
+-- refs remotos). Foi aplicada diretamente por outra sessão/feature em
+-- paralelo (Encomendas Clientes/Bundles, confirmado pelo utilizador), muito
+-- provavelmente via `supabase db push` a partir de um ficheiro local dessa
+-- sessão que ainda não foi commitado, ou via SQL Editor.
+--
+-- Este ficheiro existe só para o `supabase` CLI (`migration repair`) ter um
+-- caminho local a que associar essa versão e poder marcá-la corretamente como
+-- `applied` no histórico — sem isto, o CLI não consegue reconciliar o
+-- histórico remoto com o local (`glob ... file does not exist`).
+--
+-- NÃO EXECUTAR. NÃO SUBSTITUIR POR "CONTEÚDO REAL" ADIVINHADO. Quando o
+-- ficheiro real desta migração (da outra sessão) for commitado, substituir
+-- este placeholder pelo conteúdo verdadeiro, ou removê-lo se o real vier
+-- com nome de ficheiro diferente para esta mesma versão.
+SELECT 1;

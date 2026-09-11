@@ -8,7 +8,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Building, Pencil, Trash2, Mail, Phone, Globe, Download, Upload, Search, Filter, X, Building2, Truck } from "lucide-react";
+import { Plus, Building, Pencil, Trash2, Mail, Phone, Globe, Download, Upload, Search, Filter, X, Building2, Truck, BarChart3 } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { BulkActionsBar } from "@/components/BulkActionsBar";
@@ -29,6 +29,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
 import SupplierCatalogDialog from "@/components/SupplierCatalogDialog";
+import SupplierSlaReportDialog from "@/components/SupplierSlaReportDialog";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
@@ -49,6 +50,10 @@ const supplierSchema = z.object({
   postal_code: z.string().trim().max(20, "O código postal deve ter menos de 20 caracteres.").optional().or(z.literal("")),
   country: z.string().trim().max(100, "O país deve ter menos de 100 caracteres.").optional().or(z.literal("")),
   tax_id: z.string().trim().max(50, "O NIF deve ter menos de 50 caracteres.").optional().or(z.literal("")),
+  delivery_sla_days: z.preprocess(
+    (val) => (val === "" || val === null || val === undefined ? undefined : val),
+    z.coerce.number().int().positive().optional()
+  ),
   website: z.string().trim().url("URL do website inválido.").max(255, "O website deve ter menos de 255 caracteres.").optional().or(z.literal("")),
   notes: z.string().trim().max(2000, "As notas devem ter menos de 2000 caracteres.").optional().or(z.literal("")),
   is_active: z.boolean(),
@@ -91,6 +96,8 @@ const Suppliers = () => {
   const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
   const [catalogDialogOpen, setCatalogDialogOpen] = useState(false);
   const [catalogSupplier, setCatalogSupplier] = useState<Supplier | null>(null);
+  const [slaReportDialogOpen, setSlaReportDialogOpen] = useState(false);
+  const [slaReportSupplier, setSlaReportSupplier] = useState<Supplier | null>(null);
   
   // New bulk action states
   const [bulkCompanyDialogOpen, setBulkCompanyDialogOpen] = useState(false);
@@ -106,6 +113,7 @@ const Suppliers = () => {
     postal_code: "",
     country: "",
     tax_id: "",
+    delivery_sla_days: "" as string | number,
     website: "",
     notes: "",
     is_active: true,
@@ -298,6 +306,7 @@ const Suppliers = () => {
       postal_code: supplier.postal_code || "",
       country: supplier.country || "",
       tax_id: (supplier as any).tax_id || "",
+      delivery_sla_days: supplier.delivery_sla_days ?? "",
       website: supplier.website || "",
       notes: supplier.notes || "",
       is_active: supplier.is_active ?? true,
@@ -414,6 +423,10 @@ const Suppliers = () => {
         postal_code: formData.postal_code || null,
         country: formData.country || null,
         tax_id: formData.tax_id || null,
+        delivery_sla_days:
+          formData.delivery_sla_days === "" || formData.delivery_sla_days === null
+            ? null
+            : Number(formData.delivery_sla_days),
         website: formData.website || null,
         notes: formData.notes || null,
         is_active: formData.is_active,
@@ -474,6 +487,7 @@ const Suppliers = () => {
       postal_code: "",
       country: "",
       tax_id: "",
+      delivery_sla_days: "",
       website: "",
       notes: "",
       is_active: true,
@@ -1086,6 +1100,19 @@ const Suppliers = () => {
                                   <Truck className="h-4 w-4" />
                                 </Button>
                               </PermissionGate>
+                              <PermissionGate permission="suppliers.view">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSlaReportSupplier(supplier);
+                                    setSlaReportDialogOpen(true);
+                                  }}
+                                  title={t("suppliers.actions.slaReport")}
+                                >
+                                  <BarChart3 className="h-4 w-4" />
+                                </Button>
+                              </PermissionGate>
                               <PermissionGate permission="suppliers.edit">
                                 <Button
                                   variant="ghost"
@@ -1207,6 +1234,18 @@ const Suppliers = () => {
                   />
                   {fieldErrors.tax_id && <p className="text-sm text-destructive">{fieldErrors.tax_id}</p>}
                 </div>
+                <div className="space-y-2">
+                  <Label htmlFor="delivery_sla_days">{t("suppliers.form.deliverySlaDays")}</Label>
+                  <Input
+                    id="delivery_sla_days"
+                    type="number"
+                    min="1"
+                    value={formData.delivery_sla_days}
+                    onChange={(e) => setFormData({ ...formData, delivery_sla_days: e.target.value })}
+                    className={fieldErrors.delivery_sla_days ? "border-destructive" : ""}
+                  />
+                  {fieldErrors.delivery_sla_days && <p className="text-sm text-destructive">{fieldErrors.delivery_sla_days}</p>}
+                </div>
                 <div className="col-span-2 space-y-2">
                   <Label htmlFor="address">{t("suppliers.form.address")}</Label>
                   <Input
@@ -1297,6 +1336,18 @@ const Suppliers = () => {
             }}
             supplierId={catalogSupplier.id}
             supplierName={catalogSupplier.name}
+          />
+        )}
+
+        {slaReportSupplier && (
+          <SupplierSlaReportDialog
+            open={slaReportDialogOpen}
+            onOpenChange={(open) => {
+              setSlaReportDialogOpen(open);
+              if (!open) setSlaReportSupplier(null);
+            }}
+            supplierId={slaReportSupplier.id}
+            supplierName={slaReportSupplier.name}
           />
         )}
 
