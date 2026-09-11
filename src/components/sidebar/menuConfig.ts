@@ -34,6 +34,7 @@ import {
   Trash2,
   FileDown,
   ShieldAlert,
+  ClipboardCheck,
   ListChecks,
 } from "lucide-react";
 
@@ -43,6 +44,8 @@ export interface MenuItem {
   labelKey: string;
   permission?: string;
   permissions?: string[];
+  /** When `permissions` is set, require ALL of them instead of the default ANY (OR) logic. */
+  requireAll?: boolean;
 }
 
 export interface MenuSubSection {
@@ -210,13 +213,20 @@ export const menuSections: MenuSection[] = [
     id: "inventory",
     icon: ShoppingCart,
     labelKey: "sidebar.inventory",
-    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/stocks"],
+    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/stocks", "/client-orders", "/stock-counts"],
     permissions: ["suppliers.view"],
     items: [
       { to: "/suppliers", icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view" },
       { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses" },
       { to: "/purchase-orders", icon: ShoppingCart, labelKey: "sidebar.purchaseOrders" },
       { to: "/stocks", icon: BarChart3, labelKey: "sidebar.stocks" },
+      // Fase 5.0F: só visível para quem tem inventory.view E client_contracts.view
+      // em simultâneo (decisão do plano — evita expor nomes/valores de contratos
+      // de clientes a quem só tem acesso a Inventário).
+      { to: "/client-orders", icon: ClipboardCheck, labelKey: "sidebar.clientOrders", permissions: ["inventory.view", "client_contracts.view"], requireAll: true },
+      // Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/
+      // inventory.edit controlam ações dentro da página, não a visibilidade do menu.
+      { to: "/stock-counts", icon: ListChecks, labelKey: "sidebar.stockCounts", permission: "inventory.view" },
     ],
   },
   {

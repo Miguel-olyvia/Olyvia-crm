@@ -13,6 +13,9 @@ export interface AlertCounts {
   lead: number;
   quote: number;
   email_tracking: number;
+  stock: number;
+  purchase_order: number;
+  item_supplier: number;
 }
 
 const emptyCounts: AlertCounts = {
@@ -23,6 +26,9 @@ const emptyCounts: AlertCounts = {
   lead: 0,
   quote: 0,
   email_tracking: 0,
+  stock: 0,
+  purchase_order: 0,
+  item_supplier: 0,
 };
 
 interface SidebarAlertData {
@@ -111,6 +117,16 @@ export function useSidebarAlertCounts(activeOrgId?: string) {
     queryFn: () => fetchSidebarAlertData(activeOrgId),
     refetchInterval: POLL_INTERVAL_MS,
     initialData: emptySidebarAlertData,
+    // The global QueryClient default is staleTime: 5min. initialData here is
+    // only a zero-filled placeholder for first paint — without an explicit
+    // staleTime override, React Query treats that placeholder as fresh for
+    // 5 minutes and skips the real fetch on mount entirely, so the badge
+    // stays empty until either 5 min pass or refetchInterval (3 min) completes
+    // a full cycle without the component remounting (e.g. a page reload
+    // restarts that timer). Found in production 2026-08-27 testing the
+    // inventory alerts: a fresh reload showed zero network requests for this
+    // query at all.
+    staleTime: 0,
   });
 
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -168,6 +184,7 @@ export function useSidebarAlertCounts(activeOrgId?: string) {
   const sectionCounts = {
     crm: counts.contact + counts.client + counts.lead,
     acquisition: counts.proposal + counts.contract + counts.quote,
+    inventory: counts.stock + counts.purchase_order + counts.item_supplier,
   };
 
   return { counts, sectionCounts, totalUnread };

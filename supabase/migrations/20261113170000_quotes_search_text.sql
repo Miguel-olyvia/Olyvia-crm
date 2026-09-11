@@ -1,3 +1,8 @@
+-- Recuperado via 'supabase db query --linked' contra
+-- supabase_migrations.schema_migrations.statements -- já aplicada
+-- remotamente (drift concorrente de outra sessão), só faltava o ficheiro.
+-- Mesmo padrão de recuperação já usado neste branch para 450000-520000.
+
 -- Fixes measured defects in the Orcamentos (Quotes) search
 -- (src/pages/Quotes.tsx: fetchQuotes' `applyServerFilters`, the separate
 -- "server-side search" useEffect, and get_quotes_kpi_stats):
@@ -259,5 +264,4 @@ BEGIN
     FROM agg a
   );
 END;
-$function$
-;
+$function$;

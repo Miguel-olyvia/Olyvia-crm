@@ -236,6 +236,8 @@ interface QuoteLine {
   ordem: number;
   retail_price_unit?: number;
   section_name: string;
+  item_supplier_id?: string | null;
+  supplier_sku?: string | null;
 }
 
 const NEW_QUOTE_DRAFT_VERSION = 1;
@@ -1845,7 +1847,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         .select(`
           *,
           products(sku),
-          services(sku)
+          services(sku),
+          item_suppliers:item_supplier_id(supplier_sku, purchase_price, suppliers(name))
         `)
         .eq("quote_id", quoteId)
         .order("ordem");
@@ -1866,6 +1869,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           categoria: line.categoria,
           descricao_snapshot: line.descricao_snapshot,
           sku: (line.products as any)?.sku || (line.services as any)?.sku || null,
+          item_supplier_id: (line as any).item_supplier_id || null,
+          supplier_sku: (line as any).item_suppliers?.supplier_sku ?? null,
           unidade: (line as any).unidade || null,
           item_description: (line as any).item_description || "",
           cost_price: Number((line as any).cost_price) || 0,
@@ -2219,6 +2224,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             product_id: line.product_id || null,
             service_id: line.service_id || null,
             bundle_id: line.bundle_id || null,
+            item_supplier_id: line.item_supplier_id || null,
             selected_attributes: line.selected_attributes || {},
             categoria: line.categoria,
             descricao_snapshot: line.descricao_snapshot,
@@ -2294,6 +2300,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 product_id: l.product_id || null,
                 service_id: l.service_id || null,
                 bundle_id: l.bundle_id || null,
+                item_supplier_id: l.item_supplier_id || null,
                 selected_attributes: l.selected_attributes || {},
                 categoria: "",
                 descricao_snapshot: l.descricao_snapshot,
@@ -2464,6 +2471,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     uom_name: string | null;
     type?: "product" | "service";
     description?: string | null;
+    item_supplier_id?: string | null;
   }, selectedAttributes?: Record<string, any>, attributePriceAddon?: number) => {
     const updatedLines = [...lines];
     const currentLine = updatedLines[lineIndex];
@@ -2504,6 +2512,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       iva_percent: vatRate,
       selected_attributes: selectedAttributes || {},
       attribute_price_addon: addonPrice,
+      item_supplier_id: newProduct.item_supplier_id ?? null,
+      // supplier_sku is read-only, hydrated via the item_suppliers join on load;
+      // reset here so a stale badge from the replaced item isn't shown until reload.
+      supplier_sku: null,
     };
     
     setLines(updatedLines);
@@ -2535,6 +2547,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     attributes: Record<string, string>;
     fullAttributes?: Record<string, { attribute_code: string; label: string; value_type: string; unit?: string; value: string; pricing_type?: string }>;
     attributePriceAddon?: number;
+    item_supplier_id?: string | null;
     bundleInfo?: {
       bundle_id: string;
       bundle_sku: string;
@@ -2556,7 +2569,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     if (replaceLineIndex === null || selectedItems.length === 0) return;
     
     const selected = selectedItems[0]; // Only use the first item for replacement
-    const { item, fullAttributes, attributePriceAddon, bundleInfo } = selected;
+    const { item, fullAttributes, attributePriceAddon, bundleInfo, item_supplier_id } = selected;
     
     if (bundleInfo) {
       // Replace with a bundle
@@ -2590,6 +2603,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         retail_price_unit: retailPrice,
         selected_attributes: bundleSelectedAttributes,
         categoria: "Bundles",
+        // Bundles are out of scope for supplier-reference tracking (known limitation).
+        item_supplier_id: null,
+        supplier_sku: null,
       };
 
       setLines(updatedLines);
@@ -2609,6 +2625,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         uom_name: item.uom_name || null,
         type: item.type,
         description: item.description,
+        item_supplier_id: item_supplier_id ?? null,
       }, fullAttributes, attributePriceAddon);
     }
     
@@ -2773,6 +2790,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     attributes: Record<string, string>;
     fullAttributes?: Record<string, { attribute_code: string; label: string; value_type: string; unit?: string; value: string; pricing_type?: string }>;
     attributePriceAddon?: number;
+    item_supplier_id?: string | null;
     bundleInfo?: {
       bundle_id: string;
       bundle_sku: string;
@@ -2794,11 +2812,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const quoteOrgId = formData.organization_id || activeCompany?.id;
     const defaultMargin = 30;
     const defaultInt = 0;
-    
+
     const newLines: QuoteLine[] = [];
-    
+
     selectedItems.forEach((selected, index) => {
-      const { item, quantity, attributes, fullAttributes, attributePriceAddon, bundleInfo } = selected;
+      const { item, quantity, attributes, fullAttributes, attributePriceAddon, bundleInfo, item_supplier_id } = selected;
       const basePrice = item.retail_price ?? 0;
       const vatRate = item.vat_rate || 23;
       
@@ -2865,6 +2883,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           catalog_item_id: null,
           product_id: item.type === "product" ? item.id : null,
           service_id: item.type === "service" ? item.id : null,
+          item_supplier_id: item_supplier_id ?? null,
           selected_attributes: lineAttributes,
           categoria: item.category_name || "General",
           descricao_snapshot: item.name,
@@ -4117,6 +4136,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                             setShowReplaceDialog(true);
                                           }}
                                           isProduct={!!line.product_id}
+                                          supplierSku={line.supplier_sku || null}
                                         />
                                       )}
                                       {/* Item description */}

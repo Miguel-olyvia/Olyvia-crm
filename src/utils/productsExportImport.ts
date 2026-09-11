@@ -114,6 +114,24 @@ const resolveRangeRows = ({
   return sortRanges(relevant.filter((range: any) => range.product_id == null && range.category_id == null));
 };
 
+// Busca em lotes de 200 ids — um único .in()/.or() com dezenas de milhares de
+// ids (catálogos grandes, ex. 100k produtos) gera um query string demasiado
+// longo e falha com net::ERR_FAILED em vez de devolver um erro tratável.
+const EXPORT_BATCH = 200;
+async function fetchBatched<T>(
+  ids: string[],
+  buildQuery: (idsBatch: string[]) => PromiseLike<{ data: T[] | null; error: any }>
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += EXPORT_BATCH) {
+    const batch = ids.slice(i, i + EXPORT_BATCH);
+    const { data, error } = await buildQuery(batch);
+    if (error) throw error;
+    out.push(...(data || []));
+  }
+  return out;
+}
+
 export const exportProductsToCSV = async (products: any[], organizationId?: string) => {
   const BOM = '\uFEFF';
   const productIds = products.map((p) => p.id).filter(Boolean);
@@ -122,49 +140,87 @@ export const exportProductsToCSV = async (products: any[], organizationId?: stri
     throw new Error('Não existem produtos para exportar');
   }
 
-  const [{ data: exportProducts, error: productsError }, { data: allPrices, error: pricesError }, { data: rangePrices, error: rangePricesError }] = await Promise.all([
-    (supabase.from('products') as any)
-      .select(`
-        id,
-        sku,
-        name,
-        description,
-        barcode,
-        is_active,
-        is_sellable,
-        is_purchasable,
-        category_id,
-        organization_id,
-        product_categories!category_id(id, name, parent_category:product_categories!parent_id(id, name)),
-        subcategory:product_categories!subcategory_id(name),
-        brands(name),
-        suppliers(name),
-        anew_organizations!organization_id(name),
-        product_stock(qty_available),
-        product_attribute_values(
-          id,
-          attribute_id,
-          value_text,
-          value_number,
-          value_bool,
-          product_attributes(id, label, code, pricing_type, value_type)
-        )
-      `)
-      .in('id', productIds)
-      .is('deleted_at', null),
-    supabase
-      .from('product_prices')
-      .select('product_id, price_type, price, currency, vat_rate, price_promo, valid_from, valid_to')
-      .in('product_id', productIds),
-    supabase
-      .from('product_attribute_price_ranges')
-      .select('attribute_id, product_id, category_id, organization_id, min_value, max_value, min_width, max_width, min_height, max_height, min_depth, max_depth, price_per_unit, range_type')
-      .or(`product_id.in.(${productIds.join(',')}),product_id.is.null`),
-  ]);
+  const [exportProducts, allPrices, rangePricesForProducts, rangePricesDefaultRes, preferredSuppliers, stockRows] =
+    await Promise.all([
+      fetchBatched(productIds, (batch) =>
+        (supabase.from('products') as any)
+          .select(`
+            id,
+            sku,
+            name,
+            description,
+            barcode,
+            is_active,
+            is_sellable,
+            is_purchasable,
+            category_id,
+            organization_id,
+            product_categories!category_id(id, name, parent_category:product_categories!parent_id(id, name)),
+            subcategory:product_categories!subcategory_id(name),
+            brands(name),
+            anew_organizations!organization_id(name),
+            product_attribute_values(
+              id,
+              attribute_id,
+              value_text,
+              value_number,
+              value_bool,
+              product_attributes(id, label, code, pricing_type, value_type)
+            )
+          `)
+          .in('id', batch)
+          .is('deleted_at', null)
+      ),
+      fetchBatched(productIds, (batch) =>
+        supabase
+          .from('product_prices')
+          .select('product_id, price_type, price, currency, vat_rate, price_promo, valid_from, valid_to')
+          .in('product_id', batch)
+      ),
+      fetchBatched(productIds, (batch) =>
+        supabase
+          .from('product_attribute_price_ranges')
+          .select('attribute_id, product_id, category_id, organization_id, min_value, max_value, min_width, max_width, min_height, max_height, min_depth, max_depth, price_per_unit, range_type')
+          .in('product_id', batch)
+      ),
+      // Faixas de preço por categoria/omisso (product_id IS NULL) — independentes
+      // do nº de produtos exportados, buscadas uma única vez, sem batching.
+      supabase
+        .from('product_attribute_price_ranges')
+        .select('attribute_id, product_id, category_id, organization_id, min_value, max_value, min_width, max_width, min_height, max_height, min_depth, max_depth, price_per_unit, range_type')
+        .is('product_id', null),
+      // Fornecedor: já não vem de products.supplier_id (cache só-de-leitura,
+      // Fase 1/2 do inventário) — resolve-se o preferencial em item_suppliers.
+      fetchBatched(productIds, (batch) =>
+        (supabase.from('item_suppliers') as any)
+          .select('product_id, suppliers(name)')
+          .in('product_id', batch)
+          .eq('item_type', 'product')
+          .eq('is_preferred', true)
+          .is('deleted_at', null)
+      ),
+      // Stock: product_stock é a tabela antiga por localização, já não reflete
+      // o inventário real — agregar 'stocks' por armazém, como Products.tsx.
+      fetchBatched(productIds, (batch) =>
+        (supabase.from('stocks') as any)
+          .select('product_id, quantity')
+          .in('product_id', batch)
+          .is('deleted_at', null)
+      ),
+    ]);
 
-  if (productsError) throw productsError;
-  if (pricesError) throw pricesError;
-  if (rangePricesError) throw rangePricesError;
+  if (rangePricesDefaultRes.error) throw rangePricesDefaultRes.error;
+  const rangePrices = [...rangePricesForProducts, ...(rangePricesDefaultRes.data || [])];
+
+  const preferredSupplierMap = new Map<string, string>();
+  (preferredSuppliers || []).forEach((row: any) => {
+    if (row.suppliers?.name) preferredSupplierMap.set(row.product_id, row.suppliers.name);
+  });
+
+  const stockMap = new Map<string, number>();
+  (stockRows || []).forEach((row: any) => {
+    stockMap.set(row.product_id, (stockMap.get(row.product_id) || 0) + (Number(row.quantity) || 0));
+  });
 
   // Build price map: product_id -> { retail, purchase, wholesale, distributor, currency }
   const priceMap = new Map<string, { retail: number; purchase: number; wholesale: number; distributor: number; currency: string; vat_rate: number; promo_price: number; promo_from: string; promo_to: string }>();
@@ -195,7 +251,7 @@ export const exportProductsToCSV = async (products: any[], organizationId?: stri
     const categoryName = product.product_categories?.name ?? '';
     const categoria = parentCategory || categoryName;
     const subcategoria = parentCategory ? categoryName : (product.subcategory?.name ?? '');
-    const stock = product.product_stock?.reduce((sum: number, item: any) => sum + (Number(item.qty_available) || 0), 0) ?? 0;
+    const stock = stockMap.get(product.id) ?? 0;
 
     const attrValues = product.product_attribute_values || [];
     const attrParts: string[] = [];
@@ -270,7 +326,7 @@ export const exportProductsToCSV = async (products: any[], organizationId?: stri
       categoria,
       subcategoria,
       product.brands?.name ?? '',
-      product.suppliers?.name ?? '',
+      preferredSupplierMap.get(product.id) ?? '',
       productType,
       product.anew_organizations?.name ?? '',
       prices.vat_rate,
