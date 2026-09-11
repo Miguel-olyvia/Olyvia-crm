@@ -19,7 +19,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
-import type { ContaDoConvite } from "@/lib/hr/conviteAdmissaoPayload";
 
 export interface ConviteEstado {
   nome: string | null;
@@ -133,13 +132,14 @@ export function useConviteAdmissaoPublico(token: string | undefined) {
     async (
       dados: DadosSubmissaoConvite,
       assinaturaNome: string,
-      conta?: ContaDoConvite,
     ): Promise<{ ok: boolean; erro: string | null; avisos: string[] }> => {
       if (!token) return { ok: false, erro: "hr.convite.tokenInvalido", avisos: [] };
       setSubmetendo(true);
       try {
         const { data, error } = await supabase.functions.invoke("convite-admissao", {
-          body: { action: "submeter", token, dados, assinatura_nome: assinaturaNome, conta },
+          // A conta bancaria vai DENTRO de `dados` desde 28/11: e chave do
+          // contrato como as outras, nao um campo a parte que ninguem gravava.
+          body: { action: "submeter", token, dados, assinatura_nome: assinaturaNome },
         });
         if (error || data?.error) {
           if (error) captureFlowError(error, "hr-convite-admissao-publico");

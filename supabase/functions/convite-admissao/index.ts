@@ -14,16 +14,16 @@
  *    convite. Correm com `service_role`, atras de rate limit por IP (o mesmo
  *    mecanismo de `validate-contract-signature`).
  *
- * O QUE ESTA FUNCAO DELIBERADAMENTE NAO FAZ
- * -------------------------------------------
- * NAO escreve a conta bancaria. O relatorio da camada de base marcou essa
- * escrita como "por decidir" -- a RPC normal (`rpc_hr_definir_conta`) exige
- * `has_anew_permission_in_org(auth.uid(), ...)`, que nao resolve nada sob
- * `service_role` sem sessao. Construir aqui um caminho novo para o Vault
- * antes de essa decisao estar tomada seria decidir por quem tem de decidir.
- * O campo fica capturado no formulario (para nao obrigar a pessoa a outro
- * ecra mais tarde) mas o pedido de submissao devolve, em `avisos`, que ficou
- * por gravar -- nunca falha a submissao inteira por causa disso.
+ * A CONTA BANCARIA
+ * -----------------
+ * Ate 28/11 esta funcao NAO a reencaminhava: o ecra pedia IBAN, banco e
+ * titular, a conta vinha num campo `conta` a parte, e a resposta limitava-se a
+ * devolver o aviso `conta_nao_gravada`. Quem preenchia a conta escrevia para o
+ * vazio. Agora `iban`, `conta_titular` e `conta_banco` sao chaves do contrato
+ * como as outras, entram em `dados` e a RPC grava-as -- o IBAN cifrado no
+ * Vault, a linha so com os ultimos quatro caracteres. A decisao que faltava
+ * (um token valido substitui a permissao do utilizador para escrever o IBAN?)
+ * esta tomada: o token E a autorizacao, tal como ja era para o NISS.
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
@@ -50,6 +50,8 @@ const CAMPOS_CONVITE = [
   "carta_conducao_numero",
   "carta_conducao_validade",
   "conjuge_situacao_profissional",
+  "conta_banco",
+  "conta_titular",
   "data_nascimento",
   "dependentes",
   "dependentes_deficientes",
@@ -58,6 +60,9 @@ const CAMPOS_CONVITE = [
   "genero",
   "habilitacao_academica",
   "habilitacao_data_conclusao",
+  // O numero da conta viaja como `iban`: e a chave que a RPC le e o unico
+  // formato de conta que ela sabe gravar.
+  "iban",
   "morada_codigo_postal",
   "morada_distrito",
   "morada_linha1",
@@ -260,13 +265,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return responder({ error: "assinatura_obrigatoria" }, 400);
     }
 
-    // A conta bancaria vem FORA de `dados` e nao e gravada -- ver o cabecalho
-    // desta funcao. So serve para devolver o aviso a quem preencheu.
-    const avisos: string[] = [];
-    if (payload?.conta) {
-      avisos.push("conta_nao_gravada");
-    }
-
     const corpo = {
       p_token_hash: tokenHash,
       // PLANO, sem reagrupar por tabela: a RPC le `p_dados ->> '<chave>'`
@@ -284,7 +282,10 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return responder({ error: error.message ?? "convite_invalido_ou_usado" }, 400);
     }
 
-    return responder({ ok: true, avisos });
+    // `avisos` fica, vazio: a conta ja e gravada e nao ha nada a avisar. O ecra
+    // continua a saber ler a lista, para um aviso futuro nao obrigar a mexer
+    // nos dois lados ao mesmo tempo.
+    return responder({ ok: true, avisos: [] as string[] });
   } catch (e) {
     captureError(e);
     return responder({ error: "erro_inesperado" }, 500);

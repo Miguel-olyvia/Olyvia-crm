@@ -13,9 +13,10 @@
  * filiacao, que so a base volta a mostrar a quem tiver
  * `hr.pessoas.sindicalizacao.view`.
  *
- * O numero da conta bancaria fica capturado mas NAO gravado nesta ronda --
- * ver o comentario no topo da Edge Function `convite-admissao`. O aviso
- * devolvido pela submissao aparece no ecra de sucesso, nao como erro.
+ * A conta bancaria JA e gravada (desde 28/11): o IBAN viaja dentro de `dados`
+ * como qualquer outra chave do contrato, e a RPC guarda-o cifrado no Vault. O
+ * convite so aceita IBAN -- e o unico formato que a RPC sabe gravar -- e por
+ * isso nao ha formato nenhum a escolher aqui.
  *
  * TODO O CAMPO TEM ETIQUETA ASSOCIADA, e os obrigatorios sao anunciados a
  * leitor de ecra (nao so a vermelho) -- ver `obrigatorio` em `form/Campos.tsx`.
@@ -42,17 +43,19 @@ import {
 import {
   CONJUGE_SITUACOES_PROFISSIONAIS,
   ESTADOS_CIVIS,
-  FORMATOS_CONTA,
   GENEROS,
   HABILITACOES_ACADEMICAS,
   TAMANHOS_FARDAMENTO,
   TIPOS_DOCUMENTO,
 } from "@/types/hr";
-import { campoEhObrigatorio, pendenciasDoRascunho } from "@/lib/hr/admissaoObrigatorios";
+import {
+  CODIGOS_PAGINA_2,
+  campoEhObrigatorio,
+  pendenciasDoRascunho,
+} from "@/lib/hr/admissaoObrigatorios";
 import {
   RASCUNHO_CONVITE_VAZIO,
   construirPayloadConvite,
-  contaDoRascunho,
   type RascunhoConvite,
 } from "@/lib/hr/conviteAdmissaoPayload";
 
@@ -159,17 +162,23 @@ export default function ConviteAdmissao() {
     };
   }, [concluido, gravarRascunhoAoFechar]);
 
-  // Obrigatorios da pagina 1 -- a lista partilhada com a base (ver
-  // `admissaoObrigatorios.ts`; a autoridade em SQL ainda nao esta aplicada,
-  // por isso este e hoje o unico lado a exigi-los).
-  const pendencias1 = useMemo(
-    () => new Set<string>(pendenciasDoRascunho(rascunho)),
+  // Os obrigatorios das DUAS paginas -- a lista partilhada com a base (ver
+  // `admissaoObrigatorios.ts`). A base aplica a mesma lista no fim da
+  // submissao, sobre a ficha ja escrita; isto aqui e so para a pessoa ver o
+  // que lhe falta antes de tentar.
+  const pendencias = useMemo(
+    () => pendenciasDoRascunho(rascunho),
     [rascunho],
+  );
+  const pendenciasTodas = useMemo(() => new Set<string>(pendencias), [pendencias]);
+  const pendencias1 = useMemo(
+    () => new Set<string>(pendencias.filter((codigo) => !CODIGOS_PAGINA_2.has(codigo))),
+    [pendencias],
   );
 
   const erroDe = (campoId: keyof Rascunho): string | null => {
     if (!mostrarTodos && !tocados.has(campoId)) return null;
-    return pendencias1.has(campoId) ? t("hr.convite.erroObrigatorio") : null;
+    return pendenciasTodas.has(campoId) ? t("hr.convite.erroObrigatorio") : null;
   };
 
   const obrigatorio1 = (campoId: Parameters<typeof campoEhObrigatorio>[1]): boolean =>
@@ -190,14 +199,23 @@ export default function ConviteAdmissao() {
 
   const submeterFormulario = async () => {
     if (!podeSubmeter) return;
-    // O payload sai inteiro do contrato partilhado -- ver
-    // `conviteAdmissaoPayload.ts`. A conta bancaria viaja a parte: a Edge
-    // Function nao a grava, so devolve o aviso.
+
+    // Faltar um obrigatorio nao e erro de servidor: mostra-se onde falta e,
+    // se for na pagina 1, volta-se la -- submeter assim so gastava uma ida a
+    // base para ser recusado pelo portao de obrigatorios.
+    if (pendenciasTodas.size > 0) {
+      setMostrarTodos(true);
+      setErroSubmissao(t("hr.convite.erroObrigatorio"));
+      if (pendencias1.size > 0) setPagina(1);
+      return;
+    }
+
+    // O payload sai inteiro do contrato partilhado, conta bancaria incluida --
+    // ver `conviteAdmissaoPayload.ts`.
     const dados: DadosSubmissaoConvite = construirPayloadConvite(rascunho);
-    const conta = contaDoRascunho(rascunho);
 
     setErroSubmissao(null);
-    const resultado = await submeter(dados, rascunho.assinatura_nome.trim(), conta);
+    const resultado = await submeter(dados, rascunho.assinatura_nome.trim());
     if (!resultado.ok) {
       setErroSubmissao(resultado.erro ?? t("hr.convite.erroSubmeter"));
       return;
@@ -235,13 +253,6 @@ export default function ConviteAdmissao() {
             <CardTitle>{t("hr.convite.sucessoTitulo")}</CardTitle>
             <CardDescription>{t("hr.convite.sucessoDescricao")}</CardDescription>
           </CardHeader>
-          {concluido.avisos.includes("conta_nao_gravada") && (
-            <CardContent>
-              <p className="text-center text-sm text-muted-foreground" role="status">
-                {t("hr.convite.avisoContaNaoGravada")}
-              </p>
-            </CardContent>
-          )}
         </Card>
       </div>
     );
@@ -281,6 +292,8 @@ export default function ConviteAdmissao() {
                 <CampoSelect
                   id="convite-genero"
                   label={t("hr.campos.genero")}
+                  obrigatorio
+                  erro={erroDe("genero")}
                   valor={rascunho.genero}
                   vazioLabel={t("hr.campos.semValor")}
                   opcoes={GENEROS.map((g) => ({ value: g, label: t(`hr.genero.${g}`) }))}
@@ -337,6 +350,8 @@ export default function ConviteAdmissao() {
                   <CampoSelect
                     id="convite-conjuge-situacao"
                     label={t("hr.campos.conjugeSituacaoProfissional")}
+                    obrigatorio={obrigatorio1("conjuge_situacao_profissional")}
+                    erro={erroDe("conjuge_situacao_profissional")}
                     valor={rascunho.conjuge_situacao_profissional}
                     vazioLabel={t("hr.campos.semValor")}
                     opcoes={CONJUGE_SITUACOES_PROFISSIONAIS.map((s) => ({
@@ -352,6 +367,9 @@ export default function ConviteAdmissao() {
                   tipo="number"
                   min={0}
                   max={30}
+                  obrigatorio
+                  erro={erroDe("dependentes_deficientes")}
+                  ajuda={t("hr.convite.ajudaDependentesZero")}
                   valor={rascunho.dependentes_deficientes}
                   onChange={(v) => definir("dependentes_deficientes", v)}
                 />
@@ -366,24 +384,32 @@ export default function ConviteAdmissao() {
                 <CampoTexto
                   id="convite-naturalidade-freguesia"
                   label={t("hr.campos.naturalidadeFreguesia")}
+                  obrigatorio
+                  erro={erroDe("naturalidade_freguesia")}
                   valor={rascunho.naturalidade_freguesia}
                   onChange={(v) => definir("naturalidade_freguesia", v)}
                 />
                 <CampoTexto
                   id="convite-naturalidade-concelho"
                   label={t("hr.campos.naturalidadeConcelho")}
+                  obrigatorio
+                  erro={erroDe("naturalidade_concelho")}
                   valor={rascunho.naturalidade_concelho}
                   onChange={(v) => definir("naturalidade_concelho", v)}
                 />
                 <CampoPais
                   id="convite-naturalidade-pais"
                   label={t("hr.campos.naturalidadePais")}
+                  obrigatorio
+                  erro={erroDe("naturalidade_pais")}
                   valor={rascunho.naturalidade_pais}
                   onChange={(v) => definir("naturalidade_pais", v)}
                 />
                 <CampoSelect
                   id="convite-habilitacao"
                   label={t("hr.campos.habilitacaoAcademica")}
+                  obrigatorio
+                  erro={erroDe("habilitacao_academica")}
                   valor={rascunho.habilitacao_academica}
                   vazioLabel={t("hr.campos.semValor")}
                   opcoes={HABILITACOES_ACADEMICAS.map((h) => ({
@@ -396,6 +422,8 @@ export default function ConviteAdmissao() {
                   id="convite-habilitacao-data"
                   label={t("hr.campos.habilitacaoDataConclusao")}
                   tipo="date"
+                  obrigatorio
+                  erro={erroDe("habilitacao_data_conclusao")}
                   valor={rascunho.habilitacao_data_conclusao}
                   onChange={(v) => definir("habilitacao_data_conclusao", v)}
                 />
@@ -539,32 +567,35 @@ export default function ConviteAdmissao() {
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">{t("hr.pessoais.bancarios")}</CardTitle>
-                <CardDescription>{t("hr.convite.avisoContaProvisoria")}</CardDescription>
               </CardHeader>
+              {/*
+                So IBAN: e o unico formato de conta que a RPC sabe gravar, e
+                oferecer os outros seis era prometer o que o servidor recusa.
+                `conta_formato` fica fixo em "iban" no rascunho.
+              */}
               <CardContent className="grid gap-4 sm:grid-cols-2">
-                <CampoSelect
-                  id="convite-conta-formato"
-                  label={t("hr.campos.formatoConta")}
-                  valor={rascunho.conta_formato}
-                  vazioLabel={t("hr.campos.semValor")}
-                  opcoes={FORMATOS_CONTA.map((f) => ({ value: f, label: t(`hr.formatoConta.${f}`) }))}
-                  onChange={(v) => definir("conta_formato", v)}
-                />
                 <CampoTexto
                   id="convite-conta-numero"
-                  label={t("hr.campos.numeroConta")}
+                  label={t("hr.campos.iban")}
+                  className="sm:col-span-2"
+                  obrigatorio
+                  erro={erroDe("conta_numero")}
                   valor={rascunho.conta_numero}
                   onChange={(v) => definir("conta_numero", v)}
                 />
                 <CampoTexto
                   id="convite-conta-titular"
                   label={t("hr.campos.titularConta")}
+                  obrigatorio
+                  erro={erroDe("conta_titular")}
                   valor={rascunho.conta_titular}
                   onChange={(v) => definir("conta_titular", v)}
                 />
                 <CampoTexto
                   id="convite-conta-banco"
                   label={t("hr.campos.banco")}
+                  obrigatorio
+                  erro={erroDe("conta_banco")}
                   valor={rascunho.conta_banco}
                   onChange={(v) => definir("conta_banco", v)}
                 />
@@ -579,6 +610,8 @@ export default function ConviteAdmissao() {
                 <CampoSelect
                   id="convite-tamanho-cima"
                   label={t("hr.fardamento.tamanhoCima")}
+                  obrigatorio
+                  erro={erroDe("tamanho_cima")}
                   valor={rascunho.tamanho_cima}
                   vazioLabel={t("hr.campos.semValor")}
                   opcoes={TAMANHOS_FARDAMENTO.map((tm) => ({
@@ -598,6 +631,8 @@ export default function ConviteAdmissao() {
                 <CampoSelect
                   id="convite-tamanho-baixo"
                   label={t("hr.fardamento.tamanhoBaixo")}
+                  obrigatorio
+                  erro={erroDe("tamanho_baixo")}
                   valor={rascunho.tamanho_baixo}
                   vazioLabel={t("hr.campos.semValor")}
                   opcoes={TAMANHOS_FARDAMENTO.map((tm) => ({
@@ -617,6 +652,8 @@ export default function ConviteAdmissao() {
                 <CampoSelect
                   id="convite-tamanho-blazer"
                   label={t("hr.fardamento.tamanhoBlazer")}
+                  obrigatorio
+                  erro={erroDe("tamanho_blazer")}
                   valor={rascunho.tamanho_blazer}
                   vazioLabel={t("hr.campos.semValor")}
                   opcoes={TAMANHOS_FARDAMENTO.map((tm) => ({
@@ -651,6 +688,8 @@ export default function ConviteAdmissao() {
                   <CampoTexto
                     id="convite-sindicato"
                     label={t("hr.campos.sindicato")}
+                    obrigatorio={obrigatorio1("sindicato")}
+                    erro={erroDe("sindicato")}
                     valor={rascunho.sindicato}
                     onChange={(v) => definir("sindicato", v)}
                   />

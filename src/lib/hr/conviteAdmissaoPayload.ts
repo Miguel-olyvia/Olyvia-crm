@@ -51,8 +51,12 @@ export interface RascunhoConvite {
   localidade: string;
   distrito: string;
   pais: string;
-  // Pagina 2 -- conta bancaria (nao gravada, ver a Edge Function), fardamento,
-  // sindicalizacao, assinatura.
+  // Pagina 2 -- conta bancaria, fardamento, sindicalizacao, assinatura.
+  //
+  // `conta_formato` fica FORA do contrato: o convite so sabe gravar IBAN (e o
+  // unico ramo que a RPC tem) e por isso nao ha formato nenhum a escolher.
+  // Continua no rascunho, fixo em "iban", para a linha de
+  // pessoas_dados_bancarios ficar com o formato certo.
   conta_formato: string;
   conta_numero: string;
   conta_titular: string;
@@ -98,7 +102,7 @@ export const RASCUNHO_CONVITE_VAZIO: RascunhoConvite = {
   localidade: "",
   distrito: "",
   pais: "PT",
-  conta_formato: "",
+  conta_formato: "iban",
   conta_numero: "",
   conta_titular: "",
   conta_banco: "",
@@ -125,6 +129,8 @@ export const CHAVES_PAYLOAD_CONVITE = [
   "carta_conducao_numero",
   "carta_conducao_validade",
   "conjuge_situacao_profissional",
+  "conta_banco",
+  "conta_titular",
   "data_nascimento",
   "dependentes",
   "dependentes_deficientes",
@@ -133,6 +139,9 @@ export const CHAVES_PAYLOAD_CONVITE = [
   "genero",
   "habilitacao_academica",
   "habilitacao_data_conclusao",
+  // O numero da conta viaja como `iban` porque e o que a RPC le e porque e o
+  // unico formato que ela sabe gravar. No ecra chama-se `conta_numero`.
+  "iban",
   "morada_codigo_postal",
   "morada_distrito",
   "morada_linha1",
@@ -220,28 +229,12 @@ export function construirPayloadConvite(
     tamanho_blazer_detalhe: detalheOuNull(r.tamanho_blazer, r.tamanho_blazer_detalhe),
     sindicalizado: r.sindicalizado,
     sindicato: r.sindicalizado ? ouNull(r.sindicato) : null,
+    // A conta bancaria, que ate 28/11 nao passava daqui: a Edge Function nao a
+    // reencaminhava e o ramo do IBAN da RPC era inalcancavel. Os espacos saem
+    // aqui e a RPC valida o resto -- quem escreve um IBAN copia-o com espacos.
+    iban: ouNull(r.conta_numero)?.replace(/\s+/g, "").toUpperCase() ?? null,
+    conta_titular: ouNull(r.conta_titular),
+    conta_banco: ouNull(r.conta_banco),
   };
 }
 
-export interface ContaDoConvite {
-  formato: string;
-  numero: string;
-  titular: string | null;
-  banco: string | null;
-}
-
-/**
- * A conta bancaria viaja FORA de `dados`, e de proposito: a Edge Function nao
- * a grava (ver o cabecalho dela) e limita-se a devolver o aviso
- * `conta_nao_gravada`. Deixa-la fora do contrato evita que uma chave que
- * ninguem escreve ande a fingir que faz parte dele.
- */
-export function contaDoRascunho(r: RascunhoConvite): ContaDoConvite | undefined {
-  if (r.conta_formato.trim() === "" && r.conta_numero.trim() === "") return undefined;
-  return {
-    formato: r.conta_formato,
-    numero: r.conta_numero,
-    titular: ouNull(r.conta_titular),
-    banco: ouNull(r.conta_banco),
-  };
-}

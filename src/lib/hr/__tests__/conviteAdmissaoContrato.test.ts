@@ -18,9 +18,9 @@
  *      Function e exactamente as que a RPC le de `p_dados`;
  *   2. a lista declarada nao pode divergir do que a funcao de construcao
  *      devolve de facto;
- *   3. as unicas chaves que a RPC le e que o payload nao traz sao as da conta
- *      bancaria, que a Edge Function nao reencaminha por decisao pendente --
- *      e a lista dessas e fechada, para nao servir de saco de excepcoes;
+ *   3. as unicas chaves que a RPC le e que o payload nao traz sao a agencia e
+ *      o SWIFT, que nao existem na folha de cadastro em papel -- e a lista
+ *      dessas e fechada, para nao servir de saco de excepcoes;
  *   4. a lista de campos obrigatorios em TypeScript e a mesma que a base
  *      declara em `hr_admissao_campos_obrigatorios()`, incluindo quais sao
  *      condicionais.
@@ -76,19 +76,16 @@ const EDGE = Object.values(
 )[0];
 
 /**
- * As chaves que a RPC le e que NENHUM payload traz: o ramo da conta bancaria,
- * inalcancavel enquanto nao estiver decidido se um token valido substitui a
- * permissao do utilizador para escrever o IBAN. A lista e comparada por
- * igualdade, nao por "contem": uma excepcao nova tem de ser escrita aqui de
- * propria mao, com esta explicacao a frente.
+ * As chaves que a RPC le e que NENHUM payload traz: a agencia e o SWIFT, que a
+ * folha de cadastro em papel nao pede e o formulario por isso nao tem. A RPC
+ * sabe grava-las para o dia em que alguem as pedir por outro caminho. A lista e
+ * comparada por igualdade, nao por "contem": uma excepcao nova tem de ser
+ * escrita aqui de propria mao, com esta explicacao a frente.
+ *
+ * O IBAN, o titular e o banco SAIRAM desta lista a 28/11: passaram a ser chaves
+ * do contrato como as outras, e a conta deixou de ser deitada fora.
  */
-const CHAVES_SO_DA_RPC = [
-  "conta_agencia",
-  "conta_banco",
-  "conta_swift",
-  "conta_titular",
-  "iban",
-] as const;
+const CHAVES_SO_DA_RPC = ["conta_agencia", "conta_swift"] as const;
 
 const SO_DA_RPC = new Set<string>(CHAVES_SO_DA_RPC);
 
@@ -166,7 +163,7 @@ describe("o contrato de chaves do convite de admissao", () => {
     expect(chavesDaEdgeFunction()).toEqual(esperadas);
   });
 
-  it("a RPC de submeter le exactamente essas chaves, mais as da conta bancaria", () => {
+  it("a RPC de submeter le exactamente essas chaves, mais a agencia e o SWIFT", () => {
     const sql = migrationQueDefine("rpc_hr_convite_admissao_submeter");
     const lidas = chavesLidasPelaRpc(corpoDaFuncao(sql, "rpc_hr_convite_admissao_submeter"));
 
@@ -206,11 +203,19 @@ function camposObrigatoriosDaBase(): CampoSql[] {
 
 const VAZIO_OBRIGATORIOS: RascunhoConviteObrigatorios = {
   data_nascimento: "",
+  genero: "",
   nacionalidade: "",
   telefone_pessoal: "",
   email_pessoal: "",
   estado_civil: "",
   dependentes: "",
+  dependentes_deficientes: "",
+  conjuge_situacao_profissional: "",
+  naturalidade_freguesia: "",
+  naturalidade_concelho: "",
+  naturalidade_pais: "",
+  habilitacao_academica: "",
+  habilitacao_data_conclusao: "",
   nif: "",
   niss: "",
   tipo_documento: "",
@@ -219,6 +224,14 @@ const VAZIO_OBRIGATORIOS: RascunhoConviteObrigatorios = {
   linha1: "",
   codigo_postal: "",
   localidade: "",
+  tamanho_cima: "",
+  tamanho_baixo: "",
+  tamanho_blazer: "",
+  sindicalizado: false,
+  sindicato: "",
+  conta_numero: "",
+  conta_titular: "",
+  conta_banco: "",
 };
 
 describe("a lista de obrigatorios da admissao", () => {
@@ -238,6 +251,16 @@ describe("a lista de obrigatorios da admissao", () => {
     const rh = camposObrigatoriosDaBase().filter((c) => c.origem === "rh");
     expect(rh.length).toBeGreaterThan(0);
     for (const campo of rh) expect(doEcra.has(campo.codigo)).toBe(false);
+  });
+
+  it("a carta de conducao NAO e obrigatoria em lado nenhum", () => {
+    // Nem toda a gente tem carta. Exigi-la impedia essas pessoas de submeter o
+    // convite -- ficavam presas num campo que nunca poderao preencher.
+    const daBase = camposObrigatoriosDaBase().map((c) => c.codigo);
+    const doEcra = CAMPOS_OBRIGATORIOS_ADMISSAO.map((c) => c.codigo as string);
+    for (const codigo of [...daBase, ...doEcra]) {
+      expect(codigo.startsWith("carta_conducao")).toBe(false);
+    }
   });
 
   it("os dois lados concordam em QUAIS sao condicionais", () => {
