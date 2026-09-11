@@ -7,7 +7,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 // Friendly mapping for backend error codes returned by create-client-portal-access
 const PORTAL_ERROR_MESSAGES: Record<string, string> = {
   portal_email_is_crm_user:
-    "Este email pertence a um utilizador da plataforma. Use outro email para o acesso ao portal.",
+    "Este email já pertence a um utilizador do CRM desta empresa. Use outro email para o acesso ao portal.",
   portal_email_used_by_other_entity:
     "Este email já está associado a outro cliente nesta organização. Use outro email para manter os acessos separados.",
   proposal_has_signed_contract:

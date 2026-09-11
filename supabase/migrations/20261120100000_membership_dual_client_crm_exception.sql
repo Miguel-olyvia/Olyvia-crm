@@ -85,4 +85,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS anew_memberships_user_org_client_unique
 CREATE UNIQUE INDEX IF NOT EXISTS anew_memberships_user_org_nonclient_unique
   ON public.anew_memberships (user_id, organization_id)
   WHERE NOT role_is_client;
-

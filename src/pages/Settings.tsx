@@ -162,26 +162,34 @@ const Settings = () => {
           .maybeSingle();
         
         if (anewUser?.id) {
-          const { data: membership } = await supabase
+          // A user may hold several active memberships (and, since the
+          // dual-client/CRM exception, even a client + CRM pair in one org).
+          // Pick an ADMIN membership if one exists rather than an arbitrary
+          // first row, which .limit(1) could land on the client membership and
+          // wrongly hide the admin surface.
+          const { data: memberships } = await supabase
             .from('anew_memberships')
             .select('organization_id, role_id')
             .eq('user_id', anewUser.id)
-            .eq('status', 'active')
-            .limit(1)
-            .maybeSingle();
-          
-          if (membership) {
-            const { data: role } = await supabase
+            .eq('status', 'active');
+
+          const roleIds = (memberships || []).map((m) => m.role_id).filter(Boolean);
+          if (roleIds.length > 0) {
+            const { data: roles } = await supabase
               .from('anew_roles')
-              .select('code')
-              .eq('id', membership.role_id)
-              .maybeSingle();
-            
+              .select('id, code')
+              .in('id', roleIds);
+
             const adminCodes = ['org_admin', 'super_admin', 'system_admin'];
-            if (role?.code && adminCodes.includes(role.code)) {
+            const adminRoleIds = new Set(
+              (roles || []).filter((r) => r.code && adminCodes.includes(r.code)).map((r) => r.id)
+            );
+            const adminMembership = (memberships || []).find((m) => adminRoleIds.has(m.role_id));
+
+            if (adminMembership) {
               setIsCompanyAdmin(true);
-              setUserCompanyId(membership.organization_id);
-              loadSmtpSettings(membership.organization_id);
+              setUserCompanyId(adminMembership.organization_id);
+              loadSmtpSettings(adminMembership.organization_id);
             }
           }
         }

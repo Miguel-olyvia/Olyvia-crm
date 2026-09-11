@@ -250,6 +250,9 @@ function leadListSortValue(
   return Math.max(toMs(lead.created_at), toMs(lead.last_activity_at));
 }
 
+/** As duas datas de uma lead sobre as quais faz sentido filtrar. */
+export type LeadsDateField = "created_at" | "last_contact_at";
+
 interface LeadsQueryFilters {
   statusFilter: string;
   campaignFilter: string;
@@ -257,6 +260,14 @@ interface LeadsQueryFilters {
   contactResultFilter: string;
   dateFrom?: Date;
   dateTo?: Date;
+  /**
+   * SOBRE QUE DATA as datas acima filtram. Uma lead tem varias datas que
+   * interessam (criacao, ultimo contacto), e o filtro estava preso a de criacao
+   * -- por isso era impossivel pedir "o que foi contactado neste periodo": uma
+   * lead criada em Agosto e contactada em Setembro nunca aparecia.
+   * Por omissao mantem-se a criacao, para nao mudar o que ja existia.
+   */
+  dateField?: LeadsDateField;
   effectiveSearch: string;
   sourceFilter: string;
   // Orthogonal to statusFilter: qualification_type is sticky and survives
@@ -272,8 +283,9 @@ interface LeadsQueryFilters {
 function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
   const {
     statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
-    dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
+    dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
   } = filters;
+  const dateColumn: LeadsDateField = dateField === "last_contact_at" ? "last_contact_at" : "created_at";
 
   if (statusFilter !== "all") {
     if (statusFilter === "lost") {
@@ -312,8 +324,11 @@ function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
       q = q.eq("last_contact_result", contactResultFilter);
     }
   }
-  if (dateFrom) q = q.gte("created_at", startOfDay(dateFrom).toISOString());
-  if (dateTo) q = q.lte("created_at", endOfDay(dateTo).toISOString());
+  // A coluna e escolhida por quem filtra (criacao ou ultimo contacto). Quem
+  // nunca foi contactado tem last_contact_at nulo e fica de fora ao filtrar por
+  // contacto, que e o esperado.
+  if (dateFrom) q = q.gte(dateColumn, startOfDay(dateFrom).toISOString());
+  if (dateTo) q = q.lte(dateColumn, endOfDay(dateTo).toISOString());
   // Palavra a palavra, nao a frase seguida: um `.ilike("search_text", "%joao silva%")`
   // exigia que as palavras fossem contiguas, por isso "joao silva" nunca
   // encontrava "Joao Pedro Silva". `applySearchTextFilter` encadeia um
@@ -538,7 +553,11 @@ export default function AnewLeads() {
   const { t } = useTranslation();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const navigate = useNavigate();
-  const { resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
+  // `identityMap` entra aqui de proposito: `getIdentity` e estavel (le de uma ref
+  // e nao tem dependencias), por isso um useMemo que so dependa dele NAO volta a
+  // correr quando as fichas das pessoas chegam. A ordenacao por Nome precisa de
+  // reagir a essa chegada, e o mapa e o unico valor que muda nesse momento.
+  const { identityMap, resolveEntities, getIdentity, invalidateEntities } = useEntityIdentity();
   const queryClient = useQueryClient();
   
   // Create translated field arrays (memoized to prevent re-creation every render)
@@ -633,6 +652,9 @@ export default function AnewLeads() {
   // temporal-dead-zone ReferenceError — see their definitions near comercialUsers/assignOrgTree.
   const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
   const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
+  // Sobre que data o intervalo acima filtra. Comeca na criacao, que era o
+  // comportamento unico ate aqui.
+  const [dateField, setDateField] = useState<LeadsDateField>("created_at");
   // Por defeito, a mesma chave que o servidor usa (ver LEADS_LIST_SORT_COLUMN).
   // Se ficasse em "created_at", `filteredLeads` re-ordenava as paginas ja
   // carregadas por data de criacao e anulava a ordenacao do servidor. A coluna
@@ -1101,7 +1123,7 @@ export default function AnewLeads() {
     // is safe here because initialLoadDoneRef.current prevents re-entry, and
     // the org-change path resets that ref via the effect above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine]);
 
 
 
@@ -1150,6 +1172,9 @@ export default function AnewLeads() {
       }
       if (dateFrom) rpcParams.p_date_from = startOfDay(dateFrom).toISOString();
       if (dateTo) rpcParams.p_date_to = endOfDay(dateTo).toISOString();
+      // Os contadores tem de contar pela MESMA data que a lista, senao os
+      // numeros dos separadores discordam do que esta em baixo.
+      if (dateField !== "created_at") rpcParams.p_date_field = dateField;
       if (effectiveSearch) rpcParams.p_search = effectiveSearch;
       if (sourceFilter === "none") rpcParams.p_source_is_null = true;
       else if (sourceFilter !== "all") rpcParams.p_source = sourceFilter;
@@ -1173,7 +1198,7 @@ export default function AnewLeads() {
       console.error("Error loading status counts:", error);
       captureFlowError(error, "lead-lifecycle");
     }
-  }, [activeCompanyId, getPermissionScope, queryClient, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, effectiveSearch, onlyMine]);
+  }, [activeCompanyId, getPermissionScope, queryClient, scopeAnewUserId, scopeAuthUserId, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, dateFrom, dateTo, dateField, effectiveSearch, onlyMine]);
 
   const dashboardQuery = useMemo(() => {
     if (!activeCompanyId || scopeLoading) return null;
@@ -1193,6 +1218,7 @@ export default function AnewLeads() {
         source: sourceFilter,
         dateFrom: dateFrom || null,
         dateTo: dateTo || null,
+        dateField,
       },
     };
   }, [
@@ -1210,6 +1236,7 @@ export default function AnewLeads() {
     sourceFilter,
     dateFrom?.getTime(),
     dateTo?.getTime(),
+    dateField,
   ]);
 
   const getDescendantOrgIds = useCallback(async (rootId: string): Promise<string[]> => {
@@ -2053,7 +2080,7 @@ export default function AnewLeads() {
       teamMemberIds,
       filters: {
         statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
-        dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
+        dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
       },
     });
 
@@ -2240,7 +2267,7 @@ export default function AnewLeads() {
         pipeline,
       };
     }
-  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
+  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine, resolveEntities]);
 
   /**
    * A lista de leads, gerida pela cache. A chave inclui a organizacao, o ambito
@@ -2253,7 +2280,7 @@ export default function AnewLeads() {
     queryKey: [
       LEADS_LIST_QUERY_KEY, activeCompanyId, normalizeLeadScope(getPermissionScope("leads.view"), onlyMine),
       scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter,
-      assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo,
+      assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField,
     ],
     queryFn: ({ pageParam }) => fetchLeadsPage(pageParam as number),
     initialPageParam: 0,
@@ -2476,7 +2503,7 @@ export default function AnewLeads() {
         teamMemberIds,
         filters: {
           statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
-          dateFrom, dateTo, effectiveSearch, sourceFilter, qualificationFilter,
+          dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
         },
       });
 
@@ -2540,7 +2567,7 @@ export default function AnewLeads() {
     } finally {
       setKanbanLoading(false);
     }
-  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine, resolveEntities]);
+  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine, resolveEntities]);
 
   // Persist a kanban drag: same status + workflow_stage_id update and
   // execute-workflow automation trigger as handleBulkStatusChange, for a
@@ -2632,7 +2659,7 @@ export default function AnewLeads() {
     if (activeTab !== "list" || leadsSubView !== "kanban" || !activeCompanyId || scopeLoading) return;
     loadKanbanLeads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, leadsSubView, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, onlyMine]);
+  }, [activeTab, leadsSubView, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine]);
 
   // Refresh a single lead in-place (prevents losing infinite scroll state)
   const refreshSingleLead = useCallback(async (leadId: string) => {
@@ -2928,7 +2955,7 @@ export default function AnewLeads() {
     if (!fieldValues) return null;
     
     const phonePatterns = ['phone', 'telefone', 'tel', 'mobile', 'telemovel', 'contacto', 'celular'];
-    
+
     for (const key of Object.keys(fieldValues)) {
       if (key === '_meta') continue;
       const keyLower = key.toLowerCase();
@@ -2938,6 +2965,30 @@ export default function AnewLeads() {
       }
     }
     return null;
+  };
+
+  /**
+   * Nome, telefone e email TAL COMO APARECEM na lista.
+   *
+   * A ordenacao tem de usar exactamente estes valores. Antes procurava-os em
+   * field_values["nome"|"telefone"|"email"] -- chaves que quase nenhuma lead tem
+   * (medido: 1 nome, 0 telefones e 171 emails em 6078 leads) -- e por isso todas
+   * as linhas empatavam e o clique no cabecalho nao mudava nada. O nome, em
+   * particular, vem da ficha da pessoa e nao das respostas do formulario.
+   *
+   * Fica numa funcao so, usada pela ordenacao E pela linha da tabela, para as
+   * duas nao voltarem a divergir.
+   */
+  const leadDisplayValues = (lead: Lead) => {
+    const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
+    const name = identity?.first_name && identity?.last_name
+      ? `${identity.first_name} ${identity.last_name}`
+      : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
+    return {
+      name: name || "",
+      phone: extractPhoneFromLead(lead.field_values) || "",
+      email: extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']) || "",
+    };
   };
 
   // Format phone for WhatsApp link (remove non-digits, add country code if needed)
@@ -4608,6 +4659,16 @@ export default function AnewLeads() {
           aVal = new Date(a.created_at).getTime();
           bVal = new Date(b.created_at).getTime();
           break;
+        // `last_contact_at` e coluna da tabela, nunca de `field_values`. Sem este
+        // caso o clique no cabecalho caia no `default`, ia procurar
+        // field_values["last_contact_at"], encontrava vazio em TODAS as linhas, e
+        // a lista ficava exactamente na mesma ordem -- parecia que nao ordenava.
+        // Quem nunca foi contactado conta como 0: fica no fim quando se ordena do
+        // contacto mais recente para o mais antigo.
+        case "last_contact_at":
+          aVal = a.last_contact_at ? new Date(a.last_contact_at).getTime() : 0;
+          bVal = b.last_contact_at ? new Date(b.last_contact_at).getTime() : 0;
+          break;
         case "status":
           aVal = a.status;
           bVal = b.status;
@@ -4624,6 +4685,20 @@ export default function AnewLeads() {
           aVal = a.campaigns?.name || "";
           bVal = b.campaigns?.name || "";
           break;
+        // Nome, telefone e email ordenam pelo valor MOSTRADO na lista, nao pela
+        // chave crua em field_values (que quase nenhuma lead tem preenchida).
+        case "nome":
+          aVal = leadDisplayValues(a).name;
+          bVal = leadDisplayValues(b).name;
+          break;
+        case "telefone":
+          aVal = leadDisplayValues(a).phone;
+          bVal = leadDisplayValues(b).phone;
+          break;
+        case "email":
+          aVal = leadDisplayValues(a).email;
+          bVal = leadDisplayValues(b).email;
+          break;
         default:
           // For field_values columns
           aVal = a.field_values?.[sortColumn] || "";
@@ -4638,7 +4713,10 @@ export default function AnewLeads() {
       
       return sortDirection === "asc" ? aVal - bVal : bVal - aVal;
     });
-  }, [leads, sortColumn, sortDirection, sourceFilter]);
+    // `identityMap` e dependencia real: as fichas das pessoas chegam depois da
+    // lista, e sem ela a ordenacao por Nome ficava feita com os nomes ainda por
+    // resolver e nunca mais era refeita.
+  }, [leads, sortColumn, sortDirection, sourceFilter, identityMap]);
 
   const visibleStatusCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -5512,6 +5590,23 @@ export default function AnewLeads() {
                     </Select>
                   </div>
 
+                  {/* Sobre que data o intervalo abaixo filtra. Sem isto o filtro
+                      estava preso a data de criacao, e era impossivel pedir
+                      "leads contactadas neste periodo": uma lead criada no mes
+                      anterior e contactada este mes nunca aparecia. */}
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-muted-foreground">Filtrar data por</Label>
+                    <Select value={dateField} onValueChange={(v) => setDateField(v as LeadsDateField)}>
+                      <SelectTrigger className="h-9 bg-background">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="created_at">Data de criação</SelectItem>
+                        <SelectItem value="last_contact_at">Data do último contacto</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   {/* Date From */}
                   <div className="space-y-1.5">
                     <Label className="text-xs text-muted-foreground">Data Início</Label>
@@ -5894,12 +5989,9 @@ export default function AnewLeads() {
                         </TableRow>
                       ) : (
                         filteredLeads.map(lead => {
-                          const phone = extractPhoneFromLead(lead.field_values);
-                          const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
-                          const name = identity?.first_name && identity?.last_name
-                            ? `${identity.first_name} ${identity.last_name}`
-                            : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
-                          const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
+                          // Mesma funcao que a ordenacao usa, para o que se ve e o
+                          // que ordena nao poderem divergir.
+                          const { name, phone, email } = leadDisplayValues(lead);
                           const isSelected = selectedLeadIds.includes(lead.id);
 
                           return (
@@ -5982,12 +6074,8 @@ export default function AnewLeads() {
                 ) : (
                   <LeadsKanbanView
                     leads={kanbanLeads.map(lead => {
-                      const phone = extractPhoneFromLead(lead.field_values);
-                      const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
-                      const name = identity?.first_name && identity?.last_name
-                        ? `${identity.first_name} ${identity.last_name}`
-                        : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
-                      const email = extractSmartField(lead.field_values, ['email', 'e_mail', 'e-mail']);
+                      // Mesma funcao da lista e da ordenacao.
+                      const { name, phone, email } = leadDisplayValues(lead);
                       return {
                         id: lead.id,
                         created_at: lead.created_at,

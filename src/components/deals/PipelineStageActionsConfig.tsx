@@ -124,7 +124,10 @@ function getActionsForModule(
   if (module !== "deal") {
     result.propagate_rejection = ALL_ACTIONS.propagate_rejection;
   }
-  result.create_task = ALL_ACTIONS.create_task;
+  // `create_task` deixou de ser oferecido como opção nova: como automação de fase
+  // criaria sempre uma tarefa com o mesmo título/tipo configurado, sem valor.
+  // Fica em ALL_ACTIONS apenas para rotular linhas já existentes na tabela
+  // (via `displayLabels`); o motor ignora-a em silêncio (execute-workflow).
 
   return result;
 }
