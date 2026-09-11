@@ -44,6 +44,7 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { PessoaContratoTab } from "@/components/hr/PessoaContratoTab";
 import { PessoaDocumentosTab } from "@/components/hr/PessoaDocumentosTab";
 import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
+import { PessoaAdmissaoPendencias } from "@/components/hr/PessoaAdmissaoPendencias";
 import { PessoaAusenciasTab } from "@/components/hr/PessoaAusenciasTab";
 import { PessoaHorarioTab } from "@/components/hr/PessoaHorarioTab";
 import { PessoaLaboraisTab } from "@/components/hr/PessoaLaboraisTab";
@@ -304,6 +305,11 @@ export default function PessoaDetail() {
         modo={acessoModo}
         onCriado={() => void ficha.refresh()}
       />
+
+      {/* O que ainda falta para a admissao ficar completa -- e, quando nao
+          falta nada, o sinal de que se podem enviar as credenciais. Some-se
+          sozinho a quem nao tem permissao para saber. */}
+      <PessoaAdmissaoPendencias pessoaId={pessoa.id} />
 
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
         <div className="overflow-x-auto">

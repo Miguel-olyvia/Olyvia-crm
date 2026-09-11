@@ -121,7 +121,8 @@ export type BusinessFlow =
   | "hr-documentos-modelos-load"
   | "hr-documentos-emitir"
   | "hr-documentos-ver-conteudo"
-  | "hr-documentos-assinar";
+  | "hr-documentos-assinar"
+  | "hr-admissao-pendencias";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually
