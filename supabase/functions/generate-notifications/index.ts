@@ -496,6 +496,25 @@ Deno.serve(async (req) => {
         if (entityIds.length === 0) markResolved(n.id, "condition_changed");
       }
 
+      // ── Stock: low stock (resolve when the stock is no longer low, or was deleted) ──
+      const stockLowNotifs = stillPending.filter(n => n.entity_type === "stock" && n.type === "stock_low");
+      if (stockLowNotifs.length > 0) {
+        const stockIds = [...new Set(stockLowNotifs.map(n => n.entity_id))];
+        const stocksForResolution = await fetchByIds<any>(
+          supabase, "stocks", stockIds,
+          "id, quantity, reorder_point, deleted_at",
+        );
+        const stockMap = new Map(stocksForResolution.map((s: any) => [s.id, s]));
+
+        for (const n of stockLowNotifs) {
+          const stock = stockMap.get(n.entity_id);
+          if (!stock || stock.deleted_at) { markResolved(n.id, "entity_missing"); continue; }
+          if (!(stock.reorder_point > 0) || stock.quantity > stock.reorder_point) {
+            markResolved(n.id, "condition_changed");
+          }
+        }
+      }
+
       // ── Execute one update per reason (chunked) ──
       const resolvePromises = [];
       for (const [reason, ids] of toResolveByReason) {
@@ -988,7 +1007,7 @@ Deno.serve(async (req) => {
       const allStocksForAlert = await fetchAll<any>(
         supabase,
         "stocks",
-        (q) => q,
+        (q) => q.is("deleted_at", null),
         "id, product_id, warehouse_id, quantity, reorder_point, minimum_quantity, maximum_quantity, organization_id",
       );
       // reorder_point=0 significa "nunca configurado", não "reencomendar já" — só
