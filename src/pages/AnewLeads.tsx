@@ -251,7 +251,7 @@ function leadListSortValue(
 }
 
 /** As duas datas de uma lead sobre as quais faz sentido filtrar. */
-export type LeadsDateField = "created_at" | "last_contact_at";
+export type LeadsDateField = "created_at" | "last_contact_at" | "ambos";
 
 interface LeadsQueryFilters {
   statusFilter: string;
@@ -285,7 +285,7 @@ function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
     statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
     dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
   } = filters;
-  const dateColumn: LeadsDateField = dateField === "last_contact_at" ? "last_contact_at" : "created_at";
+  const dateColumn: "created_at" | "last_contact_at" = dateField === "last_contact_at" ? "last_contact_at" : "created_at";
 
   if (statusFilter !== "all") {
     if (statusFilter === "lost") {
@@ -327,8 +327,21 @@ function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
   // A coluna e escolhida por quem filtra (criacao ou ultimo contacto). Quem
   // nunca foi contactado tem last_contact_at nulo e fica de fora ao filtrar por
   // contacto, que e o esperado.
-  if (dateFrom) q = q.gte(dateColumn, startOfDay(dateFrom).toISOString());
-  if (dateTo) q = q.lte(dateColumn, endOfDay(dateTo).toISOString());
+  if (dateField === "ambos") {
+    // Interseccao: a lead tem de ter entrado E sido contactada dentro do
+    // intervalo. Sao dois intervalos completos, somados com AND.
+    if (dateFrom) {
+      const de = startOfDay(dateFrom).toISOString();
+      q = q.gte("created_at", de).gte("last_contact_at", de);
+    }
+    if (dateTo) {
+      const ate = endOfDay(dateTo).toISOString();
+      q = q.lte("created_at", ate).lte("last_contact_at", ate);
+    }
+  } else {
+    if (dateFrom) q = q.gte(dateColumn, startOfDay(dateFrom).toISOString());
+    if (dateTo) q = q.lte(dateColumn, endOfDay(dateTo).toISOString());
+  }
   // Palavra a palavra, nao a frase seguida: um `.ilike("search_text", "%joao silva%")`
   // exigia que as palavras fossem contiguas, por isso "joao silva" nunca
   // encontrava "Joao Pedro Silva". `applySearchTextFilter` encadeia um
@@ -5603,6 +5616,7 @@ export default function AnewLeads() {
                       <SelectContent>
                         <SelectItem value="created_at">Data de criação</SelectItem>
                         <SelectItem value="last_contact_at">Data do último contacto</SelectItem>
+                        <SelectItem value="ambos">Criada e contactada no período</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
