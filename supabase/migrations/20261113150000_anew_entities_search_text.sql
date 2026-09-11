@@ -1,3 +1,8 @@
+-- Recuperado via 'supabase db query --linked' contra
+-- supabase_migrations.schema_migrations.statements -- já aplicada
+-- remotamente (drift concorrente de outra sessão), só faltava o ficheiro.
+-- Mesmo padrão de recuperação já usado neste branch para 450000-520000.
+
 -- General entity-level `search_text`, mirroring the anew_clients architecture
 -- (20261113100000_anew_clients_search_text.sql) but at the anew_entities
 -- level: a denormalized, trigger-maintained column + trigram GIN index,

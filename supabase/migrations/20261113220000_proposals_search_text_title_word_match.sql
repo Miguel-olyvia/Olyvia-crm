@@ -1,3 +1,7 @@
+-- Recuperado via 'supabase db query --linked' contra
+-- supabase_migrations.schema_migrations.statements -- já aplicada
+-- remotamente (drift concorrente de outra sessão), só faltava o ficheiro.
+
 -- Pesquisa por TITULO nas Propostas: palavra a palavra, em qualquer ordem.
 --
 -- DEFEITO
@@ -232,8 +236,7 @@ AS $function$
           AND (d.valid_until::timestamp AT TIME ZONE _tz) < _now)
     )
     AND (NOT _no_validity OR d.valid_until IS NULL)
-$function$
-;
+$function$;
 
 COMMENT ON FUNCTION public.proposals_list_filtered(uuid, text, uuid[], uuid[], boolean, uuid[], text, text, uuid[], timestamptz, timestamptz, uuid, uuid, boolean, boolean, boolean, boolean, integer, timestamptz, text) IS
   'Ambito resolvido + filtros da UI da listagem de Propostas, com o estado '

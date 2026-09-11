@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams, Link } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
@@ -7,7 +8,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown } from "lucide-react";
+import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck } from "lucide-react";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { PermissionGate } from "@/components/PermissionGate";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
@@ -18,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -51,6 +53,16 @@ type PurchaseOrderItem = {
   notes?: string;
 };
 
+// Receção parcial (migration 20261114040000): tipo de conveniência para as
+// linhas de purchase_order_items usadas no fluxo de receção.
+// `products` (join) é usado para mostrar o nome REAL/atual do produto no
+// diálogo — a `description` da linha é um snapshot da altura da encomenda e
+// não distingue variantes cujo nome só difere na medida (ex.: "Base Duche
+// Stone Plus" 70x70 vs 70x90 guardam a mesma description genérica).
+type PurchaseOrderItemWithReceipt = Database["public"]["Tables"]["purchase_order_items"]["Row"] & {
+  products?: { name: string } | null;
+};
+
 type ProductCatalogItem = {
   id: string;
   name: string;
@@ -58,7 +70,6 @@ type ProductCatalogItem = {
   sku: string | null;
   category_name: string | null;
   brand_name: string | null;
-  supplier_id: string | null;
   purchase_price: number | null;
   vat_rate: number | null;
 };
@@ -111,9 +122,56 @@ const PurchaseOrders = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleted, setShowDeleted] = useState(false);
+  // Filtros da listagem (frontend, tudo já carregado via fetchAllRows — sem
+  // paginação, ver comentário em loadData()): fornecedor, estado e intervalo
+  // de datas (aplicado a order_date ou actual_delivery_date, à escolha).
+  const [supplierFilter, setSupplierFilter] = useState("all");
+  const [statusFilterValue, setStatusFilterValue] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [dateFilterField, setDateFilterField] = useState<"order_date" | "actual_delivery_date">("order_date");
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
+  const [catalogLoading, setCatalogLoading] = useState(false);
   const loadRequestRef = useRef(0);
+  // Receção (Fase 4C): dedicado, fora do dropdown de estado genérico — pede o
+  // armazém de destino e liga-se a rpc_receive_purchase_order (gera a entrada
+  // em stock_movements na mesma transação que muda o estado para 'received').
+  const [receiveDialogOpen, setReceiveDialogOpen] = useState(false);
+  const [receivingOrder, setReceivingOrder] = useState<{ id: string; order_number: string } | null>(null);
+  const [receiveWarehouses, setReceiveWarehouses] = useState<{ id: string; name: string }[]>([]);
+  const [receiveWarehouseId, setReceiveWarehouseId] = useState("");
+  // Receção parcial (20261114040000): linhas de produto desta encomenda e a
+  // quantidade a receber agora por linha, editável — por omissão pré-preenchida
+  // com o saldo por receber de cada linha (equivalente ao antigo "tudo de uma
+  // vez", mas agora ajustável antes de confirmar).
+  const [receiveLines, setReceiveLines] = useState<PurchaseOrderItemWithReceipt[]>([]);
+  const [receiveLineQuantities, setReceiveLineQuantities] = useState<Record<string, number>>({});
+  // Data real de entrega (suppliers.delivery_sla_days / purchase_orders.actual_delivery_date,
+  // migration pendente) — só gravada quando a encomenda fica 'received', mas pedida sempre
+  // (também é usada pelo relatório de SLA mesmo em receções parciais sucessivas).
+  const [actualDeliveryDate, setActualDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
+  const [receiving, setReceiving] = useState(false);
+  // Fase 5.0F: link inverso — quando a encomenda foi gerada automaticamente a
+  // partir de um Contrato assinado (source_type='contract'), mostra a origem
+  // no diálogo de detalhe, com link de volta para "Encomendas Clientes".
+  const [orderSourceInfo, setOrderSourceInfo] = useState<{ contractId: string; contractNumber: string; clientName: string } | null>(null);
+  // Ligação manual, só na criação (20261115200000) — resolve o caso
+  // "sem_fornecedor" em Encomendas Clientes: ao criar a encomenda daqui,
+  // escolhe-se a Encomenda Cliente que está a satisfazer.
+  const [newOrderClientOrderId, setNewOrderClientOrderId] = useState("");
+  const [clientOrderOptions, setClientOrderOptions] = useState<{ contract_id: string; contract_number: string; client_name: string | null }[]>([]);
+  const [clientOrderOptionsLoaded, setClientOrderOptionsLoaded] = useState(false);
+  // Pré-preenchimento de itens (pedido do utilizador, 2026-08-31): ao
+  // escolher a Encomenda Cliente, os produtos dela ficam "pendentes" até
+  // haver fornecedor escolhido (o preço depende do fornecedor) — nesse
+  // momento são adicionados automaticamente aos "Itens da Encomenda", mesmo
+  // padrão já usado em StockMovementDialog.tsx.
+  const [pendingClientOrderLines, setPendingClientOrderLines] = useState<{ product_id: string; quantity: number }[]>([]);
+  const [clientOrderLinesLoading, setClientOrderLinesLoading] = useState(false);
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
+  const { hasPermission } = usePermissions();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [formData, setFormData] = useState({
     supplier_id: "",
@@ -128,6 +186,12 @@ const PurchaseOrders = () => {
   const [selectedCatalogItems, setSelectedCatalogItems] = useState<string[]>([]);
   const [selectedItemType, setSelectedItemType] = useState<'product' | 'service'>('product');
   const [productAttributes, setProductAttributes] = useState<Map<string, ProductAttribute[]>>(new Map());
+  // product_id/service_id -> { purchase_price, supplier_sku } for the SELECTED supplier,
+  // resolved from item_suppliers (Fase 1). Determines which catalog items are eligible
+  // to add to this order and at what price — replaces the deprecated
+  // products.supplier_id/services.supplier_id single-supplier match.
+  const [supplierProductRefs, setSupplierProductRefs] = useState<Map<string, { purchase_price: number | null; supplier_sku: string | null }>>(new Map());
+  const [supplierServiceRefs, setSupplierServiceRefs] = useState<Map<string, { purchase_price: number | null; supplier_sku: string | null }>>(new Map());
   const [selectedItemAttributes, setSelectedItemAttributes] = useState<Record<string, Record<string, string>>>({});
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -185,204 +249,56 @@ const PurchaseOrders = () => {
     loadFormSuppliers();
   }, [organizationSelection.companyId]);
 
-  // Load products when company and supplier selection changes in the form.
-  // Gated by `open` (dialog de nova/editar encomenda) — antes disparava
-  // sempre que organizationSelection.companyId mudava, ou seja em TODO o
-  // carregamento inicial da página (companyId é sincronizado a partir de
-  // activeCompany no mount), carregando o catálogo inteiro só para mostrar a
-  // tabela de encomendas. Só é preciso quando o utilizador vai escolher itens.
+  // Resolve which products/services the SELECTED supplier can actually supply, via
+  // item_suppliers (Fase 1 do plano de fornecedores) — substitui o antigo
+  // products.supplier_id/services.supplier_id (deprecated, só guarda 1 fornecedor
+  // por artigo). O catálogo em si (produtos/serviços/preços/atributos) vem de
+  // loadCatalog() (ver mais abaixo), carregado à parte, uma vez por empresa,
+  // quando o diálogo de nova/editar encomenda abre; este efeito só resolve, para
+  // o fornecedor escolhido no cabeçalho da encomenda, QUAIS desses artigos ele
+  // fornece e a que preço/referência — não volta a fazer fetch de products/services.
   useEffect(() => {
-    const loadFormProducts = async () => {
+    const loadSupplierItemRefs = async () => {
       const companyId = organizationSelection.companyId;
       const supplierId = formData.supplier_id;
 
-      console.log("Loading products for company:", companyId, "supplier:", supplierId);
-
-      if (!open || !companyId) {
-        setProducts([]);
+      if (!companyId || !supplierId) {
+        setSupplierProductRefs(new Map());
+        setSupplierServiceRefs(new Map());
         return;
       }
 
       try {
-        // Products can be linked either directly (products.organization_id) or via
-        // product_organizations — paginated past PostgREST's 1000-row cap.
-        const [companyProductsRes, directProductsRes] = await Promise.all([
-          fetchAllRows(() =>
-            supabase.from("product_organizations").select("product_id").eq("organization_id", companyId)
-          ),
-          fetchAllRows(() =>
-            supabase.from("products").select("id").eq("organization_id", companyId).is("deleted_at", null)
-          ),
-        ]);
-
-        if (companyProductsRes.error) throw companyProductsRes.error;
-        if (directProductsRes.error) throw directProductsRes.error;
-
-        const junctionProductIds = companyProductsRes.data?.map((p: any) => p.product_id) || [];
-        const directProductIds = directProductsRes.data?.map((p: any) => p.id) || [];
-        const companyProductIds = [...new Set([...junctionProductIds, ...directProductIds])];
-
-        if (companyProductIds.length === 0) {
-          setProducts([]);
-          return;
-        }
-
-        // Batched (BATCH=200): a single .in("id", companyProductIds) with thousands
-        // of ids builds a query string that fails outright with net::ERR_FAILED for
-        // large catalogs (e.g. Mudelar) — this is what surfaced as "Failed to fetch".
-        const BATCH = 200;
-        const productsData: any[] = [];
-        for (let i = 0; i < companyProductIds.length; i += BATCH) {
-          const idBatch = companyProductIds.slice(i, i + BATCH);
-          let query = supabase
-            .from("products")
-            .select(
-              `
-                id,
-                sku,
-                name,
-                description,
-                supplier_id,
-                product_categories!category_id(name),
-                brands(name)
-              `
-            )
-            .eq("is_active", true)
-            .eq("is_purchasable", true)
-            .is("deleted_at", null)
-            .not("supplier_id", "is", null)
-            .in("id", idBatch);
-
-          // Filter by supplier if selected (strict match)
-          if (supplierId) {
-            query = query.eq("supplier_id", supplierId);
-          }
-
-          const { data, error } = await query;
-          if (error) throw error;
-          productsData.push(...(data || []));
-        }
-
-        // Fetch product purchase prices — same batching.
-        const productIds = productsData.map((p: any) => p.id);
-        const productPrices: any[] = [];
-        for (let i = 0; i < productIds.length; i += BATCH) {
-          const batch = productIds.slice(i, i + BATCH);
-          const { data, error } = await supabase
-            .from("product_prices")
-            .select("product_id, price, vat_rate")
-            .eq("price_type", "purchase")
-            .in("product_id", batch);
-          if (error) throw error;
-          productPrices.push(...(data || []));
-        }
-
-        const productPriceEntries: Array<[string, PriceInfo]> = (productPrices || [])
-          .filter((p: any) => typeof p.product_id === "string")
-          .map((p: any) => [p.product_id, { price: p.price ?? null, vat_rate: p.vat_rate ?? null }]);
-
-        const productPricesMap = new Map<string, PriceInfo>(productPriceEntries);
-
-        const mappedProducts: ProductCatalogItem[] = (productsData || []).map((product: any) => {
-          const priceInfo = productPricesMap.get(product.id);
-          return {
-            id: product.id,
-            name: product.name,
-            description: product.description,
-            sku: product.sku,
-            supplier_id: product.supplier_id,
-            category_name: product.product_categories?.name || null,
-            brand_name: product.brands?.name || null,
-            purchase_price: priceInfo?.price ?? null,
-            vat_rate: priceInfo?.vat_rate ?? 23,
-          };
-        });
-
-        console.log("Loaded products:", mappedProducts.length);
-        setProducts(mappedProducts);
-
-        // Restrito aos produtos deste catálogo (em vez de todos os produtos ativos
-        // de todas as organizações, como acontecia antes).
-        await fetchProductAttributes(productIds);
-      } catch (error: any) {
-        console.error("Error loading products:", error);
-        setProducts([]);
-      }
-    };
-
-    loadFormProducts();
-  }, [open, organizationSelection.companyId, formData.supplier_id]);
-
-  // Serviços (+ preços de compra) — mesmo racional do efeito de produtos acima:
-  // só carrega quando o diálogo de nova/editar encomenda está aberto, em vez de
-  // em todo o carregamento da lista de encomendas.
-  useEffect(() => {
-    const loadFormServices = async () => {
-      const companyId = organizationSelection.companyId;
-      if (!open || !companyId) {
-        setServices([]);
-        return;
-      }
-
-      try {
-        const { data: servicesData, error } = await supabase
-          .from("services")
-          .select(`
-            id,
-            sku,
-            name,
-            short_desc,
-            supplier_id,
-            service_categories:service_category_id(name)
-          `)
+        const { data, error } = await (supabase as any)
+          .from("item_suppliers")
+          .select("product_id, service_id, purchase_price, supplier_sku")
+          .eq("organization_id", companyId)
+          .eq("supplier_id", supplierId)
           .eq("is_active", true)
-          .eq("organization_id", companyId);
+          .is("deleted_at", null);
+
         if (error) throw error;
 
-        const serviceIds = (servicesData || []).map((s: any) => s.id);
-        const BATCH = 200;
-        const servicePrices: any[] = [];
-        for (let i = 0; i < serviceIds.length; i += BATCH) {
-          const batch = serviceIds.slice(i, i + BATCH);
-          const { data, error: priceError } = await supabase
-            .from("service_prices")
-            .select("service_id, price, vat_rate")
-            .eq("price_type", "purchase")
-            .in("service_id", batch);
-          if (priceError) throw priceError;
-          servicePrices.push(...(data || []));
-        }
+        const productMap = new Map<string, { purchase_price: number | null; supplier_sku: string | null }>();
+        const serviceMap = new Map<string, { purchase_price: number | null; supplier_sku: string | null }>();
 
-        const servicePriceEntries: Array<[string, PriceInfo]> = (servicePrices || [])
-          .filter((p: any) => typeof p.service_id === "string")
-          .map((p: any) => [p.service_id, { price: p.price ?? null, vat_rate: p.vat_rate ?? null }]);
-
-        const servicePricesMap = new Map<string, PriceInfo>(servicePriceEntries);
-
-        const mappedServices: ProductCatalogItem[] = (servicesData || []).map((service: any) => {
-          const priceInfo = servicePricesMap.get(service.id);
-          return {
-            id: service.id,
-            name: service.name,
-            description: service.short_desc,
-            sku: service.sku,
-            supplier_id: service.supplier_id,
-            category_name: service.service_categories?.name || null,
-            brand_name: null,
-            purchase_price: priceInfo?.price ?? null,
-            vat_rate: priceInfo?.vat_rate ?? 23,
-          };
+        (data || []).forEach((row: any) => {
+          const info = { purchase_price: row.purchase_price ?? null, supplier_sku: row.supplier_sku ?? null };
+          if (row.product_id) productMap.set(row.product_id, info);
+          if (row.service_id) serviceMap.set(row.service_id, info);
         });
 
-        setServices(mappedServices);
+        setSupplierProductRefs(productMap);
+        setSupplierServiceRefs(serviceMap);
       } catch (error: any) {
-        console.error("Error loading services:", error);
-        setServices([]);
+        console.error("Error loading supplier item references:", error);
+        setSupplierProductRefs(new Map());
+        setSupplierServiceRefs(new Map());
       }
     };
 
-    loadFormServices();
-  }, [open, organizationSelection.companyId]);
+    loadSupplierItemRefs();
+  }, [organizationSelection.companyId, formData.supplier_id]);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -391,13 +307,75 @@ const PurchaseOrders = () => {
     }
   }, [activeCompany?.id, showDeleted]);
 
+  // Catálogo (produtos/serviços/preços/atributos) só é preciso para escolher
+  // itens ao criar/editar uma encomenda — carregado sob demanda quando o
+  // diálogo abre, não no carregamento inicial da lista. Reseta quando a
+  // empresa ativa muda para forçar recarga do catálogo certo.
+  useEffect(() => {
+    setCatalogLoaded(false);
+    setClientOrderOptionsLoaded(false);
+  }, [activeCompany?.id]);
+
+  useEffect(() => {
+    if (open && !catalogLoaded && activeCompany?.id) {
+      loadCatalog();
+    }
+  }, [open, catalogLoaded, activeCompany?.id]);
+
+  // Fase 5.0F: Encomendas Clientes assinadas, para a ligação manual opcional
+  // ao criar uma encomenda nova (não relevante ao editar — ver
+  // rpc_create_purchase_order, 20261115200000). Best-effort: falha de
+  // permissão (client_contracts.view) não bloqueia a criação da encomenda,
+  // só esconde o campo.
+  useEffect(() => {
+    if (!open || editingId || clientOrderOptionsLoaded || !activeCompany?.id) return;
+    (async () => {
+      const { data, error } = await supabase.rpc('rpc_list_client_order_documents', {
+        p_organization_id: activeCompany.id,
+        p_search: null,
+        p_status_filter: null,
+        p_limit: 100,
+        p_offset: 0,
+      } as any);
+      setClientOrderOptionsLoaded(true);
+      if (error) return;
+      setClientOrderOptions(((data as any[]) || []).map((r) => ({
+        contract_id: r.contract_id, contract_number: r.contract_number, client_name: r.client_name,
+      })));
+    })();
+  }, [open, editingId, clientOrderOptionsLoaded, activeCompany?.id]);
+
+  // Fase 5.0F: abre o dialog de edição/detalhe de uma encomenda específica quando
+  // se navega para cá a partir de outro ecrã (ex. "Encomendas Clientes", link por
+  // linha em ClientOrders.tsx) com ?open=<purchase_order_id> — mesmo padrão de
+  // cross-link já usado em ClientContracts.tsx.
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (!openId) return;
+    if (loading) return;
+
+    const target = orders.find((o) => o.id === openId);
+    if (target) {
+      handleEdit(target);
+    } else {
+      toast({
+        title: t('purchaseOrders.toast.loadError'),
+        description: 'Encomenda não encontrada.',
+        variant: "destructive",
+      });
+    }
+
+    searchParams.delete("open");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams, setSearchParams, orders, loading]);
+
   // Só orders + suppliers — o catálogo (produtos/serviços/preços/atributos)
   // carrega à parte, sob demanda, só quando o diálogo de nova/editar encomenda
-  // abre (ver useEffects de loadFormProducts/loadFormServices acima). Antes
-  // este loadData() também carregava o catálogo inteiro da organização em
-  // TODO o carregamento da lista — dezenas de pedidos de rede por visita à
-  // página, o que tornava a página lenta e aumentava a probabilidade de um
-  // desses pedidos falhar com "Failed to fetch".
+  // abre (ver loadCatalog() abaixo). Antes este loadData() também carregava o
+  // catálogo inteiro da organização em TODO o carregamento da lista — dezenas de
+  // pedidos de rede por visita à página, o que tornava a página lenta e
+  // aumentava a probabilidade de um desses pedidos falhar com "Failed to fetch".
   const loadData = async () => {
     if (!activeCompany?.id) {
       console.log("loadData: No activeCompany");
@@ -451,6 +429,178 @@ const PurchaseOrders = () => {
       });
     } finally {
       if (loadRequestRef.current === requestId) setLoading(false);
+    }
+  };
+
+  // Catálogo completo (produtos + serviços + preços de compra + atributos), usado
+  // apenas no formulário de criar/editar encomenda para escolher itens. Carregado
+  // uma vez sob demanda (ver useEffect de `open`/`catalogLoaded` acima) em vez de em
+  // todo o carregamento da lista de encomendas — isto evitava dezenas de pedidos de
+  // rede (e falhas "Failed to fetch" ocasionais) só para mostrar a tabela.
+  const loadCatalog = async () => {
+    if (!activeCompany?.id) return;
+
+    setCatalogLoading(true);
+    try {
+      const companyId = activeCompany.id;
+
+      const productColumns = `
+            id,
+            sku,
+            name,
+            description,
+            product_categories!category_id(name),
+            brands(name)
+          `;
+
+      const fetchAllProductRows = (applyFilters: (q: any) => any) =>
+        fetchAllRows(() => applyFilters(supabase.from("products").select(productColumns)));
+
+      const [companyProductsRes, directProductsRes, servicesRes] = await Promise.all([
+        fetchAllRows(() =>
+          supabase.from("product_organizations").select("product_id").eq("organization_id", companyId)
+        ),
+        // Direct match: products owned by this org — the bulk of the catalog, paginated
+        // past the 1000-row cap above.
+        fetchAllProductRows((q) =>
+          q
+            .eq("organization_id", companyId)
+            .eq("is_active", true)
+            .eq("is_purchasable", true)
+            .is("deleted_at", null)
+        ),
+        supabase
+          .from("services")
+          .select(`
+            id,
+            sku,
+            name,
+            short_desc,
+            service_categories:service_category_id(name)
+          `)
+          .eq("is_active", true)
+          .eq("organization_id", companyId),
+      ]);
+
+      if (companyProductsRes.error) throw companyProductsRes.error;
+      if (directProductsRes.error) throw directProductsRes.error;
+      if (servicesRes.error) throw servicesRes.error;
+
+      // Shared products: linked via product_organizations to this org but owned
+      // (products.organization_id) by a DIFFERENT org — not covered by the direct query
+      // above. This set is expected to be small (cross-org sharing is the exception, not
+      // the rule), so a .in() over just these leftover ids stays well within URL limits.
+      const directProductsData = directProductsRes.data || [];
+      const directProductIds = new Set(directProductsData.map((p: any) => p.id));
+      const junctionOnlyIds = (companyProductsRes.data || [])
+        .map((p: any) => p.product_id)
+        .filter((id: string) => id && !directProductIds.has(id));
+
+      let sharedProductsData: any[] = [];
+      if (junctionOnlyIds.length > 0) {
+        const sharedRes = await fetchAllProductRows((q) =>
+          q
+            .eq("is_active", true)
+            .eq("is_purchasable", true)
+            .is("deleted_at", null)
+            .in("id", junctionOnlyIds)
+        );
+        if (sharedRes.error) throw sharedRes.error;
+        sharedProductsData = sharedRes.data || [];
+      }
+
+      const productsData: any[] = [...directProductsData, ...sharedProductsData];
+
+      // Fetch product prices — batched (same BATCH=200 pattern as AddItemsDialog.tsx):
+      // a single .in("product_id", productIds) with thousands of ids builds a query
+      // string that fails outright with net::ERR_FAILED for large catalogs.
+      const productIds = productsData?.map((p: any) => p.id) || [];
+      const PRICE_BATCH = 200;
+      const productPrices: any[] = [];
+      for (let i = 0; i < productIds.length; i += PRICE_BATCH) {
+        const batch = productIds.slice(i, i + PRICE_BATCH);
+        if (batch.length === 0) continue;
+        const { data: batchPrices, error: batchError } = await supabase
+          .from("product_prices")
+          .select("product_id, price, vat_rate")
+          .eq("price_type", "purchase")
+          .in("product_id", batch);
+        if (batchError) throw batchError;
+        productPrices.push(...(batchPrices || []));
+      }
+
+      const productPriceEntries: Array<[string, PriceInfo]> = (productPrices || [])
+        .filter((p: any) => typeof p.product_id === "string")
+        .map((p: any) => [p.product_id, { price: p.price ?? null, vat_rate: p.vat_rate ?? null }]);
+
+      const productPricesMap = new Map<string, PriceInfo>(productPriceEntries);
+
+      const mappedProducts: ProductCatalogItem[] = (productsData || []).map((product: any) => {
+        const priceInfo = productPricesMap.get(product.id);
+        return {
+          id: product.id,
+          name: product.name,
+          description: product.description,
+          sku: product.sku,
+          category_name: product.product_categories?.name || null,
+          brand_name: product.brands?.name || null,
+          purchase_price: priceInfo?.price || null,
+          vat_rate: priceInfo?.vat_rate || 23,
+        };
+      });
+
+      setProducts(mappedProducts);
+
+      // Fetch product attributes — restrito aos produtos deste catálogo (em vez de
+      // todos os produtos ativos de todas as organizações, como acontecia antes).
+      await fetchProductAttributes(productIds);
+
+      // Fetch service prices — same batching as product_prices above, for consistency
+      // (services catalogs are usually much smaller, but no reason to risk it).
+      const serviceIds = servicesRes.data?.map((s: any) => s.id) || [];
+      const servicePrices: any[] = [];
+      for (let i = 0; i < serviceIds.length; i += PRICE_BATCH) {
+        const batch = serviceIds.slice(i, i + PRICE_BATCH);
+        if (batch.length === 0) continue;
+        const { data: batchPrices, error: batchError } = await supabase
+          .from("service_prices")
+          .select("service_id, price, vat_rate")
+          .eq("price_type", "purchase")
+          .in("service_id", batch);
+        if (batchError) throw batchError;
+        servicePrices.push(...(batchPrices || []));
+      }
+
+      const servicePriceEntries: Array<[string, PriceInfo]> = (servicePrices || [])
+        .filter((p: any) => typeof p.service_id === "string")
+        .map((p: any) => [p.service_id, { price: p.price ?? null, vat_rate: p.vat_rate ?? null }]);
+
+      const servicePricesMap = new Map<string, PriceInfo>(servicePriceEntries);
+
+      const mappedServices: ProductCatalogItem[] = (servicesRes.data || []).map((service: any) => {
+        const priceInfo = servicePricesMap.get(service.id);
+        return {
+          id: service.id,
+          name: service.name,
+          description: service.short_desc,
+          sku: service.sku,
+          category_name: service.service_categories?.name || null,
+          brand_name: null,
+          purchase_price: priceInfo?.price || null,
+          vat_rate: priceInfo?.vat_rate || 23,
+        };
+      });
+
+      setServices(mappedServices);
+      setCatalogLoaded(true);
+    } catch (error: any) {
+      toast({
+        title: t('purchaseOrders.toast.loadError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setCatalogLoading(false);
     }
   };
 
@@ -538,7 +688,27 @@ const PurchaseOrders = () => {
       status: order.status,
       notes: order.notes || "",
     });
-    
+
+    // Fase 5.0F: origem via Contrato (source_type/source_id, Fase 5.0C) —
+    // best-effort, nunca bloqueia a abertura do diálogo se falhar.
+    setOrderSourceInfo(null);
+    if ((order as any).source_type === "contract" && (order as any).source_id) {
+      supabase
+        .from("client_contracts")
+        .select("contract_number, entity_id, anew_entities(display_name)")
+        .eq("id", (order as any).source_id)
+        .maybeSingle()
+        .then(({ data }) => {
+          if (data) {
+            setOrderSourceInfo({
+              contractId: (order as any).source_id,
+              contractNumber: data.contract_number || "",
+              clientName: (data as any).anew_entities?.display_name || "",
+            });
+          }
+        });
+    }
+
     // Load existing items
     const { data: items } = await supabase
       .from("purchase_order_items")
@@ -607,6 +777,124 @@ const PurchaseOrders = () => {
     }
   };
 
+  const openReceiveDialog = async (order: PurchaseOrder) => {
+    setReceivingOrder({ id: order.id, order_number: order.order_number });
+    setReceiveWarehouseId("");
+    setReceiveLines([]);
+    setReceiveLineQuantities({});
+    setActualDeliveryDate(new Date().toISOString().slice(0, 10));
+    setReceiveDialogOpen(true);
+
+    if (!activeCompany?.id) return;
+
+    const [warehousesRes, itemsRes] = await Promise.all([
+      supabase
+        .from("warehouses")
+        .select("id, name")
+        .eq("organization_id", activeCompany.id)
+        .is("deleted_at", null)
+        .order("name"),
+      supabase
+        .from("purchase_order_items")
+        .select("*, products(name)")
+        .eq("purchase_order_id", order.id)
+        .eq("item_type", "product"),
+    ]);
+
+    if (warehousesRes.error) {
+      toast({ title: t('purchaseOrders.toast.error'), description: warehousesRes.error.message, variant: "destructive" });
+      return;
+    }
+    setReceiveWarehouses(warehousesRes.data || []);
+
+    if (itemsRes.error) {
+      toast({ title: t('purchaseOrders.toast.error'), description: itemsRes.error.message, variant: "destructive" });
+      return;
+    }
+    const items = (itemsRes.data as PurchaseOrderItemWithReceipt[] | null) || [];
+    setReceiveLines(items);
+
+    const initialQuantities: Record<string, number> = {};
+    items.forEach((item) => {
+      const remaining = item.quantity - (item.received_quantity || 0);
+      initialQuantities[item.id] = remaining > 0 ? remaining : 0;
+    });
+    setReceiveLineQuantities(initialQuantities);
+  };
+
+  const getReceiveRemaining = (item: PurchaseOrderItemWithReceipt) =>
+    item.quantity - (item.received_quantity || 0);
+
+  // "Selecionar tudo": repõe cada input ao saldo por receber da respetiva
+  // linha — replica num clique o antigo comportamento por omissão ("recebe
+  // tudo de uma vez").
+  const handleSelectAllReceiveLines = () => {
+    const quantities: Record<string, number> = {};
+    receiveLines.forEach((item) => {
+      const remaining = getReceiveRemaining(item);
+      quantities[item.id] = remaining > 0 ? remaining : 0;
+    });
+    setReceiveLineQuantities(quantities);
+  };
+
+  const handleReceiveOrder = async () => {
+    if (!receivingOrder || !receiveWarehouseId) return;
+
+    const linesToReceive = receiveLines
+      .map((item) => ({
+        purchase_order_item_id: item.id,
+        quantity: receiveLineQuantities[item.id] || 0,
+      }))
+      .filter((line) => line.quantity > 0);
+
+    if (linesToReceive.length === 0) {
+      toast({
+        title: t('purchaseOrders.toast.error'),
+        description: "Indica pelo menos uma quantidade a receber numa linha.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setReceiving(true);
+    try {
+      const { data, error } = await supabase.rpc("rpc_receive_purchase_order_lines", {
+        p_purchase_order_id: receivingOrder.id,
+        p_warehouse_id: receiveWarehouseId,
+        p_lines: linesToReceive,
+        p_actual_delivery_date: actualDeliveryDate || null,
+      });
+      if (error) throw error;
+
+      // O status devolvido pelo RPC é a fonte da verdade — não assumir
+      // 'received' (pode ter ficado 'partially_received').
+      const result = data as { status?: string; stock_skipped?: boolean } | null;
+      const isFullyReceived = result?.status === 'received';
+      // Ligada a uma Encomenda Cliente (já tem destino certo) — a receção
+      // não infla o stock geral, ver 20261115210000.
+      const stockNote = result?.stock_skipped
+        ? " Ligada a uma Encomenda Cliente — o stock geral não foi alterado."
+        : " Stock atualizado.";
+
+      toast({
+        title: isFullyReceived ? "Encomenda totalmente recebida" : "Receção parcial registada",
+        description: isFullyReceived
+          ? `${receivingOrder.order_number} foi totalmente recebida —${stockNote}`
+          : `${receivingOrder.order_number} teve uma receção parcial registada —${stockNote}`,
+      });
+      setReceiveDialogOpen(false);
+      setReceivingOrder(null);
+      setReceiveLines([]);
+      setReceiveLineQuantities({});
+      setActualDeliveryDate(new Date().toISOString().slice(0, 10));
+      loadData();
+    } catch (error: any) {
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setReceiving(false);
+    }
+  };
+
   const calculateTotals = () => {
     let subtotal = 0;
     let totalVat = 0;
@@ -627,14 +915,153 @@ const PurchaseOrders = () => {
     };
   };
 
-  const getAvailableItems = () => {
+  // Products/services the selected supplier actually supplies, per item_suppliers,
+  // with purchase_price overridden to the supplier-specific price when it has one
+  // (falls back to the product_prices-derived price otherwise). Single source used
+  // both by getAvailableItems() (confirm/add) and the two tab lists in the items
+  // dialog (render) — kept as one computation so they can never disagree.
+  const availableProductsForSupplier = useMemo(() => {
     if (!formData.supplier_id) return [];
-    
-    if (selectedItemType === 'product') {
-      return products.filter(p => p.supplier_id === formData.supplier_id);
-    } else {
-      return services.filter(s => s.supplier_id === formData.supplier_id);
+    return products
+      .filter(p => supplierProductRefs.has(p.id))
+      .map(p => {
+        const ref = supplierProductRefs.get(p.id);
+        return ref?.purchase_price != null ? { ...p, purchase_price: ref.purchase_price } : p;
+      });
+  }, [products, supplierProductRefs, formData.supplier_id]);
+
+  const availableServicesForSupplier = useMemo(() => {
+    if (!formData.supplier_id) return [];
+    return services
+      .filter(s => supplierServiceRefs.has(s.id))
+      .map(s => {
+        const ref = supplierServiceRefs.get(s.id);
+        return ref?.purchase_price != null ? { ...s, purchase_price: ref.purchase_price } : s;
+      });
+  }, [services, supplierServiceRefs, formData.supplier_id]);
+
+  // Fase 5.0F (pedido do utilizador, 2026-08-31): ao escolher a Encomenda
+  // Cliente de origem, busca os produtos desse contrato e resolve o
+  // fornecedor PREFERENCIAL de cada um (item_suppliers.is_preferred) — o
+  // formulário só suporta 1 fornecedor por encomenda, por isso escolhe-se
+  // sozinho o fornecedor mais comum entre as linhas (o mesmo critério que a
+  // geração automática, Fase 5.0C, já usa por produto). Produtos sem
+  // fornecedor preferencial nenhum ficam assinalados à parte — nunca inventa
+  // fornecedor.
+  const handleNewOrderClientOrderChange = async (value: string) => {
+    const id = value === "none" ? "" : value;
+    setNewOrderClientOrderId(id);
+    setPendingClientOrderLines([]);
+    if (!id) return;
+
+    setClientOrderLinesLoading(true);
+    try {
+      const { data, error } = await supabase.rpc('rpc_get_client_order_document', {
+        p_contract_id: id,
+      } as any);
+      if (error) throw error;
+      const doc = data as any;
+      const docLines = ((doc?.lines as any[]) || [])
+        .filter((l) => l.product_id)
+        .map((l) => ({ product_id: l.product_id as string, quantity: Number(l.quantity) || 1 }));
+      setPendingClientOrderLines(docLines);
+
+      if (docLines.length === 0) {
+        toast({ title: "Encomenda sem linhas de produto", description: "Não há produtos associados a este contrato — adiciona manualmente.", variant: "destructive" });
+        return;
+      }
+
+      const companyId = organizationSelection.companyId || activeCompany?.id;
+      const { data: prefRows, error: prefError } = await supabase
+        .from("item_suppliers")
+        .select("product_id, supplier_id, suppliers(name)")
+        .eq("organization_id", companyId)
+        .in("product_id", docLines.map((l) => l.product_id))
+        .eq("is_preferred", true)
+        .eq("is_active", true)
+        .is("deleted_at", null);
+      if (prefError) throw prefError;
+
+      const supplierByProduct = new Map<string, string>();
+      (prefRows || []).forEach((r: any) => supplierByProduct.set(r.product_id, r.supplier_id));
+
+      const noSupplierProducts = docLines.filter((l) => !supplierByProduct.has(l.product_id));
+      if (noSupplierProducts.length > 0) {
+        toast({
+          title: "Produto(s) sem fornecedor atribuído",
+          description: `${noSupplierProducts.length} produto(s) desta Encomenda Cliente não têm fornecedor preferencial — atribui um em Produtos, ou adiciona manualmente aqui já com o fornecedor certo.`,
+          variant: "destructive",
+        });
+      }
+
+      // Fornecedor mais comum entre as linhas resolvidas — escolhido sozinho
+      // só se o campo ainda não tiver sido preenchido manualmente.
+      if (!formData.supplier_id && supplierByProduct.size > 0) {
+        const counts = new Map<string, number>();
+        supplierByProduct.forEach((supplierId) => counts.set(supplierId, (counts.get(supplierId) || 0) + 1));
+        const [dominantSupplierId] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+        setFormData((prev) => ({ ...prev, supplier_id: dominantSupplierId }));
+      }
+    } catch (error: any) {
+      toast({ title: "Erro ao carregar a Encomenda Cliente", description: error.message, variant: "destructive" });
+    } finally {
+      setClientOrderLinesLoading(false);
     }
+  };
+
+  // Preenchimento automático dos itens: só quando há fornecedor escolhido
+  // (preço depende dele) e a encomenda ainda está vazia (não sobrescreve
+  // trabalho manual já feito). Produtos do contrato que este fornecedor não
+  // vende (fora de availableProductsForSupplier) ficam de fora, com aviso —
+  // nunca inventa preço.
+  useEffect(() => {
+    if (editingId || pendingClientOrderLines.length === 0 || !formData.supplier_id || orderItems.length > 0) return;
+
+    const matched: PurchaseOrderItem[] = [];
+    const unmatched: string[] = [];
+
+    pendingClientOrderLines.forEach((line) => {
+      const product = availableProductsForSupplier.find((p) => p.id === line.product_id);
+      if (!product || !product.purchase_price || product.purchase_price <= 0) {
+        unmatched.push(line.product_id);
+        return;
+      }
+      const vatRate = product.vat_rate || 23;
+      const subtotal = product.purchase_price * line.quantity;
+      const vatAmount = subtotal * (vatRate / 100);
+      matched.push({
+        item_type: 'product',
+        product_id: product.id,
+        description: product.name,
+        sku: product.sku || undefined,
+        quantity: line.quantity,
+        unit_price: product.purchase_price,
+        vat_rate: vatRate,
+        vat_amount: vatAmount,
+        total_price: subtotal + vatAmount,
+        selected_attributes: {},
+      });
+    });
+
+    if (matched.length > 0) {
+      setOrderItems(matched);
+      toast({
+        title: "Itens preenchidos automaticamente",
+        description: `${matched.length} produto(s) da Encomenda Cliente adicionado(s).${unmatched.length > 0 ? ` ${unmatched.length} produto(s) sem preço para este fornecedor — adiciona manualmente ou escolhe outro fornecedor.` : ''}`,
+        variant: unmatched.length > 0 ? "destructive" : undefined,
+      });
+    } else if (unmatched.length > 0) {
+      toast({
+        title: "Fornecedor sem preço para estes produtos",
+        description: "Nenhum dos produtos desta Encomenda Cliente tem preço definido para o fornecedor escolhido — adiciona os itens manualmente ou escolhe outro fornecedor.",
+        variant: "destructive",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.supplier_id, pendingClientOrderLines, availableProductsForSupplier]);
+
+  const getAvailableItems = () => {
+    return selectedItemType === 'product' ? availableProductsForSupplier : availableServicesForSupplier;
   };
 
   const handleAddCatalogItems = () => {
@@ -807,6 +1234,12 @@ const PurchaseOrders = () => {
         status: formData.status,
         total_value: total,
         notes: formData.notes || null,
+        // Ligação manual a uma Encomenda Cliente (20261115200000) — só
+        // relevante na criação; rpc_update_purchase_order ignora estas 2
+        // chaves de propósito (nunca reescreve a ligação numa edição).
+        ...(!editingId && newOrderClientOrderId
+          ? { source_type: "contract", source_id: newOrderClientOrderId }
+          : {}),
       };
 
       const itemsPayload = orderItems.map(item => ({
@@ -883,6 +1316,9 @@ const PurchaseOrders = () => {
     const colors: Record<string, string> = {
       pending: "bg-warning/10 text-warning",
       ordered: "bg-info/10 text-info",
+      // Intermédio entre "ordered" (info/azul) e "received" (success/verde) —
+      // teal já usado noutros ecrãs do projeto para estados intermédios.
+      partially_received: "bg-teal-500/10 text-teal-600",
       received: "bg-success/10 text-success",
       cancelled: "bg-destructive/10 text-destructive",
     };
@@ -893,6 +1329,7 @@ const PurchaseOrders = () => {
     const labels: Record<string, string> = {
       pending: t('purchaseOrders.status.pending'),
       ordered: t('purchaseOrders.status.ordered'),
+      partially_received: t('purchaseOrders.status.partiallyReceived'),
       received: t('purchaseOrders.status.received'),
       cancelled: t('purchaseOrders.status.cancelled'),
     };
@@ -1081,6 +1518,39 @@ const PurchaseOrders = () => {
 
   const totals = calculateTotals();
 
+  // Filtros aplicados em memória sobre `orders` (já carregado inteiro via
+  // fetchAllRows — ver loadData()). A data é comparada como string "YYYY-MM-DD"
+  // (mesmo formato de order_date/actual_delivery_date e dos <Input type="date">),
+  // por isso a comparação lexicográfica funciona sem conversão para Date.
+  const filteredOrders = useMemo(() => {
+    return orders.filter((order) => {
+      if (supplierFilter !== "all" && order.supplier_id !== supplierFilter) return false;
+      if (statusFilterValue !== "all" && order.status !== statusFilterValue) return false;
+
+      const fieldValue = dateFilterField === "order_date"
+        ? order.order_date
+        : (order as any).actual_delivery_date;
+
+      if (dateFrom || dateTo) {
+        if (!fieldValue) return false;
+        if (dateFrom && fieldValue < dateFrom) return false;
+        if (dateTo && fieldValue > dateTo) return false;
+      }
+
+      return true;
+    });
+  }, [orders, supplierFilter, statusFilterValue, dateFrom, dateTo, dateFilterField]);
+
+  const hasActiveOrderFilters = supplierFilter !== "all" || statusFilterValue !== "all" || !!dateFrom || !!dateTo;
+
+  const clearOrderFilters = () => {
+    setSupplierFilter("all");
+    setStatusFilterValue("all");
+    setDateFrom("");
+    setDateTo("");
+    setDateFilterField("order_date");
+  };
+
   if (companyLoading) {
     return (
       <>
@@ -1191,6 +1661,8 @@ const PurchaseOrders = () => {
                   departmentId: "",
                   secondaryCompanyIds: [],
                 });
+                setNewOrderClientOrderId("");
+                setPendingClientOrderLines([]);
                }
              }}>
               <DialogTrigger asChild>
@@ -1202,6 +1674,18 @@ const PurchaseOrders = () => {
               <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{editingId ? t('purchaseOrders.editOrder') : t('purchaseOrders.newOrder')}</DialogTitle>
+                  {editingId && orderSourceInfo && (
+                    <p className="text-sm text-muted-foreground">
+                      {t('purchaseOrders.generatedFromContract', {
+                        contractNumber: orderSourceInfo.contractNumber,
+                        clientName: orderSourceInfo.clientName,
+                      }) || `Gerada automaticamente a partir do Contrato ${orderSourceInfo.contractNumber} — Cliente ${orderSourceInfo.clientName}`}
+                      {' '}
+                      <Link to={`/client-orders?open=${orderSourceInfo.contractId}`} className="underline">
+                        {t('purchaseOrders.viewClientOrder') || 'Ver Encomenda Cliente'}
+                      </Link>
+                    </p>
+                  )}
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-6">
                   {/* Organization Selection */}
@@ -1211,6 +1695,40 @@ const PurchaseOrders = () => {
                     showSecondaryCompanies={false}
                     multiSelectCompanies={false}
                   />
+
+                  {/* Fase 5.0F: ligação manual opcional a uma Encomenda Cliente — só
+                      na criação, resolve o caso "sem_fornecedor" em Encomendas
+                      Clientes (produto sem fornecedor preferencial na altura da
+                      assinatura, nenhuma PO autogerada). */}
+                  {!editingId && clientOrderOptions.length > 0 && (
+                    <div className="space-y-2">
+                      <Label htmlFor="new_order_client_order">{t('purchaseOrders.form.clientOrderSource') || 'Encomenda Cliente de origem (opcional)'}</Label>
+                      <Select
+                        value={newOrderClientOrderId || "none"}
+                        onValueChange={handleNewOrderClientOrderChange}
+                        disabled={clientOrderLinesLoading}
+                      >
+                        <SelectTrigger id="new_order_client_order">
+                          <SelectValue placeholder={t('purchaseOrders.form.clientOrderSourceNone') || 'Nenhuma — encomenda sem ligação a um contrato'} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">{t('purchaseOrders.form.clientOrderSourceNone') || 'Nenhuma — encomenda sem ligação a um contrato'}</SelectItem>
+                          {clientOrderOptions.map((o) => (
+                            <SelectItem key={o.contract_id} value={o.contract_id}>
+                              {o.contract_number} — {o.client_name || "—"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        {clientOrderLinesLoading
+                          ? "A carregar produtos da encomenda…"
+                          : (pendingClientOrderLines.length > 0 && !formData.supplier_id)
+                            ? "Escolhe o fornecedor abaixo para os produtos desta Encomenda Cliente serem adicionados automaticamente."
+                            : (t('purchaseOrders.form.clientOrderSourceHint') || 'Liga esta encomenda à Encomenda Cliente que está a satisfazer — os produtos preenchem-se automaticamente ao escolher o fornecedor. Fica rastreável em "Encomendas Clientes" e o estado atualiza quando esta for recebida.')}
+                      </p>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -1261,15 +1779,49 @@ const PurchaseOrders = () => {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="pending">{t('purchaseOrders.status.pending')}</SelectItem>
-                          <SelectItem value="ordered">{t('purchaseOrders.status.ordered')}</SelectItem>
-                          <SelectItem value="received">{t('purchaseOrders.status.received')}</SelectItem>
+                          {/* Passar a "ordered" (aprovar a encomenda) requer purchase_orders.approve.
+                              Continua visível se já for o valor atual (ex.: a reabrir uma encomenda
+                              já aprovada por quem entretanto perdeu a permissão), só fica indisponível
+                              para escolher de novo a partir de outro estado sem a permissão. Isto é só
+                              UX — o backend rejeita na mesma quem contornar isto. */}
+                          {(hasPermission('purchase_orders.approve') || formData.status === 'ordered') && (
+                            <SelectItem value="ordered">{t('purchaseOrders.status.ordered')}</SelectItem>
+                          )}
+                          {/* "received" já não é uma opção genérica aqui — passa pelo botão
+                              dedicado "Marcar como recebida" na lista (Fase 4C), que pede o
+                              armazém de destino e gera a entrada em stock_movements. Manter
+                              este dropdown a permitir 'received' deixaria criar encomendas
+                              "recebidas" sem nunca dar entrada em stock nenhum. */}
+                          {editingId && formData.status === 'received' && (
+                            <SelectItem value="received">{t('purchaseOrders.status.received')}</SelectItem>
+                          )}
+                          {/* "partially_received" nunca é uma escolha manual — é derivado por
+                              rpc_receive_purchase_order_lines a partir das receções parciais
+                              já registadas. Só aparece aqui, desativado, se a encomenda já
+                              estiver neste estado (hoje inatingível a partir deste formulário,
+                              já que o botão de editar fica desativado para encomendas com
+                              receção parcial — mantido por clareza/defesa em profundidade). */}
+                          {editingId && formData.status === 'partially_received' && (
+                            <SelectItem value="partially_received" disabled>
+                              {t('purchaseOrders.status.partiallyReceived')}
+                            </SelectItem>
+                          )}
                           <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
+                      {!hasPermission('purchase_orders.approve') && formData.status !== 'ordered' && (
+                        <p className="text-xs text-muted-foreground">
+                          Sem permissão para aprovar encomendas (mudar para "{t('purchaseOrders.status.ordered')}").
+                        </p>
+                      )}
                       {formData.status === 'received' && (
                         <p className="text-xs text-muted-foreground">
-                          {t('purchaseOrders.form.receivedStockNote') ||
-                            'Marcar como recebida não atualiza automaticamente o stock — atualize os armazéns manualmente em Stocks.'}
+                          Esta encomenda já foi recebida (stock atualizado). Para reverter, usa um ajuste em Stocks.
+                        </p>
+                      )}
+                      {formData.status === 'partially_received' && (
+                        <p className="text-xs text-muted-foreground">
+                          Esta encomenda já tem linhas parcialmente recebidas — não é possível editá-la nem cancelá-la. Para devolver mercadoria já recebida, usa a devolução ao fornecedor.
                         </p>
                       )}
                     </div>
@@ -1422,11 +1974,84 @@ const PurchaseOrders = () => {
         </div>
 
         <Card>
-          {orders.length === 0 ? (
+          <CardContent className="pt-6">
+            <div className="flex flex-col md:flex-row gap-4 flex-wrap md:items-end">
+              <div className="space-y-2 w-full md:w-[200px]">
+                <Label>{t('purchaseOrders.filters.supplier')}</Label>
+                <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('purchaseOrders.filters.all')}</SelectItem>
+                    {suppliers.map((supplier) => (
+                      <SelectItem key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 w-full md:w-[200px]">
+                <Label>{t('purchaseOrders.filters.status')}</Label>
+                <Select value={statusFilterValue} onValueChange={setStatusFilterValue}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('purchaseOrders.filters.all')}</SelectItem>
+                    <SelectItem value="pending">{getStatusLabel('pending')}</SelectItem>
+                    <SelectItem value="ordered">{getStatusLabel('ordered')}</SelectItem>
+                    <SelectItem value="partially_received">{getStatusLabel('partially_received')}</SelectItem>
+                    <SelectItem value="received">{getStatusLabel('received')}</SelectItem>
+                    <SelectItem value="cancelled">{getStatusLabel('cancelled')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 w-full md:w-[190px]">
+                <Label>{t('purchaseOrders.filters.dateField')}</Label>
+                <Select
+                  value={dateFilterField}
+                  onValueChange={(value) => setDateFilterField(value as "order_date" | "actual_delivery_date")}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="order_date">{t('purchaseOrders.filters.dateFieldOrder')}</SelectItem>
+                    <SelectItem value="actual_delivery_date">{t('purchaseOrders.filters.dateFieldDelivery')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2 w-full md:w-[160px]">
+                <Label>{t('purchaseOrders.filters.dateFrom')}</Label>
+                <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              </div>
+
+              <div className="space-y-2 w-full md:w-[160px]">
+                <Label>{t('purchaseOrders.filters.dateTo')}</Label>
+                <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </div>
+
+              {hasActiveOrderFilters && (
+                <Button variant="outline" onClick={clearOrderFilters}>
+                  <X className="w-4 h-4 mr-2" />
+                  {t('purchaseOrders.filters.clear')}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          {filteredOrders.length === 0 ? (
             <div className="p-8 text-center space-y-4">
               <ShoppingCart className="mx-auto h-12 w-12 text-muted-foreground" />
               <p className="text-muted-foreground">
-                {t('purchaseOrders.noOrders')}
+                {hasActiveOrderFilters ? t('purchaseOrders.filters.noResults') : t('purchaseOrders.noOrders')}
               </p>
             </div>
           ) : (
@@ -1443,7 +2068,7 @@ const PurchaseOrders = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orders.map((order) => (
+                {filteredOrders.map((order) => (
                   <TableRow key={order.id}>
                     <TableCell className="font-mono font-semibold">{order.order_number}</TableCell>
                     <TableCell>{order.suppliers?.name || "N/A"}</TableCell>
@@ -1476,8 +2101,25 @@ const PurchaseOrders = () => {
                             <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
                               <FileDown className="w-4 h-4" />
                             </Button>
+                            {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
+                              <PermissionGate permission="purchase_orders.receive">
+                                <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
+                                  <PackageCheck className="w-4 h-4" />
+                                </Button>
+                              </PermissionGate>
+                            )}
                             <PermissionGate permission="purchase_orders.edit">
-                              <Button variant="ghost" size="icon" onClick={() => handleEdit(order)}>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => handleEdit(order)}
+                                disabled={order.status === 'partially_received' || order.status === 'received'}
+                                title={
+                                  order.status === 'partially_received' || order.status === 'received'
+                                    ? "Não é possível editar uma encomenda já recebida"
+                                    : undefined
+                                }
+                              >
                                 <Pencil className="w-4 h-4" />
                               </Button>
                             </PermissionGate>
@@ -1516,7 +2158,7 @@ const PurchaseOrders = () => {
             </TabsList>
             
             <TabsContent value="product" className="space-y-4 max-h-[50vh] overflow-y-auto">
-              {products.filter(p => p.supplier_id === formData.supplier_id).map((product) => (
+              {availableProductsForSupplier.map((product) => (
                 <div key={product.id} className="flex items-start gap-4 p-4 border rounded-lg">
                   <Checkbox
                     checked={selectedCatalogItems.includes(product.id)}
@@ -1598,7 +2240,7 @@ const PurchaseOrders = () => {
             </TabsContent>
             
             <TabsContent value="service" className="space-y-4 max-h-[50vh] overflow-y-auto">
-              {services.filter(s => s.supplier_id === formData.supplier_id).map((service) => (
+              {availableServicesForSupplier.map((service) => (
                 <div key={service.id} className="flex items-start gap-4 p-4 border rounded-lg">
                   <Checkbox
                     checked={selectedCatalogItems.includes(service.id)}
@@ -1663,6 +2305,115 @@ const PurchaseOrders = () => {
           }}
         />
       )}
+
+      {/* Receção de encomenda, total ou parcial (Fase 4) — pede o armazém de
+          destino e, por linha de produto, a quantidade a dar entrada agora;
+          liga a rpc_receive_purchase_order_lines (recebe só as
+          linhas/quantidades indicadas). Receções parciais em armazéns
+          diferentes fazem-se em 2 chamadas separadas (1 armazém por chamada). */}
+      <Dialog open={receiveDialogOpen} onOpenChange={setReceiveDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Receção de encomenda{receivingOrder ? ` — ${receivingOrder.order_number}` : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Indica, por linha, a quantidade a dar entrada em stock agora. Só as quantidades
+              indicadas são recebidas — o que ficar por preencher continua por receber para uma
+              entrega posterior.
+            </p>
+            <div className="space-y-2">
+              <Label>Armazém de destino</Label>
+              <Select value={receiveWarehouseId} onValueChange={setReceiveWarehouseId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Escolhe um armazém" />
+                </SelectTrigger>
+                <SelectContent>
+                  {receiveWarehouses.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>{t("purchaseOrders.receive.actualDeliveryDate")}</Label>
+              <Input
+                type="date"
+                value={actualDeliveryDate}
+                onChange={(e) => setActualDeliveryDate(e.target.value)}
+              />
+            </div>
+
+            {receiveLines.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <Label>Linhas a receber</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={handleSelectAllReceiveLines}>
+                    Selecionar tudo
+                  </Button>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead className="text-right">Encomendada</TableHead>
+                      <TableHead className="text-right">Já recebida</TableHead>
+                      <TableHead className="text-right">Receber agora</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {receiveLines.map((item) => {
+                      const remaining = getReceiveRemaining(item);
+                      const fullyReceived = remaining <= 0;
+                      return (
+                        <TableRow key={item.id} className={fullyReceived ? "opacity-50" : ""}>
+                          <TableCell className={fullyReceived ? "line-through" : ""}>
+                            <div className="font-medium">{item.products?.name || item.description}</div>
+                            {item.sku && (
+                              <div className="text-xs text-muted-foreground font-mono">{item.sku}</div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right">{item.quantity}</TableCell>
+                          <TableCell className="text-right">{item.received_quantity || 0}</TableCell>
+                          <TableCell className="text-right">
+                            {fullyReceived ? (
+                              <span className="text-xs text-muted-foreground">já recebida</span>
+                            ) : (
+                              <Input
+                                type="number"
+                                min={0}
+                                max={remaining}
+                                step="1"
+                                className="w-24 ml-auto"
+                                value={receiveLineQuantities[item.id] ?? 0}
+                                onChange={(e) => {
+                                  const raw = parseFloat(e.target.value);
+                                  const clamped = isNaN(raw) ? 0 : Math.min(Math.max(raw, 0), remaining);
+                                  setReceiveLineQuantities((prev) => ({ ...prev, [item.id]: clamped }));
+                                }}
+                              />
+                            )}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setReceiveDialogOpen(false)} disabled={receiving}>
+                Cancelar
+              </Button>
+              <Button onClick={handleReceiveOrder} disabled={receiving || !receiveWarehouseId}>
+                {receiving ? "A confirmar..." : "Confirmar receção"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };
