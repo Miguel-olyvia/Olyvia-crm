@@ -96,7 +96,7 @@ const ClientOrders = () => {
   const { hasPermission } = usePermissions();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const canConfirmStockExit = hasPermission('inventory.edit');
+  const canConfirmStockExit = hasPermission('inventory.edit') && hasPermission('client_orders.confirm_stock_exit');
 
   const [orders, setOrders] = useState<ClientOrderDocumentRow[]>([]);
   const [loading, setLoading] = useState(true);

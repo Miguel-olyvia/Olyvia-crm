@@ -1100,7 +1100,7 @@ const Suppliers = () => {
                                   <Truck className="h-4 w-4" />
                                 </Button>
                               </PermissionGate>
-                              <PermissionGate permission="suppliers.view">
+                              <PermissionGate permissions={["suppliers.view", "suppliers.view_sla_report"]} requireAll>
                                 <Button
                                   variant="ghost"
                                   size="sm"
