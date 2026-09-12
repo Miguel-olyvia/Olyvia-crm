@@ -475,6 +475,33 @@ export interface PessoaVinculo {
   formacao_fim: string | null;
 }
 
+/**
+ * `pessoas_vinculos_horas` (20261130120000). Versoes de horas contratadas,
+ * validas por intervalo de datas -- copia estrutural de `PessoaRetribuicao`.
+ * `pessoas_vinculos.horas_periodo`/`horas_frequencia` sao agora DERIVADOS
+ * daqui (a versao em aberto da pessoa, escrita no vinculo em vigor por
+ * trigger) -- nunca se escrevem directamente. Ver `usePessoaVinculoHoras.ts`.
+ */
+export interface PessoaVinculoHoras {
+  id: string;
+  pessoa_id: string;
+  organization_id: string;
+  vinculo_id: string | null;
+  /** A quantidade, na unidade de `horas_frequencia` -- mesmo desenho de `PessoaVinculo.horas_periodo`. */
+  horas_periodo: number;
+  horas_frequencia: HorasFrequencia;
+  /** Coluna GERADA na base: nunca se escreve. */
+  horas_semanais_equivalentes: number | null;
+  valido_de: string;
+  /** `null` = em vigor (aberta). Uma so por PESSOA. */
+  valido_ate: string | null;
+  motivo: string | null;
+  /** O aditamento assinado que origina esta versao, quando existir um. */
+  documento_id: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface PessoaRetribuicao {
   id: string;
   pessoa_id: string;
@@ -676,6 +703,40 @@ export interface HorarioRealizado {
   validado_em: string | null;
   motivo_rejeicao: string | null;
   notas: string | null;
+}
+
+/**
+ * `pessoas_afectacoes` (20261130060000). Onde a pessoa trabalha, e desde
+ * quando -- SEM HORAS (essas leem-se do horario). Varias linhas podem estar
+ * em aberto ao mesmo tempo, desde que sejam de CENTROS diferentes; duas do
+ * mesmo centro a cruzarem-se no tempo sao recusadas pela base.
+ *
+ * `pessoas.local_id` passa a ser DERIVADO desta tabela (a afectacao em aberto
+ * mais recente) -- nao se escreve directamente. Ver `usePessoaAfectacoes.ts`.
+ */
+export type OrigemAfectacao = "declarada" | "do_horario" | "inferida";
+
+export interface PessoaAfectacao {
+  id: string;
+  pessoa_id: string;
+  organization_id: string;
+  vinculo_id: string | null;
+  local_id: string;
+  valido_de: string;
+  /** `null` = em vigor (aberta). */
+  valido_ate: string | null;
+  motivo: string | null;
+  /**
+   * declarada = RH escreveu-a directamente. do_horario = deduzida de um bloco
+   * de horario existente. inferida = so havia `pessoas.local_id`, sem
+   * horario -- o palpite mais fraco. Confirmar (`confirmada_por`/`confirmada_em`)
+   * NAO muda a origem.
+   */
+  origem: OrigemAfectacao;
+  confirmada_por: string | null;
+  confirmada_em: string | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // -- Documentos (20261123020000..20261123030000) -----------------------------

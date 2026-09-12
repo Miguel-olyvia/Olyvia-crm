@@ -37,6 +37,18 @@
  * o `estado` aqui, nao um enum solto na ficha. Sem RPC nova: grava-se pelo
  * mesmo `onGuardarVinculo` que ja existia. Terminar sem `data_fim` bloqueia-se
  * no cliente -- a mesma perda que a migration de backfill recusa fazer.
+ *
+ * AS HORAS DE TRABALHO DEIXARAM DE SE EDITAR AQUI (20261130120000)
+ * -------------------------------------------------------------------
+ * `horas_periodo`/`horas_frequencia` do vinculo sao agora DERIVADOS por
+ * trigger a partir da versao em aberto de `pessoas_vinculos_horas` --
+ * escreve-los directamente no vinculo e recusado pela base
+ * (`pessoas_vinculos_horas_e_derivado`). Os dois campos ficam aqui SO EM
+ * LEITURA (mostram o valor em vigor, que continua a vir de `activo`); quem os
+ * quer mudar usa o cartao "Horas contratadas", mais abaixo
+ * (`PessoaVinculoHorasCard`), que distingue ALTERAR (fecha a versao em vigor
+ * e abre outra, com data de efeito) de CORRIGIR (reescreve uma versao ja
+ * decorrida) -- a mesma distincao de `PessoaAfectacoesSeccao`.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -67,13 +79,10 @@ import {
   regimeContradizTipoContrato,
   type CampoNumericoContrato,
 } from "@/lib/hr/contrato";
-import {
-  equivalenteParaMostrar,
-  horasImplausiveis,
-  maximoDaFrequencia,
-} from "@/lib/hr/horas";
+import { equivalenteParaMostrar, horasImplausiveis } from "@/lib/hr/horas";
 import { somarDias } from "@/lib/hr/ausencias";
 import { sugerirPeriodoExperimentalDias } from "@/lib/hr/periodoExperimental";
+import { PessoaVinculoHorasCard } from "@/components/hr/PessoaVinculoHorasCard";
 import {
   CATEGORIAS_FUNCAO,
   DIAS_SEMANA,
@@ -99,11 +108,19 @@ import {
 } from "@/types/hr";
 
 interface PessoaContratoTabProps {
+  pessoaId: string;
+  organizationId: string;
   vinculos: PessoaVinculo[];
   retribuicao: PessoaRetribuicao | null;
   podeEditar: boolean;
   /** `hr.pessoas.retribuicao.view`: o salario tem permissao propria. */
   podeVerRetribuicao: boolean;
+  /**
+   * `hr.pessoas.vinculos.horas.corrigir`: CORRIGIR uma versao ja decorrida de
+   * `pessoas_vinculos_horas` e permissao a parte, mais perigosa que ALTERAR
+   * (essa reaproveita `podeEditar`) -- ver `PessoaVinculoHorasCard`.
+   */
+  podeCorrigirHoras: boolean;
   saving: boolean;
   onGuardarVinculo: (
     vinculoId: string | null,
@@ -216,10 +233,13 @@ function textoOuNull(valor: string): string | null {
 }
 
 export function PessoaContratoTab({
+  pessoaId,
+  organizationId,
   vinculos,
   retribuicao,
   podeEditar,
   podeVerRetribuicao,
+  podeCorrigirHoras,
   saving,
   onGuardarVinculo,
 }: PessoaContratoTabProps) {
@@ -374,10 +394,6 @@ export function PessoaContratoTab({
     return t(problema.mensagemKey);
   };
 
-  // O tecto do campo de horas segue a UNIDADE escolhida: 16 por dia, 80 por
-  // semana, 346,67 por mes, 4160 por ano -- todos derivados do mesmo factor
-  // que a coluna gerada da base usa.
-  const maximoDeHoras = maximoDaFrequencia(rascunho.horas_frequencia);
   const horasNumero = Number(rascunho.horas_periodo.replace(",", "."));
   const horasLegiveis = rascunho.horas_periodo.trim() !== "" && Number.isFinite(horasNumero);
   const equivalente = horasLegiveis
@@ -427,8 +443,9 @@ export function PessoaContratoTab({
       periodo_experimental_origem: temExperimental ? rascunho.periodo_experimental_origem : null,
       tipo_trabalho:
         rascunho.tipo_trabalho === "" ? null : (rascunho.tipo_trabalho as TipoTrabalho),
-      horas_periodo: numeroOuNull(rascunho.horas_periodo),
-      horas_frequencia: rascunho.horas_frequencia,
+      // horas_periodo/horas_frequencia NAO vao aqui: sao derivados de
+      // `pessoas_vinculos_horas` desde 20261130120000 -- escreve-los no
+      // vinculo e recusado pela base. Ver `PessoaVinculoHorasCard`.
       tempo_trabalho_pct: numeroOuNull(rascunho.tempo_trabalho_pct),
       politica_feriados: rascunho.politica_feriados,
       horas_anuais_maximas: numeroOuNull(rascunho.horas_anuais_maximas),
@@ -723,33 +740,32 @@ export function PessoaContratoTab({
                 }))}
                 onChange={(v) => definir("tipo_trabalho", v)}
               />
+              {/* So-leitura desde 20261130120000: as duas colunas sao
+                  derivadas de `pessoas_vinculos_horas` -- alteram-se no
+                  cartao "Horas contratadas", mais abaixo. */}
               <CampoTexto
                 id="hr-contrato-horas-periodo"
                 label={t("hr.contrato.horasTrabalho")}
-                erro={erroDe("hr-contrato-horas-periodo")}
                 ajuda={
                   equivalente
                     ? t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })
-                    : undefined
+                    : t("hr.contrato.ajudaHorasDerivadas")
                 }
                 tipo="number"
-                min={0}
-                max={maximoDeHoras}
-                step="0.5"
                 valor={rascunho.horas_periodo}
-                disabled={!podeEditar}
-                onChange={(v) => definir("horas_periodo", v)}
+                disabled
+                onChange={() => {}}
               />
               <CampoSelect
                 id="hr-contrato-horas-frequencia"
                 label={t("hr.contrato.horasFrequencia")}
                 valor={rascunho.horas_frequencia}
-                disabled={!podeEditar}
+                disabled
                 opcoes={HORAS_FREQUENCIAS.map((f) => ({
                   value: f,
                   label: t(`hr.horasFrequencia.${f}`),
                 }))}
-                onChange={(v) => definir("horas_frequencia", v as HorasFrequencia)}
+                onChange={() => {}}
               />
               {horasSuspeitas && (
                 <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
@@ -893,6 +909,14 @@ export function PessoaContratoTab({
           </CardContent>
         </Card>
       )}
+
+      <PessoaVinculoHorasCard
+        pessoaId={pessoaId}
+        organizationId={organizationId}
+        vinculoActivoId={activo?.id ?? null}
+        podeAlterar={podeEditar}
+        podeCorrigir={podeCorrigirHoras}
+      />
 
       {historico.length > 0 && (
         <Card>

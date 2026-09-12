@@ -116,8 +116,18 @@ export default function PessoaDetail() {
 
   const podeVerLaborais = hasPermission("hr.pessoas.laborais.view");
   const podeEditarLaborais = hasPermission("hr.pessoas.laborais.edit");
+  // Afectacoes a centros: ver, alterar (gesto normal) e corrigir historico
+  // (gesto perigoso) sao TRES permissoes distintas -- ver o cabecalho de
+  // `PessoaAfectacoesSeccao`.
+  const podeVerAfectacoes = hasPermission("hr.pessoas.afectacoes.view");
+  const podeEditarAfectacoes = hasPermission("hr.pessoas.afectacoes.edit");
+  const podeCorrigirAfectacoes = hasPermission("hr.pessoas.afectacoes.corrigir");
   const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
   const podeEditarVinculos = hasPermission("hr.pessoas.vinculos.edit");
+  // Horas contratadas versionadas (pessoas_vinculos_horas, 20261130120000):
+  // ALTERAR reaproveita `podeEditarVinculos`; CORRIGIR e permissao a parte,
+  // mais perigosa -- ver o cabecalho de `PessoaVinculoHorasCard`.
+  const podeCorrigirHorasVinculo = hasPermission("hr.pessoas.vinculos.horas.corrigir");
   const podeVerRetribuicao = hasPermission("hr.pessoas.retribuicao.view");
   const podeVerHorario = hasPermission("hr.pessoas.horario.view");
   const podeEditarHorario = hasPermission("hr.pessoas.horario.edit");
@@ -169,6 +179,16 @@ export default function PessoaDetail() {
   const estadoContratoDerivado = podeVerVinculos
     ? derivarEstadoContrato(ficha.vinculos)
     : null;
+
+  // A politica de SELECT de `pessoas_afectacoes` tambem deixa ver a propria
+  // ficha por `hr.pessoas.view.own` -- sem este OR, a propria pessoa via a
+  // seccao vazia mesmo com a base a devolver linhas.
+  const podeVerAfectacoesEfectivo = podeVerAfectacoes || minhaPessoaId === pessoa?.id;
+
+  // Vinculo "em vigor" para ligar a uma afectacao nova -- o mesmo criterio de
+  // `usePessoa.savePlaneado` (activo OU suspenso).
+  const vinculoActivoId =
+    ficha.vinculos.find((v) => v.estado === "activo" || v.estado === "suspenso")?.id ?? null;
 
   // O mesmo criterio de `PessoaAusenciasTab.podeVer`, para o cartao da Visao
   // geral so mostrar o numero de pendentes a quem o separador tambem mostra.
@@ -378,6 +398,10 @@ export default function PessoaDetail() {
               podeEditar={podeEditarLaborais}
               saving={ficha.saving}
               onGuardar={ficha.savePessoa}
+              vinculoActivoId={vinculoActivoId}
+              podeVerAfectacoes={podeVerAfectacoesEfectivo}
+              podeEditarAfectacoes={podeEditarAfectacoes}
+              podeCorrigirAfectacoes={podeCorrigirAfectacoes}
             />
           ) : (
             <Card>
@@ -418,10 +442,13 @@ export default function PessoaDetail() {
         <TabsContent value="contratos">
           {podeVerVinculos ? (
             <PessoaContratoTab
+              pessoaId={pessoa.id}
+              organizationId={pessoa.organization_id}
               vinculos={ficha.vinculos}
               retribuicao={ficha.retribuicao}
               podeEditar={podeEditarVinculos}
               podeVerRetribuicao={podeVerRetribuicao}
+              podeCorrigirHoras={podeCorrigirHorasVinculo}
               saving={ficha.saving}
               onGuardarVinculo={ficha.saveVinculo}
             />

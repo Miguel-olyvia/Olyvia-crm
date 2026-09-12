@@ -18,6 +18,25 @@ vi.mock("@/lib/toast", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
+// A seccao de afectacoes (`PessoaAfectacoesSeccao`) carrega `pessoas_afectacoes`
+// ao montar. Sem este mock o teste tentava mesmo chamar o Supabase real.
+function buildChain() {
+  const chain: Record<string, unknown> = {
+    select: () => chain,
+    eq: () => chain,
+    is: () => chain,
+    order: () => chain,
+    then(onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) {
+      return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
+    },
+  };
+  return chain;
+}
+vi.mock("@/integrations/supabase/client", () => ({
+  supabase: { from: () => buildChain(), rpc: () => Promise.resolve({ data: null, error: null }) },
+}));
+vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
+
 import { PessoaLaboraisTab } from "@/components/hr/PessoaLaboraisTab";
 import type { Pessoa } from "@/types/hr";
 
@@ -55,6 +74,10 @@ function montar(onGuardar = vi.fn().mockResolvedValue(null)) {
       podeEditar
       saving={false}
       onGuardar={onGuardar}
+      vinculoActivoId={null}
+      podeVerAfectacoes={false}
+      podeEditarAfectacoes={false}
+      podeCorrigirAfectacoes={false}
     />,
   );
   return { onGuardar };

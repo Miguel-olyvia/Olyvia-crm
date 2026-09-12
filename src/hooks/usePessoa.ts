@@ -473,19 +473,29 @@ export function usePessoa(pessoaId: string | undefined) {
    * por politica restritiva, e e assim que se quer -- o historico de contratos
    * nao se apaga. Terminar um contrato e por-lhe `estado = terminado` e abrir
    * outro, nao apagar a linha.
+   *
+   * `horas_periodo`/`horas_frequencia` NUNCA passam daqui (20261130120000):
+   * sao derivados por trigger a partir da versao em aberto de
+   * `pessoas_vinculos_horas` -- um UPDATE directo a essas colunas e recusado
+   * pela base (`pessoas_vinculos_horas_e_derivado`). Tiram-se do patch aqui,
+   * e nao so no ecra que o compoe, para nenhum chamador futuro poder
+   * ressuscitar o caminho antigo por engano. Quem quer ALTERAR ou CORRIGIR as
+   * horas usa `usePessoaVinculoHoras`, o unico caminho de escrita.
    */
   const saveVinculo = useCallback(
     (vinculoId: string | null, patch: Partial<PessoaVinculo>) =>
       guardar(async (autorId) => {
         const orgId = ficha.pessoa?.organization_id;
         if (!orgId || !pessoaId) return { error: new Error("Ficha sem organizacao resolvida") };
+        const { horas_periodo: _horasPeriodo, horas_frequencia: _horasFrequencia, ...patchSemHoras } =
+          patch;
         if (vinculoId) {
           return hrFrom("pessoas_vinculos")
-            .update({ ...patch, updated_by: autorId })
+            .update({ ...patchSemHoras, updated_by: autorId })
             .eq("id", vinculoId);
         }
         return hrFrom("pessoas_vinculos").insert({
-          ...patch,
+          ...patchSemHoras,
           pessoa_id: pessoaId,
           organization_id: orgId,
           estado: patch.estado ?? "activo",

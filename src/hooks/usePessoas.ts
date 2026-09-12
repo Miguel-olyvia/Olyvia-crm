@@ -64,6 +64,10 @@ export interface SeccaoFalhada {
     | "vinculo"
     | "retribuicao"
     | "horario"
+    // A afectacao ao centro escolhido no passo 3 (`pessoas_afectacoes`).
+    // Falhar isto NAO desfaz a ficha; so fica sem local atribuido -- corrige-se
+    // depois na propria ficha, na seccao de afectacoes.
+    | "afectacao"
     | "acesso"
     // A ligacao a uma conta de CRM (`rpc_hr_ligar_conta`), escolhida no passo
     // 1 do assistente. Falhar isto NAO desfaz a ficha -- ela ja existe, e a
@@ -271,10 +275,17 @@ export function usePessoas() {
       const autorId = await resolveCurrentBusinessUserId();
       const falhas: SeccaoFalhada[] = [];
 
+      // `local_id` NAO vai neste insert: desde 20261130060000 e DERIVADO da
+      // afectacao em aberto (`pessoas_afectacoes`) por um trigger AFTER, e
+      // escreve-lo aqui deixaria a pessoa com um local sem nenhuma afectacao
+      // por tras -- exactamente a segunda verdade que a migracao veio evitar.
+      // Ver mais abaixo, depois do vinculo: e onde se insere a afectacao.
+      const { local_id: localIdEscolhido, ...nucleoSemLocal } = payload.nucleo;
+
       const { data, error: erro } = await hrFrom("pessoas")
         .insert({
           organization_id: organizationId,
-          ...payload.nucleo,
+          ...nucleoSemLocal,
           created_by: autorId,
           updated_by: autorId,
         })
@@ -394,6 +405,22 @@ export function usePessoas() {
           hrFrom("pessoas_horario_planeado").insert(
             payload.horario!.map((linha) => ({ ...base, ...linha, vinculo_id: vinculoId })),
           ),
+        );
+      }
+
+      // O local escolhido no assistente vira uma afectacao `declarada`, em
+      // aberto -- NUNCA `pessoas.local_id` directamente (ver acima). O
+      // trigger AFTER de `pessoas_afectacoes` e que acaba por o escrever.
+      if (localIdEscolhido) {
+        await gravar("afectacao", () =>
+          hrFrom("pessoas_afectacoes").insert({
+            ...base,
+            local_id: localIdEscolhido,
+            vinculo_id: vinculoId,
+            valido_de: payload.nucleo.data_admissao ?? dataDeHoje(),
+            valido_ate: null,
+            origem: "declarada",
+          }),
         );
       }
 

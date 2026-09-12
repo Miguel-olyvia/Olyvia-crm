@@ -76,10 +76,13 @@ function montar(overrides: { podeEditar?: boolean; onGuardarVinculo?: OnGuardarV
   const onGuardarVinculo = overrides.onGuardarVinculo ?? vi.fn().mockResolvedValue(null);
   render(
     <PessoaContratoTab
+      pessoaId="p1"
+      organizationId="org"
       vinculos={[VINCULO_ACTIVO]}
       retribuicao={null}
       podeEditar={overrides.podeEditar ?? true}
       podeVerRetribuicao={false}
+      podeCorrigirHoras={false}
       saving={false}
       onGuardarVinculo={onGuardarVinculo}
     />,

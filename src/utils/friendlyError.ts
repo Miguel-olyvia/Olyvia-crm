@@ -67,6 +67,14 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /pessoa_ja_tem_conta_activa/i, key: "hr.conta.erroPessoaJaTemConta" },
   { match: /conta_sem_membership_na_organizacao/i, key: "hr.conta.erroSemMembershipNaOrganizacao" },
   { match: /pessoa_sem_conta_activa/i, key: "hr.conta.erroSemContaActiva" },
+  // `pessoas_afectacoes` (20261130060000). `afectacao_tem_horario_a_frente`
+  // vem ANTES de `afectacao_sobreposta` so por serem prefixos distintos -- a
+  // ordem entre estas duas nao importa, mas tem de vir antes de qualquer
+  // padrao generico (`duplicate`, `forbidden`) que a apanhasse por engano.
+  { match: /afectacao_tem_horario_a_frente/i, key: "friendlyError.afectacaoTemHorarioAFrente" },
+  { match: /afectacao_sobreposta/i, key: "friendlyError.afectacaoSobreposta" },
+  { match: /horario_sem_afectacao/i, key: "friendlyError.horarioSemAfectacao" },
+  { match: /pessoas_local_id_e_derivado/i, key: "friendlyError.pessoasLocalIdDerivado" },
 ];
 
 function mapFriendly(raw: string): string {

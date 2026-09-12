@@ -11,10 +11,14 @@
  * diferente daquela em que a ficha vive, e isso nao e uma escolha que se deva
  * poder fazer.
  *
- * O LOCAL DE TRABALHO e um selector sobre `hr_locais_trabalho` (`local_id`).
- * `local_trabalho`, o texto livre da ronda 1, fica visivel em leitura como
- * legenda legada enquanto nao houver local escolhido -- nao se apaga e nao se
- * migra por iniciativa do ecra.
+ * O LOCAL DE TRABALHO DEIXOU DE SE EDITAR AQUI. Desde 20261130060000
+ * `pessoas.local_id` e DERIVADO da afectacao em aberto mais recente
+ * (`pessoas_afectacoes`) -- escreve-lo directamente e recusado pela base
+ * (`pessoas_local_id_e_derivado`). Aqui mostra-se so em leitura; quem o quer
+ * mudar usa a seccao "Afectacoes a centros", mais abaixo, que e o unico
+ * caminho de escrita. `local_trabalho`, o texto livre da ronda 1, continua
+ * visivel como legenda legada enquanto nao houver local escolhido -- nao se
+ * apaga e nao se migra por iniciativa do ecra.
  *
  * "Reporta a" so oferece pessoas da MESMA organizacao. Isso e garantido pela
  * base (a chave estrangeira e composta, `(reporta_a_pessoa_id, organization_id)`),
@@ -46,6 +50,7 @@ import {
 import { Briefcase, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
+import { PessoaAfectacoesSeccao } from "@/components/hr/PessoaAfectacoesSeccao";
 import type { EstadoContratoDerivado } from "@/lib/hr/estadoContrato";
 import { type LocalTrabalho, type Pessoa } from "@/types/hr";
 
@@ -56,7 +61,8 @@ interface PessoaLaboraisTabProps {
   pessoa: Pessoa;
   /** Pessoas da organizacao activa, para o selector de chefia. */
   colegas: Array<{ id: string; nome_completo: string }>;
-  /** Locais de trabalho da organizacao activa, para o selector de local. */
+  /** Locais de trabalho da organizacao activa -- para a legenda do local
+   *  actual e para a seccao de afectacoes. */
   locais: LocalTrabalho[];
   locaisALoad: boolean;
   /** Nome da organizacao activa: a entidade legal, mostrada e nao escolhida. */
@@ -67,6 +73,12 @@ interface PessoaLaboraisTabProps {
   podeEditar: boolean;
   saving: boolean;
   onGuardar: (patch: Partial<Pessoa>) => Promise<string | null>;
+  /** Afectacoes a centros -- ver `PessoaAfectacoesSeccao`. Tres permissoes
+   *  distintas: ver, alterar (`.edit`) e corrigir historico (`.corrigir`). */
+  vinculoActivoId: string | null;
+  podeVerAfectacoes: boolean;
+  podeEditarAfectacoes: boolean;
+  podeCorrigirAfectacoes: boolean;
 }
 
 type Rascunho = {
@@ -74,7 +86,6 @@ type Rascunho = {
   telefone_trabalho: string;
   numero_interno: string;
   cargo: string;
-  local_id: string;
   data_admissao: string;
   data_antiguidade: string;
   data_saida: string;
@@ -87,7 +98,6 @@ function rascunhoDe(pessoa: Pessoa): Rascunho {
     telefone_trabalho: pessoa.telefone_trabalho ?? "",
     numero_interno: pessoa.numero_interno ?? "",
     cargo: pessoa.cargo ?? "",
-    local_id: pessoa.local_id ?? SEM_ESCOLHA,
     data_admissao: pessoa.data_admissao ?? "",
     data_antiguidade: pessoa.data_antiguidade ?? "",
     data_saida: pessoa.data_saida ?? "",
@@ -105,6 +115,10 @@ export function PessoaLaboraisTab({
   podeEditar,
   saving,
   onGuardar,
+  vinculoActivoId,
+  podeVerAfectacoes,
+  podeEditarAfectacoes,
+  podeCorrigirAfectacoes,
 }: PessoaLaboraisTabProps) {
   const { t } = useTranslation();
   const [rascunho, setRascunho] = useState<Rascunho>(() => rascunhoDe(pessoa));
@@ -130,7 +144,6 @@ export function PessoaLaboraisTab({
       telefone_trabalho: vazioParaNull(rascunho.telefone_trabalho),
       numero_interno: vazioParaNull(rascunho.numero_interno),
       cargo: vazioParaNull(rascunho.cargo),
-      local_id: rascunho.local_id === SEM_ESCOLHA ? null : rascunho.local_id,
       data_admissao: vazioParaNull(rascunho.data_admissao),
       data_antiguidade: vazioParaNull(rascunho.data_antiguidade),
       data_saida: vazioParaNull(rascunho.data_saida),
@@ -155,6 +168,7 @@ export function PessoaLaboraisTab({
   ];
 
   return (
+    <div className="space-y-4">
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
@@ -200,26 +214,25 @@ export function PessoaLaboraisTab({
             </Select>
           </div>
 
+          {/* So-leitura: `local_id` e DERIVADO da afectacao em aberto mais
+              recente (`pessoas_afectacoes`, 20261130060000) e ja nao se
+              escreve aqui. Quem o quer mudar usa a seccao de afectacoes,
+              mais abaixo -- e o unico caminho de escrita. */}
           <div className="space-y-1.5">
             <Label htmlFor="hr-laborais-local">{t("hr.laborais.local")}</Label>
-            <Select
-              value={rascunho.local_id}
-              disabled={!podeEditar || locaisALoad}
-              onValueChange={(v) => definir("local_id", v)}
-            >
-              <SelectTrigger id="hr-laborais-local">
-                <SelectValue placeholder={locaisALoad ? t("common.loading") : undefined} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
-                {locais.map((local) => (
-                  <SelectItem key={local.id} value={local.id}>
-                    {local.nome}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {rascunho.local_id === SEM_ESCOLHA && pessoa.local_trabalho && (
+            <Input
+              id="hr-laborais-local"
+              value={
+                pessoa.local_id
+                  ? (locais.find((local) => local.id === pessoa.local_id)?.nome ??
+                    t("hr.campos.semValor"))
+                  : t("hr.campos.semValor")
+              }
+              readOnly
+              disabled
+            />
+            <p className="text-xs text-muted-foreground">{t("hr.laborais.localAjudaDerivado")}</p>
+            {!pessoa.local_id && pessoa.local_trabalho && (
               <p className="text-xs text-muted-foreground">
                 {t("hr.laborais.localLegado")}: {pessoa.local_trabalho}
               </p>
@@ -273,5 +286,17 @@ export function PessoaLaboraisTab({
         )}
       </CardContent>
     </Card>
+
+    <PessoaAfectacoesSeccao
+      pessoaId={pessoa.id}
+      organizationId={pessoa.organization_id}
+      vinculoActivoId={vinculoActivoId}
+      locais={locais}
+      locaisALoad={locaisALoad}
+      podeVer={podeVerAfectacoes}
+      podeEditar={podeEditarAfectacoes}
+      podeCorrigir={podeCorrigirAfectacoes}
+    />
+    </div>
   );
 }

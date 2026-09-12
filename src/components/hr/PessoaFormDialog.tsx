@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -51,6 +52,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { usePapeisDaOrganizacao } from "@/hooks/usePapeisDaOrganizacao";
 import { useContasLigaveis } from "@/hooks/useContasLigaveis";
+import { usePessoaDuplicados } from "@/hooks/usePessoaDuplicados";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
@@ -124,12 +126,60 @@ export function PessoaFormDialog({
 
   const podeLigarConta = hasPermission("hr.pessoas.conta.link");
 
-  const tocar = useCallback((campoId: string) => {
-    setTocados((anteriores) => {
-      if (anteriores.has(campoId)) return anteriores;
-      return new Set(anteriores).add(campoId);
-    });
-  }, []);
+  const {
+    travoes: duplicadosTravao,
+    sinais: duplicadosSinal,
+    semAcesso: duplicadosSemAcesso,
+    verificar: verificarDuplicados,
+    limpar: limparDuplicados,
+  } = usePessoaDuplicados();
+  /** So se pede confirmacao explicita quando ha SO sinais (nenhum travao). Um
+   * travao nunca se confirma: bloqueia, e ponto. */
+  const [confirmouSinal, setConfirmouSinal] = useState(false);
+
+  /** Campos cuja alteracao pode mudar o resultado da verificacao de
+   * duplicados. So estes disparam a chamada -- os outros (cargo, telefone de
+   * trabalho, morada, ...) nao entram nos criterios de deteccao. */
+  const CAMPOS_DUPLICADOS = useMemo(
+    () =>
+      new Set([
+        "hr-novo-nif",
+        "hr-novo-niss",
+        "hr-novo-email-pessoal",
+        "hr-novo-tipo-documento",
+        "hr-novo-numero-documento",
+        "hr-novo-primeiro-nome",
+        "hr-novo-apelido",
+        "hr-novo-data-nascimento",
+      ]),
+    [],
+  );
+
+  const tocar = useCallback(
+    (campoId: string) => {
+      setTocados((anteriores) => {
+        if (anteriores.has(campoId)) return anteriores;
+        return new Set(anteriores).add(campoId);
+      });
+
+      if (!CAMPOS_DUPLICADOS.has(campoId) || !activeCompany) return;
+
+      setConfirmouSinal(false);
+      void verificarDuplicados({
+        organizationId: activeCompany.id,
+        nif: rascunho.pessoais.nif,
+        niss: rascunho.pessoais.niss,
+        emailPessoal: rascunho.pessoais.email_pessoal,
+        tipoDocumento: rascunho.pessoais.tipo_documento || null,
+        numeroDocumento: rascunho.pessoais.numero_documento,
+        primeiroNome: rascunho.geral.primeiro_nome,
+        apelido: rascunho.geral.apelido,
+        dataNascimento: rascunho.pessoais.data_nascimento || null,
+        excluirPessoaId: null,
+      });
+    },
+    [CAMPOS_DUPLICADOS, activeCompany, rascunho, verificarDuplicados],
+  );
 
   /** Os seis campos que uma conta pode preencher, lidos do rascunho actual. */
   const camposActuais = (r: RascunhoPessoa): CamposPreenchiveis => ({
@@ -260,6 +310,8 @@ export function PessoaFormDialog({
     setAConfirmarDescarte(false);
     setAutoPreenchido({});
     setAvisosConta([]);
+    limparDuplicados();
+    setConfirmouSinal(false);
   };
 
   const temDados = SECCOES.some((id) => seccaoPreenchida(rascunho, id));
@@ -285,11 +337,24 @@ export function PessoaFormDialog({
     onOpenChange(false);
   };
 
+  const abrirFichaExistente = (pessoaId: string) => {
+    limpar();
+    onOpenChange(false);
+    navigate(`/rh/pessoas/${pessoaId}`);
+  };
+
+  /** Um travao (NIF/NISS de outra ficha) bloqueia sempre. Um sinal so bloqueia
+   * ate ser confirmado explicitamente -- a "coincidencia de sinal" da
+   * especificacao. */
+  const temDuplicadoTravao = duplicadosTravao.length > 0;
+  const precisaConfirmarSinal = !temDuplicadoTravao && duplicadosSinal.length > 0 && !confirmouSinal;
+
   const criar = async () => {
     if (problemas.length > 0 || problemasHorario.length > 0) {
       setMostrarResumo(true);
       return;
     }
+    if (temDuplicadoTravao || precisaConfirmarSinal) return;
     setACriar(true);
     try {
       const payload = payloadDoRascunho(rascunho, linhasParaGravar, podeLigarConta);
@@ -451,6 +516,68 @@ export function PessoaFormDialog({
                   </div>
                 )}
 
+                {(duplicadosTravao.length > 0 || duplicadosSinal.length > 0) && (
+                  <div
+                    className={cn(
+                      "space-y-2 rounded-md border p-3",
+                      temDuplicadoTravao
+                        ? "border-destructive/40 bg-destructive/5"
+                        : "border-amber-400/50 bg-amber-50/50 dark:bg-amber-950/20",
+                    )}
+                  >
+                    {duplicadosTravao.map((c) => (
+                      <div key={`travao-${c.pessoaId}-${c.campoCoincidente}`} className="space-y-1">
+                        <p className="text-sm font-medium text-destructive">
+                          {t(`hr.duplicados.campo.${c.campoCoincidente}`)} —{" "}
+                          {t("hr.duplicados.travao.titulo")}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {c.estado === "apagada"
+                            ? t("hr.duplicados.apagada.descricao")
+                            : t("hr.duplicados.travao.descricao")}
+                        </p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => abrirFichaExistente(c.pessoaId)}
+                        >
+                          {t("hr.duplicados.abrirFicha")}
+                        </Button>
+                      </div>
+                    ))}
+
+                    {!temDuplicadoTravao && duplicadosSinal.length > 0 && (
+                      <div className="space-y-2">
+                        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                          {t("hr.duplicados.sinal.titulo")}
+                        </p>
+                        <ul className="space-y-1 text-xs text-muted-foreground">
+                          {duplicadosSinal.map((c) => (
+                            <li key={`sinal-${c.pessoaId}-${c.campoCoincidente}`}>
+                              {t(`hr.duplicados.campo.${c.campoCoincidente}`)} —{" "}
+                              {c.estado === "apagada"
+                                ? t("hr.duplicados.apagada.descricao")
+                                : t("hr.duplicados.sinal.descricao")}
+                            </li>
+                          ))}
+                        </ul>
+                        <label className="flex items-center gap-2 text-xs">
+                          <Checkbox
+                            checked={confirmouSinal}
+                            onCheckedChange={(v) => setConfirmouSinal(v === true)}
+                          />
+                          {t("hr.duplicados.sinal.confirmar")}
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {duplicadosSemAcesso && (
+                  <p className="text-xs text-muted-foreground">{t("hr.duplicados.semAcesso")}</p>
+                )}
+
                 {seccao === "geral" && (
                   <SeccaoInformacoesGerais
                     valor={rascunho.geral}
@@ -567,7 +694,10 @@ export function PessoaFormDialog({
           </Button>
           {/* Activo a partir dos dois nomes, em QUALQUER passo: quem tem uma
               admissao as pressas nunca ve um bloqueio. */}
-          <Button onClick={criar} disabled={aCriar || !temNomes}>
+          <Button
+            onClick={criar}
+            disabled={aCriar || !temNomes || temDuplicadoTravao || precisaConfirmarSinal}
+          >
             {aCriar && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
             {t("hr.form.criarFicha")}
           </Button>

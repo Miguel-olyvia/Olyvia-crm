@@ -115,6 +115,16 @@ export type BusinessFlow =
   // decisao de aprovacao, que sao o registo de quem autorizou o que.
   | "hr-ausencias-load"
   | "hr-ausencias-write"
+  // Afectacoes a centros (`pessoas_afectacoes`, 20261130060000). A leitura
+  // falhada esconde onde a pessoa trabalha; a escrita falhada perde uma
+  // alteracao ou uma correccao de historico -- as duas tem de se ver.
+  | "hr-afectacoes-load"
+  | "hr-afectacoes-write"
+  // Horas contratadas versionadas (`pessoas_vinculos_horas`, 20261130120000).
+  // Mesma razao das afectacoes: a leitura falhada esconde as horas em vigor;
+  // a escrita falhada perde uma alteracao ou uma correccao de historico.
+  | "hr-vinculo-horas-load"
+  | "hr-vinculo-horas-write"
   | "hr-assiduidade-load"
   | "hr-assiduidade-write"
   | "hr-documentos-load"
@@ -122,7 +132,8 @@ export type BusinessFlow =
   | "hr-documentos-emitir"
   | "hr-documentos-ver-conteudo"
   | "hr-documentos-assinar"
-  | "hr-admissao-pendencias";
+  | "hr-admissao-pendencias"
+  | "hr-pessoa-duplicados-candidatos";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually
