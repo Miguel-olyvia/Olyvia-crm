@@ -9,8 +9,8 @@
  * Usa `fireEvent` e nao `user-event`: `@testing-library/user-event` nao e
  * dependencia deste projecto.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 
 vi.mock("@/hooks/useTranslation", () => ({
   useTranslation: () => ({ t: (chave: string) => chave, language: "pt" }),
@@ -31,12 +31,15 @@ function local(id: string, nome: string): LocalTrabalho {
     codigo: null,
     tipo: "loja",
     organizacao_ref_id: null,
+    organograma_node_id: null,
     morada: null,
     cidade: null,
     codigo_postal: null,
     pais: "PT",
     latitude: null,
     longitude: null,
+    contacto_nome: null,
+    contacto_telefone: null,
     activo: true,
     notas: null,
   };
@@ -63,6 +66,17 @@ function comDoisIntervalosNaQuarta(): HorarioRascunho {
 }
 
 describe("HorarioEditor", () => {
+  beforeAll(() => {
+    // O Radix Select abre por teclado num teste mais abaixo; o jsdom nao
+    // implementa nenhum destes -- sem o mock, o efeito de abertura rebenta
+    // com "scrollIntoView is not a function" (mesmo padrao de
+    // ProposalStageActionsConfig.options.test.tsx).
+    Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
+    Element.prototype.setPointerCapture = vi.fn();
+    Element.prototype.releasePointerCapture = vi.fn();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -140,6 +154,41 @@ describe("HorarioEditor", () => {
       .getAllByLabelText("hr.horario.inicio")
       .filter((campo) => campo.getAttribute("aria-invalid") === "true");
     expect(invalidos).toHaveLength(2);
+  });
+
+  it("um centro desactivado nao aparece para escolha nova, mas continua visivel no intervalo que ja o usa", async () => {
+    const lojaDesactivada = { ...local(LOJA, "Loja Boavista"), activo: false };
+    const locaisComUmaDesactivada = [lojaDesactivada, local(SEDE, "Sede")];
+
+    render(
+      <HorarioEditor
+        valor={comDoisIntervalosNaQuarta()}
+        onChange={vi.fn()}
+        locais={locaisComUmaDesactivada}
+        podeEditar
+      />,
+    );
+
+    // O intervalo ja gravado contra a Loja Boavista continua a mostrar o
+    // nome -- nunca um id em bruto nem um Select vazio -- mesmo com o centro
+    // desactivado. Aparece na fila e no resumo por local, por isso conta-se
+    // mais que uma ocorrencia.
+    expect(screen.getAllByText("Loja Boavista").length).toBeGreaterThan(0);
+
+    // Abre o selector do PRIMEIRO intervalo (09:00-14:00, gravado contra a
+    // Loja Boavista) para ver as opcoes que ele realmente oferece.
+    const comboboxes = screen.getAllByRole("combobox");
+    fireEvent.keyDown(comboboxes[0], { key: "Enter" });
+    const listbox = await screen.findByRole("listbox");
+    const opcoes = within(listbox)
+      .getAllByRole("option")
+      .map((opcao) => opcao.textContent?.trim());
+
+    // A Loja Boavista (ja escolhida, ainda que desactivada) continua
+    // oferecida -- so uma vez -- mas nao aparece MAIS QUE UMA vez, e nenhum
+    // segundo centro desactivado sem uso apareceria aqui.
+    expect(opcoes.filter((texto) => texto === "Loja Boavista")).toHaveLength(1);
+    expect(opcoes).toContain("Sede");
   });
 
   it("sem permissao de editar nao ha botoes de acrescentar nem de remover", () => {

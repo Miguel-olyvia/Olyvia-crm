@@ -53,6 +53,18 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /timeout|timed out/i, key: "friendlyError.timeout" },
   { match: /network|failed to fetch|load failed/i, key: "friendlyError.network" },
   { match: /invalid.*email|email.*invalid/i, key: "friendlyError.invalidEmail" },
+  // Os dois indices unicos de hr_locais_trabalho (20261120130000): nome e
+  // codigo por organizacao. Vem ANTES do `duplicate|already exists|unique`
+  // generico -- que continua a apanhar tudo o resto -- para dar a quem gere
+  // centros uma mensagem que diz QUAL campo colidiu, nao so "ja existe".
+  { match: /idx_hr_locais_trabalho_nome_org/i, key: "hr.locais.erroNomeDuplicado" },
+  { match: /idx_hr_locais_trabalho_codigo_org/i, key: "hr.locais.erroCodigoDuplicado" },
+  // hr_no_pertence_a_arvore_da_org / hr_locais_trabalho_na_arvore
+  // (20261130080000): a filial escolhida nao pertence a arvore da propria
+  // organizacao. So pode acontecer se o ecra oferecer uma opcao que a base
+  // recusa -- o ecra ja filtra por `useFiliaisDaArvore`, mas a base e que
+  // decide por ultimo.
+  { match: /organograma_no_fora_da_arvore/i, key: "hr.locais.erroFilialForaDaArvore" },
   { match: /duplicate|already exists|unique/i, key: "friendlyError.duplicate" },
   // Mensagens da Edge Function export-data. Sem estas, mapFriendly devolvia o
   // texto cru em ingles ("Unable to generate export") a um utilizador com a

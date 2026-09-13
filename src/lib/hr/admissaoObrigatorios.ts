@@ -21,6 +21,13 @@
  * - a CARTA DE CONDUCAO (numero, categorias, validade): nem toda a gente tem
  *   carta, e exigi-la impedia essas pessoas de submeter o convite. Continua a
  *   ser capturada e gravada quando existe.
+ * - a SINDICALIZACAO (sindicalizado, sindicato), desde 20261130150000:
+ *   filiacao sindical e categoria especial do artigo 9.o do RGPD, e obrigar
+ *   toda a gente a declara-la para poder ser admitida exige da empresa um
+ *   fundamento legal que tem de conseguir justificar. Continua a ser
+ *   perguntada no ecra (pagina 2) e gravada quando existe -- so deixa de
+ *   travar a submissao. Os dois campos continuam nesta interface e no
+ *   formulario: so saem de `CAMPOS_OBRIGATORIOS_ADMISSAO`.
  * - `conta_formato`: o convite so sabe gravar IBAN (e o unico ramo que a RPC
  *   tem), por isso o formato nao e uma escolha a fazer aqui.
  */
@@ -98,11 +105,6 @@ function precisaDeSituacaoDoConjuge(rascunho: RascunhoConviteObrigatorios): bool
   return rascunho.estado_civil === "casado" || rascunho.estado_civil === "uniao_de_facto";
 }
 
-/** O nome do sindicato so faz sentido a quem se declarou sindicalizado. */
-function precisaDeSindicato(rascunho: RascunhoConviteObrigatorios): boolean {
-  return rascunho.sindicalizado;
-}
-
 export const CAMPOS_OBRIGATORIOS_ADMISSAO: readonly CampoObrigatorioAdmissao[] = [
   { codigo: "data_nascimento", origem: "pessoa", condicao: sempre },
   { codigo: "genero", origem: "pessoa", condicao: sempre },
@@ -133,8 +135,6 @@ export const CAMPOS_OBRIGATORIOS_ADMISSAO: readonly CampoObrigatorioAdmissao[] =
   { codigo: "tamanho_cima", origem: "pessoa", condicao: sempre },
   { codigo: "tamanho_baixo", origem: "pessoa", condicao: sempre },
   { codigo: "tamanho_blazer", origem: "pessoa", condicao: sempre },
-  { codigo: "sindicalizado", origem: "pessoa", condicao: sempre },
-  { codigo: "sindicato", origem: "pessoa", condicao: precisaDeSindicato },
   { codigo: "conta_numero", origem: "pessoa", condicao: sempre },
   { codigo: "conta_titular", origem: "pessoa", condicao: sempre },
   { codigo: "conta_banco", origem: "pessoa", condicao: sempre },
@@ -143,10 +143,6 @@ export const CAMPOS_OBRIGATORIOS_ADMISSAO: readonly CampoObrigatorioAdmissao[] =
 /**
  * `dependentes` e `0` e resposta, `""` (por preencher) nao e -- o teste e
  * sempre sobre string vazia, nunca sobre o valor numerico.
- *
- * Um INTERRUPTOR esta sempre respondido: "nao sou sindicalizado" e resposta.
- * O que a base exige dele e que a resposta EXISTA (a linha de
- * pessoas_sindicalizacao), e no ecra ela existe sempre.
  */
 function estaPreenchido(
   rascunho: RascunhoConviteObrigatorios,

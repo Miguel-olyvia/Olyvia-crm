@@ -306,7 +306,14 @@ export function HorarioEditor({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={SEM_LOCAL}>{t("hr.horario.localPredefinido")}</SelectItem>
-                {locais.map((local) => (
+                {/* So oferece centros activos -- excepto o ja escolhido
+                    neste intervalo, que tem de continuar visivel mesmo
+                    desactivado (senao o Select mostra-se vazio para um
+                    horario antigo que aponta para um centro entretanto
+                    desactivado). */}
+                {locais
+                  .filter((local) => local.activo || local.id === intervalo.local_id)
+                  .map((local) => (
                   <SelectItem key={local.id} value={local.id}>
                     {local.nome}
                   </SelectItem>

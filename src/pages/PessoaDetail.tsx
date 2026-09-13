@@ -168,7 +168,13 @@ export default function PessoaDetail() {
     [hasPermission],
   );
 
-  const { locais, loading: locaisALoad } = useLocaisTrabalho();
+  // `apenasAtivos: false`: a ficha mostra o local ACTUAL da pessoa e o
+  // historico de horario/afectacoes, que podem apontar para um centro
+  // entretanto desactivado -- desactivar nao apaga, e o nome tem de
+  // continuar legivel aqui. Quem oferece o selector para uma escolha NOVA
+  // (HorarioEditor, PessoaAfectacoesSeccao) filtra os inactivos por si,
+  // mantendo so o valor ja escolhido quando esse for o caso.
+  const { locais, loading: locaisALoad } = useLocaisTrabalho({ apenasAtivos: false });
   // Para saber se quem abre a ficha e a propria pessoa: muda o que pode pedir.
   const { pessoaId: minhaPessoaId } = useMinhaPessoa();
 

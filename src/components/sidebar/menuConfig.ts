@@ -41,6 +41,7 @@ import {
   FolderOpen,
   CalendarRange,
   CheckSquare,
+  MapPin,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -199,13 +200,18 @@ export const menuSections: MenuSection[] = [
     id: "rh",
     icon: IdCard,
     labelKey: "sidebar.hrModule",
-    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao"],
-    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"],
+    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/centros"],
+    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view"],
     items: [
       { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
       { to: "/rh/ausencias/aprovacoes", icon: CheckSquare, labelKey: "sidebar.hrAusenciasAprovacoes", permissions: ["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"] },
       { to: "/rh/ausencias/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAusenciasOrganizacao", permission: "hr.ausencias.view" },
       { to: "/rh/assiduidade/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAssiduidadeOrganizacao", permission: "hr.assiduidade.view" },
+      // Gestao de centros de trabalho (20261130165000): listar, criar,
+      // editar e desactivar hr_locais_trabalho. `hr.locais.view` ja existe
+      // desde 20261120120000 e ja esta atribuida ao super_admin
+      // (20261120180000) -- nenhuma permissao nova para este ecra.
+      { to: "/rh/centros", icon: MapPin, labelKey: "sidebar.hrCentros", permission: "hr.locais.view" },
     ],
   },
   {

@@ -115,8 +115,11 @@ export function PessoaAfectacoesSeccao({
   const { afectacoes, loading, saving, recarregar, criar, corrigir, fechar, apararEFechar, confirmar } =
     usePessoaAfectacoes(pessoaId, organizationId);
 
-  const opcoesLocais = useMemo(
-    () => locais.map((local) => ({ value: local.id, label: local.nome })),
+  // Escolher uma afectacao NOVA (criar, ou o "mudar de centro" ao fechar)
+  // so pode apontar para um centro activo -- nunca faz sentido comecar hoje
+  // uma afectacao a um centro ja desactivado.
+  const opcoesLocaisActivos = useMemo(
+    () => locais.filter((local) => local.activo).map((local) => ({ value: local.id, label: local.nome })),
     [locais],
   );
 
@@ -261,6 +264,18 @@ export function PessoaAfectacoesSeccao({
   // -- Dialogo "Corrigir" (reescreve uma linha ja decorrida) ---------------
   const [linhaACorrigir, setLinhaACorrigir] = useState<PessoaAfectacao | null>(null);
   const [corrigirRascunho, setCorrigirRascunho] = useState<Rascunho>(RASCUNHO_VAZIO);
+
+  // Diferente de `opcoesLocaisActivos`: esta correcao pre-enche o centro da
+  // linha ja existente, que pode entretanto ter sido desactivado -- o
+  // selector tem de continuar a mostrar esse nome, nao ficar vazio, mesmo
+  // que nao ofereca esse centro para uma escolha nova.
+  const opcoesLocaisParaCorrigir = useMemo(
+    () =>
+      locais
+        .filter((local) => local.activo || local.id === corrigirRascunho.localId)
+        .map((local) => ({ value: local.id, label: local.nome })),
+    [locais, corrigirRascunho.localId],
+  );
 
   const abrirDialogoCorrigir = (linha: PessoaAfectacao) => {
     setLinhaACorrigir(linha);
@@ -428,7 +443,7 @@ export function PessoaAfectacoesSeccao({
               label={t("hr.afectacoes.centro")}
               valor={novaRascunho.localId}
               placeholder={locaisALoad ? t("common.loading") : undefined}
-              opcoes={opcoesLocais}
+              opcoes={opcoesLocaisActivos}
               onChange={(v) => setNovaRascunho((a) => ({ ...a, localId: v }))}
             />
             <CampoTexto
@@ -518,7 +533,7 @@ export function PessoaAfectacoesSeccao({
                   id="hr-afectacao-novo-centro"
                   label={t("hr.afectacoes.novoCentro")}
                   valor={novoCentroId}
-                  opcoes={opcoesLocais}
+                  opcoes={opcoesLocaisActivos}
                   onChange={setNovoCentroId}
                 />
                 <CampoTexto
@@ -558,7 +573,7 @@ export function PessoaAfectacoesSeccao({
               id="hr-afectacao-corrigir-local"
               label={t("hr.afectacoes.centro")}
               valor={corrigirRascunho.localId}
-              opcoes={opcoesLocais}
+              opcoes={opcoesLocaisParaCorrigir}
               onChange={(v) => setCorrigirRascunho((a) => ({ ...a, localId: v }))}
             />
             <CampoTexto

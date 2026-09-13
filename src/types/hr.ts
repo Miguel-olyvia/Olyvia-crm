@@ -649,6 +649,20 @@ export interface LocalTrabalho {
   pais: string | null;
   latitude: number | null;
   longitude: number | null;
+  /**
+   * A que no do organograma este centro pertence (20261130080000). Coluna
+   * SIMPLES, sem versionamento e SEM peso nenhum na RLS -- e so
+   * classificacao. Tem de pertencer a arvore da propria `organization_id`
+   * (organizacao ou descendente dela); a base recusa por trigger o que nao
+   * pertencer.
+   */
+  organograma_node_id: string | null;
+  /**
+   * Quem se contacta neste centro quando alguem falta (20261130165000).
+   * Um centro tem UM contacto actual, nao um historico.
+   */
+  contacto_nome: string | null;
+  contacto_telefone: string | null;
   activo: boolean;
   notas: string | null;
 }

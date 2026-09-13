@@ -64,7 +64,10 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
   const janela = useMemo(() => ({ de, ate }), [de, ate]);
   const organizacao = useAssiduidadeDaOrganizacao(janela);
   const { pessoas } = usePessoas();
-  const { locais } = useLocaisTrabalho();
+  // So para mostrar o nome de cada picagem (LocalEtiqueta/MapaAssiduidadeMes)
+  // -- nunca um selector aqui -- por isso inclui os desactivados: um mes
+  // antigo pode ter picagens num centro entretanto desactivado.
+  const { locais } = useLocaisTrabalho({ apenasAtivos: false });
   const { pessoaId: minhaPessoaId } = useMinhaPessoa();
 
   const [aberto, setAberto] = useState<{ pessoaId: string; data: string } | null>(null);

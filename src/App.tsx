@@ -120,6 +120,7 @@ const AusenciasAprovacoes = lazy(() => import("./pages/AusenciasAprovacoes"));
 const AusenciasOrganizacao = lazy(() => import("./pages/AusenciasOrganizacao"));
 const Assiduidade = lazy(() => import("./pages/Assiduidade"));
 const AssiduidadeOrganizacao = lazy(() => import("./pages/AssiduidadeOrganizacao"));
+const RhCentros = lazy(() => import("./pages/RhCentros"));
 const OrgTemplates = lazy(() => import("./pages/OrgTemplates"));
 const OrgHelp = lazy(() => import("./pages/OrgHelp"));
 const NeedsAssessmentConfig = lazy(() => import("./pages/NeedsAssessmentConfig"));
@@ -297,6 +298,12 @@ const App = () => (
                           o meu ponto, e o mapa de toda a gente. */}
                       <Route path="/rh/assiduidade" element={<ProtectedRoute permissions={["hr.assiduidade.view.own", "hr.assiduidade.view"]}><Assiduidade /></ProtectedRoute>} />
                       <Route path="/rh/assiduidade/organizacao" element={<ProtectedRoute permission="hr.assiduidade.view"><AssiduidadeOrganizacao /></ProtectedRoute>} />
+                      {/* Gestao de centros de trabalho (20261130165000) --
+                          listar, criar, editar e desactivar hr_locais_trabalho.
+                          `hr.locais.view`/`hr.locais.edit` ja existiam desde
+                          20261120120000 e ja estao no super_admin
+                          (20261120180000); nenhuma permissao nova. */}
+                      <Route path="/rh/centros" element={<ProtectedRoute permission="hr.locais.view"><RhCentros /></ProtectedRoute>} />
                       <Route path="/organizations" element={<Organizations />} />
                       <Route path="/organizations/:id" element={<OrganizationDetail />} />
                       <Route path="/org-templates" element={<OrgTemplates />} />

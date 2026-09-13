@@ -6,9 +6,10 @@
  *  - `validade_documento` so e obrigatoria quando o documento NAO e cartao
  *    de cidadao, e um `tipo_documento` por escolher nao arrasta a validade
  *    consigo -- so a sua propria pendencia aparece.
- *  - a situacao profissional do conjuge so e exigida a quem tem conjuge, e o
- *    nome do sindicato so a quem se declarou sindicalizado.
- *  - a carta de conducao NUNCA e exigida: nem toda a gente tem carta.
+ *  - a situacao profissional do conjuge so e exigida a quem tem conjuge.
+ *  - a carta de conducao NUNCA e exigida: nem toda a gente tem carta. Desde
+ *    20261130150000, o sindicato e o interruptor de sindicalizacao tambem
+ *    NUNCA sao exigidos, pela mesma razao estrutural.
  *  - um rascunho completo nao deixa pendencia nenhuma.
  */
 import { describe, expect, it } from "vitest";
@@ -117,8 +118,10 @@ describe("pendenciasDoRascunho", () => {
     );
   });
 
-  it("o sindicato so e exigido a quem se declarou sindicalizado", () => {
-    expect(pendenciasDoRascunho({ ...COMPLETO, sindicalizado: true })).toContain("sindicato");
+  it("o sindicato NUNCA e exigido, mesmo a quem se declarou sindicalizado (20261130150000: facultativo, como a carta de conducao)", () => {
+    expect(pendenciasDoRascunho({ ...COMPLETO, sindicalizado: true, sindicato: "" })).not.toContain(
+      "sindicato",
+    );
     expect(pendenciasDoRascunho({ ...COMPLETO, sindicalizado: false })).not.toContain("sindicato");
   });
 

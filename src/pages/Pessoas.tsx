@@ -82,7 +82,9 @@ export default function Pessoas() {
   const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
 
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
-  const { locais } = useLocaisTrabalho();
+  // Lista so para leitura (nomeDoLocal, abaixo): uma pessoa cujo local actual
+  // ja foi desactivado tem de continuar a mostrar o nome, nao um "—".
+  const { locais } = useLocaisTrabalho({ apenasAtivos: false });
   const nomeDoLocal = (localId: string | null) =>
     localId ? (locais.find((local) => local.id === localId)?.nome ?? null) : null;
   const [procura, setProcura] = useState("");

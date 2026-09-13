@@ -79,7 +79,9 @@ export function PessoaAssiduidadeTab({
   );
 
   const assiduidade = useAssiduidadeDaPessoa(pessoaId, janela);
-  const { locais } = useLocaisTrabalho();
+  // So para mostrar o nome de cada picagem -- nunca um selector aqui --
+  // por isso inclui os desactivados (ver EcraMapaAssiduidade).
+  const { locais } = useLocaisTrabalho({ apenasAtivos: false });
   const [diaAberto, setDiaAberto] = useState<string | null>(null);
 
   const podeVer = permissoes.view || permissoes.equipaView || (souAPessoa && permissoes.viewOwn);
