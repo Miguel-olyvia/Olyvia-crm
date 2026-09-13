@@ -15,18 +15,22 @@ vi.mock("@/lib/toast", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
-const { verConteudoMock, assinarMock, emitirMock, useHookMock } = vi.hoisted(() => ({
-  verConteudoMock: vi.fn(),
-  assinarMock: vi.fn(),
-  emitirMock: vi.fn(),
-  useHookMock: vi.fn(),
-}));
+const { verConteudoMock, assinarMock, emitirMock, anexarFicheiroMock, obterUrlFicheiroMock, useHookMock } =
+  vi.hoisted(() => ({
+    verConteudoMock: vi.fn(),
+    assinarMock: vi.fn(),
+    emitirMock: vi.fn(),
+    anexarFicheiroMock: vi.fn(),
+    obterUrlFicheiroMock: vi.fn(),
+    useHookMock: vi.fn(),
+  }));
 
 vi.mock("@/hooks/usePessoaDocumentos", () => ({
   usePessoaDocumentos: useHookMock,
 }));
 
 import { PessoaDocumentosTab } from "@/components/hr/PessoaDocumentosTab";
+import { toast } from "@/lib/toast";
 import type { UsePessoaDocumentosResult } from "@/hooks/usePessoaDocumentos";
 import type { PessoaDocumento } from "@/types/hr";
 
@@ -39,6 +43,9 @@ const DOCUMENTO_A_AGUARDAR: PessoaDocumento = {
   tipo: "contrato",
   titulo: "Contrato de trabalho",
   estado: "a_aguardar_assinatura",
+  ficheiro_caminho: null,
+  ficheiro_hash_sha256: null,
+  ficheiro_anexado_em: null,
   emitido_em: "2026-01-01T00:00:00Z",
   emitido_por: "rh1",
   assinado_em: null,
@@ -59,6 +66,8 @@ function resultadoBase(
     emitir: emitirMock,
     verConteudo: verConteudoMock,
     assinar: assinarMock,
+    anexarFicheiro: anexarFicheiroMock,
+    obterUrlFicheiro: obterUrlFicheiroMock,
     ...overrides,
   };
 }
@@ -173,5 +182,258 @@ describe("PessoaDocumentosTab", () => {
     expect(verConteudoMock).toHaveBeenCalledWith("doc1");
     // O <script> foi sanitizado -- nunca chega ao DOM.
     expect(document.querySelector("script")).not.toBeInTheDocument();
+  });
+
+  it("mostra o botao de anexar so com hr.pessoas.documentos.edit E a_aguardar_assinatura", () => {
+    useHookMock.mockReturnValue(resultadoBase({ documentos: [DOCUMENTO_A_AGUARDAR] }));
+
+    render(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        souAPessoa={false}
+        permissoes={{
+          view: true,
+          viewOwn: false,
+          edit: true,
+          emitir: false,
+          anular: false,
+          conteudoView: false,
+          modelosView: false,
+        }}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /hr.documentos.anexarFicheiro/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("nao mostra o botao de anexar a quem tem edit mas o documento ja esta assinado", () => {
+    useHookMock.mockReturnValue(
+      resultadoBase({ documentos: [{ ...DOCUMENTO_A_AGUARDAR, estado: "assinado" }] }),
+    );
+
+    render(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        souAPessoa={false}
+        permissoes={{
+          view: true,
+          viewOwn: false,
+          edit: true,
+          emitir: false,
+          anular: false,
+          conteudoView: false,
+          modelosView: false,
+        }}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /hr.documentos.anexarFicheiro/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("anexar ficheiro chama anexarFicheiro com o documento e o ficheiro escolhido", async () => {
+    useHookMock.mockReturnValue(resultadoBase({ documentos: [DOCUMENTO_A_AGUARDAR] }));
+    anexarFicheiroMock.mockResolvedValue(null);
+
+    render(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        souAPessoa={false}
+        permissoes={{
+          view: true,
+          viewOwn: false,
+          edit: true,
+          emitir: false,
+          anular: false,
+          conteudoView: false,
+          modelosView: false,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /hr.documentos.anexarFicheiro/ }));
+
+    const ficheiro = new File(["conteudo"], "aditamento.pdf", { type: "application/pdf" });
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [ficheiro] } });
+
+    fireEvent.click(screen.getByRole("button", { name: "hr.documentos.anexar" }));
+
+    await waitFor(() => expect(anexarFicheiroMock).toHaveBeenCalledWith("doc1", ficheiro));
+  });
+
+  it("mostra o resumo guardado e o botao de abrir ficheiro quando ha ficheiro anexado", () => {
+    useHookMock.mockReturnValue(
+      resultadoBase({
+        documentos: [
+          {
+            ...DOCUMENTO_A_AGUARDAR,
+            ficheiro_caminho: "org/p1/doc1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.pdf",
+            ficheiro_hash_sha256: "a".repeat(64),
+          },
+        ],
+      }),
+    );
+
+    render(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        souAPessoa={false}
+        permissoes={{
+          view: true,
+          viewOwn: false,
+          edit: false,
+          emitir: false,
+          anular: false,
+          conteudoView: true,
+          modelosView: false,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("hr.documentos.resumoGuardado")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /hr.documentos.abrirFicheiro/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("abrir ficheiro abre uma janela em branco SINCRONAMENTE e so lhe atribui o URL quando obterUrlFicheiro resolve", async () => {
+    // O window.open tem de acontecer ANTES do await (dentro do gesto de
+    // clique) -- por isso o mock devolve uma janela FAKE (nao null) que a
+    // implementacao usa para guardar o URL assinado quando ele chega, em vez
+    // de passar o URL directamente a window.open.
+    const janelaFake = { opener: "algo", location: { href: "" }, close: vi.fn() };
+    const abrirJanela = vi.spyOn(window, "open").mockImplementation(() => janelaFake as unknown as Window);
+    obterUrlFicheiroMock.mockResolvedValue({
+      url: "https://exemplo/assinado",
+      hash: "a".repeat(64),
+      anexadoEm: "2026-01-02T00:00:00Z",
+    });
+
+    useHookMock.mockReturnValue(
+      resultadoBase({
+        documentos: [
+          {
+            ...DOCUMENTO_A_AGUARDAR,
+            ficheiro_caminho: "org/p1/doc1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.pdf",
+            ficheiro_hash_sha256: "a".repeat(64),
+          },
+        ],
+      }),
+    );
+
+    render(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        souAPessoa={false}
+        permissoes={{
+          view: true,
+          viewOwn: false,
+          edit: false,
+          emitir: false,
+          anular: false,
+          conteudoView: true,
+          modelosView: false,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /hr.documentos.abrirFicheiro/ }));
+
+    // A janela abre logo, antes do URL chegar -- e o proprio ponto do teste.
+    expect(abrirJanela).toHaveBeenCalledWith("about:blank", "_blank");
+    expect(janelaFake.opener).toBeNull();
+
+    await waitFor(() => expect(obterUrlFicheiroMock).toHaveBeenCalledWith("doc1"));
+    await waitFor(() => expect(janelaFake.location.href).toBe("https://exemplo/assinado"));
+    expect(janelaFake.close).not.toHaveBeenCalled();
+
+    abrirJanela.mockRestore();
+  });
+
+  it("abrir ficheiro fecha a janela e avisa quando obterUrlFicheiro falha", async () => {
+    const janelaFake = { opener: "algo", location: { href: "" }, close: vi.fn() };
+    const abrirJanela = vi.spyOn(window, "open").mockImplementation(() => janelaFake as unknown as Window);
+    obterUrlFicheiroMock.mockRejectedValue(new Error("falhou"));
+
+    useHookMock.mockReturnValue(
+      resultadoBase({
+        documentos: [
+          {
+            ...DOCUMENTO_A_AGUARDAR,
+            ficheiro_caminho: "org/p1/doc1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.pdf",
+            ficheiro_hash_sha256: "a".repeat(64),
+          },
+        ],
+      }),
+    );
+
+    render(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        souAPessoa={false}
+        permissoes={{
+          view: true,
+          viewOwn: false,
+          edit: false,
+          emitir: false,
+          anular: false,
+          conteudoView: true,
+          modelosView: false,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /hr.documentos.abrirFicheiro/ }));
+
+    await waitFor(() => expect(janelaFake.close).toHaveBeenCalled());
+    expect(toast.error).toHaveBeenCalledWith("hr.documentos.erroAbrirFicheiro");
+
+    abrirJanela.mockRestore();
+  });
+
+  it("abrir ficheiro avisa com mensagem traduzida quando o bloqueador de popups impede a janela", async () => {
+    const abrirJanela = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    useHookMock.mockReturnValue(
+      resultadoBase({
+        documentos: [
+          {
+            ...DOCUMENTO_A_AGUARDAR,
+            ficheiro_caminho: "org/p1/doc1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.pdf",
+            ficheiro_hash_sha256: "a".repeat(64),
+          },
+        ],
+      }),
+    );
+
+    render(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        souAPessoa={false}
+        permissoes={{
+          view: true,
+          viewOwn: false,
+          edit: false,
+          emitir: false,
+          anular: false,
+          conteudoView: true,
+          modelosView: false,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /hr.documentos.abrirFicheiro/ }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("hr.documentos.bloqueadorPopup"));
+    // Sem janela nenhuma para receber o URL, obterUrlFicheiro nunca chega a
+    // ser chamado -- e o comportamento que evita o URL de 60s ser pedido em
+    // vao.
+    expect(obterUrlFicheiroMock).not.toHaveBeenCalled();
+
+    abrirJanela.mockRestore();
   });
 });

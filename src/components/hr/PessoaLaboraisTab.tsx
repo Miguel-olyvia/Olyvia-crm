@@ -51,6 +51,7 @@ import { Briefcase, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { PessoaAfectacoesSeccao } from "@/components/hr/PessoaAfectacoesSeccao";
+import { PessoaColocacaoOrganogramaSeccao } from "@/components/hr/PessoaColocacaoOrganogramaSeccao";
 import type { EstadoContratoDerivado } from "@/lib/hr/estadoContrato";
 import { type LocalTrabalho, type Pessoa } from "@/types/hr";
 
@@ -79,6 +80,12 @@ interface PessoaLaboraisTabProps {
   podeVerAfectacoes: boolean;
   podeEditarAfectacoes: boolean;
   podeCorrigirAfectacoes: boolean;
+  /** Colocacao no organograma -- ver `PessoaColocacaoOrganogramaSeccao`.
+   *  Classificacao INDEPENDENTE das afectacoes a centros, acima: tres
+   *  permissoes proprias, tambem ver/alterar/corrigir. */
+  podeVerColocacao: boolean;
+  podeEditarColocacao: boolean;
+  podeCorrigirColocacao: boolean;
 }
 
 type Rascunho = {
@@ -119,6 +126,9 @@ export function PessoaLaboraisTab({
   podeVerAfectacoes,
   podeEditarAfectacoes,
   podeCorrigirAfectacoes,
+  podeVerColocacao,
+  podeEditarColocacao,
+  podeCorrigirColocacao,
 }: PessoaLaboraisTabProps) {
   const { t } = useTranslation();
   const [rascunho, setRascunho] = useState<Rascunho>(() => rascunhoDe(pessoa));
@@ -296,6 +306,14 @@ export function PessoaLaboraisTab({
       podeVer={podeVerAfectacoes}
       podeEditar={podeEditarAfectacoes}
       podeCorrigir={podeCorrigirAfectacoes}
+    />
+
+    <PessoaColocacaoOrganogramaSeccao
+      pessoaId={pessoa.id}
+      organizationId={pessoa.organization_id}
+      podeVer={podeVerColocacao}
+      podeEditar={podeEditarColocacao}
+      podeCorrigir={podeCorrigirColocacao}
     />
     </div>
   );

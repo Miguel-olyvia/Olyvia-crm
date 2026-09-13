@@ -29,6 +29,10 @@ const linha = (parcial: Partial<HorarioPlaneado>): HorarioPlaneado => ({
   valido_de: parcial.valido_de ?? null,
   valido_ate: parcial.valido_ate ?? null,
   notas: null,
+  corrige_horario_id: parcial.corrige_horario_id ?? null,
+  correccao_motivo: parcial.correccao_motivo ?? null,
+  corrigido_por_anew_user_id: parcial.corrigido_por_anew_user_id ?? null,
+  corrigido_por_pessoa_id: parcial.corrigido_por_pessoa_id ?? null,
 });
 
 // 2026-01-05 e uma segunda-feira.
@@ -113,6 +117,65 @@ describe("a validade delimita o passado e o futuro", () => {
     ];
     expect(planeadoDoDia(linhas, SEGUNDA).map((i) => i.id)).toEqual(["antigo"]);
     expect(planeadoDoDia(linhas, "2026-01-12").map((i) => i.id)).toEqual(["novo"]);
+  });
+});
+
+describe("uma correccao (20261130190000) substitui a linha errada, nunca se soma a ela", () => {
+  it("um dia com uma linha corrigida mostra so a correccao, nunca as duas", () => {
+    const linhas = [
+      linha({ id: "errado", data: SEGUNDA, hora_inicio: "08:00", hora_fim: "12:30" }),
+      linha({
+        id: "corrector",
+        data: SEGUNDA,
+        hora_inicio: "08:00",
+        hora_fim: "12:00",
+        corrige_horario_id: "errado",
+        correccao_motivo: "hora de fim registada errada",
+      }),
+    ];
+    const resultado = planeadoDoDia(linhas, SEGUNDA);
+    expect(resultado.map((i) => i.id)).toEqual(["corrector"]);
+    // A soma das duas seria 8h30 (4h30 + 4h00); em vigor e so a correccao, 4h00.
+    expect(resultado[0].hora_fim).toBe("12:00");
+  });
+
+  it("uma correccao de nao_trabalha esconde a linha errada e naoTrabalha fica certo", () => {
+    const linhas = [
+      linha({ id: "errado", data: SEGUNDA, hora_inicio: "08:00", hora_fim: "12:00" }),
+      linha({
+        id: "corrector",
+        data: SEGUNDA,
+        nao_trabalha: true,
+        corrige_horario_id: "errado",
+        correccao_motivo: "afinal era folga",
+      }),
+    ];
+    const leitura = leituraDoPlaneado(linhas, SEGUNDA);
+    expect(leitura.intervalos).toEqual([]);
+    expect(leitura.naoTrabalha).toBe(true);
+  });
+
+  it("uma cadeia de duas correccoes so deixa a ultima em vigor", () => {
+    const linhas = [
+      linha({ id: "original", data: SEGUNDA, hora_inicio: "08:00", hora_fim: "12:00" }),
+      linha({
+        id: "primeira_correccao",
+        data: SEGUNDA,
+        hora_inicio: "08:00",
+        hora_fim: "12:30",
+        corrige_horario_id: "original",
+        correccao_motivo: "m1",
+      }),
+      linha({
+        id: "segunda_correccao",
+        data: SEGUNDA,
+        hora_inicio: "08:00",
+        hora_fim: "13:00",
+        corrige_horario_id: "primeira_correccao",
+        correccao_motivo: "m2",
+      }),
+    ];
+    expect(planeadoDoDia(linhas, SEGUNDA).map((i) => i.id)).toEqual(["segunda_correccao"]);
   });
 });
 

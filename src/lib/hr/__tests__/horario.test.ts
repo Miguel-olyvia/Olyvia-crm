@@ -15,10 +15,14 @@ import { describe, expect, it } from "vitest";
 import {
   chavesSobrepostas,
   formatarDuracao,
+  hojeIsoServidor,
   horarioVazio,
+  linhaPlaneadaDecorrida,
+  linhaRecorrenteJaEmCurso,
   linhasParaGravar,
   minutosDe,
   novaChave,
+  ontemIso,
   partirNaMeiaNoite,
   problemasDoHorario,
   rascunhoDeLinhas,
@@ -173,6 +177,10 @@ describe("horario planeado", () => {
         valido_de: null,
         valido_ate: null,
         notas: null,
+        corrige_horario_id: null,
+        correccao_motivo: null,
+        corrigido_por_anew_user_id: null,
+        corrigido_por_pessoa_id: null,
       },
       {
         id: "b",
@@ -189,6 +197,10 @@ describe("horario planeado", () => {
         valido_de: null,
         valido_ate: null,
         notas: null,
+        corrige_horario_id: null,
+        correccao_motivo: null,
+        corrigido_por_anew_user_id: null,
+        corrigido_por_pessoa_id: null,
       },
     ];
 
@@ -209,5 +221,87 @@ describe("horario planeado", () => {
     expect(minutosDe("99:99")).toBeNull();
     expect(formatarDuracao(570)).toBe("9h30");
     expect(formatarDuracao(0)).toBe("0h00");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Historico (20261130190000): ALTERAR fecha a janela em vigor e abre outra,
+// nunca toca no que ja passou. Estas funcoes sao o espelho, do lado do
+// ecra, do que a base ja impoe -- o mesmo caso que o guarda da base
+// exercita ao vivo (hr_horario_planeado_decorrido, hr_horario_planeado_
+// janela_imutavel).
+// -----------------------------------------------------------------------------
+describe("linhaPlaneadaDecorrida", () => {
+  const HOJE = "2026-06-15";
+
+  it("uma excepcao por data e decorrida quando a data ja passou", () => {
+    expect(linhaPlaneadaDecorrida({ data: "2026-06-14", valido_ate: null }, HOJE)).toBe(true);
+  });
+
+  it("uma excepcao por data de HOJE ainda nao decorreu", () => {
+    expect(linhaPlaneadaDecorrida({ data: HOJE, valido_ate: null }, HOJE)).toBe(false);
+  });
+
+  it("uma excepcao por data no futuro nao decorreu", () => {
+    expect(linhaPlaneadaDecorrida({ data: "2026-06-16", valido_ate: null }, HOJE)).toBe(false);
+  });
+
+  it("uma regra recorrente ABERTA (valido_ate nulo) nunca decorre", () => {
+    expect(linhaPlaneadaDecorrida({ data: null, valido_ate: null }, HOJE)).toBe(false);
+  });
+
+  it("uma regra recorrente FECHADA no passado decorreu", () => {
+    expect(linhaPlaneadaDecorrida({ data: null, valido_ate: "2026-06-14" }, HOJE)).toBe(true);
+  });
+
+  it("uma regra recorrente fechada HOJE ou no futuro ainda nao decorreu", () => {
+    expect(linhaPlaneadaDecorrida({ data: null, valido_ate: HOJE }, HOJE)).toBe(false);
+    expect(linhaPlaneadaDecorrida({ data: null, valido_ate: "2026-06-16" }, HOJE)).toBe(false);
+  });
+});
+
+describe("linhaRecorrenteJaEmCurso", () => {
+  const HOJE = "2026-06-15";
+
+  it("uma excepcao por data (dia_semana nulo) nunca esta 'em curso'", () => {
+    expect(linhaRecorrenteJaEmCurso({ dia_semana: null, valido_de: "2026-06-01" }, HOJE)).toBe(
+      false,
+    );
+  });
+
+  it("sem valido_de declarado (formato legado) ja esta em curso", () => {
+    expect(linhaRecorrenteJaEmCurso({ dia_semana: 1, valido_de: null }, HOJE)).toBe(true);
+  });
+
+  it("com valido_de no passado ja esta em curso", () => {
+    expect(linhaRecorrenteJaEmCurso({ dia_semana: 1, valido_de: "2026-06-01" }, HOJE)).toBe(true);
+  });
+
+  it("com valido_de de HOJE ou no futuro ainda nao comecou", () => {
+    expect(linhaRecorrenteJaEmCurso({ dia_semana: 1, valido_de: HOJE }, HOJE)).toBe(false);
+    expect(linhaRecorrenteJaEmCurso({ dia_semana: 1, valido_de: "2026-06-16" }, HOJE)).toBe(false);
+  });
+});
+
+describe("ontemIso", () => {
+  it("e o dia civil anterior, mesmo a atravessar mudanca de mes", () => {
+    expect(ontemIso("2026-06-15")).toBe("2026-06-14");
+    expect(ontemIso("2026-03-01")).toBe("2026-02-28");
+  });
+});
+
+describe("hojeIsoServidor", () => {
+  it("le o dia em UTC, nao o calendario local do browser", () => {
+    // 23:30 UTC-3 (Brasil) de 15 de Junho e 02:30 UTC de 16 de Junho -- o dia
+    // que a base ve em CURRENT_DATE. Se isto lesse o calendario local em vez
+    // de UTC, devolvia 15 e nao 16.
+    expect(hojeIsoServidor(new Date("2026-06-15T23:30:00-03:00"))).toBe("2026-06-16");
+  });
+
+  it("perto da meia-noite UTC, o dia UTC pode ir a frente do dia local num fuso atras", () => {
+    // 21:00 UTC-3 de 15 de Junho e 00:00 UTC de 16 de Junho: e exactamente o
+    // "fim da tarde, num fuso atras da base" que fazia
+    // horario_planeado_fecha_no_passado disparar num ALTERAR normal.
+    expect(hojeIsoServidor(new Date("2026-06-15T21:00:00-03:00"))).toBe("2026-06-16");
   });
 });

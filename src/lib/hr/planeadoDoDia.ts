@@ -20,8 +20,20 @@
  * dia com um intervalo so nao e o caso normal com os outros escondidos: e a
  * mesma lista com um elemento. As senhoras da limpeza -- 09-14 numa empresa,
  * 15-19 noutra, e semanas sem padrao -- sao o caso central deste ficheiro.
+ *
+ * SO CONTA A LINHA EM VIGOR (20261130190000)
+ * -------------------------------------------
+ * Uma correccao (`rpc_hr_planeado_corrigir`) nao apaga a linha errada: insere
+ * uma nova a apontar para ela por `corrige_horario_id` e a antiga fica viva
+ * na tabela, para o historico. As duas cobrem o MESMO dia -- e se as duas
+ * entrassem aqui como "candidatas", um dia corrigido mostrava o dobro das
+ * horas planeadas e o `naoTrabalha` podia sair errado. Por isso a primeira
+ * coisa que se faz e reduzir `linhas` as que estao em vigor, com a mesma
+ * regra que a base usa (`emVigor` + `LEITOR_PLANEADO`), antes de qualquer
+ * filtro por data ou validade.
  */
 import { minutosDe } from "@/lib/hr/horario";
+import { emVigor, LEITOR_PLANEADO } from "@/lib/hr/assiduidade";
 import type { HorarioPlaneado } from "@/types/hr";
 
 /** 0 = domingo .. 6 = sabado, no calendario civil e sem passar por UTC. */
@@ -63,7 +75,8 @@ export function leituraDoPlaneado(
   linhas: readonly HorarioPlaneado[],
   iso: string,
 ): LeituraDoPlaneado {
-  const validas = linhas.filter((linha) => dentroDaValidade(linha, iso));
+  const vigentes = emVigor(linhas, LEITOR_PLANEADO);
+  const validas = vigentes.filter((linha) => dentroDaValidade(linha, iso));
 
   const excepcoes = validas.filter((linha) => linha.data === iso);
   const candidatas =

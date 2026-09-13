@@ -222,6 +222,21 @@ export const LEITOR_REALIZADO: LeitorDeCorreccoes<{
   viva: (linha) => linha.estado !== "rejeitado",
 };
 
+/**
+ * O leitor do horario PLANEADO (20261130190000). Sem `estado`: a query so
+ * traz linhas com `deleted_at IS NULL`, por isso toda a linha lida esta viva
+ * -- o que distingue "em vigor" de "substituida" e so o ponteiro
+ * `corrige_horario_id` de outra linha viva.
+ */
+export const LEITOR_PLANEADO: LeitorDeCorreccoes<{
+  id: string;
+  corrige_horario_id: string | null;
+}> = {
+  idDe: (linha) => linha.id,
+  corrigeDe: (linha) => linha.corrige_horario_id,
+  viva: () => true,
+};
+
 // ---------------------------------------------------------------------------
 // O planeado versus o que aconteceu
 // ---------------------------------------------------------------------------

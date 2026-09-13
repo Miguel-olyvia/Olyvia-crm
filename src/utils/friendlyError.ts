@@ -87,6 +87,29 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /afectacao_sobreposta/i, key: "friendlyError.afectacaoSobreposta" },
   { match: /horario_sem_afectacao/i, key: "friendlyError.horarioSemAfectacao" },
   { match: /pessoas_local_id_e_derivado/i, key: "friendlyError.pessoasLocalIdDerivado" },
+  // `pessoas_colocacao_organograma` (20261130080000): duas versoes vivas com
+  // intervalos que se cruzam -- so um no de organograma vigora de cada vez.
+  { match: /colocacao_organograma_sobreposta/i, key: "friendlyError.colocacaoOrganogramaSobreposta" },
+  // `pessoas_horario_planeado` ganha historico (20261130190000): ALTERAR
+  // fecha e abre outra, nunca toca no que ja passou; so `rpc_hr_planeado_corrigir`
+  // mexe numa janela decorrida. As entradas mais especificas vem primeiro.
+  { match: /horario_planeado_insercao_no_passado/i, key: "friendlyError.horarioPlaneadoInsercaoNoPassado" },
+  { match: /horario_planeado_correccao_alvo_invalido/i, key: "friendlyError.horarioPlaneadoCorreccaoAlvoInvalido" },
+  { match: /horario_planeado_correccao_ainda_em_vigor/i, key: "friendlyError.horarioPlaneadoCorreccaoAindaEmVigor" },
+  { match: /horario_planeado_correccao_janela_diferente/i, key: "friendlyError.horarioPlaneadoCorreccaoJanelaDiferente" },
+  { match: /horario_planeado_correccao_sem_permissao/i, key: "friendlyError.horarioPlaneadoCorreccaoSemPermissao" },
+  { match: /horario_planeado_correccao_imutavel/i, key: "friendlyError.horarioPlaneadoCorreccaoImutavel" },
+  { match: /horario_planeado_janela_decorrida/i, key: "friendlyError.horarioPlaneadoJanelaDecorrida" },
+  { match: /horario_planeado_fecha_no_passado/i, key: "friendlyError.horarioPlaneadoFechaNoPassado" },
+  { match: /horario_planeado_encolhe_inicio/i, key: "friendlyError.horarioPlaneadoEncolheInicio" },
+  { match: /horario_planeado_altera_regra_em_curso/i, key: "friendlyError.horarioPlaneadoAlteraRegraEmCurso" },
+  { match: /planeado_correccao_sem_motivo/i, key: "friendlyError.planeadoCorreccaoSemMotivo" },
+  { match: /planeado_sem_permissao/i, key: "friendlyError.planeadoSemPermissao" },
+  { match: /planeado_nao_corrigivel/i, key: "friendlyError.planeadoNaoCorrigivel" },
+  { match: /planeado_nao_decorrido/i, key: "friendlyError.planeadoNaoDecorrido" },
+  { match: /planeado_ja_corrigido/i, key: "friendlyError.planeadoJaCorrigido" },
+  { match: /planeado_horas_invalidas/i, key: "friendlyError.planeadoHorasInvalidas" },
+  { match: /planeado_inexistente/i, key: "friendlyError.planeadoInexistente" },
 ];
 
 function mapFriendly(raw: string): string {

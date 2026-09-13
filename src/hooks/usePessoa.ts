@@ -41,7 +41,13 @@ import type {
   HorarioRealizado,
   FormatoConta,
 } from "@/types/hr";
-import type { LinhaPlaneadoParaGravar } from "@/lib/hr/horario";
+import {
+  hojeIsoServidor,
+  linhaPlaneadaDecorrida,
+  linhaRecorrenteJaEmCurso,
+  ontemIso,
+  type LinhaPlaneadoParaGravar,
+} from "@/lib/hr/horario";
 
 const COLUNAS_PESSOA =
   "id, organization_id, numero_interno, primeiro_nome, apelido, nome_completo, " +
@@ -109,7 +115,8 @@ const COLUNAS_SINDICALIZACAO =
 
 const COLUNAS_HORARIO_PLANEADO =
   "id, pessoa_id, organization_id, vinculo_id, local_id, dia_semana, data, hora_inicio, " +
-  "hora_fim, nao_trabalha, ordem, valido_de, valido_ate, notas";
+  "hora_fim, nao_trabalha, ordem, valido_de, valido_ate, notas, corrige_horario_id, " +
+  "correccao_motivo, corrigido_por_anew_user_id, corrigido_por_pessoa_id";
 
 const COLUNAS_HORARIO_REALIZADO =
   "id, pessoa_id, organization_id, vinculo_id, local_id, planeado_id, data, hora_inicio, " +
@@ -507,32 +514,66 @@ export function usePessoa(pessoaId: string | undefined) {
   );
 
   /**
-   * Substitui o horario PLANEADO da pessoa pelas linhas dadas.
+   * ALTERAR o horario PLANEADO: "daqui para a frente passa a ser assim".
    *
-   * PORQUE E SUBSTITUICAO E NAO DIFERENCA
-   * -------------------------------------
-   * O editor manipula intervalos livremente -- acrescenta, remove, parte em
-   * dois, copia para outros dias. Calcular a diferenca linha a linha daria
-   * dezenas de casos e um erro silencioso em cada um. Marcar as linhas vivas
-   * como apagadas e inserir as novas e uma operacao que ou corre inteira ou
-   * falha visivelmente.
+   * FECHA A JANELA EM VIGOR, ABRE OUTRA -- NUNCA APAGA O PASSADO
+   * --------------------------------------------------------------
+   * Ate 20261130190000 esta funcao marcava TODAS as linhas vivas como
+   * apagadas e inseria as novas -- o horario deixava de ter historico
+   * verdadeiro: editar hoje fazia o passado da pessoa parecer ter sido
+   * sempre o horario novo, e como as horas por centro se calculam do
+   * horario, o historico de horas por centro desaparecia com ele.
    *
-   * O soft delete e um UPDATE, nao um DELETE: o DELETE esta bloqueado por
-   * politica e a politica de UPDATE nao exige `deleted_at IS NULL` no USING,
-   * exactamente para isto ser possivel.
+   * Agora, por linha ja existente (`ficha.horarioPlaneado`):
+   *   - JA DECORRIDA (`linhaPlaneadaDecorrida`) -- intocada. So se corrige,
+   *     com rasto, por `corrigirPlaneado`.
+   *   - excepcao por data ainda por vir, OU regra recorrente que ainda nao
+   *     comecou -- soft-delete livre: nao ha cobertura passada a perder.
+   *   - regra recorrente JA EM CURSO (`linhaRecorrenteJaEmCurso`: sem
+   *     `valido_de`, ou `valido_de` no passado/hoje) -- FECHA-SE com
+   *     `valido_ate` = ontem, nunca se apaga.
+   * As linhas novas entram por INSERT; uma regra recorrente nova comeca
+   * `valido_de` = hoje (a metade "abre outra" do ALTERAR). A base
+   * (20261130190000) impoe isto de qualquer forma -- esta funcao existe para
+   * o utilizador nunca ver o erro de servidor por tentar o caminho errado.
+   *
+   * O soft delete continua a ser um UPDATE, nao um DELETE: o DELETE esta
+   * bloqueado por politica e a politica de UPDATE nao exige
+   * `deleted_at IS NULL` no USING, exactamente para isto ser possivel.
    */
   const savePlaneado = useCallback(
     (linhas: LinhaPlaneadoParaGravar[]) =>
       guardar(async (autorId) => {
         const orgId = ficha.pessoa?.organization_id;
         if (!orgId || !pessoaId) return { error: new Error("Ficha sem organizacao resolvida") };
-        const agora = new Date().toISOString();
+        // hojeIsoServidor(), nao hojeIso(): este valor viaja para o trigger de
+        // imutabilidade, que compara com CURRENT_DATE no servidor (UTC). O dia
+        // local do browser diverge do dia em UTC perto da meia-noite, e um
+        // ALTERAR normal ao fim da tarde num fuso atras de UTC apanhava
+        // horario_planeado_fecha_no_passado por essa divergencia.
+        const hoje = hojeIsoServidor();
+        const ontem = ontemIso(hoje);
 
-        const { error: erroApagar } = await hrFrom("pessoas_horario_planeado")
-          .update({ deleted_at: agora, deleted_by: autorId, updated_by: autorId })
-          .eq("pessoa_id", pessoaId)
-          .is("deleted_at", null);
-        if (erroApagar) return { error: erroApagar };
+        for (const linha of ficha.horarioPlaneado) {
+          if (linhaPlaneadaDecorrida(linha, hoje)) continue;
+
+          if (linha.data !== null || !linhaRecorrenteJaEmCurso(linha, hoje)) {
+            const { error } = await hrFrom("pessoas_horario_planeado")
+              .update({
+                deleted_at: new Date().toISOString(),
+                deleted_by: autorId,
+                updated_by: autorId,
+              })
+              .eq("id", linha.id);
+            if (error) return { error };
+            continue;
+          }
+
+          const { error } = await hrFrom("pessoas_horario_planeado")
+            .update({ valido_ate: ontem, updated_by: autorId })
+            .eq("id", linha.id);
+          if (error) return { error };
+        }
 
         if (linhas.length === 0) return { error: null };
 
@@ -548,12 +589,48 @@ export function usePessoa(pessoaId: string | undefined) {
             pessoa_id: pessoaId,
             organization_id: orgId,
             vinculo_id: vinculoActivo?.id ?? null,
+            // Uma regra recorrente NOVA comeca hoje: e o "abre outra" do
+            // ALTERAR. Uma excepcao por data leva a sua propria data e nunca
+            // `valido_de` -- o CHECK da base impede-o.
+            valido_de: linha.dia_semana !== null ? hoje : null,
             created_by: autorId,
             updated_by: autorId,
           })),
         );
       }),
-    [guardar, ficha.pessoa?.organization_id, ficha.vinculos, pessoaId],
+    [guardar, ficha.pessoa?.organization_id, ficha.vinculos, ficha.horarioPlaneado, pessoaId],
+  );
+
+  /**
+   * CORRIGIR um intervalo de horario PLANEADO cuja janela ja decorreu: um
+   * LANCAMENTO NOVO que aponta para o errado (`rpc_hr_planeado_corrigir`),
+   * nunca uma reescrita -- a linha antiga fica visivel no historico. Exige
+   * `hr.pessoas.horario.corrigir` (perigosa) e motivo escrito; a RPC recusa
+   * corrigir uma linha que ainda esta em vigor ou no futuro (isso e
+   * `savePlaneado`/ALTERAR) e uma linha que ja tem correccao viva. Mesmo
+   * desenho de `definirNiss`/`revelarNiss`: RPC directa por dentro de
+   * `guardar`.
+   */
+  const corrigirPlaneado = useCallback(
+    (args: {
+      horarioId: string;
+      horaInicio: string | null;
+      horaFim: string | null;
+      localId: string | null;
+      naoTrabalha: boolean;
+      motivo: string;
+    }) =>
+      guardar(async () =>
+        hrRpc("rpc_hr_planeado_corrigir", {
+          _horario_id: args.horarioId,
+          _hora_inicio: args.naoTrabalha ? null : args.horaInicio,
+          _hora_fim: args.naoTrabalha ? null : args.horaFim,
+          _local_id: args.localId,
+          _nao_trabalha: args.naoTrabalha,
+          _motivo: args.motivo,
+        }),
+      ),
+    [guardar],
   );
 
   /**
@@ -641,6 +718,7 @@ export function usePessoa(pessoaId: string | undefined) {
     saveSindicalizacao,
     saveVinculo,
     savePlaneado,
+    corrigirPlaneado,
     revelarNiss,
     definirNiss,
     definirConta,

@@ -20,6 +20,16 @@
  * desta pessoa" deve estar num sitio so.
  *
  * O editor e O MESMO componente do passo 4 do assistente.
+ *
+ * ALTERAR E CORRIGIR SAO DUAS COISAS, NO PLANEADO TAMBEM (20261130190000)
+ * -------------------------------------------------------------------------
+ * O editor (`HorarioEditor` + o botao "Guardar" desta aba) so mostra e so
+ * grava linhas cuja janela AINDA NAO decorreu -- em vigor ou no futuro. Uma
+ * janela ja decorrida nunca entra no rascunho: fica no bloco de Historico,
+ * so leitura, com um botao "Corrigir" proprio, permissao propria
+ * (`podeCorrigirPlaneado`) e um painel (`CorrigirPlaneadoSheet`) diferente do
+ * editor -- de proposito. Se fosse o mesmo botao, corrigir o passado pareceria
+ * mudar o futuro.
  */
 import { useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -38,17 +48,30 @@ import { CalendarClock, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { HorarioEditor, corDoLocal } from "@/components/hr/HorarioEditor";
+import { CorrigirPlaneadoSheet } from "@/components/hr/CorrigirPlaneadoSheet";
+import { HistoricoCorreccoes } from "@/components/hr/assiduidade/HistoricoCorreccoes";
 import { PessoaAssiduidadeTab } from "@/components/hr/PessoaAssiduidadeTab";
+import { cadeiaDeCorreccoes, emVigor, LEITOR_PLANEADO } from "@/lib/hr/assiduidade";
 import {
   type HorarioRascunho,
   type LinhaPlaneadoParaGravar,
   formatarDuracao,
+  linhaPlaneadaDecorrida,
   linhasParaGravar,
   problemasDoHorario,
   rascunhoDeLinhas,
 } from "@/lib/hr/horario";
 import type { HorarioPlaneado, HorarioRealizado, LocalTrabalho } from "@/types/hr";
 import type { PermissoesAssiduidade } from "@/types/hrAssiduidade";
+
+interface CorrigirPlaneadoArgs {
+  horarioId: string;
+  horaInicio: string | null;
+  horaFim: string | null;
+  localId: string | null;
+  naoTrabalha: boolean;
+  motivo: string;
+}
 
 interface PessoaHorarioTabProps {
   planeado: HorarioPlaneado[];
@@ -57,10 +80,14 @@ interface PessoaHorarioTabProps {
   locaisALoad: boolean;
   podeVerPlaneado: boolean;
   podeEditarPlaneado: boolean;
+  /** Corrigir uma janela JA DECORRIDA -- perigosa, permissao a parte do editor. */
+  podeCorrigirPlaneado?: boolean;
   podeVerRealizado: boolean;
   saving: boolean;
-  /** Substitui o horario planeado da pessoa pelas linhas dadas. */
+  /** ALTERAR: substitui o horario planeado EM VIGOR/futuro pelas linhas dadas. */
   onGuardarPlaneado: (linhas: LinhaPlaneadoParaGravar[]) => Promise<string | null>;
+  /** CORRIGIR: um lancamento novo sobre uma linha ja decorrida, com rasto. */
+  onCorrigirPlaneado?: (args: CorrigirPlaneadoArgs) => Promise<string | null>;
   /** A aba Assiduidade. Sem isto o separador continua com duas abas. */
   pessoaId?: string;
   pessoaNome?: string;
@@ -75,20 +102,49 @@ export function PessoaHorarioTab({
   locaisALoad,
   podeVerPlaneado,
   podeEditarPlaneado,
+  podeCorrigirPlaneado = false,
   podeVerRealizado,
   saving,
   onGuardarPlaneado,
+  onCorrigirPlaneado,
   pessoaId,
   pessoaNome,
   souAPessoa = false,
   permissoesAssiduidade,
 }: PessoaHorarioTabProps) {
   const { t } = useTranslation();
-  const [rascunho, setRascunho] = useState<HorarioRascunho>(() => rascunhoDeLinhas(planeado));
+
+  // Duas fatias do MESMO array: o que ainda se ALTERA (em vigor ou futuro,
+  // vai para o rascunho editavel) e o que so se CORRIGE (janela ja
+  // decorrida, so leitura + botao proprio). `linhaPlaneadaDecorrida` e o
+  // espelho exacto do que a base ja impoe (20261130190000).
+  const editavel = useMemo(
+    () => planeado.filter((linha) => !linhaPlaneadaDecorrida(linha)),
+    [planeado],
+  );
+  const historico = useMemo(
+    () => planeado.filter((linha) => linhaPlaneadaDecorrida(linha)),
+    [planeado],
+  );
+  // Uma posicao do historico por linha "em vigor" dentro do historico: a
+  // original quando nunca foi corrigida, ou a correccao mais recente quando
+  // foi. `cadeiaDeCorreccoes` reconstroi, para cada uma, a volta completa
+  // ate ao lancamento original -- e o painel so aparece quando ha mais do
+  // que um passo.
+  const historicoEmVigor = useMemo(
+    () =>
+      emVigor(historico, LEITOR_PLANEADO).sort((a, b) =>
+        (b.data ?? b.valido_de ?? "").localeCompare(a.data ?? a.valido_de ?? ""),
+      ),
+    [historico],
+  );
+
+  const [rascunho, setRascunho] = useState<HorarioRascunho>(() => rascunhoDeLinhas(editavel));
+  const [corrigirAlvo, setCorrigirAlvo] = useState<HorarioPlaneado | null>(null);
 
   useEffect(() => {
-    setRascunho(rascunhoDeLinhas(planeado));
-  }, [planeado]);
+    setRascunho(rascunhoDeLinhas(editavel));
+  }, [editavel]);
 
   const problemas = useMemo(() => problemasDoHorario(rascunho), [rascunho]);
   const nomePorLocal = useMemo(
@@ -108,6 +164,17 @@ export function PessoaHorarioTab({
     }
     toast.success(t("hr.sucesso.guardado"));
   };
+
+  const descreverLinha = (linha: HorarioPlaneado): string => {
+    if (linha.nao_trabalha) return t("hr.horario.naoTrabalha");
+    const local = linha.local_id
+      ? (nomePorLocal.get(linha.local_id) ?? linha.local_id)
+      : t("hr.horario.localPredefinido");
+    return `${linha.hora_inicio?.slice(0, 5) ?? "—"} — ${linha.hora_fim?.slice(0, 5) ?? "—"} · ${local}`;
+  };
+
+  const quandoDaLinha = (linha: HorarioPlaneado): string =>
+    linha.data ?? linha.valido_de ?? "—";
 
   const podeVerAssiduidade =
     Boolean(pessoaId && permissoesAssiduidade) &&
@@ -170,10 +237,61 @@ export function PessoaHorarioTab({
                       size="sm"
                       variant="ghost"
                       disabled={saving}
-                      onClick={() => setRascunho(rascunhoDeLinhas(planeado))}
+                      onClick={() => setRascunho(rascunhoDeLinhas(editavel))}
                     >
                       {t("common.cancel")}
                     </Button>
+                  </div>
+                )}
+
+                {historicoEmVigor.length > 0 && (
+                  <div className="space-y-2 border-t pt-4">
+                    <h3 className="text-sm font-medium text-muted-foreground">
+                      {t("hr.horario.historicoSeccaoTitulo")}
+                    </h3>
+                    <ul className="space-y-2">
+                      {historicoEmVigor.map((linha) => {
+                        const cadeia = cadeiaDeCorreccoes(linha, historico, LEITOR_PLANEADO);
+                        return (
+                          <li
+                            key={linha.id}
+                            className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border p-2 text-sm opacity-80"
+                          >
+                            <span className="tabular-nums text-xs text-muted-foreground">
+                              {quandoDaLinha(linha)}
+                            </span>
+                            <span>{descreverLinha(linha)}</span>
+
+                            <HistoricoCorreccoes
+                              titulo={t("hr.assiduidade.historico.planeadoTitulo")}
+                              descricao={t("hr.assiduidade.historico.descricao")}
+                              rotulo={t("hr.assiduidade.historico.rotulo", {
+                                quantas: String(cadeia.length - 1),
+                              })}
+                              passos={cadeia.map((passo) => ({
+                                id: passo.id,
+                                valor: descreverLinha(passo),
+                                autor: passo.corrigido_por_pessoa_id,
+                                quando: null,
+                                motivo: passo.correccao_motivo,
+                              }))}
+                            />
+
+                            {podeCorrigirPlaneado && onCorrigirPlaneado && (
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                className="ml-auto h-7"
+                                onClick={() => setCorrigirAlvo(linha)}
+                              >
+                                {t("hr.assiduidade.accao.corrigir")}
+                              </Button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </div>
                 )}
               </>
@@ -251,6 +369,22 @@ export function PessoaHorarioTab({
           </TabsContent>
         </Tabs>
       </CardContent>
+
+      {corrigirAlvo && onCorrigirPlaneado && (
+        <CorrigirPlaneadoSheet
+          aberto={corrigirAlvo !== null}
+          horarioId={corrigirAlvo.id}
+          horaInicioActual={corrigirAlvo.hora_inicio}
+          horaFimActual={corrigirAlvo.hora_fim}
+          localActual={corrigirAlvo.local_id}
+          naoTrabalhaActual={corrigirAlvo.nao_trabalha}
+          locais={locais}
+          aGravar={saving}
+          onFechar={() => setCorrigirAlvo(null)}
+          onCorrigir={onCorrigirPlaneado}
+          idPrefixo="hr-ficha-horario-corrigir"
+        />
+      )}
     </Card>
   );
 }

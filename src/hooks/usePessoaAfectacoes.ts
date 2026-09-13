@@ -17,15 +17,36 @@
  */
 import { useCallback, useEffect, useState } from "react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
-import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { getFriendlyErrorMessage, getLocalizedFallback } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
 import {
   ERRO_AFECTACAO_HORARIO_A_FRENTE,
   ehErroNomeado,
+  mensagemDeErro,
   ordenarAfectacoes,
 } from "@/lib/hr/afectacoes";
 import type { PessoaAfectacao } from "@/types/hr";
+
+/**
+ * `hr_horario_planeado_janela_imutavel` (20261130190000) -- todos os
+ * ERRCODEs que levanta comecam por este prefixo (janela_decorrida,
+ * fecha_no_passado, encolhe_inicio, altera_regra_em_curso,
+ * insercao_no_passado).
+ *
+ * `apararEFechar` pode pedir para aparar um bloco cujo intervalo JA
+ * DECORREU, ou fechar uma regra recorrente com um `corte` retroactivo a mais
+ * de um dia -- e nesse caso o trigger recusa por desenho: uma janela ja
+ * decorrida e imutavel, e nao ha correccao que a mude de sitio no tempo (a
+ * `rpc_hr_planeado_corrigir` so corrige o que la estava, nunca o periodo).
+ * Sem esta distincao, quem fecha uma afectacao no passado via aqui via a
+ * mensagem de erro do horario planeado, que manda usar uma RPC que nao serve
+ * para isto -- em vez de lhe dizerem, em vocabulario de afectacoes, que a
+ * data escolhida nao pode retroceder tanto.
+ */
+function ehErroDeImutabilidadeDoPlaneado(erro: unknown): boolean {
+  return mensagemDeErro(erro)?.startsWith("horario_planeado_") ?? false;
+}
 
 const COLUNAS =
   "id, pessoa_id, organization_id, vinculo_id, local_id, valido_de, valido_ate, motivo, " +
@@ -243,12 +264,22 @@ export function usePessoaAfectacoes(pessoaId: string | undefined, organizationId
             const { error } = await hrFrom("pessoas_horario_planeado")
               .update({ deleted_at: agora, deleted_by: autorId, updated_by: autorId })
               .eq("id", bloco.id);
-            if (error) return { tipo: "erro", mensagem: await getFriendlyErrorMessage(error) };
+            if (error) {
+              if (ehErroDeImutabilidadeDoPlaneado(error)) {
+                return { tipo: "erro", mensagem: getLocalizedFallback("hr.afectacoes.erroAparaJaDecorrido") };
+              }
+              return { tipo: "erro", mensagem: await getFriendlyErrorMessage(error) };
+            }
           } else {
             const { error } = await hrFrom("pessoas_horario_planeado")
               .update({ valido_ate: corte, updated_by: autorId })
               .eq("id", bloco.id);
-            if (error) return { tipo: "erro", mensagem: await getFriendlyErrorMessage(error) };
+            if (error) {
+              if (ehErroDeImutabilidadeDoPlaneado(error)) {
+                return { tipo: "erro", mensagem: getLocalizedFallback("hr.afectacoes.erroAparaJaDecorrido") };
+              }
+              return { tipo: "erro", mensagem: await getFriendlyErrorMessage(error) };
+            }
           }
         }
       } catch (e) {

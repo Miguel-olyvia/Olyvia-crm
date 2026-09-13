@@ -696,6 +696,12 @@ export interface HorarioPlaneado {
   valido_de: string | null;
   valido_ate: string | null;
   notas: string | null;
+  /** O intervalo errado que esta linha substitui. Nulo num lancamento original. */
+  corrige_horario_id: string | null;
+  /** Obrigatorio quando `corrige_horario_id` esta preenchido. */
+  correccao_motivo: string | null;
+  corrigido_por_anew_user_id: string | null;
+  corrigido_por_pessoa_id: string | null;
 }
 
 /** `pessoas_horario_realizado` (20261120160000). O que aconteceu, por data. */
@@ -753,6 +759,33 @@ export interface PessoaAfectacao {
   updated_at?: string;
 }
 
+/**
+ * `pessoas_colocacao_organograma` (20261130080000). A que no do organograma a
+ * pessoa esta colocada -- FILIAL/ESTRUTURA, versionada por intervalo. DUAS
+ * classificacoes INDEPENDENTES coexistem no RH: esta (da PESSOA) e a de
+ * `LocalTrabalho.organograma_node_id` (do CENTRO, simples, sem historico).
+ * Nenhuma se calcula da outra -- por isso uma pessoa classificada em Lisboa
+ * afecta a um centro do Porto continua "de Lisboa", e isso mostra-se, nao se
+ * esconde. A classificacao NUNCA limita a que centros a pessoa pode ser
+ * afecta.
+ *
+ * `organograma_node_id` e FK simples e ANULAVEL a `anew_organizations`, fora
+ * de qualquer chave composta e NUNCA usada como ambito de seguranca -- so
+ * classificacao. `null` e sempre legitimo ("sem classificacao").
+ */
+export interface PessoaColocacaoOrganograma {
+  id: string;
+  pessoa_id: string;
+  organization_id: string;
+  organograma_node_id: string | null;
+  valido_de: string;
+  /** `null` = em vigor (aberta). */
+  valido_ate: string | null;
+  motivo: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // -- Documentos (20261123020000..20261123030000) -----------------------------
 
 /** Dominio de `pessoas_documentos_modelos.tipo` e `pessoas_documentos.tipo`. */
@@ -788,11 +821,16 @@ export interface PessoaDocumentoModelo {
 }
 
 /**
- * Metadados de `pessoas_documentos`. NUNCA `corpo_html` nem
- * `ficheiro_caminho`: essas colunas estao fechadas por GRANT de coluna
- * (migration 20261123030000) e so saem pela RPC
- * `rpc_hr_documento_ver_conteudo`. Pedi-las aqui faz o PostgREST recusar o
+ * Metadados de `pessoas_documentos`. NUNCA `corpo_html`: essa coluna continua
+ * fechada por GRANT de coluna (migration 20261123030000) e so sai pela RPC
+ * `rpc_hr_documento_ver_conteudo`. Pedi-la aqui faz o PostgREST recusar o
  * select e perder a linha inteira -- a mesma licao do NISS.
+ *
+ * `ficheiro_caminho`, `ficheiro_hash_sha256` e `ficheiro_anexado_em` JA estao
+ * no GRANT de metadados desde 20261130065000 -- sao metadados legiveis, ao
+ * contrario de `corpo_html`. O CONTEUDO do ficheiro nunca vem por aqui: so
+ * pelo URL assinado de curta duracao emitido pela Edge Function
+ * `hr-documento-ficheiro-url`, que audita antes de o devolver.
  */
 export interface PessoaDocumento {
   id: string;
@@ -803,6 +841,9 @@ export interface PessoaDocumento {
   tipo: TipoDocumentoRH;
   titulo: string;
   estado: EstadoDocumentoRH;
+  ficheiro_caminho: string | null;
+  ficheiro_hash_sha256: string | null;
+  ficheiro_anexado_em: string | null;
   emitido_em: string | null;
   emitido_por: string | null;
   assinado_em: string | null;

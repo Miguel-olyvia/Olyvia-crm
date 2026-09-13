@@ -122,6 +122,13 @@ export default function PessoaDetail() {
   const podeVerAfectacoes = hasPermission("hr.pessoas.afectacoes.view");
   const podeEditarAfectacoes = hasPermission("hr.pessoas.afectacoes.edit");
   const podeCorrigirAfectacoes = hasPermission("hr.pessoas.afectacoes.corrigir");
+  // Colocacao no organograma: classificacao INDEPENDENTE das afectacoes a
+  // centros, acima -- ver o cabecalho de `PessoaColocacaoOrganogramaSeccao`.
+  // A politica de SELECT nao tem ramo de ficha-propria (de proposito, ver a
+  // migracao 20261130080000) -- so a permissao, sem o OR de `minhaPessoaId`.
+  const podeVerColocacao = hasPermission("hr.pessoas.colocacao.view");
+  const podeEditarColocacao = hasPermission("hr.pessoas.colocacao.edit");
+  const podeCorrigirColocacao = hasPermission("hr.pessoas.colocacao.corrigir");
   const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
   const podeEditarVinculos = hasPermission("hr.pessoas.vinculos.edit");
   // Horas contratadas versionadas (pessoas_vinculos_horas, 20261130120000):
@@ -131,6 +138,10 @@ export default function PessoaDetail() {
   const podeVerRetribuicao = hasPermission("hr.pessoas.retribuicao.view");
   const podeVerHorario = hasPermission("hr.pessoas.horario.view");
   const podeEditarHorario = hasPermission("hr.pessoas.horario.edit");
+  // Horario planeado com historico (20261130190000): ALTERAR reaproveita
+  // `podeEditarHorario`; CORRIGIR (uma janela ja decorrida) e permissao a
+  // parte, mais perigosa -- ver o cabecalho de `PessoaHorarioTab`.
+  const podeCorrigirHorario = hasPermission("hr.pessoas.horario.corrigir");
   const podeVerRealizado = hasPermission("hr.pessoas.horario_realizado.view");
 
   // Ausencias: oito permissoes distintas. `pedir` e para si, `pedir.outros` e
@@ -408,6 +419,9 @@ export default function PessoaDetail() {
               podeVerAfectacoes={podeVerAfectacoesEfectivo}
               podeEditarAfectacoes={podeEditarAfectacoes}
               podeCorrigirAfectacoes={podeCorrigirAfectacoes}
+              podeVerColocacao={podeVerColocacao}
+              podeEditarColocacao={podeEditarColocacao}
+              podeCorrigirColocacao={podeCorrigirColocacao}
             />
           ) : (
             <Card>
@@ -475,9 +489,11 @@ export default function PessoaDetail() {
             locaisALoad={locaisALoad}
             podeVerPlaneado={podeVerHorario}
             podeEditarPlaneado={podeEditarHorario}
+            podeCorrigirPlaneado={podeCorrigirHorario}
             podeVerRealizado={podeVerRealizado}
             saving={ficha.saving}
             onGuardarPlaneado={ficha.savePlaneado}
+            onCorrigirPlaneado={ficha.corrigirPlaneado}
             pessoaId={pessoa.id}
             pessoaNome={pessoa.nome_completo}
             souAPessoa={minhaPessoaId === pessoa.id}

@@ -120,6 +120,12 @@ export type BusinessFlow =
   // alteracao ou uma correccao de historico -- as duas tem de se ver.
   | "hr-afectacoes-load"
   | "hr-afectacoes-write"
+  // Colocacao no organograma (`pessoas_colocacao_organograma`, 20261130080000)
+  // -- a filial/estrutura da PESSOA, independente das afectacoes a centros
+  // acima. Mesma razao: a leitura falhada esconde a classificacao actual; a
+  // escrita falhada perde uma alteracao ou uma correccao de historico.
+  | "hr-colocacao-organograma-load"
+  | "hr-colocacao-organograma-write"
   // Horas contratadas versionadas (`pessoas_vinculos_horas`, 20261130120000).
   // Mesma razao das afectacoes: a leitura falhada esconde as horas em vigor;
   // a escrita falhada perde uma alteracao ou uma correccao de historico.
@@ -132,6 +138,8 @@ export type BusinessFlow =
   | "hr-documentos-emitir"
   | "hr-documentos-ver-conteudo"
   | "hr-documentos-assinar"
+  | "hr-documentos-anexar-ficheiro"
+  | "hr-documentos-obter-url-ficheiro"
   | "hr-admissao-pendencias"
   | "hr-pessoa-duplicados-candidatos";
 

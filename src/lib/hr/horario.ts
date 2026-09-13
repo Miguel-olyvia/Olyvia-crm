@@ -25,7 +25,27 @@
  *
  * Aqui nao ha acesso a base: sao formas e funcoes puras, testaveis sem rede.
  */
+import { hojeIso, somarDias } from "@/lib/hr/ausencias";
 import type { DiaSemana, HorarioPlaneado } from "@/types/hr";
+
+/**
+ * "Hoje", em UTC -- a mesma referencia que `CURRENT_DATE` usa no Postgres do
+ * Supabase (sem `SET timezone` nas migrations, a sessao corre em UTC).
+ *
+ * NAO E `hojeIso()` (ausencias.ts) DE PROPOSITO: aquela devolve o dia LOCAL
+ * do browser, certo para "que dia e hoje para quem esta a preencher um
+ * pedido de ausencia". Aqui o valor viaja para um trigger que compara
+ * directamente com `CURRENT_DATE` no servidor
+ * (`hr_horario_planeado_janela_imutavel`, 20261130190000): um utilizador num
+ * fuso atras de UTC pode ja estar, em UTC, um dia a frente do que o seu
+ * calendario local mostra ao fim da tarde -- usar o dia local mandava um
+ * `valido_ate` que o servidor lia como mais um dia no passado, e
+ * `horario_planeado_fecha_no_passado` disparava num ALTERAR perfeitamente
+ * normal.
+ */
+export function hojeIsoServidor(agora: Date = new Date()): string {
+  return agora.toISOString().slice(0, 10);
+}
 
 /** Um intervalo em edicao. `chave` e so para o React; nunca vai para a base. */
 export interface IntervaloRascunho {
@@ -256,6 +276,48 @@ export function temAlgumIntervalo(rascunho: HorarioRascunho): boolean {
     rascunho.dias.some((dia) => dia.intervalos.length > 0 || dia.nao_trabalha) ||
     rascunho.excepcoes.length > 0
   );
+}
+
+// -- Historico (20261130190000) -----------------------------------------------
+//
+// ALTERAR fecha a janela em vigor e abre outra; nunca toca no que ja passou.
+// As duas funcoes abaixo sao o espelho, do lado do ecra, do que a base ja
+// impoe (`hr_horario_planeado_decorrido`, `hr_horario_planeado_janela_imutavel`
+// em 20261130190000) -- para o editor nunca tentar um UPDATE que o servidor ia
+// recusar, e para separar o que se edita livremente (hoje e o futuro) do que
+// so se corrige com rasto (rpc_hr_planeado_corrigir).
+
+/**
+ * A janela desta linha ja decorreu por inteiro? Uma excepcao com `data` no
+ * passado, ou uma regra recorrente FECHADA (`valido_ate` preenchido) cujo fim
+ * ja passou. Uma regra recorrente ABERTA (`valido_ate` nulo) nunca "decorre":
+ * esta em vigor ou preve o futuro.
+ */
+export function linhaPlaneadaDecorrida(
+  linha: Pick<HorarioPlaneado, "data" | "valido_ate">,
+  hoje: string = hojeIsoServidor(),
+): boolean {
+  if (linha.data !== null) return linha.data < hoje;
+  return linha.valido_ate !== null && linha.valido_ate < hoje;
+}
+
+/**
+ * Uma regra recorrente JA EM CURSO: sem inicio declarado (`valido_de` nulo --
+ * o formato de todo o horario legado, escrito antes de 20261130190000) ou com
+ * inicio no passado. Editar uma linha destas NO LUGAR reescreveria em
+ * silencio os dias ja decorridos sob ela -- so se fecha (valido_ate) e se
+ * abre outra a partir de hoje.
+ */
+export function linhaRecorrenteJaEmCurso(
+  linha: Pick<HorarioPlaneado, "dia_semana" | "valido_de">,
+  hoje: string = hojeIsoServidor(),
+): boolean {
+  return linha.dia_semana !== null && (linha.valido_de === null || linha.valido_de < hoje);
+}
+
+/** O dia antes de `hoje` -- o `valido_ate` com que ALTERAR fecha uma regra em curso. */
+export function ontemIso(hoje: string = hojeIsoServidor()): string {
+  return somarDias(hoje, -1);
 }
 
 // -- Base <-> ecra -----------------------------------------------------------

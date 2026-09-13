@@ -37,6 +37,15 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 
+// A seccao de colocacao no organograma (`PessoaColocacaoOrganogramaSeccao`)
+// usa `useFiliaisDaArvore`, que por sua vez precisa de `CompanyProvider`
+// (`useCompany`). Este teste renderiza `PessoaLaboraisTab` isolado, sem essa
+// arvore de contexto -- mock directo ao hook, tal como a leitura de
+// `pessoas_afectacoes` acima e mockada via `supabase`.
+vi.mock("@/hooks/useFiliaisDaArvore", () => ({
+  useFiliaisDaArvore: () => ({ filiais: [], loading: false }),
+}));
+
 import { PessoaLaboraisTab } from "@/components/hr/PessoaLaboraisTab";
 import type { Pessoa } from "@/types/hr";
 
@@ -78,6 +87,9 @@ function montar(onGuardar = vi.fn().mockResolvedValue(null)) {
       podeVerAfectacoes={false}
       podeEditarAfectacoes={false}
       podeCorrigirAfectacoes={false}
+      podeVerColocacao={false}
+      podeEditarColocacao={false}
+      podeCorrigirColocacao={false}
     />,
   );
   return { onGuardar };

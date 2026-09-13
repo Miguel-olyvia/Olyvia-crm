@@ -65,7 +65,8 @@ const COLUNAS_FALTA =
 
 const COLUNAS_PLANEADO =
   "id, pessoa_id, organization_id, vinculo_id, local_id, dia_semana, data, hora_inicio, " +
-  "hora_fim, nao_trabalha, ordem, valido_de, valido_ate, notas";
+  "hora_fim, nao_trabalha, ordem, valido_de, valido_ate, notas, " +
+  "corrige_horario_id, correccao_motivo, corrigido_por_anew_user_id, corrigido_por_pessoa_id";
 
 const COLUNAS_AUSENCIA_DIA =
   "id, pedido_id, pessoa_id, organization_id, tipo_id, data, fraccao_dia, estado";
