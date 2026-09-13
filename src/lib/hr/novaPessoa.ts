@@ -504,6 +504,14 @@ export interface NovaPessoaPayload {
   conta: { formato: FormatoConta; numero: string } | null;
   emergencia: Record<string, unknown> | null;
   vinculo: Record<string, unknown> | null;
+  /**
+   * Versao inicial de `pessoas_vinculos_horas`, a par de `vinculo`. `null`
+   * quando nao foram declaradas horas -- `pessoas_vinculos.horas_periodo` e
+   * `horas_frequencia` sao DERIVADOS (20261130180000, trigger
+   * `hr_pessoas_vinculos_horas_e_derivado`) e o proprio INSERT em
+   * `pessoas_vinculos` deixou de os poder levar; esta e a unica via.
+   */
+  horasVinculo: { horas_periodo: number; horas_frequencia: HorasFrequencia; valido_de: string } | null;
   retribuicao: { valor_base: number; moeda: string; periodicidade: Periodicidade } | null;
   /** Linhas de `pessoas_horario_planeado`, uma por intervalo. */
   horario: LinhaPlaneadoParaGravar[] | null;
@@ -589,6 +597,11 @@ export function payloadDoRascunho(
 
   const valorBase = numero(contrato.valor_base);
 
+  // Usada tanto em `vinculo.data_inicio` como em `horasVinculo.valido_de`: as
+  // duas tem de nascer com a MESMA data (a versao de horas comeca exactamente
+  // quando o vinculo comeca).
+  const dataInicioVinculo = texto(contrato.data_inicio) ?? texto(laborais.data_admissao) ?? hoje();
+
   return {
     nucleo: {
       primeiro_nome: geral.primeiro_nome.trim(),
@@ -656,18 +669,16 @@ export function payloadDoRascunho(
       ? {
           tipo_contrato: contrato.tipo_contrato === "" ? "sem_termo" : contrato.tipo_contrato,
           regime: contrato.regime,
-          horas_periodo: numero(contrato.horas_trabalho),
-          horas_frequencia: contrato.horas_frequencia,
-          data_inicio: texto(contrato.data_inicio) ?? texto(laborais.data_admissao) ?? hoje(),
+          // horas_periodo/horas_frequencia NAO vao aqui desde 20261130180000:
+          // sao DERIVADOS de pessoas_vinculos_horas por trigger, e o INSERT
+          // directo e recusado (HR010). Ver `horasVinculo`, abaixo.
+          data_inicio: dataInicioVinculo,
           data_fim: texto(contrato.data_fim),
           periodo_experimental_dias: experimentalDias,
           periodo_experimental_ate:
             experimentalDias === null
               ? null
-              : dataDoPeriodoExperimental(
-                  texto(contrato.data_inicio) ?? texto(laborais.data_admissao) ?? hoje(),
-                  experimentalDias,
-                ),
+              : dataDoPeriodoExperimental(dataInicioVinculo, experimentalDias),
           tipo_trabalho: contrato.tipo_trabalho === "" ? null : contrato.tipo_trabalho,
           tempo_trabalho_pct: numero(contrato.tempo_trabalho_pct),
           dias_uteis: contrato.dias_uteis.length > 0 ? contrato.dias_uteis : null,
@@ -677,6 +688,19 @@ export function payloadDoRascunho(
           estado: "activo",
         }
       : null,
+    // Par de `vinculo`, e so existe quando ha horas declaradas: sem isto, a
+    // pessoa fica legitimamente sem versao aberta (horas_periodo/
+    // horas_frequencia ficam NULL em pessoas_vinculos, o mesmo estado de quem
+    // e prestador de servicos). horas_frequencia da tabela nova e NOT NULL,
+    // por isso so se cria o par quando ha quantidade.
+    horasVinculo:
+      temVinculo && numero(contrato.horas_trabalho) !== null
+        ? {
+            horas_periodo: numero(contrato.horas_trabalho) as number,
+            horas_frequencia: contrato.horas_frequencia,
+            valido_de: dataInicioVinculo,
+          }
+        : null,
     retribuicao:
       valorBase !== null
         ? {

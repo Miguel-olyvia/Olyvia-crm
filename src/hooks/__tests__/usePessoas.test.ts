@@ -203,6 +203,7 @@ function payloadMinimo(overrides: Partial<NovaPessoaPayload> = {}): NovaPessoaPa
     conta: null,
     emergencia: null,
     vinculo: null,
+    horasVinculo: null,
     retribuicao: null,
     horario: null,
     acesso: { role_id: null, enviar_convite: false, email_convite: null },

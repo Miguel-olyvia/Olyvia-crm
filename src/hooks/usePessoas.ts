@@ -62,6 +62,12 @@ export interface SeccaoFalhada {
     | "bancarios"
     | "emergencia"
     | "vinculo"
+    // A versao inicial de horas contratadas (`pessoas_vinculos_horas`),
+    // 20261130180000. Falhar isto NAO desfaz o vinculo nem a ficha: a pessoa
+    // fica com o vinculo criado e horas_periodo/horas_frequencia NULL (o
+    // mesmo estado, legitimo, de quem nao tem horas fixas) ate se corrigir na
+    // propria ficha.
+    | "horas"
     | "retribuicao"
     | "horario"
     // A afectacao ao centro escolhido no passo 3 (`pessoas_afectacoes`).
@@ -384,6 +390,26 @@ export function usePessoas() {
         } else {
           vinculoId = (linha as { id: string }).id;
         }
+      }
+
+      // Versao inicial de horas contratadas, no MESMO padrao da retribuicao
+      // logo abaixo: satelite dependente de `vinculoId`, mesmo molde de
+      // `pessoas_retribuicoes` (20261130180000, "quarto caminho de escrita").
+      // `pessoas_vinculos.horas_periodo`/`horas_frequencia` deixaram de se
+      // poder escrever directamente no INSERT acima (sao DERIVADOS por
+      // trigger); esta e a via -- o trigger `hr_vinculos_horas_manter_valor_
+      // em_vigor` repoe o valor em vigor no vinculo a seguir a este INSERT.
+      // Falhar isto NAO desfaz o vinculo nem a ficha (doutrina dos satelites,
+      // ver `SeccaoFalhada.afectacao`, acima): a pessoa fica so sem horas
+      // contratadas registadas, corrigivel depois na propria ficha.
+      if (payload.horasVinculo) {
+        await gravar("horas", () =>
+          hrFrom("pessoas_vinculos_horas").insert({
+            ...base,
+            ...payload.horasVinculo,
+            vinculo_id: vinculoId,
+          }),
+        );
       }
 
       if (payload.retribuicao) {
