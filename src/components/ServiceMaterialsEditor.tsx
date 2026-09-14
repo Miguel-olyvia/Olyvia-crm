@@ -56,6 +56,7 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
   const { toast } = useToast();
 
   const [materials, setMaterials] = useState<ServiceMaterial[]>([]);
+  const [costPriceMap, setCostPriceMap] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
@@ -86,7 +87,27 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
         .order("created_at", { ascending: true });
 
       if (error) throw error;
-      setMaterials((data as ServiceMaterial[] | null) || []);
+      const materialsData = (data as ServiceMaterial[] | null) || [];
+      setMaterials(materialsData);
+
+      const productIds = Array.from(
+        new Set(materialsData.map((m) => m.product_id).filter(Boolean)),
+      );
+      if (productIds.length > 0) {
+        const { data: costsData, error: costsError } = await supabase
+          .from("product_prices")
+          .select("product_id, price")
+          .in("product_id", productIds)
+          .eq("price_type", "purchase");
+        if (costsError) throw costsError;
+        const map: Record<string, number> = {};
+        (costsData || []).forEach((c) => {
+          map[c.product_id] = c.price;
+        });
+        setCostPriceMap(map);
+      } else {
+        setCostPriceMap({});
+      }
     } catch (error: any) {
       captureFlowError(error, "db-error-leaked-to-ui");
       toast({
@@ -200,10 +221,22 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
   const existingProductIds = new Set(materials.map((m) => m.product_id));
   const availableItems = catalog.items.filter((item) => !existingProductIds.has(item.id));
 
+  const totalMaterialsCost = materials.reduce(
+    (sum, m) => sum + m.quantity * (costPriceMap[m.product_id] || 0),
+    0,
+  );
+
   return (
     <div className="space-y-3">
       <div className="flex justify-between items-center">
-        <h4 className="font-medium text-sm">Materiais da ficha técnica</h4>
+        <div>
+          <h4 className="font-medium text-sm">Materiais da ficha técnica</h4>
+          {materials.length > 0 && (
+            <p className="text-sm font-semibold text-foreground mt-0.5">
+              Custo total de materiais: {formatCurrency(totalMaterialsCost)}
+            </p>
+          )}
+        </div>
         <Button type="button" size="sm" variant="outline" onClick={() => setShowAddDialog(true)}>
           <Plus className="h-4 w-4 mr-2" />
           Adicionar material
@@ -225,7 +258,10 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
         </Card>
       ) : (
         <div className="space-y-2">
-          {materials.map((material) => (
+          {materials.map((material) => {
+            const unitCost = costPriceMap[material.product_id] || 0;
+            const subtotal = material.quantity * unitCost;
+            return (
             <Card key={material.id} className="p-3">
               <div className="flex items-center gap-3">
                 <Package className="h-5 w-5 text-blue-500 shrink-0" />
@@ -236,6 +272,9 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
                       <Badge variant="outline" className="text-xs">{material.product.sku}</Badge>
                     )}
                   </div>
+                  <p className="text-xs text-muted-foreground">
+                    {formatCurrency(unitCost)} / un · Subtotal: {formatCurrency(subtotal)}
+                  </p>
                 </div>
                 <div className="w-28">
                   <Label className="text-xs">Quantidade</Label>
@@ -259,7 +298,8 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
                 </Button>
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -317,7 +357,7 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
                         <p className="font-medium">{item.name}</p>
                         {item.sku && <p className="text-xs text-muted-foreground">{item.sku}</p>}
                       </div>
-                      <p className="font-semibold">{formatCurrency(item.retail_price)}</p>
+                      <p className="font-semibold">{formatCurrency(item.cost_price)}</p>
                     </div>
                   ))}
 
