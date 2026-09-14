@@ -30,6 +30,14 @@ interface ServiceMaterial {
   notes: string | null;
   sort_order: number | null;
   product?: { id: string; name: string; sku: string } | null;
+  // Regra de três simples opcional para este material (migration
+  // 20261130170000_service_technical_sheet_quantity_per_area.sql, já
+  // aplicada à BD): "Para X m² preciso de Y unidades". Quando ambos
+  // preenchidos, a quantidade sugerida no diagnóstico é calculada a partir
+  // da área da zona em vez de usar `quantity` fixa (ver
+  // QuoteDiagnosticPhase.tsx). NULL mantém o comportamento atual.
+  reference_area_m2: number | null;
+  reference_quantity: number | null;
 }
 
 interface ServiceMaterialsEditorProps {
@@ -61,6 +69,10 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
   const [localSearchTerm, setLocalSearchTerm] = useState("");
+  // Materiais com o painel da regra de três aberto — inicializado com os que
+  // já têm reference_area_m2/reference_quantity preenchidos (ver
+  // loadMaterials), para que a regra já configurada fique sempre visível.
+  const [expandedReference, setExpandedReference] = useState<Set<string>>(new Set());
 
   const debouncedSearch = useDebounce(localSearchTerm, 300);
 
@@ -80,7 +92,7 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
       setLoading(true);
       const { data, error } = await (supabase as any)
         .from("service_materials")
-        .select("id, product_id, quantity, uom_id, notes, sort_order, product:products(id, name, sku)")
+        .select("id, product_id, quantity, uom_id, notes, sort_order, reference_area_m2, reference_quantity, product:products(id, name, sku)")
         .eq("service_id", serviceId)
         .is("deleted_at", null)
         .order("sort_order", { ascending: true, nullsFirst: false })
@@ -89,6 +101,13 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
       if (error) throw error;
       const materialsData = (data as ServiceMaterial[] | null) || [];
       setMaterials(materialsData);
+      setExpandedReference(
+        new Set(
+          materialsData
+            .filter((m) => m.reference_area_m2 != null && m.reference_quantity != null)
+            .map((m) => m.id),
+        ),
+      );
 
       const productIds = Array.from(
         new Set(materialsData.map((m) => m.product_id).filter(Boolean)),
@@ -201,6 +220,40 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
     }
   };
 
+  const handleUpdateReference = async (
+    id: string,
+    field: "reference_area_m2" | "reference_quantity",
+    value: number | null,
+  ) => {
+    // Mesmo padrão de handleUpdateQuantity: atualiza a UI de imediato,
+    // gravação direta (RLS-protegida), sem RPC.
+    setMaterials((prev) => prev.map((m) => (m.id === id ? { ...m, [field]: value } : m)));
+    try {
+      const { error } = await (supabase as any).from("service_materials").update({ [field]: value }).eq("id", id);
+      if (error) throw error;
+    } catch (error: any) {
+      captureFlowError(error, "db-error-leaked-to-ui");
+      toast({
+        title: "Erro ao atualizar regra de três",
+        description: error.message,
+        variant: "destructive",
+      });
+      loadMaterials();
+    }
+  };
+
+  const toggleReferenceExpanded = (id: string) => {
+    setExpandedReference((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
   const handleDeleteMaterial = async (id: string) => {
     try {
       const { error } = await (supabase as any).rpc("rpc_delete_service_material", { p_material_id: id });
@@ -261,6 +314,8 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
           {materials.map((material) => {
             const unitCost = costPriceMap[material.product_id] || 0;
             const subtotal = material.quantity * unitCost;
+            const hasReferenceRule = material.reference_area_m2 != null && material.reference_quantity != null;
+            const isExpanded = expandedReference.has(material.id);
             return (
             <Card key={material.id} className="p-3">
               <div className="flex items-center gap-3">
@@ -275,6 +330,11 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
                   <p className="text-xs text-muted-foreground">
                     {formatCurrency(unitCost)} / un · Subtotal: {formatCurrency(subtotal)}
                   </p>
+                  {hasReferenceRule && (
+                    <p className="text-xs text-primary mt-0.5">
+                      Para {material.reference_area_m2} m² → {material.reference_quantity} unidades
+                    </p>
+                  )}
                 </div>
                 <div className="w-28">
                   <Label className="text-xs">Quantidade</Label>
@@ -296,6 +356,59 @@ export default function ServiceMaterialsEditor({ serviceId, organizationId }: Se
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
+              </div>
+
+              <div className="mt-2 pl-8">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-6 px-2 text-xs text-muted-foreground"
+                  onClick={() => toggleReferenceExpanded(material.id)}
+                >
+                  {isExpanded ? "- Regra de três" : "+ Regra de três"}
+                </Button>
+                {isExpanded && (
+                  <div className="space-y-1.5 mt-1.5">
+                    <p className="text-xs text-muted-foreground">Quantidade por área (opcional)</p>
+                    <div className="grid grid-cols-2 gap-2 max-w-xs">
+                      <div>
+                        <Label className="text-xs">Para X m²</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={material.reference_area_m2 ?? ""}
+                          onChange={(e) =>
+                            handleUpdateReference(
+                              material.id,
+                              "reference_area_m2",
+                              e.target.value === "" ? null : parseFloat(e.target.value),
+                            )
+                          }
+                          className="h-8"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Y unidades</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={material.reference_quantity ?? ""}
+                          onChange={(e) =>
+                            handleUpdateReference(
+                              material.id,
+                              "reference_quantity",
+                              e.target.value === "" ? null : parseFloat(e.target.value),
+                            )
+                          }
+                          className="h-8"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </Card>
             );

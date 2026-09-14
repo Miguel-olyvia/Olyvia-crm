@@ -292,11 +292,22 @@ function AreaCard({
   // sem passar pelas regras/IA. Best effort: nunca lança, só regista o erro
   // e não bloqueia o fluxo normal (o registo do próprio serviço já teve
   // sucesso nesse ponto).
-  const acceptServiceTechnicalSheetMaterials = async (serviceId: string): Promise<number> => {
+  // `areaM2`: área atual da zona (area.area_m2), usada para a regra de três
+  // simples por material (reference_area_m2/reference_quantity — migration
+  // 20261130170000_service_technical_sheet_quantity_per_area.sql, já
+  // aplicada à BD). Quando null (área ainda não preenchida) ou quando o
+  // material não tem a regra configurada, mantém-se a quantity fixa da
+  // linha, tal como antes.
+  const acceptServiceTechnicalSheetMaterials = async (
+    serviceId: string,
+    areaM2: number | null,
+  ): Promise<number> => {
     try {
       const { data, error } = await (supabase as any)
         .from("service_materials")
-        .select("product_id, quantity, uom_id, product:products(name), uom:uom_id(code)")
+        .select(
+          "product_id, quantity, uom_id, reference_area_m2, reference_quantity, product:products(name), uom:uom_id(code)",
+        )
         .eq("service_id", serviceId)
         .is("deleted_at", null);
       if (error) throw error;
@@ -305,18 +316,30 @@ function AreaCard({
         product_id: string;
         quantity: number;
         uom_id: string | null;
+        reference_area_m2: number | null;
+        reference_quantity: number | null;
         product?: { name: string } | null;
         uom?: { code: string } | null;
       }> | null) || [];
 
       for (const row of rows) {
+        let qty = Number(row.quantity) || 0;
+        if (
+          row.reference_area_m2 != null &&
+          row.reference_quantity != null &&
+          row.reference_area_m2 > 0 &&
+          areaM2 != null
+        ) {
+          qty = Math.ceil((row.reference_quantity / row.reference_area_m2) * areaM2);
+        }
+
         const { error: acceptError } = await supabase.rpc("rpc_record_diagnostic_suggestion_accepted", {
           p_diagnostic_area_id: area.id,
           p_source: "manual",
           p_source_field: "servico_direto",
           p_target_type: "product",
           p_descricao: row.product?.name || "Material da ficha técnica",
-          p_qty: Number(row.quantity) || 0,
+          p_qty: qty,
           p_product_id: row.product_id,
           p_service_id: null,
           p_catalog_item_id: null,
@@ -371,7 +394,7 @@ function AreaCard({
       // função acima devolve 0 sem side effects visíveis se não houver
       // materiais (ou se a leitura falhar).
       if (suggestion.target_type === "service" && suggestion.service_id) {
-        const materialsCount = await acceptServiceTechnicalSheetMaterials(suggestion.service_id);
+        const materialsCount = await acceptServiceTechnicalSheetMaterials(suggestion.service_id, area.area_m2 ?? null);
         if (materialsCount > 0) {
           toast({
             title: `${materialsCount} materiais da ficha técnica adicionados automaticamente`,
@@ -409,13 +432,39 @@ function AreaCard({
   // aceites de regra/IA.
   const handleAcceptManualService = async (service: DiagnosticServicePickerService) => {
     try {
+      const areaM2 = area.area_m2 ?? null;
+
+      // Quantidade sugerida do próprio serviço pela regra de três simples
+      // (technical_sheet_reference_area_m2/technical_sheet_reference_quantity
+      // — migration 20261130170000_service_technical_sheet_quantity_per_area.sql,
+      // já aplicada à BD). Estes 2 campos não vêm do DiagnosticServicePicker
+      // (useBundleCatalogItems não os devolve) — leitura extra por id, tal
+      // como acceptServiceTechnicalSheetMaterials já faz para os materiais.
+      // Sem área definida ou sem a regra configurada, mantém-se o
+      // comportamento atual (quantidade fixa em 1).
+      let qty = 1;
+      if (areaM2 != null) {
+        const { data: serviceData, error: serviceError } = await (supabase as any)
+          .from("services")
+          .select("technical_sheet_reference_area_m2, technical_sheet_reference_quantity")
+          .eq("id", service.id)
+          .maybeSingle();
+        if (serviceError) throw serviceError;
+
+        const refArea = serviceData?.technical_sheet_reference_area_m2 ?? null;
+        const refQuantity = serviceData?.technical_sheet_reference_quantity ?? null;
+        if (refArea != null && refQuantity != null && refArea > 0) {
+          qty = Math.ceil((refQuantity / refArea) * areaM2);
+        }
+      }
+
       const { error } = await supabase.rpc("rpc_record_diagnostic_suggestion_accepted", {
         p_diagnostic_area_id: area.id,
         p_source: "manual",
         p_source_field: "servico_direto",
         p_target_type: "service",
         p_descricao: service.name,
-        p_qty: 1,
+        p_qty: qty,
         p_product_id: null,
         p_service_id: service.id,
         p_catalog_item_id: null,
@@ -428,7 +477,7 @@ function AreaCard({
 
       setAcceptedRefreshKey((k) => k + 1);
 
-      const materialsCount = await acceptServiceTechnicalSheetMaterials(service.id);
+      const materialsCount = await acceptServiceTechnicalSheetMaterials(service.id, areaM2);
       if (materialsCount > 0) {
         setAcceptedRefreshKey((k) => k + 1);
       }

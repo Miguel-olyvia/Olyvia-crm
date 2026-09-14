@@ -91,18 +91,28 @@ interface Service {
   technical_sheet_labor_description?: string | null;
   technical_sheet_labor_people_count?: number | null;
   technical_sheet_labor_hours?: number | null;
+  // Regra de três simples opcional para a quantidade sugerida do próprio
+  // serviço no diagnóstico (migration
+  // 20261130170000_service_technical_sheet_quantity_per_area.sql, já
+  // aplicada à BD). "Para X m² preciso de Y" — ver comentário da coluna.
+  technical_sheet_reference_area_m2?: number | null;
+  technical_sheet_reference_quantity?: number | null;
 }
 
 interface TechnicalSheetFormData {
   labor_description: string;
   labor_people_count: string;
   labor_hours: string;
+  reference_area_m2: string;
+  reference_quantity: string;
 }
 
 const emptyTechnicalSheet: TechnicalSheetFormData = {
   labor_description: "",
   labor_people_count: "",
   labor_hours: "",
+  reference_area_m2: "",
+  reference_quantity: "",
 };
 
 const serviceSchema = z.object({
@@ -384,11 +394,17 @@ export default function Services() {
         const laborPeopleCount =
           technicalSheet.labor_people_count.trim() === "" ? null : Number(technicalSheet.labor_people_count);
         const laborHours = technicalSheet.labor_hours.trim() === "" ? null : Number(technicalSheet.labor_hours);
+        const referenceAreaM2 =
+          technicalSheet.reference_area_m2.trim() === "" ? null : Number(technicalSheet.reference_area_m2);
+        const referenceQuantity =
+          technicalSheet.reference_quantity.trim() === "" ? null : Number(technicalSheet.reference_quantity);
         const { error } = await (supabase as any).rpc("rpc_update_service_technical_sheet", {
           p_service_id: serviceId,
           p_labor_description: technicalSheet.labor_description.trim() || null,
           p_labor_people_count: laborPeopleCount,
           p_labor_hours: laborHours,
+          p_reference_area_m2: referenceAreaM2,
+          p_reference_quantity: referenceQuantity,
         });
         if (error) throw error;
       };
@@ -614,6 +630,10 @@ export default function Services() {
       labor_people_count:
         service.technical_sheet_labor_people_count != null ? String(service.technical_sheet_labor_people_count) : "",
       labor_hours: service.technical_sheet_labor_hours != null ? String(service.technical_sheet_labor_hours) : "",
+      reference_area_m2:
+        service.technical_sheet_reference_area_m2 != null ? String(service.technical_sheet_reference_area_m2) : "",
+      reference_quantity:
+        service.technical_sheet_reference_quantity != null ? String(service.technical_sheet_reference_quantity) : "",
     });
 
     // Load prices for service
@@ -1216,6 +1236,37 @@ export default function Services() {
                         value={technicalSheet.labor_hours}
                         onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_hours: e.target.value })}
                       />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 border rounded-md p-3 bg-muted/20">
+                    <p className="text-sm text-muted-foreground">
+                      Quantidade sugerida por área (opcional) — "Para X m² preciso de Y unidades deste serviço".
+                      Deixe em branco para manter a quantidade fixa em 1.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="reference_area_m2">Para quantos m²</Label>
+                        <Input
+                          id="reference_area_m2"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={technicalSheet.reference_area_m2}
+                          onChange={(e) => setTechnicalSheet({ ...technicalSheet, reference_area_m2: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="reference_quantity">Preciso de quantas unidades</Label>
+                        <Input
+                          id="reference_quantity"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={technicalSheet.reference_quantity}
+                          onChange={(e) => setTechnicalSheet({ ...technicalSheet, reference_quantity: e.target.value })}
+                        />
+                      </div>
                     </div>
                   </div>
 
