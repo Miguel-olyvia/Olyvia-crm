@@ -396,6 +396,43 @@ describe("accoesDoPedido", () => {
     expect(accoesDoPedido({ ...base, estado: "aprovado" }).corrigirAprovado).toBe(false);
   });
 
+  it("ninguem mexe no historico da sua propria ausencia, mesmo com a permissao", () => {
+    const accoes = accoesDoPedido({
+      ...base,
+      estado: "aprovado",
+      souOAutor: true,
+      podeEditarHistorico: true,
+    });
+    expect(accoes.cancelar).toBe(false);
+    expect(accoes.corrigirAprovado).toBe(false);
+  });
+
+  it("nao-regressao: quem tem a permissao continua a poder mexer no historico de outra pessoa", () => {
+    const accoes = accoesDoPedido({
+      ...base,
+      estado: "aprovado",
+      souOAutor: false,
+      podeEditarHistorico: true,
+    });
+    expect(accoes.cancelar).toBe(true);
+    expect(accoes.corrigirAprovado).toBe(true);
+  });
+
+  it("aprovado sem a permissao continua sem accao, autor ou nao", () => {
+    expect(
+      accoesDoPedido({ ...base, estado: "aprovado", souOAutor: true }).cancelar,
+    ).toBe(false);
+    expect(
+      accoesDoPedido({ ...base, estado: "aprovado", souOAutor: false }).cancelar,
+    ).toBe(false);
+  });
+
+  it("pendente com o autor sem permissao de editar historico continua a poder cancelar", () => {
+    expect(
+      accoesDoPedido({ ...base, estado: "pendente_chefia", souOAutor: true }).cancelar,
+    ).toBe(true);
+  });
+
   it("nao oferece accoes num pedido ja recusado", () => {
     const accoes = accoesDoPedido({
       ...base,
@@ -426,5 +463,21 @@ describe("chaveDoErroDeAusencia", () => {
   it("devolve null quando nao reconhece -- para o ecra reportar a falta", () => {
     expect(chaveDoErroDeAusencia({ message: "network timeout" })).toBeNull();
     expect(chaveDoErroDeAusencia(null)).toBeNull();
+  });
+
+  it("reconhece a guarda de historico proprio", () => {
+    expect(
+      chaveDoErroDeAusencia({
+        message: "ausencia_historico_proprio: nao pode cancelar uma ausencia sua ja aprovada",
+      }),
+    ).toBe("hr.ausencias.erroRpc.historicoProprio");
+  });
+
+  it("reconhece o codigo real de sobreposicao levantado pelo trigger (nao 'ausencia_sobreposta')", () => {
+    expect(
+      chaveDoErroDeAusencia({
+        message: "ausencia_dia_sobreposto: o dia X da pessoa Y ficaria com 1.50 de dia marcado",
+      }),
+    ).toBe("hr.ausencias.erroRpc.sobreposta");
   });
 });

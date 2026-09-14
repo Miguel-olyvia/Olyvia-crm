@@ -433,11 +433,13 @@ export function accoesDoPedido(args: {
     recusarRh: noRh && args.podeAprovarRh,
     devolverAChefia: noRh && args.podeAprovarRh && args.temChefiaResoluvel,
     // Cancelar um PENDENTE e direito de quem o fez; cancelar um APROVADO
-    // exige `hr.ausencias.historico.editar`.
+    // exige `hr.ausencias.historico.editar` -- E nao ser o proprio autor:
+    // ninguem mexe no historico da sua propria ausencia, mesmo tendo a
+    // permissao (espelha a guarda em rpc_hr_ausencia_cancelar).
     cancelar:
       ((naChefia || noRh) && (args.souOAutor || args.podeEditarHistorico)) ||
-      (aprovado && args.podeEditarHistorico),
-    corrigirAprovado: aprovado && args.podeEditarHistorico,
+      (aprovado && args.podeEditarHistorico && !args.souOAutor),
+    corrigirAprovado: aprovado && args.podeEditarHistorico && !args.souOAutor,
   };
 }
 
@@ -456,7 +458,11 @@ const PREFIXOS: ReadonlyArray<[string, string]> = [
   ["ausencia_meio_dia_nao_permitido", "hr.ausencias.erroRpc.meioDiaNaoPermitido"],
   ["ausencia_sem_antecedencia", "hr.ausencias.erroRpc.semAntecedencia"],
   ["ausencia_sem_dias_uteis", "hr.ausencias.erroRpc.semDiasUteis"],
-  ["ausencia_sobreposta", "hr.ausencias.erroRpc.sobreposta"],
+  // O codigo real levantado pelo trigger (20261121080000) e
+  // "ausencia_dia_sobreposto", nao "ausencia_sobreposta" -- o antigo nunca
+  // casava.
+  ["ausencia_dia_sobreposto", "hr.ausencias.erroRpc.sobreposta"],
+  ["ausencia_historico_proprio", "hr.ausencias.erroRpc.historicoProprio"],
   ["ausencia_ajuste_zero", "hr.ausencias.erroRpc.ajusteZero"],
   ["ferias_minimo_legal", "hr.ausencias.erroRpc.minimoLegal"],
   ["ausencia_cancelamento_sem_motivo", "hr.ausencias.erroRpc.cancelamentoSemMotivo"],
