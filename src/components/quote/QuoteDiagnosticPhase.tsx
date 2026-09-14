@@ -312,8 +312,8 @@ function AreaCard({
       for (const row of rows) {
         const { error: acceptError } = await supabase.rpc("rpc_record_diagnostic_suggestion_accepted", {
           p_diagnostic_area_id: area.id,
-          p_source: "rule",
-          p_source_field: "intervencao",
+          p_source: "manual",
+          p_source_field: "servico_direto",
           p_target_type: "product",
           p_descricao: row.product?.name || "Material da ficha técnica",
           p_qty: Number(row.quantity) || 0,
