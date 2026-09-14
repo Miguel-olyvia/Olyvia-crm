@@ -14,9 +14,15 @@
  * leva `insufficient_privilege`: `semAcesso` fica true e NAO se finge que
  * nao ha duplicado -- o formulario simplesmente nao verifica (a gravacao
  * em si continua sujeita a RLS de escrita, que e quem realmente protege).
+ *
+ * Desde a migracao 20261201030000, a RPC tambem tem um travao de tentativas
+ * (60/5min, 600/1h por utilizador) para nao servir de oraculo de enumeracao
+ * de NIF/NISS. Quem o atinge leva ERRCODE HR920: `demasiadasTentativas` fica
+ * true, distinto de `semAcesso` e de "sem duplicado" -- e a politica a
+ * funcionar, nao um defeito, por isso nao vai para `captureFlowError`.
  */
 import { useCallback, useRef, useState } from "react";
-import { hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { hrRpc, isPermissionError, isRateLimitError } from "@/lib/hr/hrDb";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 export type ForcaDuplicado = "travao" | "sinal";
@@ -67,6 +73,7 @@ export function usePessoaDuplicados() {
   const [candidatos, setCandidatos] = useState<CandidatoDuplicado[]>([]);
   const [aVerificar, setAVerificar] = useState(false);
   const [semAcesso, setSemAcesso] = useState(false);
+  const [demasiadasTentativas, setDemasiadasTentativas] = useState(false);
   const [erro, setErro] = useState(false);
   /** Descarta a resposta de uma chamada que ja nao e a mais recente. */
   const pedidoAtual = useRef(0);
@@ -74,6 +81,7 @@ export function usePessoaDuplicados() {
   const limpar = useCallback(() => {
     setCandidatos([]);
     setSemAcesso(false);
+    setDemasiadasTentativas(false);
     setErro(false);
   }, []);
 
@@ -86,6 +94,7 @@ export function usePessoaDuplicados() {
     const meuPedido = ++pedidoAtual.current;
     setAVerificar(true);
     setSemAcesso(false);
+    setDemasiadasTentativas(false);
     setErro(false);
     try {
       const { data, error } = await hrRpc("hr_pessoa_duplicados_candidatos", {
@@ -106,6 +115,11 @@ export function usePessoaDuplicados() {
       if (error) {
         if (isPermissionError(error)) {
           setSemAcesso(true);
+        } else if (isRateLimitError(error)) {
+          // O travao a funcionar, nao um defeito -- nunca vai para o
+          // Sentry. Lista vazia aqui NAO significa "sem duplicado": o
+          // formulario tem de distinguir os dois estados.
+          setDemasiadasTentativas(true);
         } else {
           captureFlowError(error, "hr-pessoa-duplicados-candidatos");
           setErro(true);
@@ -143,6 +157,7 @@ export function usePessoaDuplicados() {
     temFichaApagada: candidatos.some((c) => c.estado === "apagada"),
     aVerificar,
     semAcesso,
+    demasiadasTentativas,
     erro,
     verificar,
     limpar,

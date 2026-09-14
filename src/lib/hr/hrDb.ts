@@ -54,3 +54,22 @@ export function isPermissionError(error: unknown): boolean {
   const message = (error as { message?: unknown }).message;
   return typeof message === "string" && /permission denied|insufficient_privilege/i.test(message);
 }
+
+/**
+ * Distingue "o travao de tentativas disparou" de "a base falhou" ou "sem
+ * duplicado".
+ *
+ * `hr_pessoa_duplicados_candidatos` (migracao 20261201030000) recusa com
+ * ERRCODE HR920 e mensagem literal `demasiadas_tentativas` quem exceder o
+ * limite de tentativas (60/5min ou 600/1h, por utilizador). Isto NAO e um
+ * defeito -- e a politica de travao a funcionar -- por isso nunca deve ir
+ * para o Sentry via `captureFlowError`, e nunca deve ser lido como "sem
+ * duplicado" (lista vazia): e um terceiro estado, distinto dos outros dois.
+ */
+export function isRateLimitError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  if (typeof code === "string" && code === "HR920") return true;
+  const message = (error as { message?: unknown }).message;
+  return typeof message === "string" && /demasiadas_tentativas/i.test(message);
+}

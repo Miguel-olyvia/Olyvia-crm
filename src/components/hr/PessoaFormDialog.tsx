@@ -130,6 +130,7 @@ export function PessoaFormDialog({
     travoes: duplicadosTravao,
     sinais: duplicadosSinal,
     semAcesso: duplicadosSemAcesso,
+    demasiadasTentativas: duplicadosDemasiadasTentativas,
     verificar: verificarDuplicados,
     limpar: limparDuplicados,
   } = usePessoaDuplicados();
@@ -576,6 +577,18 @@ export function PessoaFormDialog({
 
                 {duplicadosSemAcesso && (
                   <p className="text-xs text-muted-foreground">{t("hr.duplicados.semAcesso")}</p>
+                )}
+
+                {/* Travao de tentativas (20261201030000): lista vazia AQUI nao
+                    e "sem duplicado" -- e a verificacao temporariamente
+                    indisponivel. O formulario continua a deixar gravar: a
+                    unicidade real vem dos indices unicos por organizacao
+                    (idx_pessoas_identificacao_nif_org / ..._niss_org,
+                    20261130040000), nao desta verificacao de conforto. */}
+                {duplicadosDemasiadasTentativas && (
+                  <p className="text-xs text-muted-foreground">
+                    {t("hr.duplicados.demasiadasTentativas")}
+                  </p>
                 )}
 
                 {seccao === "geral" && (
