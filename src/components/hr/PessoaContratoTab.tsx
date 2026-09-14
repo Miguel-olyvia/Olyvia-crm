@@ -89,6 +89,7 @@ import { equivalenteParaMostrar, horasImplausiveis } from "@/lib/hr/horas";
 import { somarDias } from "@/lib/hr/ausencias";
 import { sugerirPeriodoExperimentalDias } from "@/lib/hr/periodoExperimental";
 import { PessoaVinculoHorasCard } from "@/components/hr/PessoaVinculoHorasCard";
+import { PessoaRetribuicaoCard } from "@/components/hr/PessoaRetribuicaoCard";
 import {
   CATEGORIAS_FUNCAO,
   DIAS_SEMANA,
@@ -121,6 +122,18 @@ interface PessoaContratoTabProps {
   podeEditar: boolean;
   /** `hr.pessoas.retribuicao.view`: o salario tem permissao propria. */
   podeVerRetribuicao: boolean;
+  /**
+   * `hr.pessoas.retribuicao.edit`: ALTERAR a retribuicao (fechar a versao em
+   * vigor e abrir outra, com data de efeito) e permissao propria, diferente
+   * de `podeEditar` (que so cobre o vinculo) -- ver `PessoaRetribuicaoCard`.
+   */
+  podeEditarRetribuicao: boolean;
+  /**
+   * `hr.pessoas.retribuicao.corrigir`: CORRIGIR uma versao ja decorrida de
+   * `pessoas_retribuicoes` e permissao a parte, mais perigosa que ALTERAR
+   * (20261201040000) -- ver `PessoaRetribuicaoCard`.
+   */
+  podeCorrigirRetribuicao: boolean;
   /**
    * `hr.pessoas.vinculos.horas.corrigir`: CORRIGIR uma versao ja decorrida de
    * `pessoas_vinculos_horas` e permissao a parte, mais perigosa que ALTERAR
@@ -242,9 +255,10 @@ export function PessoaContratoTab({
   pessoaId,
   organizationId,
   vinculos,
-  retribuicao,
   podeEditar,
   podeVerRetribuicao,
+  podeEditarRetribuicao,
+  podeCorrigirRetribuicao,
   podeCorrigirHoras,
   saving,
   onGuardarVinculo,
@@ -921,35 +935,13 @@ export function PessoaContratoTab({
       </Card>
 
       {podeVerRetribuicao && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{t("hr.contrato.retribuicao")}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm">
-            {retribuicao ? (
-              <div className="flex flex-wrap gap-x-6 gap-y-1">
-                <span className="tabular-nums font-medium">
-                  {retribuicao.valor_base} {retribuicao.moeda}
-                </span>
-                <span className="text-muted-foreground">
-                  {t(`hr.periodicidade.${retribuicao.periodicidade}`)}
-                </span>
-                <span className="text-muted-foreground">
-                  {t("hr.contrato.validoDe")}: {retribuicao.valido_de}
-                </span>
-                {/* So-leitura nesta ronda: nao ha RPC de edicao de
-                    `pessoas_retribuicoes` -- escreve-se so na admissao. */}
-                {retribuicao.duodecimos_pct !== null && (
-                  <span className="text-muted-foreground">
-                    {t("hr.contrato.duodecimos")}: {retribuicao.duodecimos_pct}%
-                  </span>
-                )}
-              </div>
-            ) : (
-              <p className="text-muted-foreground">{t("hr.contrato.semRetribuicao")}</p>
-            )}
-          </CardContent>
-        </Card>
+        <PessoaRetribuicaoCard
+          pessoaId={pessoaId}
+          organizationId={organizationId}
+          vinculoActivoId={activo?.id ?? null}
+          podeAlterar={podeEditarRetribuicao}
+          podeCorrigir={podeCorrigirRetribuicao}
+        />
       )}
 
       <PessoaVinculoHorasCard

@@ -137,6 +137,11 @@ export default function PessoaDetail() {
   // mais perigosa -- ver o cabecalho de `PessoaVinculoHorasCard`.
   const podeCorrigirHorasVinculo = hasPermission("hr.pessoas.vinculos.horas.corrigir");
   const podeVerRetribuicao = hasPermission("hr.pessoas.retribuicao.view");
+  // Retribuicao versionada (pessoas_retribuicoes, 20261120060000): ALTERAR e
+  // CORRIGIR sao permissoes proprias -- ver o cabecalho de
+  // `PessoaRetribuicaoCard` (20261201040000).
+  const podeEditarRetribuicao = hasPermission("hr.pessoas.retribuicao.edit");
+  const podeCorrigirRetribuicaoVinculo = hasPermission("hr.pessoas.retribuicao.corrigir");
   const podeVerHorario = hasPermission("hr.pessoas.horario.view");
   const podeEditarHorario = hasPermission("hr.pessoas.horario.edit");
   // Horario planeado com historico (20261130190000): ALTERAR reaproveita
@@ -482,6 +487,8 @@ export default function PessoaDetail() {
               retribuicao={ficha.retribuicao}
               podeEditar={podeEditarVinculos}
               podeVerRetribuicao={podeVerRetribuicao}
+              podeEditarRetribuicao={podeEditarRetribuicao}
+              podeCorrigirRetribuicao={podeCorrigirRetribuicaoVinculo}
               podeCorrigirHoras={podeCorrigirHorasVinculo}
               saving={ficha.saving}
               onGuardarVinculo={ficha.saveVinculo}

@@ -517,10 +517,13 @@ export interface PessoaRetribuicao {
   motivo: string | null;
   /**
    * 0, 50 ou 100 -- percentagem de duodecimos (subsidios de ferias/Natal
-   * pagos ao duodecimo). `null` = por decidir. NAO tem RPC de edicao nesta
-   * ronda: mostra-se em leitura na ficha, escreve-se so na admissao.
+   * pagos ao duodecimo). `null` = por decidir. Escreve-se na admissao e,
+   * desde 20261201040000, tambem ao ALTERAR ou CORRIGIR uma versao de
+   * retribuicao -- ver `PessoaRetribuicaoCard`.
    */
   duodecimos_pct: 0 | 50 | 100 | null;
+  created_at?: string;
+  updated_at?: string;
 }
 
 /**

@@ -131,6 +131,10 @@ export type BusinessFlow =
   // a escrita falhada perde uma alteracao ou uma correccao de historico.
   | "hr-vinculo-horas-load"
   | "hr-vinculo-horas-write"
+  // Retribuicao versionada (`pessoas_retribuicoes`, 20261120060000, ALTERAR/
+  // CORRIGIR desde 20261201040000). Mesma razao das horas contratadas.
+  | "hr-retribuicao-load"
+  | "hr-retribuicao-write"
   | "hr-assiduidade-load"
   | "hr-assiduidade-write"
   | "hr-documentos-load"
