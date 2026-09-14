@@ -208,7 +208,7 @@ const LEADS_LIST_COLUMNS = `
   organization_id, root_organization_id,
   created_at, updated_at, converted_at,
   converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-  field_values, notes, source, source_id,
+  field_values, notes, lost_reason, source, source_id,
   last_contact_at, last_contact_result, contact_attempts,
   last_activity_at,
   callback_scheduled_at, callback_notes,
@@ -1855,6 +1855,7 @@ export default function AnewLeads() {
       qualified: "#22c55e",
       converted: "#8b5cf6",
       rejected: "#ef4444",
+      lost: "#ef4444",
       visit_scheduled: "#f97316",
       scheduled: "#f97316",
     };
@@ -2355,7 +2356,7 @@ export default function AnewLeads() {
               organization_id, root_organization_id,
               created_at, updated_at, converted_at,
               converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-              field_values, notes, source, source_id,
+              field_values, notes, lost_reason, source, source_id,
               last_contact_at, last_contact_result, contact_attempts,
               callback_scheduled_at, callback_notes, tags,
               qualification_type, qualified_at,
@@ -2688,7 +2689,7 @@ export default function AnewLeads() {
         organization_id, root_organization_id,
         created_at, updated_at, converted_at,
         converted_to_contact_id, converted_to_client_id, scheduled_visit_id,
-        field_values, notes, source, source_id,
+        field_values, notes, lost_reason, source, source_id,
         last_contact_at, last_contact_result, contact_attempts,
         last_activity_at,
         callback_scheduled_at, callback_notes,
@@ -2827,6 +2828,11 @@ export default function AnewLeads() {
     if (!leadId) return;
     invalidateEntities([payload?.entityId ?? null]);
     void refreshSingleLead(leadId);
+
+    const entityId = payload?.entityId ?? selectedLead?.entity_id ?? null;
+    if (entityId) {
+      window.dispatchEvent(new CustomEvent("entity-interaction-created", { detail: { entityId } }));
+    }
   }, [invalidateEntities, refreshSingleLead, selectedLead]);
 
   /**
@@ -4540,8 +4546,14 @@ export default function AnewLeads() {
   const handleBulkStatusChange = async (newStatus: string) => {
     if (selectedLeadIds.length === 0) return;
 
-    // Find matching workflow stage
-    const matchingStage = workflowStages.find(s => s.name === newStatus);
+    // Find matching workflow stage. "lost" e "rejected" mapeiam para o mesmo
+    // estágio terminal (is_rejection = true) — nenhuma org tem um estágio
+    // literalmente chamado "lost", só "rejected" (mesma lógica usada em
+    // AnewLeadEditDialog.resolveWorkflowStageId).
+    const isLostLikeStatus = newStatus === "lost" || newStatus === "rejected";
+    const matchingStage = workflowStages.find(
+      s => s.name === newStatus || (isLostLikeStatus && s.is_rejection)
+    );
 
     // "Perdida" stages (is_rejection = true) must always capture a reason
     // before writing anything, exactly like the Kanban drag-and-drop path —
@@ -5342,7 +5354,9 @@ export default function AnewLeads() {
                           style={{ backgroundColor: stage.color }}
                         />
                         <div className="text-xl font-bold">
-                          {statusCounts[stage.name] || 0}
+                          {stage.is_rejection
+                            ? (statusCounts['lost'] || 0) + (statusCounts['rejected'] || 0) + (statusCounts['Rejected'] || 0)
+                            : (statusCounts[stage.name] || 0)}
                         </div>
                       </div>
                       <div className="text-xs text-muted-foreground mt-1">{stage.label}</div>

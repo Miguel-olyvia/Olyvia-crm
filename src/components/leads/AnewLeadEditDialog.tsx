@@ -311,14 +311,23 @@ export function AnewLeadEditDialog({
   const resolveWorkflowStageId = async (statusValue: string) => {
     const { data, error } = await supabase
       .from("lead_workflow_stages")
-      .select("id, organization_id")
-      .eq("name", statusValue)
+      .select("id, organization_id, name, is_rejection")
       .or(`organization_id.eq.${companyId},organization_id.is.null`);
 
     if (error) throw error;
 
-    const organizationStage = data?.find((stage) => stage.organization_id === companyId);
-    return organizationStage?.id || data?.find((stage) => stage.organization_id === null)?.id || null;
+    // "lost" e "rejected" são tratados como o mesmo estado terminal em todo o
+    // resto da app (contadores, filtros, bucket "Lost" do Kanban), mas nenhuma
+    // org tem um estágio literalmente chamado "lost" — só "rejected". Usar
+    // is_rejection em vez de igualdade literal de name evita que a resolução
+    // falhe silenciosamente e deixe workflow_stage_id por atualizar.
+    const isLostLikeStatus = statusValue === "lost" || statusValue === "rejected";
+    const candidates = (data ?? []).filter(
+      (stage) => stage.name === statusValue || (isLostLikeStatus && stage.is_rejection)
+    );
+
+    const organizationStage = candidates.find((stage) => stage.organization_id === companyId);
+    return organizationStage?.id || candidates.find((stage) => stage.organization_id === null)?.id || null;
   };
 
   const handleSave = async () => {
