@@ -14,7 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Trash2, Settings2, ArrowRight, Loader2 } from "lucide-react";
+import { Plus, Trash2, Wrench, ArrowRight, Loader2, Sparkles } from "lucide-react";
 import {
   useQuoteDiagnostic,
   type QuoteDiagnosticArea,
@@ -27,16 +27,21 @@ import {
 } from "@/hooks/useQuoteDiagnosticSuggestions";
 import { DiagnosticSuggestionPanel } from "@/components/quote/DiagnosticSuggestionPanel";
 import { QuoteSuggestionRulesDialog } from "@/components/quote/QuoteSuggestionRulesDialog";
+import DiagnosticServicePicker, {
+  type DiagnosticServicePickerService,
+} from "@/components/quote/DiagnosticServicePicker";
 
 const BLUR_DEBOUNCE_MS = 700;
 
 /** Uma sugestão já aceite, tal como fica gravada (auto-suficiente) em
  * `quote_diagnostic_area_suggestions` — usada só para mostrar a lista de "já
- * registado para a ordem de trabalho" dentro de cada área. */
+ * registado para a ordem de trabalho" dentro de cada área. Inclui a origem
+ * "manual" (escolha direta de um serviço, sem regra nem IA — ver migration
+ * 20261130160000_service_labor_model_fix_and_manual_diagnostic_source.sql). */
 interface AcceptedSuggestionRow {
   id: string;
-  source: "rule" | "ai";
-  source_field: DiagnosticSourceField;
+  source: "rule" | "ai" | "manual";
+  source_field: DiagnosticSourceField | "servico_direto";
   target_type: "product" | "service" | "catalog_item" | null;
   descricao: string | null;
   unidade: string | null;
@@ -107,11 +112,12 @@ function SuggestionSlot({
   );
 }
 
-const ACCEPTED_SOURCE_FIELD_LABELS: Record<DiagnosticSourceField, string> = {
+const ACCEPTED_SOURCE_FIELD_LABELS: Record<DiagnosticSourceField | "servico_direto", string> = {
   area_m2: "Área",
   demolir: "A demolir",
   proteger: "A proteger",
   intervencao: "Intervenção",
+  servico_direto: "Serviço direto",
 };
 
 /** Lista, só de leitura (+ remover), do que já foi registado para esta área
@@ -243,51 +249,49 @@ function AreaCard({
   }, [form]);
 
   // Um slot de sugestões por campo-gatilho (demolir / proteger / intervenção).
+  // Só são pedidas sob pedido explícito do utilizador (ver triggerSuggestions
+  // e o botão "Sugerir a partir do texto" em cada campo) — nunca automático.
   const demolirSuggestions = useQuoteDiagnosticSuggestions();
   const protegerSuggestions = useQuoteDiagnosticSuggestions();
   const intervencaoSuggestions = useQuoteDiagnosticSuggestions();
 
-  const blurTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  useEffect(() => {
-    const timers = blurTimersRef.current;
-    return () => {
-      Object.values(timers).forEach(clearTimeout);
-    };
-  }, []);
+  // Controla se o painel de sugestões de cada campo já foi pedido pelo
+  // utilizador nesta sessão — antes do primeiro clique não renderiza nada.
+  const [suggestionsTriggered, setSuggestionsTriggered] = useState<
+    Record<"demolir" | "proteger" | "intervencao", boolean>
+  >({ demolir: false, proteger: false, intervencao: false });
 
-  const requestSuggestions = useCallback(
+  const triggerSuggestions = useCallback(
     (
       slotKey: "demolir" | "proteger" | "intervencao",
       sourceField: DiagnosticSourceField,
       hook: ReturnType<typeof useQuoteDiagnosticSuggestions>,
-      latestForm: SaveDiagnosticAreaInput,
     ) => {
-      if (blurTimersRef.current[slotKey]) clearTimeout(blurTimersRef.current[slotKey]);
-      blurTimersRef.current[slotKey] = setTimeout(() => {
-        hook.getSuggestions({
-          diagnosticAreaId: area.id,
-          sourceField,
-          organizationId,
-          areaData: {
-            area_m2: latestForm.area_m2 ?? null,
-            demolir_descricao: latestForm.demolir_descricao ?? null,
-            proteger_descricao: latestForm.proteger_descricao ?? null,
-            intervencao_tipo: latestForm.intervencao_tipo ?? null,
-            intervencao_descricao: latestForm.intervencao_descricao ?? null,
-          },
-        });
-      }, BLUR_DEBOUNCE_MS);
+      setSuggestionsTriggered((prev) => ({ ...prev, [slotKey]: true }));
+      hook.getSuggestions({
+        diagnosticAreaId: area.id,
+        sourceField,
+        organizationId,
+        areaData: {
+          area_m2: form.area_m2 ?? null,
+          demolir_descricao: form.demolir_descricao ?? null,
+          proteger_descricao: form.proteger_descricao ?? null,
+          intervencao_tipo: form.intervencao_tipo ?? null,
+          intervencao_descricao: form.intervencao_descricao ?? null,
+        },
+      });
     },
-    [area.id, organizationId],
+    [area.id, organizationId, form],
   );
 
-  // Depois de aceite uma sugestão de serviço, lê a ficha técnica desse
-  // serviço (public.service_materials — migration
-  // 20261130130000_service_technical_sheet_materials.sql, ainda não
-  // aplicada à BD) e regista cada material automaticamente como se fosse
-  // uma sugestão de produto aceite — sem passar pelas regras/IA. Best
-  // effort: nunca lança, só regista o erro e não bloqueia o fluxo normal
-  // (o registo do próprio serviço já teve sucesso nesse ponto).
+  // Depois de aceite uma sugestão de serviço (regra/IA ou escolha manual —
+  // ver handleAcceptManualService), lê a ficha técnica desse serviço
+  // (public.service_materials — migration
+  // 20261130130000_service_technical_sheet_materials.sql) e regista cada
+  // material automaticamente como se fosse uma sugestão de produto aceite —
+  // sem passar pelas regras/IA. Best effort: nunca lança, só regista o erro
+  // e não bloqueia o fluxo normal (o registo do próprio serviço já teve
+  // sucesso nesse ponto).
   const acceptServiceTechnicalSheetMaterials = async (serviceId: string): Promise<number> => {
     try {
       const { data, error } = await (supabase as any)
@@ -388,15 +392,53 @@ function AreaCard({
     hook: ReturnType<typeof useQuoteDiagnosticSuggestions>,
     slotKey: "demolir" | "proteger" | "intervencao",
     sourceField: DiagnosticSourceField,
-  ) => (
-    <SuggestionSlot
-      hook={hook}
-      slotKey={slotKey}
-      sourceField={sourceField}
-      onAccept={(s) => handleAccept(s, sourceField)}
-      onRetry={() => requestSuggestions(slotKey, sourceField, hook, form)}
-    />
-  );
+  ) =>
+    suggestionsTriggered[slotKey] ? (
+      <SuggestionSlot
+        hook={hook}
+        slotKey={slotKey}
+        sourceField={sourceField}
+        onAccept={(s) => handleAccept(s, sourceField)}
+        onRetry={() => triggerSuggestions(slotKey, sourceField, hook)}
+      />
+    ) : null;
+
+  // Escolha direta de um serviço do catálogo (sem regra nem IA envolvidas —
+  // ver DiagnosticServicePicker.tsx). Reaproveita a mesma RPC auto-suficiente
+  // e a mesma lógica de materiais da ficha técnica já usada para sugestões
+  // aceites de regra/IA.
+  const handleAcceptManualService = async (service: DiagnosticServicePickerService) => {
+    try {
+      const { error } = await supabase.rpc("rpc_record_diagnostic_suggestion_accepted", {
+        p_diagnostic_area_id: area.id,
+        p_source: "manual",
+        p_source_field: "servico_direto",
+        p_target_type: "service",
+        p_descricao: service.name,
+        p_qty: 1,
+        p_product_id: null,
+        p_service_id: service.id,
+        p_catalog_item_id: null,
+        p_unidade: null,
+        p_rule_id: null,
+        p_ai_rationale: null,
+        p_ai_confidence: null,
+      });
+      if (error) throw error;
+
+      setAcceptedRefreshKey((k) => k + 1);
+
+      const materialsCount = await acceptServiceTechnicalSheetMaterials(service.id);
+      if (materialsCount > 0) {
+        setAcceptedRefreshKey((k) => k + 1);
+      }
+
+      toast({ title: "Serviço adicionado" });
+    } catch (err: any) {
+      captureFlowError(err, "quote-lifecycle");
+      toast({ title: "Erro ao adicionar serviço", description: err.message, variant: "destructive" });
+    }
+  };
 
   return (
     <Card>
@@ -428,60 +470,103 @@ function AreaCard({
           onRemoved={() => setAcceptedRefreshKey((k) => k + 1)}
         />
 
-        <div className="space-y-1.5">
-          <Label>Área (m²)</Label>
-          <Input
-            type="number"
-            step="0.01"
-            min={0}
-            value={form.area_m2 ?? ""}
-            onChange={(e) => set("area_m2", e.target.value === "" ? null : Number(e.target.value))}
-            className="max-w-[160px]"
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>O que é necessário demolir</Label>
-          <Textarea
-            value={form.demolir_descricao || ""}
-            onChange={(e) => set("demolir_descricao", e.target.value)}
-            onBlur={() => requestSuggestions("demolir", "demolir", demolirSuggestions, form)}
-            rows={2}
-          />
-          {renderSuggestionSlot(demolirSuggestions, "demolir", "demolir")}
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>O que é necessário proteger</Label>
-          <Textarea
-            value={form.proteger_descricao || ""}
-            onChange={(e) => set("proteger_descricao", e.target.value)}
-            onBlur={() => requestSuggestions("proteger", "proteger", protegerSuggestions, form)}
-            rows={2}
-          />
-          {renderSuggestionSlot(protegerSuggestions, "proteger", "proteger")}
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label>Tipo de intervenção</Label>
-            <Input
-              value={form.intervencao_tipo || ""}
-              onChange={(e) => set("intervencao_tipo", e.target.value)}
-              onBlur={() => requestSuggestions("intervencao", "intervencao", intervencaoSuggestions, form)}
-              placeholder="Ex: demolição, remodelação..."
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label>Descrição da intervenção</Label>
-            <Input
-              value={form.intervencao_descricao || ""}
-              onChange={(e) => set("intervencao_descricao", e.target.value)}
-              onBlur={() => requestSuggestions("intervencao", "intervencao", intervencaoSuggestions, form)}
-            />
+        <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-sm font-medium flex items-center gap-1.5">
+                <Wrench className="h-4 w-4 text-primary" /> Serviços necessários
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Escolha diretamente os serviços do catálogo necessários para esta área.
+              </p>
+            </div>
+            <DiagnosticServicePicker organizationId={organizationId} onSelect={handleAcceptManualService} />
           </div>
         </div>
-        {renderSuggestionSlot(intervencaoSuggestions, "intervencao", "intervencao")}
+
+        <div className="space-y-3 pt-1">
+          <p className="text-xs text-muted-foreground">
+            Nota descritiva — usa o botão "Sugerir a partir do texto" se quiseres uma sugestão automática
+          </p>
+
+          <div className="space-y-1.5">
+            <Label className="text-muted-foreground">Área (m²)</Label>
+            <Input
+              type="number"
+              step="0.01"
+              min={0}
+              value={form.area_m2 ?? ""}
+              onChange={(e) => set("area_m2", e.target.value === "" ? null : Number(e.target.value))}
+              className="max-w-[160px]"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-muted-foreground">O que é necessário demolir</Label>
+            <Textarea
+              value={form.demolir_descricao || ""}
+              onChange={(e) => set("demolir_descricao", e.target.value)}
+              rows={2}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground"
+              onClick={() => triggerSuggestions("demolir", "demolir", demolirSuggestions)}
+            >
+              <Sparkles className="h-3 w-3 mr-1" /> Sugerir a partir do texto
+            </Button>
+            {renderSuggestionSlot(demolirSuggestions, "demolir", "demolir")}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-muted-foreground">O que é necessário proteger</Label>
+            <Textarea
+              value={form.proteger_descricao || ""}
+              onChange={(e) => set("proteger_descricao", e.target.value)}
+              rows={2}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground"
+              onClick={() => triggerSuggestions("proteger", "proteger", protegerSuggestions)}
+            >
+              <Sparkles className="h-3 w-3 mr-1" /> Sugerir a partir do texto
+            </Button>
+            {renderSuggestionSlot(protegerSuggestions, "proteger", "proteger")}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-muted-foreground">Tipo de intervenção</Label>
+              <Input
+                value={form.intervencao_tipo || ""}
+                onChange={(e) => set("intervencao_tipo", e.target.value)}
+                placeholder="Ex: demolição, remodelação..."
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-muted-foreground">Descrição da intervenção</Label>
+              <Input
+                value={form.intervencao_descricao || ""}
+                onChange={(e) => set("intervencao_descricao", e.target.value)}
+              />
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="text-xs text-muted-foreground"
+            onClick={() => triggerSuggestions("intervencao", "intervencao", intervencaoSuggestions)}
+          >
+            <Sparkles className="h-3 w-3 mr-1" /> Sugerir a partir do texto
+          </Button>
+          {renderSuggestionSlot(intervencaoSuggestions, "intervencao", "intervencao")}
+        </div>
 
         <div className="flex justify-end">
           <Badge variant={isAreaComplete(form) ? "default" : "secondary"} className="text-xs">
@@ -585,9 +670,13 @@ export function QuoteDiagnosticPhase({
             Preencha cada área a intervencionar. As sugestões de itens ficam só visíveis internamente — nunca no PDF ou portal do cliente.
           </p>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => setRulesDialogOpen(true)}>
-          <Settings2 className="h-4 w-4 mr-1" /> Gerir regras de sugestão
-        </Button>
+        <button
+          type="button"
+          onClick={() => setRulesDialogOpen(true)}
+          className="text-xs text-muted-foreground underline"
+        >
+          Gerir regras de sugestão
+        </button>
       </div>
 
       {isLoadingAreas ? (

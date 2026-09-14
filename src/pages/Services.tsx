@@ -84,24 +84,25 @@ interface Service {
   service_organizations?: Array<{
     organization_id: string;
   }>;
-  // Ficha técnica (migration 20261130130000_service_technical_sheet_materials.sql,
-  // ainda não aplicada à BD) — colunas nullable em services, lidas via `select("*")`
+  // Ficha técnica (migration 20261130160000_service_labor_model_fix_and_manual_diagnostic_source.sql,
+  // já aplicada à BD) — colunas nullable em services, lidas via `select("*")`
   // em loadData (com cast `as any`, ver abaixo), por isso opcionais aqui.
+  // Custo de mão de obra = preço/hora do serviço × people_count × hours.
   technical_sheet_labor_description?: string | null;
-  technical_sheet_labor_quantity?: number | null;
-  technical_sheet_labor_uom_id?: string | null;
+  technical_sheet_labor_people_count?: number | null;
+  technical_sheet_labor_hours?: number | null;
 }
 
 interface TechnicalSheetFormData {
   labor_description: string;
-  labor_quantity: string;
-  labor_uom_id: string;
+  labor_people_count: string;
+  labor_hours: string;
 }
 
 const emptyTechnicalSheet: TechnicalSheetFormData = {
   labor_description: "",
-  labor_quantity: "",
-  labor_uom_id: "",
+  labor_people_count: "",
+  labor_hours: "",
 };
 
 const serviceSchema = z.object({
@@ -177,7 +178,6 @@ export default function Services() {
 
   // Ficha técnica (mão de obra) — ver nota na interface Service acima.
   const [technicalSheet, setTechnicalSheet] = useState<TechnicalSheetFormData>(emptyTechnicalSheet);
-  const [uomList, setUomList] = useState<{ id: string; code: string; description: string | null }[]>([]);
 
   const defaultOrgSelection = (): OrganizationSelection => ({
     tenantId: "",
@@ -206,33 +206,6 @@ export default function Services() {
     setSearchTerm("");
     loadData();
   }, [activeCompany?.id, showDeleted]);
-
-  // Lista de UOM para o seletor de unidade da mão de obra (ficha técnica) —
-  // mesmo padrão de fetch usado em ProductFormPrices.tsx/Products.tsx.
-  useEffect(() => {
-    if (!activeCompany?.id) {
-      setUomList([]);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from("uom")
-        .select("id, code, description")
-        .eq("is_active", true)
-        .or(`organization_id.eq.${activeCompany.id},organization_id.is.null`)
-        .order("code");
-      if (cancelled) return;
-      if (error) {
-        captureFlowError(error, "db-error-leaked-to-ui");
-        return;
-      }
-      setUomList(data || []);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeCompany?.id]);
 
   const loadData = async () => {
     setLoading(true);
@@ -405,15 +378,17 @@ export default function Services() {
       // Ficha técnica (mão de obra) — gravada à parte via
       // rpc_update_service_technical_sheet, depois do create/update do
       // serviço em si ter sucesso. Cast `as any`: RPC ainda não existe em
-      // types.ts (migration 20261130130000 não aplicada). Quantidade vazia
-      // grava como null (não força 0 por omissão).
+      // types.ts (tipos gerados não regenerados após a migration). Campos
+      // vazios gravam como null (não forçam 0 por omissão).
       const saveTechnicalSheet = async (serviceId: string) => {
-        const laborQuantity = technicalSheet.labor_quantity.trim() === "" ? null : Number(technicalSheet.labor_quantity);
+        const laborPeopleCount =
+          technicalSheet.labor_people_count.trim() === "" ? null : Number(technicalSheet.labor_people_count);
+        const laborHours = technicalSheet.labor_hours.trim() === "" ? null : Number(technicalSheet.labor_hours);
         const { error } = await (supabase as any).rpc("rpc_update_service_technical_sheet", {
           p_service_id: serviceId,
           p_labor_description: technicalSheet.labor_description.trim() || null,
-          p_labor_quantity: laborQuantity,
-          p_labor_uom_id: technicalSheet.labor_uom_id || null,
+          p_labor_people_count: laborPeopleCount,
+          p_labor_hours: laborHours,
         });
         if (error) throw error;
       };
@@ -636,9 +611,9 @@ export default function Services() {
     });
     setTechnicalSheet({
       labor_description: service.technical_sheet_labor_description || "",
-      labor_quantity:
-        service.technical_sheet_labor_quantity != null ? String(service.technical_sheet_labor_quantity) : "",
-      labor_uom_id: service.technical_sheet_labor_uom_id || "",
+      labor_people_count:
+        service.technical_sheet_labor_people_count != null ? String(service.technical_sheet_labor_people_count) : "",
+      labor_hours: service.technical_sheet_labor_hours != null ? String(service.technical_sheet_labor_hours) : "",
     });
 
     // Load prices for service
@@ -1204,54 +1179,44 @@ export default function Services() {
                 />
 
                 {/* Ficha Técnica — mão de obra + materiais (migration
-                    20261130130000_service_technical_sheet_materials.sql) */}
+                    20261130160000_service_labor_model_fix_and_manual_diagnostic_source.sql).
+                    Custo de mão de obra = preço/hora do serviço × nº de pessoas × nº de horas. */}
                 <div className="space-y-3 border-t pt-4">
                   <h4 className="font-medium text-sm">Ficha Técnica</h4>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div className="space-y-2 sm:col-span-2">
-                      <Label htmlFor="labor_description">Descrição da mão de obra</Label>
-                      <Textarea
-                        id="labor_description"
-                        value={technicalSheet.labor_description}
-                        onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_description: e.target.value })}
-                        rows={2}
-                      />
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="labor_description">Descrição da mão de obra</Label>
+                    <Textarea
+                      id="labor_description"
+                      value={technicalSheet.labor_description}
+                      onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_description: e.target.value })}
+                      rows={2}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="labor_quantity">Quantidade</Label>
+                      <Label htmlFor="labor_people_count">Número de Pessoas</Label>
                       <Input
-                        id="labor_quantity"
+                        id="labor_people_count"
                         type="number"
                         min="0"
                         step="0.01"
-                        value={technicalSheet.labor_quantity}
-                        onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_quantity: e.target.value })}
+                        value={technicalSheet.labor_people_count}
+                        onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_people_count: e.target.value })}
                       />
                     </div>
-                  </div>
-
-                  <div className="space-y-2 max-w-xs">
-                    <Label htmlFor="labor_uom">Unidade da mão de obra</Label>
-                    <Select
-                      value={technicalSheet.labor_uom_id || "none"}
-                      onValueChange={(value) =>
-                        setTechnicalSheet({ ...technicalSheet, labor_uom_id: value === "none" ? "" : value })
-                      }
-                    >
-                      <SelectTrigger id="labor_uom">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">{t("services.form.none")}</SelectItem>
-                        {uomList.map((uom) => (
-                          <SelectItem key={uom.id} value={uom.id}>
-                            {uom.code}
-                            {uom.description ? ` - ${uom.description}` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <div className="space-y-2">
+                      <Label htmlFor="labor_hours">Número de Horas</Label>
+                      <Input
+                        id="labor_hours"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={technicalSheet.labor_hours}
+                        onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_hours: e.target.value })}
+                      />
+                    </div>
                   </div>
 
                   {/* Materiais só fazem sentido depois de o serviço existir de facto
