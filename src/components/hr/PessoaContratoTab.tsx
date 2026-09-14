@@ -38,17 +38,23 @@
  * mesmo `onGuardarVinculo` que ja existia. Terminar sem `data_fim` bloqueia-se
  * no cliente -- a mesma perda que a migration de backfill recusa fazer.
  *
- * AS HORAS DE TRABALHO DEIXARAM DE SE EDITAR AQUI (20261130120000)
+ * AS HORAS DE TRABALHO SO SE EDITAM AQUI AO CRIAR O CONTRATO (20261130120000,
+ * corrigido 20261213)
  * -------------------------------------------------------------------
  * `horas_periodo`/`horas_frequencia` do vinculo sao agora DERIVADOS por
  * trigger a partir da versao em aberto de `pessoas_vinculos_horas` --
- * escreve-los directamente no vinculo e recusado pela base
- * (`pessoas_vinculos_horas_e_derivado`). Os dois campos ficam aqui SO EM
- * LEITURA (mostram o valor em vigor, que continua a vir de `activo`); quem os
- * quer mudar usa o cartao "Horas contratadas", mais abaixo
- * (`PessoaVinculoHorasCard`), que distingue ALTERAR (fecha a versao em vigor
- * e abre outra, com data de efeito) de CORRIGIR (reescreve uma versao ja
- * decorrida) -- a mesma distincao de `PessoaAfectacoesSeccao`.
+ * escreve-los directamente num UPDATE do vinculo e recusado pela base
+ * (`pessoas_vinculos_horas_e_derivado`). Isso NAO quer dizer que os dois
+ * campos fiquem sempre em leitura aqui: um contrato NOVO ainda nao tem versao
+ * em vigor nenhuma para o cartao "Horas contratadas" alterar, por isso
+ * `criandoContrato` (sem vinculo em vigor) e o UNICO momento em que ficam
+ * editaveis, e `onGuardarVinculo`/`usePessoa.saveVinculo` grava-os como a
+ * primeira versao de `pessoas_vinculos_horas`. Ao EDITAR um contrato ja
+ * existente continuam SO EM LEITURA (mostram o valor em vigor, que continua a
+ * vir de `activo`); quem os quer mudar usa o cartao "Horas contratadas", mais
+ * abaixo (`PessoaVinculoHorasCard`), que distingue ALTERAR (fecha a versao em
+ * vigor e abre outra, com data de efeito) de CORRIGIR (reescreve uma versao
+ * ja decorrida) -- a mesma distincao de `PessoaAfectacoesSeccao`.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -263,6 +269,12 @@ export function PessoaContratoTab({
     () => vinculos.filter((vinculo) => vinculo.id !== activo?.id),
     [vinculos, activo?.id],
   );
+  /**
+   * Sem vinculo em vigor: o cartao esta em modo "Novo contrato", e e o UNICO
+   * momento em que `horas_periodo`/`horas_frequencia` se escrevem aqui -- ver
+   * o comentario junto aos dois campos, mais abaixo, e `usePessoa.saveVinculo`.
+   */
+  const criandoContrato = activo === null;
 
   const [rascunho, setRascunho] = useState<Rascunho>(() => rascunhoDe(activo));
   useEffect(() => {
@@ -443,9 +455,19 @@ export function PessoaContratoTab({
       periodo_experimental_origem: temExperimental ? rascunho.periodo_experimental_origem : null,
       tipo_trabalho:
         rascunho.tipo_trabalho === "" ? null : (rascunho.tipo_trabalho as TipoTrabalho),
-      // horas_periodo/horas_frequencia NAO vao aqui: sao derivados de
-      // `pessoas_vinculos_horas` desde 20261130120000 -- escreve-los no
-      // vinculo e recusado pela base. Ver `PessoaVinculoHorasCard`.
+      // horas_periodo/horas_frequencia SO vao aqui ao CRIAR o primeiro
+      // vinculo: sao derivadas de `pessoas_vinculos_horas` desde
+      // 20261130120000, e escreve-las no UPDATE de um vinculo existente e
+      // recusado pela base -- por isso so entram no patch quando
+      // `criandoContrato`. `usePessoa.saveVinculo` grava a primeira versao
+      // em `pessoas_vinculos_horas` a partir destas duas; para ALTERAR ou
+      // CORRIGIR um contrato ja existente usa-se `PessoaVinculoHorasCard`.
+      ...(criandoContrato
+        ? {
+            horas_periodo: numeroOuNull(rascunho.horas_periodo),
+            horas_frequencia: rascunho.horas_frequencia,
+          }
+        : {}),
       tempo_trabalho_pct: numeroOuNull(rascunho.tempo_trabalho_pct),
       politica_feriados: rascunho.politica_feriados,
       horas_anuais_maximas: numeroOuNull(rascunho.horas_anuais_maximas),
@@ -740,32 +762,45 @@ export function PessoaContratoTab({
                 }))}
                 onChange={(v) => definir("tipo_trabalho", v)}
               />
-              {/* So-leitura desde 20261130120000: as duas colunas sao
-                  derivadas de `pessoas_vinculos_horas` -- alteram-se no
-                  cartao "Horas contratadas", mais abaixo. */}
+              {/* So-leitura desde 20261130120000, MAS SO AO EDITAR um vinculo
+                  ja existente: as duas colunas sao derivadas de
+                  `pessoas_vinculos_horas`, e alteram-se depois no cartao
+                  "Horas contratadas", mais abaixo -- esse cartao serve para
+                  ALTERAR ou CORRIGIR uma versao que ja existe, e precisa de
+                  data de efeito e (para corrigir) de aditamento assinado.
+                  AO CRIAR o primeiro contrato (`criandoContrato`) nao ha
+                  nada para esse cartao alterar ainda -- um vinculo novo
+                  nascia sem horas nenhumas se este campo ficasse bloqueado
+                  aqui tambem. Por isso o campo volta a ser editavel so
+                  nesse caso; `onGuardarVinculo` grava a primeira versao em
+                  `pessoas_vinculos_horas` a partir do que aqui for escrito
+                  (ver `usePessoa.saveVinculo`). */}
               <CampoTexto
                 id="hr-contrato-horas-periodo"
                 label={t("hr.contrato.horasTrabalho")}
                 ajuda={
-                  equivalente
-                    ? t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })
-                    : t("hr.contrato.ajudaHorasDerivadas")
+                  criandoContrato
+                    ? t("hr.contrato.ajudaHorasNovoContrato")
+                    : equivalente
+                      ? t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })
+                      : t("hr.contrato.ajudaHorasDerivadas")
                 }
                 tipo="number"
                 valor={rascunho.horas_periodo}
-                disabled
-                onChange={() => {}}
+                disabled={!criandoContrato || !podeEditar}
+                onChange={(v) => definir("horas_periodo", v)}
+                erro={erroDe(CAMPOS_NUMERICOS.horas)}
               />
               <CampoSelect
                 id="hr-contrato-horas-frequencia"
                 label={t("hr.contrato.horasFrequencia")}
                 valor={rascunho.horas_frequencia}
-                disabled
+                disabled={!criandoContrato || !podeEditar}
                 opcoes={HORAS_FREQUENCIAS.map((f) => ({
                   value: f,
                   label: t(`hr.horasFrequencia.${f}`),
                 }))}
-                onChange={() => {}}
+                onChange={(v) => definir("horas_frequencia", v as HorasFrequencia)}
               />
               {horasSuspeitas && (
                 <p className="text-xs text-amber-600 dark:text-amber-500" role="status">

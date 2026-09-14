@@ -24,6 +24,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { dataDeHoje } from "@/lib/hr/novaPessoa";
 import type {
   Pessoa,
   PessoaConta,
@@ -481,34 +482,130 @@ export function usePessoa(pessoaId: string | undefined) {
    * nao se apaga. Terminar um contrato e por-lhe `estado = terminado` e abrir
    * outro, nao apagar a linha.
    *
-   * `horas_periodo`/`horas_frequencia` NUNCA passam daqui (20261130120000):
-   * sao derivados por trigger a partir da versao em aberto de
-   * `pessoas_vinculos_horas` -- um UPDATE directo a essas colunas e recusado
-   * pela base (`pessoas_vinculos_horas_e_derivado`). Tiram-se do patch aqui,
-   * e nao so no ecra que o compoe, para nenhum chamador futuro poder
-   * ressuscitar o caminho antigo por engano. Quem quer ALTERAR ou CORRIGIR as
-   * horas usa `usePessoaVinculoHoras`, o unico caminho de escrita.
+   * EDITAR um vinculo existente: `horas_periodo`/`horas_frequencia` NUNCA vao
+   * no UPDATE (20261130120000) -- sao derivados por trigger a partir da
+   * versao em aberto de `pessoas_vinculos_horas`, e um UPDATE directo a essas
+   * colunas e recusado pela base (`pessoas_vinculos_horas_e_derivado`).
+   * Tiram-se do patch nesse ramo, e nao so no ecra que o compoe, para nenhum
+   * chamador futuro poder ressuscitar o caminho antigo por engano. Quem quer
+   * ALTERAR ou CORRIGIR as horas de um contrato ja existente usa
+   * `usePessoaVinculoHoras`, o unico caminho de escrita para essa situacao.
+   *
+   * CRIAR o primeiro vinculo e diferente: nao ha ainda versao em vigor para o
+   * cartao "Horas contratadas" alterar, por isso um contrato novo nascia sem
+   * horas nenhumas se ninguem as gravasse aqui. Por isso, so quando
+   * `vinculoId` for `null`, o INSERT do vinculo (sem as duas colunas
+   * derivadas, como sempre) e seguido do INSERT da PRIMEIRA versao em
+   * `pessoas_vinculos_horas`, com `valido_de` = a data de inicio do contrato.
+   *
+   * "CRIAR" NAO QUER DIZER "PESSOA SEM HISTORICO"
+   * ----------------------------------------------
+   * `criandoContrato` (o unico vinculo em vigor e `null`) tambem e verdade
+   * numa READMISSAO ou RENOVACAO: a pessoa ja teve um vinculo, esse terminou,
+   * e este e o proximo. `idx_pessoas_vinculos_horas_aberta` e o trigger
+   * `hr_vinculos_horas_sem_sobreposicao` (20261130180000) sao POR PESSOA, nao
+   * por vinculo -- terminar um vinculo NAO fecha a versao de horas que ficou
+   * aberta, e o proprio trigger `hr_pessoas_vinculos_sincronizar_ao_entrar_
+   * em_vigor` ja copiou os valores dessa versao antiga para o vinculo novo
+   * assim que ele entrou em vigor. Um INSERT cego de uma segunda versao aberta
+   * era sempre rejeitado (23505 ou `horas_contratadas_sobrepostas`) -- e,
+   * antes de o ser, o utilizador ja via as horas ERRADAS (as do contrato
+   * anterior) no vinculo novo, copiadas por esse trigger. Por isso, antes do
+   * INSERT, fecha-se PRIMEIRO qualquer versao ainda aberta desta pessoa (
+   * `valido_ate` = a data de inicio do novo contrato) -- o mesmo gesto de
+   * `usePessoaVinculoHoras.alterar`, aqui repetido porque e outra tabela, sem
+   * o `aberta` desse hook em estado.
+   *
+   * O par (vinculo + primeira versao de horas) e o mesmo que
+   * `usePessoas.criarPessoa` grava no assistente de nova pessoa -- essa
+   * chamada e que so e segura sem o fecho acima, porque uma pessoa nova nunca
+   * tem versao em aberto.
+   *
+   * FALHAR NAO E SILENCIOSO
+   * ------------------------
+   * Mesma doutrina de satelites de `usePessoas`/`SeccaoFalhada`: se o fecho da
+   * versao anterior ou o INSERT da nova falhar, o vinculo ja criado NAO se
+   * desfaz -- fica corrigivel depois no cartao "Horas contratadas". Mas ao
+   * contrario do assistente (que tem uma lista de falhas por seccao), aqui so
+   * ha um erro para devolver: por isso, ao contrario do resto desta funcao, o
+   * erro DAS HORAS tambem se devolve a quem chamou (mesmo os de permissao,
+   * que nao vao a `captureFlowError` mas continuam a chegar ao utilizador) --
+   * nunca so ao Sentry. Sem isto, `gravar()` via `null` = sucesso e o
+   * utilizador ficava a pensar que o contrato tinha as horas certas quando na
+   * verdade nao tinha nenhumas, ou tinha as do contrato anterior.
    */
   const saveVinculo = useCallback(
     (vinculoId: string | null, patch: Partial<PessoaVinculo>) =>
       guardar(async (autorId) => {
         const orgId = ficha.pessoa?.organization_id;
         if (!orgId || !pessoaId) return { error: new Error("Ficha sem organizacao resolvida") };
-        const { horas_periodo: _horasPeriodo, horas_frequencia: _horasFrequencia, ...patchSemHoras } =
+        const { horas_periodo: horasPeriodo, horas_frequencia: horasFrequencia, ...patchSemHoras } =
           patch;
         if (vinculoId) {
           return hrFrom("pessoas_vinculos")
             .update({ ...patchSemHoras, updated_by: autorId })
             .eq("id", vinculoId);
         }
-        return hrFrom("pessoas_vinculos").insert({
-          ...patchSemHoras,
-          pessoa_id: pessoaId,
-          organization_id: orgId,
-          estado: patch.estado ?? "activo",
-          created_by: autorId,
-          updated_by: autorId,
-        });
+        const { data: novoVinculo, error: erroVinculo } = await hrFrom("pessoas_vinculos")
+          .insert({
+            ...patchSemHoras,
+            pessoa_id: pessoaId,
+            organization_id: orgId,
+            estado: patch.estado ?? "activo",
+            created_by: autorId,
+            updated_by: autorId,
+          })
+          .select("id")
+          .single();
+        if (erroVinculo) return { error: erroVinculo };
+        const novoVinculoId = (novoVinculo as { id: string }).id;
+        // Satelite: falhar isto NAO desfaz o vinculo, mas o erro chega ao
+        // utilizador -- ver o cabecalho.
+        if (horasPeriodo != null && horasFrequencia) {
+          const dataEfeito = patch.data_inicio ?? dataDeHoje();
+          // Fecha PRIMEIRO qualquer versao ainda aberta desta pessoa (de um
+          // vinculo anterior, ja terminado) -- ver o cabecalho: sem isto, uma
+          // readmissao/renovacao e sempre rejeitada pela base, e entretanto o
+          // trigger de sincronizacao ja tinha copiado as horas ERRADAS para o
+          // vinculo novo.
+          const { data: abertaAnterior, error: erroAberta } = await hrFrom(
+            "pessoas_vinculos_horas",
+          )
+            .select("id")
+            .eq("pessoa_id", pessoaId)
+            .is("valido_ate", null)
+            .is("deleted_at", null)
+            .maybeSingle();
+          if (erroAberta) {
+            if (!isPermissionError(erroAberta)) captureFlowError(erroAberta, "hr-pessoa-write");
+            return { error: erroAberta };
+          }
+          if (abertaAnterior) {
+            const { error: erroFecho } = await hrFrom("pessoas_vinculos_horas")
+              .update({ valido_ate: dataEfeito, updated_by: autorId })
+              .eq("id", (abertaAnterior as { id: string }).id);
+            if (erroFecho) {
+              if (!isPermissionError(erroFecho)) captureFlowError(erroFecho, "hr-pessoa-write");
+              return { error: erroFecho };
+            }
+          }
+          const { error: erroHoras } = await hrFrom("pessoas_vinculos_horas").insert({
+            pessoa_id: pessoaId,
+            organization_id: orgId,
+            vinculo_id: novoVinculoId,
+            horas_periodo: horasPeriodo,
+            horas_frequencia: horasFrequencia,
+            valido_de: dataEfeito,
+            valido_ate: null,
+            created_by: autorId,
+            updated_by: autorId,
+          });
+          if (erroHoras) {
+            if (!isPermissionError(erroHoras)) captureFlowError(erroHoras, "hr-pessoa-write");
+            return { error: erroHoras };
+          }
+        }
+        return { error: null };
       }),
     [guardar, ficha.pessoa?.organization_id, pessoaId],
   );
