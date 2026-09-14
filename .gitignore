@@ -67,6 +67,9 @@ tests/.auth/
 # Local secrets
 env
 
+# Script local com password da BD em texto simples — nunca commitar
+check_db.py
+
 # Arquivado no vault a 2026-08-31 (vault/ficheiros/arquivo-repositorio/).
 # Fora do repositorio, mas nao apagado: codigo morto que ninguem importa,
 # lockfiles de um gestor que o projecto nao usa, e um zip do proprio src.

@@ -42,6 +42,20 @@ export function ClientNotesTab({ entityId, organizationId }: ClientNotesTabProps
     loadNotes();
   }, [entityId]);
 
+  useEffect(() => {
+    if (!entityId) return;
+
+    const handleRefresh = (event: Event) => {
+      const customEvent = event as CustomEvent<{ entityId?: string }>;
+      if (customEvent.detail?.entityId === entityId) {
+        loadNotes();
+      }
+    };
+
+    window.addEventListener("entity-interaction-created", handleRefresh);
+    return () => window.removeEventListener("entity-interaction-created", handleRefresh);
+  }, [entityId]);
+
   const loadNotes = async () => {
     setLoading(true);
     try {
