@@ -23,11 +23,14 @@ import type { AusenciaDecisao, AusenciaDia, AusenciaPedido } from "@/types/hrAus
 // SEM `motivo`: a coluna fica sem SELECT directo para authenticated (migration
 // 20261122050000). Le-se so por `rpc_hr_ausencia_ver_motivo`, chamada a pedido
 // quando o detalhe abre -- nunca aqui, que carrega a lista e o mapa inteiros.
+// COM `substitui_pedido_id`: falta o GRANT desta coluna faria falhar TODAS as
+// leituras (migration 20261201020000); falta pedi-la aqui deixaria esta vista
+// sem saber distinguir um pedido de alteracao de dias de um pedido normal.
 const COLUNAS_PEDIDO =
   "id, organization_id, pessoa_id, tipo_id, vinculo_id, data_inicio, data_fim, " +
   "meio_dia_inicio, meio_dia_fim, hora_inicio, hora_fim, dias_solicitados, estado, " +
   "aprovador_chefia_pessoa_id, criado_por_pessoa_id, origem, schedule_item_id, " +
-  "periodo_inicio, periodo_fim, created_at";
+  "periodo_inicio, periodo_fim, created_at, substitui_pedido_id";
 
 const COLUNAS_DECISAO =
   "id, pedido_id, pessoa_id, organization_id, ordem, passo, resultado, " +

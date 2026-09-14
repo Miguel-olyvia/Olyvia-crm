@@ -44,11 +44,15 @@ import type {
 // SEM `motivo`: a coluna fica sem SELECT directo para authenticated (migration
 // 20261122050000). Le-se so por `rpc_hr_ausencia_ver_motivo`, chamada a pedido
 // quando o detalhe abre -- nunca aqui, que carrega a lista inteira.
+// COM `substitui_pedido_id`: sem o GRANT por coluna desta a authenticated
+// (migration 20261201020000) TODAS as leituras desta tabela falhavam -- e sem
+// a coluna PEDIDA aqui, o ecra nunca saberia distinguir um pedido de alteracao
+// de dias de um pedido normal.
 const COLUNAS_PEDIDO =
   "id, organization_id, pessoa_id, tipo_id, vinculo_id, data_inicio, data_fim, " +
   "meio_dia_inicio, meio_dia_fim, hora_inicio, hora_fim, dias_solicitados, estado, " +
   "aprovador_chefia_pessoa_id, criado_por_pessoa_id, origem, schedule_item_id, " +
-  "periodo_inicio, periodo_fim, created_at";
+  "periodo_inicio, periodo_fim, created_at, substitui_pedido_id";
 
 const COLUNAS_DECISAO =
   "id, pedido_id, pessoa_id, organization_id, ordem, passo, resultado, " +
@@ -227,6 +231,34 @@ export function useAusenciasDaPessoa(pessoaId: string | undefined) {
         }),
       ),
     [executar, orgId, pessoaId],
+  );
+
+  /**
+   * Pede a alteracao de dias de um pedido JA APROVADO (rpc_hr_ausencia_pedir_
+   * alteracao, migration 20261201020000). Herda tipo, vinculo, pessoa e
+   * organizacao do original -- nao sao argumentos aqui. Enquanto pendente, o
+   * original continua aprovado e a ocupar as suas datas; nada e reescrito.
+   */
+  const pedirAlteracao = useCallback(
+    (args: {
+      pedidoOriginalId: string;
+      novaDataInicio: string;
+      novaDataFim: string;
+      novoMeioDiaInicio: boolean;
+      novoMeioDiaFim: boolean;
+      motivo: string | null;
+    }) =>
+      executar(() =>
+        hrRpc("rpc_hr_ausencia_pedir_alteracao", {
+          _pedido_original_id: args.pedidoOriginalId,
+          _nova_data_inicio: args.novaDataInicio,
+          _nova_data_fim: args.novaDataFim,
+          _novo_meio_dia_inicio: args.novoMeioDiaInicio,
+          _novo_meio_dia_fim: args.novoMeioDiaFim,
+          _motivo: args.motivo,
+        }),
+      ),
+    [executar],
   );
 
   const cancelar = useCallback(
@@ -418,6 +450,7 @@ export function useAusenciasDaPessoa(pessoaId: string | undefined) {
     saving,
     recarregar: load,
     pedir,
+    pedirAlteracao,
     cancelar,
     corrigirAprovado,
     decidirChefia,

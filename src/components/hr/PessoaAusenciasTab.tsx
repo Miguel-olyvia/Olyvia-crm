@@ -30,6 +30,7 @@ import { CalendarioAnual } from "@/components/hr/ausencias/CalendarioAnual";
 import { MotivoDialog } from "@/components/hr/ausencias/MotivoDialog";
 import { PedidoDetalheSheet } from "@/components/hr/ausencias/PedidoDetalheSheet";
 import { PedidosLista } from "@/components/hr/ausencias/PedidosLista";
+import { PedirAlteracaoSheet } from "@/components/hr/ausencias/PedirAlteracaoSheet";
 import { PedirAusenciaSheet } from "@/components/hr/ausencias/PedirAusenciaSheet";
 import { useAusenciasDaPessoa } from "@/hooks/useAusenciasDaPessoa";
 import { useAusenciasTipos } from "@/hooks/useAusenciasTipos";
@@ -74,6 +75,7 @@ export function PessoaAusenciasTab({
   const [aPedir, setAPedir] = useState(false);
   const [dataInicial, setDataInicial] = useState<string | null>(null);
   const [pedidoAberto, setPedidoAberto] = useState<string | null>(null);
+  const [aPedirAlteracao, setAPedirAlteracao] = useState(false);
   const [aAjustar, setAAjustar] = useState(false);
   const [tipoDoAjuste, setTipoDoAjuste] = useState<string | null>(null);
   const [ajusteAAnular, setAjusteAAnular] = useState<string | null>(null);
@@ -287,11 +289,14 @@ export function PessoaAusenciasTab({
           nomePorPessoaId={nomePorPessoaId}
           souOAutor={souAPessoa}
           saving={dados.saving}
+          pedidos={dados.pedidos}
           permissoes={{
             aprovarChefia: permissoes.aprovarChefia,
             aprovarRh: permissoes.aprovarRh,
             editarHistorico: permissoes.historicoEditar,
             verJustificacao: permissoes.justificacaoView,
+            pedir: permissoes.pedir,
+            pedirOutros: permissoes.pedirOutros,
           }}
           onFechar={() => setPedidoAberto(null)}
           onDecidirChefia={dados.decidirChefia}
@@ -302,6 +307,28 @@ export function PessoaAusenciasTab({
             permissoes.justificacaoView ? dados.revelarJustificacao : undefined
           }
           onVerMotivo={dados.verMotivo}
+          onIniciarAlteracao={() => setAPedirAlteracao(true)}
+        />
+      )}
+
+      {pedidoSeleccionado && aPedirAlteracao && (
+        <PedirAlteracaoSheet
+          aberto={aPedirAlteracao}
+          onFechar={() => setAPedirAlteracao(false)}
+          pedidoOriginal={pedidoSeleccionado}
+          tipo={tipos.porId.get(pedidoSeleccionado.tipo_id) ?? null}
+          saldos={dados.saldos}
+          direitos={dados.direitos}
+          feriados={dados.feriados}
+          pessoaNome={pessoaNome}
+          saving={dados.saving}
+          onPedir={(alteracao) =>
+            dados.pedirAlteracao({
+              pedidoOriginalId: pedidoSeleccionado.id,
+              ...alteracao,
+            })
+          }
+          idPrefixo="hr-ficha-alteracao"
         />
       )}
 

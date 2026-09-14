@@ -18,6 +18,7 @@ import {
   indexarFeriados,
   lerPedido,
   periodoDoDia,
+  podePedirAlteracao,
   problemasDoPedido,
   sentidoObrigatorio,
 } from "@/lib/hr/ausencias";
@@ -445,6 +446,52 @@ describe("accoesDoPedido", () => {
   });
 });
 
+describe("podePedirAlteracao", () => {
+  const base = {
+    estado: "aprovado" as const,
+    souAPessoa: true,
+    podePedir: true,
+    podePedirOutros: false,
+    dataInicio: "2026-09-15",
+    hoje: "2026-09-14",
+    temAlteracaoPendente: false,
+  };
+
+  it("so num pedido aprovado", () => {
+    expect(podePedirAlteracao({ ...base, estado: "pendente_chefia" })).toBe(false);
+    expect(podePedirAlteracao({ ...base, estado: "recusado" })).toBe(false);
+    expect(podePedirAlteracao({ ...base, estado: "cancelado" })).toBe(false);
+    expect(podePedirAlteracao(base)).toBe(true);
+  });
+
+  it("a fronteira e o proprio dia: ontem e hoje ja nao, amanha sim", () => {
+    expect(podePedirAlteracao({ ...base, dataInicio: "2026-09-13", hoje: "2026-09-14" })).toBe(
+      false,
+    );
+    expect(podePedirAlteracao({ ...base, dataInicio: "2026-09-14", hoje: "2026-09-14" })).toBe(
+      false,
+    );
+    expect(podePedirAlteracao({ ...base, dataInicio: "2026-09-15", hoje: "2026-09-14" })).toBe(
+      true,
+    );
+  });
+
+  it("a propria pessoa precisa de pedir, outra pessoa precisa de pedirOutros", () => {
+    expect(podePedirAlteracao({ ...base, souAPessoa: true, podePedir: false })).toBe(false);
+    expect(podePedirAlteracao({ ...base, souAPessoa: true, podePedir: true })).toBe(true);
+    expect(
+      podePedirAlteracao({ ...base, souAPessoa: false, podePedirOutros: false }),
+    ).toBe(false);
+    expect(
+      podePedirAlteracao({ ...base, souAPessoa: false, podePedirOutros: true }),
+    ).toBe(true);
+  });
+
+  it("nunca com uma alteracao ja pendente sobre o mesmo original", () => {
+    expect(podePedirAlteracao({ ...base, temAlteracaoPendente: true })).toBe(false);
+  });
+});
+
 describe("chaveDoErroDeAusencia", () => {
   it("reconhece o prefixo estavel no meio da mensagem do Postgres", () => {
     expect(
@@ -479,5 +526,31 @@ describe("chaveDoErroDeAusencia", () => {
         message: "ausencia_dia_sobreposto: o dia X da pessoa Y ficaria com 1.50 de dia marcado",
       }),
     ).toBe("hr.ausencias.erroRpc.sobreposta");
+  });
+
+  // Os codigos novos de `rpc_hr_ausencia_pedir_alteracao` e
+  // `hr_ausencias_efectivar_substituicao` (migration 20261201020000).
+  it.each([
+    ["ausencia_alteracao_original_nao_aprovado", "hr.ausencias.erroRpc.alteracaoOriginalNaoAprovado"],
+    ["ausencia_alteracao_ja_comecou", "hr.ausencias.erroRpc.alteracaoJaComecou"],
+    ["ausencia_alteracao_ja_pendente", "hr.ausencias.erroRpc.alteracaoJaPendente"],
+    ["ausencia_alteracao_original_ja_fechada", "hr.ausencias.erroRpc.alteracaoOriginalJaFechada"],
+    ["ausencia_alteracao_original_inexistente", "hr.ausencias.erroRpc.alteracaoOriginalInexistente"],
+    ["ausencia_alteracao_calendario_mudou", "hr.ausencias.erroRpc.alteracaoCalendarioMudou"],
+    ["ausencia_sem_utilizador_anew", "hr.ausencias.erroRpc.semUtilizadorAnew"],
+    ["ausencia_tipo_inexistente", "hr.ausencias.erroRpc.tipoInexistente"],
+    ["ausencia_pedido_inexistente", "hr.ausencias.erroRpc.pedidoInexistente"],
+  ] as const)("reconhece %s", (codigo, chave) => {
+    expect(chaveDoErroDeAusencia({ message: `${codigo}: qualquer texto do Postgres` })).toBe(chave);
+  });
+
+  it("um prefixo generico nao apanha um codigo mais especifico de alteracao", () => {
+    // `ausencia_alteracao_original_nao_aprovado` nao pode ser lido como
+    // qualquer prefixo generico -- so como o seu proprio, mais especifico.
+    expect(
+      chaveDoErroDeAusencia({
+        message: "ausencia_alteracao_original_nao_aprovado: so se pede alteracao de aprovado",
+      }),
+    ).toBe("hr.ausencias.erroRpc.alteracaoOriginalNaoAprovado");
   });
 });

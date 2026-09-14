@@ -209,11 +209,17 @@ export default function AusenciasOrganizacao() {
             nomePorPessoaId={nomePorPessoaId}
             souOAutor={minha.pessoaId === pedidoSeleccionado.pessoa_id}
             saving={dados.saving}
+            pedidos={dados.pedidos}
             permissoes={{
               aprovarChefia: hasPermission("hr.ausencias.aprovar.chefia"),
               aprovarRh: hasPermission("hr.ausencias.aprovar.rh"),
               editarHistorico: hasPermission("hr.ausencias.historico.editar"),
               verJustificacao: hasPermission("hr.ausencias.justificacao.view"),
+              // Sem `onIniciarAlteracao` (este ecra nao tem a RPC de
+              // alteracao ligada -- so a ficha da pessoa tem): o botao nunca
+              // aparece aqui, mesmo que a permissao exista.
+              pedir: hasPermission("hr.ausencias.pedir"),
+              pedirOutros: hasPermission("hr.ausencias.pedir.outros"),
             }}
             onFechar={() => setPedidoAberto(null)}
             onDecidirChefia={dados.decidirChefia}

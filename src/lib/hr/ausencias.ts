@@ -410,6 +410,7 @@ export interface AccoesPossiveis {
   devolverAChefia: boolean;
   cancelar: boolean;
   corrigirAprovado: boolean;
+  pedirAlteracao: boolean;
 }
 
 export function accoesDoPedido(args: {
@@ -420,6 +421,14 @@ export function accoesDoPedido(args: {
   podeEditarHistorico: boolean;
   /** So ha para onde devolver se o tipo exige chefia E ela e resoluvel. */
   temChefiaResoluvel: boolean;
+  /** `hr.ausencias.pedir`, para pedir alteracao da PROPRIA ausencia. */
+  podePedir?: boolean;
+  /** `hr.ausencias.pedir.outros`, para pedir alteracao na ficha de outra pessoa. */
+  podePedirOutros?: boolean;
+  dataInicio?: string;
+  hoje?: string;
+  /** Ja existe uma alteracao pendente sobre este pedido. */
+  temAlteracaoPendente?: boolean;
 }): AccoesPossiveis {
   const naChefia = args.estado === "pendente_chefia";
   const noRh = args.estado === "pendente_rh";
@@ -440,7 +449,43 @@ export function accoesDoPedido(args: {
       ((naChefia || noRh) && (args.souOAutor || args.podeEditarHistorico)) ||
       (aprovado && args.podeEditarHistorico && !args.souOAutor),
     corrigirAprovado: aprovado && args.podeEditarHistorico && !args.souOAutor,
+    pedirAlteracao: podePedirAlteracao({
+      estado: args.estado,
+      souAPessoa: args.souOAutor,
+      podePedir: args.podePedir ?? false,
+      podePedirOutros: args.podePedirOutros ?? false,
+      dataInicio: args.dataInicio ?? "",
+      hoje: args.hoje ?? "",
+      temAlteracaoPendente: args.temAlteracaoPendente ?? false,
+    }),
   };
+}
+
+/**
+ * Se este pedido, JA APROVADO, pode receber um pedido de alteracao de dias
+ * (`rpc_hr_ausencia_pedir_alteracao`, migration 20261201020000).
+ *
+ * Espelha as guardas da RPC, para o botao nunca aparecer onde ela recusaria:
+ * so `aprovado`; so se `dataInicio` ainda for FUTURA (a fronteira e o proprio
+ * dia -- hoje ja nao chega, corrige-se pelo caminho do historico); a propria
+ * pessoa precisa de `hr.ausencias.pedir`, outra pessoa de
+ * `hr.ausencias.pedir.outros`; e nunca com uma alteracao ja pendente sobre o
+ * mesmo original (o indice unico parcial da base recusaria a segunda).
+ */
+export function podePedirAlteracao(args: {
+  estado: EstadoPedido;
+  souAPessoa: boolean;
+  podePedir: boolean;
+  podePedirOutros: boolean;
+  dataInicio: string;
+  hoje: string;
+  temAlteracaoPendente: boolean;
+}): boolean {
+  if (args.estado !== "aprovado") return false;
+  if (!args.dataInicio || !args.hoje) return false;
+  if (args.dataInicio <= args.hoje) return false;
+  if (args.temAlteracaoPendente) return false;
+  return args.souAPessoa ? args.podePedir : args.podePedirOutros;
 }
 
 /**
@@ -450,6 +495,18 @@ export function accoesDoPedido(args: {
  * amigavel generica E reporta, para se saber que faltou uma chave.
  */
 const PREFIXOS: ReadonlyArray<[string, string]> = [
+  // Os codigos do pedido de alteracao de dias (migration 20261201020000) vem
+  // PRIMEIRO: sao mais especificos do que os genericos mais abaixo, e um
+  // prefixo generico nao pode apanhar um destes por engano.
+  ["ausencia_alteracao_original_nao_aprovado", "hr.ausencias.erroRpc.alteracaoOriginalNaoAprovado"],
+  ["ausencia_alteracao_ja_comecou", "hr.ausencias.erroRpc.alteracaoJaComecou"],
+  ["ausencia_alteracao_ja_pendente", "hr.ausencias.erroRpc.alteracaoJaPendente"],
+  ["ausencia_alteracao_original_ja_fechada", "hr.ausencias.erroRpc.alteracaoOriginalJaFechada"],
+  ["ausencia_alteracao_original_inexistente", "hr.ausencias.erroRpc.alteracaoOriginalInexistente"],
+  ["ausencia_alteracao_calendario_mudou", "hr.ausencias.erroRpc.alteracaoCalendarioMudou"],
+  ["ausencia_sem_utilizador_anew", "hr.ausencias.erroRpc.semUtilizadorAnew"],
+  ["ausencia_tipo_inexistente", "hr.ausencias.erroRpc.tipoInexistente"],
+  ["ausencia_pedido_inexistente", "hr.ausencias.erroRpc.pedidoInexistente"],
   ["ausencia_sem_sessao", "hr.ausencias.erroRpc.semSessao"],
   ["ausencia_sem_permissao", "hr.ausencias.erroRpc.semPermissao"],
   ["ausencia_pessoa_invalida", "hr.ausencias.erroRpc.pessoaInvalida"],

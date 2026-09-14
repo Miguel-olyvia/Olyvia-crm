@@ -84,10 +84,20 @@ export function PedidosLista({
                   </TableCell>
                 )}
                 <TableCell>
-                  <TipoEtiqueta
-                    tipo={tiposPorId.get(pedido.tipo_id) ?? null}
-                    nomeAlternativo={t("hr.ausencias.tipoDesconhecido")}
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <TipoEtiqueta
+                      tipo={tiposPorId.get(pedido.tipo_id) ?? null}
+                      nomeAlternativo={t("hr.ausencias.tipoDesconhecido")}
+                    />
+                    {/* Sem esta marca, uma alteracao de dias e o pedido
+                        original que ela substitui ficam como duas linhas
+                        quase iguais na mesma lista, e nao se distinguem. */}
+                    {pedido.substitui_pedido_id && (
+                      <Badge variant="outline" className="font-normal">
+                        {t("hr.ausencias.lista.etiquetaAlteracao")}
+                      </Badge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="whitespace-nowrap">
                   {pedido.data_inicio === pedido.data_fim

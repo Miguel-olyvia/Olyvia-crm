@@ -118,6 +118,12 @@ export interface AusenciaPedido {
   periodo_inicio: string | null;
   periodo_fim: string | null;
   created_at: string;
+  /**
+   * Quando NOT NULL, este pedido E um PEDIDO DE ALTERACAO DE DIAS: aponta ao
+   * pedido ja aprovado que pretende substituir (migration 20261201020000).
+   * Nao se reescrevem as datas do original enquanto este esta pendente.
+   */
+  substitui_pedido_id: string | null;
 }
 
 export type PassoDecisao = "chefia" | "rh";

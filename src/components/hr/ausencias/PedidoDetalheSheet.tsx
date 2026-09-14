@@ -34,14 +34,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { CalendarOff, Check, Eye, Loader2, Undo2, X } from "lucide-react";
+import { CalendarClock, CalendarOff, Check, Eye, Loader2, Undo2, X } from "lucide-react";
 import { MotivoDialog, type ResultadoMotivo } from "@/components/hr/ausencias/MotivoDialog";
 import { TipoEtiqueta } from "@/components/hr/ausencias/TipoEtiqueta";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { isPermissionError } from "@/lib/hr/hrDb";
-import { accoesDoPedido, formatarDias, lerPedido } from "@/lib/hr/ausencias";
+import { accoesDoPedido, formatarDias, hojeIso, lerPedido } from "@/lib/hr/ausencias";
 import type {
   AusenciaDecisao,
   AusenciaJustificacaoRevelada,
@@ -55,6 +55,10 @@ export interface PermissoesAusencias {
   aprovarRh: boolean;
   editarHistorico: boolean;
   verJustificacao: boolean;
+  /** `hr.ausencias.pedir` -- para pedir alteracao da PROPRIA ausencia. */
+  pedir?: boolean;
+  /** `hr.ausencias.pedir.outros` -- para pedir alteracao na ficha de outra pessoa. */
+  pedirOutros?: boolean;
 }
 
 interface PedidoDetalheSheetProps {
@@ -67,6 +71,15 @@ interface PedidoDetalheSheetProps {
   permissoes: PermissoesAusencias;
   souOAutor: boolean;
   saving: boolean;
+  /**
+   * Todos os pedidos carregados nesta vista -- so para resolver, sem outra
+   * chamada, o pedido ORIGINAL de uma alteracao (`substitui_pedido_id`) e se
+   * ja ha uma alteracao PENDENTE sobre este pedido. Sem esta lista, o botao
+   * "pedir alteracao" nao sabe recusar uma segunda alteracao antes da base.
+   */
+  pedidos?: AusenciaPedido[];
+  /** Presente so quando esta vista sabe pedir alteracoes (ficha da pessoa). */
+  onIniciarAlteracao?: () => void;
   onFechar: () => void;
   onDecidirChefia: (args: {
     pedidoId: string;
@@ -180,6 +193,32 @@ export function PedidoDetalheSheet(props: PedidoDetalheSheetProps) {
     [pedido, decisoes],
   );
 
+  // Ja ha uma alteracao PENDENTE sobre este pedido? A base recusa uma
+  // segunda (indice unico parcial, `ausencia_alteracao_ja_pendente`); o botao
+  // espelha essa guarda para nao abrir um painel que a RPC ia recusar.
+  const temAlteracaoPendente = useMemo(
+    () =>
+      Boolean(
+        pedido &&
+          props.pedidos?.some(
+            (p) =>
+              p.substitui_pedido_id === pedido.id &&
+              (p.estado === "pendente_chefia" || p.estado === "pendente_rh"),
+          ),
+      ),
+    [pedido, props.pedidos],
+  );
+
+  // Quando ESTE pedido e uma alteracao, o original que ele pretende
+  // substituir -- so para mostrar as datas antigas lado a lado no aviso.
+  const pedidoOriginal = useMemo(
+    () =>
+      pedido?.substitui_pedido_id
+        ? (props.pedidos?.find((p) => p.id === pedido.substitui_pedido_id) ?? null)
+        : null,
+    [pedido, props.pedidos],
+  );
+
   const accoes = useMemo(
     () =>
       pedido
@@ -190,9 +229,14 @@ export function PedidoDetalheSheet(props: PedidoDetalheSheetProps) {
             podeAprovarRh: permissoes.aprovarRh,
             podeEditarHistorico: permissoes.editarHistorico,
             temChefiaResoluvel: Boolean(pedido.aprovador_chefia_pessoa_id),
+            podePedir: permissoes.pedir,
+            podePedirOutros: permissoes.pedirOutros,
+            dataInicio: pedido.data_inicio,
+            hoje: hojeIso(),
+            temAlteracaoPendente,
           })
         : null,
-    [pedido, props.souOAutor, permissoes],
+    [pedido, props.souOAutor, permissoes, temAlteracaoPendente],
   );
 
   if (!pedido || !leitura || !accoes) return null;
@@ -354,6 +398,23 @@ export function PedidoDetalheSheet(props: PedidoDetalheSheetProps) {
               <Alert>
                 <CalendarOff className="h-4 w-4" />
                 <AlertDescription>{t("hr.ausencias.detalhe.semBoardExplicacao")}</AlertDescription>
+              </Alert>
+            )}
+
+            {pedido.substitui_pedido_id && (
+              // Este pedido E uma alteracao de dias: enquanto pendente, o
+              // original continua aprovado e a ocupar as suas datas -- nada
+              // muda ate haver decisao.
+              <Alert>
+                <CalendarClock className="h-4 w-4" />
+                <AlertDescription>
+                  {pedidoOriginal
+                    ? t("hr.ausencias.detalhe.eUmaAlteracao", {
+                        inicio: pedidoOriginal.data_inicio,
+                        fim: pedidoOriginal.data_fim,
+                      })
+                    : t("hr.ausencias.detalhe.eUmaAlteracaoSemOriginal")}
+                </AlertDescription>
               </Alert>
             )}
 
@@ -572,6 +633,20 @@ export function PedidoDetalheSheet(props: PedidoDetalheSheetProps) {
                 </Button>
               )}
             </div>
+
+            {accoes.pedirAlteracao && props.onIniciarAlteracao && (
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={saving}
+                  onClick={props.onIniciarAlteracao}
+                >
+                  <CalendarClock className="mr-1.5 h-3.5 w-3.5" />
+                  {t("hr.ausencias.accao.pedirAlteracao")}
+                </Button>
+              </div>
+            )}
 
             {(accoes.cancelar || accoes.corrigirAprovado) && (
               <div className="space-y-2 rounded-md border border-destructive/40 p-3">
