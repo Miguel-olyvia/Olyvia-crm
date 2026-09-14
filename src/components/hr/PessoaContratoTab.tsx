@@ -782,7 +782,13 @@ export function PessoaContratoTab({
                   criandoContrato
                     ? t("hr.contrato.ajudaHorasNovoContrato")
                     : equivalente
-                      ? t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })
+                      ? // As duas frases juntas, de proposito: mostrar so o
+                        // equivalente ("Equivale a 40h/semana") sem dizer ONDE
+                        // se muda deixava a pessoa sem saber que ha um sitio
+                        // para isso -- e como um contrato ja existente quase
+                        // sempre tem um equivalente calculavel, a frase de
+                        // "altera-se abaixo" nunca aparecia sozinha na pratica.
+                        `${t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })} ${t("hr.contrato.ajudaHorasDerivadas")}`
                       : t("hr.contrato.ajudaHorasDerivadas")
                 }
                 tipo="number"
@@ -795,6 +801,7 @@ export function PessoaContratoTab({
                 id="hr-contrato-horas-frequencia"
                 label={t("hr.contrato.horasFrequencia")}
                 valor={rascunho.horas_frequencia}
+                ajuda={criandoContrato ? undefined : t("hr.contrato.ajudaHorasDerivadas")}
                 disabled={!criandoContrato || !podeEditar}
                 opcoes={HORAS_FREQUENCIAS.map((f) => ({
                   value: f,

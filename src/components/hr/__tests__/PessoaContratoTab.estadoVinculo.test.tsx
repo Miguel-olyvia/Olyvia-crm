@@ -110,4 +110,20 @@ describe("PessoaContratoTab -- estado do vinculo", () => {
     expect(onGuardarVinculo).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledWith("hr.contrato.erroTerminadoSemDataFim");
   });
+
+  it("num contrato ja existente, a ajuda das horas diz o equivalente E onde se altera -- nunca so uma das duas", () => {
+    // Regressao: antes, quando havia equivalente calculavel (o caso normal
+    // de um contrato ja existente), a frase "altera-se abaixo" nunca
+    // aparecia -- so o equivalente. O `t` mocado devolve a propria chave, por
+    // isso as duas mensagens juntas aparecem como as duas chaves com espaco.
+    montar();
+
+    const ajudaHoras = screen.getByText(
+      "hr.contrato.ajudaEquivalenteSemanal hr.contrato.ajudaHorasDerivadas",
+    );
+    expect(ajudaHoras).toBeInTheDocument();
+
+    // A frequencia das horas tambem passa a explicar-se, nao fica muda.
+    expect(screen.getAllByText("hr.contrato.ajudaHorasDerivadas").length).toBeGreaterThan(0);
+  });
 });
