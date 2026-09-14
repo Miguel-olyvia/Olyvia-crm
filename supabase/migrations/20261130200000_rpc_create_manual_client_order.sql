@@ -207,13 +207,15 @@ BEGIN
   INSERT INTO public.client_contracts (
     contract_number, client_id, entity_id, quote_id,
     organization_id, root_organization_id, created_by,
-    status, total_value, currency, start_date, notes
+    status, total_value, currency, start_date, notes,
+    is_manual_order
   )
   VALUES (
     NULL, v_client_id, v_entity_id, v_quote_id,
     p_organization_id, v_root_org_id, v_actor,
     'draft', v_total_com, 'EUR', v_start_date,
-    nullif(p_order ->> 'notes', '')
+    nullif(p_order ->> 'notes', ''),
+    true
   )
   RETURNING * INTO v_contract;
 
