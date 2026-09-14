@@ -29,6 +29,7 @@ import { ScheduleSettingsDialog } from '@/components/scheduling/ScheduleSettings
 import { ScheduleBoardsTab } from '@/components/scheduling/ScheduleBoardsTab';
 import type { ScheduleItem, ScheduleBoard, ScheduleResource, ScheduleFilters } from '@/types/scheduling';
 import { PageFAQSheet } from "@/components/PageFAQSheet";
+import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 
 type ViewMode = 'month' | 'week' | 'day';
 type TabType = 'calendar' | 'boards' | 'resources' | 'rules';
@@ -166,9 +167,23 @@ export default function Scheduling() {
         supabase.auth.getUser(),
       ]);
       // Load users via separate queries (no FK between anew_memberships and anew_users)
-      const { data: memberships } = await supabase.from('anew_memberships').select('user_id').eq('organization_id', activeCompany.id).eq('status', 'active');
+      const { data: rawMemberships } = await supabase.from('anew_memberships').select('user_id, role_id').eq('organization_id', activeCompany.id).eq('status', 'active');
+      // anew_memberships também tem linhas "active" para clientes/contactos do
+      // portal (criadas ao enviar propostas/orçamentos/contratos) — sem este
+      // filtro de role, o dropdown "Utilizador do Sistema" mostrava clientes
+      // a par dos utilizadores reais da equipa.
+      const roleIds = [...new Set((rawMemberships || []).map((m: any) => m.role_id).filter(Boolean))];
+      const roleCodeMap: Record<string, string> = {};
+      if (roleIds.length > 0) {
+        const { data: rolesData } = await supabase.from('anew_roles').select('id, code').in('id', roleIds);
+        (rolesData || []).forEach((r: any) => { roleCodeMap[r.id] = (r.code || '').toLowerCase(); });
+      }
+      const memberships = (rawMemberships || []).filter((m: any) => {
+        const code = roleCodeMap[m.role_id];
+        return !code || !INTERNAL_ASSIGNMENT_EXCLUDED_ROLES.has(code);
+      });
       let usersData: any[] = [];
-      if (memberships && memberships.length > 0) {
+      if (memberships.length > 0) {
         const userIds = memberships.map((m: any) => m.user_id).filter(Boolean);
         if (userIds.length > 0) {
           const { data: anewUsers } = await supabase.from('anew_users').select('id, name').in('id', userIds);
