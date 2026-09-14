@@ -622,6 +622,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   // reabrir. Nunca corre ao editar um orçamento existente (quoteId já vem
   // preenchido na prop).
   useEffect(() => {
+    // DEBUG TEMPORÁRIO — remover depois de identificar o bug do diagnóstico Fase 1
+    console.log("[DEBUG diagnostico-fase1]", {
+      quoteId,
+      draftQuoteId,
+      silentDraftCreationRef: silentDraftCreationRef.current,
+      isCompanyContextLoading,
+      activeCompanyId: activeCompany?.id,
+    });
     if (quoteId) return;
     if (draftQuoteId) return;
     if (silentDraftCreationRef.current) return;
