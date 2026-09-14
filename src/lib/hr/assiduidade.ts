@@ -30,7 +30,8 @@
  */
 import { minutosDe, formatarDuracao, chaveDoDia } from "@/lib/hr/horario";
 import { dataDeIso, somarDias } from "@/lib/hr/ausencias";
-import type { DiaSemana } from "@/types/hr";
+import { horasContratadasSemanaisReais } from "@/lib/hr/horas";
+import type { DiaSemana, HorasFrequencia } from "@/types/hr";
 
 export { formatarDuracao };
 
@@ -501,15 +502,22 @@ export function envolventeDoDia(intervalos: readonly Periodo[]): Periodo | null 
 export function minutosPrevistosNoMes(params: {
   mesActual: string;
   hoje: string;
-  horasSemanaisEquivalentes: number | null;
+  horasPeriodo: number | null;
+  horasFrequencia: HorasFrequencia;
   diasUteis: readonly DiaSemana[] | null;
   dataInicio: string;
   dataFim: string | null;
 }): number | null {
-  const { mesActual, hoje, horasSemanaisEquivalentes, diasUteis, dataInicio, dataFim } = params;
-  if (!horasSemanaisEquivalentes || !diasUteis || diasUteis.length === 0) return null;
+  const { mesActual, hoje, horasPeriodo, horasFrequencia, diasUteis, dataInicio, dataFim } = params;
+  if (!diasUteis || diasUteis.length === 0) return null;
 
-  const minutosPorDiaUtil = (horasSemanaisEquivalentes * 60) / diasUteis.length;
+  // Semanais REAIS, nao o equivalente fixo do tecto: para "diaria", conta os
+  // dias uteis DESTE vinculo (podem ser menos de 5) -- ver
+  // horasContratadasSemanaisReais em horas.ts para o porque.
+  const horasSemanaisReais = horasContratadasSemanaisReais(horasPeriodo, horasFrequencia, diasUteis);
+  if (!horasSemanaisReais) return null;
+
+  const minutosPorDiaUtil = (horasSemanaisReais * 60) / diasUteis.length;
   const diasUteisSet = new Set(diasUteis);
 
   const inicioMes = `${mesActual}-01`;

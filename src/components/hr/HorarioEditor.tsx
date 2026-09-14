@@ -98,6 +98,15 @@ interface HorarioEditorProps {
   /** Prefixo dos `id` dos campos, para dois editores na mesma pagina nao
    * colidirem nos `htmlFor`. */
   idPrefixo?: string;
+  /**
+   * As horas contratadas por semana, REAIS (`horasContratadasSemanaisReais`
+   * em `@/lib/hr/horas.ts` -- para "diaria", ja conta os dias uteis do
+   * vinculo, nao o equivalente fixo do tecto de 80h). `null`/`undefined`
+   * quando o chamador nao tem essa informacao (ex.: passo do assistente
+   * antes de o vinculo estar gravado) -- nesse caso o aviso nao aparece,
+   * mas o total continua a mostrar-se normalmente.
+   */
+  horasContratadasSemanais?: number | null;
 }
 
 export function HorarioEditor({
@@ -107,6 +116,7 @@ export function HorarioEditor({
   locaisALoad = false,
   podeEditar,
   idPrefixo = "hr-horario",
+  horasContratadasSemanais = null,
 }: HorarioEditorProps) {
   const { t } = useTranslation();
   const anuncio = useRef<HTMLDivElement>(null);
@@ -240,6 +250,14 @@ export function HorarioEditor({
 
   const totais = useMemo(() => totaisPorLocal(valor), [valor]);
   const semanal = useMemo(() => totalSemanal(valor), [valor]);
+  /**
+   * O planeado excede o contrato? So se compara quando o chamador conhece o
+   * contratado (`horasContratadasSemanais`, ja ajustado aos dias uteis reais
+   * -- ver o comentario da prop). E um AVISO, nunca um bloqueio: a base nao
+   * recusa um horario planeado acima do contrato, e este editor tambem nao.
+   */
+  const excedeContrato =
+    horasContratadasSemanais !== null && semanal > horasContratadasSemanais * 60;
 
   const filaDeIntervalo = (
     intervalo: IntervaloRascunho,
@@ -627,6 +645,14 @@ export function HorarioEditor({
         <span className="font-medium">
           {t("hr.horario.totalSemanal")}: <span className="tabular-nums">{formatarDuracao(semanal)}</span>
         </span>
+        {excedeContrato && horasContratadasSemanais !== null && (
+          <span className="flex items-center gap-1.5 text-xs text-destructive">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {t("hr.horario.excedeContrato", {
+              contratado: formatarDuracao(Math.round(horasContratadasSemanais * 60)),
+            })}
+          </span>
+        )}
         {[...totais.entries()].map(([localId, minutos]) => (
           <span key={localId ?? "sem-local"} className="inline-flex items-center gap-1.5">
             <span

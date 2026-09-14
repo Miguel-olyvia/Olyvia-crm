@@ -79,6 +79,45 @@ export function horasAcimaDoTecto(horas: number | null, frequencia: HorasFrequen
 }
 
 /**
+ * As horas contratadas por semana, REAIS -- para comparar contra o horario
+ * planeado, nunca contra o tecto de 80h (esse usa `equivalenteSemanal`, de
+ * proposito diferente desta).
+ *
+ * PORQUE NAO E A MESMA CONTA QUE horas_semanais_equivalentes
+ * ------------------------------------------------------------------------
+ * A coluna gerada da base (20261120190000) converte uma taxa DIARIA para
+ * semana com um factor FIXO de 5 dias -- e uma CONVENCAO para o tecto legal
+ * de 80h, documentada como tal, e nao muda: um contrato de "4h/dia" conta
+ * sempre como 20h/semana para efeitos desse tecto, sejam quais forem os dias
+ * uteis reais do vinculo.
+ *
+ * Mas para saber se o HORARIO PLANEADO ultrapassa o CONTRATO, a pergunta e
+ * outra: quantas horas esta pessoa devia mesmo trabalhar esta semana, dados
+ * os dias uteis REAIS do vinculo? Um contrato de 4h/dia, seg-qua (3 dias
+ * uteis), implica 12h/semana -- nao as 20h que o tecto assume. Usar o
+ * equivalente fixo aqui faria o aviso disparar tarde de mais (ou nunca) para
+ * quem trabalha menos de 5 dias por semana.
+ *
+ * Para as outras tres frequencias (semanal, mensal, anual) nao ha dias uteis
+ * a corrigir -- "40 por semana" ja e o total da semana, e mensal/anual sao
+ * medias de calendario sem relacao com quantos dias a pessoa trabalha -- por
+ * isso usam exactamente `equivalenteSemanal`, sem correccao nenhuma.
+ *
+ * `null` quando falta a quantidade OU, no caso diario, os dias uteis --
+ * sem eles nao ha como saber quantos dias contar.
+ */
+export function horasContratadasSemanaisReais(
+  horas: number | null,
+  frequencia: HorasFrequencia,
+  diasUteis: readonly unknown[] | null,
+): number | null {
+  if (frequencia !== "diaria") return equivalenteSemanal(horas, frequencia);
+  if (horas === null || !Number.isFinite(horas)) return null;
+  if (!diasUteis || diasUteis.length === 0) return null;
+  return horas * diasUteis.length;
+}
+
+/**
  * O equivalente e legal mas improvavel? E o sinal de unidade trocada.
  *
  * "40 mensais" da 9,2h/semana -- passa o tecto e nao passa isto.

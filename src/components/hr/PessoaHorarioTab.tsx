@@ -93,6 +93,14 @@ interface PessoaHorarioTabProps {
   pessoaNome?: string;
   souAPessoa?: boolean;
   permissoesAssiduidade?: PermissoesAssiduidade;
+  /**
+   * As horas contratadas por semana, REAIS -- ja calculadas pelo chamador
+   * com `horasContratadasSemanaisReais` (para "diaria", conta os dias uteis
+   * do vinculo, nao o equivalente fixo do tecto de 80h). `null`/`undefined`
+   * quando nao ha vinculo em vigor ou falta a informacao -- o editor so
+   * mostra o aviso quando isto vem preenchido.
+   */
+  horasContratadasSemanais?: number | null;
 }
 
 export function PessoaHorarioTab({
@@ -111,6 +119,7 @@ export function PessoaHorarioTab({
   pessoaNome,
   souAPessoa = false,
   permissoesAssiduidade,
+  horasContratadasSemanais = null,
 }: PessoaHorarioTabProps) {
   const { t } = useTranslation();
 
@@ -226,6 +235,7 @@ export function PessoaHorarioTab({
                   locaisALoad={locaisALoad}
                   podeEditar={podeEditarPlaneado}
                   idPrefixo="hr-ficha-horario"
+                  horasContratadasSemanais={horasContratadasSemanais}
                 />
                 {podeEditarPlaneado && (
                   <div className="flex gap-2">

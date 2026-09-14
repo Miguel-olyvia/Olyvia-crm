@@ -396,7 +396,8 @@ describe("minutosPrevistosNoMes", () => {
     const minutos = minutosPrevistosNoMes({
       mesActual: "2026-09",
       hoje: "2026-09-14",
-      horasSemanaisEquivalentes: 45,
+      horasPeriodo: 45,
+      horasFrequencia: "semanal",
       diasUteis: semanaCompleta,
       dataInicio: "2026-01-01",
       dataFim: null,
@@ -408,7 +409,8 @@ describe("minutosPrevistosNoMes", () => {
     const minutos = minutosPrevistosNoMes({
       mesActual: "2026-09",
       hoje: "2026-09-14",
-      horasSemanaisEquivalentes: 45,
+      horasPeriodo: 45,
+      horasFrequencia: "semanal",
       diasUteis: semanaCompleta,
       dataInicio: "2026-09-08",
       dataFim: null,
@@ -421,7 +423,8 @@ describe("minutosPrevistosNoMes", () => {
     const minutos = minutosPrevistosNoMes({
       mesActual: "2026-09",
       hoje: "2026-09-14",
-      horasSemanaisEquivalentes: 45,
+      horasPeriodo: 45,
+      horasFrequencia: "semanal",
       diasUteis: semanaCompleta,
       dataInicio: "2026-01-01",
       dataFim: "2026-09-04",
@@ -435,7 +438,8 @@ describe("minutosPrevistosNoMes", () => {
       minutosPrevistosNoMes({
         mesActual: "2026-09",
         hoje: "2026-09-14",
-        horasSemanaisEquivalentes: null,
+        horasPeriodo: null,
+        horasFrequencia: "semanal",
         diasUteis: semanaCompleta,
         dataInicio: "2026-01-01",
         dataFim: null,
@@ -445,7 +449,8 @@ describe("minutosPrevistosNoMes", () => {
       minutosPrevistosNoMes({
         mesActual: "2026-09",
         hoje: "2026-09-14",
-        horasSemanaisEquivalentes: 45,
+        horasPeriodo: 45,
+        horasFrequencia: "semanal",
         diasUteis: [],
         dataInicio: "2026-01-01",
         dataFim: null,
@@ -457,11 +462,31 @@ describe("minutosPrevistosNoMes", () => {
     const minutos = minutosPrevistosNoMes({
       mesActual: "2026-09",
       hoje: "2026-09-14",
-      horasSemanaisEquivalentes: 45,
+      horasPeriodo: 45,
+      horasFrequencia: "semanal",
       diasUteis: semanaCompleta,
       dataInicio: "2026-09-20",
       dataFim: null,
     });
     expect(minutos).toBe(0);
+  });
+
+  it("diaria com menos de 5 dias uteis reais: usa os dias reais, nao o equivalente fixo de 5", () => {
+    // 4h/dia, seg-qua (3 dias uteis): 12h/semana reais -- ANTES desta
+    // correcao, o calculo usava o equivalente fixo da base (4 * 5 = 20h) a
+    // dividir por 3 dias reais, dando minutos/dia errados. 1 a 14 de Setembro
+    // de 2026, seg/ter/qua: dias 1(ter),2(qua),7(seg),8(ter),9(qua),14(seg)
+    // -- 6 dias uteis, a 4h (240min) cada.
+    const diasUteisReais: DiaSemana[] = ["seg", "ter", "qua"];
+    const minutos = minutosPrevistosNoMes({
+      mesActual: "2026-09",
+      hoje: "2026-09-14",
+      horasPeriodo: 4,
+      horasFrequencia: "diaria",
+      diasUteis: diasUteisReais,
+      dataInicio: "2026-09-01",
+      dataFim: null,
+    });
+    expect(minutos).toBe(6 * 4 * 60);
   });
 });

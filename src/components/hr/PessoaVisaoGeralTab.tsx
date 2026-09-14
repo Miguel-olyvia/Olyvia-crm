@@ -168,7 +168,8 @@ export function PessoaVisaoGeralTab({
     ? minutosPrevistosNoMes({
         mesActual,
         hoje,
-        horasSemanaisEquivalentes: vinculoEmVigor.horas_semanais_equivalentes,
+        horasPeriodo: vinculoEmVigor.horas_periodo,
+        horasFrequencia: vinculoEmVigor.horas_frequencia,
         diasUteis: vinculoEmVigor.dias_uteis,
         dataInicio: vinculoEmVigor.data_inicio,
         dataFim: vinculoEmVigor.data_fim,

@@ -12,6 +12,7 @@ import {
   equivalenteSemanal,
   FACTOR_SEMANAL,
   horasAcimaDoTecto,
+  horasContratadasSemanaisReais,
   horasImplausiveis,
   maximoDaFrequencia,
 } from "@/lib/hr/horas";
@@ -75,5 +76,38 @@ describe("horas de trabalho em unidade canonica", () => {
     expect(FACTOR_SEMANAL.semanal).toBe(1);
     expect(FACTOR_SEMANAL.mensal).toBe(3 / 13);
     expect(FACTOR_SEMANAL.anual).toBe(1 / 52);
+  });
+});
+
+describe("horasContratadasSemanaisReais: para comparar contra o horario planeado", () => {
+  it("diaria usa os dias uteis REAIS, nao o factor fixo de 5 do tecto", () => {
+    // 4h/dia, seg-qua (3 dias uteis): 12h/semana -- NAO os 20h que
+    // equivalenteSemanal(4, 'diaria') daria (4 * FACTOR_SEMANAL.diaria).
+    expect(horasContratadasSemanaisReais(4, "diaria", ["seg", "ter", "qua"])).toBe(12);
+    expect(equivalenteSemanal(4, "diaria")).toBe(20); // o tecto continua fixo, de proposito
+  });
+
+  it("diaria com os 5 dias uteis do costume da o mesmo que o equivalente fixo", () => {
+    expect(
+      horasContratadasSemanaisReais(8, "diaria", ["seg", "ter", "qua", "qui", "sex"]),
+    ).toBe(40);
+    expect(equivalenteSemanal(8, "diaria")).toBe(40);
+  });
+
+  it("diaria sem dias uteis definidos: null, nao um numero adivinhado", () => {
+    expect(horasContratadasSemanaisReais(4, "diaria", null)).toBeNull();
+    expect(horasContratadasSemanaisReais(4, "diaria", [])).toBeNull();
+  });
+
+  it("semanal, mensal e anual nao tem dias uteis a corrigir -- usam o equivalente directo", () => {
+    expect(horasContratadasSemanaisReais(40, "semanal", null)).toBe(40);
+    expect(horasContratadasSemanaisReais(40, "semanal", ["seg", "ter"])).toBe(40);
+    expect(horasContratadasSemanaisReais(173.33, "mensal", null)).toBeCloseTo(40, 1);
+    expect(horasContratadasSemanaisReais(2080, "anual", null)).toBe(40);
+  });
+
+  it("ausencia de horas continua a nao ser um contrato de zero horas", () => {
+    expect(horasContratadasSemanaisReais(null, "diaria", ["seg"])).toBeNull();
+    expect(horasContratadasSemanaisReais(null, "semanal", null)).toBeNull();
   });
 });

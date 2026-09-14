@@ -43,6 +43,7 @@ import {
 } from "@/lib/hr/contrato";
 import {
   equivalenteParaMostrar,
+  horasContratadasSemanaisReais,
   horasImplausiveis,
   maximoDaFrequencia,
 } from "@/lib/hr/horas";
@@ -105,6 +106,14 @@ export function SeccaoContrato({
     : null;
   // Aviso, nao erro: 9,2h/semana e legal. O que isto apanha e "40 mensais".
   const horasSuspeitas = horasValidas && horasImplausiveis(horasNumero, valor.horas_frequencia);
+
+  // Para o aviso de "excede o contrato" no editor de horario variavel, mais
+  // abaixo -- REAIS, nao o equivalente fixo do tecto (ver horas.ts).
+  const horasContratadasSemanais = horasContratadasSemanaisReais(
+    horasValidas ? horasNumero : null,
+    valor.horas_frequencia,
+    valor.dias_uteis,
+  );
 
   /**
    * So aparece quando a pessoa escolheu o regime A MAO e ele contradiz o tipo:
@@ -380,6 +389,7 @@ export function SeccaoContrato({
             locaisALoad={locaisALoad}
             podeEditar
             idPrefixo="hr-novo-horario"
+            horasContratadasSemanais={horasContratadasSemanais}
           />
         ) : (
           <Badge variant="outline" className="font-normal">

@@ -54,6 +54,7 @@ import {
 } from "@/components/hr/PessoaPessoaisTab";
 import { PessoaVisaoGeralTab } from "@/components/hr/PessoaVisaoGeralTab";
 import { derivarEstadoContrato } from "@/lib/hr/estadoContrato";
+import { horasContratadasSemanaisReais } from "@/lib/hr/horas";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -204,8 +205,21 @@ export default function PessoaDetail() {
 
   // Vinculo "em vigor" para ligar a uma afectacao nova -- o mesmo criterio de
   // `usePessoa.savePlaneado` (activo OU suspenso).
-  const vinculoActivoId =
-    ficha.vinculos.find((v) => v.estado === "activo" || v.estado === "suspenso")?.id ?? null;
+  const vinculoEmVigorParaHorario = ficha.vinculos.find(
+    (v) => v.estado === "activo" || v.estado === "suspenso",
+  );
+  const vinculoActivoId = vinculoEmVigorParaHorario?.id ?? null;
+
+  // Para o aviso de "excede o contrato" no editor de horario -- so quando
+  // quem olha pode ver vinculos, pelo mesmo motivo de estadoContratoDerivado
+  // acima: nao se inventa um numero para quem nao tem a permissao de o ler.
+  const horasContratadasSemanaisParaHorario = podeVerVinculos
+    ? horasContratadasSemanaisReais(
+        vinculoEmVigorParaHorario?.horas_periodo ?? null,
+        vinculoEmVigorParaHorario?.horas_frequencia ?? "semanal",
+        vinculoEmVigorParaHorario?.dias_uteis ?? null,
+      )
+    : null;
 
   // O mesmo criterio de `PessoaAusenciasTab.podeVer`, para o cartao da Visao
   // geral so mostrar o numero de pendentes a quem o separador tambem mostra.
@@ -498,6 +512,7 @@ export default function PessoaDetail() {
             pessoaNome={pessoa.nome_completo}
             souAPessoa={minhaPessoaId === pessoa.id}
             permissoesAssiduidade={permissoesAssiduidade}
+            horasContratadasSemanais={horasContratadasSemanaisParaHorario}
           />
         </TabsContent>
 
