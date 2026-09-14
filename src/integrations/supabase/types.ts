@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _migration_contacts_to_leads_map: {
@@ -15463,6 +15438,7 @@ export type Database = {
       }
       purchase_orders: {
         Row: {
+          actual_delivery_date: string | null
           business_unit_id: string | null
           created_at: string
           created_by: string
@@ -15482,6 +15458,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          actual_delivery_date?: string | null
           business_unit_id?: string | null
           created_at?: string
           created_by: string
@@ -15501,6 +15478,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          actual_delivery_date?: string | null
           business_unit_id?: string | null
           created_at?: string
           created_by?: string
@@ -18503,6 +18481,7 @@ export type Database = {
           created_by: string
           deleted_at: string | null
           deleted_by: string | null
+          delivery_sla_days: number | null
           department_id: string | null
           email: string | null
           id: string
@@ -18534,6 +18513,7 @@ export type Database = {
           created_by: string
           deleted_at?: string | null
           deleted_by?: string | null
+          delivery_sla_days?: number | null
           department_id?: string | null
           email?: string | null
           id?: string
@@ -18565,6 +18545,7 @@ export type Database = {
           created_by?: string
           deleted_at?: string | null
           deleted_by?: string | null
+          delivery_sla_days?: number | null
           department_id?: string | null
           email?: string | null
           id?: string
@@ -20692,6 +20673,7 @@ export type Database = {
           p_campaign_id?: string
           p_contact_result?: string
           p_contact_result_none?: boolean
+          p_date_field?: string
           p_date_from?: string
           p_date_to?: string
           p_is_root?: boolean
@@ -20895,6 +20877,7 @@ export type Database = {
           p_campaign_id?: string
           p_contact_result?: string
           p_contact_result_none?: boolean
+          p_date_field?: string
           p_date_from?: string
           p_date_to?: string
           p_is_root?: boolean
@@ -21837,6 +21820,15 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_confirm_client_order_stock_exit: {
+        Args: {
+          p_contract_id: string
+          p_product_id: string
+          p_quantity: number
+          p_warehouse_id: string
+        }
+        Returns: Json
+      }
       rpc_convert_lead_to_client: {
         Args: {
           p_campaign_id: string
@@ -22588,6 +22580,7 @@ export type Database = {
       rpc_create_purchase_order: {
         Args: { p_items: Json; p_order: Json; p_organization_id: string }
         Returns: {
+          actual_delivery_date: string | null
           business_unit_id: string | null
           created_at: string
           created_by: string
@@ -23141,6 +23134,30 @@ export type Database = {
         Args: { p_contract_id: string }
         Returns: Json
       }
+      rpc_get_supplier_sla_orders: {
+        Args: { p_supplier_id: string }
+        Returns: {
+          actual_delivery_date: string
+          days_taken: number
+          delivery_sla_days: number
+          expected_delivery: string
+          is_within_sla: boolean
+          order_date: string
+          order_number: string
+        }[]
+      }
+      rpc_get_supplier_sla_report: {
+        Args: { p_supplier_id?: string }
+        Returns: {
+          avg_delay_days: number
+          compliance_pct: number
+          over_sla: number
+          supplier_id: string
+          supplier_name: string
+          total_received: number
+          within_sla: number
+        }[]
+      }
       rpc_import_purchase_orders_csv: {
         Args: { p_orders: Json }
         Returns: number
@@ -23605,11 +23622,16 @@ export type Database = {
         Returns: string
       }
       rpc_receive_purchase_order: {
-        Args: { p_purchase_order_id: string; p_warehouse_id: string }
+        Args: {
+          p_actual_delivery_date?: string
+          p_purchase_order_id: string
+          p_warehouse_id: string
+        }
         Returns: Json
       }
       rpc_receive_purchase_order_lines: {
         Args: {
+          p_actual_delivery_date?: string
           p_lines: Json
           p_purchase_order_id: string
           p_warehouse_id: string
@@ -24678,6 +24700,7 @@ export type Database = {
       rpc_update_purchase_order: {
         Args: { p_items: Json; p_order: Json; p_purchase_order_id: string }
         Returns: {
+          actual_delivery_date: string | null
           business_unit_id: string | null
           created_at: string
           created_by: string
@@ -25572,9 +25595,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       anew_scope_level: ["NONE", "OWNED", "TEAM", "ORG"],

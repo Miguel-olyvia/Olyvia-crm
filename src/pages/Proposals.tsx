@@ -31,6 +31,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
+import { proposalTitleFromTemplate } from "@/lib/proposalTitleFromTemplate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StickyHorizontalScroll } from "@/components/ui/sticky-horizontal-scroll";
@@ -3104,7 +3105,21 @@ const Proposals = () => {
                           <Palette className="h-4 w-4" />
                           Template de Proposta
                         </Label>
-                        <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+                        <Select
+                          value={formData.template_id}
+                          onValueChange={(value) => {
+                            const nextId = value === "none" ? "" : value;
+                            setFormData((prev) => ({
+                              ...prev,
+                              template_id: nextId,
+                              title: proposalTitleFromTemplate(
+                                prev.title,
+                                proposalTemplates.find((t) => t.id === prev.template_id),
+                                proposalTemplates.find((t) => t.id === nextId),
+                              ),
+                            }));
+                          }}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Escolher template" />
                           </SelectTrigger>

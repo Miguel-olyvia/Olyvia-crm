@@ -50,6 +50,12 @@
 --
 -- Nao se toca nas policies RESTRICTIVE system_admin_pii_default_deny nem nas
 -- anon_*_read destas tabelas, nem na propria funcao.
+--
+-- NOTA: esta migration foi revertida logo a seguir por
+-- 20261112510000_revert_entity_contact_rls_fast_path.sql -- a verificacao
+-- empirica desmentiu o argumento de subconjunto estrito acima (10 linhas a
+-- mais visiveis por utilizador). Mantida aqui pelo historico real aplicado
+-- no remoto; NAO editar -- ver a migration de reversao para o estado ativo.
 -- ============================================================================
 
 ALTER POLICY authenticated_select_anew_entity_emails

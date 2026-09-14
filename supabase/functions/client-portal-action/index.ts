@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { z } from "npm:zod";
 import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
+import { resolveNotifyTarget, type NotifyTarget } from "../_shared/portalNotifyTarget.ts";
 import { withRetryResult } from "../_shared/retry.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
 import { detectClientIp } from "../_shared/clientIp.ts";
@@ -249,74 +250,35 @@ serve(async (req) => {
       return stripped;
     }
 
+    // Per-request cache so several notifications about the same document resolve
+    // its target (org + commercial) only once. The resolution itself lives in
+    // the shared, unit-tested `resolveNotifyTarget` helper.
+    const notifyTargetCache = new Map<string, NotifyTarget>();
+
     /**
-     * Resolve the commercial responsible for this portal user.
-     * Priority: client.assigned_to > deal.assigned_to > portalUser.created_by
+     * Insert a notification for the document's commercial, in the document's own
+     * organization — only if that notification type is enabled for that org.
+     * `docRef` is the document the action is about, so multi-org logins always
+     * notify the right company's commercial (see portalNotifyTarget.ts).
      */
-    async function resolveCommercialId(): Promise<string | null> {
-      // 1) Check anew_clients.assigned_to via portal user's client_id
-      if (portalUser.client_id) {
-        const { data: client } = await supabase
-          .from("anew_clients")
-          .select("assigned_to")
-          .eq("id", portalUser.client_id)
-          .maybeSingle();
-        if (client?.assigned_to) return client.assigned_to;
+    async function maybeNotify(
+      type: string,
+      payload: Record<string, any>,
+      docRef: { column: "proposal_id" | "quote_id" | "contract_id"; id: string },
+    ) {
+      const cacheKey = `${docRef.column}:${docRef.id}`;
+      let target = notifyTargetCache.get(cacheKey);
+      if (!target) {
+        target = await resolveNotifyTarget(supabase, docRef.column, docRef.id);
+        notifyTargetCache.set(cacheKey, target);
       }
-
-      // 2) Check deal.assigned_to via proposal or quote
-      const dealLookupId = portalUser.proposal_id || portalUser.quote_id;
-      if (dealLookupId) {
-        const table = portalUser.proposal_id ? "proposals" : "quotes";
-        const { data: doc } = await supabase
-          .from(table)
-          .select("deal_id")
-          .eq("id", dealLookupId)
-          .maybeSingle();
-        if (doc?.deal_id) {
-          const { data: deal } = await supabase
-            .from("deals")
-            .select("assigned_to, client_id")
-            .eq("id", doc.deal_id)
-            .maybeSingle();
-          // 2a) deal's client assigned_to
-          if (deal?.client_id) {
-            const { data: dealClient } = await supabase
-              .from("anew_clients")
-              .select("assigned_to")
-              .eq("id", deal.client_id)
-              .maybeSingle();
-            if (dealClient?.assigned_to) return dealClient.assigned_to;
-          }
-          // 2b) deal.assigned_to
-          if (deal?.assigned_to) return deal.assigned_to;
-        }
-      }
-
-      // 3) Fallback to portal access creator
-      return portalUser.created_by || null;
-    }
-
-    // Resolve once per request — convert internal ID to auth UUID for notifications
-    const commercialInternalId = await resolveCommercialId();
-    let commercialAuthId: string | null = null;
-    if (commercialInternalId) {
-      const { data: anewUser } = await supabase
-        .from("anew_users")
-        .select("auth_user_id")
-        .eq("id", commercialInternalId)
-        .maybeSingle();
-      commercialAuthId = anewUser?.auth_user_id || null;
-    }
-
-    /** Helper: insert notification only if enabled for this org */
-    async function maybeNotify(type: string, payload: Record<string, any>) {
-      if (!commercialAuthId) return;
-      const enabled = await isNotificationEnabled(supabase, portalUser.organization_id, type);
+      const { orgId, commercialAuthId } = target;
+      if (!commercialAuthId || !orgId) return;
+      const enabled = await isNotificationEnabled(supabase, orgId, type);
       if (!enabled) return;
       await supabase.from("notifications").insert({
         user_id: commercialAuthId,
-        organization_id: portalUser.organization_id,
+        organization_id: orgId,
         type,
         kind: "notification",
         ...payload,
@@ -429,7 +391,7 @@ serve(async (req) => {
           message: `O cliente ${clientName} aceitou o orçamento ${acceptedQuote?.quote_number || ""} no portal.${proposalNote}`,
           priority: "urgent",
           link: createdProposalId ? `/proposals` : `/quotes`,
-        });
+        }, { column: "quote_id", id: quote_id });
 
         return new Response(JSON.stringify({ success: true, proposal_id: createdProposalId }), { headers: corsHeaders });
       }
@@ -456,7 +418,7 @@ serve(async (req) => {
           title: "Orçamento rejeitado no portal",
           message: `O cliente ${clientName} rejeitou o orçamento ${rejQuote?.quote_number || ""}.${safeReason ? ` Motivo: ${safeReason}` : ""}`,
           priority: "high",
-        });
+        }, { column: "quote_id", id: quote_id });
 
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       }
@@ -745,7 +707,7 @@ serve(async (req) => {
           message: `O cliente ${clientName} assinou a proposta ${propData?.proposal_number || propData?.title || ""}!${contractNote}`,
           priority: "urgent",
           link: createdContractId ? `/client-contracts` : `/proposals`,
-        });
+        }, { column: "proposal_id", id: proposal_id });
 
         return new Response(JSON.stringify({ success: true, contract_id: createdContractId }), { headers: corsHeaders });
       }
@@ -801,7 +763,7 @@ serve(async (req) => {
           message: `O cliente ${clientName} rejeitou a proposta ${rejProp?.proposal_number || rejProp?.title || ""}.${reason_code ? ` Motivo: ${reason_code}` : ""}`,
           priority: "high",
           link: `/proposals`,
-        });
+        }, { column: "proposal_id", id: proposal_id });
 
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       }
@@ -887,7 +849,7 @@ serve(async (req) => {
           message: `O cliente ${clientName} assinou o contrato ${signedContract?.contract_number || ""}!`,
           priority: "urgent",
           link: `/client-contracts`,
-        });
+        }, { column: "contract_id", id: contract_id });
 
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       }
@@ -917,7 +879,7 @@ serve(async (req) => {
           message: `O cliente ${clientName} rejeitou o contrato ${rejContract?.contract_number || ""}.${reason_code ? ` Motivo: ${reason_code}` : ""}`,
           priority: "high",
           link: `/client-contracts`,
-        });
+        }, { column: "contract_id", id: contract_id });
 
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       }
@@ -981,7 +943,7 @@ serve(async (req) => {
           link: document_type === "proposal" ? `/proposals` : document_type === "quote" ? `/quotes` : `/client-contracts`,
           entity_type: document_type,
           entity_id: document_id,
-        });
+        }, { column: filterCol as "proposal_id" | "quote_id" | "contract_id", id: document_id });
 
         // Log the question (reuse resolved portalUserId)
         await supabase.from("client_portal_access_log").insert({
@@ -1030,7 +992,7 @@ serve(async (req) => {
           title: `Cliente visualizou ${docLabel}`,
           message: `O cliente ${clientName} visualizou um(a) ${docLabel} no portal.`,
           priority: "low",
-        });
+        }, { column: filterCol as "proposal_id" | "quote_id" | "contract_id", id: document_id });
 
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       }
