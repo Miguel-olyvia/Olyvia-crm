@@ -441,12 +441,26 @@ export function accoesDoPedido(args: {
     aprovarRh: noRh && args.podeAprovarRh,
     recusarRh: noRh && args.podeAprovarRh,
     devolverAChefia: noRh && args.podeAprovarRh && args.temChefiaResoluvel,
-    // Cancelar um PENDENTE e direito de quem o fez; cancelar um APROVADO
-    // exige `hr.ausencias.historico.editar` -- E nao ser o proprio autor:
-    // ninguem mexe no historico da sua propria ausencia, mesmo tendo a
-    // permissao (espelha a guarda em rpc_hr_ausencia_cancelar).
+    // Cancelar um PENDENTE e direito de quem o fez, ou de quem tem
+    // `hr.ausencias.pedir.outros` ou `hr.ausencias.aprovar.rh` -- NAO de quem
+    // so tem `hr.ausencias.historico.editar`, que a RPC so aceita no ramo
+    // APROVADO. Um pedido pendente ainda nao tem historico para editar; o
+    // botao a mostrar-se a quem so tem a permissao de historico fazia essa
+    // pessoa ver "Cancelar" e a RPC recusar com `ausencia_sem_permissao`.
+    //
+    // NAO E uma copia exacta da guarda da RPC: o autor passa aqui so por
+    // `souOAutor`, sem confirmar `hr.ausencias.pedir` -- lacuna pre-existente
+    // (o codigo anterior tinha a mesma), so alcancavel se essa permissao for
+    // revogada depois de o pedido ja existir. Registada em
+    // vault/registo-trabalho.md, nao corrigida aqui: e outra questao, fora do
+    // botao que a base recusa.
+    //
+    // Cancelar um APROVADO exige `hr.ausencias.historico.editar` -- E nao ser
+    // o proprio autor: ninguem mexe no historico da sua propria ausencia,
+    // mesmo tendo a permissao (espelha a guarda em rpc_hr_ausencia_cancelar).
     cancelar:
-      ((naChefia || noRh) && (args.souOAutor || args.podeEditarHistorico)) ||
+      ((naChefia || noRh) &&
+        (args.souOAutor || Boolean(args.podePedirOutros) || args.podeAprovarRh)) ||
       (aprovado && args.podeEditarHistorico && !args.souOAutor),
     corrigirAprovado: aprovado && args.podeEditarHistorico && !args.souOAutor,
     pedirAlteracao: podePedirAlteracao({

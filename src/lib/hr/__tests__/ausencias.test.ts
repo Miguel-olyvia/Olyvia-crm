@@ -434,6 +434,44 @@ describe("accoesDoPedido", () => {
     ).toBe(true);
   });
 
+  it("pendente, nao-autor, so com editar historico NAO pode cancelar -- a RPC nao aceita essa permissao no ramo pendente", () => {
+    expect(
+      accoesDoPedido({
+        ...base,
+        estado: "pendente_chefia",
+        souOAutor: false,
+        podeEditarHistorico: true,
+      }).cancelar,
+    ).toBe(false);
+    expect(
+      accoesDoPedido({
+        ...base,
+        estado: "pendente_rh",
+        souOAutor: false,
+        podeEditarHistorico: true,
+      }).cancelar,
+    ).toBe(false);
+  });
+
+  it("pendente, nao-autor, com pedirOutros ou aprovarRh pode cancelar -- espelha o ramo pendente da RPC", () => {
+    expect(
+      accoesDoPedido({
+        ...base,
+        estado: "pendente_chefia",
+        souOAutor: false,
+        podePedirOutros: true,
+      }).cancelar,
+    ).toBe(true);
+    expect(
+      accoesDoPedido({
+        ...base,
+        estado: "pendente_rh",
+        souOAutor: false,
+        podeAprovarRh: true,
+      }).cancelar,
+    ).toBe(true);
+  });
+
   it("nao oferece accoes num pedido ja recusado", () => {
     const accoes = accoesDoPedido({
       ...base,
