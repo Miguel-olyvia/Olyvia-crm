@@ -271,6 +271,30 @@ export function totalSemanal(rascunho: HorarioRascunho): number {
   return rascunho.dias.reduce((soma, dia) => soma + totalDoDia(dia.intervalos), 0);
 }
 
+/**
+ * Minutos que faltam para atingir as horas contratadas -- SEMPRE arredonda a
+ * DIFERENCA, nunca o contratado primeiro e so depois subtrai.
+ *
+ * PORQUE A ORDEM IMPORTA
+ * -----------------------
+ * `horasContratadasSemanais` pode ser fraccionario (uma frequencia mensal ou
+ * anual convertida para semana raramente da um numero inteiro de minutos --
+ * ver `equivalenteSemanal` em horas.ts). Se se arredondasse o contratado
+ * primeiro (`Math.round(horasContratadasSemanais * 60) - semanalMinutos`),
+ * havia uma janela em que a comparacao BRUTA diz que falta algo mas a
+ * subtracao com o valor ja arredondado dava 0 -- "faltam 0h00", que confunde
+ * mais do que ajuda. Arredondar so no fim evita isso.
+ *
+ * Devolve o numero cru (pode ser negativo ou zero); quem chama so mostra o
+ * aviso quando o resultado e positivo.
+ */
+export function minutosEmFaltaParaContrato(
+  horasContratadasSemanais: number,
+  semanalMinutos: number,
+): number {
+  return Math.round(horasContratadasSemanais * 60 - semanalMinutos);
+}
+
 export function temAlgumIntervalo(rascunho: HorarioRascunho): boolean {
   return (
     rascunho.dias.some((dia) => dia.intervalos.length > 0 || dia.nao_trabalha) ||

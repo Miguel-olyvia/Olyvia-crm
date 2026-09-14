@@ -58,8 +58,10 @@ import {
   diaSeguinte,
   formatarDuracao,
   intervaloVazio,
+  minutosEmFaltaParaContrato,
   novaChave,
   partirNaMeiaNoite,
+  temAlgumIntervalo,
   totaisPorLocal,
   totalDoDia,
   totalSemanal,
@@ -258,6 +260,37 @@ export function HorarioEditor({
    */
   const excedeContrato =
     horasContratadasSemanais !== null && semanal > horasContratadasSemanais * 60;
+  /**
+   * Minutos que faltam para o contrato, ja arredondados -- o MESMO valor que
+   * o texto do aviso mostra. `null` quando o chamador nao sabe o contratado.
+   */
+  const faltaMinutos =
+    horasContratadasSemanais !== null
+      ? minutosEmFaltaParaContrato(horasContratadasSemanais, semanal)
+      : null;
+  /**
+   * O planeado fica ABAIXO do contrato? Simetrico ao aviso de exceder, mas
+   * com DUAS guardas que o de exceder nao precisa:
+   *
+   * 1. `temAlgumIntervalo` -- sem isto, um horario em branco (novo, ainda por
+   *    preencher) mostraria sempre "faltam Xh", ruido constante em vez de
+   *    aviso util. O de exceder nao precisa disto: 0 minutos nunca excede
+   *    nada, so pode faltar.
+   *
+   * 2. `faltaMinutos > 0`, NAO a comparacao bruta `semanal <
+   *    horasContratadasSemanais * 60` -- com um contratado fraccionario (uma
+   *    frequencia mensal/anual convertida para semana raramente da um numero
+   *    inteiro de minutos), a comparacao bruta pode ser verdadeira por uma
+   *    fraccao de minuto (ex.: falta 0,2 min) que arredonda para "0h00" no
+   *    texto. Disparar so quando o valor ARREDONDADO (o mesmo que se mostra)
+   *    e positivo garante que o aviso nunca diz "faltam 0h00" -- nao chega a
+   *    aparecer quando a falta e invisivel ao minuto.
+   *
+   * Distribuir por centros diferentes nao muda as horas contratadas -- so a
+   * SOMA entre todos os centros e que se compara aqui (mapa-rh.html).
+   */
+  const abaixoDoContrato =
+    faltaMinutos !== null && faltaMinutos > 0 && temAlgumIntervalo(valor);
 
   const filaDeIntervalo = (
     intervalo: IntervaloRascunho,
@@ -651,6 +684,12 @@ export function HorarioEditor({
             {t("hr.horario.excedeContrato", {
               contratado: formatarDuracao(Math.round(horasContratadasSemanais * 60)),
             })}
+          </span>
+        )}
+        {abaixoDoContrato && faltaMinutos !== null && (
+          <span className="flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-500">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {t("hr.horario.abaixoDoContrato", { falta: formatarDuracao(faltaMinutos) })}
           </span>
         )}
         {[...totais.entries()].map(([localId, minutos]) => (

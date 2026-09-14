@@ -191,6 +191,106 @@ describe("HorarioEditor", () => {
     expect(opcoes).toContain("Sede");
   });
 
+  it("avisa quando o total semanal excede as horas contratadas", () => {
+    render(
+      <HorarioEditor
+        valor={comDoisIntervalosNaQuarta()}
+        onChange={vi.fn()}
+        locais={LOCAIS}
+        podeEditar
+        horasContratadasSemanais={5}
+      />,
+    );
+
+    // comDoisIntervalosNaQuarta: 09:00-14:00 (5h) + 15:00-19:00 (4h) = 9h
+    // numa so quarta -- excede um contrato de 5h/semana.
+    expect(screen.getByText("hr.horario.excedeContrato")).toBeInTheDocument();
+    expect(screen.queryByText("hr.horario.abaixoDoContrato")).not.toBeInTheDocument();
+  });
+
+  it("avisa quando o total semanal fica abaixo das horas contratadas", () => {
+    render(
+      <HorarioEditor
+        valor={comDoisIntervalosNaQuarta()}
+        onChange={vi.fn()}
+        locais={LOCAIS}
+        podeEditar
+        horasContratadasSemanais={40}
+      />,
+    );
+
+    // 9h planeadas contra 40h contratadas -- falta muito.
+    expect(screen.getByText("hr.horario.abaixoDoContrato")).toBeInTheDocument();
+    expect(screen.queryByText("hr.horario.excedeContrato")).not.toBeInTheDocument();
+  });
+
+  it("nao avisa de falta num horario ainda em branco -- so depois de ser tocado", () => {
+    render(
+      <HorarioEditor
+        valor={horarioVazio()}
+        onChange={vi.fn()}
+        locais={LOCAIS}
+        podeEditar
+        horasContratadasSemanais={40}
+      />,
+    );
+
+    expect(screen.queryByText("hr.horario.abaixoDoContrato")).not.toBeInTheDocument();
+    expect(screen.queryByText("hr.horario.excedeContrato")).not.toBeInTheDocument();
+  });
+
+  it("exactamente igual ao contrato: nenhum dos dois avisos aparece", () => {
+    // comDoisIntervalosNaQuarta = 9h (5h + 4h). Contrato de 9h/semana bate
+    // exactamente -- nem excede, nem falta.
+    render(
+      <HorarioEditor
+        valor={comDoisIntervalosNaQuarta()}
+        onChange={vi.fn()}
+        locais={LOCAIS}
+        podeEditar
+        horasContratadasSemanais={9}
+      />,
+    );
+
+    expect(screen.queryByText("hr.horario.excedeContrato")).not.toBeInTheDocument();
+    expect(screen.queryByText("hr.horario.abaixoDoContrato")).not.toBeInTheDocument();
+  });
+
+  it("REGRESSAO: uma falta fraccionaria que arredonda para 0min nao mostra 'faltam 0h00'", () => {
+    // 9h planeadas (540 min) contra um contratado fraccionario que da
+    // 540,4 min/semana -- como sairia de uma frequencia mensal/anual
+    // convertida para semana. A comparacao BRUTA diria que falta algo
+    // (540 &lt; 540,4), mas 0,4 minutos arredonda para 0 -- e um aviso a dizer
+    // "faltam 0h00" seria mais confuso do que nenhum aviso. A condicao usa o
+    // valor JA ARREDONDADO, por isso nao aparece nada.
+    render(
+      <HorarioEditor
+        valor={comDoisIntervalosNaQuarta()}
+        onChange={vi.fn()}
+        locais={LOCAIS}
+        podeEditar
+        horasContratadasSemanais={540.4 / 60}
+      />,
+    );
+
+    expect(screen.queryByText("hr.horario.abaixoDoContrato")).not.toBeInTheDocument();
+    expect(screen.queryByText("hr.horario.excedeContrato")).not.toBeInTheDocument();
+  });
+
+  it("sem horasContratadasSemanais (chamador nao sabe o contrato) nao mostra nenhum aviso", () => {
+    render(
+      <HorarioEditor
+        valor={comDoisIntervalosNaQuarta()}
+        onChange={vi.fn()}
+        locais={LOCAIS}
+        podeEditar
+      />,
+    );
+
+    expect(screen.queryByText("hr.horario.excedeContrato")).not.toBeInTheDocument();
+    expect(screen.queryByText("hr.horario.abaixoDoContrato")).not.toBeInTheDocument();
+  });
+
   it("sem permissao de editar nao ha botoes de acrescentar nem de remover", () => {
     render(
       <HorarioEditor

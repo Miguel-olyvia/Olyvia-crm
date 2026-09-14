@@ -21,6 +21,7 @@ import {
   linhaRecorrenteJaEmCurso,
   linhasParaGravar,
   minutosDe,
+  minutosEmFaltaParaContrato,
   novaChave,
   ontemIso,
   partirNaMeiaNoite,
@@ -303,5 +304,38 @@ describe("hojeIsoServidor", () => {
     // "fim da tarde, num fuso atras da base" que fazia
     // horario_planeado_fecha_no_passado disparar num ALTERAR normal.
     expect(hojeIsoServidor(new Date("2026-06-15T21:00:00-03:00"))).toBe("2026-06-16");
+  });
+});
+
+describe("minutosEmFaltaParaContrato", () => {
+  it("40h/semana contratadas, 30h planeadas: faltam 10h", () => {
+    expect(minutosEmFaltaParaContrato(40, 30 * 60)).toBe(10 * 60);
+  });
+
+  it("planeado exactamente igual ao contrato: falta zero", () => {
+    expect(minutosEmFaltaParaContrato(9, 9 * 60)).toBe(0);
+  });
+
+  it("planeado acima do contrato: numero negativo (quem chama nao mostra o aviso nesse caso)", () => {
+    expect(minutosEmFaltaParaContrato(9, 10 * 60)).toBe(-60);
+  });
+
+  it("equivalente semanal fraccionario: arredondar a diferenca directamente da o MESMO resultado que arredondar o contratado primeiro", () => {
+    // Identidade matematica: Math.round(a) - n === Math.round(a - n) para
+    // qualquer inteiro n (semanal e sempre um numero inteiro de minutos --
+    // soma de intervalos). Por isso a ORDEM do arredondamento nunca muda o
+    // resultado -- o que importa e OUTRA coisa (ver o teste a seguir): a
+    // CONDICAO que decide mostrar o aviso tem de usar este valor ja
+    // arredondado, nao a comparacao bruta.
+    const contratadoFraccionario = 541.4 / 60; // 9,0233...h -- como sairia de
+    // uma frequencia mensal/anual convertida para semana (equivalenteSemanal
+    // em horas.ts raramente da um numero inteiro de minutos).
+    const falta = minutosEmFaltaParaContrato(contratadoFraccionario, 541);
+    expect(falta).toBe(0); // 0,4 minutos arredonda para 0 -- correcto.
+    expect(Math.round(contratadoFraccionario * 60) - 541).toBe(falta); // mesma identidade
+  });
+
+  it("uma falta real mas pequena arredonda para um numero positivo, nunca zero", () => {
+    expect(minutosEmFaltaParaContrato(9.01, 9 * 60)).toBeGreaterThan(0);
   });
 });
