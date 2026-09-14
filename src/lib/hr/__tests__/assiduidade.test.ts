@@ -26,12 +26,14 @@ import {
   justificacaoUtil,
   minutosCobertos,
   minutosEntre,
+  minutosPrevistosNoMes,
   problemasDaFalta,
   sentidoSeguinte,
   situacaoDoIntervalo,
   sobrepoem,
   totaisPorLocal,
 } from "@/lib/hr/assiduidade";
+import type { DiaSemana } from "@/types/hr";
 
 type LinhaPicagem = { id: string; corrige_picagem_id: string | null; estado: string };
 
@@ -384,5 +386,82 @@ describe("ajudas de apresentacao", () => {
     expect(justificacaoUtil("  ", "  ")).toBe(false);
     expect(justificacaoUtil("AT-2026-1", "")).toBe(true);
     expect(justificacaoUtil("", "entregue em mao")).toBe(true);
+  });
+});
+
+describe("minutosPrevistosNoMes", () => {
+  const semanaCompleta: DiaSemana[] = ["seg", "ter", "qua", "qui", "sex"];
+
+  it("45h/semana em 5 dias uteis: dez dias uteis no mes ate 14 de Setembro dao 90h -- o caso da Carla Pinheiro", () => {
+    const minutos = minutosPrevistosNoMes({
+      mesActual: "2026-09",
+      hoje: "2026-09-14",
+      horasSemanaisEquivalentes: 45,
+      diasUteis: semanaCompleta,
+      dataInicio: "2026-01-01",
+      dataFim: null,
+    });
+    expect(minutos).toBe(90 * 60);
+  });
+
+  it("vinculo comecado a meio do mes: so conta a partir do inicio, nao do dia 1", () => {
+    const minutos = minutosPrevistosNoMes({
+      mesActual: "2026-09",
+      hoje: "2026-09-14",
+      horasSemanaisEquivalentes: 45,
+      diasUteis: semanaCompleta,
+      dataInicio: "2026-09-08",
+      dataFim: null,
+    });
+    // Sep 8, 9, 10, 11, 14 -- cinco dias uteis, a 9h cada.
+    expect(minutos).toBe(45 * 60);
+  });
+
+  it("vinculo terminado antes de hoje: para de contar no fim, nao em hoje", () => {
+    const minutos = minutosPrevistosNoMes({
+      mesActual: "2026-09",
+      hoje: "2026-09-14",
+      horasSemanaisEquivalentes: 45,
+      diasUteis: semanaCompleta,
+      dataInicio: "2026-01-01",
+      dataFim: "2026-09-04",
+    });
+    // Sep 1, 2, 3, 4 -- quatro dias uteis.
+    expect(minutos).toBe(4 * 9 * 60);
+  });
+
+  it("sem horas contratadas ou sem dias uteis definidos: nao ha previsto", () => {
+    expect(
+      minutosPrevistosNoMes({
+        mesActual: "2026-09",
+        hoje: "2026-09-14",
+        horasSemanaisEquivalentes: null,
+        diasUteis: semanaCompleta,
+        dataInicio: "2026-01-01",
+        dataFim: null,
+      }),
+    ).toBeNull();
+    expect(
+      minutosPrevistosNoMes({
+        mesActual: "2026-09",
+        hoje: "2026-09-14",
+        horasSemanaisEquivalentes: 45,
+        diasUteis: [],
+        dataInicio: "2026-01-01",
+        dataFim: null,
+      }),
+    ).toBeNull();
+  });
+
+  it("vinculo que so comeca depois de hoje: zero, nao negativo", () => {
+    const minutos = minutosPrevistosNoMes({
+      mesActual: "2026-09",
+      hoje: "2026-09-14",
+      horasSemanaisEquivalentes: 45,
+      diasUteis: semanaCompleta,
+      dataInicio: "2026-09-20",
+      dataFim: null,
+    });
+    expect(minutos).toBe(0);
   });
 });

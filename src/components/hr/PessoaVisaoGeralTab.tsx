@@ -35,7 +35,7 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
-import { formatarDuracao, hojeIso } from "@/lib/hr/assiduidade";
+import { formatarDuracao, hojeIso, minutosPrevistosNoMes } from "@/lib/hr/assiduidade";
 import type { DiaSemana, HorarioRealizado, Pessoa, PessoaRetribuicao, PessoaVinculo } from "@/types/hr";
 
 interface PessoaVisaoGeralTabProps {
@@ -158,6 +158,24 @@ export function PessoaVisaoGeralTab({
     .reduce((soma, linha) => soma + (linha.minutos ?? 0), 0);
 
   /**
+   * O previsto do mes ate hoje, pelo horario CONTRATADO do vinculo em vigor
+   * -- para o cartao "Folha de horas" mostrar as duas metades e a falta de
+   * registos saltar a vista. `null` quando o vinculo nao tem horas semanais
+   * ou dias uteis definidos: nesse caso o cartao volta ao texto antigo, so
+   * com o realizado.
+   */
+  const minutosPrevistosEsteMes = vinculoEmVigor
+    ? minutosPrevistosNoMes({
+        mesActual,
+        hoje,
+        horasSemanaisEquivalentes: vinculoEmVigor.horas_semanais_equivalentes,
+        diasUteis: vinculoEmVigor.dias_uteis,
+        dataInicio: vinculoEmVigor.data_inicio,
+        dataFim: vinculoEmVigor.data_fim,
+      })
+    : null;
+
+  /**
    * Unica consulta nova desta ronda: pedidos de ausencia pendentes. So corre
    * quando ha permissao para ver, e o resto da ficha (assiduidade,
    * compensacoes) continua a vir so da ficha ja carregada.
@@ -242,9 +260,14 @@ export function PessoaVisaoGeralTab({
             labelKey="hr.visaoGeral.cards.folhaHoras"
             icon={ListChecks}
             valor={
-              minutosEsteMes > 0
-                ? t("hr.visaoGeral.horasEsteMes", { duracao: formatarDuracao(minutosEsteMes) })
-                : t("hr.visaoGeral.semHorasEsteMes")
+              minutosPrevistosEsteMes !== null && minutosPrevistosEsteMes > 0
+                ? t("hr.visaoGeral.horasEsteMesDePrevisto", {
+                    realizado: formatarDuracao(minutosEsteMes),
+                    previsto: formatarDuracao(minutosPrevistosEsteMes),
+                  })
+                : minutosEsteMes > 0
+                  ? t("hr.visaoGeral.horasEsteMes", { duracao: formatarDuracao(minutosEsteMes) })
+                  : t("hr.visaoGeral.semHorasEsteMes")
             }
             ariaLabel={t("hr.visaoGeral.cards.folhaHoras")}
             onAbrir={() => onAbrirSeparador("planeamento")}

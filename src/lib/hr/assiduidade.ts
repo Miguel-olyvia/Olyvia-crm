@@ -28,7 +28,9 @@
  * ao ultimo minuto planeado. Faltar so a manha de um 09:00-18:00 e
  * 09:00-13:00, e sao os 240 minutos que a coluna gerada vai calcular.
  */
-import { minutosDe, formatarDuracao } from "@/lib/hr/horario";
+import { minutosDe, formatarDuracao, chaveDoDia } from "@/lib/hr/horario";
+import { dataDeIso, somarDias } from "@/lib/hr/ausencias";
+import type { DiaSemana } from "@/types/hr";
 
 export { formatarDuracao };
 
@@ -477,4 +479,50 @@ export function envolventeDoDia(intervalos: readonly Periodo[]): Periodo | null 
   const primeiro = validos.reduce((a, b) => ((a.inicio ?? 0) <= (b.inicio ?? 0) ? a : b));
   const ultimo = validos.reduce((a, b) => ((a.fim ?? 0) >= (b.fim ?? 0) ? a : b));
   return { hora_inicio: primeiro.bruto.hora_inicio, hora_fim: ultimo.bruto.hora_fim };
+}
+
+/**
+ * Minutos PREVISTOS no mes, do dia 1 (ou do inicio do vinculo, se for
+ * depois) até `hoje` inclusive -- para pôr ao lado do REALIZADO do mesmo
+ * periodo no cartao "Folha de horas" da visao geral. Divide as horas
+ * semanais do contrato em partes iguais pelos dias uteis do contrato, e conta
+ * quantos desses dias uteis ja passaram este mes.
+ *
+ * E UMA APROXIMACAO, DE PROPOSITO SIMPLES: nao desconta feriados nem ausencias
+ * aprovadas -- essa lista nao chega a este cartao. O objectivo nao e um
+ * horario planeado dia a dia (isso ja existe no separador Planeamento); e dar
+ * a quem olha para a visao geral uma referencia para notar quando falta
+ * registar dias, sem abrir mais nada.
+ *
+ * `null` quando falta o horario contratado (sem horas semanais equivalentes
+ * ou sem dias uteis definidos) -- nesse caso nao ha previsto para mostrar, e
+ * o cartao volta a so mostrar o realizado.
+ */
+export function minutosPrevistosNoMes(params: {
+  mesActual: string;
+  hoje: string;
+  horasSemanaisEquivalentes: number | null;
+  diasUteis: readonly DiaSemana[] | null;
+  dataInicio: string;
+  dataFim: string | null;
+}): number | null {
+  const { mesActual, hoje, horasSemanaisEquivalentes, diasUteis, dataInicio, dataFim } = params;
+  if (!horasSemanaisEquivalentes || !diasUteis || diasUteis.length === 0) return null;
+
+  const minutosPorDiaUtil = (horasSemanaisEquivalentes * 60) / diasUteis.length;
+  const diasUteisSet = new Set(diasUteis);
+
+  const inicioMes = `${mesActual}-01`;
+  const de = dataInicio > inicioMes ? dataInicio : inicioMes;
+  const ate = dataFim && dataFim < hoje ? dataFim : hoje;
+  if (de > ate) return 0;
+
+  let diasContados = 0;
+  let corrente = de;
+  while (corrente <= ate) {
+    if (diasUteisSet.has(chaveDoDia(dataDeIso(corrente).getUTCDay()))) diasContados += 1;
+    corrente = somarDias(corrente, 1);
+  }
+
+  return Math.round(diasContados * minutosPorDiaUtil);
 }
