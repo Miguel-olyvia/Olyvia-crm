@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Accordion,
   AccordionContent,
@@ -14,24 +14,23 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { supabase } from "@/integrations/supabase/client";
-import { Plus, Trash2, Wrench, ArrowRight, Loader2, Sparkles } from "lucide-react";
+import { Plus, Trash2, Wrench, ArrowRight, Loader2 } from "lucide-react";
 import {
   useQuoteDiagnostic,
   type QuoteDiagnosticArea,
   type SaveDiagnosticAreaInput,
 } from "@/hooks/useQuoteDiagnostic";
-import {
-  useQuoteDiagnosticSuggestions,
-  type DiagnosticSourceField,
-  type DiagnosticSuggestion,
-} from "@/hooks/useQuoteDiagnosticSuggestions";
-import { DiagnosticSuggestionPanel } from "@/components/quote/DiagnosticSuggestionPanel";
-import { QuoteSuggestionRulesDialog } from "@/components/quote/QuoteSuggestionRulesDialog";
 import DiagnosticServicePicker, {
   type DiagnosticServicePickerService,
 } from "@/components/quote/DiagnosticServicePicker";
 
 const BLUR_DEBOUNCE_MS = 700;
+
+/** Campo de origem de um registo já aceite para a área — mantido aqui como
+ * tipo local desde que o motor de sugestões por regra/IA foi removido (ver
+ * migration 20261130160000_service_labor_model_fix_and_manual_diagnostic_source.sql
+ * para a origem "manual"). */
+type DiagnosticSourceField = "area_m2" | "demolir" | "proteger" | "intervencao";
 
 /** Uma sugestão já aceite, tal como fica gravada (auto-suficiente) em
  * `quote_diagnostic_area_suggestions` — usada só para mostrar a lista de "já
@@ -62,53 +61,6 @@ function isAreaComplete(area: SaveDiagnosticAreaInput): boolean {
       area.proteger_descricao?.trim() &&
       area.intervencao_tipo?.trim() &&
       area.intervencao_descricao?.trim(),
-  );
-}
-
-/**
- * Camada de estado local sobre `useQuoteDiagnosticSuggestions`: o resultado
- * da mutação é só de leitura, mas o painel precisa de qty editável e de
- * remover uma sugestão da lista ao rejeitá-la — sem isso reabrir a mesma
- * pesquisa.
- */
-function SuggestionSlot({
-  hook,
-  slotKey,
-  sourceField,
-  onAccept,
-  onRetry,
-}: {
-  hook: ReturnType<typeof useQuoteDiagnosticSuggestions>;
-  slotKey: "demolir" | "proteger" | "intervencao";
-  sourceField: DiagnosticSourceField;
-  // Devolve se o registo foi bem sucedido — só remove da lista visível
-  // quando sim; se a gravação falhar, a sugestão mantém-se para o
-  // utilizador poder tentar aceitar outra vez (o toast de erro já avisa).
-  onAccept: (suggestion: DiagnosticSuggestion) => Promise<boolean>;
-  onRetry: () => void;
-}) {
-  const [visible, setVisible] = useState<DiagnosticSuggestion[]>([]);
-
-  useEffect(() => {
-    setVisible(hook.suggestions);
-  }, [hook.suggestions]);
-
-  return (
-    <DiagnosticSuggestionPanel
-      suggestions={visible}
-      isLoadingRules={hook.isLoadingRules}
-      isLoadingAiFallback={hook.isLoadingAiFallback}
-      aiError={hook.aiError}
-      onAccept={async (s) => {
-        const ok = await onAccept(s);
-        if (ok) setVisible((prev) => prev.filter((v) => v.client_id !== s.client_id));
-      }}
-      onReject={(s) => setVisible((prev) => prev.filter((v) => v.client_id !== s.client_id))}
-      onQtyChange={(s, newQty) =>
-        setVisible((prev) => prev.map((v) => (v.client_id === s.client_id ? { ...v, qty: newQty } : v)))
-      }
-      onRetry={onRetry}
-    />
   );
 }
 
@@ -248,42 +200,6 @@ function AreaCard({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form]);
 
-  // Um slot de sugestões por campo-gatilho (demolir / proteger / intervenção).
-  // Só são pedidas sob pedido explícito do utilizador (ver triggerSuggestions
-  // e o botão "Sugerir a partir do texto" em cada campo) — nunca automático.
-  const demolirSuggestions = useQuoteDiagnosticSuggestions();
-  const protegerSuggestions = useQuoteDiagnosticSuggestions();
-  const intervencaoSuggestions = useQuoteDiagnosticSuggestions();
-
-  // Controla se o painel de sugestões de cada campo já foi pedido pelo
-  // utilizador nesta sessão — antes do primeiro clique não renderiza nada.
-  const [suggestionsTriggered, setSuggestionsTriggered] = useState<
-    Record<"demolir" | "proteger" | "intervencao", boolean>
-  >({ demolir: false, proteger: false, intervencao: false });
-
-  const triggerSuggestions = useCallback(
-    (
-      slotKey: "demolir" | "proteger" | "intervencao",
-      sourceField: DiagnosticSourceField,
-      hook: ReturnType<typeof useQuoteDiagnosticSuggestions>,
-    ) => {
-      setSuggestionsTriggered((prev) => ({ ...prev, [slotKey]: true }));
-      hook.getSuggestions({
-        diagnosticAreaId: area.id,
-        sourceField,
-        organizationId,
-        areaData: {
-          area_m2: form.area_m2 ?? null,
-          demolir_descricao: form.demolir_descricao ?? null,
-          proteger_descricao: form.proteger_descricao ?? null,
-          intervencao_tipo: form.intervencao_tipo ?? null,
-          intervencao_descricao: form.intervencao_descricao ?? null,
-        },
-      });
-    },
-    [area.id, organizationId, form],
-  );
-
   // Depois de aceite uma sugestão de serviço (regra/IA ou escolha manual —
   // ver handleAcceptManualService), lê a ficha técnica desse serviço
   // (public.service_materials — migration
@@ -357,74 +273,6 @@ function AreaCard({
       return 0;
     }
   };
-
-  // Aceitar já NÃO cria nenhuma linha no orçamento — os itens do orçamento
-  // continuam sempre a ser adicionados manualmente. Isto só regista a
-  // sugestão (auto-suficiente, sem depender de nenhuma quote_line) para
-  // alimentar mais tarde a nota de encomenda/ordem de trabalho.
-  const handleAccept = async (
-    suggestion: DiagnosticSuggestion,
-    sourceField: DiagnosticSourceField,
-  ): Promise<boolean> => {
-    try {
-      const { error } = await supabase.rpc("rpc_record_diagnostic_suggestion_accepted", {
-        p_diagnostic_area_id: area.id,
-        p_source: suggestion.source,
-        p_source_field: sourceField,
-        p_target_type: suggestion.target_type,
-        p_descricao: suggestion.descricao,
-        p_qty: suggestion.qty,
-        p_product_id: suggestion.target_type === "product" ? suggestion.product_id ?? null : null,
-        p_service_id: suggestion.target_type === "service" ? suggestion.service_id ?? null : null,
-        p_catalog_item_id: suggestion.target_type === "catalog_item" ? suggestion.catalog_item_id ?? null : null,
-        p_unidade: suggestion.unidade ?? null,
-        p_rule_id: suggestion.rule_id ?? null,
-        p_ai_rationale: suggestion.rationale ?? null,
-        p_ai_confidence: suggestion.confidence ?? null,
-      });
-      if (error) throw error;
-      toast({
-        title: "Registado para a ordem de trabalho",
-        description: suggestion.descricao,
-      });
-      setAcceptedRefreshKey((k) => k + 1);
-
-      // Sem alterar o comportamento quando o serviço não tem
-      // service_materials: só entra aqui para target_type "service", e a
-      // função acima devolve 0 sem side effects visíveis se não houver
-      // materiais (ou se a leitura falhar).
-      if (suggestion.target_type === "service" && suggestion.service_id) {
-        const materialsCount = await acceptServiceTechnicalSheetMaterials(suggestion.service_id, area.area_m2 ?? null);
-        if (materialsCount > 0) {
-          toast({
-            title: `${materialsCount} materiais da ficha técnica adicionados automaticamente`,
-          });
-          setAcceptedRefreshKey((k) => k + 1);
-        }
-      }
-
-      return true;
-    } catch (err: any) {
-      captureFlowError(err, "quote-lifecycle");
-      toast({ title: "Erro ao registar sugestão", description: err.message, variant: "destructive" });
-      return false;
-    }
-  };
-
-  const renderSuggestionSlot = (
-    hook: ReturnType<typeof useQuoteDiagnosticSuggestions>,
-    slotKey: "demolir" | "proteger" | "intervencao",
-    sourceField: DiagnosticSourceField,
-  ) =>
-    suggestionsTriggered[slotKey] ? (
-      <SuggestionSlot
-        hook={hook}
-        slotKey={slotKey}
-        sourceField={sourceField}
-        onAccept={(s) => handleAccept(s, sourceField)}
-        onRetry={() => triggerSuggestions(slotKey, sourceField, hook)}
-      />
-    ) : null;
 
   // Escolha direta de um serviço do catálogo (sem regra nem IA envolvidas —
   // ver DiagnosticServicePicker.tsx). Reaproveita a mesma RPC auto-suficiente
@@ -535,7 +383,7 @@ function AreaCard({
 
         <div className="space-y-3 pt-1">
           <p className="text-xs text-muted-foreground">
-            Nota descritiva — usa o botão "Sugerir a partir do texto" se quiseres uma sugestão automática
+            Nota descritiva (uso interno, não aparece no PDF/portal).
           </p>
 
           <div className="space-y-1.5">
@@ -557,16 +405,6 @@ function AreaCard({
               onChange={(e) => set("demolir_descricao", e.target.value)}
               rows={2}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-xs text-muted-foreground"
-              onClick={() => triggerSuggestions("demolir", "demolir", demolirSuggestions)}
-            >
-              <Sparkles className="h-3 w-3 mr-1" /> Sugerir a partir do texto
-            </Button>
-            {renderSuggestionSlot(demolirSuggestions, "demolir", "demolir")}
           </div>
 
           <div className="space-y-1.5">
@@ -576,16 +414,6 @@ function AreaCard({
               onChange={(e) => set("proteger_descricao", e.target.value)}
               rows={2}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-xs text-muted-foreground"
-              onClick={() => triggerSuggestions("proteger", "proteger", protegerSuggestions)}
-            >
-              <Sparkles className="h-3 w-3 mr-1" /> Sugerir a partir do texto
-            </Button>
-            {renderSuggestionSlot(protegerSuggestions, "proteger", "proteger")}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -605,16 +433,6 @@ function AreaCard({
               />
             </div>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="text-xs text-muted-foreground"
-            onClick={() => triggerSuggestions("intervencao", "intervencao", intervencaoSuggestions)}
-          >
-            <Sparkles className="h-3 w-3 mr-1" /> Sugerir a partir do texto
-          </Button>
-          {renderSuggestionSlot(intervencaoSuggestions, "intervencao", "intervencao")}
         </div>
 
         <div className="flex justify-end">
@@ -645,7 +463,6 @@ export function QuoteDiagnosticPhase({
     refetchAreas,
   } = useQuoteDiagnostic(quoteId);
 
-  const [rulesDialogOpen, setRulesDialogOpen] = useState(false);
   const [openAccordionItems, setOpenAccordionItems] = useState<string[]>([]);
 
   useEffect(() => {
@@ -719,13 +536,6 @@ export function QuoteDiagnosticPhase({
             Preencha cada área a intervencionar. As sugestões de itens ficam só visíveis internamente — nunca no PDF ou portal do cliente.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setRulesDialogOpen(true)}
-          className="text-xs text-muted-foreground underline"
-        >
-          Gerir regras de sugestão
-        </button>
       </div>
 
       {isLoadingAreas ? (
@@ -767,12 +577,6 @@ export function QuoteDiagnosticPhase({
           </Button>
         </>
       )}
-
-      <QuoteSuggestionRulesDialog
-        open={rulesDialogOpen}
-        onOpenChange={setRulesDialogOpen}
-        organizationId={organizationId}
-      />
 
       <div className="fixed bottom-0 left-0 right-0 border-t bg-background/95 backdrop-blur px-6 py-3 flex items-center justify-between z-40">
         <span className="text-sm text-muted-foreground">
