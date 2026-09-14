@@ -10,6 +10,9 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -20,8 +23,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
+import { PermissionGate } from "@/components/PermissionGate";
+import { EntitySearchInput, type EntitySearchResult } from "@/components/EntitySearchInput";
+import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { Badge } from "@/components/ui/badge";
-import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2 } from "lucide-react";
+import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Plus, Trash2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { pdf } from '@react-pdf/renderer';
 import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
@@ -41,6 +47,27 @@ import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
 // Stocks.tsx: hasMore inferido de "a página veio cheia?").
 
 const PAGE_SIZE = 30;
+
+// IVA por omissão quando o artigo do catálogo não traz taxa definida — mesmo
+// valor usado em PurchaseOrders.tsx e no AddItemsDialog.
+const DEFAULT_VAT_RATE = 23;
+
+// Criação manual de Encomenda Cliente: linha em edição no diálogo, antes de
+// ser convertida no payload da RPC (product_id/service_id + descricao +
+// categoria + qt + preco_unit + iva_percent). Estrutura deliberadamente igual
+// à de `PurchaseOrderItem` em PurchaseOrders.tsx, para a tabela editável e a
+// validação seguirem exatamente o mesmo padrão.
+interface ManualClientOrderItem {
+  item_type: 'product' | 'service';
+  product_id: string | null;
+  service_id: string | null;
+  description: string;
+  categoria: string;
+  sku: string | null;
+  quantity: number;
+  unit_price: number;
+  vat_rate: number;
+}
 
 interface ClientOrderDocumentRow {
   contract_id: string;
@@ -116,6 +143,20 @@ const ClientOrders = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState<ClientOrderDocumentDetail | null>(null);
   const [pdfGeneratingId, setPdfGeneratingId] = useState<string | null>(null);
+
+  // Criação manual (rpc_create_manual_client_order). Até aqui a página era
+  // só-leitura: as encomendas nasciam sempre de um Contrato assinado. A criação
+  // manual reaproveita esse mesmo caminho — a RPC cria um orçamento sintético
+  // (quotes.is_internal = true + quote_lines) e o client_contracts já assinado
+  // ligado a ele, pelo que toda a automação existente (dedução de stock,
+  // encomendas a fornecedor, PDF, listagem) continua a funcionar sem alterações.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createClient, setCreateClient] = useState<EntitySearchResult | null>(null);
+  const [createDate, setCreateDate] = useState(new Date().toISOString().split('T')[0]);
+  const [createNotes, setCreateNotes] = useState("");
+  const [createItems, setCreateItems] = useState<ManualClientOrderItem[]>([]);
+  const [showItemsDialog, setShowItemsDialog] = useState(false);
 
   // Checklist de saída de stock (linhas stock_disponivel_confirmar):
   // - checklistActiveLineIds: linhas onde o checkbox foi marcado E há mais de
@@ -529,6 +570,196 @@ const ClientOrders = () => {
     );
   };
 
+  // ── Criação manual de Encomenda Cliente ──────────────────────────────────
+  // UI/UX e código replicam o diálogo de criação manual de Encomenda de Compra
+  // (PurchaseOrders.tsx): tabela de linhas editável (qt/preço), resumo de
+  // totais ao lado e validação com um toast por erro antes de submeter. O
+  // seletor de artigos é o AddItemsDialog já usado nos Orçamentos — e não o
+  // seletor de PurchaseOrders.tsx, que filtra o catálogo pelo fornecedor
+  // escolhido e usa preços de COMPRA; aqui as linhas acabam em `quote_lines`,
+  // logo o que interessa são artigos vendáveis a preço de VENDA.
+
+  const resetCreateForm = () => {
+    setCreateClient(null);
+    setCreateDate(new Date().toISOString().split('T')[0]);
+    setCreateNotes("");
+    setCreateItems([]);
+  };
+
+  const getCreateTotals = () => {
+    let subtotal = 0;
+    let totalVat = 0;
+    createItems.forEach((item) => {
+      const itemSubtotal = item.unit_price * item.quantity;
+      subtotal += itemSubtotal;
+      totalVat += itemSubtotal * (item.vat_rate / 100);
+    });
+    return { subtotal, totalVat, total: subtotal + totalVat };
+  };
+
+  const handleAddCatalogItems = (selected: any[]) => {
+    const newItems: ManualClientOrderItem[] = [];
+
+    selected.forEach((sel) => {
+      const { item, quantity, fullAttributes, attributePriceAddon, bundleInfo } = sel;
+
+      // Bundles: o AddItemsDialog devolve-os como UMA linha cujo `item.id` é o
+      // id do bundle, que não é um product_id nem um service_id — a RPC
+      // rejeitaria. Expande-se nos componentes reais (bundleInfo.components já
+      // traz o source_id de cada um, com a quantidade por unidade de bundle).
+      if (bundleInfo) {
+        (bundleInfo.components || []).forEach((comp: any) => {
+          const isProduct = comp.type === 'product';
+          newItems.push({
+            item_type: isProduct ? 'product' : 'service',
+            product_id: isProduct ? comp.source_id : null,
+            service_id: isProduct ? null : comp.source_id,
+            description: comp.name,
+            categoria: bundleInfo.bundle_name || 'Bundle',
+            sku: comp.sku ?? null,
+            quantity: (Number(comp.quantity) || 0) * (Number(quantity) || 1),
+            unit_price: Number(comp.unit_price) || 0,
+            vat_rate: Number(comp.vat_rate) || DEFAULT_VAT_RATE,
+          });
+        });
+        return;
+      }
+
+      // Descrição com atributos escolhidos, mesmo formato de PurchaseOrders.tsx
+      // ("Nome (Medida: 90x90, Cor: Branco)") — é esta string que fica no
+      // snapshot da linha do orçamento sintético.
+      const attrStrings = Object.values(fullAttributes || {})
+        .map((attr: any) => {
+          if (!attr?.value) return null;
+          const displayValue = attr.unit ? `${attr.value} ${attr.unit}` : attr.value;
+          return `${attr.label}: ${displayValue}`;
+        })
+        .filter(Boolean) as string[];
+      const description = attrStrings.length > 0
+        ? `${item.name} (${attrStrings.join(', ')})`
+        : item.name;
+
+      const isProduct = item.type === 'product';
+      newItems.push({
+        item_type: isProduct ? 'product' : 'service',
+        product_id: isProduct ? item.id : null,
+        service_id: isProduct ? null : item.id,
+        description,
+        categoria: item.category_name || t('clientOrders.create.noCategory'),
+        sku: item.sku ?? null,
+        quantity: Number(quantity) || 1,
+        unit_price: (Number(item.retail_price) || 0) + (Number(attributePriceAddon) || 0),
+        vat_rate: Number(item.vat_rate) || DEFAULT_VAT_RATE,
+      });
+    });
+
+    if (newItems.length === 0) return;
+
+    setCreateItems((prev) => [...prev, ...newItems]);
+    toast({
+      title: t('clientOrders.create.itemsAdded', { count: newItems.length }),
+    });
+  };
+
+  const handleCreateItemChange = (index: number, field: 'quantity' | 'unit_price' | 'vat_rate', value: string) => {
+    setCreateItems((prev) => {
+      const next = [...prev];
+      const parsed = parseFloat(value);
+      next[index] = { ...next[index], [field]: isNaN(parsed) ? 0 : parsed };
+      return next;
+    });
+  };
+
+  const handleRemoveCreateItem = (index: number) => {
+    setCreateItems((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleCreateOrder = async () => {
+    if (!activeCompany?.id) return;
+
+    // Validação antes de submeter — um toast por erro, mesmo padrão de
+    // PurchaseOrders.tsx (o backend valida na mesma; isto é só UX).
+    const entityId = createClient?.entityId;
+    if (!entityId) {
+      toast({
+        title: t('clientOrders.create.validation.clientRequired'),
+        description: t('clientOrders.create.validation.clientRequiredDesc'),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (createItems.length === 0) {
+      toast({
+        title: t('clientOrders.create.validation.itemsRequired'),
+        description: t('clientOrders.create.validation.itemsRequiredDesc'),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    for (let i = 0; i < createItems.length; i++) {
+      const item = createItems[i];
+      if (!item.product_id && !item.service_id) {
+        toast({
+          title: t('clientOrders.create.validation.lineWithoutItem'),
+          description: t('clientOrders.create.validation.lineWithoutItemDesc', { line: i + 1 }),
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!(item.quantity > 0)) {
+        toast({
+          title: t('clientOrders.create.validation.invalidQuantity'),
+          description: t('clientOrders.create.validation.invalidQuantityDesc', { line: i + 1 }),
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    setCreating(true);
+    try {
+      // `rpc_create_manual_client_order` ainda não está nos tipos gerados
+      // (migration nova) — daí o cast, mesmo padrão já usado nas outras RPCs
+      // desta página.
+      const { error } = await (supabase as any).rpc('rpc_create_manual_client_order', {
+        p_organization_id: activeCompany.id,
+        p_order: {
+          entity_id: entityId,
+          notes: createNotes.trim() || null,
+          start_date: createDate || null,
+        },
+        p_items: createItems.map((item) => ({
+          product_id: item.product_id,
+          service_id: item.service_id,
+          descricao: item.description,
+          categoria: item.categoria,
+          qt: item.quantity,
+          preco_unit: item.unit_price,
+          iva_percent: item.vat_rate,
+        })),
+      });
+
+      if (error) throw error;
+
+      toast({ title: t('clientOrders.toast.createSuccess') });
+      setCreateOpen(false);
+      resetCreateForm();
+      // Recarrega a listagem a partir da primeira página (a RPC de leitura é a
+      // fonte da verdade — a encomenda nova já vem com o estado calculado).
+      loadOrders(0, true);
+    } catch (error: any) {
+      toast({
+        title: t('clientOrders.toast.createError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setCreating(false);
+    }
+  };
+
   if (companyLoading) {
     return (
       <>
@@ -556,12 +787,24 @@ const ClientOrders = () => {
   return (
     <>
       <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <ClipboardCheck className="w-7 h-7 text-muted-foreground" />
-          <div>
-            <h1 className="text-3xl font-bold mb-1">{t('clientOrders.title')}</h1>
-            <p className="text-muted-foreground">{t('clientOrders.description')}</p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <ClipboardCheck className="w-7 h-7 text-muted-foreground" />
+            <div>
+              <h1 className="text-3xl font-bold mb-1">{t('clientOrders.title')}</h1>
+              <p className="text-muted-foreground">{t('clientOrders.description')}</p>
+            </div>
           </div>
+          {/* A página já está protegida por inventory.view + client_contracts.view
+              (ProtectedRoute em App.tsx e menuConfig.ts). Criar uma encomenda
+              cria um contrato assinado, pelo que exige client_contracts.create —
+              mesmo PermissionGate usado em ClientContracts.tsx. */}
+          <PermissionGate permission="client_contracts.create">
+            <Button onClick={() => setCreateOpen(true)}>
+              <Plus className="w-4 h-4 mr-2" />
+              {t('clientOrders.create.newOrder')}
+            </Button>
+          </PermissionGate>
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">
@@ -802,6 +1045,217 @@ const ClientOrders = () => {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      {/* Criação manual de Encomenda Cliente */}
+      <Dialog
+        open={createOpen}
+        onOpenChange={(isOpen) => {
+          setCreateOpen(isOpen);
+          if (!isOpen) resetCreateForm();
+        }}
+      >
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{t('clientOrders.create.title')}</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <Label>{t('clientOrders.create.client')} *</Label>
+              <EntitySearchInput
+                value={createClient}
+                onChange={setCreateClient}
+                searchTypes={["client"]}
+                placeholder={t('clientOrders.create.clientPlaceholder')}
+                disabled={creating}
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="client_order_date">{t('clientOrders.create.date')} *</Label>
+                <Input
+                  id="client_order_date"
+                  type="date"
+                  value={createDate}
+                  onChange={(e) => setCreateDate(e.target.value)}
+                  disabled={creating}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="client_order_notes">{t('clientOrders.create.notes')}</Label>
+                <Textarea
+                  id="client_order_notes"
+                  value={createNotes}
+                  onChange={(e) => setCreateNotes(e.target.value)}
+                  rows={2}
+                  disabled={creating}
+                />
+              </div>
+            </div>
+
+            <div className="border-t pt-4">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-lg font-semibold">{t('clientOrders.create.items')}</h3>
+                <Button type="button" onClick={() => setShowItemsDialog(true)} disabled={creating}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  {t('clientOrders.create.addItems')}
+                </Button>
+              </div>
+
+              {createItems.length > 0 ? (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  <div className="lg:col-span-2">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>{t('clientOrders.create.itemType')}</TableHead>
+                          <TableHead>{t('clientOrders.create.itemDescription')}</TableHead>
+                          <TableHead>{t('clientOrders.create.itemQuantity')}</TableHead>
+                          <TableHead>{t('clientOrders.create.itemUnitPrice')}</TableHead>
+                          <TableHead>{t('clientOrders.create.itemVat')}</TableHead>
+                          <TableHead className="text-right">{t('clientOrders.create.itemTotal')}</TableHead>
+                          <TableHead></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {createItems.map((item, index) => {
+                          const lineSubtotal = item.unit_price * item.quantity;
+                          const lineTotal = lineSubtotal * (1 + item.vat_rate / 100);
+                          return (
+                            <TableRow key={`${item.product_id || item.service_id}-${index}`}>
+                              <TableCell>
+                                <Badge variant="outline">
+                                  {item.item_type === 'product'
+                                    ? t('clientOrders.create.typeProduct')
+                                    : t('clientOrders.create.typeService')}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>
+                                <div className="font-medium">{item.description}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {item.sku ? `${item.sku} · ` : ''}{item.categoria}
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <Input
+                                  type="number"
+                                  value={item.quantity}
+                                  onChange={(e) => handleCreateItemChange(index, 'quantity', e.target.value)}
+                                  className="w-20"
+                                  min="0"
+                                  step="0.01"
+                                  disabled={creating}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Input
+                                  type="number"
+                                  value={item.unit_price}
+                                  onChange={(e) => handleCreateItemChange(index, 'unit_price', e.target.value)}
+                                  className="w-24"
+                                  min="0"
+                                  step="0.01"
+                                  disabled={creating}
+                                />
+                              </TableCell>
+                              <TableCell>
+                                <Input
+                                  type="number"
+                                  value={item.vat_rate}
+                                  onChange={(e) => handleCreateItemChange(index, 'vat_rate', e.target.value)}
+                                  className="w-20"
+                                  min="0"
+                                  step="0.5"
+                                  disabled={creating}
+                                />
+                              </TableCell>
+                              <TableCell className="text-right font-semibold">€{lineTotal.toFixed(2)}</TableCell>
+                              <TableCell>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => handleRemoveCreateItem(index)}
+                                  title={t('clientOrders.create.removeItem')}
+                                  disabled={creating}
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div>
+                    {(() => {
+                      const totals = getCreateTotals();
+                      return (
+                        <Card>
+                          <CardHeader>
+                            <CardTitle>{t('clientOrders.create.summary')}</CardTitle>
+                          </CardHeader>
+                          <CardContent className="space-y-2">
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">{t('clientOrders.create.subtotal')}</span>
+                              <span>€{totals.subtotal.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">{t('clientOrders.create.vat')}</span>
+                              <span>€{totals.totalVat.toFixed(2)}</span>
+                            </div>
+                            <div className="flex justify-between text-lg font-bold pt-2 border-t">
+                              <span>{t('clientOrders.create.total')}</span>
+                              <span>€{totals.total.toFixed(2)}</span>
+                            </div>
+                            <div className="text-sm text-muted-foreground pt-2">
+                              {t('clientOrders.create.itemsCount')}: {createItems.length}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })()}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-muted-foreground">
+                  {t('clientOrders.create.noItems')}
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-2 justify-end pt-4 border-t">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateOpen(false)}
+                disabled={creating}
+              >
+                {t('clientOrders.create.cancel')}
+              </Button>
+              <Button type="button" onClick={handleCreateOrder} disabled={creating}>
+                {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {creating ? t('clientOrders.create.submitting') : t('clientOrders.create.submit')}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Seletor de artigos partilhado com os Orçamentos: carrega o catálogo
+          do lado do servidor (as props products/services existem só por
+          compatibilidade de API e não são usadas lá dentro — ver
+          InlineQuoteBuilder.tsx, que as passa igualmente vazias/derivadas). */}
+      <AddItemsDialog
+        open={showItemsDialog}
+        onOpenChange={setShowItemsDialog}
+        onAddItems={handleAddCatalogItems}
+        products={[]}
+        services={[]}
+      />
     </>
   );
 };
