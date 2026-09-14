@@ -281,6 +281,56 @@ function AreaCard({
     [area.id, organizationId],
   );
 
+  // Depois de aceite uma sugestão de serviço, lê a ficha técnica desse
+  // serviço (public.service_materials — migration
+  // 20261130130000_service_technical_sheet_materials.sql, ainda não
+  // aplicada à BD) e regista cada material automaticamente como se fosse
+  // uma sugestão de produto aceite — sem passar pelas regras/IA. Best
+  // effort: nunca lança, só regista o erro e não bloqueia o fluxo normal
+  // (o registo do próprio serviço já teve sucesso nesse ponto).
+  const acceptServiceTechnicalSheetMaterials = async (serviceId: string): Promise<number> => {
+    try {
+      const { data, error } = await (supabase as any)
+        .from("service_materials")
+        .select("product_id, quantity, uom_id, product:products(name), uom:uom_id(code)")
+        .eq("service_id", serviceId)
+        .is("deleted_at", null);
+      if (error) throw error;
+
+      const rows = (data as Array<{
+        product_id: string;
+        quantity: number;
+        uom_id: string | null;
+        product?: { name: string } | null;
+        uom?: { code: string } | null;
+      }> | null) || [];
+
+      for (const row of rows) {
+        const { error: acceptError } = await supabase.rpc("rpc_record_diagnostic_suggestion_accepted", {
+          p_diagnostic_area_id: area.id,
+          p_source: "rule",
+          p_source_field: "intervencao",
+          p_target_type: "product",
+          p_descricao: row.product?.name || "Material da ficha técnica",
+          p_qty: Number(row.quantity) || 0,
+          p_product_id: row.product_id,
+          p_service_id: null,
+          p_catalog_item_id: null,
+          p_unidade: row.uom?.code ?? null,
+          p_rule_id: null,
+          p_ai_rationale: null,
+          p_ai_confidence: null,
+        });
+        if (acceptError) throw acceptError;
+      }
+
+      return rows.length;
+    } catch (err) {
+      captureFlowError(err, "quote-lifecycle");
+      return 0;
+    }
+  };
+
   // Aceitar já NÃO cria nenhuma linha no orçamento — os itens do orçamento
   // continuam sempre a ser adicionados manualmente. Isto só regista a
   // sugestão (auto-suficiente, sem depender de nenhuma quote_line) para
@@ -311,6 +361,21 @@ function AreaCard({
         description: suggestion.descricao,
       });
       setAcceptedRefreshKey((k) => k + 1);
+
+      // Sem alterar o comportamento quando o serviço não tem
+      // service_materials: só entra aqui para target_type "service", e a
+      // função acima devolve 0 sem side effects visíveis se não houver
+      // materiais (ou se a leitura falhar).
+      if (suggestion.target_type === "service" && suggestion.service_id) {
+        const materialsCount = await acceptServiceTechnicalSheetMaterials(suggestion.service_id);
+        if (materialsCount > 0) {
+          toast({
+            title: `${materialsCount} materiais da ficha técnica adicionados automaticamente`,
+          });
+          setAcceptedRefreshKey((k) => k + 1);
+        }
+      }
+
       return true;
     } catch (err: any) {
       captureFlowError(err, "quote-lifecycle");

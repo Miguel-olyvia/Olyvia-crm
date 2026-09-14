@@ -62,6 +62,7 @@ import { BulkStatusDialog, BulkDeleteDialog } from "@/components/BulkActionDialo
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { OrganizationFormSection, type OrganizationSelection } from "@/components/OrganizationFormSection";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import ServiceMaterialsEditor from "@/components/ServiceMaterialsEditor";
 
 interface Service {
   id: string;
@@ -74,7 +75,7 @@ interface Service {
   service_type: string;
   organization_id?: string | null;
   root_organization_id?: string | null;
-  
+
   service_category_id?: string | null;
   service_subcategory_id?: string | null;
   service_categories?: { name: string };
@@ -83,7 +84,25 @@ interface Service {
   service_organizations?: Array<{
     organization_id: string;
   }>;
+  // Ficha técnica (migration 20261130130000_service_technical_sheet_materials.sql,
+  // ainda não aplicada à BD) — colunas nullable em services, lidas via `select("*")`
+  // em loadData (com cast `as any`, ver abaixo), por isso opcionais aqui.
+  technical_sheet_labor_description?: string | null;
+  technical_sheet_labor_quantity?: number | null;
+  technical_sheet_labor_uom_id?: string | null;
 }
+
+interface TechnicalSheetFormData {
+  labor_description: string;
+  labor_quantity: string;
+  labor_uom_id: string;
+}
+
+const emptyTechnicalSheet: TechnicalSheetFormData = {
+  labor_description: "",
+  labor_quantity: "",
+  labor_uom_id: "",
+};
 
 const serviceSchema = z.object({
   sku: z.string().trim().min(1, "O SKU é obrigatório.").max(100, "O SKU deve ter menos de 100 caracteres."),
@@ -156,6 +175,10 @@ export default function Services() {
     vat_rate: 23,
   });
 
+  // Ficha técnica (mão de obra) — ver nota na interface Service acima.
+  const [technicalSheet, setTechnicalSheet] = useState<TechnicalSheetFormData>(emptyTechnicalSheet);
+  const [uomList, setUomList] = useState<{ id: string; code: string; description: string | null }[]>([]);
+
   const defaultOrgSelection = (): OrganizationSelection => ({
     tenantId: "",
     companyId: activeCompany?.id || "",
@@ -183,6 +206,33 @@ export default function Services() {
     setSearchTerm("");
     loadData();
   }, [activeCompany?.id, showDeleted]);
+
+  // Lista de UOM para o seletor de unidade da mão de obra (ficha técnica) —
+  // mesmo padrão de fetch usado em ProductFormPrices.tsx/Products.tsx.
+  useEffect(() => {
+    if (!activeCompany?.id) {
+      setUomList([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("uom")
+        .select("id, code, description")
+        .eq("is_active", true)
+        .or(`organization_id.eq.${activeCompany.id},organization_id.is.null`)
+        .order("code");
+      if (cancelled) return;
+      if (error) {
+        captureFlowError(error, "db-error-leaked-to-ui");
+        return;
+      }
+      setUomList(data || []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeCompany?.id]);
 
   const loadData = async () => {
     setLoading(true);
@@ -352,6 +402,22 @@ export default function Services() {
         return;
       }
 
+      // Ficha técnica (mão de obra) — gravada à parte via
+      // rpc_update_service_technical_sheet, depois do create/update do
+      // serviço em si ter sucesso. Cast `as any`: RPC ainda não existe em
+      // types.ts (migration 20261130130000 não aplicada). Quantidade vazia
+      // grava como null (não força 0 por omissão).
+      const saveTechnicalSheet = async (serviceId: string) => {
+        const laborQuantity = technicalSheet.labor_quantity.trim() === "" ? null : Number(technicalSheet.labor_quantity);
+        const { error } = await (supabase as any).rpc("rpc_update_service_technical_sheet", {
+          p_service_id: serviceId,
+          p_labor_description: technicalSheet.labor_description.trim() || null,
+          p_labor_quantity: laborQuantity,
+          p_labor_uom_id: technicalSheet.labor_uom_id || null,
+        });
+        if (error) throw error;
+      };
+
       await withAuditContext(supabase, businessUserId, async () => {
         if (editingService) {
           const { error } = await supabase.rpc("rpc_update_service", {
@@ -376,11 +442,13 @@ export default function Services() {
 
           if (error) throw error;
 
+          await saveTechnicalSheet(editingService.id);
+
           toast({
             title: t("services.toast.updateSuccess"),
           });
         } else {
-          const { error } = await supabase.rpc("rpc_create_service", {
+          const { data: createdService, error } = await supabase.rpc("rpc_create_service", {
             p_sku: formData.sku,
             p_name: formData.name,
             p_slug: slug,
@@ -398,6 +466,10 @@ export default function Services() {
           });
 
           if (error) throw error;
+
+          if (createdService?.id) {
+            await saveTechnicalSheet(createdService.id);
+          }
 
           toast({
             title: t("services.toast.createSuccess"),
@@ -562,6 +634,12 @@ export default function Services() {
       service_type: service.service_type || "both",
       status: service.is_active ? "active" : "inactive",
     });
+    setTechnicalSheet({
+      labor_description: service.technical_sheet_labor_description || "",
+      labor_quantity:
+        service.technical_sheet_labor_quantity != null ? String(service.technical_sheet_labor_quantity) : "",
+      labor_uom_id: service.technical_sheet_labor_uom_id || "",
+    });
 
     // Load prices for service
     const { data: prices, error: pricesError } = await supabase
@@ -645,6 +723,7 @@ export default function Services() {
       currency: "EUR",
       vat_rate: 23,
     });
+    setTechnicalSheet(emptyTechnicalSheet);
     setOrganizationSelection(defaultOrgSelection());
   };
 
@@ -1123,6 +1202,74 @@ export default function Services() {
                   prices={priceData}
                   onChange={setPriceData}
                 />
+
+                {/* Ficha Técnica — mão de obra + materiais (migration
+                    20261130130000_service_technical_sheet_materials.sql) */}
+                <div className="space-y-3 border-t pt-4">
+                  <h4 className="font-medium text-sm">Ficha Técnica</h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    <div className="space-y-2 sm:col-span-2">
+                      <Label htmlFor="labor_description">Descrição da mão de obra</Label>
+                      <Textarea
+                        id="labor_description"
+                        value={technicalSheet.labor_description}
+                        onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_description: e.target.value })}
+                        rows={2}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="labor_quantity">Quantidade</Label>
+                      <Input
+                        id="labor_quantity"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={technicalSheet.labor_quantity}
+                        onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_quantity: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 max-w-xs">
+                    <Label htmlFor="labor_uom">Unidade da mão de obra</Label>
+                    <Select
+                      value={technicalSheet.labor_uom_id || "none"}
+                      onValueChange={(value) =>
+                        setTechnicalSheet({ ...technicalSheet, labor_uom_id: value === "none" ? "" : value })
+                      }
+                    >
+                      <SelectTrigger id="labor_uom">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">{t("services.form.none")}</SelectItem>
+                        {uomList.map((uom) => (
+                          <SelectItem key={uom.id} value={uom.id}>
+                            {uom.code}
+                            {uom.description ? ` - ${uom.description}` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Materiais só fazem sentido depois de o serviço existir de facto
+                      (precisam de service_id real) — mesmo princípio de sub-recurso
+                      dependente já usado noutros ecrãs (ex.: separadores de
+                      componentes/bundle desativados até o bundle ser gravado, em
+                      BundleFormDialog.tsx). */}
+                  {editingService ? (
+                    <ServiceMaterialsEditor
+                      serviceId={editingService.id}
+                      organizationId={editingService.organization_id || activeCompany?.id || ""}
+                    />
+                  ) : (
+                    <p className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/30">
+                      Grave o serviço primeiro para poder adicionar materiais à ficha técnica.
+                    </p>
+                  )}
+                </div>
 
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => handleCloseDialog(false)}>
