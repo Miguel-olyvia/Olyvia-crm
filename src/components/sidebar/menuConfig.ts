@@ -200,8 +200,8 @@ export const menuSections: MenuSection[] = [
     id: "rh",
     icon: IdCard,
     labelKey: "sidebar.hrModule",
-    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/centros"],
-    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view"],
+    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/centros", "/rh/admissao/configuracao"],
+    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view", "hr.admissao.obrigatorios.gerir"],
     items: [
       { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
       { to: "/rh/ausencias/aprovacoes", icon: CheckSquare, labelKey: "sidebar.hrAusenciasAprovacoes", permissions: ["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"] },
@@ -212,6 +212,10 @@ export const menuSections: MenuSection[] = [
       // desde 20261120120000 e ja esta atribuida ao super_admin
       // (20261120180000) -- nenhuma permissao nova para este ecra.
       { to: "/rh/centros", icon: MapPin, labelKey: "sidebar.hrCentros", permission: "hr.locais.view" },
+      // Configuracao dos obrigatorios de admissao por organizacao
+      // (20261201050000). Permissao nova, hr.admissao.obrigatorios.gerir --
+      // NENHUM papel a recebe por omissao.
+      { to: "/rh/admissao/configuracao", icon: Settings, labelKey: "sidebar.hrAdmissaoConfig", permission: "hr.admissao.obrigatorios.gerir" },
     ],
   },
   {

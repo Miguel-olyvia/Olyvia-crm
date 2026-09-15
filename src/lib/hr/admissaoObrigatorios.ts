@@ -153,20 +153,58 @@ function estaPreenchido(
   return valor.trim() !== "";
 }
 
+/**
+ * O codigo, tal como a RPC `rpc_hr_convite_admissao_estado` o devolve na
+ * chave `campos_obrigatorios` (20261201050000): so o codigo e se e
+ * condicional -- a decisao de QUANDO um condicional se aplica continua no
+ * lado do ecra, em `CAMPOS_OBRIGATORIOS_ADMISSAO.condicao`.
+ */
+export interface CodigoObrigatorioDoServidor {
+  codigo: string;
+  condicional: boolean;
+}
+
+/**
+ * A lista de campos EFECTIVAMENTE obrigatoria, depois de cruzar a lista fixa
+ * do ecra com o que o servidor diz para ESTA organizacao
+ * (`organization_admissao_settings`, via `hr_admissao_campos_obrigatorios_org`).
+ *
+ * Um codigo so fica de fora quando o servidor o excluiu explicitamente -- por
+ * isso `null`/`undefined` (convites antigos que a RPC ainda nao anotava, ou
+ * uma falha a carregar o estado) devolve `CAMPOS_OBRIGATORIOS_ADMISSAO` por
+ * inteiro: o comportamento de sempre, nunca uma regressao para "nada e
+ * obrigatorio".
+ *
+ * A condicionalidade (validade do documento, situacao do conjuge) continua a
+ * ser decidida pela `condicao` de cada campo, aplicada pelos chamadores
+ * (`pendenciasDoRascunho`, `campoEhObrigatorio`) -- esta funcao so filtra
+ * QUAIS codigos entram em jogo, nunca decide se se aplicam a este rascunho.
+ */
+export function obrigatoriosResolvidos(
+  codigosObrigatoriosDoServidor?: readonly CodigoObrigatorioDoServidor[] | null,
+): readonly CampoObrigatorioAdmissao[] {
+  if (!codigosObrigatoriosDoServidor) return CAMPOS_OBRIGATORIOS_ADMISSAO;
+  const permitidos = new Set(codigosObrigatoriosDoServidor.map((c) => c.codigo));
+  return CAMPOS_OBRIGATORIOS_ADMISSAO.filter((campo) => permitidos.has(campo.codigo));
+}
+
 /** Verdadeiro quando ESTE campo, NESTE rascunho, e obrigatorio. */
 export function campoEhObrigatorio(
   rascunho: RascunhoConviteObrigatorios,
   codigo: CodigoCampoObrigatorioAdmissao,
+  campos: readonly CampoObrigatorioAdmissao[] = CAMPOS_OBRIGATORIOS_ADMISSAO,
 ): boolean {
-  const campo = CAMPOS_OBRIGATORIOS_ADMISSAO.find((c) => c.codigo === codigo);
+  const campo = campos.find((c) => c.codigo === codigo);
   return campo ? campo.condicao(rascunho) : false;
 }
 
 /** Os codigos ainda por preencher, na ordem da lista acima. */
 export function pendenciasDoRascunho(
   rascunho: RascunhoConviteObrigatorios,
+  campos: readonly CampoObrigatorioAdmissao[] = CAMPOS_OBRIGATORIOS_ADMISSAO,
 ): CodigoCampoObrigatorioAdmissao[] {
-  return CAMPOS_OBRIGATORIOS_ADMISSAO.filter((campo) => campo.condicao(rascunho))
+  return campos
+    .filter((campo) => campo.condicao(rascunho))
     .filter((campo) => !estaPreenchido(rascunho, campo.codigo))
     .map((campo) => campo.codigo);
 }

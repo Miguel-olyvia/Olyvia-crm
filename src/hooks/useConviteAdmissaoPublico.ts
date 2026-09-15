@@ -24,6 +24,14 @@ export interface ConviteEstado {
   nome: string | null;
   email_destino: string | null;
   rascunho: Record<string, unknown> | null;
+  /**
+   * Os codigos obrigatorios REAIS desta organizacao, so origem "pessoa"
+   * (20261201050000, `rpc_hr_convite_admissao_estado`) -- respeita
+   * `organization_admissao_settings`. `null`/ausente em convites que a RPC
+   * ainda nao anota (ou numa falha): o ecra cai na lista estatica de
+   * `admissaoObrigatorios.ts` nesse caso, ver `obrigatoriosResolvidos`.
+   */
+  campos_obrigatorios: { codigo: string; condicional: boolean }[] | null;
 }
 
 export interface DadosSubmissaoConvite {

@@ -121,6 +121,7 @@ const AusenciasOrganizacao = lazy(() => import("./pages/AusenciasOrganizacao"));
 const Assiduidade = lazy(() => import("./pages/Assiduidade"));
 const AssiduidadeOrganizacao = lazy(() => import("./pages/AssiduidadeOrganizacao"));
 const RhCentros = lazy(() => import("./pages/RhCentros"));
+const ConfiguracaoAdmissao = lazy(() => import("./pages/ConfiguracaoAdmissao"));
 const OrgTemplates = lazy(() => import("./pages/OrgTemplates"));
 const OrgHelp = lazy(() => import("./pages/OrgHelp"));
 const NeedsAssessmentConfig = lazy(() => import("./pages/NeedsAssessmentConfig"));
@@ -304,6 +305,11 @@ const App = () => (
                           20261120120000 e ja estao no super_admin
                           (20261120180000); nenhuma permissao nova. */}
                       <Route path="/rh/centros" element={<ProtectedRoute permission="hr.locais.view"><RhCentros /></ProtectedRoute>} />
+                      {/* Configuracao dos campos obrigatorios de admissao, por
+                          organizacao (20261201050000). Permissao nova,
+                          hr.admissao.obrigatorios.gerir -- nao atribuida a
+                          nenhum papel por omissao. */}
+                      <Route path="/rh/admissao/configuracao" element={<ProtectedRoute permission="hr.admissao.obrigatorios.gerir"><ConfiguracaoAdmissao /></ProtectedRoute>} />
                       <Route path="/organizations" element={<Organizations />} />
                       <Route path="/organizations/:id" element={<OrganizationDetail />} />
                       <Route path="/org-templates" element={<OrgTemplates />} />

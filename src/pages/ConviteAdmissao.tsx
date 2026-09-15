@@ -51,6 +51,7 @@ import {
 import {
   CODIGOS_PAGINA_2,
   campoEhObrigatorio,
+  obrigatoriosResolvidos,
   pendenciasDoRascunho,
 } from "@/lib/hr/admissaoObrigatorios";
 import {
@@ -162,13 +163,23 @@ export default function ConviteAdmissao() {
     };
   }, [concluido, gravarRascunhoAoFechar]);
 
+  // Os obrigatorios REAIS desta organizacao, cruzados com a lista fixa do
+  // ecra (20261201050000): `estado.campos_obrigatorios` respeita
+  // `organization_admissao_settings`; quando vier vazio (convite antigo,
+  // falha), cai-se na lista estatica de sempre -- nunca uma regressao para
+  // "nada e obrigatorio".
+  const camposObrigatorios = useMemo(
+    () => obrigatoriosResolvidos(estado?.campos_obrigatorios),
+    [estado],
+  );
+
   // Os obrigatorios das DUAS paginas -- a lista partilhada com a base (ver
   // `admissaoObrigatorios.ts`). A base aplica a mesma lista no fim da
   // submissao, sobre a ficha ja escrita; isto aqui e so para a pessoa ver o
   // que lhe falta antes de tentar.
   const pendencias = useMemo(
-    () => pendenciasDoRascunho(rascunho),
-    [rascunho],
+    () => pendenciasDoRascunho(rascunho, camposObrigatorios),
+    [rascunho, camposObrigatorios],
   );
   const pendenciasTodas = useMemo(() => new Set<string>(pendencias), [pendencias]);
   const pendencias1 = useMemo(
@@ -182,7 +193,7 @@ export default function ConviteAdmissao() {
   };
 
   const obrigatorio1 = (campoId: Parameters<typeof campoEhObrigatorio>[1]): boolean =>
-    campoEhObrigatorio(rascunho, campoId);
+    campoEhObrigatorio(rascunho, campoId, camposObrigatorios);
 
   const avancar = () => {
     if (pendencias1.size > 0) {

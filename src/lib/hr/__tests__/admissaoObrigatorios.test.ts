@@ -14,7 +14,9 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  CAMPOS_OBRIGATORIOS_ADMISSAO,
   campoEhObrigatorio,
+  obrigatoriosResolvidos,
   pendenciasDoRascunho,
   type RascunhoConviteObrigatorios,
 } from "@/lib/hr/admissaoObrigatorios";
@@ -169,5 +171,47 @@ describe("campoEhObrigatorio", () => {
 
   it("niss e sempre obrigatorio", () => {
     expect(campoEhObrigatorio(VAZIO, "niss")).toBe(true);
+  });
+});
+
+describe("obrigatoriosResolvidos", () => {
+  it("sem dados do servidor, cai na lista estatica por inteiro (fallback, nunca regressao)", () => {
+    expect(obrigatoriosResolvidos(undefined)).toBe(CAMPOS_OBRIGATORIOS_ADMISSAO);
+    expect(obrigatoriosResolvidos(null)).toBe(CAMPOS_OBRIGATORIOS_ADMISSAO);
+  });
+
+  it("um codigo omitido pelo servidor deixa de ser obrigatorio", () => {
+    const doServidor = CAMPOS_OBRIGATORIOS_ADMISSAO.filter((c) => c.codigo !== "niss").map((c) => ({
+      codigo: c.codigo as string,
+      condicional: false,
+    }));
+
+    const resolvidos = obrigatoriosResolvidos(doServidor);
+    expect(resolvidos.some((c) => c.codigo === "niss")).toBe(false);
+    expect(pendenciasDoRascunho(VAZIO, resolvidos)).not.toContain("niss");
+    // O resto continua obrigatorio como sempre.
+    expect(pendenciasDoRascunho(VAZIO, resolvidos)).toContain("nif");
+  });
+
+  it("um codigo condicional presente no servidor mas cuja condicao local e falsa nao fica pendente", () => {
+    const doServidor = CAMPOS_OBRIGATORIOS_ADMISSAO.map((c) => ({
+      codigo: c.codigo as string,
+      condicional: c.codigo === "validade_documento",
+    }));
+    const resolvidos = obrigatoriosResolvidos(doServidor);
+
+    // Cartao de cidadao: a condicao local (precisaDeValidadeDocumento) e
+    // falsa, mesmo com o codigo presente na lista do servidor.
+    const rascunhoCC: RascunhoConviteObrigatorios = { ...VAZIO, tipo_documento: "cartao_cidadao" };
+    expect(campoEhObrigatorio(rascunhoCC, "validade_documento", resolvidos)).toBe(false);
+    expect(pendenciasDoRascunho(rascunhoCC, resolvidos)).not.toContain("validade_documento");
+
+    // Passaporte: a condicao local passa a ser verdadeira.
+    const rascunhoPassaporte: RascunhoConviteObrigatorios = {
+      ...VAZIO,
+      tipo_documento: "passaporte",
+    };
+    expect(campoEhObrigatorio(rascunhoPassaporte, "validade_documento", resolvidos)).toBe(true);
+    expect(pendenciasDoRascunho(rascunhoPassaporte, resolvidos)).toContain("validade_documento");
   });
 });
