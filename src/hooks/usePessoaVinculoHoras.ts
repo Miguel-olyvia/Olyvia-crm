@@ -44,6 +44,8 @@ export interface CorrigirVersaoHorasPatch {
   validoDe: string;
   validoAte: string;
   motivo: string | null;
+  /** O documento de suporte (contrato/adenda) desta versao, se houver. */
+  documentoId: string | null;
 }
 
 export function usePessoaVinculoHoras(
@@ -121,6 +123,8 @@ export function usePessoaVinculoHoras(
       horasFrequencia: HorasFrequencia;
       dataEfeito: string;
       motivo: string | null;
+      /** O documento de suporte (contrato/adenda) desta versao nova, se houver. */
+      documentoId?: string | null;
     }) =>
       executar(async (autorId) => {
         if (!pessoaId || !organizationId) {
@@ -141,6 +145,7 @@ export function usePessoaVinculoHoras(
           valido_de: args.dataEfeito,
           valido_ate: null,
           motivo: args.motivo,
+          documento_id: args.documentoId ?? null,
           created_by: autorId,
           updated_by: autorId,
         });
@@ -164,6 +169,7 @@ export function usePessoaVinculoHoras(
             valido_de: patch.validoDe,
             valido_ate: patch.validoAte,
             motivo: patch.motivo,
+            documento_id: patch.documentoId ?? null,
             updated_by: autorId,
           })
           .eq("id", versaoId),

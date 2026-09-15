@@ -810,6 +810,16 @@ export const ESTADOS_DOCUMENTO_RH: readonly EstadoDocumentoRH[] = [
   "anulado",
 ];
 
+/**
+ * Dominio de `pessoas_documentos.assinatura_origem` (20261201070000). `null`
+ * enquanto nao assinado, ou documento legado anterior a esta coluna.
+ * `interna` = assinado DENTRO da app pela propria pessoa
+ * (`rpc_hr_documento_assinar`). `externa` = ja vinha assinado em papel fora
+ * do sistema; RH so registou e anexou o ficheiro
+ * (`rpc_hr_documento_registar_assinatura_externa`).
+ */
+export type OrigemAssinaturaDocumentoRH = "interna" | "externa";
+
 /** Um modelo de documento por organizacao. `corpo_html` tem SELECT directo
  *  aqui -- ao contrario de `PessoaDocumento`, esta tabela nao tem grants por
  *  coluna, so a permissao `hr.pessoas.documentos.modelos.view` na RLS. */
@@ -850,6 +860,8 @@ export interface PessoaDocumento {
   emitido_em: string | null;
   emitido_por: string | null;
   assinado_em: string | null;
+  /** `null` enquanto nao assinado, ou documento legado anterior a 20261201070000. */
+  assinatura_origem: OrigemAssinaturaDocumentoRH | null;
   anulado_em: string | null;
   anulado_motivo: string | null;
   created_at?: string;

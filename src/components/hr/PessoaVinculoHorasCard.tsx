@@ -20,11 +20,16 @@
  * cartao e o UNICO caminho de escrita; o separador Contratos continua so a
  * MOSTRAR o valor em vigor (desactivado).
  *
- * O DOCUMENTO DE SUPORTE, NESTA RONDA
- * -------------------------------------
- * So se mostra o aviso quando a versao em vigor nao tem nenhum documento
- * ligado -- nao se impede a alteracao por isso, e nao ha selector de
- * documento aqui: ligar um fica para quando o ecra de Documentos o permitir.
+ * O DOCUMENTO DE SUPORTE
+ * ------------------------
+ * O aviso continua a so aparecer quando a versao em vigor nao tem nenhum
+ * documento ligado -- nao se impede a alteracao por isso. Os dialogos de
+ * Alterar e Corrigir ganham um selector opcional "Documento de suporte",
+ * com os documentos JA EXISTENTES desta pessoa (via `usePessoaDocumentos`,
+ * o mesmo hook do separador Documentos) -- sem filtrar por vinculo nem por
+ * estado=assinado nesta ronda: e informacao de apoio, nao um portao. Ligar
+ * um documento aqui nao o cria nem o altera -- so grava `documento_id` na
+ * versao de horas.
  */
 import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -52,6 +57,7 @@ import { CampoSelect, CampoTexto } from "@/components/hr/form/Campos";
 import { dataDeHojeISO } from "@/lib/hr/afectacoes";
 import { equivalenteParaMostrar, maximoDaFrequencia } from "@/lib/hr/horas";
 import { usePessoaVinculoHoras } from "@/hooks/usePessoaVinculoHoras";
+import { usePessoaDocumentos } from "@/hooks/usePessoaDocumentos";
 import { HORAS_FREQUENCIAS, type HorasFrequencia, type PessoaVinculoHoras } from "@/types/hr";
 
 interface PessoaVinculoHorasCardProps {
@@ -70,10 +76,19 @@ type Rascunho = {
   validoDe: string;
   validoAte: string;
   motivo: string;
+  /** "" = sem documento de suporte escolhido. */
+  documentoId: string;
 };
 
 function rascunhoVazio(validoDe: string): Rascunho {
-  return { horasPeriodo: "", horasFrequencia: "semanal", validoDe, validoAte: "", motivo: "" };
+  return {
+    horasPeriodo: "",
+    horasFrequencia: "semanal",
+    validoDe,
+    validoAte: "",
+    motivo: "",
+    documentoId: "",
+  };
 }
 
 export function PessoaVinculoHorasCard({
@@ -88,6 +103,13 @@ export function PessoaVinculoHorasCard({
     pessoaId,
     organizationId,
   );
+  // So para listar os documentos JA EXISTENTES desta pessoa no selector de
+  // apoio -- `false` porque este cartao nunca precisa da lista de modelos.
+  const { documentos: documentosDaPessoa } = usePessoaDocumentos(pessoaId, false);
+  const opcoesDocumento = documentosDaPessoa.map((documento) => ({
+    value: documento.id,
+    label: `${documento.titulo} — ${t(`hr.tipoDocumentoRH.${documento.tipo}`)} · ${t(`hr.estadoDocumentoRH.${documento.estado}`)}`,
+  }));
 
   const historico = versoes.filter((v) => v.id !== aberta?.id);
 
@@ -104,6 +126,7 @@ export function PessoaVinculoHorasCard({
       validoDe: dataDeHojeISO(),
       validoAte: "",
       motivo: "",
+      documentoId: "",
     });
     setAlterarAberto(true);
   };
@@ -135,6 +158,7 @@ export function PessoaVinculoHorasCard({
       horasFrequencia: rascunhoAlterar.horasFrequencia,
       dataEfeito: rascunhoAlterar.validoDe,
       motivo: rascunhoAlterar.motivo.trim() || null,
+      documentoId: rascunhoAlterar.documentoId || null,
     });
     if (erro) {
       toast.error(erro);
@@ -156,6 +180,7 @@ export function PessoaVinculoHorasCard({
       validoDe: linha.valido_de,
       validoAte: linha.valido_ate ?? "",
       motivo: linha.motivo ?? "",
+      documentoId: linha.documento_id ?? "",
     });
   };
 
@@ -184,6 +209,7 @@ export function PessoaVinculoHorasCard({
       validoDe: rascunhoCorrigir.validoDe,
       validoAte: rascunhoCorrigir.validoAte,
       motivo: rascunhoCorrigir.motivo.trim() || null,
+      documentoId: rascunhoCorrigir.documentoId || null,
     });
     if (erro) {
       toast.error(erro);
@@ -323,6 +349,15 @@ export function PessoaVinculoHorasCard({
               valor={rascunhoAlterar.motivo}
               onChange={(v) => setRascunhoAlterar((a) => ({ ...a, motivo: v }))}
             />
+            <CampoSelect
+              id="hr-horas-alterar-documento"
+              label={t("hr.horasContratadas.documentoSuporte")}
+              valor={rascunhoAlterar.documentoId}
+              opcoes={opcoesDocumento}
+              vazioLabel={t("common.none")}
+              placeholder={t("common.none")}
+              onChange={(v) => setRascunhoAlterar((a) => ({ ...a, documentoId: v }))}
+            />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setAlterarAberto(false)} disabled={saving}>
@@ -390,6 +425,15 @@ export function PessoaVinculoHorasCard({
               label={t("hr.contrato.motivoTermo")}
               valor={rascunhoCorrigir.motivo}
               onChange={(v) => setRascunhoCorrigir((a) => ({ ...a, motivo: v }))}
+            />
+            <CampoSelect
+              id="hr-horas-corrigir-documento"
+              label={t("hr.horasContratadas.documentoSuporte")}
+              valor={rascunhoCorrigir.documentoId}
+              opcoes={opcoesDocumento}
+              vazioLabel={t("common.none")}
+              placeholder={t("common.none")}
+              onChange={(v) => setRascunhoCorrigir((a) => ({ ...a, documentoId: v }))}
             />
           </div>
           <DialogFooter>

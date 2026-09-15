@@ -40,12 +40,12 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage, getLocalizedFallback } from "@/utils/friendlyError";
 import { getUploadErrorMessage, resolveValidateUploadErrorMessage, parseValidateUploadResponse } from "@/lib/uploadErrors";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
-import type { PessoaDocumento, PessoaDocumentoModelo } from "@/types/hr";
+import type { PessoaDocumento, PessoaDocumentoModelo, TipoDocumentoRH } from "@/types/hr";
 
 const COLUNAS_DOCUMENTO =
   "id, pessoa_id, organization_id, vinculo_id, modelo_id, tipo, titulo, estado, " +
   "ficheiro_caminho, ficheiro_hash_sha256, ficheiro_anexado_em, " +
-  "emitido_em, emitido_por, assinado_em, anulado_em, anulado_motivo, created_at";
+  "emitido_em, emitido_por, assinado_em, assinatura_origem, anulado_em, anulado_motivo, created_at";
 
 /** O resultado de `hr-documento-ficheiro-url`: o URL so vive o tempo do dialogo que o abre. */
 export interface UrlFicheiroDocumento {
@@ -90,6 +90,26 @@ export interface UsePessoaDocumentosResult {
   recusado: boolean;
   recarregar: () => Promise<void>;
   emitir: (modeloId: string) => Promise<string | null>;
+  /**
+   * O segundo caminho de criar um documento (20261201070000): sem modelo,
+   * para um contrato ja assinado em papel fora do sistema. Nasce
+   * `a_aguardar_assinatura`, tal como `emitir` -- o ficheiro anexa-se a
+   * seguir por `anexarFicheiro`, o MESMO caminho que a emissao por modelo ja
+   * usa. Ao contrario dos outros metodos de escrita deste hook, devolve o id
+   * do documento novo (quem chama precisa dele para o passo seguinte de
+   * anexar o ficheiro) em vez de so `string | null` de erro.
+   */
+  criarPorUpload: (args: {
+    tipo: TipoDocumentoRH;
+    titulo: string;
+    vinculoId: string | null;
+  }) => Promise<{ documentoId: string | null; erro: string | null }>;
+  /**
+   * Fecha o caminho externo: so aceita quando o ficheiro JA esta anexado.
+   * `assinado_por_auth_uid` fica NULL na base -- ninguem assinou dentro da
+   * app. Devolve uma mensagem de erro amigavel, ou `null` em sucesso.
+   */
+  registarAssinaturaExterna: (documentoId: string) => Promise<string | null>;
   /** O conteudo em claro, uma vez. Lanca em erro -- quem chama mostra a mensagem. */
   verConteudo: (documentoId: string) => Promise<string>;
   assinar: (documentoId: string) => Promise<string | null>;
@@ -193,6 +213,54 @@ export function usePessoaDocumentos(
       }
     },
     [pessoaId, load],
+  );
+
+  const criarPorUpload = useCallback(
+    async (args: {
+      tipo: TipoDocumentoRH;
+      titulo: string;
+      vinculoId: string | null;
+    }): Promise<{ documentoId: string | null; erro: string | null }> => {
+      if (!pessoaId) return { documentoId: null, erro: null };
+      setSaving(true);
+      try {
+        const { data, error } = await hrRpc("rpc_hr_documento_upload_assinado_criar", {
+          p_pessoa_id: pessoaId,
+          p_vinculo_id: args.vinculoId,
+          p_tipo: args.tipo,
+          p_titulo: args.titulo,
+        });
+        if (error) throw error;
+        await load();
+        return { documentoId: (data ?? null) as string | null, erro: null };
+      } catch (e) {
+        if (!isPermissionError(e)) captureFlowError(e, "hr-documentos-criar-por-upload");
+        return { documentoId: null, erro: await getFriendlyErrorMessage(e) };
+      } finally {
+        setSaving(false);
+      }
+    },
+    [pessoaId, load],
+  );
+
+  const registarAssinaturaExterna = useCallback(
+    async (documentoId: string): Promise<string | null> => {
+      setSaving(true);
+      try {
+        const { error } = await hrRpc("rpc_hr_documento_registar_assinatura_externa", {
+          p_documento_id: documentoId,
+        });
+        if (error) throw error;
+        await load();
+        return null;
+      } catch (e) {
+        if (!isPermissionError(e)) captureFlowError(e, "hr-documentos-assinatura-externa");
+        return await getFriendlyErrorMessage(e);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [load],
   );
 
   const verConteudo = useCallback(async (documentoId: string): Promise<string> => {
@@ -318,6 +386,8 @@ export function usePessoaDocumentos(
     recusado,
     recarregar: load,
     emitir,
+    criarPorUpload,
+    registarAssinaturaExterna,
     verConteudo,
     assinar,
     anexarFicheiro,

@@ -5,7 +5,7 @@
  * quando o dialogo abre.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("@/hooks/useTranslation", () => ({
   useTranslation: () => ({ t: (chave: string) => chave, language: "pt" }),
@@ -15,15 +15,25 @@ vi.mock("@/lib/toast", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
-const { verConteudoMock, assinarMock, emitirMock, anexarFicheiroMock, obterUrlFicheiroMock, useHookMock } =
-  vi.hoisted(() => ({
-    verConteudoMock: vi.fn(),
-    assinarMock: vi.fn(),
-    emitirMock: vi.fn(),
-    anexarFicheiroMock: vi.fn(),
-    obterUrlFicheiroMock: vi.fn(),
-    useHookMock: vi.fn(),
-  }));
+const {
+  verConteudoMock,
+  assinarMock,
+  emitirMock,
+  anexarFicheiroMock,
+  obterUrlFicheiroMock,
+  criarPorUploadMock,
+  registarAssinaturaExternaMock,
+  useHookMock,
+} = vi.hoisted(() => ({
+  verConteudoMock: vi.fn(),
+  assinarMock: vi.fn(),
+  emitirMock: vi.fn(),
+  anexarFicheiroMock: vi.fn(),
+  obterUrlFicheiroMock: vi.fn(),
+  criarPorUploadMock: vi.fn(),
+  registarAssinaturaExternaMock: vi.fn(),
+  useHookMock: vi.fn(),
+}));
 
 vi.mock("@/hooks/usePessoaDocumentos", () => ({
   usePessoaDocumentos: useHookMock,
@@ -49,6 +59,7 @@ const DOCUMENTO_A_AGUARDAR: PessoaDocumento = {
   emitido_em: "2026-01-01T00:00:00Z",
   emitido_por: "rh1",
   assinado_em: null,
+  assinatura_origem: null,
   anulado_em: null,
   anulado_motivo: null,
 };
@@ -64,6 +75,8 @@ function resultadoBase(
     recusado: false,
     recarregar: vi.fn(),
     emitir: emitirMock,
+    criarPorUpload: criarPorUploadMock,
+    registarAssinaturaExterna: registarAssinaturaExternaMock,
     verConteudo: verConteudoMock,
     assinar: assinarMock,
     anexarFicheiro: anexarFicheiroMock,
@@ -435,5 +448,135 @@ describe("PessoaDocumentosTab", () => {
     expect(obterUrlFicheiroMock).not.toHaveBeenCalled();
 
     abrirJanela.mockRestore();
+  });
+
+  it("anexar contrato ja assinado: apos criarPorUpload, abre o dialogo de anexar ficheiro com o documento novo", async () => {
+    useHookMock.mockReturnValue(resultadoBase({ documentos: [] }));
+    criarPorUploadMock.mockResolvedValue({ documentoId: "docNovo", erro: null });
+
+    render(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        souAPessoa={false}
+        permissoes={{
+          view: true,
+          viewOwn: false,
+          edit: false,
+          emitir: true,
+          anular: false,
+          conteudoView: false,
+          modelosView: false,
+        }}
+      />,
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "hr.documentos.anexarContratoAssinado" }),
+    );
+
+    const dialogoCriar = screen.getByRole("dialog");
+    fireEvent.change(within(dialogoCriar).getByLabelText("hr.documentos.coluna.titulo"), {
+      target: { value: "Contrato assinado em papel" },
+    });
+    fireEvent.click(
+      within(dialogoCriar).getByRole("button", { name: "hr.documentos.anexarContratoAssinado" }),
+    );
+
+    await waitFor(() => expect(criarPorUploadMock).toHaveBeenCalled());
+    // Este e o ponto do bug HIGH: dados.documentos (capturado nesta closure)
+    // nao tem "docNovo" -- so aparece la num render futuro, depois de load()
+    // resolver. O dialogo de anexar ficheiro tem de abrir mesmo assim, com um
+    // documento construido localmente a partir do que ja se sabe (o id
+    // devolvido pela RPC e o rascunho preenchido), sem depender do array
+    // desactualizado.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "hr.documentos.anexar" })).toBeInTheDocument(),
+    );
+  });
+
+  it("so mostra 'confirmar assinatura registada em papel' quando o documento ja tem ficheiro anexado", () => {
+    const permissoes = {
+      view: true,
+      viewOwn: false,
+      edit: false,
+      emitir: true,
+      anular: false,
+      conteudoView: false,
+      modelosView: false,
+    };
+
+    const { rerender } = render(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        souAPessoa={false}
+        permissoes={permissoes}
+      />,
+    );
+    useHookMock.mockReturnValue(resultadoBase({ documentos: [DOCUMENTO_A_AGUARDAR] }));
+    rerender(
+      <PessoaDocumentosTab pessoaId="p1" souAPessoa={false} permissoes={permissoes} />,
+    );
+
+    // Sem ficheiro anexado ainda -- o botao nao aparece.
+    expect(
+      screen.queryByRole("button", { name: /hr.documentos.confirmarAssinaturaExterna/ }),
+    ).not.toBeInTheDocument();
+
+    useHookMock.mockReturnValue(
+      resultadoBase({
+        documentos: [
+          {
+            ...DOCUMENTO_A_AGUARDAR,
+            ficheiro_caminho: "org/p1/doc1/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa.pdf",
+            ficheiro_hash_sha256: "a".repeat(64),
+          },
+        ],
+      }),
+    );
+    rerender(
+      <PessoaDocumentosTab pessoaId="p1" souAPessoa={false} permissoes={permissoes} />,
+    );
+
+    // Com o ficheiro ja anexado -- o botao aparece.
+    expect(
+      screen.getByRole("button", { name: /hr.documentos.confirmarAssinaturaExterna/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("o badge distingue assinatura 'interna' (na app) de 'externa' (em papel) num documento assinado", () => {
+    useHookMock.mockReturnValue(
+      resultadoBase({
+        documentos: [
+          { ...DOCUMENTO_A_AGUARDAR, estado: "assinado", assinatura_origem: "interna" },
+        ],
+      }),
+    );
+    const permissoes = {
+      view: true,
+      viewOwn: false,
+      edit: false,
+      emitir: false,
+      anular: false,
+      conteudoView: false,
+      modelosView: false,
+    };
+    const { rerender } = render(
+      <PessoaDocumentosTab pessoaId="p1" souAPessoa={false} permissoes={permissoes} />,
+    );
+
+    expect(screen.getByText("hr.documentos.origemInterna")).toBeInTheDocument();
+    expect(screen.queryByText("hr.documentos.origemExterna")).not.toBeInTheDocument();
+
+    useHookMock.mockReturnValue(
+      resultadoBase({
+        documentos: [
+          { ...DOCUMENTO_A_AGUARDAR, estado: "assinado", assinatura_origem: "externa" },
+        ],
+      }),
+    );
+    rerender(<PessoaDocumentosTab pessoaId="p1" souAPessoa={false} permissoes={permissoes} />);
+
+    expect(screen.getByText("hr.documentos.origemExterna")).toBeInTheDocument();
+    expect(screen.queryByText("hr.documentos.origemInterna")).not.toBeInTheDocument();
   });
 });

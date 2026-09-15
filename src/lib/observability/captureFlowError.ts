@@ -144,6 +144,8 @@ export type BusinessFlow =
   | "hr-documentos-assinar"
   | "hr-documentos-anexar-ficheiro"
   | "hr-documentos-obter-url-ficheiro"
+  | "hr-documentos-criar-por-upload"
+  | "hr-documentos-assinatura-externa"
   | "hr-admissao-pendencias"
   | "hr-pessoa-duplicados-candidatos";
 

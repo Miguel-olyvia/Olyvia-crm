@@ -539,6 +539,10 @@ export default function PessoaDetail() {
             pessoaId={pessoa.id}
             souAPessoa={minhaPessoaId === pessoa.id}
             permissoes={permissoesDocumentos}
+            vinculosOpcoes={ficha.vinculos.map((v) => ({
+              value: v.id,
+              label: `${t(`hr.tipoContrato.${v.tipo_contrato}`)} · ${v.data_inicio}`,
+            }))}
           />
         </TabsContent>
 
