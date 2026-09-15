@@ -51,7 +51,6 @@ import { resolveQuotePdfEntityId } from "@/utils/quotePdfClient";
 import { fetchActivePdfTemplates } from "@/utils/quotePdfTemplate";
 
 import LineAttributesDialog from "@/components/LineAttributesDialog";
-import { InlineQuoteBuilder, InlineQuoteData, createEmptyInlineQuote } from "@/components/proposals/InlineQuoteBuilder";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { BundleEditAttributesDialog } from "@/components/quote/BundleEditAttributesDialog";
 import { InlineProductSelector } from "@/components/quote/InlineProductSelector";
@@ -366,7 +365,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [templates, setTemplates] = useState<any[]>([]);
-  const [inlineQuotes, setInlineQuotes] = useState<InlineQuoteData[]>([]);
   const saveLockRef = useRef(false);
   // Tracks the organization.id a draft restore attempt has already run for
   // (null = never tried). Deliberately NOT a boolean "did it ever run" latch:
@@ -417,7 +415,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       setActiveSection(typeof draft.activeSection === "string" ? draft.activeSection : "Geral");
       setSelectedFees(new Set(Array.isArray(draft.selectedFees) ? draft.selectedFees : []));
       setFeeVatOverrides(draft.feeVatOverrides && typeof draft.feeVatOverrides === "object" ? draft.feeVatOverrides : {});
-      setInlineQuotes(Array.isArray(draft.inlineQuotes) ? draft.inlineQuotes : []);
+      // `draft.inlineQuotes` deixa de ser restaurado de propósito. Rascunhos
+      // gravados antes desta alteração podem trazer linhas de bundle com o id do
+      // bundle em product_id (o defeito corrigido em InlineQuoteBuilder), que
+      // faziam rpc_save_quote rebentar com 23503/409. Ignorar a chave resolve
+      // esses rascunhos sem mexer em NEW_QUOTE_DRAFT_VERSION — subir a versão
+      // descartaria o rascunho INTEIRO, incluindo o orçamento principal, por
+      // causa do `!==` estrito acima.
       setSelectedDeal(draft.selectedDeal || null);
     } catch (error) {
       console.error("Error restoring quote draft:", error);
@@ -429,7 +433,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
     const hasDraftContent = Boolean(
       formData.deal_id || formData.cliente_id || formData.title || formData.obra_notas ||
-      formData.client_notes || formData.conditions || selectedDeal || lines.length > 0 || inlineQuotes.length > 0
+      formData.client_notes || formData.conditions || selectedDeal || lines.length > 0
     );
     if (!hasDraftContent) return;
 
@@ -445,13 +449,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         activeSection,
         selectedFees: Array.from(selectedFees),
         feeVatOverrides,
-        inlineQuotes,
         selectedDeal,
       }));
     }, 300);
 
     return () => window.clearTimeout(timeoutId);
-  }, [quoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, inlineQuotes, selectedDeal]);
+  }, [quoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, selectedDeal]);
 
   useEffect(() => {
     if (!activeCompany?.id || typeof window === "undefined") return;
@@ -459,7 +462,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       const hasDraftContent = Boolean(
         formData.deal_id || formData.cliente_id || formData.title || formData.obra_notas ||
-        formData.client_notes || formData.conditions || selectedDeal || lines.length > 0 || inlineQuotes.length > 0
+        formData.client_notes || formData.conditions || selectedDeal || lines.length > 0
       );
       if (!hasDraftContent) return;
       event.preventDefault();
@@ -468,7 +471,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [quoteId, activeCompany?.id, formData, lines.length, inlineQuotes.length, selectedDeal]);
+  }, [quoteId, activeCompany?.id, formData, lines.length, selectedDeal]);
 
   // Generate auto-reference for new quotes
   useEffect(() => {
@@ -2265,74 +2268,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         total: totals.grandTotal,
       };
 
-      // Inline quotes (additional quotes created within the builder) — same shape
-      // handleSave() used to build per-iteration, now batched into one RPC argument.
-      const inlineQuotesPayload = inlineQuotes
-        .filter((iq) => iq.lines.length > 0 && iq.lines.filter(l => l.qt > 0).length > 0)
-        .map((iq) => {
-          const iqData = {
-            deal_id: formData.deal_id || null,
-            organization_id: dealOrgId || activeCompany?.id || null,
-            root_organization_id: resolvedRootOrgId || activeCompany?.id || null,
-            title: iq.title || null,
-            obra_notas: iq.obra_notas || null,
-            modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
-            desconto_global_percent: iq.desconto_global_percent,
-            estado: "rascunho",
-            validade_dias: iq.validade_dias,
-            iva_rate: iq.iva_rate,
-            client_notes: iq.client_notes || null,
-            conditions: iq.conditions || null,
-          };
-
-          const iqLinesToInsert = iq.lines
-            .filter(l => l.qt > 0)
-            .map(l => {
-              // Mesma fonte única de preço usada no orçamento principal.
-              const lineDiscount = l.discount_percent || 0;
-              const precoSemIva = getLineSubtotal(l);
-              const ivaValor = precoSemIva * (l.iva_percent / 100);
-              const totalComIva = precoSemIva + ivaValor;
-              const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
-
-              return {
-                catalog_item_id: l.catalog_item_id || null,
-                product_id: l.product_id || null,
-                service_id: l.service_id || null,
-                bundle_id: l.bundle_id || null,
-                item_supplier_id: l.item_supplier_id || null,
-                selected_attributes: l.selected_attributes || {},
-                categoria: "",
-                descricao_snapshot: l.descricao_snapshot,
-                qt: l.qt,
-                custo_material_unit: l.custo_material_unit,
-                custo_mao_obra_unit: l.custo_mao_obra_unit,
-                margem_percent: l.margem_percent,
-                iva_percent: l.iva_percent,
-                int_percent: l.int_percent,
-                discount_percent: lineDiscount,
-                total_sem_iva: precoSemIva,
-                total_com_iva: totalComIva,
-                total_com_desconto: totalComDesconto,
-                ordem: l.ordem,
-                section_name: l.section_name || "Geral",
-                unidade: l.unidade || null,
-                item_description: l.item_description || null,
-                cost_price: l.cost_price || 0,
-                retail_price_unit: (l.retail_price_unit ?? null) || null,
-              };
-            });
-
-          const iqTotalSemIva = iqLinesToInsert.reduce((s, l) => s + l.total_sem_iva, 0);
-          const iqGrandTotal = iqLinesToInsert.reduce((s, l) => s + l.total_com_desconto, 0);
-
-          return {
-            data: iqData,
-            lines: iqLinesToInsert,
-            totals: { subtotal: iqTotalSemIva, total: iqGrandTotal },
-          };
-        });
-
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
 
       // KNOWN GAP: quoteData may carry lost_reason (set above when estado === "rejeitado"),
@@ -2350,7 +2285,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         p_lines: linesToInsert,
         p_fees: feesToInsert,
         p_totals: totalsPayload,
-        p_inline_quotes: inlineQuotesPayload,
+        // Orçamentos inline foram removidos deste builder (ver comentário na
+        // secção de itens). O parâmetro fica na RPC com DEFAULT '[]'::jsonb —
+        // mexer em assinaturas de funções já causou incidentes aqui.
+        p_inline_quotes: [],
       });
 
       if (saveError) throw saveError;
@@ -2358,8 +2296,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const savedQuoteRow = savedQuote as Database["public"]["Tables"]["quotes"]["Row"] | null;
       savedQuoteId = savedQuoteRow?.id || savedQuoteId;
 
-      // Clear inline quotes after saving
-      setInlineQuotes([]);
       if (activeCompany?.id && typeof window !== "undefined") {
         localStorage.removeItem(getQuoteDraftKey(activeCompany.id, quoteId));
       }
@@ -3496,7 +3432,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       setAssignedToTouched(false);
                       setSelectedFees(new Set());
                       setLines([]);
-                      setInlineQuotes([]);
                     }}
                   />
                 ) : (
@@ -3641,7 +3576,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             setAssignedToTouched(false);
                             setSelectedFees(new Set());
                             setLines([]);
-                            setInlineQuotes([]);
                           }}>
                           <X className="h-3 w-3 mr-1" /> Desligar
                         </Button>
@@ -4399,30 +4333,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 </Button>
               </div>
 
-              {/* Inline Quotes */}
-              {inlineQuotes.map((iq, idx) => (
-                <InlineQuoteBuilder
-                  key={iq.tempId}
-                  quote={iq}
-                  onChange={(updated) => {
-                    const newInline = [...inlineQuotes];
-                    newInline[idx] = updated;
-                    setInlineQuotes(newInline);
-                  }}
-                  onRemove={() => setInlineQuotes(inlineQuotes.filter((_, i) => i !== idx))}
-                  proposalTitle={formData.title}
-                  organizationId={activeCompany?.id}
-                />
-              ))}
-
-              {/* Add Another Quote Button */}
-              <div className="border-2 border-dashed rounded-lg p-4 text-center">
-                <Button variant="ghost" onClick={() => {
-                  setInlineQuotes([...inlineQuotes, createEmptyInlineQuote(formData.title)]);
-                }}>
-                  <Plus className="w-4 h-4 mr-1" /> Adicionar outro orçamento
-                </Button>
-              </div>
+              {/* Orçamentos inline removidos: eram gravados como registos soltos em
+                  `quotes`, sem proposal_id/entity_id/cliente_id, e por isso nunca
+                  apareciam na proposta, no PDF, no portal do cliente nem no
+                  proposals.value. O caminho correto para vários orçamentos é
+                  criá-los dentro da Proposta (Proposals.tsx / ProposalCreateDialog),
+                  onde fn_proposals_persist_relations preenche a ligação. */}
             </CardContent>
           </Card>
 
@@ -4455,7 +4371,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               onPreviewPdf={() => setShowPdfPreview(true)}
               onDownloadPdf={handleDownloadPdf}
               downloadingPdf={downloadingPdf}
-              inlineQuotes={inlineQuotes}
               onSaveAsTemplate={handleOpenSaveAsTemplateDialog}
               canViewCosts={canViewCosts}
             />
@@ -4625,7 +4540,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         lines={lines}
         organizationId={formData.organization_id || selectedSource?.organization_id || activeCompany?.id || null}
         entityId={resolvedQuoteEntityId}
-        inlineQuotes={inlineQuotes}
         initialTemplateId={formData.pdf_template_id || null}
         onTemplateChange={(id) => setFormData(prev => ({ ...prev, pdf_template_id: id || "" }))}
         fees={totals.fees.map(f => ({
