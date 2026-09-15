@@ -35,4 +35,6 @@ jobs:
             supabase/functions/send-schedule-invite/index.test.ts \
             supabase/functions/suggest-schedule-assignee/index.test.ts \
             supabase/functions/export-data/index.test.ts \
-            supabase/functions/generate-notifications/alertTiers.test.ts
+            supabase/functions/generate-notifications/alertTiers.test.ts \
+            supabase/functions/client-portal-action/index.test.ts \
+            supabase/functions/client-portal-action/sourceDrift.test.ts
