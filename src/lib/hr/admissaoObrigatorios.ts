@@ -30,6 +30,10 @@
  *   formulario: so saem de `CAMPOS_OBRIGATORIOS_ADMISSAO`.
  * - `conta_formato`: o convite so sabe gravar IBAN (e o unico ramo que a RPC
  *   tem), por isso o formato nao e uma escolha a fazer aqui.
+ *
+ * Desde 20261201060000 (decisao 38): `nif` e `niss` deixaram de ser os dois
+ * incondicionalmente obrigatorios -- basta um dos dois (ver `precisaDeNif` /
+ * `precisaDeNiss` mais abaixo, e a mesma excepcao em `hr_admissao_pendencias`).
  */
 export type OrigemCampoAdmissao = "pessoa" | "rh";
 
@@ -105,6 +109,20 @@ function precisaDeSituacaoDoConjuge(rascunho: RascunhoConviteObrigatorios): bool
   return rascunho.estado_civil === "casado" || rascunho.estado_civil === "uniao_de_facto";
 }
 
+/**
+ * Decisao 38 (mapa do modulo RH): NIF e NISS deixam de ser os dois
+ * incondicionalmente obrigatorios -- um dos dois basta. `nif` so e exigido
+ * quando `niss` ainda nao esta preenchido.
+ */
+function precisaDeNif(rascunho: RascunhoConviteObrigatorios): boolean {
+  return !estaPreenchido(rascunho, "niss");
+}
+
+/** Espelho de `precisaDeNif`: `niss` so e exigido quando `nif` ainda nao esta preenchido. */
+function precisaDeNiss(rascunho: RascunhoConviteObrigatorios): boolean {
+  return !estaPreenchido(rascunho, "nif");
+}
+
 export const CAMPOS_OBRIGATORIOS_ADMISSAO: readonly CampoObrigatorioAdmissao[] = [
   { codigo: "data_nascimento", origem: "pessoa", condicao: sempre },
   { codigo: "genero", origem: "pessoa", condicao: sempre },
@@ -124,8 +142,8 @@ export const CAMPOS_OBRIGATORIOS_ADMISSAO: readonly CampoObrigatorioAdmissao[] =
   { codigo: "naturalidade_pais", origem: "pessoa", condicao: sempre },
   { codigo: "habilitacao_academica", origem: "pessoa", condicao: sempre },
   { codigo: "habilitacao_data_conclusao", origem: "pessoa", condicao: sempre },
-  { codigo: "nif", origem: "pessoa", condicao: sempre },
-  { codigo: "niss", origem: "pessoa", condicao: sempre },
+  { codigo: "nif", origem: "pessoa", condicao: precisaDeNif },
+  { codigo: "niss", origem: "pessoa", condicao: precisaDeNiss },
   { codigo: "tipo_documento", origem: "pessoa", condicao: sempre },
   { codigo: "numero_documento", origem: "pessoa", condicao: sempre },
   { codigo: "validade_documento", origem: "pessoa", condicao: precisaDeValidadeDocumento },

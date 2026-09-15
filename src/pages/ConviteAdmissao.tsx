@@ -479,7 +479,7 @@ export default function ConviteAdmissao() {
                 <CampoTexto
                   id="convite-nif"
                   label={t("hr.campos.nif")}
-                  obrigatorio
+                  obrigatorio={obrigatorio1("nif")}
                   erro={erroDe("nif")}
                   valor={rascunho.nif}
                   onChange={(v) => definir("nif", v)}
@@ -487,7 +487,7 @@ export default function ConviteAdmissao() {
                 <CampoTexto
                   id="convite-niss"
                   label={t("hr.campos.niss")}
-                  obrigatorio
+                  obrigatorio={obrigatorio1("niss")}
                   erro={erroDe("niss")}
                   valor={rascunho.niss}
                   onChange={(v) => definir("niss", v.replace(/\s+/g, ""))}

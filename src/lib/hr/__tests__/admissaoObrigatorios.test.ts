@@ -169,8 +169,65 @@ describe("campoEhObrigatorio", () => {
     ).toBe(true);
   });
 
-  it("niss e sempre obrigatorio", () => {
+  it("niss e obrigatorio quando o nif tambem esta vazio", () => {
     expect(campoEhObrigatorio(VAZIO, "niss")).toBe(true);
+  });
+
+  // Decisao 38 (mapa do modulo RH): NIF e NISS deixaram de ser os dois
+  // incondicionalmente obrigatorios -- um dos dois basta. `condicao` depende
+  // do OUTRO campo, nao do proprio: com o nif preenchido, deixa de ser exigido
+  // o niss -- mas o nif continua "exigivel" em si (ver o teste de
+  // `pendenciasDoRascunho` a seguir para o efeito completo, que tambem olha
+  // ao que ja esta preenchido).
+  it("so o nif preenchido: o niss deixa de ser exigido", () => {
+    const rascunho = { ...VAZIO, nif: "123456789" };
+    expect(campoEhObrigatorio(rascunho, "niss")).toBe(false);
+  });
+
+  it("so o niss preenchido: o nif deixa de ser exigido", () => {
+    const rascunho = { ...VAZIO, niss: "12345678901" };
+    expect(campoEhObrigatorio(rascunho, "nif")).toBe(false);
+  });
+
+  it("nenhum dos dois preenchido: nif e niss ficam ambos obrigatorios", () => {
+    expect(campoEhObrigatorio(VAZIO, "nif")).toBe(true);
+    expect(campoEhObrigatorio(VAZIO, "niss")).toBe(true);
+  });
+
+  it("os dois preenchidos: nif e niss deixam de ser obrigatorios", () => {
+    const rascunho = { ...VAZIO, nif: "123456789", niss: "12345678901" };
+    expect(campoEhObrigatorio(rascunho, "nif")).toBe(false);
+    expect(campoEhObrigatorio(rascunho, "niss")).toBe(false);
+  });
+});
+
+describe("pendenciasDoRascunho -- nif e niss (decisao 38, NIF OU NISS)", () => {
+  it("so o nif preenchido: nenhum dos dois aparece nas pendencias", () => {
+    const rascunho = { ...COMPLETO, nif: "123456789", niss: "" };
+    const pendencias = pendenciasDoRascunho(rascunho);
+    expect(pendencias).not.toContain("nif");
+    expect(pendencias).not.toContain("niss");
+  });
+
+  it("so o niss preenchido: nenhum dos dois aparece nas pendencias", () => {
+    const rascunho = { ...COMPLETO, nif: "", niss: "12345678901" };
+    const pendencias = pendenciasDoRascunho(rascunho);
+    expect(pendencias).not.toContain("nif");
+    expect(pendencias).not.toContain("niss");
+  });
+
+  it("nenhum dos dois preenchido: os dois aparecem nas pendencias", () => {
+    const rascunho = { ...COMPLETO, nif: "", niss: "" };
+    const pendencias = pendenciasDoRascunho(rascunho);
+    expect(pendencias).toContain("nif");
+    expect(pendencias).toContain("niss");
+  });
+
+  it("os dois preenchidos: nenhum dos dois aparece nas pendencias", () => {
+    const rascunho = { ...COMPLETO, nif: "123456789", niss: "12345678901" };
+    const pendencias = pendenciasDoRascunho(rascunho);
+    expect(pendencias).not.toContain("nif");
+    expect(pendencias).not.toContain("niss");
   });
 });
 
