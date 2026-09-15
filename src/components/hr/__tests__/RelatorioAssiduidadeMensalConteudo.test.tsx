@@ -27,12 +27,21 @@ vi.mock("@/hooks/useTranslation", () => ({
         "hr.relatorioMensal.coluna.dia": "Dia",
         "hr.relatorioMensal.coluna.planeado": "Planeado",
         "hr.relatorioMensal.coluna.realizado": "Realizado",
+        "hr.relatorioMensal.coluna.horasExtra": "Horas extra",
         "hr.relatorioMensal.coluna.obra": "Obra",
         "hr.relatorioMensal.coluna.estado": "Estado",
         "hr.relatorioMensal.estado.normal": "Normal",
+        "hr.relatorioMensal.estado.descanso": "Descanso",
+        "hr.relatorioMensal.estado.feriado": "Feriado",
+        "hr.relatorioMensal.feriadoTrabalhado": "Feriado trabalhado",
+        "hr.relatorioMensal.descansoTrabalhado": "Descanso trabalhado",
         "hr.relatorioMensal.semCargo": "Sem cargo registado",
         "hr.relatorioMensal.admissao": `Admissao em ${valores?.data ?? ""}`,
         "hr.assiduidade.dia.faltaDe": `Falta de ${valores?.duracao ?? ""}`,
+        "hr.relatorioMensal.totais.horasExtra": `Horas extra: ${valores?.duracao ?? ""}`,
+        "hr.relatorioMensal.totais.diasFeriadoTrabalhados": `${valores?.dias ?? ""} dias de feriado trabalhados`,
+        "hr.relatorioMensal.totais.faltaCompleta": `${valores?.dias ?? ""} faltas completas`,
+        "hr.relatorioMensal.totais.faltaIncompleta": `${valores?.dias ?? ""} faltas incompletas`,
       };
       return chaves[chave] ?? chave;
     },
@@ -78,9 +87,12 @@ beforeEach(() => {
         categoriaAusencia: null,
         planeadoMinutos: 480,
         realizadoMinutos: 480,
+        planeadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "17:00" }],
+        realizadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "17:00" }],
         obraHoras: 0,
         temFalta: false,
         minutosEmFalta: 0,
+        horasExtraMinutos: 0,
       },
     ],
     totais: {
@@ -88,7 +100,10 @@ beforeEach(() => {
       planeadoMinutos: 480,
       realizadoMinutos: 480,
       obraHoras: 0,
-      diasComFalta: 0,
+      diasFeriadoTrabalhados: 0,
+      diasComFaltaCompleta: 0,
+      diasComFaltaIncompleta: 0,
+      horasExtraMinutos: 0,
     },
     obras: [],
     obrasRecusadas: false,
@@ -183,5 +198,220 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
     );
 
     expect(aoTerminarCarregamento).not.toHaveBeenCalled();
+  });
+
+  it("mostra o planeado e o realizado como intervalos, com o almoco a partir os dois em dois", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "normal",
+        categoriaAusencia: null,
+        planeadoMinutos: 480,
+        realizadoMinutos: 480,
+        planeadoIntervalos: [
+          { hora_inicio: "09:00:00", hora_fim: "12:00:00" },
+          { hora_inicio: "13:00:00", hora_fim: "18:00:00" },
+        ],
+        realizadoIntervalos: [
+          { hora_inicio: "09:00:00", hora_fim: "13:00:00" },
+          { hora_inicio: "14:00:00", hora_fim: "18:00:00" },
+        ],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 0,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("09:00-12:00 | 13:00-18:00")).toBeInTheDocument();
+    expect(screen.getByText("09:00-13:00 14:00-18:00")).toBeInTheDocument();
+  });
+
+  it("sem planeado nem realizado nesse dia, mostra um travessao", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "normal",
+        categoriaAusencia: null,
+        planeadoMinutos: 0,
+        realizadoMinutos: 0,
+        planeadoIntervalos: [],
+        realizadoIntervalos: [],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 0,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("a coluna de horas extra so mostra o excedente quando ha excedente, nunca negativo", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "normal",
+        categoriaAusencia: null,
+        planeadoMinutos: 480,
+        realizadoMinutos: 480,
+        planeadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "17:00" }],
+        realizadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "17:00" }],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 0,
+      },
+      {
+        iso: "2026-09-02",
+        diaSemana: 3,
+        estado: "normal",
+        categoriaAusencia: null,
+        planeadoMinutos: 480,
+        realizadoMinutos: 540,
+        planeadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "17:00" }],
+        realizadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "18:00" }],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 60,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("+1h00")).toBeInTheDocument();
+  });
+
+  it("um feriado trabalhado deixa de ficar escondido: mostra planeado/realizado e fica destacado", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "feriado",
+        categoriaAusencia: null,
+        planeadoMinutos: 0,
+        realizadoMinutos: 240,
+        planeadoIntervalos: [],
+        realizadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "13:00" }],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 240,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("09:00-13:00")).toBeInTheDocument();
+    expect(screen.getByText("Feriado trabalhado")).toBeInTheDocument();
+    const linha = screen.getByText("2026-09-01").closest("tr");
+    expect(linha?.className).toMatch(/bg-amber/);
+  });
+
+  it("um descanso trabalhado fica destacado com uma cor diferente da do feriado trabalhado", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "descanso",
+        categoriaAusencia: null,
+        planeadoMinutos: 0,
+        realizadoMinutos: 120,
+        planeadoIntervalos: [],
+        realizadoIntervalos: [{ hora_inicio: "10:00", hora_fim: "12:00" }],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 120,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("Descanso trabalhado")).toBeInTheDocument();
+    const linha = screen.getByText("2026-09-01").closest("tr");
+    expect(linha?.className).toMatch(/bg-blue/);
+    expect(linha?.className).not.toMatch(/bg-amber/);
+  });
+
+  it("um feriado ou descanso sem trabalho nenhum continua escondido, sem destaque", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "feriado",
+        categoriaAusencia: null,
+        planeadoMinutos: 0,
+        realizadoMinutos: 0,
+        planeadoIntervalos: [],
+        realizadoIntervalos: [],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 0,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.queryByText("Feriado trabalhado")).not.toBeInTheDocument();
+    const linha = screen.getByText("2026-09-01").closest("tr");
+    expect(linha?.className ?? "").not.toMatch(/bg-amber|bg-blue/);
   });
 });

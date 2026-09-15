@@ -92,6 +92,12 @@ const COLUNAS_OBRA =
 
 export type EstadoDiaRelatorio = "normal" | "descanso" | "feriado" | "ausencia";
 
+/** Um intervalo `HH:MM-HH:MM`, planeado ou realizado, pronto a mostrar. */
+export interface IntervaloRelatorio {
+  hora_inicio: string;
+  hora_fim: string;
+}
+
 export interface DiaRelatorioMensal {
   iso: string;
   /** 0 = domingo .. 6 = sabado, para quem quiser desenhar a abreviatura do dia. */
@@ -101,9 +107,20 @@ export interface DiaRelatorioMensal {
   categoriaAusencia: CategoriaAusencia | null;
   planeadoMinutos: number;
   realizadoMinutos: number;
+  /** Os intervalos planeados do dia, na ordem em que se sucedem (o almoco parte em dois). */
+  planeadoIntervalos: IntervaloRelatorio[];
+  /** Os intervalos REALMENTE picados -- podem diferir do planeado no horario do almoco. */
+  realizadoIntervalos: IntervaloRelatorio[];
   obraHoras: number;
   temFalta: boolean;
   minutosEmFalta: number;
+  /**
+   * O excedente de `realizadoMinutos` sobre `planeadoMinutos`, nunca negativo:
+   * entrar mais cedo, sair mais tarde, ou trabalhar um dia sem nenhum horario
+   * planeado (feriado, descanso). Sem taxa nem classificacao legal -- e so o
+   * numero de minutos a mais, fora de ambito decidir se e a 50% ou nocturno.
+   */
+  horasExtraMinutos: number;
 }
 
 export interface TotaisRelatorioMensal {
@@ -111,7 +128,16 @@ export interface TotaisRelatorioMensal {
   planeadoMinutos: number;
   realizadoMinutos: number;
   obraHoras: number;
-  diasComFalta: number;
+  /** Dias de feriado em que a pessoa trabalhou mesmo assim (realizado > 0). */
+  diasFeriadoTrabalhados: number;
+  /**
+   * Falta completa: a falta cobre todo o planeado do dia (so faz sentido
+   * quando havia planeado -- um dia sem horario nenhum nao tem falta a medir).
+   * Falta incompleta: cobre uma parte, a pessoa trabalhou o resto.
+   */
+  diasComFaltaCompleta: number;
+  diasComFaltaIncompleta: number;
+  horasExtraMinutos: number;
 }
 
 interface Satelite<T> {
@@ -161,6 +187,23 @@ function minutosPlaneadosDoDia(linhas: readonly HorarioPlaneado[], iso: string):
     if (inicio === null || fim === null || fim <= inicio) return soma;
     return soma + (fim - inicio);
   }, 0);
+}
+
+/**
+ * Os intervalos REALMENTE picados de um dia, ordenados pela hora de inicio.
+ *
+ * Cada linha de `pessoas_horario_realizado` ja e um intervalo fechado (um par
+ * entrada/saida): se a pessoa picou para almoco ha duas linhas, se nao picou
+ * ha uma so, mais longa. Nao ha aqui nenhuma logica de emparelhamento -- so a
+ * ordenacao para o ecra mostrar da esquerda para a direita.
+ */
+function intervalosOrdenados(
+  linhas: readonly Pick<RealizadoComCorreccao, "hora_inicio" | "hora_fim">[],
+): IntervaloRelatorio[] {
+  return linhas
+    .filter((linha) => Boolean(linha.hora_inicio) && Boolean(linha.hora_fim))
+    .map((linha) => ({ hora_inicio: linha.hora_inicio, hora_fim: linha.hora_fim }))
+    .sort((a, b) => a.hora_inicio.localeCompare(b.hora_inicio));
 }
 
 export function useRelatorioAssiduidadeMensal(
@@ -314,16 +357,26 @@ export function useRelatorioAssiduidadeMensal(
         estado = "descanso";
       }
 
+      const planeadoMinutos = minutosPlaneadosDoDia(planeado.linhas, iso);
+      const realizadoMinutos = realizadoDoDia.reduce((soma, linha) => soma + (linha.minutos ?? 0), 0);
+      const { intervalos: planeadoIntervalos } = leituraDoPlaneado(planeado.linhas, iso);
+
       linhas.push({
         iso,
         diaSemana: diaSemanaDe(iso),
         estado,
         categoriaAusencia,
-        planeadoMinutos: minutosPlaneadosDoDia(planeado.linhas, iso),
-        realizadoMinutos: realizadoDoDia.reduce((soma, linha) => soma + (linha.minutos ?? 0), 0),
+        planeadoMinutos,
+        realizadoMinutos,
+        planeadoIntervalos: planeadoIntervalos.map((intervalo) => ({
+          hora_inicio: intervalo.hora_inicio,
+          hora_fim: intervalo.hora_fim,
+        })),
+        realizadoIntervalos: intervalosOrdenados(realizadoDoDia),
         obraHoras: obraDoDia.reduce((soma, obra) => soma + Number(obra.horas), 0),
         temFalta: faltasDoDia.length > 0,
         minutosEmFalta: faltasDoDia.reduce((soma, falta) => soma + (falta.minutos ?? 0), 0),
+        horasExtraMinutos: Math.max(realizadoMinutos - planeadoMinutos, 0),
       });
     }
     return linhas;
@@ -342,14 +395,44 @@ export function useRelatorioAssiduidadeMensal(
   const totais = useMemo<TotaisRelatorioMensal>(
     () =>
       dias.reduce<TotaisRelatorioMensal>(
-        (acc, dia) => ({
-          diasTrabalhados: acc.diasTrabalhados + (dia.realizadoMinutos > 0 ? 1 : 0),
-          planeadoMinutos: acc.planeadoMinutos + dia.planeadoMinutos,
-          realizadoMinutos: acc.realizadoMinutos + dia.realizadoMinutos,
-          obraHoras: acc.obraHoras + dia.obraHoras,
-          diasComFalta: acc.diasComFalta + (dia.temFalta ? 1 : 0),
-        }),
-        { diasTrabalhados: 0, planeadoMinutos: 0, realizadoMinutos: 0, obraHoras: 0, diasComFalta: 0 },
+        (acc, dia) => {
+          // Falta completa so faz sentido com planeado > 0: sem horario nesse
+          // dia nao ha "todo o planeado" para a falta cobrir.
+          const faltaCompleta =
+            dia.temFalta && dia.planeadoMinutos > 0 && dia.minutosEmFalta >= dia.planeadoMinutos;
+          const faltaIncompleta =
+            dia.temFalta && dia.planeadoMinutos > 0 && dia.minutosEmFalta > 0 && !faltaCompleta;
+
+          // Uma ausencia aprovada de dia inteiro fica sempre escondida na UI
+          // (trabalhouForaDoNormal so revela feriado/descanso, nunca
+          // ausencia); por isso os seus minutos nao podem entrar nos totais
+          // de horas extra nem de dias trabalhados, sob pena de o total
+          // mostrar minutos que nenhuma linha visivel explica.
+          const contaParaTotais = dia.estado !== "ausencia";
+
+          return {
+            diasTrabalhados:
+              acc.diasTrabalhados + (contaParaTotais && dia.realizadoMinutos > 0 ? 1 : 0),
+            planeadoMinutos: acc.planeadoMinutos + dia.planeadoMinutos,
+            realizadoMinutos: acc.realizadoMinutos + dia.realizadoMinutos,
+            obraHoras: acc.obraHoras + dia.obraHoras,
+            diasFeriadoTrabalhados:
+              acc.diasFeriadoTrabalhados + (dia.estado === "feriado" && dia.realizadoMinutos > 0 ? 1 : 0),
+            diasComFaltaCompleta: acc.diasComFaltaCompleta + (faltaCompleta ? 1 : 0),
+            diasComFaltaIncompleta: acc.diasComFaltaIncompleta + (faltaIncompleta ? 1 : 0),
+            horasExtraMinutos: acc.horasExtraMinutos + (contaParaTotais ? dia.horasExtraMinutos : 0),
+          };
+        },
+        {
+          diasTrabalhados: 0,
+          planeadoMinutos: 0,
+          realizadoMinutos: 0,
+          obraHoras: 0,
+          diasFeriadoTrabalhados: 0,
+          diasComFaltaCompleta: 0,
+          diasComFaltaIncompleta: 0,
+          horasExtraMinutos: 0,
+        },
       ),
     [dias],
   );

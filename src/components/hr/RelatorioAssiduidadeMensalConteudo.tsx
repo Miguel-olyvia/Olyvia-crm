@@ -20,7 +20,7 @@
  * dispara uma vez por montagem (uma nova busca a seguir, por exemplo depois
  * de registar uma obra, nao volta a avisar).
  */
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -33,10 +33,11 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { formatarDuracao } from "@/lib/hr/assiduidade";
+import { formatarDuracao, horaCurta } from "@/lib/hr/assiduidade";
 import {
   useRelatorioAssiduidadeMensal,
   type DiaRelatorioMensal,
+  type IntervaloRelatorio,
 } from "@/hooks/useRelatorioAssiduidadeMensal";
 import type { PermissoesAssiduidade } from "@/types/hrAssiduidade";
 
@@ -65,6 +66,44 @@ function chaveDoEstado(dia: DiaRelatorioMensal): string {
       : "hr.relatorioMensal.estado.ausencia.outro";
   }
   return `hr.relatorioMensal.estado.${dia.estado}`;
+}
+
+/** "09:00-12:00 | 13:00-18:00" -- o formato do Excel do Kairos para o planeado. */
+function formatarPlaneado(intervalos: readonly IntervaloRelatorio[]): string {
+  if (intervalos.length === 0) return "—";
+  return intervalos
+    .map((intervalo) => `${horaCurta(intervalo.hora_inicio)}-${horaCurta(intervalo.hora_fim)}`)
+    .join(" | ");
+}
+
+/** "09:00-13:00 14:00-18:00" -- os intervalos REAIS picados, separados por espaco. */
+function formatarRealizado(intervalos: readonly IntervaloRelatorio[]): string {
+  if (intervalos.length === 0) return "—";
+  return intervalos
+    .map((intervalo) => `${horaCurta(intervalo.hora_inicio)}-${horaCurta(intervalo.hora_fim)}`)
+    .join(" ");
+}
+
+/**
+ * A pessoa trabalhou num dia que, por omissao, nao tinha horario nenhum
+ * (feriado ou descanso). Uma ausencia aprovada fica de fora de proposito: e
+ * um caso raro (picar durante ferias aprovadas) que este relatorio nao trata.
+ */
+function trabalhouForaDoNormal(dia: DiaRelatorioMensal): boolean {
+  return (dia.estado === "feriado" || dia.estado === "descanso") && dia.realizadoMinutos > 0;
+}
+
+/** Estilo inline que sobrevive a impressao: uma `background-color` sem isto some no papel. */
+const AJUSTE_COR_IMPRESSAO = {
+  WebkitPrintColorAdjust: "exact",
+  printColorAdjust: "exact",
+} as unknown as CSSProperties;
+
+function classeDeDestaque(dia: DiaRelatorioMensal): string | undefined {
+  if (!trabalhouForaDoNormal(dia)) return undefined;
+  return dia.estado === "feriado"
+    ? "bg-amber-50 dark:bg-amber-950/30"
+    : "bg-blue-50 dark:bg-blue-950/30";
 }
 
 export function RelatorioAssiduidadeMensalConteudo({
@@ -157,49 +196,96 @@ export function RelatorioAssiduidadeMensalConteudo({
                 <TableHead>{t("hr.relatorioMensal.coluna.dia")}</TableHead>
                 <TableHead>{t("hr.relatorioMensal.coluna.planeado")}</TableHead>
                 <TableHead>{t("hr.relatorioMensal.coluna.realizado")}</TableHead>
+                <TableHead>{t("hr.relatorioMensal.coluna.horasExtra")}</TableHead>
                 <TableHead>{t("hr.relatorioMensal.coluna.obra")}</TableHead>
                 <TableHead>{t("hr.relatorioMensal.coluna.estado")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {relatorio.dias.map((dia) => {
-                const diaSubstituido = dia.estado !== "normal";
+                const trabalhou = trabalhouForaDoNormal(dia);
+                // So se esconde o bloco de valores quando o dia foi substituido
+                // E nao houve trabalho nenhum -- um feriado ou descanso
+                // trabalhado continua a mostrar planeado, realizado e horas
+                // extra, so a coluna Estado e que fica.
+                const esconderValores = dia.estado !== "normal" && !trabalhou;
+                const destaque = classeDeDestaque(dia);
                 return (
-                  <TableRow key={dia.iso}>
-                    <TableCell className="tabular-nums">{dia.iso}</TableCell>
-                    <TableCell className="text-muted-foreground">
+                  <TableRow
+                    key={dia.iso}
+                    className={destaque}
+                    style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}
+                  >
+                    <TableCell
+                      className="tabular-nums"
+                      style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}
+                    >
+                      {dia.iso}
+                    </TableCell>
+                    <TableCell
+                      className="text-muted-foreground"
+                      style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}
+                    >
                       {DIAS_SEMANA_ABREV[dia.diaSemana]}
                     </TableCell>
-                    {diaSubstituido ? (
-                      <TableCell colSpan={3} className="text-muted-foreground">
+                    {esconderValores ? (
+                      <TableCell
+                        colSpan={4}
+                        className="text-muted-foreground"
+                        style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}
+                      >
                         {t(chaveDoEstado(dia))}
                       </TableCell>
                     ) : (
                       <>
-                        <TableCell className="tabular-nums">
-                          {dia.planeadoMinutos > 0 ? formatarDuracao(dia.planeadoMinutos) : "—"}
+                        <TableCell
+                          className="tabular-nums whitespace-nowrap"
+                          style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}
+                        >
+                          {formatarPlaneado(dia.planeadoIntervalos)}
                         </TableCell>
-                        <TableCell className="tabular-nums">
-                          {dia.realizadoMinutos > 0 ? formatarDuracao(dia.realizadoMinutos) : "—"}
+                        <TableCell
+                          className="tabular-nums whitespace-nowrap"
+                          style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}
+                        >
+                          {formatarRealizado(dia.realizadoIntervalos)}
                         </TableCell>
-                        <TableCell className="tabular-nums">
+                        <TableCell
+                          className="tabular-nums"
+                          style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}
+                        >
+                          {dia.horasExtraMinutos > 0 ? `+${formatarDuracao(dia.horasExtraMinutos)}` : "—"}
+                        </TableCell>
+                        <TableCell
+                          className="tabular-nums"
+                          style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}
+                        >
                           {dia.obraHoras > 0 ? `${dia.obraHoras}h` : "—"}
                         </TableCell>
                       </>
                     )}
-                    <TableCell>
-                      {dia.temFalta && (
-                        <Badge variant="outline" className="font-normal">
-                          {t("hr.assiduidade.dia.faltaDe", {
-                            duracao: formatarDuracao(dia.minutosEmFalta),
-                          })}
-                        </Badge>
-                      )}
-                      {!diaSubstituido && !dia.temFalta && (
-                        <span className="text-muted-foreground">
-                          {t("hr.relatorioMensal.estado.normal")}
-                        </span>
-                      )}
+                    <TableCell style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}>
+                      <div className="flex flex-col gap-1">
+                        {esconderValores ? null : (
+                          <span className="text-muted-foreground">{t(chaveDoEstado(dia))}</span>
+                        )}
+                        {trabalhou && (
+                          <Badge variant="outline" className="w-fit font-normal">
+                            {t(
+                              dia.estado === "feriado"
+                                ? "hr.relatorioMensal.feriadoTrabalhado"
+                                : "hr.relatorioMensal.descansoTrabalhado",
+                            )}
+                          </Badge>
+                        )}
+                        {dia.temFalta && (
+                          <Badge variant="outline" className="w-fit font-normal">
+                            {t("hr.assiduidade.dia.faltaDe", {
+                              duracao: formatarDuracao(dia.minutosEmFalta),
+                            })}
+                          </Badge>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -229,8 +315,23 @@ export function RelatorioAssiduidadeMensalConteudo({
               })}
             </span>
             <span>
-              {t("hr.relatorioMensal.totais.faltas", {
-                dias: String(relatorio.totais.diasComFalta),
+              {t("hr.relatorioMensal.totais.horasExtra", {
+                duracao: formatarDuracao(relatorio.totais.horasExtraMinutos),
+              })}
+            </span>
+            <span>
+              {t("hr.relatorioMensal.totais.diasFeriadoTrabalhados", {
+                dias: String(relatorio.totais.diasFeriadoTrabalhados),
+              })}
+            </span>
+            <span>
+              {t("hr.relatorioMensal.totais.faltaCompleta", {
+                dias: String(relatorio.totais.diasComFaltaCompleta),
+              })}
+            </span>
+            <span>
+              {t("hr.relatorioMensal.totais.faltaIncompleta", {
+                dias: String(relatorio.totais.diasComFaltaIncompleta),
               })}
             </span>
           </div>

@@ -306,6 +306,281 @@ describe("useRelatorioAssiduidadeMensal", () => {
     expect(result.current.totais.realizadoMinutos).toBe(480);
   });
 
+  it("guarda os intervalos planeados e realizados do dia, nao so o total em minutos", async () => {
+    tabelas.pessoas_horario_planeado = [
+      { ...planeadoSemanal(2, "09:00", "12:00"), id: "pl-2-a", ordem: 1 },
+      { ...planeadoSemanal(2, "13:00", "18:00"), id: "pl-2-b", ordem: 2 },
+    ];
+    tabelas.pessoas_horario_realizado = [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-01",
+        hora_inicio: "09:00",
+        hora_fim: "13:00",
+        minutos: 240,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+      {
+        id: "r2",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-01",
+        hora_inicio: "14:00",
+        hora_fim: "18:00",
+        minutos: 240,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+    expect(dia1?.planeadoIntervalos).toEqual([
+      { hora_inicio: "09:00", hora_fim: "12:00" },
+      { hora_inicio: "13:00", hora_fim: "18:00" },
+    ]);
+    // O almoco foi picado a horas diferentes do planeado -- 13:00-14:00, nao 12:00-13:00.
+    expect(dia1?.realizadoIntervalos).toEqual([
+      { hora_inicio: "09:00", hora_fim: "13:00" },
+      { hora_inicio: "14:00", hora_fim: "18:00" },
+    ]);
+  });
+
+  it("horasExtraMinutos e o excedente do realizado sobre o planeado, nunca negativo", async () => {
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min
+    tabelas.pessoas_horario_realizado = [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-01",
+        hora_inicio: "09:00",
+        hora_fim: "19:00", // saiu 1h mais tarde: 600 min
+        minutos: 600,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+    expect(dia1?.horasExtraMinutos).toBe(60);
+
+    const dia2 = result.current.dias.find((d) => d.iso === "2026-09-02"); // sem realizado, so falta
+    expect(dia2?.horasExtraMinutos).toBe(0);
+  });
+
+  it("trabalhar um feriado sem horario nenhum planeado conta tudo como horas extra", async () => {
+    tabelas.pessoas_horario_planeado = [diaDeFolga(1)]; // segunda, sem horario
+    tabelas.schedule_holidays = [{ holiday_date: "2026-09-07", is_recurring: false }];
+    tabelas.pessoas_horario_realizado = [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-07",
+        hora_inicio: "09:00",
+        hora_fim: "13:00",
+        minutos: 240,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const feriado = result.current.dias.find((d) => d.iso === "2026-09-07");
+    expect(feriado?.estado).toBe("feriado");
+    expect(feriado?.horasExtraMinutos).toBe(240);
+    expect(result.current.totais.diasFeriadoTrabalhados).toBe(1);
+  });
+
+  it("falta completa (cobre todo o planeado) e falta incompleta (cobre so parte) contam-se em separado", async () => {
+    tabelas.pessoas_horario_planeado = [
+      planeadoSemanal(2, "09:00", "18:00"), // terca, 2026-09-01, 540 min
+      planeadoSemanal(3, "09:00", "18:00"), // quarta, 2026-09-02, 540 min
+    ];
+    tabelas.pessoas_faltas = [
+      {
+        id: "f1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        data: "2026-09-01",
+        planeado_id: null,
+        vinculo_id: null,
+        local_id: null,
+        hora_inicio: "09:00",
+        hora_fim: "18:00",
+        minutos: 540, // falta completa
+        motivo_codigo: "falta_total",
+        justificacao_estado: "sem_justificacao",
+        justificada: false,
+        remunerada: false,
+        desconta_saldo: false,
+        justificacao_decidida_por: null,
+        justificacao_decidida_em: null,
+        justificacao_motivo: null,
+        ausencia_dia_id: null,
+        corrige_falta_id: null,
+        correccao_motivo: null,
+        estado: "activa",
+        anulado_em: null,
+        anulacao_motivo: null,
+        created_at: "2026-09-01T09:00:00Z",
+      },
+      {
+        id: "f2",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        data: "2026-09-02",
+        planeado_id: null,
+        vinculo_id: null,
+        local_id: null,
+        hora_inicio: "09:00",
+        hora_fim: "11:00",
+        minutos: 120, // falta incompleta (so 120 de 540)
+        motivo_codigo: "atraso",
+        justificacao_estado: "sem_justificacao",
+        justificada: false,
+        remunerada: false,
+        desconta_saldo: false,
+        justificacao_decidida_por: null,
+        justificacao_decidida_em: null,
+        justificacao_motivo: null,
+        ausencia_dia_id: null,
+        corrige_falta_id: null,
+        correccao_motivo: null,
+        estado: "activa",
+        anulado_em: null,
+        anulacao_motivo: null,
+        created_at: "2026-09-02T09:00:00Z",
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.totais.diasComFaltaCompleta).toBe(1);
+    expect(result.current.totais.diasComFaltaIncompleta).toBe(1);
+  });
+
+  it("trabalhar durante uma ausencia aprovada de dia inteiro nao entra nos totais de horas extra nem de dias trabalhados", async () => {
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min
+    tabelas.pessoas_ausencias_dias = [
+      {
+        id: "ad1",
+        pedido_id: "ped1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        tipo_id: "tipo-ferias",
+        data: "2026-09-01",
+        fraccao_dia: 1,
+        conta_saldo: true,
+        e_feriado: false,
+        e_fim_semana: false,
+        periodo_inicio: "2026-09-01",
+        estado: "aprovado",
+      },
+    ];
+    tabelas.hr_ausencias_tipos = [
+      {
+        id: "tipo-ferias",
+        organization_id: ORG_ACTIVA,
+        codigo: "ferias",
+        nome: "Ferias",
+        categoria: "ferias",
+      },
+    ];
+    // Picou 1h durante as ferias aprovadas -- nao devia poluir os totais do mes.
+    tabelas.pessoas_horario_realizado = [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-01",
+        hora_inicio: "09:00",
+        hora_fim: "10:00",
+        minutos: 60,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+    expect(dia1?.estado).toBe("ausencia");
+    expect(dia1?.realizadoMinutos).toBe(60); // o dado em si continua guardado no dia
+    // Mas os totais do mes tem de ficar como se o dia nao tivesse trabalho,
+    // porque a UI nunca mostra este trabalho (ausencia fica sempre escondida).
+    expect(result.current.totais.horasExtraMinutos).toBe(0);
+    expect(result.current.totais.diasTrabalhados).toBe(0);
+  });
+
   it("registarObra chama a RPC com a pessoa e a organizacao resolvidas", async () => {
     const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
     await waitFor(() => expect(result.current.loading).toBe(false));
