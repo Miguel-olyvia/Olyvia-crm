@@ -2932,15 +2932,19 @@ const Proposals = () => {
           </>
         )}
 
-        {(sn === "draft" || sn === "rascunho") && (
-          <>
-            <DropdownMenuSeparator />
-            <PermissionGate permission="proposals.delete">
-              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteClick(proposal.id)}>
-                <Trash2 className="w-3.5 h-3.5 mr-2" /> Eliminar
-              </DropdownMenuItem>
-            </PermissionGate>
-          </>
+        <DropdownMenuSeparator />
+        {(sn === "draft" || sn === "rascunho") ? (
+          <PermissionGate permission="proposals.delete">
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteClick(proposal.id)}>
+              <Trash2 className="w-3.5 h-3.5 mr-2" /> Eliminar
+            </DropdownMenuItem>
+          </PermissionGate>
+        ) : (
+          <PermissionGate permissions={["proposals.delete", "proposals.delete_sent"]} requireAll>
+            <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => handleDeleteClick(proposal.id)}>
+              <Trash2 className="w-3.5 h-3.5 mr-2" /> Eliminar proposta enviada
+            </DropdownMenuItem>
+          </PermissionGate>
         )}
       </DropdownMenuContent>
     );
@@ -4137,10 +4141,37 @@ const Proposals = () => {
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('proposals.delete.title')}</AlertDialogTitle>
-            <AlertDialogDescription>{t('proposals.delete.description')}</AlertDialogDescription>
-          </AlertDialogHeader>
+          {(() => {
+            const deletingProposal = proposals.find(p => p.id === deletingId) || null;
+            const deletingSn = deletingProposal ? getStageName(deletingProposal) : "";
+            const isDraft = deletingSn === "draft" || deletingSn === "rascunho";
+            if (isDraft) {
+              return (
+                <>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>{t('proposals.delete.title')}</AlertDialogTitle>
+                    <AlertDialogDescription>{t('proposals.delete.description')}</AlertDialogDescription>
+                  </AlertDialogHeader>
+                </>
+              );
+            }
+            return (
+              <AlertDialogHeader>
+                <AlertDialogTitle>Eliminar proposta já enviada?</AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-2">
+                    <p>Esta proposta já saiu de rascunho — foi enviada, aceite, rejeitada ou expirou.</p>
+                    {deletingProposal?.published_at && (
+                      <p className="text-xs font-medium text-amber-600">
+                        Tem portal de cliente activo: ao eliminar, deixa de estar visível no portal — o cliente já não a vê lá, mas o portal em si continua a funcionar normalmente para os outros documentos.
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground">Esta acção não pode ser desfeita a partir daqui.</p>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+            );
+          })()}
           <AlertDialogFooter>
             <AlertDialogCancel>{t('proposals.form.cancel')}</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteConfirm} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">{t('proposals.actions.delete')}</AlertDialogAction>
