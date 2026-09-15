@@ -27,6 +27,8 @@ interface DiagnosticServicePickerProps {
   organizationId: string;
   onSelect: (service: DiagnosticServicePickerService) => void;
   trigger?: ReactNode;
+  /** Desativa o botão que abre o picker (ex: área m² ainda por preencher). */
+  disabled?: boolean;
 }
 
 /**
@@ -38,7 +40,7 @@ interface DiagnosticServicePickerProps {
  *     fecha o diálogo; quem chama decide o que fazer com a escolha
  *     (ver QuoteDiagnosticPhase.tsx / handleAcceptManualService).
  */
-export default function DiagnosticServicePicker({ organizationId, onSelect, trigger }: DiagnosticServicePickerProps) {
+export default function DiagnosticServicePicker({ organizationId, onSelect, trigger, disabled }: DiagnosticServicePickerProps) {
   const [open, setOpen] = useState(false);
   const [localSearchTerm, setLocalSearchTerm] = useState("");
 
@@ -97,7 +99,7 @@ export default function DiagnosticServicePicker({ organizationId, onSelect, trig
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         {trigger ?? (
-          <Button type="button" size="sm" variant="outline">
+          <Button type="button" size="sm" variant="outline" disabled={disabled}>
             <Plus className="h-4 w-4 mr-2" />
             Adicionar serviço
           </Button>

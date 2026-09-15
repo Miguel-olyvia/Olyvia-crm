@@ -208,7 +208,8 @@ function AreaCard({
   // sem passar pelas regras/IA. Best effort: nunca lança, só regista o erro
   // e não bloqueia o fluxo normal (o registo do próprio serviço já teve
   // sucesso nesse ponto).
-  // `areaM2`: área atual da zona (area.area_m2), usada para a regra de três
+  // `areaM2`: área atual da zona (valor do formulário, ver
+  // handleAcceptManualService), usada para a regra de três
   // simples por material (reference_area_m2/reference_quantity — migration
   // 20261130170000_service_technical_sheet_quantity_per_area.sql, já
   // aplicada à BD). Quando null (área ainda não preenchida) ou quando o
@@ -280,7 +281,10 @@ function AreaCard({
   // aceites de regra/IA.
   const handleAcceptManualService = async (service: DiagnosticServicePickerService) => {
     try {
-      const areaM2 = area.area_m2 ?? null;
+      // Usa o valor do formulário e só depois o persistido: a gravação da área
+      // tem debounce de 700ms, pelo que area.area_m2 pode ainda estar vazio
+      // quando o utilizador adiciona o serviço logo a seguir a escrever a área.
+      const areaM2 = form.area_m2 ?? area.area_m2 ?? null;
 
       // Quantidade sugerida do próprio serviço pela regra de três simples
       // (technical_sheet_reference_area_m2/technical_sheet_reference_quantity
@@ -330,7 +334,13 @@ function AreaCard({
         setAcceptedRefreshKey((k) => k + 1);
       }
 
-      toast({ title: "Serviço adicionado" });
+      toast({
+        title: "Serviço adicionado",
+        description:
+          materialsCount > 0
+            ? `${materialsCount} material(is) da ficha técnica adicionado(s).`
+            : "Sem materiais na ficha técnica.",
+      });
     } catch (err: any) {
       captureFlowError(err, "quote-lifecycle");
       toast({ title: "Erro ao adicionar serviço", description: err.message, variant: "destructive" });
@@ -367,6 +377,20 @@ function AreaCard({
           onRemoved={() => setAcceptedRefreshKey((k) => k + 1)}
         />
 
+        {/* A área fica acima dos serviços: é ela que define as quantidades dos
+            materiais da ficha técnica (regra de três simples). */}
+        <div className="space-y-1.5">
+          <Label className="text-muted-foreground">Área (m²)</Label>
+          <Input
+            type="number"
+            step="0.01"
+            min={0}
+            value={form.area_m2 ?? ""}
+            onChange={(e) => set("area_m2", e.target.value === "" ? null : Number(e.target.value))}
+            className="max-w-[160px]"
+          />
+        </div>
+
         <div className="rounded-md border border-primary/30 bg-primary/5 p-3 space-y-2">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
@@ -377,26 +401,23 @@ function AreaCard({
                 Escolha diretamente os serviços do catálogo necessários para esta área.
               </p>
             </div>
-            <DiagnosticServicePicker organizationId={organizationId} onSelect={handleAcceptManualService} />
+            <DiagnosticServicePicker
+              organizationId={organizationId}
+              onSelect={handleAcceptManualService}
+              disabled={form.area_m2 == null}
+            />
           </div>
+          {form.area_m2 == null && (
+            <p className="text-xs text-muted-foreground">
+              Preencha a área (m²) para calcular as quantidades dos materiais.
+            </p>
+          )}
         </div>
 
         <div className="space-y-3 pt-1">
           <p className="text-xs text-muted-foreground">
             Nota descritiva (uso interno, não aparece no PDF/portal).
           </p>
-
-          <div className="space-y-1.5">
-            <Label className="text-muted-foreground">Área (m²)</Label>
-            <Input
-              type="number"
-              step="0.01"
-              min={0}
-              value={form.area_m2 ?? ""}
-              onChange={(e) => set("area_m2", e.target.value === "" ? null : Number(e.target.value))}
-              className="max-w-[160px]"
-            />
-          </div>
 
           <div className="space-y-1.5">
             <Label className="text-muted-foreground">O que é necessário demolir</Label>
