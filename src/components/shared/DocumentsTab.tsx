@@ -265,8 +265,12 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
           <Paperclip className="h-4 w-4" />
           Documentos ({documents.length})
         </h3>
+        {/* type="button" em todos os Button deste componente: ele é renderizado
+            dentro do <form> do produto (Products.tsx), e sem isso o botão faz
+            submit do formulário — gravava o produto e fechava o diálogo em vez
+            de abrir o seletor de ficheiros. */}
         {!readOnly && (
-          <Button size="sm" onClick={() => setIsUploadOpen(true)} className="gap-1.5">
+          <Button type="button" size="sm" onClick={() => setIsUploadOpen(true)} className="gap-1.5">
             <Paperclip className="h-3.5 w-3.5" />
             Anexar Documento
           </Button>
@@ -296,14 +300,14 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
                 </div>
                 <Badge className={`${typeInfo.color} text-[10px] shrink-0`}>{typeInfo.label}</Badge>
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleView(doc)} title="Visualizar">
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleView(doc)} title="Visualizar">
                     <Eye className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(doc)} title="Descarregar">
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(doc)} title="Descarregar">
                     <Download className="h-3.5 w-3.5" />
                   </Button>
                   {!readOnly && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDeleteDocId(doc.id)} title="Eliminar">
+                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDeleteDocId(doc.id)} title="Eliminar">
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
                   )}
@@ -393,8 +397,8 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsUploadOpen(false)} disabled={uploading}>Cancelar</Button>
-            <Button onClick={handleUpload} disabled={selectedFiles.length === 0 || uploading}>
+            <Button type="button" variant="outline" onClick={() => setIsUploadOpen(false)} disabled={uploading}>Cancelar</Button>
+            <Button type="button" onClick={handleUpload} disabled={selectedFiles.length === 0 || uploading}>
               {uploading && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
               <Paperclip className="h-4 w-4 mr-1.5" />
               Fazer Upload{selectedFiles.length > 0 ? ` (${selectedFiles.length})` : ""}
