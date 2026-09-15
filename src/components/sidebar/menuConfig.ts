@@ -40,7 +40,6 @@ import {
   Clock,
   FolderOpen,
   CalendarRange,
-  CheckSquare,
   MapPin,
 } from "lucide-react";
 
@@ -192,11 +191,14 @@ export const menuSections: MenuSection[] = [
     // atribuicao nenhuma). Os sub-separadores do ecra (Atividade, Equipas,
     // Organograma, Funcoes) vivem dentro da pagina e nao no menu.
     //
-    // Aprovacoes fica aqui, e nao em "A minha area", por decisao explicita:
-    // quem controla o acesso e a PERMISSAO (aprovar.chefia / aprovar.rh), nao
-    // a seccao -- a seccao e so organizacao visual. `paths` usa as quatro
-    // rotas exactas (nao o prefixo "/rh") para nao ser prefixo das rotas de
-    // "A minha area".
+    // Aprovacoes e Organizacao fundiram-se num so item de menu, que leva a
+    // AusenciasGestao.tsx (separadores por permissao dentro do proprio
+    // ecra). Continua aqui, e nao em "A minha area", pela mesma razao de
+    // sempre: quem controla o acesso e a PERMISSAO (aprovar.chefia /
+    // aprovar.rh / view), nao a seccao -- a seccao e so organizacao visual.
+    // `/rh/ausencias/aprovacoes` fica em `paths` (mesmo sem item de menu
+    // proprio) para o grupo continuar realcado quando alguem aterra nesse
+    // redirect antigo.
     id: "rh",
     icon: IdCard,
     labelKey: "sidebar.hrModule",
@@ -204,8 +206,7 @@ export const menuSections: MenuSection[] = [
     permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view", "hr.admissao.obrigatorios.gerir"],
     items: [
       { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
-      { to: "/rh/ausencias/aprovacoes", icon: CheckSquare, labelKey: "sidebar.hrAusenciasAprovacoes", permissions: ["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"] },
-      { to: "/rh/ausencias/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAusenciasOrganizacao", permission: "hr.ausencias.view" },
+      { to: "/rh/ausencias/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAusenciasGestao", permissions: ["hr.ausencias.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"] },
       { to: "/rh/assiduidade/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAssiduidadeOrganizacao", permission: "hr.assiduidade.view" },
       // Gestao de centros de trabalho (20261130165000): listar, criar,
       // editar e desactivar hr_locais_trabalho. `hr.locais.view` ja existe

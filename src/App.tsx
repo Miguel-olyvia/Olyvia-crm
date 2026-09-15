@@ -116,8 +116,7 @@ const Pessoas = lazy(() => import("./pages/Pessoas"));
 const PessoaDetail = lazy(() => import("./pages/PessoaDetail"));
 const MeusDocumentosHR = lazy(() => import("./pages/MeusDocumentosHR"));
 const Ausencias = lazy(() => import("./pages/Ausencias"));
-const AusenciasAprovacoes = lazy(() => import("./pages/AusenciasAprovacoes"));
-const AusenciasOrganizacao = lazy(() => import("./pages/AusenciasOrganizacao"));
+const AusenciasGestao = lazy(() => import("./pages/AusenciasGestao"));
 const Assiduidade = lazy(() => import("./pages/Assiduidade"));
 const AssiduidadeOrganizacao = lazy(() => import("./pages/AssiduidadeOrganizacao"));
 const RhCentros = lazy(() => import("./pages/RhCentros"));
@@ -293,8 +292,11 @@ const App = () => (
                       {/* Ausencias e ferias -- o eixo do menu e a AUDIENCIA: as minhas,
                           as que tenho de decidir, e as de toda a gente. */}
                       <Route path="/rh/ausencias" element={<ProtectedRoute permissions={["hr.ausencias.view.own", "hr.ausencias.view"]}><Ausencias /></ProtectedRoute>} />
-                      <Route path="/rh/ausencias/aprovacoes" element={<ProtectedRoute permissions={["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"]}><AusenciasAprovacoes /></ProtectedRoute>} />
-                      <Route path="/rh/ausencias/organizacao" element={<ProtectedRoute permission="hr.ausencias.view"><AusenciasOrganizacao /></ProtectedRoute>} />
+                      {/* Aprovacoes e Organizacao fundiram-se visualmente num so ecra
+                          (AusenciasGestao, com separadores por permissao); a rota antiga
+                          fica como redirect para quem a tinha guardada. */}
+                      <Route path="/rh/ausencias/aprovacoes" element={<ProtectedRoute permissions={["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"]}><Navigate to="/rh/ausencias/organizacao?tab=aprovacoes" replace /></ProtectedRoute>} />
+                      <Route path="/rh/ausencias/organizacao" element={<ProtectedRoute permissions={["hr.ausencias.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"]}><AusenciasGestao /></ProtectedRoute>} />
                       {/* Assiduidade e picagens -- o mesmo eixo de audiencia:
                           o meu ponto, e o mapa de toda a gente. */}
                       <Route path="/rh/assiduidade" element={<ProtectedRoute permissions={["hr.assiduidade.view.own", "hr.assiduidade.view"]}><Assiduidade /></ProtectedRoute>} />

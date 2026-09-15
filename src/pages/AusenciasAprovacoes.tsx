@@ -31,10 +31,24 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { usePessoas } from "@/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
 
-export default function AusenciasAprovacoes() {
+interface AprovacoesConteudoProps {
+  /**
+   * Nome do parametro de URL usado para o sub-separador (aDecidir/decididos).
+   * Configuravel porque, dentro de `AusenciasGestao`, o separador de topo
+   * (Aprovacoes/Organizacao) ja usa "tab" -- usar o mesmo nome aqui pisava o
+   * estado um do outro.
+   */
+  tabParam?: string;
+}
+
+/**
+ * So o conteudo (sem h1/descricao de pagina): usado standalone abaixo e
+ * tambem dentro de `AusenciasGestao.tsx`, que fornece o proprio titulo.
+ */
+export function AprovacoesConteudo({ tabParam = "tab" }: AprovacoesConteudoProps) {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get("tab") || "aDecidir";
+  const activeTab = searchParams.get(tabParam) || "aDecidir";
 
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
@@ -82,21 +96,14 @@ export default function AusenciasAprovacoes() {
     setSearchParams(
       (anterior) => {
         const proximos = new URLSearchParams(anterior);
-        proximos.set("tab", valor);
+        proximos.set(tabParam, valor);
         return proximos;
       },
       { replace: true },
     );
 
   return (
-    <div className="space-y-4 p-6">
-      <div>
-        <h1 className="text-xl font-semibold">{t("hr.ausencias.aprovacoes.titulo")}</h1>
-        <p className="text-sm text-muted-foreground">
-          {t("hr.ausencias.aprovacoes.descricao")}
-        </p>
-      </div>
-
+    <>
       {dados.recusado ? (
         <SemAcessoCard />
       ) : dados.loading || tipos.loading ? (
@@ -171,6 +178,7 @@ export default function AusenciasAprovacoes() {
           onVerMotivo={dados.verMotivo}
         />
       )}
-    </div>
+    </>
   );
 }
+

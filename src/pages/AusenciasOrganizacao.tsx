@@ -46,11 +46,24 @@ function mesDeHoje(): string {
   return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
-export default function AusenciasOrganizacao() {
+interface OrganizacaoConteudoProps {
+  /**
+   * Nome do parametro de URL usado para o sub-separador (mapa/pedidos).
+   * Configuravel pela mesma razao que em `AprovacoesConteudo`: dentro de
+   * `AusenciasGestao`, "tab" ja identifica o separador de topo.
+   */
+  tabParam?: string;
+}
+
+/**
+ * So o conteudo (sem h1/descricao de pagina): usado standalone abaixo e
+ * tambem dentro de `AusenciasGestao.tsx`, que fornece o proprio titulo.
+ */
+export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const activeTab = searchParams.get("tab") || "mapa";
+  const activeTab = searchParams.get(tabParam) || "mapa";
 
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
@@ -109,21 +122,14 @@ export default function AusenciasOrganizacao() {
     setSearchParams(
       (anterior) => {
         const proximos = new URLSearchParams(anterior);
-        proximos.set("tab", valor);
+        proximos.set(tabParam, valor);
         return proximos;
       },
       { replace: true },
     );
 
   return (
-    <div className="space-y-4 p-6">
-      <div>
-        <h1 className="text-xl font-semibold">{t("hr.ausencias.organizacao.titulo")}</h1>
-        <p className="text-sm text-muted-foreground">
-          {t("hr.ausencias.organizacao.descricao")}
-        </p>
-      </div>
-
+    <>
       {dados.recusado ? (
         <SemAcessoCard />
       ) : dados.loading || tipos.loading ? (
@@ -230,6 +236,7 @@ export default function AusenciasOrganizacao() {
             onIrParaFicha={() => navigate(`/rh/pessoas/${pedidoSeleccionado.pessoa_id}`)}
           />
       )}
-    </div>
+    </>
   );
 }
+
