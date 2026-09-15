@@ -234,7 +234,13 @@ export async function loadProposalPortalData(
       // cliente.
       supabase
         .from("quote_lines")
-        .select("id, quote_id, descricao_snapshot, item_description, qt, unidade, total_sem_iva, total_com_iva, section_name, ordem, iva_percent")
+        // `selected_attributes` traz os componentes do bundle. Sem eles o portal
+        // não consegue repartir o IVA (material a 23%, mão de obra a 6%) e teria
+        // de confiar no `total_com_iva` gravado, que foi escrito com o
+        // `iva_percent` flat da linha — era isso que fazia as secções somarem
+        // mais do que o total do orçamento mostrado logo abaixo. O PDF já lê os
+        // componentes e mostra-os ao cliente, por isso nada aqui é novo para ele.
+        .select("id, quote_id, descricao_snapshot, item_description, qt, unidade, total_sem_iva, total_com_iva, section_name, ordem, iva_percent, selected_attributes")
         .in("quote_id", quoteIds)
         .eq("visible_to_client", true)
         .order("ordem", { ascending: true }),
