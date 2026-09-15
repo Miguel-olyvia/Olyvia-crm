@@ -441,6 +441,37 @@ serve(async (req: Request) => {
       }
     }
 
+    // Plan seat limit: checked per distinct organization being granted a
+    // membership, before the auth user is created (same "no orphaned
+    // auth.users row" reasoning as the membership_required check above).
+    // fn_check_user_seat_limit resolves the actual billing organization
+    // itself (an account can have more than one work org) — see
+    // supabase/migrations/20261201090000_billing_owner_resolution_and_new_plan_limits.sql.
+    const seatLimitOrgIds = [
+      ...new Set(normalizedMembershipsForScopeCheck.map((m: any) => m.organization_id)),
+    ];
+    for (const orgId of seatLimitOrgIds) {
+      const { data: seatCheck, error: seatCheckError } = await supabaseClient.rpc(
+        "fn_check_user_seat_limit",
+        { _organization_id: orgId },
+      );
+      if (seatCheckError) {
+        console.error("fn_check_user_seat_limit failed:", seatCheckError);
+        return new Response(JSON.stringify({ error: seatCheckError.message }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (seatCheck?.blocked) {
+        return jsonError(
+          corsHeaders,
+          "plan_limit_exceeded:users",
+          `User seat limit reached for this plan (reason: ${seatCheck.reason}).`,
+          403,
+        );
+      }
+    }
+
     const preparedAddressResult = prepareAddresses(addresses);
     if (preparedAddressResult.error) return jsonError(corsHeaders, "address_incomplete", preparedAddressResult.error);
     const preparedAddresses = preparedAddressResult.addresses;
