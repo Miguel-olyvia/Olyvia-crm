@@ -23,6 +23,9 @@ import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
 export interface MinhaPessoa {
   pessoaId: string | null;
   nome: string | null;
+  /** Cabecalho do relatorio mensal de assiduidade. */
+  cargo: string | null;
+  dataAdmissao: string | null;
   loading: boolean;
   /** Verdadeiro quando ja se procurou e nao ha ficha ligada a esta conta. */
   semFicha: boolean;
@@ -32,6 +35,8 @@ export function useMinhaPessoa(): MinhaPessoa {
   const { activeCompany } = useCompany();
   const [pessoaId, setPessoaId] = useState<string | null>(null);
   const [nome, setNome] = useState<string | null>(null);
+  const [cargo, setCargo] = useState<string | null>(null);
+  const [dataAdmissao, setDataAdmissao] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -39,6 +44,8 @@ export function useMinhaPessoa(): MinhaPessoa {
     if (!orgId) {
       setPessoaId(null);
       setNome(null);
+      setCargo(null);
+      setDataAdmissao(null);
       setLoading(false);
       return;
     }
@@ -48,6 +55,8 @@ export function useMinhaPessoa(): MinhaPessoa {
       if (!anewUserId) {
         setPessoaId(null);
         setNome(null);
+        setCargo(null);
+        setDataAdmissao(null);
         return;
       }
       const { data, error } = await hrFrom("pessoas_contas")
@@ -64,6 +73,8 @@ export function useMinhaPessoa(): MinhaPessoa {
         if (!isPermissionError(error)) captureFlowError(error, "hr-ausencias-load");
         setPessoaId(null);
         setNome(null);
+        setCargo(null);
+        setDataAdmissao(null);
         return;
       }
 
@@ -72,17 +83,26 @@ export function useMinhaPessoa(): MinhaPessoa {
 
       if (id) {
         const { data: ficha } = await hrFrom("pessoas")
-          .select("nome_completo")
+          .select("nome_completo, cargo, data_admissao")
           .eq("id", id)
           .maybeSingle();
-        setNome((ficha as { nome_completo?: string } | null)?.nome_completo ?? null);
+        const registo = ficha as
+          | { nome_completo?: string; cargo?: string | null; data_admissao?: string | null }
+          | null;
+        setNome(registo?.nome_completo ?? null);
+        setCargo(registo?.cargo ?? null);
+        setDataAdmissao(registo?.data_admissao ?? null);
       } else {
         setNome(null);
+        setCargo(null);
+        setDataAdmissao(null);
       }
     } catch (e) {
       captureFlowError(e, "hr-ausencias-load");
       setPessoaId(null);
       setNome(null);
+      setCargo(null);
+      setDataAdmissao(null);
     } finally {
       setLoading(false);
     }
@@ -92,5 +112,12 @@ export function useMinhaPessoa(): MinhaPessoa {
     void load();
   }, [load]);
 
-  return { pessoaId, nome, loading, semFicha: !loading && pessoaId === null };
+  return {
+    pessoaId,
+    nome,
+    cargo,
+    dataAdmissao,
+    loading,
+    semFicha: !loading && pessoaId === null,
+  };
 }

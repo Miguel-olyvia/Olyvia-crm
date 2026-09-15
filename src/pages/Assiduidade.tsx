@@ -53,6 +53,8 @@ export default function Assiduidade() {
         pessoaNome={minha.nome ?? t("hr.assiduidade.meuPonto.eu")}
         souAPessoa
         permissoes={permissoes}
+        cargo={minha.cargo}
+        dataAdmissao={minha.dataAdmissao}
       />
     </div>
   );

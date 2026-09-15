@@ -29,6 +29,7 @@ import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
 import { BotaoPicar } from "@/components/hr/assiduidade/BotaoPicar";
 import { LocalEtiqueta } from "@/components/hr/assiduidade/LocalEtiqueta";
 import { PainelDoDia } from "@/components/hr/assiduidade/PainelDoDia";
+import { PessoaRelatorioAssiduidadeMensal } from "@/components/hr/PessoaRelatorioAssiduidadeMensal";
 import { useAssiduidadeDaPessoa } from "@/hooks/useAssiduidadeDaPessoa";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import {
@@ -47,6 +48,9 @@ interface PessoaAssiduidadeTabProps {
   pessoaNome: string;
   souAPessoa: boolean;
   permissoes: PermissoesAssiduidade;
+  /** Cabecalho do relatorio mensal. Omissos quando o chamador nao os tem a mao. */
+  cargo?: string | null;
+  dataAdmissao?: string | null;
 }
 
 /** O primeiro e o ultimo dia de um mes, em ISO, sem passar por UTC. */
@@ -64,6 +68,8 @@ export function PessoaAssiduidadeTab({
   pessoaNome,
   souAPessoa,
   permissoes,
+  cargo = null,
+  dataAdmissao = null,
 }: PessoaAssiduidadeTabProps) {
   const { t, language } = useTranslation();
   const hoje = hojeIso();
@@ -72,6 +78,7 @@ export function PessoaAssiduidadeTab({
     const agora = new Date();
     return { ano: agora.getFullYear(), mes: agora.getMonth() };
   });
+  const [relatorioAberto, setRelatorioAberto] = useState(false);
 
   const janela = useMemo(
     () => limitesDoMes(mesVisivel.ano, mesVisivel.mes),
@@ -190,6 +197,9 @@ export function PessoaAssiduidadeTab({
             >
               <ChevronRight className="h-4 w-4" />
             </Button>
+            <Button variant="outline" size="sm" onClick={() => setRelatorioAberto(true)}>
+              {t("hr.relatorioMensal.abrir")}
+            </Button>
           </div>
         </CardHeader>
 
@@ -251,6 +261,16 @@ export function PessoaAssiduidadeTab({
           onFechar={() => setDiaAberto(null)}
         />
       )}
+
+      <PessoaRelatorioAssiduidadeMensal
+        aberto={relatorioAberto}
+        onFechar={() => setRelatorioAberto(false)}
+        pessoaId={pessoaId}
+        pessoaNome={pessoaNome}
+        cargo={cargo}
+        dataAdmissao={dataAdmissao}
+        permissoes={permissoes}
+      />
     </div>
   );
 }

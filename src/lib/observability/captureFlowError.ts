@@ -137,6 +137,8 @@ export type BusinessFlow =
   | "hr-retribuicao-write"
   | "hr-assiduidade-load"
   | "hr-assiduidade-write"
+  | "hr-relatorio-assiduidade-mensal-load"
+  | "hr-relatorio-assiduidade-mensal-write"
   | "hr-documentos-load"
   | "hr-documentos-modelos-load"
   | "hr-documentos-emitir"

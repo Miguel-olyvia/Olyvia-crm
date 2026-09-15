@@ -34,6 +34,7 @@ export function usePermissoesAssiduidade(): {
       justificacaoView: hasPermission("hr.assiduidade.justificacao.view"),
       justificacaoEdit: hasPermission("hr.assiduidade.justificacao.edit"),
       validarRealizado: hasPermission("hr.pessoas.horario_realizado.validar"),
+      obrasRegistar: hasPermission("hr.assiduidade.obras.registar"),
     }),
     [hasPermission],
   );

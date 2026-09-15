@@ -208,4 +208,6 @@ export interface PermissoesAssiduidade {
   justificacaoEdit: boolean;
   /** `hr.pessoas.horario_realizado.validar`, da ronda 2. */
   validarRealizado: boolean;
+  /** `hr.assiduidade.obras.registar` (20261201100000). Registar e anular horas de obra. */
+  obrasRegistar: boolean;
 }

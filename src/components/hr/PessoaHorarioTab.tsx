@@ -93,6 +93,9 @@ interface PessoaHorarioTabProps {
   pessoaNome?: string;
   souAPessoa?: boolean;
   permissoesAssiduidade?: PermissoesAssiduidade;
+  /** Cabecalho do relatorio mensal de assiduidade, na aba Assiduidade. */
+  cargo?: string | null;
+  dataAdmissao?: string | null;
   /**
    * As horas contratadas por semana, REAIS -- ja calculadas pelo chamador
    * com `horasContratadasSemanaisReais` (para "diaria", conta os dias uteis
@@ -119,6 +122,8 @@ export function PessoaHorarioTab({
   pessoaNome,
   souAPessoa = false,
   permissoesAssiduidade,
+  cargo = null,
+  dataAdmissao = null,
   horasContratadasSemanais = null,
 }: PessoaHorarioTabProps) {
   const { t } = useTranslation();
@@ -372,6 +377,8 @@ export function PessoaHorarioTab({
                 pessoaNome={pessoaNome ?? ""}
                 souAPessoa={souAPessoa}
                 permissoes={permissoesAssiduidade}
+                cargo={cargo}
+                dataAdmissao={dataAdmissao}
               />
             ) : (
               <p className="py-8 text-center text-muted-foreground">{t("hr.semAcesso")}</p>

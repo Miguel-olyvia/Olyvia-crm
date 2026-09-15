@@ -519,6 +519,8 @@ export default function PessoaDetail() {
             pessoaNome={pessoa.nome_completo}
             souAPessoa={minhaPessoaId === pessoa.id}
             permissoesAssiduidade={permissoesAssiduidade}
+            cargo={pessoa.cargo}
+            dataAdmissao={pessoa.data_admissao}
             horasContratadasSemanais={horasContratadasSemanaisParaHorario}
           />
         </TabsContent>
