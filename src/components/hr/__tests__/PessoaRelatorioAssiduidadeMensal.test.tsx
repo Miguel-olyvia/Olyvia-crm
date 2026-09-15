@@ -3,7 +3,7 @@
  * visivel logo a seguir a grelha diaria (nao um ecra separado).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 const registarObra = vi.fn().mockResolvedValue(null);
 const anularObra = vi.fn().mockResolvedValue(null);
@@ -12,6 +12,12 @@ let relatorioMock: any;
 
 vi.mock("@/hooks/useRelatorioAssiduidadeMensal", () => ({
   useRelatorioAssiduidadeMensal: () => relatorioMock,
+}));
+
+const generateRelatorioAssiduidadeMensalPdfBlob = vi.fn();
+vi.mock("@/utils/generateRelatorioAssiduidadeMensalPdfBlob", () => ({
+  generateRelatorioAssiduidadeMensalPdfBlob: (...args: unknown[]) =>
+    generateRelatorioAssiduidadeMensalPdfBlob(...args),
 }));
 
 vi.mock("@/hooks/useTranslation", () => ({
@@ -34,7 +40,8 @@ vi.mock("@/hooks/useTranslation", () => ({
         "hr.relatorioMensal.estado.descanso": "Descanso",
         "hr.relatorioMensal.estado.feriado": "Feriado",
         "hr.relatorioMensal.semCargo": "Sem cargo registado",
-        "hr.relatorioMensal.imprimir": "Exportar / Imprimir",
+        "hr.relatorioMensal.exportar": "Exportar",
+        "hr.relatorioMensal.exportarErro": "Nao foi possivel gerar o PDF. Tente novamente.",
         "hr.assiduidade.mesAnterior": "Mes anterior",
         "hr.assiduidade.mesSeguinte": "Mes seguinte",
         "hr.assiduidade.dia.faltaDe": `Falta de ${valores?.duracao ?? ""}`,
@@ -49,8 +56,16 @@ vi.mock("@/contexts/CompanyContext", () => ({
   useCompany: () => ({ activeCompany: { id: "org-1", name: "Nike" }, companies: [] }),
 }));
 
+vi.mock("@/lib/toast", () => ({
+  toast: {
+    error: vi.fn(),
+    warning: vi.fn(),
+  },
+}));
+
 import { PessoaRelatorioAssiduidadeMensal } from "@/components/hr/PessoaRelatorioAssiduidadeMensal";
 import type { PermissoesAssiduidade } from "@/types/hrAssiduidade";
+import { toast } from "@/lib/toast";
 
 function permissoes(overrides: Partial<PermissoesAssiduidade> = {}): PermissoesAssiduidade {
   return {
@@ -74,6 +89,12 @@ function permissoes(overrides: Partial<PermissoesAssiduidade> = {}): PermissoesA
 beforeEach(() => {
   registarObra.mockClear();
   anularObra.mockClear();
+  vi.mocked(toast.error).mockReset();
+  generateRelatorioAssiduidadeMensalPdfBlob.mockReset();
+  generateRelatorioAssiduidadeMensalPdfBlob.mockResolvedValue({
+    blob: new Blob(["pdf"], { type: "application/pdf" }),
+    fileName: "assiduidade-maria-silva-2026-09.pdf",
+  });
   relatorioMock = {
     dias: [
       {
@@ -197,5 +218,65 @@ describe("PessoaRelatorioAssiduidadeMensal", () => {
 
     expect(screen.getByText("Anulada")).toBeInTheDocument();
     expect(screen.queryByText("Anular")).not.toBeInTheDocument();
+  });
+
+  it("ao clicar em exportar, gera o PDF com os dados da pessoa e descarrega-o em vez de imprimir", async () => {
+    const criadoUrl = "blob:mock-url";
+    const createObjectURL = vi.fn().mockReturnValue(criadoUrl);
+    const revokeObjectURL = vi.fn();
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    const cliqueSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    render(
+      <PessoaRelatorioAssiduidadeMensal
+        aberto
+        onFechar={vi.fn()}
+        pessoaId="pessoa-1"
+        pessoaNome="Maria Silva"
+        cargo="Tecnica de manutencao"
+        dataAdmissao="2020-01-01"
+        permissoes={permissoes()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Exportar"));
+
+    await waitFor(() => {
+      expect(generateRelatorioAssiduidadeMensalPdfBlob).toHaveBeenCalledTimes(1);
+    });
+    const chamada = generateRelatorioAssiduidadeMensalPdfBlob.mock.calls[0][0];
+    expect(chamada.pessoaNome).toBe("Maria Silva");
+    expect(chamada.dias).toEqual(relatorioMock.dias);
+    expect(chamada.totais).toEqual(relatorioMock.totais);
+    expect(chamada.obras).toEqual(relatorioMock.obras);
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(cliqueSpy).toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith(criadoUrl);
+
+    cliqueSpy.mockRestore();
+  });
+
+  it("um erro a gerar o PDF mostra um toast em vez de rebentar", async () => {
+    generateRelatorioAssiduidadeMensalPdfBlob.mockRejectedValueOnce(new Error("falhou"));
+
+    render(
+      <PessoaRelatorioAssiduidadeMensal
+        aberto
+        onFechar={vi.fn()}
+        pessoaId="pessoa-1"
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Exportar"));
+
+    await waitFor(() => {
+      expect(generateRelatorioAssiduidadeMensalPdfBlob).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Nao foi possivel gerar o PDF. Tente novamente.");
+    });
   });
 });

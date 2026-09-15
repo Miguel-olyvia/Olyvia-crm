@@ -7,7 +7,7 @@
  * o proprio hook, porque o que se testa e a orquestracao de varias pessoas,
  * nao a leitura dos dados.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
 const relatorioPorPessoa: Record<string, any> = {};
@@ -16,12 +16,21 @@ vi.mock("@/hooks/useRelatorioAssiduidadeMensal", () => ({
   useRelatorioAssiduidadeMensal: (pessoaId: string) => relatorioPorPessoa[pessoaId],
 }));
 
+const generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob = vi.fn();
+vi.mock("@/utils/generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob", () => ({
+  generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob: (...args: unknown[]) =>
+    generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob(...args),
+}));
+
 vi.mock("@/hooks/useTranslation", () => ({
   useTranslation: () => ({
     t: (chave: string, valores?: Record<string, string>) => {
       const chaves: Record<string, string> = {
         "hr.relatorioMensal.organizacao.titulo": "Relatorio de assiduidade da organizacao",
         "hr.relatorioMensal.organizacao.aPreparar": `A preparar ${valores?.prontas ?? ""} de ${valores?.total ?? ""}`,
+        "hr.relatorioMensal.exportar": "Exportar",
+        "hr.relatorioMensal.exportarErro": "Nao foi possivel gerar o PDF. Tente novamente.",
+        "hr.relatorioMensal.exportarParcial": `Gerado sem ${valores?.falhas ?? ""} de ${valores?.total ?? ""} pessoas`,
         "hr.relatorioMensal.obras.titulo": "Obras do mes",
         "hr.relatorioMensal.obras.vazio": "Sem obras registadas este mes.",
         "hr.relatorioMensal.coluna.data": "Data",
@@ -43,8 +52,16 @@ vi.mock("@/contexts/CompanyContext", () => ({
   useCompany: () => ({ activeCompany: { id: "org-1", name: "Nike" }, companies: [] }),
 }));
 
+vi.mock("@/lib/toast", () => ({
+  toast: {
+    error: vi.fn(),
+    warning: vi.fn(),
+  },
+}));
+
 import { RelatorioAssiduidadeMensalOrganizacao } from "@/components/hr/assiduidade/RelatorioAssiduidadeMensalOrganizacao";
 import type { PermissoesAssiduidade } from "@/types/hrAssiduidade";
+import { toast } from "@/lib/toast";
 
 function permissoes(overrides: Partial<PermissoesAssiduidade> = {}): PermissoesAssiduidade {
   return {
@@ -106,16 +123,17 @@ function relatorioDe(loading: boolean) {
   };
 }
 
-let printSpy: ReturnType<typeof vi.spyOn>;
-
 beforeEach(() => {
-  printSpy = vi.spyOn(window, "print").mockImplementation(() => {});
+  generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob.mockReset();
+  generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob.mockResolvedValue({
+    blob: new Blob(["pdf"], { type: "application/pdf" }),
+    fileName: "assiduidade-organizacao-2026-09.pdf",
+    falhas: [],
+  });
   relatorioPorPessoa["pessoa-1"] = relatorioDe(false);
   relatorioPorPessoa["pessoa-2"] = relatorioDe(false);
-});
-
-afterEach(() => {
-  printSpy.mockRestore();
+  vi.mocked(toast.error).mockReset();
+  vi.mocked(toast.warning).mockReset();
 });
 
 describe("RelatorioAssiduidadeMensalOrganizacao", () => {
@@ -161,11 +179,18 @@ describe("RelatorioAssiduidadeMensalOrganizacao", () => {
     );
 
     expect(screen.getByText(/A preparar/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /imprimir/i })).toBeDisabled();
-    expect(window.print).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: /exportar/i })).toBeDisabled();
+    expect(generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob).not.toHaveBeenCalled();
   });
 
-  it("so chama window.print quando a pessoa clica no botao, depois de todas terminarem de carregar", async () => {
+  it("so gera o PDF agregado quando a pessoa clica no botao, depois de todas terminarem de carregar", async () => {
+    const criadoUrl = "blob:mock-url";
+    const createObjectURL = vi.fn().mockReturnValue(criadoUrl);
+    const revokeObjectURL = vi.fn();
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    const cliqueSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
     render(
       <RelatorioAssiduidadeMensalOrganizacao
         aberto
@@ -180,11 +205,95 @@ describe("RelatorioAssiduidadeMensalOrganizacao", () => {
       />,
     );
 
-    const botao = screen.getByRole("button", { name: /imprimir/i });
+    const botao = screen.getByRole("button", { name: /exportar/i });
     await waitFor(() => expect(botao).not.toBeDisabled());
-    expect(window.print).not.toHaveBeenCalled();
+    expect(generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob).not.toHaveBeenCalled();
 
     fireEvent.click(botao);
-    expect(window.print).toHaveBeenCalledTimes(1);
+
+    await waitFor(() => {
+      expect(generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob).toHaveBeenCalledTimes(1);
+    });
+    const [pessoasChamada] = generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob.mock.calls[0];
+    expect(pessoasChamada).toHaveLength(2);
+    expect(pessoasChamada.map((p: any) => p.pessoaNome)).toEqual(["Maria Silva", "Joao Costa"]);
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(cliqueSpy).toHaveBeenCalled();
+
+    cliqueSpy.mockRestore();
+  });
+
+  it("um erro a gerar o PDF agregado mostra um toast em vez de rebentar", async () => {
+    generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob.mockRejectedValueOnce(new Error("falhou"));
+
+    render(
+      <RelatorioAssiduidadeMensalOrganizacao
+        aberto
+        onFechar={vi.fn()}
+        ano={2026}
+        mes={8}
+        pessoas={[
+          { id: "pessoa-1", nome: "Maria Silva" },
+          { id: "pessoa-2", nome: "Joao Costa" },
+        ]}
+        permissoes={permissoes()}
+      />,
+    );
+
+    const botao = screen.getByRole("button", { name: /exportar/i });
+    await waitFor(() => expect(botao).not.toBeDisabled());
+
+    fireEvent.click(botao);
+
+    await waitFor(() => {
+      expect(generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("Nao foi possivel gerar o PDF. Tente novamente.");
+    });
+    expect(toast.warning).not.toHaveBeenCalled();
+  });
+
+  it("quando o PDF agregado e gerado sem todas as pessoas, mostra um toast de aviso parcial (nao o de erro) e mesmo assim descarrega", async () => {
+    generateRelatorioAssiduidadeMensalOrganizacaoPdfBlob.mockResolvedValueOnce({
+      blob: new Blob(["pdf"], { type: "application/pdf" }),
+      fileName: "assiduidade-organizacao-2026-09.pdf",
+      falhas: ["pessoa-2"],
+    });
+    const createObjectURL = vi.fn().mockReturnValue("blob:mock-url");
+    const revokeObjectURL = vi.fn();
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+    const cliqueSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    render(
+      <RelatorioAssiduidadeMensalOrganizacao
+        aberto
+        onFechar={vi.fn()}
+        ano={2026}
+        mes={8}
+        pessoas={[
+          { id: "pessoa-1", nome: "Maria Silva" },
+          { id: "pessoa-2", nome: "Joao Costa" },
+        ]}
+        permissoes={permissoes()}
+      />,
+    );
+
+    const botao = screen.getByRole("button", { name: /exportar/i });
+    await waitFor(() => expect(botao).not.toBeDisabled());
+
+    fireEvent.click(botao);
+
+    await waitFor(() => {
+      expect(createObjectURL).toHaveBeenCalled();
+      expect(cliqueSpy).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith("Gerado sem 1 de 2 pessoas");
+    });
+    expect(toast.error).not.toHaveBeenCalled();
+
+    cliqueSpy.mockRestore();
   });
 });

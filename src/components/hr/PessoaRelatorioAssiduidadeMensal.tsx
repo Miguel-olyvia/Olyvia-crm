@@ -1,6 +1,6 @@
 /**
  * O relatorio mensal de assiduidade de uma pessoa: cabecalho, selector de
- * mes, botao de imprimir, e o CORPO do relatorio (grelha diaria, totais,
+ * mes, botao de exportar, e o CORPO do relatorio (grelha diaria, totais,
  * obras) vindo de `RelatorioAssiduidadeMensalConteudo` -- a mesma grelha
  * usada, uma instancia por pessoa, no relatorio em massa
  * `RelatorioAssiduidadeMensalOrganizacao`. Nao duplicar essa grelha aqui.
@@ -14,19 +14,26 @@
  * (dias trabalhados, faltas): nao ha "saldo de compensacao" nem "banco de
  * horas", que este produto nao tem.
  *
- * IMPRESSAO, NAO EXPORTACAO
- * --------------------------
- * O botao "Exportar / Imprimir" chama `window.print()`. Uma folha de estilo
- * `@media print` propria esconde tudo o que nao seja o relatorio (inclusive o
- * resto do dialog) e mostra so o conteudo, em formatacao limpa -- nao gera
- * nenhum ficheiro .xlsx.
+ * EXPORTACAO REAL, NAO IMPRESSAO
+ * --------------------------------
+ * O botao "Exportar" gera um PDF verdadeiro com `@react-pdf/renderer`
+ * (`generateRelatorioAssiduidadeMensalPdfBlob`, mesmo padrao de
+ * `generateQuotePdfBlob`) e descarrega-o directamente -- nao abre o dialogo
+ * de impressao do browser. Os dados (`dias`/`totais`/`obras`) chegam via
+ * `aoObterDados`, que `RelatorioAssiduidadeMensalConteudo` ja calcula.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Printer } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
-import { RelatorioAssiduidadeMensalConteudo } from "@/components/hr/RelatorioAssiduidadeMensalConteudo";
+import { useCompany } from "@/contexts/CompanyContext";
+import { toast } from "@/lib/toast";
+import {
+  RelatorioAssiduidadeMensalConteudo,
+  type DadosRelatorioAssiduidadeMensal,
+} from "@/components/hr/RelatorioAssiduidadeMensalConteudo";
+import { generateRelatorioAssiduidadeMensalPdfBlob } from "@/utils/generateRelatorioAssiduidadeMensalPdfBlob";
 import type { PermissoesAssiduidade } from "@/types/hrAssiduidade";
 
 interface PessoaRelatorioAssiduidadeMensalProps {
@@ -50,11 +57,14 @@ export function PessoaRelatorioAssiduidadeMensal({
   permissoes,
 }: PessoaRelatorioAssiduidadeMensalProps) {
   const { t, language } = useTranslation();
+  const { activeCompany } = useCompany();
 
   const [mesVisivel, setMesVisivel] = useState(() => {
     const agora = new Date();
     return { ano: agora.getFullYear(), mes: agora.getMonth() };
   });
+  const [aExportar, setAExportar] = useState(false);
+  const dadosRef = useRef<DadosRelatorioAssiduidadeMensal | null>(null);
 
   const nomeDoMes = useMemo(
     () =>
@@ -70,61 +80,84 @@ export function PessoaRelatorioAssiduidadeMensal({
       return { ano: proximo.getFullYear(), mes: proximo.getMonth() };
     });
 
+  const exportar = async () => {
+    if (!dadosRef.current || aExportar) return;
+    setAExportar(true);
+    try {
+      const { blob, fileName } = await generateRelatorioAssiduidadeMensalPdfBlob({
+        organizacaoNome: activeCompany?.name,
+        pessoaNome,
+        cargo,
+        dataAdmissao,
+        ano: mesVisivel.ano,
+        mes: mesVisivel.mes,
+        dias: dadosRef.current.dias,
+        totais: dadosRef.current.totais,
+        obras: dadosRef.current.obras,
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (erro) {
+      toast.error(t("hr.relatorioMensal.exportarErro"));
+    } finally {
+      setAExportar(false);
+    }
+  };
+
   return (
     <Dialog open={aberto} onOpenChange={(valor) => !valor && onFechar()}>
-      <DialogContent className="max-w-4xl print:max-w-none">
-        <style>{`
-          @media print {
-            body * { visibility: hidden; }
-            #hr-relatorio-mensal-impressao, #hr-relatorio-mensal-impressao * { visibility: visible; }
-            #hr-relatorio-mensal-impressao { position: static; padding: 1.5rem; }
-            .no-print { display: none !important; }
-            tr { break-inside: avoid; }
-          }
-        `}</style>
-
-        <DialogHeader className="no-print">
+      <DialogContent className="max-w-4xl">
+        <DialogHeader>
           <DialogTitle>{t("hr.relatorioMensal.titulo")}</DialogTitle>
         </DialogHeader>
 
-        <div id="hr-relatorio-mensal-impressao">
-          <RelatorioAssiduidadeMensalConteudo
-            pessoaId={pessoaId}
-            ano={mesVisivel.ano}
-            mes={mesVisivel.mes}
-            pessoaNome={pessoaNome}
-            cargo={cargo}
-            dataAdmissao={dataAdmissao}
-            permissoes={permissoes}
-            controlos={
-              <div className="flex items-center justify-between no-print">
-                <h2 className="text-base font-medium capitalize">{nomeDoMes}</h2>
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t("hr.assiduidade.mesAnterior")}
-                    onClick={() => mudarMes(-1)}
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={t("hr.assiduidade.mesSeguinte")}
-                    onClick={() => mudarMes(1)}
-                  >
-                    <ChevronRight className="h-4 w-4" />
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => window.print()}>
-                    <Printer className="mr-2 h-4 w-4" />
-                    {t("hr.relatorioMensal.imprimir")}
-                  </Button>
-                </div>
+        <RelatorioAssiduidadeMensalConteudo
+          pessoaId={pessoaId}
+          ano={mesVisivel.ano}
+          mes={mesVisivel.mes}
+          pessoaNome={pessoaNome}
+          cargo={cargo}
+          dataAdmissao={dataAdmissao}
+          permissoes={permissoes}
+          aoObterDados={(dados) => {
+            dadosRef.current = dados;
+          }}
+          controlos={
+            <div className="flex items-center justify-between">
+              <h2 className="text-base font-medium capitalize">{nomeDoMes}</h2>
+              <div className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("hr.assiduidade.mesAnterior")}
+                  onClick={() => mudarMes(-1)}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  aria-label={t("hr.assiduidade.mesSeguinte")}
+                  onClick={() => mudarMes(1)}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button variant="outline" size="sm" onClick={exportar} disabled={aExportar}>
+                  {aExportar ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  {t("hr.relatorioMensal.exportar")}
+                </Button>
               </div>
-            }
-          />
-        </div>
+            </div>
+          }
+        />
       </DialogContent>
     </Dialog>
   );

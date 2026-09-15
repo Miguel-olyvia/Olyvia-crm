@@ -6,19 +6,23 @@
  * EXTRAIDO DE `PessoaRelatorioAssiduidadeMensal` DE PROPOSITO
  * -------------------------------------------------------------
  * Este componente NAO tem Dialog, NAO tem selector de mes, e NAO tem o botao
- * de imprimir -- esses controlos ficam em quem o usa, porque tem dois
+ * de exportar -- esses controlos ficam em quem o usa, porque tem dois
  * consumidores com controlos diferentes: `PessoaRelatorioAssiduidadeMensal`
  * (uma pessoa, com selector de mes) e `RelatorioAssiduidadeMensalOrganizacao`
  * (muitas pessoas, uma instancia por pessoa, sem selector -- o mes vem de
  * fora). O slot `controlos` deixa `PessoaRelatorioAssiduidadeMensal` colocar o
- * seu selector de mes e botao de imprimir no mesmo lugar do DOM onde estavam
+ * seu selector de mes e botao de exportar no mesmo lugar do DOM onde estavam
  * antes da extraccao.
  *
  * `aoTerminarCarregamento` avisa quem usa este componente (o relatorio em
- * massa) quando ESTA pessoa terminou de carregar -- para nao chamar
- * `window.print()` a meio do carregamento e imprimir paginas em branco. So
- * dispara uma vez por montagem (uma nova busca a seguir, por exemplo depois
- * de registar uma obra, nao volta a avisar).
+ * massa) quando ESTA pessoa terminou de carregar -- para nao gerar o PDF
+ * agregado a meio do carregamento e produzir paginas em branco. So dispara
+ * uma vez por montagem (uma nova busca a seguir, por exemplo depois de
+ * registar uma obra, nao volta a avisar).
+ *
+ * `aoObterDados` entrega os dados computados (dias/totais/obras) a quem usa o
+ * componente, para gerar o PDF de exportacao sem duplicar o hook -- ver
+ * `generateRelatorioAssiduidadeMensalPdfBlob`.
  */
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
@@ -38,8 +42,17 @@ import {
   useRelatorioAssiduidadeMensal,
   type DiaRelatorioMensal,
   type IntervaloRelatorio,
+  type ObraHoras,
+  type TotaisRelatorioMensal,
 } from "@/hooks/useRelatorioAssiduidadeMensal";
 import type { PermissoesAssiduidade } from "@/types/hrAssiduidade";
+
+/** Os dados computados por este componente -- entregues a quem gera o PDF de exportacao. */
+export interface DadosRelatorioAssiduidadeMensal {
+  dias: DiaRelatorioMensal[];
+  totais: TotaisRelatorioMensal;
+  obras: ObraHoras[];
+}
 
 interface RelatorioAssiduidadeMensalConteudoProps {
   pessoaId: string;
@@ -55,6 +68,12 @@ interface RelatorioAssiduidadeMensalConteudoProps {
   className?: string;
   /** Avisa, uma so vez por montagem, quando esta pessoa termina de carregar. */
   aoTerminarCarregamento?: () => void;
+  /**
+   * Entrega os dados computados (dias, totais, obras) a quem usa o componente,
+   * assim que ficam prontos -- para gerar o PDF sem duplicar o hook. Dispara
+   * de novo sempre que os dados mudarem (por exemplo, ao navegar de mes).
+   */
+  aoObterDados?: (dados: DadosRelatorioAssiduidadeMensal) => void;
 }
 
 const DIAS_SEMANA_ABREV = ["dom", "seg", "ter", "qua", "qui", "sex", "sab"] as const;
@@ -68,8 +87,11 @@ function chaveDoEstado(dia: DiaRelatorioMensal): string {
   return `hr.relatorioMensal.estado.${dia.estado}`;
 }
 
-/** "09:00-12:00 | 13:00-18:00" -- o formato do Excel do Kairos para o planeado. */
-function formatarPlaneado(intervalos: readonly IntervaloRelatorio[]): string {
+/**
+ * "09:00-12:00 | 13:00-18:00" -- o formato do Excel do Kairos para o planeado.
+ * Exportada para o gerador de PDF do relatorio reaproveitar o mesmo formato.
+ */
+export function formatarPlaneado(intervalos: readonly IntervaloRelatorio[]): string {
   if (intervalos.length === 0) return "—";
   return intervalos
     .map((intervalo) => `${horaCurta(intervalo.hora_inicio)}-${horaCurta(intervalo.hora_fim)}`)
@@ -77,7 +99,7 @@ function formatarPlaneado(intervalos: readonly IntervaloRelatorio[]): string {
 }
 
 /** "09:00-13:00 14:00-18:00" -- os intervalos REAIS picados, separados por espaco. */
-function formatarRealizado(intervalos: readonly IntervaloRelatorio[]): string {
+export function formatarRealizado(intervalos: readonly IntervaloRelatorio[]): string {
   if (intervalos.length === 0) return "—";
   return intervalos
     .map((intervalo) => `${horaCurta(intervalo.hora_inicio)}-${horaCurta(intervalo.hora_fim)}`)
@@ -117,6 +139,7 @@ export function RelatorioAssiduidadeMensalConteudo({
   controlos,
   className,
   aoTerminarCarregamento,
+  aoObterDados,
 }: RelatorioAssiduidadeMensalConteudoProps) {
   const { t, language } = useTranslation();
   const { activeCompany } = useCompany();
@@ -135,6 +158,30 @@ export function RelatorioAssiduidadeMensalConteudo({
       aoTerminarCarregamento?.();
     }
   }, [relatorio.loading, aoTerminarCarregamento]);
+
+  // So entrega dados depois de carregar, e so quando de facto mudam -- evita
+  // disparar em cada render enquanto o resto do ecra actualiza por outros
+  // motivos (ex.: abrir o formulario de registar obra).
+  const ultimosDadosRef = useRef<DadosRelatorioAssiduidadeMensal | null>(null);
+  useEffect(() => {
+    if (relatorio.loading) return;
+    const dados: DadosRelatorioAssiduidadeMensal = {
+      dias: relatorio.dias,
+      totais: relatorio.totais,
+      obras: relatorio.obras,
+    };
+    const anteriores = ultimosDadosRef.current;
+    if (
+      anteriores &&
+      anteriores.dias === dados.dias &&
+      anteriores.totais === dados.totais &&
+      anteriores.obras === dados.obras
+    ) {
+      return;
+    }
+    ultimosDadosRef.current = dados;
+    aoObterDados?.(dados);
+  }, [relatorio.loading, relatorio.dias, relatorio.totais, relatorio.obras, aoObterDados]);
 
   const nomeDoMes = useMemo(
     () =>

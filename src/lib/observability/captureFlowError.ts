@@ -139,6 +139,9 @@ export type BusinessFlow =
   | "hr-assiduidade-write"
   | "hr-relatorio-assiduidade-mensal-load"
   | "hr-relatorio-assiduidade-mensal-write"
+  // Falha a gerar/juntar o PDF do relatorio mensal (uma pessoa ou toda a
+  // organizacao) -- o utilizador clicou em "Exportar" e nao recebeu ficheiro.
+  | "hr-relatorio-assiduidade-mensal-pdf-export"
   | "hr-documentos-load"
   | "hr-documentos-modelos-load"
   | "hr-documentos-emitir"
