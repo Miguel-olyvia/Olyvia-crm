@@ -1,0 +1,50 @@
+-- Venda Direta — Fase 3 (parte 1/2): valor novo no enum do portal.
+-- Módulos: Venda Direta, Client Portal
+--
+-- Contexto
+-- --------
+-- Fase 3 dá ao cliente acesso de leitura, no portal, à sua Venda Direta
+-- (public.direct_sales / public.direct_sale_lines). O mecanismo de
+-- visibilidade de documento já existente no portal (proposals, quotes,
+-- client_contracts) não compara colunas em client_portal_users diretamente —
+-- passa pela função public.portal_user_can_see_document(_doc_type, _doc_id),
+-- que junta public.client_portal_documents (portal_user_id, document_type,
+-- document_id, is_visible) a public.client_portal_users (baseline
+-- 20260615130000, linha 4721). "_doc_type" é do tipo public.portal_document_type,
+-- um ENUM Postgres definido no baseline (linha 179) com exatamente
+-- ('proposal', 'quote', 'contract') — sem nenhum ALTER TYPE posterior
+-- (confirmado por grep a supabase/migrations/*.sql). Para reutilizar essa
+-- função, tal como as políticas de "Client can view own quotes"/"...own quote
+-- lines"/"...own contracts"/"...own proposals" já fazem, o enum precisa de um
+-- valor novo: 'direct_sale'.
+--
+-- Por que esta migration está isolada num ficheiro próprio
+-- ----------------------------------------------------------
+-- Em Postgres, um valor acrescentado a um enum por ALTER TYPE ... ADD VALUE
+-- não pode ser lido/comparado (::enum ou em qualquer expressão) na MESMA
+-- transação em que foi criado — falha com "unsafe use of new value of enum
+-- type". O `supabase db push` corre cada ficheiro de migration dentro de uma
+-- única transação, por isso o ALTER TYPE tem de ficar isolado num ficheiro
+-- que corre e faz commit antes de qualquer ficheiro que use 'direct_sale'.
+-- A parte 2/2 (20261201110000_venda_direta_portal.sql) depende deste ficheiro
+-- ter corrido primeiro.
+--
+-- Forward-only migration. Do not fold into the baseline. Do not edit an
+-- already-applied migration.
+
+ALTER TYPE public.portal_document_type ADD VALUE IF NOT EXISTS 'direct_sale';
+
+-- ============================================================
+-- Verification notes (para revisão humana, não executadas)
+-- ============================================================
+--
+-- 1. Valor novo presente no enum:
+--      SELECT enumlabel FROM pg_enum
+--      WHERE enumtypid = 'public.portal_document_type'::regtype
+--      ORDER BY enumsortorder;
+--      -- Esperado: proposal, quote, contract, direct_sale
+--
+-- 2. Nada mais depende deste ficheiro sozinho — client_portal_documents
+--    continua sem nenhuma linha com document_type = 'direct_sale' até existir
+--    a RPC/edge function (fase seguinte) que publica a Venda Direta no
+--    portal.
