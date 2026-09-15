@@ -255,11 +255,15 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         // O preço de venda definido fica SEMPRE na linha e é ele que manda.
         retail_price_unit: retailPrice,
         cost_price: materialCost,
-        // A composição do bundle viaja no jsonb, como no orçamento principal, para
-        // sobreviver à gravação mesmo onde a coluna bundle_id não é escrita.
-        selected_attributes: bundleInfo
-          ? { ...(fullAttributes || {}), bundle_components: bundleInfo.components }
-          : (fullAttributes || {}),
+        // NÃO gravar aqui `bundle_components` em selected_attributes, por muito
+        // tentador que pareça: getLineBundleComponents (inlineQuoteVatCalculation.ts:32)
+        // lê essa chave e, ao encontrá-la, passa a repartir o IVA por componente
+        // em vez de usar o iva_percent flat da linha. Como AddItemsDialog.tsx:1687
+        // fixa 23% nos bundles, isso mudaria o total (e o proposal.value gravado)
+        // de qualquer bundle com componentes a taxa reduzida — num caminho que
+        // hoje funciona. É uma melhoria a decidir à parte, não um efeito colateral
+        // desta correção de crash.
+        selected_attributes: fullAttributes || {},
       });
     });
 
