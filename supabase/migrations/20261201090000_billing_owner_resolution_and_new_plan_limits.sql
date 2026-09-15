@@ -290,7 +290,8 @@ DECLARE
   v_status         text;
   v_trial_ends_at  timestamptz;
   v_limit_value    integer;
-  v_period_start   date := date_trunc('month', now())::date;
+  v_reset_cadence  text;
+  v_period_start   date;
   v_used_value     integer;
 BEGIN
   v_billing_org_id := public.resolve_billing_organization_id(_organization_id);
@@ -306,13 +307,26 @@ BEGIN
     RETURN jsonb_build_object('blocked', true, 'reason', 'no_active_subscription');
   END IF;
 
-  SELECT limit_value INTO v_limit_value
+  SELECT limit_value, reset_cadence INTO v_limit_value, v_reset_cadence
     FROM public.plan_limits
     WHERE plan = v_plan AND limit_type = 'leads';
 
   IF NOT FOUND THEN
     RETURN jsonb_build_object('blocked', true, 'reason', 'no_plan_limit_configured');
   END IF;
+
+  -- reset_cadence decide o "balde" onde o consumo se acumula: 'monthly'
+  -- -> o mês corrente, calculado sempre no servidor (date_trunc('month',
+  -- now()) usa o relógio do Postgres, nunca o do browser/PC do
+  -- utilizador -- imune a alguém adiantar a hora do computador para
+  -- "renovar" o limite mais cedo); 'none' -> um único balde fixo para
+  -- sempre (ex: o teto de leads do trial, que não deve recarregar todos
+  -- os meses -- usa uma data-sentinela fora do calendário real para nunca
+  -- colidir com um period_start mensal genuíno).
+  v_period_start := CASE
+    WHEN v_reset_cadence = 'monthly' THEN date_trunc('month', now())::date
+    ELSE DATE '0001-01-01'
+  END;
 
   INSERT INTO public.organization_usage_counters (organization_id, limit_type, period_start, used_value)
   VALUES (v_billing_org_id, 'leads', v_period_start, 0)
@@ -424,3 +438,24 @@ $$;
 
 REVOKE ALL ON FUNCTION public.fn_check_user_seat_limit(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.fn_check_user_seat_limit(uuid) TO service_role;
+
+-- ------------------------------------------------------------
+-- 5. Seed plan_limits (leads, users) -- números já publicados na página
+--    inicial (src/pages/Landing.tsx), não inventados aqui
+-- ------------------------------------------------------------
+-- users: lotação (reset_cadence='none') para todos os planos -- nunca há
+-- "/month" na página inicial para utilizadores, só para leads.
+-- leads: trial é um teto único para o período todo do trial (reset_cadence
+-- ='none', "50 leads (trial)" sem "/month"); starter/pro/enterprise
+-- resetam todos os meses (reset_cadence='monthly', "N leads/month").
+INSERT INTO public.plan_limits (plan, limit_type, limit_value, reset_cadence)
+VALUES
+  ('trial',      'users', 3,    'none'),
+  ('starter',    'users', 20,   'none'),
+  ('pro',        'users', 70,   'none'),
+  ('enterprise', 'users', 200,  'none'),
+  ('trial',      'leads', 50,   'none'),
+  ('starter',    'leads', 200,  'monthly'),
+  ('pro',        'leads', 1000, 'monthly'),
+  ('enterprise', 'leads', 5000, 'monthly')
+ON CONFLICT (plan, limit_type) DO NOTHING;
