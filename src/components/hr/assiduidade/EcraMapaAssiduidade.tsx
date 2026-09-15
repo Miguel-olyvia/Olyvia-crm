@@ -20,12 +20,13 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Printer } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
 import { FilaDesvios } from "@/components/hr/assiduidade/FilaDesvios";
 import { MapaAssiduidadeMes } from "@/components/hr/assiduidade/MapaAssiduidadeMes";
 import { PainelDoDiaDePessoa } from "@/components/hr/assiduidade/PainelDoDiaDePessoa";
+import { RelatorioAssiduidadeMensalOrganizacao } from "@/components/hr/assiduidade/RelatorioAssiduidadeMensalOrganizacao";
 import { useAssiduidadeDaOrganizacao } from "@/hooks/useAssiduidadeDaOrganizacao";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
@@ -71,11 +72,13 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
   const { pessoaId: minhaPessoaId } = useMinhaPessoa();
 
   const [aberto, setAberto] = useState<{ pessoaId: string; data: string } | null>(null);
+  const [exportarTudoAberto, setExportarTudoAberto] = useState(false);
 
   const nomePorPessoaId = useMemo(
     () => new Map(pessoas.map((pessoa) => [pessoa.id, pessoa.nome_completo])),
     [pessoas],
   );
+  const pessoaCompletaPorId = useMemo(() => new Map(pessoas.map((pessoa) => [pessoa.id, pessoa])), [pessoas]);
 
   /**
    * So as pessoas com alguma coisa na janela. Uma grelha com trezentas linhas
@@ -87,6 +90,24 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
         .map((id) => ({ id, nome: nomePorPessoaId.get(id) ?? id }))
         .sort((a, b) => a.nome.localeCompare(b.nome)),
     [organizacao.pessoasComRegisto, nomePorPessoaId],
+  );
+
+  /**
+   * Mesma lista do mapa (mesmo filtro, se algum dia o mapa vier a ter um),
+   * so com cargo e data de admissao para o cabecalho impresso de cada pessoa.
+   */
+  const pessoasParaExportar = useMemo(
+    () =>
+      pessoasDoMapa.map((pessoa) => {
+        const completa = pessoaCompletaPorId.get(pessoa.id);
+        return {
+          id: pessoa.id,
+          nome: pessoa.nome,
+          cargo: completa?.cargo ?? null,
+          dataAdmissao: completa?.data_admissao ?? null,
+        };
+      }),
+    [pessoasDoMapa, pessoaCompletaPorId],
   );
 
   const nomeDoMes = new Intl.DateTimeFormat(language, { month: "long", year: "numeric" }).format(
@@ -135,6 +156,12 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
                   >
                     <ChevronRight className="h-4 w-4" />
                   </Button>
+                  {pessoasDoMapa.length > 0 && (
+                    <Button variant="outline" size="sm" onClick={() => setExportarTudoAberto(true)}>
+                      <Printer className="mr-2 h-4 w-4" />
+                      {t("hr.assiduidade.mapa.exportarTudo")}
+                    </Button>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
@@ -169,6 +196,17 @@ export function EcraMapaAssiduidade({ titulo, permissoes }: EcraMapaAssiduidadeP
           permissoes={permissoes}
           onFechar={() => setAberto(null)}
           onDepoisDeGravar={() => void organizacao.recarregar()}
+        />
+      )}
+
+      {exportarTudoAberto && (
+        <RelatorioAssiduidadeMensalOrganizacao
+          aberto={exportarTudoAberto}
+          onFechar={() => setExportarTudoAberto(false)}
+          ano={mesVisivel.ano}
+          mes={mesVisivel.mes}
+          pessoas={pessoasParaExportar}
+          permissoes={permissoes}
         />
       )}
     </div>
