@@ -119,8 +119,10 @@ const Ausencias = lazy(() => import("./pages/Ausencias"));
 const AusenciasGestao = lazy(() => import("./pages/AusenciasGestao"));
 const Assiduidade = lazy(() => import("./pages/Assiduidade"));
 const AssiduidadeOrganizacao = lazy(() => import("./pages/AssiduidadeOrganizacao"));
+const AssiduidadeEAusencias = lazy(() => import("./pages/AssiduidadeEAusencias"));
 const RhCentros = lazy(() => import("./pages/RhCentros"));
 const ConfiguracaoAdmissao = lazy(() => import("./pages/ConfiguracaoAdmissao"));
+const ConfiguracaoModelosDocumentos = lazy(() => import("./pages/ConfiguracaoModelosDocumentos"));
 const OrgTemplates = lazy(() => import("./pages/OrgTemplates"));
 const OrgHelp = lazy(() => import("./pages/OrgHelp"));
 const NeedsAssessmentConfig = lazy(() => import("./pages/NeedsAssessmentConfig"));
@@ -292,15 +294,21 @@ const App = () => (
                       {/* Ausencias e ferias -- o eixo do menu e a AUDIENCIA: as minhas,
                           as que tenho de decidir, e as de toda a gente. */}
                       <Route path="/rh/ausencias" element={<ProtectedRoute permissions={["hr.ausencias.view.own", "hr.ausencias.view"]}><Ausencias /></ProtectedRoute>} />
-                      {/* Aprovacoes e Organizacao fundiram-se visualmente num so ecra
-                          (AusenciasGestao, com separadores por permissao); a rota antiga
-                          fica como redirect para quem a tinha guardada. */}
-                      <Route path="/rh/ausencias/aprovacoes" element={<ProtectedRoute permissions={["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"]}><Navigate to="/rh/ausencias/organizacao?tab=aprovacoes" replace /></ProtectedRoute>} />
-                      <Route path="/rh/ausencias/organizacao" element={<ProtectedRoute permissions={["hr.ausencias.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"]}><AusenciasGestao /></ProtectedRoute>} />
+                      {/* Ausencias (Aprovacoes + Organizacao, AusenciasGestao) e o Mapa
+                          de assiduidade (AssiduidadeOrganizacao) fundiram-se num so item
+                          de menu de nivel superior, "Assiduidade e Ausencias"
+                          (AssiduidadeEAusencias, com um separador de DOMINIO por cima dos
+                          separadores internos que cada um ja tinha). As tres rotas antigas
+                          ficam como redirect para quem as tinha guardadas, cada uma
+                          protegida pela MESMA permissao que tinha antes -- a fusao nao
+                          alarga acesso a ninguem. */}
+                      <Route path="/rh/ausencias/aprovacoes" element={<ProtectedRoute permissions={["hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"]}><Navigate to="/rh/assiduidade-e-ausencias?dominio=ausencias&tab=aprovacoes" replace /></ProtectedRoute>} />
+                      <Route path="/rh/ausencias/organizacao" element={<ProtectedRoute permissions={["hr.ausencias.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"]}><Navigate to="/rh/assiduidade-e-ausencias?dominio=ausencias" replace /></ProtectedRoute>} />
                       {/* Assiduidade e picagens -- o mesmo eixo de audiencia:
                           o meu ponto, e o mapa de toda a gente. */}
                       <Route path="/rh/assiduidade" element={<ProtectedRoute permissions={["hr.assiduidade.view.own", "hr.assiduidade.view"]}><Assiduidade /></ProtectedRoute>} />
-                      <Route path="/rh/assiduidade/organizacao" element={<ProtectedRoute permission="hr.assiduidade.view"><AssiduidadeOrganizacao /></ProtectedRoute>} />
+                      <Route path="/rh/assiduidade/organizacao" element={<ProtectedRoute permission="hr.assiduidade.view"><Navigate to="/rh/assiduidade-e-ausencias?dominio=assiduidade" replace /></ProtectedRoute>} />
+                      <Route path="/rh/assiduidade-e-ausencias" element={<ProtectedRoute permissions={["hr.ausencias.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.assiduidade.view"]}><AssiduidadeEAusencias /></ProtectedRoute>} />
                       {/* Gestao de centros de trabalho (20261130165000) --
                           listar, criar, editar e desactivar hr_locais_trabalho.
                           `hr.locais.view`/`hr.locais.edit` ja existiam desde
@@ -312,6 +320,7 @@ const App = () => (
                           hr.admissao.obrigatorios.gerir -- nao atribuida a
                           nenhum papel por omissao. */}
                       <Route path="/rh/admissao/configuracao" element={<ProtectedRoute permission="hr.admissao.obrigatorios.gerir"><ConfiguracaoAdmissao /></ProtectedRoute>} />
+                      <Route path="/rh/documentos/modelos" element={<ProtectedRoute permission="hr.pessoas.documentos.modelos.view"><ConfiguracaoModelosDocumentos /></ProtectedRoute>} />
                       <Route path="/organizations" element={<Organizations />} />
                       <Route path="/organizations/:id" element={<OrganizationDetail />} />
                       <Route path="/org-templates" element={<OrgTemplates />} />

@@ -243,6 +243,19 @@ export default function PessoaDetail() {
     [colegas],
   );
 
+  // Vinculos desta pessoa, para o selector opcional dos dois pontos de
+  // entrada do fluxo "Anexar contrato ja assinado" (Documentos e Contratos
+  // -- ver `AnexarContratoAssinadoDialog`). Calculado uma so vez aqui para
+  // os dois separadores mostrarem exactamente a mesma lista.
+  const vinculosOpcoesDocumento = useMemo(
+    () =>
+      ficha.vinculos.map((v) => ({
+        value: v.id,
+        label: `${t(`hr.tipoContrato.${v.tipo_contrato}`)} · ${v.data_inicio}`,
+      })),
+    [ficha.vinculos, t],
+  );
+
   // A entidade legal e SEMPRE a da organizacao da ficha -- nao se escolhe, e
   // por isso o formulario nem sequer envia `entidade_legal_org_id`: fica nulo
   // em todas as fichas criadas por aqui.
@@ -490,6 +503,8 @@ export default function PessoaDetail() {
               podeEditarRetribuicao={podeEditarRetribuicao}
               podeCorrigirRetribuicao={podeCorrigirRetribuicaoVinculo}
               podeCorrigirHoras={podeCorrigirHorasVinculo}
+              podeAnexarContratoAssinado={permissoesDocumentos.emitir}
+              vinculosOpcoesDocumento={vinculosOpcoesDocumento}
               saving={ficha.saving}
               onGuardarVinculo={ficha.saveVinculo}
             />
@@ -539,12 +554,10 @@ export default function PessoaDetail() {
         <TabsContent value="documentos">
           <PessoaDocumentosTab
             pessoaId={pessoa.id}
+            organizationId={pessoa.organization_id}
             souAPessoa={minhaPessoaId === pessoa.id}
             permissoes={permissoesDocumentos}
-            vinculosOpcoes={ficha.vinculos.map((v) => ({
-              value: v.id,
-              label: `${t(`hr.tipoContrato.${v.tipo_contrato}`)} · ${v.data_inicio}`,
-            }))}
+            vinculosOpcoes={vinculosOpcoesDocumento}
           />
         </TabsContent>
 

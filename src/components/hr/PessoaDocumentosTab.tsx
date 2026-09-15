@@ -48,6 +48,14 @@
  * `assinatura_origem` (`interna`/`externa`) distingue os dois so depois de
  * assinado -- mostrado como badge extra na coluna de estado.
  *
+ * O fluxo dos dois passos (criar sem modelo -> anexar ficheiro) vive em
+ * `AnexarContratoAssinadoDialog`, extraido daqui para ser reaproveitado
+ * TAMBEM pelo separador Contratos (`PessoaContratoTab`) -- o mesmo atalho,
+ * dois pontos de entrada na ficha. O passo de anexar sozinho (para qualquer
+ * documento a_aguardar_assinatura, nao so os criados por este caminho) vive
+ * em `AnexarFicheiroDialog`, reaproveitado pela accao "Anexar ficheiro" da
+ * tabela abaixo.
+ *
  * A coluna "Ficheiro" mostra sempre que ha um RESUMO (hash) guardado quando
  * `ficheiro_caminho` nao e nulo -- e o que torna verificavel a promessa de
  * `rpc_hr_documento_anexar_ficheiro` de nunca sobrescrever em silencio: o
@@ -60,7 +68,7 @@
  * anterior, o mesmo cuidado do NISS e do conteudo HTML: um URL assinado e
  * tao sensivel como o proprio ficheiro enquanto for valido.
  */
-import { useRef, useState } from "react";
+import { useState } from "react";
 import DOMPurify from "dompurify";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -95,13 +103,15 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { usePessoaDocumentos } from "@/hooks/usePessoaDocumentos";
-import { CampoSelect, CampoTexto } from "@/components/hr/form/Campos";
-import { TIPOS_DOCUMENTO_RH, type EstadoDocumentoRH, type PessoaDocumento, type TipoDocumentoRH } from "@/types/hr";
+import { CampoSelect } from "@/components/hr/form/Campos";
+import {
+  AnexarContratoAssinadoDialog,
+  type OpcaoVinculoDocumento,
+} from "@/components/hr/AnexarContratoAssinadoDialog";
+import { AnexarFicheiroDialog } from "@/components/hr/AnexarFicheiroDialog";
+import type { EstadoDocumentoRH, PessoaDocumento } from "@/types/hr";
 
-export interface OpcaoVinculoDocumento {
-  value: string;
-  label: string;
-}
+export type { OpcaoVinculoDocumento };
 
 export interface PermissoesDocumentosFicha {
   view: boolean;
@@ -115,6 +125,13 @@ export interface PermissoesDocumentosFicha {
 
 interface PessoaDocumentosTabProps {
   pessoaId: string;
+  /**
+   * So para o caminho de "Anexar contrato ja assinado" (o documento novo
+   * ainda nao esta em `dados.documentos` no momento em que se constroi
+   * localmente -- ver `AnexarContratoAssinadoDialog`). Nao usado para ler
+   * nada nesta lista, que ja filtra por `pessoaId`.
+   */
+  organizationId: string;
   souAPessoa: boolean;
   permissoes: PermissoesDocumentosFicha;
   /** Vinculos desta pessoa, para o selector opcional do dialogo de upload. */
@@ -135,6 +152,7 @@ function formatarData(iso: string | null): string {
 
 export function PessoaDocumentosTab({
   pessoaId,
+  organizationId,
   souAPessoa,
   permissoes,
   vinculosOpcoes = [],
@@ -155,18 +173,12 @@ export function PessoaDocumentosTab({
   const [aCarregarConteudo, setACarregarConteudo] = useState(false);
   const [documentoAAssinar, setDocumentoAAssinar] = useState<PessoaDocumento | null>(null);
   const [documentoAAnexar, setDocumentoAAnexar] = useState<PessoaDocumento | null>(null);
-  const [ficheiroEscolhido, setFicheiroEscolhido] = useState<File | null>(null);
   const [documentoAAbrirId, setDocumentoAAbrirId] = useState<string | null>(null);
-  const inputFicheiroRef = useRef<HTMLInputElement>(null);
 
   // -- Segundo caminho de criar um documento: upload de um contrato ja
-  // assinado em papel (20261201070000). ---------------------------------
+  // assinado em papel (20261201070000). O fluxo em si vive em
+  // `AnexarContratoAssinadoDialog` -- aqui so se guarda se esta aberto.
   const [aCriarPorUpload, setACriarPorUpload] = useState(false);
-  const [rascunhoUpload, setRascunhoUpload] = useState<{
-    tipo: TipoDocumentoRH;
-    titulo: string;
-    vinculoId: string;
-  }>({ tipo: "contrato", titulo: "", vinculoId: "" });
   const [documentoAConfirmarExterna, setDocumentoAConfirmarExterna] =
     useState<PessoaDocumento | null>(null);
 
@@ -223,64 +235,6 @@ export function PessoaDocumentosTab({
     setDocumentoAAssinar(null);
   };
 
-  const fecharAnexar = () => {
-    setDocumentoAAnexar(null);
-    setFicheiroEscolhido(null);
-    if (inputFicheiroRef.current) inputFicheiroRef.current.value = "";
-  };
-
-  const fecharCriarPorUpload = () => {
-    setACriarPorUpload(false);
-    setRascunhoUpload({ tipo: "contrato", titulo: "", vinculoId: "" });
-  };
-
-  const confirmarCriarPorUpload = async () => {
-    if (!rascunhoUpload.titulo.trim()) return;
-    const { documentoId, erro } = await dados.criarPorUpload({
-      tipo: rascunhoUpload.tipo,
-      titulo: rascunhoUpload.titulo.trim(),
-      vinculoId: rascunhoUpload.vinculoId || null,
-    });
-    if (erro || !documentoId) {
-      toast.error(erro ?? t("hr.documentos.erroAnexar"));
-      return;
-    }
-    toast.success(t("hr.documentos.criarUploadComSucesso"));
-    // Reaproveita o MESMO dialogo de anexar ficheiro que a emissao por
-    // modelo ja usa -- o documento recem-criado esta em
-    // a_aguardar_assinatura, o mesmo estado que esse dialogo exige.
-    //
-    // NAO procurar em dados.documentos: esse array e o valor capturado nesta
-    // closure no render em que o botao foi clicado. criarPorUpload chama
-    // load() por dentro, mas o setDocumentos(...) resultante so aparece num
-    // RENDER FUTURO -- nunca muta o array ja capturado aqui. Procurar
-    // documentoId nele resolve sempre para null (o documento ainda nao la
-    // esta), o dialogo de anexar nao abre, e ninguem percebe porque. Construir
-    // o objecto localmente, a partir do que ja se sabe: o id devolvido pela
-    // RPC e os campos do rascunho escolhidos no dialogo anterior.
-    const documentoNovo: PessoaDocumento = {
-      id: documentoId,
-      pessoa_id: pessoaId,
-      organization_id: dados.documentos[0]?.organization_id ?? "",
-      vinculo_id: rascunhoUpload.vinculoId || null,
-      modelo_id: null,
-      tipo: rascunhoUpload.tipo,
-      titulo: rascunhoUpload.titulo.trim(),
-      estado: "a_aguardar_assinatura",
-      ficheiro_caminho: null,
-      ficheiro_hash_sha256: null,
-      ficheiro_anexado_em: null,
-      emitido_em: null,
-      emitido_por: null,
-      assinado_em: null,
-      assinatura_origem: null,
-      anulado_em: null,
-      anulado_motivo: null,
-    };
-    fecharCriarPorUpload();
-    setDocumentoAAnexar(documentoNovo);
-  };
-
   const confirmarAssinaturaExterna = async () => {
     if (!documentoAConfirmarExterna) return;
     const erro = await dados.registarAssinaturaExterna(documentoAConfirmarExterna.id);
@@ -290,17 +244,6 @@ export function PessoaDocumentosTab({
     }
     toast.success(t("hr.documentos.assinaturaExternaComSucesso"));
     setDocumentoAConfirmarExterna(null);
-  };
-
-  const confirmarAnexo = async () => {
-    if (!documentoAAnexar || !ficheiroEscolhido) return;
-    const erro = await dados.anexarFicheiro(documentoAAnexar.id, ficheiroEscolhido);
-    if (erro) {
-      toast.error(erro);
-      return;
-    }
-    toast.success(t("hr.documentos.anexadoComSucesso"));
-    fecharAnexar();
   };
 
   const abrirFicheiro = async (documento: PessoaDocumento) => {
@@ -585,90 +528,29 @@ export function PessoaDocumentosTab({
         </DialogContent>
       </Dialog>
 
-      <Dialog open={documentoAAnexar !== null} onOpenChange={(aberto) => !aberto && fecharAnexar()}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("hr.documentos.confirmarAnexoTitulo")}</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            {t("hr.documentos.confirmarAnexoDescricao", {
-              titulo: documentoAAnexar?.titulo ?? "",
-            })}
-          </p>
-          <input
-            ref={inputFicheiroRef}
-            type="file"
-            accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-            className="block w-full text-sm text-muted-foreground file:mr-3 file:rounded-md file:border file:border-input file:bg-background file:px-3 file:py-1.5 file:text-sm file:font-medium hover:file:bg-accent"
-            onChange={(evento) => setFicheiroEscolhido(evento.target.files?.[0] ?? null)}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={fecharAnexar}>
-              {t("common.cancel")}
-            </Button>
-            <Button disabled={!ficheiroEscolhido || dados.saving} onClick={confirmarAnexo}>
-              {dados.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t("hr.documentos.anexar")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Anexar ficheiro a um documento ja existente (qualquer origem),
+          a_aguardar_assinatura -- reaproveitado tambem pelo segundo passo do
+          fluxo abaixo. */}
+      <AnexarFicheiroDialog
+        documento={documentoAAnexar}
+        onOpenChange={(aberto) => !aberto && setDocumentoAAnexar(null)}
+        anexarFicheiro={dados.anexarFicheiro}
+        saving={dados.saving}
+      />
 
-      {/* Criar por upload: sem modelo, sem assinatura na app -- o primeiro
-          passo do caminho de anexar um contrato ja assinado em papel. */}
-      <Dialog
+      {/* Criar por upload + anexar: sem modelo, sem assinatura na app -- o
+          caminho de anexar um contrato ja assinado em papel. Reaproveitado
+          TAMBEM pelo separador Contratos (PessoaContratoTab). */}
+      <AnexarContratoAssinadoDialog
         open={aCriarPorUpload}
-        onOpenChange={(aberto) => !aberto && fecharCriarPorUpload()}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("hr.documentos.anexarContratoAssinadoTitulo")}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <CampoSelect
-              id="hr-documentos-upload-tipo"
-              label={t("hr.documentos.coluna.tipo")}
-              valor={rascunhoUpload.tipo}
-              opcoes={TIPOS_DOCUMENTO_RH.map((tipo) => ({
-                value: tipo,
-                label: t(`hr.tipoDocumentoRH.${tipo}`),
-              }))}
-              onChange={(v) =>
-                setRascunhoUpload((r) => ({ ...r, tipo: v as TipoDocumentoRH }))
-              }
-            />
-            <CampoTexto
-              id="hr-documentos-upload-titulo"
-              label={t("hr.documentos.coluna.titulo")}
-              valor={rascunhoUpload.titulo}
-              onChange={(v) => setRascunhoUpload((r) => ({ ...r, titulo: v }))}
-            />
-            {vinculosOpcoes.length > 0 && (
-              <CampoSelect
-                id="hr-documentos-upload-vinculo"
-                label={t("hr.form.seccoes.vinculo")}
-                valor={rascunhoUpload.vinculoId}
-                opcoes={vinculosOpcoes}
-                vazioLabel={t("common.none")}
-                placeholder={t("common.none")}
-                onChange={(v) => setRascunhoUpload((r) => ({ ...r, vinculoId: v }))}
-              />
-            )}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={fecharCriarPorUpload}>
-              {t("common.cancel")}
-            </Button>
-            <Button
-              disabled={!rascunhoUpload.titulo.trim() || dados.saving}
-              onClick={confirmarCriarPorUpload}
-            >
-              {dados.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t("hr.documentos.anexarContratoAssinado")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onOpenChange={setACriarPorUpload}
+        pessoaId={pessoaId}
+        organizationId={organizationId}
+        vinculosOpcoes={vinculosOpcoes}
+        criarPorUpload={dados.criarPorUpload}
+        anexarFicheiro={dados.anexarFicheiro}
+        saving={dados.saving}
+      />
 
       {/* Confirmar assinatura externa: fecha o ciclo, so depois de o
           ficheiro JA estar anexado -- a mesma ordem que a base impoe. */}

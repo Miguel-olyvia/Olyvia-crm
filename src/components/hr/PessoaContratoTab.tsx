@@ -55,6 +55,21 @@
  * abaixo (`PessoaVinculoHorasCard`), que distingue ALTERAR (fecha a versao em
  * vigor e abre outra, com data de efeito) de CORRIGIR (reescreve uma versao
  * ja decorrida) -- a mesma distincao de `PessoaAfectacoesSeccao`.
+ *
+ * "ANEXAR CONTRATO JA ASSINADO" TAMBEM APARECE AQUI (20261215)
+ * --------------------------------------------------------------
+ * O mesmo atalho de criar um documento sem modelo, para um contrato ja
+ * assinado em papel, que existe no separador Documentos
+ * (`PessoaDocumentosTab`) -- aqui e que se trata do contrato, e obrigar a
+ * saltar de separador so para anexar o papel assinado era o mesmo atrito que
+ * a ficha ja evita nos outros fluxos. O fluxo dos dois passos (criar +
+ * anexar ficheiro) vive em `AnexarContratoAssinadoDialog`, reaproveitado sem
+ * duplicar nada; este ecra so lhe fornece uma instancia PROPRIA de
+ * `usePessoaDocumentos` (o mesmo padrao que `PessoaVinculoHorasCard` ja usa
+ * para ler `documentos`) e o botao, gated pela MESMA permissao
+ * (`hr.pessoas.documentos.emitir`) que o abre em Documentos. A LISTAGEM dos
+ * documentos continua so em Documentos -- este separador nunca a mostra,
+ * so o atalho de criacao.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
@@ -71,9 +86,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { FileText, Loader2 } from "lucide-react";
+import { FileSignature, FileText, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
+import { usePessoaDocumentos } from "@/hooks/usePessoaDocumentos";
+import {
+  AnexarContratoAssinadoDialog,
+  type OpcaoVinculoDocumento,
+} from "@/components/hr/AnexarContratoAssinadoDialog";
 import {
   CamposTocadosProvider,
   CampoSelect,
@@ -140,6 +160,16 @@ interface PessoaContratoTabProps {
    * (essa reaproveita `podeEditar`) -- ver `PessoaVinculoHorasCard`.
    */
   podeCorrigirHoras: boolean;
+  /**
+   * `hr.pessoas.documentos.emitir`: a MESMA permissao que abre "Anexar
+   * contrato ja assinado" em `PessoaDocumentosTab` -- e a mesma classe de
+   * accao, "criar um documento novo para esta pessoa", so que acedida a
+   * partir deste separador.
+   */
+  podeAnexarContratoAssinado: boolean;
+  /** Vinculos desta pessoa, para o selector opcional do dialogo -- a MESMA
+   *  lista que `PessoaDetail` ja calcula para `PessoaDocumentosTab`. */
+  vinculosOpcoesDocumento: OpcaoVinculoDocumento[];
   saving: boolean;
   onGuardarVinculo: (
     vinculoId: string | null,
@@ -260,10 +290,19 @@ export function PessoaContratoTab({
   podeEditarRetribuicao,
   podeCorrigirRetribuicao,
   podeCorrigirHoras,
+  podeAnexarContratoAssinado,
+  vinculosOpcoesDocumento,
   saving,
   onGuardarVinculo,
 }: PessoaContratoTabProps) {
   const { t } = useTranslation();
+  // Instancia PROPRIA de usePessoaDocumentos, so para o atalho de "Anexar
+  // contrato ja assinado" -- o mesmo padrao que `PessoaVinculoHorasCard` ja
+  // usa para ler `documentos` a partir deste separador. `podeVerModelos:
+  // false` -- este caminho nunca passa por um modelo, por isso nunca precisa
+  // da lista de modelos.
+  const dadosDocumentos = usePessoaDocumentos(pessoaId, false);
+  const [aAnexarContrato, setAAnexarContrato] = useState(false);
   // "Em vigor" e activo OU suspenso, e NAO so activo. Um contrato suspenso
   // continua a ser a relacao laboral vigente -- esta parada, nao acabada.
   //
@@ -512,11 +551,25 @@ export function PessoaContratoTab({
             <FileText className="h-4 w-4 text-muted-foreground" />
             {activo ? t("hr.contrato.activoTitulo") : t("hr.contrato.novoTitulo")}
           </CardTitle>
-          {activo && (
-            <Badge variant="secondary" className="font-normal">
-              {t("hr.estadoVinculo.activo")}
-            </Badge>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {activo && (
+              <Badge variant="secondary" className="font-normal">
+                {t("hr.estadoVinculo.activo")}
+              </Badge>
+            )}
+            {/* Mesmo atalho, mesmo texto, mesmo icone que "Anexar contrato ja
+                assinado" em Documentos -- ver o cabecalho deste ficheiro. */}
+            {podeAnexarContratoAssinado && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setAAnexarContrato(true)}
+              >
+                <FileSignature className="mr-2 h-4 w-4" />
+                {t("hr.documentos.anexarContratoAssinado")}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent className="space-y-6">
           <CamposTocadosProvider onTocar={tocar}>
@@ -982,6 +1035,19 @@ export function PessoaContratoTab({
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {podeAnexarContratoAssinado && (
+        <AnexarContratoAssinadoDialog
+          open={aAnexarContrato}
+          onOpenChange={setAAnexarContrato}
+          pessoaId={pessoaId}
+          organizationId={organizationId}
+          vinculosOpcoes={vinculosOpcoesDocumento}
+          criarPorUpload={dadosDocumentos.criarPorUpload}
+          anexarFicheiro={dadosDocumentos.anexarFicheiro}
+          saving={dadosDocumentos.saving}
+        />
       )}
     </div>
   );

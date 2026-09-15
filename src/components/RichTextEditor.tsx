@@ -266,50 +266,52 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
         {extraToolbarButtons}
 
-        {/* Variables Popover */}
-        <Popover open={showVariables} onOpenChange={setShowVariables}>
-          <PopoverTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 text-xs"
-              title="Inserir variável"
-            >
-              <Variable className="h-3.5 w-3.5" />
-              Variáveis
-            </Button>
-          </PopoverTrigger>
-          <PopoverContent className="w-80 p-2 z-[650]" align="start">
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground font-medium px-2">
-                Clique para inserir uma variável dinâmica
-              </p>
-              <ScrollArea className="h-[250px]">
-                <div className="space-y-1">
-                  {variables.map((v) => (
-                    <button
-                      key={v.key}
-                      type="button"
-                      onClick={() => insertVariable(v.key)}
-                      className="w-full flex items-start gap-2 p-2 rounded hover:bg-muted text-left transition-colors"
-                    >
-                      <Badge variant="secondary" className="font-mono text-[10px] shrink-0">
-                        {v.key}
-                      </Badge>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">{v.label}</p>
-                        {v.description && (
-                          <p className="text-[10px] text-muted-foreground">{v.description}</p>
-                        )}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </ScrollArea>
-            </div>
-          </PopoverContent>
-        </Popover>
+        {/* Variables Popover — só faz sentido quando há variáveis para inserir */}
+        {variables.length > 0 && (
+          <Popover open={showVariables} onOpenChange={setShowVariables}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                title="Inserir variável"
+              >
+                <Variable className="h-3.5 w-3.5" />
+                Variáveis
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-80 p-2 z-[650]" align="start">
+              <div className="space-y-2">
+                <p className="text-xs text-muted-foreground font-medium px-2">
+                  Clique para inserir uma variável dinâmica
+                </p>
+                <ScrollArea className="h-[250px]">
+                  <div className="space-y-1">
+                    {variables.map((v) => (
+                      <button
+                        key={v.key}
+                        type="button"
+                        onClick={() => insertVariable(v.key)}
+                        className="w-full flex items-start gap-2 p-2 rounded hover:bg-muted text-left transition-colors"
+                      >
+                        <Badge variant="secondary" className="font-mono text-[10px] shrink-0">
+                          {v.key}
+                        </Badge>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium">{v.label}</p>
+                          {v.description && (
+                            <p className="text-[10px] text-muted-foreground">{v.description}</p>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
 
       {/* Editor */}

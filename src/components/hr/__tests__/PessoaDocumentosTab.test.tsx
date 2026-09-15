@@ -95,6 +95,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: false,
@@ -118,6 +119,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa
         permissoes={{
           view: false,
@@ -148,6 +150,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -175,6 +178,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -203,6 +207,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -229,6 +234,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -254,6 +260,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -294,6 +301,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -341,6 +349,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -387,6 +396,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -426,6 +436,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -457,6 +468,7 @@ describe("PessoaDocumentosTab", () => {
     render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={{
           view: true,
@@ -508,13 +520,19 @@ describe("PessoaDocumentosTab", () => {
     const { rerender } = render(
       <PessoaDocumentosTab
         pessoaId="p1"
+        organizationId="org"
         souAPessoa={false}
         permissoes={permissoes}
       />,
     );
     useHookMock.mockReturnValue(resultadoBase({ documentos: [DOCUMENTO_A_AGUARDAR] }));
     rerender(
-      <PessoaDocumentosTab pessoaId="p1" souAPessoa={false} permissoes={permissoes} />,
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        organizationId="org"
+        souAPessoa={false}
+        permissoes={permissoes}
+      />,
     );
 
     // Sem ficheiro anexado ainda -- o botao nao aparece.
@@ -534,7 +552,12 @@ describe("PessoaDocumentosTab", () => {
       }),
     );
     rerender(
-      <PessoaDocumentosTab pessoaId="p1" souAPessoa={false} permissoes={permissoes} />,
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        organizationId="org"
+        souAPessoa={false}
+        permissoes={permissoes}
+      />,
     );
 
     // Com o ficheiro ja anexado -- o botao aparece.
@@ -561,7 +584,12 @@ describe("PessoaDocumentosTab", () => {
       modelosView: false,
     };
     const { rerender } = render(
-      <PessoaDocumentosTab pessoaId="p1" souAPessoa={false} permissoes={permissoes} />,
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        organizationId="org"
+        souAPessoa={false}
+        permissoes={permissoes}
+      />,
     );
 
     expect(screen.getByText("hr.documentos.origemInterna")).toBeInTheDocument();
@@ -574,7 +602,14 @@ describe("PessoaDocumentosTab", () => {
         ],
       }),
     );
-    rerender(<PessoaDocumentosTab pessoaId="p1" souAPessoa={false} permissoes={permissoes} />);
+    rerender(
+      <PessoaDocumentosTab
+        pessoaId="p1"
+        organizationId="org"
+        souAPessoa={false}
+        permissoes={permissoes}
+      />,
+    );
 
     expect(screen.getByText("hr.documentos.origemExterna")).toBeInTheDocument();
     expect(screen.queryByText("hr.documentos.origemInterna")).not.toBeInTheDocument();

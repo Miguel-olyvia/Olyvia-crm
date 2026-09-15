@@ -191,23 +191,25 @@ export const menuSections: MenuSection[] = [
     // atribuicao nenhuma). Os sub-separadores do ecra (Atividade, Equipas,
     // Organograma, Funcoes) vivem dentro da pagina e nao no menu.
     //
-    // Aprovacoes e Organizacao fundiram-se num so item de menu, que leva a
-    // AusenciasGestao.tsx (separadores por permissao dentro do proprio
-    // ecra). Continua aqui, e nao em "A minha area", pela mesma razao de
-    // sempre: quem controla o acesso e a PERMISSAO (aprovar.chefia /
-    // aprovar.rh / view), nao a seccao -- a seccao e so organizacao visual.
-    // `/rh/ausencias/aprovacoes` fica em `paths` (mesmo sem item de menu
-    // proprio) para o grupo continuar realcado quando alguem aterra nesse
-    // redirect antigo.
+    // Ausencias (Aprovacoes + Organizacao) e Mapa de assiduidade fundiram-se
+    // agora num so item de menu de nivel superior, que leva a
+    // AssiduidadeEAusencias.tsx (separador de DOMINIO por cima dos
+    // separadores internos que cada um ja tinha, nao tocados). Continua
+    // aqui, e nao em "A minha area", pela mesma razao de sempre: quem
+    // controla o acesso e a PERMISSAO, nao a seccao -- a seccao e so
+    // organizacao visual.
+    // As tres rotas antigas (`/rh/ausencias/aprovacoes`,
+    // `/rh/ausencias/organizacao`, `/rh/assiduidade/organizacao`) ficam em
+    // `paths` (mesmo sem item de menu proprio) para o grupo continuar
+    // realcado para quem aterra num desses redirects antigos.
     id: "rh",
     icon: IdCard,
     labelKey: "sidebar.hrModule",
-    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/centros", "/rh/admissao/configuracao"],
-    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view", "hr.admissao.obrigatorios.gerir"],
+    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/assiduidade-e-ausencias", "/rh/centros", "/rh/admissao/configuracao", "/rh/documentos/modelos"],
+    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view", "hr.admissao.obrigatorios.gerir", "hr.pessoas.documentos.modelos.view"],
     items: [
       { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
-      { to: "/rh/ausencias/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAusenciasGestao", permissions: ["hr.ausencias.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh"] },
-      { to: "/rh/assiduidade/organizacao", icon: CalendarRange, labelKey: "sidebar.hrAssiduidadeOrganizacao", permission: "hr.assiduidade.view" },
+      { to: "/rh/assiduidade-e-ausencias", icon: CalendarRange, labelKey: "sidebar.hrAssiduidadeEAusencias", permissions: ["hr.ausencias.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.assiduidade.view"] },
       // Gestao de centros de trabalho (20261130165000): listar, criar,
       // editar e desactivar hr_locais_trabalho. `hr.locais.view` ja existe
       // desde 20261120120000 e ja esta atribuida ao super_admin
@@ -217,6 +219,10 @@ export const menuSections: MenuSection[] = [
       // (20261201050000). Permissao nova, hr.admissao.obrigatorios.gerir --
       // NENHUM papel a recebe por omissao.
       { to: "/rh/admissao/configuracao", icon: Settings, labelKey: "sidebar.hrAdmissaoConfig", permission: "hr.admissao.obrigatorios.gerir" },
+      // Modelos de documento (contrato/adenda/declaracao/recibo/outro) usados
+      // para emitir a um pessoa (20261123020000). Permissao ja existe, so
+      // atribuida a super_admin -- ver hrDb/useModelosDocumentosRH.
+      { to: "/rh/documentos/modelos", icon: FileText, labelKey: "sidebar.hrModelosDocumentos", permission: "hr.pessoas.documentos.modelos.view" },
     ],
   },
   {

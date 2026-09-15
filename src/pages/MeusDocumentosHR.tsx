@@ -46,6 +46,7 @@ export default function MeusDocumentosHR() {
       <h1 className="text-xl font-semibold">{t("hr.documentos.minhas.titulo")}</h1>
       <PessoaDocumentosTab
         pessoaId={minha.pessoaId}
+        organizationId={activeCompany.id}
         souAPessoa
         permissoes={{
           view: false,
