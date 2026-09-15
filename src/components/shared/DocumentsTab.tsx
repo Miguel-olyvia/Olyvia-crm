@@ -17,7 +17,10 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { generateSecureFileName } from "@/utils/secureFileUpload";
 
-export type DocumentEntityType = "quote" | "proposal" | "contract";
+// "product": fichas técnicas, certificados e manuais do artigo. Fica fora do
+// alcance do portal do cliente sem ser preciso fazer nada — ver a nota de
+// segurança na migração 20261201100000.
+export type DocumentEntityType = "quote" | "proposal" | "contract" | "product";
 
 const DOCUMENT_TYPES = [
   { value: "contract_signed", label: "Contrato Assinado (scan)", color: "bg-green-100 text-green-800" },

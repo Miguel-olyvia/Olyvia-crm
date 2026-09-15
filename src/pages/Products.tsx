@@ -4,6 +4,7 @@ import * as XLSX from 'xlsx';
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Loader2, RotateCcw, Truck, X, ImageIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { DocumentsTab } from "@/components/shared/DocumentsTab";
 import { getSafeFileExtension } from "@/utils/secureFileUpload";
 import { parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
@@ -2227,6 +2228,25 @@ export default function Products() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">PNG, JPEG ou WebP, até 5 MB cada.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Documentos</Label>
+                  {editingProduct?.id && activeCompany?.id ? (
+                    // Os documentos vivem na tabela `documents`, ligados por
+                    // entity_type/entity_id — por isso só podem ser carregados
+                    // depois de o produto existir. Ao criar, o campo explica-o
+                    // em vez de aparecer desativado sem razão aparente.
+                    <DocumentsTab
+                      entityId={editingProduct.id}
+                      entityType="product"
+                      organizationId={activeCompany.id}
+                    />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Guarde o produto primeiro para lhe anexar documentos (fichas técnicas, certificados, manuais).
+                    </p>
+                  )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
