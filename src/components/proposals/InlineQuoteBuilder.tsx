@@ -209,7 +209,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
     const newLines: InlineQuoteLine[] = [];
     
     selectedItems.forEach((selected) => {
-      const { item, quantity, fullAttributes, attributePriceAddon } = selected;
+      const { item, quantity, fullAttributes, attributePriceAddon, bundleInfo } = selected;
       const basePrice = item.retail_price ?? 0;
       const vatRate = item.vat_rate || DEFAULT_IVA;
       const retailPrice = basePrice + (attributePriceAddon || 0);
@@ -241,12 +241,25 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         int_percent: 0,
         discount_percent: 0,
         ordem: maxOrdem,
-        product_id: item.type === "product" ? item.id : null,
-        service_id: item.type === "service" ? item.id : null,
+        // O AddItemsDialog devolve um bundle como UMA linha cujo `item.id` é o id
+        // do BUNDLE e cujo `item.type` é, ainda assim, "product"
+        // (AddItemsDialog.tsx:1689). O sinal verdadeiro é `bundleInfo`, que vem
+        // ao lado. Sem esta distinção o id do bundle ia parar a `product_id`:
+        // pelo QuoteBuilder rebentava com quote_lines_product_id_fkey (23503) e
+        // pelo diálogo da proposta a FK era saneada para NULL em silêncio,
+        // perdendo a ligação ao bundle. O orçamento principal já fazia isto
+        // (QuoteBuilder.tsx:2943); este não.
+        product_id: bundleInfo ? null : (item.type === "product" ? item.id : null),
+        service_id: bundleInfo ? null : (item.type === "service" ? item.id : null),
+        bundle_id: bundleInfo ? bundleInfo.bundle_id : null,
         // O preço de venda definido fica SEMPRE na linha e é ele que manda.
         retail_price_unit: retailPrice,
         cost_price: materialCost,
-        selected_attributes: fullAttributes || {},
+        // A composição do bundle viaja no jsonb, como no orçamento principal, para
+        // sobreviver à gravação mesmo onde a coluna bundle_id não é escrita.
+        selected_attributes: bundleInfo
+          ? { ...(fullAttributes || {}), bundle_components: bundleInfo.components }
+          : (fullAttributes || {}),
       });
     });
 
