@@ -306,17 +306,51 @@ REVOKE ALL ON FUNCTION public.fn_check_and_consume_ai_credits(uuid, integer) FRO
 GRANT EXECUTE ON FUNCTION public.fn_check_and_consume_ai_credits(uuid, integer) TO service_role;
 
 -- ------------------------------------------------------------
--- 3. fn_check_and_consume_lead_quota -- pronta, ainda não ligada a
+-- 3a. organization_counted_entities -- deduplicação por identidade
+-- ------------------------------------------------------------
+-- Só leads e clientes -- contactos não entram nisto de forma nenhuma
+-- (nem tabela referenciada, nem trigger, nem contagem).
+--
+-- anew_leads e anew_clients partilham a mesma identidade de fundo:
+-- anew_entities.id. Converter uma lead em cliente REUTILIZA o entity_id
+-- (confirmado em 20261116150000_converter_nao_escreve_na_pessoa.sql --
+-- só cria anew_clients quando ainda não existe nenhum para aquele
+-- entity_id) em vez de criar uma pessoa nova. Sem esta tabela, contar
+-- "leads criadas" e separadamente "clientes criados" contava a MESMA
+-- pessoa duas vezes só por ela ter avançado no funil.
+--
+-- Uma linha aqui = "esta entidade já foi contada para o limite desta
+-- conta, nunca mais volta a consumir quota, seja lead ou cliente". A
+-- chave primária faz o "só conta a primeira vez" ser atómico só com um
+-- INSERT ... ON CONFLICT DO NOTHING -- não precisa de lock separado.
+CREATE TABLE IF NOT EXISTS public.organization_counted_entities (
+  organization_id uuid NOT NULL REFERENCES public.anew_organizations(id) ON DELETE CASCADE,
+  entity_id       uuid NOT NULL REFERENCES public.anew_entities(id) ON DELETE CASCADE,
+  counted_at      timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (organization_id, entity_id)
+);
+
+COMMENT ON TABLE public.organization_counted_entities IS
+  'organization_id aqui é sempre a organização de faturação já resolvida (resolve_billing_organization_id), nunca a organização onde o lead/cliente foi criado. Uma entidade (pessoa/empresa) só consome quota de leads na primeira vez que aparece como lead OU cliente nesta conta -- uma conversão lead->cliente para a mesma entity_id nunca volta a contar. Contactos não participam nisto.';
+
+ALTER TABLE public.organization_counted_entities ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.organization_counted_entities FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.organization_counted_entities TO service_role;
+
+-- ------------------------------------------------------------
+-- 3b. fn_check_and_consume_lead_quota -- pronta, ainda não ligada a
 --    nenhum trigger (ver nota no cabeçalho desta migration)
 -- ------------------------------------------------------------
 -- Mesmo desenho de fn_check_and_consume_ai_credits (organização de
--- faturação resolvida primeiro, lock da linha do mês corrente, ausência
--- de plan_limits = bloqueado) -- mais simples porque não há saldo
--- comprado para leads, só o teto mensal do plano. Consome sempre 1 (um
--- lead de cada vez); parâmetro de quantidade omitido de propósito para
--- não sugerir que se pode "comprar" leads em lote como os créditos de IA.
+-- faturação resolvida primeiro, ausência de plan_limits = bloqueado) --
+-- com um passo a mais: _entity_id é a identidade real (anew_entities.id)
+-- por trás do lead/cliente que está a ser criado. Se essa entidade já
+-- tiver sido contada nesta conta (organization_counted_entities), esta
+-- função devolve blocked=false SEM tocar no contador -- não é uma pessoa
+-- nova, é a mesma a mudar de estado (lead -> cliente).
 CREATE OR REPLACE FUNCTION public.fn_check_and_consume_lead_quota(
-  _organization_id uuid
+  _organization_id uuid,
+  _entity_id uuid
 )
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -324,14 +358,15 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_billing_org_id uuid;
-  v_plan           text;
-  v_status         text;
-  v_trial_ends_at  timestamptz;
-  v_limit_value    integer;
-  v_reset_cadence  text;
-  v_period_start   date;
-  v_used_value     integer;
+  v_billing_org_id  uuid;
+  v_plan            text;
+  v_status          text;
+  v_trial_ends_at   timestamptz;
+  v_limit_value     integer;
+  v_reset_cadence   text;
+  v_period_start    date;
+  v_used_value      integer;
+  v_newly_counted   boolean;
 BEGIN
   v_billing_org_id := public.resolve_billing_organization_id(_organization_id);
 
@@ -346,6 +381,32 @@ BEGIN
     RETURN jsonb_build_object('blocked', true, 'reason', 'no_active_subscription');
   END IF;
 
+  -- Sem entity_id (caminho legado/desconhecido) não há como deduplicar
+  -- com segurança -- deixa passar sem contar, em vez de arriscar bloquear
+  -- por um falso positivo. Fica registado como limitação conhecida, a
+  -- rever se aparecer um caminho de criação sem entity_id na prática.
+  IF _entity_id IS NULL THEN
+    RETURN jsonb_build_object('blocked', false, 'reason', 'no_entity_id');
+  END IF;
+
+  -- "Já foi contada antes?" é atómico só com o INSERT: se a linha já
+  -- existir, ON CONFLICT DO NOTHING não devolve nada e v_newly_counted
+  -- fica NULL/false -- sinal de que isto é uma entidade conhecida, não
+  -- uma pessoa nova.
+  INSERT INTO public.organization_counted_entities (organization_id, entity_id)
+  VALUES (v_billing_org_id, _entity_id)
+  ON CONFLICT (organization_id, entity_id) DO NOTHING
+  RETURNING true INTO v_newly_counted;
+
+  IF NOT COALESCE(v_newly_counted, false) THEN
+    RETURN jsonb_build_object('blocked', false, 'reason', 'entity_already_counted');
+  END IF;
+
+  -- A partir daqui é sempre uma entidade nova para esta conta -- o mesmo
+  -- teto mensal/do trial de sempre. Se isto bloquear, a exceção lançada
+  -- pelo trigger chamador desfaz também o INSERT acima (mesma transação),
+  -- por isso nunca fica uma entidade "contada" sem ter sido de facto
+  -- admitida.
   SELECT limit_value, reset_cadence INTO v_limit_value, v_reset_cadence
     FROM public.plan_limits
     WHERE plan = v_plan AND limit_type = 'leads';
@@ -393,12 +454,12 @@ BEGIN
       AND limit_type = 'leads'
       AND period_start = v_period_start;
 
-  RETURN jsonb_build_object('blocked', false);
+  RETURN jsonb_build_object('blocked', false, 'reason', 'new_entity');
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.fn_check_and_consume_lead_quota(uuid) FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.fn_check_and_consume_lead_quota(uuid) TO service_role;
+REVOKE ALL ON FUNCTION public.fn_check_and_consume_lead_quota(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.fn_check_and_consume_lead_quota(uuid, uuid) TO service_role;
 
 -- ------------------------------------------------------------
 -- 4. fn_check_user_seat_limit -- pronta, ainda não chamada por create-user
