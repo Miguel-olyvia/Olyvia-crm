@@ -3,6 +3,7 @@ import { useLanguage } from "@/contexts/LanguageContext";
 import { translations } from "@/translations/index";
 import { bundleTranslations } from "@/translations/bundles";
 import { priceContextsTranslations } from "@/translations/priceContexts";
+import { directSalesTranslations } from "@/translations/directSales";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -13,6 +14,10 @@ Object.keys(bundleTranslations).forEach((lang) => {
 });
 Object.keys(priceContextsTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...priceContextsTranslations[lang as keyof typeof priceContextsTranslations] };
+});
+// Venda Direta (Fase 2) — módulo próprio, mesmo padrão dos dois acima.
+Object.keys(directSalesTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...directSalesTranslations[lang as keyof typeof directSalesTranslations] };
 });
 
 export const useTranslation = () => {

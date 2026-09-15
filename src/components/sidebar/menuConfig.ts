@@ -36,6 +36,7 @@ import {
   ShieldAlert,
   ClipboardCheck,
   ListChecks,
+  Receipt,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -167,8 +168,8 @@ export const menuSections: MenuSection[] = [
     id: "acquisition",
     icon: Target,
     labelKey: "sidebar.acquisition",
-    paths: ["/deals", "/proposals", "/quotes", "/quote-models", "/quote-templates", "/modelos-orcamento", "/proposal-templates", "/client-contracts", "/contract-templates", "/acquisition-help", "/needs-assessment-config"],
-    permissions: ["deals.view", "proposals.view", "quotes.view"],
+    paths: ["/deals", "/proposals", "/quotes", "/quote-models", "/quote-templates", "/modelos-orcamento", "/proposal-templates", "/direct-sales", "/client-contracts", "/contract-templates", "/acquisition-help", "/needs-assessment-config"],
+    permissions: ["deals.view", "proposals.view", "quotes.view", "direct_sales.view"],
     items: [
       { to: "/deals", icon: Handshake, labelKey: "sidebar.proposalRequests", permission: "deals.view" },
     ],
@@ -179,6 +180,17 @@ export const menuSections: MenuSection[] = [
         items: [
           { to: "/proposals", icon: FileText, labelKey: "sidebar.proposals", permission: "proposals.view" },
           { to: "/quotes", icon: FileCheck, labelKey: "sidebar.quotes", permission: "quotes.view" },
+        ],
+      },
+      // Venda Direta (Fase 2): fluxo alternativo, mais leve, ao caminho
+      // Orçamento -> Proposta -> Contrato. Fica entre "proposals" e
+      // "contracts" porque é exatamente aí que entra no percurso comercial —
+      // substitui a proposta e dispensa o contrato.
+      {
+        key: "direct-sale",
+        labelKey: "sidebar.directSale",
+        items: [
+          { to: "/direct-sales", icon: Receipt, labelKey: "sidebar.directSales", permission: "direct_sales.view" },
         ],
       },
       {
