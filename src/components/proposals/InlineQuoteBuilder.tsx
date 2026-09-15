@@ -232,7 +232,11 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         section_name: catalogSection,
         descricao_snapshot: item.name,
         qt: quantity,
-        unidade: item.uom_symbol || item.uom_name || "un",
+        // Paridade com QuoteBuilder.tsx:2953: um bundle não tem unidade de medida
+        // própria (os componentes é que têm), por isso fica null em vez de "un".
+        unidade: bundleInfo ? null : (item.uom_symbol || item.uom_name || "un"),
+        // Idem QuoteBuilder.tsx:2686: a descrição do bundle acompanha a linha.
+        item_description: bundleInfo ? (bundleInfo.bundle_description ?? undefined) : undefined,
         custo_material_unit: materialCost,
         custo_mao_obra_unit: 0,
         // O markup passa a ser consequência do custo e do preço, não a origem do preço.
@@ -255,15 +259,15 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         // O preço de venda definido fica SEMPRE na linha e é ele que manda.
         retail_price_unit: retailPrice,
         cost_price: materialCost,
-        // NÃO gravar aqui `bundle_components` em selected_attributes, por muito
-        // tentador que pareça: getLineBundleComponents (inlineQuoteVatCalculation.ts:32)
-        // lê essa chave e, ao encontrá-la, passa a repartir o IVA por componente
-        // em vez de usar o iva_percent flat da linha. Como AddItemsDialog.tsx:1687
-        // fixa 23% nos bundles, isso mudaria o total (e o proposal.value gravado)
-        // de qualquer bundle com componentes a taxa reduzida — num caminho que
-        // hoje funciona. É uma melhoria a decidir à parte, não um efeito colateral
-        // desta correção de crash.
-        selected_attributes: fullAttributes || {},
+        // Paridade com o orçamento normal (QuoteBuilder.tsx:2938): a composição do
+        // bundle viaja em selected_attributes.bundle_components. É daí — e não do
+        // iva_percent da linha, que o AddItemsDialog.tsx:1689 fixa em 23 — que sai
+        // o IVA: getLineBundleComponents (inlineQuoteVatCalculation.ts:32) lê a
+        // chave e reparte por componente, aplicando os 6% da mão de obra. Sem ela,
+        // a instalação era cobrada a 23%.
+        selected_attributes: bundleInfo
+          ? { ...(fullAttributes || {}), bundle_components: bundleInfo.components }
+          : (fullAttributes || {}),
       });
     });
 
