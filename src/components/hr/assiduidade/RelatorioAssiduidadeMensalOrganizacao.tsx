@@ -80,7 +80,7 @@ export function RelatorioAssiduidadeMensalOrganizacao({
 
   return (
     <Dialog open={aberto} onOpenChange={(valor) => !valor && onFechar()}>
-      <DialogContent className="max-w-4xl print:max-w-none">
+      <DialogContent className="flex max-h-[90vh] max-w-4xl flex-col print:max-h-none print:max-w-none">
         <style>{`
           @media print {
             body * { visibility: hidden; }
@@ -93,7 +93,7 @@ export function RelatorioAssiduidadeMensalOrganizacao({
           }
         `}</style>
 
-        <DialogHeader className="no-print flex-row items-center justify-between space-y-0">
+        <DialogHeader className="no-print shrink-0 flex-row items-center justify-between space-y-0">
           <DialogTitle>{t("hr.relatorioMensal.organizacao.titulo")}</DialogTitle>
           <Button variant="outline" size="sm" onClick={() => window.print()} disabled={!pronto}>
             <Printer className="mr-2 h-4 w-4" />
@@ -102,7 +102,7 @@ export function RelatorioAssiduidadeMensalOrganizacao({
         </DialogHeader>
 
         {!pronto && (
-          <div className="no-print flex items-center gap-3 py-8" role="status" aria-live="polite">
+          <div className="no-print flex shrink-0 items-center gap-3 py-8" role="status" aria-live="polite">
             <OlyviaLoader />
             <p className="text-sm text-muted-foreground">
               {t("hr.relatorioMensal.organizacao.aPreparar", {
@@ -113,21 +113,23 @@ export function RelatorioAssiduidadeMensalOrganizacao({
           </div>
         )}
 
-        <div id="hr-relatorio-organizacao-impressao" className={pronto ? "space-y-0" : "hidden"}>
-          {pessoas.map((pessoa) => (
-            <div key={pessoa.id} className="hr-relatorio-organizacao-pessoa">
-              <RelatorioAssiduidadeMensalConteudo
-                pessoaId={pessoa.id}
-                ano={ano}
-                mes={mes}
-                pessoaNome={pessoa.nome}
-                cargo={pessoa.cargo}
-                dataAdmissao={pessoa.dataAdmissao}
-                permissoes={permissoes}
-                aoTerminarCarregamento={() => marcarCarregada(pessoa.id)}
-              />
-            </div>
-          ))}
+        <div className="min-h-0 overflow-y-auto print:overflow-visible">
+          <div id="hr-relatorio-organizacao-impressao" className={pronto ? "space-y-0" : "hidden"}>
+            {pessoas.map((pessoa) => (
+              <div key={pessoa.id} className="hr-relatorio-organizacao-pessoa">
+                <RelatorioAssiduidadeMensalConteudo
+                  pessoaId={pessoa.id}
+                  ano={ano}
+                  mes={mes}
+                  pessoaNome={pessoa.nome}
+                  cargo={pessoa.cargo}
+                  dataAdmissao={pessoa.dataAdmissao}
+                  permissoes={permissoes}
+                  aoTerminarCarregamento={() => marcarCarregada(pessoa.id)}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       </DialogContent>
     </Dialog>
