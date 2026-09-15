@@ -385,6 +385,11 @@ export function PessoaAfectacoesSeccao({
                           >
                             {t(`hr.afectacoes.origem.${linha.origem}`)}
                           </Badge>
+                          {linha.origem !== "declarada" && (
+                            <span className="text-xs text-muted-foreground">
+                              {t("hr.afectacoes.origemAutomaticaAjuda")}
+                            </span>
+                          )}
                           {linha.confirmada_em && (
                             <span className="text-xs text-muted-foreground">
                               {t("hr.afectacoes.confirmadaEm", { data: linha.confirmada_em.slice(0, 10) })}
