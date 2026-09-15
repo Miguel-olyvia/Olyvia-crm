@@ -37,22 +37,21 @@
 -- ============================================================
 
 -- ------------------------------------------------------------
--- 1. resolve_billing_organization_id -- o utilizador-raiz, traduzido de
---    volta para a organização que efetivamente tem o plano
+-- 1a. resolve_root_payer_user_id -- A FUNÇÃO PRIMÁRIA: quem é a pessoa
+--     dona do plano. Não uma organização -- um utilizador.
 -- ------------------------------------------------------------
--- organization_ai_credits/organization_subscriptions/plan_limits continuam
--- todos chaveados por organization_id (não se mexe em nenhuma chave
--- primária nem FK existente) -- só se passa a resolver, antes de ler ou
--- escrever, qual É essa organização: sobe anew_organizations.created_by ->
--- anew_users.created_by, recursivamente, até encontrar o utilizador-raiz
--- (created_by IS NULL), e devolve a organização que ESSE utilizador criou
--- no signup (a única com organization_subscriptions.created_by = ele).
+-- O plano não pertence a uma organização, pertence a uma PESSOA -- o
+-- utilizador auto-registado que arrancou a conta (anew_users.created_by
+-- IS NULL). Esta função sobe anew_organizations.created_by ->
+-- anew_users.created_by, recursivamente, até encontrar essa pessoa, e
+-- devolve o SEU anew_users.id -- não um organization_id. Tudo o resto
+-- (resolve_billing_organization_id, abaixo) deriva desta identidade; não
+-- o contrário.
 --
 -- Falha sempre para o lado seguro: qualquer resolução inconclusiva (sem
--- created_by, sem subscrição correspondente, cadeia longa de mais)
--- devolve a própria organização de entrada -- nunca um erro, e nunca pior
--- do que o comportamento de hoje para o caso comum (uma só organização).
-CREATE OR REPLACE FUNCTION public.resolve_billing_organization_id(
+-- created_by, cadeia longa de mais) devolve NULL -- quem chama trata NULL
+-- exatamente como "sem utilizador-raiz encontrado", nunca como um erro.
+CREATE OR REPLACE FUNCTION public.resolve_root_payer_user_id(
   p_organization_id uuid
 )
 RETURNS uuid
@@ -62,11 +61,9 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_walk_user_id   uuid;
-  v_next_creator   uuid;
-  v_root_user_id   uuid;
-  v_billing_org_id uuid;
-  v_depth          integer := 0;
+  v_walk_user_id uuid;
+  v_next_creator uuid;
+  v_depth        integer := 0;
 BEGIN
   IF p_organization_id IS NULL THEN
     RETURN NULL;
@@ -77,20 +74,20 @@ BEGIN
     WHERE id = p_organization_id;
 
   IF v_walk_user_id IS NULL THEN
-    -- Organização sem criador registado -- nada a resolver, mantém o
-    -- comportamento de hoje.
-    RETURN p_organization_id;
+    -- Organização sem criador registado -- não há utilizador-raiz a
+    -- encontrar por esta via.
+    RETURN NULL;
   END IF;
 
-  -- Sobe a cadeia de "quem criou quem" até ao utilizador-raiz. Limite de
-  -- profundidade é só uma rede de segurança contra um ciclo que um bug
+  -- Sobe a cadeia de "quem criou quem" até à pessoa dona da conta. Limite
+  -- de profundidade é só uma rede de segurança contra um ciclo que um bug
   -- futuro possa introduzir -- esta cadeia nunca deve legitimamente passar
   -- de um punhado de saltos.
   LOOP
     v_depth := v_depth + 1;
     IF v_depth > 50 THEN
-      RAISE WARNING 'resolve_billing_organization_id: cadeia created_by excedeu 50 saltos para a organização % -- a devolver a própria organização', p_organization_id;
-      RETURN p_organization_id;
+      RAISE WARNING 'resolve_root_payer_user_id: cadeia created_by excedeu 50 saltos para a organização % -- a devolver NULL', p_organization_id;
+      RETURN NULL;
     END IF;
 
     SELECT created_by INTO v_next_creator
@@ -98,12 +95,54 @@ BEGIN
       WHERE id = v_walk_user_id;
 
     IF v_next_creator IS NULL THEN
-      v_root_user_id := v_walk_user_id;
-      EXIT;
+      RETURN v_walk_user_id;
     END IF;
 
     v_walk_user_id := v_next_creator;
   END LOOP;
+END;
+$$;
+
+COMMENT ON FUNCTION public.resolve_root_payer_user_id(uuid) IS
+  'A identidade primária por trás de qualquer plano/faturação: dado o id de qualquer organização, devolve o anew_users.id da PESSOA dona da conta -- sobe anew_organizations.created_by -> anew_users.created_by até ao utilizador auto-registado (created_by IS NULL). O plano pertence a este utilizador, não a nenhuma organização; resolve_billing_organization_id é só a tradução desta identidade para uma chave que as tabelas de faturação (ainda chaveadas por organization_id) conseguem usar. Devolve NULL sempre que a resolução for inconclusiva -- nunca um erro.';
+
+REVOKE ALL ON FUNCTION public.resolve_root_payer_user_id(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.resolve_root_payer_user_id(uuid) TO service_role;
+
+-- ------------------------------------------------------------
+-- 1b. resolve_billing_organization_id -- wrapper fino: traduz o
+--     utilizador-raiz de volta para uma chave organization_id, só porque
+--     é isso que as tabelas de faturação ainda usam
+-- ------------------------------------------------------------
+-- organization_ai_credits/organization_subscriptions/plan_limits
+-- continuam todos chaveados por organization_id (não se mexe em nenhuma
+-- chave primária nem FK existente) -- esta função existe só para dar a
+-- essas tabelas a chave que elas entendem. A identidade real é
+-- resolve_root_payer_user_id; isto é derivado dela, não o oposto.
+CREATE OR REPLACE FUNCTION public.resolve_billing_organization_id(
+  p_organization_id uuid
+)
+RETURNS uuid
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_root_user_id   uuid;
+  v_billing_org_id uuid;
+BEGIN
+  IF p_organization_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  v_root_user_id := public.resolve_root_payer_user_id(p_organization_id);
+
+  IF v_root_user_id IS NULL THEN
+    -- Sem utilizador-raiz encontrado -- mantém o comportamento de hoje
+    -- (nunca pior do que antes desta correção existir).
+    RETURN p_organization_id;
+  END IF;
 
   SELECT organization_id INTO v_billing_org_id
     FROM public.organization_subscriptions
@@ -116,7 +155,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.resolve_billing_organization_id(uuid) IS
-  'Dado o id de qualquer organização, devolve a organização que efetivamente tem o plano/faturação: sobe anew_organizations.created_by -> anew_users.created_by até ao utilizador-raiz (created_by IS NULL) e devolve a organização de signup desse utilizador (organization_subscriptions.created_by = ele). Nunca falha -- devolve a própria organização de entrada sempre que a resolução for inconclusiva, para nunca regredir o comportamento de hoje no caso comum de uma só organização.';
+  'Tradução de resolve_root_payer_user_id (a identidade real) para a organização que guarda a subscrição dessa pessoa (organization_subscriptions.created_by = utilizador-raiz) -- só para servir as tabelas ainda chaveadas por organization_id. Nunca falha -- devolve a própria organização de entrada sempre que a resolução for inconclusiva.';
 
 REVOKE ALL ON FUNCTION public.resolve_billing_organization_id(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.resolve_billing_organization_id(uuid) TO service_role;
