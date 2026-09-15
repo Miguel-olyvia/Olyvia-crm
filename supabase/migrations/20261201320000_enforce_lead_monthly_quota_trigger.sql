@@ -1,9 +1,9 @@
--- Liga fn_check_and_consume_lead_quota (20261201090000, já com
+-- Liga fn_check_and_consume_lead_quota (20261201300000, já com
 -- deduplicação por entity_id) a um trigger em anew_leads E em
 -- anew_clients -- é seguro fazer isto agora porque as duas migrations
 -- anteriores já garantem que TODA organização tem uma linha em
 -- plan_limits para 'leads' e em organization_subscriptions (via o plano
--- 'internal' + backfill de 20261201110000).
+-- 'internal' + backfill de 20261201310000).
 -- ============================================================
 -- Trigger, não uma verificação só do lado da Edge Function, porque leads
 -- são criados por DUAS vias diferentes: a função create-lead E um insert
@@ -14,7 +14,7 @@
 -- criado diretamente (sem passar por lead primeiro). A deduplicação por
 -- entity_id dentro de fn_check_and_consume_lead_quota garante que uma
 -- conversão lead->cliente da MESMA entidade nunca conta duas vezes --
--- ver organization_counted_entities em 20261201090000. Contactos não
+-- ver organization_counted_entities em 20261201300000. Contactos não
 -- entram nisto: não têm trigger, não são referenciados.
 -- ============================================================
 

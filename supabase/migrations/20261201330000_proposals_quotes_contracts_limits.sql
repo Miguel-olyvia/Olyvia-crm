@@ -125,7 +125,7 @@ VALUES
 ON CONFLICT (plan, limit_type) DO NOTHING;
 
 -- 'internal' (equipa/teste) sem teto em nada, mesmo padrão dos outros
--- limit_type já cobertos para este plano em 20261201110000.
+-- limit_type já cobertos para este plano em 20261201310000.
 INSERT INTO public.plan_limits (plan, limit_type, limit_value, reset_cadence)
 VALUES
   ('internal', 'proposals', NULL, 'monthly'),

@@ -3,7 +3,7 @@
 -- tenha nenhuma -- para que ligar o trigger de limite de leads (migration
 -- seguinte) não bloqueie o trabalho da própria equipa/organizações de
 -- teste, que hoje ficam sem nenhuma linha em organization_subscriptions
--- (ver 20261201090000, ponto 1).
+-- (ver 20261201300000, ponto 1).
 -- ============================================================
 -- 'internal' é distinto de 'enterprise' de propósito: enterprise tem os
 -- números reais anunciados na página inicial (200 utilizadores / 5000
