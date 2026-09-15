@@ -16,17 +16,19 @@
  * `RelatorioAssiduidadeMensalConteudo`, que chama o hook por si. Todas
  * arrancam a busca em paralelo assim que o dialog abre.
  *
- * NAO IMPRIME A MEIO DO CARREGAMENTO
- * -------------------------------------
+ * SO IMPRIME QUANDO A PESSOA CLICA, NUNCA SOZINHO
+ * -------------------------------------------------
  * Enquanto nem todas as pessoas terminaram de carregar, o conteudo fica
  * escondido (mas montado, para a busca continuar) e mostra-se um estado "a
- * preparar". So depois de todas terminarem e que o conteudo aparece e
- * `window.print()` e chamado -- nunca antes, para nao imprimir paginas em
- * branco.
+ * preparar", com o botao de exportar desactivado. So depois de todas
+ * terminarem e que o botao "Exportar / Imprimir" fica activo -- a pessoa
+ * decide quando, o dialog nunca chama `window.print()` por conta propria.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
+import { Printer } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { RelatorioAssiduidadeMensalConteudo } from "@/components/hr/RelatorioAssiduidadeMensalConteudo";
 import type { PermissoesAssiduidade } from "@/types/hrAssiduidade";
@@ -57,30 +59,15 @@ export function RelatorioAssiduidadeMensalOrganizacao({
 }: RelatorioAssiduidadeMensalOrganizacaoProps) {
   const { t } = useTranslation();
   const [carregadas, setCarregadas] = useState<Set<string>>(() => new Set());
-  /**
-   * Ref, nao estado: marcar aqui nao pode disparar um novo render, senao o
-   * proprio efeito que agenda o `window.print()` cancela-se a si mesmo antes
-   * de o temporizador chegar a disparar.
-   */
-  const imprimiuRef = useRef(false);
 
   // Reabrir (ou mudar de mes/pessoas) recomeca a contagem do zero.
   useEffect(() => {
     if (!aberto) return;
     setCarregadas(new Set());
-    imprimiuRef.current = false;
   }, [aberto, ano, mes, pessoas]);
 
   const total = pessoas.length;
   const pronto = aberto && total > 0 && carregadas.size >= total;
-
-  useEffect(() => {
-    if (!pronto || imprimiuRef.current) return;
-    imprimiuRef.current = true;
-    // Um instante para o layout assentar antes de imprimir.
-    const temporizador = window.setTimeout(() => window.print(), 50);
-    return () => window.clearTimeout(temporizador);
-  }, [pronto]);
 
   const marcarCarregada = useCallback((pessoaId: string) => {
     setCarregadas((atual) => {
@@ -106,8 +93,12 @@ export function RelatorioAssiduidadeMensalOrganizacao({
           }
         `}</style>
 
-        <DialogHeader className="no-print">
+        <DialogHeader className="no-print flex-row items-center justify-between space-y-0">
           <DialogTitle>{t("hr.relatorioMensal.organizacao.titulo")}</DialogTitle>
+          <Button variant="outline" size="sm" onClick={() => window.print()} disabled={!pronto}>
+            <Printer className="mr-2 h-4 w-4" />
+            {t("hr.relatorioMensal.imprimir")}
+          </Button>
         </DialogHeader>
 
         {!pronto && (

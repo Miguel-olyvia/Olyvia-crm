@@ -8,7 +8,7 @@
  * nao a leitura dos dados.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 
 const relatorioPorPessoa: Record<string, any> = {};
 
@@ -137,7 +137,7 @@ describe("RelatorioAssiduidadeMensalOrganizacao", () => {
     expect(seccoes).toHaveLength(2);
   });
 
-  it("so chama window.print depois de todas as pessoas terminarem de carregar", async () => {
+  it("o botao de exportar fica desactivado enquanto nem todas as pessoas terminaram de carregar", async () => {
     relatorioPorPessoa["pessoa-2"] = relatorioDe(true);
 
     render(
@@ -155,10 +155,11 @@ describe("RelatorioAssiduidadeMensalOrganizacao", () => {
     );
 
     expect(screen.getByText(/A preparar/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /imprimir/i })).toBeDisabled();
     expect(window.print).not.toHaveBeenCalled();
   });
 
-  it("chama window.print quando todas as pessoas ja carregaram", async () => {
+  it("so chama window.print quando a pessoa clica no botao, depois de todas terminarem de carregar", async () => {
     render(
       <RelatorioAssiduidadeMensalOrganizacao
         aberto
@@ -173,6 +174,11 @@ describe("RelatorioAssiduidadeMensalOrganizacao", () => {
       />,
     );
 
-    await waitFor(() => expect(window.print).toHaveBeenCalledTimes(1));
+    const botao = screen.getByRole("button", { name: /imprimir/i });
+    await waitFor(() => expect(botao).not.toBeDisabled());
+    expect(window.print).not.toHaveBeenCalled();
+
+    fireEvent.click(botao);
+    expect(window.print).toHaveBeenCalledTimes(1);
   });
 });
