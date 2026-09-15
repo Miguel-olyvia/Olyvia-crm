@@ -38,6 +38,42 @@ export interface QuoteTotals {
   total: number;
 }
 
+/**
+ * VAT of a single line, split by rate. Bundle lines whose components carry
+ * different rates (material a 23%, mão de obra a 6%) are split proportionally
+ * by each component's share of the components' gross total; everything else
+ * uses the line's own rate. A manual `iva_override` on the line always wins.
+ *
+ * Exported because `handleSave` in QuoteBuilder has to persist
+ * `quote_lines.total_com_iva` with exactly this math. Before, it used the
+ * line's flat `iva_percent` (23 on every bundle, fixed by AddItemsDialog),
+ * so each stored line overstated the VAT on the labour part — and the client
+ * portal, which sums those columns per section, showed sections that did not
+ * add up to the quote total shown right below them.
+ */
+export function computeLineVatBuckets(line: any, lineBase: number): VatRateBucket[] {
+  const components = getBundleComponents(line);
+  const componentsTotal = components.reduce((s, c) => s + (c.unit_price * c.quantity), 0);
+  const ivaOverrideRaw = (line as any)?.selected_attributes?.iva_override;
+  const hasOverride = typeof ivaOverrideRaw === "number" && !Number.isNaN(ivaOverrideRaw);
+
+  if (components.length > 0 && componentsTotal > 0 && !hasOverride) {
+    return components.map((c) => {
+      const share = (c.unit_price * c.quantity) / componentsTotal;
+      const base = lineBase * share;
+      return { rate: c.vat_rate, base, vat: base * (c.vat_rate / 100) };
+    });
+  }
+
+  const rate = hasOverride ? ivaOverrideRaw : parseFloat(String(line.iva_percent || 0));
+  return [{ rate, base: lineBase, vat: lineBase * (rate / 100) }];
+}
+
+/** Total VAT of a single line (sum of `computeLineVatBuckets`). */
+export function computeLineVatAmount(line: any, lineBase: number): number {
+  return computeLineVatBuckets(line, lineBase).reduce((s, b) => s + b.vat, 0);
+}
+
 export function computeQuoteTotals(lines: any[], fees: any[] = [], descontoPercent = 0): QuoteTotals {
   const subtotalBruto = lines.reduce((sum, line) => {
     return sum + (parseFloat(String(line.total_sem_iva || 0)));
@@ -61,30 +97,10 @@ export function computeQuoteTotals(lines: any[], fees: any[] = [], descontoPerce
   const vatByRateMap = new Map<number, { base: number; vat: number }>();
   lines.forEach((line) => {
     const lineBase = parseFloat(String(line.total_sem_iva || 0)) * discountFactor;
-    const components = getBundleComponents(line);
-    const componentsTotal = components.reduce(
-      (s, c) => s + (c.unit_price * c.quantity),
-      0
-    );
-    const ivaOverrideRaw = (line as any)?.selected_attributes?.iva_override;
-    const hasOverride = typeof ivaOverrideRaw === "number" && !Number.isNaN(ivaOverrideRaw);
-
-    if (components.length > 0 && componentsTotal > 0 && !hasOverride) {
-      // Split line base across components by their share of the gross components total
-      components.forEach((c) => {
-        const share = (c.unit_price * c.quantity) / componentsTotal;
-        const base = lineBase * share;
-        const rate = c.vat_rate;
-        const vat = base * (rate / 100);
-        const existing = vatByRateMap.get(rate) || { base: 0, vat: 0 };
-        vatByRateMap.set(rate, { base: existing.base + base, vat: existing.vat + vat });
-      });
-    } else {
-      const rate = hasOverride ? ivaOverrideRaw : parseFloat(String(line.iva_percent || 0));
-      const vat = lineBase * (rate / 100);
+    computeLineVatBuckets(line, lineBase).forEach(({ rate, base, vat }) => {
       const existing = vatByRateMap.get(rate) || { base: 0, vat: 0 };
-      vatByRateMap.set(rate, { base: existing.base + lineBase, vat: existing.vat + vat });
-    }
+      vatByRateMap.set(rate, { base: existing.base + base, vat: existing.vat + vat });
+    });
   });
 
   // Compute fee VAT: merge with product VAT bucket when same rate exists,

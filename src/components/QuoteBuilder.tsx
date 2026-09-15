@@ -64,6 +64,7 @@ import {
   getLineSubtotal,
   markupFromCostAndPrice,
 } from "@/utils/quotes/quoteLinePricing";
+import { computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
 import {
   Dialog,
   DialogContent,
@@ -2294,7 +2295,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           // antes de multiplicar pela quantidade.
           const lineDiscount = line.discount_percent || 0;
           const precoSemIva = getLineSubtotal(line);
-          const ivaValor = precoSemIva * (line.iva_percent / 100);
+          // O IVA da linha é o mesmo que o total do orçamento usa: num bundle
+          // reparte-se pelos componentes (material a 23%, mão de obra a 6%) em
+          // vez de aplicar o iva_percent da linha, que o AddItemsDialog fixa em
+          // 23. Antes divergia: o total do orçamento repartia, a linha não, e o
+          // portal do cliente — que soma estas colunas por secção — mostrava
+          // secções que não somavam para o total logo abaixo delas.
+          // O total do orçamento não muda com isto; só as parcelas passam a
+          // fechar com ele.
+          const ivaValor = computeLineVatAmount(line, precoSemIva);
           const totalComIva = precoSemIva + ivaValor;
           const totalComDesconto =
             totalComIva * (1 - formData.desconto_global_percent / 100);
