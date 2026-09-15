@@ -3,7 +3,9 @@ import { z } from "zod";
 import * as XLSX from 'xlsx';
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Loader2, RotateCcw, Truck } from "lucide-react";
+import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Loader2, RotateCcw, Truck, X, ImageIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { getSafeFileExtension } from "@/utils/secureFileUpload";
+import { parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { Input } from "@/components/ui/input";
@@ -195,6 +197,19 @@ export default function Products() {
     manages_stock: false,
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // ── Fotos do produto ──────────────────────────────────────────────────────
+  // Guardadas em products.image_urls (text[]). O limite vive aqui e não na base
+  // de dados, para passar de 4 para outro número ser só uma alteração destas.
+  const MAX_PRODUCT_IMAGES = 4;
+  const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
+  const PRODUCT_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+  const [productImages, setProductImages] = useState<string[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const productImageInputRef = useRef<HTMLInputElement | null>(null);
+  // Índice da foto aberta no visualizador; null = visualizador fechado.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const defaultOrgSelection = (): OrganizationSelection => ({
     tenantId: "",
@@ -657,6 +672,73 @@ export default function Products() {
     };
   }, [loading, hasMore, loadingMore, page, loadProducts, descendantIds]);
 
+  // Mesmo fluxo obrigatório de todos os uploads da aplicação: o cliente só
+  // pode escrever no bucket de quarentena (política block_direct_client_insert_media),
+  // e é a edge function validate-upload que valida e promove para o bucket
+  // final. Copiado de ProposalTemplateEditor.handleLogoUpload.
+  const handleProductImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const resetInput = () => {
+      if (productImageInputRef.current) productImageInputRef.current.value = "";
+    };
+
+    if (productImages.length >= MAX_PRODUCT_IMAGES) {
+      toast({ title: "Limite atingido", description: `Máximo de ${MAX_PRODUCT_IMAGES} fotos por produto.`, variant: "destructive" });
+      resetInput();
+      return;
+    }
+    if (!PRODUCT_IMAGE_TYPES.includes(file.type)) {
+      toast({ title: "Formato não suportado", description: "Use PNG, JPEG ou WebP.", variant: "destructive" });
+      resetInput();
+      return;
+    }
+    if (file.size > MAX_PRODUCT_IMAGE_BYTES) {
+      toast({ title: "Ficheiro demasiado grande", description: "A foto não pode exceder 5 MB.", variant: "destructive" });
+      resetInput();
+      return;
+    }
+
+    setUploadingImage(true);
+    try {
+      // O primeiro segmento do caminho TEM de ser uma organização a que o
+      // utilizador tem acesso — validate-upload rejeita o resto (validateOrgScope).
+      const orgId = activeCompany?.id;
+      if (!orgId) throw new Error("Empresa ativa não identificada");
+
+      const ext = getSafeFileExtension(file);
+      const filePath = `${orgId}/product-${crypto.randomUUID()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("media-quarantine")
+        .upload(filePath, file);
+      if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "media-quarantine", finalBucket: "media", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast({
+          title: "Erro ao carregar a foto",
+          description: await resolveValidateUploadErrorMessage(validateResult, validateError),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const { data: urlData } = supabase.storage.from("media").getPublicUrl(filePath);
+      setProductImages(prev => [...prev, urlData.publicUrl].slice(0, MAX_PRODUCT_IMAGES));
+    } catch (error: any) {
+      console.error("Erro ao carregar foto do produto:", error);
+      toast({ title: "Erro ao carregar a foto", description: error?.message, variant: "destructive" });
+    } finally {
+      setUploadingImage(false);
+      resetInput();
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -778,6 +860,25 @@ export default function Products() {
 
         if (error) throw error;
 
+        // As fotos ficam fora da RPC de propósito: rpc_update_product já leva 20
+        // parâmetros, e acrescentar um obrigaria a uma assinatura nova com
+        // REVOKE/GRANT e a apagar a antiga — o mesmo tipo de alteração que
+        // provocou o erro 409 dos bundles. A política products_update permite
+        // este UPDATE direto. O custo é uma linha de auditoria própria em vez de
+        // ir na transação da RPC.
+        const { error: imagesError } = await supabase
+          .from("products")
+          // `as any`: image_urls foi acrescentada à base de dados na migração
+          // 20261201090000 e o types.ts é gerado — só a conhece depois de
+          // `supabase gen types`, que altera ficheiros e precisa de aprovação.
+          // Cast localizado até lá, no mesmo estilo do insert de item_suppliers.
+          .update({ image_urls: productImages.length > 0 ? productImages : null } as any)
+          .eq("id", editingProduct.id);
+        if (imagesError) {
+          console.error("Erro ao gravar fotos do produto:", imagesError);
+          toast({ title: "Produto guardado, fotos não", description: "As fotos não foram gravadas. Tente novamente.", variant: "destructive" });
+        }
+
         toast({
           title: t('products.toast.updateSuccess'),
         });
@@ -804,6 +905,20 @@ export default function Products() {
         const { data: newProductId, error } = await supabase.rpc('rpc_create_product', createProductArgs);
 
         if (error) throw error;
+
+        // Fotos: UPDATE a seguir à RPC, pela mesma razão explicada no ramo da
+        // edição — não mexer na assinatura de uma função com 17 parâmetros.
+        if (newProductId && productImages.length > 0) {
+          const { error: imagesError } = await supabase
+            .from("products")
+            // Ver nota sobre `as any` no ramo da edição.
+            .update({ image_urls: productImages } as any)
+            .eq("id", newProductId);
+          if (imagesError) {
+            console.error("Erro ao gravar fotos do produto:", imagesError);
+            toast({ title: "Produto criado, fotos não", description: "As fotos não foram gravadas. Edite o produto e tente de novo.", variant: "destructive" });
+          }
+        }
 
         // Fornecedor inicial (opcional): cria já a linha preferencial em
         // item_suppliers, para o produto nascer consistente com o novo
@@ -968,7 +1083,8 @@ export default function Products() {
         product_type: productType,
         manages_stock: data.manages_stock ?? false,
       });
-      
+      setProductImages(Array.isArray((product as any).image_urls) ? (product as any).image_urls : []);
+
       // Set organization selection from organization associations
       const primaryCompanyId = companyIds.length > 0 ? companyIds[0] : (product.organization_id || activeCompany?.id || "");
       const secondaryIds = companyIds.slice(1);
@@ -1022,6 +1138,8 @@ export default function Products() {
       product_type: "sale",
       manages_stock: false,
     });
+    setProductImages([]);
+    setViewerIndex(null);
     setFieldErrors({});
     setOrganizationSelection(defaultOrgSelection());
     setPriceFormData({
@@ -1101,6 +1219,9 @@ export default function Products() {
             : "sale",
         manages_stock: (lastProduct as any).manages_stock ?? false,
       });
+      // As fotos NÃO são copiadas: são do artigo anterior, não deste. Copiá-las
+      // criaria produtos diferentes a mostrar a mesma imagem sem ninguém reparar.
+      setProductImages([]);
 
       // Set organization
       const orgIds = (lastProduct as any).product_organizations?.map((po: any) => po.organization_id) || [];
@@ -2060,6 +2181,54 @@ export default function Products() {
                   {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                 </div>
 
+                <div className="space-y-2">
+                  <Label>Fotos <span className="text-muted-foreground font-normal">({productImages.length}/{MAX_PRODUCT_IMAGES})</span></Label>
+                  <input
+                    ref={productImageInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                    className="hidden"
+                    onChange={handleProductImageUpload}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    {productImages.map((url, idx) => (
+                      <div key={url} className="relative h-16 w-16 border rounded overflow-hidden group">
+                        <button
+                          type="button"
+                          onClick={() => setViewerIndex(idx)}
+                          className="h-full w-full"
+                          title="Ver foto"
+                        >
+                          <img src={url} alt={`Foto ${idx + 1}`} className="h-full w-full object-cover" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProductImages(prev => prev.filter((_, i) => i !== idx))}
+                          className="absolute top-0 right-0 bg-destructive text-destructive-foreground rounded-bl p-0.5"
+                          title="Remover"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                    {productImages.length === 0 && (
+                      <div className="h-16 w-16 border border-dashed rounded flex items-center justify-center text-muted-foreground">
+                        <ImageIcon className="h-5 w-5" />
+                      </div>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={uploadingImage || productImages.length >= MAX_PRODUCT_IMAGES}
+                      onClick={() => productImageInputRef.current?.click()}
+                    >
+                      {uploadingImage ? "A carregar..." : "Escolher Ficheiro"}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">PNG, JPEG ou WebP, até 5 MB cada.</p>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="category_id">{t('products.form.category')}</Label>
@@ -2943,6 +3112,47 @@ export default function Products() {
         labelColumns={["sku", "name"]}
         onRestored={loadData}
       />
+
+      {/* Visualizador das fotos do produto: abre na foto clicada e permite
+          passar entre elas. Sem biblioteca nova — Dialog + dois botões. */}
+      <Dialog open={viewerIndex !== null} onOpenChange={(o) => !o && setViewerIndex(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              Foto {viewerIndex !== null ? viewerIndex + 1 : 0} de {productImages.length}
+            </DialogTitle>
+          </DialogHeader>
+          {viewerIndex !== null && productImages[viewerIndex] && (
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                disabled={productImages.length < 2}
+                onClick={() => setViewerIndex(i => i === null ? null : (i - 1 + productImages.length) % productImages.length)}
+                title="Anterior"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <img
+                src={productImages[viewerIndex]}
+                alt={`Foto ${viewerIndex + 1}`}
+                className="flex-1 max-h-[70vh] w-full object-contain rounded"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                disabled={productImages.length < 2}
+                onClick={() => setViewerIndex(i => i === null ? null : (i + 1) % productImages.length)}
+                title="Seguinte"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
