@@ -1,11 +1,13 @@
 /**
  * As ausencias de toda a gente -- a vista de gestao.
  *
- * Tres separadores: o mapa do mes (uma linha por pessoa), o ano em calendario
- * de uma pessoa escolhida num dropdown (reaproveita `CalendarioAnual`, o
- * mesmo componente da ficha individual) e a lista completa de pedidos com
- * filtros. De qualquer um se abre o detalhe do pedido, e dai se salta para a
- * ficha da pessoa.
+ * Dois separadores: o mapa de ausencias e ferias (com um alternador Mes/Ano
+ * dentro) e a lista completa de pedidos com filtros. No modo Mes ve-se a
+ * grelha com uma linha por pessoa (ou so a pessoa escolhida, se houver uma);
+ * no modo Ano ve-se o calendario anual de UMA pessoa escolhida num dropdown
+ * (reaproveita `CalendarioAnual`, o mesmo componente da ficha individual). De
+ * qualquer um se abre o detalhe do pedido, e dai se salta para a ficha da
+ * pessoa.
  *
  * Uma lista vazia aqui NAO prova que nao ha pedidos: a RLS pode estar a
  * esconder tudo. Por isso o hook devolve `recusado` a parte, e o ecra mostra o
@@ -50,6 +52,8 @@ function mesDeHoje(): string {
   return `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
+type ModoMapa = "mes" | "ano";
+
 interface OrganizacaoConteudoProps {
   /**
    * Nome do parametro de URL usado para o sub-separador (mapa/pedidos).
@@ -78,6 +82,7 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
   const [mes, setMes] = useState(mesDeHoje);
   const dados = useAusenciasDaOrganizacao({ anoDoMapa: Number(mes.slice(0, 4)) });
 
+  const [modoMapa, setModoMapa] = useState<ModoMapa>("mes");
   const [filtroEstado, setFiltroEstado] = useState("");
   const [filtroTipo, setFiltroTipo] = useState("");
   const [pedidoAberto, setPedidoAberto] = useState<string | null>(null);
@@ -123,6 +128,17 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
     [dados.dias, pessoaAnoId],
   );
 
+  /**
+   * No modo Mes a mesma pessoa escolhida no dropdown filtra a grelha a uma
+   * linha so; sem pessoa escolhida ve-se toda a gente, como sempre foi. O
+   * `MapaMensal` nao sabe nada de filtro por pessoa -- so ve os `dias` que
+   * lhe chegam, por isso o filtro fica aqui.
+   */
+  const diasDoMapaMensal = useMemo(
+    () => (pessoaAnoId ? diasDaPessoaAno : dados.dias),
+    [pessoaAnoId, diasDaPessoaAno, dados.dias],
+  );
+
   const filtrados = useMemo(
     () =>
       dados.pedidos.filter(
@@ -163,55 +179,73 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
           <CardContent className="pt-6">
             <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
               <TabsList>
-                <TabsTrigger value="mapa">{t("hr.ausencias.organizacao.mapa")}</TabsTrigger>
-                <TabsTrigger value="ano">{t("hr.ausencias.organizacao.ano")}</TabsTrigger>
+                <TabsTrigger value="mapa">{t("hr.ausencias.organizacao.mapaAusencias")}</TabsTrigger>
                 <TabsTrigger value="pedidos">{t("hr.ausencias.organizacao.pedidos")}</TabsTrigger>
               </TabsList>
 
               <TabsContent value="mapa" className="space-y-3">
-                <div className="flex items-end gap-2">
+                <div className="flex flex-wrap items-end gap-4">
+                  <fieldset className="space-y-1.5">
+                    <legend className="text-sm font-medium">
+                      {t("hr.ausencias.organizacao.modo")}
+                    </legend>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={modoMapa === "mes" ? "default" : "outline"}
+                        aria-pressed={modoMapa === "mes"}
+                        onClick={() => setModoMapa("mes")}
+                      >
+                        {t("hr.ausencias.organizacao.modoMes")}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={modoMapa === "ano" ? "default" : "outline"}
+                        aria-pressed={modoMapa === "ano"}
+                        onClick={() => setModoMapa("ano")}
+                      >
+                        {t("hr.ausencias.organizacao.modoAno")}
+                      </Button>
+                    </div>
+                  </fieldset>
+
                   <div className="w-48">
-                    <label
-                      htmlFor="hr-ausencias-org-mes"
-                      className="mb-1.5 block text-sm font-medium"
-                    >
-                      {t("hr.ausencias.organizacao.mes")}
-                    </label>
-                    <input
-                      id="hr-ausencias-org-mes"
-                      type="month"
-                      className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
-                      value={mes.slice(0, 7)}
-                      onChange={(evento) => setMes(`${evento.target.value}-01`)}
+                    <CampoSelect
+                      id="hr-ausencias-org-pessoa"
+                      label={t("hr.ausencias.organizacao.pessoa")}
+                      valor={pessoaAnoId}
+                      onChange={setPessoaAnoId}
+                      vazioLabel={
+                        modoMapa === "ano"
+                          ? t("hr.ausencias.organizacao.escolherPessoa")
+                          : t("hr.ausencias.organizacao.todos")
+                      }
+                      opcoes={pessoas.map((pessoa) => ({
+                        value: pessoa.id,
+                        label: pessoa.nome_completo,
+                      }))}
                     />
                   </div>
-                </div>
-                <MapaMensal
-                  mes={mes}
-                  dias={dados.dias}
-                  tiposPorId={tipos.porId}
-                  nomePorPessoaId={nomePorPessoaId}
-                  feriados={feriados}
-                  onAbrirPedido={setPedidoAberto}
-                />
-              </TabsContent>
 
-              <TabsContent value="ano" className="space-y-3">
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  <CampoSelect
-                    id="hr-ausencias-org-ano-pessoa"
-                    label={t("hr.ausencias.organizacao.pessoa")}
-                    valor={pessoaAnoId}
-                    onChange={setPessoaAnoId}
-                    vazioLabel={t("hr.ausencias.organizacao.escolherPessoa")}
-                    opcoes={pessoas.map((pessoa) => ({
-                      value: pessoa.id,
-                      label: pessoa.nome_completo,
-                    }))}
-                  />
-                </div>
-                {pessoaAnoId ? (
-                  <>
+                  {modoMapa === "mes" ? (
+                    <div className="w-48">
+                      <label
+                        htmlFor="hr-ausencias-org-mes"
+                        className="mb-1.5 block text-sm font-medium"
+                      >
+                        {t("hr.ausencias.organizacao.mes")}
+                      </label>
+                      <input
+                        id="hr-ausencias-org-mes"
+                        type="month"
+                        className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={mes.slice(0, 7)}
+                        onChange={(evento) => setMes(`${evento.target.value}-01`)}
+                      />
+                    </div>
+                  ) : (
                     <div className="flex items-center gap-2">
                       <Button
                         size="sm"
@@ -235,14 +269,26 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
                         {anoCalendario + 1}
                       </Button>
                     </div>
-                    <CalendarioAnual
-                      ano={anoCalendario}
-                      dias={diasDaPessoaAno}
-                      tiposPorId={tipos.porId}
-                      feriados={feriados}
-                      onAbrirPedido={setPedidoAberto}
-                    />
-                  </>
+                  )}
+                </div>
+
+                {modoMapa === "mes" ? (
+                  <MapaMensal
+                    mes={mes}
+                    dias={diasDoMapaMensal}
+                    tiposPorId={tipos.porId}
+                    nomePorPessoaId={nomePorPessoaId}
+                    feriados={feriados}
+                    onAbrirPedido={setPedidoAberto}
+                  />
+                ) : pessoaAnoId ? (
+                  <CalendarioAnual
+                    ano={anoCalendario}
+                    dias={diasDaPessoaAno}
+                    tiposPorId={tipos.porId}
+                    feriados={feriados}
+                    onAbrirPedido={setPedidoAberto}
+                  />
                 ) : (
                   <p className="text-sm text-muted-foreground">
                     {t("hr.ausencias.organizacao.semPessoaEscolhida")}

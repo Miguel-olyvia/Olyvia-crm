@@ -1,11 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, within, cleanup } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { format } from "date-fns";
+import { pt } from "date-fns/locale";
 import type { AusenciaDia, AusenciaTipo } from "@/types/hrAusencias";
 
-// Separador "Ano" de AusenciasOrganizacao: escolhe-se uma pessoa num dropdown
-// e ve-se o calendario anual dela (o mesmo componente `CalendarioAnual` da
-// ficha individual), com os dias de ausencia coloridos por tipo.
+// Separador "Mapa de ausências e férias" de AusenciasOrganizacao: junta o
+// mapa mensal (grelha com todas as pessoas) e o calendario anual de UMA
+// pessoa escolhida num dropdown num alternador Mes/Ano, em vez de dois
+// separadores fixos e desligados um do outro.
 
 vi.mock("@/contexts/CompanyContext", () => ({
   useCompany: () => ({ activeCompany: { id: "org-nike" }, isLoading: false }),
@@ -67,6 +70,8 @@ vi.mock("@/hooks/useAusenciasTipos", () => ({
   }),
 }));
 
+const MES_ACTUAL = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+
 const DIAS: AusenciaDia[] = [
   {
     id: "dia-1",
@@ -74,7 +79,7 @@ const DIAS: AusenciaDia[] = [
     pessoa_id: "pessoa-ana",
     organization_id: "org-nike",
     tipo_id: TIPO_FERIAS.id,
-    data: `${new Date().getFullYear()}-06-10`,
+    data: `${MES_ACTUAL}-10`,
     fraccao_dia: 1,
     conta_saldo: true,
     e_feriado: false,
@@ -88,7 +93,7 @@ const DIAS: AusenciaDia[] = [
     pessoa_id: "pessoa-bruno",
     organization_id: "org-nike",
     tipo_id: TIPO_FERIAS.id,
-    data: `${new Date().getFullYear()}-06-11`,
+    data: `${MES_ACTUAL}-11`,
     fraccao_dia: 1,
     conta_saldo: true,
     e_feriado: false,
@@ -119,7 +124,7 @@ vi.mock("@/hooks/useAusenciasDaOrganizacao", () => ({
 // CampoSelect usa o Select do Radix, que em jsdom exige polyfills de ponteiro
 // que este projecto nao tem configurados (nenhum outro teste o exercita). O
 // que este teste quer verificar e a logica de OrganizacaoConteudo -- que a
-// lista de pessoas aparece e que escolher uma troca os dados do calendario --
+// lista de pessoas aparece e que escolher uma troca os dados mostrados --
 // nao o comportamento interno do Radix. Um `<select>` nativo testa exactamente
 // essa logica sem depender de pointer events que o jsdom nao implementa.
 vi.mock("@/components/hr/form/Campos", async () => {
@@ -176,7 +181,11 @@ async function renderPagina() {
   );
 }
 
-describe("AusenciasOrganizacao: separador Ano", () => {
+function irParaModoAno() {
+  fireEvent.click(screen.getByRole("button", { name: "Ano" }));
+}
+
+describe("AusenciasOrganizacao: separador Mapa de ausências e férias", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -185,27 +194,35 @@ describe("AusenciasOrganizacao: separador Ano", () => {
     cleanup();
   });
 
-  it("mostra a lista de pessoas para escolher", async () => {
+  it("entra por omissao no modo Mes, com a grelha de todas as pessoas", async () => {
     await renderPagina();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Ano" }), { button: 0 });
 
+    expect(screen.getByRole("button", { name: "Mês" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("grid")).toBeTruthy();
+  });
+
+  it("o alternador muda para o modo Ano e mostra a lista de pessoas para escolher", async () => {
+    await renderPagina();
+    irParaModoAno();
+
+    expect(screen.getByRole("button", { name: "Ano" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("Pessoa")).toBeTruthy();
     const opcoes = screen.getAllByRole("option").map((opcao) => opcao.textContent);
     expect(opcoes).toContain("Ana Silva");
     expect(opcoes).toContain("Bruno Costa");
   });
 
-  it("sem pessoa escolhida, nao mostra o calendario", async () => {
+  it("no modo Ano, sem pessoa escolhida, nao mostra o calendario", async () => {
     await renderPagina();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Ano" }), { button: 0 });
+    irParaModoAno();
 
     expect(screen.getByText("Escolhe uma pessoa para ver o ano dela")).toBeTruthy();
     expect(screen.queryByRole("grid")).toBeNull();
   });
 
-  it("ao escolher uma pessoa, mostra o calendario anual dela com os dias coloridos por tipo", async () => {
+  it("no modo Ano, ao escolher uma pessoa, mostra o calendario anual dela com os dias coloridos por tipo", async () => {
     await renderPagina();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Ano" }), { button: 0 });
+    irParaModoAno();
 
     fireEvent.change(screen.getByLabelText("Pessoa"), { target: { value: "pessoa-ana" } });
 
@@ -219,17 +236,57 @@ describe("AusenciasOrganizacao: separador Ano", () => {
     expect((diaMarcado as HTMLElement).style.backgroundColor).not.toBe("");
   });
 
-  it("os dias da outra pessoa (Bruno) nao aparecem no calendario da Ana", async () => {
+  it("no modo Ano, os dias da outra pessoa (Bruno) nao aparecem no calendario da Ana", async () => {
     await renderPagina();
-    fireEvent.mouseDown(screen.getByRole("tab", { name: "Ano" }), { button: 0 });
+    irParaModoAno();
 
     fireEvent.change(screen.getByLabelText("Pessoa"), { target: { value: "pessoa-ana" } });
 
-    const junho = screen.getAllByRole("grid").find((grelha) =>
-      grelha.getAttribute("aria-label")?.toLowerCase().startsWith("jun"),
+    const nomeMesActual = format(new Date(`${MES_ACTUAL}-01T12:00:00Z`), "LLLL yyyy", {
+      locale: pt,
+    });
+    const mesActual = screen.getAllByRole("grid").find(
+      (grelha) => grelha.getAttribute("aria-label") === nomeMesActual,
     );
-    expect(junho).toBeTruthy();
-    const diaOnze = within(junho as HTMLElement).getByText("11");
+    expect(mesActual).toBeTruthy();
+    const diaOnze = within(mesActual as HTMLElement).getByText("11");
     expect(diaOnze.closest("button")?.getAttribute("title")).toMatch(/sem ausência/i);
+  });
+
+  it("no modo Mes, sem pessoa escolhida, a grelha mostra todas as pessoas", async () => {
+    await renderPagina();
+
+    const linhas = screen.getAllByRole("rowheader").map((linha) => linha.textContent);
+    expect(linhas).toContain("Ana Silva");
+    expect(linhas).toContain("Bruno Costa");
+  });
+
+  it("no modo Mes, escolher uma pessoa filtra a grelha a essa pessoa so", async () => {
+    await renderPagina();
+
+    fireEvent.change(screen.getByLabelText("Pessoa"), { target: { value: "pessoa-ana" } });
+
+    const linhas = screen.getAllByRole("rowheader").map((linha) => linha.textContent);
+    expect(linhas).toEqual(["Ana Silva"]);
+  });
+
+  it("trocar de mes no modo Mes actualiza o campo de mes", async () => {
+    await renderPagina();
+
+    const campoMes = screen.getByLabelText("Mês") as HTMLInputElement;
+    const anoActual = new Date().getFullYear();
+    fireEvent.change(campoMes, { target: { value: `${anoActual}-01` } });
+
+    expect(campoMes.value).toBe(`${anoActual}-01`);
+  });
+
+  it("trocar de ano no modo Ano actualiza o ano mostrado e continua em sincronia ao voltar ao Mes", async () => {
+    await renderPagina();
+    irParaModoAno();
+
+    const anoActual = new Date().getFullYear();
+    fireEvent.click(screen.getByRole("button", { name: `Ano seguinte (${anoActual + 1})` }));
+
+    expect(screen.getByText(String(anoActual + 1))).toBeTruthy();
   });
 });
