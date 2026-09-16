@@ -135,6 +135,8 @@ const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalPropos
 const ClientPortalContracts = lazy(() => import("./pages/ClientPortalContracts"));
 const ClientPortalContractDetail = lazy(() => import("./pages/ClientPortalContractDetail"));
 const ClientPortalDocuments = lazy(() => import("./pages/ClientPortalDocuments"));
+const ClientPortalDirectSales = lazy(() => import("./pages/ClientPortalDirectSales"));
+const ClientPortalDirectSaleDetail = lazy(() => import("./pages/ClientPortalDirectSaleDetail"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -184,6 +186,8 @@ const App = () => (
                     <Route path="/client-portal" element={<ClientPortal />} />
                     <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
                     <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
+                    <Route path="/client-portal/direct-sales" element={<ClientPortalDirectSales />} />
+                    <Route path="/client-portal/direct-sales/:id" element={<ClientPortalDirectSaleDetail />} />
                     <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
                     <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
                     <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />

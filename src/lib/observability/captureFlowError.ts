@@ -56,6 +56,7 @@ export type BusinessFlow =
   // the client has no other route.
   | "client-portal-proposal"
   | "client-portal-contract"
+  | "client-portal-direct-sale"
   | "client-portal-access"
   // Writes that can land half-applied and leave wrong data behind, rather
   // than simply failing. Grouped by what ends up corrupted.

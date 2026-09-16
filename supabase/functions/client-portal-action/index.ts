@@ -1007,10 +1007,21 @@ serve(async (req) => {
           .eq("portal_status", "sent");
 
 
-        // H7 — correct label for all three document types
-        const docLabel = document_type === "proposal" ? "proposta"
-          : document_type === "quote" ? "orçamento"
-          : "contrato";
+        // H7 — correct label for all document types.
+        // Mapa explícito pelo mesmo motivo do DOC_TYPE_COLUMN acima: com o
+        // ternário anterior o `else` era "contrato", por isso um
+        // document_type novo (direct_sale) produzia "Cliente visualizou
+        // contrato". Os 3 rótulos anteriores mantêm-se exactamente iguais,
+        // incluindo o fallback para "contrato" de qualquer valor não
+        // reconhecido (que, tal como antes, nem chega aqui — o filterCol
+        // cai em contract_id e a resolução devolve forbidden()).
+        const DOC_TYPE_LABEL: Record<string, string> = {
+          proposal: "proposta",
+          quote: "orçamento",
+          contract: "contrato",
+          direct_sale: "venda direta",
+        };
+        const docLabel = DOC_TYPE_LABEL[document_type as string] ?? "contrato";
 
         await maybeNotify(`client_viewed_${document_type}`, {
           title: `Cliente visualizou ${docLabel}`,

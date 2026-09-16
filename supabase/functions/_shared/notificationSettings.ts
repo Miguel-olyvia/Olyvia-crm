@@ -17,6 +17,11 @@ const INACTIVE_BY_DEFAULT = [
   "client_viewed_proposal",
   "client_viewed_quote",
   "client_viewed_contract",
+  // log_view builds the type as `client_viewed_${document_type}`, so a new
+  // document type is enabled by default unless it is listed here. Without this
+  // line every portal view of a Venda Direta would notify the commercial,
+  // which is not what the other three do.
+  "client_viewed_direct_sale",
 ];
 
 /**

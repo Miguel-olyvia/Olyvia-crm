@@ -126,6 +126,7 @@ const NOTIFICATION_MODULES: ModuleDef[] = [
       { type: "client_rejected_quote", label: "Orçamento rejeitado", description: "Quando o cliente rejeita um orçamento", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "client_rejected_proposal", label: "Proposta rejeitada", description: "Quando o cliente rejeita uma proposta", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "client_rejected_contract", label: "Contrato rejeitado", description: "Quando o cliente rejeita um contrato", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "client_accepted_direct_sale", label: "Venda direta aceite", description: "Quando o cliente aceita uma venda direta no portal", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "client_question", label: "Dúvida do cliente", description: "Quando o cliente envia uma dúvida sobre um documento", hasDays: false, defaultDays: null, defaultActive: true },
     ],
   },
@@ -138,6 +139,7 @@ const NOTIFICATION_MODULES: ModuleDef[] = [
       { type: "client_viewed_proposal", label: "Proposta visualizada", description: "Quando o cliente abre uma proposta no portal", hasDays: false, defaultDays: null, defaultActive: false },
       { type: "client_viewed_quote", label: "Orçamento visualizado", description: "Quando o cliente abre um orçamento no portal", hasDays: false, defaultDays: null, defaultActive: false },
       { type: "client_viewed_contract", label: "Contrato visualizado", description: "Quando o cliente abre um contrato no portal", hasDays: false, defaultDays: null, defaultActive: false },
+      { type: "client_viewed_direct_sale", label: "Venda direta visualizada", description: "Quando o cliente abre uma venda direta no portal", hasDays: false, defaultDays: null, defaultActive: false },
     ],
   },
   {
