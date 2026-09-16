@@ -38,11 +38,13 @@
  * SE ALTERARES `index.ts`, ACTUALIZA ESTE FICHEIRO NA MESMA ALTERAÇÃO.
  *
  * Fonte: supabase/functions/client-portal-action/index.ts
- *   - resolveDocEntity      ~ linhas 95-133
- *   - assertOwnership       ~ linhas 136-160
- *   - consumeVerifiedOtp    ~ linhas 198-236
- *   - sanitizeReason        ~ linhas 246-251
- *   - SENSITIVE_LINE_COLUMNS / stripCosts ~ linhas 486-498
+ *   - resolveDocEntity      ~ linhas 95-138
+ *   - assertOwnership       ~ linhas 141-165
+ *   - consumeVerifiedOtp    ~ linhas 203-241
+ *   - sanitizeReason        ~ linhas 251-256
+ *   - SENSITIVE_LINE_COLUMNS / stripCosts ~ linhas 299-311
+ *     (subiram para o escopo do serve(), acima do switch — antes viviam
+ *      dentro do case "get_proposal_pdf_data"; corpo inalterado)
  */
 
 // ── Forma mínima do cliente Supabase usada pelos helpers ────────────────
@@ -85,7 +87,7 @@ export function makePortalGuards(
   // ── Resolve (entity_id, organization_id) for a document column ──
   // Shared by assertOwnership and resolveAuthorizedPortalUserId.
   async function resolveDocEntity(
-    column: "proposal_id" | "quote_id" | "contract_id",
+    column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id",
     id: string,
   ): Promise<{ entityId: string | null; orgId: string | null }> {
     if (!id) return { entityId: null, orgId: null };
@@ -101,6 +103,11 @@ export function makePortalGuards(
         .select("entity_id, organization_id").eq("id", id).maybeSingle();
       entityId = (c as any)?.entity_id || null;
       orgId = (c as any)?.organization_id || null;
+    } else if (column === "direct_sale_id") {
+      const { data: ds } = await supabase.from("direct_sales")
+        .select("entity_id, organization_id").eq("id", id).maybeSingle();
+      entityId = (ds as any)?.entity_id || null;
+      orgId = (ds as any)?.organization_id || null;
     } else if (column === "quote_id") {
       const { data: q } = await supabase.from("quotes")
         .select("entity_id, organization_id, deal_id, proposal_id").eq("id", id).maybeSingle();
@@ -125,7 +132,7 @@ export function makePortalGuards(
   }
 
   // ── IDOR GUARD: direct portal-user row match, with entity_id fallback ──
-  async function assertOwnership(column: "proposal_id" | "quote_id" | "contract_id", id: string): Promise<boolean> {
+  async function assertOwnership(column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id", id: string): Promise<boolean> {
     if (!id) return false;
 
     // 1) Direct match: this portal user has a row for this exact document
@@ -153,7 +160,7 @@ export function makePortalGuards(
 
   // ── OTP single-use guard: atomically claim a verified OTP. ──
   async function consumeVerifiedOtp(
-    referenceType: "proposal" | "contract",
+    referenceType: "proposal" | "contract" | "direct_sale",
     referenceId: string,
     purpose: string,
   ): Promise<{ ok: boolean; otpId?: string }> {

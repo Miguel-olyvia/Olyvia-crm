@@ -79,7 +79,7 @@ serve(async (req) => {
     // Verify this user is a portal client
     const { data: portalUser } = await supabase
       .from("client_portal_users")
-      .select("id, organization_id, created_by, client_id, proposal_id, quote_id, contract_id")
+      .select("id, organization_id, created_by, client_id, proposal_id, quote_id, contract_id, direct_sale_id")
       .eq("auth_user_id", user.id)
       .limit(1)
       .maybeSingle();
@@ -93,7 +93,7 @@ serve(async (req) => {
     // ── Resolve (entity_id, organization_id) for a document column ──
     // Shared by assertOwnership and resolveAuthorizedPortalUserId.
     async function resolveDocEntity(
-      column: "proposal_id" | "quote_id" | "contract_id",
+      column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id",
       id: string,
     ): Promise<{ entityId: string | null; orgId: string | null }> {
       if (!id) return { entityId: null, orgId: null };
@@ -109,6 +109,11 @@ serve(async (req) => {
           .select("entity_id, organization_id").eq("id", id).maybeSingle();
         entityId = (c as any)?.entity_id || null;
         orgId = (c as any)?.organization_id || null;
+      } else if (column === "direct_sale_id") {
+        const { data: ds } = await supabase.from("direct_sales")
+          .select("entity_id, organization_id").eq("id", id).maybeSingle();
+        entityId = (ds as any)?.entity_id || null;
+        orgId = (ds as any)?.organization_id || null;
       } else if (column === "quote_id") {
         const { data: q } = await supabase.from("quotes")
           .select("entity_id, organization_id, deal_id, proposal_id").eq("id", id).maybeSingle();
@@ -133,7 +138,7 @@ serve(async (req) => {
     }
 
     // ── IDOR GUARD: direct portal-user row match, with entity_id fallback ──
-    async function assertOwnership(column: "proposal_id" | "quote_id" | "contract_id", id: string): Promise<boolean> {
+    async function assertOwnership(column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id", id: string): Promise<boolean> {
       if (!id) return false;
 
       // 1) Direct match: this portal user has a row for this exact document
@@ -162,7 +167,7 @@ serve(async (req) => {
     // ── Resolve which client_portal_users row authorizes this user for a doc ──
     // Returns the portal_user_id row id (for logging / rate-limit scoping).
     async function resolveAuthorizedPortalUserId(
-      column: "proposal_id" | "quote_id" | "contract_id",
+      column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id",
       id: string,
     ): Promise<string | null> {
       // 1) Direct row
@@ -196,7 +201,7 @@ serve(async (req) => {
     // the auth_user_id rollout will have auth_user_id IS NULL and will fail
     // by design — users must request a fresh code post-deploy.
     async function consumeVerifiedOtp(
-      referenceType: "proposal" | "contract",
+      referenceType: "proposal" | "contract" | "direct_sale",
       referenceId: string,
       purpose: string,
     ): Promise<{ ok: boolean; otpId?: string }> {
@@ -264,7 +269,7 @@ serve(async (req) => {
     async function maybeNotify(
       type: string,
       payload: Record<string, any>,
-      docRef: { column: "proposal_id" | "quote_id" | "contract_id"; id: string },
+      docRef: { column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id"; id: string },
     ) {
       const cacheKey = `${docRef.column}:${docRef.id}`;
       let target = notifyTargetCache.get(cacheKey);
@@ -284,6 +289,26 @@ serve(async (req) => {
         ...payload,
       });
     }
+
+    // Never leaves the server: costs and margins are internal.
+    // Declarado ao nível do serve() (e não dentro de um `case`) porque é
+    // preciso em mais do que uma rota: as linhas de orçamento do PDF da
+    // proposta e as linhas da venda direta. Corpo e lista de colunas
+    // inalterados face à declaração anterior, que vivia dentro do
+    // case "get_proposal_pdf_data".
+    const SENSITIVE_LINE_COLUMNS = [
+      "cost_price",
+      "custo_mao_obra_unit",
+      "custo_material_unit",
+      "margem_percent",
+    ];
+    const stripCosts = (row: Record<string, unknown>) => {
+      const clean: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (!SENSITIVE_LINE_COLUMNS.includes(key)) clean[key] = value;
+      }
+      return clean;
+    };
 
     switch (action) {
       case "accept_quote": {
@@ -482,21 +507,8 @@ serve(async (req) => {
           }
         }
 
-        // Never leaves the server: costs and margins are internal.
-        const SENSITIVE_LINE_COLUMNS = [
-          "cost_price",
-          "custo_mao_obra_unit",
-          "custo_material_unit",
-          "margem_percent",
-        ];
-        const stripCosts = (row: Record<string, unknown>) => {
-          const clean: Record<string, unknown> = {};
-          for (const [key, value] of Object.entries(row)) {
-            if (!SENSITIVE_LINE_COLUMNS.includes(key)) clean[key] = value;
-          }
-          return clean;
-        };
-
+        // SENSITIVE_LINE_COLUMNS/stripCosts vivem agora no escopo do serve()
+        // (acima do switch) — mesmo corpo, mesma lista de colunas.
         const quotes: any[] = [];
         for (const quote of quoteRows) {
           const [{ data: lines }, { data: fees }] = await Promise.all([
@@ -962,7 +974,19 @@ serve(async (req) => {
           return new Response(JSON.stringify({ error: "document_type and document_id required" }), { status: 400, headers: corsHeaders });
         }
 
-        const filterCol = document_type === "proposal" ? "proposal_id" : document_type === "quote" ? "quote_id" : "contract_id";
+        // Mapa explícito em vez do ternário anterior: com o ternário, o `else`
+        // era "contract_id", por isso um document_type novo (direct_sale)
+        // cairia silenciosamente na coluna do contrato. Os 3 mapeamentos
+        // anteriores mantêm-se exactamente iguais, incluindo o fallback para
+        // "contract_id" de qualquer valor não reconhecido (que continua a não
+        // resolver nenhum portal user e a devolver forbidden()).
+        const DOC_TYPE_COLUMN: Record<string, "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id"> = {
+          proposal: "proposal_id",
+          quote: "quote_id",
+          contract: "contract_id",
+          direct_sale: "direct_sale_id",
+        };
+        const filterCol = DOC_TYPE_COLUMN[document_type as string] ?? "contract_id";
 
         // resolveAuthorizedPortalUserId covers both direct (proposal/quote/contract_id)
         // and entity-scoped access. Returns null when the caller has no access.
@@ -992,7 +1016,104 @@ serve(async (req) => {
           title: `Cliente visualizou ${docLabel}`,
           message: `O cliente ${clientName} visualizou um(a) ${docLabel} no portal.`,
           priority: "low",
-        }, { column: filterCol as "proposal_id" | "quote_id" | "contract_id", id: document_id });
+        }, { column: filterCol as "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id", id: document_id });
+
+        return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+      }
+
+      // Dados da Venda Direta para o portal do cliente.
+      //
+      // ATENÇÃO: esta função corre com service_role, logo a RLS de
+      // direct_sale_lines ("Client can view own direct sale lines",
+      // migration 20261201110000) NÃO se aplica aqui. O filtro
+      // visible_to_client = true tem de ser explícito — sem ele, as linhas
+      // internas da venda direta chegavam ao cliente.
+      //
+      // direct_sale_lines tem cost_price e margem_percent com o mesmo
+      // significado interno que quote_lines, por isso as linhas passam pelo
+      // mesmo stripCosts (as outras duas colunas da lista não existem nesta
+      // tabela; o helper ignora as que faltam).
+      case "get_direct_sale_data": {
+        const { direct_sale_id } = params;
+        if (!direct_sale_id) {
+          return new Response(JSON.stringify({ error: "direct_sale_id required" }), { status: 400, headers: corsHeaders });
+        }
+        if (!(await assertOwnership("direct_sale_id", direct_sale_id))) return forbidden();
+
+        const { data: directSale } = await supabase
+          .from("direct_sales")
+          // Colunas nomeadas de propósito (nunca select("*")): o cabeçalho tem
+          // campos que não dizem respeito ao cliente (client_contract_id,
+          // assigned_to, invoice_*, search_text, ...).
+          .select(
+            "id, sale_number, title, description, status, notes, client_notes, subtotal, total, iva_rate, currency, valid_until, sent_at, accepted_at, rejected_at, proforma_number, proforma_issued_at, organization_id",
+          )
+          .eq("id", direct_sale_id)
+          .maybeSingle();
+
+        const { data: saleLines } = await supabase
+          .from("direct_sale_lines")
+          .select("*")
+          .eq("direct_sale_id", direct_sale_id)
+          // Obrigatório — ver comentário acima (service_role ignora a RLS).
+          .eq("visible_to_client", true)
+          .order("ordem", { ascending: true });
+
+        return new Response(
+          JSON.stringify({
+            direct_sale: directSale,
+            lines: (saleLines || []).map((l: any) => stripCosts(l)),
+          }),
+          { headers: corsHeaders },
+        );
+      }
+
+      // Aceitação da Venda Direta no portal. Espelha sign_proposal na parte
+      // que é comum (OTP antes de qualquer escrita, prova de aceitação,
+      // portal_status, notificação), SEM nada do fluxo pesado de propostas:
+      // não há selecção de orçamentos, não há stage de pipeline, não há
+      // record_proposal_decision e, sobretudo, NÃO se cria contrato nenhum —
+      // a ligação a client_contracts da venda direta é outra fase.
+      case "accept_direct_sale": {
+        const { direct_sale_id, signature_image } = params;
+        if (!direct_sale_id || !signature_image) {
+          return new Response(JSON.stringify({ error: "direct_sale_id and signature_image required" }), { status: 400, headers: corsHeaders });
+        }
+        if (!(await assertOwnership("direct_sale_id", direct_sale_id))) return forbidden();
+        // B1 — atomically claim OTP BEFORE any sign-side mutation
+        {
+          const otpClaim = await consumeVerifiedOtp("direct_sale", direct_sale_id, "direct_sale_acceptance");
+          if (!otpClaim.ok) {
+            return new Response(
+              JSON.stringify({ error: "otp_required", message: "OTP inválido, expirado ou já utilizado. Peça um novo código." }),
+              { status: 403, headers: corsHeaders },
+            );
+          }
+        }
+
+        const now = new Date().toISOString();
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("direct_sales").update({
+          status: "aceite",
+          accepted_at: now,
+          signature_image,
+          acceptance_ip: detectedIp,
+          acceptance_user_agent: req.headers.get("user-agent") || null,
+        }).eq("id", direct_sale_id));
+
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("client_portal_users")
+          .update({ portal_status: "signed" })
+          .eq("auth_user_id", user.id)
+          .eq("direct_sale_id", direct_sale_id));
+
+        const { data: acceptedSale } = await supabase.from("direct_sales").select("sale_number, title").eq("id", direct_sale_id).maybeSingle();
+        await maybeNotify("client_accepted_direct_sale", {
+          title: "🎉 Venda direta aceite no portal!",
+          message: `O cliente ${clientName} aceitou a venda direta ${acceptedSale?.sale_number || acceptedSale?.title || ""}!`,
+          priority: "urgent",
+          link: `/direct-sales`,
+        }, { column: "direct_sale_id", id: direct_sale_id });
 
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       }
