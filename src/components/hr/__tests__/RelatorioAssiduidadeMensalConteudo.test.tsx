@@ -33,6 +33,7 @@ vi.mock("@/hooks/useTranslation", () => ({
         "hr.relatorioMensal.estado.normal": "Normal",
         "hr.relatorioMensal.estado.descanso": "Descanso",
         "hr.relatorioMensal.estado.feriado": "Feriado",
+        "hr.relatorioMensal.estado.sem_registo": "Sem registo",
         "hr.relatorioMensal.feriadoTrabalhado": "Feriado trabalhado",
         "hr.relatorioMensal.descansoTrabalhado": "Descanso trabalhado",
         "hr.relatorioMensal.semCargo": "Sem cargo registado",
@@ -44,6 +45,7 @@ vi.mock("@/hooks/useTranslation", () => ({
         "hr.relatorioMensal.totais.diasFeriadoTrabalhados": `${valores?.dias ?? ""} dias de feriado trabalhados`,
         "hr.relatorioMensal.totais.faltaCompleta": `${valores?.dias ?? ""} faltas completas`,
         "hr.relatorioMensal.totais.faltaIncompleta": `${valores?.dias ?? ""} faltas incompletas`,
+        "hr.relatorioMensal.totais.diasSemRegisto": `${valores?.dias ?? ""} dias sem registo`,
       };
       return chaves[chave] ?? chave;
     },
@@ -106,6 +108,7 @@ beforeEach(() => {
       diasFeriadoTrabalhados: 0,
       diasComFaltaCompleta: 0,
       diasComFaltaIncompleta: 0,
+      diasSemRegisto: 0,
       horasExtraMinutos: 0,
       horasExtraNoturnasMinutos: 0,
     },
@@ -484,6 +487,60 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
     const linha = screen.getByText("2026-09-01").closest("tr");
     expect(linha?.className).toMatch(/bg-blue/);
     expect(linha?.className).not.toMatch(/bg-amber/);
+  });
+
+  it("um dia 'sem_registo' mostra o planeado, o badge proprio e fica destacado", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "sem_registo",
+        categoriaAusencia: null,
+        planeadoMinutos: 480,
+        realizadoMinutos: 0,
+        planeadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "17:00" }],
+        realizadoIntervalos: [],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 0,
+        horasExtraNoturnasMinutos: 0,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("09:00-17:00")).toBeInTheDocument();
+    expect(screen.getByText("Sem registo")).toBeInTheDocument();
+    const linha = screen.getByText("2026-09-01").closest("tr");
+    expect(linha?.className).toMatch(/bg-rose/);
+  });
+
+  it("o rodape mostra o total de dias sem registo", () => {
+    relatorioMock.totais = {
+      ...relatorioMock.totais,
+      diasSemRegisto: 4,
+    };
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("4 dias sem registo")).toBeInTheDocument();
   });
 
   it("um feriado ou descanso sem trabalho nenhum continua escondido, sem destaque", () => {

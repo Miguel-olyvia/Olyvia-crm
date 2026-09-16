@@ -73,6 +73,13 @@ const COLUNAS_AUSENCIA_DIA =
 
 const COLUNAS_AUSENCIA_TIPO = "id, organization_id, codigo, nome, categoria";
 
+/** So o timezone -- e o mesmo `schedule_settings` que `useScheduleSettings` usa. */
+const COLUNAS_SCHEDULE_SETTINGS = "timezone";
+
+interface ScheduleSettingsTimezone {
+  timezone: string | null;
+}
+
 /** `hr_obras_horas` (20261201100000). Nunca se apaga -- uma anulada fica marcada. */
 export interface ObraHoras {
   id: string;
@@ -92,7 +99,7 @@ const COLUNAS_OBRA =
   "id, pessoa_id, organization_id, data, horas, descricao, registado_por, " +
   "anulado_em, anulado_por, anulado_motivo, created_at";
 
-export type EstadoDiaRelatorio = "normal" | "descanso" | "feriado" | "ausencia";
+export type EstadoDiaRelatorio = "normal" | "descanso" | "feriado" | "ausencia" | "sem_registo";
 
 /** Um intervalo `HH:MM-HH:MM`, planeado ou realizado, pronto a mostrar. */
 export interface IntervaloRelatorio {
@@ -156,6 +163,11 @@ export interface TotaisRelatorioMensal {
    */
   diasComFaltaCompleta: number;
   diasComFaltaIncompleta: number;
+  /**
+   * Dias com horario planeado, zero realizado, sem falta registada e sem
+   * ausencia aprovada -- um buraco por esclarecer, nao um dia "normal".
+   */
+  diasSemRegisto: number;
   horasExtraMinutos: number;
   horasExtraNoturnasMinutos: number;
 }
@@ -190,6 +202,40 @@ function limitesDoMes(ano: number, mes: number): { de: string; ate: string; ulti
     ate: `${ano}-${doisDigitos(mes + 1)}-${doisDigitos(ultimoDia)}`,
     ultimoDia,
   };
+}
+
+/**
+ * Hoje, em ISO -- para "sem_registo" nunca apanhar hoje nem o futuro.
+ *
+ * Usa o `timezone` da organizacao (`schedule_settings`, o mesmo que
+ * `useScheduleSettings` le) quando disponivel: perto da meia-noite, quem ve o
+ * relatorio de uma equipa portuguesa a partir de outro fuso nao pode ter uma
+ * nocao de "hoje" diferente da equipa. Se o timezone ainda nao estiver
+ * disponivel (a carregar, ou organizacao sem `schedule_settings`), ou se for
+ * um valor que o `Intl` deste ambiente nao reconhece, cai-se para o fuso do
+ * browser -- uma aproximacao aceite, nao ignorada em silencio.
+ */
+function isoDeHoje(timezone?: string | null): string {
+  const agora = new Date();
+  if (timezone) {
+    try {
+      const partes = new Intl.DateTimeFormat("en-US", {
+        timeZone: timezone,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(agora);
+      const valorDe = (tipo: string) => partes.find((parte) => parte.type === tipo)?.value ?? "";
+      const ano = valorDe("year");
+      const mes = valorDe("month");
+      const dia = valorDe("day");
+      if (ano && mes && dia) return `${ano}-${mes}-${dia}`;
+    } catch {
+      // timezone invalido para este Intl -- cai para o fuso do browser abaixo.
+    }
+  }
+  const doisDigitos = (valor: number) => String(valor).padStart(2, "0");
+  return `${agora.getFullYear()}-${doisDigitos(agora.getMonth() + 1)}-${doisDigitos(agora.getDate())}`;
 }
 
 function diaSemanaDe(iso: string): number {
@@ -244,6 +290,9 @@ export function useRelatorioAssiduidadeMensal(
     vazio<AusenciaTipo>(),
   );
   const [obras, setObras] = useState<Satelite<ObraHoras>>(vazio<ObraHoras>());
+  const [scheduleSettings, setScheduleSettings] = useState<Satelite<ScheduleSettingsTimezone>>(
+    vazio<ScheduleSettingsTimezone>(),
+  );
   const [feriados, setFeriados] = useState<IndiceFeriados>(() => indexarFeriados([]));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -259,6 +308,7 @@ export function useRelatorioAssiduidadeMensal(
       setAusenciasDias(vazio<AusenciaDia>());
       setAusenciasTipos(vazio<AusenciaTipo>());
       setObras(vazio<ObraHoras>());
+      setScheduleSettings(vazio<ScheduleSettingsTimezone>());
       setLoading(false);
       return;
     }
@@ -272,6 +322,7 @@ export function useRelatorioAssiduidadeMensal(
         osTiposDeAusencia,
         asObras,
         osFeriados,
+        asScheduleSettings,
       ] = await Promise.all([
         carregar<RealizadoComCorreccao>("pessoas_horario_realizado", COLUNAS_REALIZADO, (q) =>
           q
@@ -309,6 +360,9 @@ export function useRelatorioAssiduidadeMensal(
         carregar<FeriadoOrg>("schedule_holidays", "holiday_date, is_recurring", (q) =>
           q.eq("organization_id", orgId),
         ),
+        carregar<ScheduleSettingsTimezone>("schedule_settings", COLUNAS_SCHEDULE_SETTINGS, (q) =>
+          q.eq("organization_id", orgId),
+        ),
       ]);
 
       setRealizado(oRealizado);
@@ -318,6 +372,7 @@ export function useRelatorioAssiduidadeMensal(
       setAusenciasTipos(osTiposDeAusencia);
       setObras(asObras);
       setFeriados(indexarFeriados(osFeriados.linhas));
+      setScheduleSettings(asScheduleSettings);
     } catch (e) {
       captureFlowError(e, "hr-relatorio-assiduidade-mensal-load");
     } finally {
@@ -345,11 +400,15 @@ export function useRelatorioAssiduidadeMensal(
     return mapa;
   }, [ausenciasDias.linhas]);
 
+  const timezoneDaOrganizacao = scheduleSettings.linhas[0]?.timezone ?? null;
+
   const dias = useMemo<DiaRelatorioMensal[]>(() => {
     const realizadoEmVigor = emVigor(realizado.linhas, LEITOR_REALIZADO).filter(
       (linha) => !linha.deleted_at,
     );
     const faltasEmVigor = emVigor(faltas.linhas, LEITOR_FALTAS);
+
+    const hoje = isoDeHoje(timezoneDaOrganizacao);
 
     const linhas: DiaRelatorioMensal[] = [];
     for (let dia = 1; dia <= ultimoDia; dia += 1) {
@@ -360,6 +419,10 @@ export function useRelatorioAssiduidadeMensal(
       const obraDoDia = obras.linhas.filter((obra) => obra.data === iso && !obra.anulado_em);
       const { naoTrabalha } = leituraDoPlaneado(planeado.linhas, iso);
       const ausenciaDoDia = ausenciaAprovadaPorDia.get(iso) ?? null;
+
+      const planeadoMinutos = minutosPlaneadosDoDia(planeado.linhas, iso);
+      const realizadoMinutos = realizadoDoDia.reduce((soma, linha) => soma + (linha.minutos ?? 0), 0);
+      const minutosEmFalta = faltasDoDia.reduce((soma, falta) => soma + (falta.minutos ?? 0), 0);
 
       let estado: EstadoDiaRelatorio = "normal";
       let categoriaAusencia: CategoriaAusencia | null = null;
@@ -375,10 +438,22 @@ export function useRelatorioAssiduidadeMensal(
         estado = "feriado";
       } else if (naoTrabalha) {
         estado = "descanso";
+      } else if (
+        planeadoMinutos > 0 &&
+        realizadoMinutos === 0 &&
+        minutosEmFalta === 0 &&
+        // Uma ausencia aprovada PARCIAL (ex. fraccao_dia 0.5) nao cai no ramo
+        // "ausencia" acima (que so substitui o dia inteiro), mas ja explica
+        // parte do buraco -- nao deve ficar "por esclarecer" so porque a
+        // fraccao nao chega a 1.
+        !ausenciaDoDia &&
+        // Hoje e o futuro ainda podem vir a ter picagem -- so um dia que ja
+        // passou e um buraco por esclarecer.
+        iso < hoje
+      ) {
+        estado = "sem_registo";
       }
 
-      const planeadoMinutos = minutosPlaneadosDoDia(planeado.linhas, iso);
-      const realizadoMinutos = realizadoDoDia.reduce((soma, linha) => soma + (linha.minutos ?? 0), 0);
       const { intervalos: planeadoIntervalos } = leituraDoPlaneado(planeado.linhas, iso);
       // `leituraDoPlaneado` ja filtrou fora as linhas sem hora_inicio/hora_fim
       // (ver planeadoDoDia.ts), mas o tipo `HorarioPlaneado` continua nulavel --
@@ -411,7 +486,7 @@ export function useRelatorioAssiduidadeMensal(
         realizadoIntervalos: realizadoIntervalosDoDia,
         obraHoras: obraDoDia.reduce((soma, obra) => soma + Number(obra.horas), 0),
         temFalta: faltasDoDia.length > 0,
-        minutosEmFalta: faltasDoDia.reduce((soma, falta) => soma + (falta.minutos ?? 0), 0),
+        minutosEmFalta,
         horasExtraMinutos,
         horasExtraNoturnasMinutos: Math.min(horasExtraMinutos, minutosNoturnosDoExcedente),
       });
@@ -425,6 +500,7 @@ export function useRelatorioAssiduidadeMensal(
     ausenciaAprovadaPorDia,
     categoriaPorTipoId,
     feriados,
+    timezoneDaOrganizacao,
     de,
     ultimoDia,
   ]);
@@ -457,6 +533,7 @@ export function useRelatorioAssiduidadeMensal(
               acc.diasFeriadoTrabalhados + (dia.estado === "feriado" && dia.realizadoMinutos > 0 ? 1 : 0),
             diasComFaltaCompleta: acc.diasComFaltaCompleta + (faltaCompleta ? 1 : 0),
             diasComFaltaIncompleta: acc.diasComFaltaIncompleta + (faltaIncompleta ? 1 : 0),
+            diasSemRegisto: acc.diasSemRegisto + (dia.estado === "sem_registo" ? 1 : 0),
             horasExtraMinutos: acc.horasExtraMinutos + (contaParaTotais ? dia.horasExtraMinutos : 0),
             horasExtraNoturnasMinutos:
               acc.horasExtraNoturnasMinutos + (contaParaTotais ? dia.horasExtraNoturnasMinutos : 0),
@@ -470,6 +547,7 @@ export function useRelatorioAssiduidadeMensal(
           diasFeriadoTrabalhados: 0,
           diasComFaltaCompleta: 0,
           diasComFaltaIncompleta: 0,
+          diasSemRegisto: 0,
           horasExtraMinutos: 0,
           horasExtraNoturnasMinutos: 0,
         },

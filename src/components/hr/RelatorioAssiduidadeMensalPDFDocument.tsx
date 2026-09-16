@@ -26,6 +26,7 @@ const ESTADO_LABEL: Record<string, string> = {
   descanso: "Descanso",
   feriado: "Feriado",
   ausencia: "Ausência",
+  sem_registo: "Sem registo",
 };
 
 const styles = StyleSheet.create({
@@ -120,12 +121,14 @@ const styles = StyleSheet.create({
 
 const FUNDO_FERIADO = "#fef3c7";
 const FUNDO_DESCANSO = "#dbeafe";
+const FUNDO_SEM_REGISTO = "#ffe4e6";
 
 function trabalhouForaDoNormal(dia: DiaRelatorioMensal): boolean {
   return (dia.estado === "feriado" || dia.estado === "descanso") && dia.realizadoMinutos > 0;
 }
 
 function fundoDaLinha(dia: DiaRelatorioMensal): string | undefined {
+  if (dia.estado === "sem_registo") return FUNDO_SEM_REGISTO;
   if (!trabalhouForaDoNormal(dia)) return undefined;
   return dia.estado === "feriado" ? FUNDO_FERIADO : FUNDO_DESCANSO;
 }
@@ -184,7 +187,7 @@ export function RelatorioAssiduidadeMensalPDFDocument({
 
           {dias.map((dia) => {
             const trabalhou = trabalhouForaDoNormal(dia);
-            const esconderValores = dia.estado !== "normal" && !trabalhou;
+            const esconderValores = dia.estado !== "normal" && dia.estado !== "sem_registo" && !trabalhou;
             const backgroundColor = fundoDaLinha(dia);
             return (
               <View key={dia.iso} style={[styles.tableRow, backgroundColor ? { backgroundColor } : {}]} wrap={false}>
@@ -235,6 +238,7 @@ export function RelatorioAssiduidadeMensalPDFDocument({
             <Text style={styles.totalItem}>{totais.diasFeriadoTrabalhados} feriados trabalhados</Text>
             <Text style={styles.totalItem}>{totais.diasComFaltaCompleta} faltas completas</Text>
             <Text style={styles.totalItem}>{totais.diasComFaltaIncompleta} faltas parciais</Text>
+            <Text style={styles.totalItem}>{totais.diasSemRegisto} dias sem registo</Text>
           </View>
         </View>
 

@@ -4,7 +4,7 @@
  *
  * Supabase simulado. Nada toca em base nenhuma.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 const ORG_ACTIVA = "org-activa";
@@ -87,6 +87,85 @@ describe("useRelatorioAssiduidadeMensal", () => {
     tabelas = {};
     rpcChamadas = [];
     rpcResposta = { data: "nova-obra-id", error: null };
+  });
+
+  describe("'sem_registo' -- depende de 'hoje', por isso corre com o relogio fixado", () => {
+    beforeEach(() => {
+      // "Hoje" fixado em 2026-09-16: sem isto, o teste do "dia futuro"
+      // (2026-09-22) passa a falhar sozinho assim que essa data deixar de
+      // estar no futuro, e a contagem de "tercas passadas" muda com o
+      // calendario sem ninguem tocar no codigo.
+      //
+      // So o `Date` e falsificado -- `setTimeout`/`setInterval` ficam reais,
+      // porque o `waitFor` do Testing Library depende deles para fazer
+      // polling; falsifica-los tambem so trava os testes em timeout.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-16T12:00:00"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("um dia PASSADO com planeado, zero realizado e sem falta fica 'sem_registo' e conta nos totais", async () => {
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // todas as tercas de Set/2026
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      // "Hoje" nos testes e 2026-09-16 (data do sistema, fixada acima) -- as
+      // tercas passadas sao 01, 08 e 15.
+      const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+      expect(dia1?.estado).toBe("sem_registo");
+      expect(dia1?.realizadoMinutos).toBe(0);
+      expect(result.current.totais.diasSemRegisto).toBe(3);
+    });
+
+    it("um dia FUTURO com planeado e zero realizado nao entra em 'sem_registo' -- ainda pode vir a ter picagem", async () => {
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // tercas, incl. 22 e 29 (futuro)
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const diaFuturo = result.current.dias.find((d) => d.iso === "2026-09-22");
+      expect(diaFuturo?.estado).toBe("normal");
+    });
+
+    it("uma ausencia aprovada PARCIAL (fraccao_dia 0.5) num dia passado sem realizado nao vira 'sem_registo'", async () => {
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 2026-09-01, terca, passado
+      tabelas.pessoas_ausencias_dias = [
+        {
+          id: "ad1",
+          pedido_id: "ped1",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          tipo_id: "tipo-consulta",
+          data: "2026-09-01",
+          fraccao_dia: 0.5,
+          conta_saldo: true,
+          e_feriado: false,
+          e_fim_semana: false,
+          periodo_inicio: "2026-09-01",
+          estado: "aprovado",
+        },
+      ];
+      tabelas.hr_ausencias_tipos = [
+        {
+          id: "tipo-consulta",
+          organization_id: ORG_ACTIVA,
+          codigo: "consulta",
+          nome: "Consulta medica",
+          categoria: "doenca",
+        },
+      ];
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+      expect(dia1?.realizadoMinutos).toBe(0);
+      expect(dia1?.estado).not.toBe("sem_registo");
+    });
   });
 
   it("classifica um dia normal com planeado, realizado e obra distintos, nunca fundidos", async () => {
@@ -686,6 +765,59 @@ describe("useRelatorioAssiduidadeMensal", () => {
     const dia = result.current.dias.find((d) => d.iso === "2026-09-07");
     expect(dia?.horasExtraMinutos).toBe(59); // sem planeado, tudo conta como extra
     expect(dia?.horasExtraNoturnasMinutos).toBe(dia?.horasExtraMinutos);
+  });
+
+  it("um dia com falta registada nao vira 'sem_registo' -- a falta ja explica o buraco", async () => {
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min
+    tabelas.pessoas_faltas = [
+      {
+        id: "f1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        data: "2026-09-01",
+        planeado_id: null,
+        vinculo_id: null,
+        local_id: null,
+        hora_inicio: "09:00",
+        hora_fim: "18:00",
+        minutos: 540,
+        motivo_codigo: "falta_total",
+        justificacao_estado: "sem_justificacao",
+        justificada: false,
+        remunerada: false,
+        desconta_saldo: false,
+        justificacao_decidida_por: null,
+        justificacao_decidida_em: null,
+        justificacao_motivo: null,
+        ausencia_dia_id: null,
+        corrige_falta_id: null,
+        correccao_motivo: null,
+        estado: "activa",
+        anulado_em: null,
+        anulacao_motivo: null,
+        created_at: "2026-09-01T09:00:00Z",
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+    expect(dia1?.estado).not.toBe("sem_registo");
+    expect(dia1?.estado).toBe("normal");
+  });
+
+  it("um feriado ou descanso sem trabalho continua 'feriado'/'descanso', nunca 'sem_registo'", async () => {
+    tabelas.pessoas_horario_planeado = [diaDeFolga(1)]; // segunda, sem horario
+    tabelas.schedule_holidays = [{ holiday_date: "2026-09-07", is_recurring: false }];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const feriado = result.current.dias.find((d) => d.iso === "2026-09-07"); // segunda com feriado
+    expect(feriado?.estado).toBe("feriado");
+    const descanso = result.current.dias.find((d) => d.iso === "2026-09-14"); // segunda sem feriado
+    expect(descanso?.estado).toBe("descanso");
   });
 
   it("registarObra chama a RPC com a pessoa e a organizacao resolvidas", async () => {

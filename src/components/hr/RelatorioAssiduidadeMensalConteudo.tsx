@@ -122,6 +122,7 @@ const AJUSTE_COR_IMPRESSAO = {
 } as unknown as CSSProperties;
 
 function classeDeDestaque(dia: DiaRelatorioMensal): string | undefined {
+  if (dia.estado === "sem_registo") return "bg-rose-50 dark:bg-rose-950/30";
   if (!trabalhouForaDoNormal(dia)) return undefined;
   return dia.estado === "feriado"
     ? "bg-amber-50 dark:bg-amber-950/30"
@@ -254,8 +255,10 @@ export function RelatorioAssiduidadeMensalConteudo({
                 // So se esconde o bloco de valores quando o dia foi substituido
                 // E nao houve trabalho nenhum -- um feriado ou descanso
                 // trabalhado continua a mostrar planeado, realizado e horas
-                // extra, so a coluna Estado e que fica.
-                const esconderValores = dia.estado !== "normal" && !trabalhou;
+                // extra, so a coluna Estado e que fica. "Sem registo" e
+                // exactamente o planeado sem realizado -- mostrar o planeado e
+                // o que torna o buraco visivel.
+                const esconderValores = dia.estado !== "normal" && dia.estado !== "sem_registo" && !trabalhou;
                 const destaque = classeDeDestaque(dia);
                 return (
                   <TableRow
@@ -326,7 +329,7 @@ export function RelatorioAssiduidadeMensalConteudo({
                     )}
                     <TableCell style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}>
                       <div className="flex flex-col gap-1">
-                        {esconderValores ? null : (
+                        {esconderValores || dia.estado === "sem_registo" ? null : (
                           <span className="text-muted-foreground">{t(chaveDoEstado(dia))}</span>
                         )}
                         {trabalhou && (
@@ -336,6 +339,14 @@ export function RelatorioAssiduidadeMensalConteudo({
                                 ? "hr.relatorioMensal.feriadoTrabalhado"
                                 : "hr.relatorioMensal.descansoTrabalhado",
                             )}
+                          </Badge>
+                        )}
+                        {dia.estado === "sem_registo" && (
+                          <Badge
+                            variant="outline"
+                            className="w-fit border-rose-300 font-normal text-rose-700 dark:border-rose-800 dark:text-rose-300"
+                          >
+                            {t(chaveDoEstado(dia))}
                           </Badge>
                         )}
                         {dia.temFalta && (
@@ -399,6 +410,15 @@ export function RelatorioAssiduidadeMensalConteudo({
             <span>
               {t("hr.relatorioMensal.totais.faltaIncompleta", {
                 dias: String(relatorio.totais.diasComFaltaIncompleta),
+              })}
+            </span>
+            <span
+              className={
+                relatorio.totais.diasSemRegisto > 0 ? "text-rose-700 dark:text-rose-300" : undefined
+              }
+            >
+              {t("hr.relatorioMensal.totais.diasSemRegisto", {
+                dias: String(relatorio.totais.diasSemRegisto),
               })}
             </span>
           </div>

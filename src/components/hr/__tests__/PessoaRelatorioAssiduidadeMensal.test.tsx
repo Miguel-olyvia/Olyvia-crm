@@ -121,6 +121,7 @@ beforeEach(() => {
       diasFeriadoTrabalhados: 0,
       diasComFaltaCompleta: 0,
       diasComFaltaIncompleta: 0,
+      diasSemRegisto: 0,
       horasExtraMinutos: 0,
       horasExtraNoturnasMinutos: 0,
     },
