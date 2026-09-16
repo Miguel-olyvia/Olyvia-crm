@@ -166,7 +166,7 @@ export function MapaAssiduidadeMes({
               <div
                 key={dia}
                 role="columnheader"
-                className="w-6 shrink-0 text-center text-[10px] text-muted-foreground tabular-nums"
+                className="m-px w-6 shrink-0 text-center text-[10px] text-muted-foreground tabular-nums"
               >
                 {dia.slice(8, 10)}
               </div>
@@ -218,10 +218,34 @@ export function MapaAssiduidadeMes({
   );
 }
 
-/** As faixas verticais de uma celula: uma por local, no maximo duas mais "+". */
+/**
+ * As faixas verticais de uma celula: uma por local, no maximo duas mais "+",
+ * e a faixa vermelha da falta PROPORCIONAL ao que faltou.
+ *
+ * NAO SE CARREGA O HORARIO PLANEADO DA ORGANIZACAO (ver o cabecalho de
+ * useAssiduidadeDaOrganizacao), por isso a "base" para a proporcao e o total
+ * de minutos que a celula conhece nesse dia -- realizado mais falta. Quando
+ * nao ha nada realizado, a falta cobre a celula toda: e o caso da falta do
+ * dia inteiro, que a versao anterior desenhava sempre com a mesma faixa
+ * fininha de 6px, seja a falta de uma hora ou o dia completo.
+ */
 function Faixas({ celula, locais }: { celula: CelulaDoDia; locais: LocalTrabalho[] }) {
   const visiveis = celula.locais.slice(0, 2);
   const escondidos = celula.locais.length - visiveis.length;
+  // hr_horario_realizado tem CHECK (hora_fim > hora_inicio) -- minutosRealizados
+  // === 0 implica sempre locais.length === 0, nunca o contrario.
+  const semTrabalhoRealizado = celula.minutosRealizados === 0;
+
+  if (celula.faltas > 0 && semTrabalhoRealizado) {
+    return <span aria-hidden="true" className="h-full flex-1 bg-destructive" />;
+  }
+
+  const totalMinutos = celula.minutosRealizados + celula.minutosEmFalta;
+  const proporcaoFalta =
+    celula.faltas > 0 && totalMinutos > 0
+      ? Math.min(1, celula.minutosEmFalta / totalMinutos)
+      : 0;
+  const restante = 1 - proporcaoFalta;
 
   return (
     <>
@@ -229,19 +253,26 @@ function Faixas({ celula, locais }: { celula: CelulaDoDia; locais: LocalTrabalho
         <span
           key={localId ?? "sem-local"}
           aria-hidden="true"
-          className="h-full flex-1"
-          style={{ backgroundColor: corDoLocal(locais, localId) }}
+          className="h-full"
+          style={{
+            backgroundColor: corDoLocal(locais, localId),
+            flex: `${restante / visiveis.length} 1 0%`,
+          }}
         />
       ))}
       {escondidos > 0 && (
         <span
           aria-hidden="true"
-          className="h-full w-1.5 bg-foreground/60"
+          className="h-full w-1.5 shrink-0 bg-foreground/60"
           title={`+${escondidos}`}
         />
       )}
-      {celula.faltas > 0 && (
-        <span aria-hidden="true" className="h-full w-1.5 shrink-0 bg-destructive" />
+      {proporcaoFalta > 0 && (
+        <span
+          aria-hidden="true"
+          className="h-full shrink-0 bg-destructive"
+          style={{ flex: `${proporcaoFalta} 1 0%` }}
+        />
       )}
     </>
   );

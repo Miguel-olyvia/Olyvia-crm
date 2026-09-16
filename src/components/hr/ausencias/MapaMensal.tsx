@@ -158,7 +158,7 @@ export function MapaMensal({
             <div
               key={data}
               role="columnheader"
-              className="w-5 shrink-0 text-center font-normal tabular-nums"
+              className="m-px w-5 shrink-0 text-center font-normal tabular-nums"
             >
               {data.slice(8)}
             </div>
