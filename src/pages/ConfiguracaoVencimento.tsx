@@ -257,6 +257,33 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
 
 const MODOS_SUBSIDIO: readonly SubsidioAlimentacaoModo[] = ["dinheiro", "cartao"];
 
+type UnidadeMinutosMinimos = "minutos" | "horas";
+const UNIDADES_MINUTOS_MINIMOS: readonly UnidadeMinutosMinimos[] = ["minutos", "horas"];
+
+/**
+ * Converte o texto do campo (na unidade em que a pessoa esta a escrever)
+ * para minutos inteiros -- a unica unidade que a base guarda
+ * (`minutos_minimos_dia integer`). Em horas aceita fraccoes (ex. "1.5") e
+ * arredonda ao minuto mais proximo; nunca se grava fraccao de minuto.
+ */
+function paraMinutos(valorTexto: string, unidade: UnidadeMinutosMinimos): number {
+  const valor = Number(valorTexto);
+  if (!Number.isFinite(valor)) return NaN;
+  return unidade === "horas" ? Math.round(valor * 60) : valor;
+}
+
+/**
+ * Converte minutos (o valor real, sempre guardado) para o texto a mostrar
+ * na unidade escolhida. Horas ficam com no maximo 2 casas decimais, sem
+ * zeros a mais (90 minutos -> "1.5", nao "1.50").
+ */
+function deMinutosParaTexto(minutos: number, unidade: UnidadeMinutosMinimos): string {
+  if (!Number.isFinite(minutos)) return "";
+  if (unidade === "minutos") return String(minutos);
+  const horas = Math.round((minutos / 60) * 100) / 100;
+  return String(horas);
+}
+
 function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
   const { t } = useTranslation();
   const { regra, isLoading, isSaving, gravar } = useRegrasSubsidioAlimentacao();
@@ -264,21 +291,36 @@ function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
   const [valorDiario, setValorDiario] = useState<string>("");
   const [modo, setModo] = useState<SubsidioAlimentacaoModo>("dinheiro");
   const [minutosMinimosDia, setMinutosMinimosDia] = useState<string>("");
+  const [unidadeMinutosMinimos, setUnidadeMinutosMinimos] = useState<UnidadeMinutosMinimos>("minutos");
 
   // Sincroniza os campos com a regra carregada (gravada ou omissao) so
   // quando o carregamento termina -- o formulario continua editavel a
-  // partir dai sem se sobrepor ao que o utilizador esta a escrever.
+  // partir dai sem se sobrepor ao que o utilizador esta a escrever. A
+  // unidade volta sempre a "minutos" (a omissao pedida): o valor gravado na
+  // base e sempre em minutos, a unidade e so uma conveniencia de escrita.
   useEffect(() => {
     if (isLoading) return;
     setValorDiario(String(regra.valorDiario));
     setModo(regra.modo);
+    setUnidadeMinutosMinimos("minutos");
     setMinutosMinimosDia(String(regra.minutosMinimosDia));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
+  /** Ao trocar de unidade, converte o numero mostrado sem perder o valor
+   *  real (que continua a ser sempre minutos, arredondados ao inteiro). */
+  const mudarUnidadeMinutosMinimos = (novaUnidade: UnidadeMinutosMinimos) => {
+    if (novaUnidade === unidadeMinutosMinimos) return;
+    const minutosActuais = paraMinutos(minutosMinimosDia, unidadeMinutosMinimos);
+    if (Number.isFinite(minutosActuais)) {
+      setMinutosMinimosDia(deMinutosParaTexto(minutosActuais, novaUnidade));
+    }
+    setUnidadeMinutosMinimos(novaUnidade);
+  };
+
   const submeter = async () => {
     const valor = Number(valorDiario);
-    const minutos = Number(minutosMinimosDia);
+    const minutos = paraMinutos(minutosMinimosDia, unidadeMinutosMinimos);
     if (!Number.isFinite(valor) || valor < 0) return;
     if (!Number.isInteger(minutos) || minutos <= 0) return;
     try {
@@ -336,20 +378,49 @@ function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="subsidio-minutos-minimos">
-                  {t("hr.vencimento.subsidio.campoMinutosMinimos")}
+                  {t(
+                    unidadeMinutosMinimos === "horas"
+                      ? "hr.vencimento.subsidio.campoMinimoDiaHoras"
+                      : "hr.vencimento.subsidio.campoMinutosMinimos",
+                  )}
                 </Label>
-                <Input
-                  id="subsidio-minutos-minimos"
-                  type="number"
-                  min={1}
-                  step="1"
-                  value={minutosMinimosDia}
-                  disabled={!podeGerir}
-                  onChange={(e) => setMinutosMinimosDia(e.target.value)}
-                />
+                <div className="flex gap-2">
+                  <Input
+                    id="subsidio-minutos-minimos"
+                    type="number"
+                    min={unidadeMinutosMinimos === "horas" ? 0.01 : 1}
+                    step={unidadeMinutosMinimos === "horas" ? "0.01" : "1"}
+                    value={minutosMinimosDia}
+                    disabled={!podeGerir}
+                    onChange={(e) => setMinutosMinimosDia(e.target.value)}
+                    className="flex-1"
+                  />
+                  <Select
+                    value={unidadeMinutosMinimos}
+                    onValueChange={(v) => mudarUnidadeMinutosMinimos(v as UnidadeMinutosMinimos)}
+                    disabled={!podeGerir}
+                  >
+                    <SelectTrigger id="subsidio-minutos-minimos-unidade" className="w-28 shrink-0">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {UNIDADES_MINUTOS_MINIMOS.map((u) => (
+                        <SelectItem key={u} value={u}>
+                          {t(`hr.vencimento.subsidio.unidade.${u}`)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">{t("hr.vencimento.subsidio.minutosMinimosAjuda")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                unidadeMinutosMinimos === "horas"
+                  ? "hr.vencimento.subsidio.minutosMinimosAjudaHoras"
+                  : "hr.vencimento.subsidio.minutosMinimosAjuda",
+              )}
+            </p>
 
             {podeGerir && (
               <div className="flex justify-end">

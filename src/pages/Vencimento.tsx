@@ -1,0 +1,78 @@
+/**
+ * "Vencimento" (20261201180000..20261201200000) e o dominio, nao so a
+ * configuracao. Antes disto, o item de menu "Vencimento" levava direito a
+ * `ConfiguracaoVencimento.tsx` -- so os codigos de processamento e a regra
+ * do subsidio de alimentacao. Estruturalmente errado: "Vencimento" e o
+ * ecra principal (onde no futuro vive o relatorio/calculo real, ainda por
+ * construir -- combinado com o utilizador, fora de ambito agora), e a
+ * configuracao e so UMA PARTE dele.
+ *
+ * Dois separadores: "Visao geral" (o relatorio de vencimento -- estado
+ * vazio honesto, ainda nao existe) e "Configuracao" (o ecra antigo,
+ * importado tal como estava, sem duplicar logica nenhuma -- a gestao de
+ * permissoes por seccao continua dentro de `ConfiguracaoVencimento`).
+ *
+ * O separador activo fica na URL (`?tab=`), tal como
+ * `AusenciasOrganizacao.tsx` -- assim um link directo para a configuracao
+ * pode continuar a apontar para aqui com o separador certo aberto.
+ */
+import { useSearchParams } from "react-router-dom";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { OlyviaLoader } from "@/components/ui/olyvia-loader";
+import { NoOrganizationState } from "@/components/NoOrganizationState";
+import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
+import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
+import { useCompany } from "@/contexts/CompanyContext";
+import { usePermissions } from "@/hooks/usePermissions";
+import { useTranslation } from "@/hooks/useTranslation";
+import ConfiguracaoVencimento from "./ConfiguracaoVencimento";
+
+const ABA_PARAM = "tab";
+const ABA_OMISSAO = "visao-geral";
+
+export default function Vencimento() {
+  const { t } = useTranslation();
+  const { activeCompany, isLoading: companyLoading } = useCompany();
+  const { hasPermission, loading: permissionsLoading } = usePermissions();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const podeVerCodigos = hasPermission("hr.vencimento.codigos.view");
+  const podeVerSubsidio = hasPermission("hr.vencimento.subsidio.view");
+
+  if (companyLoading || permissionsLoading) return <OlyviaLoader />;
+  if (!activeCompany) return <NoOrganizationState />;
+  if (!podeVerCodigos && !podeVerSubsidio) return <SemAcessoCard className="m-6" />;
+
+  const abaActiva = searchParams.get(ABA_PARAM) || ABA_OMISSAO;
+
+  const mudarAba = (valor: string) =>
+    setSearchParams((anterior) => {
+      const proximos = new URLSearchParams(anterior);
+      proximos.set(ABA_PARAM, valor);
+      return proximos;
+    });
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold">{t("hr.vencimento.tituloPagina")}</h1>
+        <p className="text-muted-foreground">{t("hr.vencimento.subtituloPagina")}</p>
+      </div>
+
+      <Tabs value={abaActiva} onValueChange={mudarAba}>
+        <TabsList>
+          <TabsTrigger value="visao-geral">{t("hr.vencimento.abaVisaoGeral")}</TabsTrigger>
+          <TabsTrigger value="configuracao">{t("hr.vencimento.abaConfiguracao")}</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="visao-geral" className="mt-4">
+          <PessoaEmConstrucaoTab titulo={t("hr.vencimento.abaVisaoGeral")} />
+        </TabsContent>
+
+        <TabsContent value="configuracao" className="mt-4">
+          <ConfiguracaoVencimento />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

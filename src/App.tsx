@@ -123,7 +123,7 @@ const AssiduidadeEAusencias = lazy(() => import("./pages/AssiduidadeEAusencias")
 const RhCentros = lazy(() => import("./pages/RhCentros"));
 const ConfiguracaoAdmissao = lazy(() => import("./pages/ConfiguracaoAdmissao"));
 const ConfiguracaoModelosDocumentos = lazy(() => import("./pages/ConfiguracaoModelosDocumentos"));
-const ConfiguracaoVencimento = lazy(() => import("./pages/ConfiguracaoVencimento"));
+const Vencimento = lazy(() => import("./pages/Vencimento"));
 const OrgTemplates = lazy(() => import("./pages/OrgTemplates"));
 const OrgHelp = lazy(() => import("./pages/OrgHelp"));
 const NeedsAssessmentConfig = lazy(() => import("./pages/NeedsAssessmentConfig"));
@@ -322,13 +322,18 @@ const App = () => (
                           nenhum papel por omissao. */}
                       <Route path="/rh/admissao/configuracao" element={<ProtectedRoute permission="hr.admissao.obrigatorios.gerir"><ConfiguracaoAdmissao /></ProtectedRoute>} />
                       <Route path="/rh/documentos/modelos" element={<ProtectedRoute permission="hr.pessoas.documentos.modelos.view"><ConfiguracaoModelosDocumentos /></ProtectedRoute>} />
-                      {/* Configuracao do dominio "Vencimento" (20261201180000
-                          .. 20261201200000): codigos de processamento e a
-                          regra do subsidio de alimentacao, por organizacao.
-                          Duas permissoes de leitura diferentes -- a rota
-                          aceita qualquer uma das duas, o ecra decide os
-                          separadores que mostra a cada uma. */}
-                      <Route path="/rh/vencimento/configuracao" element={<ProtectedRoute permissions={["hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"]}><ConfiguracaoVencimento /></ProtectedRoute>} />
+                      {/* "Vencimento" (20261201180000..20261201200000) e o
+                          dominio -- ecra principal com separadores "Visao
+                          geral" (o relatorio, ainda por construir) e
+                          "Configuracao" (codigos de processamento + regra do
+                          subsidio de alimentacao, o que antes era o ecra
+                          inteiro). Duas permissoes de leitura diferentes --
+                          a rota aceita qualquer uma das duas, o ecra decide
+                          os separadores internos que mostra a cada uma. A
+                          rota antiga `/rh/vencimento/configuracao` foi
+                          removida -- confirmado por grep que nao havia
+                          nenhum link directo a apontar para ela. */}
+                      <Route path="/rh/vencimento" element={<ProtectedRoute permissions={["hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"]}><Vencimento /></ProtectedRoute>} />
                       <Route path="/organizations" element={<Organizations />} />
                       <Route path="/organizations/:id" element={<OrganizationDetail />} />
                       <Route path="/org-templates" element={<OrgTemplates />} />
