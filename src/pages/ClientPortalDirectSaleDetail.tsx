@@ -39,7 +39,10 @@ import { pt } from "date-fns/locale";
 const FLOW: BusinessFlow = "client-portal-direct-sale";
 
 const STATUS_MAP: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  rascunho: { label: "Rascunho", variant: "outline" },
+  // "rascunho" e "enviada" são estados internos do comercial; para o cliente
+  // são a mesma coisa — um documento à espera da decisão dele. É o mesmo que
+  // as propostas mostram por omissão (ProposalPortalDocument.tsx:100).
+  rascunho: { label: "A aguardar decisão", variant: "secondary" },
   enviada: { label: "A aguardar decisão", variant: "secondary" },
   aceite: { label: "Venda direta aceite", variant: "default" },
   rejeitada: { label: "Venda direta rejeitada", variant: "destructive" },
@@ -318,8 +321,14 @@ const ClientPortalDirectSaleDetail = () => {
   }
 
   const statusInfo = STATUS_MAP[sale.status] || { label: sale.status, variant: "outline" as const };
-  const canAccept = sale.status === "enviada";
+  // Paridade com as propostas: o portal não exige um estado concreto para
+  // deixar aceitar — o ProposalPortalDocument só recusa quando já foi aceite ou
+  // rejeitada (ProposalPortalDocument.tsx:247-248). Quem chega aqui é porque a
+  // RLS o deixou ver o documento, ou seja, ele foi mesmo publicado; o estado é
+  // do comercial e não deve poder bloquear a decisão do cliente.
+  // "cancelada" é o único estado extra da venda direta e não deve ser aceitável.
   const isAccepted = sale.status === "aceite";
+  const canAccept = !isAccepted && sale.status !== "rejeitada" && sale.status !== "cancelada";
 
   // Totais: vêm do cabeçalho tal como foram gravados. As linhas internas
   // (visible_to_client = false) já não entram nesses valores, por isso

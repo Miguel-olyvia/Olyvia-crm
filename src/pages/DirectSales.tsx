@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send } from "lucide-react";
+import { KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send, SendHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -24,6 +24,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
+import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { cn, formatCurrency } from "@/lib/utils";
 
 // Venda Direta — Fase 2: listagem. Fluxo alternativo, mais leve, ao caminho
@@ -88,6 +89,9 @@ const DirectSales = () => {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  /** Venda cujo "Marcar como enviada" está em curso — trava só esse item. */
+  const [markingSentId, setMarkingSentId] = useState<string | null>(null);
 
   /** Id monotónico do pedido de listagem em curso — ver `loadSales`. */
   const latestRequestIdRef = useRef(0);
@@ -186,14 +190,101 @@ const DirectSales = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompany?.id, statusFilter]);
 
-  // Envio ao portal do cliente — mesma edge function usada por Propostas e
-  // Encomendas Clientes. Tal como nas propostas, publicar no portal NÃO altera
-  // `status`/`sent_at` da venda: só cria o acesso, publica o documento e grava
-  // em `direct_sale_sends`. Recarregamos na mesma para o histórico de envios
-  // ficar refletido. Declarado depois de `loadSales` porque o callback depende dela.
+  /**
+   * Escreve `status = 'enviada'` (única escrita deste estado no ficheiro — o
+   * item de menu e o envio para o portal passam os dois por aqui).
+   *
+   * Sem estágios/workflow, ao contrário do molde `handleMarkAsSent` de
+   * Proposals.tsx: `direct_sales` não tem `stage_id`, o ciclo de vida vive só
+   * na coluna `status`.
+   *
+   * A guarda de `rascunho` é feita no próprio UPDATE (`.eq("status",
+   * "rascunho")`) e não em memória: é o servidor a decidir, logo uma venda
+   * entretanto aceite/cancelada noutro separador nunca é puxada para trás. Por
+   * isso o retorno distingue "skipped" (nenhuma linha correspondeu — já não
+   * estava em rascunho) de "error" (a escrita falhou de facto).
+   *
+   * Não faz toasts nem recarrega a lista: cada chamador decide o que dizer ao
+   * utilizador, porque o significado da falha é diferente nos dois caminhos.
+   */
+  const markSaleAsSent = useCallback(
+    async (saleId: string): Promise<{ outcome: "updated" | "skipped" | "error"; message?: string }> => {
+      if (!activeCompany?.id) return { outcome: "error", message: "Nenhuma organização ativa." };
+      try {
+        // Identidade de negócio (anew_users.id), não o auth uid — é o que os
+        // triggers de auditoria esperam em `set_audit_context`.
+        const businessUserId = await resolveCurrentBusinessUserId();
+        if (!businessUserId) return { outcome: "error", message: "Utilizador não identificado." };
+        await supabase.rpc("set_audit_context", { p_user_id: businessUserId, p_source: "ui" });
+
+        // Filtro pela organização ativa além do id, como em `loadSales`: a RLS
+        // já protege, mas o scoping explícito impede que um id de outra
+        // organização (lista obsoleta, empresa trocada entretanto) seja tocado.
+        const { data, error } = await (supabase as any)
+          .from("direct_sales")
+          .update({ status: "enviada", sent_at: new Date().toISOString() })
+          .eq("id", saleId)
+          .eq("organization_id", activeCompany.id)
+          .eq("status", "rascunho")
+          .select("id")
+          .maybeSingle();
+        if (error) throw error;
+        return { outcome: data ? "updated" : "skipped" };
+      } catch (error: any) {
+        return { outcome: "error", message: error?.message };
+      }
+    },
+    [activeCompany?.id],
+  );
+
+  /**
+   * Envio ao portal do cliente — mesma edge function usada por Propostas e
+   * Encomendas Clientes.
+   *
+   * Nas propostas quem marca `sent` é a edge function send-proposal-email
+   * (index.ts:352), não a publicação no portal. A venda direta não tem função
+   * de email própria: o email de credenciais do portal É o ato de envio, logo
+   * o equivalente fiel é publicar no portal marcar `enviada` — caso contrário
+   * a venda ficava em `rascunho` e o portal não deixava o cliente aceitar.
+   *
+   * Só promove a partir de `rascunho`: reenviar credenciais ou republicar uma
+   * venda já aceite não pode reverter o estado (garantido no UPDATE).
+   *
+   * Declarado depois de `loadSales`/`markSaleAsSent` porque o callback depende
+   * das duas. O id vai num ref preenchido imediatamente antes da chamada
+   * porque `onSuccess` do hook não recebe argumentos; um ref (e não estado)
+   * evita um render extra e é lido de forma síncrona no callback.
+   */
+  const portalTargetSaleIdRef = useRef<string | null>(null);
+
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({
-    onSuccess: () => loadSales(0, true),
+    onSuccess: async () => {
+      const saleId = portalTargetSaleIdRef.current;
+      portalTargetSaleIdRef.current = null;
+      if (saleId) {
+        const result = await markSaleAsSent(saleId);
+        // O acesso ao portal já foi criado e o email já saiu. Um toast de erro
+        // aqui levava o utilizador a pensar que o envio falhou e a repeti-lo —
+        // avisamos apenas que o estado não acompanhou, com o item "Marcar como
+        // enviada" ainda disponível para corrigir à mão.
+        if (result.outcome === "error") {
+          toast({
+            title: "Enviado, mas o estado não foi atualizado",
+            description:
+              "O cliente recebeu o acesso ao portal. A venda continua em rascunho — use \"Marcar como enviada\" para corrigir.",
+          });
+        }
+      }
+      // Sempre depois da escrita: recarregar antes mostrava o estado antigo.
+      await loadSales(0, true);
+    },
   });
+
+  /** Envolve a chamada ao portal para o `onSuccess` saber de que venda se trata. */
+  const handleSendToPortal = (saleId: string, forceNewPassword?: boolean) => {
+    portalTargetSaleIdRef.current = saleId;
+    generatePortalAccess("direct_sale", saleId, forceNewPassword);
+  };
 
   useEffect(() => {
     if (!activeCompany?.id) {
@@ -227,6 +318,38 @@ const DirectSales = () => {
   const handleOpenExisting = (id: string) => {
     setEditingId(id);
     setEditorOpen(true);
+  };
+
+  /**
+   * Ação de ESTADO no menu, para quem faça chegar a venda ao cliente por outra
+   * via que não o portal. As propostas têm o equivalente (`handleMarkAsSent` em
+   * Proposals.tsx), por isso mantém-se mesmo com o portal já a marcar sozinho.
+   *
+   * Consequência intencional: ao sair de `rascunho` o editor passa a leitura
+   * (DirectSaleEditor) — é o mesmo corte que o portal exige para permitir a
+   * aceitação, que só está disponível a partir de `enviada`.
+   */
+  const handleMarkAsSent = async (sale: DirectSaleRow) => {
+    if (markingSentId) return;
+    setMarkingSentId(sale.id);
+    try {
+      const result = await markSaleAsSent(sale.id);
+      if (result.outcome === "error") {
+        toast({ title: "Erro", description: result.message, variant: "destructive" });
+      } else if (result.outcome === "skipped") {
+        // A lista dizia rascunho, o servidor já não concorda (outro separador,
+        // outro utilizador). Recarregar abaixo mostra o estado real.
+        toast({
+          title: "A venda já não está em rascunho",
+          description: "O estado foi entretanto alterado — a listagem foi atualizada.",
+        });
+      } else {
+        toast({ title: "Venda direta marcada como enviada" });
+      }
+      await loadSales(0, true);
+    } finally {
+      setMarkingSentId(null);
+    }
   };
 
   const formatDate = (value: string | null) => {
@@ -425,6 +548,27 @@ const DirectSales = () => {
                             <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
                           </DropdownMenuItem>
                           <PermissionGate permission="direct_sales.edit">
+                            {/* Só faz sentido em rascunho: marcar como enviada
+                                uma venda já aceite/rejeitada/cancelada andaria
+                                para trás no ciclo de vida. */}
+                            {sale.status === "rascunho" && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
+                                  Estado
+                                </DropdownMenuLabel>
+                                <DropdownMenuItem
+                                  disabled={markingSentId === sale.id}
+                                  onClick={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleMarkAsSent(sale);
+                                  }}
+                                >
+                                  <SendHorizontal className="mr-2 h-3.5 w-3.5 text-blue-600" /> Marcar como enviada
+                                </DropdownMenuItem>
+                              </>
+                            )}
                             <DropdownMenuSeparator />
                             <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
                               Portal
@@ -434,7 +578,7 @@ const DirectSales = () => {
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                generatePortalAccess("direct_sale", sale.id);
+                                handleSendToPortal(sale.id);
                               }}
                             >
                               <Send className="mr-2 h-3.5 w-3.5 text-purple-600" /> Enviar para Portal Cliente
@@ -444,7 +588,7 @@ const DirectSales = () => {
                               onClick={(e) => {
                                 e.preventDefault();
                                 e.stopPropagation();
-                                generatePortalAccess("direct_sale", sale.id, true);
+                                handleSendToPortal(sale.id, true);
                               }}
                             >
                               <KeyRound className="mr-2 h-3.5 w-3.5" /> Reenviar credenciais
