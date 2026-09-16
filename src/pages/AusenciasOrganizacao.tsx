@@ -1,9 +1,11 @@
 /**
  * As ausencias de toda a gente -- a vista de gestao.
  *
- * Dois separadores: o mapa do mes (uma linha por pessoa) e a lista completa de
- * pedidos com filtros. De qualquer um se abre o detalhe do pedido, e dai se
- * salta para a ficha da pessoa.
+ * Tres separadores: o mapa do mes (uma linha por pessoa), o ano em calendario
+ * de uma pessoa escolhida num dropdown (reaproveita `CalendarioAnual`, o
+ * mesmo componente da ficha individual) e a lista completa de pedidos com
+ * filtros. De qualquer um se abre o detalhe do pedido, e dai se salta para a
+ * ficha da pessoa.
  *
  * Uma lista vazia aqui NAO prova que nao ha pedidos: a RLS pode estar a
  * esconder tudo. Por isso o hook devolve `recusado` a parte, e o ecra mostra o
@@ -11,11 +13,13 @@
  */
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
+import { CalendarioAnual } from "@/components/hr/ausencias/CalendarioAnual";
 import { MapaMensal } from "@/components/hr/ausencias/MapaMensal";
 import { PedidoDetalheSheet } from "@/components/hr/ausencias/PedidoDetalheSheet";
 import { PedidosLista } from "@/components/hr/ausencias/PedidosLista";
@@ -78,6 +82,7 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
   const [filtroTipo, setFiltroTipo] = useState("");
   const [pedidoAberto, setPedidoAberto] = useState<string | null>(null);
   const [feriados, setFeriados] = useState(() => indexarFeriados([]));
+  const [pessoaAnoId, setPessoaAnoId] = useState("");
 
   useEffect(() => {
     const orgId = activeCompany?.id;
@@ -94,9 +99,28 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
     })();
   }, [activeCompany?.id]);
 
+  useEffect(() => {
+    setPessoaAnoId("");
+  }, [activeCompany?.id]);
+
   const nomePorPessoaId = useMemo(
     () => new Map(pessoas.map((pessoa) => [pessoa.id, pessoa.nome_completo])),
     [pessoas],
+  );
+
+  /**
+   * O calendario anual reaproveita o ano ja carregado pelo hook (o mesmo do
+   * mapa mensal, `anoDoMapa`) -- pedir outro ano exigiria outra leitura a
+   * base. Trocar de ano aqui move tambem o mes do mapa, para os dois
+   * separadores ficarem sempre a olhar para o mesmo ano.
+   */
+  const anoCalendario = Number(mes.slice(0, 4));
+  const mudarAnoCalendario = (delta: number) =>
+    setMes(`${anoCalendario + delta}-${mes.slice(5, 7)}-01`);
+
+  const diasDaPessoaAno = useMemo(
+    () => dados.dias.filter((dia) => dia.pessoa_id === pessoaAnoId),
+    [dados.dias, pessoaAnoId],
   );
 
   const filtrados = useMemo(
@@ -140,6 +164,7 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
             <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
               <TabsList>
                 <TabsTrigger value="mapa">{t("hr.ausencias.organizacao.mapa")}</TabsTrigger>
+                <TabsTrigger value="ano">{t("hr.ausencias.organizacao.ano")}</TabsTrigger>
                 <TabsTrigger value="pedidos">{t("hr.ausencias.organizacao.pedidos")}</TabsTrigger>
               </TabsList>
 
@@ -169,6 +194,60 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
                   feriados={feriados}
                   onAbrirPedido={setPedidoAberto}
                 />
+              </TabsContent>
+
+              <TabsContent value="ano" className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                  <CampoSelect
+                    id="hr-ausencias-org-ano-pessoa"
+                    label={t("hr.ausencias.organizacao.pessoa")}
+                    valor={pessoaAnoId}
+                    onChange={setPessoaAnoId}
+                    vazioLabel={t("hr.ausencias.organizacao.escolherPessoa")}
+                    opcoes={pessoas.map((pessoa) => ({
+                      value: pessoa.id,
+                      label: pessoa.nome_completo,
+                    }))}
+                  />
+                </div>
+                {pessoaAnoId ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        aria-label={t("hr.ausencias.organizacao.anoAnterior", {
+                          ano: anoCalendario - 1,
+                        })}
+                        onClick={() => mudarAnoCalendario(-1)}
+                      >
+                        {anoCalendario - 1}
+                      </Button>
+                      <span className="text-sm font-medium tabular-nums">{anoCalendario}</span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        aria-label={t("hr.ausencias.organizacao.anoSeguinte", {
+                          ano: anoCalendario + 1,
+                        })}
+                        onClick={() => mudarAnoCalendario(1)}
+                      >
+                        {anoCalendario + 1}
+                      </Button>
+                    </div>
+                    <CalendarioAnual
+                      ano={anoCalendario}
+                      dias={diasDaPessoaAno}
+                      tiposPorId={tipos.porId}
+                      feriados={feriados}
+                      onAbrirPedido={setPedidoAberto}
+                    />
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("hr.ausencias.organizacao.semPessoaEscolhida")}
+                  </p>
+                )}
               </TabsContent>
 
               <TabsContent value="pedidos" className="space-y-3">
