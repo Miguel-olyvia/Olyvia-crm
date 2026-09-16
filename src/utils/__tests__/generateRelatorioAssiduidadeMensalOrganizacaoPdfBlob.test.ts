@@ -31,6 +31,7 @@ const dia: DiaRelatorioMensal = {
   temFalta: false,
   minutosEmFalta: 0,
   horasExtraMinutos: 0,
+  horasExtraNoturnasMinutos: 0,
 };
 
 const totais: TotaisRelatorioMensal = {
@@ -42,6 +43,7 @@ const totais: TotaisRelatorioMensal = {
   diasComFaltaCompleta: 0,
   diasComFaltaIncompleta: 0,
   horasExtraMinutos: 0,
+  horasExtraNoturnasMinutos: 0,
 };
 
 async function pdfDeUmaPagina(): Promise<Blob> {

@@ -110,6 +110,7 @@ beforeEach(() => {
         temFalta: false,
         minutosEmFalta: 0,
         horasExtraMinutos: 0,
+        horasExtraNoturnasMinutos: 0,
       },
     ],
     totais: {
@@ -121,6 +122,7 @@ beforeEach(() => {
       diasComFaltaCompleta: 0,
       diasComFaltaIncompleta: 0,
       horasExtraMinutos: 0,
+      horasExtraNoturnasMinutos: 0,
     },
     obras: [
       {

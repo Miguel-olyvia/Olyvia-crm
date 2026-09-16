@@ -26,11 +26,13 @@ import {
   justificacaoUtil,
   minutosCobertos,
   minutosEntre,
+  minutosNoturnosDoPeriodo,
   minutosPrevistosNoMes,
   problemasDaFalta,
   sentidoSeguinte,
   situacaoDoIntervalo,
   sobrepoem,
+  subtrairIntervalos,
   totaisPorLocal,
 } from "@/lib/hr/assiduidade";
 import type { DiaSemana } from "@/types/hr";
@@ -210,6 +212,100 @@ describe("minutos cobertos", () => {
 
   it("sem cobertores, zero", () => {
     expect(minutosCobertos({ hora_inicio: "09:00", hora_fim: "18:00" }, [])).toBe(0);
+  });
+});
+
+describe("minutos nocturnos de um periodo (22:00-07:00)", () => {
+  it("periodo todo de dia nao tem minutos nocturnos", () => {
+    expect(minutosNoturnosDoPeriodo({ hora_inicio: "09:00", hora_fim: "17:00" })).toBe(0);
+  });
+
+  it("periodo todo de noite (atravessa a meia-noite) tem tudo nocturno", () => {
+    expect(minutosNoturnosDoPeriodo({ hora_inicio: "23:00", hora_fim: "06:00" })).toBe(420); // 7h
+  });
+
+  it("periodo a atravessar as 22:00 so conta a parte depois das 22:00", () => {
+    expect(minutosNoturnosDoPeriodo({ hora_inicio: "20:00", hora_fim: "23:00" })).toBe(60); // 22:00-23:00
+  });
+
+  it("periodo a atravessar as 07:00 so conta a parte antes das 07:00", () => {
+    expect(minutosNoturnosDoPeriodo({ hora_inicio: "06:00", hora_fim: "09:00" })).toBe(60); // 06:00-07:00
+  });
+
+  it("periodo que atravessa a meia-noite inteira (23:00-07:00) e todo nocturno", () => {
+    expect(minutosNoturnosDoPeriodo({ hora_inicio: "23:00", hora_fim: "07:00" })).toBe(480); // 8h
+  });
+
+  it("21:00-08:00 conta so a parte dentro da janela 22:00-07:00", () => {
+    // 21:00-22:00 (60 min, fora) + 22:00-07:00 (540 min, dentro) + 07:00-08:00 (60 min, fora)
+    expect(minutosNoturnosDoPeriodo({ hora_inicio: "21:00", hora_fim: "08:00" })).toBe(540);
+  });
+
+  it("22:00-07:00 exacto e a janela nocturna inteira, 540 minutos", () => {
+    expect(minutosNoturnosDoPeriodo({ hora_inicio: "22:00", hora_fim: "07:00" })).toBe(540);
+  });
+});
+
+describe("subtrair intervalos (o excedente do realizado sobre o planeado)", () => {
+  it("sem sobreposicao, devolve o realizado inteiro", () => {
+    const excedente = subtrairIntervalos(
+      [{ hora_inicio: "14:00", hora_fim: "16:00" }],
+      [{ hora_inicio: "09:00", hora_fim: "13:00" }],
+    );
+    expect(excedente).toEqual([{ hora_inicio: "14:00", hora_fim: "16:00" }]);
+  });
+
+  it("sobreposicao total, devolve vazio", () => {
+    const excedente = subtrairIntervalos(
+      [{ hora_inicio: "09:00", hora_fim: "13:00" }],
+      [{ hora_inicio: "09:00", hora_fim: "13:00" }],
+    );
+    expect(excedente).toEqual([]);
+  });
+
+  it("sobreposicao parcial no inicio, sobra o fim", () => {
+    const excedente = subtrairIntervalos(
+      [{ hora_inicio: "08:30", hora_fim: "13:00" }],
+      [{ hora_inicio: "09:00", hora_fim: "13:00" }],
+    );
+    expect(excedente).toEqual([{ hora_inicio: "08:30", hora_fim: "09:00" }]);
+  });
+
+  it("sobreposicao parcial no fim, sobra o inicio", () => {
+    const excedente = subtrairIntervalos(
+      [{ hora_inicio: "09:00", hora_fim: "13:30" }],
+      [{ hora_inicio: "09:00", hora_fim: "13:00" }],
+    );
+    expect(excedente).toEqual([{ hora_inicio: "13:00", hora_fim: "13:30" }]);
+  });
+
+  it("multiplos planeados a cobrir partes diferentes do mesmo realizado: so sobra a tarde", () => {
+    const excedente = subtrairIntervalos(
+      [{ hora_inicio: "09:00", hora_fim: "18:00" }],
+      [
+        { hora_inicio: "09:00", hora_fim: "13:00" },
+        { hora_inicio: "13:00", hora_fim: "14:00" },
+      ],
+    );
+    expect(excedente).toEqual([{ hora_inicio: "14:00", hora_fim: "18:00" }]);
+  });
+
+  it("turno planeado nocturno mais horas extra diurnas: nenhuma hora extra e nocturna", () => {
+    // Cenario real que motivou a correccao: turno planeado 22:00-06:00 (todo
+    // nocturno), mais 2h extra fora do planeado, das 10:00 as 12:00 (diurnas).
+    const planeado = [{ hora_inicio: "22:00", hora_fim: "06:00" }];
+    const realizado = [
+      { hora_inicio: "22:00", hora_fim: "06:00" },
+      { hora_inicio: "10:00", hora_fim: "12:00" },
+    ];
+    const excedente = subtrairIntervalos(realizado, planeado);
+    expect(excedente).toEqual([{ hora_inicio: "10:00", hora_fim: "12:00" }]);
+
+    const minutosNoturnosDoExcedente = excedente.reduce(
+      (soma, intervalo) => soma + minutosNoturnosDoPeriodo(intervalo),
+      0,
+    );
+    expect(minutosNoturnosDoExcedente).toBe(0);
   });
 });
 

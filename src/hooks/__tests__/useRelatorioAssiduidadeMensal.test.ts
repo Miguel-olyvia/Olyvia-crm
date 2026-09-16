@@ -581,6 +581,113 @@ describe("useRelatorioAssiduidadeMensal", () => {
     expect(result.current.totais.diasTrabalhados).toBe(0);
   });
 
+  it("horas extra inteiramente de dia nao tem parte nocturna", async () => {
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min
+    tabelas.pessoas_horario_realizado = [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-01",
+        hora_inicio: "08:00",
+        hora_fim: "18:00", // entrou 1h mais cedo, tudo de dia
+        minutos: 600,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+    expect(dia1?.horasExtraMinutos).toBe(60);
+    expect(dia1?.horasExtraNoturnasMinutos).toBe(0);
+  });
+
+  it("horas extra que atravessam as 22:00 tem parte nocturna maior que zero mas menor que o total", async () => {
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min
+    tabelas.pessoas_horario_realizado = [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-01",
+        hora_inicio: "09:00",
+        hora_fim: "23:00", // saiu 5h mais tarde, 1h delas depois das 22:00
+        minutos: 840,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+    expect(dia1?.horasExtraMinutos).toBe(300); // 840 - 540
+    expect(dia1?.horasExtraNoturnasMinutos).toBe(60); // so 22:00-23:00
+    expect(dia1?.horasExtraNoturnasMinutos).toBeGreaterThan(0);
+    expect(dia1?.horasExtraNoturnasMinutos).toBeLessThan(dia1?.horasExtraMinutos ?? 0);
+  });
+
+  it("um turno nocturno inteiro batido como extra (sem planeado) tem horasExtraNoturnasMinutos igual ao total", async () => {
+    tabelas.pessoas_horario_planeado = [diaDeFolga(1)]; // segunda, sem horario planeado
+    tabelas.pessoas_horario_realizado = [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-07", // segunda-feira
+        hora_inicio: "23:00",
+        hora_fim: "23:59", // "pessoas_horario_realizado" nunca atravessa a meia-noite: uma linha por dia
+        minutos: 59,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const dia = result.current.dias.find((d) => d.iso === "2026-09-07");
+    expect(dia?.horasExtraMinutos).toBe(59); // sem planeado, tudo conta como extra
+    expect(dia?.horasExtraNoturnasMinutos).toBe(dia?.horasExtraMinutos);
+  });
+
   it("registarObra chama a RPC com a pessoa e a organizacao resolvidas", async () => {
     const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
     await waitFor(() => expect(result.current.loading).toBe(false));

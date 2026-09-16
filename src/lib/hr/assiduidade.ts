@@ -114,6 +114,67 @@ export function chavesSobrepostas<T extends Periodo & { chave: string }>(
   return conflitos;
 }
 
+function minutosParaHora(minutos: number): string {
+  const h = Math.floor(minutos / 60);
+  const m = minutos % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
+/**
+ * As partes de `realizados` que NENHUM intervalo de `planeados` cobre -- o
+ * excedente como intervalos de tempo reais, nao so um total de minutos.
+ *
+ * Serve para separar "quanto do trabalho a mais caiu de noite" de "quanto do
+ * turno normal (que ja era nocturno) caiu de noite": sem isto, um turno
+ * planeado 22:00-06:00 mais 2h extra ao meio-dia fazia o excedente nocturno
+ * sair de um total (450 minutos do turno normal) que nada tem a ver com o que
+ * excedeu -- ver `horasExtraNoturnasMinutos` em
+ * `useRelatorioAssiduidadeMensal.ts`.
+ *
+ * NAO trata travessia de meia-noite dentro de um intervalo: as tabelas de
+ * origem (`pessoas_horario_planeado`, `pessoas_horario_realizado`) tem CHECK
+ * (hora_fim > hora_inicio) e um turno nocturno fica sempre partido em duas
+ * linhas, uma por dia (ver 20261120150000_hr_pessoas_horario_planeado.sql,
+ * seccao "TURNOS QUE ATRAVESSAM A MEIA-NOITE") -- por isso todo o intervalo
+ * aqui cabe sempre dentro de um so dia, ao contrario da janela nocturna fixa
+ * (22:00-07:00) que `minutosNoturnosDoPeriodo` compara, essa sim atravessando
+ * a meia-noite por definicao.
+ */
+export function subtrairIntervalos(
+  realizados: readonly Periodo[],
+  planeados: readonly Periodo[],
+): Periodo[] {
+  const cobertores = planeados
+    .map((p) => ({ de: minutosDe(p.hora_inicio), ate: minutosDe(p.hora_fim) }))
+    .filter((p): p is { de: number; ate: number } => p.de !== null && p.ate !== null && p.ate > p.de)
+    .sort((a, b) => a.de - b.de);
+
+  const resultado: Periodo[] = [];
+  for (const realizado of realizados) {
+    const inicio = minutosDe(realizado.hora_inicio);
+    const fim = minutosDe(realizado.hora_fim);
+    if (inicio === null || fim === null || fim <= inicio) continue;
+
+    let cursor = inicio;
+    for (const cobertor of cobertores) {
+      if (cursor >= fim) break;
+      if (cobertor.de >= fim) break; // ordenado por `de`: nenhum seguinte ajuda
+      if (cobertor.ate <= cursor) continue; // cobertor todo antes do cursor
+      if (cobertor.de > cursor) {
+        resultado.push({
+          hora_inicio: minutosParaHora(cursor),
+          hora_fim: minutosParaHora(cobertor.de),
+        });
+      }
+      cursor = Math.max(cursor, cobertor.ate);
+    }
+    if (cursor < fim) {
+      resultado.push({ hora_inicio: minutosParaHora(cursor), hora_fim: minutosParaHora(fim) });
+    }
+  }
+  return resultado;
+}
+
 // ---------------------------------------------------------------------------
 // Valor em vigor e cadeia de correccoes
 // ---------------------------------------------------------------------------
@@ -300,6 +361,46 @@ export function situacaoDoIntervalo(
   }
 
   return { situacao, minutosPlaneados, minutosRealizados, minutosEmFalta };
+}
+
+/** Periodo nocturno legal (Codigo do Trabalho, art. 223): 22:00 as 07:00. */
+const INICIO_NOITE_MINUTOS = 22 * 60;
+const FIM_NOITE_MINUTOS = 7 * 60;
+/** Largura da janela nocturna em minutos (22:00 -> 07:00 do dia seguinte). */
+const DURACAO_NOITE_MINUTOS = 24 * 60 - INICIO_NOITE_MINUTOS + FIM_NOITE_MINUTOS;
+
+/**
+ * Quantos minutos de um periodo `HH:MM`-`HH:MM` caem no periodo nocturno
+ * (22:00-07:00).
+ *
+ * A janela atravessa a meia-noite, por isso nao chega comparar contra
+ * [22:00, 07:00] num so dia: representa-se a noite como uma janela de 540
+ * minutos repetida a cada 24h (22:00 de um dia ao 07:00 do seguinte), e o
+ * periodo de entrada e alinhado com ela em ate tres ciclos (o de ontem, o de
+ * hoje, o de amanha) para apanhar as duas fronteiras possiveis -- entrar antes
+ * das 22:00 e sair depois, ou entrar antes das 07:00 e sair depois.
+ *
+ * Um periodo cujo fim nao e depois do inicio (ex.: "23:00"-"07:00") e lido
+ * como atravessando a meia-noite -- a mesma leitura que `partirNaMeiaNoite`
+ * faria, so que aqui basta somar 24h ao fim para o calculo funcionar.
+ */
+export function minutosNoturnosDoPeriodo(periodo: Periodo): number {
+  const inicioBruto = minutosDe(periodo.hora_inicio);
+  const fimBruto = minutosDe(periodo.hora_fim);
+  if (inicioBruto === null || fimBruto === null) return 0;
+
+  const inicio = inicioBruto;
+  const fim = fimBruto > inicio ? fimBruto : fimBruto + 24 * 60;
+
+  let total = 0;
+  for (const ciclo of [-1, 0, 1]) {
+    const inicioNoite = INICIO_NOITE_MINUTOS + ciclo * 24 * 60;
+    const fimNoite = inicioNoite + DURACAO_NOITE_MINUTOS;
+    const sobreposicaoInicio = Math.max(inicio, inicioNoite);
+    const sobreposicaoFim = Math.min(fim, fimNoite);
+    if (sobreposicaoFim > sobreposicaoInicio) total += sobreposicaoFim - sobreposicaoInicio;
+  }
+  return total;
 }
 
 /** Totais por local, para o rodape do dia. `null` = sem local atribuido. */

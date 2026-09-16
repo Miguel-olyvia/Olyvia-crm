@@ -298,10 +298,23 @@ export function RelatorioAssiduidadeMensalConteudo({
                           {formatarRealizado(dia.realizadoIntervalos)}
                         </TableCell>
                         <TableCell
-                          className="tabular-nums"
+                          className="tabular-nums whitespace-nowrap"
                           style={destaque ? AJUSTE_COR_IMPRESSAO : undefined}
                         >
-                          {dia.horasExtraMinutos > 0 ? `+${formatarDuracao(dia.horasExtraMinutos)}` : "—"}
+                          {dia.horasExtraMinutos > 0 ? (
+                            <>
+                              {`+${formatarDuracao(dia.horasExtraMinutos)}`}
+                              {dia.horasExtraNoturnasMinutos > 0 && (
+                                <span className="ml-1 text-xs text-muted-foreground">
+                                  {t("hr.relatorioMensal.horasExtraNoturnasNota", {
+                                    duracao: formatarDuracao(dia.horasExtraNoturnasMinutos),
+                                  })}
+                                </span>
+                              )}
+                            </>
+                          ) : (
+                            "—"
+                          )}
                         </TableCell>
                         <TableCell
                           className="tabular-nums"
@@ -366,6 +379,13 @@ export function RelatorioAssiduidadeMensalConteudo({
                 duracao: formatarDuracao(relatorio.totais.horasExtraMinutos),
               })}
             </span>
+            {relatorio.totais.horasExtraNoturnasMinutos > 0 && (
+              <span>
+                {t("hr.relatorioMensal.totais.horasExtraNoturnas", {
+                  duracao: formatarDuracao(relatorio.totais.horasExtraNoturnasMinutos),
+                })}
+              </span>
+            )}
             <span>
               {t("hr.relatorioMensal.totais.diasFeriadoTrabalhados", {
                 dias: String(relatorio.totais.diasFeriadoTrabalhados),

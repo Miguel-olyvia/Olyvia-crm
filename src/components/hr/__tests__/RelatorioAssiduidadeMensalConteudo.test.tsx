@@ -39,6 +39,8 @@ vi.mock("@/hooks/useTranslation", () => ({
         "hr.relatorioMensal.admissao": `Admissao em ${valores?.data ?? ""}`,
         "hr.assiduidade.dia.faltaDe": `Falta de ${valores?.duracao ?? ""}`,
         "hr.relatorioMensal.totais.horasExtra": `Horas extra: ${valores?.duracao ?? ""}`,
+        "hr.relatorioMensal.totais.horasExtraNoturnas": `Horas extra noturnas: ${valores?.duracao ?? ""}`,
+        "hr.relatorioMensal.horasExtraNoturnasNota": `(${valores?.duracao ?? ""} noturnas)`,
         "hr.relatorioMensal.totais.diasFeriadoTrabalhados": `${valores?.dias ?? ""} dias de feriado trabalhados`,
         "hr.relatorioMensal.totais.faltaCompleta": `${valores?.dias ?? ""} faltas completas`,
         "hr.relatorioMensal.totais.faltaIncompleta": `${valores?.dias ?? ""} faltas incompletas`,
@@ -93,6 +95,7 @@ beforeEach(() => {
         temFalta: false,
         minutosEmFalta: 0,
         horasExtraMinutos: 0,
+        horasExtraNoturnasMinutos: 0,
       },
     ],
     totais: {
@@ -104,6 +107,7 @@ beforeEach(() => {
       diasComFaltaCompleta: 0,
       diasComFaltaIncompleta: 0,
       horasExtraMinutos: 0,
+      horasExtraNoturnasMinutos: 0,
     },
     obras: [],
     obrasRecusadas: false,
@@ -312,6 +316,106 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
     );
 
     expect(screen.getByText("+1h00")).toBeInTheDocument();
+  });
+
+  it("mostra a nota de horas extra noturnas quando ha parte nocturna", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "normal",
+        categoriaAusencia: null,
+        planeadoMinutos: 480,
+        realizadoMinutos: 540,
+        planeadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "17:00" }],
+        realizadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "18:00" }],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 60,
+        horasExtraNoturnasMinutos: 10,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("+1h00")).toBeInTheDocument();
+    expect(screen.getByText("(0h10 noturnas)")).toBeInTheDocument();
+  });
+
+  it("sem parte nocturna nas horas extra, nao mostra nenhuma nota adicional", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "normal",
+        categoriaAusencia: null,
+        planeadoMinutos: 480,
+        realizadoMinutos: 540,
+        planeadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "17:00" }],
+        realizadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "18:00" }],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 60,
+        horasExtraNoturnasMinutos: 0,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("+1h00")).toBeInTheDocument();
+    expect(screen.queryByText(/noturnas/)).not.toBeInTheDocument();
+  });
+
+  it("o rodape mostra o total de horas extra noturnas quando maior que zero", () => {
+    relatorioMock.totais = {
+      ...relatorioMock.totais,
+      horasExtraMinutos: 90,
+      horasExtraNoturnasMinutos: 30,
+    };
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("Horas extra noturnas: 0h30")).toBeInTheDocument();
+  });
+
+  it("o rodape nao mostra o total de horas extra noturnas quando e zero", () => {
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.queryByText(/Horas extra noturnas/)).not.toBeInTheDocument();
   });
 
   it("um feriado trabalhado deixa de ficar escondido: mostra planeado/realizado e fica destacado", () => {

@@ -39,6 +39,8 @@ import {
   LEITOR_FALTAS,
   LEITOR_REALIZADO,
   emVigor,
+  minutosNoturnosDoPeriodo,
+  subtrairIntervalos,
 } from "@/lib/hr/assiduidade";
 import { leituraDoPlaneado } from "@/lib/hr/planeadoDoDia";
 import { minutosDe } from "@/lib/hr/horario";
@@ -121,6 +123,23 @@ export interface DiaRelatorioMensal {
    * numero de minutos a mais, fora de ambito decidir se e a 50% ou nocturno.
    */
   horasExtraMinutos: number;
+  /**
+   * Quanto do EXCEDENTE caiu no periodo nocturno (22:00-07:00, Codigo do
+   * Trabalho art. 223) -- e nao quanto do realizado do dia caiu de noite.
+   *
+   * O excedente e calculado como INTERVALOS DE TEMPO reais: `subtrairIntervalos`
+   * tira aos intervalos realmente picados a parte coberta por algum intervalo
+   * planeado desse dia, e so essa sobra (entrar mais cedo, sair mais tarde,
+   * trabalhar um dia sem horario planeado) e medida contra a janela nocturna.
+   * Sem isto, um turno planeado 22:00-06:00 (~450 min, todo nocturno) com 2h
+   * extra a meio do dia dava `Math.min(120, 450) = 120` -- o relatorio dizia
+   * "120 min de horas extra nocturnas" quando NENHUMA das horas extra era
+   * nocturna, so o turno normal (ja nocturno por si so) e que era. O
+   * `Math.min` com `horasExtraMinutos` fica como rede de seguranca: o
+   * excedente calculado aqui nunca deveria exceder o total de horas extra, mas
+   * nao custa nada garantir.
+   */
+  horasExtraNoturnasMinutos: number;
 }
 
 export interface TotaisRelatorioMensal {
@@ -138,6 +157,7 @@ export interface TotaisRelatorioMensal {
   diasComFaltaCompleta: number;
   diasComFaltaIncompleta: number;
   horasExtraMinutos: number;
+  horasExtraNoturnasMinutos: number;
 }
 
 interface Satelite<T> {
@@ -360,6 +380,25 @@ export function useRelatorioAssiduidadeMensal(
       const planeadoMinutos = minutosPlaneadosDoDia(planeado.linhas, iso);
       const realizadoMinutos = realizadoDoDia.reduce((soma, linha) => soma + (linha.minutos ?? 0), 0);
       const { intervalos: planeadoIntervalos } = leituraDoPlaneado(planeado.linhas, iso);
+      // `leituraDoPlaneado` ja filtrou fora as linhas sem hora_inicio/hora_fim
+      // (ver planeadoDoDia.ts), mas o tipo `HorarioPlaneado` continua nulavel --
+      // reduz aqui para o par nao-nulo que `IntervaloRelatorio` promete.
+      const planeadoIntervalosRelatorio: IntervaloRelatorio[] = planeadoIntervalos.map(
+        (intervalo) => ({
+          hora_inicio: intervalo.hora_inicio as string,
+          hora_fim: intervalo.hora_fim as string,
+        }),
+      );
+      const realizadoIntervalosDoDia = intervalosOrdenados(realizadoDoDia);
+      const horasExtraMinutos = Math.max(realizadoMinutos - planeadoMinutos, 0);
+      const excedenteIntervalos = subtrairIntervalos(
+        realizadoIntervalosDoDia,
+        planeadoIntervalosRelatorio,
+      );
+      const minutosNoturnosDoExcedente = excedenteIntervalos.reduce(
+        (soma, intervalo) => soma + minutosNoturnosDoPeriodo(intervalo),
+        0,
+      );
 
       linhas.push({
         iso,
@@ -368,15 +407,13 @@ export function useRelatorioAssiduidadeMensal(
         categoriaAusencia,
         planeadoMinutos,
         realizadoMinutos,
-        planeadoIntervalos: planeadoIntervalos.map((intervalo) => ({
-          hora_inicio: intervalo.hora_inicio,
-          hora_fim: intervalo.hora_fim,
-        })),
-        realizadoIntervalos: intervalosOrdenados(realizadoDoDia),
+        planeadoIntervalos: planeadoIntervalosRelatorio,
+        realizadoIntervalos: realizadoIntervalosDoDia,
         obraHoras: obraDoDia.reduce((soma, obra) => soma + Number(obra.horas), 0),
         temFalta: faltasDoDia.length > 0,
         minutosEmFalta: faltasDoDia.reduce((soma, falta) => soma + (falta.minutos ?? 0), 0),
-        horasExtraMinutos: Math.max(realizadoMinutos - planeadoMinutos, 0),
+        horasExtraMinutos,
+        horasExtraNoturnasMinutos: Math.min(horasExtraMinutos, minutosNoturnosDoExcedente),
       });
     }
     return linhas;
@@ -421,6 +458,8 @@ export function useRelatorioAssiduidadeMensal(
             diasComFaltaCompleta: acc.diasComFaltaCompleta + (faltaCompleta ? 1 : 0),
             diasComFaltaIncompleta: acc.diasComFaltaIncompleta + (faltaIncompleta ? 1 : 0),
             horasExtraMinutos: acc.horasExtraMinutos + (contaParaTotais ? dia.horasExtraMinutos : 0),
+            horasExtraNoturnasMinutos:
+              acc.horasExtraNoturnasMinutos + (contaParaTotais ? dia.horasExtraNoturnasMinutos : 0),
           };
         },
         {
@@ -432,6 +471,7 @@ export function useRelatorioAssiduidadeMensal(
           diasComFaltaCompleta: 0,
           diasComFaltaIncompleta: 0,
           horasExtraMinutos: 0,
+          horasExtraNoturnasMinutos: 0,
         },
       ),
     [dias],

@@ -98,6 +98,7 @@ function relatorioDe(loading: boolean) {
         temFalta: false,
         minutosEmFalta: 0,
         horasExtraMinutos: 0,
+        horasExtraNoturnasMinutos: 0,
       },
     ],
     totais: {
@@ -109,6 +110,7 @@ function relatorioDe(loading: boolean) {
       diasComFaltaCompleta: 0,
       diasComFaltaIncompleta: 0,
       horasExtraMinutos: 0,
+      horasExtraNoturnasMinutos: 0,
     },
     obras: [],
     obrasRecusadas: false,

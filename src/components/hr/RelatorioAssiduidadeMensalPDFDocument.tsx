@@ -83,9 +83,9 @@ const styles = StyleSheet.create({
   colDia: { width: "8%" },
   colPlaneado: { width: "20%" },
   colRealizado: { width: "20%" },
-  colExtra: { width: "10%", textAlign: "right" as const },
+  colExtra: { width: "16%", textAlign: "right" as const },
   colObra: { width: "10%", textAlign: "right" as const },
-  colEstado: { width: "22%" },
+  colEstado: { width: "16%" },
   totais: {
     marginTop: 10,
     paddingTop: 6,
@@ -197,7 +197,13 @@ export function RelatorioAssiduidadeMensalPDFDocument({
                     <Text style={styles.colPlaneado}>{formatarPlaneado(dia.planeadoIntervalos)}</Text>
                     <Text style={styles.colRealizado}>{formatarRealizado(dia.realizadoIntervalos)}</Text>
                     <Text style={styles.colExtra}>
-                      {dia.horasExtraMinutos > 0 ? `+${formatarDuracao(dia.horasExtraMinutos)}` : "—"}
+                      {dia.horasExtraMinutos > 0
+                        ? `+${formatarDuracao(dia.horasExtraMinutos)}${
+                            dia.horasExtraNoturnasMinutos > 0
+                              ? ` (${formatarDuracao(dia.horasExtraNoturnasMinutos)} noturnas)`
+                              : ""
+                          }`
+                        : "—"}
                     </Text>
                     <Text style={styles.colObra}>{dia.obraHoras > 0 ? `${dia.obraHoras}h` : "—"}</Text>
                   </>
@@ -220,6 +226,11 @@ export function RelatorioAssiduidadeMensalPDFDocument({
             <Text style={styles.totalItem}>Planeado: {formatarDuracao(totais.planeadoMinutos)}</Text>
             <Text style={styles.totalItem}>Realizado: {formatarDuracao(totais.realizadoMinutos)}</Text>
             <Text style={styles.totalItem}>Horas extra: {formatarDuracao(totais.horasExtraMinutos)}</Text>
+            {totais.horasExtraNoturnasMinutos > 0 && (
+              <Text style={styles.totalItem}>
+                Horas extra noturnas: {formatarDuracao(totais.horasExtraNoturnasMinutos)}
+              </Text>
+            )}
             <Text style={styles.totalItem}>Obra: {totais.obraHoras}h</Text>
             <Text style={styles.totalItem}>{totais.diasFeriadoTrabalhados} feriados trabalhados</Text>
             <Text style={styles.totalItem}>{totais.diasComFaltaCompleta} faltas completas</Text>
