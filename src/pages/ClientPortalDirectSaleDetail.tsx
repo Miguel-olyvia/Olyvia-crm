@@ -82,7 +82,8 @@ interface DirectSaleHeader {
   title: string | null;
   description: string | null;
   status: string;
-  notes: string | null;
+  // `notes` não existe aqui de propósito: é o campo interno do comercial e o
+  // backend deixou de o enviar ao portal. Só `client_notes` é para o cliente.
   client_notes: string | null;
   subtotal: number | null;
   total: number | null;

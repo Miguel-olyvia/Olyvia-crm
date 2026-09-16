@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send, SendHorizontal } from "lucide-react";
+import { FileDown, KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send, SendHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -25,6 +25,7 @@ import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { downloadBlob, generateProformaPdfBlob } from "@/utils/generateProformaPdfBlob";
 import { cn, formatCurrency } from "@/lib/utils";
 
 // Venda Direta — Fase 2: listagem. Fluxo alternativo, mais leve, ao caminho
@@ -54,6 +55,13 @@ interface DirectSaleRow {
   total: number | null;
   invoice_status: string | null;
   created_at: string;
+  /**
+   * Número da proforma (PF-YYYY-NNNN), preenchido por trigger na aceitação
+   * (20261201150000_venda_direta_proforma_numeracao.sql). NULL enquanto a
+   * venda não for aceite — é isso que decide se há documento para descarregar.
+   */
+  proforma_number: string | null;
+  proforma_issued_at: string | null;
   /** Resolvido a partir de anew_entities depois da query principal. */
   client_name: string | null;
 }
@@ -93,6 +101,9 @@ const DirectSales = () => {
   /** Venda cujo "Marcar como enviada" está em curso — trava só esse item. */
   const [markingSentId, setMarkingSentId] = useState<string | null>(null);
 
+  /** Venda cuja proforma está a ser gerada — a geração do PDF demora, trava só esse item. */
+  const [generatingProformaId, setGeneratingProformaId] = useState<string | null>(null);
+
   /** Id monotónico do pedido de listagem em curso — ver `loadSales`. */
   const latestRequestIdRef = useRef(0);
 
@@ -119,7 +130,7 @@ const DirectSales = () => {
     try {
       let query = (supabase as any)
         .from("direct_sales")
-        .select("id, sale_number, entity_id, client_id, title, status, total, invoice_status, created_at")
+        .select("id, sale_number, entity_id, client_id, title, status, total, invoice_status, created_at, proforma_number, proforma_issued_at")
         .eq("organization_id", activeCompany.id)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
@@ -163,6 +174,8 @@ const DirectSales = () => {
         total: row.total === null || row.total === undefined ? null : Number(row.total),
         invoice_status: row.invoice_status ?? null,
         created_at: row.created_at,
+        proforma_number: row.proforma_number ?? null,
+        proforma_issued_at: row.proforma_issued_at ?? null,
         client_name: row.entity_id ? nameByEntityId.get(row.entity_id) ?? null : null,
       }));
 
@@ -349,6 +362,34 @@ const DirectSales = () => {
       await loadSales(0, true);
     } finally {
       setMarkingSentId(null);
+    }
+  };
+
+  /**
+   * Descarrega a proforma (documento NÃO fiscal) da venda direta aceite.
+   *
+   * Só é oferecido quando `proforma_number` existe — o número nasce do trigger
+   * na aceitação, e sem número não há documento. O gerador volta a validar isso
+   * do lado dele, para o caso de a listagem estar desatualizada.
+   *
+   * Lê a venda outra vez lá dentro (modo CRM, sem `prefetched`): a listagem só
+   * traz o cabeçalho resumido, e o documento precisa das linhas, da empresa
+   * emitente e do cliente.
+   */
+  const handleDownloadProforma = async (sale: DirectSaleRow) => {
+    if (generatingProformaId) return;
+    setGeneratingProformaId(sale.id);
+    try {
+      const { blob, fileName } = await generateProformaPdfBlob(sale.id);
+      downloadBlob(blob, fileName);
+    } catch (error: any) {
+      toast({
+        title: "Não foi possível gerar a proforma",
+        description: error?.message,
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingProformaId(null);
     }
   };
 
@@ -594,6 +635,35 @@ const DirectSales = () => {
                               <KeyRound className="mr-2 h-3.5 w-3.5" /> Reenviar credenciais
                             </DropdownMenuItem>
                           </PermissionGate>
+                          {/* Proforma: documento NÃO fiscal, só existe depois de
+                              a venda ser aceite (é aí que o trigger atribui o
+                              proforma_number). Sem número não há documento, por
+                              isso o item nem aparece.
+
+                              Fora do PermissionGate de direct_sales.edit de
+                              propósito: descarregar um documento é leitura, e a
+                              rota já exige direct_sales.view. */}
+                          {sale.proforma_number && (
+                            <>
+                              <DropdownMenuSeparator />
+                              <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
+                                Documento
+                              </DropdownMenuLabel>
+                              <DropdownMenuItem
+                                disabled={generatingProformaId === sale.id}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleDownloadProforma(sale);
+                                }}
+                              >
+                                <FileDown className="mr-2 h-3.5 w-3.5 text-emerald-600" />
+                                {generatingProformaId === sale.id
+                                  ? "A gerar proforma…"
+                                  : "Descarregar proforma"}
+                              </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
