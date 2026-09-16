@@ -164,8 +164,9 @@ export interface TotaisRelatorioMensal {
   diasComFaltaCompleta: number;
   diasComFaltaIncompleta: number;
   /**
-   * Dias com horario planeado, zero realizado, sem falta registada e sem
-   * ausencia aprovada -- um buraco por esclarecer, nao um dia "normal".
+   * Dias com horario planeado e realizado abaixo do planeado (zero ou so
+   * parte), sem falta registada e sem ausencia aprovada -- um buraco por
+   * esclarecer, nao um dia "normal".
    */
   diasSemRegisto: number;
   horasExtraMinutos: number;
@@ -438,9 +439,20 @@ export function useRelatorioAssiduidadeMensal(
         estado = "feriado";
       } else if (naoTrabalha) {
         estado = "descanso";
+      } else if (planeadoMinutos === 0) {
+        // Sem linha nenhuma de horario para este dia da semana (nao so uma
+        // linha explicita a marcar "nao_trabalha") -- para quem ve o
+        // relatorio isto e igualmente um dia de descanso, nao "Normal". Vale
+        // para o passado e o futuro: um dia sem horario nao e um buraco por
+        // esclarecer (isso e o "sem_registo", abaixo, que exige planeado>0).
+        estado = "descanso";
       } else if (
         planeadoMinutos > 0 &&
-        realizadoMinutos === 0 &&
+        // Qualquer deficit -- zero realizado OU so parte do planeado -- e um
+        // buraco por esclarecer. Um dia com dois blocos planeados em que so
+        // um foi picado (realizado > 0 mas < planeado) e tao "sem registo"
+        // quanto um dia sem nenhuma picagem: falta o resto, e nada o explica.
+        realizadoMinutos < planeadoMinutos &&
         minutosEmFalta === 0 &&
         // Uma ausencia aprovada PARCIAL (ex. fraccao_dia 0.5) nao cai no ramo
         // "ausencia" acima (que so substitui o dia inteiro), mas ja explica

@@ -46,6 +46,12 @@ vi.mock("@/hooks/useTranslation", () => ({
         "hr.relatorioMensal.totais.faltaCompleta": `${valores?.dias ?? ""} faltas completas`,
         "hr.relatorioMensal.totais.faltaIncompleta": `${valores?.dias ?? ""} faltas incompletas`,
         "hr.relatorioMensal.totais.diasSemRegisto": `${valores?.dias ?? ""} dias sem registo`,
+        "hr.relatorioMensal.totais.faltasTitulo": "Faltas e dias por esclarecer",
+        "hr.relatorioMensal.totais.faltasResumo": `De ${valores?.total ?? ""} dias com falha no trabalho, ${
+          valores?.registadas ?? ""
+        } já foram registados como falta pelo RH; os restantes ${
+          valores?.porEsclarecer ?? ""
+        } ainda não têm falta associada.`,
       };
       return chaves[chave] ?? chave;
     },
@@ -541,6 +547,132 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
     );
 
     expect(screen.getByText("4 dias sem registo")).toBeInTheDocument();
+  });
+
+  it("um dia 'normal' com horas extra fica destacado a verde", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "normal",
+        categoriaAusencia: null,
+        planeadoMinutos: 480,
+        realizadoMinutos: 720,
+        planeadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "13:00" }],
+        realizadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "17:00" }],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 240,
+        horasExtraNoturnasMinutos: 0,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    const linha = screen.getByText("2026-09-01").closest("tr");
+    expect(linha?.className).toMatch(/bg-green/);
+  });
+
+  it("um feriado trabalhado com horas extra mantem o destaque ambar, nunca verde", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "feriado",
+        categoriaAusencia: null,
+        planeadoMinutos: 0,
+        realizadoMinutos: 240,
+        planeadoIntervalos: [],
+        realizadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "13:00" }],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 240,
+        horasExtraNoturnasMinutos: 0,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    const linha = screen.getByText("2026-09-01").closest("tr");
+    expect(linha?.className).toMatch(/bg-amber/);
+    expect(linha?.className).not.toMatch(/bg-green/);
+  });
+
+  it("sem horas extra, um dia 'normal' nao fica destacado", () => {
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    const linha = screen.getByText("2026-09-01").closest("tr");
+    expect(linha?.className ?? "").not.toMatch(/bg-green/);
+  });
+
+  it("com dias sem registo, o rodape mostra a legenda a explicar a relacao com faltas", () => {
+    relatorioMock.totais = {
+      ...relatorioMock.totais,
+      diasSemRegisto: 6,
+    };
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("6 dias sem registo")).toBeInTheDocument();
+    expect(screen.getByText("Faltas e dias por esclarecer")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "De 6 dias com falha no trabalho, 0 já foram registados como falta pelo RH; os restantes 6 ainda não têm falta associada.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("sem dias sem registo nem faltas registadas, a frase de ligacao nao aparece", () => {
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("Faltas e dias por esclarecer")).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /De \d+ dias com falha no trabalho/,
+      ),
+    ).not.toBeInTheDocument();
   });
 
   it("um feriado ou descanso sem trabalho nenhum continua escondido, sem destaque", () => {

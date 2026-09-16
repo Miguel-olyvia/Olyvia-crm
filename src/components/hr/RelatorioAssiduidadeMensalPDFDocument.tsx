@@ -103,6 +103,22 @@ const styles = StyleSheet.create({
     marginRight: 14,
     marginBottom: 2,
   },
+  totaisFaltasBloco: {
+    marginTop: 6,
+    paddingTop: 4,
+    borderTop: "1 solid #e5e7eb",
+  },
+  totaisFaltasTitulo: {
+    fontSize: 8,
+    fontWeight: "bold",
+    marginBottom: 2,
+    textTransform: "uppercase" as const,
+  },
+  totaisFaltasResumo: {
+    fontSize: 7.5,
+    color: "#555555",
+    marginBottom: 3,
+  },
   obrasSecao: {
     marginTop: 10,
     paddingTop: 6,
@@ -122,15 +138,22 @@ const styles = StyleSheet.create({
 const FUNDO_FERIADO = "#fef3c7";
 const FUNDO_DESCANSO = "#dbeafe";
 const FUNDO_SEM_REGISTO = "#ffe4e6";
+const FUNDO_HORAS_EXTRA = "#dcfce7";
 
 function trabalhouForaDoNormal(dia: DiaRelatorioMensal): boolean {
   return (dia.estado === "feriado" || dia.estado === "descanso") && dia.realizadoMinutos > 0;
 }
 
+/**
+ * Mesma precedencia do ecra: feriado/descanso trabalhado e sem_registo so
+ * ocorrem com `estado !== "normal"`, por isso o verde das horas extra (que
+ * exige `estado === "normal"`) nunca os sobrepoe.
+ */
 function fundoDaLinha(dia: DiaRelatorioMensal): string | undefined {
   if (dia.estado === "sem_registo") return FUNDO_SEM_REGISTO;
-  if (!trabalhouForaDoNormal(dia)) return undefined;
-  return dia.estado === "feriado" ? FUNDO_FERIADO : FUNDO_DESCANSO;
+  if (trabalhouForaDoNormal(dia)) return dia.estado === "feriado" ? FUNDO_FERIADO : FUNDO_DESCANSO;
+  if (dia.estado === "normal" && dia.horasExtraMinutos > 0) return FUNDO_HORAS_EXTRA;
+  return undefined;
 }
 
 function rotuloDoEstado(dia: DiaRelatorioMensal): string {
@@ -160,6 +183,8 @@ export function RelatorioAssiduidadeMensalPDFDocument({
   obras,
 }: RelatorioAssiduidadeMensalPDFDocumentProps) {
   const obrasActivas = obras.filter((obra) => !obra.anulado_em);
+  const diasFaltaRegistada = totais.diasComFaltaCompleta + totais.diasComFaltaIncompleta;
+  const diasComFalhaNoTrabalho = diasFaltaRegistada + totais.diasSemRegisto;
 
   return (
     <Document>
@@ -236,6 +261,19 @@ export function RelatorioAssiduidadeMensalPDFDocument({
             )}
             <Text style={styles.totalItem}>Obra: {totais.obraHoras}h</Text>
             <Text style={styles.totalItem}>{totais.diasFeriadoTrabalhados} feriados trabalhados</Text>
+          </View>
+        </View>
+
+        <View style={styles.totaisFaltasBloco}>
+          <Text style={styles.totaisFaltasTitulo}>Faltas e dias por esclarecer</Text>
+          {diasComFalhaNoTrabalho > 0 && (
+            <Text style={styles.totaisFaltasResumo}>
+              De {diasComFalhaNoTrabalho} dias com falha no trabalho, {diasFaltaRegistada} já foram
+              registados como falta pelo RH; os restantes {totais.diasSemRegisto} ainda não têm falta
+              associada.
+            </Text>
+          )}
+          <View style={styles.totaisLinha}>
             <Text style={styles.totalItem}>{totais.diasComFaltaCompleta} faltas completas</Text>
             <Text style={styles.totalItem}>{totais.diasComFaltaIncompleta} faltas parciais</Text>
             <Text style={styles.totalItem}>{totais.diasSemRegisto} dias sem registo</Text>

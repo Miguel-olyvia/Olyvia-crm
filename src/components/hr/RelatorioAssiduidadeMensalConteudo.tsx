@@ -121,12 +121,25 @@ const AJUSTE_COR_IMPRESSAO = {
   printColorAdjust: "exact",
 } as unknown as CSSProperties;
 
+/**
+ * Um dia "normal" com horas extra ganha o destaque verde -- mas so quando
+ * `estado === "normal"`. Os outros destaques (feriado/descanso trabalhado,
+ * sem_registo) tem sempre `estado !== "normal"`, por isso a condicao aqui
+ * chega para nunca sobrepor o verde a um deles: a linha guarda a cor do
+ * estado mais relevante, e as horas extra continuam visiveis na coluna
+ * propria em qualquer dos casos.
+ */
 function classeDeDestaque(dia: DiaRelatorioMensal): string | undefined {
   if (dia.estado === "sem_registo") return "bg-rose-50 dark:bg-rose-950/30";
-  if (!trabalhouForaDoNormal(dia)) return undefined;
-  return dia.estado === "feriado"
-    ? "bg-amber-50 dark:bg-amber-950/30"
-    : "bg-blue-50 dark:bg-blue-950/30";
+  if (trabalhouForaDoNormal(dia)) {
+    return dia.estado === "feriado"
+      ? "bg-amber-50 dark:bg-amber-950/30"
+      : "bg-blue-50 dark:bg-blue-950/30";
+  }
+  if (dia.estado === "normal" && dia.horasExtraMinutos > 0) {
+    return "bg-green-50 dark:bg-green-950/30";
+  }
+  return undefined;
 }
 
 export function RelatorioAssiduidadeMensalConteudo({
@@ -191,6 +204,13 @@ export function RelatorioAssiduidadeMensalConteudo({
       ),
     [language, ano, mes],
   );
+
+  // "Sem registo" nao e um total independente: e o complemento das faltas
+  // registadas dentro do mesmo grupo de dias com falha no trabalho -- ver
+  // aviso no rodape (faltasResumo).
+  const diasFaltaRegistada =
+    relatorio.totais.diasComFaltaCompleta + relatorio.totais.diasComFaltaIncompleta;
+  const diasComFalhaNoTrabalho = diasFaltaRegistada + relatorio.totais.diasSemRegisto;
 
   const submeterObra = async () => {
     const horas = Number(horasObra.replace(",", "."));
@@ -402,25 +422,42 @@ export function RelatorioAssiduidadeMensalConteudo({
                 dias: String(relatorio.totais.diasFeriadoTrabalhados),
               })}
             </span>
-            <span>
-              {t("hr.relatorioMensal.totais.faltaCompleta", {
-                dias: String(relatorio.totais.diasComFaltaCompleta),
-              })}
-            </span>
-            <span>
-              {t("hr.relatorioMensal.totais.faltaIncompleta", {
-                dias: String(relatorio.totais.diasComFaltaIncompleta),
-              })}
-            </span>
-            <span
-              className={
-                relatorio.totais.diasSemRegisto > 0 ? "text-rose-700 dark:text-rose-300" : undefined
-              }
-            >
-              {t("hr.relatorioMensal.totais.diasSemRegisto", {
-                dias: String(relatorio.totais.diasSemRegisto),
-              })}
-            </span>
+          </div>
+
+          <div className="space-y-1 border-t pt-2 text-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("hr.relatorioMensal.totais.faltasTitulo")}
+            </p>
+            {diasComFalhaNoTrabalho > 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t("hr.relatorioMensal.totais.faltasResumo", {
+                  total: String(diasComFalhaNoTrabalho),
+                  registadas: String(diasFaltaRegistada),
+                  porEsclarecer: String(relatorio.totais.diasSemRegisto),
+                })}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-x-6 gap-y-1 font-medium">
+              <span>
+                {t("hr.relatorioMensal.totais.faltaCompleta", {
+                  dias: String(relatorio.totais.diasComFaltaCompleta),
+                })}
+              </span>
+              <span>
+                {t("hr.relatorioMensal.totais.faltaIncompleta", {
+                  dias: String(relatorio.totais.diasComFaltaIncompleta),
+                })}
+              </span>
+              <span
+                className={
+                  relatorio.totais.diasSemRegisto > 0 ? "text-rose-700 dark:text-rose-300" : undefined
+                }
+              >
+                {t("hr.relatorioMensal.totais.diasSemRegisto", {
+                  dias: String(relatorio.totais.diasSemRegisto),
+                })}
+              </span>
+            </div>
           </div>
 
           <section className="space-y-2 border-t pt-3" aria-labelledby={`hr-relatorio-obras-titulo-${pessoaId}`}>

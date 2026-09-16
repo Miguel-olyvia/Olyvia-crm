@@ -2449,6 +2449,9 @@ export const translations = {
     'hr.relatorioMensal.totais.faltaCompleta': '{dias} full absence days',
     'hr.relatorioMensal.totais.faltaIncompleta': '{dias} partial absence days',
     'hr.relatorioMensal.totais.diasSemRegisto': '{dias} days without a record',
+    'hr.relatorioMensal.totais.faltasTitulo': 'Absences and unexplained days',
+    'hr.relatorioMensal.totais.faltasResumo':
+      'Of {total} days with missing work, {registadas} have already been logged as an absence by HR; the remaining {porEsclarecer} have no absence logged yet.',
     'hr.relatorioMensal.obras.titulo': 'Site work this month',
     'hr.relatorioMensal.obras.registar': 'Register site work',
     'hr.relatorioMensal.obras.vazio': 'No site work registered this month.',
@@ -10974,6 +10977,9 @@ export const translations = {
     'hr.relatorioMensal.totais.faltaCompleta': '{dias} faltas completas',
     'hr.relatorioMensal.totais.faltaIncompleta': '{dias} faltas incompletas',
     'hr.relatorioMensal.totais.diasSemRegisto': '{dias} dias sem registo',
+    'hr.relatorioMensal.totais.faltasTitulo': 'Faltas e dias por esclarecer',
+    'hr.relatorioMensal.totais.faltasResumo':
+      'De {total} dias com falha no trabalho, {registadas} já foram registados como falta pelo RH; os restantes {porEsclarecer} ainda não têm falta associada.',
     'hr.relatorioMensal.obras.titulo': 'Obras do mês',
     'hr.relatorioMensal.obras.registar': 'Registar obra',
     'hr.relatorioMensal.obras.vazio': 'Sem obras registadas este mês.',
@@ -19715,6 +19721,9 @@ export const translations = {
     'hr.relatorioMensal.totais.faltaCompleta': '{dias} faltas completas',
     'hr.relatorioMensal.totais.faltaIncompleta': '{dias} faltas incompletas',
     'hr.relatorioMensal.totais.diasSemRegisto': '{dias} días sin registro',
+    'hr.relatorioMensal.totais.faltasTitulo': 'Faltas y días por aclarar',
+    'hr.relatorioMensal.totais.faltasResumo':
+      'De {total} días con falta de trabajo, {registadas} ya fueron registrados como falta por RRHH; los {porEsclarecer} restantes aún no tienen falta asociada.',
     'hr.relatorioMensal.obras.titulo': 'Obras del mes',
     'hr.relatorioMensal.obras.registar': 'Registrar obra',
     'hr.relatorioMensal.obras.vazio': 'Sin obras registradas este mes.',
@@ -27839,6 +27848,9 @@ export const translations = {
     'hr.relatorioMensal.totais.faltaCompleta': '{dias} absences complètes',
     'hr.relatorioMensal.totais.faltaIncompleta': '{dias} absences partielles',
     'hr.relatorioMensal.totais.diasSemRegisto': '{dias} jours sans pointage',
+    'hr.relatorioMensal.totais.faltasTitulo': 'Absences et jours à clarifier',
+    'hr.relatorioMensal.totais.faltasResumo':
+      "Sur {total} jours avec un manque de travail, {registadas} ont déjà été enregistrés comme absence par les RH ; les {porEsclarecer} restants n'ont pas encore d'absence associée.",
     'hr.relatorioMensal.obras.titulo': 'Chantiers du mois',
     'hr.relatorioMensal.obras.registar': 'Enregistrer un chantier',
     'hr.relatorioMensal.obras.vazio': 'Aucun chantier enregistré ce mois-ci.',
@@ -36417,6 +36429,9 @@ export const translations = {
     'hr.relatorioMensal.totais.faltaCompleta': '{dias} vollständige Fehlzeiten',
     'hr.relatorioMensal.totais.faltaIncompleta': '{dias} teilweise Fehlzeiten',
     'hr.relatorioMensal.totais.diasSemRegisto': '{dias} Tage ohne Erfassung',
+    'hr.relatorioMensal.totais.faltasTitulo': 'Fehlzeiten und ungeklärte Tage',
+    'hr.relatorioMensal.totais.faltasResumo':
+      'Von {total} Tagen mit fehlender Arbeitszeit wurden {registadas} bereits von der Personalabteilung als Fehlzeit erfasst; für die restlichen {porEsclarecer} liegt noch keine Fehlzeit vor.',
     'hr.relatorioMensal.obras.titulo': 'Baustellen des Monats',
     'hr.relatorioMensal.obras.registar': 'Baustelle erfassen',
     'hr.relatorioMensal.obras.vazio': 'Diesen Monat keine Baustellen erfasst.',

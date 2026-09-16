@@ -131,6 +131,49 @@ describe("useRelatorioAssiduidadeMensal", () => {
       expect(diaFuturo?.estado).toBe("normal");
     });
 
+    it("um dia PASSADO com falta PARCIAL do planeado (realizado > 0 mas < planeado), sem falta registada, tambem fica 'sem_registo'", async () => {
+      // 2026-09-01, terca, passada: excepcao por data (nao semanal, para nao
+      // repetir o buraco nas outras tercas do mes) em dois blocos, so o
+      // primeiro foi picado.
+      tabelas.pessoas_horario_planeado = [
+        { ...planeadoSemanal(2, "06:00", "08:00"), id: "pl-2-a", data: "2026-09-01", ordem: 1 },
+        { ...planeadoSemanal(2, "17:00", "19:00"), id: "pl-2-b", data: "2026-09-01", ordem: 2 },
+      ];
+      tabelas.pessoas_horario_realizado = [
+        {
+          id: "r1",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          vinculo_id: null,
+          local_id: null,
+          planeado_id: null,
+          data: "2026-09-01",
+          hora_inicio: "06:00",
+          hora_fim: "08:00",
+          minutos: 120,
+          origem: "picagem",
+          estado: "fechado",
+          validado_por: null,
+          validado_em: null,
+          motivo_rejeicao: null,
+          notas: null,
+          corrige_realizado_id: null,
+          correccao_motivo: null,
+          corrigido_por_pessoa_id: null,
+          deleted_at: null,
+        },
+      ];
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+      expect(dia1?.planeadoMinutos).toBe(240); // 06:00-08:00 + 17:00-19:00
+      expect(dia1?.realizadoMinutos).toBe(120); // so o primeiro bloco
+      expect(dia1?.estado).toBe("sem_registo");
+      expect(result.current.totais.diasSemRegisto).toBe(1);
+    });
+
     it("uma ausencia aprovada PARCIAL (fraccao_dia 0.5) num dia passado sem realizado nao vira 'sem_registo'", async () => {
       tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 2026-09-01, terca, passado
       tabelas.pessoas_ausencias_dias = [
@@ -209,6 +252,39 @@ describe("useRelatorioAssiduidadeMensal", () => {
         anulado_por: null,
         anulado_motivo: null,
         created_at: "2026-09-01T20:00:00Z",
+      },
+    ];
+    // Planeado (540) e realizado (480) diferem de proposito para provar que
+    // nunca se fundem -- mas a diferenca tem de vir explicada por uma falta,
+    // senao o dia (ja passado) cai em "sem_registo" e a asserção de "normal"
+    // deixa de ser valida.
+    tabelas.pessoas_faltas = [
+      {
+        id: "f1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        data: "2026-09-01",
+        planeado_id: null,
+        vinculo_id: null,
+        local_id: null,
+        hora_inicio: "17:00",
+        hora_fim: "18:00",
+        minutos: 60,
+        motivo_codigo: "atraso",
+        justificacao_estado: "sem_justificacao",
+        justificada: false,
+        remunerada: false,
+        desconta_saldo: false,
+        justificacao_decidida_por: null,
+        justificacao_decidida_em: null,
+        justificacao_motivo: null,
+        ausencia_dia_id: null,
+        corrige_falta_id: null,
+        correccao_motivo: null,
+        estado: "activa",
+        anulado_em: null,
+        anulacao_motivo: null,
+        created_at: "2026-09-01T09:00:00Z",
       },
     ];
 
