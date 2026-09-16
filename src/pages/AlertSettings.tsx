@@ -127,6 +127,7 @@ const NOTIFICATION_MODULES: ModuleDef[] = [
       { type: "client_rejected_proposal", label: "Proposta rejeitada", description: "Quando o cliente rejeita uma proposta", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "client_rejected_contract", label: "Contrato rejeitado", description: "Quando o cliente rejeita um contrato", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "client_accepted_direct_sale", label: "Venda direta aceite", description: "Quando o cliente aceita uma venda direta no portal", hasDays: false, defaultDays: null, defaultActive: true },
+      { type: "client_rejected_direct_sale", label: "Venda direta rejeitada", description: "Quando o cliente rejeita uma venda direta", hasDays: false, defaultDays: null, defaultActive: true },
       { type: "client_question", label: "Dúvida do cliente", description: "Quando o cliente envia uma dúvida sobre um documento", hasDays: false, defaultDays: null, defaultActive: true },
     ],
   },

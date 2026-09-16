@@ -1129,6 +1129,52 @@ serve(async (req) => {
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
       }
 
+      // Rejeição da Venda Direta no portal. O molde é o reject_proposal: tal
+      // como ele, NÃO exige OTP — só posse do documento. A prova forte (SMS)
+      // é para o compromisso (aceitar/assinar); recusar não cria obrigação
+      // nenhuma e exigir código aí só serviria para prender o cliente a um
+      // documento que ele não quer.
+      //
+      // Do molde ficam de fora, de propósito:
+      //   - a cascata para `quotes` (uma venda direta não tem orçamentos);
+      //   - o resolveProposalStageId (direct_sales não tem stage_id);
+      //   - o record_proposal_decision (é um snapshot de proposta).
+      // Também não se mexe em client_portal_users.portal_status, exactamente
+      // como o reject_proposal: esse campo só avança para "signed" nos fluxos
+      // de assinatura/aceitação e não tem valor de "rejeitado" (a coluna é
+      // NOT NULL com default 'sent' e é o que o republish repõe).
+      case "reject_direct_sale": {
+        const { direct_sale_id, reason_code, reason_text } = params;
+        if (!direct_sale_id) {
+          return new Response(JSON.stringify({ error: "direct_sale_id required" }), { status: 400, headers: corsHeaders });
+        }
+        if (!(await assertOwnership("direct_sale_id", direct_sale_id))) return forbidden();
+
+        const safeReasonText = reason_text ? sanitizeReason(reason_text) : null;
+        if (reason_text && !safeReasonText) {
+          return new Response(JSON.stringify({ error: "Motivo deve ter entre 10 e 500 caracteres" }), { status: 400, headers: corsHeaders });
+        }
+
+        const now = new Date().toISOString();
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("direct_sales").update({
+          status: "rejeitada",
+          rejected_at: now,
+          rejection_reason_code: reason_code || null,
+          rejection_notes: safeReasonText,
+        }).eq("id", direct_sale_id));
+
+        const { data: rejSale } = await supabase.from("direct_sales").select("sale_number, title").eq("id", direct_sale_id).maybeSingle();
+        await maybeNotify("client_rejected_direct_sale", {
+          title: "Venda direta rejeitada no portal",
+          message: `O cliente ${clientName} rejeitou a venda direta ${rejSale?.sale_number || rejSale?.title || ""}.${reason_code ? ` Motivo: ${reason_code}` : ""}`,
+          priority: "high",
+          link: `/direct-sales`,
+        }, { column: "direct_sale_id", id: direct_sale_id });
+
+        return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+      }
+
       default:
         return new Response(JSON.stringify({ error: "Unknown action" }), { status: 400, headers: corsHeaders });
     }

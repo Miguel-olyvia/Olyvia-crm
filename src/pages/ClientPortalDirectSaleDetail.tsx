@@ -1,15 +1,25 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, Receipt, ShieldCheck, Smartphone } from "lucide-react";
+import { ArrowLeft, Loader2, Receipt, ShieldCheck, Smartphone, XCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { parseEdgeFunctionPayload } from "@/utils/edgeFunctionResponse";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { captureFlowError, type BusinessFlow } from "@/lib/observability/captureFlowError";
 import { formatCurrency } from "@/lib/utils";
@@ -22,9 +32,14 @@ import { pt } from "date-fns/locale";
 // ordem: enviar -> verificar -> aceitar, e só marca "verified" depois de a
 // aceitação ter sucesso). Diferenças deliberadas em relação à proposta:
 //   - não há seleção de orçamentos (a venda direta não os tem);
-//   - não há rejeição nem "tenho dúvidas" nesta fase — o backend só expõe
-//     accept_direct_sale;
+//   - não há "tenho dúvidas" nesta fase — o backend expõe apenas
+//     accept_direct_sale e reject_direct_sale;
 //   - não há PDF/proforma nesta fase (Fase 4).
+//
+// A rejeição segue o molde das propostas (ClientPortalProposalDetail): motivo
+// de uma lista fixa + comentário opcional, e SEM OTP — tal como o
+// reject_proposal, o backend só exige posse do documento. O código SMS existe
+// para provar o compromisso de aceitar, não para recusar.
 //
 // Os dados vêm de client-portal-action#get_direct_sale_data, que já devolve
 // apenas as linhas visible_to_client = true e já remove cost_price/
@@ -48,6 +63,18 @@ const STATUS_MAP: Record<string, { label: string; variant: "default" | "secondar
   rejeitada: { label: "Venda direta rejeitada", variant: "destructive" },
   cancelada: { label: "Venda direta cancelada", variant: "destructive" },
 };
+
+// Exactamente os mesmos 6 motivos das propostas
+// (ClientPortalProposalDetail.tsx:35-42) — o relatório de motivos de perda
+// tem de poder juntar os dois fluxos sem traduzir nada.
+const REJECTION_REASONS = [
+  "Preço alto",
+  "Encontrei alternativa",
+  "Já não preciso",
+  "Prazo não serve",
+  "Vou adiar",
+  "Outro",
+];
 
 interface DirectSaleHeader {
   id: string;
@@ -103,6 +130,11 @@ const ClientPortalDirectSaleDetail = () => {
   const [lines, setLines] = useState<DirectSaleLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+
+  // Rejeição — mesmo desenho das propostas (motivo + comentário opcional)
+  const [showReject, setShowReject] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectNotes, setRejectNotes] = useState("");
 
   // OTP states — iguais aos da proposta
   const [otpStep, setOtpStep] = useState<"idle" | "sending" | "input" | "verifying" | "verified">("idle");
@@ -295,6 +327,51 @@ const ClientPortalDirectSaleDetail = () => {
     }
   }
 
+  async function handleRejectSale() {
+    if (!id) return;
+    setActionLoading(true);
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke("client-portal-action", {
+        body: {
+          action: "reject_direct_sale",
+          direct_sale_id: id,
+          reason_code: rejectReason,
+          reason_text: rejectNotes,
+        },
+      });
+      // Mesmo unwrap do acceptAfterOtp: em não-2xx o supabase-js só põe uma
+      // mensagem genérica em `error` e o motivo real ("Motivo deve ter entre
+      // 10 e 500 caracteres") fica no corpo da resposta.
+      if (invokeError) {
+        let friendly = invokeError.message;
+        try {
+          const ctx: any = (invokeError as any).context;
+          if (ctx && typeof ctx.json === "function") {
+            const body = await ctx.json();
+            if (body?.message || body?.error) friendly = body.message || body.error;
+          } else if (ctx?.body) {
+            const body = typeof ctx.body === "string" ? JSON.parse(ctx.body) : ctx.body;
+            if (body?.message || body?.error) friendly = body.message || body.error;
+          }
+        } catch {}
+        throw new Error(friendly);
+      }
+      const payload = parseEdgeFunctionPayload<{ error?: string; message?: string }>(data);
+      if (payload?.error) throw new Error(payload.message || payload.error);
+
+      toast({ title: "Venda direta rejeitada", description: "Lamentamos. Obrigado pelo seu feedback." });
+      setShowReject(false);
+      setRejectReason("");
+      setRejectNotes("");
+      await reloadSale();
+    } catch (error: any) {
+      captureFlowError(error, FLOW);
+      toast({ title: "Erro ao rejeitar", description: error.message, variant: "destructive" });
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <ClientPortalLayout>
@@ -328,6 +405,7 @@ const ClientPortalDirectSaleDetail = () => {
   // do comercial e não deve poder bloquear a decisão do cliente.
   // "cancelada" é o único estado extra da venda direta e não deve ser aceitável.
   const isAccepted = sale.status === "aceite";
+  const isRejected = sale.status === "rejeitada";
   const canAccept = !isAccepted && sale.status !== "rejeitada" && sale.status !== "cancelada";
 
   // Totais: vêm do cabeçalho tal como foram gravados. As linhas internas
@@ -479,6 +557,21 @@ const ClientPortalDirectSaleDetail = () => {
           </Card>
         )}
 
+        {/* Estado rejeitado — a par do painel de "aceite" acima */}
+        {isRejected && (
+          <Card className="border-destructive/30 bg-destructive/5">
+            <CardContent className="space-y-2 py-6 text-center">
+              <XCircle className="mx-auto h-10 w-10 text-destructive" />
+              <p className="text-sm font-medium text-destructive">
+                Venda direta rejeitada{sale.rejected_at ? ` em ${formatDate(sale.rejected_at)}` : ""}.
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Obrigado pelo seu feedback. Se mudar de ideias, fale com o seu comercial.
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Aceitação por OTP */}
         {canAccept && (
           <Card className="border-2 border-dashed border-primary/30">
@@ -560,9 +653,69 @@ const ClientPortalDirectSaleDetail = () => {
                   <p className="text-sm font-medium text-emerald-600">Código verificado! Venda direta aceite com sucesso.</p>
                 </div>
               )}
+
+              {/* Rejeitar — mesma condição do aceitar (quem pode aceitar pode
+                  recusar), mas deliberadamente discreto: ghost e pequeno, para
+                  não competir com o botão de aceitação acima. A cor forte de
+                  destructive fica só para o "Confirmar Rejeição" do diálogo. */}
+              {otpStep !== "verified" && (
+                <div className="border-t pt-3 text-center">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-muted-foreground hover:text-destructive"
+                    onClick={() => setShowReject(true)}
+                    disabled={actionLoading}
+                  >
+                    Rejeitar venda direta
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
+
+        {/* Diálogo de rejeição */}
+        <Dialog open={showReject} onOpenChange={setShowReject}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Rejeitar Venda Direta</DialogTitle>
+              <DialogDescription>
+                Indique o motivo da rejeição para nos ajudar a melhorar.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Motivo</label>
+                <Select value={rejectReason} onValueChange={setRejectReason}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um motivo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REJECTION_REASONS.map((reason) => (
+                      <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Comentário (opcional)</label>
+                <Textarea
+                  value={rejectNotes}
+                  onChange={(e) => setRejectNotes(e.target.value)}
+                  placeholder="Adicione um comentário..."
+                  rows={3}
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setShowReject(false)}>Cancelar</Button>
+              <Button variant="destructive" onClick={handleRejectSale} disabled={actionLoading}>
+                Confirmar Rejeição
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </ClientPortalLayout>
   );
