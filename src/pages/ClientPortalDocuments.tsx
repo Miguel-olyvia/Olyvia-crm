@@ -118,6 +118,10 @@ const ClientPortalDocuments = () => {
           .from("documents")
           .select("id, file_name, file_url, file_type, document_type, created_at, entity_type")
           .eq("entity_type", f.type)
+          // Redundante com a RLS do portal (que já exige visible_to_client),
+          // mas deixa a intenção escrita onde se lê: só anexos marcados como
+          // visíveis pelo utilizador do CRM chegam ao cliente.
+          .eq("visible_to_client", true)
           .in("entity_id", f.ids)
           .order("created_at", { ascending: false });
         if (cancelled) return;
