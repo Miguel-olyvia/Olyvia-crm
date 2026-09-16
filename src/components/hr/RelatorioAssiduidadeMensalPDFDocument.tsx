@@ -116,11 +116,6 @@ const styles = StyleSheet.create({
     marginBottom: 2,
     textTransform: "uppercase" as const,
   },
-  totaisFaltasResumo: {
-    fontSize: 7.5,
-    color: "#555555",
-    marginBottom: 3,
-  },
   obrasSecao: {
     marginTop: 10,
     paddingTop: 6,
@@ -188,8 +183,10 @@ export function RelatorioAssiduidadeMensalPDFDocument({
   obras,
 }: RelatorioAssiduidadeMensalPDFDocumentProps) {
   const obrasActivas = obras.filter((obra) => !obra.anulado_em);
-  const diasFaltaRegistada = totais.diasComFaltaCompleta + totais.diasComFaltaIncompleta;
-  const diasComFalhaNoTrabalho = diasFaltaRegistada + totais.diasSemRegisto;
+  const faltasCompletasPorEsclarecer =
+    totais.diasComFaltaCompleta - totais.diasComFaltaCompletaRegistada;
+  const faltasIncompletasPorEsclarecer =
+    totais.diasComFaltaIncompleta - totais.diasComFaltaIncompletaRegistada;
 
   return (
     <Document>
@@ -272,17 +269,15 @@ export function RelatorioAssiduidadeMensalPDFDocument({
 
         <View style={styles.totaisFaltasBloco}>
           <Text style={styles.totaisFaltasTitulo}>Faltas e dias por esclarecer</Text>
-          {diasComFalhaNoTrabalho > 0 && (
-            <Text style={styles.totaisFaltasResumo}>
-              De {diasComFalhaNoTrabalho} dias com falha no trabalho, {diasFaltaRegistada} já foram
-              registados como falta pelo RH; os restantes {totais.diasSemRegisto} ainda não têm falta
-              associada.
-            </Text>
-          )}
           <View style={styles.totaisLinha}>
-            <Text style={styles.totalItem}>{totais.diasComFaltaCompleta} faltas completas</Text>
-            <Text style={styles.totalItem}>{totais.diasComFaltaIncompleta} faltas parciais</Text>
-            <Text style={styles.totalItem}>{totais.diasSemRegisto} dias sem registo</Text>
+            <Text style={styles.totalItem}>
+              {totais.diasComFaltaCompleta} faltas completas ({totais.diasComFaltaCompletaRegistada} já
+              registadas pelo RH, {faltasCompletasPorEsclarecer} por esclarecer)
+            </Text>
+            <Text style={styles.totalItem}>
+              {totais.diasComFaltaIncompleta} faltas incompletas ({totais.diasComFaltaIncompletaRegistada}{" "}
+              já registadas pelo RH, {faltasIncompletasPorEsclarecer} por esclarecer)
+            </Text>
           </View>
         </View>
 

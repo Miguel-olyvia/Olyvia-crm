@@ -118,7 +118,11 @@ describe("useRelatorioAssiduidadeMensal", () => {
       const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
       expect(dia1?.estado).toBe("sem_registo");
       expect(dia1?.realizadoMinutos).toBe(0);
-      expect(result.current.totais.diasSemRegisto).toBe(3);
+      // As 3 tercas passadas sao falta completa por zero picagem -- nenhuma
+      // tem linha em pessoas_faltas, por isso entram no total mas nao na
+      // parcela "registada".
+      expect(result.current.totais.diasComFaltaCompleta).toBe(3);
+      expect(result.current.totais.diasComFaltaCompletaRegistada).toBe(0);
     });
 
     it("um dia FUTURO com planeado e zero realizado nao entra em 'sem_registo' -- ainda pode vir a ter picagem", async () => {
@@ -171,7 +175,10 @@ describe("useRelatorioAssiduidadeMensal", () => {
       expect(dia1?.planeadoMinutos).toBe(240); // 06:00-08:00 + 17:00-19:00
       expect(dia1?.realizadoMinutos).toBe(120); // so o primeiro bloco
       expect(dia1?.estado).toBe("sem_registo");
-      expect(result.current.totais.diasSemRegisto).toBe(1);
+      // Picagem parcial sem falta registada -- falta incompleta por
+      // esclarecer, nao registada.
+      expect(result.current.totais.diasComFaltaIncompleta).toBe(1);
+      expect(result.current.totais.diasComFaltaIncompletaRegistada).toBe(0);
     });
 
     it("uma ausencia aprovada PARCIAL (fraccao_dia 0.5) num dia passado sem realizado nao vira 'sem_registo'", async () => {
@@ -603,6 +610,12 @@ describe("useRelatorioAssiduidadeMensal", () => {
   });
 
   it("falta completa (cobre todo o planeado) e falta incompleta (cobre so parte) contam-se em separado", async () => {
+    // Fixa "hoje" no primeiro dia do mes: sem isto, as outras tercas/quartas
+    // do mes (sem falta nenhuma) tambem ficam "sem_registo" e entram nos
+    // totais, poluindo a contagem que este teste quer isolar.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-01T12:00:00"));
+
     tabelas.pessoas_horario_planeado = [
       planeadoSemanal(2, "09:00", "18:00"), // terca, 2026-09-01, 540 min
       planeadoSemanal(3, "09:00", "18:00"), // quarta, 2026-09-02, 540 min
@@ -668,7 +681,145 @@ describe("useRelatorioAssiduidadeMensal", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.totais.diasComFaltaCompleta).toBe(1);
+    expect(result.current.totais.diasComFaltaCompletaRegistada).toBe(1);
     expect(result.current.totais.diasComFaltaIncompleta).toBe(1);
+    expect(result.current.totais.diasComFaltaIncompletaRegistada).toBe(1);
+
+    vi.useRealTimers();
+  });
+
+  describe("falta completa/incompleta juntam o registado e o sem_registo no mesmo total", () => {
+    beforeEach(() => {
+      // "sem_registo" so existe para dias PASSADOS -- fixa "hoje" logo depois
+      // do 2o dia de teste (2026-09-08) e ANTES da 3a terca do mes
+      // (2026-09-15), para essa nao entrar como "sem_registo" extra e poluir
+      // a contagem que este teste quer isolar a dois dias.
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-09-09T12:00:00"));
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("uma falta completa REGISTADA + um dia de falta completa SEM registo somam no mesmo total", async () => {
+      tabelas.pessoas_horario_planeado = [
+        planeadoSemanal(2, "09:00", "18:00"), // terca, 2026-09-01 e 2026-09-08 (540 min cada)
+      ];
+      tabelas.pessoas_faltas = [
+        {
+          id: "f1",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          data: "2026-09-01",
+          planeado_id: null,
+          vinculo_id: null,
+          local_id: null,
+          hora_inicio: "09:00",
+          hora_fim: "18:00",
+          minutos: 540,
+          motivo_codigo: "falta_total",
+          justificacao_estado: "sem_justificacao",
+          justificada: false,
+          remunerada: false,
+          desconta_saldo: false,
+          justificacao_decidida_por: null,
+          justificacao_decidida_em: null,
+          justificacao_motivo: null,
+          ausencia_dia_id: null,
+          corrige_falta_id: null,
+          correccao_motivo: null,
+          estado: "activa",
+          anulado_em: null,
+          anulacao_motivo: null,
+          created_at: "2026-09-01T09:00:00Z",
+        },
+      ];
+      // 2026-09-08: mesmo planeado, zero picagem, sem falta registada -- fica
+      // "sem_registo" (falta completa por tratar).
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const diaRegistado = result.current.dias.find((d) => d.iso === "2026-09-01");
+      const diaSemRegisto = result.current.dias.find((d) => d.iso === "2026-09-08");
+      expect(diaRegistado?.temFalta).toBe(true);
+      expect(diaSemRegisto?.estado).toBe("sem_registo");
+
+      expect(result.current.totais.diasComFaltaCompleta).toBe(2);
+      expect(result.current.totais.diasComFaltaCompletaRegistada).toBe(1);
+    });
+
+    it("uma falta incompleta REGISTADA + um dia de falta incompleta SEM registo somam no mesmo total", async () => {
+      tabelas.pessoas_horario_planeado = [
+        { ...planeadoSemanal(2, "09:00", "18:00"), id: "pl-2-a", data: "2026-09-01", ordem: 1 },
+        { ...planeadoSemanal(2, "09:00", "18:00"), id: "pl-2-b", data: "2026-09-08", ordem: 1 },
+      ];
+      tabelas.pessoas_horario_realizado = [
+        {
+          id: "r1",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          vinculo_id: null,
+          local_id: null,
+          planeado_id: null,
+          data: "2026-09-08",
+          hora_inicio: "09:00",
+          hora_fim: "13:00",
+          minutos: 240, // picagem parcial, sem falta registada -- "sem_registo"
+          origem: "picagem",
+          estado: "fechado",
+          validado_por: null,
+          validado_em: null,
+          motivo_rejeicao: null,
+          notas: null,
+          corrige_realizado_id: null,
+          correccao_motivo: null,
+          corrigido_por_pessoa_id: null,
+          deleted_at: null,
+        },
+      ];
+      tabelas.pessoas_faltas = [
+        {
+          id: "f2",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          data: "2026-09-01",
+          planeado_id: null,
+          vinculo_id: null,
+          local_id: null,
+          hora_inicio: "09:00",
+          hora_fim: "11:00",
+          minutos: 120, // falta incompleta registada (so 120 de 540)
+          motivo_codigo: "atraso",
+          justificacao_estado: "sem_justificacao",
+          justificada: false,
+          remunerada: false,
+          desconta_saldo: false,
+          justificacao_decidida_por: null,
+          justificacao_decidida_em: null,
+          justificacao_motivo: null,
+          ausencia_dia_id: null,
+          corrige_falta_id: null,
+          correccao_motivo: null,
+          estado: "activa",
+          anulado_em: null,
+          anulacao_motivo: null,
+          created_at: "2026-09-01T09:00:00Z",
+        },
+      ];
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const diaRegistado = result.current.dias.find((d) => d.iso === "2026-09-01");
+      const diaSemRegisto = result.current.dias.find((d) => d.iso === "2026-09-08");
+      expect(diaRegistado?.temFalta).toBe(true);
+      expect(diaSemRegisto?.estado).toBe("sem_registo");
+
+      expect(result.current.totais.diasComFaltaIncompleta).toBe(2);
+      expect(result.current.totais.diasComFaltaIncompletaRegistada).toBe(1);
+    });
   });
 
   it("trabalhar durante uma ausencia aprovada de dia inteiro nao entra nos totais de horas extra nem de dias trabalhados", async () => {

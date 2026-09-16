@@ -30,8 +30,9 @@ const totais: TotaisRelatorioMensal = {
   obraHoras: 0,
   diasFeriadoTrabalhados: 0,
   diasComFaltaCompleta: 0,
+  diasComFaltaCompletaRegistada: 0,
   diasComFaltaIncompleta: 0,
-  diasSemRegisto: 0,
+  diasComFaltaIncompletaRegistada: 0,
   horasExtraMinutos: 0,
   horasExtraNoturnasMinutos: 0,
 };

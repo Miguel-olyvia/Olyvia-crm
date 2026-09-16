@@ -210,13 +210,6 @@ export function RelatorioAssiduidadeMensalConteudo({
     [language, ano, mes],
   );
 
-  // "Sem registo" nao e um total independente: e o complemento das faltas
-  // registadas dentro do mesmo grupo de dias com falha no trabalho -- ver
-  // aviso no rodape (faltasResumo).
-  const diasFaltaRegistada =
-    relatorio.totais.diasComFaltaCompleta + relatorio.totais.diasComFaltaIncompleta;
-  const diasComFalhaNoTrabalho = diasFaltaRegistada + relatorio.totais.diasSemRegisto;
-
   const submeterObra = async () => {
     const horas = Number(horasObra.replace(",", "."));
     if (!dataObra || !Number.isFinite(horas) || horas <= 0 || !descricaoObra.trim()) {
@@ -441,33 +434,24 @@ export function RelatorioAssiduidadeMensalConteudo({
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               {t("hr.relatorioMensal.totais.faltasTitulo")}
             </p>
-            {diasComFalhaNoTrabalho > 0 && (
-              <p className="text-xs text-muted-foreground">
-                {t("hr.relatorioMensal.totais.faltasResumo", {
-                  total: String(diasComFalhaNoTrabalho),
-                  registadas: String(diasFaltaRegistada),
-                  porEsclarecer: String(relatorio.totais.diasSemRegisto),
-                })}
-              </p>
-            )}
             <div className="flex flex-wrap gap-x-6 gap-y-1 font-medium">
               <span>
                 {t("hr.relatorioMensal.totais.faltaCompleta", {
                   dias: String(relatorio.totais.diasComFaltaCompleta),
+                  registadas: String(relatorio.totais.diasComFaltaCompletaRegistada),
+                  porEsclarecer: String(
+                    relatorio.totais.diasComFaltaCompleta - relatorio.totais.diasComFaltaCompletaRegistada,
+                  ),
                 })}
               </span>
               <span>
                 {t("hr.relatorioMensal.totais.faltaIncompleta", {
                   dias: String(relatorio.totais.diasComFaltaIncompleta),
-                })}
-              </span>
-              <span
-                className={
-                  relatorio.totais.diasSemRegisto > 0 ? "text-rose-700 dark:text-rose-300" : undefined
-                }
-              >
-                {t("hr.relatorioMensal.totais.diasSemRegisto", {
-                  dias: String(relatorio.totais.diasSemRegisto),
+                  registadas: String(relatorio.totais.diasComFaltaIncompletaRegistada),
+                  porEsclarecer: String(
+                    relatorio.totais.diasComFaltaIncompleta -
+                      relatorio.totais.diasComFaltaIncompletaRegistada,
+                  ),
                 })}
               </span>
             </div>

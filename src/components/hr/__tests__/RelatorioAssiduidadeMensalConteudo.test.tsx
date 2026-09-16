@@ -44,15 +44,13 @@ vi.mock("@/hooks/useTranslation", () => ({
         "hr.relatorioMensal.totais.horasExtraNoturnas": `Horas extra noturnas: ${valores?.duracao ?? ""}`,
         "hr.relatorioMensal.horasExtraNoturnasNota": `(${valores?.duracao ?? ""} noturnas)`,
         "hr.relatorioMensal.totais.diasFeriadoTrabalhados": `${valores?.dias ?? ""} dias de feriado trabalhados`,
-        "hr.relatorioMensal.totais.faltaCompleta": `${valores?.dias ?? ""} faltas completas`,
-        "hr.relatorioMensal.totais.faltaIncompleta": `${valores?.dias ?? ""} faltas incompletas`,
-        "hr.relatorioMensal.totais.diasSemRegisto": `${valores?.dias ?? ""} dias sem registo`,
-        "hr.relatorioMensal.totais.faltasTitulo": "Faltas e dias por esclarecer",
-        "hr.relatorioMensal.totais.faltasResumo": `De ${valores?.total ?? ""} dias com falha no trabalho, ${
+        "hr.relatorioMensal.totais.faltaCompleta": `${valores?.dias ?? ""} faltas completas (${
           valores?.registadas ?? ""
-        } já foram registados como falta pelo RH; os restantes ${
-          valores?.porEsclarecer ?? ""
-        } ainda não têm falta associada.`,
+        } já registadas pelo RH, ${valores?.porEsclarecer ?? ""} por esclarecer)`,
+        "hr.relatorioMensal.totais.faltaIncompleta": `${valores?.dias ?? ""} faltas incompletas (${
+          valores?.registadas ?? ""
+        } já registadas pelo RH, ${valores?.porEsclarecer ?? ""} por esclarecer)`,
+        "hr.relatorioMensal.totais.faltasTitulo": "Faltas e dias por esclarecer",
       };
       return chaves[chave] ?? chave;
     },
@@ -114,8 +112,9 @@ beforeEach(() => {
       obraHoras: 0,
       diasFeriadoTrabalhados: 0,
       diasComFaltaCompleta: 0,
+      diasComFaltaCompletaRegistada: 0,
       diasComFaltaIncompleta: 0,
-      diasSemRegisto: 0,
+      diasComFaltaIncompletaRegistada: 0,
       horasExtraMinutos: 0,
       horasExtraNoturnasMinutos: 0,
     },
@@ -568,10 +567,11 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
     expect(linha?.className).toMatch(/bg-rose/);
   });
 
-  it("o rodape mostra o total de dias sem registo", () => {
+  it("o rodape junta as faltas completas sem registo ao total, distinguindo quantas ja foram tratadas", () => {
     relatorioMock.totais = {
       ...relatorioMock.totais,
-      diasSemRegisto: 4,
+      diasComFaltaCompleta: 4,
+      diasComFaltaCompletaRegistada: 1,
     };
 
     render(
@@ -584,7 +584,9 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
       />,
     );
 
-    expect(screen.getByText("4 dias sem registo")).toBeInTheDocument();
+    expect(
+      screen.getByText("4 faltas completas (1 já registadas pelo RH, 3 por esclarecer)"),
+    ).toBeInTheDocument();
   });
 
   it("um dia 'normal' com horas extra fica destacado a verde", () => {
@@ -670,10 +672,11 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
     expect(linha?.className ?? "").not.toMatch(/bg-green/);
   });
 
-  it("com dias sem registo, o rodape mostra a legenda a explicar a relacao com faltas", () => {
+  it("com faltas incompletas so por sem_registo, o rodape mostra o total e zero registadas", () => {
     relatorioMock.totais = {
       ...relatorioMock.totais,
-      diasSemRegisto: 6,
+      diasComFaltaIncompleta: 6,
+      diasComFaltaIncompletaRegistada: 0,
     };
 
     render(
@@ -686,16 +689,13 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
       />,
     );
 
-    expect(screen.getByText("6 dias sem registo")).toBeInTheDocument();
     expect(screen.getByText("Faltas e dias por esclarecer")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "De 6 dias com falha no trabalho, 0 já foram registados como falta pelo RH; os restantes 6 ainda não têm falta associada.",
-      ),
+      screen.getByText("6 faltas incompletas (0 já registadas pelo RH, 6 por esclarecer)"),
     ).toBeInTheDocument();
   });
 
-  it("sem dias sem registo nem faltas registadas, a frase de ligacao nao aparece", () => {
+  it("sem faltas nenhumas, o rodape mostra os totais a zero, sem esconder a seccao", () => {
     render(
       <RelatorioAssiduidadeMensalConteudo
         pessoaId="pessoa-1"
@@ -708,10 +708,11 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
 
     expect(screen.getByText("Faltas e dias por esclarecer")).toBeInTheDocument();
     expect(
-      screen.queryByText(
-        /De \d+ dias com falha no trabalho/,
-      ),
-    ).not.toBeInTheDocument();
+      screen.getByText("0 faltas completas (0 já registadas pelo RH, 0 por esclarecer)"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("0 faltas incompletas (0 já registadas pelo RH, 0 por esclarecer)"),
+    ).toBeInTheDocument();
   });
 
   it("um feriado ou descanso sem trabalho nenhum continua escondido, sem destaque", () => {

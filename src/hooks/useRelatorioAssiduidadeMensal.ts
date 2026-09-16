@@ -157,18 +157,17 @@ export interface TotaisRelatorioMensal {
   /** Dias de feriado em que a pessoa trabalhou mesmo assim (realizado > 0). */
   diasFeriadoTrabalhados: number;
   /**
-   * Falta completa: a falta cobre todo o planeado do dia (so faz sentido
-   * quando havia planeado -- um dia sem horario nenhum nao tem falta a medir).
-   * Falta incompleta: cobre uma parte, a pessoa trabalhou o resto.
+   * Falta completa: TODOS os dias que sao falta completa -- zero picagem num
+   * dia planeado, registada pelo RH (`pessoas_faltas`) ou nao. "Sem registo"
+   * nao e uma terceira categoria: e a mesma falta, so que ainda por tratar.
+   * `diasComFaltaCompletaRegistada` diz quantos, DENTRO deste total, ja tem
+   * essa linha -- e so um atributo da falta, nunca decide se ela existe.
    */
   diasComFaltaCompleta: number;
+  diasComFaltaCompletaRegistada: number;
+  /** Idem, para a falta incompleta (picagem parcial, nao cobre o planeado todo). */
   diasComFaltaIncompleta: number;
-  /**
-   * Dias com horario planeado e realizado abaixo do planeado (zero ou so
-   * parte), sem falta registada e sem ausencia aprovada -- um buraco por
-   * esclarecer, nao um dia "normal".
-   */
-  diasSemRegisto: number;
+  diasComFaltaIncompletaRegistada: number;
   horasExtraMinutos: number;
   horasExtraNoturnasMinutos: number;
 }
@@ -523,10 +522,20 @@ export function useRelatorioAssiduidadeMensal(
         (acc, dia) => {
           // Falta completa so faz sentido com planeado > 0: sem horario nesse
           // dia nao ha "todo o planeado" para a falta cobrir.
-          const faltaCompleta =
+          const faltaCompletaRegistada =
             dia.temFalta && dia.planeadoMinutos > 0 && dia.minutosEmFalta >= dia.planeadoMinutos;
-          const faltaIncompleta =
-            dia.temFalta && dia.planeadoMinutos > 0 && dia.minutosEmFalta > 0 && !faltaCompleta;
+          const faltaIncompletaRegistada =
+            dia.temFalta &&
+            dia.planeadoMinutos > 0 &&
+            dia.minutosEmFalta > 0 &&
+            !faltaCompletaRegistada;
+
+          // "sem_registo" e a MESMA falta, so que o RH ainda nao criou a linha
+          // em pessoas_faltas -- entra no mesmo total, distinguida so por
+          // realizadoMinutos (zero = completa, >0 = incompleta), nunca como
+          // categoria propria.
+          const faltaCompletaSemRegisto = dia.estado === "sem_registo" && dia.realizadoMinutos === 0;
+          const faltaIncompletaSemRegisto = dia.estado === "sem_registo" && dia.realizadoMinutos > 0;
 
           // Uma ausencia aprovada de dia inteiro fica sempre escondida na UI
           // (trabalhouForaDoNormal so revela feriado/descanso, nunca
@@ -543,9 +552,14 @@ export function useRelatorioAssiduidadeMensal(
             obraHoras: acc.obraHoras + dia.obraHoras,
             diasFeriadoTrabalhados:
               acc.diasFeriadoTrabalhados + (dia.estado === "feriado" && dia.realizadoMinutos > 0 ? 1 : 0),
-            diasComFaltaCompleta: acc.diasComFaltaCompleta + (faltaCompleta ? 1 : 0),
-            diasComFaltaIncompleta: acc.diasComFaltaIncompleta + (faltaIncompleta ? 1 : 0),
-            diasSemRegisto: acc.diasSemRegisto + (dia.estado === "sem_registo" ? 1 : 0),
+            diasComFaltaCompleta:
+              acc.diasComFaltaCompleta + (faltaCompletaRegistada || faltaCompletaSemRegisto ? 1 : 0),
+            diasComFaltaCompletaRegistada:
+              acc.diasComFaltaCompletaRegistada + (faltaCompletaRegistada ? 1 : 0),
+            diasComFaltaIncompleta:
+              acc.diasComFaltaIncompleta + (faltaIncompletaRegistada || faltaIncompletaSemRegisto ? 1 : 0),
+            diasComFaltaIncompletaRegistada:
+              acc.diasComFaltaIncompletaRegistada + (faltaIncompletaRegistada ? 1 : 0),
             horasExtraMinutos: acc.horasExtraMinutos + (contaParaTotais ? dia.horasExtraMinutos : 0),
             horasExtraNoturnasMinutos:
               acc.horasExtraNoturnasMinutos + (contaParaTotais ? dia.horasExtraNoturnasMinutos : 0),
@@ -558,8 +572,9 @@ export function useRelatorioAssiduidadeMensal(
           obraHoras: 0,
           diasFeriadoTrabalhados: 0,
           diasComFaltaCompleta: 0,
+          diasComFaltaCompletaRegistada: 0,
           diasComFaltaIncompleta: 0,
-          diasSemRegisto: 0,
+          diasComFaltaIncompletaRegistada: 0,
           horasExtraMinutos: 0,
           horasExtraNoturnasMinutos: 0,
         },
