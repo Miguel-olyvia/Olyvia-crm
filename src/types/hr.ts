@@ -527,6 +527,41 @@ export interface PessoaRetribuicao {
 }
 
 /**
+ * `hr_codigos_processamento` (20261201190000). Catalogo de codigos de
+ * processamento salarial. `organization_id === null` = codigo TRANSVERSAL,
+ * partilhado por todo o grupo (100, 200); preenchido = codigo PROPRIO dessa
+ * organizacao (ex.: recibos verdes, horas nocturnas). SO catalogo/config --
+ * sem calculo nenhum ligado a assiduidade nesta versao.
+ */
+export interface HrCodigoProcessamento {
+  id: string;
+  organization_id: string | null;
+  codigo: string;
+  nome: string;
+  descricao: string | null;
+  activo: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * `hr_regras_subsidio_alimentacao` (20261201200000). A REGRA de elegibilidade
+ * do subsidio de alimentacao da organizacao -- distinta de
+ * `PessoaRetribuicao.subsidio_alimentacao`, que e a EXCEPCAO por pessoa.
+ * Uma linha por organizacao (nunca `organization_id` nulo, ao contrario de
+ * `HrCodigoProcessamento`).
+ */
+export interface HrRegraSubsidioAlimentacao {
+  id: string;
+  organization_id: string;
+  valor_diario: number;
+  modo: SubsidioAlimentacaoModo;
+  minutos_minimos_dia: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * Dados bancarios SEM o numero da conta em claro.
  *
  * Na base nao existe coluna com o numero: existe `conta_secret_id` (Vault) e a
