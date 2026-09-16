@@ -215,10 +215,12 @@ export const menuSections: MenuSection[] = [
       // desde 20261120120000 e ja esta atribuida ao super_admin
       // (20261120180000) -- nenhuma permissao nova para este ecra.
       { to: "/rh/centros", icon: MapPin, labelKey: "sidebar.hrCentros", permission: "hr.locais.view" },
-      // Configuracao dos obrigatorios de admissao por organizacao
-      // (20261201050000). Permissao nova, hr.admissao.obrigatorios.gerir --
-      // NENHUM papel a recebe por omissao.
-      { to: "/rh/admissao/configuracao", icon: Settings, labelKey: "sidebar.hrAdmissaoConfig", permission: "hr.admissao.obrigatorios.gerir" },
+      // "Campos de admissao" (20261201050000) deixou de ter item proprio
+      // aqui -- passou a um botao dentro do ecra de Pessoas (Pessoas.tsx),
+      // atras da mesma permissao. A rota `/rh/admissao/configuracao`
+      // continua a existir e protegida (App.tsx); so o link na barra lateral
+      // saiu. Fica em `paths`/`permissions` acima para o grupo RH continuar
+      // realcado para quem aterra la.
       // Modelos de documento (contrato/adenda/declaracao/recibo/outro) usados
       // para emitir a um pessoa (20261123020000). Permissao ja existe, so
       // atribuida a super_admin -- ver hrDb/useModelosDocumentosRH.

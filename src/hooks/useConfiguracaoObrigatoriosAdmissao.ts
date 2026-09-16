@@ -23,6 +23,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 
+/**
+ * Erros do Supabase (RPC/PostgREST) chegam como objecto `{ message, code, ... }`,
+ * nunca `instanceof Error`. `String(erro)` nesse caso da so "[object Object]" --
+ * por isso vai-se buscar `message` explicitamente antes de recorrer a String().
+ */
+function mensagemDeErro(erro: unknown): string {
+  if (erro instanceof Error) return erro.message;
+  if (typeof erro === "object" && erro !== null && "message" in erro) {
+    const mensagem = (erro as { message: unknown }).message;
+    if (typeof mensagem === "string") return mensagem;
+  }
+  return String(erro);
+}
+
 export type ObrigatoriosOverride = Record<string, boolean>;
 
 interface SettingsRow {
@@ -63,12 +77,23 @@ export function useConfiguracaoObrigatoriosAdmissao() {
   // A lista dos 29 codigos, JA cruzada com o override -- a mesma funcao que
   // `hr_admissao_pendencias` usa. Evita duplicar a lista de codigos aqui: a
   // autoridade continua a ser a base.
-  const { data: campos, isLoading: camposLoading } = useQuery({
+  //
+  // Chama o WRAPPER (`rpc_hr_admissao_campos_obrigatorios_org`, 20261201130000),
+  // nao `hr_admissao_campos_obrigatorios_org` directamente -- essa e SO
+  // service_role desde 20261201050000 (sem gate proprio, um GRANT a
+  // authenticated deixaria ver a configuracao de QUALQUER organizacao). O
+  // wrapper confirma `hr.admissao.obrigatorios.gerir` NESTA organizacao antes
+  // de devolver seja o que for.
+  const {
+    data: campos,
+    isLoading: camposLoading,
+    error: camposErro,
+  } = useQuery({
     queryKey: camposQueryKey,
     queryFn: async (): Promise<CampoObrigatorioOrg[]> => {
       if (!orgId) throw new Error("Sem organizacao activa");
       const { data: linhas, error } = await (supabase as any).rpc(
-        "hr_admissao_campos_obrigatorios_org",
+        "rpc_hr_admissao_campos_obrigatorios_org",
         { p_organization_id: orgId },
       );
       if (error) throw error;
@@ -112,11 +137,14 @@ export function useConfiguracaoObrigatoriosAdmissao() {
     await saveMutation.mutateAsync(novoOverride);
   };
 
+  const erro: string | null = camposErro ? mensagemDeErro(camposErro) : null;
+
   return {
     campos: campos ?? [],
     override,
     isLoading: isLoading || camposLoading,
     isSaving: saveMutation.isPending,
     definirObrigatorio,
+    erro,
   };
 }

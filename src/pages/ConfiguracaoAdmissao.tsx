@@ -72,7 +72,7 @@ export default function ConfiguracaoAdmissao() {
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const podeGerir = hasPermission("hr.admissao.obrigatorios.gerir");
 
-  const { campos, isLoading, isSaving, definirObrigatorio } = useConfiguracaoObrigatoriosAdmissao();
+  const { campos, isLoading, isSaving, definirObrigatorio, erro } = useConfiguracaoObrigatoriosAdmissao();
 
   // Pagina 1 (a pessoa preenche antes de submeter) primeiro, depois o que o
   // RH preenche na retaguarda -- a ordem em que a folha de cadastro os pede.
@@ -104,6 +104,12 @@ export default function ConfiguracaoAdmissao() {
         <h1 className="text-2xl font-bold">{t("hr.admissao.configTitulo")}</h1>
         <p className="text-muted-foreground">{t("hr.admissao.configSubtitulo")}</p>
       </div>
+
+      {erro && (
+        <Card className="border-destructive/40">
+          <CardContent className="py-4 text-sm text-destructive">{erro}</CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="pb-3">

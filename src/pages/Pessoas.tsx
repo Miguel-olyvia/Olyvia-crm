@@ -42,7 +42,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { IdCard, Network, Plus, Search, UserMinus, UserPlus, Users } from "lucide-react";
+import { IdCard, Network, Plus, Search, Settings, UserMinus, UserPlus, Users } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PessoaFormDialog } from "@/components/hr/PessoaFormDialog";
 import { PessoasFuncoesTab } from "@/components/hr/PessoasFuncoesTab";
@@ -80,6 +80,12 @@ export default function Pessoas() {
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const canCreate = hasPermission("hr.pessoas.create");
   const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
+  // Campos obrigatorios de admissao (20261201050000): deixou de ter item
+  // proprio na barra lateral e passou a viver aqui, atras da mesma
+  // permissao que ja protegia a rota `/rh/admissao/configuracao`. Navega
+  // para a rota em vez de abrir em dialog -- mantem o link partilhavel e
+  // nao duplica o ecra existente.
+  const podeGerirAdmissaoObrigatorios = hasPermission("hr.admissao.obrigatorios.gerir");
 
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
   // Lista so para leitura (nomeDoLocal, abaixo): uma pessoa cujo local actual
@@ -136,12 +142,24 @@ export default function Pessoas() {
           <h1 className="text-2xl font-bold">{t("hr.pessoas.title")}</h1>
           <p className="text-muted-foreground">{t("hr.pessoas.subtitle")}</p>
         </div>
-        {canCreate && (
-          <Button onClick={() => setDialogoAberto(true)} className="gap-2">
-            <Plus className="h-4 w-4" />
-            {t("hr.pessoas.new")}
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {podeGerirAdmissaoObrigatorios && (
+            <Button
+              variant="outline"
+              onClick={() => navigate("/rh/admissao/configuracao")}
+              className="gap-2"
+            >
+              <Settings className="h-4 w-4" />
+              {t("sidebar.hrAdmissaoConfig")}
+            </Button>
+          )}
+          {canCreate && (
+            <Button onClick={() => setDialogoAberto(true)} className="gap-2">
+              <Plus className="h-4 w-4" />
+              {t("hr.pessoas.new")}
+            </Button>
+          )}
+        </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
