@@ -86,12 +86,6 @@ export default function Pessoas() {
   // para a rota em vez de abrir em dialog -- mantem o link partilhavel e
   // nao duplica o ecra existente.
   const podeGerirAdmissaoObrigatorios = hasPermission("hr.admissao.obrigatorios.gerir");
-  // Codigos de processamento e regra do subsidio de alimentacao
-  // (20261201180000..20261201200000): mesmo padrao de navegacao -- botao
-  // aqui, atras de QUALQUER UMA das duas permissoes de leitura do dominio
-  // (o ecra decide os separadores que mostra a cada uma).
-  const podeVerVencimento =
-    hasPermission("hr.vencimento.codigos.view") || hasPermission("hr.vencimento.subsidio.view");
 
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
   // Lista so para leitura (nomeDoLocal, abaixo): uma pessoa cujo local actual
@@ -157,16 +151,6 @@ export default function Pessoas() {
             >
               <Settings className="h-4 w-4" />
               {t("sidebar.hrAdmissaoConfig")}
-            </Button>
-          )}
-          {podeVerVencimento && (
-            <Button
-              variant="outline"
-              onClick={() => navigate("/rh/vencimento/configuracao")}
-              className="gap-2"
-            >
-              <Settings className="h-4 w-4" />
-              {t("sidebar.hrVencimentoConfig")}
             </Button>
           )}
           {canCreate && (
