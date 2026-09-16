@@ -1220,7 +1220,10 @@ serve(async (req) => {
           // fora os campos internos do cabeçalho (assigned_to, invoice_*,
           // client_contract_id, search_text, ...).
           .select(
-            "id, sale_number, title, description, status, subtotal, total, iva_rate, currency, accepted_at, proforma_number, proforma_issued_at, organization_id, entity_id, client_id",
+            // client_notes entra porque o documento mostra-o (ProformaPDFDocument);
+            // sem ele a proforma do portal sairia diferente da do CRM, para a
+            // mesma venda. `notes` continua de fora — é o campo interno.
+            "id, sale_number, title, description, status, client_notes, subtotal, total, iva_rate, currency, accepted_at, proforma_number, proforma_issued_at, organization_id, entity_id, client_id",
           )
           .eq("id", direct_sale_id)
           .maybeSingle();

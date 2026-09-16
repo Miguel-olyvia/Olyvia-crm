@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Loader2, Receipt, ShieldCheck, Smartphone, XCircle } from "lucide-react";
+import { ArrowLeft, Download, Loader2, Receipt, ShieldCheck, Smartphone, XCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { parseEdgeFunctionPayload } from "@/utils/edgeFunctionResponse";
+import { generateProformaPdfBlob, downloadBlob, type ProformaPdfPrefetch } from "@/utils/generateProformaPdfBlob";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,7 +35,8 @@ import { pt } from "date-fns/locale";
 //   - não há seleção de orçamentos (a venda direta não os tem);
 //   - não há "tenho dúvidas" nesta fase — o backend expõe apenas
 //     accept_direct_sale e reject_direct_sale;
-//   - não há PDF/proforma nesta fase (Fase 4).
+//   - o PDF só existe depois de aceite (Fase 4b): é a proforma, e só há
+//     proforma quando o trigger da BD lhe atribui um número.
 //
 // A rejeição segue o molde das propostas (ClientPortalProposalDetail): motivo
 // de uma lista fixa + comentário opcional, e SEM OTP — tal como o
@@ -112,6 +114,51 @@ interface DirectSaleLine {
   ordem: number | null;
 }
 
+/**
+ * Resposta de client-portal-action#get_direct_sale_pdf_data.
+ *
+ * Declarada à parte de DirectSaleHeader/DirectSaleLine de propósito: é outra
+ * ação, com outro conjunto de colunas (traz `proforma_*`, `company` e `client`,
+ * não traz `sent_at`/`valid_until`/`rejected_at`). Os campos numéricos vêm de
+ * colunas `numeric`, que o PostgREST tanto pode serializar como número como
+ * como string — daí o `number | string | null` e a coerção explícita.
+ */
+interface ProformaPdfPayload {
+  direct_sale: {
+    sale_number: string | null;
+    title: string | null;
+    client_notes: string | null;
+    currency: string | null;
+    subtotal: number | string | null;
+    total: number | string | null;
+    iva_rate: number | string | null;
+    proforma_number: string | null;
+    proforma_issued_at: string | null;
+  } | null;
+  lines: Array<{
+    id: string;
+    descricao_snapshot: string | null;
+    qt: number | string | null;
+    unidade: string | null;
+    retail_price_unit: number | string | null;
+    iva_percent: number | string | null;
+    total_sem_iva: number | string | null;
+    total_com_iva: number | string | null;
+    total_com_desconto: number | string | null;
+  }> | null;
+  company: { name: string | null; vat: string | null; address: string | null; logo_url: string | null } | null;
+  client: { name: string | null; vat: string | null; address: string | null } | null;
+  error?: string;
+  message?: string;
+}
+
+/** Coerção segura para o gerador do PDF: nunca transformar um null em 0. */
+function toNumberOrNull(value: number | string | null | undefined): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function formatDate(value: string | null): string {
   if (!value) return "—";
   return format(new Date(value), "d MMM yyyy", { locale: pt });
@@ -131,6 +178,10 @@ const ClientPortalDirectSaleDetail = () => {
   const [lines, setLines] = useState<DirectSaleLine[]>([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  // Estado próprio do PDF: gerar a proforma demora (edge function + render do
+  // @react-pdf), e não deve bloquear nem ser bloqueado pelas ações de aceitar/
+  // rejeitar, que vivem noutro painel.
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   // Rejeição — mesmo desenho das propostas (motivo + comentário opcional)
   const [showReject, setShowReject] = useState(false);
@@ -373,6 +424,100 @@ const ClientPortalDirectSaleDetail = () => {
     }
   }
 
+  async function handleDownloadProforma() {
+    if (!id) return;
+    setPdfLoading(true);
+    try {
+      const { data, error: invokeError } = await supabase.functions.invoke("client-portal-action", {
+        body: { action: "get_direct_sale_pdf_data", direct_sale_id: id },
+      });
+      // Mesmo unwrap do acceptAfterOtp/handleRejectSale. Aqui é o que faz a
+      // diferença entre "Proforma ainda não emitida" (o 404 real, acionável) e
+      // o "Edge Function returned a non-2xx status code" que o supabase-js põe
+      // em `error.message` e que não diz nada ao cliente.
+      if (invokeError) {
+        let friendly = invokeError.message;
+        try {
+          const ctx: any = (invokeError as any).context;
+          if (ctx && typeof ctx.json === "function") {
+            const body = await ctx.json();
+            if (body?.message || body?.error) friendly = body.message || body.error;
+          } else if (ctx?.body) {
+            const body = typeof ctx.body === "string" ? JSON.parse(ctx.body) : ctx.body;
+            if (body?.message || body?.error) friendly = body.message || body.error;
+          }
+        } catch {}
+        throw new Error(friendly);
+      }
+
+      const payload = parseEdgeFunctionPayload<ProformaPdfPayload>(data);
+      if (payload?.error) throw new Error(payload.message || payload.error);
+      const saleData = payload?.direct_sale;
+      if (!saleData) throw new Error("Não foi possível obter os dados da proforma.");
+
+      // MODO PREFETCHED, OBRIGATÓRIO NO PORTAL. Sem isto o gerador vai ele
+      // próprio ao Supabase buscar venda, linhas, organização e cliente — e a
+      // RLS do portal bloqueia tudo isso em silêncio, produzindo uma proforma
+      // vazia (ver ProformaPdfPrefetch em generateProformaPdfBlob.ts). Tudo o
+      // que o documento mostra tem de vir da edge function, incluindo o
+      // logótipo, que já chega em data URI base64.
+      const prefetched: ProformaPdfPrefetch = {
+        sale: {
+          sale_number: saleData.sale_number ?? null,
+          proforma_number: saleData.proforma_number ?? null,
+          proforma_issued_at: saleData.proforma_issued_at ?? null,
+          title: saleData.title ?? null,
+          client_notes: saleData.client_notes ?? null,
+          currency: saleData.currency ?? null,
+          subtotal: toNumberOrNull(saleData.subtotal),
+          total: toNumberOrNull(saleData.total),
+          iva_rate: toNumberOrNull(saleData.iva_rate),
+        },
+        // Já vêm só as visíveis ao cliente e já ordenadas por `ordem` — não se
+        // reordena nem se filtra nada aqui.
+        lines: (payload?.lines ?? []).map(line => ({
+          id: line.id,
+          descricao_snapshot: line.descricao_snapshot ?? null,
+          qt: toNumberOrNull(line.qt),
+          unidade: line.unidade ?? null,
+          retail_price_unit: toNumberOrNull(line.retail_price_unit),
+          iva_percent: toNumberOrNull(line.iva_percent),
+          total_sem_iva: toNumberOrNull(line.total_sem_iva),
+          total_com_iva: toNumberOrNull(line.total_com_iva),
+          total_com_desconto: toNumberOrNull(line.total_com_desconto),
+        })),
+        // `email`/`phone` não vêm no payload do portal (a edge function só
+        // envia name/vat/address/logo_url): explicitamente null, para não
+        // parecer um esquecimento.
+        company: {
+          name: payload?.company?.name ?? null,
+          vat: payload?.company?.vat ?? null,
+          address: payload?.company?.address ?? null,
+          email: null,
+          phone: null,
+          logo_url: payload?.company?.logo_url ?? null,
+        },
+        client: {
+          name: payload?.client?.name ?? null,
+          vat: payload?.client?.vat ?? null,
+          address: payload?.client?.address ?? null,
+        },
+      };
+
+      const { blob, fileName } = await generateProformaPdfBlob(id, prefetched);
+      downloadBlob(blob, fileName);
+    } catch (err: any) {
+      captureFlowError(err, FLOW);
+      toast({
+        title: "Erro ao gerar proforma",
+        description: err?.message || "Não foi possível gerar o PDF da proforma.",
+        variant: "destructive",
+      });
+    } finally {
+      setPdfLoading(false);
+    }
+  }
+
   if (loading) {
     return (
       <ClientPortalLayout>
@@ -554,6 +699,31 @@ const ClientPortalDirectSaleDetail = () => {
               <p className="text-xs text-muted-foreground">
                 A aceitação foi confirmada por código SMS. Entraremos em contacto brevemente.
               </p>
+              {/* Sem número não há documento: o proforma_number é escrito pelo
+                  trigger da BD ao aceitar, e a edge function devolve 404 até lá.
+                  Esconder o botão evita oferecer um download que não existe. */}
+              {sale.proforma_number && (
+                <div className="pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={handleDownloadProforma}
+                    disabled={pdfLoading}
+                  >
+                    {pdfLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}
+                    {pdfLoading ? "A gerar proforma..." : "Descarregar proforma"}
+                  </Button>
+                  <p className="pt-2 text-xs text-muted-foreground">
+                    <span className="font-mono font-medium text-foreground">{sale.proforma_number}</span>
+                    {sale.proforma_issued_at ? ` · emitida em ${formatDate(sale.proforma_issued_at)}` : ""}
+                  </p>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
