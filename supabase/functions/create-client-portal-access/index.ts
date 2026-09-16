@@ -6,7 +6,7 @@ import { validateOrgScope, checkUserPermission } from "../_shared/auth.ts";
 import { withRetryResult } from "../_shared/retry.ts";
 
 const requestSchema = z.object({
-  document_type: z.enum(["proposal", "contract", "quote"]),
+  document_type: z.enum(["proposal", "contract", "quote", "direct_sale"]),
   document_id: z.string(),
   organization_id: z.string(),
   login_url: z.string().optional(),
@@ -148,11 +148,17 @@ serve(async (req: Request) => {
     // Contracts use client_contracts.send_signature (NOT client_contracts.edit — a role can
     // be allowed to edit a contract's fields without being allowed to send it anywhere,
     // e.g. Sales Technician; the roles screen exposes these as two separate checkboxes).
+    // Direct sales live outside the client_contracts permission family, so they gate on
+    // their own direct_sales.edit (created in 20261130230000_venda_direta_base.sql).
+    const sendPermissionByType: Record<typeof document_type, string> = {
+      contract: "client_contracts.send_signature",
+      proposal: "client_contracts.edit",
+      quote: "client_contracts.edit",
+      direct_sale: "direct_sales.edit",
+    };
     const hasPermission =
       await checkUserPermission(supabase, callerAnew.id, "portal.manage", organization_id) ||
-      (document_type === "contract"
-        ? await checkUserPermission(supabase, callerAnew.id, "client_contracts.send_signature", organization_id)
-        : await checkUserPermission(supabase, callerAnew.id, "client_contracts.edit", organization_id));
+      await checkUserPermission(supabase, callerAnew.id, sendPermissionByType[document_type], organization_id);
     if (!hasPermission) {
       return new Response(
         JSON.stringify({ error: "Sem permissão para gerir acessos ao portal de clientes" }),
@@ -253,7 +259,7 @@ serve(async (req: Request) => {
           entityId = client?.entity_id || null;
         }
       }
-    } else {
+    } else if (document_type === "contract") {
       const { data: contract } = await supabase
         .from("client_contracts")
         .select("id, contract_number, entity_id, client_id")
@@ -271,6 +277,30 @@ serve(async (req: Request) => {
         const { data: client } = await supabase.from("anew_clients").select("entity_id").eq("id", contract.client_id).maybeSingle();
         entityId = client?.entity_id || null;
       }
+    } else if (document_type === "direct_sale") {
+      const { data: sale } = await supabase
+        .from("direct_sales")
+        .select("id, sale_number, title, entity_id, client_id")
+        .eq("id", document_id)
+        .eq("organization_id", organization_id)
+        .maybeSingle();
+
+      if (!sale) {
+        return new Response(JSON.stringify({ error: "Venda direta não encontrada" }), { status: 404, headers: corsHeaders });
+      }
+      documentTitle = sale.title || sale.sale_number || "Venda Direta";
+      entityId = sale.entity_id || null;
+
+      // fallback to client_id (anew_clients). direct_sales has NO deal_id
+      // (20261130230000_venda_direta_base.sql) — there is no deal fallback here.
+      if (!entityId && sale.client_id) {
+        const { data: client } = await supabase.from("anew_clients").select("entity_id").eq("id", sale.client_id).maybeSingle();
+        entityId = client?.entity_id || null;
+      }
+    } else {
+      // Unreachable for the four values allowed by requestSchema — kept so a
+      // future enum entry fails loudly instead of silently reading nothing.
+      return new Response(JSON.stringify({ error: "Tipo de documento não suportado" }), { status: 400, headers: corsHeaders });
     }
 
     if (!entityId) {
@@ -647,7 +677,10 @@ serve(async (req: Request) => {
       portalUserPayload.proposal_id = document_id;
     } else if (document_type === "quote") {
       portalUserPayload.quote_id = document_id;
-    } else {
+    } else if (document_type === "direct_sale") {
+      portalUserPayload.direct_sale_id = document_id;
+    } else if (document_type === "contract") {
+      // explicit: a new document type must never fall through into contract_id
       portalUserPayload.contract_id = document_id;
     }
 
@@ -671,11 +704,14 @@ serve(async (req: Request) => {
     // Upsert portal user
     let portalUserId: string | null = null;
     if (existingPortalUser) {
-      const docUpdate = document_type === "proposal"
-        ? { proposal_id: document_id }
-        : document_type === "quote"
-          ? { quote_id: document_id }
-          : { contract_id: document_id };
+      // explicit per type: a new document type must never fall through into contract_id
+      const docUpdateByType: Record<typeof document_type, Record<string, string>> = {
+        proposal: { proposal_id: document_id },
+        quote: { quote_id: document_id },
+        contract: { contract_id: document_id },
+        direct_sale: { direct_sale_id: document_id },
+      };
+      const docUpdate = docUpdateByType[document_type];
 
       const portalUpdatePayload: any = {
         portal_status: "sent",
@@ -702,7 +738,7 @@ serve(async (req: Request) => {
     }
 
     // Publish document visibility for portal (required by RLS portal_user_can_see_document)
-    async function publishPortalDocument(docType: "proposal" | "quote" | "contract", docId: string) {
+    async function publishPortalDocument(docType: "proposal" | "quote" | "contract" | "direct_sale", docId: string) {
       try {
         // Re-activate if previously revoked, or insert fresh
         const { data: existingDoc } = await supabase
@@ -779,7 +815,7 @@ serve(async (req: Request) => {
       }
     }
 
-    // Record in proposal_sends / quote_sends / contract_sends for history tracking
+    // Record in proposal_sends / quote_sends / contract_sends / direct_sale_sends for history tracking
     await supabase.rpc('set_audit_context', { p_user_id: callerAnew!.id, p_source: 'web_app' });
     try {
       const sendRecord = {
@@ -798,6 +834,8 @@ serve(async (req: Request) => {
         await supabase.from("quote_sends").insert({ ...sendRecord, quote_id: document_id });
       } else if (document_type === "contract") {
         await supabase.from("contract_sends").insert({ ...sendRecord, contract_id: document_id });
+      } else if (document_type === "direct_sale") {
+        await supabase.from("direct_sale_sends").insert({ ...sendRecord, direct_sale_id: document_id });
       }
     } catch (e) {
       console.error("Error recording send history:", e);
@@ -839,7 +877,13 @@ serve(async (req: Request) => {
 
     const smtpConfig = resolvedSmtp.smtp;
     const callerName = callerAnew?.name || caller.email || "A equipa";
-    const docLabel = document_type === "proposal" ? "proposta" : document_type === "quote" ? "orçamento" : "contrato";
+    const docLabelByType: Record<typeof document_type, string> = {
+      proposal: "proposta",
+      quote: "orçamento",
+      contract: "contrato",
+      direct_sale: "venda direta",
+    };
+    const docLabel = docLabelByType[document_type];
 
     // BASE-USR-012: escape all user-controlled strings before interpolating into HTML
     const safeContactName = escapeHtml(contactName);

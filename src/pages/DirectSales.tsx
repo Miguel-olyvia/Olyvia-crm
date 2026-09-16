@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { Pencil, Plus, Receipt, Search } from "lucide-react";
+import { KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -8,6 +8,10 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -17,6 +21,7 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { DirectSaleEditor } from "@/components/directSales/DirectSaleEditor";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { cn, formatCurrency } from "@/lib/utils";
@@ -180,6 +185,15 @@ const DirectSales = () => {
     // `t`/`toast` são estáveis o suficiente; incluí-los só recriava a função.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompany?.id, statusFilter]);
+
+  // Envio ao portal do cliente — mesma edge function usada por Propostas e
+  // Encomendas Clientes. Tal como nas propostas, publicar no portal NÃO altera
+  // `status`/`sent_at` da venda: só cria o acesso, publica o documento e grava
+  // em `direct_sale_sends`. Recarregamos na mesma para o histórico de envios
+  // ficar refletido. Declarado depois de `loadSales` porque o callback depende dela.
+  const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({
+    onSuccess: () => loadSales(0, true),
+  });
 
   useEffect(() => {
     if (!activeCompany?.id) {
@@ -385,18 +399,59 @@ const DirectSales = () => {
                     </TableCell>
                     <TableCell>{formatDate(sale.created_at)}</TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleOpenExisting(sale.id);
-                        }}
-                        aria-label={t("directSales.table.actions")}
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </Button>
+                      {/* A linha inteira é clicável (abre o editor). Tanto o
+                          trigger como cada item têm de travar a propagação,
+                          senão o clique chega ao `onClick` da linha e o editor
+                          abre por cima da ação escolhida. */}
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={t("directSales.table.actions")}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleOpenExisting(sale.id);
+                            }}
+                          >
+                            <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
+                          </DropdownMenuItem>
+                          <PermissionGate permission="direct_sales.edit">
+                            <DropdownMenuSeparator />
+                            <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
+                              Portal
+                            </DropdownMenuLabel>
+                            <DropdownMenuItem
+                              disabled={portalAccessLoading}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                generatePortalAccess("direct_sale", sale.id);
+                              }}
+                            >
+                              <Send className="mr-2 h-3.5 w-3.5 text-purple-600" /> Enviar para Portal Cliente
+                            </DropdownMenuItem>
+                            <DropdownMenuItem
+                              disabled={portalAccessLoading}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                generatePortalAccess("direct_sale", sale.id, true);
+                              }}
+                            >
+                              <KeyRound className="mr-2 h-3.5 w-3.5" /> Reenviar credenciais
+                            </DropdownMenuItem>
+                          </PermissionGate>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 ))}
