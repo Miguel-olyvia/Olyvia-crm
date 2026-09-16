@@ -61,11 +61,23 @@ const TIPO_FERIAS: AusenciaTipo = {
   activo: true,
 };
 
+const TIPO_DOENCA: AusenciaTipo = {
+  ...TIPO_FERIAS,
+  id: "tipo-doenca",
+  codigo: "doenca",
+  nome: "Doença",
+  categoria: "doenca",
+  cor: "#ef4444",
+};
+
 vi.mock("@/hooks/useAusenciasTipos", () => ({
   useAusenciasTipos: () => ({
-    tipos: [TIPO_FERIAS],
-    activos: [TIPO_FERIAS],
-    porId: new Map([[TIPO_FERIAS.id, TIPO_FERIAS]]),
+    tipos: [TIPO_FERIAS, TIPO_DOENCA],
+    activos: [TIPO_FERIAS, TIPO_DOENCA],
+    porId: new Map([
+      [TIPO_FERIAS.id, TIPO_FERIAS],
+      [TIPO_DOENCA.id, TIPO_DOENCA],
+    ]),
     loading: false,
   }),
 }));
@@ -94,6 +106,20 @@ const DIAS: AusenciaDia[] = [
     organization_id: "org-nike",
     tipo_id: TIPO_FERIAS.id,
     data: `${MES_ACTUAL}-11`,
+    fraccao_dia: 1,
+    conta_saldo: true,
+    e_feriado: false,
+    e_fim_semana: false,
+    periodo_inicio: `${new Date().getFullYear()}-01-01`,
+    estado: "aprovado",
+  },
+  {
+    id: "dia-3",
+    pedido_id: "pedido-3",
+    pessoa_id: "pessoa-bruno",
+    organization_id: "org-nike",
+    tipo_id: TIPO_DOENCA.id,
+    data: `${MES_ACTUAL}-12`,
     fraccao_dia: 1,
     conta_saldo: true,
     e_feriado: false,
@@ -206,18 +232,27 @@ describe("AusenciasOrganizacao: separador Mapa de ausências e férias", () => {
     irParaModoAno();
 
     expect(screen.getByRole("button", { name: "Ano" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Pessoa")).toBeTruthy();
+    expect(screen.getByLabelText("Pessoa")).toBeTruthy();
     const opcoes = screen.getAllByRole("option").map((opcao) => opcao.textContent);
     expect(opcoes).toContain("Ana Silva");
     expect(opcoes).toContain("Bruno Costa");
   });
 
-  it("no modo Ano, sem pessoa escolhida, nao mostra o calendario", async () => {
+  it("no modo Ano, com 'Todos' escolhido, mostra os 12 meses de todas as pessoas", async () => {
     await renderPagina();
     irParaModoAno();
 
-    expect(screen.getByText("Escolhe uma pessoa para ver o ano dela")).toBeTruthy();
-    expect(screen.queryByRole("grid")).toBeNull();
+    // So os meses com marcacoes tem grelha (`MapaMensal` mostra texto de
+    // "sem marcacoes" nos outros 11) -- o que conta aqui e o mes actual, que
+    // tem os dois, e que ha doze cabecalhos de mes no total.
+    const cabecalhosDeMes = screen
+      .getAllByText(/^[a-zç]+ \d{4}$/i)
+      .filter((elemento) => elemento.tagName === "P");
+    expect(cabecalhosDeMes.length).toBe(12);
+
+    const linhas = screen.getAllByRole("rowheader").map((linha) => linha.textContent);
+    expect(linhas).toContain("Ana Silva");
+    expect(linhas).toContain("Bruno Costa");
   });
 
   it("no modo Ano, ao escolher uma pessoa, mostra o calendario anual dela com os dias coloridos por tipo", async () => {
@@ -288,5 +323,49 @@ describe("AusenciasOrganizacao: separador Mapa de ausências e férias", () => {
     fireEvent.click(screen.getByRole("button", { name: `Ano seguinte (${anoActual + 1})` }));
 
     expect(screen.getByText(String(anoActual + 1))).toBeTruthy();
+  });
+
+  it("no modo Mes, o filtro de tipo reduz os dias mostrados ao tipo escolhido", async () => {
+    await renderPagina();
+
+    let linhas = screen.getAllByRole("rowheader").map((linha) => linha.textContent);
+    expect(linhas).toEqual(expect.arrayContaining(["Ana Silva", "Bruno Costa"]));
+
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: TIPO_DOENCA.id } });
+
+    linhas = screen.getAllByRole("rowheader").map((linha) => linha.textContent);
+    expect(linhas).toEqual(["Bruno Costa"]);
+  });
+
+  it("no modo Mes, sem filtro de tipo (Todos), mostra tudo como antes", async () => {
+    await renderPagina();
+
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: TIPO_DOENCA.id } });
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: "" } });
+
+    const linhas = screen.getAllByRole("rowheader").map((linha) => linha.textContent);
+    expect(linhas).toEqual(expect.arrayContaining(["Ana Silva", "Bruno Costa"]));
+  });
+
+  it("no modo Ano, com uma pessoa escolhida, o filtro de tipo reduz os dias mostrados", async () => {
+    await renderPagina();
+    irParaModoAno();
+
+    fireEvent.change(screen.getByLabelText("Pessoa"), { target: { value: "pessoa-bruno" } });
+    fireEvent.change(screen.getByLabelText("Tipo"), { target: { value: TIPO_DOENCA.id } });
+
+    const nomeMesActual = format(new Date(`${MES_ACTUAL}-01T12:00:00Z`), "LLLL yyyy", {
+      locale: pt,
+    });
+    const mesActual = screen.getAllByRole("grid").find(
+      (grelha) => grelha.getAttribute("aria-label") === nomeMesActual,
+    );
+    expect(mesActual).toBeTruthy();
+
+    const diaOnze = within(mesActual as HTMLElement).getByText("11");
+    expect(diaOnze.closest("button")?.getAttribute("title")).toMatch(/sem ausência/i);
+
+    const diaDoze = within(mesActual as HTMLElement).getByText("12");
+    expect(diaDoze.closest("button")?.getAttribute("title")).toMatch(/Doença/i);
   });
 });

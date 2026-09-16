@@ -4,8 +4,12 @@
  * Dois separadores: o mapa de ausencias e ferias (com um alternador Mes/Ano
  * dentro) e a lista completa de pedidos com filtros. No modo Mes ve-se a
  * grelha com uma linha por pessoa (ou so a pessoa escolhida, se houver uma);
- * no modo Ano ve-se o calendario anual de UMA pessoa escolhida num dropdown
- * (reaproveita `CalendarioAnual`, o mesmo componente da ficha individual). De
+ * no modo Ano, com uma pessoa escolhida, ve-se o calendario anual dela
+ * (reaproveita `CalendarioAnual`, o mesmo componente da ficha individual), e
+ * com "Todos" ve-se `MapaMensal` repetido doze vezes, uma por mes do ano --
+ * `CalendarioAnual` e feito para uma pessoa so, e nao ha vista equivalente
+ * para toda a gente. Um filtro por tipo de ausencia, comum aos dois modos,
+ * filtra os `dias` antes de chegarem a qualquer um dos dois componentes. De
  * qualquer um se abre o detalhe do pedido, e dai se salta para a ficha da
  * pessoa.
  *
@@ -15,6 +19,8 @@
  */
 import { useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { format } from "date-fns";
+import { de, enUS, es, fr, pt } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -38,6 +44,9 @@ import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useEffect } from "react";
 import type { EstadoPedido } from "@/types/hrAusencias";
+
+const LOCALES: Record<string, Locale> = { en: enUS, pt, es, fr, de };
+type Locale = typeof enUS;
 
 const ESTADOS: EstadoPedido[] = [
   "pendente_chefia",
@@ -68,7 +77,8 @@ interface OrganizacaoConteudoProps {
  * tambem dentro de `AusenciasGestao.tsx`, que fornece o proprio titulo.
  */
 export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoProps) {
-  const { t } = useTranslation();
+  const { t, language } = useTranslation();
+  const locale = LOCALES[language] ?? enUS;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get(tabParam) || "mapa";
@@ -85,6 +95,7 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
   const [modoMapa, setModoMapa] = useState<ModoMapa>("mes");
   const [filtroEstado, setFiltroEstado] = useState("");
   const [filtroTipo, setFiltroTipo] = useState("");
+  const [filtroTipoMapa, setFiltroTipoMapa] = useState("");
   const [pedidoAberto, setPedidoAberto] = useState<string | null>(null);
   const [feriados, setFeriados] = useState(() => indexarFeriados([]));
   const [pessoaAnoId, setPessoaAnoId] = useState("");
@@ -123,9 +134,19 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
   const mudarAnoCalendario = (delta: number) =>
     setMes(`${anoCalendario + delta}-${mes.slice(5, 7)}-01`);
 
+  /**
+   * O filtro por tipo de ausencia vale para os dois modos do mapa (Mes e
+   * Ano) e aplica-se antes do filtro por pessoa -- nem `MapaMensal` nem
+   * `CalendarioAnual` sabem nada de tipo, so veem os `dias` que lhes chegam.
+   */
+  const diasDoMapaPorTipo = useMemo(
+    () => (filtroTipoMapa ? dados.dias.filter((dia) => dia.tipo_id === filtroTipoMapa) : dados.dias),
+    [dados.dias, filtroTipoMapa],
+  );
+
   const diasDaPessoaAno = useMemo(
-    () => dados.dias.filter((dia) => dia.pessoa_id === pessoaAnoId),
-    [dados.dias, pessoaAnoId],
+    () => diasDoMapaPorTipo.filter((dia) => dia.pessoa_id === pessoaAnoId),
+    [diasDoMapaPorTipo, pessoaAnoId],
   );
 
   /**
@@ -135,8 +156,20 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
    * lhe chegam, por isso o filtro fica aqui.
    */
   const diasDoMapaMensal = useMemo(
-    () => (pessoaAnoId ? diasDaPessoaAno : dados.dias),
-    [pessoaAnoId, diasDaPessoaAno, dados.dias],
+    () => (pessoaAnoId ? diasDaPessoaAno : diasDoMapaPorTipo),
+    [pessoaAnoId, diasDaPessoaAno, diasDoMapaPorTipo],
+  );
+
+  /**
+   * No modo Ano com "Todos", `CalendarioAnual` nao serve -- e feito para UMA
+   * pessoa. Em vez disso repete-se `MapaMensal` (a mesma grelha do modo Mes,
+   * todas as pessoas em linhas) doze vezes, uma por mes do ano escolhido; o
+   * proprio `MapaMensal` ja filtra os `dias` ao mes que recebe.
+   */
+  const mesesDoAno = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, indice) => `${anoCalendario}-${String(indice + 1).padStart(2, "0")}-01`),
+    [anoCalendario],
   );
 
   const filtrados = useMemo(
@@ -217,14 +250,24 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
                       label={t("hr.ausencias.organizacao.pessoa")}
                       valor={pessoaAnoId}
                       onChange={setPessoaAnoId}
-                      vazioLabel={
-                        modoMapa === "ano"
-                          ? t("hr.ausencias.organizacao.escolherPessoa")
-                          : t("hr.ausencias.organizacao.todos")
-                      }
+                      vazioLabel={t("hr.ausencias.organizacao.todos")}
                       opcoes={pessoas.map((pessoa) => ({
                         value: pessoa.id,
                         label: pessoa.nome_completo,
+                      }))}
+                    />
+                  </div>
+
+                  <div className="w-48">
+                    <CampoSelect
+                      id="hr-ausencias-org-mapa-tipo"
+                      label={t("hr.ausencias.lista.tipo")}
+                      valor={filtroTipoMapa}
+                      onChange={setFiltroTipoMapa}
+                      vazioLabel={t("hr.ausencias.organizacao.todos")}
+                      opcoes={tipos.tipos.map((tipo) => ({
+                        value: tipo.id,
+                        label: nomeTipoAusencia(tipo, t),
                       }))}
                     />
                   </div>
@@ -290,9 +333,23 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
                     onAbrirPedido={setPedidoAberto}
                   />
                 ) : (
-                  <p className="text-sm text-muted-foreground">
-                    {t("hr.ausencias.organizacao.semPessoaEscolhida")}
-                  </p>
+                  <div className="space-y-4">
+                    {mesesDoAno.map((mesDoAno) => (
+                      <div key={mesDoAno} className="space-y-1.5">
+                        <p className="text-sm font-medium capitalize">
+                          {format(new Date(`${mesDoAno}T12:00:00Z`), "LLLL yyyy", { locale })}
+                        </p>
+                        <MapaMensal
+                          mes={mesDoAno}
+                          dias={diasDoMapaPorTipo}
+                          tiposPorId={tipos.porId}
+                          nomePorPessoaId={nomePorPessoaId}
+                          feriados={feriados}
+                          onAbrirPedido={setPedidoAberto}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 )}
               </TabsContent>
 
