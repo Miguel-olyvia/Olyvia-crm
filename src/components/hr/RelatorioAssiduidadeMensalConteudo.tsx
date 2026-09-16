@@ -84,6 +84,11 @@ function chaveDoEstado(dia: DiaRelatorioMensal): string {
       ? `hr.relatorioMensal.estado.ausencia.${dia.categoriaAusencia}`
       : "hr.relatorioMensal.estado.ausencia.outro";
   }
+  if (dia.estado === "sem_registo") {
+    return dia.realizadoMinutos === 0
+      ? "hr.relatorioMensal.estado.faltaCompletaNaoRegistada"
+      : "hr.relatorioMensal.estado.faltaIncompletaNaoRegistada";
+  }
   return `hr.relatorioMensal.estado.${dia.estado}`;
 }
 

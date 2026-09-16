@@ -26,8 +26,10 @@ const ESTADO_LABEL: Record<string, string> = {
   descanso: "Descanso",
   feriado: "Feriado",
   ausencia: "Ausência",
-  sem_registo: "Sem registo",
 };
+
+const FALTA_COMPLETA_NAO_REGISTADA = "Falta completa";
+const FALTA_INCOMPLETA_NAO_REGISTADA = "Falta incompleta";
 
 const styles = StyleSheet.create({
   page: {
@@ -158,6 +160,9 @@ function fundoDaLinha(dia: DiaRelatorioMensal): string | undefined {
 
 function rotuloDoEstado(dia: DiaRelatorioMensal): string {
   if (dia.estado === "ausencia") return dia.categoriaAusencia ?? "Ausência";
+  if (dia.estado === "sem_registo") {
+    return dia.realizadoMinutos === 0 ? FALTA_COMPLETA_NAO_REGISTADA : FALTA_INCOMPLETA_NAO_REGISTADA;
+  }
   return ESTADO_LABEL[dia.estado] ?? dia.estado;
 }
 

@@ -33,7 +33,8 @@ vi.mock("@/hooks/useTranslation", () => ({
         "hr.relatorioMensal.estado.normal": "Normal",
         "hr.relatorioMensal.estado.descanso": "Descanso",
         "hr.relatorioMensal.estado.feriado": "Feriado",
-        "hr.relatorioMensal.estado.sem_registo": "Sem registo",
+        "hr.relatorioMensal.estado.faltaCompletaNaoRegistada": "Falta completa",
+        "hr.relatorioMensal.estado.faltaIncompletaNaoRegistada": "Falta incompleta",
         "hr.relatorioMensal.feriadoTrabalhado": "Feriado trabalhado",
         "hr.relatorioMensal.descansoTrabalhado": "Descanso trabalhado",
         "hr.relatorioMensal.semCargo": "Sem cargo registado",
@@ -495,7 +496,7 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
     expect(linha?.className).not.toMatch(/bg-amber/);
   });
 
-  it("um dia 'sem_registo' mostra o planeado, o badge proprio e fica destacado", () => {
+  it("um dia 'sem_registo' com zero picagem mostra o planeado, o badge 'Falta completa' e fica destacado", () => {
     relatorioMock.dias = [
       {
         iso: "2026-09-01",
@@ -525,7 +526,44 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
     );
 
     expect(screen.getByText("09:00-17:00")).toBeInTheDocument();
-    expect(screen.getByText("Sem registo")).toBeInTheDocument();
+    expect(screen.getByText("Falta completa")).toBeInTheDocument();
+    expect(screen.queryByText("Falta incompleta")).not.toBeInTheDocument();
+    const linha = screen.getByText("2026-09-01").closest("tr");
+    expect(linha?.className).toMatch(/bg-rose/);
+  });
+
+  it("um dia 'sem_registo' com picagem parcial mostra o badge 'Falta incompleta' e fica destacado", () => {
+    relatorioMock.dias = [
+      {
+        iso: "2026-09-01",
+        diaSemana: 2,
+        estado: "sem_registo",
+        categoriaAusencia: null,
+        planeadoMinutos: 540,
+        realizadoMinutos: 240,
+        planeadoIntervalos: [{ hora_inicio: "09:30", hora_fim: "18:30" }],
+        realizadoIntervalos: [{ hora_inicio: "09:00", hora_fim: "13:00" }],
+        obraHoras: 0,
+        temFalta: false,
+        minutosEmFalta: 0,
+        horasExtraMinutos: 0,
+        horasExtraNoturnasMinutos: 0,
+      },
+    ];
+
+    render(
+      <RelatorioAssiduidadeMensalConteudo
+        pessoaId="pessoa-1"
+        ano={2026}
+        mes={8}
+        pessoaNome="Maria Silva"
+        permissoes={permissoes()}
+      />,
+    );
+
+    expect(screen.getByText("09:00-13:00")).toBeInTheDocument();
+    expect(screen.getByText("Falta incompleta")).toBeInTheDocument();
+    expect(screen.queryByText("Falta completa")).not.toBeInTheDocument();
     const linha = screen.getByText("2026-09-01").closest("tr");
     expect(linha?.className).toMatch(/bg-rose/);
   });
