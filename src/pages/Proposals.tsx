@@ -7,6 +7,7 @@ import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendPropos
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { runProposalStageWorkflow } from "@/lib/proposals/runStageWorkflow";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { applyClientSearchTextFilter, resolveClientSearch } from "@/lib/clientSearch";
 import { useScopedEntitySearch } from "@/hooks/useScopedEntitySearch";
 import { useDescendantOrgIds } from "@/hooks/useDescendantOrgIds";
@@ -2127,7 +2128,8 @@ const Proposals = () => {
       if (editedId) afterProposalMutation([editedId]); else loadData();
     } catch (error: any) {
       captureFlowError(error, "proposal-lifecycle");
-      toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description: error.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: editingId ? t('proposals.toast.updateError') : t('proposals.toast.createError'), description, variant: "destructive" });
     } finally {
       submitLockRef.current = false;
       setSavingProposal(false);

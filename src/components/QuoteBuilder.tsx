@@ -98,6 +98,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 // Sortable row wrapper for quote items
 function SortableQuoteRow({ id, children }: { id: string; children: (args: { setNodeRef: (el: HTMLElement | null) => void; style: React.CSSProperties; attributes: any; listeners: any; isDragging: boolean }) => React.ReactNode }) {
@@ -2386,9 +2387,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
     } catch (error: any) {
       captureFlowError(error, "quote-lifecycle");
+      const description = await getFriendlyErrorMessage(error);
       toast({
         title: t('quoteBuilder.toast.errorSavingQuote'),
-        description: error.message,
+        description,
         variant: "destructive",
       });
     } finally {

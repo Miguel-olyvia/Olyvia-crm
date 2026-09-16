@@ -75,6 +75,7 @@ import { ScheduleClientMeetingDialog } from "@/components/clients/ScheduleClient
 import { ContactTagsDialog } from "@/components/contacts/ContactTagsDialog";
 import { ClientsTableColumns, ClientColumnConfig, DEFAULT_CLIENT_COLUMNS } from "@/components/clients/ClientsTableColumns";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 
 interface ClientRecord {
   id: string;
@@ -1516,7 +1517,7 @@ const AnewClients = () => {
       setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
       setFieldErrors({});
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
-    } catch (error: any) { captureFlowError(error, "client-lifecycle"); toast({ title: t('clients.toast.createError'), description: error.message, variant: "destructive" }); }
+    } catch (error: any) { captureFlowError(error, "client-lifecycle"); const description = await getFriendlyErrorMessage(error); toast({ title: t('clients.toast.createError'), description, variant: "destructive" }); }
     } finally { submitLockRef.current = false; setSavingClient(false); }
   };
 
@@ -1661,7 +1662,8 @@ const AnewClients = () => {
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
       captureFlowError(err, "client-lifecycle");
-      toast({ title: t('clients.toast.shareEntityError'), description: err.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(err);
+      toast({ title: t('clients.toast.shareEntityError'), description, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
@@ -1707,7 +1709,8 @@ const AnewClients = () => {
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
       captureFlowError(err, "client-lifecycle");
-      toast({ title: t('clients.toast.createError'), description: err.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(err);
+      toast({ title: t('clients.toast.createError'), description, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
