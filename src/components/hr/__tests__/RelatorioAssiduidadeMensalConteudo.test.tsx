@@ -580,6 +580,7 @@ describe("RelatorioAssiduidadeMensalConteudo", () => {
 
     const linha = screen.getByText("2026-09-01").closest("tr");
     expect(linha?.className).toMatch(/bg-green/);
+    expect(linha?.textContent).toContain("Horas extra");
   });
 
   it("um feriado trabalhado com horas extra mantem o destaque ambar, nunca verde", () => {

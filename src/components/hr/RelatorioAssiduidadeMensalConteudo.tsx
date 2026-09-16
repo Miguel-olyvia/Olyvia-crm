@@ -369,6 +369,14 @@ export function RelatorioAssiduidadeMensalConteudo({
                             {t(chaveDoEstado(dia))}
                           </Badge>
                         )}
+                        {dia.estado === "normal" && dia.horasExtraMinutos > 0 && (
+                          <Badge
+                            variant="outline"
+                            className="w-fit border-green-300 font-normal text-green-700 dark:border-green-800 dark:text-green-300"
+                          >
+                            {t("hr.relatorioMensal.coluna.horasExtra")}
+                          </Badge>
+                        )}
                         {dia.temFalta && (
                           <Badge variant="outline" className="w-fit font-normal">
                             {t("hr.assiduidade.dia.faltaDe", {

@@ -240,6 +240,7 @@ export function RelatorioAssiduidadeMensalPDFDocument({
                   <Text style={styles.colEstado}>
                     {rotuloDoEstado(dia)}
                     {trabalhou ? (dia.estado === "feriado" ? " (feriado trabalhado)" : " (descanso trabalhado)") : ""}
+                    {dia.estado === "normal" && dia.horasExtraMinutos > 0 ? " (horas extra)" : ""}
                     {dia.temFalta ? ` · Falta de ${formatarDuracao(dia.minutosEmFalta)}` : ""}
                   </Text>
                 )}
