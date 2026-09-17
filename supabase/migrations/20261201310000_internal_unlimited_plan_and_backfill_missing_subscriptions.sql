@@ -15,13 +15,20 @@
 -- 1. Permitir 'internal' nos dois CHECK constraints existentes
 -- ------------------------------------------------------------
 ALTER TABLE public.organization_subscriptions
-  DROP CONSTRAINT organization_subscriptions_plan_check;
+  DROP CONSTRAINT IF EXISTS organization_subscriptions_plan_check;
 ALTER TABLE public.organization_subscriptions
   ADD CONSTRAINT organization_subscriptions_plan_check
     CHECK (plan IN ('trial', 'starter', 'pro', 'enterprise', 'internal'));
 
+-- IF EXISTS: confirmado por leitura direta ao remoto (pg_constraint) que
+-- plan_limits nunca teve uma constraint chamada plan_limits_plan_check --
+-- só limit_value_check, pkey, plan_limit_type_key e reset_cadence_check
+-- existem. O CHECK(plan IN (...)) desta tabela nunca chegou a ser criado
+-- com esse nome (ou nome nenhum) no remoto, apesar de estar escrito na
+-- migration original (20261112400000). IF EXISTS torna isto seguro nos
+-- dois cenários possíveis, sem precisar de saber qual é o real.
 ALTER TABLE public.plan_limits
-  DROP CONSTRAINT plan_limits_plan_check;
+  DROP CONSTRAINT IF EXISTS plan_limits_plan_check;
 ALTER TABLE public.plan_limits
   ADD CONSTRAINT plan_limits_plan_check
     CHECK (plan IN ('trial', 'starter', 'pro', 'enterprise', 'internal'));
