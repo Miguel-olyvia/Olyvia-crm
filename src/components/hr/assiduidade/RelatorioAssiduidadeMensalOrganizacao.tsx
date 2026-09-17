@@ -117,6 +117,9 @@ export function RelatorioAssiduidadeMensalOrganizacao({
             diasComFaltaIncompletaRegistada: 0,
             horasExtraMinutos: 0,
             horasExtraNoturnasMinutos: 0,
+            minutosFeriadoTrabalhado: 0,
+            minutosDescansoTrabalhado: 0,
+            minutosExtraNormal: 0,
           },
           obras: dados?.obras ?? [],
         };

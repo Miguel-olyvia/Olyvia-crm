@@ -170,6 +170,20 @@ export interface TotaisRelatorioMensal {
   diasComFaltaIncompletaRegistada: number;
   horasExtraMinutos: number;
   horasExtraNoturnasMinutos: number;
+  /** Minutos de excedente (realizado, ja que o planeado e zero) em dias de feriado. */
+  minutosFeriadoTrabalhado: number;
+  /** Idem, em dias de descanso (folga propria da pessoa). */
+  minutosDescansoTrabalhado: number;
+  /**
+   * Os minutos de excedente que sobram depois de tirar feriado e descanso --
+   * o excedente em dias NORMAIS. `horasExtraNoturnasMinutos` continua
+   * TRANSVERSAL (conta sempre, inclui minutos que tambem cairam dentro de
+   * `minutosFeriadoTrabalhado`/`minutosDescansoTrabalhado`) -- nao se
+   * subtrai daqui, por decisao de produto (as horas nocturnas empilham com
+   * feriado/descanso, nao sao mutuamente exclusivas).
+   * `minutosExtraNormal + minutosFeriadoTrabalhado + minutosDescansoTrabalhado === horasExtraMinutos`
+   */
+  minutosExtraNormal: number;
 }
 
 interface Satelite<T> {
@@ -517,8 +531,8 @@ export function useRelatorioAssiduidadeMensal(
   ]);
 
   const totais = useMemo<TotaisRelatorioMensal>(
-    () =>
-      dias.reduce<TotaisRelatorioMensal>(
+    () => {
+      const acumulado = dias.reduce<Omit<TotaisRelatorioMensal, "minutosExtraNormal">>(
         (acc, dia) => {
           // Falta completa so faz sentido com planeado > 0: sem horario nesse
           // dia nao ha "todo o planeado" para a falta cobrir.
@@ -563,6 +577,18 @@ export function useRelatorioAssiduidadeMensal(
             horasExtraMinutos: acc.horasExtraMinutos + (contaParaTotais ? dia.horasExtraMinutos : 0),
             horasExtraNoturnasMinutos:
               acc.horasExtraNoturnasMinutos + (contaParaTotais ? dia.horasExtraNoturnasMinutos : 0),
+            // Feriado e descanso tem sempre planeadoMinutos === 0 (ver
+            // comentario em TotaisRelatorioMensal), por isso o realizado do
+            // dia JA E o excedente -- nao ha aqui nenhuma parte "normal" a
+            // descontar. `contaParaTotais` exclui so "ausencia", e nenhum dia
+            // pode ser "feriado"/"descanso" e "ausencia" ao mesmo tempo, mas
+            // mantem-se a guarda por consistencia com os outros totais.
+            minutosFeriadoTrabalhado:
+              acc.minutosFeriadoTrabalhado +
+              (contaParaTotais && dia.estado === "feriado" ? dia.realizadoMinutos : 0),
+            minutosDescansoTrabalhado:
+              acc.minutosDescansoTrabalhado +
+              (contaParaTotais && dia.estado === "descanso" ? dia.realizadoMinutos : 0),
           };
         },
         {
@@ -577,8 +603,25 @@ export function useRelatorioAssiduidadeMensal(
           diasComFaltaIncompletaRegistada: 0,
           horasExtraMinutos: 0,
           horasExtraNoturnasMinutos: 0,
+          minutosFeriadoTrabalhado: 0,
+          minutosDescansoTrabalhado: 0,
         },
-      ),
+      );
+
+      // O excedente que sobra depois de feriado e descanso e o excedente em
+      // dias normais -- nunca negativo por construcao (feriado/descanso
+      // somam so uma PARTE do que entra em horasExtraMinutos), mas o
+      // Math.max fica como rede de seguranca, tal como o Math.min de
+      // horasExtraNoturnasMinutos acima.
+      const minutosExtraNormal = Math.max(
+        0,
+        acumulado.horasExtraMinutos -
+          acumulado.minutosFeriadoTrabalhado -
+          acumulado.minutosDescansoTrabalhado,
+      );
+
+      return { ...acumulado, minutosExtraNormal };
+    },
     [dias],
   );
 

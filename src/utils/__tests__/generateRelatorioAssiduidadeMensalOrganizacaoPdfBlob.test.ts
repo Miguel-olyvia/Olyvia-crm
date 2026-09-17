@@ -46,6 +46,9 @@ const totais: TotaisRelatorioMensal = {
   diasComFaltaIncompletaRegistada: 0,
   horasExtraMinutos: 0,
   horasExtraNoturnasMinutos: 0,
+  minutosFeriadoTrabalhado: 0,
+  minutosDescansoTrabalhado: 0,
+  minutosExtraNormal: 0,
 };
 
 async function pdfDeUmaPagina(): Promise<Blob> {

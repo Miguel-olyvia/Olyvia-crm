@@ -1070,4 +1070,166 @@ describe("useRelatorioAssiduidadeMensal", () => {
       args: { p_obra_id: "obra-1", p_motivo: "Enganei-me na data" },
     });
   });
+
+  describe("decomposicao das horas extra por tipo de dia (feriado / descanso / normal)", () => {
+    it("um mes sem feriado nem descanso trabalhado: os dois baldes ficam 0 e o extra normal e o total", async () => {
+      tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min
+      tabelas.pessoas_horario_realizado = [
+        {
+          id: "r1",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          vinculo_id: null,
+          local_id: null,
+          planeado_id: null,
+          data: "2026-09-01",
+          hora_inicio: "09:00",
+          hora_fim: "19:00", // 1h a mais, tudo em dia normal
+          minutos: 600,
+          origem: "picagem",
+          estado: "fechado",
+          validado_por: null,
+          validado_em: null,
+          motivo_rejeicao: null,
+          notas: null,
+          corrige_realizado_id: null,
+          correccao_motivo: null,
+          corrigido_por_pessoa_id: null,
+          deleted_at: null,
+        },
+      ];
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.totais.minutosFeriadoTrabalhado).toBe(0);
+      expect(result.current.totais.minutosDescansoTrabalhado).toBe(0);
+      expect(result.current.totais.minutosExtraNormal).toBe(result.current.totais.horasExtraMinutos);
+    });
+
+    it("um mes so com feriado trabalhado: o balde de feriado recebe tudo, descanso e extra normal ficam 0", async () => {
+      tabelas.pessoas_horario_planeado = [diaDeFolga(1)]; // segunda, sem horario planeado
+      tabelas.schedule_holidays = [{ holiday_date: "2026-09-07", is_recurring: false }];
+      tabelas.pessoas_horario_realizado = [
+        {
+          id: "r1",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          vinculo_id: null,
+          local_id: null,
+          planeado_id: null,
+          data: "2026-09-07",
+          hora_inicio: "09:00",
+          hora_fim: "13:00",
+          minutos: 240,
+          origem: "picagem",
+          estado: "fechado",
+          validado_por: null,
+          validado_em: null,
+          motivo_rejeicao: null,
+          notas: null,
+          corrige_realizado_id: null,
+          correccao_motivo: null,
+          corrigido_por_pessoa_id: null,
+          deleted_at: null,
+        },
+      ];
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      expect(result.current.totais.minutosFeriadoTrabalhado).toBe(240);
+      expect(result.current.totais.minutosDescansoTrabalhado).toBe(0);
+      expect(result.current.totais.minutosExtraNormal).toBe(0);
+      expect(result.current.totais.horasExtraMinutos).toBe(240);
+    });
+
+    it("invariante: feriado trabalhado + descanso trabalhado + extra normal, no mesmo mes, somam sempre horasExtraMinutos", async () => {
+      tabelas.pessoas_horario_planeado = [
+        planeadoSemanal(2, "09:00", "18:00"), // terca (dia normal, 2026-09-01, 08, 15, 22, 29)
+        diaDeFolga(0), // domingo -- descanso (2026-09-06, 13, 20, 27)
+      ];
+      // Feriado numa segunda sem horario planeado -- 240 min todos excedente.
+      tabelas.schedule_holidays = [{ holiday_date: "2026-09-07", is_recurring: false }];
+      tabelas.pessoas_horario_realizado = [
+        {
+          id: "r-feriado",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          vinculo_id: null,
+          local_id: null,
+          planeado_id: null,
+          data: "2026-09-07", // segunda, feriado
+          hora_inicio: "09:00",
+          hora_fim: "13:00",
+          minutos: 240,
+          origem: "picagem",
+          estado: "fechado",
+          validado_por: null,
+          validado_em: null,
+          motivo_rejeicao: null,
+          notas: null,
+          corrige_realizado_id: null,
+          correccao_motivo: null,
+          corrigido_por_pessoa_id: null,
+          deleted_at: null,
+        },
+        {
+          id: "r-descanso",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          vinculo_id: null,
+          local_id: null,
+          planeado_id: null,
+          data: "2026-09-06", // domingo, descanso
+          hora_inicio: "10:00",
+          hora_fim: "12:00",
+          minutos: 120,
+          origem: "picagem",
+          estado: "fechado",
+          validado_por: null,
+          validado_em: null,
+          motivo_rejeicao: null,
+          notas: null,
+          corrige_realizado_id: null,
+          correccao_motivo: null,
+          corrigido_por_pessoa_id: null,
+          deleted_at: null,
+        },
+        {
+          id: "r-normal",
+          pessoa_id: PESSOA_ID,
+          organization_id: ORG_ACTIVA,
+          vinculo_id: null,
+          local_id: null,
+          planeado_id: null,
+          data: "2026-09-01", // terca normal, 1h de excedente
+          hora_inicio: "09:00",
+          hora_fim: "19:00",
+          minutos: 600,
+          origem: "picagem",
+          estado: "fechado",
+          validado_por: null,
+          validado_em: null,
+          motivo_rejeicao: null,
+          notas: null,
+          corrige_realizado_id: null,
+          correccao_motivo: null,
+          corrigido_por_pessoa_id: null,
+          deleted_at: null,
+        },
+      ];
+
+      const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      const { totais } = result.current;
+      expect(totais.minutosFeriadoTrabalhado).toBe(240);
+      expect(totais.minutosDescansoTrabalhado).toBe(120);
+      expect(totais.minutosExtraNormal).toBe(60);
+      expect(
+        totais.minutosExtraNormal + totais.minutosFeriadoTrabalhado + totais.minutosDescansoTrabalhado,
+      ).toBe(totais.horasExtraMinutos);
+    });
+  });
 });
