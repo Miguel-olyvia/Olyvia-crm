@@ -33,6 +33,9 @@ export const TIMELINE_AUDIT_IGNORED_FIELDS: readonly string[] = [
   "accepted_at", "rejected_at", "sent_at", "delivered_at",
   "viewed_at", "last_viewed_at", "view_count",
 
+  // Espelhos da assinatura do lado da empresa (client_contracts)
+  "company_signature_date", "company_signed_by_name", "company_signed_by_id",
+
   // Snapshots e tokens — volumosos e sem leitura humana
   "published_at", "published_snapshot", "published_snapshot_hash",
   "decided_snapshot", "decided_snapshot_hash", "decided_published_at",
@@ -40,3 +43,72 @@ export const TIMELINE_AUDIT_IGNORED_FIELDS: readonly string[] = [
   "public_token", "tracking_token", "document_url",
   "acceptance_ip", "acceptance_user_agent", "signature_image",
 ];
+
+/**
+ * Padrões de nome cujo conteúdo não tem leitura humana nenhuma.
+ *
+ * Uma lista de nomes exactos nunca acompanha: cada tabela nova traz os seus
+ * `*_html` e `*_snapshot`. Isto apanha a família toda de uma vez — foi o que
+ * deixou passar o `contract_body_html` (um documento HTML inteiro despejado na
+ * timeline) e o `prompt_values` (que saía como "[object Object]").
+ */
+const UNREADABLE_FIELD_PATTERNS: RegExp[] = [
+  /_html$/,
+  /_json$/,
+  /_snapshot$/,
+  /_hash$/,
+  /_token$/,
+  /^prompt_/,
+  // Referências internas: o uuid não diz nada a ninguém, e quando existe um
+  // campo legível ao lado (…_by_name para …_by_id) é esse que interessa.
+  /_id$/,
+];
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Acima disto, um valor deixa de se ler e passa a ocupar o ecrã. */
+const MAX_VALUE_CHARS = 120;
+
+function renderValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "object") return "[object Object]";
+  return String(value);
+}
+
+/**
+ * Formata um diff do `entity_audit_log` para a timeline.
+ * Devolve `null` quando a linha não deve sequer aparecer.
+ *
+ * Três razões para esconder, por ordem de aplicação:
+ *   1. o nome do campo é de uma família sem leitura humana (`*_html`, `*_id`…);
+ *   2. o valor é um objecto — apareceria como "[object Object]", que não é
+ *      informação nenhuma;
+ *   3. os dois lados são uuids.
+ *
+ * O que é apenas COMPRIDO não se esconde, trunca-se: uma nota longa continua a
+ * ser uma edição real e o utilizador deve vê-la, só não em ecrã inteiro.
+ */
+export function formatAuditDiff(
+  field: string,
+  oldValue: unknown,
+  newValue: unknown,
+  translate: (v: string) => string = (v) => v,
+): string | null {
+  if (UNREADABLE_FIELD_PATTERNS.some((re) => re.test(field))) return null;
+  if (typeof oldValue === "object" && oldValue !== null) return null;
+  if (typeof newValue === "object" && newValue !== null) return null;
+
+  const rawOld = renderValue(oldValue);
+  const rawNew = renderValue(newValue);
+  if (UUID_RE.test(rawOld) && UUID_RE.test(rawNew)) return null;
+  if (rawOld === "—" && UUID_RE.test(rawNew)) return null;
+
+  // Nada mudou que se veja — acontece quando o valor real está num campo já
+  // escondido. Mostrar "— → —" é pior do que não mostrar nada.
+  if (rawOld === "—" && rawNew === "—") return null;
+
+  const clip = (v: string) =>
+    v.length > MAX_VALUE_CHARS ? `${v.slice(0, MAX_VALUE_CHARS)}…` : v;
+
+  return `${clip(rawOld === "—" ? rawOld : translate(rawOld))} → ${clip(rawNew === "—" ? rawNew : translate(rawNew))}`;
+}

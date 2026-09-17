@@ -9,7 +9,7 @@ import {
   describeDocumentHistoryEvent,
   shouldHideAuditDiff,
 } from "@/lib/timeline/documentEvents";
-import { TIMELINE_AUDIT_IGNORED_FIELDS } from "@/lib/timeline/auditIgnoredFields";
+import { TIMELINE_AUDIT_IGNORED_FIELDS, formatAuditDiff } from "@/lib/timeline/auditIgnoredFields";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
@@ -426,13 +426,13 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
             .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field) && !shouldHideAuditDiff(row.table_name, field))
             .forEach(([field, diff], idx) => {
-              const oldVal = diff?.old == null ? "—" : String(diff.old);
-              const newVal = diff?.new == null ? "—" : String(diff.new);
+              const description = formatAuditDiff(field, diff?.old, diff?.new);
+              if (description === null) return;
               auditEvents.push({
                 id: `audit-${row.id}-${idx}`,
                 type: "field_change",
                 title: `Editou ${clientFieldLabel(field)}`,
-                description: `${oldVal} → ${newVal}`,
+                description,
                 date: row.created_at,
                 actor,
               });

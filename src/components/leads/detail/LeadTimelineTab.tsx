@@ -15,7 +15,7 @@ import {
   describeDocumentHistoryEvent,
   shouldHideAuditDiff,
 } from "@/lib/timeline/documentEvents";
-import { TIMELINE_AUDIT_IGNORED_FIELDS } from "@/lib/timeline/auditIgnoredFields";
+import { TIMELINE_AUDIT_IGNORED_FIELDS, formatAuditDiff } from "@/lib/timeline/auditIgnoredFields";
 
 interface TimelineEvent {
   id: string;
@@ -258,13 +258,15 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
             .filter(([field]) => !AUDIT_IGNORED_FIELDS.has(field) && !shouldHideAuditDiff(row.table_name, field));
           entries.forEach(([field, diff], idx) => {
             const translate = field === "status" ? statusValueLabel : (v: string) => v;
-            const oldVal = diff?.old == null ? "—" : translate(String(diff.old));
-            const newVal = diff?.new == null ? "—" : translate(String(diff.new));
+            // null = a linha não tem leitura humana (HTML, jsonb, uuid) e não
+            // deve sequer aparecer. Ver formatAuditDiff.
+            const description = formatAuditDiff(field, diff?.old, diff?.new, translate);
+            if (description === null) return;
             auditEvents.push({
               id: `audit-${row.id}-${idx}`,
               type: "field_change",
               title: `Editou ${fieldLabel(field)}`,
-              description: `${oldVal} → ${newVal}`,
+              description,
               date: row.created_at,
               actor,
             });
