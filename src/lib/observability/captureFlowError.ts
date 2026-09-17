@@ -152,7 +152,17 @@ export type BusinessFlow =
   | "hr-documentos-criar-por-upload"
   | "hr-documentos-assinatura-externa"
   | "hr-admissao-pendencias"
-  | "hr-pessoa-duplicados-candidatos";
+  | "hr-pessoa-duplicados-candidatos"
+  // Periodo de processamento salarial (`hr_periodos_processamento`,
+  // 20261201220000) -- ciclo de vida abrir/fechar. Mesma razao das outras
+  // escritas versionadas de RH: a leitura falhada esconde se o periodo esta
+  // aberto ou fechado; a escrita falhada perde uma abertura ou um fecho.
+  | "hr-processamento-periodo-load"
+  | "hr-processamento-periodo-write"
+  // Lancamentos pontuais dentro de um periodo (`hr_processamento_
+  // lancamentos`, 20261201230000) -- premios e outros valores pontuais.
+  | "hr-processamento-lancamentos-load"
+  | "hr-processamento-lancamentos-write";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually

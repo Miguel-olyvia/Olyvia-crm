@@ -561,6 +561,52 @@ export interface HrRegraSubsidioAlimentacao {
   updated_at: string;
 }
 
+/** Dominio de `hr_periodos_processamento.estado` (20261201220000). */
+export type EstadoPeriodoProcessamento = "aberto" | "fechado";
+
+/**
+ * `hr_periodos_processamento` (20261201220000). O ciclo de vida do periodo
+ * mensal de "Processamento Salarial": um periodo por (organization_id, ano,
+ * mes). So `aberto` -> `fechado`, nunca ao contrario por UPDATE directo (a
+ * base bloqueia por trigger). SEM reabertura auditada nesta fase -- decisao de
+ * produto pendente.
+ */
+export interface HrPeriodoProcessamento {
+  id: string;
+  organization_id: string;
+  ano: number;
+  mes: number;
+  estado: EstadoPeriodoProcessamento;
+  fechado_em: string | null;
+  fechado_por: string | null;
+  created_at: string;
+  created_by: string | null;
+}
+
+/**
+ * `hr_processamento_lancamentos` (20261201230000). Premio ou valor pontual
+ * lancado a uma pessoa dentro de um periodo. Nunca se apaga -- so se anula
+ * (`anulado_em`/`anulado_por`/`anulado_motivo`). Escrita SO por RPC
+ * (`rpc_hr_processamento_lancamento_criar` / `_anular`), e so enquanto o
+ * periodo estiver `aberto`.
+ */
+export interface HrProcessamentoLancamento {
+  id: string;
+  periodo_id: string;
+  pessoa_id: string;
+  organization_id: string;
+  descricao: string;
+  valor: number;
+  codigo_processamento_id: string | null;
+  anulado_em: string | null;
+  anulado_por: string | null;
+  anulado_motivo: string | null;
+  created_at: string;
+  created_by: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
 /**
  * Dados bancarios SEM o numero da conta em claro.
  *

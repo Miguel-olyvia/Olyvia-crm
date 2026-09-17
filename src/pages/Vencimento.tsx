@@ -5,14 +5,15 @@
  * a configuracao. Antes disto, o item de menu levava direito a
  * `ConfiguracaoVencimento.tsx` (20261201180000..20261201200000) -- so os
  * codigos de processamento e a regra do subsidio de alimentacao.
- * Estruturalmente errado: este e o ecra principal (onde no futuro vive o
- * relatorio/calculo real, ainda por construir -- combinado com o utilizador,
- * fora de ambito agora), e a configuracao e so UMA PARTE dele.
+ * Estruturalmente errado: este e o ecra principal, e a configuracao e so UMA
+ * PARTE dele.
  *
- * Dois separadores: "Visao geral" (o relatorio -- estado vazio honesto,
- * ainda nao existe) e "Configuracao" (o ecra antigo, importado tal como
- * estava, sem duplicar logica nenhuma -- a gestao de permissoes por seccao
- * continua dentro de `ConfiguracaoVencimento`).
+ * Dois separadores: "Visao geral" (FASE 1 do ciclo de vida do periodo --
+ * abrir/fechar, resumo por pessoa e lancamentos pontuais; o recibo em si e a
+ * exportacao ficam para a FASE 2, ver `ProcessamentoVisaoGeralTab.tsx`) e
+ * "Configuracao" (o ecra antigo, importado tal como estava, sem duplicar
+ * logica nenhuma -- a gestao de permissoes por seccao continua dentro de
+ * `ConfiguracaoVencimento`).
  *
  * O separador activo fica na URL (`?tab=`), tal como
  * `AusenciasOrganizacao.tsx` -- assim um link directo para a configuracao
@@ -23,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
-import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
+import { ProcessamentoVisaoGeralTab } from "@/components/hr/processamento/ProcessamentoVisaoGeralTab";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -40,10 +41,11 @@ export default function Vencimento() {
 
   const podeVerCodigos = hasPermission("hr.vencimento.codigos.view");
   const podeVerSubsidio = hasPermission("hr.vencimento.subsidio.view");
+  const podeVerPeriodo = hasPermission("hr.processamento.periodo.view");
 
   if (companyLoading || permissionsLoading) return <OlyviaLoader />;
   if (!activeCompany) return <NoOrganizationState />;
-  if (!podeVerCodigos && !podeVerSubsidio) return <SemAcessoCard className="m-6" />;
+  if (!podeVerCodigos && !podeVerSubsidio && !podeVerPeriodo) return <SemAcessoCard className="m-6" />;
 
   const abaActiva = searchParams.get(ABA_PARAM) || ABA_OMISSAO;
 
@@ -68,7 +70,7 @@ export default function Vencimento() {
         </TabsList>
 
         <TabsContent value="visao-geral" className="mt-4">
-          <PessoaEmConstrucaoTab titulo={t("hr.vencimento.abaVisaoGeral")} />
+          <ProcessamentoVisaoGeralTab />
         </TabsContent>
 
         <TabsContent value="configuracao" className="mt-4">
