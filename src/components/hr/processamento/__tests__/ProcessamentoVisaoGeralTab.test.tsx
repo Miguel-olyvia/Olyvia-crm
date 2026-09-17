@@ -110,6 +110,17 @@ vi.mock("@/hooks/useProcessamentoLancamentos", () => ({
   }),
 }));
 
+const TOTAIS_PADRAO = {
+  diasPlaneados: 22,
+  diasTrabalhados: 20,
+  diasComFaltaCompleta: 0,
+  diasComFaltaIncompleta: 0,
+  horasExtraMinutos: 60,
+  planeadoMinutos: 0,
+  realizadoMinutos: 0,
+};
+let totaisPorPessoaMock: Record<string, typeof TOTAIS_PADRAO> = {};
+
 vi.mock("@/components/hr/processamento/ResumoPessoaProcessamentoOculto", async () => {
   const react = await vi.importActual<typeof import("react")>("react");
   return {
@@ -126,12 +137,7 @@ vi.mock("@/components/hr/processamento/ResumoPessoaProcessamentoOculto", async (
       aoTerminarCarregamento: (id: string, totais: unknown) => void;
     }) => {
       react.useEffect(() => {
-        aoTerminarCarregamento(pessoaId, {
-          diasTrabalhados: 20,
-          diasComFaltaCompleta: 0,
-          diasComFaltaIncompleta: 0,
-          horasExtraMinutos: 60,
-        });
+        aoTerminarCarregamento(pessoaId, totaisPorPessoaMock[pessoaId] ?? TOTAIS_PADRAO);
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [pessoaId]);
       return null;
@@ -166,6 +172,7 @@ beforeEach(() => {
   retribuicoesPorPessoa = new Map();
   retribuicoesRecusado = false;
   horasPorPessoa = new Map();
+  totaisPorPessoaMock = {};
   abrirMock.mockClear();
   fecharMock.mockClear();
   criarMock.mockClear();
@@ -342,9 +349,10 @@ describe("ProcessamentoVisaoGeralTab", () => {
 
     const linha = screen.getByText("Ana Silva").closest("tr")!;
     const celulas = within(linha).getAllByRole("cell");
-    // Ordem das colunas: Pessoa, Dias, Falta completa, Falta incompleta, Horas
-    // extra, Salario-base, Codigos aplicados, Total bruto estimado, Accoes.
-    const celulaCodigos = celulas[6];
+    // Ordem das colunas: Pessoa, Dias planeados, Dias trabalhados, Falta
+    // completa, Falta incompleta, Horas extra, Salario-base, Codigos
+    // aplicados, Total bruto estimado, Accoes.
+    const celulaCodigos = celulas[7];
     expect(celulaCodigos.textContent).toBe("");
   });
 
@@ -379,5 +387,124 @@ describe("ProcessamentoVisaoGeralTab", () => {
     expect(
       within(linha).getAllByText("hr.vencimento.visaoGeral.semPermissaoRetribuicao"),
     ).toHaveLength(2); // salario-base + codigos aplicados
+  });
+
+  it("mostra a coluna de dias planeados, antes de dias trabalhados", async () => {
+    periodoActual = PERIODO_ABERTO;
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+
+    // diasPlaneados = 22 para as duas pessoas (TOTAIS_PADRAO do mock).
+    expect(screen.getAllByText("22")).toHaveLength(2);
+
+    const cabecalhos = screen.getAllByRole("columnheader").map((c) => c.textContent);
+    const indiceDiasPlaneados = cabecalhos.indexOf("hr.vencimento.visaoGeral.colunaDiasPlaneados");
+    const indiceDiasTrabalhados = cabecalhos.indexOf("hr.vencimento.visaoGeral.colunaDiasTrabalhados");
+    expect(indiceDiasPlaneados).toBeGreaterThanOrEqual(0);
+    expect(indiceDiasPlaneados).toBeLessThan(indiceDiasTrabalhados);
+  });
+
+  it("o total bruto estimado nunca fica negativo, mesmo com um desconto de faltas maior que a base", async () => {
+    periodoActual = PERIODO_ABERTO;
+    retribuicoesPorPessoa = new Map([
+      [
+        "pessoa-1",
+        [
+          {
+            pessoa_id: "pessoa-1",
+            valor_base: 1000,
+            periodicidade: "mensal",
+            duodecimos_pct: 100,
+            subsidio_alimentacao: null,
+            valido_de: "2026-01-01",
+            valido_ate: null,
+          },
+        ],
+      ],
+    ]);
+    horasPorPessoa = new Map([["pessoa-1", 1]]);
+    totaisPorPessoaMock = {
+      "pessoa-1": {
+        ...TOTAIS_PADRAO,
+        diasPlaneados: 1,
+        diasTrabalhados: 0,
+        diasComFaltaCompleta: 1,
+        horasExtraMinutos: 0,
+        planeadoMinutos: 600,
+        realizadoMinutos: 0,
+      },
+    };
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+
+    const linha = screen.getByText("Ana Silva").closest("tr")!;
+    // baseMes = 1166.67 mas o desconto de faltas (10h * 230.77 €/h) ultrapassa-a
+    // largamente -- o total mostrado tem de ficar em 0,00 €, nunca negativo.
+    const normalizar = (texto: string) => texto.replace(/\s/g, " ");
+    const valorZeroEsperado = normalizar(formatarValorEsperado(0));
+    const correspondeAZero = (_: string, elemento: Element | null) =>
+      normalizar(elemento?.textContent ?? "") === valorZeroEsperado;
+    expect(within(linha).getByText(correspondeAZero)).toBeInTheDocument();
+  });
+
+  it("abrir o detalhe de uma pessoa mostra a conta completa", async () => {
+    periodoActual = PERIODO_ABERTO;
+    retribuicoesPorPessoa = new Map([
+      [
+        "pessoa-1",
+        [
+          {
+            pessoa_id: "pessoa-1",
+            valor_base: 1200,
+            periodicidade: "mensal",
+            duodecimos_pct: 0,
+            subsidio_alimentacao: null,
+            valido_de: "2026-01-01",
+            valido_ate: null,
+          },
+        ],
+      ],
+    ]);
+    horasPorPessoa = new Map([["pessoa-1", 40]]);
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+
+    const linhaAna = screen.getByText("Ana Silva").closest("tr")!;
+    fireEvent.click(within(linhaAna).getByText("hr.vencimento.visaoGeral.verDetalhe"));
+
+    await screen.findByText("hr.vencimento.visaoGeral.detalheSalarioBase");
+    expect(screen.getByText("hr.vencimento.visaoGeral.detalheValorHoraNormal")).toBeInTheDocument();
+    expect(screen.getByText("hr.vencimento.visaoGeral.detalheDescontoFaltas")).toBeInTheDocument();
+    expect(screen.getByText("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao")).toBeInTheDocument();
+    expect(screen.getByText("hr.vencimento.visaoGeral.detalheLancamentosPontuais")).toBeInTheDocument();
+    expect(screen.getByText("hr.vencimento.visaoGeral.detalheSemCodigos")).toBeInTheDocument();
+    // duodecimos_pct 0 -> divisor 14 -> baseMes = (1200*14)/14 = 1200, sem
+    // faltas nem lancamentos -- o total no dialogo tem de bater com o da tabela.
+    const dialogo = screen.getByRole("dialog");
+    const normalizar = (texto: string) => texto.replace(/\s/g, " ");
+    const valor1200Esperado = normalizar(formatarValorEsperado(1200));
+    const correspondeA1200 = (_: string, elemento: Element | null) =>
+      normalizar(elemento?.textContent ?? "") === valor1200Esperado;
+    expect(within(dialogo).getByText(correspondeA1200)).toBeInTheDocument();
+  });
+
+  it("sem permissao de retribuicao, o detalhe esconde base e total mas mostra o resto", async () => {
+    periodoActual = PERIODO_ABERTO;
+    retribuicoesRecusado = true;
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+
+    const linhaAna = screen.getByText("Ana Silva").closest("tr")!;
+    fireEvent.click(within(linhaAna).getByText("hr.vencimento.visaoGeral.verDetalhe"));
+
+    await screen.findByText("hr.vencimento.visaoGeral.detalheDescontoFaltas");
+    const dialogo = screen.getByRole("dialog");
+    expect(within(dialogo).getByText("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao")).toBeInTheDocument();
+    expect(within(dialogo).getByText("hr.vencimento.visaoGeral.detalheLancamentosPontuais")).toBeInTheDocument();
+    expect(within(dialogo).queryByText("hr.vencimento.visaoGeral.detalheSalarioBase")).not.toBeInTheDocument();
+    expect(within(dialogo).queryByText("hr.vencimento.visaoGeral.detalheValorHoraNormal")).not.toBeInTheDocument();
+    expect(
+      within(dialogo).queryByText("hr.vencimento.visaoGeral.colunaTotalBrutoEstimado"),
+    ).not.toBeInTheDocument();
   });
 });

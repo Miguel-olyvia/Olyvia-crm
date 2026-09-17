@@ -151,6 +151,16 @@ export interface DiaRelatorioMensal {
 
 export interface TotaisRelatorioMensal {
   diasTrabalhados: number;
+  /**
+   * Dias com horario planeado (`planeadoMinutos > 0`), a mesma exclusao de
+   * `contaParaTotais` que os outros totais usam (uma ausencia aprovada de dia
+   * inteiro nao conta -- esse dia fica escondido em todos os totais, nao so
+   * neste). Opcional para nao obrigar os fixtures de outros ecras (relatorio
+   * de assiduidade, PDF) que ja tinham `TotaisRelatorioMensal` construido a
+   * mao a acrescentar este campo -- so o Processamento Salarial o usa por
+   * agora.
+   */
+  diasPlaneados?: number;
   planeadoMinutos: number;
   realizadoMinutos: number;
   obraHoras: number;
@@ -561,6 +571,8 @@ export function useRelatorioAssiduidadeMensal(
           return {
             diasTrabalhados:
               acc.diasTrabalhados + (contaParaTotais && dia.realizadoMinutos > 0 ? 1 : 0),
+            diasPlaneados:
+              (acc.diasPlaneados ?? 0) + (contaParaTotais && dia.planeadoMinutos > 0 ? 1 : 0),
             planeadoMinutos: acc.planeadoMinutos + dia.planeadoMinutos,
             realizadoMinutos: acc.realizadoMinutos + dia.realizadoMinutos,
             obraHoras: acc.obraHoras + dia.obraHoras,
@@ -593,6 +605,7 @@ export function useRelatorioAssiduidadeMensal(
         },
         {
           diasTrabalhados: 0,
+          diasPlaneados: 0,
           planeadoMinutos: 0,
           realizadoMinutos: 0,
           obraHoras: 0,

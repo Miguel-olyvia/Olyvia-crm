@@ -67,10 +67,14 @@ import { useHorasVigentesDaOrganizacao } from "@/hooks/useHorasVigentesDaOrganiz
 import { useRegrasSubsidioAlimentacao } from "@/hooks/useRegrasSubsidioAlimentacao";
 import { ResumoPessoaProcessamentoOculto } from "@/components/hr/processamento/ResumoPessoaProcessamentoOculto";
 import type { TotaisRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
-import { calcularProcessamentoPessoa, type ResultadoProcessamentoPessoa } from "@/lib/hr/processamentoTotais";
+import {
+  calcularProcessamentoPessoa,
+  type AvisoProcessamento,
+  type ResultadoProcessamentoPessoa,
+} from "@/lib/hr/processamentoTotais";
 import type { HrProcessamentoLancamento } from "@/types/hr";
 import { toast } from "@/lib/toast";
-import { Loader2, Lock, Plus, TriangleAlert } from "lucide-react";
+import { Eye, Loader2, Lock, Plus, TriangleAlert } from "lucide-react";
 
 function mesDeHoje(): string {
   const hoje = new Date();
@@ -102,6 +106,16 @@ function formatarLinhaCodigo(linha: { codigo: string; horas: number | null; valo
   return partes.join(" · ");
 }
 
+/** A chave de traducao de cada aviso de `processamentoTotais.ts` -- uma frase por aviso. */
+const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
+  sem_retribuicao: "hr.vencimento.visaoGeral.avisoSemRetribuicao",
+  sem_horas_semanais: "hr.vencimento.visaoGeral.avisoSemHorasSemanais",
+  periodicidade_nao_convertivel: "hr.vencimento.visaoGeral.avisoPeriodicidadeNaoConvertivel",
+  duodecimos_por_decidir: "hr.vencimento.visaoGeral.avisoDuodecimosPorDecidir",
+  duodecimos_50_aproximado: "hr.vencimento.visaoGeral.avisoDuodecimos50Aproximado",
+  sem_regra_subsidio: "hr.vencimento.visaoGeral.avisoSemRegraSubsidio",
+};
+
 const FORM_LANCAMENTO_VAZIO = { descricao: "", valor: "", codigoProcessamentoId: "" };
 
 export function ProcessamentoVisaoGeralTab() {
@@ -132,6 +146,7 @@ export function ProcessamentoVisaoGeralTab() {
   const [totaisPorPessoa, setTotaisPorPessoa] = useState<Record<string, TotaisRelatorioMensal>>({});
   const [confirmarFecho, setConfirmarFecho] = useState(false);
   const [pessoaParaLancamento, setPessoaParaLancamento] = useState<string | null>(null);
+  const [pessoaParaDetalhe, setPessoaParaDetalhe] = useState<string | null>(null);
   const [formLancamento, setFormLancamento] = useState(FORM_LANCAMENTO_VAZIO);
   const [lancamentoParaAnular, setLancamentoParaAnular] = useState<HrProcessamentoLancamento | null>(
     null,
@@ -357,6 +372,7 @@ export function ProcessamentoVisaoGeralTab() {
                 <thead className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
                   <tr>
                     <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaPessoa")}</th>
+                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaDiasPlaneados")}</th>
                     <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaDiasTrabalhados")}</th>
                     <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaFaltaCompleta")}</th>
                     <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaFaltaIncompleta")}</th>
@@ -376,6 +392,9 @@ export function ProcessamentoVisaoGeralTab() {
                     return (
                       <tr key={pessoa.id} className="border-b last:border-b-0 align-top">
                         <td className="px-4 py-3 font-medium">{pessoa.nome_completo}</td>
+                        <td className="px-4 py-3 tabular-nums">
+                          {totais ? (totais.diasPlaneados ?? 0) : <OlyviaLoader size={16} />}
+                        </td>
                         <td className="px-4 py-3 tabular-nums">
                           {totais ? totais.diasTrabalhados : <OlyviaLoader size={16} />}
                         </td>
@@ -448,16 +467,26 @@ export function ProcessamentoVisaoGeralTab() {
                               : formatarValor(resultadoPessoa.resultado.totalBrutoEstimado)}
                         </td>
                         <td className="px-4 py-3 text-right">
-                          {podeGerirLancamentos && !periodoFechado && (
+                          <div className="flex justify-end gap-2">
                             <Button
                               size="sm"
-                              variant="outline"
-                              onClick={() => abrirFormularioLancamento(pessoa.id)}
+                              variant="ghost"
+                              onClick={() => setPessoaParaDetalhe(pessoa.id)}
                             >
-                              <Plus className="mr-1 h-3 w-3" />
-                              {t("hr.vencimento.visaoGeral.acrescentarValor")}
+                              <Eye className="mr-1 h-3 w-3" />
+                              {t("hr.vencimento.visaoGeral.verDetalhe")}
                             </Button>
-                          )}
+                            {podeGerirLancamentos && !periodoFechado && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => abrirFormularioLancamento(pessoa.id)}
+                              >
+                                <Plus className="mr-1 h-3 w-3" />
+                                {t("hr.vencimento.visaoGeral.acrescentarValor")}
+                              </Button>
+                            )}
+                          </div>
                           {lancamentosDaPessoa.length > 0 && (
                             <ul className="mt-2 space-y-1 text-left text-xs">
                               {lancamentosDaPessoa.map((lancamento) => (
@@ -633,6 +662,147 @@ export function ProcessamentoVisaoGeralTab() {
               {t("hr.vencimento.visaoGeral.anular")}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Detalhe da conta por pessoa -- so apresentacao, nada aqui recalcula nada. */}
+      <Dialog open={!!pessoaParaDetalhe} onOpenChange={(open) => !open && setPessoaParaDetalhe(null)}>
+        <DialogContent className="max-w-lg">
+          {(() => {
+            if (!pessoaParaDetalhe) return null;
+            const pessoaDetalhe = pessoasActivas.find((p) => p.id === pessoaParaDetalhe);
+            const resultadoPessoa = resultadosPorPessoa.get(pessoaParaDetalhe);
+            const semPermissaoRetribuicao = retribuicoesHook.recusado;
+            const { resultado } = resultadoPessoa ?? {};
+
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle>
+                    {t("hr.vencimento.visaoGeral.detalheTitulo")}
+                    {pessoaDetalhe ? ` -- ${pessoaDetalhe.nome_completo}` : ""}
+                  </DialogTitle>
+                </DialogHeader>
+                {!resultado ? (
+                  <p className="text-sm text-muted-foreground">
+                    {t("hr.vencimento.visaoGeral.semPermissaoRetribuicao")}
+                  </p>
+                ) : (
+                  <div className="space-y-4 text-sm">
+                    {!semPermissaoRetribuicao && (
+                      <div className="space-y-1">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            {t("hr.vencimento.visaoGeral.detalheSalarioBase")}
+                          </span>
+                          <span className="tabular-nums">
+                            {resultadoPessoa?.valorBase !== null && resultadoPessoa?.valorBase !== undefined
+                              ? formatarValor(resultadoPessoa.valorBase)
+                              : "—"}
+                            {resultadoPessoa?.periodicidade
+                              ? ` (${PERIODICIDADE_LEGENDA[resultadoPessoa.periodicidade] ?? resultadoPessoa.periodicidade})`
+                              : ""}
+                          </span>
+                        </div>
+                        {resultado.divisorDuodecimos !== null && (
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">
+                              {t("hr.vencimento.visaoGeral.detalheDivisorDuodecimos")}
+                            </span>
+                            <span className="tabular-nums">{resultado.divisorDuodecimos}</span>
+                          </div>
+                        )}
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">
+                            {t("hr.vencimento.visaoGeral.detalheValorHoraNormal")}
+                          </span>
+                          <span className="tabular-nums">
+                            {resultado.valorHoraNormal !== null ? formatarValor(resultado.valorHoraNormal) : "—"}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {!semPermissaoRetribuicao && (
+                      <div className="space-y-1">
+                        <div className="font-medium">
+                          {t("hr.vencimento.visaoGeral.colunaCodigosAplicados")}
+                        </div>
+                        {resultado.linhasAutomaticas.length > 0 ? (
+                          <ul className="space-y-0.5">
+                            {resultado.linhasAutomaticas.map((linha) => (
+                              <li key={linha.codigoId} className="tabular-nums">
+                                {formatarLinhaCodigo(linha)}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-muted-foreground">
+                            {t("hr.vencimento.visaoGeral.detalheSemCodigos")}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">
+                          {t("hr.vencimento.visaoGeral.detalheDescontoFaltas")}
+                        </span>
+                        <span className="tabular-nums">
+                          {resultado.descontoFaltas > 0
+                            ? `-${formatarValor(resultado.descontoFaltas)}`
+                            : formatarValor(0)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">
+                          {t("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao")}
+                        </span>
+                        <span className="tabular-nums">{formatarValor(resultado.subsidioAlimentacao)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">
+                          {t("hr.vencimento.visaoGeral.detalheLancamentosPontuais")}
+                        </span>
+                        <span className="tabular-nums">{formatarValor(resultado.lancamentosPontuais)}</span>
+                      </div>
+                    </div>
+
+                    {!semPermissaoRetribuicao && (
+                      <div className="flex justify-between border-t pt-2 font-semibold">
+                        <span>{t("hr.vencimento.visaoGeral.colunaTotalBrutoEstimado")}</span>
+                        <span className="tabular-nums">
+                          {resultado.totalBrutoEstimado !== null
+                            ? formatarValor(resultado.totalBrutoEstimado)
+                            : "—"}
+                        </span>
+                      </div>
+                    )}
+
+                    {resultado.avisos.length > 0 && (
+                      <div className="space-y-1 border-t pt-2">
+                        <div className="font-medium">{t("hr.vencimento.visaoGeral.detalheAvisos")}</div>
+                        <ul className="space-y-0.5 text-amber-600">
+                          {resultado.avisos.map((aviso) => (
+                            <li key={aviso} className="flex items-center gap-1.5">
+                              <TriangleAlert className="h-3.5 w-3.5 shrink-0" />
+                              {t(AVISO_CHAVE[aviso])}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setPessoaParaDetalhe(null)}>
+                    {t("common.cancel")}
+                  </Button>
+                </DialogFooter>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>

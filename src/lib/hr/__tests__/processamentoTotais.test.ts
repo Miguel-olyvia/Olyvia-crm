@@ -453,6 +453,21 @@ describe("calcularProcessamentoPessoa", () => {
     expect(entrada).toEqual(copia);
   });
 
+  it("total bruto estimado nunca fica negativo -- zero dias trabalhados desconta mais do que a base", () => {
+    const resultado = calcularProcessamentoPessoa(
+      entradaBase({
+        retribuicao: retribuicao({ valorBase: 200, periodicidade: "mensal", duodecimosPct: 100 }),
+        // Horas semanais baixas -> valorHoraNormal alto (200*12/(52*1) ~ 46.15
+        // €/h), para que o desconto de um mes inteiro sem trabalhar (160h)
+        // ultrapasse largamente a base de ~233.33 €.
+        horasSemanaisEquivalentes: 1,
+        totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 0 }),
+      }),
+    );
+    expect(resultado.descontoFaltas).toBeGreaterThan(resultado.baseMes ?? 0);
+    expect(resultado.totalBrutoEstimado).toBe(0);
+  });
+
   it("tudo em falta (sem retribuicao): valores derivados dela ficam null, o resto continua a calcular-se", () => {
     const resultado = calcularProcessamentoPessoa(
       entradaBase({

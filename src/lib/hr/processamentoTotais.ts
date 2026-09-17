@@ -327,10 +327,17 @@ export function calcularProcessamentoPessoa(
 
   const lancamentosPontuais = calcularLancamentosPontuais(entrada.lancamentos);
 
+  // Nunca negativo: mesmo que o desconto de faltas supere a base (a pessoa
+  // nao trabalhou nenhum dos dias planeados), o total fica 0, nao uma divida
+  // da pessoa a empresa. So se aplica quando ha base para calcular -- `null`
+  // continua `null`, essa lacuna nao muda aqui.
   const totalBrutoEstimado =
     baseMes === null
       ? null
-      : baseMes + totalCodigosAutomaticos - descontoFaltas + subsidioAlimentacao + lancamentosPontuais;
+      : Math.max(
+          0,
+          baseMes + totalCodigosAutomaticos - descontoFaltas + subsidioAlimentacao + lancamentosPontuais,
+        );
 
   return {
     valorHoraNormal,
