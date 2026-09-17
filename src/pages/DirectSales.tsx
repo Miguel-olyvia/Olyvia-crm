@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { format, parseISO } from "date-fns";
-import { FileDown, KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send, SendHorizontal } from "lucide-react";
+import { FileDown, KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send, SendHorizontal, TrendingUp } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,6 +26,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadBlob, generateProformaPdfBlob } from "@/utils/generateProformaPdfBlob";
+import { generateInternalSalePdfBlob } from "@/utils/generateInternalSalePdfBlob";
+import { usePermissions } from "@/hooks/usePermissions";
 import { cn, formatCurrency } from "@/lib/utils";
 
 // Venda Direta — Fase 2: listagem. Fluxo alternativo, mais leve, ao caminho
@@ -85,6 +87,12 @@ const STATUS_OPTIONS: DirectSaleStatus[] = ["rascunho", "enviada", "aceite", "re
 const DirectSales = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { hasPermission } = usePermissions();
+
+  // Mesma permissão que governa "ver margens e custos" nos orçamentos. A venda
+  // direta não tem permissão própria de custos, e criar uma obrigaria a
+  // atribuí-la aos papéis antes de alguém poder ver o documento.
+  const canViewCosts = hasPermission("quotes.view_costs");
   const { activeCompany, isLoading: companyLoading } = useCompany();
 
   const [sales, setSales] = useState<DirectSaleRow[]>([]);
@@ -103,6 +111,9 @@ const DirectSales = () => {
 
   /** Venda cuja proforma está a ser gerada — a geração do PDF demora, trava só esse item. */
   const [generatingProformaId, setGeneratingProformaId] = useState<string | null>(null);
+
+  /** Idem, para o documento interno de custo e margem (Fase 6A). */
+  const [generatingInternalId, setGeneratingInternalId] = useState<string | null>(null);
 
   /** Id monotónico do pedido de listagem em curso — ver `loadSales`. */
   const latestRequestIdRef = useRef(0);
@@ -393,6 +404,31 @@ const DirectSales = () => {
     }
   };
 
+  /**
+   * Documento interno de custo e margem (Fase 6A).
+   *
+   * Sem exigir proforma: ao contrário da proforma, este documento faz sentido
+   * antes da aceitação — serve para decidir o preço, não para o comunicar. O
+   * acesso é travado pela permissão `quotes.view_costs` no menu; aqui o guarda
+   * é só contra cliques repetidos.
+   */
+  const handleDownloadInternalDoc = async (sale: DirectSaleRow) => {
+    if (generatingInternalId) return;
+    setGeneratingInternalId(sale.id);
+    try {
+      const { blob, fileName } = await generateInternalSalePdfBlob(sale.id);
+      downloadBlob(blob, fileName);
+    } catch (error: any) {
+      toast({
+        title: "Não foi possível gerar o documento interno",
+        description: error?.message,
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingInternalId(null);
+    }
+  };
+
   const formatDate = (value: string | null) => {
     if (!value) return "—";
     try {
@@ -643,12 +679,16 @@ const DirectSales = () => {
                               Fora do PermissionGate de direct_sales.edit de
                               propósito: descarregar um documento é leitura, e a
                               rota já exige direct_sales.view. */}
-                          {sale.proforma_number && (
+                          {(sale.proforma_number || canViewCosts) && (
                             <>
                               <DropdownMenuSeparator />
                               <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
-                                Documento
+                                Documentos
                               </DropdownMenuLabel>
+                            </>
+                          )}
+                          {sale.proforma_number && (
+                            <>
                               <DropdownMenuItem
                                 disabled={generatingProformaId === sale.id}
                                 onClick={(e) => {
@@ -663,6 +703,30 @@ const DirectSales = () => {
                                   : "Descarregar proforma"}
                               </DropdownMenuItem>
                             </>
+                          )}
+
+                          {/* Documento interno de custo e margem (Fase 6A).
+                              Atrás de `quotes.view_costs`, a permissão que já
+                              governa "ver margens e custos" — quem não a tem
+                              nem vê o item.
+
+                              Ao contrário da proforma, não depende de
+                              proforma_number: serve para decidir o preço antes
+                              de enviar, não só para analisar depois. */}
+                          {canViewCosts && (
+                            <DropdownMenuItem
+                              disabled={generatingInternalId === sale.id}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleDownloadInternalDoc(sale);
+                              }}
+                            >
+                              <TrendingUp className="mr-2 h-3.5 w-3.5 text-amber-600" />
+                              {generatingInternalId === sale.id
+                                ? "A gerar documento…"
+                                : "Documento interno (custos)"}
+                            </DropdownMenuItem>
                           )}
                         </DropdownMenuContent>
                       </DropdownMenu>

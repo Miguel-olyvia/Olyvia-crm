@@ -101,7 +101,10 @@ function joinAddress(a: any): string {
  * Nunca deita a geração abaixo: qualquer falha degrada para os campos que se
  * conseguiram obter.
  */
-async function resolveEmitterCompany(organizationId: string | null): Promise<ProformaPdfCompany> {
+// Exportada para o gerador do documento interno (Fase 6A): é a mesma empresa
+// emitente, resolvida da mesma maneira e com o logótipo tratado da mesma forma.
+// Duplicá-la levaria os dois documentos a divergirem no cabeçalho.
+export async function resolveEmitterCompany(organizationId: string | null): Promise<ProformaPdfCompany> {
   if (!organizationId) return { ...EMPTY_COMPANY };
 
   const { data: org } = await (supabase as any)
@@ -198,8 +201,12 @@ function formatClientAddress(client: any): string {
     .join(', ');
 }
 
-/** Cliente da venda direta (modo CRM apenas), via o resolver já usado pelos PDFs de orçamento. */
-async function resolveSaleClient(
+/**
+ * Cliente da venda direta (modo CRM apenas), via o resolver já usado pelos PDFs
+ * de orçamento. Exportada pela mesma razão que `resolveEmitterCompany`: o
+ * documento interno da Fase 6A tem de identificar o cliente exatamente igual.
+ */
+export async function resolveSaleClient(
   entityId: string | null,
   clientId: string | null,
 ): Promise<ProformaPdfClient> {
