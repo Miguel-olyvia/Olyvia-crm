@@ -9,6 +9,7 @@
  */
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import type { HrCodigoProcessamento, HrCodigoProcessamentoOrigemAutomatica } from "@/types/hr";
 
 // Radix Select precisa disto no jsdom -- mesmo padrao de
 // `WorkflowAutomationRules.options.test.tsx`.
@@ -44,6 +45,10 @@ const CODIGO_A = {
   nome: "Horas extraordinarias ao valor normal",
   descricao: null as string | null,
   activo: true,
+  modo_calculo: "percentagem_hora_normal" as const,
+  percentagem: 100 as number | null,
+  valor_fixo: null as number | null,
+  origem_automatica: "horas_extra" as const,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -55,19 +60,25 @@ const CODIGO_PROPRIO = {
   nome: "Recibos verdes",
   descricao: null as string | null,
   activo: true,
+  modo_calculo: "manual" as const,
+  percentagem: null as number | null,
+  valor_fixo: null as number | null,
+  origem_automatica: null as HrCodigoProcessamentoOrigemAutomatica | null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
 
 const criarCodigo = vi.fn(async () => {});
+const actualizarCodigo = vi.fn(async () => {});
 const definirActivoCodigo = vi.fn(async () => {});
-let codigos: typeof CODIGO_A[] = [];
+let codigos: HrCodigoProcessamento[] = [];
 vi.mock("@/hooks/useCodigosProcessamento", () => ({
   useCodigosProcessamento: () => ({
     codigos,
     isLoading: false,
     isSaving: false,
     criar: criarCodigo,
+    actualizar: actualizarCodigo,
     definirActivo: definirActivoCodigo,
   }),
 }));
@@ -96,6 +107,7 @@ describe("ConfiguracaoVencimento", () => {
     hasPermission.mockReset();
     hasPermission.mockReturnValue(false);
     criarCodigo.mockClear();
+    actualizarCodigo.mockClear();
     definirActivoCodigo.mockClear();
     gravarRegra.mockClear();
     codigos = [CODIGO_A, CODIGO_PROPRIO];
@@ -135,6 +147,18 @@ describe("ConfiguracaoVencimento", () => {
     expect(screen.queryByText("Novo código")).toBeNull();
   });
 
+  /** Radix Select no jsdom nao reage de forma fiavel a clique/mouseDown num
+   *  item da lista -- mesmo padrao do selector de unidade do subsidio,
+   *  abaixo. */
+  async function escolherOpcaoCombobox(combo: HTMLElement, nomeOpcao: string) {
+    fireEvent.keyDown(combo, { key: "Enter" });
+    const listbox = await screen.findByRole("listbox");
+    const opcao = within(listbox).getByText(nomeOpcao);
+    fireEvent.pointerUp(opcao);
+    fireEvent.click(opcao);
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+  }
+
   it("com .gerir, criar um codigo novo chama o hook com os dados do formulario", async () => {
     hasPermission.mockReturnValue(true);
 
@@ -148,7 +172,149 @@ describe("ConfiguracaoVencimento", () => {
     fireEvent.click(botoesGuardar[botoesGuardar.length - 1]);
 
     await waitFor(() =>
-      expect(criarCodigo).toHaveBeenCalledWith({ codigo: "400", nome: "Horas noturnas", descricao: null }),
+      expect(criarCodigo).toHaveBeenCalledWith({
+        codigo: "400",
+        nome: "Horas noturnas",
+        descricao: null,
+        modo_calculo: "manual",
+        percentagem: null,
+        valor_fixo: null,
+        origem_automatica: null,
+      }),
+    );
+  });
+
+  it("criar um codigo com percentagem_hora_normal e origem horas_extra funciona", async () => {
+    hasPermission.mockReturnValue(true);
+    // Nenhum outro codigo activo reclama "horas_extra" para este teste.
+    codigos = [];
+
+    await renderPagina();
+
+    fireEvent.click(screen.getByText("Novo código"));
+    fireEvent.change(screen.getByLabelText("Código"), { target: { value: "410" } });
+    fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Horas extra a 150%" } });
+
+    await escolherOpcaoCombobox(
+      screen.getByLabelText("Modo de cálculo"),
+      "Percentagem da hora normal",
+    );
+    fireEvent.change(screen.getByLabelText("Percentagem"), { target: { value: "150" } });
+    await escolherOpcaoCombobox(screen.getByLabelText("Aplicar automaticamente a"), "Horas extra");
+
+    const botoesGuardar = screen.getAllByText("Novo código");
+    fireEvent.click(botoesGuardar[botoesGuardar.length - 1]);
+
+    await waitFor(() =>
+      expect(criarCodigo).toHaveBeenCalledWith({
+        codigo: "410",
+        nome: "Horas extra a 150%",
+        descricao: null,
+        modo_calculo: "percentagem_hora_normal",
+        percentagem: 150,
+        valor_fixo: null,
+        origem_automatica: "horas_extra",
+      }),
+    );
+  });
+
+  it("percentagem vazia impede o submit e nao grava percentagem: 0", async () => {
+    hasPermission.mockReturnValue(true);
+    codigos = [];
+
+    await renderPagina();
+
+    fireEvent.click(screen.getByText("Novo código"));
+    fireEvent.change(screen.getByLabelText("Código"), { target: { value: "420" } });
+    fireEvent.change(screen.getByLabelText("Nome"), { target: { value: "Codigo sem percentagem" } });
+
+    await escolherOpcaoCombobox(
+      screen.getByLabelText("Modo de cálculo"),
+      "Percentagem da hora normal",
+    );
+    // Campo de percentagem fica vazio de proposito -- e o que se esta a testar.
+    expect((screen.getByLabelText("Percentagem") as HTMLInputElement).value).toBe("");
+
+    const botoesGuardar = screen.getAllByText("Novo código");
+    fireEvent.click(botoesGuardar[botoesGuardar.length - 1]);
+
+    // O submit fica bloqueado pela validacao: nunca chega a chamar o hook,
+    // e nunca com percentagem: 0 (que era o que `Number("")` produzia).
+    expect(criarCodigo).not.toHaveBeenCalled();
+    expect(criarCodigo).not.toHaveBeenCalledWith(expect.objectContaining({ percentagem: 0 }));
+  });
+
+  it("trocar de modo limpa o campo do modo anterior", async () => {
+    hasPermission.mockReturnValue(true);
+
+    await renderPagina();
+
+    fireEvent.click(screen.getByText("Novo código"));
+    await escolherOpcaoCombobox(
+      screen.getByLabelText("Modo de cálculo"),
+      "Percentagem da hora normal",
+    );
+    fireEvent.change(screen.getByLabelText("Percentagem"), { target: { value: "150" } });
+
+    await escolherOpcaoCombobox(screen.getByLabelText("Modo de cálculo"), "Valor fixo mensal");
+    expect(screen.queryByLabelText("Percentagem")).toBeNull();
+
+    await escolherOpcaoCombobox(
+      screen.getByLabelText("Modo de cálculo"),
+      "Percentagem da hora normal",
+    );
+    expect((screen.getByLabelText("Percentagem") as HTMLInputElement).value).toBe("");
+  });
+
+  it("uma origem ja usada por outro codigo activo aparece desactivada no selector", async () => {
+    hasPermission.mockReturnValue(true);
+    // CODIGO_A ja usa "horas_extra" e esta activo.
+    codigos = [CODIGO_A, CODIGO_PROPRIO];
+
+    await renderPagina();
+
+    fireEvent.click(screen.getByText("Novo código"));
+    await escolherOpcaoCombobox(
+      screen.getByLabelText("Modo de cálculo"),
+      "Percentagem da hora normal",
+    );
+
+    fireEvent.keyDown(screen.getByLabelText("Aplicar automaticamente a"), { key: "Enter" });
+    const listbox = await screen.findByRole("listbox");
+    const opcaoHorasExtra = within(listbox).getByText(
+      (conteudo) => conteudo.startsWith("Horas extra") && conteudo.includes("já usada"),
+    );
+    expect(opcaoHorasExtra.closest('[role="option"]')).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("editar um codigo existente preenche o formulario correctamente", async () => {
+    hasPermission.mockReturnValue(true);
+
+    await renderPagina();
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Editar código" })[0]);
+
+    expect(screen.getByRole("heading", { name: "Editar código" })).toBeTruthy();
+    expect((screen.getByLabelText("Código") as HTMLInputElement).value).toBe("100");
+    expect((screen.getByLabelText("Código") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Nome") as HTMLInputElement).value).toBe(
+      "Horas extraordinarias ao valor normal",
+    );
+    expect((screen.getByLabelText("Percentagem") as HTMLInputElement).value).toBe("100");
+    expect(screen.getByLabelText("Modo de cálculo").textContent).toContain("Percentagem da hora normal");
+    expect(screen.getByLabelText("Aplicar automaticamente a").textContent).toContain("Horas extra");
+
+    fireEvent.click(screen.getByText("Guardar alterações"));
+
+    await waitFor(() =>
+      expect(actualizarCodigo).toHaveBeenCalledWith("c-100", {
+        nome: "Horas extraordinarias ao valor normal",
+        descricao: null,
+        modo_calculo: "percentagem_hora_normal",
+        percentagem: 100,
+        valor_fixo: null,
+        origem_automatica: "horas_extra",
+      }),
     );
   });
 
@@ -159,7 +325,9 @@ describe("ConfiguracaoVencimento", () => {
 
     const linhaRecibosVerdes = screen.getByText("Recibos verdes").closest("div")?.parentElement?.parentElement
       ?.parentElement;
-    fireEvent.click(within(linhaRecibosVerdes as HTMLElement).getByTitle("Desactivar código"));
+    fireEvent.click(
+      within(linhaRecibosVerdes as HTMLElement).getByRole("button", { name: "Desactivar código" }),
+    );
 
     await waitFor(() => expect(definirActivoCodigo).toHaveBeenCalledWith("c-300", false));
   });

@@ -230,6 +230,58 @@ describe("useCodigosProcessamento", () => {
     );
   });
 
+  it("actualizar grava os campos passados, filtrando por id e organizacao", async () => {
+    const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await (result.current as { actualizar: (id: string, campos: unknown) => Promise<void> }).actualizar(
+      "c-100",
+      {
+        nome: "Horas extraordinarias a 175%",
+        descricao: null,
+        modo_calculo: "percentagem_hora_normal",
+        percentagem: 175,
+        valor_fixo: null,
+        origem_automatica: "horas_extra",
+      },
+    );
+
+    expect(chamadasEscrita).toHaveLength(1);
+    expect(chamadasEscrita[0].tipo).toBe("update");
+    expect(chamadasEscrita[0].payload).toMatchObject({
+      nome: "Horas extraordinarias a 175%",
+      modo_calculo: "percentagem_hora_normal",
+      percentagem: 175,
+      valor_fixo: null,
+      origem_automatica: "horas_extra",
+      updated_by: "business-user-1",
+    });
+    expect(chamadasEscrita[0].eqs).toEqual([
+      ["id", "c-100"],
+      ["organization_id", ORG_ID],
+    ]);
+  });
+
+  it("actualizar trata zero linhas afectadas como erro -- nunca assume sucesso silencioso", async () => {
+    linhasAfectadasUpdate = [];
+    const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await expect(
+      (result.current as { actualizar: (id: string, campos: unknown) => Promise<void> }).actualizar(
+        "c-de-outra-organizacao",
+        {
+          nome: "X",
+          descricao: null,
+          modo_calculo: "manual",
+          percentagem: null,
+          valor_fixo: null,
+          origem_automatica: null,
+        },
+      ),
+    ).rejects.toThrow(/organiza/i);
+  });
+
   it("propaga o erro da base ao criar, em vez de o engolir", async () => {
     erroEscrita = { message: "recusado" };
     const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });

@@ -50,6 +50,17 @@ export interface NovoCodigoProcessamento {
   origem_automatica?: HrCodigoProcessamentoOrigemAutomatica | null;
 }
 
+/** Campos editaveis de um codigo ja existente -- tudo menos `codigo`, que
+ *  identifica a linha e nao se muda depois de criado. */
+export interface CamposCodigoProcessamento {
+  nome: string;
+  descricao: string | null;
+  modo_calculo: HrCodigoProcessamentoModoCalculo;
+  percentagem: number | null;
+  valor_fixo: number | null;
+  origem_automatica: HrCodigoProcessamentoOrigemAutomatica | null;
+}
+
 export function useCodigosProcessamento() {
   const { activeCompany } = useCompany();
   const queryClient = useQueryClient();
@@ -100,6 +111,35 @@ export function useCodigosProcessamento() {
     onSuccess: invalidar,
   });
 
+  const actualizarMutation = useMutation({
+    mutationFn: async (args: { id: string; campos: CamposCodigoProcessamento }) => {
+      if (!orgId) throw new Error("Sem organizacao activa");
+      const businessUserId = await resolveCurrentBusinessUserId();
+      // Mesmo padrao de alternarActivoMutation: filtrar tambem por
+      // organizacao (um id de outra organizacao, aceite pela RLS, nunca deve
+      // ser actualizado so porque o utilizador tem permissao equivalente
+      // noutro lado), e tratar zero linhas afectadas como erro.
+      const { data: linhas, error: erro } = await hrFrom("hr_codigos_processamento")
+        .update({
+          nome: args.campos.nome,
+          descricao: args.campos.descricao,
+          modo_calculo: args.campos.modo_calculo,
+          percentagem: args.campos.percentagem,
+          valor_fixo: args.campos.valor_fixo,
+          origem_automatica: args.campos.origem_automatica,
+          updated_by: businessUserId,
+        })
+        .eq("id", args.id)
+        .eq("organization_id", orgId)
+        .select("id");
+      if (erro) throw erro;
+      if (!linhas || linhas.length === 0) {
+        throw new Error("Nenhum codigo foi actualizado -- verifica se pertence a esta organizacao.");
+      }
+    },
+    onSuccess: invalidar,
+  });
+
   const alternarActivoMutation = useMutation({
     mutationFn: async (args: { id: string; activo: boolean }) => {
       if (!orgId) throw new Error("Sem organizacao activa");
@@ -126,8 +166,11 @@ export function useCodigosProcessamento() {
     codigos: data ?? [],
     isLoading,
     error,
-    isSaving: criarMutation.isPending || alternarActivoMutation.isPending,
+    isSaving:
+      criarMutation.isPending || actualizarMutation.isPending || alternarActivoMutation.isPending,
     criar: criarMutation.mutateAsync,
+    actualizar: (id: string, campos: CamposCodigoProcessamento) =>
+      actualizarMutation.mutateAsync({ id, campos }),
     /** Nunca `eliminar` -- so activar/desactivar. Ver nota no cabecalho. */
     definirActivo: (id: string, activo: boolean) => alternarActivoMutation.mutateAsync({ id, activo }),
   };
