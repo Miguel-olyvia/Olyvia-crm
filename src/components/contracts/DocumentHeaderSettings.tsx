@@ -144,10 +144,10 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground truncate">Logo carregado</p>
             </div>
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => fileInputRef.current?.click()}>
+            <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => fileInputRef.current?.click()}>
               Alterar
             </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onChange({ logo_url: null })}>
+            <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onChange({ logo_url: null })}>
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>
