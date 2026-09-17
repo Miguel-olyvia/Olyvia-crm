@@ -125,13 +125,19 @@ const columnStyles = {
   status: { width: '30%', fontSize: 8 },
 };
 
+// Espelha ClientOrderDocumentLine em src/pages/ClientOrders.tsx: uma linha é de
+// produto OU de serviço, e a RPC devolve o par não aplicável a NULL.
 interface ClientOrderDocumentPDFLine {
   quote_line_id: string;
-  product_id: string;
-  product_name: string;
+  item_type?: 'product' | 'service';
+  product_id: string | null;
+  product_name: string | null;
   product_sku: string | null;
+  service_id?: string | null;
+  service_name?: string | null;
+  service_sku?: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
   purchase_order_number: string | null;
 }
 
@@ -166,6 +172,8 @@ const getLineStatusText = (line: ClientOrderDocumentPDFLine): string => {
       return 'Stock disponível — confirmar saída';
     case 'sem_fornecedor':
       return 'Sem fornecedor preferencial';
+    case 'servico':
+      return 'Serviço';
     default:
       return line.line_status;
   }
@@ -232,8 +240,8 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
         <View>
           {lines.map((line) => (
             <View key={line.quote_line_id} style={styles.tableRow}>
-              <Text style={columnStyles.sku}>{line.product_sku || '-'}</Text>
-              <Text style={columnStyles.description}>{line.product_name || ''}</Text>
+              <Text style={columnStyles.sku}>{line.product_sku || line.service_sku || '-'}</Text>
+              <Text style={columnStyles.description}>{line.product_name || line.service_name || ''}</Text>
               <Text style={columnStyles.quantity}>{line.quantity}</Text>
               <Text style={columnStyles.status}>{getLineStatusText(line)}</Text>
             </View>

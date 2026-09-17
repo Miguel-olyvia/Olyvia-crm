@@ -93,13 +93,22 @@ interface ClientOrderAvailableWarehouse {
   quantity: number;
 }
 
+// Uma linha é de produto OU de serviço (item_type), nunca das duas. A RPC
+// rpc_get_client_order_document já devolve os dois pares de campos desde
+// 20261130190000, com o par não aplicável a NULL — daí product_id/product_name
+// serem anuláveis. Ler só o par do produto deixava as linhas de serviço sem SKU
+// e sem descrição na tabela.
 interface ClientOrderDocumentLine {
   quote_line_id: string;
-  product_id: string;
-  product_name: string;
+  item_type: 'product' | 'service';
+  product_id: string | null;
+  product_name: string | null;
   product_sku: string | null;
+  service_id: string | null;
+  service_name: string | null;
+  service_sku: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
   stock_movement_id: string | null;
   purchase_order_id: string | null;
   purchase_order_number: string | null;
@@ -445,6 +454,10 @@ const ClientOrders = () => {
       a_aguardar_encomenda: "bg-info/10 text-info",
       stock_disponivel_confirmar: "bg-warning/10 text-warning",
       sem_fornecedor: "bg-destructive/10 text-destructive",
+      // Neutro de propósito: uma linha de serviço não tem stock nem fornecedor,
+      // por isso não é uma pendência. Sem esta entrada caía no fallback
+      // vermelho e parecia um problema por resolver.
+      servico: "bg-muted text-muted-foreground",
     };
     return colors[status] || colors.sem_fornecedor;
   };
@@ -461,6 +474,8 @@ const ClientOrders = () => {
         return t('clientOrders.lineStatus.stockAvailableConfirm');
       case 'sem_fornecedor':
         return t('clientOrders.lineStatus.noSupplier');
+      case 'servico':
+        return t('clientOrders.lineStatus.service');
       default:
         return line.line_status;
     }
@@ -471,8 +486,12 @@ const ClientOrders = () => {
   // já recalcula badges/labels da mesma forma).
   const getAvailableProductsProgress = () => {
     if (!detailData) return { done: 0, total: 0, percent: 0 };
-    const total = detailData.lines.length;
-    const done = detailData.lines.filter((line) =>
+    // Só produtos entram na contagem: uma linha de serviço nunca pode ficar
+    // "disponível", por isso contá-la no denominador tornava os 100%
+    // inalcançáveis em qualquer encomenda com serviços.
+    const productLines = detailData.lines.filter((line) => line.line_status !== 'servico');
+    const total = productLines.length;
+    const done = productLines.filter((line) =>
       ['servido_por_stock', 'recebido', 'stock_disponivel_confirmar'].includes(line.line_status)
     ).length;
     const percent = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -1015,8 +1034,8 @@ const ClientOrders = () => {
                   ) : (
                     detailData.lines.map((line) => (
                       <TableRow key={line.quote_line_id}>
-                        <TableCell>{line.product_sku || '-'}</TableCell>
-                        <TableCell>{line.product_name}</TableCell>
+                        <TableCell>{line.product_sku || line.service_sku || '-'}</TableCell>
+                        <TableCell>{line.product_name || line.service_name || '-'}</TableCell>
                         <TableCell className="text-right">{line.quantity}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
