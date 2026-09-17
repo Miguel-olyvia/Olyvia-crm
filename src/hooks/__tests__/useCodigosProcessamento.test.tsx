@@ -96,6 +96,10 @@ const CODIGO_A = {
   nome: "Horas extraordinarias ao valor normal",
   descricao: null,
   activo: true,
+  modo_calculo: "percentagem_hora_normal",
+  percentagem: 100,
+  valor_fixo: null,
+  origem_automatica: "horas_extra",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -107,6 +111,10 @@ const CODIGO_PROPRIO = {
   nome: "Recibos verdes",
   descricao: null,
   activo: true,
+  modo_calculo: "manual",
+  percentagem: null,
+  valor_fixo: null,
+  origem_automatica: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
@@ -158,6 +166,41 @@ describe("useCodigosProcessamento", () => {
       nome: "Recibos verdes",
       created_by: "business-user-1",
       updated_by: "business-user-1",
+    });
+  });
+
+  it("criar sem modo_calculo grava 'manual' e os parametros a null (20261201260000)", async () => {
+    const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await result.current.criar({ codigo: "300", nome: "Recibos verdes", descricao: null });
+
+    expect(chamadasEscrita[0].payload).toMatchObject({
+      modo_calculo: "manual",
+      percentagem: null,
+      valor_fixo: null,
+      origem_automatica: null,
+    });
+  });
+
+  it("criar com modo_calculo explicito grava os parametros passados", async () => {
+    const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await result.current.criar({
+      codigo: "400",
+      nome: "Horas nocturnas",
+      descricao: null,
+      modo_calculo: "percentagem_hora_normal",
+      percentagem: 125,
+      origem_automatica: "horas_extra_noturnas",
+    });
+
+    expect(chamadasEscrita[0].payload).toMatchObject({
+      modo_calculo: "percentagem_hora_normal",
+      percentagem: 125,
+      valor_fixo: null,
+      origem_automatica: "horas_extra_noturnas",
     });
   });
 

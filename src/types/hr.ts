@@ -526,13 +526,33 @@ export interface PessoaRetribuicao {
   updated_at?: string;
 }
 
+/** Como um codigo de processamento se calcula (`hr_codigos_processamento.modo_calculo`, 20261201260000). */
+export type HrCodigoProcessamentoModoCalculo =
+  | "manual"
+  | "percentagem_hora_normal"
+  | "valor_fixo_ocorrencia"
+  | "valor_fixo_mensal";
+
+/**
+ * De onde vem automaticamente um codigo com esse modo (`hr_codigos_processamento.origem_automatica`,
+ * 20261201260000). `horas_extra_noturnas` e TRANSVERSAL -- conta sempre, em cima de qualquer
+ * outra origem (feriado/descanso trabalhado), nunca em vez dela.
+ */
+export type HrCodigoProcessamentoOrigemAutomatica =
+  | "horas_extra"
+  | "horas_extra_noturnas"
+  | "feriado_trabalhado"
+  | "descanso_trabalhado";
+
 /**
  * `hr_codigos_processamento` (20261201190000; `organization_id` obrigatorio
  * desde 20261201250000). Catalogo de codigos de processamento salarial,
  * PROPRIO de cada organizacao -- ate 20261201250000 existiam codigos
  * TRANSVERSAIS (`organization_id` null, partilhados por todo o grupo), mas
- * essa nocao acabou por decisao de produto. SO catalogo/config -- sem
- * calculo nenhum ligado a assiduidade nesta versao.
+ * essa nocao acabou por decisao de produto. Desde 20261201260000 a tabela
+ * tambem guarda COMO cada codigo se calcula (`modo_calculo` e os seus
+ * parametros) -- ainda sem ligacao nenhuma a assiduidade/picagens, isso fica
+ * para uma fase seguinte.
  */
 export interface HrCodigoProcessamento {
   id: string;
@@ -541,6 +561,10 @@ export interface HrCodigoProcessamento {
   nome: string;
   descricao: string | null;
   activo: boolean;
+  modo_calculo: HrCodigoProcessamentoModoCalculo;
+  percentagem: number | null;
+  valor_fixo: number | null;
+  origem_automatica: HrCodigoProcessamentoOrigemAutomatica | null;
   created_at: string;
   updated_at: string;
 }

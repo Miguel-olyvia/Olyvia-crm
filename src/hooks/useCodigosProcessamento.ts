@@ -30,15 +30,24 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
 import { useCompany } from "@/contexts/CompanyContext";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import type { HrCodigoProcessamento } from "@/types/hr";
+import type {
+  HrCodigoProcessamento,
+  HrCodigoProcessamentoModoCalculo,
+  HrCodigoProcessamentoOrigemAutomatica,
+} from "@/types/hr";
 
 const COLUNAS =
-  "id, organization_id, codigo, nome, descricao, activo, created_at, updated_at";
+  "id, organization_id, codigo, nome, descricao, activo, modo_calculo, percentagem, valor_fixo, origem_automatica, created_at, updated_at";
 
 export interface NovoCodigoProcessamento {
   codigo: string;
   nome: string;
   descricao: string | null;
+  /** Omitido => `'manual'` (20261201260000). */
+  modo_calculo?: HrCodigoProcessamentoModoCalculo;
+  percentagem?: number | null;
+  valor_fixo?: number | null;
+  origem_automatica?: HrCodigoProcessamentoOrigemAutomatica | null;
 }
 
 export function useCodigosProcessamento() {
@@ -79,6 +88,10 @@ export function useCodigosProcessamento() {
         codigo: novo.codigo,
         nome: novo.nome,
         descricao: novo.descricao,
+        modo_calculo: novo.modo_calculo ?? "manual",
+        percentagem: novo.percentagem ?? null,
+        valor_fixo: novo.valor_fixo ?? null,
+        origem_automatica: novo.origem_automatica ?? null,
         created_by: businessUserId,
         updated_by: businessUserId,
       });
