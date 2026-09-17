@@ -1098,9 +1098,14 @@ serve(async (req) => {
       // Aceitação da Venda Direta no portal. Espelha sign_proposal na parte
       // que é comum (OTP antes de qualquer escrita, prova de aceitação,
       // portal_status, notificação), SEM nada do fluxo pesado de propostas:
-      // não há selecção de orçamentos, não há stage de pipeline, não há
-      // record_proposal_decision e, sobretudo, NÃO se cria contrato nenhum —
-      // a ligação a client_contracts da venda direta é outra fase.
+      // não há selecção de orçamentos, não há stage de pipeline e não há
+      // record_proposal_decision.
+      //
+      // A Encomenda Cliente (Fase 5) é criada por rpc_create_direct_sale_order,
+      // e NÃO por inserts encadeados aqui como faz sign_proposal: cada chamada
+      // PostgREST é a sua própria transação, e um contrato criado sem a
+      // promoção a 'signed' seria uma encomenda invisível e sem stock deduzido.
+      // A RPC é uma transação real — ou nasce tudo, ou não nasce nada.
       case "accept_direct_sale": {
         const { direct_sale_id, signature_image } = params;
         if (!direct_sale_id || !signature_image) {
@@ -1134,15 +1139,34 @@ serve(async (req) => {
           .eq("auth_user_id", user.id)
           .eq("direct_sale_id", direct_sale_id));
 
+        // Fase 5 — Encomenda Cliente. Fail-soft, como o bloco equivalente de
+        // sign_proposal: a venda JÁ está aceite e a proforma JÁ foi numerada
+        // pelo trigger, por isso uma falha aqui não pode devolver erro ao
+        // cliente nem desfazer a aceitação. A RPC é idempotente, portanto o
+        // caso falhado recupera-se voltando a chamá-la para a mesma venda.
+        let createdContractId: string | null = null;
+        try {
+          const { data: orderContract, error: orderError } = await supabase
+            .rpc("rpc_create_direct_sale_order", { p_direct_sale_id: direct_sale_id });
+          if (orderError) {
+            console.error("accept_direct_sale: create client order failed:", orderError);
+          } else {
+            createdContractId = (orderContract as { id?: string } | null)?.id ?? null;
+          }
+        } catch (e) {
+          console.error("accept_direct_sale: create client order threw:", e);
+        }
+
         const { data: acceptedSale } = await supabase.from("direct_sales").select("sale_number, title").eq("id", direct_sale_id).maybeSingle();
+        const orderNote = createdContractId ? " Encomenda de cliente criada." : "";
         await maybeNotify("client_accepted_direct_sale", {
           title: "🎉 Venda direta aceite no portal!",
-          message: `O cliente ${clientName} aceitou a venda direta ${acceptedSale?.sale_number || acceptedSale?.title || ""}!`,
+          message: `O cliente ${clientName} aceitou a venda direta ${acceptedSale?.sale_number || acceptedSale?.title || ""}!${orderNote}`,
           priority: "urgent",
           link: `/direct-sales`,
         }, { column: "direct_sale_id", id: direct_sale_id });
 
-        return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+        return new Response(JSON.stringify({ success: true, contract_id: createdContractId }), { headers: corsHeaders });
       }
 
       // Rejeição da Venda Direta no portal. O molde é o reject_proposal: tal
