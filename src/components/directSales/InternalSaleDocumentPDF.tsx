@@ -125,6 +125,14 @@ const styles = StyleSheet.create({
   totalsGrandLabel: { fontSize: 10, fontFamily: 'Helvetica-Bold' },
   totalsGrandValue: { fontSize: 10, fontFamily: 'Helvetica-Bold' },
 
+  warningNote: {
+    marginTop: 10,
+    padding: 6,
+    border: '1 solid #b45309',
+    backgroundColor: '#fffbeb',
+    fontSize: 7.5,
+    color: '#7c2d12',
+  },
   fixedFooter: {
     position: 'absolute',
     bottom: 22,
@@ -187,6 +195,14 @@ export interface InternalSaleLine {
   descricao_snapshot: string | null;
   qt: number | null;
   unidade: string | null;
+  /**
+   * Custo unitário resolvido do CATÁLOGO pelo gerador (product_prices /
+   * service_prices, price_type='purchase'), não o `cost_price` gravado na
+   * linha — esse fica a 0 em tudo o que venha de um bundle.
+   * `null` significa "o catálogo não tem preço de compra", e o documento tem de
+   * o dizer em vez de imprimir 0: um zero lê-se como "de graça" e inflaciona a
+   * margem sem avisar.
+   */
   cost_price: number | null;
   retail_price_unit: number | null;
   total_sem_iva: number | null;
@@ -238,9 +254,14 @@ function formatPercent(value: number | null): string {
   return `${value.toFixed(0)}%`;
 }
 
-/** Custo total da linha: custo unitário × quantidade. */
-function lineCost(line: InternalSaleLine): number {
-  return Number(line.cost_price ?? 0) * Number(line.qt ?? 0);
+/**
+ * Custo total da linha: custo unitário × quantidade.
+ * `null` quando o catálogo não tem preço de compra — nunca 0, para o documento
+ * poder distinguir "custa zero" de "não sei quanto custa".
+ */
+function lineCost(line: InternalSaleLine): number | null {
+  if (line.cost_price === null || line.cost_price === undefined) return null;
+  return Number(line.cost_price) * Number(line.qt ?? 0);
 }
 
 /**
@@ -258,7 +279,11 @@ export const InternalSaleDocumentPDF = ({ sale, lines, company, client }: Intern
   const rows = lines || [];
   const currency = sale.currency;
 
-  const totalCost = rows.reduce((acc, l) => acc + lineCost(l), 0);
+  // Só os custos conhecidos entram na soma. As linhas sem custo no catálogo
+  // são contadas à parte e avisadas: sem isso, a margem apareceria maior do que
+  // é e ninguém saberia porquê.
+  const linesWithoutCost = rows.filter((l) => lineCost(l) === null);
+  const totalCost = rows.reduce((acc, l) => acc + (lineCost(l) ?? 0), 0);
   // Receita do cabeçalho (o que o cliente paga, sem IVA), não uma soma nova —
   // mesma regra da proforma, para os dois documentos não divergirem.
   const revenue = sale.subtotal ?? 0;
@@ -266,7 +291,7 @@ export const InternalSaleDocumentPDF = ({ sale, lines, company, client }: Intern
   const marginPct = revenue !== 0 ? (margin / revenue) * 100 : null;
 
   const hiddenLines = rows.filter((l) => !l.visible_to_client);
-  const hiddenCost = hiddenLines.reduce((acc, l) => acc + lineCost(l), 0);
+  const hiddenCost = hiddenLines.reduce((acc, l) => acc + (lineCost(l) ?? 0), 0);
 
   return (
     <Document>
@@ -347,8 +372,10 @@ export const InternalSaleDocumentPDF = ({ sale, lines, company, client }: Intern
           {rows.map((line) => {
             const cost = lineCost(line);
             const rev = lineRevenue(line);
-            const mg = rev - cost;
-            const mgPct = rev !== 0 ? (mg / rev) * 100 : null;
+            // Sem custo conhecido não se inventa margem: a linha mostra "—" em
+            // vez de um número que pareceria 100%.
+            const mg = cost === null ? null : rev - cost;
+            const mgPct = mg !== null && rev !== 0 ? (mg / rev) * 100 : null;
             return (
               <View key={line.id} style={styles.tableRow} wrap={false}>
                 <View style={columnStyles.description}>
@@ -356,17 +383,24 @@ export const InternalSaleDocumentPDF = ({ sale, lines, company, client }: Intern
                   {!line.visible_to_client ? (
                     <Text style={styles.internalTag}>Linha interna — não cobrada ao cliente</Text>
                   ) : null}
+                  {cost === null ? (
+                    <Text style={styles.internalTag}>Sem preço de compra no catálogo</Text>
+                  ) : null}
                 </View>
                 <Text style={columnStyles.quantity}>{formatQuantity(line.qt)}</Text>
-                <Text style={columnStyles.unitCost}>{formatMoney(line.cost_price, currency)}</Text>
+                <Text style={columnStyles.unitCost}>
+                  {line.cost_price === null ? '—' : formatMoney(line.cost_price, currency)}
+                </Text>
                 <Text style={columnStyles.unitPrice}>
                   {line.visible_to_client ? formatMoney(line.retail_price_unit, currency) : '—'}
                 </Text>
-                <Text style={columnStyles.totalCost}>{formatMoney(cost, currency)}</Text>
+                <Text style={columnStyles.totalCost}>
+                  {cost === null ? '—' : formatMoney(cost, currency)}
+                </Text>
                 <Text style={columnStyles.totalSale}>{formatMoney(rev, currency)}</Text>
                 <Text style={columnStyles.marginPct}>{formatPercent(mgPct)}</Text>
-                <Text style={[columnStyles.marginAbs, ...(mg < 0 ? [styles.negative] : [])]}>
-                  {formatMoney(mg, currency)}
+                <Text style={[columnStyles.marginAbs, ...(mg !== null && mg < 0 ? [styles.negative] : [])]}>
+                  {mg === null ? '—' : formatMoney(mg, currency)}
                 </Text>
               </View>
             );
@@ -398,7 +432,9 @@ export const InternalSaleDocumentPDF = ({ sale, lines, company, client }: Intern
               </View>
             ) : null}
             <View style={styles.totalsGrandRow}>
-              <Text style={styles.totalsGrandLabel}>Margem</Text>
+              <Text style={styles.totalsGrandLabel}>
+                {linesWithoutCost.length > 0 ? 'Margem (incompleta)' : 'Margem'}
+              </Text>
               <Text style={[styles.totalsGrandValue, ...(margin < 0 ? [styles.negative] : [])]}>
                 {formatMoney(margin, currency)}
                 {marginPct !== null ? `  (${formatPercent(marginPct)})` : ''}
@@ -406,6 +442,19 @@ export const InternalSaleDocumentPDF = ({ sale, lines, company, client }: Intern
             </View>
           </View>
         </View>
+
+        {/* Sem isto, uma venda com artigos sem preço de compra sairia com a
+            margem inflacionada e sem nada que o denunciasse. */}
+        {linesWithoutCost.length > 0 ? (
+          <View style={styles.warningNote} wrap={false}>
+            <Text>
+              {linesWithoutCost.length === 1
+                ? '1 linha não tem preço de compra no catálogo, por isso o seu custo não entra nesta conta.'
+                : `${linesWithoutCost.length} linhas não têm preço de compra no catálogo, por isso o custo delas não entra nesta conta.`}
+              {' '}A margem acima é o valor MÁXIMO possível — a real é menor.
+            </Text>
+          </View>
+        ) : null}
 
         <View fixed style={styles.fixedFooter}>
           <Text style={styles.legalNotice}>{INTERNAL_DOC_NOTICE}</Text>

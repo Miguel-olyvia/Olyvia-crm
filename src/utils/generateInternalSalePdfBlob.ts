@@ -50,6 +50,63 @@ export async function generateInternalSalePdfBlob(
   const num = (v: unknown): number | null =>
     v === null || v === undefined ? null : Number(v);
 
+  // ── Custo: lido SEMPRE do catálogo, nunca de direct_sale_lines.cost_price ──
+  // O custo vive no produto/serviço, e é de lá que os orçamentos o leem
+  // (InlineQuoteBuilder.tsx:349-357, AddItemsDialog.tsx:545-552). A coluna
+  // `cost_price` da linha não é de confiança: fica a 0 em tudo o que venha da
+  // expansão de um bundle (DirectSaleEditor.tsx:292), e uma venda com bundles
+  // sairia com 100% de margem — confiantemente errada.
+  //
+  // Consequência assumida: a margem é calculada ao custo de HOJE, não ao da
+  // data da venda. Se o fornecedor mudar de preço, a margem histórica muda com
+  // ele. É o comportamento pedido e é o mesmo dos orçamentos.
+  const rawLines = (lineRows || []) as any[];
+  const productIds = Array.from(
+    new Set(rawLines.map((r) => r.product_id).filter(Boolean)),
+  ) as string[];
+  const serviceIds = Array.from(
+    new Set(rawLines.map((r) => r.service_id).filter(Boolean)),
+  ) as string[];
+
+  const [productCosts, serviceCosts] = await Promise.all([
+    productIds.length > 0
+      ? (supabase as any)
+          .from('product_prices')
+          .select('product_id, price')
+          .eq('price_type', 'purchase')
+          .in('product_id', productIds)
+      : Promise.resolve({ data: [] as any[] }),
+    serviceIds.length > 0
+      ? (supabase as any)
+          .from('service_prices')
+          .select('service_id, price')
+          .eq('price_type', 'purchase')
+          .in('service_id', serviceIds)
+      : Promise.resolve({ data: [] as any[] }),
+  ]);
+
+  const costByProduct = new Map<string, number>();
+  for (const row of (productCosts?.data || []) as any[]) {
+    costByProduct.set(row.product_id, Number(row.price) || 0);
+  }
+  const costByService = new Map<string, number>();
+  for (const row of (serviceCosts?.data || []) as any[]) {
+    costByService.set(row.service_id, Number(row.price) || 0);
+  }
+
+  /**
+   * Custo unitário da linha. `null` quando o catálogo não tem preço de compra
+   * para aquele artigo — e aí o documento diz "sem custo" em vez de imprimir um
+   * zero que se leria como "de graça". Uma linha sem produto nem serviço (lançada
+   * à mão) cai no valor gravado, que é a única fonte que tem.
+   */
+  const resolveUnitCost = (row: any): number | null => {
+    if (row.product_id) return costByProduct.get(row.product_id) ?? null;
+    if (row.service_id) return costByService.get(row.service_id) ?? null;
+    const stored = num(row.cost_price);
+    return stored && stored > 0 ? stored : null;
+  };
+
   const sale: InternalSaleHeader = {
     sale_number: saleRow.sale_number ?? null,
     status: saleRow.status ?? null,
@@ -61,12 +118,12 @@ export async function generateInternalSalePdfBlob(
     created_at: saleRow.created_at ?? null,
   };
 
-  const lines: InternalSaleLine[] = ((lineRows || []) as any[]).map((row) => ({
+  const lines: InternalSaleLine[] = rawLines.map((row) => ({
     id: row.id,
     descricao_snapshot: row.descricao_snapshot ?? null,
     qt: num(row.qt),
     unidade: row.unidade ?? null,
-    cost_price: num(row.cost_price),
+    cost_price: resolveUnitCost(row),
     retail_price_unit: num(row.retail_price_unit),
     total_sem_iva: num(row.total_sem_iva),
     total_com_desconto: num(row.total_com_desconto),
