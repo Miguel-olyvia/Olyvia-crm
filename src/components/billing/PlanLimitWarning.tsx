@@ -25,9 +25,9 @@ const LABEL_KEY_BY_TYPE: Record<PlanUsageLimit["limit_type"], string> = {
  * plan's ceiling for `limitType`, then an amber banner with a progress
  * bar; at/over the ceiling it switches to the same red tone the blocked
  * toast uses, so a user sees the wall coming before they actually hit it
- * (fn_check_and_consume_*/the anew_leads-anew_clients-proposals-quotes-
- * client_contracts triggers) — see usePlanUsage for how the numbers are
- * sourced.
+ * (the fn_check_and_consume_ family of RPCs / the triggers on anew_leads,
+ * anew_clients, proposals, quotes and client_contracts) — see
+ * usePlanUsage for how the numbers are sourced.
  *
  * Renders nothing for a NULL limit_value (unlimited plan/limit_type) or
  * while the read hasn't resolved yet — never a loading skeleton, since

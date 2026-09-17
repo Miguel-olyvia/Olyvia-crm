@@ -26,7 +26,7 @@ export interface PlanUsageSummary {
  *
  * Read-only: never blocks anything by itself. Pair with
  * PlanLimitWarning to show an approaching-limit banner before the actual
- * fn_check_and_consume_*/trigger block happens.
+ * fn_check_and_consume_ / trigger block happens.
  */
 export function usePlanUsage(organizationId: string | null | undefined) {
   const [summary, setSummary] = useState<PlanUsageSummary | null>(null);
