@@ -205,7 +205,7 @@ export const menuSections: MenuSection[] = [
     id: "rh",
     icon: IdCard,
     labelKey: "sidebar.hrModule",
-    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/assiduidade-e-ausencias", "/rh/centros", "/rh/admissao/configuracao", "/rh/documentos/modelos", "/rh/vencimento"],
+    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/assiduidade-e-ausencias", "/rh/centros", "/rh/admissao/configuracao", "/rh/documentos/modelos", "/rh/processamento-salarial"],
     permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view", "hr.admissao.obrigatorios.gerir", "hr.pessoas.documentos.modelos.view", "hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"],
     items: [
       { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
@@ -225,13 +225,19 @@ export const menuSections: MenuSection[] = [
       // para emitir a um pessoa (20261123020000). Permissao ja existe, so
       // atribuida a super_admin -- ver hrDb/useModelosDocumentosRH.
       { to: "/rh/documentos/modelos", icon: FileText, labelKey: "sidebar.hrModelosDocumentos", permission: "hr.pessoas.documentos.modelos.view" },
-      // "Vencimento" (20261201180000..20261201200000) e o dominio, nao so a
-      // configuracao -- passou a apontar para o ecra principal `/rh/vencimento`
-      // (Vencimento.tsx), que tem "Configuracao" como um dos separadores.
+      // "Processamento Salarial" (nome de apresentacao; dominio interno
+      // continua "vencimento" -- permissoes hr.vencimento.*, tabelas e hooks
+      // nao mudam de nome, 20261201180000..20261201200000) e o dominio, nao
+      // so a configuracao -- passou a apontar para o ecra principal
+      // `/rh/processamento-salarial` (Vencimento.tsx, rota renomeada em
+      // 20260917), que tem "Configuracao" como um dos separadores.
       // Qualquer uma das duas permissoes de leitura do dominio ja chega -- o
       // ecra decide os separadores internos que mostra a cada uma (ver
-      // App.tsx, mesma rota).
-      { to: "/rh/vencimento", icon: Settings, labelKey: "sidebar.hrVencimentoConfig", permissions: ["hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"] },
+      // App.tsx, mesma rota). A chave de traducao `sidebar.hrVencimentoConfig`
+      // fica com o nome antigo por decisao deliberada -- corresponde ao
+      // dominio interno "vencimento" que a base e as permissoes usam; so o
+      // VALOR mostrado muda para "Processamento Salarial".
+      { to: "/rh/processamento-salarial", icon: Settings, labelKey: "sidebar.hrVencimentoConfig", permissions: ["hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"] },
     ],
   },
   {

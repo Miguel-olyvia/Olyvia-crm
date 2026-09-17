@@ -1,8 +1,10 @@
 /**
- * Configuracao do dominio "Vencimento" (20261201180000..20261201200000): os
- * codigos de processamento salarial e a regra do subsidio de alimentacao da
- * organizacao activa. SO CATALOGO/CONFIGURACAO -- sem calculo nenhum ligado
- * a assiduidade ainda (confirmado com o utilizador, fica para depois).
+ * Configuracao do dominio "Processamento Salarial" (nome de apresentacao;
+ * dominio interno continua "vencimento" -- ficheiro, permissoes
+ * hr.vencimento.* e hooks nao mudam de nome, 20261201180000..20261201200000):
+ * os codigos de processamento salarial e a regra do subsidio de alimentacao
+ * da organizacao activa. SO CATALOGO/CONFIGURACAO -- sem calculo nenhum
+ * ligado a assiduidade ainda (confirmado com o utilizador, fica para depois).
  *
  * Segue o padrao de gating de `ConfiguracaoAdmissao.tsx` e o padrao de lista
  * activar/desactivar de `ConfiguracaoModelosDocumentos.tsx`. Duas seccoes

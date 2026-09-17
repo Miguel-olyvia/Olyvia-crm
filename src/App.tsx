@@ -322,18 +322,25 @@ const App = () => (
                           nenhum papel por omissao. */}
                       <Route path="/rh/admissao/configuracao" element={<ProtectedRoute permission="hr.admissao.obrigatorios.gerir"><ConfiguracaoAdmissao /></ProtectedRoute>} />
                       <Route path="/rh/documentos/modelos" element={<ProtectedRoute permission="hr.pessoas.documentos.modelos.view"><ConfiguracaoModelosDocumentos /></ProtectedRoute>} />
-                      {/* "Vencimento" (20261201180000..20261201200000) e o
-                          dominio -- ecra principal com separadores "Visao
-                          geral" (o relatorio, ainda por construir) e
-                          "Configuracao" (codigos de processamento + regra do
-                          subsidio de alimentacao, o que antes era o ecra
-                          inteiro). Duas permissoes de leitura diferentes --
-                          a rota aceita qualquer uma das duas, o ecra decide
-                          os separadores internos que mostra a cada uma. A
-                          rota antiga `/rh/vencimento/configuracao` foi
-                          removida -- confirmado por grep que nao havia
-                          nenhum link directo a apontar para ela. */}
-                      <Route path="/rh/vencimento" element={<ProtectedRoute permissions={["hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"]}><Vencimento /></ProtectedRoute>} />
+                      {/* "Processamento Salarial" (nome de apresentacao;
+                          dominio interno continua "vencimento" -- tabelas,
+                          permissoes hr.vencimento.* e hooks nao mudam de nome,
+                          20261201180000..20261201200000) -- ecra principal com
+                          separadores "Visao geral" (o relatorio, ainda por
+                          construir) e "Configuracao" (codigos de
+                          processamento + regra do subsidio de alimentacao, o
+                          que antes era o ecra inteiro). Duas permissoes de
+                          leitura diferentes -- a rota aceita qualquer uma das
+                          duas, o ecra decide os separadores internos que
+                          mostra a cada uma. A rota antiga
+                          `/rh/vencimento/configuracao` foi removida --
+                          confirmado por grep que nao havia nenhum link
+                          directo a apontar para ela. A rota mudou de
+                          `/rh/vencimento` para `/rh/processamento-salarial`
+                          (20260917) -- so a apresentacao, sem redirect da
+                          antiga porque nao ha link nenhum a apontar para ela
+                          fora deste ficheiro. */}
+                      <Route path="/rh/processamento-salarial" element={<ProtectedRoute permissions={["hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"]}><Vencimento /></ProtectedRoute>} />
                       <Route path="/organizations" element={<Organizations />} />
                       <Route path="/organizations/:id" element={<OrganizationDetail />} />
                       <Route path="/org-templates" element={<OrgTemplates />} />

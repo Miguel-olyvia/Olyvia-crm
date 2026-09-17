@@ -1,16 +1,18 @@
 /**
- * "Vencimento" (20261201180000..20261201200000) e o dominio, nao so a
- * configuracao. Antes disto, o item de menu "Vencimento" levava direito a
- * `ConfiguracaoVencimento.tsx` -- so os codigos de processamento e a regra
- * do subsidio de alimentacao. Estruturalmente errado: "Vencimento" e o
- * ecra principal (onde no futuro vive o relatorio/calculo real, ainda por
- * construir -- combinado com o utilizador, fora de ambito agora), e a
- * configuracao e so UMA PARTE dele.
+ * "Processamento Salarial" (nome de apresentacao; dominio interno continua
+ * "vencimento" -- ficheiro, permissoes hr.vencimento.* e hooks nao mudam de
+ * nome, so o titulo do ecra e o texto do menu, 20260917) e o dominio, nao so
+ * a configuracao. Antes disto, o item de menu levava direito a
+ * `ConfiguracaoVencimento.tsx` (20261201180000..20261201200000) -- so os
+ * codigos de processamento e a regra do subsidio de alimentacao.
+ * Estruturalmente errado: este e o ecra principal (onde no futuro vive o
+ * relatorio/calculo real, ainda por construir -- combinado com o utilizador,
+ * fora de ambito agora), e a configuracao e so UMA PARTE dele.
  *
- * Dois separadores: "Visao geral" (o relatorio de vencimento -- estado
- * vazio honesto, ainda nao existe) e "Configuracao" (o ecra antigo,
- * importado tal como estava, sem duplicar logica nenhuma -- a gestao de
- * permissoes por seccao continua dentro de `ConfiguracaoVencimento`).
+ * Dois separadores: "Visao geral" (o relatorio -- estado vazio honesto,
+ * ainda nao existe) e "Configuracao" (o ecra antigo, importado tal como
+ * estava, sem duplicar logica nenhuma -- a gestao de permissoes por seccao
+ * continua dentro de `ConfiguracaoVencimento`).
  *
  * O separador activo fica na URL (`?tab=`), tal como
  * `AusenciasOrganizacao.tsx` -- assim um link directo para a configuracao

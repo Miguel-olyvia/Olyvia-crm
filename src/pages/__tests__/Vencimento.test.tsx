@@ -49,7 +49,7 @@ vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
 async function renderPagina() {
   const { default: Vencimento } = await import("../Vencimento");
   render(
-    <MemoryRouter initialEntries={["/rh/vencimento"]}>
+    <MemoryRouter initialEntries={["/rh/processamento-salarial"]}>
       <Vencimento />
     </MemoryRouter>,
   );
