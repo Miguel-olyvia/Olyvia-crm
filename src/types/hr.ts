@@ -527,15 +527,16 @@ export interface PessoaRetribuicao {
 }
 
 /**
- * `hr_codigos_processamento` (20261201190000). Catalogo de codigos de
- * processamento salarial. `organization_id === null` = codigo TRANSVERSAL,
- * partilhado por todo o grupo (100, 200); preenchido = codigo PROPRIO dessa
- * organizacao (ex.: recibos verdes, horas nocturnas). SO catalogo/config --
- * sem calculo nenhum ligado a assiduidade nesta versao.
+ * `hr_codigos_processamento` (20261201190000; `organization_id` obrigatorio
+ * desde 20261201250000). Catalogo de codigos de processamento salarial,
+ * PROPRIO de cada organizacao -- ate 20261201250000 existiam codigos
+ * TRANSVERSAIS (`organization_id` null, partilhados por todo o grupo), mas
+ * essa nocao acabou por decisao de produto. SO catalogo/config -- sem
+ * calculo nenhum ligado a assiduidade nesta versao.
  */
 export interface HrCodigoProcessamento {
   id: string;
-  organization_id: string | null;
+  organization_id: string;
   codigo: string;
   nome: string;
   descricao: string | null;
@@ -548,8 +549,7 @@ export interface HrCodigoProcessamento {
  * `hr_regras_subsidio_alimentacao` (20261201200000). A REGRA de elegibilidade
  * do subsidio de alimentacao da organizacao -- distinta de
  * `PessoaRetribuicao.subsidio_alimentacao`, que e a EXCEPCAO por pessoa.
- * Uma linha por organizacao (nunca `organization_id` nulo, ao contrario de
- * `HrCodigoProcessamento`).
+ * Uma linha por organizacao.
  */
 export interface HrRegraSubsidioAlimentacao {
   id: string;

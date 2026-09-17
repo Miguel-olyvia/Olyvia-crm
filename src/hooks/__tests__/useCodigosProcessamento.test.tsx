@@ -1,9 +1,13 @@
 /**
- * `useCodigosProcessamento`: le o catalogo (transversais + proprios,
- * decidido pela RLS -- este hook nao filtra nada por si), cria um codigo
- * PROPRIO e (des)activa -- nunca `delete` (a RLS bloqueia-o, mas o hook nem
- * o expoe). `hrFrom`/`resolveCurrentBusinessUserId` simulados. Nada toca em
- * base nenhuma.
+ * `useCodigosProcessamento`: le o catalogo desta organizacao -- filtrado
+ * explicitamente por `organization_id` no proprio hook, porque a RLS de
+ * SELECT so confirma a permissao e nao restringe as linhas devolvidas
+ * (20261201250000 acabou com a nocao de codigo transversal); cria um codigo
+ * novo e (des)activa -- filtrando tambem por organizacao e tratando "zero
+ * linhas afectadas" como erro -- nunca `delete` (a RLS bloqueia-o, mas o
+ * hook nem o expoe).
+ * `hrFrom`/`resolveCurrentBusinessUserId` simulados. Nada toca em base
+ * nenhuma.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
@@ -20,31 +24,56 @@ vi.mock("@/lib/identity/resolveBusinessUserId", () => ({
   resolveCurrentBusinessUserId: vi.fn(async () => "business-user-1"),
 }));
 
-let chamadasEscrita: Array<{ tipo: "insert" | "update"; payload: unknown; eq?: [string, unknown] }> = [];
+let chamadasEscrita: Array<{
+  tipo: "insert" | "update";
+  payload: unknown;
+  eqs: Array<[string, unknown]>;
+  selectApósUpdate?: boolean;
+}> = [];
 let respostaCodigos: { data: unknown; error: unknown } = { data: [], error: null };
 let erroEscrita: unknown = null;
+/** Linhas devolvidas pelo `.select("id")` apos o `update` -- vazio simula "zero linhas afectadas". */
+let linhasAfectadasUpdate: unknown[] = [{ id: "c-300" }];
+/** `.eq(...)` chamados na leitura (select), fora de qualquer insert/update. */
+let eqsLeitura: Array<[string, unknown]> = [];
 
+/**
+ * Cada chamada a `hrFrom(...)` cria a sua propria cadeia -- por isso o
+ * registo de qual chamada de escrita esta em curso (`entradaDesteChain`) e
+ * local a esta funcao, e nunca confundido com um `select` de leitura
+ * posterior (ex.: o refetch depois de `invalidar()`), que usaria a ultima
+ * entrada de `chamadasEscrita` de uma chamada anterior se isto fosse global.
+ */
 function buildChain() {
+  let entradaDesteChain: (typeof chamadasEscrita)[number] | null = null;
   const chain: Record<string, unknown> = {
-    select: () => chain,
+    select: () => {
+      if (entradaDesteChain?.tipo === "update") entradaDesteChain.selectApósUpdate = true;
+      return chain;
+    },
     order: () => chain,
     eq: (campo: string, valor: unknown) => {
-      const ultima = chamadasEscrita[chamadasEscrita.length - 1];
-      if (ultima && !ultima.eq) ultima.eq = [campo, valor];
+      if (entradaDesteChain) {
+        entradaDesteChain.eqs.push([campo, valor]);
+      } else {
+        eqsLeitura.push([campo, valor]);
+      }
       return chain;
     },
     insert: (payload: unknown) => {
-      chamadasEscrita.push({ tipo: "insert", payload });
+      entradaDesteChain = { tipo: "insert", payload, eqs: [] };
+      chamadasEscrita.push(entradaDesteChain);
       return Promise.resolve({ data: null, error: erroEscrita });
     },
     update: (payload: unknown) => {
-      chamadasEscrita.push({ tipo: "update", payload });
+      entradaDesteChain = { tipo: "update", payload, eqs: [] };
+      chamadasEscrita.push(entradaDesteChain);
       return chain;
     },
     then(onFulfilled: (v: unknown) => unknown, onRejected?: (e: unknown) => unknown) {
-      const ultima = chamadasEscrita[chamadasEscrita.length - 1];
-      if (ultima?.tipo === "update") {
-        return Promise.resolve({ data: null, error: erroEscrita }).then(onFulfilled, onRejected);
+      if (entradaDesteChain?.tipo === "update") {
+        const data = erroEscrita ? null : linhasAfectadasUpdate;
+        return Promise.resolve({ data, error: erroEscrita }).then(onFulfilled, onRejected);
       }
       return Promise.resolve(respostaCodigos).then(onFulfilled, onRejected);
     },
@@ -60,9 +89,9 @@ vi.mock("@/lib/hr/hrDb", () => ({
 
 import { useCodigosProcessamento } from "@/hooks/useCodigosProcessamento";
 
-const CODIGO_TRANSVERSAL = {
+const CODIGO_A = {
   id: "c-100",
-  organization_id: null,
+  organization_id: ORG_ID,
   codigo: "100",
   nome: "Horas extraordinarias ao valor normal",
   descricao: null,
@@ -92,15 +121,18 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   chamadasEscrita = [];
   erroEscrita = null;
-  respostaCodigos = { data: [CODIGO_TRANSVERSAL, CODIGO_PROPRIO], error: null };
+  linhasAfectadasUpdate = [{ id: "c-300" }];
+  eqsLeitura = [];
+  respostaCodigos = { data: [CODIGO_A, CODIGO_PROPRIO], error: null };
 });
 
 describe("useCodigosProcessamento", () => {
-  it("carrega os codigos que a RLS devolver, transversais e proprios juntos", async () => {
+  it("carrega os codigos filtrando explicitamente por organization_id -- a RLS nao restringe as linhas por si", async () => {
     const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(result.current.codigos).toEqual([CODIGO_TRANSVERSAL, CODIGO_PROPRIO]);
+    expect(result.current.codigos).toEqual([CODIGO_A, CODIGO_PROPRIO]);
+    expect(eqsLeitura).toContainEqual(["organization_id", ORG_ID]);
   });
 
   it("um erro de permissao na leitura devolve lista vazia, sem lancar", async () => {
@@ -129,7 +161,7 @@ describe("useCodigosProcessamento", () => {
     });
   });
 
-  it("definirActivo(false) desactiva pelo id -- nunca chama delete", async () => {
+  it("definirActivo(false) desactiva pelo id filtrando tambem por organizacao -- nunca chama delete", async () => {
     const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
@@ -138,8 +170,21 @@ describe("useCodigosProcessamento", () => {
     expect(chamadasEscrita).toHaveLength(1);
     expect(chamadasEscrita[0].tipo).toBe("update");
     expect(chamadasEscrita[0].payload).toMatchObject({ activo: false });
-    expect(chamadasEscrita[0].eq).toEqual(["id", "c-300"]);
+    expect(chamadasEscrita[0].eqs).toEqual([
+      ["id", "c-300"],
+      ["organization_id", ORG_ID],
+    ]);
     expect((result.current as Record<string, unknown>).eliminar).toBeUndefined();
+  });
+
+  it("definirActivo trata zero linhas afectadas como erro -- nunca assume sucesso silencioso", async () => {
+    linhasAfectadasUpdate = [];
+    const { result } = renderHook(() => useCodigosProcessamento(), { wrapper });
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await expect(result.current.definirActivo("c-de-outra-organizacao", false)).rejects.toThrow(
+      /organiza/i,
+    );
   });
 
   it("propaga o erro da base ao criar, em vez de o engolir", async () => {

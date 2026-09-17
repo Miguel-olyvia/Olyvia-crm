@@ -18,7 +18,7 @@
  * so uma das duas -- por isso cada separador esconde-se por si, e o ecra so
  * mostra "sem acesso" se NENHUMA das duas permissoes de leitura existir.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -64,15 +64,6 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
   const [dialogoAberto, setDialogoAberto] = useState(false);
   const [form, setForm] = useState(FORM_VAZIO);
 
-  const { transversais, proprios } = useMemo(() => {
-    const t: HrCodigoProcessamento[] = [];
-    const p: HrCodigoProcessamento[] = [];
-    for (const codigo of codigos) {
-      (codigo.organization_id === null ? t : p).push(codigo);
-    }
-    return { transversais: t, proprios: p };
-  }, [codigos]);
-
   const abrirNovo = () => {
     setForm(FORM_VAZIO);
     setDialogoAberto(true);
@@ -111,7 +102,7 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
     }
   };
 
-  const linha = (codigo: HrCodigoProcessamento, transversal: boolean) => (
+  const linha = (codigo: HrCodigoProcessamento) => (
     <div
       key={codigo.id}
       className="flex items-center justify-between gap-4 border-b py-3 last:border-b-0"
@@ -124,11 +115,6 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
               {codigo.codigo}
             </Badge>
             <span className="font-medium">{codigo.nome}</span>
-            {transversal && (
-              <Badge variant="secondary" className="text-[10px]">
-                {t("hr.vencimento.codigos.transversal")}
-              </Badge>
-            )}
             <Badge variant={codigo.activo ? "default" : "secondary"} className="text-[10px]">
               {codigo.activo ? t("hr.vencimento.codigos.activo") : t("hr.vencimento.codigos.inactivo")}
             </Badge>
@@ -138,7 +124,7 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
           )}
         </div>
       </div>
-      {!transversal && podeGerir && (
+      {podeGerir && (
         <Button
           variant="ghost"
           size="icon"
@@ -163,26 +149,10 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
   return (
     <div className="space-y-6">
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">{t("hr.vencimento.codigos.tituloTransversais")}</CardTitle>
-          <p className="text-sm text-muted-foreground">{t("hr.vencimento.codigos.subtituloTransversais")}</p>
-        </CardHeader>
-        <CardContent className="space-y-1">
-          {isLoading ? (
-            <div className="flex justify-center py-8">
-              <OlyviaLoader size={28} />
-            </div>
-          ) : (
-            transversais.map((codigo) => linha(codigo, true))
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
         <CardHeader className="pb-3 flex flex-row items-center justify-between">
           <div>
-            <CardTitle className="text-base">{t("hr.vencimento.codigos.tituloProprios")}</CardTitle>
-            <p className="text-sm text-muted-foreground">{t("hr.vencimento.codigos.subtituloProprios")}</p>
+            <CardTitle className="text-base">{t("hr.vencimento.codigos.titulo")}</CardTitle>
+            <p className="text-sm text-muted-foreground">{t("hr.vencimento.codigos.subtitulo")}</p>
           </div>
           {podeGerir && (
             <Button onClick={abrirNovo}>
@@ -191,13 +161,17 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
           )}
         </CardHeader>
         <CardContent className="space-y-1">
-          {!isLoading && proprios.length === 0 ? (
+          {isLoading ? (
+            <div className="flex justify-center py-8">
+              <OlyviaLoader size={28} />
+            </div>
+          ) : codigos.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               <Tag className="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p>{t("hr.vencimento.codigos.semCodigosProprios")}</p>
+              <p>{t("hr.vencimento.codigos.semCodigos")}</p>
             </div>
           ) : (
-            proprios.map((codigo) => linha(codigo, false))
+            codigos.map((codigo) => linha(codigo))
           )}
         </CardContent>
       </Card>
@@ -206,7 +180,7 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{t("hr.vencimento.codigos.novoCodigo")}</DialogTitle>
-            <DialogDescription>{t("hr.vencimento.codigos.subtituloProprios")}</DialogDescription>
+            <DialogDescription>{t("hr.vencimento.codigos.subtitulo")}</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">

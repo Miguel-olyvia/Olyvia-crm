@@ -1,10 +1,11 @@
 /**
  * `ConfiguracaoVencimento`: gating por permissao (as duas leituras sao
  * independentes -- so uma delas ja chega para ver o ecra, so a sua propria
- * aba), a lista de codigos aparece separada em transversais/proprios, criar
- * um codigo novo, desactivar, e o formulario do subsidio grava. Os hooks
- * (`useCodigosProcessamento`, `useRegrasSubsidioAlimentacao`) sao mockados --
- * a logica de escrita ja tem os proprios testes.
+ * aba), a lista de codigos (todos da organizacao activa, sem separacao
+ * nenhuma -- 20261201250000 acabou com a nocao de codigo transversal),
+ * criar um codigo novo, desactivar, e o formulario do subsidio grava. Os
+ * hooks (`useCodigosProcessamento`, `useRegrasSubsidioAlimentacao`) sao
+ * mockados -- a logica de escrita ja tem os proprios testes.
  */
 import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
@@ -36,9 +37,9 @@ vi.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ hasPermission, loading: false }),
 }));
 
-const CODIGO_TRANSVERSAL = {
+const CODIGO_A = {
   id: "c-100",
-  organization_id: null as string | null,
+  organization_id: "org-nike",
   codigo: "100",
   nome: "Horas extraordinarias ao valor normal",
   descricao: null as string | null,
@@ -49,7 +50,7 @@ const CODIGO_TRANSVERSAL = {
 
 const CODIGO_PROPRIO = {
   id: "c-300",
-  organization_id: "org-nike" as string | null,
+  organization_id: "org-nike",
   codigo: "300",
   nome: "Recibos verdes",
   descricao: null as string | null,
@@ -60,7 +61,7 @@ const CODIGO_PROPRIO = {
 
 const criarCodigo = vi.fn(async () => {});
 const definirActivoCodigo = vi.fn(async () => {});
-let codigos: typeof CODIGO_TRANSVERSAL[] = [];
+let codigos: typeof CODIGO_A[] = [];
 vi.mock("@/hooks/useCodigosProcessamento", () => ({
   useCodigosProcessamento: () => ({
     codigos,
@@ -97,7 +98,7 @@ describe("ConfiguracaoVencimento", () => {
     criarCodigo.mockClear();
     definirActivoCodigo.mockClear();
     gravarRegra.mockClear();
-    codigos = [CODIGO_TRANSVERSAL, CODIGO_PROPRIO];
+    codigos = [CODIGO_A, CODIGO_PROPRIO];
     regra = { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 };
   });
 
@@ -116,16 +117,14 @@ describe("ConfiguracaoVencimento", () => {
     expect(screen.queryByText("Subsídio de alimentação")).toBeNull();
   });
 
-  it("os codigos transversais aparecem marcados, os proprios sem essa marca", async () => {
+  it("todos os codigos da organizacao aparecem juntos, num so cartao", async () => {
     hasPermission.mockReturnValue(true);
 
     await renderPagina();
 
-    const transversal = screen.getByText("Horas extraordinarias ao valor normal").closest("div");
-    expect(transversal?.parentElement?.textContent).toContain("Partilhado por todo o grupo");
-
-    const proprio = screen.getByText("Recibos verdes").closest("div");
-    expect(proprio?.parentElement?.textContent).not.toContain("Partilhado por todo o grupo");
+    expect(screen.getByText("Horas extraordinarias ao valor normal")).toBeTruthy();
+    expect(screen.getByText("Recibos verdes")).toBeTruthy();
+    expect(screen.getByText("Catálogo de códigos")).toBeTruthy();
   });
 
   it("sem hr.vencimento.codigos.gerir nao mostra o botao de novo codigo nem acoes", async () => {
@@ -153,12 +152,14 @@ describe("ConfiguracaoVencimento", () => {
     );
   });
 
-  it("desactivar um codigo proprio chama definirActivo(id, false)", async () => {
+  it("desactivar um codigo chama definirActivo(id, false)", async () => {
     hasPermission.mockReturnValue(true);
 
     await renderPagina();
 
-    fireEvent.click(screen.getByTitle("Desactivar código"));
+    const linhaRecibosVerdes = screen.getByText("Recibos verdes").closest("div")?.parentElement?.parentElement
+      ?.parentElement;
+    fireEvent.click(within(linhaRecibosVerdes as HTMLElement).getByTitle("Desactivar código"));
 
     await waitFor(() => expect(definirActivoCodigo).toHaveBeenCalledWith("c-300", false));
   });
