@@ -40,8 +40,11 @@ export async function generateInternalSalePdfBlob(
   // precisamente esse custo que este documento existe para mostrar.
   const { data: lineRows, error: linesError } = await (supabase as any)
     .from('direct_sale_lines')
+    // product_id/service_id são indispensáveis: é por eles que o custo se vai
+    // buscar ao catálogo. Sem eles no select, resolveUnitCost não encontra nada
+    // e o documento inteiro sai "sem preço de compra".
     .select(
-      'id, descricao_snapshot, qt, unidade, cost_price, retail_price_unit, total_sem_iva, total_com_desconto, visible_to_client, ordem',
+      'id, descricao_snapshot, qt, unidade, cost_price, retail_price_unit, total_sem_iva, total_com_desconto, visible_to_client, ordem, product_id, service_id',
     )
     .eq('direct_sale_id', directSaleId)
     .order('ordem', { ascending: true });
@@ -84,6 +87,13 @@ export async function generateInternalSalePdfBlob(
           .in('service_id', serviceIds)
       : Promise.resolve({ data: [] as any[] }),
   ]);
+
+  // Erros aqui NÃO podem ser engolidos: uma falha de RLS ou de permissão
+  // produziria zero linhas, o documento diria "sem preço de compra em tudo" e
+  // anunciaria 100% de margem — indistinguível de um catálogo por preencher.
+  // Mais vale não sair documento nenhum do que sair um documento a mentir.
+  if (productCosts?.error) throw productCosts.error;
+  if (serviceCosts?.error) throw serviceCosts.error;
 
   const costByProduct = new Map<string, number>();
   for (const row of (productCosts?.data || []) as any[]) {
