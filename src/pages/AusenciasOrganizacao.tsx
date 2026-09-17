@@ -28,6 +28,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
 import { CalendarioAnual } from "@/components/hr/ausencias/CalendarioAnual";
+import { LegendaMapaAusencias } from "@/components/hr/ausencias/LegendaMapaAusencias";
 import { MapaMensal } from "@/components/hr/ausencias/MapaMensal";
 import { PedidoDetalheSheet } from "@/components/hr/ausencias/PedidoDetalheSheet";
 import { PedidosLista } from "@/components/hr/ausencias/PedidosLista";
@@ -314,6 +315,8 @@ export function OrganizacaoConteudo({ tabParam = "tab" }: OrganizacaoConteudoPro
                     </div>
                   )}
                 </div>
+
+                <LegendaMapaAusencias />
 
                 {modoMapa === "mes" ? (
                   <MapaMensal

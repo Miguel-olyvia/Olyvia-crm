@@ -368,4 +368,26 @@ describe("AusenciasOrganizacao: separador Mapa de ausências e férias", () => {
     const diaDoze = within(mesActual as HTMLElement).getByText("12");
     expect(diaDoze.closest("button")?.getAttribute("title")).toMatch(/Doença/i);
   });
+
+  it("mostra a legenda dos padrões visuais do mapa uma unica vez, no modo Mes", async () => {
+    await renderPagina();
+
+    expect(screen.getByText("Aprovado")).toBeTruthy();
+    expect(screen.getByText("Pendente de aprovação")).toBeTruthy();
+    expect(screen.getByText("Não útil (fim de semana/feriado)")).toBeTruthy();
+    expect(screen.getByText("Sem marcação")).toBeTruthy();
+  });
+
+  it("mostra a legenda uma unica vez tambem no modo Ano, com os 12 mapas mensais", async () => {
+    await renderPagina();
+    irParaModoAno();
+
+    // So o mes com marcacoes tem grelha; os outros onze mostram "sem
+    // marcacoes" (ver teste acima) -- o que interessa aqui e que a legenda,
+    // que vive no ecra pai e nao dentro de `MapaMensal`, aparece so uma vez.
+    expect(screen.getAllByText("Aprovado").length).toBe(1);
+    expect(screen.getAllByText("Pendente de aprovação").length).toBe(1);
+    expect(screen.getAllByText("Não útil (fim de semana/feriado)").length).toBe(1);
+    expect(screen.getAllByText("Sem marcação").length).toBe(1);
+  });
 });
