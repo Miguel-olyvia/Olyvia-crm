@@ -3,12 +3,16 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { PhoneCall, Mail, Users, StickyNote, Briefcase, ArrowRightLeft, Bot, Filter, Send, Pencil, Sparkles, RefreshCw, ShoppingBag } from "lucide-react";
+import { PhoneCall, Mail, Users, StickyNote, Briefcase, ArrowRightLeft, Bot, Filter, Send, Pencil, Sparkles, RefreshCw, ShoppingBag, FileText, Calculator, FileSignature } from "lucide-react";
 import {
-  DIRECT_SALE_AUDIT_TABLES,
   DIRECT_SALE_EVENT_TYPE,
-  describeDirectSaleHistoryEvent,
-} from "@/lib/directSales/timelineEvents";
+  PROPOSAL_EVENT_TYPE,
+  QUOTE_EVENT_TYPE,
+  CONTRACT_EVENT_TYPE,
+  DOCUMENT_INSERT_TABLES,
+  describeDocumentHistoryEvent,
+  shouldHideAuditDiff,
+} from "@/lib/timeline/documentEvents";
 import { TIMELINE_AUDIT_IGNORED_FIELDS } from "@/lib/timeline/auditIgnoredFields";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -84,6 +88,9 @@ const TYPE_CONFIG: Record<string, { icon: typeof PhoneCall; color: string; bg: s
   role_status_changed: { icon: RefreshCw, color: "text-orange-600", bg: "bg-orange-100 dark:bg-orange-900/30", label: "Lifecycle" },
   field_change: { icon: Pencil, color: "text-slate-600", bg: "bg-slate-100 dark:bg-slate-800/50", label: "Edição" },
   [DIRECT_SALE_EVENT_TYPE]: { icon: ShoppingBag, color: "text-fuchsia-600", bg: "bg-fuchsia-100 dark:bg-fuchsia-900/30", label: "Venda direta" },
+  [PROPOSAL_EVENT_TYPE]: { icon: FileText, color: "text-indigo-600", bg: "bg-indigo-100 dark:bg-indigo-900/30", label: "Proposta" },
+  [QUOTE_EVENT_TYPE]: { icon: Calculator, color: "text-cyan-600", bg: "bg-cyan-100 dark:bg-cyan-900/30", label: "Orçamento" },
+  [CONTRACT_EVENT_TYPE]: { icon: FileSignature, color: "text-emerald-700", bg: "bg-emerald-100 dark:bg-emerald-900/30", label: "Contrato" },
 };
 
 const SENTIMENT_EMOJI: Record<string, string> = {
@@ -180,16 +187,16 @@ export function ContactTimelineTab({ events, onRegisterCall, contactId, entityId
         const isCreated = d.change_type === "created";
         const isRoleStatus = d.change_type === "role_status_changed" || d.change_type === "status_changed";
         // Marcos da venda direta — sem este ramo caíam em "Editou campo".
-        const directSale = describeDirectSaleHistoryEvent(d.change_type, d.metadata);
-        const type = directSale
-          ? DIRECT_SALE_EVENT_TYPE
+        const docEvent = describeDocumentHistoryEvent(d.change_type, d.metadata);
+        const type = docEvent
+          ? docEvent.type
           : isCreated ? "created" : isRoleStatus ? "role_status_changed" : "field_change";
 
         let title: string;
         let description: string | null = null;
-        if (directSale) {
-          title = directSale.title;
-          description = directSale.description;
+        if (docEvent) {
+          title = docEvent.title;
+          description = docEvent.description;
         } else if (isCreated) {
           const kind = d.metadata?.kind;
           title = kind === "contact" ? "Lead qualificada" : kind === "client" ? "Cliente criado" : "Lead criada";
@@ -221,13 +228,9 @@ export function ContactTimelineTab({ events, onRegisterCall, contactId, entityId
       for (const row of (auditRes.data || []) as any[]) {
         const actor = row.changed_by ? (actorMap[row.changed_by] || null) : null;
 
-        // Ver LeadTimelineTab: a venda direta já tem marcos próprios, e o
-        // trg_audit_direct_sales duplicaria o mesmo facto em bruto.
-        if (DIRECT_SALE_AUDIT_TABLES.has(row.table_name)) continue;
-
         if (row.operation === "UPDATE" && row.changed_fields && typeof row.changed_fields === "object") {
           const entries = Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
-            .filter(([field]) => !AUDIT_IGNORED_FIELDS.has(field));
+            .filter(([field]) => !AUDIT_IGNORED_FIELDS.has(field) && !shouldHideAuditDiff(row.table_name, field));
           entries.forEach(([field, diff], idx) => {
             const oldVal = diff?.old == null ? "—" : String(diff.old);
             const newVal = diff?.new == null ? "—" : String(diff.new);
@@ -240,7 +243,7 @@ export function ContactTimelineTab({ events, onRegisterCall, contactId, entityId
               actor,
             });
           });
-        } else if (row.operation === "INSERT" && row.table_name !== "anew_contacts" && row.table_name !== "anew_entities") {
+        } else if (row.operation === "INSERT" && !DOCUMENT_INSERT_TABLES.has(row.table_name) && row.table_name !== "anew_contacts" && row.table_name !== "anew_entities") {
           auditEvents.push({
             id: `audit-${row.id}`,
             type: "field_change",

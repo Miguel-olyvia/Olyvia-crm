@@ -1,10 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import {
-  DIRECT_SALE_AUDIT_TABLES,
   DIRECT_SALE_EVENT_TYPE,
-  describeDirectSaleHistoryEvent,
-} from "@/lib/directSales/timelineEvents";
+  PROPOSAL_EVENT_TYPE,
+  QUOTE_EVENT_TYPE,
+  CONTRACT_EVENT_TYPE,
+  DOCUMENT_INSERT_TABLES,
+  describeDocumentHistoryEvent,
+  shouldHideAuditDiff,
+} from "@/lib/timeline/documentEvents";
 import { TIMELINE_AUDIT_IGNORED_FIELDS } from "@/lib/timeline/auditIgnoredFields";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
@@ -385,16 +389,16 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         const isCreated = d.change_type === "created";
         const isRoleStatus = d.change_type === "role_status_changed" || d.change_type === "status_changed";
         // Marcos da venda direta — sem este ramo caíam em "Editou campo".
-        const directSale = describeDirectSaleHistoryEvent(d.change_type, d.metadata);
-        const type = directSale
-          ? DIRECT_SALE_EVENT_TYPE
+        const docEvent = describeDocumentHistoryEvent(d.change_type, d.metadata);
+        const type = docEvent
+          ? docEvent.type
           : isCreated ? "conversion" : isRoleStatus ? "status_change" : "field_change";
 
         let title: string;
         let description: string | null = null;
-        if (directSale) {
-          title = directSale.title;
-          description = directSale.description;
+        if (docEvent) {
+          title = docEvent.title;
+          description = docEvent.description;
         } else if (isCreated) {
           title = "Entidade criada";
         } else if (isRoleStatus) {
@@ -418,12 +422,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const auditEvents: TimelineExtraEvent[] = [];
       for (const row of (auditRes.data || []) as any[]) {
         const actor = row.changed_by ? (userMapLocal[row.changed_by] || null) : null;
-        // A venda direta já tem marcos próprios; o trg_audit_direct_sales
-        // duplicaria o mesmo facto como "Editou status: rascunho → enviada".
-        if (DIRECT_SALE_AUDIT_TABLES.has(row.table_name)) continue;
         if (row.operation === "UPDATE" && row.changed_fields && typeof row.changed_fields === "object") {
           Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
-            .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field))
+            .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field) && !shouldHideAuditDiff(row.table_name, field))
             .forEach(([field, diff], idx) => {
               const oldVal = diff?.old == null ? "—" : String(diff.old);
               const newVal = diff?.new == null ? "—" : String(diff.new);

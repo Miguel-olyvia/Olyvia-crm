@@ -3,14 +3,18 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { PhoneCall, Mail, Users, StickyNote, Briefcase, ArrowRightLeft, Bot, Filter, MessageCircle, Eye, CalendarIcon, Sparkles, Pencil, RefreshCw, ShoppingBag } from "lucide-react";
+import { PhoneCall, Mail, Users, StickyNote, Briefcase, ArrowRightLeft, Bot, Filter, MessageCircle, Eye, CalendarIcon, Sparkles, Pencil, RefreshCw, ShoppingBag, FileText, Calculator, FileSignature } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { leadStatusLabel } from "@/lib/leads/statusLabels";
 import {
-  DIRECT_SALE_AUDIT_TABLES,
   DIRECT_SALE_EVENT_TYPE,
-  describeDirectSaleHistoryEvent,
-} from "@/lib/directSales/timelineEvents";
+  PROPOSAL_EVENT_TYPE,
+  QUOTE_EVENT_TYPE,
+  CONTRACT_EVENT_TYPE,
+  DOCUMENT_INSERT_TABLES,
+  describeDocumentHistoryEvent,
+  shouldHideAuditDiff,
+} from "@/lib/timeline/documentEvents";
 import { TIMELINE_AUDIT_IGNORED_FIELDS } from "@/lib/timeline/auditIgnoredFields";
 
 interface TimelineEvent {
@@ -44,6 +48,9 @@ const TYPE_CONFIG: Record<string, { icon: typeof PhoneCall; color: string; bg: s
   role_status_changed: { icon: RefreshCw, color: "text-orange-600", bg: "bg-orange-100 dark:bg-orange-900/30", label: "Lifecycle" },
   field_change: { icon: Pencil, color: "text-slate-600", bg: "bg-slate-100 dark:bg-slate-800/50", label: "Edição" },
   [DIRECT_SALE_EVENT_TYPE]: { icon: ShoppingBag, color: "text-fuchsia-600", bg: "bg-fuchsia-100 dark:bg-fuchsia-900/30", label: "Venda direta" },
+  [PROPOSAL_EVENT_TYPE]: { icon: FileText, color: "text-indigo-600", bg: "bg-indigo-100 dark:bg-indigo-900/30", label: "Proposta" },
+  [QUOTE_EVENT_TYPE]: { icon: Calculator, color: "text-cyan-600", bg: "bg-cyan-100 dark:bg-cyan-900/30", label: "Orçamento" },
+  [CONTRACT_EVENT_TYPE]: { icon: FileSignature, color: "text-emerald-700", bg: "bg-emerald-100 dark:bg-emerald-900/30", label: "Contrato" },
 };
 
 // Human-readable PT labels for audited field names.
@@ -202,16 +209,16 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
         // Vendas diretas têm marcos próprios (criada/enviada/aceite/rejeitada/
         // faturada). Sem este ramo caíam em "Editou campo", que é o destino de
         // qualquer change_type desconhecido.
-        const directSale = describeDirectSaleHistoryEvent(d.change_type, d.metadata);
-        const type = directSale
-          ? DIRECT_SALE_EVENT_TYPE
+        const docEvent = describeDocumentHistoryEvent(d.change_type, d.metadata);
+        const type = docEvent
+          ? docEvent.type
           : isCreated ? "created" : isRoleStatus ? "role_status_changed" : "field_change";
 
         let title: string;
         let description: string | null = null;
-        if (directSale) {
-          title = directSale.title;
-          description = directSale.description;
+        if (docEvent) {
+          title = docEvent.title;
+          description = docEvent.description;
         } else if (isCreated) {
           const kind = d.metadata?.kind;
           title = kind === "contact" ? "Contacto criado" : kind === "client" ? "Cliente criado" : "Lead criada";
@@ -246,16 +253,9 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
       for (const row of (auditRes.data || []) as any[]) {
         const actor = row.changed_by ? (localUserMap[row.changed_by] || null) : null;
 
-        // As vendas diretas já têm marcos próprios vindos de anew_entity_history
-        // (ver describeDirectSaleHistoryEvent acima). O trg_audit_direct_sales
-        // continua a escrever aqui, mas mostrá-lo seria o mesmo facto duas
-        // vezes — uma bem escrita e outra em bruto ("Editou status: rascunho →
-        // enviada", "Registo adicionado").
-        if (DIRECT_SALE_AUDIT_TABLES.has(row.table_name)) continue;
-
         if (row.operation === "UPDATE" && row.changed_fields && typeof row.changed_fields === "object") {
           const entries = Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
-            .filter(([field]) => !AUDIT_IGNORED_FIELDS.has(field));
+            .filter(([field]) => !AUDIT_IGNORED_FIELDS.has(field) && !shouldHideAuditDiff(row.table_name, field));
           entries.forEach(([field, diff], idx) => {
             const translate = field === "status" ? statusValueLabel : (v: string) => v;
             const oldVal = diff?.old == null ? "—" : translate(String(diff.old));
@@ -271,6 +271,7 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
           });
         } else if (
           row.operation === "INSERT"
+          && !DOCUMENT_INSERT_TABLES.has(row.table_name)
           && row.table_name !== "anew_leads"
           && row.table_name !== "anew_entities"
           // Already shown as its own "Chamada telefónica"/"Email enviado"/etc.
