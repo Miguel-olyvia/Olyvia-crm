@@ -22,13 +22,17 @@
  */
 import { useEffect, useRef } from "react";
 import { useRelatorioAssiduidadeMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
-import type { TotaisRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
+import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
 
 interface ResumoPessoaProcessamentoOcultoProps {
   pessoaId: string;
   ano: number;
   mes: number;
-  aoTerminarCarregamento: (pessoaId: string, totais: TotaisRelatorioMensal) => void;
+  aoTerminarCarregamento: (
+    pessoaId: string,
+    totais: TotaisRelatorioMensal,
+    dias: readonly DiaRelatorioMensal[],
+  ) => void;
 }
 
 export function ResumoPessoaProcessamentoOculto({
@@ -47,9 +51,9 @@ export function ResumoPessoaProcessamentoOculto({
   useEffect(() => {
     if (relatorio.loading || avisouRef.current) return;
     avisouRef.current = true;
-    aoTerminarCarregamento(pessoaId, relatorio.totais);
+    aoTerminarCarregamento(pessoaId, relatorio.totais, relatorio.dias);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [relatorio.loading, relatorio.totais, pessoaId]);
+  }, [relatorio.loading, relatorio.totais, relatorio.dias, pessoaId]);
 
   return null;
 }

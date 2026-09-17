@@ -23,6 +23,7 @@ import type {
   HrCodigoProcessamentoOrigemAutomatica,
   HrProcessamentoLancamento,
 } from "@/types/hr";
+import type { DiaRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
 
 export type Periodicidade = "hora" | "diaria" | "semanal" | "mensal" | "anual";
 
@@ -278,6 +279,24 @@ function calcularSubsidioAlimentacao(
     return 0;
   }
   return diasElegiveisSubsidio * valorDia;
+}
+
+/**
+ * Quantos dias do mes dao direito ao subsidio de alimentacao: a pessoa
+ * trabalhou pelo menos `minutosMinimosDia` nesse dia (regra da organizacao,
+ * `hr_regras_subsidio_alimentacao.minutos_minimos_dia`) e o dia nao e uma
+ * ausencia -- a mesma exclusao que `contaParaTotais` ja aplica em
+ * `useRelatorioAssiduidadeMensal.ts` aos outros totais do relatorio.
+ */
+export function contarDiasElegiveisSubsidio(
+  dias: readonly Pick<DiaRelatorioMensal, "estado" | "realizadoMinutos">[],
+  minutosMinimosDia: number,
+): number {
+  return dias.reduce(
+    (soma, dia) =>
+      dia.estado !== "ausencia" && dia.realizadoMinutos >= minutosMinimosDia ? soma + 1 : soma,
+    0,
+  );
 }
 
 function calcularLancamentosPontuais(lancamentos: readonly HrProcessamentoLancamento[]): number {

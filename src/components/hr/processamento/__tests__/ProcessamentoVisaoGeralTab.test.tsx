@@ -69,9 +69,10 @@ vi.mock("@/hooks/useHorasVigentesDaOrganizacao", () => ({
   }),
 }));
 
+let regraSubsidioMock = { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 };
 vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
   useRegrasSubsidioAlimentacao: () => ({
-    regra: { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 },
+    regra: regraSubsidioMock,
     temRegraGravada: false,
     isLoading: false,
     isFetched: true,
@@ -120,6 +121,7 @@ const TOTAIS_PADRAO = {
   realizadoMinutos: 0,
 };
 let totaisPorPessoaMock: Record<string, typeof TOTAIS_PADRAO> = {};
+let diasPorPessoaMock: Record<string, unknown[]> = {};
 
 vi.mock("@/components/hr/processamento/ResumoPessoaProcessamentoOculto", async () => {
   const react = await vi.importActual<typeof import("react")>("react");
@@ -134,10 +136,14 @@ vi.mock("@/components/hr/processamento/ResumoPessoaProcessamentoOculto", async (
       aoTerminarCarregamento,
     }: {
       pessoaId: string;
-      aoTerminarCarregamento: (id: string, totais: unknown) => void;
+      aoTerminarCarregamento: (id: string, totais: unknown, dias: unknown[]) => void;
     }) => {
       react.useEffect(() => {
-        aoTerminarCarregamento(pessoaId, totaisPorPessoaMock[pessoaId] ?? TOTAIS_PADRAO);
+        aoTerminarCarregamento(
+          pessoaId,
+          totaisPorPessoaMock[pessoaId] ?? TOTAIS_PADRAO,
+          diasPorPessoaMock[pessoaId] ?? [],
+        );
         // eslint-disable-next-line react-hooks/exhaustive-deps
       }, [pessoaId]);
       return null;
@@ -173,6 +179,8 @@ beforeEach(() => {
   retribuicoesRecusado = false;
   horasPorPessoa = new Map();
   totaisPorPessoaMock = {};
+  diasPorPessoaMock = {};
+  regraSubsidioMock = { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 };
   abrirMock.mockClear();
   fecharMock.mockClear();
   criarMock.mockClear();
@@ -486,6 +494,52 @@ describe("ProcessamentoVisaoGeralTab", () => {
     const correspondeA1200 = (_: string, elemento: Element | null) =>
       normalizar(elemento?.textContent ?? "") === valor1200Esperado;
     expect(within(dialogo).getByText(correspondeA1200)).toBeInTheDocument();
+  });
+
+  it("com regra de subsidio e dias elegiveis, o detalhe deixa de mostrar o subsidio a 0 EUR", async () => {
+    periodoActual = PERIODO_ABERTO;
+    regraSubsidioMock = { valorDiario: 6, modo: "dinheiro", minutosMinimosDia: 300 };
+    retribuicoesPorPessoa = new Map([
+      [
+        "pessoa-1",
+        [
+          {
+            pessoa_id: "pessoa-1",
+            valor_base: 1200,
+            periodicidade: "mensal",
+            duodecimos_pct: 0,
+            subsidio_alimentacao: null,
+            valido_de: "2026-01-01",
+            valido_ate: null,
+          },
+        ],
+      ],
+    ]);
+    horasPorPessoa = new Map([["pessoa-1", 40]]);
+    // Dois dias com >= 300 min trabalhados (elegiveis) e um dia de ausencia
+    // com muitos minutos (nao conta) e um dia curto (nao conta).
+    diasPorPessoaMock = {
+      "pessoa-1": [
+        { estado: "normal", realizadoMinutos: 480 },
+        { estado: "normal", realizadoMinutos: 300 },
+        { estado: "ausencia", realizadoMinutos: 480 },
+        { estado: "normal", realizadoMinutos: 100 },
+      ],
+    };
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+
+    const linhaAna = screen.getByText("Ana Silva").closest("tr")!;
+    fireEvent.click(within(linhaAna).getByText("hr.vencimento.visaoGeral.verDetalhe"));
+
+    await screen.findByText("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao");
+    const dialogo = screen.getByRole("dialog");
+    // 2 dias elegiveis * 6 EUR/dia = 12 EUR -- ja nao e 0,00 EUR.
+    const normalizar = (texto: string) => texto.replace(/\s/g, " ");
+    const valorEsperado = normalizar(formatarValorEsperado(12));
+    const correspondeAoValor = (_: string, elemento: Element | null) =>
+      normalizar(elemento?.textContent ?? "") === valorEsperado;
+    expect(within(dialogo).getByText(correspondeAoValor)).toBeInTheDocument();
   });
 
   it("sem permissao de retribuicao, o detalhe esconde base e total mas mostra o resto", async () => {

@@ -1,10 +1,22 @@
 import { describe, expect, it } from "vitest";
 import {
   calcularProcessamentoPessoa,
+  contarDiasElegiveisSubsidio,
   type EntradaProcessamentoPessoa,
   type RetribuicaoParaCalculo,
 } from "@/lib/hr/processamentoTotais";
 import type { HrCodigoProcessamento, HrProcessamentoLancamento } from "@/types/hr";
+import type { DiaRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
+
+function diaBase(
+  overrides: Partial<Pick<DiaRelatorioMensal, "estado" | "realizadoMinutos">> = {},
+): Pick<DiaRelatorioMensal, "estado" | "realizadoMinutos"> {
+  return {
+    estado: "normal",
+    realizadoMinutos: 0,
+    ...overrides,
+  };
+}
 
 function totaisBase(
   overrides: Partial<EntradaProcessamentoPessoa["totais"]> = {},
@@ -489,5 +501,39 @@ describe("calcularProcessamentoPessoa", () => {
     expect(resultado.subsidioAlimentacao).toBe(120);
     expect(resultado.lancamentosPontuais).toBe(15);
     expect(resultado.avisos).toContain("sem_retribuicao");
+  });
+});
+
+describe("contarDiasElegiveisSubsidio", () => {
+  it("conta so os dias com realizadoMinutos >= minimo", () => {
+    const dias = [
+      diaBase({ realizadoMinutos: 500 }), // >= 300, conta
+      diaBase({ realizadoMinutos: 200 }), // < 300, nao conta
+      diaBase({ realizadoMinutos: 300 }), // == 300, conta (fronteira inclusiva)
+      diaBase({ realizadoMinutos: 0 }), // nao conta
+    ];
+    expect(contarDiasElegiveisSubsidio(dias, 300)).toBe(2);
+  });
+
+  it("um dia de ausencia com realizadoMinutos alto nao conta -- mesma exclusao dos outros totais", () => {
+    const dias = [
+      diaBase({ estado: "ausencia", realizadoMinutos: 600 }),
+      diaBase({ estado: "normal", realizadoMinutos: 600 }),
+    ];
+    expect(contarDiasElegiveisSubsidio(dias, 300)).toBe(1);
+  });
+
+  it("minimo a 0 conta todos os dias com qualquer minuto trabalhado", () => {
+    const dias = [
+      diaBase({ realizadoMinutos: 1 }),
+      diaBase({ realizadoMinutos: 0 }),
+      diaBase({ realizadoMinutos: 480 }),
+    ];
+    // realizadoMinutos >= 0 e sempre verdade -- os tres dias contam.
+    expect(contarDiasElegiveisSubsidio(dias, 0)).toBe(3);
+  });
+
+  it("array vazio da 0", () => {
+    expect(contarDiasElegiveisSubsidio([], 300)).toBe(0);
   });
 });

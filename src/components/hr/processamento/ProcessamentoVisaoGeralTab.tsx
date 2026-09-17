@@ -66,9 +66,10 @@ import {
 import { useHorasVigentesDaOrganizacao } from "@/hooks/useHorasVigentesDaOrganizacao";
 import { useRegrasSubsidioAlimentacao } from "@/hooks/useRegrasSubsidioAlimentacao";
 import { ResumoPessoaProcessamentoOculto } from "@/components/hr/processamento/ResumoPessoaProcessamentoOculto";
-import type { TotaisRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
+import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
 import {
   calcularProcessamentoPessoa,
+  contarDiasElegiveisSubsidio,
   type AvisoProcessamento,
   type ResultadoProcessamentoPessoa,
 } from "@/lib/hr/processamentoTotais";
@@ -144,6 +145,9 @@ export function ProcessamentoVisaoGeralTab() {
   const { ultimoDia } = useMemo(() => limitesDoMes(ano, mes), [ano, mes]);
 
   const [totaisPorPessoa, setTotaisPorPessoa] = useState<Record<string, TotaisRelatorioMensal>>({});
+  const [diasPorPessoa, setDiasPorPessoa] = useState<Record<string, readonly DiaRelatorioMensal[]>>(
+    {},
+  );
   const [confirmarFecho, setConfirmarFecho] = useState(false);
   const [pessoaParaLancamento, setPessoaParaLancamento] = useState<string | null>(null);
   const [pessoaParaDetalhe, setPessoaParaDetalhe] = useState<string | null>(null);
@@ -158,8 +162,13 @@ export function ProcessamentoVisaoGeralTab() {
     [pessoas],
   );
 
-  const marcarTotais = (pessoaId: string, totais: TotaisRelatorioMensal) => {
+  const marcarTotais = (
+    pessoaId: string,
+    totais: TotaisRelatorioMensal,
+    dias: readonly DiaRelatorioMensal[],
+  ) => {
     setTotaisPorPessoa((atual) => ({ ...atual, [pessoaId]: totais }));
+    setDiasPorPessoa((atual) => ({ ...atual, [pessoaId]: dias }));
   };
 
   const lancamentosPorPessoa = useMemo(() => {
@@ -192,6 +201,13 @@ export function ProcessamentoVisaoGeralTab() {
       const { retribuicao, mudouAMeioDoMes } = escolherRetribuicaoVigente(versoes, ultimoDia);
       const horasSemanaisEquivalentes = horasHook.porPessoa.get(pessoa.id) ?? null;
       const lancamentosDaPessoa = lancamentosPorPessoa.get(pessoa.id) ?? [];
+      const diasDaPessoa = diasPorPessoa[pessoa.id] ?? [];
+      // Sem regra gravada, `regrasSubsidioHook.regra` ja vem com a omissao
+      // (minutosMinimosDia=1) -- ver useRegrasSubsidioAlimentacao.ts.
+      const diasElegiveisSubsidio = contarDiasElegiveisSubsidio(
+        diasDaPessoa,
+        regrasSubsidioHook.regra.minutosMinimosDia,
+      );
 
       const resultado = calcularProcessamentoPessoa({
         totais: {
@@ -206,8 +222,7 @@ export function ProcessamentoVisaoGeralTab() {
           // conhecida, documentada no cabecalho de processamentoTotais.ts.
           diasDescansoTrabalhado: 0,
         },
-        // TODO: contar dias elegiveis para subsidio quando essa soma existir
-        diasElegiveisSubsidio: 0,
+        diasElegiveisSubsidio,
         retribuicao: retribuicao
           ? {
               valorBase: retribuicao.valor_base,
@@ -233,6 +248,7 @@ export function ProcessamentoVisaoGeralTab() {
   }, [
     pessoasActivas,
     totaisPorPessoa,
+    diasPorPessoa,
     retribuicoesHook.porPessoa,
     horasHook.porPessoa,
     lancamentosPorPessoa,
