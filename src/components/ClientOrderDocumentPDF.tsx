@@ -148,6 +148,9 @@ interface ClientOrderDocumentPDFProps {
     client_name: string | null;
     signature_date: string | null;
     total_value: number | null;
+    // Preenchidos só quando a encomenda nasceu de uma venda direta (Fase 5).
+    direct_sale_number?: string | null;
+    proforma_number?: string | null;
     lines: ClientOrderDocumentPDFLine[];
   };
   company?: {
@@ -201,6 +204,12 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
             {document.signature_date && (
               <Text style={styles.docDate}>
                 Data de Assinatura: {new Date(document.signature_date).toLocaleDateString('pt-PT')}
+              </Text>
+            )}
+            {document.direct_sale_number && (
+              <Text style={styles.docDate}>
+                Origem: Venda Direta {document.direct_sale_number}
+                {document.proforma_number ? ` · Proforma ${document.proforma_number}` : ''}
               </Text>
             )}
           </View>

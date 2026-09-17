@@ -27,8 +27,9 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { EntitySearchInput, type EntitySearchResult } from "@/components/EntitySearchInput";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { Badge } from "@/components/ui/badge";
-import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Plus, Trash2 } from "lucide-react";
+import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Plus, ShoppingBag, Trash2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
 import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
 
@@ -115,6 +116,14 @@ interface ClientOrderDocumentLine {
   available_warehouses: ClientOrderAvailableWarehouse[] | null;
 }
 
+// Origem de uma encomenda que nasceu de uma venda direta (Fase 5). Ausente
+// quando a encomenda veio de uma proposta assinada ou foi criada à mão.
+interface DirectSaleOrigin {
+  direct_sale_id: string;
+  sale_number: string | null;
+  proforma_number: string | null;
+}
+
 interface ClientOrderDocumentDetail {
   contract_id: string;
   contract_number: string;
@@ -135,6 +144,13 @@ const ClientOrders = () => {
   const canConfirmStockExit = hasPermission('inventory.edit') && hasPermission('client_orders.confirm_stock_exit');
 
   const [orders, setOrders] = useState<ClientOrderDocumentRow[]>([]);
+  // Origem "Venda Direta", indexada por contract_id. Vem de uma query própria a
+  // direct_sales em vez de das RPCs de encomendas: evita um CREATE OR REPLACE
+  // sobre duas funções de ~240 linhas só para acrescentar três campos, e faz
+  // com que a RLS de direct_sales.view decida quem vê a origem — quem não pode
+  // ver vendas directas não passa a vê-las através desta página.
+  const [salesByContract, setSalesByContract] = useState<Record<string, DirectSaleOrigin>>({});
+  const [proformaDownloadingId, setProformaDownloadingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(0);
@@ -198,6 +214,58 @@ const ClientOrders = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
+  /**
+   * Descarrega a proforma da venda direta que originou esta encomenda.
+   * Reutiliza o gerador do módulo de Vendas Diretas em modo CRM (sem
+   * prefetch): é ele que lê as linhas, o emitente e o cliente, e é o mesmo
+   * que produz o PDF do portal — os dois documentos não podem divergir.
+   */
+  const handleDownloadProforma = async (contractId: string) => {
+    const origin = salesByContract[contractId];
+    if (!origin || proformaDownloadingId) return;
+    setProformaDownloadingId(contractId);
+    try {
+      const { blob, fileName } = await generateProformaPdfBlob(origin.direct_sale_id);
+      downloadBlob(blob, fileName);
+    } catch (error: any) {
+      toast({
+        title: t('clientOrders.toast.proformaError'),
+        description: error?.message,
+        variant: "destructive",
+      });
+    } finally {
+      setProformaDownloadingId(null);
+    }
+  };
+
+  const loadOrigins = useCallback(async (contractIds: string[], reset: boolean) => {
+    if (reset) setSalesByContract({});
+    if (contractIds.length === 0) return;
+    try {
+      const { data, error } = await (supabase as any)
+        .from("direct_sales")
+        .select("id, sale_number, proforma_number, client_contract_id")
+        .in("client_contract_id", contractIds)
+        .is("deleted_at", null);
+      if (error) throw error;
+      const found = (data as Array<{ id: string; sale_number: string | null; proforma_number: string | null; client_contract_id: string }> | null) || [];
+      if (found.length === 0) return;
+      setSalesByContract((prev) => {
+        const next = reset ? {} : { ...prev };
+        for (const s of found) {
+          next[s.client_contract_id] = {
+            direct_sale_id: s.id,
+            sale_number: s.sale_number,
+            proforma_number: s.proforma_number,
+          };
+        }
+        return next;
+      });
+    } catch {
+      // Silencioso por desenho — ver a chamada em loadOrders.
+    }
+  }, []);
+
   const loadOrders = useCallback(async (pageNum: number, reset: boolean) => {
     const filters = filtersRef.current;
     if (!filters.activeCompanyId) return;
@@ -232,6 +300,12 @@ const ClientOrders = () => {
           return [...prev, ...newRows.filter((o) => !existingIds.has(o.contract_id))];
         });
       }
+
+      // Origem, só para os contratos desta página. Falha em silêncio de
+      // propósito: sem permissão direct_sales.view a RLS devolve vazio, e a
+      // encomenda continua a mostrar-se — apenas sem o distintivo. Nunca pode
+      // impedir a listagem de carregar.
+      void loadOrigins(newRows.map((o) => o.contract_id), reset);
       // Sem total_count na RPC — hasMore inferido do tamanho da página devolvida.
       setHasMore(newRows.length === PAGE_SIZE);
       setPage(pageNum);
@@ -241,7 +315,7 @@ const ClientOrders = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [t, toast]);
+  }, [t, toast, loadOrigins]);
 
   useEffect(() => {
     if (!activeCompany?.id) return;
@@ -279,6 +353,9 @@ const ClientOrders = () => {
     try {
       const doc = await fetchDetail(contractId);
       setDetailData(doc);
+      // O deep-link ?open=<contract_id> pode abrir uma encomenda que não está
+      // na página carregada, e nesse caso a origem ainda não foi buscada.
+      if (!salesByContract[contractId]) void loadOrigins([contractId], false);
     } catch (error: any) {
       toast({ title: t('clientOrders.toast.detailError'), description: error.message, variant: "destructive" });
       setDetailOpen(false);
@@ -338,8 +415,19 @@ const ClientOrders = () => {
         company = { name: orgData?.name, logo_url: logoBase64 || orgData?.logo_url };
       }
 
+      // A origem pode não estar em cache quando o PDF é pedido a partir de uma
+      // linha ainda não aberta em detalhe; sem ela o PDF sai apenas sem a
+      // menção à venda direta, nunca em erro.
+      const origin = salesByContract[contractId];
       const blob = await pdf(
-        <ClientOrderDocumentPDF document={doc} company={company} />
+        <ClientOrderDocumentPDF
+          document={{
+            ...doc,
+            direct_sale_number: origin?.sale_number ?? null,
+            proforma_number: origin?.proforma_number ?? null,
+          }}
+          company={company}
+        />
       ).toBlob();
 
       const url = URL.createObjectURL(blob);
@@ -899,7 +987,20 @@ const ClientOrders = () => {
             ) : (
               orders.map((order) => (
                 <TableRow key={order.contract_id}>
-                  <TableCell className="font-medium">{order.contract_number}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex flex-col gap-1">
+                      <span>{order.contract_number}</span>
+                      {salesByContract[order.contract_id] && (
+                        <Badge variant="outline" className="w-fit gap-1 font-normal text-xs">
+                          <ShoppingBag className="h-3 w-3" />
+                          {t('clientOrders.origin.directSale')}
+                          {salesByContract[order.contract_id].sale_number
+                            ? ` ${salesByContract[order.contract_id].sale_number}`
+                            : ''}
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>{order.client_name || '-'}</TableCell>
                   <TableCell>
                     {order.signature_date ? new Date(order.signature_date).toLocaleDateString('pt-PT') : '-'}
@@ -983,6 +1084,32 @@ const ClientOrders = () => {
                       : '-'}
                   </span>
                 </div>
+                {salesByContract[detailData.contract_id] && (
+                  <div className="col-span-2 flex flex-wrap items-center gap-2">
+                    <span className="text-muted-foreground">{t('clientOrders.dialog.origin')}: </span>
+                    <Badge variant="outline" className="gap-1 font-normal">
+                      <ShoppingBag className="h-3 w-3" />
+                      {t('clientOrders.origin.directSale')}
+                      {salesByContract[detailData.contract_id].sale_number
+                        ? ` ${salesByContract[detailData.contract_id].sale_number}`
+                        : ''}
+                    </Badge>
+                    {salesByContract[detailData.contract_id].proforma_number && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() => handleDownloadProforma(detailData.contract_id)}
+                        disabled={proformaDownloadingId === detailData.contract_id}
+                      >
+                        {proformaDownloadingId === detailData.contract_id
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : <FileDown className="h-3.5 w-3.5" />}
+                        {salesByContract[detailData.contract_id].proforma_number}
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {(() => {
