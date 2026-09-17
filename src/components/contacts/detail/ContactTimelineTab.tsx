@@ -9,6 +9,7 @@ import {
   DIRECT_SALE_EVENT_TYPE,
   describeDirectSaleHistoryEvent,
 } from "@/lib/directSales/timelineEvents";
+import { TIMELINE_AUDIT_IGNORED_FIELDS } from "@/lib/timeline/auditIgnoredFields";
 import { supabase } from "@/integrations/supabase/client";
 
 interface TimelineEvent {
@@ -64,10 +65,9 @@ const FIELD_LABELS: Record<string, string> = {
 const fieldLabel = (field: string): string => FIELD_LABELS[field] || field.replace(/_/g, " ");
 
 // Skip noisy audited columns that carry no meaning for the user-facing timeline.
-const AUDIT_IGNORED_FIELDS = new Set([
-  "id", "entity_id", "organization_id", "root_organization_id",
-  "created_at", "updated_at", "created_by", "search_text",
-]);
+// Lista partilhada com a ficha da lead e a do cliente — antes cada uma tinha a
+// sua e esta era a mais curta das três.
+const AUDIT_IGNORED_FIELDS = new Set(TIMELINE_AUDIT_IGNORED_FIELDS);
 
 const TYPE_CONFIG: Record<string, { icon: typeof PhoneCall; color: string; bg: string; label: string }> = {
   call: { icon: PhoneCall, color: "text-green-600", bg: "bg-green-100 dark:bg-green-900/30", label: "Chamada" },

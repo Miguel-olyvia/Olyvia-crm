@@ -11,6 +11,7 @@ import {
   DIRECT_SALE_EVENT_TYPE,
   describeDirectSaleHistoryEvent,
 } from "@/lib/directSales/timelineEvents";
+import { TIMELINE_AUDIT_IGNORED_FIELDS } from "@/lib/timeline/auditIgnoredFields";
 
 interface TimelineEvent {
   id: string;
@@ -70,18 +71,12 @@ const fieldLabel = (field: string): string => FIELD_LABELS[field] || field.repla
 // and drowned out real actions like a registered call. Applied to BOTH the
 // entity_audit_log diffs and the anew_entity_history field_change events
 // below, which previously had no such filter at all.
-const AUDIT_IGNORED_FIELDS = new Set([
-  "id", "entity_id", "organization_id", "root_organization_id",
-  "created_at", "updated_at", "created_by", "search_text",
-  "pipeline_dirty_at", "workflow_stage_id", "raw_status", "previous_status",
-  "field_values", "needs_manual_scheduling",
-  // Written automatically by the same action that already produces a
-  // dedicated "Chamada telefónica"/"Email enviado"/etc. entry (registering
-  // an interaction updates the lead's last_contact_* bookkeeping in the
-  // same UPDATE) — showing them again as raw "Editou last contact by:
-  // <uuid>" lines is pure duplication of what's already on screen.
-  "last_contact_at", "last_contact_by", "last_contact_result",
-]);
+// A lista passou a ser partilhada com as timelines do cliente e do contacto
+// (@/lib/timeline/auditIgnoredFields), que tinham ficado com uma versão curta.
+// Todas as entradas que estavam aqui — incluindo os last_contact_*, escritos
+// pela mesma acção que já produz uma "Chamada telefónica"/"Email enviado" — vão
+// agora nessa lista.
+const AUDIT_IGNORED_FIELDS = new Set(TIMELINE_AUDIT_IGNORED_FIELDS);
 
 // Raw status/stage values -> the same PT labels shown elsewhere (funnel,
 // status pills), so "Editou estado" reads as "new → rejected" no longer.

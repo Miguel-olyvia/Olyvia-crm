@@ -5,6 +5,7 @@ import {
   DIRECT_SALE_EVENT_TYPE,
   describeDirectSaleHistoryEvent,
 } from "@/lib/directSales/timelineEvents";
+import { TIMELINE_AUDIT_IGNORED_FIELDS } from "@/lib/timeline/auditIgnoredFields";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
@@ -116,10 +117,8 @@ const CLIENT_FIELD_LABELS: Record<string, string> = {
 const clientFieldLabel = (field: string): string =>
   CLIENT_FIELD_LABELS[field] || field.replace(/_/g, " ");
 
-const CLIENT_AUDIT_IGNORED_FIELDS = new Set([
-  "id", "entity_id", "organization_id", "root_organization_id",
-  "created_at", "updated_at", "created_by", "search_text",
-]);
+// Lista partilhada com as timelines da lead e do contacto.
+const CLIENT_AUDIT_IGNORED_FIELDS = new Set(TIMELINE_AUDIT_IGNORED_FIELDS);
 
 interface Deal {
   id: string; title: string; value: number; stage_id: string;
