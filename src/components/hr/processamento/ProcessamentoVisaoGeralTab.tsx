@@ -87,6 +87,17 @@ function horasDeMinutos(minutos: number): string {
   return String(Math.round((minutos / 60) * 100) / 100);
 }
 
+/**
+ * Minutos -> horas para mostrar entre parenteses ao lado de uma contagem de dias.
+ * Inteiro quando o numero de horas e redondo (ex.: "189h"), uma casa decimal com
+ * virgula quando nao e (ex.: "4,5h").
+ */
+function horasEntreParenteses(minutos: number): string {
+  const horas = Math.round((minutos / 60) * 10) / 10;
+  const horasTexto = Number.isInteger(horas) ? String(horas) : horas.toFixed(1).replace(".", ",");
+  return `(${horasTexto}h)`;
+}
+
 function formatarValor(valor: number): string {
   return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(valor);
 }
@@ -409,10 +420,18 @@ export function ProcessamentoVisaoGeralTab() {
                       <tr key={pessoa.id} className="border-b last:border-b-0 align-top">
                         <td className="px-4 py-3 font-medium">{pessoa.nome_completo}</td>
                         <td className="px-4 py-3 tabular-nums">
-                          {totais ? (totais.diasPlaneados ?? 0) : <OlyviaLoader size={16} />}
+                          {totais ? (
+                            `${totais.diasPlaneados ?? 0} ${horasEntreParenteses(totais.planeadoMinutos)}`
+                          ) : (
+                            <OlyviaLoader size={16} />
+                          )}
                         </td>
                         <td className="px-4 py-3 tabular-nums">
-                          {totais ? totais.diasTrabalhados : <OlyviaLoader size={16} />}
+                          {totais ? (
+                            `${totais.diasTrabalhados} ${horasEntreParenteses(totais.realizadoMinutos)}`
+                          ) : (
+                            <OlyviaLoader size={16} />
+                          )}
                         </td>
                         <td className="px-4 py-3 tabular-nums">
                           {totais ? totais.diasComFaltaCompleta : "-"}

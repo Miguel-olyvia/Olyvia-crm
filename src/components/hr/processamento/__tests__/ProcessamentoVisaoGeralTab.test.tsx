@@ -214,11 +214,18 @@ describe("ProcessamentoVisaoGeralTab", () => {
 
   it("com periodo aberto mostra o resumo por pessoa, reaproveitando os totais do relatorio", async () => {
     periodoActual = PERIODO_ABERTO;
+    // realizadoMinutos = 9630 (160,5h) -- caso com casas decimais.
+    totaisPorPessoaMock = {
+      "pessoa-1": { ...TOTAIS_PADRAO, realizadoMinutos: 9630 },
+      "pessoa-2": { ...TOTAIS_PADRAO, realizadoMinutos: 9630 },
+    };
     render(<ProcessamentoVisaoGeralTab />);
     await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
     expect(screen.getByText("Bruno Costa")).toBeInTheDocument();
-    // diasTrabalhados = 20 para as duas pessoas, mostrado na tabela.
-    expect(screen.getAllByText("20")).toHaveLength(2);
+    // diasTrabalhados = 20 para as duas pessoas -- as horas aparecem entre
+    // parenteses ao lado dos dias, com uma casa decimal quando o numero de
+    // horas nao e redondo.
+    expect(screen.getAllByText("20 (160,5h)")).toHaveLength(2);
   });
 
   it("com periodo aberto, acrescentar valor pontual abre o formulario e chama criar()", async () => {
@@ -399,11 +406,17 @@ describe("ProcessamentoVisaoGeralTab", () => {
 
   it("mostra a coluna de dias planeados, antes de dias trabalhados", async () => {
     periodoActual = PERIODO_ABERTO;
+    // planeadoMinutos = 11340 (189h) -- caso redondo.
+    totaisPorPessoaMock = {
+      "pessoa-1": { ...TOTAIS_PADRAO, planeadoMinutos: 11340 },
+      "pessoa-2": { ...TOTAIS_PADRAO, planeadoMinutos: 11340 },
+    };
     render(<ProcessamentoVisaoGeralTab />);
     await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
 
-    // diasPlaneados = 22 para as duas pessoas (TOTAIS_PADRAO do mock).
-    expect(screen.getAllByText("22")).toHaveLength(2);
+    // diasPlaneados = 22 para as duas pessoas -- as horas (189h, redondas)
+    // aparecem entre parenteses, sem casas decimais.
+    expect(screen.getAllByText("22 (189h)")).toHaveLength(2);
 
     const cabecalhos = screen.getAllByRole("columnheader").map((c) => c.textContent);
     const indiceDiasPlaneados = cabecalhos.indexOf("hr.vencimento.visaoGeral.colunaDiasPlaneados");
