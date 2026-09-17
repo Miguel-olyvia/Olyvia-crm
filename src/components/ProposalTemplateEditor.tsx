@@ -748,7 +748,15 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
       const orgId = activeCompany?.id || "general";
       const ext = getSafeFileExtension(file);
       const filePath = `${orgId}/proposal-logo-${crypto.randomUUID()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file, { upsert: true });
+      // Sem upsert: o caminho já leva um crypto.randomUUID() novo em cada
+      // envio, nunca colide com um ficheiro existente — e "company-logos-
+      // -quarantine" não tem política de UPDATE para authenticated (só
+      // INSERT). Com upsert:true, o Postgres exige também a permissão de
+      // UPDATE mesmo sem conflito real (INSERT ... ON CONFLICT DO UPDATE),
+      // e a falta dela recusava sempre o envio como "violates row-level
+      // security policy". Mesmo padrão já usado em Products.tsx (sem
+      // upsert) para a pasta "media-quarantine".
+      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file);
       if (uploadError) throw uploadError;
 
       const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {

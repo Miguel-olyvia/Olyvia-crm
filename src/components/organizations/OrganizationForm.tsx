@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Building, MapPin, FileText, X, FolderTree, Sparkles, ChevronDown } from "lucide-react";
+import { Building, MapPin, FileText, X, FolderTree, Sparkles, ChevronDown, Upload, Loader2 } from "lucide-react";
 import { AdministrativeDivision } from "@/hooks/useAdministrativeDivisions";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -19,6 +19,22 @@ import { cn } from "@/lib/utils";
 import { MultiAddressForm, AddressFormData, emptyAddress } from "./MultiAddressForm";
 import { useToast } from "@/hooks/use-toast";
 import { organizationFormSchema, organizationFiscalAddressSchema } from "@/lib/validations";
+import { useCompany } from "@/contexts/CompanyContext";
+import { getSafeFileExtension } from "@/utils/secureFileUpload";
+import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
+
+const ALLOWED_LOGO_MIME_TYPES = ["image/png", "image/jpeg", "image/jpg", "image/webp"];
+const MAX_LOGO_FILE_SIZE_BYTES = 5 * 1024 * 1024;
+
+function validateOrgLogoFile(file: File): string | null {
+  if (!ALLOWED_LOGO_MIME_TYPES.includes(file.type)) {
+    return "Formato inválido. Selecione um ficheiro PNG, JPG ou WEBP.";
+  }
+  if (file.size > MAX_LOGO_FILE_SIZE_BYTES) {
+    return "Imagem demasiado grande (máx. 5MB)";
+  }
+  return null;
+}
 
 interface OrgTemplate {
   id: string;
@@ -98,6 +114,8 @@ export interface OrganizationFormData {
   address: AddressData;
   fiscalAddressOption: 'same' | 'new';
   fiscalAddress: AddressData;
+  /** The organization's own small icon (anew_organizations.logo_url), shown e.g. in CompanySwitcher. */
+  logo_url: string | null;
 }
 
 interface Organization {
@@ -171,7 +189,73 @@ export function OrganizationForm({
 }: OrganizationFormProps) {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+  const logoFileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const { activeCompany } = useCompany();
+
+  // Sem upsert: o caminho leva um crypto.randomUUID() novo em cada envio, nunca
+  // colide — e "company-logos-quarantine" só tem política de INSERT para
+  // authenticated (sem UPDATE). Com upsert:true o Postgres trataria o envio
+  // como INSERT ... ON CONFLICT DO UPDATE, que exige também UPDATE mesmo sem
+  // conflito real, e a falta dela recusa sempre o envio como "violates row-level
+  // security policy" (mesmo padrão já corrigido em DocumentHeaderSettings /
+  // ProposalTemplateEditor).
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const validationError = validateOrgLogoFile(file);
+    if (validationError) {
+      toast({ title: t("common.error") || "Validation Error", description: validationError, variant: "destructive" });
+      if (logoFileInputRef.current) logoFileInputRef.current.value = "";
+      return;
+    }
+
+    // A new org has no id yet, so the quarantine path is namespaced under the
+    // org the user is currently working in (already in their visible scope)
+    // rather than the not-yet-created target org. On edit, the org being
+    // edited is used directly.
+    const scopeOrgId = selectedOrg?.id || activeCompany?.id;
+    if (!scopeOrgId) {
+      toast({
+        title: t("common.error") || "Validation Error",
+        description: "Não foi possível determinar a organização para o upload.",
+        variant: "destructive",
+      });
+      if (logoFileInputRef.current) logoFileInputRef.current.value = "";
+      return;
+    }
+
+    setIsUploadingLogo(true);
+    try {
+      const ext = getSafeFileExtension(file);
+      const filePath = `${scopeOrgId}/org-logo-${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file);
+      if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "company-logos-quarantine", finalBucket: "company-logos", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast({
+          title: t("common.error") || "Validation Error",
+          description: await resolveValidateUploadErrorMessage(validateResult, validateError),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const { data: urlData } = supabase.storage.from("company-logos").getPublicUrl(filePath);
+      setFormData(prev => ({ ...prev, logo_url: urlData.publicUrl }));
+    } catch (err: unknown) {
+      console.error("Organization logo upload error:", err);
+      toast({ title: t("common.error") || "Validation Error", description: getUploadErrorMessage(err), variant: "destructive" });
+    } finally {
+      setIsUploadingLogo(false);
+      if (logoFileInputRef.current) logoFileInputRef.current.value = "";
+    }
+  };
 
   // Fetch templates based on selected sector
   const { data: templates = [] } = useQuery({
@@ -349,6 +433,63 @@ export function OrganizationForm({
                 aria-invalid={!!formErrors.name}
               />
               {formErrors.name && <p className="text-xs text-destructive">{formErrors.name}</p>}
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs">Ícone da organização</Label>
+              <input
+                ref={logoFileInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/jpg,image/webp"
+                className="hidden"
+                onChange={handleLogoUpload}
+              />
+              {formData.logo_url ? (
+                <div className="flex items-center gap-3 p-2 border rounded-lg bg-muted/20">
+                  <img src={formData.logo_url} alt="Ícone da organização" className="h-12 w-12 object-contain rounded border p-1 bg-background" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-muted-foreground truncate">Ícone carregado</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    disabled={isUploadingLogo}
+                    onClick={() => logoFileInputRef.current?.click()}
+                  >
+                    {isUploadingLogo ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Alterar"}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 text-destructive"
+                    disabled={isUploadingLogo}
+                    onClick={() => setFormData(prev => ({ ...prev, logo_url: null }))}
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  disabled={isUploadingLogo}
+                  onClick={() => logoFileInputRef.current?.click()}
+                  className="w-full border-2 border-dashed rounded-lg p-4 text-center text-muted-foreground text-xs hover:border-primary/40 hover:bg-primary/5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {isUploadingLogo ? (
+                    <Loader2 className="h-5 w-5 mx-auto mb-1 opacity-50 animate-spin" />
+                  ) : (
+                    <Upload className="h-5 w-5 mx-auto mb-1 opacity-50" />
+                  )}
+                  <p className="font-medium">Clique para carregar o ícone</p>
+                  <p className="text-[10px] mt-0.5">PNG, JPG ou WEBP até 5MB</p>
+                </button>
+              )}
+              <p className="text-[10px] text-muted-foreground">
+                Usado para identificar rapidamente esta organização, por exemplo ao trocar entre empresas.
+              </p>
             </div>
 
             <div className="space-y-2">

@@ -310,6 +310,14 @@ serve(async (req: Request) => {
     // 2. Get entity email — usa limit(1) em vez de maybeSingle() para tolerar
     // duplicados de is_primary (caso existam várias linhas marcadas como primary,
     // maybeSingle devolve erro e perderíamos o email). Fallback: qualquer email da entity.
+    //
+    // Desempate por created_at DESCENDENTE (o mais recente primeiro): uma
+    // substituição de email numa lead/entidade é feita por um DELETE seguido
+    // de um INSERT (linkEntityEmail em entityContactSync.ts) — se o DELETE
+    // for bloqueado por RLS (falta leads.delete/clients.delete, que nada tem
+    // a ver com editar a lead), o email antigo fica para trás, marcado
+    // is_primary=true na mesma, e ambos ficam empatados. Nesse empate o mais
+    // novo é sempre o que reflete a substituição pretendida, nunca o antigo.
     let email: string | undefined;
     {
       const { data: primaryEmails } = await supabase
@@ -317,7 +325,7 @@ serve(async (req: Request) => {
         .select("email, is_primary, created_at")
         .eq("entity_id", entityId)
         .order("is_primary", { ascending: false })
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .limit(1);
       email = primaryEmails?.[0]?.email;
     }

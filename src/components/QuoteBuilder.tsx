@@ -99,6 +99,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 
 // Sortable row wrapper for quote items
 function SortableQuoteRow({ id, children }: { id: string; children: (args: { setNodeRef: (el: HTMLElement | null) => void; style: React.CSSProperties; attributes: any; listeners: any; isDragging: boolean }) => React.ReactNode }) {
@@ -2425,9 +2427,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
     } catch (error: any) {
       captureFlowError(error, "quote-lifecycle");
+      const description = await getFriendlyErrorMessage(error);
       toast({
         title: t('quoteBuilder.toast.errorSavingQuote'),
-        description: error.message,
+        description,
         variant: "destructive",
       });
     } finally {
@@ -3531,6 +3534,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   return (
     <div className="container mx-auto py-4 max-w-[1600px]">
+      {!quoteId && (
+        <div className="mb-4">
+          <PlanLimitWarning organizationId={activeCompany?.id} limitType="quotes" />
+        </div>
+      )}
       {/* Enhanced Header */}
       <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3">

@@ -17,6 +17,7 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { callAiGateway } from "../_shared/aiGateway.ts";
 import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
+import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 
 initSentry();
@@ -548,6 +549,8 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
 
     const aiData = await aiResponse.json();
     const aiContent = aiData.choices?.[0]?.message?.content || "[]";
+
+    await logAiGatewayUsage(supabaseAdmin, organization_id, "suggest-schedule-assignee", AI_CREDIT_COSTS["suggest-schedule-assignee"], aiData.usage);
     
     let suggestions: any[] = [];
     try {

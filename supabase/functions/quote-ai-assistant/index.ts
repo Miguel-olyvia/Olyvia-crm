@@ -8,6 +8,7 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
 import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
+import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 
 initSentry();
@@ -708,6 +709,14 @@ Deves responder SEMPRE com um JSON válido no seguinte formato:
 
     const aiResponse = await response.json();
     const content = aiResponse.choices?.[0]?.message?.content || "";
+
+    await logAiGatewayUsage(
+      supabaseAdmin,
+      effective_org_id as string,
+      "quote-ai-assistant",
+      AI_CREDIT_COSTS["quote-ai-assistant"],
+      aiResponse.usage,
+    );
 
     console.log("AI Response content:", content);
 
