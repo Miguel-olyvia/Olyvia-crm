@@ -1084,7 +1084,18 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
                                     </div>
 
                                     <div className="flex items-center gap-1">
+                                        {/* `modal` é obrigatório aqui, não é preferência: este
+                                            Popover vive dentro do Dialog do AddItemsDialog e o
+                                            PopoverContent é renderizado num portal FORA do
+                                            DialogContent. Sem `modal`, o focus trap do diálogo vê
+                                            o foco ir para o CommandInput (que está fora do seu
+                                            contentor) e puxa-o de volta à força; o Radix deteta
+                                            foco fora do popover, dispara onFocusOutside e fecha-o
+                                            no mesmo instante — o dropdown abria e fechava-se
+                                            sozinho. Com `modal` o popover passa a gerir o próprio
+                                            foco e ganha a disputa. */}
                                         <Popover
+                                          modal
                                           open={openChoiceCombobox === `${bundle.id}:${group.id}`}
                                           onOpenChange={(open) => setOpenChoiceCombobox(open ? `${bundle.id}:${group.id}` : null)}
                                         >
@@ -1105,7 +1116,7 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
                                           </PopoverTrigger>
                                           <PopoverContent
                                             align="start"
-                                            className="w-[var(--radix-popover-trigger-width)] min-w-[28rem] p-0 z-[650]"
+                                            className="w-[var(--radix-popover-trigger-width)] min-w-[28rem] p-0 z-[700]"
                                             onClick={(e) => e.stopPropagation()}
                                             onWheel={(e) => e.stopPropagation()}
                                             onPointerDown={(e) => e.stopPropagation()}

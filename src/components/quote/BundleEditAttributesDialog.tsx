@@ -172,8 +172,12 @@ export function BundleEditAttributesDialog({
                     </Button>
                   </div>
 
+                  {/* `modal` no Popover abaixo, pela mesma razão que em BundleSelectionTab:
+                      o PopoverContent vai para um portal fora do DialogContent, e sem isto
+                      o focus trap do diálogo rouba o foco ao CommandInput e o popover
+                      fecha-se sozinho ao abrir. */}
                   {hasChoices && onReplaceWithChoiceOption && (
-                    <Popover open={openCombobox === idx} onOpenChange={(o) => setOpenCombobox(o ? idx : null)}>
+                    <Popover modal open={openCombobox === idx} onOpenChange={(o) => setOpenCombobox(o ? idx : null)}>
                       <PopoverTrigger asChild>
                         <Button variant="outline" size="sm" className="w-full justify-between font-normal text-xs">
                           <span className="truncate">Trocar opção do bundle…</span>
