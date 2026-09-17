@@ -349,6 +349,14 @@ export default function Quotes() {
   const applyQuoteFilters = useCallback(<T,>(query: T): T => {
     const { status, search, dateFromIso, dateToIso, comercial } = quoteFilters;
     let q = query as any;
+    // Orçamentos sintéticos (quotes.is_internal = true) nunca aparecem neste
+    // ecrã: são criados pela RPC de criação manual de Encomendas Clientes só
+    // para servirem de suporte às linhas do contrato, não são orçamentos que
+    // alguém tenha feito. Fica aqui, e não repetido em cada query, pelo mesmo
+    // motivo do resto do predicado (ver "UM filtro, UM sítio" acima): a lista,
+    // a contagem que decide a paginação e os gráficos do Dashboard passam
+    // todos por esta função, logo nenhum deles pode divergir.
+    q = q.eq("is_internal", false);
     if (status) q = q.eq("estado", status);
     const searchWords = search ? splitSearchWords(search) : [];
     if (searchWords.length > 0) q = applySearchTextFilter(q, searchWords);
@@ -672,8 +680,11 @@ export default function Quotes() {
 
             // (a) quotes they created
             const directQuotes = await fetchInBatches(userIds, async (chunk) => {
+              // is_internal: orçamentos sintéticos das Encomendas Clientes
+              // manuais ficam de fora já na resolução dos ids visíveis, para
+              // não entrarem sequer no `visible_ids` enviado aos KPIs.
               const { data, error } = await (supabase as any).from("quotes").select("id")
-                .eq("organization_id", activeCompany.id).in("created_by", chunk);
+                .eq("organization_id", activeCompany.id).eq("is_internal", false).in("created_by", chunk);
               if (error) throw error;
               return (data as any[]) || [];
             }, 30);
@@ -715,7 +726,7 @@ export default function Quotes() {
               const uniqueDealIds = Array.from(new Set(dealIds));
               const quotesViaDeals = await fetchInBatches(uniqueDealIds, async (chunk) => {
                 const { data, error } = await (supabase as any).from("quotes").select("id")
-                  .eq("organization_id", activeCompany.id).in("deal_id", chunk);
+                  .eq("organization_id", activeCompany.id).eq("is_internal", false).in("deal_id", chunk);
                 if (error) throw error;
                 return (data as any[]) || [];
               }, 30);

@@ -12,7 +12,11 @@
 // Imports no mesmo estilo das restantes funções (ver send-email/index.ts).
 
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+
+// Cliente Supabase (service role) — alias permissivo para os helpers internos.
+// Evita o TS2345 de inferência entre createClient(...) e ReturnType<typeof createClient>.
+type DbClient = SupabaseClient<any, any, any>;
 
 // CORS mínimo. Esta função é chamada por um scheduler (pg_cron / Scheduled
 // Functions) com o service role, não por um browser, por isso "*" é suficiente
@@ -28,10 +32,16 @@ const corsHeaders: Record<string, string> = {
 // ── Tipos (espelham o schema do duc-app; ver duc-app/src/lib/ducSchema.ts) ──
 
 interface StageRecipient {
-  // "member" → anew_users.id da organização; "email" → endereço livre (externo).
-  type: "member" | "email";
+  // "member" → anew_users.id; "email" → externo; "role" → chave de uma role.
+  type: "member" | "email" | "role";
   value: string;
   label?: string;
+}
+
+interface DucRole {
+  key: string;
+  label?: string;
+  memberIds?: string[];
 }
 
 interface StageNotify {
@@ -40,6 +50,8 @@ interface StageNotify {
   onClose?: boolean;
   // Alertar se a etapa ficar ATIVA sem fechar mais de N dias. 0/vazio = sem alerta.
   alertAfterDays?: number;
+  // Lembrete antecipado: avisar N dias ANTES de alertAfterDays. 0/vazio = sem lembrete.
+  remindBeforeDays?: number;
 }
 
 interface StageConfig {
@@ -75,6 +87,10 @@ interface AlertItem {
   stage_title: string;
   days_open: number;
   recipients: string[];
+  // "alert" = etapa já estourou o prazo; "reminder" = lembrete antecipado.
+  kind: "alert" | "reminder";
+  // Dias que faltam para estourar o prazo (só relevante em "reminder").
+  days_left: number;
 }
 
 // ── Utilitários ──
@@ -131,14 +147,27 @@ function findStageConfig(
 // Resolve a lista final de emails de uma etapa: membros (anew_users.id → email)
 // + emails externos. Dedup case-insensitive.
 async function resolveRecipientEmails(
-  supabase: ReturnType<typeof createClient>,
+  supabase: DbClient,
   recipients: StageRecipient[],
   memberEmailCache: Map<string, string | null>,
+  orgRoles: DucRole[],
 ): Promise<string[]> {
   const emails = new Set<string>();
   const memberIds: string[] = [];
 
+  // Expande roles → ids de membros (usando config.roles da organização).
+  const expanded: StageRecipient[] = [];
   for (const r of recipients) {
+    if (!r || typeof r.value !== "string") continue;
+    if (r.type === "role") {
+      const role = orgRoles.find((x) => x.key === r.value);
+      (role?.memberIds ?? []).forEach((id) => expanded.push({ type: "member", value: id }));
+    } else {
+      expanded.push(r);
+    }
+  }
+
+  for (const r of expanded) {
     if (!r || typeof r.value !== "string") continue;
     if (r.type === "email") {
       const trimmed = r.value.trim();
@@ -167,7 +196,7 @@ async function resolveRecipientEmails(
     }
   }
 
-  for (const r of recipients) {
+  for (const r of expanded) {
     if (r?.type === "member" && typeof r.value === "string") {
       const email = memberEmailCache.get(r.value);
       if (email && EMAIL_RE.test(email)) emails.add(email.toLowerCase());
@@ -177,16 +206,27 @@ async function resolveRecipientEmails(
   return [...emails];
 }
 
-// Constrói o HTML do email de alerta (dados escapados).
+// Constrói o HTML do email (dados escapados). Distingue alerta (prazo estourado)
+// de lembrete antecipado (ainda dentro do prazo, a aproximar-se).
 function buildAlertHtml(item: AlertItem): string {
   const ducLabel = item.duc_number || item.duc_id;
+  const isReminder = item.kind === "reminder";
+  const heading = isReminder
+    ? "Lembrete — etapa a aproximar-se do prazo"
+    : "Etapa parada — atenção necessária";
+  const lead = isReminder
+    ? `A etapa <strong>${escapeHtml(item.stage_no)} · ${escapeHtml(item.stage_title)}</strong>
+        do DUC <strong>${escapeHtml(ducLabel)}</strong> está aberta há
+        <strong>${escapeHtml(item.days_open)}</strong> dias — faltam
+        <strong>${escapeHtml(item.days_left)}</strong> dias para o prazo.`
+    : `A etapa <strong>${escapeHtml(item.stage_no)} · ${escapeHtml(item.stage_title)}</strong>
+        do DUC <strong>${escapeHtml(ducLabel)}</strong> está aberta há
+        <strong>${escapeHtml(item.days_open)}</strong> dias sem fechar.`;
   return `
     <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; color: #0f172a; line-height: 1.5;">
-      <h2 style="margin: 0 0 8px; font-size: 18px;">Etapa parada — atenção necessária</h2>
+      <h2 style="margin: 0 0 8px; font-size: 18px;">${heading}</h2>
       <p style="margin: 0 0 16px; color: #475569;">
-        A etapa <strong>${escapeHtml(item.stage_no)} · ${escapeHtml(item.stage_title)}</strong>
-        do DUC <strong>${escapeHtml(ducLabel)}</strong> está aberta há
-        <strong>${escapeHtml(item.days_open)}</strong> dias sem fechar.
+        ${lead}
       </p>
       <table style="border-collapse: collapse; font-size: 14px;">
         <tr>
@@ -294,6 +334,7 @@ const handler = async (req: Request): Promise<Response> => {
     // está acessível aqui, por isso não conseguimos saber o alertAfterDays/
     // recipients dessa etapa (ver LIMITAÇÕES no README).
     const configCache = new Map<string, StageConfig[] | null>();
+    const rolesCache = new Map<string, DucRole[]>();
     const memberEmailCache = new Map<string, string | null>();
 
     async function getStagesForOrg(orgId: string): Promise<StageConfig[] | null> {
@@ -307,10 +348,12 @@ const handler = async (req: Request): Promise<Response> => {
       if (error) {
         console.error(`[duc-stale-alerts] erro a carregar config da org ${orgId}`, error.message);
         configCache.set(orgId, null);
+        rolesCache.set(orgId, []);
         return null;
       }
-      const cfg = (data?.[0]?.config as { stages?: StageConfig[] } | null) ?? null;
+      const cfg = (data?.[0]?.config as { stages?: StageConfig[]; roles?: DucRole[] } | null) ?? null;
       const stages = Array.isArray(cfg?.stages) && cfg!.stages!.length > 0 ? cfg!.stages! : null;
+      rolesCache.set(orgId, Array.isArray(cfg?.roles) ? cfg!.roles! : []);
       configCache.set(orgId, stages);
       return stages;
     }
@@ -330,12 +373,29 @@ const handler = async (req: Request): Promise<Response> => {
 
         const openedAt = stageOpenedAt(duc);
         const daysOpen = daysSince(openedAt, now);
-        if (daysOpen <= alertAfterDays) continue; // ainda dentro do prazo
+
+        // Decide o tipo de aviso:
+        //  - "alert"    → já passou o prazo (comportamento diário existente).
+        //  - "reminder" → lembrete antecipado, SÓ no dia em que se cruza o limiar
+        //    (alertAfterDays - remindBeforeDays). Como o cron corre diariamente e
+        //    daysOpen sobe 1/dia, esta igualdade dispara uma única vez (dedup sem
+        //    estado persistido).
+        const remindBeforeDays = Number(notify?.remindBeforeDays ?? 0);
+        const reminderDay = remindBeforeDays > 0 ? alertAfterDays - remindBeforeDays : -1;
+        let kind: "alert" | "reminder";
+        if (daysOpen > alertAfterDays) {
+          kind = "alert";
+        } else if (reminderDay >= 0 && daysOpen === reminderDay) {
+          kind = "reminder";
+        } else {
+          continue; // dentro do prazo e fora do dia de lembrete
+        }
 
         const recipients = Array.isArray(notify?.recipients) ? notify!.recipients! : [];
         if (recipients.length === 0) continue; // sem destinatários → nada a enviar
 
-        const emails = await resolveRecipientEmails(supabase, recipients, memberEmailCache);
+        const orgRoles = rolesCache.get(duc.organization_id) ?? [];
+        const emails = await resolveRecipientEmails(supabase, recipients, memberEmailCache, orgRoles);
         if (emails.length === 0) {
           console.warn(`[duc-stale-alerts] DUC ${duc.id}: destinatários sem email válido`);
           continue;
@@ -349,10 +409,15 @@ const handler = async (req: Request): Promise<Response> => {
           stage_title: stageCfg?.title || `Etapa ${duc.current_stage}`,
           days_open: daysOpen,
           recipients: emails,
+          kind,
+          days_left: Math.max(0, alertAfterDays - daysOpen),
         };
 
         const ducLabel = duc.duc_number || duc.id;
-        const subject = `DUC ${ducLabel} · Etapa ${item.stage_no} parada há ${item.days_open} dias`;
+        const subject =
+          kind === "reminder"
+            ? `DUC ${ducLabel} · Etapa ${item.stage_no} — faltam ${item.days_left} dias`
+            : `DUC ${ducLabel} · Etapa ${item.stage_no} parada há ${item.days_open} dias`;
         const html = buildAlertHtml(item);
 
         // 4) Envia UM email por DUC via send-email (SMTP da org).

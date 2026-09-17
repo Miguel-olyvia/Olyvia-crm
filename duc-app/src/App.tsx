@@ -13,6 +13,7 @@ const DucConfig = lazy(() => import("./pages/DucConfig"));
 const Notifications = lazy(() => import("./pages/Notifications"));
 const Help = lazy(() => import("./pages/Help"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
+const MyTasks = lazy(() => import("./pages/MyTasks"));
 const PublicDuc = lazy(() => import("./pages/PublicDuc"));
 
 export default function App() {
@@ -40,6 +41,14 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar dashboard…" />}>
               <Dashboard />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/tarefas"
+          element={
+            <Suspense fallback={<Spinner label="A carregar tarefas…" />}>
+              <MyTasks />
             </Suspense>
           }
         />

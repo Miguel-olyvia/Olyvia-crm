@@ -1,6 +1,6 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.80.0";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
-import { requireServiceRoleOrCronSecret } from "../_shared/auth.ts";
+import { requireServiceRoleOrCronSecret, getServiceRoleKey } from "../_shared/auth.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { chooseEscalatingTier } from "./alertTiers.ts";
 
@@ -35,6 +35,11 @@ const ALERT_DEFAULTS: Record<string, { days: number | null; active: boolean }> =
   contract_expired: { days: null, active: true },
   quote_stale: { days: 30, active: true },
   quote_no_value: { days: null, active: true },
+  stock_low: { days: null, active: true },
+  purchase_order_overdue: { days: null, active: true },
+  supplier_price_change: { days: 10, active: true }, // days_threshold reaproveitado como percentagem (10 = 10%)
+  inventory_discrepancy_unresolved: { days: null, active: true },
+  inventory_count_stale: { days: 5, active: true }, // dias sem atualização (updated_at) em status em_contagem
 };
 
 interface LegacySettings {
@@ -120,33 +125,27 @@ async function fetchAll<T>(
   return results;
 }
 
-/**
- * fetchAll for an `.in(column, ids)` filter, splitting `ids` into batches.
- *
- * PostgREST puts filters in the query string, so `.in()` over a long id list
- * builds a huge URL — 539 uuids is ~22 KB — and the request dies on the way out
- * with "TypeError: error sending request", never reaching Postgres. Batching
- * keeps every URL small; the caller still sees one flat array.
- */
-const IN_FILTER_BATCH = 100;
+// Chunks a large `.in("id", ids)` lookup into safe-sized requests (same 100-id
+// chunk size already used for the resolve-notifications UPDATE below), then
+// merges results. A single unchunked `.in()` over thousands of ids produces a
+// multi-KB URL that can trip an HTTP/2 protocol error at the edge — hit in
+// production 2026-08-27 when STEP 1 tried to re-verify a 37-day backlog of
+// unresolved contact_no_deal notifications in one request.
+async function fetchByIds<T>(supabase: any, table: string, ids: string[], selectColumns: string, column = "id", chunkSize = 100): Promise<T[]> {
+  return chunkedFetch<T>(supabase, table, ids, selectColumns, (q, chunk) => q.in(column, chunk), chunkSize);
+}
 
-async function fetchAllIn<T>(
-  supabase: any,
-  table: string,
-  column: string,
-  ids: string[],
-  selectColumns = "*",
-  refine: (q: any) => any = (q) => q,
-): Promise<T[]> {
-  const unique = [...new Set(ids)].filter(Boolean);
-  if (unique.length === 0) return [];
-
-  const results: T[] = [];
-  for (let i = 0; i < unique.length; i += IN_FILTER_BATCH) {
-    const batch = unique.slice(i, i + IN_FILTER_BATCH);
-    results.push(...await fetchAll<T>(supabase, table, (q) => refine(q).in(column, batch), selectColumns));
-  }
-  return results;
+// Same idea as fetchByIds, but for queries that filter on the chunked ids
+// PLUS other fixed conditions (e.g. `.in("entity_id", chunk).in("organization_id", orgIds)`)
+// — queryFn receives the chunk and builds the full filter itself.
+async function chunkedFetch<T>(supabase: any, table: string, ids: string[], selectColumns: string, queryFn: (q: any, chunk: string[]) => any, chunkSize = 100): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += chunkSize) chunks.push(ids.slice(i, i + chunkSize));
+  const results = await Promise.all(
+    chunks.map(chunk => fetchAll<T>(supabase, table, (q) => queryFn(q, chunk), selectColumns))
+  );
+  return results.flat();
 }
 
 Deno.serve(async (req) => {
@@ -164,7 +163,7 @@ Deno.serve(async (req) => {
 
   try {
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const serviceRoleKey = getServiceRoleKey();
     const supabase = createClient(supabaseUrl, serviceRoleKey);
 
     const url = new URL(req.url);
@@ -276,6 +275,8 @@ Deno.serve(async (req) => {
         "proposal_no_validity", "proposal_expired", "proposal_draft_stale",
         "contract_draft_stale", "contract_expiring", "contract_expiring_urgent", "contract_expired",
         "quote_stale", "quote_no_value",
+        "stock_low", "purchase_order_overdue", "supplier_price_change",
+        "inventory_discrepancy_unresolved", "inventory_count_stale",
       ]);
 
       const stillPending: typeof pendingNotifications = [];
@@ -316,12 +317,12 @@ Deno.serve(async (req) => {
       const quoteIds = [...new Set(quoteNotifs.map(n => n.entity_id))];
 
       const [leads, contacts, clients, proposals, contracts, quotesPre] = await Promise.all([
-        leadIds.length > 0 ? fetchAll<any>(supabase, "anew_leads", (q) => q.in("id", leadIds), "id, last_contact_at, status") : [],
-        contactIds.length > 0 ? fetchAll<any>(supabase, "anew_contacts", (q) => q.in("id", contactIds), "id, last_interaction_at, converted_to_client_id, status") : [],
-        clientIds.length > 0 ? fetchAll<any>(supabase, "anew_clients", (q) => q.in("id", clientIds), "id, last_interaction_at, status, entity_id") : [],
-        proposalIds.length > 0 ? fetchAll<any>(supabase, "proposals", (q) => q.in("id", proposalIds), "id, status, sent_at, created_at, organization_id") : [],
-        contractIds.length > 0 ? fetchAll<any>(supabase, "client_contracts", (q) => q.in("id", contractIds), "id, status, end_date, client_id, created_at") : [],
-        quoteIds.length > 0 ? fetchAll<any>(supabase, "quotes", (q) => q.in("id", quoteIds), "id, estado, total, updated_at, created_at") : [],
+        fetchByIds<any>(supabase, "anew_leads", leadIds, "id, last_contact_at, status"),
+        fetchByIds<any>(supabase, "anew_contacts", contactIds, "id, last_interaction_at, converted_to_client_id, status"),
+        fetchByIds<any>(supabase, "anew_clients", clientIds, "id, last_interaction_at, status, entity_id"),
+        fetchByIds<any>(supabase, "proposals", proposalIds, "id, status, sent_at, created_at, organization_id"),
+        fetchByIds<any>(supabase, "client_contracts", contractIds, "id, status, end_date, client_id, created_at"),
+        fetchByIds<any>(supabase, "quotes", quoteIds, "id, estado, total, updated_at, created_at"),
       ]);
 
       const leadMap = new Map((leads || []).map((l: any) => [l.id, l]));
@@ -358,7 +359,7 @@ Deno.serve(async (req) => {
       // ── Contacts: no deal (batch deals count) ──
       if (contactNoDealNotifs.length > 0) {
         const noDealContactIds = [...new Set(contactNoDealNotifs.map(n => n.entity_id))];
-        const dealsForContacts = await fetchAll<any>(supabase, "deals", (q) => q.in("contact_id", noDealContactIds), "contact_id");
+        const dealsForContacts = await fetchByIds<any>(supabase, "deals", noDealContactIds, "contact_id", "contact_id");
         const contactsWithDeals = new Set((dealsForContacts || []).map((d: any) => d.contact_id));
 
         for (const n of contactNoDealNotifs) {
@@ -386,9 +387,7 @@ Deno.serve(async (req) => {
         const nifClientEntityIds = [...new Set(
           clientNifNotifs.map(n => clientMap.get(n.entity_id)?.entity_id).filter(Boolean)
         )] as string[];
-        const fiscalEntities = nifClientEntityIds.length > 0
-          ? await fetchAll<any>(supabase, "anew_entity_fiscal_entities", (q) => q.in("entity_id", nifClientEntityIds), "entity_id")
-          : [];
+        const fiscalEntities = await fetchByIds<any>(supabase, "anew_entity_fiscal_entities", nifClientEntityIds, "entity_id", "entity_id");
         const entitiesWithFiscal = new Set((fiscalEntities || []).map((f: any) => f.entity_id));
 
         for (const n of clientNifNotifs) {
@@ -495,6 +494,25 @@ Deno.serve(async (req) => {
         const data = n.action_config as Record<string, unknown> | null;
         const entityIds = (data?.entity_ids as string[]) || [];
         if (entityIds.length === 0) markResolved(n.id, "condition_changed");
+      }
+
+      // ── Stock: low stock (resolve when the stock is no longer low, or was deleted) ──
+      const stockLowNotifs = stillPending.filter(n => n.entity_type === "stock" && n.type === "stock_low");
+      if (stockLowNotifs.length > 0) {
+        const stockIds = [...new Set(stockLowNotifs.map(n => n.entity_id))];
+        const stocksForResolution = await fetchByIds<any>(
+          supabase, "stocks", stockIds,
+          "id, quantity, reorder_point, deleted_at",
+        );
+        const stockMap = new Map(stocksForResolution.map((s: any) => [s.id, s]));
+
+        for (const n of stockLowNotifs) {
+          const stock = stockMap.get(n.entity_id);
+          if (!stock || stock.deleted_at) { markResolved(n.id, "entity_missing"); continue; }
+          if (!(stock.reorder_point > 0) || stock.quantity > stock.reorder_point) {
+            markResolved(n.id, "condition_changed");
+          }
+        }
       }
 
       // ── Execute one update per reason (chunked) ──
@@ -822,10 +840,10 @@ Deno.serve(async (req) => {
         const actionOrgIds = [...new Set(scheduledActions.map(a => a.organization_id))];
 
         const [entityNames, actionClients, actionContacts, actionLeads] = await Promise.all([
-          fetchAllIn<any>(supabase, "anew_entities", "id", actionEntityIds, "id, display_name"),
-          fetchAllIn<any>(supabase, "anew_clients", "entity_id", actionEntityIds, "id, entity_id, organization_id", (q) => q.in("organization_id", actionOrgIds).neq("status", "inactive")),
-          fetchAllIn<any>(supabase, "anew_contacts", "entity_id", actionEntityIds, "id, entity_id, organization_id", (q) => q.in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive")),
-          fetchAllIn<any>(supabase, "anew_leads", "entity_id", actionEntityIds, "id, entity_id, organization_id", (q) => q.in("organization_id", actionOrgIds).neq("status", "converted")),
+          fetchByIds<any>(supabase, "anew_entities", actionEntityIds, "id, display_name"),
+          chunkedFetch<any>(supabase, "anew_clients", actionEntityIds, "id, entity_id, organization_id", (q, chunk) => q.in("entity_id", chunk).in("organization_id", actionOrgIds).neq("status", "inactive")),
+          chunkedFetch<any>(supabase, "anew_contacts", actionEntityIds, "id, entity_id, organization_id", (q, chunk) => q.in("entity_id", chunk).in("organization_id", actionOrgIds).is("converted_to_client_id", null).neq("status", "inactive")),
+          chunkedFetch<any>(supabase, "anew_leads", actionEntityIds, "id, entity_id, organization_id", (q, chunk) => q.in("entity_id", chunk).in("organization_id", actionOrgIds).neq("status", "converted")),
         ]);
 
         const entityNameMap = new Map((entityNames || []).map((e: any) => [e.id, e.display_name]));
@@ -943,6 +961,258 @@ Deno.serve(async (req) => {
           }
         }
       }
+
+      // ★ Preload: quem tem que permissão, por organização.
+      // Padrão novo neste ficheiro — destinatários são todos os utilizadores da
+      // organização com uma permissão específica (via role ativo), não o
+      // created_by da entidade. anew_memberships.user_id referencia anew_users.id
+      // (mesmo domínio que created_by nas outras tabelas) — passa por resolveUserId.
+      // anew_role_permissions.role_id referencia anew_roles.id diretamente, o
+      // mesmo role_id usado em anew_memberships — não é preciso ir a anew_roles.
+      const [allActiveMemberships, allRolePermissions] = await Promise.all([
+        fetchAll<any>(supabase, "anew_memberships", (q) => q.eq("status", "active"), "user_id, organization_id, role_id"),
+        fetchAll<any>(supabase, "anew_role_permissions", (q) => q, "role_id, permission_code"),
+      ]);
+
+      const roleIdsWithPermission = new Map<string, Set<string>>(); // permission_code -> Set<role_id>
+      for (const rp of allRolePermissions || []) {
+        if (!roleIdsWithPermission.has(rp.permission_code)) roleIdsWithPermission.set(rp.permission_code, new Set());
+        roleIdsWithPermission.get(rp.permission_code)!.add(rp.role_id);
+      }
+
+      const membershipsByOrg = new Map<string, any[]>();
+      for (const m of allActiveMemberships || []) {
+        if (!membershipsByOrg.has(m.organization_id)) membershipsByOrg.set(m.organization_id, []);
+        membershipsByOrg.get(m.organization_id)!.push(m);
+      }
+
+      function getUsersWithPermission(orgId: string, permissionCode: string): string[] {
+        const roleIds = roleIdsWithPermission.get(permissionCode);
+        if (!roleIds || roleIds.size === 0) return [];
+        const orgMemberships = membershipsByOrg.get(orgId);
+        if (!orgMemberships) return [];
+        const result: string[] = [];
+        for (const m of orgMemberships) {
+          if (roleIds.has(m.role_id)) {
+            const authUserId = resolveUserId(m.user_id);
+            if (authUserId) result.push(authUserId);
+          }
+        }
+        return [...new Set(result)];
+      }
+
+      // ── STOCK LOW (destinatários: utilizadores com permissão inventory.view) ──
+      // stocks.quantity/reorder_point são 2 colunas da mesma linha — não dá para
+      // filtrar isto no PostgREST, filtra-se em JS (mesmo padrão de src/pages/Stocks.tsx).
+      const allStocksForAlert = await fetchAll<any>(
+        supabase,
+        "stocks",
+        (q) => q.is("deleted_at", null),
+        "id, product_id, warehouse_id, quantity, reorder_point, minimum_quantity, maximum_quantity, organization_id",
+      );
+      // reorder_point=0 significa "nunca configurado", não "reencomendar já" — só
+      // dispara quando alguém definiu mesmo um ponto de reencomenda (>0).
+      const lowStocks = (allStocksForAlert || []).filter((s: any) => s.reorder_point > 0 && s.quantity <= s.reorder_point);
+
+      if (lowStocks.length > 0) {
+        const lowStockProductIds = [...new Set(lowStocks.map((s: any) => s.product_id))];
+        const lowStockProducts = await fetchByIds<any>(supabase, "products", lowStockProductIds, "id, name, sku");
+        const lowStockProductMap = new Map((lowStockProducts || []).map((p: any) => [p.id, p]));
+
+        for (const stock of lowStocks) {
+          const orgId = stock.organization_id;
+          if (!orgId) continue;
+          const cfg = getAlertConfig(orgId, "stock_low");
+          if (!cfg.is_active) continue;
+
+          const product = lowStockProductMap.get(stock.product_id);
+          const productLabel = product ? `${product.name} (${product.sku})` : `o produto ${stock.product_id}`;
+
+          const recipients = getUsersWithPermission(orgId, "inventory.view");
+          for (const userId of recipients) {
+            if (shouldSkip(stock.id, "stock_low", userId)) continue;
+            queueNotification({
+              user_id: userId, organization_id: orgId, kind: "alert",
+              type: "stock_low", entity_type: "stock", entity_id: stock.id,
+              title: "Stock baixo",
+              message: `${productLabel} está com stock baixo (${stock.quantity} unidades, ponto de reencomenda: ${stock.reorder_point}).`,
+              priority: "medium",
+              action_config: { stock_id: stock.id, product_id: stock.product_id, warehouse_id: stock.warehouse_id },
+              link: "/stocks",
+            });
+          }
+        }
+      }
+
+      // ── PURCHASE ORDER OVERDUE (destinatários: utilizadores com permissão purchase_orders.view) ──
+      const openPurchaseOrders = await fetchAll<any>(
+        supabase,
+        "purchase_orders",
+        (q) => q.in("status", ["pending", "ordered"]).not("expected_delivery", "is", null),
+        "id, expected_delivery, status, organization_id",
+      );
+
+      for (const po of openPurchaseOrders || []) {
+        const orgId = po.organization_id;
+        if (!orgId || !po.expected_delivery) continue;
+        const cfg = getAlertConfig(orgId, "purchase_order_overdue");
+        if (!cfg.is_active) continue;
+
+        const daysOverdue = calendarDayDiff(new Date(po.expected_delivery), now);
+        if (daysOverdue <= 0) continue;
+
+        const recipients = getUsersWithPermission(orgId, "purchase_orders.view");
+        for (const userId of recipients) {
+          if (shouldSkip(po.id, "purchase_order_overdue", userId)) continue;
+          queueNotification({
+            user_id: userId, organization_id: orgId, kind: "alert",
+            type: "purchase_order_overdue", entity_type: "purchase_order", entity_id: po.id,
+            title: "Encomenda em atraso",
+            message: `Esta encomenda tem entrega prevista há ${daysOverdue} dia${daysOverdue === 1 ? "" : "s"} e ainda não foi recebida.`,
+            priority: "high",
+            action_config: { purchase_order_id: po.id },
+            link: "/purchase-orders",
+          });
+        }
+      }
+
+      // ── SUPPLIER PRICE CHANGE (destinatários: utilizadores com permissão suppliers.view) ──
+      // Só linhas recentes (últimas 24h) — mesmo padrão do email tracking, evita
+      // reprocessar histórico antigo a cada run. days_threshold é reaproveitado
+      // como percentagem (10 = 10%), tal como o resto da infra de alert_settings.
+      const oneDayAgoPriceHistory = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+      const recentPriceChanges = await fetchAll<any>(
+        supabase,
+        "item_supplier_price_history",
+        (q) => q
+          .gte("changed_at", oneDayAgoPriceHistory)
+          .not("old_price", "is", null)
+          .not("new_price", "is", null)
+          .gt("old_price", 0),
+        "id, item_supplier_id, old_price, new_price, changed_at, organization_id",
+      );
+
+      for (const row of recentPriceChanges || []) {
+        const orgId = row.organization_id;
+        if (!orgId) continue;
+        const cfg = getAlertConfig(orgId, "supplier_price_change");
+        if (!cfg.is_active) continue;
+
+        const thresholdPct = cfg.days_threshold ?? 10;
+        const oldPrice = Number(row.old_price);
+        const newPrice = Number(row.new_price);
+        if (!(newPrice > oldPrice * (1 + thresholdPct / 100))) continue;
+
+        const pctChange = ((newPrice - oldPrice) / oldPrice) * 100;
+        const recipients = getUsersWithPermission(orgId, "suppliers.view");
+        for (const userId of recipients) {
+          if (shouldSkip(row.id, "supplier_price_change", userId)) continue;
+          queueNotification({
+            user_id: userId, organization_id: orgId, kind: "alert",
+            type: "supplier_price_change", entity_type: "item_supplier", entity_id: row.id,
+            title: "Aumento de preço de fornecedor",
+            message: `O preço subiu ${pctChange.toFixed(1)}% (de ${oldPrice.toFixed(2)}€ para ${newPrice.toFixed(2)}€).`,
+            priority: "medium",
+            action_config: { item_supplier_id: row.item_supplier_id },
+            link: "/suppliers",
+          });
+        }
+      }
+
+      // ── INVENTORY DISCREPANCY UNRESOLVED (destinatários: utilizadores com permissão inventory.view) ──
+      // Dispara quando uma sessão de contagem (inventory_counts) é finalizada
+      // com pelo menos 1 linha aceite_sem_ajuste (Fase 5.4). Mesmo padrão de
+      // stock_low/purchase_order_overdue: 1 query batch + filtro em JS, sem
+      // N+1 por sessão.
+      const finalizedInventoryCounts = await fetchAll<any>(
+        supabase,
+        "inventory_counts",
+        (q) => q.eq("status", "finalizada"),
+        "id, document_number, organization_id",
+      );
+
+      if (finalizedInventoryCounts.length > 0) {
+        const finalizedCountIds = finalizedInventoryCounts.map((c: any) => c.id);
+        const acceptedWithoutAdjustmentLines = await chunkedFetch<any>(
+          supabase,
+          "inventory_count_lines",
+          finalizedCountIds,
+          "id, inventory_count_id",
+          (q, chunk) => q.in("inventory_count_id", chunk).eq("discrepancy_resolution", "aceite_sem_ajuste"),
+        );
+        const acceptedLineCountByCount = new Map<string, number>();
+        for (const line of acceptedWithoutAdjustmentLines || []) {
+          acceptedLineCountByCount.set(
+            line.inventory_count_id,
+            (acceptedLineCountByCount.get(line.inventory_count_id) || 0) + 1,
+          );
+        }
+
+        for (const ic of finalizedInventoryCounts) {
+          const orgId = ic.organization_id;
+          if (!orgId) continue;
+          const cfg = getAlertConfig(orgId, "inventory_discrepancy_unresolved");
+          if (!cfg.is_active) continue;
+
+          const acceptedLineCount = acceptedLineCountByCount.get(ic.id) || 0;
+          if (acceptedLineCount === 0) continue;
+
+          const recipients = getUsersWithPermission(orgId, "inventory.view");
+          for (const userId of recipients) {
+            if (shouldSkip(ic.id, "inventory_discrepancy_unresolved", userId)) continue;
+            queueNotification({
+              user_id: userId, organization_id: orgId, kind: "alert",
+              type: "inventory_discrepancy_unresolved", entity_type: "inventory_count", entity_id: ic.id,
+              title: "Contagem finalizada com diferenças aceites sem ajuste",
+              message: `A contagem ${ic.document_number} foi finalizada com ${acceptedLineCount} linha${acceptedLineCount === 1 ? "" : "s"} aceite${acceptedLineCount === 1 ? "" : "s"} sem ajuste ao stock.`,
+              priority: "medium",
+              action_config: { inventory_count_id: ic.id },
+              link: "/stock-counts",
+            });
+          }
+        }
+      }
+
+      // ── INVENTORY COUNT STALE (destinatários: utilizadores com permissão inventory.view) ──
+      // Dispara quando uma sessão em em_contagem está há mais de N dias sem
+      // atualização (updated_at). N é configurável via alert_settings
+      // (days_threshold), mesmo mecanismo de proposal_draft_stale/
+      // contract_draft_stale — purchase_order_overdue não serviu de modelo
+      // direto aqui porque o seu "atraso" vem de uma data própria da entidade
+      // (expected_delivery) e não tem days_threshold configurável
+      // (ALERT_DEFAULTS tem days:null, só o is_active é lido de alert_settings);
+      // inventory_counts não tem uma data de "previsão" equivalente, por isso
+      // o padrão com days_threshold real (default 5) é o que se aplica aqui.
+      const staleInventoryCounts = await fetchAll<any>(
+        supabase,
+        "inventory_counts",
+        (q) => q.eq("status", "em_contagem"),
+        "id, document_number, organization_id, updated_at",
+      );
+
+      for (const ic of staleInventoryCounts || []) {
+        const orgId = ic.organization_id;
+        if (!orgId || !ic.updated_at) continue;
+        const cfg = getAlertConfig(orgId, "inventory_count_stale");
+        if (!cfg.is_active || !cfg.days_threshold) continue;
+
+        const daysSinceUpdate = Math.floor((now.getTime() - new Date(ic.updated_at).getTime()) / 86400000);
+        if (daysSinceUpdate < cfg.days_threshold) continue;
+
+        const recipients = getUsersWithPermission(orgId, "inventory.view");
+        for (const userId of recipients) {
+          if (shouldSkip(ic.id, "inventory_count_stale", userId)) continue;
+          queueNotification({
+            user_id: userId, organization_id: orgId, kind: "alert",
+            type: "inventory_count_stale", entity_type: "inventory_count", entity_id: ic.id,
+            title: `Contagem parada há ${daysSinceUpdate} dias`,
+            message: `A contagem ${ic.document_number} está em curso há ${daysSinceUpdate} dias sem atualização.`,
+            priority: "medium",
+            action_config: { inventory_count_id: ic.id },
+            link: "/stock-counts",
+          });
+        }
+      }
     }
 
     // ─────────────────────────────────────────
@@ -986,9 +1256,9 @@ Deno.serve(async (req) => {
 
         // ★ OPTIMIZATION: Batch all chain validation queries in parallel
         const [inactiveContacts, convertedContacts, inactiveDirectClients] = await Promise.all([
-          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", leadEntityIds).eq("status", "inactive"), "entity_id"),
-          fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", leadEntityIds).not("converted_to_client_id", "is", null), "entity_id, converted_to_client_id"),
-          fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", leadEntityIds).in("status", ["inactive", "lost", "churned", "lost_definitive"]), "entity_id"),
+          chunkedFetch<any>(supabase, "anew_contacts", leadEntityIds, "entity_id", (q, chunk) => q.in("entity_id", chunk).eq("status", "inactive")),
+          chunkedFetch<any>(supabase, "anew_contacts", leadEntityIds, "entity_id, converted_to_client_id", (q, chunk) => q.in("entity_id", chunk).not("converted_to_client_id", "is", null)),
+          chunkedFetch<any>(supabase, "anew_clients", leadEntityIds, "entity_id", (q, chunk) => q.in("entity_id", chunk).in("status", ["inactive", "lost", "churned", "lost_definitive"])),
         ]);
 
         inactiveContacts?.forEach((c: any) => excludedEntityIds.add(c.entity_id));
@@ -996,11 +1266,12 @@ Deno.serve(async (req) => {
 
         if (convertedContacts?.length) {
           const clientIds = convertedContacts.map((c: any) => c.converted_to_client_id).filter(Boolean);
-          const activeClients = await fetchAll<any>(
+          const activeClients = await chunkedFetch<any>(
             supabase,
             "anew_clients",
-            (q) => q.in("id", clientIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+            clientIds,
             "id",
+            (q, chunk) => q.in("id", chunk).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
           );
           const activeClientIds = new Set(activeClients?.map((c: any) => c.id));
           // All converted contacts exclude the lead entity (whether client active or not)
@@ -1011,8 +1282,8 @@ Deno.serve(async (req) => {
         const remainingEntityIds = leadEntityIds.filter(id => !excludedEntityIds.has(id));
         if (remainingEntityIds.length > 0) {
           const [activeContacts, directActiveClients] = await Promise.all([
-            fetchAll<any>(supabase, "anew_contacts", (q) => q.in("entity_id", remainingEntityIds).neq("status", "inactive"), "entity_id, converted_to_client_id"),
-            fetchAll<any>(supabase, "anew_clients", (q) => q.in("entity_id", remainingEntityIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'), "entity_id"),
+            chunkedFetch<any>(supabase, "anew_contacts", remainingEntityIds, "entity_id, converted_to_client_id", (q, chunk) => q.in("entity_id", chunk).neq("status", "inactive")),
+            chunkedFetch<any>(supabase, "anew_clients", remainingEntityIds, "entity_id", (q, chunk) => q.in("entity_id", chunk).not("status", "in", '("inactive","lost","churned","lost_definitive")')),
           ]);
 
           const directActiveClientEntityIds = new Set((directActiveClients || []).map((c: any) => c.entity_id));
@@ -1021,11 +1292,12 @@ Deno.serve(async (req) => {
             const withClient = activeContacts.filter((c: any) => c.converted_to_client_id);
             if (withClient.length) {
               const cIds = withClient.map((c: any) => c.converted_to_client_id);
-              const activeCli = await fetchAll<any>(
+              const activeCli = await chunkedFetch<any>(
                 supabase,
                 "anew_clients",
-                (q) => q.in("id", cIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+                cIds,
                 "id",
+                (q, chunk) => q.in("id", chunk).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
               );
               const activeCliIds = new Set(activeCli?.map((c: any) => c.id));
               withClient.filter((c: any) => activeCliIds.has(c.converted_to_client_id)).forEach((c: any) => excludedEntityIds.add(c.entity_id));
@@ -1106,12 +1378,13 @@ Deno.serve(async (req) => {
       let filteredContacts = rawContacts || [];
       const contactEntityIds = filteredContacts.map(c => c.entity_id).filter(Boolean) as string[];
 
-      if (contactEntityIds.length > 0) {
-        const activeClientsForContacts = await fetchAll<any>(
+      {
+        const activeClientsForContacts = await chunkedFetch<any>(
           supabase,
           "anew_clients",
-          (q) => q.in("entity_id", contactEntityIds).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
+          contactEntityIds,
           "entity_id",
+          (q, chunk) => q.in("entity_id", chunk).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
         );
 
         if (activeClientsForContacts?.length) {
@@ -1123,9 +1396,7 @@ Deno.serve(async (req) => {
 
       // ★ OPTIMIZATION: Batch preload deals for contact_no_deal check
       const contactIdsForDeal = filteredContacts.filter(c => c.converted_at).map(c => c.id);
-      const dealsForDailyContacts = contactIdsForDeal.length > 0
-        ? await fetchAll<any>(supabase, "deals", (q) => q.in("contact_id", contactIdsForDeal), "contact_id")
-        : [];
+      const dealsForDailyContacts = await fetchByIds<any>(supabase, "deals", contactIdsForDeal, "contact_id", "contact_id");
       const contactsWithDealsDaily = new Set((dealsForDailyContacts || []).map((d: any) => d.contact_id));
 
       const contactsByUser = new Map<string, { orgId: string; normal: string[]; urgent: string[]; noDeal: string[] }>();
@@ -1210,9 +1481,7 @@ Deno.serve(async (req) => {
 
       // ★ OPTIMIZATION: Batch preload fiscal entities for all clients
       const clientEntityIdsForNif = (clients || []).map((c: any) => c.entity_id).filter(Boolean) as string[];
-      const clientFiscalEntities = clientEntityIdsForNif.length > 0
-        ? await fetchAll<any>(supabase, "anew_entity_fiscal_entities", (q) => q.in("entity_id", clientEntityIdsForNif), "entity_id")
-        : [];
+      const clientFiscalEntities = await fetchByIds<any>(supabase, "anew_entity_fiscal_entities", clientEntityIdsForNif, "entity_id", "entity_id");
       const entitiesWithFiscalDaily = new Set((clientFiscalEntities || []).map((f: any) => f.entity_id));
 
       const clientsByUser = new Map<string, { orgId: string; normal: string[]; urgent: string[]; missingNif: string[] }>();
@@ -1285,22 +1554,31 @@ Deno.serve(async (req) => {
     }
 
     // ─── INSERT ALL (with dedup safety) ───
-    if (notifications.length > 0) {
-      // .insert() silently ignores onConflict/ignoreDuplicates — only .upsert()
-      // honours them. As a plain batch INSERT, a single row colliding with
-      // "notifications_dedup" rolled the whole statement back and every
-      // notification of the run was lost, with the error swallowed below.
-      // No onConflict target on purpose: "notifications_dedup" is a PARTIAL
-      // index (WHERE is_resolved = false), and ON CONFLICT (type, entity_id,
-      // user_id) cannot infer it — Postgres rejects it with 42P10 "no unique or
-      // exclusion constraint matching the ON CONFLICT specification" (verified
-      // against production with EXPLAIN). Omitting the target makes PostgREST
-      // emit a bare ON CONFLICT DO NOTHING, which arbitrates on every unique
-      // index, the partial one included.
-      const { error } = await supabase
-        .from("notifications")
-        .upsert(notifications, { ignoreDuplicates: true });
-      if (error) throw error;
+    // supabase-js's `ignoreDuplicates`/`onConflict` on .insert() does not
+    // correctly target notifications_dedup, a PARTIAL unique index
+    // (`WHERE is_resolved = false`) — PostgREST falls back to a bare
+    // multi-row INSERT, so a single colliding row makes Postgres reject the
+    // *entire* batch with 23505 ("duplicate key ..."), silently dropping
+    // every row, not just the duplicate one. Found in production 2026-08-27:
+    // a 897-notification batch reported "generated: 897" but 0 rows were
+    // actually written. Fix: insert in small batches; a batch that collides
+    // retries row-by-row so only the genuine duplicates are skipped.
+    let insertedCount = 0;
+    let duplicateCount = 0;
+    const INSERT_BATCH = 50;
+    for (let i = 0; i < notifications.length; i += INSERT_BATCH) {
+      const batch = notifications.slice(i, i + INSERT_BATCH);
+      const { error } = await supabase.from("notifications").insert(batch);
+      if (!error) { insertedCount += batch.length; continue; }
+      if (!error.message?.includes("duplicate key")) throw error;
+      // Batch had at least one collision — retry individually so only the
+      // actual duplicates are skipped.
+      for (const row of batch) {
+        const { error: rowError } = await supabase.from("notifications").insert(row);
+        if (!rowError) insertedCount++;
+        else if (rowError.message?.includes("duplicate key")) duplicateCount++;
+        else throw rowError;
+      }
     }
 
     // ─── AUDIT LOG ───
@@ -1310,10 +1588,10 @@ Deno.serve(async (req) => {
       .eq("is_resolved", false)
       .eq("is_dismissed", false);
 
-    console.log(`[notifications] Done: mode=${mode}, generated=${notifications.length}, skipped_batch_dups=${queuedNotificationKeys.size - notifications.length}, resolved=${resolvedCount}, cleanup={orphans:${cleanupOrphans},dups:${cleanupDuplicates},old:${cleanupOld}}, active_total=${finalActiveCount || 0}`);
+    console.log(`[notifications] Done: mode=${mode}, queued=${notifications.length}, inserted=${insertedCount}, duplicates=${duplicateCount}, resolved=${resolvedCount}, cleanup={orphans:${cleanupOrphans},dups:${cleanupDuplicates},old:${cleanupOld}}, active_total=${finalActiveCount || 0}`);
 
     return new Response(
-      JSON.stringify({ ok: true, mode, generated: notifications.length, resolved: resolvedCount, cleanup_orphans: cleanupOrphans, cleanup_duplicates: cleanupDuplicates, cleanup_old: cleanupOld }),
+      JSON.stringify({ ok: true, mode, queued: notifications.length, inserted: insertedCount, duplicates: duplicateCount, resolved: resolvedCount, cleanup_orphans: cleanupOrphans, cleanup_duplicates: cleanupDuplicates, cleanup_old: cleanupOld }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {

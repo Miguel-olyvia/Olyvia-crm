@@ -10,6 +10,7 @@ import {
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { acceptCollaboratorInvites } from "../lib/collaborators";
+import { fetchPortalClientRoleIds } from "../lib/members";
 
 export interface OrgOption {
   id: string;
@@ -86,10 +87,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBusinessUserId(anewUser.id as string);
     setUserName((anewUser.name as string) ?? currentSession.user.email ?? null);
 
-    // Organizações onde o user é membro ativo.
+    // Organizações onde o user é membro ativo. Só contam as memberships de
+    // sistema: uma conta de portal (role `client`) tem membership ativa mas é
+    // cliente, não utilizador do duc-app — não deve ver a org nem "entrar".
     const { data: memberships, error: membErr } = await supabase
       .from("anew_memberships")
-      .select("organization_id")
+      .select("organization_id, role_id")
       .eq("user_id", anewUser.id as string)
       .eq("status", "active");
     if (membErr) {
@@ -97,8 +100,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.error("[DUC] erro a carregar as organizações do utilizador:", membErr);
     }
 
+    const portalRoleIds = await fetchPortalClientRoleIds(
+      (memberships ?? []).map((m) => m.role_id as string)
+    );
     const orgIds = Array.from(
-      new Set((memberships ?? []).map((m) => m.organization_id as string).filter(Boolean))
+      new Set(
+        (memberships ?? [])
+          .filter((m) => !(m.role_id && portalRoleIds.has(m.role_id as string)))
+          .map((m) => m.organization_id as string)
+          .filter(Boolean)
+      )
     );
 
     if (orgIds.length === 0) {

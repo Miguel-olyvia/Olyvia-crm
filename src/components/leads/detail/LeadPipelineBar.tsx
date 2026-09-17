@@ -1,4 +1,27 @@
 import { Badge } from "@/components/ui/badge";
+import { useTranslation } from "@/hooks/useTranslation";
+
+// Map known internal stage names to translation keys — mirrors
+// statusTranslationKeys in AnewLeads.tsx's getStatusLabel. Only names that
+// match one of these known/standard keys get translated here; anything else
+// (a truly custom org-defined stage name) falls back to stage.label ||
+// stage.name unchanged.
+const statusTranslationKeys: Record<string, string> = {
+  new: 'contactResults.statuses.new',
+  contacted: 'contactResults.statuses.contacted',
+  callback_scheduled: 'contactResults.statuses.callbackScheduled',
+  visit_scheduled: 'contactResults.statuses.visitScheduled',
+  scheduled: 'contactResults.statuses.visitScheduled',
+  qualified: 'contactResults.statuses.qualified',
+  proposal_sent: 'contactResults.statuses.proposalSent',
+  negotiation: 'contactResults.statuses.negotiation',
+  won: 'contactResults.statuses.converted',
+  lost: 'contactResults.statuses.lost',
+  no_answer: 'contactResults.statuses.noAnswer',
+  converted: 'contactResults.statuses.converted',
+  rejected: 'contactResults.statuses.rejected',
+  incomplete: 'contactResults.statuses.new',
+};
 
 interface WorkflowStage {
   id: string;
@@ -28,7 +51,15 @@ interface LeadPipelineBarProps {
 }
 
 export function LeadPipelineBar({ currentStatus, currentStageId, workflowStages, furthestProgressStageId }: LeadPipelineBarProps) {
+  const { t } = useTranslation();
+
   if (workflowStages.length === 0) return null;
+
+  const getStageLabel = (stage: WorkflowStage) => {
+    const key = statusTranslationKeys[stage.name];
+    if (key) return t(key);
+    return stage.label || stage.name;
+  };
 
   const sortedStages = [...workflowStages].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
   const currentIndex = currentStageId
@@ -66,7 +97,7 @@ export function LeadPipelineBar({ currentStatus, currentStageId, workflowStages,
                   ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
                   : "bg-muted text-muted-foreground"
               }`}>
-                {stage.label || stage.name}
+                {getStageLabel(stage)}
               </div>
               {i < sortedStages.length - 1 && (
                 <div className={`w-4 h-0.5 shrink-0 ${

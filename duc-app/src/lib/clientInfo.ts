@@ -93,9 +93,11 @@ export interface ClientOlyviaInfo {
   valor: string | null;
   condicoes: string | null;
   contractNumber: string | null;
-  /** Id da proposta ligada ao contrato — para o deep-link "Ver proposta" na Olyvia. */
+  /** Id da proposta de origem — para o deep-link "Ver proposta" e para o âmbito. */
   proposalId: string | null;
-  /** Linhas do orçamento assinado (produtos/serviços vendidos). */
+  /** Existe já um contrato assinado/ativo para este cliente? (fluxo por proposta). */
+  hasContract: boolean;
+  /** Linhas do orçamento (produtos/serviços vendidos), da proposta de origem. */
   scopeLines: ScopeLine[];
 }
 
@@ -104,8 +106,18 @@ function fmtDate(v: unknown): string | null {
   return v.slice(0, 10);
 }
 
-/** Busca os dados do cliente que já existem na Olyvia (entidade, contactos, contrato). */
-export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOlyviaInfo | null> {
+/**
+ * Busca os dados do cliente que já existem na Olyvia (entidade, contactos e —
+ * quando já existe — contrato). No fluxo por PROPOSTA, o DUC nasce antes do
+ * contrato: passa-se a proposta de origem em `opts.proposalId` para o âmbito e o
+ * deep-link funcionarem já; os campos do contrato ficam vazios e preenchem-se
+ * mais tarde (esta função é chamada a cada abertura do DUC e `mergePrefill` só
+ * escreve em campos ainda vazios).
+ */
+export async function fetchClientOlyviaInfo(
+  clientId: string,
+  opts?: { proposalId?: string | null }
+): Promise<ClientOlyviaInfo | null> {
   const { data: client } = await supabase
     .from("anew_clients")
     .select("entity_id, assigned_to")
@@ -242,6 +254,7 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
   }
 
   const contract = contractRes.data?.[0] as Record<string, unknown> | undefined;
+  const hasContract = Boolean(contract);
   let valor: string | null = null;
   let condicoes: string | null = null;
   let dataAdjudicacao: string | null = null;
@@ -261,8 +274,23 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     proposalId = (contract.proposal_id as string) || null;
   }
 
-  // Puxa as linhas do orçamento assinado (o que foi VENDIDO) a partir da proposta
-  // ligada ao contrato → quotes → quote_lines. Alimenta o âmbito do DUC.
+  // Proposta EFETIVA de origem: a do contrato (quando já existe), senão a passada
+  // como hint (a que originou o DUC), senão a proposta aceite mais recente do
+  // cliente. Garante que o âmbito e o "Ver proposta" funcionam antes do contrato.
+  if (!proposalId) proposalId = opts?.proposalId ?? null;
+  if (!proposalId) {
+    const { data: accepted } = await supabase
+      .from("proposals")
+      .select("id")
+      .eq("client_id", clientId)
+      .eq("status", "accepted")
+      .order("created_at", { ascending: false })
+      .limit(1);
+    proposalId = (accepted?.[0]?.id as string) ?? null;
+  }
+
+  // Puxa as linhas do orçamento (o que foi VENDIDO) a partir da proposta de
+  // origem → quotes → quote_lines. Alimenta o âmbito do DUC.
   const scopeLines: ScopeLine[] = [];
   if (proposalId) {
     const { data: quoteRows } = await supabase
@@ -316,6 +344,7 @@ export async function fetchClientOlyviaInfo(clientId: string): Promise<ClientOly
     condicoes,
     contractNumber,
     proposalId,
+    hasContract,
     scopeLines,
   };
 }

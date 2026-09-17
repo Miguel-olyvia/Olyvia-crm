@@ -3,13 +3,16 @@ import { z } from "zod";
 import * as XLSX from 'xlsx';
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
-import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Loader2, RotateCcw } from "lucide-react";
+import { Plus, Search, ShoppingCart, Download, Upload, Pencil, Trash2, DollarSign, History, Copy, ArrowUpDown, ArrowUp, ArrowDown, Settings2, Loader2, RotateCcw, Truck, X, ImageIcon, ChevronLeft, ChevronRight } from "lucide-react";
+import { getSafeFileExtension } from "@/utils/secureFileUpload";
+import { parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { RestoreItemsDialog } from "@/components/RestoreItemsDialog";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { Input } from "@/components/ui/input";
 import ProductPricesDialog from "@/components/ProductPricesDialog";
 import ProductPriceHistoryDialog from "@/components/ProductPriceHistoryDialog";
 import ProductConfigurableOptionsDialog from "@/components/ProductConfigurableOptionsDialog";
+import ProductSuppliersDialog from "@/components/ProductSuppliersDialog";
 import ProductFormPrices, { PriceFormData } from "@/components/ProductFormPrices";
 import ProductFormAttributes, { AttributeFormValue } from "@/components/ProductFormAttributes";
 import { exportProductsToCSV, parseProductsCSV, downloadProductsTemplate } from "@/utils/productsExportImport";
@@ -86,6 +89,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Switch } from "@/components/ui/switch";
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -99,6 +103,7 @@ interface Product {
   is_active: boolean;
   is_sellable?: boolean;
   is_purchasable?: boolean;
+  manages_stock?: boolean;
   barcode: string;
   category_id?: string | null;
   subcategory_id?: string | null;
@@ -109,8 +114,12 @@ interface Product {
   subcategory?: { name: string } | null;
   brands?: { name: string };
   anew_organizations?: { name: string };
-  product_stock?: Array<{
-    qty_available: number;
+  // stocks (armazéns) é a fonte real de stock hoje em dia — product_stock,
+  // usada aqui antes, é uma tabela antiga por localização que já não reflete
+  // o inventário real. Ver ProductSuppliersDialog para o detalhe por
+  // armazém; aqui só precisamos do total agregado para a coluna da listagem.
+  stocks?: Array<{
+    quantity: number;
   }>;
 }
 
@@ -155,6 +164,7 @@ export default function Products() {
   const [pricesDialogOpen, setPricesDialogOpen] = useState(false);
   const [priceHistoryDialogOpen, setPriceHistoryDialogOpen] = useState(false);
   const [configurableOptionsDialogOpen, setConfigurableOptionsDialogOpen] = useState(false);
+  const [suppliersDialogOpen, setSuppliersDialogOpen] = useState(false);
   const [bulkPriceDialogOpen, setBulkPriceDialogOpen] = useState(false);
   const [bulkAttributesDialogOpen, setBulkAttributesDialogOpen] = useState(false);
   const [bulkCategoryDialogOpen, setBulkCategoryDialogOpen] = useState(false);
@@ -184,8 +194,22 @@ export default function Products() {
     subcategory_id: "",
     brand_id: "",
     product_type: "sale", // "sale", "purchase", or "both"
+    manages_stock: false,
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // ── Fotos do produto ──────────────────────────────────────────────────────
+  // Guardadas em products.image_urls (text[]). O limite vive aqui e não na base
+  // de dados, para passar de 4 para outro número ser só uma alteração destas.
+  const MAX_PRODUCT_IMAGES = 4;
+  const MAX_PRODUCT_IMAGE_BYTES = 5 * 1024 * 1024;
+  const PRODUCT_IMAGE_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+  const [productImages, setProductImages] = useState<string[]>([]);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const productImageInputRef = useRef<HTMLInputElement | null>(null);
+  // Índice da foto aberta no visualizador; null = visualizador fechado.
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const defaultOrgSelection = (): OrganizationSelection => ({
     tenantId: "",
@@ -319,7 +343,7 @@ export default function Products() {
           product_categories!category_id(name),
           subcategory:product_categories!subcategory_id(name),
           brands(name),
-          product_stock(qty_available),
+          stocks(quantity),
           product_organizations(organization_id)
         `)
         .is("deleted_at", null);
@@ -334,7 +358,7 @@ export default function Products() {
             product_categories!category_id(name),
             subcategory:product_categories!subcategory_id(name),
             brands(name),
-            product_stock(qty_available),
+            stocks(quantity),
             product_organizations!inner(organization_id)
           `)
           .is("deleted_at", null)
@@ -648,6 +672,73 @@ export default function Products() {
     };
   }, [loading, hasMore, loadingMore, page, loadProducts, descendantIds]);
 
+  // Mesmo fluxo obrigatório de todos os uploads da aplicação: o cliente só
+  // pode escrever no bucket de quarentena (política block_direct_client_insert_media),
+  // e é a edge function validate-upload que valida e promove para o bucket
+  // final. Copiado de ProposalTemplateEditor.handleLogoUpload.
+  const handleProductImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const resetInput = () => {
+      if (productImageInputRef.current) productImageInputRef.current.value = "";
+    };
+
+    if (productImages.length >= MAX_PRODUCT_IMAGES) {
+      toast({ title: "Limite atingido", description: `Máximo de ${MAX_PRODUCT_IMAGES} fotos por produto.`, variant: "destructive" });
+      resetInput();
+      return;
+    }
+    if (!PRODUCT_IMAGE_TYPES.includes(file.type)) {
+      toast({ title: "Formato não suportado", description: "Use PNG, JPEG ou WebP.", variant: "destructive" });
+      resetInput();
+      return;
+    }
+    if (file.size > MAX_PRODUCT_IMAGE_BYTES) {
+      toast({ title: "Ficheiro demasiado grande", description: "A foto não pode exceder 5 MB.", variant: "destructive" });
+      resetInput();
+      return;
+    }
+
+    setUploadingImage(true);
+    try {
+      // O primeiro segmento do caminho TEM de ser uma organização a que o
+      // utilizador tem acesso — validate-upload rejeita o resto (validateOrgScope).
+      const orgId = activeCompany?.id;
+      if (!orgId) throw new Error("Empresa ativa não identificada");
+
+      const ext = getSafeFileExtension(file);
+      const filePath = `${orgId}/product-${crypto.randomUUID()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from("media-quarantine")
+        .upload(filePath, file);
+      if (uploadError) throw uploadError;
+
+      const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
+        body: { quarantineBucket: "media-quarantine", finalBucket: "media", path: filePath },
+      });
+      const validateResult = parseValidateUploadResponse(validateData);
+      if (validateError || !validateResult.ok) {
+        toast({
+          title: "Erro ao carregar a foto",
+          description: await resolveValidateUploadErrorMessage(validateResult, validateError),
+          variant: "destructive",
+        });
+        return;
+      }
+
+      const { data: urlData } = supabase.storage.from("media").getPublicUrl(filePath);
+      setProductImages(prev => [...prev, urlData.publicUrl].slice(0, MAX_PRODUCT_IMAGES));
+    } catch (error: any) {
+      console.error("Erro ao carregar foto do produto:", error);
+      toast({ title: "Erro ao carregar a foto", description: error?.message, variant: "destructive" });
+    } finally {
+      setUploadingImage(false);
+      resetInput();
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -746,6 +837,7 @@ export default function Products() {
           p_status: formData.status,
           p_is_sellable: isSellable,
           p_is_purchasable: isPurchasable,
+          p_manages_stock: formData.manages_stock,
           p_category_id: formData.category_id || null,
           p_subcategory_id: formData.subcategory_id || null,
           p_primary_org_id: primaryOrgId,
@@ -753,7 +845,12 @@ export default function Products() {
           p_description: formData.description || null,
           p_barcode: formData.barcode || null,
           p_brand_id: formData.brand_id || null,
-          p_supplier_id: selectedSupplierId || null,
+          // A edição de fornecedores passa a ser feita pelo
+          // ProductSuppliersDialog (item_suppliers, Fase 1/2 do inventário) —
+          // devolve-se aqui o valor já existente, sem alteração, para não
+          // escrever um supplier_id arbitrário que o trigger de sincronização
+          // (fn_item_suppliers_sync_preferred) só voltaria a substituir.
+          p_supplier_id: editingProduct.supplier_id ?? null,
           p_all_org_ids: allOrgIds,
           p_prices: pricesPayload,
           p_attribute_ids: attributeFormData.map(av => av.attribute_id),
@@ -762,6 +859,25 @@ export default function Products() {
         const { error } = await supabase.rpc('rpc_update_product', updateProductArgs);
 
         if (error) throw error;
+
+        // As fotos ficam fora da RPC de propósito: rpc_update_product já leva 20
+        // parâmetros, e acrescentar um obrigaria a uma assinatura nova com
+        // REVOKE/GRANT e a apagar a antiga — o mesmo tipo de alteração que
+        // provocou o erro 409 dos bundles. A política products_update permite
+        // este UPDATE direto. O custo é uma linha de auditoria própria em vez de
+        // ir na transação da RPC.
+        const { error: imagesError } = await supabase
+          .from("products")
+          // `as any`: image_urls foi acrescentada à base de dados na migração
+          // 20261201090000 e o types.ts é gerado — só a conhece depois de
+          // `supabase gen types`, que altera ficheiros e precisa de aprovação.
+          // Cast localizado até lá, no mesmo estilo do insert de item_suppliers.
+          .update({ image_urls: productImages.length > 0 ? productImages : null } as any)
+          .eq("id", editingProduct.id);
+        if (imagesError) {
+          console.error("Erro ao gravar fotos do produto:", imagesError);
+          toast({ title: "Produto guardado, fotos não", description: "As fotos não foram gravadas. Tente novamente.", variant: "destructive" });
+        }
 
         toast({
           title: t('products.toast.updateSuccess'),
@@ -773,6 +889,7 @@ export default function Products() {
           p_status: formData.status,
           p_is_sellable: isSellable,
           p_is_purchasable: isPurchasable,
+          p_manages_stock: formData.manages_stock,
           p_category_id: formData.category_id || null,
           p_subcategory_id: formData.subcategory_id || null,
           p_primary_org_id: primaryOrgId,
@@ -785,9 +902,42 @@ export default function Products() {
           p_prices: pricesPayload,
           p_attribute_values: attributeValuesPayload,
         };
-        const { error } = await supabase.rpc('rpc_create_product', createProductArgs);
+        const { data: newProductId, error } = await supabase.rpc('rpc_create_product', createProductArgs);
 
         if (error) throw error;
+
+        // Fotos: UPDATE a seguir à RPC, pela mesma razão explicada no ramo da
+        // edição — não mexer na assinatura de uma função com 17 parâmetros.
+        if (newProductId && productImages.length > 0) {
+          const { error: imagesError } = await supabase
+            .from("products")
+            // Ver nota sobre `as any` no ramo da edição.
+            .update({ image_urls: productImages } as any)
+            .eq("id", newProductId);
+          if (imagesError) {
+            console.error("Erro ao gravar fotos do produto:", imagesError);
+            toast({ title: "Produto criado, fotos não", description: "As fotos não foram gravadas. Edite o produto e tente de novo.", variant: "destructive" });
+          }
+        }
+
+        // Fornecedor inicial (opcional): cria já a linha preferencial em
+        // item_suppliers, para o produto nascer consistente com o novo
+        // modelo multi-fornecedor (Fase 1/2 do inventário) em vez de só
+        // depender do supplier_id que a RPC acima já gravou.
+        if (selectedSupplierId && newProductId) {
+          const { error: itemSupplierError } = await supabase.from("item_suppliers").insert({
+            organization_id: activeCompany.id,
+            item_type: "product",
+            product_id: newProductId,
+            supplier_id: selectedSupplierId,
+            is_preferred: true,
+            is_active: true,
+            created_by: businessUserId,
+          } as any);
+          if (itemSupplierError) {
+            console.error("Erro ao criar fornecedor inicial do produto:", itemSupplierError);
+          }
+        }
 
         toast({
           title: t('products.toast.createSuccess'),
@@ -852,7 +1002,7 @@ export default function Products() {
       const [productRes, companyRes, pricesRes, attributesRes] = await Promise.all([
         supabase
           .from("products")
-          .select("is_sellable, is_purchasable, uom_id")
+          .select("is_sellable, is_purchasable, manages_stock, uom_id")
           .eq("id", product.id)
           .single(),
         supabase
@@ -931,8 +1081,10 @@ export default function Products() {
         subcategory_id: product.subcategory_id || "",
         brand_id: product.brand_id || "",
         product_type: productType,
+        manages_stock: data.manages_stock ?? false,
       });
-      
+      setProductImages(Array.isArray((product as any).image_urls) ? (product as any).image_urls : []);
+
       // Set organization selection from organization associations
       const primaryCompanyId = companyIds.length > 0 ? companyIds[0] : (product.organization_id || activeCompany?.id || "");
       const secondaryIds = companyIds.slice(1);
@@ -984,7 +1136,10 @@ export default function Products() {
       subcategory_id: "",
       brand_id: "",
       product_type: "sale",
+      manages_stock: false,
     });
+    setProductImages([]);
+    setViewerIndex(null);
     setFieldErrors({});
     setOrganizationSelection(defaultOrgSelection());
     setPriceFormData({
@@ -1057,12 +1212,16 @@ export default function Products() {
         category_id: lastProduct.category_id || "",
         subcategory_id: lastProduct.subcategory_id || "",
         brand_id: lastProduct.brand_id || "",
-        product_type: lastProduct.is_sellable && lastProduct.is_purchasable 
-          ? "both" 
-          : lastProduct.is_purchasable 
-            ? "purchase" 
+        product_type: lastProduct.is_sellable && lastProduct.is_purchasable
+          ? "both"
+          : lastProduct.is_purchasable
+            ? "purchase"
             : "sale",
+        manages_stock: (lastProduct as any).manages_stock ?? false,
       });
+      // As fotos NÃO são copiadas: são do artigo anterior, não deste. Copiá-las
+      // criaria produtos diferentes a mostrar a mesma imagem sem ninguém reparar.
+      setProductImages([]);
 
       // Set organization
       const orgIds = (lastProduct as any).product_organizations?.map((po: any) => po.organization_id) || [];
@@ -1261,8 +1420,8 @@ export default function Products() {
   };
 
   const getTotalStock = (product: Product) => {
-    if (!product.product_stock || product.product_stock.length === 0) return 0;
-    return product.product_stock.reduce((sum, stock) => sum + (stock.qty_available || 0), 0);
+    if (!product.stocks || product.stocks.length === 0) return 0;
+    return product.stocks.reduce((sum, stock) => sum + (stock.quantity || 0), 0);
   };
 
   // Bulk category update handler
@@ -1398,9 +1557,75 @@ export default function Products() {
     }
   };
 
+  // Busca TODOS os ids que respeitam os filtros atuais (organização, categoria,
+  // subcategoria, marca, pesquisa) — não só os já carregados na tela pelo
+  // infinite scroll. Sem isto, "Exportar" só exportava a página visível (por
+  // vezes uma dúzia de produtos), silenciosamente, sem qualquer aviso.
+  const fetchAllFilteredProductIds = async (): Promise<string[]> => {
+    const filters = filtersRef.current;
+    const effectiveOrgIds = descendantIdsRef.current.length > 0
+      ? descendantIdsRef.current
+      : (filters.activeCompanyId ? [filters.activeCompanyId] : []);
+
+    const PAGE = 1000;
+    const ids: string[] = [];
+    let from = 0;
+    while (true) {
+      let query = (supabase.from("products") as any)
+        .select(
+          effectiveOrgIds.length > 0
+            ? "id, product_organizations!inner(organization_id)"
+            : "id, organization_id, product_organizations(organization_id)"
+        )
+        .is("deleted_at", null);
+
+      if (effectiveOrgIds.length > 0) {
+        query = query.in("product_organizations.organization_id", effectiveOrgIds);
+      }
+      if (filters.categoryFilter !== "all") query = query.eq("category_id", filters.categoryFilter);
+      if (filters.subcategoryFilter !== "all") query = query.eq("subcategory_id", filters.subcategoryFilter);
+      if (filters.brandFilter !== "all") query = query.eq("brand_id", filters.brandFilter);
+      if (filters.debouncedSearchTerm.trim()) {
+        const searchLower = escapePostgrestOrTerm(filters.debouncedSearchTerm.toLowerCase().trim());
+        if (searchLower) {
+          query = query.or(`sku.ilike.%${searchLower}%,name.ilike.%${searchLower}%,barcode.ilike.%${searchLower}%`);
+        }
+      }
+
+      query = query.order("id", { ascending: true }).range(from, from + PAGE - 1);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      const page = data || [];
+
+      for (const p of page) {
+        // Mesmo filtro de organização (vista global) que filteredProducts aplicava
+        // client-side — replicado aqui para não exportar produtos de outra empresa.
+        if (effectiveOrgIds.length === 0 && companyFilter !== "all") {
+          const productOrgIds = (p.product_organizations || []).map((po: any) => po.organization_id);
+          if (!productOrgIds.includes(companyFilter) && p.organization_id !== companyFilter) continue;
+        }
+        ids.push(p.id);
+      }
+
+      if (page.length < PAGE) break;
+      from += PAGE;
+    }
+    return ids;
+  };
+
   const handleExport = async () => {
     try {
-      await exportProductsToCSV(filteredProducts, activeCompany?.id);
+      const ids = await fetchAllFilteredProductIds();
+      if (ids.length === 0) {
+        toast({
+          title: t('products.toast.exportError'),
+          description: "Não existem produtos para exportar com os filtros atuais",
+          variant: "destructive",
+        });
+        return;
+      }
+      await exportProductsToCSV(ids.map((id) => ({ id })), activeCompany?.id);
       toast({
         title: t('products.toast.exportSuccess'),
         description: t('products.toast.exportSuccessDesc'),
@@ -1956,6 +2181,54 @@ export default function Products() {
                   {fieldErrors.description && <p className="text-sm text-destructive">{fieldErrors.description}</p>}
                 </div>
 
+                <div className="space-y-2">
+                  <Label>Fotos <span className="text-muted-foreground font-normal">({productImages.length}/{MAX_PRODUCT_IMAGES})</span></Label>
+                  <input
+                    ref={productImageInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                    className="hidden"
+                    onChange={handleProductImageUpload}
+                  />
+                  <div className="flex flex-wrap items-center gap-2">
+                    {productImages.map((url, idx) => (
+                      <div key={url} className="relative h-16 w-16 border rounded overflow-hidden group">
+                        <button
+                          type="button"
+                          onClick={() => setViewerIndex(idx)}
+                          className="h-full w-full"
+                          title="Ver foto"
+                        >
+                          <img src={url} alt={`Foto ${idx + 1}`} className="h-full w-full object-cover" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setProductImages(prev => prev.filter((_, i) => i !== idx))}
+                          className="absolute top-0 right-0 bg-destructive text-destructive-foreground rounded-bl p-0.5"
+                          title="Remover"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
+                    {productImages.length === 0 && (
+                      <div className="h-16 w-16 border border-dashed rounded flex items-center justify-center text-muted-foreground">
+                        <ImageIcon className="h-5 w-5" />
+                      </div>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={uploadingImage || productImages.length >= MAX_PRODUCT_IMAGES}
+                      onClick={() => productImageInputRef.current?.click()}
+                    >
+                      {uploadingImage ? "A carregar..." : "Escolher Ficheiro"}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">PNG, JPEG ou WebP, até 5 MB cada.</p>
+                </div>
+
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="category_id">{t('products.form.category')}</Label>
@@ -2015,23 +2288,31 @@ export default function Products() {
                     )}
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="supplier_id">{t('products.form.supplier') || "Fornecedor"}</Label>
-                    {suppliers.length === 0 ? (
-                      <p className="text-sm text-muted-foreground italic h-10 flex items-center">{t('products.form.noSuppliersAvailable') || "Nenhum fornecedor disponível"}</p>
-                    ) : (
-                      <Select value={selectedSupplierId} onValueChange={(value) => setSelectedSupplierId(value)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder={t('products.form.selectSupplier') || "Selecione um fornecedor"} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {suppliers.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
+                  {/* Só na criação: um produto pode ter vários fornecedores
+                     (item_suppliers, Fase 1/2 do inventário) — a edição de
+                     fornecedores existentes passa a ser feita pelo botão
+                     "Fornecedores" da listagem (ProductSuppliersDialog), não
+                     aqui. Este seletor só serve para criar já a primeira
+                     linha (preferencial) por conveniência. */}
+                  {!editingProduct && (
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier_id">{t('products.form.supplier') || "Fornecedor"}</Label>
+                      {suppliers.length === 0 ? (
+                        <p className="text-sm text-muted-foreground italic h-10 flex items-center">{t('products.form.noSuppliersAvailable') || "Nenhum fornecedor disponível"}</p>
+                      ) : (
+                        <Select value={selectedSupplierId} onValueChange={(value) => setSelectedSupplierId(value)}>
+                          <SelectTrigger>
+                            <SelectValue placeholder={t('products.form.selectSupplier') || "Selecione um fornecedor"} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {suppliers.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 <OrganizationFormSection
@@ -2071,6 +2352,22 @@ export default function Products() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+
+                <div className="space-y-2 rounded-md border p-4">
+                  <div className="flex items-center space-x-2">
+                    <Switch
+                      id="manages_stock"
+                      checked={formData.manages_stock}
+                      onCheckedChange={(checked) => setFormData({ ...formData, manages_stock: checked })}
+                    />
+                    <Label htmlFor="manages_stock" className="cursor-pointer">
+                      {t('products.form.manageStock')}
+                    </Label>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    {t('products.form.manageStockHelp')}
+                  </p>
                 </div>
 
                 <ProductFormPrices prices={priceFormData} onChange={setPriceFormData} />
@@ -2487,6 +2784,19 @@ export default function Products() {
                               <Button
                                 variant="ghost"
                                 size="icon"
+                                onClick={() => {
+                                  setSelectedProduct(product);
+                                  setSuppliersDialogOpen(true);
+                                }}
+                                title="Fornecedores"
+                              >
+                                <Truck className="w-4 h-4" />
+                              </Button>
+                            </PermissionGate>
+                            <PermissionGate permission="products.edit">
+                              <Button
+                                variant="ghost"
+                                size="icon"
                                 onClick={() => openEditDialog(product)}
                               >
                                 <Pencil className="w-4 h-4" />
@@ -2563,6 +2873,22 @@ export default function Products() {
               companyId={selectedProduct.organization_id || activeCompany?.id || ''}
               productCategoryId={selectedProduct.subcategory_id || selectedProduct.category_id || null}
               productBasePrice={0}
+            />
+            <ProductSuppliersDialog
+              open={suppliersDialogOpen}
+              onOpenChange={(open) => {
+                setSuppliersDialogOpen(open);
+                if (!open) {
+                  setSelectedProduct(null);
+                  // fn_item_suppliers_sync_preferred pode ter mudado
+                  // products.supplier_id (fornecedor preferencial) --
+                  // recarregar para a listagem não ficar com cache antigo.
+                  loadData();
+                }
+              }}
+              productId={selectedProduct.id}
+              productName={selectedProduct.name}
+              organizationId={selectedProduct.organization_id || activeCompany?.id || ''}
             />
           </>
         )}
@@ -2786,6 +3112,47 @@ export default function Products() {
         labelColumns={["sku", "name"]}
         onRestored={loadData}
       />
+
+      {/* Visualizador das fotos do produto: abre na foto clicada e permite
+          passar entre elas. Sem biblioteca nova — Dialog + dois botões. */}
+      <Dialog open={viewerIndex !== null} onOpenChange={(o) => !o && setViewerIndex(null)}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>
+              Foto {viewerIndex !== null ? viewerIndex + 1 : 0} de {productImages.length}
+            </DialogTitle>
+          </DialogHeader>
+          {viewerIndex !== null && productImages[viewerIndex] && (
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                disabled={productImages.length < 2}
+                onClick={() => setViewerIndex(i => i === null ? null : (i - 1 + productImages.length) % productImages.length)}
+                title="Anterior"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <img
+                src={productImages[viewerIndex]}
+                alt={`Foto ${viewerIndex + 1}`}
+                className="flex-1 max-h-[70vh] w-full object-contain rounded"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                disabled={productImages.length < 2}
+                onClick={() => setViewerIndex(i => i === null ? null : (i + 1) % productImages.length)}
+                title="Seguinte"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

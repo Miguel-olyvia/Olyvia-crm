@@ -1,3 +1,7 @@
+-- Recuperado via 'supabase db query --linked' contra
+-- supabase_migrations.schema_migrations.statements -- já aplicada
+-- remotamente (drift concorrente de outra sessão), só faltava o ficheiro.
+
 -- REPOSICAO URGENTE: a pagina de Propostas ficou a dar "canceling statement
 -- due to statement timeout" e a mostrar "No proposals registered".
 --

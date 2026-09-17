@@ -4,6 +4,7 @@ import {
   fieldsForVariant,
   sectionsForVariant,
   stageAppliesToVariant,
+  type DucRole,
   type DucStage,
 } from "./ducSchema";
 import type { DucVariant } from "./types";
@@ -59,15 +60,36 @@ export async function fetchEffectiveStages(
   return { stages: stagesForVariant(variant), custom: false };
 }
 
+/**
+ * Funções/roles definidas para uma organização (guardadas em `config.roles`).
+ * Vazio quando a org não tem override ou não definiu roles.
+ */
+export async function fetchOrgRoles(orgId: string): Promise<DucRole[]> {
+  const { data, error } = await supabase
+    .from("anew_client_duc_configs")
+    .select("config")
+    .eq("organization_id", orgId)
+    .order("updated_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.error("[DUC] erro a carregar roles:", error);
+    return [];
+  }
+  const cfg = (data?.[0]?.config as { roles?: DucRole[] } | null) ?? null;
+  return Array.isArray(cfg?.roles) ? cfg!.roles! : [];
+}
+
 export async function saveDucConfig(
   orgId: string,
   stages: DucStage[],
+  roles: DucRole[],
   userId: string | null
 ): Promise<string | null> {
   const { error } = await supabase.from("anew_client_duc_configs").upsert(
     {
       organization_id: orgId,
-      config: { stages },
+      config: { stages, roles },
       updated_by: userId,
     },
     { onConflict: "organization_id" }

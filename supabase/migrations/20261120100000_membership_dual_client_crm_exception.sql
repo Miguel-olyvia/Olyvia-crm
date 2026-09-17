@@ -1,3 +1,9 @@
+-- Reposto a partir do historico da base (supabase_migrations.schema_migrations)
+-- em 2026-09-09: esta migration estava aplicada no remoto sem ficheiro no
+-- repositorio (aplicada por outra sessao/branch), o que impedia qualquer
+-- 'db push' e faria uma base reconstruida do zero sair diferente da de
+-- producao. O SQL abaixo e o que correu de facto.
+
 -- ============================================================================
 -- Excecao: permitir que o MESMO utilizador tenha, na MESMA organizacao, uma
 -- membership de CRM (role != client) E uma membership de cliente (role =
@@ -48,6 +54,7 @@ END;
 $function$;
 
 DROP TRIGGER IF EXISTS anew_memberships_set_role_is_client ON public.anew_memberships;
+
 CREATE TRIGGER anew_memberships_set_role_is_client
   BEFORE INSERT OR UPDATE ON public.anew_memberships
   FOR EACH ROW

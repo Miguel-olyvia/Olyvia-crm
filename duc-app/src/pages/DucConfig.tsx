@@ -15,6 +15,7 @@ import "../components/flow/flow.css";
 import { useAuth } from "../auth/AuthProvider";
 import {
   fetchEffectiveStages,
+  fetchOrgRoles,
   saveDucConfig,
   resetDucConfig,
 } from "../lib/ducConfig";
@@ -23,6 +24,7 @@ import {
   variantForOrgName,
   type DucField,
   type DucItemSection,
+  type DucRole,
   type DucStage,
   type StageNotify,
 } from "../lib/ducSchema";
@@ -34,6 +36,7 @@ import {
   Card,
   ConfirmDialog,
   EmptyState,
+  Modal,
   Select,
   Spinner,
   cx,
@@ -48,6 +51,8 @@ import {
   ChevronRight,
   FileText,
   Sheet,
+  Trash,
+  X,
 } from "../components/icons";
 import {
   StageNodeComponent,
@@ -95,6 +100,8 @@ export default function DucConfig() {
 
   const [orgId, setOrgId] = useState<string | null>(activeOrgId);
   const [stages, setStages] = useState<DucStage[]>([]);
+  const [roles, setRoles] = useState<DucRole[]>([]);
+  const [rolesOpen, setRolesOpen] = useState(false);
   const [custom, setCustom] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -131,8 +138,12 @@ export default function DucConfig() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchEffectiveStages(orgId, variant);
+      const [res, orgRoles] = await Promise.all([
+        fetchEffectiveStages(orgId, variant),
+        fetchOrgRoles(orgId),
+      ]);
       setStages(res.stages);
+      setRoles(orgRoles);
       setCustom(res.custom);
       setDirty(false);
       setSavedAt(null);
@@ -459,7 +470,7 @@ export default function DucConfig() {
     if (!orgId || saving || hasErrors) return;
     setSaving(true);
     setError(null);
-    const err = await saveDucConfig(orgId, stages, businessUserId);
+    const err = await saveDucConfig(orgId, stages, roles, businessUserId);
     setSaving(false);
     if (err) {
       setError(err);
@@ -468,7 +479,7 @@ export default function DucConfig() {
     setCustom(true);
     setDirty(false);
     setSavedAt(new Date().toLocaleTimeString("pt-PT"));
-  }, [orgId, saving, hasErrors, stages, businessUserId]);
+  }, [orgId, saving, hasErrors, stages, roles, businessUserId]);
 
   const doReset = useCallback(async () => {
     setConfirmReset(false);
@@ -576,6 +587,17 @@ export default function DucConfig() {
 
             <Button variant="secondary" size="sm" onClick={addStage} disabled={!orgId}>
               <Plus width={15} height={15} /> Etapa
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setRolesOpen(true)}
+              disabled={!orgId}
+              title="Definir funções (roles) e os seus membros"
+            >
+              <Building width={15} height={15} />
+              <span className="hidden sm:inline">Funções</span>
+              {roles.length > 0 && <Badge className="ml-0.5">{roles.length}</Badge>}
             </Button>
             <Button
               variant="secondary"
@@ -741,6 +763,7 @@ export default function DucConfig() {
                   stageIdx={selectedIdx}
                   keyErrors={fieldKeyErrors[selectedIdx]}
                   members={members}
+                  roles={roles}
                   handlers={handlers}
                   onClose={() => setSelectedIdx(null)}
                   onDelete={() => setConfirmDelete(selectedIdx)}
@@ -750,6 +773,18 @@ export default function DucConfig() {
           </>
         )}
       </div>
+
+      {rolesOpen && (
+        <RolesManager
+          roles={roles}
+          members={members}
+          onChange={(next) => {
+            setRoles(next);
+            setDirty(true);
+          }}
+          onClose={() => setRolesOpen(false)}
+        />
+      )}
 
       {confirmReset && (
         <ConfirmDialog
@@ -815,4 +850,153 @@ function fieldKeyHasDup(stages: DucStage[]): boolean {
     }
     return false;
   });
+}
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Gestor de funções/roles da organização: define grupos nomeados de membros
+ * (ex.: "Financeiro" = [Ana, Rui]) reutilizáveis como destinatários de
+ * notificação em qualquer etapa. As alterações entram no estado da config e são
+ * persistidas com o "Guardar" (em `config.roles`).
+ */
+function RolesManager({
+  roles,
+  members,
+  onChange,
+  onClose,
+}: {
+  roles: DucRole[];
+  members: OrgMember[];
+  onChange: (roles: DucRole[]) => void;
+  onClose: () => void;
+}) {
+  const memberName = (id: string) => members.find((m) => m.id === id)?.name ?? "Membro";
+  // Índice da função a eliminar, a aguardar confirmação (null = sem diálogo).
+  const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
+
+  const addRole = () => {
+    onChange([
+      ...roles,
+      { key: "role_" + Date.now().toString(36), label: "Nova função", memberIds: [] },
+    ]);
+  };
+  const patchRole = (idx: number, patch: Partial<DucRole>) => {
+    onChange(roles.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
+  };
+  const removeRole = (idx: number) => onChange(roles.filter((_, i) => i !== idx));
+  const toggleMember = (idx: number, memberId: string) => {
+    const role = roles[idx];
+    const has = role.memberIds.includes(memberId);
+    patchRole(idx, {
+      memberIds: has
+        ? role.memberIds.filter((x) => x !== memberId)
+        : [...role.memberIds, memberId],
+    });
+  };
+
+  return (
+    <Modal
+      title="Funções (roles) da organização"
+      size="lg"
+      onClose={onClose}
+      footer={
+        <>
+          <Button variant="secondary" onClick={addRole}>
+            <Plus width={14} height={14} /> Nova função
+          </Button>
+          <Button onClick={onClose}>Concluir</Button>
+        </>
+      }
+    >
+      <p className="mb-4 text-xs text-slate-500">
+        Define grupos de membros reutilizáveis. Depois, em cada etapa, podes escolher uma função
+        como destinatário de notificações — resolve automaticamente para os seus membros. Lembra-te
+        de <span className="font-medium">Guardar</span> a configuração no fim.
+      </p>
+
+      {roles.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-slate-200 px-4 py-8 text-center text-sm text-slate-400">
+          Sem funções definidas. Cria a primeira.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {roles.map((role, idx) => (
+            <div key={role.key} className="rounded-xl border border-slate-200 p-3.5">
+              <div className="mb-3 flex items-center gap-2">
+                <input
+                  type="text"
+                  value={role.label}
+                  onChange={(e) => patchRole(idx, { label: e.target.value })}
+                  placeholder="Nome da função (ex.: Financeiro)"
+                  className="min-w-0 flex-1 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium outline-none focus:border-brand focus:ring-1 focus:ring-brand"
+                />
+                <span className="shrink-0 text-xs text-slate-400">
+                  {role.memberIds.length} {role.memberIds.length === 1 ? "membro" : "membros"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDelete(idx)}
+                  title="Eliminar função"
+                  className="shrink-0 rounded-md p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                >
+                  <Trash width={15} height={15} />
+                </button>
+              </div>
+              {members.length === 0 ? (
+                <p className="text-xs text-slate-400">Sem membros na organização.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {members.map((m) => {
+                    const on = role.memberIds.includes(m.id);
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => toggleMember(idx, m.id)}
+                        className={cx(
+                          "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ring-1 ring-inset transition-colors",
+                          on
+                            ? "bg-brand-50 text-brand-800 ring-brand-100"
+                            : "bg-white text-slate-500 ring-slate-200 hover:bg-slate-50"
+                        )}
+                      >
+                        {on ? <Check width={11} height={11} /> : <Plus width={11} height={11} />}
+                        {memberName(m.id)}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {confirmDelete !== null && (
+        <ConfirmDialog
+          title="Eliminar função"
+          tone="danger"
+          confirmLabel="Eliminar"
+          icon={<Trash width={18} height={18} />}
+          message={
+            <>
+              Eliminar a função{" "}
+              <span className="font-medium text-slate-800">
+                {roles[confirmDelete]?.label || "sem nome"}
+              </span>
+              ? Deixa de estar disponível como destinatário nas etapas. (Só é permanente após
+              Guardar a configuração.)
+            </>
+          }
+          onCancel={() => setConfirmDelete(null)}
+          onConfirm={() => {
+            const idx = confirmDelete;
+            setConfirmDelete(null);
+            removeRole(idx);
+          }}
+        />
+      )}
+    </Modal>
+  );
 }

@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { fetchOrgRoles } from "./ducConfig";
 import type { DucStage, StageNotify } from "./ducSchema";
 
 export interface NotifyContext {
@@ -13,16 +14,33 @@ export interface NotifyContext {
   ducUrl?: string;
 }
 
-/** Resolve os emails dos destinatários (membros → email em anew_users; externos → o próprio). */
-async function resolveRecipientEmails(notify: StageNotify): Promise<string[]> {
+/**
+ * Resolve os emails dos destinatários: externos → o próprio; membros → email em
+ * anew_users; roles → membros da role (config.roles da org) → email. `orgId` é
+ * necessário para expandir roles.
+ */
+async function resolveRecipientEmails(notify: StageNotify, orgId: string): Promise<string[]> {
   const emails = new Set<string>();
-  const memberIds: string[] = [];
+  const memberIds = new Set<string>();
+  const roleKeys: string[] = [];
   for (const r of notify.recipients ?? []) {
     if (r.type === "email") emails.add(r.value);
-    else memberIds.push(r.value);
+    else if (r.type === "role") roleKeys.push(r.value);
+    else memberIds.add(r.value);
   }
-  if (memberIds.length > 0) {
-    const { data } = await supabase.from("anew_users").select("email").in("id", memberIds);
+  // Expande as roles em ids de membros (uma leitura da config da org).
+  if (roleKeys.length > 0) {
+    const roles = await fetchOrgRoles(orgId);
+    for (const key of roleKeys) {
+      const role = roles.find((x) => x.key === key);
+      (role?.memberIds ?? []).forEach((id) => memberIds.add(id));
+    }
+  }
+  if (memberIds.size > 0) {
+    const { data } = await supabase
+      .from("anew_users")
+      .select("email")
+      .in("id", Array.from(memberIds));
     (data ?? []).forEach((u) => {
       if (u.email) emails.add(u.email as string);
     });
@@ -68,6 +86,39 @@ function buildHtml(ctx: NotifyContext): string {
 }
 
 /**
+ * Notifica o RESPONSÁVEL atribuído a uma etapa (assignee) de que é a vez dele —
+ * independentemente dos destinatários/`onEnter` configurados na etapa. Usado
+ * quando a etapa passa a ativa (fecho da anterior) ou ao (re)atribuir a etapa
+ * atual. Best-effort: resolve o email do membro e envia; nunca bloqueia a UI.
+ */
+export async function notifyAssignee(assigneeId: string, ctx: NotifyContext): Promise<void> {
+  if (!assigneeId) return;
+  try {
+    const { data } = await supabase
+      .from("anew_users")
+      .select("email")
+      .eq("id", assigneeId)
+      .maybeSingle();
+    const email = data?.email as string | undefined;
+    if (!email) return;
+
+    const subject = `DUC ${ctx.ducNumber ?? ""} · Etapa ${ctx.stageNo} atribuída a ti`.trim();
+    await supabase.functions.invoke("send-email", {
+      body: {
+        organization_id: ctx.organizationId,
+        to: email,
+        recipients: [email],
+        subject,
+        html: buildHtml({ ...ctx, event: "enter" }),
+      },
+    });
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("[DUC] falha ao notificar responsável da etapa:", e);
+  }
+}
+
+/**
  * Notifica (por email, via `send-email` com o SMTP da organização) os destinatários
  * configurados de uma etapa. Best-effort: nunca lança nem bloqueia a UI.
  * Depende de: função `send-email` publicada + SMTP configurado na organização.
@@ -79,7 +130,7 @@ export async function notifyStage(stage: DucStage, ctx: NotifyContext): Promise<
   if (ctx.event === "close" && !notify.onClose) return;
 
   try {
-    const emails = await resolveRecipientEmails(notify);
+    const emails = await resolveRecipientEmails(notify, ctx.organizationId);
     if (emails.length === 0) return;
 
     const subject =

@@ -23,6 +23,14 @@ export interface TrackingEntry {
   date?: string | null;
   signed_by?: string | null;
   note?: string | null;
+  /**
+   * Responsável atribuído a esta etapa: `anew_users.id` do membro da organização
+   * a quem calha tratar da etapa. Distinto de `signed_by` (quem fechou) e do
+   * rótulo `responsible` do schema (só descritivo). Alimenta "As minhas tarefas".
+   */
+  assigned_to?: string | null;
+  /** Nome do responsável, desnormalizado para leitura direta (ex.: inbox). */
+  assigned_name?: string | null;
 }
 
 /**
@@ -37,6 +45,8 @@ export interface DucRecord {
   organization_id: string;
   root_organization_id: string | null;
   client_id: string | null;
+  /** Proposta comercial aceite de origem (o DUC nasce daqui, antes do contrato). */
+  proposal_id: string | null;
   duc_number: string | null;
   title: string | null;
   variant: DucVariant;
@@ -70,8 +80,10 @@ export interface ClientOption {
   entity_id: string | null;
   name: string;
   assigned_to: string | null;
-  /** Data de referência do contrato (assinatura/criação) — para "dias sem DUC". */
+  /** Data de referência (aceitação da proposta / contrato) — para "dias sem DUC". */
   since?: string | null;
+  /** Proposta comercial aceite de origem (fluxo por proposta). */
+  proposalId?: string | null;
 }
 
 export type AttachmentCategory =

@@ -375,7 +375,13 @@ const ClientContracts = () => {
         .from("client_contracts")
         .select(`*, proposals!client_contracts_proposal_id_fkey ( id, title, quotes(id, total, subtotal, total_fees, deleted_at) )`)
         .in("organization_id", subtreeIds)
-        .is("deleted_at", null);
+        .is("deleted_at", null)
+        // Encomendas Clientes manuais criam um client_contracts assinado por
+        // baixo (ver rpc_create_manual_client_order) só para reaproveitar a
+        // automação de stock/fornecedor — não são contratos de verdade e não
+        // pertencem a este ecrã. client_contracts_list_metrics aplica o mesmo
+        // filtro, para os cartões baterem certo com a lista.
+        .eq("is_manual_order", false);
       if (scopeUserIds !== null) {
         const ids = scopeUserIds.join(",");
         contractsQuery = contractsQuery.or(`created_by.in.(${ids}),assigned_to.in.(${ids})`);

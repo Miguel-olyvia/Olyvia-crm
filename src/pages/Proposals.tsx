@@ -33,6 +33,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
+import { proposalTitleFromTemplate } from "@/lib/proposalTitleFromTemplate";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StickyHorizontalScroll } from "@/components/ui/sticky-horizontal-scroll";
@@ -431,10 +432,15 @@ const Proposals = () => {
     if (!orgId || (!dealId && !entityId)) { setSuggestedQuotes([]); return; }
     let cancelled = false;
     (async () => {
-      let q = supabase
+      // is_internal = false: os orçamentos sintéticos criados pela criação
+      // manual de Encomendas Clientes existem só para suportar as linhas do
+      // contrato — nunca podem ser sugeridos para ligar a uma proposta.
+      // (`supabase as any` porque a coluna ainda não está em types.ts gerado.)
+      let q = (supabase as any)
         .from("quotes")
         .select("id, quote_number, total, estado, deal_id, entity_id")
         .eq("organization_id", orgId)
+        .eq("is_internal", false)
         .is("proposal_id", null)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
@@ -501,11 +507,13 @@ const Proposals = () => {
 
   const loadOpenQuotesForEntity = useCallback(async (entityId: string): Promise<QuoteItem[]> => {
     if (!activeCompany?.id || !entityId) return [];
-    const { data, error } = await supabase
+    const { data, error } = await (supabase as any)
       .from("quotes")
       .select("id, quote_number, total, estado, created_at")
       .eq("organization_id", activeCompany.id)
       .eq("entity_id", entityId)
+      // Ver nota sobre is_internal nos orçamentos sugeridos, acima.
+      .eq("is_internal", false)
       .is("proposal_id", null)
       .is("deleted_at", null)
       .order("created_at", { ascending: false })
@@ -558,10 +566,12 @@ const Proposals = () => {
     const assignedTo = formData.assigned_to;
     const relevanceFilter = assignedTo ? `estado.eq.rascunho,assigned_to.eq.${assignedTo}` : `estado.eq.rascunho`;
 
-    const directPromise = supabase
+    const directPromise = (supabase as any)
       .from("quotes")
       .select("id, quote_number, total, estado, title, created_at")
       .eq("organization_id", orgId)
+      // Ver nota sobre is_internal nos orçamentos sugeridos, acima.
+      .eq("is_internal", false)
       .or(`quote_number.ilike.${like},title.ilike.${like}`)
       .or(relevanceFilter)
       .is("proposal_id", null)
@@ -588,10 +598,12 @@ const Proposals = () => {
 
     let byEntity: any[] = [];
     if (entityIds.length > 0) {
-      const { data: qByEntity, error: entityQuoteError } = await supabase
+      const { data: qByEntity, error: entityQuoteError } = await (supabase as any)
         .from("quotes")
         .select("id, quote_number, total, estado, title, created_at")
         .eq("organization_id", orgId)
+        // Ver nota sobre is_internal nos orçamentos sugeridos, acima.
+        .eq("is_internal", false)
         .in("entity_id", entityIds)
         .or(relevanceFilter)
         .is("proposal_id", null)
@@ -1459,10 +1471,14 @@ const Proposals = () => {
 
     // Fetch quotes and proposal items in parallel — no data dependency between them.
     const [quotesRes, itemsRes] = await Promise.all([
-      supabase
+      (supabase as any)
         .from("quotes")
         .select("id, quote_number, total, estado")
         .eq("proposal_id", proposal.id)
+        // Defesa em profundidade: a RPC de criação manual de Encomendas
+        // Clientes nunca liga o orçamento sintético a uma proposta, mas se
+        // alguma vez ligasse não podia aparecer aqui.
+        .eq("is_internal", false)
         .eq("organization_id", activeCompany?.id),
       supabase
         .from("proposal_items")
@@ -3114,7 +3130,21 @@ const Proposals = () => {
                           <Palette className="h-4 w-4" />
                           Template de Proposta
                         </Label>
-                        <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+                        <Select
+                          value={formData.template_id}
+                          onValueChange={(value) => {
+                            const nextId = value === "none" ? "" : value;
+                            setFormData((prev) => ({
+                              ...prev,
+                              template_id: nextId,
+                              title: proposalTitleFromTemplate(
+                                prev.title,
+                                proposalTemplates.find((t) => t.id === prev.template_id),
+                                proposalTemplates.find((t) => t.id === nextId),
+                              ),
+                            }));
+                          }}
+                        >
                           <SelectTrigger>
                             <SelectValue placeholder="Escolher template" />
                           </SelectTrigger>
@@ -3193,7 +3223,8 @@ const Proposals = () => {
                                         setDealSearchResults([]);
                                         
                                         // Load existing quotes for this deal
-                                        const { data: dealQuotes } = await supabase.from("quotes").select("id, quote_number, total, estado").eq("deal_id", deal.id).eq("organization_id", activeCompany?.id).neq("estado", "rascunho").order("created_at", { ascending: false });
+                                        // is_internal = false: ver nota nos orçamentos sugeridos.
+                                        const { data: dealQuotes } = await (supabase as any).from("quotes").select("id, quote_number, total, estado").eq("deal_id", deal.id).eq("organization_id", activeCompany?.id).eq("is_internal", false).neq("estado", "rascunho").order("created_at", { ascending: false });
                                         if (dealQuotes && dealQuotes.length > 0) {
                                           setSelectedQuotes(dealQuotes.map(q => ({ id: q.id, quote_number: q.quote_number, total: q.total, estado: q.estado })));
                                         } else {

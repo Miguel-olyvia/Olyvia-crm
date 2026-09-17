@@ -11,7 +11,11 @@ import {
   Skeleton,
   cx,
 } from "../components/ui";
-import { Search, Check, AlertTriangle, FileText, Settings } from "../components/icons";
+import { Search, Check, AlertTriangle, FileText, Settings, Bell, X } from "../components/icons";
+import {
+  fetchStageResponsibilities,
+  type DucResponsibility,
+} from "../lib/responsibilities";
 
 /* ------------------------------------------------------------------ Tipos -- */
 
@@ -26,6 +30,9 @@ interface EmailLog {
 
 /** Filtro de estado (chips/segmented). */
 type StatusFilter = "all" | "sent" | "failed";
+
+/** Vista da área: feed de emails enviados, ou mapa de responsabilidades/privilégios. */
+type View = "sent" | "resp";
 
 /** Chave de agrupamento por proximidade temporal. */
 type DayBucket = "today" | "yesterday" | "week" | "older";
@@ -112,11 +119,16 @@ const BUCKET_ORDER: DayBucket[] = ["today", "yesterday", "week", "older"];
 
 export default function Notifications() {
   const { activeOrgId } = useAuth();
+  const [view, setView] = useState<View>("sent");
   const [logs, setLogs] = useState<EmailLog[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  // Vista "Responsabilidades": mapa por etapa (assignee + quem é notificado).
+  const [resp, setResp] = useState<DucResponsibility[] | null>(null);
+  const [respLoading, setRespLoading] = useState(false);
 
   // Recarrega sempre que a organização ativa muda.
   useEffect(() => {
@@ -152,6 +164,23 @@ export default function Notifications() {
       cancelled = true;
     };
   }, [activeOrgId]);
+
+  // Carrega o mapa de responsabilidades quando se entra nessa vista (ou muda a org).
+  useEffect(() => {
+    if (view !== "resp" || !activeOrgId) return;
+    let cancelled = false;
+    setRespLoading(true);
+    setResp(null);
+    void fetchStageResponsibilities(activeOrgId).then((r) => {
+      if (!cancelled) {
+        setResp(r);
+        setRespLoading(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, activeOrgId]);
 
   // Contagens globais (sobre tudo o que foi carregado, ignora filtros).
   const counts = useMemo(() => {
@@ -243,6 +272,16 @@ export default function Notifications() {
         </div>
       </header>
 
+      {/* Separador de vistas: Enviadas (feed) vs Responsabilidades (privilégios) */}
+      <div className="flex gap-1 rounded-xl border border-slate-200 bg-white p-1">
+        <ViewTab active={view === "sent"} onClick={() => setView("sent")} icon={<Bell width={14} height={14} />} label="Enviadas" />
+        <ViewTab active={view === "resp"} onClick={() => setView("resp")} icon={<Settings width={14} height={14} />} label="Responsabilidades" />
+      </div>
+
+      {view === "resp" ? (
+        <ResponsibilitiesView data={resp} loading={respLoading} />
+      ) : (
+      <>
       {/* Barra de filtros: pesquisa + chips de estado */}
       <div className="space-y-3">
         <div className="relative">
@@ -340,6 +379,171 @@ export default function Notifications() {
           </div>
         </div>
       )}
+      </>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------- Vista Responsabilidades -- */
+
+/** Tab do seletor de vistas. */
+function ViewTab({
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cx(
+        "flex flex-1 items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+        active ? "bg-brand text-white shadow-sm" : "text-slate-500 hover:bg-slate-100"
+      )}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+/** Cor/estilo do chip de um destinatário consoante o tipo. */
+const NOTIFY_TONE: Record<"member" | "role" | "email", string> = {
+  member: "bg-brand-50 text-brand-800 ring-brand-100",
+  role: "bg-violet-50 text-violet-700 ring-violet-100",
+  email: "bg-amber-50 text-amber-700 ring-amber-100",
+};
+
+/**
+ * Mapa de responsabilidades por etapa de cada DUC ativo: quem está atribuído
+ * (assignee) e quem é notificado (membros/funções/emails). Só leitura — a
+ * configuração faz-se em /config.
+ */
+function ResponsibilitiesView({
+  data,
+  loading,
+}: {
+  data: DucResponsibility[] | null;
+  loading: boolean;
+}) {
+  if (loading || data === null) return <FeedSkeleton />;
+
+  if (data.length === 0) {
+    return (
+      <Card className="p-6">
+        <EmptyState
+          icon={<FileText width={22} height={22} />}
+          title="Sem DUCs ativos"
+          description="Quando houver DUCs em curso, o mapa de responsabilidades por etapa aparece aqui."
+        />
+      </Card>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50/60 p-3 text-xs text-slate-500">
+        <Settings width={15} height={15} className="mt-0.5 shrink-0 text-brand-700" />
+        <span>
+          Por etapa: <strong className="font-medium text-slate-600">responsável</strong> atribuído e{" "}
+          <strong className="font-medium text-slate-600">quem é notificado</strong> (membros, funções
+          ou emails). Configura em <Link to="/config" className="font-medium text-brand-700 hover:text-brand">Configurações</Link>.
+        </span>
+      </div>
+
+      {data.map((duc) => (
+        <Card key={duc.ducId} className="overflow-hidden p-0">
+          <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/50 px-4 py-3">
+            <Link to={`/duc/${duc.ducId}`} className="min-w-0">
+              <span className="font-mono text-xs text-slate-400">{duc.ducNumber ?? "DUC"}</span>
+              <p className="truncate text-sm font-semibold text-slate-800">
+                {duc.clientName ?? "—"}
+              </p>
+            </Link>
+          </div>
+          <ul className="divide-y divide-slate-50">
+            {duc.stages.map((s) => (
+              <li
+                key={s.stageNo}
+                className={cx(
+                  "flex flex-col gap-2 px-4 py-3 sm:flex-row sm:items-center sm:gap-4",
+                  s.isCurrent && "bg-brand-50/40"
+                )}
+              >
+                {/* Etapa + estado */}
+                <div className="flex min-w-0 items-center gap-2.5 sm:w-64">
+                  <span
+                    className={cx(
+                      "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-xs font-bold tabular-nums ring-1 ring-inset",
+                      s.state === "done"
+                        ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                        : s.state === "skipped"
+                          ? "bg-slate-100 text-slate-400 ring-slate-200"
+                          : s.isCurrent
+                            ? "bg-brand text-white ring-brand"
+                            : "bg-white text-slate-500 ring-slate-200"
+                    )}
+                  >
+                    {s.state === "done" ? (
+                      <Check width={13} height={13} />
+                    ) : s.state === "skipped" ? (
+                      <X width={13} height={13} />
+                    ) : (
+                      s.stageNo
+                    )}
+                  </span>
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-800">{s.title}</p>
+                    <p className="truncate text-[11px] text-slate-400">
+                      {s.responsibleLabel || "—"}
+                      {s.isCurrent && " · atual"}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Responsável atribuído */}
+                <div className="shrink-0 sm:w-44">
+                  {s.assignedName ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800 ring-1 ring-inset ring-brand-100">
+                      {s.assignedName}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-slate-300">sem responsável</span>
+                  )}
+                </div>
+
+                {/* Notificados */}
+                <div className="min-w-0 flex-1">
+                  {s.notified.length === 0 ? (
+                    <span className="text-xs text-slate-300">ninguém notificado</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-1.5">
+                      {s.notified.map((n, i) => (
+                        <span
+                          key={`${n.kind}-${n.label}-${i}`}
+                          className={cx(
+                            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+                            NOTIFY_TONE[n.kind]
+                          )}
+                        >
+                          {n.kind === "role" ? `${n.label} (função)` : n.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ))}
     </div>
   );
 }

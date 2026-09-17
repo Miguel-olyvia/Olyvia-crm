@@ -181,7 +181,7 @@ describe("saveDucConfig", () => {
     const { saveDucConfig } = await import("./ducConfig");
     state.upsertResult = { error: null };
     const stages = baseStages();
-    const err = await saveDucConfig("org-9", stages, "user-1");
+    const err = await saveDucConfig("org-9", stages, [], "user-1");
     expect(err).toBeNull();
     expect(upsert).toHaveBeenCalledTimes(1);
     const [payload, opts] = state.lastUpsertArgs as [
@@ -190,7 +190,7 @@ describe("saveDucConfig", () => {
     ];
     expect(payload).toMatchObject({
       organization_id: "org-9",
-      config: { stages },
+      config: { stages, roles: [] },
       updated_by: "user-1",
     });
     expect(opts).toEqual({ onConflict: "organization_id" });
@@ -198,7 +198,7 @@ describe("saveDucConfig", () => {
 
   it("aceita userId null", async () => {
     const { saveDucConfig } = await import("./ducConfig");
-    await saveDucConfig("org-9", baseStages(), null);
+    await saveDucConfig("org-9", baseStages(), [], null);
     const [payload] = state.lastUpsertArgs as [Record<string, unknown>];
     expect(payload.updated_by).toBeNull();
   });
@@ -206,7 +206,7 @@ describe("saveDucConfig", () => {
   it("devolve a mensagem de erro quando o upsert falha", async () => {
     const { saveDucConfig } = await import("./ducConfig");
     state.upsertResult = { error: { message: "boom" } };
-    const err = await saveDucConfig("org-9", baseStages(), "user-1");
+    const err = await saveDucConfig("org-9", baseStages(), [], "user-1");
     expect(err).toBe("boom");
   });
 });

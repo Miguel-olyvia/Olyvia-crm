@@ -933,7 +933,18 @@ export function AnewLeadContactDialog({
       // Calculate new status based on selected result's workflow
       const selectedResult = getSelectedResult();
       let statusToSet = newStatus || lead.status;
-      if (selectedResult?.workflow_next_status) {
+      // Guard: registar um resultado de contacto negativo (ex: "Não Interessado",
+      // "Número Errado") não deve, por si só, marcar a lead como perdida.
+      // A transição para 'rejected'/'lost' só pode acontecer explicitamente
+      // através do modal "Editar Lead", que exige um lost_reason. Aqui,
+      // workflow_next_status continua a ser aplicado normalmente para
+      // progressões legítimas do pipeline (ex: 'contacted', 'no_answer',
+      // 'callback_scheduled', 'visit_scheduled'), apenas os estados terminais
+      // negativos são ignorados nesta via automática.
+      const isAutoLossTransition =
+        selectedResult?.workflow_next_status === "rejected" ||
+        selectedResult?.workflow_next_status === "lost";
+      if (selectedResult?.workflow_next_status && !isAutoLossTransition) {
         statusToSet = selectedResult.workflow_next_status;
       }
 

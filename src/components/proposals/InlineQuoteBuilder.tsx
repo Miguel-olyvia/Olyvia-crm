@@ -38,6 +38,7 @@ export interface InlineQuoteLine {
   product_id?: string | null;
   service_id?: string | null;
   bundle_id?: string | null;
+  item_supplier_id?: string | null;
   retail_price_unit?: number;
   cost_price?: number;
   selected_attributes?: Record<string, any>;
@@ -208,7 +209,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
     const newLines: InlineQuoteLine[] = [];
     
     selectedItems.forEach((selected) => {
-      const { item, quantity, fullAttributes, attributePriceAddon } = selected;
+      const { item, quantity, fullAttributes, attributePriceAddon, bundleInfo } = selected;
       const basePrice = item.retail_price ?? 0;
       const vatRate = item.vat_rate || DEFAULT_IVA;
       const retailPrice = basePrice + (attributePriceAddon || 0);
@@ -231,7 +232,11 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         section_name: catalogSection,
         descricao_snapshot: item.name,
         qt: quantity,
-        unidade: item.uom_symbol || item.uom_name || "un",
+        // Paridade com QuoteBuilder.tsx:2953: um bundle não tem unidade de medida
+        // própria (os componentes é que têm), por isso fica null em vez de "un".
+        unidade: bundleInfo ? null : (item.uom_symbol || item.uom_name || "un"),
+        // Idem QuoteBuilder.tsx:2686: a descrição do bundle acompanha a linha.
+        item_description: bundleInfo ? (bundleInfo.bundle_description ?? undefined) : undefined,
         custo_material_unit: materialCost,
         custo_mao_obra_unit: 0,
         // O markup passa a ser consequência do custo e do preço, não a origem do preço.
@@ -240,12 +245,29 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         int_percent: 0,
         discount_percent: 0,
         ordem: maxOrdem,
-        product_id: item.type === "product" ? item.id : null,
-        service_id: item.type === "service" ? item.id : null,
+        // O AddItemsDialog devolve um bundle como UMA linha cujo `item.id` é o id
+        // do BUNDLE e cujo `item.type` é, ainda assim, "product"
+        // (AddItemsDialog.tsx:1689). O sinal verdadeiro é `bundleInfo`, que vem
+        // ao lado. Sem esta distinção o id do bundle ia parar a `product_id`:
+        // pelo QuoteBuilder rebentava com quote_lines_product_id_fkey (23503) e
+        // pelo diálogo da proposta a FK era saneada para NULL em silêncio,
+        // perdendo a ligação ao bundle. O orçamento principal já fazia isto
+        // (QuoteBuilder.tsx:2943); este não.
+        product_id: bundleInfo ? null : (item.type === "product" ? item.id : null),
+        service_id: bundleInfo ? null : (item.type === "service" ? item.id : null),
+        bundle_id: bundleInfo ? bundleInfo.bundle_id : null,
         // O preço de venda definido fica SEMPRE na linha e é ele que manda.
         retail_price_unit: retailPrice,
         cost_price: materialCost,
-        selected_attributes: fullAttributes || {},
+        // Paridade com o orçamento normal (QuoteBuilder.tsx:2938): a composição do
+        // bundle viaja em selected_attributes.bundle_components. É daí — e não do
+        // iva_percent da linha, que o AddItemsDialog.tsx:1689 fixa em 23 — que sai
+        // o IVA: getLineBundleComponents (inlineQuoteVatCalculation.ts:32) lê a
+        // chave e reparte por componente, aplicando os 6% da mão de obra. Sem ela,
+        // a instalação era cobrada a 23%.
+        selected_attributes: bundleInfo
+          ? { ...(fullAttributes || {}), bundle_components: bundleInfo.components }
+          : (fullAttributes || {}),
       });
     });
 

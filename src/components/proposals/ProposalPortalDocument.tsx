@@ -12,7 +12,23 @@ import {
 } from "@/components/ui/input-otp";
 import type { ProposalPortalCommercial } from "@/components/proposals/proposalPortalData";
 import { formatCurrency } from "@/lib/utils";
-import { computeQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
+import { computeQuoteTotals, computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
+
+/**
+ * Total c/IVA de uma linha, calculado como o PDF o calcula: num bundle o IVA é
+ * repartido pelos componentes (material a 23%, mão de obra a 6%).
+ *
+ * NÃO usar a coluna `total_com_iva` gravada: até à correção do handleSave ela
+ * foi escrita com o `iva_percent` flat da linha, que o AddItemsDialog fixa em
+ * 23 nos bundles. Somá-la por secção dava secções que não fechavam com o total
+ * do orçamento mostrado logo abaixo (€1.692,31 contra €1.632,88 no Q-2026-1749).
+ * Calcular aqui corrige também os orçamentos já gravados, sem depender de
+ * serem regravados.
+ */
+const lineTotalComIva = (item: any): number => {
+  const base = Number(item?.total_sem_iva) || 0;
+  return base + computeLineVatAmount(item, base);
+};
 
 interface ProposalPortalDocumentProps {
   proposal: any;
@@ -219,7 +235,7 @@ export function ProposalPortalDocument({
       return allSections
         .filter(s => selectedSectionKeys.has(s.key))
         .reduce((sum, s) => {
-          return sum + s.items.reduce((itemSum, item) => itemSum + (item.total_com_iva || 0), 0);
+          return sum + s.items.reduce((itemSum, item) => itemSum + lineTotalComIva(item), 0);
         }, 0);
     }
     return proposal.value;
@@ -277,7 +293,7 @@ export function ProposalPortalDocument({
                       )}
                       {sectionEntries.map(([sectionName, items], sectionIdx) => {
                         const sectionSubtotal = items.reduce((sum, item) => sum + (item.total_sem_iva || 0), 0);
-                        const sectionTotalComIva = items.reduce((sum, item) => sum + (item.total_com_iva || 0), 0);
+                        const sectionTotalComIva = items.reduce((sum, item) => sum + lineTotalComIva(item), 0);
                         const sectionIva = sectionTotalComIva - sectionSubtotal;
                         const sectionKey = `${quote.id}::${sectionName}`;
                         const isSectionSelected = selectedSectionKeys.has(sectionKey);

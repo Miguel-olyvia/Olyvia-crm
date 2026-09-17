@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
-import { requireServiceRole } from "../_shared/auth.ts";
+import { requireServiceRole, getServiceRoleKey } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
 const requestSchema = z.object({
@@ -33,7 +33,7 @@ serve(async (req) => {
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      getServiceRoleKey()
     );
 
     const body = await req.json();
@@ -127,7 +127,7 @@ serve(async (req) => {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+                  "Authorization": `Bearer ${Deno.env.get("CRON_SHARED_SECRET") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
                 },
                 body: JSON.stringify({
                   user_id: triggered_by,
