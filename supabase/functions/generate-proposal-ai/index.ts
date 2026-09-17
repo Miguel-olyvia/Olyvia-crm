@@ -8,6 +8,7 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
 import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
+import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 
 initSentry();
 
@@ -203,6 +204,16 @@ Responde em JSON: { "title": "...", "description": "...", "items": [{"descriptio
 
     const aiResponse = await response.json();
     const content = aiResponse.choices?.[0]?.message?.content || "";
+
+    // Real Google token cost, separate from the flat credit price already
+    // charged above — see _shared/aiUsageLog.ts.
+    await logAiGatewayUsage(
+      supabaseAdmin,
+      organization_id,
+      "generate-proposal-ai",
+      AI_CREDIT_COSTS["generate-proposal-ai"],
+      aiResponse.usage,
+    );
 
     let parsedResponse;
     try {
