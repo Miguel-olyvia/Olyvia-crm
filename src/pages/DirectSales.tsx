@@ -19,6 +19,7 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PermissionGate } from "@/components/PermissionGate";
 import { DirectSaleEditor } from "@/components/directSales/DirectSaleEditor";
+import { InvoiceRegistrationDialog } from "@/components/directSales/InvoiceRegistrationDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
@@ -114,6 +115,9 @@ const DirectSales = () => {
 
   /** Idem, para o documento interno de custo e margem (Fase 6A). */
   const [generatingInternalId, setGeneratingInternalId] = useState<string | null>(null);
+
+  /** Venda cuja fatura se está a registar (Fase 6B); null = diálogo fechado. */
+  const [invoiceSale, setInvoiceSale] = useState<DirectSaleRow | null>(null);
 
   /** Id monotónico do pedido de listagem em curso — ver `loadSales`. */
   const latestRequestIdRef = useRef(0);
@@ -728,6 +732,28 @@ const DirectSales = () => {
                                 : "Documento interno (custos)"}
                             </DropdownMenuItem>
                           )}
+
+                          {/* Registo da fatura (Fase 6B). Só depois de aceite,
+                              porque é essa a regra que a RPC também aplica —
+                              faturar uma venda que ainda pode ser rejeitada não
+                              faz sentido. Atrás de direct_sales.edit: é escrita. */}
+                          {sale.status === "aceite" && (
+                            <PermissionGate permission="direct_sales.edit">
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setInvoiceSale(sale);
+                                }}
+                              >
+                                <Receipt className="mr-2 h-3.5 w-3.5 text-sky-600" />
+                                {sale.invoice_status === "emitida"
+                                  ? "Ver/editar fatura"
+                                  : "Registar fatura"}
+                              </DropdownMenuItem>
+                            </PermissionGate>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -758,6 +784,14 @@ const DirectSales = () => {
         open={editorOpen}
         onOpenChange={setEditorOpen}
         saleId={editingId}
+        onSaved={() => loadSales(0, true)}
+      />
+
+      <InvoiceRegistrationDialog
+        open={invoiceSale !== null}
+        onOpenChange={(next) => { if (!next) setInvoiceSale(null); }}
+        directSaleId={invoiceSale?.id ?? null}
+        saleNumber={invoiceSale?.sale_number ?? null}
         onSaved={() => loadSales(0, true)}
       />
     </>
