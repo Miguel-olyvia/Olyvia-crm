@@ -33,8 +33,52 @@ vi.mock("@/hooks/usePessoas", () => ({
   usePessoas: () => ({ pessoas: [PESSOA_1, PESSOA_2], loading: false }),
 }));
 
+let codigosActuais: unknown[] = [];
 vi.mock("@/hooks/useCodigosProcessamento", () => ({
-  useCodigosProcessamento: () => ({ codigos: [] }),
+  useCodigosProcessamento: () => ({ codigos: codigosActuais }),
+}));
+
+vi.mock("@/contexts/CompanyContext", () => ({
+  useCompany: () => ({ activeCompany: { id: "org-nike" } }),
+}));
+
+let retribuicoesPorPessoa = new Map<string, unknown[]>();
+let retribuicoesRecusado = false;
+vi.mock("@/hooks/useRetribuicoesVigentesDaOrganizacao", async () => {
+  const real = await vi.importActual<
+    typeof import("@/hooks/useRetribuicoesVigentesDaOrganizacao")
+  >("@/hooks/useRetribuicoesVigentesDaOrganizacao");
+  return {
+    ...real,
+    useRetribuicoesVigentesDaOrganizacao: () => ({
+      porPessoa: retribuicoesPorPessoa,
+      loading: false,
+      recusado: retribuicoesRecusado,
+      recarregar: vi.fn(),
+    }),
+  };
+});
+
+let horasPorPessoa = new Map<string, number>();
+vi.mock("@/hooks/useHorasVigentesDaOrganizacao", () => ({
+  useHorasVigentesDaOrganizacao: () => ({
+    porPessoa: horasPorPessoa,
+    loading: false,
+    recusado: false,
+    recarregar: vi.fn(),
+  }),
+}));
+
+vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
+  useRegrasSubsidioAlimentacao: () => ({
+    regra: { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 },
+    temRegraGravada: false,
+    isLoading: false,
+    isFetched: true,
+    error: null,
+    isSaving: false,
+    gravar: vi.fn(),
+  }),
 }));
 
 let periodoActual: unknown = null;
@@ -118,11 +162,19 @@ beforeEach(() => {
   periodoActual = null;
   periodoLoading = false;
   lancamentosActuais = [];
+  codigosActuais = [];
+  retribuicoesPorPessoa = new Map();
+  retribuicoesRecusado = false;
+  horasPorPessoa = new Map();
   abrirMock.mockClear();
   fecharMock.mockClear();
   criarMock.mockClear();
   anularMock.mockClear();
 });
+
+function formatarValorEsperado(valor: number): string {
+  return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(valor);
+}
 
 describe("ProcessamentoVisaoGeralTab", () => {
   it("sem hr.processamento.periodo.view mostra o cartao de sem acesso", () => {
@@ -222,5 +274,110 @@ describe("ProcessamentoVisaoGeralTab", () => {
     fireEvent.click(botaoConfirmar);
 
     await waitFor(() => expect(fecharMock).toHaveBeenCalledTimes(1));
+  });
+
+  it("pessoa com retribuicao e sem codigos automaticos mostra base e total = base", async () => {
+    periodoActual = PERIODO_ABERTO;
+    retribuicoesPorPessoa = new Map([
+      [
+        "pessoa-1",
+        [
+          {
+            pessoa_id: "pessoa-1",
+            valor_base: 1200,
+            periodicidade: "mensal",
+            duodecimos_pct: 0,
+            subsidio_alimentacao: null,
+            valido_de: "2026-01-01",
+            valido_ate: null,
+          },
+        ],
+      ],
+    ]);
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+
+    const linha = screen.getByText("Ana Silva").closest("tr")!;
+    const normalizar = (texto: string) => texto.replace(/\s/g, " ");
+    const valorEsperado = normalizar(formatarValorEsperado(1200));
+    const correspondeAoValor = (_: string, elemento: Element | null) =>
+      normalizar(elemento?.textContent ?? "") === valorEsperado;
+    expect(within(linha).getAllByText(correspondeAoValor)).toHaveLength(2); // salario-base + total bruto estimado
+    expect(within(linha).getByText("mensal")).toBeInTheDocument();
+  });
+
+  it("pessoa sem retribuicao mostra as colunas de salario e total com travessao", async () => {
+    periodoActual = PERIODO_ABERTO;
+    // Nenhuma entrada em retribuicoesPorPessoa para nenhuma das pessoas.
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+
+    const linhaAna = screen.getByText("Ana Silva").closest("tr")!;
+    const linhaBruno = screen.getByText("Bruno Costa").closest("tr")!;
+    expect(within(linhaAna).getAllByText("—")).toHaveLength(2); // salario-base + total
+    expect(within(linhaBruno).getAllByText("—")).toHaveLength(2);
+  });
+
+  it("sem codigos activos automaticos a coluna de codigos aparece vazia", async () => {
+    periodoActual = PERIODO_ABERTO;
+    codigosActuais = [];
+    retribuicoesPorPessoa = new Map([
+      [
+        "pessoa-1",
+        [
+          {
+            pessoa_id: "pessoa-1",
+            valor_base: 1200,
+            periodicidade: "mensal",
+            duodecimos_pct: 0,
+            subsidio_alimentacao: null,
+            valido_de: "2026-01-01",
+            valido_ate: null,
+          },
+        ],
+      ],
+    ]);
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+
+    const linha = screen.getByText("Ana Silva").closest("tr")!;
+    const celulas = within(linha).getAllByRole("cell");
+    // Ordem das colunas: Pessoa, Dias, Falta completa, Falta incompleta, Horas
+    // extra, Salario-base, Codigos aplicados, Total bruto estimado, Accoes.
+    const celulaCodigos = celulas[6];
+    expect(celulaCodigos.textContent).toBe("");
+  });
+
+  it("sem permissao de retribuicao, a coluna de codigos aplicados tambem nao mostra valores (M4)", async () => {
+    periodoActual = PERIODO_ABERTO;
+    retribuicoesRecusado = true;
+    // Um codigo automatico de valor fixo mensal entraria sempre, uma vez por
+    // pessoa -- exactamente o caso que teria "escapado" pelo gate emergente
+    // de processamentoTotais.ts (valor=0) sem esconder a LISTA em si.
+    codigosActuais = [
+      {
+        id: "codigo-1",
+        organization_id: "org-nike",
+        codigo: "100",
+        nome: "Premio fixo",
+        activo: true,
+        modo_calculo: "valor_fixo_mensal",
+        origem_automatica: null,
+        percentagem: null,
+        valor_fixo: 50,
+      },
+    ];
+    render(<ProcessamentoVisaoGeralTab />);
+    await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
+
+    const linha = screen.getByText("Ana Silva").closest("tr")!;
+    // Nao mostra o codigo "100" nem o valor "50,00 €" da lista.
+    expect(within(linha).queryByText(/100/)).not.toBeInTheDocument();
+    expect(within(linha).queryByText(/50,00/)).not.toBeInTheDocument();
+    // A coluna de codigos aparece com a mesma mensagem de sem-permissao usada
+    // na coluna de salario-base (o total bruto estimado usa "—" simples).
+    expect(
+      within(linha).getAllByText("hr.vencimento.visaoGeral.semPermissaoRetribuicao"),
+    ).toHaveLength(2); // salario-base + codigos aplicados
   });
 });

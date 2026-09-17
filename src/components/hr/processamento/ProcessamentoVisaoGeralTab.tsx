@@ -45,10 +45,12 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useCompany } from "@/contexts/CompanyContext";
 import { usePessoas } from "@/hooks/usePessoas";
 import { useCodigosProcessamento } from "@/hooks/useCodigosProcessamento";
 import { useProcessamentoPeriodo } from "@/hooks/useProcessamentoPeriodo";
@@ -56,11 +58,19 @@ import {
   useProcessamentoLancamentos,
   type NovoLancamentoProcessamento,
 } from "@/hooks/useProcessamentoLancamentos";
+import {
+  useRetribuicoesVigentesDaOrganizacao,
+  escolherRetribuicaoVigente,
+  limitesDoMes,
+} from "@/hooks/useRetribuicoesVigentesDaOrganizacao";
+import { useHorasVigentesDaOrganizacao } from "@/hooks/useHorasVigentesDaOrganizacao";
+import { useRegrasSubsidioAlimentacao } from "@/hooks/useRegrasSubsidioAlimentacao";
 import { ResumoPessoaProcessamentoOculto } from "@/components/hr/processamento/ResumoPessoaProcessamentoOculto";
 import type { TotaisRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
+import { calcularProcessamentoPessoa, type ResultadoProcessamentoPessoa } from "@/lib/hr/processamentoTotais";
 import type { HrProcessamentoLancamento } from "@/types/hr";
 import { toast } from "@/lib/toast";
-import { Loader2, Lock, Plus } from "lucide-react";
+import { Loader2, Lock, Plus, TriangleAlert } from "lucide-react";
 
 function mesDeHoje(): string {
   const hoje = new Date();
@@ -76,11 +86,28 @@ function formatarValor(valor: number): string {
   return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(valor);
 }
 
+const PERIODICIDADE_LEGENDA: Record<string, string> = {
+  hora: "hora",
+  diaria: "diária",
+  semanal: "semanal",
+  mensal: "mensal",
+  anual: "anual",
+};
+
+/** Uma linha por codigo aplicado, ex. "100 · 12h · 138,46 €" -- sem as horas quando o modo nao as tem. */
+function formatarLinhaCodigo(linha: { codigo: string; horas: number | null; valor: number }): string {
+  const partes = [linha.codigo];
+  if (linha.horas !== null) partes.push(`${Math.round(linha.horas * 100) / 100}h`);
+  partes.push(formatarValor(linha.valor));
+  return partes.join(" · ");
+}
+
 const FORM_LANCAMENTO_VAZIO = { descricao: "", valor: "", codigoProcessamentoId: "" };
 
 export function ProcessamentoVisaoGeralTab() {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
+  const { activeCompany } = useCompany();
   const { pessoas, loading: pessoasLoading } = usePessoas();
   const { codigos } = useCodigosProcessamento();
 
@@ -96,6 +123,11 @@ export function ProcessamentoVisaoGeralTab() {
   const { periodo } = periodoHook;
   const lancamentosHook = useProcessamentoLancamentos(periodo?.id);
   const { lancamentos } = lancamentosHook;
+
+  const retribuicoesHook = useRetribuicoesVigentesDaOrganizacao(activeCompany?.id, ano, mes);
+  const horasHook = useHorasVigentesDaOrganizacao(activeCompany?.id);
+  const regrasSubsidioHook = useRegrasSubsidioAlimentacao();
+  const { ultimoDia } = useMemo(() => limitesDoMes(ano, mes), [ano, mes]);
 
   const [totaisPorPessoa, setTotaisPorPessoa] = useState<Record<string, TotaisRelatorioMensal>>({});
   const [confirmarFecho, setConfirmarFecho] = useState(false);
@@ -126,6 +158,73 @@ export function ProcessamentoVisaoGeralTab() {
   }, [lancamentos]);
 
   const codigosActivos = useMemo(() => codigos.filter((c) => c.activo), [codigos]);
+
+  interface ResultadoPessoa {
+    resultado: ResultadoProcessamentoPessoa;
+    valorBase: number | null;
+    periodicidade: string | null;
+    mudouAMeioDoMes: boolean;
+  }
+
+  /** `undefined` = totais da assiduidade ainda por carregar para esta pessoa. */
+  const resultadosPorPessoa = useMemo(() => {
+    const mapa = new Map<string, ResultadoPessoa>();
+    for (const pessoa of pessoasActivas) {
+      const totais = totaisPorPessoa[pessoa.id];
+      if (!totais) continue;
+
+      const versoes = retribuicoesHook.porPessoa.get(pessoa.id) ?? [];
+      const { retribuicao, mudouAMeioDoMes } = escolherRetribuicaoVigente(versoes, ultimoDia);
+      const horasSemanaisEquivalentes = horasHook.porPessoa.get(pessoa.id) ?? null;
+      const lancamentosDaPessoa = lancamentosPorPessoa.get(pessoa.id) ?? [];
+
+      const resultado = calcularProcessamentoPessoa({
+        totais: {
+          planeadoMinutos: totais.planeadoMinutos,
+          realizadoMinutos: totais.realizadoMinutos,
+          minutosExtraNormal: totais.minutosExtraNormal,
+          minutosFeriadoTrabalhado: totais.minutosFeriadoTrabalhado,
+          minutosDescansoTrabalhado: totais.minutosDescansoTrabalhado,
+          horasExtraNoturnasMinutos: totais.horasExtraNoturnasMinutos,
+          diasFeriadoTrabalhados: totais.diasFeriadoTrabalhados,
+          // `TotaisRelatorioMensal` nao tem esta contagem ainda -- lacuna
+          // conhecida, documentada no cabecalho de processamentoTotais.ts.
+          diasDescansoTrabalhado: 0,
+        },
+        // TODO: contar dias elegiveis para subsidio quando essa soma existir
+        diasElegiveisSubsidio: 0,
+        retribuicao: retribuicao
+          ? {
+              valorBase: retribuicao.valor_base,
+              periodicidade: retribuicao.periodicidade,
+              duodecimosPct: retribuicao.duodecimos_pct,
+              subsidioAlimentacaoPessoa: retribuicao.subsidio_alimentacao,
+            }
+          : null,
+        horasSemanaisEquivalentes,
+        codigos: codigosActivos,
+        lancamentos: lancamentosDaPessoa,
+        regraSubsidio: { valorDiario: regrasSubsidioHook.regra.valorDiario },
+      });
+
+      mapa.set(pessoa.id, {
+        resultado,
+        valorBase: retribuicao?.valor_base ?? null,
+        periodicidade: retribuicao?.periodicidade ?? null,
+        mudouAMeioDoMes,
+      });
+    }
+    return mapa;
+  }, [
+    pessoasActivas,
+    totaisPorPessoa,
+    retribuicoesHook.porPessoa,
+    horasHook.porPessoa,
+    lancamentosPorPessoa,
+    codigosActivos,
+    regrasSubsidioHook.regra,
+    ultimoDia,
+  ]);
 
   const periodoFechado = periodo?.estado === "fechado";
 
@@ -253,6 +352,7 @@ export function ProcessamentoVisaoGeralTab() {
               <CardTitle className="text-base">{t("hr.vencimento.visaoGeral.resumoTitulo")}</CardTitle>
             </CardHeader>
             <CardContent className="overflow-x-auto p-0">
+              <TooltipProvider>
               <table className="w-full text-sm">
                 <thead className="border-b bg-muted/50 text-left text-xs text-muted-foreground">
                   <tr>
@@ -261,6 +361,9 @@ export function ProcessamentoVisaoGeralTab() {
                     <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaFaltaCompleta")}</th>
                     <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaFaltaIncompleta")}</th>
                     <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaHorasExtra")}</th>
+                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaSalarioBase")}</th>
+                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaCodigosAplicados")}</th>
+                    <th className="px-4 py-2">{t("hr.vencimento.visaoGeral.colunaTotalBrutoEstimado")}</th>
                     <th className="px-4 py-2 text-right">{t("hr.vencimento.visaoGeral.colunaAccoes")}</th>
                   </tr>
                 </thead>
@@ -268,6 +371,8 @@ export function ProcessamentoVisaoGeralTab() {
                   {pessoasActivas.map((pessoa) => {
                     const totais = totaisPorPessoa[pessoa.id];
                     const lancamentosDaPessoa = lancamentosPorPessoa.get(pessoa.id) ?? [];
+                    const resultadoPessoa = resultadosPorPessoa.get(pessoa.id);
+                    const semPermissaoRetribuicao = retribuicoesHook.recusado;
                     return (
                       <tr key={pessoa.id} className="border-b last:border-b-0 align-top">
                         <td className="px-4 py-3 font-medium">{pessoa.nome_completo}</td>
@@ -282,6 +387,65 @@ export function ProcessamentoVisaoGeralTab() {
                         </td>
                         <td className="px-4 py-3 tabular-nums">
                           {totais ? `${horasDeMinutos(totais.horasExtraMinutos)}h` : "-"}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums">
+                          {semPermissaoRetribuicao ? (
+                            <span className="text-muted-foreground" title={t("hr.vencimento.visaoGeral.semPermissaoRetribuicao")}>
+                              {t("hr.vencimento.visaoGeral.semPermissaoRetribuicao")}
+                            </span>
+                          ) : !resultadoPessoa ||
+                            resultadoPessoa.resultado.baseMes === null ||
+                            resultadoPessoa.valorBase === null ? (
+                            "—"
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <div>
+                                <div>{formatarValor(resultadoPessoa.valorBase)}</div>
+                                {resultadoPessoa.periodicidade && (
+                                  <div className="text-xs font-normal text-muted-foreground">
+                                    {PERIODICIDADE_LEGENDA[resultadoPessoa.periodicidade] ?? resultadoPessoa.periodicidade}
+                                  </div>
+                                )}
+                              </div>
+                              {resultadoPessoa.mudouAMeioDoMes && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <TriangleAlert
+                                      className="h-3.5 w-3.5 shrink-0 text-amber-500"
+                                      aria-label={t("hr.vencimento.visaoGeral.avisoRetribuicaoMudouAMeioDoMes")}
+                                    />
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    {t("hr.vencimento.visaoGeral.avisoRetribuicaoMudouAMeioDoMes")}
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {semPermissaoRetribuicao ? (
+                            <span className="text-muted-foreground" title={t("hr.vencimento.visaoGeral.semPermissaoRetribuicao")}>
+                              {t("hr.vencimento.visaoGeral.semPermissaoRetribuicao")}
+                            </span>
+                          ) : resultadoPessoa && resultadoPessoa.resultado.linhasAutomaticas.length > 0 ? (
+                            <ul className="space-y-0.5 text-xs">
+                              {resultadoPessoa.resultado.linhasAutomaticas.map((linha) => (
+                                <li key={linha.codigoId} className="tabular-nums">
+                                  {formatarLinhaCodigo(linha)}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            ""
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right font-semibold tabular-nums">
+                          {semPermissaoRetribuicao
+                            ? "—"
+                            : !resultadoPessoa || resultadoPessoa.resultado.totalBrutoEstimado === null
+                              ? "—"
+                              : formatarValor(resultadoPessoa.resultado.totalBrutoEstimado)}
                         </td>
                         <td className="px-4 py-3 text-right">
                           {podeGerirLancamentos && !periodoFechado && (
@@ -326,6 +490,7 @@ export function ProcessamentoVisaoGeralTab() {
                   })}
                 </tbody>
               </table>
+              </TooltipProvider>
             </CardContent>
           </Card>
         </>

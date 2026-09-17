@@ -162,7 +162,13 @@ export type BusinessFlow =
   // Lancamentos pontuais dentro de um periodo (`hr_processamento_
   // lancamentos`, 20261201230000) -- premios e outros valores pontuais.
   | "hr-processamento-lancamentos-load"
-  | "hr-processamento-lancamentos-write";
+  | "hr-processamento-lancamentos-write"
+  // Retribuicoes/horas de TODA a organizacao, para o resumo de "Processamento
+  // Salarial" (`ProcessamentoVisaoGeralTab`) -- versao "toda a organizacao,
+  // uma query" de `hr-retribuicao-load`/`hr-vinculo-horas-load`. So leitura:
+  // este ecra nunca escreve retribuicao nem horas.
+  | "hr-retribuicoes-vigentes-organizacao-load"
+  | "hr-horas-vigentes-organizacao-load";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually
