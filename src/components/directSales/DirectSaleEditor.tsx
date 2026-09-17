@@ -22,6 +22,7 @@ import { EntitySearchInput, type EntitySearchResult } from "@/components/EntityS
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { resolveEntityCommercial } from "@/utils/entityCommercial";
 import { getLineSubtotal, markupFromCostAndPrice, round2 } from "@/utils/quotes/quoteLinePricing";
 import { cn, formatCurrency } from "@/lib/utils";
 
@@ -511,6 +512,17 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
         if (!updated) throw new Error(t("directSales.toast.updateBlocked"));
       } else {
         const businessUserId = await resolveCurrentBusinessUserId();
+        // Comercial responsável pela venda. O da lead/cliente tem PRIORIDADE
+        // sobre quem cria: quem responde pela venda é o comercial a quem a
+        // entidade estava atribuída, não quem carregou no botão (pode ser um
+        // administrativo a lançar por ele).
+        //
+        // Grava-se agora e não muda depois: se a lead for reatribuída, esta
+        // venda continua do primeiro comercial, porque foi ele que a fez. O
+        // comercial actual da lead é mostrado ao lado, lido ao vivo.
+        const assignedTo = await resolveEntityCommercial(entityId, activeCompany.id)
+          ?? businessUserId;
+
         // `sale_number` NÃO é enviado: é o trigger trigger_set_direct_sale_number
         // que gera o VD-YYYY-NNNN no BEFORE INSERT.
         const { data, error } = await (supabase as any)
@@ -521,6 +533,7 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
             root_organization_id: rootOrgId,
             status: "rascunho",
             created_by: businessUserId,
+            assigned_to: assignedTo,
             subtotal: 0,
             total: 0,
           })

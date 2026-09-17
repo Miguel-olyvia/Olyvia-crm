@@ -1,5 +1,10 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  DIRECT_SALE_AUDIT_TABLES,
+  DIRECT_SALE_EVENT_TYPE,
+  describeDirectSaleHistoryEvent,
+} from "@/lib/directSales/timelineEvents";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
@@ -354,7 +359,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const [lifecycleRes, auditRes] = await Promise.all([
         (supabase as any)
           .from("anew_entity_history")
-          .select("id, change_type, field_name, old_value, new_value, changed_by, created_at")
+          .select("id, change_type, field_name, old_value, new_value, changed_by, created_at, metadata")
           .eq("entity_id", entityId)
           .order("created_at", { ascending: false })
           .limit(100),
@@ -380,11 +385,18 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const lifecycleEvents: TimelineExtraEvent[] = (lifecycleRes.data || []).map((d: any) => {
         const isCreated = d.change_type === "created";
         const isRoleStatus = d.change_type === "role_status_changed" || d.change_type === "status_changed";
-        const type = isCreated ? "conversion" : isRoleStatus ? "status_change" : "field_change";
+        // Marcos da venda direta — sem este ramo caíam em "Editou campo".
+        const directSale = describeDirectSaleHistoryEvent(d.change_type, d.metadata);
+        const type = directSale
+          ? DIRECT_SALE_EVENT_TYPE
+          : isCreated ? "conversion" : isRoleStatus ? "status_change" : "field_change";
 
         let title: string;
         let description: string | null = null;
-        if (isCreated) {
+        if (directSale) {
+          title = directSale.title;
+          description = directSale.description;
+        } else if (isCreated) {
           title = "Entidade criada";
         } else if (isRoleStatus) {
           title = "Estado do ciclo de vida alterado";
@@ -407,6 +419,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const auditEvents: TimelineExtraEvent[] = [];
       for (const row of (auditRes.data || []) as any[]) {
         const actor = row.changed_by ? (userMapLocal[row.changed_by] || null) : null;
+        // A venda direta já tem marcos próprios; o trg_audit_direct_sales
+        // duplicaria o mesmo facto como "Editou status: rascunho → enviada".
+        if (DIRECT_SALE_AUDIT_TABLES.has(row.table_name)) continue;
         if (row.operation === "UPDATE" && row.changed_fields && typeof row.changed_fields === "object") {
           Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
             .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field))

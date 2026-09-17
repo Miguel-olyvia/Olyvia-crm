@@ -21,6 +21,8 @@ export const directSalesTranslations: Record<string, Record<string, string>> = {
 
     'directSales.table.number': 'Number',
     'directSales.table.client': 'Client',
+    'directSales.table.commercial': 'Commercial',
+    'directSales.table.leadNowWith': 'Lead now with: {name}',
     'directSales.table.saleTitle': 'Title',
     'directSales.table.status': 'Status',
     'directSales.table.total': 'Total',
@@ -113,6 +115,8 @@ export const directSalesTranslations: Record<string, Record<string, string>> = {
 
     'directSales.table.number': 'Número',
     'directSales.table.client': 'Cliente',
+    'directSales.table.commercial': 'Comercial',
+    'directSales.table.leadNowWith': 'Lead agora com: {name}',
     'directSales.table.saleTitle': 'Título',
     'directSales.table.status': 'Estado',
     'directSales.table.total': 'Total',

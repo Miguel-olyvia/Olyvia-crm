@@ -28,6 +28,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadBlob, generateProformaPdfBlob } from "@/utils/generateProformaPdfBlob";
 import { generateInternalSalePdfBlob } from "@/utils/generateInternalSalePdfBlob";
+import { resolveEntityCommercials } from "@/utils/entityCommercial";
 import { usePermissions } from "@/hooks/usePermissions";
 import { cn, formatCurrency } from "@/lib/utils";
 
@@ -58,6 +59,15 @@ interface DirectSaleRow {
   total: number | null;
   invoice_status: string | null;
   created_at: string;
+  /**
+   * Comercial responsável pela venda, fotografado na criação a partir do
+   * comercial da lead/cliente. NÃO muda quando a entidade é reatribuída — a
+   * venda é de quem a fez. Resolvido para nome depois da query principal.
+   */
+  assigned_to: string | null;
+  assigned_to_name: string | null;
+  /** Comercial que tem a lead/cliente AGORA. Só se mostra quando difere. */
+  current_commercial_name: string | null;
   /**
    * Número da proforma (PF-YYYY-NNNN), preenchido por trigger na aceitação
    * (20261201150000_venda_direta_proforma_numeracao.sql). NULL enquanto a
@@ -145,7 +155,7 @@ const DirectSales = () => {
     try {
       let query = (supabase as any)
         .from("direct_sales")
-        .select("id, sale_number, entity_id, client_id, title, status, total, invoice_status, created_at, proforma_number, proforma_issued_at")
+        .select("id, sale_number, entity_id, client_id, title, status, total, invoice_status, created_at, proforma_number, proforma_issued_at, assigned_to")
         .eq("organization_id", activeCompany.id)
         .is("deleted_at", null)
         .order("created_at", { ascending: false })
@@ -179,6 +189,23 @@ const DirectSales = () => {
         });
       }
 
+      // Comercial: dois valores diferentes, de propósito.
+      //  · assigned_to  — quem fez a venda, gravado na criação e imutável.
+      //  · comercial actual da lead/cliente — lido ao vivo, só para mostrar ao
+      //    lado quando a entidade foi reatribuída entretanto.
+      // Nenhum dos dois pode impedir a listagem de aparecer, por isso ambos
+      // falham em silêncio.
+      const assignedIds = Array.from(new Set(rows.map((r) => r.assigned_to).filter(Boolean))) as string[];
+      const assignedNameById = new Map<string, string | null>();
+      if (assignedIds.length > 0) {
+        const { data: users } = await (supabase as any)
+          .from("anew_users")
+          .select("id, name")
+          .in("id", assignedIds);
+        ((users || []) as any[]).forEach((u) => assignedNameById.set(u.id, u.name ?? null));
+      }
+      const currentByEntity = await resolveEntityCommercials(entityIds, activeCompany.id);
+
       const mapped: DirectSaleRow[] = rows.map((row) => ({
         id: row.id,
         sale_number: row.sale_number ?? null,
@@ -192,6 +219,15 @@ const DirectSales = () => {
         proforma_number: row.proforma_number ?? null,
         proforma_issued_at: row.proforma_issued_at ?? null,
         client_name: row.entity_id ? nameByEntityId.get(row.entity_id) ?? null : null,
+        assigned_to: row.assigned_to ?? null,
+        assigned_to_name: row.assigned_to ? assignedNameById.get(row.assigned_to) ?? null : null,
+        // Só interessa quando é OUTRA pessoa: se for a mesma, mostrar duas
+        // vezes o mesmo nome só enchia a tabela.
+        current_commercial_name: (() => {
+          const current = row.entity_id ? currentByEntity.get(row.entity_id) : undefined;
+          if (!current || !current.id) return null;
+          return current.id === row.assigned_to ? null : current.name;
+        })(),
       }));
 
       if (requestId !== latestRequestIdRef.current) return;
@@ -561,6 +597,7 @@ const DirectSales = () => {
                 <TableRow>
                   <TableHead>{t("directSales.table.number")}</TableHead>
                   <TableHead>{t("directSales.table.client")}</TableHead>
+                  <TableHead>{t("directSales.table.commercial")}</TableHead>
                   <TableHead>{t("directSales.table.saleTitle")}</TableHead>
                   <TableHead>{t("directSales.table.status")}</TableHead>
                   <TableHead className="text-right">{t("directSales.table.total")}</TableHead>
@@ -578,6 +615,19 @@ const DirectSales = () => {
                   >
                     <TableCell className="font-medium">{sale.sale_number || "—"}</TableCell>
                     <TableCell>{sale.client_name || "—"}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-col">
+                        <span>{sale.assigned_to_name || "—"}</span>
+                        {/* Só aparece quando a lead mudou de mãos depois da
+                            venda: a venda continua do primeiro comercial, e
+                            isto diz com quem falar hoje. */}
+                        {sale.current_commercial_name && (
+                          <span className="text-[11px] text-muted-foreground">
+                            {t("directSales.table.leadNowWith", { name: sale.current_commercial_name })}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
                     <TableCell className="max-w-[260px] truncate">{sale.title || "—"}</TableCell>
                     <TableCell>
                       <Badge
