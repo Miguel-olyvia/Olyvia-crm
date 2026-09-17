@@ -126,6 +126,7 @@ const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
   duodecimos_por_decidir: "hr.vencimento.visaoGeral.avisoDuodecimosPorDecidir",
   duodecimos_50_aproximado: "hr.vencimento.visaoGeral.avisoDuodecimos50Aproximado",
   sem_regra_subsidio: "hr.vencimento.visaoGeral.avisoSemRegraSubsidio",
+  sem_horas_planeadas_no_mes: "hr.vencimento.visaoGeral.avisoSemHorasPlaneadasNoMes",
 };
 
 const FORM_LANCAMENTO_VAZIO = { descricao: "", valor: "", codigoProcessamentoId: "" };
@@ -749,10 +750,10 @@ export function ProcessamentoVisaoGeralTab() {
                         )}
                         <div className="flex justify-between">
                           <span className="text-muted-foreground">
-                            {t("hr.vencimento.visaoGeral.detalheValorHoraNormal")}
+                            {t("hr.vencimento.visaoGeral.detalheValorHoraReal")}
                           </span>
                           <span className="tabular-nums">
-                            {resultado.valorHoraNormal !== null ? formatarValor(resultado.valorHoraNormal) : "—"}
+                            {resultado.valorHoraReal !== null ? formatarValor(resultado.valorHoraReal) : "—"}
                           </span>
                         </div>
                       </div>

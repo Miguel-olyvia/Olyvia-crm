@@ -494,7 +494,7 @@ describe("ProcessamentoVisaoGeralTab", () => {
     fireEvent.click(within(linhaAna).getByText("hr.vencimento.visaoGeral.verDetalhe"));
 
     await screen.findByText("hr.vencimento.visaoGeral.detalheSalarioBase");
-    expect(screen.getByText("hr.vencimento.visaoGeral.detalheValorHoraNormal")).toBeInTheDocument();
+    expect(screen.getByText("hr.vencimento.visaoGeral.detalheValorHoraReal")).toBeInTheDocument();
     expect(screen.getByText("hr.vencimento.visaoGeral.detalheDescontoFaltas")).toBeInTheDocument();
     expect(screen.getByText("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao")).toBeInTheDocument();
     expect(screen.getByText("hr.vencimento.visaoGeral.detalheLancamentosPontuais")).toBeInTheDocument();
@@ -569,7 +569,7 @@ describe("ProcessamentoVisaoGeralTab", () => {
     expect(within(dialogo).getByText("hr.vencimento.visaoGeral.detalheSubsidioAlimentacao")).toBeInTheDocument();
     expect(within(dialogo).getByText("hr.vencimento.visaoGeral.detalheLancamentosPontuais")).toBeInTheDocument();
     expect(within(dialogo).queryByText("hr.vencimento.visaoGeral.detalheSalarioBase")).not.toBeInTheDocument();
-    expect(within(dialogo).queryByText("hr.vencimento.visaoGeral.detalheValorHoraNormal")).not.toBeInTheDocument();
+    expect(within(dialogo).queryByText("hr.vencimento.visaoGeral.detalheValorHoraReal")).not.toBeInTheDocument();
     expect(
       within(dialogo).queryByText("hr.vencimento.visaoGeral.colunaTotalBrutoEstimado"),
     ).not.toBeInTheDocument();

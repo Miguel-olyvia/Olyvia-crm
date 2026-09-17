@@ -65,7 +65,8 @@ export type AvisoProcessamento =
   | "periodicidade_nao_convertivel"
   | "duodecimos_por_decidir"
   | "duodecimos_50_aproximado"
-  | "sem_regra_subsidio";
+  | "sem_regra_subsidio"
+  | "sem_horas_planeadas_no_mes";
 
 export interface LinhaCodigoAplicado {
   codigoId: string;
@@ -78,7 +79,7 @@ export interface LinhaCodigoAplicado {
 }
 
 export interface ResultadoProcessamentoPessoa {
-  valorHoraNormal: number | null;
+  valorHoraReal: number | null;
   baseMes: number | null;
   divisorDuodecimos: number | null;
   linhasAutomaticas: readonly LinhaCodigoAplicado[];
@@ -141,26 +142,24 @@ function calcularRetribuicaoMensal(
 }
 
 /**
- * Valor da hora normal -- `null` se `R` for null ou nao houver horas semanais
- * positivas. Quando falta/e invalido `horasSemanaisEquivalentes`, emite o
- * aviso `sem_horas_semanais` -- independentemente da periodicidade da
- * retribuicao, porque sem ele `valorHoraNormal` fica `null` em silencio e
- * zera o desconto de faltas e os codigos `percentagem_hora_normal`. Quando
- * `retribuicaoMensal` ja e `null` (periodicidade "hora" sem horas semanais,
- * por exemplo), o aviso ja foi emitido por quem calculou `retribuicaoMensal`
- * -- nao duplicar aqui.
+ * Valor da hora REAL -- baseado nas horas efectivamente planeadas do mes a
+ * processar, nao numa media anual. `null` se `baseMes` for `null` ou se nao
+ * houver horas planeadas positivas neste mes (`planeadoMinutos <= 0`), caso
+ * em que emite o aviso `sem_horas_planeadas_no_mes` -- sem esta guarda,
+ * `baseMes / 0` daria `Infinity` e contaminaria todo o resultado
+ * (`totalCodigosAutomaticos`, `totalBrutoEstimado`).
  */
-function calcularValorHoraNormal(
-  retribuicaoMensal: number | null,
-  horasSemanaisEquivalentes: number | null,
+function calcularValorHoraReal(
+  baseMes: number | null,
+  planeadoMinutos: number,
   avisos: AvisoProcessamento[],
 ): number | null {
-  if (retribuicaoMensal === null) return null;
-  if (horasSemanaisEquivalentes === null || horasSemanaisEquivalentes <= 0) {
-    avisos.push("sem_horas_semanais");
+  if (baseMes === null) return null;
+  if (planeadoMinutos <= 0) {
+    avisos.push("sem_horas_planeadas_no_mes");
     return null;
   }
-  return (retribuicaoMensal * 12) / (52 * horasSemanaisEquivalentes);
+  return baseMes / (planeadoMinutos / 60);
 }
 
 /**
@@ -203,7 +202,7 @@ function calcularDivisorDuodecimos(
 function calcularLinhasAutomaticas(
   codigos: readonly HrCodigoProcessamento[],
   totais: EntradaProcessamentoPessoa["totais"],
-  valorHoraNormal: number | null,
+  valorHoraReal: number | null,
 ): LinhaCodigoAplicado[] {
   const linhas: LinhaCodigoAplicado[] = [];
 
@@ -230,7 +229,7 @@ function calcularLinhasAutomaticas(
       const minutos = totais[MINUTOS_POR_ORIGEM[origem]];
       const horas = minutos / 60;
       const percentagem = codigo.percentagem ?? 0;
-      const valor = valorHoraNormal === null ? 0 : horas * valorHoraNormal * (percentagem / 100);
+      const valor = valorHoraReal === null ? 0 : horas * valorHoraReal * (percentagem / 100);
       linhas.push({
         codigoId: codigo.id,
         codigo: codigo.codigo,
@@ -316,11 +315,6 @@ export function calcularProcessamentoPessoa(
     entrada.horasSemanaisEquivalentes,
     avisos,
   );
-  const valorHoraNormal = calcularValorHoraNormal(
-    retribuicaoMensal,
-    entrada.horasSemanaisEquivalentes,
-    avisos,
-  );
   const divisorDuodecimos =
     retribuicaoMensal === null ? null : calcularDivisorDuodecimos(entrada.retribuicao?.duodecimosPct ?? null, avisos);
   const baseMes =
@@ -328,14 +322,16 @@ export function calcularProcessamentoPessoa(
       ? null
       : (retribuicaoMensal * 14) / divisorDuodecimos;
 
-  const linhasAutomaticas = calcularLinhasAutomaticas(entrada.codigos, entrada.totais, valorHoraNormal);
+  const valorHoraReal = calcularValorHoraReal(baseMes, entrada.totais.planeadoMinutos, avisos);
+
+  const linhasAutomaticas = calcularLinhasAutomaticas(entrada.codigos, entrada.totais, valorHoraReal);
   const totalCodigosAutomaticos = linhasAutomaticas.reduce((soma, linha) => soma + linha.valor, 0);
 
   const descontoFaltas =
-    valorHoraNormal === null
+    valorHoraReal === null
       ? 0
       : (Math.max(entrada.totais.planeadoMinutos - entrada.totais.realizadoMinutos, 0) / 60) *
-        valorHoraNormal;
+        valorHoraReal;
 
   const subsidioAlimentacao = calcularSubsidioAlimentacao(
     entrada.retribuicao,
@@ -359,7 +355,7 @@ export function calcularProcessamentoPessoa(
         );
 
   return {
-    valorHoraNormal,
+    valorHoraReal,
     baseMes,
     divisorDuodecimos,
     linhasAutomaticas,

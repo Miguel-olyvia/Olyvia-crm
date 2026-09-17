@@ -22,7 +22,11 @@ function totaisBase(
   overrides: Partial<EntradaProcessamentoPessoa["totais"]> = {},
 ): EntradaProcessamentoPessoa["totais"] {
   return {
-    planeadoMinutos: 0,
+    // 9600 min = 160h -- um mes-tipo, escolhido para dar contas redondas com
+    // a retribuicao de omissao (1300 mensal, duodecimos 100%) dos testes que
+    // nao o sobrescrevem. Os poucos testes que precisam mesmo de 0 (a guarda
+    // de "sem horas planeadas") passam-no explicitamente.
+    planeadoMinutos: 9600,
     realizadoMinutos: 0,
     minutosExtraNormal: 0,
     minutosFeriadoTrabalhado: 0,
@@ -98,45 +102,132 @@ function lancamento(overrides: Partial<HrProcessamentoLancamento> = {}): HrProce
 }
 
 describe("calcularProcessamentoPessoa", () => {
-  describe("valor da hora normal", () => {
-    it("calcula com retribuicao mensal e horas semanais normais", () => {
+  describe("valor da hora real", () => {
+    it("calcula a partir das horas REAIS planeadas do mes, nao de uma media anual", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
           horasSemanaisEquivalentes: 40,
+          totais: totaisBase({ planeadoMinutos: 9600 }), // 160h
         }),
       );
-      // valorHoraNormal = (R*12)/(52*40) = (1300*12)/2080 = 7.5
-      expect(resultado.valorHoraNormal).toBeCloseTo(7.5, 6);
+      // baseMes = (1300*14)/12 = 1516.6666...; valorHoraReal = baseMes/(9600/60)
+      // = 1516.6666.../160 = 9.479166666666668 (valor real produzido pelo teste).
+      expect(resultado.valorHoraReal).toBeCloseTo(9.479166666666668, 6);
     });
 
     it("e null quando falta a retribuicao", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({ retribuicao: null, horasSemanaisEquivalentes: 40 }),
       );
-      expect(resultado.valorHoraNormal).toBeNull();
+      expect(resultado.valorHoraReal).toBeNull();
       expect(resultado.avisos).toContain("sem_retribuicao");
     });
 
-    it("e null quando faltam as horas semanais", () => {
-      const resultado = calcularProcessamentoPessoa(
-        entradaBase({
-          retribuicao: retribuicao({ periodicidade: "mensal" }),
-          horasSemanaisEquivalentes: null,
-        }),
-      );
-      expect(resultado.valorHoraNormal).toBeNull();
+    it("horasSemanaisEquivalentes null ou 0 nao impede o calculo -- so a periodicidade 'hora' depende dela", () => {
+      // Antes da fórmula real, valorHoraNormal dependia de horasSemanaisEquivalentes
+      // para QUALQUER periodicidade. Agora o valor-hora vem de planeadoMinutos, por
+      // isso uma pessoa mensal sem horas semanais registadas calcula normalmente.
+      for (const horasSemanaisEquivalentes of [null, 0] as const) {
+        const resultado = calcularProcessamentoPessoa(
+          entradaBase({
+            retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
+            horasSemanaisEquivalentes,
+            totais: totaisBase({ planeadoMinutos: 9600 }),
+          }),
+        );
+        expect(resultado.valorHoraReal).not.toBeNull();
+        expect(resultado.avisos).not.toContain("sem_horas_semanais");
+      }
     });
 
-    it("periodicidade mensal com horasSemanaisEquivalentes 0 da null com aviso sem_horas_semanais", () => {
+    it("planeadoMinutos <= 0 da valorHoraReal null com aviso, sem contaminar o total com Infinity/NaN", () => {
+      for (const planeadoMinutos of [0, -60]) {
+        const resultado = calcularProcessamentoPessoa(
+          entradaBase({
+            retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
+            horasSemanaisEquivalentes: 40,
+            totais: totaisBase({ planeadoMinutos, realizadoMinutos: 0, minutosExtraNormal: 120 }),
+            regraSubsidio: { valorDiario: 6 },
+            diasElegiveisSubsidio: 10,
+            lancamentos: [lancamento({ id: "l1", valor: 20 })],
+            codigos: [
+              codigo({
+                id: "he",
+                modo_calculo: "percentagem_hora_normal",
+                origem_automatica: "horas_extra",
+                percentagem: 50,
+              }),
+            ],
+          }),
+        );
+        expect(resultado.valorHoraReal).toBeNull();
+        expect(resultado.avisos).toContain("sem_horas_planeadas_no_mes");
+        expect(resultado.descontoFaltas).toBe(0);
+        expect(resultado.linhasAutomaticas[0]?.valor).toBe(0);
+        expect(resultado.totalBrutoEstimado).not.toBeNull();
+        expect(Number.isFinite(resultado.totalBrutoEstimado as number)).toBe(true);
+      }
+    });
+
+    it("retribuicao a zero da valorHoraReal 0, sem Infinity nem NaN em lado nenhum do resultado", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 0, periodicidade: "mensal" }),
+          horasSemanaisEquivalentes: 40,
+          totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9000 }),
+          regraSubsidio: { valorDiario: 6 },
+          diasElegiveisSubsidio: 5,
+        }),
+      );
+      expect(resultado.baseMes).toBe(0);
+      expect(resultado.valorHoraReal).toBe(0);
+      expect(Number.isFinite(resultado.descontoFaltas)).toBe(true);
+      expect(resultado.totalBrutoEstimado).not.toBeNull();
+      expect(Number.isFinite(resultado.totalBrutoEstimado as number)).toBe(true);
+    });
+
+    it("falta parcial e codigo de horas extra usam exactamente o mesmo valorHoraReal -- uma so unidade de hora", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-          horasSemanaisEquivalentes: 0,
+          horasSemanaisEquivalentes: 40,
+          totais: totaisBase({
+            planeadoMinutos: 9600,
+            realizadoMinutos: 9000, // deficit de 600 min = 10h
+            minutosExtraNormal: 120, // 2h extra
+          }),
+          codigos: [
+            codigo({
+              id: "he",
+              modo_calculo: "percentagem_hora_normal",
+              origem_automatica: "horas_extra",
+              percentagem: 100,
+            }),
+          ],
         }),
       );
-      expect(resultado.valorHoraNormal).toBeNull();
-      expect(resultado.avisos).toContain("sem_horas_semanais");
+      expect(resultado.valorHoraReal).not.toBeNull();
+      const deficitHoras = (9600 - 9000) / 60;
+      const horasExtra = 120 / 60;
+      const valorHoraDoDesconto = resultado.descontoFaltas / deficitHoras;
+      const valorHoraDoCodigo = resultado.linhasAutomaticas[0].valor / horasExtra;
+      expect(valorHoraDoDesconto).toBeCloseTo(valorHoraDoCodigo, 6);
+      expect(valorHoraDoDesconto).toBeCloseTo(resultado.valorHoraReal as number, 6);
+    });
+  });
+
+  describe("invariante central -- cumprir o planeado da exactamente a base, seja qual for o tamanho do mes", () => {
+    it.each([9600, 11880])("planeadoMinutos = %i, sem codigos/subsidio/lancamentos", (planeadoMinutos) => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 100 }),
+          horasSemanaisEquivalentes: 40,
+          totais: totaisBase({ planeadoMinutos, realizadoMinutos: planeadoMinutos }),
+        }),
+      );
+      expect(resultado.baseMes).not.toBeNull();
+      expect(resultado.totalBrutoEstimado).toBeCloseTo(resultado.baseMes as number, 6);
     });
   });
 
@@ -272,10 +363,11 @@ describe("calcularProcessamentoPessoa", () => {
         ],
       }),
     );
-    // valorHoraNormal = 7.5; horas = 2; valor = 2 * 7.5 * 0.5 = 7.5
+    // baseMes = (1300*14)/12 = 1516.6666...; valorHoraReal = baseMes/(9600/60)
+    // = 9.479166666666668; horas = 2; valor = 2 * 9.479166666666668 * 0.5.
     expect(resultado.linhasAutomaticas).toHaveLength(1);
-    expect(resultado.linhasAutomaticas[0].valor).toBeCloseTo(7.5, 6);
-    expect(resultado.totalCodigosAutomaticos).toBeCloseTo(7.5, 6);
+    expect(resultado.linhasAutomaticas[0].valor).toBeCloseTo(9.479166666666668, 6);
+    expect(resultado.totalCodigosAutomaticos).toBeCloseTo(9.479166666666668, 6);
   });
 
   it("horas nocturnas empilham com feriado trabalhado -- os dois valores somam ao total", () => {
@@ -307,9 +399,9 @@ describe("calcularProcessamentoPessoa", () => {
     expect(resultado.linhasAutomaticas).toHaveLength(2);
     const valorFeriado = resultado.linhasAutomaticas.find((l) => l.codigoId === "feriado")!.valor;
     const valorNoturno = resultado.linhasAutomaticas.find((l) => l.codigoId === "noturno")!.valor;
-    // valorHoraNormal = 7.5
-    expect(valorFeriado).toBeCloseTo((480 / 60) * 7.5 * 2, 6);
-    expect(valorNoturno).toBeCloseTo((240 / 60) * 7.5 * 0.25, 6);
+    // valorHoraReal = 9.479166666666668 (baseMes 1516.6666.../160h planeadas)
+    expect(valorFeriado).toBeCloseTo((480 / 60) * 9.479166666666668 * 2, 6);
+    expect(valorNoturno).toBeCloseTo((240 / 60) * 9.479166666666668 * 0.25, 6);
     expect(resultado.totalCodigosAutomaticos).toBeCloseTo(valorFeriado + valorNoturno, 6);
   });
 
@@ -376,8 +468,9 @@ describe("calcularProcessamentoPessoa", () => {
           totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9000 }),
         }),
       );
-      // deficit = 600 min = 10h; valorHoraNormal = 7.5 -> desconto = 75
-      expect(resultado.descontoFaltas).toBeCloseTo(75, 6);
+      // deficit = 600 min = 10h; valorHoraReal = 9.479166666666668 (baseMes
+      // 1516.6666.../160h planeadas) -> desconto = 10 * 9.479166666666668.
+      expect(resultado.descontoFaltas).toBeCloseTo(94.79166666666669, 6);
     });
 
     it("mes com excedente da desconto 0", () => {
@@ -465,18 +558,36 @@ describe("calcularProcessamentoPessoa", () => {
     expect(entrada).toEqual(copia);
   });
 
-  it("total bruto estimado nunca fica negativo -- zero dias trabalhados desconta mais do que a base", () => {
+  it("falta o mes inteiro: o desconto fica perto da base e o total perto de subsidio+lancamentos", () => {
+    // Com a formula real, o desconto de faltar TODO o planeado nunca pode
+    // ultrapassar a base -- por construcao, desconto = deficitHoras *
+    // (baseMes / planeadoHoras), e quando deficitHoras == planeadoHoras o
+    // desconto e exactamente baseMes (a menos de arredondamento).
     const resultado = calcularProcessamentoPessoa(
       entradaBase({
-        retribuicao: retribuicao({ valorBase: 200, periodicidade: "mensal", duodecimosPct: 100 }),
-        // Horas semanais baixas -> valorHoraNormal alto (200*12/(52*1) ~ 46.15
-        // €/h), para que o desconto de um mes inteiro sem trabalhar (160h)
-        // ultrapasse largamente a base de ~233.33 €.
-        horasSemanaisEquivalentes: 1,
+        retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 100 }),
+        horasSemanaisEquivalentes: 40,
         totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 0 }),
       }),
     );
-    expect(resultado.descontoFaltas).toBeGreaterThan(resultado.baseMes ?? 0);
+    expect(resultado.baseMes).not.toBeNull();
+    expect(resultado.descontoFaltas).toBeCloseTo(resultado.baseMes as number, 6);
+    expect(resultado.totalBrutoEstimado).toBeCloseTo(
+      resultado.subsidioAlimentacao + resultado.lancamentosPontuais,
+      6,
+    );
+  });
+
+  it("o clamp a zero ainda protege contra um lancamento pontual muito negativo, mesmo sem faltas nenhumas", () => {
+    const resultado = calcularProcessamentoPessoa(
+      entradaBase({
+        retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 100 }),
+        horasSemanaisEquivalentes: 40,
+        totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9600 }), // sem faltas
+        lancamentos: [lancamento({ id: "l1", valor: -5000 })],
+      }),
+    );
+    expect(resultado.descontoFaltas).toBe(0);
     expect(resultado.totalBrutoEstimado).toBe(0);
   });
 
@@ -492,12 +603,12 @@ describe("calcularProcessamentoPessoa", () => {
       }),
     );
 
-    expect(resultado.valorHoraNormal).toBeNull();
+    expect(resultado.valorHoraReal).toBeNull();
     expect(resultado.baseMes).toBeNull();
     expect(resultado.totalBrutoEstimado).toBeNull();
 
     // O que nao depende da retribuicao continua a calcular-se.
-    expect(resultado.descontoFaltas).toBe(0); // valorHoraNormal null -> nunca null-propagar, fica 0
+    expect(resultado.descontoFaltas).toBe(0); // valorHoraReal null -> nunca null-propagar, fica 0
     expect(resultado.subsidioAlimentacao).toBe(120);
     expect(resultado.lancamentosPontuais).toBe(15);
     expect(resultado.avisos).toContain("sem_retribuicao");
