@@ -54,7 +54,6 @@ import LineAttributesDialog from "@/components/LineAttributesDialog";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { BundleEditAttributesDialog } from "@/components/quote/BundleEditAttributesDialog";
 import { InlineProductSelector } from "@/components/quote/InlineProductSelector";
-import { QuoteDiagnosticPhase } from "@/components/quote/QuoteDiagnosticPhase";
 import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-prices";
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { calculateQuoteFees, type LineForFees } from "../../supabase/functions/_shared/calculateQuoteFees";
@@ -245,6 +244,14 @@ interface QuoteLine {
   visible_to_client?: boolean;
   item_supplier_id?: string | null;
   supplier_sku?: string | null;
+  // Origem da linha quando foi importada do Pedido de Proposta.
+  // `source_deal_need_id` (deal_needs.id) é a chave ESTÁVEL e a única usada
+  // para decidir se uma necessidade já foi importada.
+  source_deal_need_id?: string | null;
+  // `source_deal_need_item_id` (deal_need_items.id) é só rastreabilidade:
+  // fn_apply_deal_need faz DELETE+reinsert dos itens a cada gravação da
+  // necessidade, por isso estes ids são voláteis e nunca servem de critério.
+  source_deal_need_item_id?: string | null;
 }
 
 const NEW_QUOTE_DRAFT_VERSION = 1;
@@ -256,18 +263,11 @@ const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
 
 export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null }: QuoteBuilderProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-  // Fluxo "Novo Orçamento": em vez de só mostrar o diagnóstico Fase 1 depois
-  // de gravar e reabrir, cria-se um rascunho silencioso (estado "rascunho",
-  // sem linhas) assim que o ecrã abre, para o diagnóstico poder aparecer já
-  // na primeira renderização. `effectiveQuoteId` é o id "real" a usar em todo
-  // o resto do componente (edição de orçamento existente OU rascunho recém-criado);
-  // `quoteId` cru só se mantém em 3 sítios muito específicos (ver comentários
-  // junto a cada um).
-  const [draftQuoteId, setDraftQuoteId] = useState<string | null>(null);
-  const effectiveQuoteId = quoteId ?? draftQuoteId;
-  const silentDraftCreationRef = useRef(false);
-  const createdBySilentDraftRef = useRef(false);
-  const [silentDraftError, setSilentDraftError] = useState(false);
+  // `effectiveQuoteId` é o id do orçamento a usar em todo o componente: só
+  // existe quando se está a EDITAR um orçamento já gravado. "Novo Orçamento"
+  // abre o editor sem escrever nada na BD (o rascunho silencioso que existia
+  // aqui só servia o diagnóstico Fase 1, que saiu deste ecrã).
+  const effectiveQuoteId: string | null = quoteId ?? null;
   const [clients, setClients] = useState<Client[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -275,13 +275,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [products, setProducts] = useState<ProductCatalogItem[]>([]);
   const [services, setServices] = useState<ProductCatalogItem[]>([]);
   const [lines, setLines] = useState<QuoteLine[]>([]);
-  // Fase 1 (diagnóstico): timestamp lido de quotes.diagnostic_phase1_completed_at
-  // em fetchQuote() — NULL/undefined = fase 1 por concluir (ou orçamento novo,
-  // que nem sequer mostra o ecrã de diagnóstico, ver guarda mais abaixo).
-  const [diagnosticPhase1CompletedAt, setDiagnosticPhase1CompletedAt] = useState<string | null>(null);
-  // Reabre o ecrã de diagnóstico por cima do editor já preenchido, sem apagar
-  // linhas existentes — acionado pelo botão "Rever diagnóstico".
-  const [showDiagnosticReview, setShowDiagnosticReview] = useState(false);
+  // Importação (explícita) dos itens do Pedido de Proposta em curso.
+  const [importingDealItems, setImportingDealItems] = useState(false);
   const [sections, setSections] = useState<string[]>(["Geral"]);
   const [activeSection, setActiveSection] = useState<string>("Geral");
   const [loading, setLoading] = useState(false);
@@ -344,7 +339,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [resolvedQuoteEntityId, setResolvedQuoteEntityId] = useState<string | null>(null);
   const { toast } = useToast();
   const { t } = useTranslation();
-  const { activeCompany, companies: userCompanies, userType: companyUserType, isLoading: isCompanyContextLoading } = useCompany();
+  const { activeCompany, companies: userCompanies, userType: companyUserType } = useCompany();
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
   const { hasPermission } = usePermissions();
   // Ver custos/margens segue a MESMA regra do resto da app (Quotes/Proposals):
@@ -621,49 +616,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     };
     resolveRoot();
   }, [activeCompany?.id]);
-
-  // Cria silenciosamente um rascunho (estado "rascunho", sem linhas) assim que
-  // o ecrã de "Novo Orçamento" abre, para o diagnóstico Fase 1 poder ser
-  // mostrado já na primeira renderização, em vez de só depois de gravar e
-  // reabrir. Nunca corre ao editar um orçamento existente (quoteId já vem
-  // preenchido na prop).
-  useEffect(() => {
-    if (quoteId) return;
-    if (draftQuoteId) return;
-    if (silentDraftCreationRef.current) return;
-    if (isCompanyContextLoading || !activeCompany?.id) return;
-
-    silentDraftCreationRef.current = true;
-    (async () => {
-      try {
-        const businessUserId = await resolveCurrentBusinessUserId();
-        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
-        const { data, error } = await supabase.rpc('rpc_save_quote', {
-          p_quote_id: null as unknown as string,
-          p_quote_data: {
-            organization_id: activeCompany.id,
-            modelo_base: '0',
-            estado: 'rascunho',
-            desconto_global_percent: 0,
-            validade_dias: 30,
-            iva_rate: 23,
-          },
-          p_lines: [],
-          p_fees: [],
-          p_totals: {},
-          p_inline_quotes: [],
-          p_diagnostic_suggestions: [],
-        });
-        if (error) throw error;
-        createdBySilentDraftRef.current = true;
-        setDraftQuoteId((data as any)?.id ?? null);
-      } catch (err) {
-        captureFlowError(err, "quote-lifecycle");
-        silentDraftCreationRef.current = false; // permite nova tentativa
-        setSilentDraftError(true);
-      }
-    })();
-  }, [quoteId, draftQuoteId, activeCompany?.id, isCompanyContextLoading]);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -1848,8 +1800,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       setAssignedToTouched(true);
       
       setQuoteNumber(quote.quote_number || null);
-      setDiagnosticPhase1CompletedAt(quote.diagnostic_phase1_completed_at || null);
-      
+
       // Set selected deal for display with lead info
       if (quote.deals) {
         const dealData = quote.deals as any;
@@ -1963,6 +1914,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           ordem: line.ordem,
           section_name: (line as any).section_name || "Geral",
           visible_to_client: line.visible_to_client ?? true,
+          // Cast local: colunas novas em quote_lines, ainda não presentes nos
+          // tipos gerados (src/integrations/supabase/types.ts será regenerado).
+          // Sem isto, reabrir um orçamento já gravado perderia a marca de
+          // origem e o botão de importar duplicaria as linhas.
+          source_deal_need_id: (line as any).source_deal_need_id || null,
+          source_deal_need_item_id: (line as any).source_deal_need_item_id || null,
         }))
       );
       
@@ -2334,6 +2291,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             // diagnóstico (Fase 1 não cria linhas; só regista sugestões
             // aceites em quote_diagnostic_area_suggestions).
             visible_to_client: line.visible_to_client ?? true,
+            // Marca de origem no Pedido de Proposta. A necessidade
+            // (deal_needs.id) é a chave estável que torna o botão "Importar do
+            // pedido de proposta" idempotente depois de gravar e reabrir; o id
+            // do item é volátil (fn_apply_deal_need recria-os) e fica só como
+            // rastreabilidade.
+            source_deal_need_id: line.source_deal_need_id || null,
+            source_deal_need_item_id: line.source_deal_need_item_id || null,
           };
         });
 
@@ -2963,7 +2927,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     }
   };
 
-  // Load deal items (deal_needs + deal_need_items) and auto-populate quote lines
+  // Importa os itens do Pedido de Proposta (deal_needs + deal_need_items) para
+  // linhas do orçamento. Deixou de correr sozinho ao escolher o pedido: agora é
+  // sempre explícito, pelo botão "Importar do pedido de proposta". Repetir a
+  // importação não duplica linhas — a idempotência é por NECESSIDADE
+  // (deal_needs.id, gravado em quote_lines.source_deal_need_id): uma
+  // necessidade já importada é saltada por inteiro. Comparar item a item não
+  // serviria — fn_apply_deal_need apaga e reinsere todos os deal_need_items a
+  // cada gravação da necessidade, logo esses ids mudam em uso normal.
   const loadDealItems = async (dealId: string) => {
     try {
       // Fetch deal_needs for this deal
@@ -2975,24 +2946,40 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const defaultMargin = 30;
       const defaultInt = 0;
       const newLines: QuoteLine[] = [];
+      // Necessidades que já têm linhas neste orçamento — nunca voltam a ser
+      // importadas. Cobre tanto a sessão atual como um orçamento reaberto
+      // (fetchQuote hidrata source_deal_need_id a partir da BD).
+      const alreadyImportedNeedIds = new Set(
+        lines.map((l) => l.source_deal_need_id).filter(Boolean) as string[]
+      );
+      let skippedNeedsCount = 0;
 
       if (dealNeeds && dealNeeds.length > 0) {
-        const needIds = dealNeeds.map((n: any) => n.id);
+        // Salta as necessidades já importadas antes de ir buscar seja o que
+        // for: nem os itens delas chegam a ser lidos.
+        const pendingNeedIds = dealNeeds
+          .map((n: any) => n.id)
+          .filter((id: string) => !alreadyImportedNeedIds.has(id));
+        skippedNeedsCount = dealNeeds.length - pendingNeedIds.length;
 
         // Fetch deal_need_items
-        const { data: needItems } = await (supabase as any)
-          .from("deal_need_items")
-          .select("*")
-          .in("deal_need_id", needIds)
-          .order("sort_order");
+        const { data: needItems } = pendingNeedIds.length > 0
+          ? await (supabase as any)
+              .from("deal_need_items")
+              .select("*")
+              .in("deal_need_id", pendingNeedIds)
+              .order("sort_order")
+          : { data: [] as any[] };
 
-        if (needItems && needItems.length > 0) {
+        const pendingItems = (needItems || []) as any[];
+
+        if (pendingItems.length > 0) {
           // Fetch only the specific products/services this deal's needs
           // reference — never the whole catalog.
-          const neededProductIds = needItems
+          const neededProductIds = pendingItems
             .filter((i: any) => i.item_type === "product" && i.product_id)
             .map((i: any) => i.product_id);
-          const neededServiceIds = needItems
+          const neededServiceIds = pendingItems
             .filter((i: any) => i.item_type === "service" && i.service_id)
             .map((i: any) => i.service_id);
           const [neededProductsMap, neededServicesMap] = await Promise.all([
@@ -3000,7 +2987,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             fetchServicesByIds(neededServiceIds),
           ]);
 
-          for (const item of needItems) {
+          for (const item of pendingItems) {
             let name = item.notes || "Item";
             let retailPrice = 0;
             let vatRate = 23;
@@ -3063,13 +3050,21 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               discount_percent: 0,
               ordem: 0,
               section_name: "Geral",
+              // Chave estável (decide a idempotência) + id do item só para
+              // rastreabilidade.
+              source_deal_need_id: item.deal_need_id || null,
+              source_deal_need_item_id: item.id,
             });
           }
         }
       }
 
-      // Fallback: if no items were created from deal_need_items, check deal value
-      if (newLines.length === 0) {
+      // Fallback: sem itens no pedido, usa-se o valor do negócio como linha
+      // única. Só corre quando o orçamento ainda está vazio — de outra forma
+      // cada clique no botão acrescentava outra vez a mesma linha (esta não
+      // não vem de nenhuma necessidade, logo não tem source_deal_need_id que
+      // a identifique).
+      if (newLines.length === 0 && skippedNeedsCount === 0 && lines.length === 0) {
         const { data: dealData } = await (supabase as any)
           .from("deals")
           .select("value, title")
@@ -3104,19 +3099,73 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         }
       }
 
-      if (newLines.length > 0) {
-        const updatedLines = [...lines, ...newLines].map((line, idx) => ({
-          ...line,
-          ordem: idx + 1,
-        }));
-        setLines(updatedLines);
+      if (newLines.length === 0) {
         toast({
-          title: "Itens do pedido carregados",
-          description: `${newLines.length} item(ns) adicionado(s) automaticamente ao orçamento.`,
+          title: "Nada para importar",
+          description: skippedNeedsCount > 0
+            ? `As necessidades deste pedido de proposta (${skippedNeedsCount}) já tinham sido importadas.`
+            : "Este pedido de proposta não tem itens para importar.",
         });
+        return 0;
       }
+
+      const updatedLines = [...lines, ...newLines].map((line, idx) => ({
+        ...line,
+        ordem: idx + 1,
+      }));
+      setLines(updatedLines);
+      const importedNeedsCount = new Set(
+        newLines.map((l) => l.source_deal_need_id).filter(Boolean) as string[]
+      ).size;
+      toast({
+        title: "Itens do pedido importados",
+        description: importedNeedsCount > 0
+          ? `${newLines.length} linha(s) importada(s) de ${importedNeedsCount} necessidade(s) do pedido de proposta.`
+          : `${newLines.length} linha(s) importada(s) do pedido de proposta.`,
+      });
+      return newLines.length;
     } catch (err) {
       console.error("Error loading deal items:", err);
+      captureFlowError(err, "quote-lifecycle");
+      toast({
+        title: "Erro ao importar",
+        description: "Não foi possível importar os itens do pedido de proposta.",
+        variant: "destructive",
+      });
+      return 0;
+    }
+  };
+
+  // Congela o diagnóstico do pedido no orçamento (snapshot). Só faz sentido
+  // com o orçamento já gravado — num orçamento novo, o snapshot fica para a
+  // importação seguinte, depois de guardar. Best-effort: nunca rebenta a
+  // importação já concluída.
+  const snapshotQuoteDiagnostic = async (quoteIdForSnapshot: string, dealId: string) => {
+    try {
+      // Cast local: RPC nova, ainda ausente dos tipos gerados
+      // (src/integrations/supabase/types.ts será regenerado).
+      const { error } = await (supabase as any).rpc("rpc_snapshot_quote_diagnostic", {
+        p_quote_id: quoteIdForSnapshot,
+        p_deal_id: dealId,
+      });
+      if (error) throw error;
+    } catch (err) {
+      captureFlowError(err, "quote-lifecycle");
+    }
+  };
+
+  // Handler do botão "Importar do pedido de proposta".
+  const handleImportFromDeal = async () => {
+    const dealId = formData.deal_id;
+    if (!dealId || importingDealItems) return;
+    setImportingDealItems(true);
+    try {
+      const imported = await loadDealItems(dealId);
+      if (imported > 0 && effectiveQuoteId) {
+        await snapshotQuoteDiagnostic(effectiveQuoteId, dealId);
+      }
+    } finally {
+      setImportingDealItems(false);
     }
   };
 
@@ -3407,27 +3456,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     );
   };
 
-  // Fase 1 (diagnóstico): organização do orçamento, no mesmo padrão de
-  // resolução já usado em handleSave (deal > formData > empresa ativa).
-  const diagnosticOrganizationId = formData.organization_id || activeCompany?.id || "";
-
-  // Sair do ecrã de diagnóstico (botão "Voltar") sem ter concluído a Fase 1.
-  // Só descarta o rascunho quando FOI esta instância a criá-lo silenciosamente
-  // nesta sessão (fluxo "Novo Orçamento") — reabrir um orçamento antigo via
-  // "Editar" nunca passa por aqui com createdBySilentDraftRef.current a true,
-  // porque o useEffect de criação silenciosa nem chega a correr quando a prop
-  // quoteId já vem preenchida. Descartar um orçamento real seria um bug grave.
-  const handleExitDiagnosticWithoutCompleting = async () => {
-    if (createdBySilentDraftRef.current && draftQuoteId && !diagnosticPhase1CompletedAt) {
-      try {
-        await supabase.rpc('rpc_discard_draft_quote', { p_quote_id: draftQuoteId });
-      } catch (err) {
-        captureFlowError(err, "quote-lifecycle"); // best-effort — nunca bloqueia a navegação
-      }
-    }
-    onClose();
-  };
-
   // Guard: require active company for non-system-admins
   if (!activeCompany?.id && !isSystemAdmin) {
     return (
@@ -3447,79 +3475,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             </p>
           </CardContent>
         </Card>
-      </div>
-    );
-  }
-
-  // Orçamento novo: cria-se um rascunho silencioso assim que o ecrã abre (ver
-  // useEffect acima) para o diagnóstico Fase 1 poder aparecer já de início.
-  // Enquanto esse rascunho ainda não existe (draftQuoteId), mostra-se um
-  // placeholder de carregamento em vez do formulário normal ou do diagnóstico.
-  if (!quoteId && !draftQuoteId) {
-    // Caso limite: um system admin pode chegar aqui sem `activeCompany.id`
-    // (é o único perfil isento do guard de "sem empresa ativa" acima) — mas
-    // criar um orçamento novo exige sempre saber a organização, por isso a
-    // criação silenciosa nunca dispara nesse caso (nem erro, nem sucesso).
-    // Sem isto, o ecrã ficava preso no spinner para sempre, sem saída.
-    const needsCompanySelection = isSystemAdmin && !activeCompany?.id;
-    return (
-      <div className="flex flex-col items-center justify-center gap-3 py-24 text-sm text-muted-foreground">
-        {needsCompanySelection ? (
-          <p>Seleciona uma empresa ativa antes de criar um orçamento novo.</p>
-        ) : silentDraftError ? (
-          <>
-            <p>Não foi possível preparar o novo orçamento.</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => { setSilentDraftError(false); silentDraftCreationRef.current = false; }}
-            >
-              Tentar novamente
-            </Button>
-          </>
-        ) : (
-          <>
-            <Loader2 className="h-5 w-5 animate-spin" />
-            A preparar novo orçamento…
-          </>
-        )}
-        {/* Nunca deixar o utilizador preso sem saída neste ecrã, seja qual
-            for o motivo (a criar, a falhar, ou à espera de escolher empresa). */}
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
-        </Button>
-      </div>
-    );
-  }
-
-  // Fase 1 (diagnóstico): orçamento já existe (tem effectiveQuoteId) e ou
-  // ainda não concluiu a fase 1, ou o utilizador pediu para a rever ("Rever
-  // diagnóstico" na toolbar) — mostra este ecrã em vez do corpo normal, sem
-  // apagar quote_lines já existentes.
-  if (effectiveQuoteId && (!diagnosticPhase1CompletedAt || showDiagnosticReview)) {
-    return (
-      <div className="container mx-auto py-4 max-w-4xl">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="mb-2"
-          onClick={
-            showDiagnosticReview
-              ? () => setShowDiagnosticReview(false)
-              : handleExitDiagnosticWithoutCompleting
-          }
-          aria-label="Voltar"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <QuoteDiagnosticPhase
-          quoteId={effectiveQuoteId}
-          organizationId={diagnosticOrganizationId}
-          onPhase1Complete={() => {
-            setDiagnosticPhase1CompletedAt(new Date().toISOString());
-            setShowDiagnosticReview(false);
-          }}
-        />
       </div>
     );
   }
@@ -3551,13 +3506,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           })()}
         </div>
         <div className="flex items-center gap-2">
-
-          {effectiveQuoteId && diagnosticPhase1CompletedAt && (
-            <Button variant="outline" size="sm" onClick={() => setShowDiagnosticReview(true)}>
-              Rever diagnóstico
-            </Button>
-          )}
-
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -3693,7 +3641,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                 }
                                 if (!inherited) inherited = r.assignedTo || null;
                                 setFormData(prev => ({ ...prev, deal_id: r.id, organization_id: r.organizationId || "", cliente_id: r.dealClientId || "", title: prev.title || r.name || "", assigned_to: assignedToTouched ? prev.assigned_to : (inherited ?? prev.assigned_to) }));
-                                if (lines.length === 0) loadDealItems(r.id);
+                                // Os itens do pedido já não entram sozinhos: a
+                                // importação passou a ser pelo botão
+                                // "Importar do pedido de proposta" logo abaixo.
                               } else {
                                 setSelectedSource({ kind: r.kind, id: r.id, name: r.name, entity_id: r.entityId, organization_id: r.organizationId });
                                 setSelectedDeal(null);
@@ -3742,6 +3692,31 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                     )}
                     <p className="text-xs text-muted-foreground mt-1">Escreva pelo menos 2 caracteres para pesquisar pedidos</p>
                     {fieldErrors.deal_id && <p className="text-sm text-destructive">{fieldErrors.deal_id}</p>}
+                  </div>
+                )}
+                {/* Importação explícita dos itens do pedido. Antes acontecia
+                    sozinha ao escolher o pedido (e só com o orçamento vazio);
+                    agora é sempre o utilizador a decidir, e pode repetir sem
+                    duplicar linhas já importadas. */}
+                {formData.deal_id && (
+                  <div className="space-y-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleImportFromDeal}
+                      disabled={importingDealItems}
+                    >
+                      {importingDealItems ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <FileDown className="w-4 h-4 mr-1" />
+                      )}
+                      {importingDealItems ? "A importar…" : "Importar do pedido de proposta"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Acrescenta os itens do pedido ao orçamento. Necessidades já importadas não voltam a ser adicionadas.
+                    </p>
                   </div>
                 )}
               </div>

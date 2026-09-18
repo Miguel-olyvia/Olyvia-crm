@@ -25,6 +25,12 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import {
+  DealNeedDiagnostic,
+  type DealNeedDiagnosticMaterial,
+  type DealNeedDiagnosticService,
+  type DealNeedDiagnosticAcceptedService,
+} from "@/components/deals/DealNeedDiagnostic";
 import { withAuditContext } from "@/utils/auditContext";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
@@ -320,6 +326,27 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   // Checklist state (from template)
   const [formChecklist, setFormChecklist] = useState<{ text: string; checked: boolean; value?: string }[]>([]);
 
+  // ─── Diagnóstico (aba nova) ─────────────────────────────
+  // Uma necessidade = uma área de diagnóstico. Os 6 campos abaixo viajam no
+  // payload da RPC para as colunas diag_* de deal_needs.
+  const [formDiagAreaM2, setFormDiagAreaM2] = useState("");
+  const [formDiagDemolirDescricao, setFormDiagDemolirDescricao] = useState("");
+  const [formDiagDemolirM2, setFormDiagDemolirM2] = useState("");
+  const [formDiagProtegerDescricao, setFormDiagProtegerDescricao] = useState("");
+  const [formDiagIntervencaoTipo, setFormDiagIntervencaoTipo] = useState("");
+  const [formDiagIntervencaoDescricao, setFormDiagIntervencaoDescricao] = useState("");
+  // Materiais da ficha técnica: SÓ informativos para o armazém. Não entram em
+  // linkedItems nem somam ao valor da necessidade — persistidos à parte, em
+  // deal_need_diagnostic_materials, depois da gravação da necessidade.
+  const [formDiagMaterials, setFormDiagMaterials] = useState<DealNeedDiagnosticMaterial[]>([]);
+  // Evita que uma hidratação assíncrona lenta de uma necessidade pise a
+  // seguinte quando o utilizador abre dois diálogos em sequência rápida.
+  const diagLoadTokenRef = useRef<string | null>(null);
+  // true quando a lista de materiais em memória reflete de facto o que está na
+  // BD (criação, ou leitura bem sucedida numa edição). Só nesse caso a
+  // gravação pode apagar-e-reinserir sem risco de destruir linhas existentes.
+  const diagMaterialsLoadedRef = useRef(false);
+
   // Item linking state
   const [linkedItems, setLinkedItems] = useState<DealNeedItem[]>([]);
   const [itemPickerOpen, setItemPickerOpen] = useState(false);
@@ -456,6 +483,12 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     setFormTemplateId(null); setFormFieldValues({}); setFormMeasurements({});
     setLinkedItems([]); setFormChecklist([]);
     setFieldErrors({});
+    // Diagnóstico
+    diagLoadTokenRef.current = null;
+    diagMaterialsLoadedRef.current = true; // criação: não há nada na BD para perder
+    setFormDiagAreaM2(""); setFormDiagDemolirDescricao(""); setFormDiagDemolirM2("");
+    setFormDiagProtegerDescricao(""); setFormDiagIntervencaoTipo(""); setFormDiagIntervencaoDescricao("");
+    setFormDiagMaterials([]);
     updateTabVisibility(null);
   };
 
@@ -518,8 +551,115 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     updateTabVisibility(need.template_id);
     setLinkedItems(needItems[need.id] || []);
     setFormChecklist(need.checklist || []);
+
+    // Diagnóstico: limpa e hidrata em segundo plano (best effort — ver
+    // loadDiagnosticForNeed). openEditDialog não passa por resetForm.
+    setFormDiagAreaM2(""); setFormDiagDemolirDescricao(""); setFormDiagDemolirM2("");
+    setFormDiagProtegerDescricao(""); setFormDiagIntervencaoTipo(""); setFormDiagIntervencaoDescricao("");
+    setFormDiagMaterials([]);
+    diagLoadTokenRef.current = need.id;
+    diagMaterialsLoadedRef.current = false;
+    void loadDiagnosticForNeed(need.id);
+
     setDialogOpen(true);
   };
+
+  // ─── Diagnóstico: hidratação ────────────────────────────
+  // As colunas diag_* e a tabela deal_need_diagnostic_materials são novas e
+  // ainda não estão no types.ts gerado — daí os casts locais. Toda a leitura é
+  // best effort: se a migração ainda não estiver aplicada, a aba abre vazia e
+  // o resto do diálogo continua a funcionar exatamente como antes.
+  const loadDiagnosticForNeed = async (needId: string) => {
+    try {
+      const { data, error } = await (supabase as any)
+        .from("deal_needs")
+        .select("diag_area_m2, diag_demolir_descricao, diag_demolir_m2, diag_proteger_descricao, diag_intervencao_tipo, diag_intervencao_descricao")
+        .eq("id", needId)
+        .maybeSingle();
+      if (error) throw error;
+      if (data && diagLoadTokenRef.current === needId) {
+        setFormDiagAreaM2(data.diag_area_m2 != null ? String(data.diag_area_m2) : "");
+        setFormDiagDemolirDescricao(data.diag_demolir_descricao || "");
+        setFormDiagDemolirM2(data.diag_demolir_m2 != null ? String(data.diag_demolir_m2) : "");
+        setFormDiagProtegerDescricao(data.diag_proteger_descricao || "");
+        setFormDiagIntervencaoTipo(data.diag_intervencao_tipo || "");
+        setFormDiagIntervencaoDescricao(data.diag_intervencao_descricao || "");
+      }
+    } catch (err) {
+      captureFlowError(err, "deal-lifecycle");
+    }
+
+    try {
+      const { data, error } = await (supabase as any)
+        .from("deal_need_diagnostic_materials")
+        .select("id, service_id, product_id, descricao, quantity, unidade, sort_order")
+        .eq("deal_need_id", needId)
+        .order("sort_order");
+      if (error) throw error;
+      if (diagLoadTokenRef.current === needId) {
+        diagMaterialsLoadedRef.current = true;
+        setFormDiagMaterials(((data as any[]) || []).map(m => ({
+          id: m.id,
+          service_id: m.service_id ?? null,
+          product_id: m.product_id ?? null,
+          descricao: m.descricao || "",
+          quantity: Number(m.quantity) || 0,
+          unidade: m.unidade ?? null,
+        })));
+      }
+    } catch (err) {
+      captureFlowError(err, "deal-lifecycle");
+    }
+  };
+
+  // Serviço aceite no picker do diagnóstico: entra em linkedItems (aba Itens) —
+  // é isso que o faz viajar para o orçamento pela importação já existente. Os
+  // materiais da ficha técnica ficam à parte, só informativos.
+  const handleDiagnosticServiceAccepted = (accepted: DealNeedDiagnosticAcceptedService) => {
+    setLinkedItems(prev => {
+      const existingIdx = prev.findIndex(li => li.service_id === accepted.service_id);
+      if (existingIdx >= 0) {
+        return prev.map((li, i) => i === existingIdx ? { ...li, quantity: accepted.quantity } : li);
+      }
+      return [...prev, {
+        id: `temp-${Date.now()}`,
+        deal_need_id: editingNeed?.id || "",
+        product_id: null,
+        service_id: accepted.service_id,
+        item_type: 'service',
+        quantity: accepted.quantity,
+        notes: null,
+        service_name: accepted.name,
+        unit_price: accepted.price,
+      }];
+    });
+
+    setFormDiagMaterials(prev => {
+      // Substitui os materiais anteriores deste serviço (nova área -> novas
+      // quantidades) e acrescenta os novos.
+      const kept = prev.filter(m => m.service_id !== accepted.service_id);
+      return [...kept, ...accepted.materials];
+    });
+  };
+
+  const handleDiagnosticRemoveService = (serviceId: string) => {
+    setLinkedItems(prev => prev.filter(li => li.service_id !== serviceId));
+    setFormDiagMaterials(prev => prev.filter(m => m.service_id !== serviceId));
+  };
+
+  const handleDiagnosticRemoveMaterial = (materialId: string) => {
+    setFormDiagMaterials(prev => prev.filter(m => m.id !== materialId));
+  };
+
+  // Lista de serviços já aceites, derivada de linkedItems (fonte única).
+  const diagnosticServices: DealNeedDiagnosticService[] = linkedItems
+    .filter(li => li.item_type === 'service' && li.service_id)
+    .map((li, idx) => ({
+      key: li.id || `svc-${idx}`,
+      service_id: li.service_id as string,
+      name: li.service_name || "Serviço",
+      quantity: li.quantity,
+    }));
 
   // ─── Item search ────────────────────────────────────────
   const searchItems = useCallback(async (query: string) => {
@@ -596,6 +736,53 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   const unlinkItem = (index: number) => setLinkedItems(prev => prev.filter((_, i) => i !== index));
   const updateItemQuantity = (index: number, qty: number) => setLinkedItems(prev => prev.map((item, i) => i === index ? { ...item, quantity: Math.max(1, qty) } : item));
 
+  // ─── Diagnóstico: gravação dos materiais ────────────────
+  // Apaga-e-reinsere a lista completa de deal_need_diagnostic_materials da
+  // necessidade, à imagem do que fn_apply_deal_need já faz com os itens.
+  // Best effort por desenho: a necessidade já foi gravada com sucesso neste
+  // ponto, e estes materiais são apenas informativos para o armazém — uma
+  // falha aqui (ex.: migração ainda não aplicada) avisa, mas nunca faz a
+  // gravação da necessidade parecer falhada.
+  const syncDiagnosticMaterials = async (needId: string | null, businessUserId: string) => {
+    if (!needId || !organizationId) return;
+    if (!diagMaterialsLoadedRef.current && formDiagMaterials.length === 0) return;
+    try {
+      await withAuditContext(supabase, businessUserId, async () => {
+        // cast local: tabela nova, ainda fora do types.ts gerado.
+        const client = supabase as any;
+        const { error: delError } = await client
+          .from("deal_need_diagnostic_materials")
+          .delete()
+          .eq("deal_need_id", needId);
+        if (delError) throw delError;
+
+        if (formDiagMaterials.length > 0) {
+          const rows = formDiagMaterials.map((m, idx) => ({
+            organization_id: organizationId,
+            deal_need_id: needId,
+            service_id: m.service_id,
+            product_id: m.product_id,
+            descricao: m.descricao,
+            quantity: m.quantity,
+            unidade: m.unidade,
+            sort_order: idx,
+            created_by: businessUserId,
+          }));
+          const { error: insError } = await client.from("deal_need_diagnostic_materials").insert(rows);
+          if (insError) throw insError;
+        }
+        return null;
+      });
+    } catch (err: any) {
+      captureFlowError(err, "deal-lifecycle");
+      toast({
+        title: "Materiais do diagnóstico não gravados",
+        description: err?.message || "A necessidade foi gravada, mas os materiais da ficha técnica não.",
+        variant: "destructive",
+      });
+    }
+  };
+
   // ─── Submit ─────────────────────────────────────────────
   const handleSubmit = async () => {
     const validation = dealNeedSchema.safeParse({
@@ -650,6 +837,15 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         category_name: editingNeed?.category_name || null,
         technical_notes: editingNeed?.technical_notes || null,
         measurements: editingNeed?.measurements || {},
+        // ─── Diagnóstico (colunas diag_* de deal_needs) ───
+        // Chaves extra no payload jsonb são ignoradas pela função caso a
+        // migração ainda não esteja aplicada — não alteram o comportamento atual.
+        diag_area_m2: formDiagAreaM2.trim() === "" ? null : parseFloat(formDiagAreaM2),
+        diag_demolir_descricao: formDiagDemolirDescricao.trim() || null,
+        diag_demolir_m2: formDiagDemolirM2.trim() === "" ? null : parseFloat(formDiagDemolirM2),
+        diag_proteger_descricao: formDiagProtegerDescricao.trim() || null,
+        diag_intervencao_tipo: formDiagIntervencaoTipo.trim() || null,
+        diag_intervencao_descricao: formDiagIntervencaoDescricao.trim() || null,
       };
 
       const itemsPayload = linkedItems.map((li, idx) => ({
@@ -659,7 +855,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
 
       // p_update_need_columns=true: this dialog edits the deal_needs fields themselves
       // (title, priority, custom fields, etc.), unlike the items-only path in Deals.tsx.
-      const { error } = await supabase.rpc("rpc_update_deal_needs", {
+      const { data: savedNeed, error } = await supabase.rpc("rpc_update_deal_needs", {
         p_deal_id: dealId,
         p_need_id: editingNeed?.id || null,
         p_need_data: { ...needData, sort_order: editingNeed ? undefined : needs.length },
@@ -667,6 +863,10 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         p_update_need_columns: true,
       });
       if (error) throw error;
+
+      // Materiais da ficha técnica (só informativos para o armazém) — gravados
+      // depois da necessidade, porque numa criação o id só existe aqui.
+      await syncDiagnosticMaterials((savedNeed as any)?.id || editingNeed?.id || null, businessUserId);
 
       toast({ title: editingNeed ? "Necessidade atualizada" : "Necessidade adicionada" });
       setDialogOpen(false);
@@ -872,8 +1072,14 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     }
   };
 
-  // Count visible tabs
-  const tabCount = 1 + (showCustomFields ? 1 : 0) + (showMeasurements ? 1 : 0) + (showItems ? 1 : 0);
+  // Count visible tabs (Detalhes + Diagnóstico são sempre visíveis)
+  const tabCount = 2 + (showCustomFields ? 1 : 0) + (showMeasurements ? 1 : 0) + (showItems ? 1 : 0);
+  // `grid-cols-${tabCount}` é uma string dinâmica que o JIT do Tailwind não
+  // consegue extrair — mapa explícito para as classes existirem no bundle.
+  const TAB_GRID_COLS: Record<number, string> = {
+    1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4", 5: "grid-cols-5",
+  };
+  const tabGridColsClass = TAB_GRID_COLS[tabCount] || "grid-cols-2";
 
   // ─── LOADING ────────────────────────────────────────────
   if (loading) {
@@ -1176,9 +1382,15 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
 
           <Tabs defaultValue="details" className="flex-1 flex flex-col min-h-0">
             <div className="px-6 pt-3">
-              <TabsList className={cn("grid w-full h-9", `grid-cols-${tabCount}`)}>
+              <TabsList className={cn("grid w-full h-9", tabGridColsClass)}>
                 <TabsTrigger value="details" className="text-xs gap-1.5">
                   <FileText className="h-3.5 w-3.5" /> Detalhes
+                </TabsTrigger>
+                <TabsTrigger value="diagnostic" className="text-xs gap-1.5">
+                  <Stethoscope className="h-3.5 w-3.5" /> Diagnóstico
+                  {formDiagMaterials.length > 0 && (
+                    <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4 min-w-4 flex items-center justify-center">{formDiagMaterials.length}</Badge>
+                  )}
                 </TabsTrigger>
                 {showCustomFields && (
                   <TabsTrigger value="custom" className="text-xs gap-1.5">
@@ -1334,6 +1546,31 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
                     </div>
                   </>
                 )}
+              </TabsContent>
+
+              {/* ─── Tab: Diagnóstico ─── */}
+              <TabsContent value="diagnostic" className="mt-0">
+                <DealNeedDiagnostic
+                  organizationId={organizationId}
+                  readOnly={readOnly}
+                  areaM2={formDiagAreaM2}
+                  onAreaM2Change={setFormDiagAreaM2}
+                  demolirDescricao={formDiagDemolirDescricao}
+                  onDemolirDescricaoChange={setFormDiagDemolirDescricao}
+                  demolirM2={formDiagDemolirM2}
+                  onDemolirM2Change={setFormDiagDemolirM2}
+                  protegerDescricao={formDiagProtegerDescricao}
+                  onProtegerDescricaoChange={setFormDiagProtegerDescricao}
+                  intervencaoTipo={formDiagIntervencaoTipo}
+                  onIntervencaoTipoChange={setFormDiagIntervencaoTipo}
+                  intervencaoDescricao={formDiagIntervencaoDescricao}
+                  onIntervencaoDescricaoChange={setFormDiagIntervencaoDescricao}
+                  services={diagnosticServices}
+                  onServiceAccepted={handleDiagnosticServiceAccepted}
+                  onRemoveService={handleDiagnosticRemoveService}
+                  materials={formDiagMaterials}
+                  onRemoveMaterial={handleDiagnosticRemoveMaterial}
+                />
               </TabsContent>
 
               {/* ─── Tab: Custom Fields ─── */}

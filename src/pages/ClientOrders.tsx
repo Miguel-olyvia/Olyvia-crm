@@ -124,6 +124,39 @@ interface DirectSaleOrigin {
   proforma_number: string | null;
 }
 
+// Diagnóstico da obra (Fase 1): cópia congelada gravada do lado da BD quando o
+// contrato é assinado, para o armazém saber o que vai ser executado. Tal como
+// `available_warehouses`, chega dentro do jsonb de
+// `rpc_get_client_order_document` — e como `supabase gen types` gera sempre
+// `Returns: Json` (opaco) para essa RPC, a tipagem tem de ser manual aqui e
+// validada defensivamente em `normalizeDiagnosticNeeds`. Não é um `as any`
+// temporário nem se edita types.ts por causa disto.
+//
+// Um material é informativo: é o que o diagnóstico previu, não é linha da
+// encomenda — não tem preço nem soma ao total.
+interface ClientOrderDiagnosticMaterial {
+  descricao: string | null;
+  quantity: number;
+  unidade: string | null;
+  product_id: string | null;
+  service_id: string | null;
+}
+
+// Um elemento por necessidade da obra. Encomendas de venda direta e encomendas
+// manuais nunca têm diagnóstico: a RPC devolve `[]` e não se mostra nada — é o
+// comportamento correto, não é erro.
+interface ClientOrderDiagnosticNeed {
+  deal_need_id: string;
+  need_title: string | null;
+  diag_area_m2: number | null;
+  diag_demolir_descricao: string | null;
+  diag_demolir_m2: number | null;
+  diag_proteger_descricao: string | null;
+  diag_intervencao_tipo: string | null;
+  diag_intervencao_descricao: string | null;
+  materials: ClientOrderDiagnosticMaterial[];
+}
+
 interface ClientOrderDocumentDetail {
   contract_id: string;
   contract_number: string;
@@ -132,7 +165,59 @@ interface ClientOrderDocumentDetail {
   total_value: number | null;
   status: string;
   lines: ClientOrderDocumentLine[];
+  // Opcional de propósito: a chave só passa a existir depois de a migração da
+  // RPC estar aplicada, e `fetchDetail` normaliza sempre para array.
+  diagnostic?: ClientOrderDiagnosticNeed[];
 }
+
+// --- Normalização defensiva do bloco `diagnostic` -------------------------
+// O jsonb da RPC não é validado pelo TypeScript: qualquer campo pode vir em
+// falta, a null, ou (no caso dos numéricos do Postgres) como string. Estas
+// funções garantem que o diálogo só lê a forma que declarámos acima.
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const asOptionalText = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+
+const asOptionalNumber = (value: unknown): number | null => {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim() !== ''
+      ? Number(value)
+      : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeDiagnosticMaterials = (raw: unknown): ClientOrderDiagnosticMaterial[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isPlainRecord).map((material) => ({
+    descricao: asOptionalText(material.descricao),
+    quantity: asOptionalNumber(material.quantity) ?? 0,
+    unidade: asOptionalText(material.unidade),
+    product_id: asOptionalText(material.product_id),
+    service_id: asOptionalText(material.service_id),
+  }));
+};
+
+const normalizeDiagnosticNeeds = (raw: unknown): ClientOrderDiagnosticNeed[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isPlainRecord).map((need, index) => ({
+    deal_need_id: asOptionalText(need.deal_need_id) ?? `diag-${index}`,
+    need_title: asOptionalText(need.need_title),
+    diag_area_m2: asOptionalNumber(need.diag_area_m2),
+    diag_demolir_descricao: asOptionalText(need.diag_demolir_descricao),
+    diag_demolir_m2: asOptionalNumber(need.diag_demolir_m2),
+    diag_proteger_descricao: asOptionalText(need.diag_proteger_descricao),
+    diag_intervencao_tipo: asOptionalText(need.diag_intervencao_tipo),
+    diag_intervencao_descricao: asOptionalText(need.diag_intervencao_descricao),
+    materials: normalizeDiagnosticMaterials(need.materials),
+  }));
+};
+
+// Quantidades/áreas do diagnóstico: separador decimal PT e sem casas a mais.
+const formatDiagnosticNumber = (value: number): string =>
+  new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(value);
 
 const ClientOrders = () => {
   const { t } = useTranslation();
@@ -142,6 +227,16 @@ const ClientOrders = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const canConfirmStockExit = hasPermission('inventory.edit') && hasPermission('client_orders.confirm_stock_exit');
+
+  // As chaves da secção "Diagnóstico da obra" ainda não existem em
+  // src/translations/index.ts (ficheiro fora do âmbito desta alteração).
+  // `t()` devolve a própria chave quando não a encontra, pelo que `tf` mostra
+  // o texto PT de reserva entretanto — e passa a usar a tradução sozinho assim
+  // que as chaves forem acrescentadas, sem mexer neste ficheiro outra vez.
+  const tf = useCallback((key: string, fallback: string): string => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  }, [t]);
 
   const [orders, setOrders] = useState<ClientOrderDocumentRow[]>([]);
   // Origem "Venda Direta", indexada por contract_id. Vem de uma query própria a
@@ -343,7 +438,16 @@ const ClientOrders = () => {
       p_contract_id: contractId,
     });
     if (error) throw error;
-    return data as unknown as ClientOrderDocumentDetail;
+    const doc = data as unknown as ClientOrderDocumentDetail;
+    // Fluxo inalterado: só se acrescenta o bloco `diagnostic` já normalizado,
+    // para o diálogo ler sempre um array (a chave não existe nas encomendas
+    // sem diagnóstico, nem enquanto a migração da RPC não estiver aplicada).
+    // O cast local é mínimo — types.ts não conhece o campo e não é editado.
+    if (!doc || typeof doc !== 'object') return doc;
+    return {
+      ...doc,
+      diagnostic: normalizeDiagnosticNeeds((doc as { diagnostic?: unknown }).diagnostic),
+    };
   };
 
   const openDetail = async (contractId: string) => {
@@ -1111,6 +1215,142 @@ const ClientOrders = () => {
                   </div>
                 )}
               </div>
+
+              {/* Diagnóstico da obra — só-leitura. Cópia congelada que o
+                  contrato assinado arrasta consigo, para o armazém saber o que
+                  vai executar. Não renderiza nada (nem título, nem caixa) quando
+                  a encomenda não tem diagnóstico: é o caso normal das vendas
+                  diretas e das encomendas manuais. */}
+              {(() => {
+                const needs = detailData.diagnostic ?? [];
+                if (needs.length === 0) return null;
+                return (
+                  <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ClipboardCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <h3 className="text-sm font-semibold">
+                        {tf('clientOrders.dialog.diagnostic.title', 'Diagnóstico da obra')}
+                      </h3>
+                      <Badge variant="outline" className="font-normal">
+                        {tf('clientOrders.dialog.diagnostic.readOnlyBadge', 'Só leitura')}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {tf(
+                        'clientOrders.dialog.diagnostic.subtitle',
+                        'Cópia do diagnóstico no momento da assinatura do contrato. Não faz parte das linhas da encomenda.'
+                      )}
+                    </p>
+
+                    {needs.map((need) => {
+                      // Só os campos preenchidos entram na lista — rótulos sem
+                      // valor não se mostram.
+                      const fields: Array<{ label: string; value: string; wide?: boolean }> = [];
+                      if (need.diag_demolir_descricao) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.demolish', 'Demolir'),
+                          value: need.diag_demolir_descricao,
+                          wide: true,
+                        });
+                      }
+                      if (need.diag_demolir_m2 !== null) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.demolishArea', 'Área a demolir'),
+                          value: `${formatDiagnosticNumber(need.diag_demolir_m2)} m²`,
+                        });
+                      }
+                      if (need.diag_proteger_descricao) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.protect', 'Proteger'),
+                          value: need.diag_proteger_descricao,
+                          wide: true,
+                        });
+                      }
+                      if (need.diag_intervencao_tipo) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.interventionType', 'Tipo de intervenção'),
+                          value: need.diag_intervencao_tipo,
+                        });
+                      }
+                      if (need.diag_intervencao_descricao) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.interventionDescription', 'Descrição da intervenção'),
+                          value: need.diag_intervencao_descricao,
+                          wide: true,
+                        });
+                      }
+
+                      return (
+                        <div
+                          key={need.deal_need_id}
+                          className="space-y-3 rounded-md border bg-background p-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="min-w-0 break-words text-sm font-medium">
+                              {need.need_title
+                                || tf('clientOrders.dialog.diagnostic.untitledNeed', 'Necessidade sem título')}
+                            </span>
+                            {need.diag_area_m2 !== null && (
+                              <Badge variant="secondary" className="shrink-0 font-normal">
+                                {formatDiagnosticNumber(need.diag_area_m2)} m²
+                              </Badge>
+                            )}
+                          </div>
+
+                          {fields.length > 0 && (
+                            <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+                              {fields.map((field) => (
+                                <div key={field.label} className={field.wide ? 'sm:col-span-2' : undefined}>
+                                  <dt className="text-xs text-muted-foreground">{field.label}</dt>
+                                  <dd className="whitespace-pre-wrap break-words font-medium">{field.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                          )}
+
+                          {need.materials.length > 0 && (
+                            <div className="space-y-1.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                  {tf('clientOrders.dialog.diagnostic.materials', 'Materiais previstos')}
+                                </span>
+                                <Badge variant="outline" className="font-normal">
+                                  {tf(
+                                    'clientOrders.dialog.diagnostic.materialsBadge',
+                                    'Informativo para o armazém'
+                                  )}
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                {tf(
+                                  'clientOrders.dialog.diagnostic.materialsNote',
+                                  'Não são linhas da encomenda, não têm preço e não somam ao total.'
+                                )}
+                              </p>
+                              <ul className="space-y-1">
+                                {need.materials.map((material, materialIndex) => (
+                                  <li
+                                    key={`${need.deal_need_id}-mat-${materialIndex}`}
+                                    className="flex items-baseline gap-2 text-sm"
+                                  >
+                                    <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">
+                                      {formatDiagnosticNumber(material.quantity)}
+                                      {material.unidade ? ` ${material.unidade}` : ''}
+                                    </span>
+                                    <span className="min-w-0 break-words text-muted-foreground">
+                                      {material.descricao || '-'}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {(() => {
                 const { done, total, percent } = getAvailableProductsProgress();
