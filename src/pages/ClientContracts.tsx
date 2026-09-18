@@ -1425,6 +1425,22 @@ const ClientContracts = () => {
     return '€' + int.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + dec;
   };
 
+  /**
+   * Um contrato enviado ('pending_signature') continua a ser um contrato por
+   * assinar: para efeitos de acções disponíveis vale exactamente o mesmo que
+   * um 'draft'.
+   *
+   * Porquê um predicado em vez de dois ramos: enquanto nada no sistema escrevia
+   * 'pending_signature', todos os contratos ficavam em 'draft' e a divergência
+   * entre os dois ramos do menu nunca se notava. Assim que enviar passou a
+   * transitar mesmo o estado, o ramo 'pending_signature' — que nunca tinha sido
+   * mantido a par do de 'draft' — fazia desaparecer Editar, Reatribuir, Anular
+   * e Eliminar só por o contrato ter sido enviado. Os ramos divergiram por
+   * terem sido copiados; ficam agora com uma condição só.
+   */
+  const isPreSignature = (contract: { status?: string | null }) =>
+    contract.status === "draft" || contract.status === "pending_signature";
+
   const getRowColor = (contract: ClientContract) => {
     if (contract.status === "draft") return "bg-yellow-50/60 dark:bg-yellow-950/10";
     if (contract.status === "signed" || contract.status === "active") return "bg-green-50/40 dark:bg-green-950/10";
@@ -2072,26 +2088,19 @@ const ClientContracts = () => {
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
                           {/* Quick actions by status */}
-                          {contract.status === "draft" && (
+                          {isPreSignature(contract) && (
                             <>
-                              <Button variant="ghost" size="icon" className="text-blue-600" title="Enviar para assinatura" onClick={() => handleOpenSendChannel(contract)}>
+                              {/* Follow-up só faz sentido depois de enviado. */}
+                              {contract.status === "pending_signature" && (
+                                <Button variant="ghost" size="icon" className="text-yellow-600" title="Follow-up" onClick={() => toast.info(t('clientContracts.toast.followUpGeneric'))}>
+                                  <Phone className="h-4 w-4" />
+                                </Button>
+                              )}
+                              <Button variant="ghost" size="icon" className="text-blue-600" title={contract.status === "draft" ? "Enviar para assinatura" : "Reenviar"} onClick={() => handleOpenSendChannel(contract)}>
                                 <Send className="h-4 w-4" />
                               </Button>
                               <Button variant="ghost" size="icon" onClick={() => handleEdit(contract)} title="Editar">
                                 <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" className="text-green-600" title="Marcar como assinado" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
-                                <CheckCheck className="h-4 w-4" />
-                              </Button>
-                            </>
-                          )}
-                          {contract.status === "pending_signature" && (
-                            <>
-                              <Button variant="ghost" size="icon" className="text-yellow-600" title="Follow-up" onClick={() => toast.info(t('clientContracts.toast.followUpGeneric'))}>
-                                <Phone className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" title="Reenviar" onClick={() => handleOpenSendChannel(contract)}>
-                                <Send className="h-4 w-4" />
                               </Button>
                               <Button variant="ghost" size="icon" className="text-green-600" title="Marcar como assinado" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
                                 <CheckCheck className="h-4 w-4" />
@@ -2124,17 +2133,23 @@ const ClientContracts = () => {
                               <Button variant="ghost" size="icon"><MoreHorizontal className="h-4 w-4" /></Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-56">
-                              {contract.status === "draft" && (
+                              {isPreSignature(contract) && (
                                 <>
                                   {canSendSignature && (
                                     <>
                                       <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">✈️ Envio</DropdownMenuLabel>
-                                      <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>✈️ Enviar para assinatura</DropdownMenuItem>
+                                      <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>
+                                        {contract.status === "draft" ? "✈️ Enviar para assinatura" : "📧 Reenviar"}
+                                      </DropdownMenuItem>
                                       <DropdownMenuSeparator />
                                     </>
                                   )}
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📊 Avançar</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => handleStatusChange(contract.id, "pending_signature")}>📨 Marcar como Enviado</DropdownMenuItem>
+                                  {/* Marcar como Enviado é a própria transição draft → pending_signature:
+                                      num contrato já enviado não tem para onde avançar. */}
+                                  {contract.status === "draft" && (
+                                    <DropdownMenuItem onClick={() => handleStatusChange(contract.id, "pending_signature")}>📨 Marcar como Enviado</DropdownMenuItem>
+                                  )}
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
                                     ✅ Marcar como Assinado
                                     <span className="text-[10px] text-muted-foreground ml-1">⚡ Converte contacto em cliente</span>
@@ -2238,41 +2253,8 @@ const ClientContracts = () => {
                                   <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (assinado não pode ser eliminado)</DropdownMenuItem>
                                 </>
                               )}
-                              {contract.status === "pending_signature" && (
-                                <>
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📊 Avançar</DropdownMenuLabel>
-                                  <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
-                                    ✅ Marcar como Assinado
-                                  </DropdownMenuItem>
-                                  {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Reenviar</DropdownMenuItem>}
-                                  {canSendSignature && (
-                                    <>
-                                      <DropdownMenuSeparator />
-                                      <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Portal</DropdownMenuLabel>
-                                      <DropdownMenuItem disabled={portalAccessLoading} onClick={(e) => { e.preventDefault(); generatePortalAccess("contract", contract.id); }}>
-                                        <Send className="w-3.5 h-3.5 mr-2 text-purple-600" /> Enviar para Portal Cliente
-                                      </DropdownMenuItem>
-                                      <DropdownMenuItem onClick={async (e) => { e.preventDefault(); await navigator.clipboard.writeText(`${window.location.origin}/auth`); toast.success(t('clientContracts.toast.portalLinkCopied')); }}>
-                                        🔗 Copiar link do portal
-                                      </DropdownMenuItem>
-                                    </>
-                                  )}
-                                   <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
-                                  <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
-                                  <DropdownMenuSeparator />
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔗 Relacionados</DropdownMenuLabel>
-                                  <DropdownMenuItem
-                                    disabled={!contract.proposal_id}
-                                    onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
-                                  >📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem
-                                    disabled={!contractHasQuotes(contract)}
-                                    onClick={() => navigate(contractQuotesRoute(contract))}
-                                  >📊 Ver orçamentos</DropdownMenuItem>
-                                </>
-                              )}
+                              {/* 'pending_signature' já não tem ramo próprio: partilha o bloco
+                                  acima com 'draft' (ver isPreSignature). */}
                               {contract.status === "expired" && (
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">🔄 Renovação</DropdownMenuLabel>
