@@ -757,8 +757,10 @@ serve(async (req: Request) => {
           .eq("document_id", docId)
           .maybeSingle();
 
+        let publishError: any = null;
+
         if (existingDoc) {
-          await supabase
+          const { error } = await supabase
             .from("client_portal_documents")
             .update({
               is_visible: true,
@@ -769,8 +771,9 @@ serve(async (req: Request) => {
               updated_at: new Date().toISOString(),
             })
             .eq("id", existingDoc.id);
+          publishError = error;
         } else {
-          await supabase.from("client_portal_documents").insert({
+          const { error } = await supabase.from("client_portal_documents").insert({
             portal_user_id: portalUserId,
             organization_id,
             entity_id: entityId,
@@ -779,6 +782,62 @@ serve(async (req: Request) => {
             is_visible: true,
             published_by: callerAnew?.id || null,
           });
+          publishError = error;
+        }
+
+        if (publishError) {
+          // Fail-soft as before (the caller still gets a 200 and the email is
+          // sent), but now it is visible in the logs AND it stops the contract
+          // status transition below from claiming a publication that failed.
+          console.error("Error publishing document to portal:", publishError);
+          return;
+        }
+
+        // ── Contract sent to the portal ⇒ status draft → pending_signature ────
+        // Nothing in the codebase ever wrote 'pending_signature' (every other
+        // reference is a READ: rpc_client_contracts_list_metrics, dashboards,
+        // alerts, notifications, exports, filters). The consequence was that a
+        // contract sent for signature stayed 'draft' — the client opened the
+        // portal and saw "Rascunho" on a document he was being asked to sign,
+        // and the "Enviado" counter / sent→signed conversion rate were pinned
+        // at zero because the denominator was never populated.
+        //
+        // Only 'draft' may transition. The guard lives in the UPDATE itself
+        // (.eq("status", "draft")) rather than in a SELECT-then-UPDATE, so a
+        // contract that was signed/cancelled concurrently is never overwritten:
+        // the WHERE simply matches zero rows.
+        //
+        // Safety: the three AFTER UPDATE OF status triggers on client_contracts
+        // (fn_contract_stock_deduction, fn_contract_supplier_request,
+        // fn_contract_cancelled_stock_reversal) all return immediately unless
+        // NEW.status is in the signature aliases ARRAY['signed','assinado'] or
+        // the cancellation aliases. 'pending_signature' is in neither, so this
+        // transition moves no stock and raises no supplier purchase order. The
+        // only trigger that reacts is fn_contract_timeline_history, which
+        // already had a 'contract_pending_signature' branch waiting for an
+        // event that until now never arrived.
+        //
+        // Never fatal: a failure here must not cost the client the document he
+        // has to sign. A wrong status is preferable to an unsent contract.
+        if (docType === "contract") {
+          try {
+            const { error: statusError } = await supabase
+              .from("client_contracts")
+              .update({
+                status: "pending_signature",
+                status_changed_at: new Date().toISOString(),
+                status_changed_by: callerAnew?.id || null,
+              })
+              .eq("id", docId)
+              .eq("organization_id", organization_id)
+              .eq("status", "draft");
+
+            if (statusError) {
+              console.error("Error moving contract to pending_signature:", statusError);
+            }
+          } catch (statusErr) {
+            console.error("Error moving contract to pending_signature:", statusErr);
+          }
         }
       } catch (e) {
         console.error("Error publishing document to portal:", e);

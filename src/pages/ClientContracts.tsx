@@ -211,6 +211,65 @@ const ClientContracts = () => {
 
   const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({ onSuccess: () => queryClient.invalidateQueries({ queryKey: ["client-contracts"] }) });
 
+  /**
+   * O contrato acabou de ser enviado ao cliente: draft → pending_signature.
+   *
+   * O estado responde a "já foi enviado?", e só a isso. Por onde foi (portal,
+   * email, WhatsApp) é pergunta da timeline, que já a regista e não é tocada
+   * aqui — são coisas diferentes e não se misturam.
+   *
+   * Um único sítio para os três canais de propósito: até agora nenhum deles
+   * escrevia 'pending_signature' (todas as referências a esse estado no
+   * codebase são leituras — métricas, alertas, filtros, exportações), e a
+   * regra repetida em três handlers acabaria por divergir num deles.
+   *
+   *  - Portal: NÃO passa por aqui. A transição vive na edge function
+   *    create-client-portal-access, logo a seguir a publicar o documento, que
+   *    é onde o envio realmente acontece (e onde também é feita quando o envio
+   *    parte de outro ecrã).
+   *  - Email: callback onSent do SendEntityEmailDialog, disparado só depois do
+   *    email seguir mesmo.
+   *  - WhatsApp: callback onSent do WhatsAppSendDialog, disparado só quando o
+   *    WhatsApp abriu mesmo com a mensagem.
+   * Abrir o diálogo nunca chega aqui: fechar sem enviar deixa o contrato em
+   * draft, como deve ser.
+   *
+   * Salvaguardas:
+   *  - Só transita a partir de 'draft', e a condição está no próprio UPDATE
+   *    (.eq("status", "draft")) em vez de num SELECT antes — um contrato
+   *    entretanto assinado ou anulado nunca é pisado, o WHERE apenas não
+   *    encontra linha nenhuma. Isto importa a sério porque reenviar por email
+   *    ou portal é oferecido também em contratos já assinados.
+   *  - Falhar nunca trava o envio nem mostra erro: o email/WhatsApp já seguiu,
+   *    e dizer ao utilizador que algo correu mal levá-lo-ia a reenviar um
+   *    documento que o cliente já tem. Fica no log.
+   */
+  const markContractAsSent = async (contractId: string) => {
+    if (!contractId) return;
+    try {
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (businessUserId) {
+        await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
+      }
+      const { error } = await (supabase as any)
+        .from("client_contracts")
+        .update({
+          status: "pending_signature",
+          status_changed_at: new Date().toISOString(),
+          status_changed_by: businessUserId ?? null,
+        })
+        .eq("id", contractId)
+        .eq("status", "draft");
+      if (error) {
+        console.error("[contracts] falha ao marcar contrato como enviado:", error);
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: ["client-contracts"] });
+    } catch (e) {
+      console.error("[contracts] falha ao marcar contrato como enviado:", e);
+    }
+  };
+
   const handleOpenSendChannel = (contract: any) => {
     setSendingContract(contract);
     setSendChannelOpen(true);
@@ -2428,13 +2487,24 @@ const ClientContracts = () => {
         />
 
         {/* WhatsApp Dialog */}
+        {/* onSent só dispara depois do WhatsApp abrir mesmo com a mensagem —
+            nunca ao abrir este diálogo. O id vem do contexto (e não de
+            sendingContract) porque é ele que carrega o contrato que a mensagem
+            leva. */}
         <WhatsAppSendDialog
           open={showWhatsAppDialog}
           onOpenChange={setShowWhatsAppDialog}
           context={whatsAppContext}
+          onSent={() => {
+            const contractId = whatsAppContext?.contractId;
+            if (contractId) void markContractAsSent(contractId);
+          }}
         />
 
         {/* Email Dialog */}
+        {/* onSent só dispara depois do email seguir mesmo (ver
+            SendEntityEmailDialog: é chamado a seguir ao toast de sucesso).
+            Fechar o diálogo sem enviar deixa o contrato em draft. */}
         <SendEntityEmailDialog
           open={showEmailDialog}
           onOpenChange={setShowEmailDialog}
@@ -2444,6 +2514,10 @@ const ClientContracts = () => {
           entityEmail={sendingContract?._clientEmail || ""}
           organizationId={activeCompany?.id}
           contractId={sendingContract?.id}
+          onSent={() => {
+            const contractId = sendingContract?.id;
+            if (contractId) void markContractAsSent(contractId);
+          }}
         />
       </div>
     </Layout>
