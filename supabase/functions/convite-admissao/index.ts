@@ -168,8 +168,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
       // ainda tem o link para copiar e mandar a mao. Nunca faz a criacao
       // falhar por causa disto.
       let emailEnviado = false;
+      // O motivo real (sanitizado, sem segredos -- send-email ja tira isso via
+      // sanitizeSmtpError) vai na resposta para quem criou o convite (RH),
+      // nunca para o candidato: sem isto, um envio falhado ficava silencioso
+      // e so "email_enviado: false", sem dizer porque.
+      let emailErro: string | null = null;
       try {
-        const svc = createClient(supabaseUrl, serviceKey);
+        // { persistSession: false, autoRefreshToken: false } e obrigatorio aqui:
+        // sem isso, functions.invoke() nao garante o cabecalho Authorization com
+        // a chave de servico -- send-email recebia o pedido sem autenticacao
+        // nenhuma e devolvia 401 "Authentication required", em silencio (so
+        // visivel depois de a resposta desta funcao passar a incluir o erro).
+        // O mesmo padrao ja e usado em criar-acesso-pessoa/index.ts.
+        const svc = createClient(supabaseUrl, serviceKey, {
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
         // O SMTP a usar e o da organizacao da pessoa (resolveOrganizationSmtp
         // em _shared/smtp.ts devolve null, e falha em silencio, sem
         // organization_id) -- a RPC acima nao o devolve, so o id do convite,
@@ -180,6 +193,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
           .eq("id", pessoaId)
           .maybeSingle();
         const { error: erroEmail } = await svc.functions.invoke("send-email", {
+          headers: { Authorization: `Bearer ${serviceKey}` },
           body: {
             to: email,
             subject: "Convite de admissao",
@@ -189,11 +203,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
           },
         });
         emailEnviado = !erroEmail;
+        if (erroEmail) {
+          captureError(erroEmail);
+          try {
+            const ctx = (erroEmail as { context?: Response }).context;
+            const corpo = ctx ? await ctx.clone().json().catch(() => null) : null;
+            emailErro = corpo?.error ?? erroEmail.message ?? String(erroEmail);
+          } catch {
+            emailErro = erroEmail.message ?? String(erroEmail);
+          }
+        }
       } catch (e) {
         captureError(e);
+        emailErro = e instanceof Error ? e.message : String(e);
       }
 
-      return responder({ ok: true, email_enviado: emailEnviado, valid_until: validUntil });
+      return responder({ ok: true, email_enviado: emailEnviado, valid_until: validUntil, email_erro: emailErro });
     }
 
     // -- estado / submeter: sem sessao, service_role, atras de rate limit ----
@@ -206,7 +231,9 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return responder({ error: "token_invalido" }, 400);
     }
 
-    const svc = createClient(supabaseUrl, serviceKey);
+    const svc = createClient(supabaseUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
     const ip = getClientIp(req);
     const limite = await checkRateLimit(svc, {
       bucket: `convite-admissao-${action}`,

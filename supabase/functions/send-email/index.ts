@@ -241,6 +241,10 @@ const handler = async (req: Request): Promise<Response> => {
       }
     }
 
+    if (!smtpConfig.smtp_password) {
+      throw new Error(smtpNotFoundMessage());
+    }
+
     const emailResult = await sendEmailViaSMTP(smtpConfig, { to: toListInput.length ? toListInput : to, cc: ccList.length ? ccList : undefined, subject, html, text, attachments });
 
     try {
