@@ -519,8 +519,9 @@ export const parseProductsCSV = async ({
     if (_createdBrands.has(key)) return _createdBrands.get(key);
     const fromDb = await _fetchByName('brands', name, targetOrg);
     if (fromDb) { _createdBrands.set(key, fromDb); (brands as any[]).push(fromDb); return fromDb; }
+    const slug = _slugify(name);
     const { data, error } = await (supabase.from('brands' as any) as any)
-      .insert({ name: name.trim(), organization_id: targetOrg }).select().limit(1);
+      .insert({ name: name.trim(), slug, organization_id: targetOrg, created_by: userId }).select().limit(1);
     if (error) { captureFlowError(error, "record-export-import"); warnings.push(`Falha ao criar marca "${name.trim()}": ${error.message}`); }
     const created = data?.[0] ?? null;
     if (created) { _createdBrands.set(key, created); (brands as any[]).push(created); }
@@ -538,7 +539,7 @@ export const parseProductsCSV = async ({
     const fromDb = await _fetchByName('suppliers', name, targetOrg);
     if (fromDb) { _createdSuppliers.set(key, fromDb); (suppliers as any[]).push(fromDb); return fromDb; }
     const { data, error } = await (supabase.from('suppliers' as any) as any)
-      .insert({ name: name.trim(), organization_id: targetOrg }).select().limit(1);
+      .insert({ name: name.trim(), organization_id: targetOrg, created_by: userId }).select().limit(1);
     if (error) { captureFlowError(error, "record-export-import"); warnings.push(`Falha ao criar fornecedor "${name.trim()}": ${error.message}`); }
     const created = data?.[0] ?? null;
     if (created) { _createdSuppliers.set(key, created); (suppliers as any[]).push(created); }
