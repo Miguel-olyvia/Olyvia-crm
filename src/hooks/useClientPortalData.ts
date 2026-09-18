@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { resolvePortalContractIdsForUsers } from "@/lib/portal/contractAccess";
 
 interface PortalSummary {
   proposalCount: number;
@@ -57,8 +58,14 @@ export function useClientPortalData() {
         }
 
         const directProposalIds = [...new Set(portalUsers.map(p => p.proposal_id).filter(Boolean))];
-        const contractIds = portalUsers.filter(p => p.contract_id).map(p => p.contract_id!);
         const quoteIds = portalUsers.filter(p => p.quote_id).map(p => p.quote_id!);
+
+        // Mesma resolução usada pela página "Os Meus Contratos": une a coluna
+        // legada `contract_id` com as concessões em `client_portal_documents`.
+        // Contar só a coluna legada era o que punha o cartão "Contratos" a 1
+        // enquanto a lista mostrava 5.
+        const contractIds = await resolvePortalContractIdsForUsers(portalUsers);
+        if (cancelled) return;
 
         // Build the actual granted (organization_id, entity_id) PAIRS instead of
         // deduping each column independently — two separate `.in()` filters would

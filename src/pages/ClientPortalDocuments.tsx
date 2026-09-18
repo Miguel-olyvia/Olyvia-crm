@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { resolvePortalContractIdsForUsers } from "@/lib/portal/contractAccess";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -49,7 +50,7 @@ const ClientPortalDocuments = () => {
       // Get portal user records
       const { data: portalUsers } = await supabase
         .from("client_portal_users")
-        .select("proposal_id, contract_id, quote_id")
+        .select("id, proposal_id, contract_id, quote_id")
         .eq("auth_user_id", uid);
       if (cancelled) return;
 
@@ -59,8 +60,13 @@ const ClientPortalDocuments = () => {
       }
 
       const proposalIds = Array.from(new Set(portalUsers.filter(p => p.proposal_id).map(p => p.proposal_id!)));
-      const contractIds = Array.from(new Set(portalUsers.filter(p => p.contract_id).map(p => p.contract_id!)));
       const quoteIds    = Array.from(new Set(portalUsers.filter(p => p.quote_id   ).map(p => p.quote_id!   )));
+
+      // Resolução partilhada (coluna legada + client_portal_documents) — ver
+      // src/lib/portal/contractAccess.ts. Usar só `contract_id` escondia aqui os
+      // anexos dos contratos concedidos por documento.
+      const contractIds = await resolvePortalContractIdsForUsers(portalUsers);
+      if (cancelled) return;
 
       // Quotes visíveis indirectamente (via proposta ou contrato)
       const indirectQuoteIds = new Set<string>(quoteIds);
