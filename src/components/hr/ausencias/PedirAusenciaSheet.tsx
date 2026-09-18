@@ -77,6 +77,14 @@ interface PedirAusenciaSheetProps {
   pessoaNome: string;
   /** Resolvido de `hr_ausencias_aprovador_chefia`: null = passo DISPENSADO. */
   aprovadorChefiaNome?: string | null;
+  /**
+   * Verdadeiro quando quem esta a pedir tem `hr.ausencias.aprovar.rh` e o
+   * pedido e para OUTRA pessoa (nunca para si) -- o mesmo calculo, feito no
+   * ecra, que `rpc_hr_ausencia_pedir` faz na base (20261202030000). So
+   * muda o TEXTO do encaminhamento -- a base decide de facto, este painel
+   * so evita prometer "vai para o RH" quando o pedido nasce ja aprovado.
+   */
+  aprovoOPassoDeRh?: boolean;
   dataInicial?: string | null;
   /** Verdadeiro quando o painel foi aberto de um quadro de agendas. */
   vindoDoBoard?: boolean;
@@ -94,6 +102,7 @@ export function PedirAusenciaSheet({
   feriados,
   pessoaNome,
   aprovadorChefiaNome,
+  aprovoOPassoDeRh,
   dataInicial,
   vindoDoBoard,
   saving,
@@ -216,13 +225,19 @@ export function PedirAusenciaSheet({
     if (comChefia) {
       return t("hr.ausencias.pedir.vaiParaChefia", { nome: aprovadorChefiaNome as string });
     }
+    // Sem chefia no caminho (dispensada ou nao exigida) e com o atalho de RH:
+    // o pedido nasce ja aprovado -- dizer isso, nao prometer um passo que a
+    // base ja vai dispensar. Ver rpc_hr_ausencia_pedir (20261202030000).
+    if (tipo.exige_aprovacao_rh && aprovoOPassoDeRh) {
+      return t("hr.ausencias.pedir.aprovadoNoActo");
+    }
     if (tipo.exige_aprovacao_chefia && !aprovadorChefiaNome) {
       // Aprovador nulo significa passo DISPENSADO, nao passo em aberto.
       return t("hr.ausencias.pedir.semChefiaVaiParaRh");
     }
     if (tipo.exige_aprovacao_rh) return t("hr.ausencias.pedir.vaiParaRh");
     return t("hr.ausencias.pedir.semAprovacao");
-  }, [tipo, aprovadorChefiaNome, t]);
+  }, [tipo, aprovadorChefiaNome, aprovoOPassoDeRh, t]);
 
   const submeter = async () => {
     setMostrarTodos(true);

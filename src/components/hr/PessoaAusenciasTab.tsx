@@ -261,6 +261,10 @@ export function PessoaAusenciasTab({
         feriados={dados.feriados}
         pessoaNome={pessoaNome}
         aprovadorChefiaNome={aprovadorChefiaNome ?? null}
+        // Mesmo calculo que a base faz para o atalho de RH
+        // (rpc_hr_ausencia_pedir, 20261202030000): nunca para a propria
+        // pessoa, so quando quem pede tem hr.ausencias.aprovar.rh.
+        aprovoOPassoDeRh={!souAPessoa && permissoes.aprovarRh}
         dataInicial={dataInicial}
         saving={dados.saving}
         onPedir={(pedido) => dados.pedir({ ...pedido, origem: "ficha" })}
