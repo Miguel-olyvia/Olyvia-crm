@@ -461,7 +461,7 @@ describe("PessoaDocumentosTab", () => {
     abrirJanela.mockRestore();
   });
 
-  it("anexar contrato ja assinado: apos criarPorUpload, abre o dialogo de anexar ficheiro com o documento novo", async () => {
+  it("inserir documento por anexar ficheiro: apos criarPorUpload, abre o dialogo de anexar ficheiro com o documento novo", async () => {
     useHookMock.mockReturnValue(resultadoBase({ documentos: [] }));
     criarPorUploadMock.mockResolvedValue({ documentoId: "docNovo", erro: null });
 
@@ -477,21 +477,21 @@ describe("PessoaDocumentosTab", () => {
           emitir: true,
           anular: false,
           conteudoView: false,
+          // modelosView false -- so o modo "anexar" fica disponivel, sem
+          // tabs (o mesmo caminho do antigo "Anexar contrato ja assinado").
           modelosView: false,
         }}
       />,
     );
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "hr.documentos.anexarContratoAssinado" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "hr.documentos.inserirDocumento" }));
 
     const dialogoCriar = screen.getByRole("dialog");
     fireEvent.change(within(dialogoCriar).getByLabelText("hr.documentos.coluna.titulo"), {
       target: { value: "Contrato assinado em papel" },
     });
     fireEvent.click(
-      within(dialogoCriar).getByRole("button", { name: "hr.documentos.anexarContratoAssinado" }),
+      within(dialogoCriar).getByRole("button", { name: "hr.documentos.modoAnexar" }),
     );
 
     await waitFor(() => expect(criarPorUploadMock).toHaveBeenCalled());

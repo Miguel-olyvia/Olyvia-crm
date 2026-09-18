@@ -54,7 +54,11 @@ export interface UrlFicheiroDocumento {
   anexadoEm: string | null;
 }
 
-const COLUNAS_MODELO = "id, organization_id, nome, tipo, activo";
+// corpo_html incluido para a pre-visualizacao (com DADOS_EXEMPLO_RH, nunca a
+// pessoa real) no dialogo de inserir documento -- o GRANT de
+// pessoas_documentos_modelos e por TABELA, sem restricao de coluna
+// (20261123020000), por isso pedir esta coluna aqui nao muda a RLS nenhuma.
+const COLUNAS_MODELO = "id, organization_id, nome, tipo, corpo_html, variaveis, activo";
 
 /**
  * Extensoes que a politica de storage de hr-documentos-quarantine

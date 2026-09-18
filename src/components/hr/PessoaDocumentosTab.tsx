@@ -34,27 +34,30 @@
  * imutavel com o resto da linha -- corrigi-lo e anular e emitir outro, nao
  * reabrir este dialogo.
  *
- * SEGUNDO CAMINHO DE CRIAR UM DOCUMENTO -- CONTRATO JA ASSINADO EM PAPEL
- * ------------------------------------------------------------------------
- * "Anexar contrato ja assinado" (20261201070000) e o segundo caminho de
- * criar um documento, sem modelo e sem assinatura dentro da app: RH cria a
- * linha (`rpc_hr_documento_upload_assinado_criar`), anexa o ficheiro pelo
- * MESMO dialogo que a emissao por modelo ja usa (reaproveitado, nunca
- * duplicado), e so entao confirma que a assinatura ja aconteceu em papel
- * (`rpc_hr_documento_registar_assinatura_externa`) -- que exige o ficheiro
- * JA anexado, por isso o botao de confirmar so aparece depois disso. A
- * mesma permissao de emitir (`permissoes.emitir`) abre os dois caminhos: sao
- * a mesma classe de accao, "criar um documento novo para esta pessoa".
+ * UM SO BOTAO -- "INSERIR DOCUMENTO" -- COM DOIS MODOS POR DENTRO
+ * ---------------------------------------------------------------------
+ * Ate 20261202060000 havia dois botoes ("Emitir documento" e "Anexar
+ * contrato ja assinado"), cada um com o seu dialogo. Passaram a um so botao,
+ * "Inserir documento", que abre `InserirDocumentoDialog` -- essa e que
+ * decide, por dentro, entre "a partir de um modelo" (emitir, com
+ * pre-visualizacao das variaveis por dados de amostra) e "anexar ficheiro"
+ * (criar sem modelo, `rpc_hr_documento_upload_assinado_criar`, e so entao
+ * `rpc_hr_documento_registar_assinatura_externa` -- que exige o ficheiro JA
+ * anexado, por isso o botao de confirmar externa so aparece depois disso).
  * `assinatura_origem` (`interna`/`externa`) distingue os dois so depois de
- * assinado -- mostrado como badge extra na coluna de estado.
+ * assinado -- mostrado como badge extra na coluna de estado. A mesma
+ * permissao de emitir (`permissoes.emitir`) abre os dois modos: sao a mesma
+ * classe de accao, "criar um documento novo para esta pessoa".
  *
- * O fluxo dos dois passos (criar sem modelo -> anexar ficheiro) vive em
- * `AnexarContratoAssinadoDialog`, extraido daqui para ser reaproveitado
- * TAMBEM pelo separador Contratos (`PessoaContratoTab`) -- o mesmo atalho,
- * dois pontos de entrada na ficha. O passo de anexar sozinho (para qualquer
- * documento a_aguardar_assinatura, nao so os criados por este caminho) vive
- * em `AnexarFicheiroDialog`, reaproveitado pela accao "Anexar ficheiro" da
- * tabela abaixo.
+ * O separador Contratos (`PessoaContratoTab`) continua com o seu proprio
+ * botao "Anexar contrato ja assinado", via `AnexarContratoAssinadoDialog` --
+ * um ponto de entrada DIFERENTE deste, intocado por esta mudanca.
+ * `InserirDocumentoDialog` copia essa logica de criar-sem-modelo para dentro
+ * de si (nao importa `AnexarContratoAssinadoDialog`), para os dois pontos de
+ * entrada poderem evoluir em separado. O passo de anexar sozinho (para
+ * qualquer documento a_aguardar_assinatura, nao so os criados por este
+ * caminho) continua em `AnexarFicheiroDialog`, reaproveitado pela accao
+ * "Anexar ficheiro" da tabela abaixo E pelos dois dialogos de criacao.
  *
  * A coluna "Ficheiro" mostra sempre que ha um RESUMO (hash) guardado quando
  * `ficheiro_caminho` nao e nulo -- e o que torna verificavel a promessa de
@@ -103,11 +106,8 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { usePessoaDocumentos } from "@/hooks/usePessoaDocumentos";
-import { CampoSelect } from "@/components/hr/form/Campos";
-import {
-  AnexarContratoAssinadoDialog,
-  type OpcaoVinculoDocumento,
-} from "@/components/hr/AnexarContratoAssinadoDialog";
+import { InserirDocumentoDialog } from "@/components/hr/InserirDocumentoDialog";
+import type { OpcaoVinculoDocumento } from "@/components/hr/AnexarContratoAssinadoDialog";
 import { AnexarFicheiroDialog } from "@/components/hr/AnexarFicheiroDialog";
 import type { EstadoDocumentoRH, PessoaDocumento } from "@/types/hr";
 
@@ -166,19 +166,15 @@ export function PessoaDocumentosTab({
   const podeCriarPorUpload = permissoes.emitir;
   const dados = usePessoaDocumentos(pessoaId, podeEmitir);
 
-  const [aEmitir, setAEmitir] = useState(false);
-  const [modeloEscolhido, setModeloEscolhido] = useState("");
+  // "Inserir documento": ponto de entrada UNICO, com os dois modos (a partir
+  // de um modelo, ou anexar ficheiro) dentro de `InserirDocumentoDialog`.
+  const [aInserir, setAInserir] = useState(false);
   const [documentoAVer, setDocumentoAVer] = useState<PessoaDocumento | null>(null);
   const [conteudo, setConteudo] = useState<string | null>(null);
   const [aCarregarConteudo, setACarregarConteudo] = useState(false);
   const [documentoAAssinar, setDocumentoAAssinar] = useState<PessoaDocumento | null>(null);
   const [documentoAAnexar, setDocumentoAAnexar] = useState<PessoaDocumento | null>(null);
   const [documentoAAbrirId, setDocumentoAAbrirId] = useState<string | null>(null);
-
-  // -- Segundo caminho de criar um documento: upload de um contrato ja
-  // assinado em papel (20261201070000). O fluxo em si vive em
-  // `AnexarContratoAssinadoDialog` -- aqui so se guarda se esta aberto.
-  const [aCriarPorUpload, setACriarPorUpload] = useState(false);
   const [documentoAConfirmarExterna, setDocumentoAConfirmarExterna] =
     useState<PessoaDocumento | null>(null);
 
@@ -210,18 +206,6 @@ export function PessoaDocumentosTab({
     // NUNCA fica em estado alem do dialogo que o mostrou -- o mesmo cuidado
     // do NISS revelado.
     setConteudo(null);
-  };
-
-  const confirmarEmissao = async () => {
-    if (!modeloEscolhido) return;
-    const erro = await dados.emitir(modeloEscolhido);
-    if (erro) {
-      toast.error(erro);
-      return;
-    }
-    toast.success(t("hr.documentos.emitidoComSucesso"));
-    setAEmitir(false);
-    setModeloEscolhido("");
   };
 
   const confirmarAssinatura = async () => {
@@ -286,16 +270,10 @@ export function PessoaDocumentosTab({
             {t("hr.documentos.titulo")}
           </CardTitle>
           <div className="flex flex-wrap gap-2">
-            {podeEmitir && (
-              <Button size="sm" onClick={() => setAEmitir(true)}>
+            {(podeEmitir || podeCriarPorUpload) && (
+              <Button size="sm" onClick={() => setAInserir(true)}>
                 <FilePlus2 className="mr-2 h-4 w-4" />
-                {t("hr.documentos.emitirNovo")}
-              </Button>
-            )}
-            {podeCriarPorUpload && (
-              <Button size="sm" variant="outline" onClick={() => setACriarPorUpload(true)}>
-                <FileSignature className="mr-2 h-4 w-4" />
-                {t("hr.documentos.anexarContratoAssinado")}
+                {t("hr.documentos.inserirDocumento")}
               </Button>
             )}
           </div>
@@ -458,30 +436,20 @@ export function PessoaDocumentosTab({
         </CardContent>
       </Card>
 
-      <Dialog open={aEmitir} onOpenChange={(aberto) => !aberto && setAEmitir(false)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("hr.documentos.emitirNovo")}</DialogTitle>
-          </DialogHeader>
-          <CampoSelect
-            id="hr-documentos-modelo"
-            label={t("hr.documentos.modelo")}
-            valor={modeloEscolhido}
-            opcoes={dados.modelos.map((modelo) => ({ value: modelo.id, label: modelo.nome }))}
-            placeholder={t("hr.documentos.escolherModelo")}
-            onChange={setModeloEscolhido}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAEmitir(false)}>
-              {t("common.cancel")}
-            </Button>
-            <Button disabled={!modeloEscolhido || dados.saving} onClick={confirmarEmissao}>
-              {dados.saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {t("hr.documentos.emitir")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <InserirDocumentoDialog
+        open={aInserir}
+        onOpenChange={setAInserir}
+        pessoaId={pessoaId}
+        organizationId={organizationId}
+        vinculosOpcoes={vinculosOpcoes}
+        modelos={dados.modelos}
+        podeEmitir={podeEmitir}
+        podeCriarPorUpload={podeCriarPorUpload}
+        emitir={dados.emitir}
+        criarPorUpload={dados.criarPorUpload}
+        anexarFicheiro={dados.anexarFicheiro}
+        saving={dados.saving}
+      />
 
       <Dialog open={documentoAVer !== null} onOpenChange={(aberto) => !aberto && fecharConteudo()}>
         <DialogContent className="max-h-[80vh] max-w-2xl overflow-y-auto">
@@ -534,20 +502,6 @@ export function PessoaDocumentosTab({
       <AnexarFicheiroDialog
         documento={documentoAAnexar}
         onOpenChange={(aberto) => !aberto && setDocumentoAAnexar(null)}
-        anexarFicheiro={dados.anexarFicheiro}
-        saving={dados.saving}
-      />
-
-      {/* Criar por upload + anexar: sem modelo, sem assinatura na app -- o
-          caminho de anexar um contrato ja assinado em papel. Reaproveitado
-          TAMBEM pelo separador Contratos (PessoaContratoTab). */}
-      <AnexarContratoAssinadoDialog
-        open={aCriarPorUpload}
-        onOpenChange={setACriarPorUpload}
-        pessoaId={pessoaId}
-        organizationId={organizationId}
-        vinculosOpcoes={vinculosOpcoes}
-        criarPorUpload={dados.criarPorUpload}
         anexarFicheiro={dados.anexarFicheiro}
         saving={dados.saving}
       />
