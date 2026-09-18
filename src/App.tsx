@@ -123,6 +123,7 @@ const AssiduidadeEAusencias = lazy(() => import("./pages/AssiduidadeEAusencias")
 const RhCentros = lazy(() => import("./pages/RhCentros"));
 const ConfiguracaoAdmissao = lazy(() => import("./pages/ConfiguracaoAdmissao"));
 const ConfiguracaoModelosDocumentos = lazy(() => import("./pages/ConfiguracaoModelosDocumentos"));
+const ConfiguracaoClausulasDocumentos = lazy(() => import("./pages/ConfiguracaoClausulasDocumentos"));
 const Vencimento = lazy(() => import("./pages/Vencimento"));
 const OrgTemplates = lazy(() => import("./pages/OrgTemplates"));
 const OrgHelp = lazy(() => import("./pages/OrgHelp"));
@@ -322,6 +323,7 @@ const App = () => (
                           nenhum papel por omissao. */}
                       <Route path="/rh/admissao/configuracao" element={<ProtectedRoute permission="hr.admissao.obrigatorios.gerir"><ConfiguracaoAdmissao /></ProtectedRoute>} />
                       <Route path="/rh/documentos/modelos" element={<ProtectedRoute permission="hr.pessoas.documentos.modelos.view"><ConfiguracaoModelosDocumentos /></ProtectedRoute>} />
+                      <Route path="/rh/documentos/clausulas" element={<ProtectedRoute permission="hr.pessoas.documentos.modelos.view"><ConfiguracaoClausulasDocumentos /></ProtectedRoute>} />
                       {/* "Processamento Salarial" (nome de apresentacao;
                           dominio interno continua "vencimento" -- tabelas,
                           permissoes hr.vencimento.* e hooks nao mudam de nome,

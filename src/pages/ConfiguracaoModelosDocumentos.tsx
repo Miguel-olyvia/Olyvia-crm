@@ -2,24 +2,30 @@
  * Modelos de documento de RH -- lista, cria, edita e activa/desactiva
  * `pessoas_documentos_modelos` (20261123020000). Segue o padrao de
  * `ConfiguracaoAdmissao.tsx` para o gating e `ContractTemplates.tsx` para o
- * dialogo de editor, simplificado: sem preview, sem variaveis clicaveis (nao
- * ha substituicao de variaveis do lado do servidor para RH -- ver a nota no
- * cabecalho de `useModelosDocumentosRH.ts`).
+ * dialogo de editor.
  *
- * O CORPO USA `RichTextEditor` SEM VARIAVEIS
- * -------------------------------------------
- * `RichTextEditor` da formatacao (negrito, listas, alinhamento) util num
- * contrato ou declaracao -- mais do que um textarea simples ofereceria. O
- * popover de "inserir variavel" fica FORA (passa-se `variables={[]}`): como
- * `{{...}}` nao e substituido em lado nenhum para RH, mostrar esse botao
- * sugeria uma funcionalidade que nao existe.
+ * VARIAVEIS E CLAUSULAS (20261202020000)
+ * -----------------------------------------
+ * Desde 20261202020000, `{{token}}` E substituido do lado do servidor, dentro
+ * de `rpc_hr_documento_emitir` -- por isso o popover de variaveis do
+ * `RichTextEditor` volta a mostrar-se (`variables={CATALOGO_VARIAVEIS_RH...}`),
+ * e ha um botao extra para colar uma clausula da biblioteca
+ * (`SelectorClausulasRH`, insercao por COPIA, nao por referencia).
+ *
+ * O campo "variaveis" deixou de ser texto livre: `pessoas_documentos_modelos.variaveis`
+ * passa a gravar os tokens DETECTADOS no corpo (`extrairTokensRH`), so leitura
+ * no ecra -- ninguem escreve a mao uma lista que o corpo ja contem.
+ *
+ * A pre-visualizacao usa `DADOS_EXEMPLO_RH` (uma pessoa ficticia) e nunca a
+ * pessoa real: o corpo substituido de verdade so existe do lado do servidor,
+ * no momento de emitir.
  *
  * NUNCA SE APAGA -- SO SE (DES)ACTIVA
  * -------------------------------------
  * A RLS bloqueia DELETE por politica RESTRICTIVE; este ecra nem mostra a
  * opcao. "Desactivar" e "Reactivar" sao o UPDATE de `activo`.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +50,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RichTextEditor } from "@/components/RichTextEditor";
+import { RichTextEditor, type RichTextEditorHandle } from "@/components/RichTextEditor";
+import { SelectorClausulasRH } from "@/components/hr/SelectorClausulasRH";
+import { sanitizeRichHtml } from "@/utils/sanitize";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -54,9 +62,16 @@ import {
   type NovoModeloDocumentoRH,
 } from "@/hooks/useModelosDocumentosRH";
 import { TIPOS_DOCUMENTO_RH, type TipoDocumentoRH } from "@/types/hr";
+import {
+  CATALOGO_VARIAVEIS_RH,
+  DADOS_EXEMPLO_RH,
+  extrairTokensRH,
+  tokensDesconhecidosRH,
+  substituirVariaveisRH,
+} from "@/utils/hr/variaveisDocumentoRH";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
-import { FileText, Loader2, Plus, Pencil, Ban, RotateCcw } from "lucide-react";
+import { FileText, Loader2, Plus, Pencil, Ban, RotateCcw, Eye, AlertTriangle } from "lucide-react";
 
 const FORM_VAZIO: NovoModeloDocumentoRH = {
   nome: "",
@@ -65,17 +80,13 @@ const FORM_VAZIO: NovoModeloDocumentoRH = {
   variaveis: [],
 };
 
-/** `variaveis` mostra-se como texto separado por virgulas -- e so uma nota
- *  documental, sem validacao de formato nenhuma. */
-function variaveisParaTexto(variaveis: string[]): string {
-  return variaveis.join(", ");
-}
-function textoParaVariaveis(texto: string): string[] {
-  return texto
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
-}
+/** As mesmas variaveis do catalogo, na forma `{key, label, description}` que
+ *  o popover do `RichTextEditor` espera (`{{token}}` com chavetas). */
+const VARIAVEIS_EDITOR = CATALOGO_VARIAVEIS_RH.map((v) => ({
+  key: `{{${v.token}}}`,
+  label: v.rotulo,
+  description: v.grupo,
+}));
 
 export default function ConfiguracaoModelosDocumentos() {
   const { t } = useTranslation();
@@ -85,20 +96,34 @@ export default function ConfiguracaoModelosDocumentos() {
   const podeEditar = hasPermission("hr.pessoas.documentos.modelos.edit");
 
   const { modelos, isLoading, isSaving, criar, editar, definirActivo } = useModelosDocumentosRH();
+  const editorRef = useRef<RichTextEditorHandle>(null);
 
   const [mostrarInactivos, setMostrarInactivos] = useState(false);
   const [dialogoAberto, setDialogoAberto] = useState(false);
   const [modeloAEditar, setModeloAEditar] = useState<ModeloDocumentoRH | null>(null);
   const [form, setForm] = useState<NovoModeloDocumentoRH>(FORM_VAZIO);
+  const [mostrarPreview, setMostrarPreview] = useState(false);
 
   const modelosVisiveis = useMemo(
     () => (mostrarInactivos ? modelos : modelos.filter((m) => m.activo)),
     [modelos, mostrarInactivos],
   );
 
+  // So leitura -- derivados do corpo, nunca escritos a mao. Ver cabecalho.
+  const tokensDetectados = useMemo(() => extrairTokensRH(form.corpo_html), [form.corpo_html]);
+  const tokensFora = useMemo(() => tokensDesconhecidosRH(form.corpo_html), [form.corpo_html]);
+  // Sanitizar SEMPRE antes do dangerouslySetInnerHTML -- mesma regra que
+  // SelectorClausulasRH.tsx (sanitizeRichHtml) e PessoaDocumentosTab.tsx
+  // (DOMPurify.sanitize) ja seguem para corpo_html vindo de outra fonte.
+  const preview = useMemo(
+    () => sanitizeRichHtml(substituirVariaveisRH(form.corpo_html, DADOS_EXEMPLO_RH, true)),
+    [form.corpo_html],
+  );
+
   const abrirNovo = () => {
     setModeloAEditar(null);
     setForm(FORM_VAZIO);
+    setMostrarPreview(false);
     setDialogoAberto(true);
   };
 
@@ -110,6 +135,7 @@ export default function ConfiguracaoModelosDocumentos() {
       corpo_html: modelo.corpo_html,
       variaveis: modelo.variaveis,
     });
+    setMostrarPreview(false);
     setDialogoAberto(true);
   };
 
@@ -117,16 +143,20 @@ export default function ConfiguracaoModelosDocumentos() {
     setDialogoAberto(false);
     setModeloAEditar(null);
     setForm(FORM_VAZIO);
+    setMostrarPreview(false);
   };
 
   const submeter = async () => {
     if (!form.nome.trim() || !form.corpo_html.trim()) return;
     try {
+      // `variaveis` grava os tokens DETECTADOS no corpo agora, no momento de
+      // gravar -- nao o que estava no form antes de mexer no corpo.
+      const payload: NovoModeloDocumentoRH = { ...form, variaveis: extrairTokensRH(form.corpo_html) };
       if (modeloAEditar) {
-        await editar({ ...form, id: modeloAEditar.id });
+        await editar({ ...payload, id: modeloAEditar.id });
         toast.success(t("hr.modelos.actualizarSucesso"));
       } else {
-        await criar(form);
+        await criar(payload);
         toast.success(t("hr.modelos.criarSucesso"));
       }
       fecharDialogo();
@@ -284,23 +314,59 @@ export default function ConfiguracaoModelosDocumentos() {
             </div>
 
             <div className="space-y-2">
-              <Label>{t("hr.modelos.corpo")}</Label>
-              <RichTextEditor
-                value={form.corpo_html}
-                onChange={(v) => setForm((f) => ({ ...f, corpo_html: v }))}
-                variables={[]}
-                minHeight="300px"
-              />
+              <div className="flex items-center justify-between">
+                <Label>{t("hr.modelos.corpo")}</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  onClick={() => setMostrarPreview((v) => !v)}
+                >
+                  <Eye className="h-3.5 w-3.5" />
+                  {mostrarPreview ? t("hr.modelos.ocultarPreview") : t("hr.modelos.verPreview")}
+                </Button>
+              </div>
+              {mostrarPreview ? (
+                <div
+                  className="rounded-lg border bg-background p-4 text-sm min-h-[220px] overflow-y-auto"
+                  style={{ maxHeight: "300px" }}
+                  dangerouslySetInnerHTML={{ __html: preview }}
+                />
+              ) : (
+                <RichTextEditor
+                  ref={editorRef}
+                  value={form.corpo_html}
+                  onChange={(v) => setForm((f) => ({ ...f, corpo_html: v }))}
+                  variables={VARIAVEIS_EDITOR}
+                  extraToolbarButtons={<SelectorClausulasRH editorRef={editorRef} />}
+                  minHeight="300px"
+                />
+              )}
+              {mostrarPreview && (
+                <p className="text-xs text-muted-foreground">{t("hr.modelos.previewAjuda")}</p>
+              )}
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="modelo-variaveis">{t("hr.modelos.variaveis")}</Label>
-              <Input
-                id="modelo-variaveis"
-                value={variaveisParaTexto(form.variaveis)}
-                onChange={(e) => setForm((f) => ({ ...f, variaveis: textoParaVariaveis(e.target.value) }))}
-                placeholder="nome_completo, retribuicao_valor"
-              />
+              <Label>{t("hr.modelos.variaveis")}</Label>
+              {tokensDetectados.length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t("hr.modelos.semVariaveisDetectadas")}</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5">
+                  {tokensDetectados.map((token) => (
+                    <Badge
+                      key={token}
+                      variant={tokensFora.includes(token) ? "destructive" : "secondary"}
+                      className="font-mono text-[10px]"
+                      title={tokensFora.includes(token) ? t("hr.modelos.variavelDesconhecidaAjuda") : undefined}
+                    >
+                      {tokensFora.includes(token) && <AlertTriangle className="h-3 w-3 mr-1" />}
+                      {`{{${token}}}`}
+                    </Badge>
+                  ))}
+                </div>
+              )}
               <p className="text-xs text-muted-foreground">{t("hr.modelos.variaveisAjuda")}</p>
             </div>
           </div>

@@ -47,6 +47,21 @@ vi.mock("@/hooks/useModelosDocumentosRH", () => ({
   }),
 }));
 
+// O botao de clausulas (SelectorClausulasRH, dentro do RichTextEditor) usa
+// useClausulasDocumentosRH, que precisa de um QueryClientProvider real. Este
+// ecra ja mocka useModelosDocumentosRH pela mesma razao -- a logica de
+// escrita das clausulas tem o proprio teste em useClausulasDocumentosRH.test.ts.
+vi.mock("@/hooks/useClausulasDocumentosRH", () => ({
+  useClausulasDocumentosRH: () => ({
+    clausulas: [],
+    isLoading: false,
+    isSaving: false,
+    criar: vi.fn(async () => {}),
+    editar: vi.fn(async () => {}),
+    definirActivo: vi.fn(async () => {}),
+  }),
+}));
+
 async function renderPagina() {
   const { default: ConfiguracaoModelosDocumentos } = await import("../ConfiguracaoModelosDocumentos");
   render(<ConfiguracaoModelosDocumentos />);
@@ -87,6 +102,34 @@ describe("ConfiguracaoModelosDocumentos", () => {
     fireEvent.click(botaoNovo);
 
     expect(screen.getByText("Corpo do documento")).toBeTruthy();
+  });
+
+  it("a pre-visualizacao sanitiza o HTML antes do dangerouslySetInnerHTML (ponto (c) da revisao)", async () => {
+    hasPermission.mockReturnValue(true);
+    modelos = [
+      {
+        ...MODELO,
+        corpo_html: '<p onclick="alert(1)">Ola {{pessoa_nome_completo}}</p><script>alert(1)</script><img src="x" onerror="alert(2)">',
+      },
+    ];
+
+    await renderPagina();
+
+    // Abre o modelo para edicao (o form arranca com o corpo_html do modelo).
+    fireEvent.click(screen.getByTitle("Editar modelo"));
+    // Liga a pre-visualizacao.
+    fireEvent.click(screen.getByText("Pré-visualizar"));
+
+    const preview = document.querySelector(".rounded-lg.border.bg-background.p-4");
+    expect(preview).toBeTruthy();
+    // O nome de exemplo (DADOS_EXEMPLO_RH) foi substituido normalmente.
+    expect(preview?.innerHTML).toContain("Ana Sofia Ferreira");
+    // Mas nada de script, nem handlers inline -- sanitizeRichHtml removeu-os,
+    // tal como SelectorClausulasRH.tsx e PessoaDocumentosTab.tsx ja fazem
+    // para corpo_html vindo de fora.
+    expect(preview?.innerHTML).not.toContain("<script");
+    expect(preview?.innerHTML).not.toContain("onerror");
+    expect(preview?.innerHTML).not.toContain("onclick");
   });
 
   it("por omissao esconde modelos inactivos, e o interruptor mostra-os", async () => {
