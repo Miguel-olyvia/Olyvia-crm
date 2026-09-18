@@ -1682,7 +1682,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   </div>
                   <div className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                    <p><strong>Defina o fluxo:</strong> Restrinja as transições para evitar que leads saltem etapas.</p>
+                    <p><strong>Defina o fluxo:</strong> As ligações que desenha no separador Fluxo descrevem as transições permitidas entre estágios. Por omissão são apenas documentação: só bloqueiam mudanças se ativar o interruptor "Restringir transições ao fluxo desenhado" nesse separador — e mesmo aí aplicam-se apenas a mudanças feitas por utilizadores, nunca ao avanço automático.</p>
                   </div>
                   <div className="flex items-start gap-2">
                     <CheckCircle2 className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />

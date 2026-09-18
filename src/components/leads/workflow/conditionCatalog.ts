@@ -194,8 +194,24 @@ export function buildContactResultCatalogRows(results: ContactResultCatalogSourc
  * signal can independently be part of the "all" (AND) set, the "any" (OR)
  * set, both, or neither (two-column checkbox layout, see StageRulesEditor).
  */
+/**
+ * Existem regras legadas em que os elementos de `all`/`any` são strings soltas
+ * (ex: "has_assignee") em vez de objetos `{type: ...}`. Não são avaliáveis pelo
+ * evaluator SQL nem reconhecíveis pelos `matches` do catálogo, por isso são
+ * descartadas — tanto ao ler (para as checkboxes refletirem o que é real) como
+ * ao gravar (para abrir e guardar um estágio auto-reparar a regra). Não se
+ * tenta adivinhar/traduzir o valor legado: o que é inválido desaparece.
+ */
+function sanitizeConditions(list: unknown): RuleCondition[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (c): c is RuleCondition =>
+      !!c && typeof c === "object" && !Array.isArray(c) && typeof (c as { type?: unknown }).type === "string"
+  );
+}
+
 export function isRowInBucket(rule: RuleGroup | null, row: CatalogRow, bucket: "all" | "any"): boolean {
-  const list = bucket === "all" ? (rule?.all ?? []) : (rule?.any ?? []);
+  const list = sanitizeConditions(bucket === "all" ? rule?.all : rule?.any);
   return list.some(row.matches);
 }
 
@@ -204,7 +220,7 @@ export function conditionForRowInBucket(
   row: CatalogRow,
   bucket: "all" | "any"
 ): RuleCondition | undefined {
-  const list = bucket === "all" ? (rule?.all ?? []) : (rule?.any ?? []);
+  const list = sanitizeConditions(bucket === "all" ? rule?.all : rule?.any);
   return list.find(row.matches);
 }
 
@@ -219,8 +235,10 @@ export function setRowInBucket(
   bucket: "all" | "any",
   checked: boolean
 ): RuleGroup | null {
-  const all = rule?.all ?? [];
-  const any = rule?.any ?? [];
+  // Reescrever a partir das listas saneadas é o que faz o auto-reparo: o lixo
+  // legado não volta a ser gravado.
+  const all = sanitizeConditions(rule?.all);
+  const any = sanitizeConditions(rule?.any);
   const list = bucket === "all" ? all : any;
   const existing = list.find(row.matches);
 
@@ -249,8 +267,8 @@ export function setNumericValueInBucket(
 ): RuleGroup | null {
   if (!row.numericParam) return rule;
 
-  const all = rule?.all ?? [];
-  const any = rule?.any ?? [];
+  const all = sanitizeConditions(rule?.all);
+  const any = sanitizeConditions(rule?.any);
   const list = bucket === "all" ? all : any;
   if (!list.some(row.matches)) return rule;
 

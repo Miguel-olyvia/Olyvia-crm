@@ -10315,6 +10315,58 @@ export type Database = {
           },
         ]
       }
+      lead_pipeline_settings: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          enforce_stage_transitions: boolean
+          organization_id: string
+          stage_positions: Json
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          enforce_stage_transitions?: boolean
+          organization_id: string
+          stage_positions?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          enforce_stage_transitions?: boolean
+          organization_id?: string
+          stage_positions?: Json
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "lead_pipeline_settings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_pipeline_settings_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: true
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_pipeline_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       lead_qualification_rules: {
         Row: {
           created_at: string
