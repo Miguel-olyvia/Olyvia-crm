@@ -134,8 +134,7 @@ export function DealNeedDiagnostic({
       //    mesma regra do QuoteDiagnosticPhase.tsx. Sem área definida ou sem a
       //    regra configurada, fica 1.
       let qty = 1;
-      // cast local: estas colunas técnicas não estão no types.ts gerado.
-      const { data: serviceData, error: serviceError } = await (supabase as any)
+      const { data: serviceData, error: serviceError } = await supabase
         .from("services")
         .select("technical_sheet_reference_area_m2, technical_sheet_reference_quantity")
         .eq("id", service.id)
@@ -167,8 +166,7 @@ export function DealNeedDiagnostic({
       //    Regra de três copiada de QuoteDiagnosticPhase.tsx:243-251.
       const materialsOut: DealNeedDiagnosticMaterial[] = [];
       try {
-        // cast local: service_materials ainda não está tipada no types.ts gerado.
-        const { data, error } = await (supabase as any)
+        const { data, error } = await supabase
           .from("service_materials")
           .select(
             "product_id, quantity, uom_id, reference_area_m2, reference_quantity, product:products(name), uom:uom_id(code)",
@@ -177,7 +175,7 @@ export function DealNeedDiagnostic({
           .is("deleted_at", null);
         if (error) throw error;
 
-        const rows = ((data as ServiceMaterialRow[] | null) || []);
+        const rows: ServiceMaterialRow[] = data || [];
         for (const row of rows) {
           let matQty = Number(row.quantity) || 0;
           if (

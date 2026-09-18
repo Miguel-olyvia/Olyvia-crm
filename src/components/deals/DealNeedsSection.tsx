@@ -574,13 +574,12 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   };
 
   // ─── Diagnóstico: hidratação ────────────────────────────
-  // As colunas diag_* e a tabela deal_need_diagnostic_materials são novas e
-  // ainda não estão no types.ts gerado — daí os casts locais. Toda a leitura é
-  // best effort: se a migração ainda não estiver aplicada, a aba abre vazia e
-  // o resto do diálogo continua a funcionar exatamente como antes.
+  // Toda a leitura é best effort: se a migração ainda não estiver aplicada, a
+  // aba abre vazia e o resto do diálogo continua a funcionar exatamente como
+  // antes.
   const loadDiagnosticForNeed = async (needId: string) => {
     try {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from("deal_needs")
         .select("diag_area_m2, diag_demolir_descricao, diag_demolir_m2, diag_proteger_descricao, diag_intervencao_tipo, diag_intervencao_descricao")
         .eq("id", needId)
@@ -602,7 +601,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     }
 
     try {
-      const { data, error } = await (supabase as any)
+      const { data, error } = await supabase
         .from("deal_need_diagnostic_materials")
         .select("id, service_id, product_id, descricao, quantity, unidade, sort_order")
         .eq("deal_need_id", needId)
@@ -610,7 +609,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       if (error) throw error;
       if (diagLoadTokenRef.current === needId) {
         diagMaterialsLoadedRef.current = true;
-        setFormDiagMaterials(((data as any[]) || []).map(m => ({
+        setFormDiagMaterials((data || []).map(m => ({
           id: m.id,
           service_id: m.service_id ?? null,
           product_id: m.product_id ?? null,
@@ -791,9 +790,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     }
     try {
       await withAuditContext(supabase, businessUserId, async () => {
-        // cast local: tabela nova, ainda fora do types.ts gerado.
-        const client = supabase as any;
-        const { error: delError } = await client
+        const { error: delError } = await supabase
           .from("deal_need_diagnostic_materials")
           .delete()
           .eq("deal_need_id", needId);
@@ -811,7 +808,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
             sort_order: idx,
             created_by: businessUserId,
           }));
-          const { error: insError } = await client.from("deal_need_diagnostic_materials").insert(rows);
+          const { error: insError } = await supabase.from("deal_need_diagnostic_materials").insert(rows);
           if (insError) throw insError;
         }
         return null;
@@ -935,7 +932,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
 
       // Materiais da ficha técnica (só informativos para o armazém) — gravados
       // depois da necessidade, porque numa criação o id só existe aqui.
-      await syncDiagnosticMaterials((savedNeed as any)?.id || editingNeed?.id || null, businessUserId);
+      await syncDiagnosticMaterials(savedNeed?.id || editingNeed?.id || null, businessUserId);
 
       toast({ title: editingNeed ? "Necessidade atualizada" : "Necessidade adicionada" });
       setDialogOpen(false);

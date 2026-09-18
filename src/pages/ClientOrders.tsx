@@ -141,7 +141,7 @@ interface DirectSaleOrigin {
 //
 // Um material é informativo: é o que o diagnóstico previu, não é linha da
 // encomenda — não tem preço nem soma ao total.
-interface ClientOrderDiagnosticMaterial {
+export interface ClientOrderDiagnosticMaterial {
   descricao: string | null;
   quantity: number;
   unidade: string | null;
@@ -152,7 +152,10 @@ interface ClientOrderDiagnosticMaterial {
 // Um elemento por necessidade da obra. Encomendas de venda direta e encomendas
 // manuais nunca têm diagnóstico: a RPC devolve `[]` e não se mostra nada — é o
 // comportamento correto, não é erro.
-interface ClientOrderDiagnosticNeed {
+// Exportado (só o tipo) para o PDF em `ClientOrderDocumentPDF.tsx` reutilizar
+// esta forma em vez de a duplicar. O import lá é `import type`, logo não há
+// dependência circular em runtime.
+export interface ClientOrderDiagnosticNeed {
   deal_need_id: string;
   need_title: string | null;
   diag_area_m2: number | null;

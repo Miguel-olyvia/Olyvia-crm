@@ -1914,12 +1914,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           ordem: line.ordem,
           section_name: (line as any).section_name || "Geral",
           visible_to_client: line.visible_to_client ?? true,
-          // Cast local: colunas novas em quote_lines, ainda não presentes nos
-          // tipos gerados (src/integrations/supabase/types.ts será regenerado).
           // Sem isto, reabrir um orçamento já gravado perderia a marca de
           // origem e o botão de importar duplicaria as linhas.
-          source_deal_need_id: (line as any).source_deal_need_id || null,
-          source_deal_need_item_id: (line as any).source_deal_need_item_id || null,
+          source_deal_need_id: line.source_deal_need_id || null,
+          source_deal_need_item_id: line.source_deal_need_item_id || null,
         }))
       );
       
@@ -2071,9 +2069,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   // orçamento, por isso o erro é registado e engolido — nunca propaga.
   const snapshotQuoteDiagnostic = async (quoteIdForSnapshot: string, dealId: string) => {
     try {
-      // Cast local: RPC nova, ainda ausente dos tipos gerados
-      // (src/integrations/supabase/types.ts será regenerado).
-      const { error } = await (supabase as any).rpc("rpc_snapshot_quote_diagnostic", {
+      const { error } = await supabase.rpc("rpc_snapshot_quote_diagnostic", {
         p_quote_id: quoteIdForSnapshot,
         p_deal_id: dealId,
       });

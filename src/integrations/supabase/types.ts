@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       _migration_contacts_to_leads_map: {
@@ -403,6 +428,47 @@ export type Database = {
           stripe_price_id?: string | null
         }
         Relationships: []
+      }
+      ai_gateway_usage_log: {
+        Row: {
+          completion_tokens: number | null
+          created_at: string
+          credits_charged: number
+          id: string
+          operation: string
+          organization_id: string
+          prompt_tokens: number | null
+          total_tokens: number | null
+        }
+        Insert: {
+          completion_tokens?: number | null
+          created_at?: string
+          credits_charged: number
+          id?: string
+          operation: string
+          organization_id: string
+          prompt_tokens?: number | null
+          total_tokens?: number | null
+        }
+        Update: {
+          completion_tokens?: number | null
+          created_at?: string
+          credits_charged?: number
+          id?: string
+          operation?: string
+          organization_id?: string
+          prompt_tokens?: number | null
+          total_tokens?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ai_gateway_usage_log_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       ai_suggestion_ratings: {
         Row: {
@@ -5532,6 +5598,7 @@ export type Database = {
           end_date: string | null
           entity_id: string | null
           id: string
+          is_manual_order: boolean
           notes: string | null
           organization_id: string
           payment_terms: string | null
@@ -5579,6 +5646,7 @@ export type Database = {
           end_date?: string | null
           entity_id?: string | null
           id?: string
+          is_manual_order?: boolean
           notes?: string | null
           organization_id: string
           payment_terms?: string | null
@@ -5626,6 +5694,7 @@ export type Database = {
           end_date?: string | null
           entity_id?: string | null
           id?: string
+          is_manual_order?: boolean
           notes?: string | null
           organization_id?: string
           payment_terms?: string | null
@@ -5858,6 +5927,7 @@ export type Database = {
           contract_id: string | null
           created_at: string
           created_by: string | null
+          direct_sale_id: string | null
           entity_id: string | null
           first_login: boolean
           first_login_at: string | null
@@ -5878,6 +5948,7 @@ export type Database = {
           contract_id?: string | null
           created_at?: string
           created_by?: string | null
+          direct_sale_id?: string | null
           entity_id?: string | null
           first_login?: boolean
           first_login_at?: string | null
@@ -5898,6 +5969,7 @@ export type Database = {
           contract_id?: string | null
           created_at?: string
           created_by?: string | null
+          direct_sale_id?: string | null
           entity_id?: string | null
           first_login?: boolean
           first_login_at?: string | null
@@ -5952,6 +6024,13 @@ export type Database = {
             columns: ["contract_id"]
             isOneToOne: false
             referencedRelation: "client_contracts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "client_portal_users_direct_sale_id_fkey"
+            columns: ["direct_sale_id"]
+            isOneToOne: false
+            referencedRelation: "direct_sales"
             referencedColumns: ["id"]
           },
           {
@@ -6688,6 +6767,94 @@ export type Database = {
           },
         ]
       }
+      deal_need_diagnostic_materials: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          deal_need_id: string
+          descricao: string | null
+          id: string
+          organization_id: string
+          product_id: string | null
+          quantity: number
+          service_id: string | null
+          sort_order: number | null
+          unidade: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          deal_need_id: string
+          descricao?: string | null
+          id?: string
+          organization_id: string
+          product_id?: string | null
+          quantity?: number
+          service_id?: string | null
+          sort_order?: number | null
+          unidade?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          deal_need_id?: string
+          descricao?: string | null
+          id?: string
+          organization_id?: string
+          product_id?: string | null
+          quantity?: number
+          service_id?: string | null
+          sort_order?: number | null
+          unidade?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "deal_need_diagnostic_materials_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deal_need_diagnostic_materials_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "deal_need_diagnostic_materials_deal_need_id_fkey"
+            columns: ["deal_need_id"]
+            isOneToOne: false
+            referencedRelation: "deal_needs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deal_need_diagnostic_materials_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deal_need_diagnostic_materials_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "deal_need_diagnostic_materials_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       deal_need_items: {
         Row: {
           created_at: string
@@ -6738,6 +6905,12 @@ export type Database = {
           custom_fields: Json | null
           deal_id: string
           description: string | null
+          diag_area_m2: number | null
+          diag_demolir_descricao: string | null
+          diag_demolir_m2: number | null
+          diag_intervencao_descricao: string | null
+          diag_intervencao_tipo: string | null
+          diag_proteger_descricao: string | null
           estimate_max: number | null
           estimate_min: number | null
           id: string
@@ -6763,6 +6936,12 @@ export type Database = {
           custom_fields?: Json | null
           deal_id: string
           description?: string | null
+          diag_area_m2?: number | null
+          diag_demolir_descricao?: string | null
+          diag_demolir_m2?: number | null
+          diag_intervencao_descricao?: string | null
+          diag_intervencao_tipo?: string | null
+          diag_proteger_descricao?: string | null
           estimate_max?: number | null
           estimate_min?: number | null
           id?: string
@@ -6788,6 +6967,12 @@ export type Database = {
           custom_fields?: Json | null
           deal_id?: string
           description?: string | null
+          diag_area_m2?: number | null
+          diag_demolir_descricao?: string | null
+          diag_demolir_m2?: number | null
+          diag_intervencao_descricao?: string | null
+          diag_intervencao_tipo?: string | null
+          diag_proteger_descricao?: string | null
           estimate_max?: number | null
           estimate_min?: number | null
           id?: string
@@ -7140,6 +7325,425 @@ export type Database = {
           },
         ]
       }
+      direct_sale_lines: {
+        Row: {
+          cost_price: number | null
+          created_at: string
+          descricao_snapshot: string
+          direct_sale_id: string
+          discount_percent: number | null
+          id: string
+          iva_percent: number | null
+          margem_percent: number | null
+          ordem: number | null
+          product_id: string | null
+          qt: number | null
+          retail_price_unit: number | null
+          service_id: string | null
+          total_com_desconto: number | null
+          total_com_iva: number | null
+          total_sem_iva: number | null
+          unidade: string | null
+          visible_to_client: boolean
+        }
+        Insert: {
+          cost_price?: number | null
+          created_at?: string
+          descricao_snapshot: string
+          direct_sale_id: string
+          discount_percent?: number | null
+          id?: string
+          iva_percent?: number | null
+          margem_percent?: number | null
+          ordem?: number | null
+          product_id?: string | null
+          qt?: number | null
+          retail_price_unit?: number | null
+          service_id?: string | null
+          total_com_desconto?: number | null
+          total_com_iva?: number | null
+          total_sem_iva?: number | null
+          unidade?: string | null
+          visible_to_client?: boolean
+        }
+        Update: {
+          cost_price?: number | null
+          created_at?: string
+          descricao_snapshot?: string
+          direct_sale_id?: string
+          discount_percent?: number | null
+          id?: string
+          iva_percent?: number | null
+          margem_percent?: number | null
+          ordem?: number | null
+          product_id?: string | null
+          qt?: number | null
+          retail_price_unit?: number | null
+          service_id?: string | null
+          total_com_desconto?: number | null
+          total_com_iva?: number | null
+          total_sem_iva?: number | null
+          unidade?: string | null
+          visible_to_client?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "direct_sale_lines_direct_sale_id_fkey"
+            columns: ["direct_sale_id"]
+            isOneToOne: false
+            referencedRelation: "direct_sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_lines_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_lines_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      direct_sale_sends: {
+        Row: {
+          browser: string | null
+          channel: string
+          created_at: string
+          device_type: string | null
+          direct_sale_id: string
+          first_link_clicked_at: string | null
+          first_opened_at: string | null
+          id: string
+          ip_address: string | null
+          last_opened_at: string | null
+          location_city: string | null
+          location_country: string | null
+          message: string | null
+          open_count: number | null
+          organization_id: string | null
+          os: string | null
+          recipient_email: string | null
+          recipient_name: string | null
+          sent_at: string
+          sent_by: string | null
+          status: string | null
+          subject: string | null
+          total_view_time_seconds: number | null
+        }
+        Insert: {
+          browser?: string | null
+          channel?: string
+          created_at?: string
+          device_type?: string | null
+          direct_sale_id: string
+          first_link_clicked_at?: string | null
+          first_opened_at?: string | null
+          id?: string
+          ip_address?: string | null
+          last_opened_at?: string | null
+          location_city?: string | null
+          location_country?: string | null
+          message?: string | null
+          open_count?: number | null
+          organization_id?: string | null
+          os?: string | null
+          recipient_email?: string | null
+          recipient_name?: string | null
+          sent_at?: string
+          sent_by?: string | null
+          status?: string | null
+          subject?: string | null
+          total_view_time_seconds?: number | null
+        }
+        Update: {
+          browser?: string | null
+          channel?: string
+          created_at?: string
+          device_type?: string | null
+          direct_sale_id?: string
+          first_link_clicked_at?: string | null
+          first_opened_at?: string | null
+          id?: string
+          ip_address?: string | null
+          last_opened_at?: string | null
+          location_city?: string | null
+          location_country?: string | null
+          message?: string | null
+          open_count?: number | null
+          organization_id?: string | null
+          os?: string | null
+          recipient_email?: string | null
+          recipient_name?: string | null
+          sent_at?: string
+          sent_by?: string | null
+          status?: string | null
+          subject?: string | null
+          total_view_time_seconds?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "direct_sale_sends_direct_sale_id_fkey"
+            columns: ["direct_sale_id"]
+            isOneToOne: false
+            referencedRelation: "direct_sales"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_sends_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      direct_sales: {
+        Row: {
+          acceptance_ip: string | null
+          acceptance_user_agent: string | null
+          accepted_at: string | null
+          assigned_to: string | null
+          client_contract_id: string | null
+          client_id: string | null
+          client_notes: string | null
+          created_at: string
+          created_by: string | null
+          currency: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          description: string | null
+          document_url: string | null
+          entity_id: string | null
+          external_invoice_id: string | null
+          id: string
+          invoice_atcud: string | null
+          invoice_hash: string | null
+          invoice_issued_at: string | null
+          invoice_number: string | null
+          invoice_pdf_url: string | null
+          invoice_series: string | null
+          invoice_source: string | null
+          invoice_status: string
+          iva_rate: number | null
+          last_viewed_at: string | null
+          notes: string | null
+          organization_id: string
+          proforma_issued_at: string | null
+          proforma_number: string | null
+          rejected_at: string | null
+          rejection_notes: string | null
+          rejection_reason: string | null
+          rejection_reason_code: string | null
+          rejection_reason_id: string | null
+          root_organization_id: string | null
+          sale_number: string | null
+          search_text: string | null
+          sent_at: string | null
+          signature_image: string | null
+          status: string
+          subtotal: number | null
+          title: string | null
+          total: number | null
+          updated_at: string
+          valid_until: string | null
+          view_count: number | null
+          viewed_at: string | null
+        }
+        Insert: {
+          acceptance_ip?: string | null
+          acceptance_user_agent?: string | null
+          accepted_at?: string | null
+          assigned_to?: string | null
+          client_contract_id?: string | null
+          client_id?: string | null
+          client_notes?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
+          description?: string | null
+          document_url?: string | null
+          entity_id?: string | null
+          external_invoice_id?: string | null
+          id?: string
+          invoice_atcud?: string | null
+          invoice_hash?: string | null
+          invoice_issued_at?: string | null
+          invoice_number?: string | null
+          invoice_pdf_url?: string | null
+          invoice_series?: string | null
+          invoice_source?: string | null
+          invoice_status?: string
+          iva_rate?: number | null
+          last_viewed_at?: string | null
+          notes?: string | null
+          organization_id: string
+          proforma_issued_at?: string | null
+          proforma_number?: string | null
+          rejected_at?: string | null
+          rejection_notes?: string | null
+          rejection_reason?: string | null
+          rejection_reason_code?: string | null
+          rejection_reason_id?: string | null
+          root_organization_id?: string | null
+          sale_number?: string | null
+          search_text?: string | null
+          sent_at?: string | null
+          signature_image?: string | null
+          status?: string
+          subtotal?: number | null
+          title?: string | null
+          total?: number | null
+          updated_at?: string
+          valid_until?: string | null
+          view_count?: number | null
+          viewed_at?: string | null
+        }
+        Update: {
+          acceptance_ip?: string | null
+          acceptance_user_agent?: string | null
+          accepted_at?: string | null
+          assigned_to?: string | null
+          client_contract_id?: string | null
+          client_id?: string | null
+          client_notes?: string | null
+          created_at?: string
+          created_by?: string | null
+          currency?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
+          description?: string | null
+          document_url?: string | null
+          entity_id?: string | null
+          external_invoice_id?: string | null
+          id?: string
+          invoice_atcud?: string | null
+          invoice_hash?: string | null
+          invoice_issued_at?: string | null
+          invoice_number?: string | null
+          invoice_pdf_url?: string | null
+          invoice_series?: string | null
+          invoice_source?: string | null
+          invoice_status?: string
+          iva_rate?: number | null
+          last_viewed_at?: string | null
+          notes?: string | null
+          organization_id?: string
+          proforma_issued_at?: string | null
+          proforma_number?: string | null
+          rejected_at?: string | null
+          rejection_notes?: string | null
+          rejection_reason?: string | null
+          rejection_reason_code?: string | null
+          rejection_reason_id?: string | null
+          root_organization_id?: string | null
+          sale_number?: string | null
+          search_text?: string | null
+          sent_at?: string | null
+          signature_image?: string | null
+          status?: string
+          subtotal?: number | null
+          title?: string | null
+          total?: number | null
+          updated_at?: string
+          valid_until?: string | null
+          view_count?: number | null
+          viewed_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "direct_sales_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sales_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "direct_sales_client_contract_id_fkey"
+            columns: ["client_contract_id"]
+            isOneToOne: false
+            referencedRelation: "client_contracts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sales_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "anew_clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sales_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_cliente"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sales_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_contacto_cliente"
+            referencedColumns: ["cliente_id"]
+          },
+          {
+            foreignKeyName: "direct_sales_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_morada_cliente"
+            referencedColumns: ["cliente_id"]
+          },
+          {
+            foreignKeyName: "direct_sales_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sales_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "direct_sales_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "anew_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sales_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sales_root_organization_id_fkey"
+            columns: ["root_organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       documents: {
         Row: {
           created_at: string
@@ -7155,6 +7759,7 @@ export type Database = {
           organization_id: string
           uploaded_by: string | null
           validation_status: string
+          visible_to_client: boolean
         }
         Insert: {
           created_at?: string
@@ -7170,6 +7775,7 @@ export type Database = {
           organization_id: string
           uploaded_by?: string | null
           validation_status?: string
+          visible_to_client?: boolean
         }
         Update: {
           created_at?: string
@@ -7185,6 +7791,7 @@ export type Database = {
           organization_id?: string
           uploaded_by?: string | null
           validation_status?: string
+          visible_to_client?: boolean
         }
         Relationships: []
       }
@@ -12592,6 +13199,39 @@ export type Database = {
           },
         ]
       }
+      organization_counted_entities: {
+        Row: {
+          counted_at: string
+          entity_id: string
+          organization_id: string
+        }
+        Insert: {
+          counted_at?: string
+          entity_id: string
+          organization_id: string
+        }
+        Update: {
+          counted_at?: string
+          entity_id?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_counted_entities_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "anew_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_counted_entities_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_document_settings: {
         Row: {
           company_name_override: string | null
@@ -14406,6 +15046,7 @@ export type Database = {
           description: string | null
           has_variants: boolean
           id: string
+          image_urls: string[] | null
           is_active: boolean | null
           is_deleted: boolean
           is_purchasable: boolean
@@ -14435,6 +15076,7 @@ export type Database = {
           description?: string | null
           has_variants?: boolean
           id?: string
+          image_urls?: string[] | null
           is_active?: boolean | null
           is_deleted?: boolean
           is_purchasable?: boolean
@@ -14464,6 +15106,7 @@ export type Database = {
           description?: string | null
           has_variants?: boolean
           id?: string
+          image_urls?: string[] | null
           is_active?: boolean | null
           is_deleted?: boolean
           is_purchasable?: boolean
@@ -15731,6 +16374,76 @@ export type Database = {
           },
         ]
       }
+      quote_diagnostic_snapshot: {
+        Row: {
+          created_at: string
+          deal_need_id: string | null
+          diag_area_m2: number | null
+          diag_demolir_descricao: string | null
+          diag_demolir_m2: number | null
+          diag_intervencao_descricao: string | null
+          diag_intervencao_tipo: string | null
+          diag_proteger_descricao: string | null
+          id: string
+          materials: Json
+          need_title: string | null
+          organization_id: string
+          quote_id: string
+        }
+        Insert: {
+          created_at?: string
+          deal_need_id?: string | null
+          diag_area_m2?: number | null
+          diag_demolir_descricao?: string | null
+          diag_demolir_m2?: number | null
+          diag_intervencao_descricao?: string | null
+          diag_intervencao_tipo?: string | null
+          diag_proteger_descricao?: string | null
+          id?: string
+          materials?: Json
+          need_title?: string | null
+          organization_id: string
+          quote_id: string
+        }
+        Update: {
+          created_at?: string
+          deal_need_id?: string | null
+          diag_area_m2?: number | null
+          diag_demolir_descricao?: string | null
+          diag_demolir_m2?: number | null
+          diag_intervencao_descricao?: string | null
+          diag_intervencao_tipo?: string | null
+          diag_proteger_descricao?: string | null
+          id?: string
+          materials?: Json
+          need_title?: string | null
+          organization_id?: string
+          quote_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quote_diagnostic_snapshot_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_snapshot_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_orcamento"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_diagnostic_snapshot_quote_id_fkey"
+            columns: ["quote_id"]
+            isOneToOne: false
+            referencedRelation: "quotes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quote_fees: {
         Row: {
           base_amount: number
@@ -15811,6 +16524,8 @@ export type Database = {
           section_name: string | null
           selected_attributes: Json | null
           service_id: string | null
+          source_deal_need_id: string | null
+          source_deal_need_item_id: string | null
           total_com_desconto: number | null
           total_com_iva: number | null
           total_sem_iva: number | null
@@ -15841,6 +16556,8 @@ export type Database = {
           section_name?: string | null
           selected_attributes?: Json | null
           service_id?: string | null
+          source_deal_need_id?: string | null
+          source_deal_need_item_id?: string | null
           total_com_desconto?: number | null
           total_com_iva?: number | null
           total_sem_iva?: number | null
@@ -15871,6 +16588,8 @@ export type Database = {
           section_name?: string | null
           selected_attributes?: Json | null
           service_id?: string | null
+          source_deal_need_id?: string | null
+          source_deal_need_item_id?: string | null
           total_com_desconto?: number | null
           total_com_iva?: number | null
           total_sem_iva?: number | null
@@ -16401,6 +17120,7 @@ export type Database = {
           entity_id: string | null
           estado: string | null
           id: string
+          is_internal: boolean
           iva_rate: number | null
           lost_reason: string | null
           modelo_base: string
@@ -16440,6 +17160,7 @@ export type Database = {
           entity_id?: string | null
           estado?: string | null
           id?: string
+          is_internal?: boolean
           iva_rate?: number | null
           lost_reason?: string | null
           modelo_base?: string
@@ -16479,6 +17200,7 @@ export type Database = {
           entity_id?: string | null
           estado?: string | null
           id?: string
+          is_internal?: boolean
           iva_rate?: number | null
           lost_reason?: string | null
           modelo_base?: string
@@ -17784,6 +18506,103 @@ export type Database = {
           },
         ]
       }
+      service_materials: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          product_id: string
+          quantity: number
+          reference_area_m2: number | null
+          reference_quantity: number | null
+          service_id: string
+          sort_order: number | null
+          uom_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
+          id?: string
+          notes?: string | null
+          organization_id: string
+          product_id: string
+          quantity?: number
+          reference_area_m2?: number | null
+          reference_quantity?: number | null
+          service_id: string
+          sort_order?: number | null
+          uom_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          product_id?: string
+          quantity?: number
+          reference_area_m2?: number | null
+          reference_quantity?: number | null
+          service_id?: string
+          sort_order?: number | null
+          uom_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_materials_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_materials_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "service_materials_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_materials_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_materials_service_id_fkey"
+            columns: ["service_id"]
+            isOneToOne: false
+            referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_materials_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       service_organizations: {
         Row: {
           created_at: string
@@ -17981,6 +18800,11 @@ export type Database = {
           sku: string
           slug: string
           supplier_id: string | null
+          technical_sheet_labor_description: string | null
+          technical_sheet_labor_hours: number | null
+          technical_sheet_labor_people_count: number | null
+          technical_sheet_reference_area_m2: number | null
+          technical_sheet_reference_quantity: number | null
           updated_at: string | null
         }
         Insert: {
@@ -18002,6 +18826,11 @@ export type Database = {
           sku: string
           slug: string
           supplier_id?: string | null
+          technical_sheet_labor_description?: string | null
+          technical_sheet_labor_hours?: number | null
+          technical_sheet_labor_people_count?: number | null
+          technical_sheet_reference_area_m2?: number | null
+          technical_sheet_reference_quantity?: number | null
           updated_at?: string | null
         }
         Update: {
@@ -18023,6 +18852,11 @@ export type Database = {
           sku?: string
           slug?: string
           supplier_id?: string | null
+          technical_sheet_labor_description?: string | null
+          technical_sheet_labor_hours?: number | null
+          technical_sheet_labor_people_count?: number | null
+          technical_sheet_reference_area_m2?: number | null
+          technical_sheet_reference_quantity?: number | null
           updated_at?: string | null
         }
         Relationships: [
@@ -20255,6 +21089,16 @@ export type Database = {
         Args: { _left: string; _right: string; _tz: string }
         Returns: number
       }
+      direct_sales_compute_search_text: {
+        Args: {
+          p_client_id: string
+          p_description: string
+          p_entity_id: string
+          p_sale_number: string
+          p_title: string
+        }
+        Returns: string
+      }
       duplicate_proposal: {
         Args: { new_title?: string; source_proposal_id: string }
         Returns: string
@@ -20277,6 +21121,10 @@ export type Database = {
           p_organization_id: string
         }
         Returns: undefined
+      }
+      entity_has_live_business_reference: {
+        Args: { p_auth_uid: string; p_entity_id: string }
+        Returns: boolean
       }
       evaluate_condition: {
         Args: { p_condition: Json; p_lead_status: string; p_signals: Json }
@@ -20370,11 +21218,27 @@ export type Database = {
         Args: { _amount: number; _organization_id: string }
         Returns: Json
       }
+      fn_check_and_consume_lead_quota: {
+        Args: { _entity_id: string; _organization_id: string }
+        Returns: Json
+      }
+      fn_check_and_consume_simple_quota: {
+        Args: { _limit_type: string; _organization_id: string }
+        Returns: Json
+      }
       fn_check_email_unique_within_org: {
         Args: { p_email: string; p_entity_id: string }
         Returns: undefined
       }
+      fn_check_user_seat_limit: {
+        Args: { _organization_id: string }
+        Returns: Json
+      }
       fn_deal_org_in_scope: { Args: { p_org_id: string }; Returns: boolean }
+      fn_get_plan_usage_summary: {
+        Args: { _organization_id: string }
+        Returns: Json
+      }
       fn_lead_org_in_scope: {
         Args: { p_org_id: string; p_root_org_id: string }
         Returns: boolean
@@ -20437,7 +21301,12 @@ export type Database = {
       }
       generate_api_key: { Args: never; Returns: string }
       generate_client_contract_number: { Args: never; Returns: string }
+      generate_direct_sale_number: { Args: never; Returns: string }
       generate_po_number: {
+        Args: { p_organization_id: string }
+        Returns: string
+      }
+      generate_proforma_number: {
         Args: { p_organization_id: string }
         Returns: string
       }
@@ -21388,6 +22257,10 @@ export type Database = {
           published_snapshot_hash: string
         }[]
       }
+      resolve_billing_organization_id: {
+        Args: { p_organization_id: string }
+        Returns: string
+      }
       resolve_business_user_id: {
         Args: { p_auth_uid: string }
         Returns: string
@@ -21527,6 +22400,10 @@ export type Database = {
       }
       resolve_root_organization_id: {
         Args: { p_org_id: string }
+        Returns: string
+      }
+      resolve_root_payer_user_id: {
+        Args: { p_organization_id: string }
         Returns: string
       }
       resolve_stage_bucket: { Args: { p_stage_id: string }; Returns: string }
@@ -21792,6 +22669,7 @@ export type Database = {
           entity_id: string | null
           estado: string | null
           id: string
+          is_internal: boolean
           iva_rate: number | null
           lost_reason: string | null
           modelo_base: string
@@ -22120,6 +22998,63 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      rpc_create_direct_sale_order: {
+        Args: { p_direct_sale_id: string }
+        Returns: {
+          accepted_at: string | null
+          assigned_to: string | null
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          client_id: string | null
+          company_signature_date: string | null
+          company_signed_by_id: string | null
+          company_signed_by_name: string | null
+          contract_body_frozen_html: string | null
+          contract_body_html: string | null
+          contract_frozen_at: string | null
+          contract_number: string | null
+          contract_template_id: string | null
+          created_at: string
+          created_by: string
+          currency: string | null
+          current_version_id: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          end_date: string | null
+          entity_id: string | null
+          id: string
+          is_manual_order: boolean
+          notes: string | null
+          organization_id: string
+          payment_terms: string | null
+          prompt_values: Json | null
+          proposal_id: string | null
+          quote_id: string | null
+          replaced_by_contract_id: string | null
+          replaces_contract_id: string | null
+          root_organization_id: string | null
+          signature_date: string | null
+          signature_image: string | null
+          signature_ip: string | null
+          signed_by_name: string | null
+          start_date: string | null
+          status: string
+          status_changed_at: string | null
+          status_changed_by: string | null
+          template_id: string | null
+          template_snapshot: Json | null
+          total_value: number | null
+          total_value_sem_iva: number | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "client_contracts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_create_inventory_count: {
         Args: {
           p_category_id?: string
@@ -22266,6 +23201,63 @@ export type Database = {
         SetofOptions: {
           from: "*"
           to: "anew_leads"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      rpc_create_manual_client_order: {
+        Args: { p_items: Json; p_order: Json; p_organization_id: string }
+        Returns: {
+          accepted_at: string | null
+          assigned_to: string | null
+          cancellation_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          client_id: string | null
+          company_signature_date: string | null
+          company_signed_by_id: string | null
+          company_signed_by_name: string | null
+          contract_body_frozen_html: string | null
+          contract_body_html: string | null
+          contract_frozen_at: string | null
+          contract_number: string | null
+          contract_template_id: string | null
+          created_at: string
+          created_by: string
+          currency: string | null
+          current_version_id: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          end_date: string | null
+          entity_id: string | null
+          id: string
+          is_manual_order: boolean
+          notes: string | null
+          organization_id: string
+          payment_terms: string | null
+          prompt_values: Json | null
+          proposal_id: string | null
+          quote_id: string | null
+          replaced_by_contract_id: string | null
+          replaces_contract_id: string | null
+          root_organization_id: string | null
+          signature_date: string | null
+          signature_image: string | null
+          signature_ip: string | null
+          signed_by_name: string | null
+          start_date: string | null
+          status: string
+          status_changed_at: string | null
+          status_changed_by: string | null
+          template_id: string | null
+          template_snapshot: Json | null
+          total_value: number | null
+          total_value_sem_iva: number | null
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "client_contracts"
           isOneToOne: true
           isSetofReturn: false
         }
@@ -22744,6 +23736,11 @@ export type Database = {
           sku: string
           slug: string
           supplier_id: string | null
+          technical_sheet_labor_description: string | null
+          technical_sheet_labor_hours: number | null
+          technical_sheet_labor_people_count: number | null
+          technical_sheet_reference_area_m2: number | null
+          technical_sheet_reference_quantity: number | null
           updated_at: string | null
         }
         SetofOptions: {
@@ -22895,6 +23892,10 @@ export type Database = {
         Args: { p_id: string }
         Returns: undefined
       }
+      rpc_delete_service_material: {
+        Args: { p_material_id: string }
+        Returns: undefined
+      }
       rpc_delete_stock: { Args: { p_id: string }; Returns: undefined }
       rpc_delete_supplier: { Args: { p_id: string }; Returns: undefined }
       rpc_delete_user: { Args: { p_user_id: string }; Returns: undefined }
@@ -23004,6 +24005,7 @@ export type Database = {
           entity_id: string | null
           estado: string | null
           id: string
+          is_internal: boolean
           iva_rate: number | null
           lost_reason: string | null
           modelo_base: string
@@ -23182,6 +24184,8 @@ export type Database = {
       }
       rpc_list_client_order_documents: {
         Args: {
+          p_date_from?: string
+          p_date_to?: string
           p_limit?: number
           p_offset?: number
           p_organization_id: string
@@ -23196,6 +24200,7 @@ export type Database = {
           lines_from_stock: number
           lines_no_supplier: number
           lines_received: number
+          lines_service: number
           overall_status: string
           signature_date: string
           total_lines: number
@@ -23656,6 +24661,66 @@ export type Database = {
         }
         Returns: string
       }
+      rpc_register_direct_sale_invoice: {
+        Args: { p_direct_sale_id: string; p_invoice: Json }
+        Returns: {
+          acceptance_ip: string | null
+          acceptance_user_agent: string | null
+          accepted_at: string | null
+          assigned_to: string | null
+          client_contract_id: string | null
+          client_id: string | null
+          client_notes: string | null
+          created_at: string
+          created_by: string | null
+          currency: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          description: string | null
+          document_url: string | null
+          entity_id: string | null
+          external_invoice_id: string | null
+          id: string
+          invoice_atcud: string | null
+          invoice_hash: string | null
+          invoice_issued_at: string | null
+          invoice_number: string | null
+          invoice_pdf_url: string | null
+          invoice_series: string | null
+          invoice_source: string | null
+          invoice_status: string
+          iva_rate: number | null
+          last_viewed_at: string | null
+          notes: string | null
+          organization_id: string
+          proforma_issued_at: string | null
+          proforma_number: string | null
+          rejected_at: string | null
+          rejection_notes: string | null
+          rejection_reason: string | null
+          rejection_reason_code: string | null
+          rejection_reason_id: string | null
+          root_organization_id: string | null
+          sale_number: string | null
+          search_text: string | null
+          sent_at: string | null
+          signature_image: string | null
+          status: string
+          subtotal: number | null
+          title: string | null
+          total: number | null
+          updated_at: string
+          valid_until: string | null
+          view_count: number | null
+          viewed_at: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "direct_sales"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       rpc_register_sale_stock_movement: {
         Args: {
           p_document_number: string
@@ -23763,6 +24828,10 @@ export type Database = {
       }
       rpc_restore_service_fee_type: {
         Args: { p_id: string }
+        Returns: undefined
+      }
+      rpc_restore_service_material: {
+        Args: { p_material_id: string }
         Returns: undefined
       }
       rpc_restore_stock: { Args: { p_id: string }; Returns: undefined }
@@ -23905,6 +24974,7 @@ export type Database = {
           entity_id: string | null
           estado: string | null
           id: string
+          is_internal: boolean
           iva_rate: number | null
           lost_reason: string | null
           modelo_base: string
@@ -23969,6 +25039,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      rpc_snapshot_quote_diagnostic: {
+        Args: { p_deal_id: string; p_quote_id: string }
+        Returns: number
       }
       rpc_toggle_client_vip: {
         Args: {
@@ -24292,6 +25366,12 @@ export type Database = {
           custom_fields: Json | null
           deal_id: string
           description: string | null
+          diag_area_m2: number | null
+          diag_demolir_descricao: string | null
+          diag_demolir_m2: number | null
+          diag_intervencao_descricao: string | null
+          diag_intervencao_tipo: string | null
+          diag_proteger_descricao: string | null
           estimate_max: number | null
           estimate_min: number | null
           id: string
@@ -24885,6 +25965,11 @@ export type Database = {
           sku: string
           slug: string
           supplier_id: string | null
+          technical_sheet_labor_description: string | null
+          technical_sheet_labor_hours: number | null
+          technical_sheet_labor_people_count: number | null
+          technical_sheet_reference_area_m2: number | null
+          technical_sheet_reference_quantity: number | null
           updated_at: string | null
         }
         SetofOptions: {
@@ -24961,6 +26046,17 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      rpc_update_service_technical_sheet: {
+        Args: {
+          p_labor_description: string
+          p_labor_hours: number
+          p_labor_people_count: number
+          p_reference_area_m2?: number
+          p_reference_quantity?: number
+          p_service_id: string
+        }
+        Returns: undefined
       }
       rpc_update_user: {
         Args: {
@@ -25385,7 +26481,7 @@ export type Database = {
         | "complaint"
         | "other"
       maintenance_type: "preventive" | "corrective" | "inspection"
-      portal_document_type: "proposal" | "quote" | "contract"
+      portal_document_type: "proposal" | "quote" | "contract" | "direct_sale"
       price_type:
         | "purchase"
         | "retail"
@@ -25595,6 +26691,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       anew_scope_level: ["NONE", "OWNED", "TEAM", "ORG"],
@@ -25648,7 +26747,7 @@ export const Constants = {
         "other",
       ],
       maintenance_type: ["preventive", "corrective", "inspection"],
-      portal_document_type: ["proposal", "quote", "contract"],
+      portal_document_type: ["proposal", "quote", "contract", "direct_sale"],
       price_type: [
         "purchase",
         "retail",
