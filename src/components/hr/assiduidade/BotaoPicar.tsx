@@ -19,9 +19,16 @@
  * que e tambem o que a RPC vai ligar. Fica editavel porque quem trabalha em
  * dois sitios no mesmo dia e o caso central deste modulo, e nao a excepcao.
  *
- * A GEOLOCALIZACAO VIAJA EM SILENCIO: quando o dispositivo a da e o utilizador
- * a autoriza, vai; quando nao da, pica-se na mesma e nao se avisa nada. Nao e
- * condicao de nada, e um aviso so ensinaria que talvez fosse.
+ * A LOCALIZACAO E CONDICAO, NAO EXTRA
+ * ------------------------------------
+ * A picagem so fica registada com localizacao. Isto vale para os tres casos
+ * em que o browser nao a da -- recusa explicita, sem sinal/timeout, ou API
+ * indisponivel -- e nao so para a recusa. A razao e que quem quer mesmo evitar
+ * a localizacao raramente carrega em "Bloquear": desliga a localizacao no
+ * dispositivo, e isso chega como "sem sinal", nao como "recusada". Bloquear
+ * so a recusa explicita deixava essa porta aberta. O timeout sobe para 10s
+ * (era 4s) para compensar um GPS frio, que so nesse caso passaria a impedir
+ * alguem de picar por pressa do relogio e nao por falta real de sinal.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -73,6 +80,8 @@ export function BotaoPicar({
   const [agora, setAgora] = useState(() => agoraHoraLocal());
   const [localEscolhido, setLocalEscolhido] = useState<string | null>(null);
   const [anuncio, setAnuncio] = useState("");
+  const [aLocalizar, setALocalizar] = useState(false);
+  const [alerta, setAlerta] = useState<{ texto: string; seq: number } | null>(null);
   const tocado = useRef(false);
 
   // O relogio anda: quem olha para o ecra antes de picar tem de ver a hora que
@@ -95,13 +104,21 @@ export function BotaoPicar({
   const eEntrada = sentido === "entrada";
 
   const picar = async () => {
-    const posicao = await posicaoActual();
+    setALocalizar(true);
+    const resultado = await localizacaoActual().finally(() => setALocalizar(false));
+    if (resultado.estado !== "ok") {
+      const mensagem = t(CHAVE_ERRO_LOCALIZACAO[resultado.estado]);
+      setAlerta((anterior) => ({ texto: mensagem, seq: (anterior?.seq ?? 0) + 1 }));
+      toast.error(mensagem);
+      return;
+    }
+    setAlerta(null);
     const erro = await onPicar({
       sentido,
       localId: localEfectivo,
-      latitude: posicao?.latitude ?? null,
-      longitude: posicao?.longitude ?? null,
-      precisaoMetros: posicao?.precisao ?? null,
+      latitude: resultado.posicao.latitude,
+      longitude: resultado.posicao.longitude,
+      precisaoMetros: resultado.posicao.precisao,
     });
     if (erro) {
       toast.error(t(erro));
@@ -125,17 +142,21 @@ export function BotaoPicar({
         type="button"
         size="lg"
         className="h-16 w-full text-base"
-        disabled={aGravar}
+        disabled={aGravar || aLocalizar}
         onClick={() => void picar()}
       >
-        {aGravar ? (
+        {aGravar || aLocalizar ? (
           <Loader2 className="mr-2 h-5 w-5 animate-spin" />
         ) : eEntrada ? (
           <LogIn className="mr-2 h-5 w-5" />
         ) : (
           <LogOut className="mr-2 h-5 w-5" />
         )}
-        {eEntrada ? t("hr.assiduidade.picar.entrar") : t("hr.assiduidade.picar.sair")}
+        {aLocalizar
+          ? t("hr.assiduidade.picar.aLocalizar")
+          : eEntrada
+            ? t("hr.assiduidade.picar.entrar")
+            : t("hr.assiduidade.picar.sair")}
       </Button>
 
       <p className="text-center text-sm text-muted-foreground tabular-nums">
@@ -171,38 +192,81 @@ export function BotaoPicar({
             })}
           </p>
         )}
+        <p className="text-xs text-muted-foreground">
+          {t("hr.assiduidade.picar.localizacaoExigida")}
+        </p>
       </div>
 
       <p aria-live="polite" className="sr-only">
         {anuncio}
       </p>
+      {alerta && (
+        <p key={alerta.seq} role="alert" className="sr-only">
+          {alerta.texto}
+        </p>
+      )}
     </div>
   );
 }
 
+const TEMPO_LIMITE_LOCALIZACAO_MS = 10_000;
+
+interface Localizacao {
+  latitude: number;
+  longitude: number;
+  precisao: number | null;
+}
+
+type ResultadoLocalizacao =
+  | { estado: "ok"; posicao: Localizacao }
+  | { estado: "recusada" }
+  | { estado: "semSinal" }
+  | { estado: "indisponivel" };
+
+const CHAVE_ERRO_LOCALIZACAO: Record<
+  Exclude<ResultadoLocalizacao["estado"], "ok">,
+  string
+> = {
+  recusada: "hr.assiduidade.picar.localizacaoRecusada",
+  semSinal: "hr.assiduidade.picar.localizacaoSemSinal",
+  indisponivel: "hr.assiduidade.picar.localizacaoIndisponivel",
+};
+
 /**
- * A posicao, se o browser a der depressa e o utilizador a autorizar.
+ * A localizacao actual, ou o motivo por que nao veio.
  *
- * Nunca rejeita: uma recusa de permissao, um browser sem API ou um demora
- * demais devolvem `null` e a picagem segue. A localizacao e um extra do
- * registo, nao um requisito para picar o ponto.
+ * Bloqueia nos tres casos -- recusa explicita, sem sinal/timeout, ou API
+ * indisponivel -- porque a picagem passou a exigir localizacao (ver
+ * comentario do topo do ficheiro).
  */
-async function posicaoActual(): Promise<
-  { latitude: number; longitude: number; precisao: number | null } | null
-> {
-  if (typeof navigator === "undefined" || !navigator.geolocation) return null;
+async function localizacaoActual(): Promise<ResultadoLocalizacao> {
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return { estado: "indisponivel" };
+  }
+  // Em contexto nao seguro (http) o Chrome devolve PERMISSION_DENIED por
+  // politica, mesmo sem o utilizador ter recusado nada -- sem esta guarda um
+  // deploy mal servido acusava o utilizador de ter bloqueado a localizacao.
+  if (typeof window !== "undefined" && window.isSecureContext === false) {
+    return { estado: "indisponivel" };
+  }
   return new Promise((resolver) => {
     navigator.geolocation.getCurrentPosition(
       (posicao) =>
         resolver({
-          latitude: posicao.coords.latitude,
-          longitude: posicao.coords.longitude,
-          precisao: Number.isFinite(posicao.coords.accuracy)
-            ? Math.round(posicao.coords.accuracy)
-            : null,
+          estado: "ok",
+          posicao: {
+            latitude: posicao.coords.latitude,
+            longitude: posicao.coords.longitude,
+            precisao: Number.isFinite(posicao.coords.accuracy)
+              ? Math.round(posicao.coords.accuracy)
+              : null,
+          },
         }),
-      () => resolver(null),
-      { timeout: 4000, maximumAge: 60_000 },
+      (erro) =>
+        resolver(
+          erro.code === erro.PERMISSION_DENIED ? { estado: "recusada" } : { estado: "semSinal" },
+        ),
+      { timeout: TEMPO_LIMITE_LOCALIZACAO_MS, maximumAge: 60_000 },
     );
   });
 }

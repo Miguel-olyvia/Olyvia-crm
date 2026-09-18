@@ -302,7 +302,11 @@ export function PainelDoDia({
                 <h3 id="hr-dia-picagens" className="text-sm font-medium">
                   {t("hr.assiduidade.dia.picagens")}
                 </h3>
-                {(permissoes.picar || permissoes.picarOutros) && (
+                {/* So picarOutros, nunca picar: lancar uma picagem sem picagem
+                    real (ex.: esquecimento) e uma correccao, nao uma segunda
+                    forma de picar sem localizacao -- a propria pessoa nao se
+                    corrige a si mesma, pede ao RH. */}
+                {permissoes.picarOutros && (
                   <Button
                     type="button"
                     size="sm"
