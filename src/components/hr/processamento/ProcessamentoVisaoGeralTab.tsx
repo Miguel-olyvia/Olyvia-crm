@@ -63,7 +63,6 @@ import {
   escolherRetribuicaoVigente,
   limitesDoMes,
 } from "@/hooks/useRetribuicoesVigentesDaOrganizacao";
-import { useHorasVigentesDaOrganizacao } from "@/hooks/useHorasVigentesDaOrganizacao";
 import { useRegrasSubsidioAlimentacao } from "@/hooks/useRegrasSubsidioAlimentacao";
 import { ResumoPessoaProcessamentoOculto } from "@/components/hr/processamento/ResumoPessoaProcessamentoOculto";
 import type { DiaRelatorioMensal, TotaisRelatorioMensal } from "@/hooks/useRelatorioAssiduidadeMensal";
@@ -121,7 +120,6 @@ function formatarLinhaCodigo(linha: { codigo: string; horas: number | null; valo
 /** A chave de traducao de cada aviso de `processamentoTotais.ts` -- uma frase por aviso. */
 const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
   sem_retribuicao: "hr.vencimento.visaoGeral.avisoSemRetribuicao",
-  sem_horas_semanais: "hr.vencimento.visaoGeral.avisoSemHorasSemanais",
   periodicidade_nao_convertivel: "hr.vencimento.visaoGeral.avisoPeriodicidadeNaoConvertivel",
   duodecimos_por_decidir: "hr.vencimento.visaoGeral.avisoDuodecimosPorDecidir",
   duodecimos_50_aproximado: "hr.vencimento.visaoGeral.avisoDuodecimos50Aproximado",
@@ -152,7 +150,6 @@ export function ProcessamentoVisaoGeralTab() {
   const { lancamentos } = lancamentosHook;
 
   const retribuicoesHook = useRetribuicoesVigentesDaOrganizacao(activeCompany?.id, ano, mes);
-  const horasHook = useHorasVigentesDaOrganizacao(activeCompany?.id);
   const regrasSubsidioHook = useRegrasSubsidioAlimentacao();
   const { ultimoDia } = useMemo(() => limitesDoMes(ano, mes), [ano, mes]);
 
@@ -211,7 +208,6 @@ export function ProcessamentoVisaoGeralTab() {
 
       const versoes = retribuicoesHook.porPessoa.get(pessoa.id) ?? [];
       const { retribuicao, mudouAMeioDoMes } = escolherRetribuicaoVigente(versoes, ultimoDia);
-      const horasSemanaisEquivalentes = horasHook.porPessoa.get(pessoa.id) ?? null;
       const lancamentosDaPessoa = lancamentosPorPessoa.get(pessoa.id) ?? [];
       const diasDaPessoa = diasPorPessoa[pessoa.id] ?? [];
       // Sem regra gravada, `regrasSubsidioHook.regra` ja vem com a omissao
@@ -243,7 +239,6 @@ export function ProcessamentoVisaoGeralTab() {
               subsidioAlimentacaoPessoa: retribuicao.subsidio_alimentacao,
             }
           : null,
-        horasSemanaisEquivalentes,
         codigos: codigosActivos,
         lancamentos: lancamentosDaPessoa,
         regraSubsidio: { valorDiario: regrasSubsidioHook.regra.valorDiario },
@@ -262,7 +257,6 @@ export function ProcessamentoVisaoGeralTab() {
     totaisPorPessoa,
     diasPorPessoa,
     retribuicoesHook.porPessoa,
-    horasHook.porPessoa,
     lancamentosPorPessoa,
     codigosActivos,
     regrasSubsidioHook.regra,

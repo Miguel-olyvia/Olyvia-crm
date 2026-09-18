@@ -51,7 +51,6 @@ export interface EntradaProcessamentoPessoa {
   };
   diasElegiveisSubsidio: number;
   retribuicao: RetribuicaoParaCalculo | null;
-  horasSemanaisEquivalentes: number | null;
   /** So os codigos ACTIVOS da organizacao. */
   codigos: readonly HrCodigoProcessamento[];
   /** Os lancamentos do periodo, da pessoa. */
@@ -61,7 +60,6 @@ export interface EntradaProcessamentoPessoa {
 
 export type AvisoProcessamento =
   | "sem_retribuicao"
-  | "sem_horas_semanais"
   | "periodicidade_nao_convertivel"
   | "duodecimos_por_decidir"
   | "duodecimos_50_aproximado"
@@ -108,12 +106,21 @@ const OCORRENCIAS_POR_ORIGEM: Partial<Record<OrigemAutomaticaCodigo, keyof Entra
 
 /**
  * Retribuicao mensal equivalente `R`, a partir do valor base e periodicidade.
- * `null` quando nao ha retribuicao, falta um dado necessario, ou a
- * periodicidade nao e convertivel (diaria -- nao se inventam dias uteis do mes).
+ * `null` quando nao ha retribuicao ou a periodicidade nao e convertivel
+ * (diaria -- nao se inventam dias uteis do mes).
+ *
+ * "hora": calculo DIRECTO a partir das horas REALMENTE planeadas neste mes
+ * (`planeadoMinutos`), nao de uma media anual (`valorBase * horasSemanais *
+ * 52/12`). Essa conversao antiga so existia para inventar um mes-tipo quando
+ * nao se sabiam as horas do mes -- agora sabem-se, e usa-se a mesma unidade
+ * que `calcularValorHoraReal` ja usa. Com `planeadoMinutos <= 0` o resultado
+ * e `0`, nao `null`: quem e pago a hora e nao tem horas planeadas nesse mes
+ * nao ganha base, mas continua a poder ter subsidio de alimentacao e
+ * lancamentos pontuais -- `totalBrutoEstimado` fica `0`/finito, nunca `null`.
  */
 function calcularRetribuicaoMensal(
   retribuicao: RetribuicaoParaCalculo | null,
-  horasSemanaisEquivalentes: number | null,
+  planeadoMinutos: number,
   avisos: AvisoProcessamento[],
 ): number | null {
   if (!retribuicao) {
@@ -128,11 +135,7 @@ function calcularRetribuicaoMensal(
     case "semanal":
       return (retribuicao.valorBase * 52) / 12;
     case "hora":
-      if (horasSemanaisEquivalentes === null) {
-        avisos.push("sem_horas_semanais");
-        return null;
-      }
-      return (retribuicao.valorBase * horasSemanaisEquivalentes * 52) / 12;
+      return (Math.max(planeadoMinutos, 0) / 60) * retribuicao.valorBase;
     case "diaria":
       avisos.push("periodicidade_nao_convertivel");
       return null;
@@ -312,7 +315,7 @@ export function calcularProcessamentoPessoa(
 
   const retribuicaoMensal = calcularRetribuicaoMensal(
     entrada.retribuicao,
-    entrada.horasSemanaisEquivalentes,
+    entrada.totais.planeadoMinutos,
     avisos,
   );
   const divisorDuodecimos =

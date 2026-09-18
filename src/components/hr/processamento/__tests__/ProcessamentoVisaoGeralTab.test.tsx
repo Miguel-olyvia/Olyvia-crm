@@ -59,16 +59,6 @@ vi.mock("@/hooks/useRetribuicoesVigentesDaOrganizacao", async () => {
   };
 });
 
-let horasPorPessoa = new Map<string, number>();
-vi.mock("@/hooks/useHorasVigentesDaOrganizacao", () => ({
-  useHorasVigentesDaOrganizacao: () => ({
-    porPessoa: horasPorPessoa,
-    loading: false,
-    recusado: false,
-    recarregar: vi.fn(),
-  }),
-}));
-
 let regraSubsidioMock = { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 };
 vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
   useRegrasSubsidioAlimentacao: () => ({
@@ -177,7 +167,6 @@ beforeEach(() => {
   codigosActuais = [];
   retribuicoesPorPessoa = new Map();
   retribuicoesRecusado = false;
-  horasPorPessoa = new Map();
   totaisPorPessoaMock = {};
   diasPorPessoaMock = {};
   regraSubsidioMock = { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 };
@@ -443,7 +432,6 @@ describe("ProcessamentoVisaoGeralTab", () => {
         ],
       ],
     ]);
-    horasPorPessoa = new Map([["pessoa-1", 1]]);
     totaisPorPessoaMock = {
       "pessoa-1": {
         ...TOTAIS_PADRAO,
@@ -486,7 +474,6 @@ describe("ProcessamentoVisaoGeralTab", () => {
         ],
       ],
     ]);
-    horasPorPessoa = new Map([["pessoa-1", 40]]);
     render(<ProcessamentoVisaoGeralTab />);
     await waitFor(() => expect(screen.getByText("Ana Silva")).toBeInTheDocument());
 
@@ -528,7 +515,6 @@ describe("ProcessamentoVisaoGeralTab", () => {
         ],
       ],
     ]);
-    horasPorPessoa = new Map([["pessoa-1", 40]]);
     // Dois dias com >= 300 min trabalhados (elegiveis) e um dia de ausencia
     // com muitos minutos (nao conta) e um dia curto (nao conta).
     diasPorPessoaMock = {

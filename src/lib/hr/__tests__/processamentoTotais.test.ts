@@ -45,7 +45,6 @@ function entradaBase(
     totais: totaisBase(),
     diasElegiveisSubsidio: 0,
     retribuicao: null,
-    horasSemanaisEquivalentes: null,
     codigos: [],
     lancamentos: [],
     regraSubsidio: null,
@@ -107,7 +106,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-          horasSemanaisEquivalentes: 40,
           totais: totaisBase({ planeadoMinutos: 9600 }), // 160h
         }),
       );
@@ -117,28 +115,9 @@ describe("calcularProcessamentoPessoa", () => {
     });
 
     it("e null quando falta a retribuicao", () => {
-      const resultado = calcularProcessamentoPessoa(
-        entradaBase({ retribuicao: null, horasSemanaisEquivalentes: 40 }),
-      );
+      const resultado = calcularProcessamentoPessoa(entradaBase({ retribuicao: null }));
       expect(resultado.valorHoraReal).toBeNull();
       expect(resultado.avisos).toContain("sem_retribuicao");
-    });
-
-    it("horasSemanaisEquivalentes null ou 0 nao impede o calculo -- so a periodicidade 'hora' depende dela", () => {
-      // Antes da fórmula real, valorHoraNormal dependia de horasSemanaisEquivalentes
-      // para QUALQUER periodicidade. Agora o valor-hora vem de planeadoMinutos, por
-      // isso uma pessoa mensal sem horas semanais registadas calcula normalmente.
-      for (const horasSemanaisEquivalentes of [null, 0] as const) {
-        const resultado = calcularProcessamentoPessoa(
-          entradaBase({
-            retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-            horasSemanaisEquivalentes,
-            totais: totaisBase({ planeadoMinutos: 9600 }),
-          }),
-        );
-        expect(resultado.valorHoraReal).not.toBeNull();
-        expect(resultado.avisos).not.toContain("sem_horas_semanais");
-      }
     });
 
     it("planeadoMinutos <= 0 da valorHoraReal null com aviso, sem contaminar o total com Infinity/NaN", () => {
@@ -146,7 +125,6 @@ describe("calcularProcessamentoPessoa", () => {
         const resultado = calcularProcessamentoPessoa(
           entradaBase({
             retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-            horasSemanaisEquivalentes: 40,
             totais: totaisBase({ planeadoMinutos, realizadoMinutos: 0, minutosExtraNormal: 120 }),
             regraSubsidio: { valorDiario: 6 },
             diasElegiveisSubsidio: 10,
@@ -174,7 +152,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 0, periodicidade: "mensal" }),
-          horasSemanaisEquivalentes: 40,
           totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9000 }),
           regraSubsidio: { valorDiario: 6 },
           diasElegiveisSubsidio: 5,
@@ -191,7 +168,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-          horasSemanaisEquivalentes: 40,
           totais: totaisBase({
             planeadoMinutos: 9600,
             realizadoMinutos: 9000, // deficit de 600 min = 10h
@@ -218,11 +194,21 @@ describe("calcularProcessamentoPessoa", () => {
   });
 
   describe("invariante central -- cumprir o planeado da exactamente a base, seja qual for o tamanho do mes", () => {
-    it.each([9600, 11880])("planeadoMinutos = %i, sem codigos/subsidio/lancamentos", (planeadoMinutos) => {
+    it.each([9600, 11880])("mensal: planeadoMinutos = %i, sem codigos/subsidio/lancamentos", (planeadoMinutos) => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 100 }),
-          horasSemanaisEquivalentes: 40,
+          totais: totaisBase({ planeadoMinutos, realizadoMinutos: planeadoMinutos }),
+        }),
+      );
+      expect(resultado.baseMes).not.toBeNull();
+      expect(resultado.totalBrutoEstimado).toBeCloseTo(resultado.baseMes as number, 6);
+    });
+
+    it.each([4080, 9600])("hora: planeadoMinutos = %i, sem codigos/subsidio/lancamentos", (planeadoMinutos) => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 5.4, periodicidade: "hora", duodecimosPct: 100 }),
           totais: totaisBase({ planeadoMinutos, realizadoMinutos: planeadoMinutos }),
         }),
       );
@@ -236,7 +222,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1400, periodicidade: "mensal", duodecimosPct: 0 }),
-          horasSemanaisEquivalentes: 40,
         }),
       );
       expect(resultado.divisorDuodecimos).toBe(14);
@@ -249,7 +234,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 50 }),
-          horasSemanaisEquivalentes: 40,
         }),
       );
       expect(resultado.divisorDuodecimos).toBe(13);
@@ -261,7 +245,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1200, periodicidade: "mensal", duodecimosPct: 100 }),
-          horasSemanaisEquivalentes: 40,
         }),
       );
       expect(resultado.divisorDuodecimos).toBe(12);
@@ -272,7 +255,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1400, periodicidade: "mensal", duodecimosPct: null }),
-          horasSemanaisEquivalentes: 40,
         }),
       );
       expect(resultado.divisorDuodecimos).toBe(14);
@@ -285,7 +267,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1000, periodicidade: "mensal", duodecimosPct: 100 }),
-          horasSemanaisEquivalentes: 40,
         }),
       );
       expect(resultado.baseMes).toBeCloseTo((1000 * 14) / 12, 6);
@@ -295,7 +276,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 12000, periodicidade: "anual", duodecimosPct: 100 }),
-          horasSemanaisEquivalentes: 40,
         }),
       );
       // R = 12000/12 = 1000
@@ -306,40 +286,106 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 230.77, periodicidade: "semanal", duodecimosPct: 100 }),
-          horasSemanaisEquivalentes: 40,
         }),
       );
       const rEsperado = (230.77 * 52) / 12;
       expect(resultado.baseMes).toBeCloseTo((rEsperado * 14) / 12, 4);
     });
 
-    it("hora converte usando horasSemanaisEquivalentes", () => {
+    it("hora calcula directamente a partir das horas REAIS planeadas do mes, nao de uma media anual (52/12)", () => {
+      // O bug: 68h a 5.40 EUR/hora tinha de dar 367.20 EUR, e dava 351.00 EUR
+      // pela formula antiga 5.40 * 15 (horas semanais) * 52/12.
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
-          retribuicao: retribuicao({ valorBase: 7.5, periodicidade: "hora", duodecimosPct: 100 }),
-          horasSemanaisEquivalentes: 40,
+          retribuicao: retribuicao({ valorBase: 5.4, periodicidade: "hora", duodecimosPct: 0 }),
+          totais: totaisBase({ planeadoMinutos: 4080 }), // 68h
         }),
       );
-      const rEsperado = (7.5 * 40 * 52) / 12;
-      expect(resultado.baseMes).toBeCloseTo((rEsperado * 14) / 12, 4);
+      expect(resultado.baseMes).toBeCloseTo(367.2, 2);
+      expect(resultado.baseMes).not.toBeCloseTo(351.0, 2);
     });
 
-    it("hora sem horasSemanaisEquivalentes da null com aviso", () => {
-      const resultado = calcularProcessamentoPessoa(
+    it("hora: a base varia com o mes (numero real de horas planeadas), ao contrario de mensal", () => {
+      const baseMesHora = (planeadoMinutos: number) =>
+        calcularProcessamentoPessoa(
+          entradaBase({
+            retribuicao: retribuicao({ valorBase: 5.4, periodicidade: "hora", duodecimosPct: 0 }),
+            totais: totaisBase({ planeadoMinutos }),
+          }),
+        ).baseMes;
+
+      expect(baseMesHora(4080)).toBeCloseTo(367.2, 2); // 68h
+      expect(baseMesHora(3600)).toBeCloseTo(324.0, 2); // 60h
+
+      const baseMesMensal = (planeadoMinutos: number) =>
+        calcularProcessamentoPessoa(
+          entradaBase({
+            retribuicao: retribuicao({ valorBase: 1000, periodicidade: "mensal", duodecimosPct: 0 }),
+            totais: totaisBase({ planeadoMinutos }),
+          }),
+        ).baseMes;
+
+      expect(baseMesMensal(4080)).toBe(baseMesMensal(3600));
+    });
+
+    it("hora: duodecimos continuam a aplicar-se, tal como no caso mensal", () => {
+      const resultado100 = calcularProcessamentoPessoa(
         entradaBase({
-          retribuicao: retribuicao({ valorBase: 7.5, periodicidade: "hora", duodecimosPct: 100 }),
-          horasSemanaisEquivalentes: null,
+          retribuicao: retribuicao({ valorBase: 5.4, periodicidade: "hora", duodecimosPct: 100 }),
+          totais: totaisBase({ planeadoMinutos: 4080 }), // 68h
         }),
       );
-      expect(resultado.baseMes).toBeNull();
-      expect(resultado.avisos).toContain("sem_horas_semanais");
+      // R = 367.20; baseMes = R*14/12 = 428.40; valorHoraReal = baseMes/68 = 6.30.
+      expect(resultado100.baseMes).toBeCloseTo(428.4, 2);
+      expect(resultado100.valorHoraReal).toBeCloseTo(6.3, 2);
+
+      const resultado50 = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 5.4, periodicidade: "hora", duodecimosPct: 50 }),
+          totais: totaisBase({ planeadoMinutos: 4080 }),
+        }),
+      );
+      expect(resultado50.divisorDuodecimos).toBe(13);
+      expect(resultado50.avisos).toContain("duodecimos_50_aproximado");
     });
+
+    it("hora sem horas planeadas no mes: baseMes 0, sem valorHoraReal, mas subsidio e lancamentos continuam a contar", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 5.4, periodicidade: "hora", duodecimosPct: 0 }),
+          totais: totaisBase({ planeadoMinutos: 0 }),
+          regraSubsidio: { valorDiario: 6 },
+          diasElegiveisSubsidio: 10,
+          lancamentos: [lancamento({ id: "l1", valor: 20 })],
+        }),
+      );
+      expect(resultado.baseMes).toBe(0);
+      expect(resultado.valorHoraReal).toBeNull();
+      expect(resultado.avisos).toContain("sem_horas_planeadas_no_mes");
+      expect(resultado.descontoFaltas).toBe(0);
+      expect(resultado.totalBrutoEstimado).not.toBeNull();
+      expect(Number.isFinite(resultado.totalBrutoEstimado as number)).toBe(true);
+    });
+
+    it.each(["mensal", "semanal", "anual"] as const)(
+      "%s: baseMes nao depende de planeadoMinutos (nao ha calendario a converter)",
+      (periodicidade) => {
+        const baseMesPara = (planeadoMinutos: number) =>
+          calcularProcessamentoPessoa(
+            entradaBase({
+              retribuicao: retribuicao({ valorBase: 1000, periodicidade, duodecimosPct: 100 }),
+              totais: totaisBase({ planeadoMinutos }),
+            }),
+          ).baseMes;
+
+        expect(baseMesPara(4080)).toBeCloseTo(baseMesPara(9600) as number, 6);
+      },
+    );
 
     it("diaria da null com aviso de nao convertivel", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 50, periodicidade: "diaria", duodecimosPct: 100 }),
-          horasSemanaisEquivalentes: 40,
         }),
       );
       expect(resultado.baseMes).toBeNull();
@@ -351,7 +397,6 @@ describe("calcularProcessamentoPessoa", () => {
     const resultado = calcularProcessamentoPessoa(
       entradaBase({
         retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-        horasSemanaisEquivalentes: 40,
         totais: totaisBase({ minutosExtraNormal: 120 }),
         codigos: [
           codigo({
@@ -374,7 +419,6 @@ describe("calcularProcessamentoPessoa", () => {
     const resultado = calcularProcessamentoPessoa(
       entradaBase({
         retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-        horasSemanaisEquivalentes: 40,
         totais: totaisBase({
           minutosFeriadoTrabalhado: 480,
           horasExtraNoturnasMinutos: 240,
@@ -464,7 +508,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-          horasSemanaisEquivalentes: 40,
           totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9000 }),
         }),
       );
@@ -477,7 +520,6 @@ describe("calcularProcessamentoPessoa", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-          horasSemanaisEquivalentes: 40,
           totais: totaisBase({ planeadoMinutos: 9000, realizadoMinutos: 9600 }),
         }),
       );
@@ -539,7 +581,6 @@ describe("calcularProcessamentoPessoa", () => {
   it("nao muta a entrada nem os arrays recebidos", () => {
     const entrada = entradaBase({
       retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
-      horasSemanaisEquivalentes: 40,
       totais: totaisBase({ minutosFeriadoTrabalhado: 60, diasFeriadoTrabalhados: 1 }),
       codigos: [
         codigo({
@@ -566,7 +607,6 @@ describe("calcularProcessamentoPessoa", () => {
     const resultado = calcularProcessamentoPessoa(
       entradaBase({
         retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 100 }),
-        horasSemanaisEquivalentes: 40,
         totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 0 }),
       }),
     );
@@ -582,7 +622,6 @@ describe("calcularProcessamentoPessoa", () => {
     const resultado = calcularProcessamentoPessoa(
       entradaBase({
         retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 100 }),
-        horasSemanaisEquivalentes: 40,
         totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9600 }), // sem faltas
         lancamentos: [lancamento({ id: "l1", valor: -5000 })],
       }),
@@ -595,7 +634,6 @@ describe("calcularProcessamentoPessoa", () => {
     const resultado = calcularProcessamentoPessoa(
       entradaBase({
         retribuicao: null,
-        horasSemanaisEquivalentes: 40,
         totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9000 }),
         regraSubsidio: { valorDiario: 6 },
         diasElegiveisSubsidio: 20,
