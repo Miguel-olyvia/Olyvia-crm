@@ -206,6 +206,7 @@ describe("useRelatorioAssiduidadeMensal", () => {
           codigo: "consulta",
           nome: "Consulta medica",
           categoria: "doenca",
+          remunerada: true,
         },
       ];
 
@@ -353,6 +354,7 @@ describe("useRelatorioAssiduidadeMensal", () => {
         codigo: "ferias",
         nome: "Ferias",
         categoria: "ferias",
+        remunerada: true,
       },
     ];
 
@@ -362,6 +364,251 @@ describe("useRelatorioAssiduidadeMensal", () => {
     const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
     expect(dia1?.estado).toBe("ausencia");
     expect(dia1?.categoriaAusencia).toBe("ferias");
+  });
+
+  it("um dia de ferias aprovado de dia inteiro entra em minutosAusenciaRemunerada, sem sair de planeadoMinutos", async () => {
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min
+    tabelas.pessoas_ausencias_dias = [
+      {
+        id: "ad1",
+        pedido_id: "ped1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        tipo_id: "tipo-ferias",
+        data: "2026-09-01",
+        fraccao_dia: 1,
+        conta_saldo: true,
+        e_feriado: false,
+        e_fim_semana: false,
+        periodo_inicio: "2026-09-01",
+        estado: "aprovado",
+      },
+    ];
+    tabelas.hr_ausencias_tipos = [
+      {
+        id: "tipo-ferias",
+        organization_id: ORG_ACTIVA,
+        codigo: "ferias",
+        nome: "Ferias",
+        categoria: "ferias",
+        remunerada: true,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    // Guarda anti-regressao contra a opcao (a) descartada no desenho: o dia
+    // de ferias continua a contar como planeado (a base a hora paga-o).
+    expect(result.current.totais.planeadoMinutos).toBeGreaterThanOrEqual(540);
+    const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+    expect(dia1?.planeadoMinutos).toBe(540);
+    expect(result.current.totais.minutosAusenciaRemunerada).toBe(540);
+  });
+
+  it("um dia de ferias aprovado com picagem NESSE MESMO dia so entra em minutosAusenciaRemunerada pelo defice, nunca pelo planeado inteiro", async () => {
+    // Regressao do bloqueante: picagem num dia de ferias nao pode dar credito
+    // a faltas de OUTROS dias. Setembro/2026, tercas planeadas 9h-18h (540
+    // min): dia 01 tem ferias aprovadas de dia inteiro E picagem completa
+    // (540 min); os restantes dias ficam sem picagem (faltas reais).
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min, todas as tercas
+    tabelas.pessoas_ausencias_dias = [
+      {
+        id: "ad1",
+        pedido_id: "ped1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        tipo_id: "tipo-ferias",
+        data: "2026-09-01",
+        fraccao_dia: 1,
+        conta_saldo: true,
+        e_feriado: false,
+        e_fim_semana: false,
+        periodo_inicio: "2026-09-01",
+        estado: "aprovado",
+      },
+    ];
+    tabelas.hr_ausencias_tipos = [
+      {
+        id: "tipo-ferias",
+        organization_id: ORG_ACTIVA,
+        codigo: "ferias",
+        nome: "Ferias",
+        categoria: "ferias",
+        remunerada: true,
+      },
+    ];
+    // Picagem completa no PROPRIO dia de ferias -- e este picado que nao
+    // pode ser contado a dobrar (uma vez em realizadoMinutos, outra vez em
+    // minutosAusenciaRemunerada via planeadoMinutos inteiro).
+    tabelas.pessoas_horario_realizado = [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-01",
+        hora_inicio: "09:00",
+        hora_fim: "18:00",
+        minutos: 540,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const dia1 = result.current.dias.find((d) => d.iso === "2026-09-01");
+    expect(dia1?.planeadoMinutos).toBe(540);
+    expect(dia1?.realizadoMinutos).toBe(540); // o dado em si continua guardado no dia
+
+    // Picagem completa no dia de ferias cobre todo o planeado -- o defice
+    // desse dia e zero, por isso NAO pode entrar no desconto de faltas.
+    expect(result.current.totais.minutosAusenciaRemunerada).toBe(0);
+  });
+
+  it("um dia de ferias aprovado com picagem PARCIAL nesse mesmo dia so credita o defice, nao o planeado inteiro", async () => {
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min
+    tabelas.pessoas_ausencias_dias = [
+      {
+        id: "ad1",
+        pedido_id: "ped1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        tipo_id: "tipo-ferias",
+        data: "2026-09-01",
+        fraccao_dia: 1,
+        conta_saldo: true,
+        e_feriado: false,
+        e_fim_semana: false,
+        periodo_inicio: "2026-09-01",
+        estado: "aprovado",
+      },
+    ];
+    tabelas.hr_ausencias_tipos = [
+      {
+        id: "tipo-ferias",
+        organization_id: ORG_ACTIVA,
+        codigo: "ferias",
+        nome: "Ferias",
+        categoria: "ferias",
+        remunerada: true,
+      },
+    ];
+    // So picou metade do dia de ferias (270 de 540) -- o defice deste dia e
+    // 270, e e so isso que pode entrar no desconto de faltas.
+    tabelas.pessoas_horario_realizado = [
+      {
+        id: "r1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        vinculo_id: null,
+        local_id: null,
+        planeado_id: null,
+        data: "2026-09-01",
+        hora_inicio: "09:00",
+        hora_fim: "13:30",
+        minutos: 270,
+        origem: "picagem",
+        estado: "fechado",
+        validado_por: null,
+        validado_em: null,
+        motivo_rejeicao: null,
+        notas: null,
+        corrige_realizado_id: null,
+        correccao_motivo: null,
+        corrigido_por_pessoa_id: null,
+        deleted_at: null,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.totais.minutosAusenciaRemunerada).toBe(270); // 540 - 270
+  });
+
+  it("uma ausencia aprovada com remunerada: false nao entra em minutosAusenciaRemunerada", async () => {
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")]; // 540 min
+    tabelas.pessoas_ausencias_dias = [
+      {
+        id: "ad1",
+        pedido_id: "ped1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        tipo_id: "tipo-sem-retribuicao",
+        data: "2026-09-01",
+        fraccao_dia: 1,
+        conta_saldo: true,
+        e_feriado: false,
+        e_fim_semana: false,
+        periodo_inicio: "2026-09-01",
+        estado: "aprovado",
+      },
+    ];
+    tabelas.hr_ausencias_tipos = [
+      {
+        id: "tipo-sem-retribuicao",
+        organization_id: ORG_ACTIVA,
+        codigo: "sem_retribuicao",
+        nome: "Ausencia sem retribuicao",
+        categoria: "sem_retribuicao",
+        remunerada: false,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.totais.minutosAusenciaRemunerada).toBe(0);
+  });
+
+  it("uma ausencia aprovada PARCIAL (fraccao_dia 0.5) nao entra em minutosAusenciaRemunerada", async () => {
+    // Documenta a lacuna conhecida: ausencia parcial nao substitui o dia
+    // (estado !== 'ausencia'), por isso tambem nao neutraliza o desconto.
+    tabelas.pessoas_horario_planeado = [planeadoSemanal(2, "09:00", "18:00")];
+    tabelas.pessoas_ausencias_dias = [
+      {
+        id: "ad1",
+        pedido_id: "ped1",
+        pessoa_id: PESSOA_ID,
+        organization_id: ORG_ACTIVA,
+        tipo_id: "tipo-ferias",
+        data: "2026-09-01",
+        fraccao_dia: 0.5,
+        conta_saldo: true,
+        e_feriado: false,
+        e_fim_semana: false,
+        periodo_inicio: "2026-09-01",
+        estado: "aprovado",
+      },
+    ];
+    tabelas.hr_ausencias_tipos = [
+      {
+        id: "tipo-ferias",
+        organization_id: ORG_ACTIVA,
+        codigo: "ferias",
+        nome: "Ferias",
+        categoria: "ferias",
+        remunerada: true,
+      },
+    ];
+
+    const { result } = renderHook(() => useRelatorioAssiduidadeMensal(PESSOA_ID, ANO, MES));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.totais.minutosAusenciaRemunerada).toBe(0);
   });
 
   it("uma falta nao substitui o dia: continua a mostrar planeado/realizado, so assinala temFalta", async () => {

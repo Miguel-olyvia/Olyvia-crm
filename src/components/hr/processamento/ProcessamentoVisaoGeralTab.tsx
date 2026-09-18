@@ -225,6 +225,7 @@ export function ProcessamentoVisaoGeralTab() {
           minutosFeriadoTrabalhado: totais.minutosFeriadoTrabalhado,
           minutosDescansoTrabalhado: totais.minutosDescansoTrabalhado,
           horasExtraNoturnasMinutos: totais.horasExtraNoturnasMinutos,
+          minutosAusenciaRemunerada: totais.minutosAusenciaRemunerada ?? 0,
           diasFeriadoTrabalhados: totais.diasFeriadoTrabalhados,
           // `TotaisRelatorioMensal` nao tem esta contagem ainda -- lacuna
           // conhecida, documentada no cabecalho de processamentoTotais.ts.

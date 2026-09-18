@@ -32,6 +32,7 @@ function totaisBase(
     minutosFeriadoTrabalhado: 0,
     minutosDescansoTrabalhado: 0,
     horasExtraNoturnasMinutos: 0,
+    minutosAusenciaRemunerada: 0,
     diasFeriadoTrabalhados: 0,
     diasDescansoTrabalhado: 0,
     ...overrides,
@@ -524,6 +525,99 @@ describe("calcularProcessamentoPessoa", () => {
         }),
       );
       expect(resultado.descontoFaltas).toBe(0);
+    });
+  });
+
+  describe("ausencia remunerada (ferias) neutraliza o desconto de faltas", () => {
+    it("um dia de ferias sozinho no mes: 8h planeadas, 0h picadas -> 0 de desconto, total = base do dia (nao 0)", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1600, periodicidade: "mensal", duodecimosPct: 0 }),
+          totais: totaisBase({
+            planeadoMinutos: 480,
+            realizadoMinutos: 0,
+            minutosAusenciaRemunerada: 480,
+          }),
+        }),
+      );
+      expect(resultado.descontoFaltas).toBe(0);
+      expect(resultado.baseMes).toBe(1600);
+      expect(resultado.totalBrutoEstimado).toBe(resultado.baseMes);
+    });
+
+    it("mes de 20 dias com 1 dia de ferias: 19 dias picados cobrem o resto -> 0 de desconto", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1600, periodicidade: "mensal", duodecimosPct: 0 }),
+          totais: totaisBase({
+            planeadoMinutos: 9600, // 20 dias * 8h
+            realizadoMinutos: 9120, // 19 dias * 8h
+            minutosAusenciaRemunerada: 480, // o dia de ferias
+          }),
+        }),
+      );
+      expect(resultado.descontoFaltas).toBe(0);
+      expect(resultado.totalBrutoEstimado).toBe(resultado.baseMes);
+    });
+
+    it("ferias E uma falta a serio no mesmo mes: desconta so a falta (8h), nao os dois dias (16h)", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1600, periodicidade: "mensal", duodecimosPct: 0 }),
+          totais: totaisBase({
+            planeadoMinutos: 9600,
+            realizadoMinutos: 8640, // faltam 16h ao todo
+            minutosAusenciaRemunerada: 480, // so 8h sao ferias
+          }),
+        }),
+      );
+      // valorHoraReal = 1600 / 160h = 10; defice real = 16h - 8h(ferias) = 8h.
+      expect(resultado.valorHoraReal).toBeCloseTo(10, 6);
+      expect(resultado.descontoFaltas).toBeCloseTo(80, 6);
+    });
+
+    it("periodicidade a hora: o dia de ferias continua pago -- nao e a opcao (a) descartada no desenho", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 10, periodicidade: "hora", duodecimosPct: 0 }),
+          totais: totaisBase({
+            planeadoMinutos: 9600,
+            realizadoMinutos: 9120,
+            minutosAusenciaRemunerada: 480,
+          }),
+        }),
+      );
+      expect(resultado.baseMes).toBe(1600);
+      expect(resultado.descontoFaltas).toBe(0);
+    });
+
+    it("trabalhar durante as ferias nao gera desconto negativo", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1600, periodicidade: "mensal", duodecimosPct: 0 }),
+          totais: totaisBase({
+            planeadoMinutos: 9600,
+            realizadoMinutos: 9200, // mais do que planeado - ferias
+            minutosAusenciaRemunerada: 480,
+          }),
+        }),
+      );
+      expect(resultado.descontoFaltas).toBe(0);
+    });
+
+    it("minutosAusenciaRemunerada superior ao defice nao gera credito no total", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ valorBase: 1600, periodicidade: "mensal", duodecimosPct: 0 }),
+          totais: totaisBase({
+            planeadoMinutos: 9600,
+            realizadoMinutos: 9600, // sem defice nenhum
+            minutosAusenciaRemunerada: 480,
+          }),
+        }),
+      );
+      expect(resultado.descontoFaltas).toBe(0);
+      expect(resultado.totalBrutoEstimado).toBe(resultado.baseMes);
     });
   });
 

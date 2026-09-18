@@ -45,6 +45,17 @@ export interface EntradaProcessamentoPessoa {
     minutosFeriadoTrabalhado: number;
     minutosDescansoTrabalhado: number;
     horasExtraNoturnasMinutos: number;
+    /**
+     * Minutos PLANEADOS cobertos por uma ausencia aprovada de dia inteiro e
+     * remunerada (ferias, tipicamente). Um dia de ferias e ausencia
+     * remunerada -- continua a contar como planeado (a base a hora paga-o),
+     * nao tem picagem, e NAO e uma falta. Sem esta subtracao no desconto de
+     * faltas, 8h planeadas + 0h picadas saiam descontadas a 100% e o dia de
+     * ferias valia 0 EUR. Obrigatorio (contrato interno fechado): quem
+     * chamar `calcularProcessamentoPessoa` tem de decidir este numero, nunca
+     * esquece-lo em silencio.
+     */
+    minutosAusenciaRemunerada: number;
     diasFeriadoTrabalhados: number;
     /** Ver nota de topo do ficheiro -- ainda nao existe em `TotaisRelatorioMensal`. */
     diasDescansoTrabalhado: number;
@@ -301,6 +312,22 @@ export function contarDiasElegiveisSubsidio(
   );
 }
 
+/**
+ * Os minutos de falta a descontar: o defice entre planeado e realizado,
+ * DEPOIS de tirar as ausencias aprovadas e remuneradas. Um dia de ferias e
+ * ausencia remunerada -- continua a contar como planeado (a base a hora
+ * paga-o), nao tem picagem, e nao e uma falta. Sem esta subtraccao, 8h
+ * planeadas + 0h picadas saiam descontadas a 100% e o dia de ferias valia
+ * 0 EUR. Nunca negativo: `minutosAusenciaRemunerada` acima do defice nao gera
+ * credito.
+ */
+function calcularMinutosDeFalta(totais: EntradaProcessamentoPessoa["totais"]): number {
+  return Math.max(
+    totais.planeadoMinutos - totais.realizadoMinutos - totais.minutosAusenciaRemunerada,
+    0,
+  );
+}
+
 function calcularLancamentosPontuais(lancamentos: readonly HrProcessamentoLancamento[]): number {
   return lancamentos.reduce(
     (soma, lancamento) => (lancamento.anulado_em === null ? soma + lancamento.valor : soma),
@@ -331,10 +358,7 @@ export function calcularProcessamentoPessoa(
   const totalCodigosAutomaticos = linhasAutomaticas.reduce((soma, linha) => soma + linha.valor, 0);
 
   const descontoFaltas =
-    valorHoraReal === null
-      ? 0
-      : (Math.max(entrada.totais.planeadoMinutos - entrada.totais.realizadoMinutos, 0) / 60) *
-        valorHoraReal;
+    valorHoraReal === null ? 0 : (calcularMinutosDeFalta(entrada.totais) / 60) * valorHoraReal;
 
   const subsidioAlimentacao = calcularSubsidioAlimentacao(
     entrada.retribuicao,

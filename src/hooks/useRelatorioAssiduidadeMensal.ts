@@ -71,7 +71,7 @@ const COLUNAS_AUSENCIA_DIA =
   "id, pedido_id, pessoa_id, organization_id, tipo_id, data, fraccao_dia, conta_saldo, " +
   "e_feriado, e_fim_semana, periodo_inicio, estado";
 
-const COLUNAS_AUSENCIA_TIPO = "id, organization_id, codigo, nome, categoria";
+const COLUNAS_AUSENCIA_TIPO = "id, organization_id, codigo, nome, categoria, remunerada";
 
 /** So o timezone -- e o mesmo `schedule_settings` que `useScheduleSettings` usa. */
 const COLUNAS_SCHEDULE_SETTINGS = "timezone";
@@ -114,6 +114,18 @@ export interface DiaRelatorioMensal {
   estado: EstadoDiaRelatorio;
   /** So quando `estado === "ausencia"`: a categoria do tipo aprovado (ferias, doenca, ...). */
   categoriaAusencia: CategoriaAusencia | null;
+  /**
+   * So quando `estado === "ausencia"`: se o tipo aprovado e remunerado
+   * (`hr_ausencias_tipos.remunerada`). Opcional, mesmo precedente de
+   * `diasPlaneados` -- ausente (fixtures antigos sem a coluna, ou tipo sem
+   * linha carregada) equivale a `true`: so um `false` explicito desliga. Na
+   * base a coluna e NOT NULL e a query de tipos filtra so por
+   * `organization_id`, por isso este lado nunca se atinge em produção; e o
+   * inofensivo em fixtures de teste, que nao tem outros tipos a apanhar.
+   * So entra no desconto de faltas (`minutosAusenciaRemunerada`), nunca em
+   * `planeadoMinutos`/`realizadoMinutos`.
+   */
+  ausenciaRemunerada?: boolean;
   planeadoMinutos: number;
   realizadoMinutos: number;
   /** Os intervalos planeados do dia, na ordem em que se sucedem (o almoco parte em dois). */
@@ -194,6 +206,15 @@ export interface TotaisRelatorioMensal {
    * `minutosExtraNormal + minutosFeriadoTrabalhado + minutosDescansoTrabalhado === horasExtraMinutos`
    */
   minutosExtraNormal: number;
+  /**
+   * Minutos PLANEADOS cobertos por uma ausencia aprovada de dia inteiro E
+   * remunerada (tipicamente ferias). Continuam a contar em `planeadoMinutos`
+   * (a base paga a hora nao pode ficar sem elas) e NAO em `realizadoMinutos`
+   * (nao houve picagem) -- este numero serve so para o desconto de faltas os
+   * poder neutralizar, nunca para inflacionar dias trabalhados/realizado.
+   * Opcional, mesmo precedente de `diasPlaneados`.
+   */
+  minutosAusenciaRemunerada?: number;
 }
 
 interface Satelite<T> {
@@ -414,6 +435,13 @@ export function useRelatorioAssiduidadeMensal(
     return mapa;
   }, [ausenciasTipos.linhas]);
 
+  /** `hr_ausencias_tipos.remunerada`, por tipo -- ver `ausenciaRemunerada` do dia. */
+  const remuneradaPorTipoId = useMemo(() => {
+    const mapa = new Map<string, boolean>();
+    for (const tipo of ausenciasTipos.linhas) mapa.set(tipo.id, tipo.remunerada);
+    return mapa;
+  }, [ausenciasTipos.linhas]);
+
   /** A ausencia aprovada de maior fraccao por dia -- a mesma regra de useAssiduidadeDaPessoa. */
   const ausenciaAprovadaPorDia = useMemo(() => {
     const mapa = new Map<string, AusenciaDia>();
@@ -450,6 +478,7 @@ export function useRelatorioAssiduidadeMensal(
 
       let estado: EstadoDiaRelatorio = "normal";
       let categoriaAusencia: CategoriaAusencia | null = null;
+      let ausenciaRemunerada = false;
 
       // Uma ausencia aprovada de dia inteiro substitui o dia -- a mesma
       // hierarquia do Excel de referencia (Descanso/Feriado/Ferias no lugar
@@ -458,6 +487,10 @@ export function useRelatorioAssiduidadeMensal(
       if (ausenciaDoDia && ausenciaDoDia.fraccao_dia >= 1) {
         estado = "ausencia";
         categoriaAusencia = categoriaPorTipoId.get(ausenciaDoDia.tipo_id) ?? null;
+        // `!== false` cobre o tipo sem linha carregada (fixture antigo sem a
+        // coluna); na base a coluna e NOT NULL, por isso so um `false`
+        // explicito desliga.
+        ausenciaRemunerada = remuneradaPorTipoId.get(ausenciaDoDia.tipo_id) !== false;
       } else if (eFeriado(iso, feriados)) {
         estado = "feriado";
       } else if (naoTrabalha) {
@@ -515,6 +548,7 @@ export function useRelatorioAssiduidadeMensal(
         diaSemana: diaSemanaDe(iso),
         estado,
         categoriaAusencia,
+        ausenciaRemunerada,
         planeadoMinutos,
         realizadoMinutos,
         planeadoIntervalos: planeadoIntervalosRelatorio,
@@ -534,6 +568,7 @@ export function useRelatorioAssiduidadeMensal(
     obras.linhas,
     ausenciaAprovadaPorDia,
     categoriaPorTipoId,
+    remuneradaPorTipoId,
     feriados,
     timezoneDaOrganizacao,
     de,
@@ -575,6 +610,18 @@ export function useRelatorioAssiduidadeMensal(
               (acc.diasPlaneados ?? 0) + (contaParaTotais && dia.planeadoMinutos > 0 ? 1 : 0),
             planeadoMinutos: acc.planeadoMinutos + dia.planeadoMinutos,
             realizadoMinutos: acc.realizadoMinutos + dia.realizadoMinutos,
+            // So o DEFICE do dia (planeado menos o que ja foi picado nesse
+            // mesmo dia) cobertos por uma ausencia aprovada de dia inteiro e
+            // remunerada (ferias, tipicamente) -- para o desconto de faltas
+            // os poder neutralizar. Sem o `- realizadoMinutos`, um dia de
+            // ferias com picagem (ex.: meio-dia trabalhado por engano) conta
+            // os minutos picados a dobrar, e o excedente migra para o
+            // desconto de faltas de OUTROS dias, neutralizando faltas reais.
+            minutosAusenciaRemunerada:
+              (acc.minutosAusenciaRemunerada ?? 0) +
+              (dia.estado === "ausencia" && dia.ausenciaRemunerada
+                ? Math.max(dia.planeadoMinutos - dia.realizadoMinutos, 0)
+                : 0),
             obraHoras: acc.obraHoras + dia.obraHoras,
             diasFeriadoTrabalhados:
               acc.diasFeriadoTrabalhados + (dia.estado === "feriado" && dia.realizadoMinutos > 0 ? 1 : 0),
@@ -608,6 +655,7 @@ export function useRelatorioAssiduidadeMensal(
           diasPlaneados: 0,
           planeadoMinutos: 0,
           realizadoMinutos: 0,
+          minutosAusenciaRemunerada: 0,
           obraHoras: 0,
           diasFeriadoTrabalhados: 0,
           diasComFaltaCompleta: 0,
