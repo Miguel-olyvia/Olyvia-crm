@@ -170,12 +170,22 @@ Deno.serve(async (req: Request): Promise<Response> => {
       let emailEnviado = false;
       try {
         const svc = createClient(supabaseUrl, serviceKey);
+        // O SMTP a usar e o da organizacao da pessoa (resolveOrganizationSmtp
+        // em _shared/smtp.ts devolve null, e falha em silencio, sem
+        // organization_id) -- a RPC acima nao o devolve, so o id do convite,
+        // por isso confirma-se aqui, pela mesma pessoa ja validada por ela.
+        const { data: pessoaOrg } = await svc
+          .from("pessoas")
+          .select("organization_id")
+          .eq("id", pessoaId)
+          .maybeSingle();
         const { error: erroEmail } = await svc.functions.invoke("send-email", {
           body: {
             to: email,
             subject: "Convite de admissao",
             html: `<p>Foi convidado a completar a sua admissao. Use o link (valido ${VALIDADE_DIAS} dias): </p>` +
               `<p><a href="${Deno.env.get("APP_BASE_URL") ?? ""}/admissao/${token}">Completar admissao</a></p>`,
+            organization_id: pessoaOrg?.organization_id ?? undefined,
           },
         });
         emailEnviado = !erroEmail;
