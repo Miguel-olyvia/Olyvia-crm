@@ -2057,6 +2057,32 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const missingTemplateOkRef = useRef(false);
   const pendingSaveArgRef = useRef<unknown>(undefined);
 
+  // Congela o diagnóstico do pedido de proposta no orçamento (snapshot), para
+  // que a Encomenda de Cliente (rpc_get_client_order_document) consiga mostrar
+  // o levantamento de necessidades tal como estava ao gravar.
+  //
+  // Corre sempre em handleSave, depois do rpc_save_quote, quando o orçamento
+  // tem deal_id — é o único ponto do fluxo onde o id real do orçamento existe
+  // (quoteId é uma prop e fica desatualizada num orçamento novo). A RPC é
+  // idempotente (DELETE + reinsert por quote_id), logo repetir gravações não
+  // duplica nada.
+  //
+  // Best-effort por desenho: o snapshot é secundário face a gravar o
+  // orçamento, por isso o erro é registado e engolido — nunca propaga.
+  const snapshotQuoteDiagnostic = async (quoteIdForSnapshot: string, dealId: string) => {
+    try {
+      // Cast local: RPC nova, ainda ausente dos tipos gerados
+      // (src/integrations/supabase/types.ts será regenerado).
+      const { error } = await (supabase as any).rpc("rpc_snapshot_quote_diagnostic", {
+        p_quote_id: quoteIdForSnapshot,
+        p_deal_id: dealId,
+      });
+      if (error) throw error;
+    } catch (err) {
+      captureFlowError(err, "quote-lifecycle");
+    }
+  };
+
   const handleSave = async (rejectReasonOverride?: unknown) => {
     if (saveLockRef.current || loading) return;
 
@@ -2349,6 +2375,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       const savedQuoteRow = savedQuote as Database["public"]["Tables"]["quotes"]["Row"] | null;
       savedQuoteId = savedQuoteRow?.id || savedQuoteId;
+
+      // Snapshot do diagnóstico do pedido de proposta. Aqui — e só aqui —
+      // savedQuoteId é o id real do orçamento (num orçamento novo a prop
+      // quoteId continua null). Idempotente e best-effort: engole o próprio
+      // erro, nunca faz a gravação do orçamento falhar.
+      const dealIdForSnapshot = formData.deal_id;
+      if (savedQuoteId && dealIdForSnapshot) {
+        await snapshotQuoteDiagnostic(savedQuoteId, dealIdForSnapshot);
+      }
 
       if (activeCompany?.id && typeof window !== "undefined") {
         localStorage.removeItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId));
@@ -3136,34 +3171,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     }
   };
 
-  // Congela o diagnóstico do pedido no orçamento (snapshot). Só faz sentido
-  // com o orçamento já gravado — num orçamento novo, o snapshot fica para a
-  // importação seguinte, depois de guardar. Best-effort: nunca rebenta a
-  // importação já concluída.
-  const snapshotQuoteDiagnostic = async (quoteIdForSnapshot: string, dealId: string) => {
-    try {
-      // Cast local: RPC nova, ainda ausente dos tipos gerados
-      // (src/integrations/supabase/types.ts será regenerado).
-      const { error } = await (supabase as any).rpc("rpc_snapshot_quote_diagnostic", {
-        p_quote_id: quoteIdForSnapshot,
-        p_deal_id: dealId,
-      });
-      if (error) throw error;
-    } catch (err) {
-      captureFlowError(err, "quote-lifecycle");
-    }
-  };
-
   // Handler do botão "Importar do pedido de proposta".
+  // Nota: não tira snapshot do diagnóstico. O snapshot é do diagnóstico do
+  // pedido (deal), não das linhas importadas, e é tirado em handleSave — ver
+  // snapshotQuoteDiagnostic. Aqui seria redundante e, num orçamento novo,
+  // impossível (ainda não há quote_id).
   const handleImportFromDeal = async () => {
     const dealId = formData.deal_id;
     if (!dealId || importingDealItems) return;
     setImportingDealItems(true);
     try {
-      const imported = await loadDealItems(dealId);
-      if (imported > 0 && effectiveQuoteId) {
-        await snapshotQuoteDiagnostic(effectiveQuoteId, dealId);
-      }
+      await loadDealItems(dealId);
     } finally {
       setImportingDealItems(false);
     }

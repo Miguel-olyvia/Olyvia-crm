@@ -346,6 +346,11 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   // BD (criação, ou leitura bem sucedida numa edição). Só nesse caso a
   // gravação pode apagar-e-reinserir sem risco de destruir linhas existentes.
   const diagMaterialsLoadedRef = useRef(false);
+  // O mesmo para os 6 campos diag_* de deal_needs: enquanto for false, o
+  // payload da RPC OMITE essas chaves. fn_apply_deal_need usa
+  // `CASE WHEN p_need_data ? 'diag_x' THEN ... ELSE diag_x END`, portanto a
+  // ausência da chave preserva o que está na BD; a presença com null apagava.
+  const diagFieldsLoadedRef = useRef(true);
 
   // Item linking state
   const [linkedItems, setLinkedItems] = useState<DealNeedItem[]>([]);
@@ -486,6 +491,7 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     // Diagnóstico
     diagLoadTokenRef.current = null;
     diagMaterialsLoadedRef.current = true; // criação: não há nada na BD para perder
+    diagFieldsLoadedRef.current = true;    // idem para as colunas diag_*
     setFormDiagAreaM2(""); setFormDiagDemolirDescricao(""); setFormDiagDemolirM2("");
     setFormDiagProtegerDescricao(""); setFormDiagIntervencaoTipo(""); setFormDiagIntervencaoDescricao("");
     setFormDiagMaterials([]);
@@ -554,11 +560,14 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
 
     // Diagnóstico: limpa e hidrata em segundo plano (best effort — ver
     // loadDiagnosticForNeed). openEditDialog não passa por resetForm.
+    // Os dois refs ficam a false até a leitura voltar: enquanto isso, uma
+    // gravação não escreve nada de diagnóstico e o que está na BD sobrevive.
     setFormDiagAreaM2(""); setFormDiagDemolirDescricao(""); setFormDiagDemolirM2("");
     setFormDiagProtegerDescricao(""); setFormDiagIntervencaoTipo(""); setFormDiagIntervencaoDescricao("");
     setFormDiagMaterials([]);
     diagLoadTokenRef.current = need.id;
     diagMaterialsLoadedRef.current = false;
+    diagFieldsLoadedRef.current = false;
     void loadDiagnosticForNeed(need.id);
 
     setDialogOpen(true);
@@ -578,6 +587,9 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         .maybeSingle();
       if (error) throw error;
       if (data && diagLoadTokenRef.current === needId) {
+        // A partir daqui o estado local reflete a BD: a gravação já pode
+        // incluir as chaves diag_* no payload sem risco de as apagar.
+        diagFieldsLoadedRef.current = true;
         setFormDiagAreaM2(data.diag_area_m2 != null ? String(data.diag_area_m2) : "");
         setFormDiagDemolirDescricao(data.diag_demolir_descricao || "");
         setFormDiagDemolirM2(data.diag_demolir_m2 != null ? String(data.diag_demolir_m2) : "");
@@ -733,7 +745,18 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     }]);
   };
 
-  const unlinkItem = (index: number) => setLinkedItems(prev => prev.filter((_, i) => i !== index));
+  // Desligar um serviço pela aba Itens tem de arrastar consigo os materiais da
+  // ficha técnica que ele gerou — senão ficam órfãos (service_id de um serviço
+  // que já não pertence à necessidade) e o armazém continua a vê-los.
+  // Reutiliza a mesma limpeza da aba Diagnóstico.
+  const unlinkItem = (index: number) => {
+    const removed = linkedItems[index];
+    if (removed?.service_id) {
+      handleDiagnosticRemoveService(removed.service_id);
+      return;
+    }
+    setLinkedItems(prev => prev.filter((_, i) => i !== index));
+  };
   const updateItemQuantity = (index: number, qty: number) => setLinkedItems(prev => prev.map((item, i) => i === index ? { ...item, quantity: Math.max(1, qty) } : item));
 
   // ─── Diagnóstico: gravação dos materiais ────────────────
@@ -744,8 +767,28 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   // falha aqui (ex.: migração ainda não aplicada) avisa, mas nunca faz a
   // gravação da necessidade parecer falhada.
   const syncDiagnosticMaterials = async (needId: string | null, businessUserId: string) => {
-    if (!needId || !organizationId) return;
-    if (!diagMaterialsLoadedRef.current && formDiagMaterials.length === 0) return;
+    if (!needId || !organizationId) {
+      if (formDiagMaterials.length > 0) {
+        toast({
+          title: "Materiais do diagnóstico não gravados",
+          description: "A necessidade foi gravada, mas não foi possível identificar a organização para gravar os materiais da ficha técnica.",
+          variant: "destructive",
+        });
+      }
+      return;
+    }
+    // A gravação apaga-e-reinsere a lista toda. Se a leitura inicial não
+    // chegou a correr bem, o que está em memória NÃO representa a BD — gravar
+    // aqui apagaria materiais existentes, mesmo que o utilizador tenha
+    // entretanto aceite serviços novos nesta sessão.
+    if (!diagMaterialsLoadedRef.current) {
+      toast({
+        title: "Materiais do diagnóstico não gravados",
+        description: "Os materiais já existentes ainda não tinham sido lidos, por isso não foram gravadas alterações para não apagar dados. Reabra a necessidade e tente de novo.",
+        variant: "destructive",
+      });
+      return;
+    }
     try {
       await withAuditContext(supabase, businessUserId, async () => {
         // cast local: tabela nova, ainda fora do types.ts gerado.
@@ -818,6 +861,30 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         .filter(([, v]) => v && parseFloat(v) > 0)
         .map(([fieldId, value]) => ({ field_id: fieldId, value: parseFloat(value) }));
 
+      // ─── Diagnóstico (colunas diag_* de deal_needs) ───
+      // fn_apply_deal_need faz `CASE WHEN p_need_data ? 'diag_x' THEN ... ELSE
+      // diag_x END`: a chave presente com null APAGA o valor na BD. Enquanto a
+      // hidratação não confirmar que o estado local reflete a BD (edição com
+      // leitura ainda a decorrer, ou falhada), as 6 chaves são OMITIDAS — só
+      // assim o `?` preserva o que lá está. Numa criação o ref arranca a true.
+      const diagFields = diagFieldsLoadedRef.current
+        ? {
+            diag_area_m2: formDiagAreaM2.trim() === "" ? null : parseFloat(formDiagAreaM2),
+            diag_demolir_descricao: formDiagDemolirDescricao.trim() || null,
+            diag_demolir_m2: formDiagDemolirM2.trim() === "" ? null : parseFloat(formDiagDemolirM2),
+            diag_proteger_descricao: formDiagProtegerDescricao.trim() || null,
+            diag_intervencao_tipo: formDiagIntervencaoTipo.trim() || null,
+            diag_intervencao_descricao: formDiagIntervencaoDescricao.trim() || null,
+          }
+        : {};
+      // Só para avisar: se a hidratação não voltou e o utilizador ainda assim
+      // escreveu nos campos, o que escreveu não seguiu no payload.
+      const diagFieldsSkippedWithInput =
+        !diagFieldsLoadedRef.current &&
+        [formDiagAreaM2, formDiagDemolirDescricao, formDiagDemolirM2,
+         formDiagProtegerDescricao, formDiagIntervencaoTipo, formDiagIntervencaoDescricao]
+          .some(v => v.trim() !== "");
+
       const needData = {
         deal_id: dealId,
         title: formTitle.trim(),
@@ -837,15 +904,9 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         category_name: editingNeed?.category_name || null,
         technical_notes: editingNeed?.technical_notes || null,
         measurements: editingNeed?.measurements || {},
-        // ─── Diagnóstico (colunas diag_* de deal_needs) ───
         // Chaves extra no payload jsonb são ignoradas pela função caso a
         // migração ainda não esteja aplicada — não alteram o comportamento atual.
-        diag_area_m2: formDiagAreaM2.trim() === "" ? null : parseFloat(formDiagAreaM2),
-        diag_demolir_descricao: formDiagDemolirDescricao.trim() || null,
-        diag_demolir_m2: formDiagDemolirM2.trim() === "" ? null : parseFloat(formDiagDemolirM2),
-        diag_proteger_descricao: formDiagProtegerDescricao.trim() || null,
-        diag_intervencao_tipo: formDiagIntervencaoTipo.trim() || null,
-        diag_intervencao_descricao: formDiagIntervencaoDescricao.trim() || null,
+        ...diagFields,
       };
 
       const itemsPayload = linkedItems.map((li, idx) => ({
@@ -863,6 +924,14 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         p_update_need_columns: true,
       });
       if (error) throw error;
+
+      if (diagFieldsSkippedWithInput) {
+        toast({
+          title: "Campos do diagnóstico não gravados",
+          description: "O diagnóstico existente ainda não tinha sido lido, por isso os campos não foram alterados para não apagar dados. Reabra a necessidade e tente de novo.",
+          variant: "destructive",
+        });
+      }
 
       // Materiais da ficha técnica (só informativos para o armazém) — gravados
       // depois da necessidade, porque numa criação o id só existe aqui.

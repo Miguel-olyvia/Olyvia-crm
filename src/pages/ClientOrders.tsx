@@ -124,8 +124,15 @@ interface DirectSaleOrigin {
   proforma_number: string | null;
 }
 
-// Diagnóstico da obra (Fase 1): cópia congelada gravada do lado da BD quando o
-// contrato é assinado, para o armazém saber o que vai ser executado. Tal como
+// Diagnóstico da obra (Fase 1): cópia congelada do levantamento de necessidades
+// do pedido de proposta, para o armazém saber o que vai ser executado.
+//
+// Quem escreve o snapshot é o frontend, não a BD: o `QuoteBuilder` chama
+// `rpc_snapshot_quote_diagnostic(quote_id, deal_id)` em cada gravação do
+// orçamento que tenha `deal_id` (ver `handleSave` em
+// `src/components/QuoteBuilder.tsx`). Não existe nenhum trigger de assinatura
+// do contrato a preencher `quote_diagnostic_snapshot` — se um orçamento nunca
+// for gravado pelo builder, a encomenda fica sem diagnóstico. Tal como
 // `available_warehouses`, chega dentro do jsonb de
 // `rpc_get_client_order_document` — e como `supabase gen types` gera sempre
 // `Returns: Json` (opaco) para essa RPC, a tipagem tem de ser manual aqui e
@@ -1216,11 +1223,12 @@ const ClientOrders = () => {
                 )}
               </div>
 
-              {/* Diagnóstico da obra — só-leitura. Cópia congelada que o
-                  contrato assinado arrasta consigo, para o armazém saber o que
-                  vai executar. Não renderiza nada (nem título, nem caixa) quando
-                  a encomenda não tem diagnóstico: é o caso normal das vendas
-                  diretas e das encomendas manuais. */}
+              {/* Diagnóstico da obra — só-leitura. Cópia congelada tirada pelo
+                  QuoteBuilder quando o orçamento é gravado (não há trigger de
+                  assinatura de contrato nenhum por trás disto), para o armazém
+                  saber o que vai executar. Não renderiza nada (nem título, nem
+                  caixa) quando a encomenda não tem diagnóstico: é o caso normal
+                  das vendas diretas e das encomendas manuais. */}
               {(() => {
                 const needs = detailData.diagnostic ?? [];
                 if (needs.length === 0) return null;
@@ -1238,7 +1246,7 @@ const ClientOrders = () => {
                     <p className="text-xs text-muted-foreground">
                       {tf(
                         'clientOrders.dialog.diagnostic.subtitle',
-                        'Cópia do diagnóstico no momento da assinatura do contrato. Não faz parte das linhas da encomenda.'
+                        'Cópia do diagnóstico no momento em que o orçamento foi gravado. Não faz parte das linhas da encomenda.'
                       )}
                     </p>
 
