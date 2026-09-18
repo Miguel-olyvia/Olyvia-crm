@@ -307,3 +307,27 @@ export const QUALIFICATION_LEGACY_KEYS = [
 export function isEmptyRule(rule: RuleGroup | null | undefined): boolean {
   return !rule || ((rule.all?.length ?? 0) === 0 && (rule.any?.length ?? 0) === 0);
 }
+
+/**
+ * Saneia uma regra inteira vinda da base de dados (onde `reached_when` é
+ * jsonb livre e pode conter entulho legado) e devolve-a na forma canónica
+ * que o editor e o payload de gravação usam.
+ *
+ * Devolve `null` — e não `{all:[],any:[]}` — quando não sobra nenhuma
+ * condição utilizável, para que o motor SQL (public.stage_reached) caia de
+ * forma limpa no fallback por status literal e para que `isEmptyRule` e as
+ * comparações de "tem regras personalizadas" concordem com o que o
+ * utilizador vê nas checkboxes.
+ *
+ * Aplicar isto ao CARREGAR e ao GRAVAR é o que faz abrir-e-guardar um
+ * estágio reparar mesmo a regra, em vez de preservar o entulho.
+ */
+export function normalizeRule(rule: unknown): RuleGroup | null {
+  if (!rule || typeof rule !== "object" || Array.isArray(rule)) return null;
+  const source = rule as { all?: unknown; any?: unknown };
+  const normalized: RuleGroup = {
+    all: sanitizeConditions(source.all),
+    any: sanitizeConditions(source.any),
+  };
+  return isEmptyRule(normalized) ? null : normalized;
+}

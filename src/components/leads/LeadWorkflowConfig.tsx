@@ -74,7 +74,7 @@ import { QualificationRulesTab } from "./workflow/QualificationRulesTab";
 import { DryRunPanel, type DryRunStagePayload } from "./workflow/DryRunPanel";
 import { StageRulesSimulator } from "./workflow/StageRulesSimulator";
 import type { RuleGroup } from "./workflow/conditionCatalog";
-import { isEmptyRule } from "./workflow/conditionCatalog";
+import { isEmptyRule, normalizeRule } from "./workflow/conditionCatalog";
 import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
 import { LEAD_FUNNEL_PRESETS, findPresetStageRule, type FunnelPreset } from "./leadFunnelPresets";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -115,6 +115,60 @@ export const LEAD_STATUS_OPTIONS = [
   { value: "lost", label: "Perdida" },
   { value: "incomplete", label: "Incompleta" },
 ];
+
+/** minúsculas, sem acentos e sem espaços à volta — para comparar slugs com labels. */
+const normalizeStatusToken = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+
+/**
+ * Procura um status literal do catálogo que corresponda ao nome/slug (ou ao
+ * label) de um estágio. Só correspondências exactas contam — nada é
+ * adivinhado por semelhança: um estágio sem correspondência fica sem status
+ * associado e é o aviso de "estágio inatingível" que chama a atenção do
+ * utilizador.
+ */
+const findMatchingLeadStatus = (...candidates: Array<string | null | undefined>): string | null => {
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const token = normalizeStatusToken(candidate);
+    if (!token) continue;
+    const match = LEAD_STATUS_OPTIONS.find(
+      opt => opt.value === token || normalizeStatusToken(opt.label) === token
+    );
+    if (match) return match.value;
+  }
+  return null;
+};
+
+/**
+ * Um estágio só é atingível por duas vias: o fallback por status literal do
+ * motor (`lead_status = ANY(matching_statuses)`) ou condições avançadas em
+ * `reached_when`. Se `matching_statuses` estiver vazio/nulo — ou só contiver
+ * valores que nenhuma lead pode ter, porque não existem no catálogo de
+ * status — e a regra ficar vazia depois de saneada, nenhuma lead consegue
+ * lá chegar: o estágio é permanentemente inalcançável, sem qualquer sintoma
+ * visível a não ser este aviso.
+ *
+ * Nota: o critério "existe no catálogo" é deliberadamente o mesmo que a
+ * lista de badges "Status literais associados" desenha, para que o aviso
+ * apareça exactamente quando o utilizador não vê nenhum badge aceso nem
+ * nenhuma condição marcada.
+ */
+export const isStageUnreachable = (stage: Pick<WorkflowStage, "name" | "matching_statuses" | "reached_when">): boolean => {
+  // Espelha o default de toStagePayload: matching_statuses nulo é gravado como [name].
+  const effectiveStatuses = stage.matching_statuses ?? [stage.name];
+  const hasKnownStatus = effectiveStatuses.some(value =>
+    LEAD_STATUS_OPTIONS.some(opt => opt.value === value)
+  );
+  return !hasKnownStatus && isEmptyRule(normalizeRule(stage.reached_when));
+};
+
+const UNREACHABLE_STAGE_HINT =
+  "Nenhuma lead consegue chegar a esta etapa: não tem nenhum status literal associado nem condições avançadas definidas. Associe pelo menos um status em \"Status literais associados\" ou defina condições em \"Condições avançadas (motor)\".";
 
 interface LeadWorkflowConfigProps {
   open: boolean;
@@ -196,6 +250,25 @@ function SortableStageRow({
           <span className="font-medium">{stage.label}</span>
           <span className="text-muted-foreground text-xs">({stage.name})</span>
           {isTemplate && <Badge variant="secondary" className="text-xs">Template</Badge>}
+          {/* Só para estágios da organização: os templates não são editáveis aqui. */}
+          {!isTemplate && isStageUnreachable(stage) && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="outline"
+                    className="text-xs gap-1 border-amber-500/60 text-amber-700 dark:text-amber-400 cursor-help"
+                  >
+                    <AlertTriangle className="w-3 h-3" />
+                    Inatingível
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p>{UNREACHABLE_STAGE_HINT}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           {stage.default_status && (
             <Badge variant="outline" className="text-xs">
               → {LEAD_STATUS_OPTIONS.find(o => o.value === stage.default_status)?.label || stage.default_status}
@@ -460,7 +533,10 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     is_rejection: s.is_rejection,
     default_status: s.default_status ?? null,
     matching_statuses: s.matching_statuses ?? [s.name],
-    reached_when: s.reached_when ?? null,
+    // Saneia ao gravar: gravar um estágio repara de facto regras legadas com
+    // entulho (ver normalizeRule). Vazio depois de saneado → null, para o
+    // motor cair no fallback por status literal em vez de guardar {all:[],any:[]}.
+    reached_when: normalizeRule(s.reached_when),
     auto_advance: s.auto_advance ?? false,
     qualification_hint: s.qualification_hint ?? "none",
     counts_as_qualified: s.counts_as_qualified ?? false,
@@ -483,18 +559,28 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
       return;
     }
 
+    const slug = newStage.name.toLowerCase().replace(/\s+/g, '_');
+    // Um estágio novo nascia sempre com matching_statuses = [slug]. Se o slug
+    // não for um status real do catálogo, o fallback do motor
+    // (lead_status = ANY(matching_statuses)) nunca é verdadeiro e o estágio
+    // nasce permanentemente inatingível. Pré-selecionamos o status literal
+    // correspondente quando existe; quando não existe, fica vazio de
+    // propósito e o aviso de "estágio inatingível" torna o problema visível
+    // em vez de o esconder atrás de um valor que parece configurado.
+    const matchedStatus = findMatchingLeadStatus(slug, newStage.name, newStage.label);
+
     const payload: StagePayload[] = [
       ...stages.map(toStagePayload),
       {
         id: null,
-        name: newStage.name.toLowerCase().replace(/\s+/g, '_'),
+        name: slug,
         label: newStage.label,
         color: newStage.color,
         is_final: newStage.is_final,
         is_conversion: newStage.is_conversion,
         is_rejection: newStage.is_rejection,
         default_status: newStage.default_status || null,
-        matching_statuses: [newStage.name.toLowerCase().replace(/\s+/g, '_')],
+        matching_statuses: matchedStatus ? [matchedStatus] : [],
         reached_when: null,
         auto_advance: false,
         qualification_hint: "none",
@@ -586,7 +672,8 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
         is_rejection: false,
         default_status: null,
         matching_statuses: [stage.name + "_copy"],
-        reached_when: stage.reached_when ?? null,
+        // Não propagar entulho legado para a cópia.
+        reached_when: normalizeRule(stage.reached_when),
         auto_advance: stage.auto_advance ?? false,
         qualification_hint: stage.qualification_hint ?? "none",
         counts_as_qualified: stage.counts_as_qualified ?? false,
@@ -669,7 +756,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     const defaultMatching = stage.matching_statuses == null
       || (stage.matching_statuses.length === 1 && stage.matching_statuses[0] === stage.name);
     return !defaultMatching
-      || !isEmptyRule(stage.reached_when ?? null)
+      // Saneado: uma regra que só contém entulho legado não é avaliável pelo
+      // motor, logo não conta como personalização a proteger.
+      || !isEmptyRule(normalizeRule(stage.reached_when))
       || !!stage.auto_advance
       || (stage.qualification_hint ?? "none") !== "none"
       || !!stage.counts_as_qualified
@@ -685,7 +774,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
       return {
         ...stage,
         matching_statuses: rule.matchingStatuses.length > 0 ? rule.matchingStatuses : [stage.name],
-        reached_when: rule.reachedWhen,
+        // Os presets são estáticos e bem formados, mas passam pela mesma
+        // normalização para que nenhum caminho consiga reintroduzir entulho.
+        reached_when: normalizeRule(rule.reachedWhen),
         auto_advance: rule.autoAdvance,
         qualification_hint: rule.qualificationHint,
         counts_as_qualified: rule.countsAsQualified,
@@ -788,7 +879,15 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   // counts already fetched/displayed per-stage above instead of an extra query.
   const totalLeadCountEstimate = Object.values(leadCountByStage).reduce((sum, n) => sum + n, 0);
 
+  // Saneia ao CARREGAR o estágio para edição: as checkboxes passam a mostrar
+  // exactamente o que o motor consegue avaliar, e o entulho legado deixa de
+  // ser reenviado tal e qual no Guardar — abrir e guardar repara mesmo a regra.
+  const handleEditStage = (stage: WorkflowStage) => {
+    setEditingStage({ ...stage, reached_when: normalizeRule(stage.reached_when) });
+  };
+
   const displayStages = stages.length > 0 ? stages : templateStages;
+  const editingStageUnreachable = editingStage ? isStageUnreachable(editingStage) : false;
   const deletableLeadCount = deletingStage ? (leadCountByStage[deletingStage.id] || 0) : 0;
   const migrationTargets = stages.filter(s => s.id !== deletingStage?.id);
 
@@ -899,7 +998,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                             leadCount={leadCountByStage[stage.id] || 0}
                             isFirst={index === 0}
                             isLast={index === displayStages.length - 1}
-                            onEdit={setEditingStage}
+                            onEdit={handleEditStage}
                             onDelete={(s) => {
                               setDeletingStage(s);
                               setMigrationTargetId("");
@@ -1014,7 +1113,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       id: s.id,
                       label: s.label,
                       stage_order: s.stage_order,
-                      reached_when: s.reached_when ?? null,
+                      // Simular com a regra saneada — é o que o motor avalia
+                      // e o que ficará gravado ao guardar.
+                      reached_when: normalizeRule(s.reached_when),
                       matching_statuses: s.matching_statuses ?? [s.name],
                       counts_as_qualified: s.counts_as_qualified ?? false,
                       counts_as_negotiation: s.counts_as_negotiation ?? false,
@@ -1141,6 +1242,29 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
             <DialogTitle>Editar Estágio</DialogTitle>
           </DialogHeader>
           {editingStage && (
+            <>
+            {/* Fora das Tabs de propósito: o problema tem de ser visível
+                mesmo com o separador "Geral" activo. */}
+            {editingStageUnreachable && (
+              <div
+                role="alert"
+                className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3"
+              >
+                <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                    Estágio inatingível — nenhuma lead consegue chegar aqui
+                  </p>
+                  <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                    Esta etapa não tem nenhum status literal associado nem condições avançadas
+                    definidas, por isso o motor nunca a considera atingida — mesmo que fique visível
+                    no funil, continuará sempre vazia. No separador <strong>Regras</strong>, associe
+                    pelo menos um status em <strong>"Status literais associados"</strong> ou defina
+                    condições em <strong>"Condições avançadas (motor)"</strong>.
+                  </p>
+                </div>
+              </div>
+            )}
             <Tabs value={editStageTab} onValueChange={setEditStageTab}>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="general">Geral</TabsTrigger>
@@ -1272,8 +1396,8 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   </p>
                   <div className="mt-2">
                     <StageRulesEditor
-                      value={editingStage.reached_when ?? null}
-                      onChange={v => setEditingStage({ ...editingStage, reached_when: v })}
+                      value={normalizeRule(editingStage.reached_when)}
+                      onChange={v => setEditingStage({ ...editingStage, reached_when: normalizeRule(v) })}
                       organizationId={companyId}
                     />
                   </div>
@@ -1376,7 +1500,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     stage={{
                       id: editingStage.id,
                       matching_statuses: editingStage.matching_statuses ?? [editingStage.name],
-                      reached_when: editingStage.reached_when ?? null,
+                      reached_when: normalizeRule(editingStage.reached_when),
                       auto_advance: editingStage.auto_advance ?? false,
                       qualification_hint: editingStage.qualification_hint ?? "none",
                       counts_as_converted: editingStage.counts_as_converted ?? false,
@@ -1388,6 +1512,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                 </div>
               </TabsContent>
             </Tabs>
+            </>
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingStage(null)}>Cancelar</Button>
