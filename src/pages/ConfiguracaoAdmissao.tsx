@@ -74,14 +74,23 @@ export default function ConfiguracaoAdmissao() {
 
   const { campos, isLoading, isSaving, definirObrigatorio, erro } = useConfiguracaoObrigatoriosAdmissao();
 
-  // Pagina 1 (a pessoa preenche antes de submeter) primeiro, depois o que o
-  // RH preenche na retaguarda -- a ordem em que a folha de cadastro os pede.
-  const camposOrdenados = useMemo(
+  // Duas seccoes visuais, nao uma lista so ordenada por origem -- quem
+  // configura precisa de ver de imediato quais campos sao dela (a pessoa
+  // preenche na folha de cadastro) e quais sao do RH (preenchidos na
+  // retaguarda, nunca travam o convite), sem ter de ler o rotulo linha a
+  // linha para separar os dois grupos a olho.
+  const camposPessoa = useMemo(
     () =>
-      [...campos].sort((a: CampoObrigatorioOrg, b: CampoObrigatorioOrg) => {
-        if (a.origem !== b.origem) return a.origem === "pessoa" ? -1 : 1;
-        return a.codigo.localeCompare(b.codigo);
-      }),
+      campos
+        .filter((c: CampoObrigatorioOrg) => c.origem === "pessoa")
+        .sort((a, b) => a.codigo.localeCompare(b.codigo)),
+    [campos],
+  );
+  const camposRh = useMemo(
+    () =>
+      campos
+        .filter((c: CampoObrigatorioOrg) => c.origem === "rh")
+        .sort((a, b) => a.codigo.localeCompare(b.codigo)),
     [campos],
   );
 
@@ -98,6 +107,35 @@ export default function ConfiguracaoAdmissao() {
   if (!activeCompany) return <NoOrganizationState />;
   if (!podeGerir) return <SemAcessoCard className="m-6" />;
 
+  const renderCampo = (campo: CampoObrigatorioOrg) => {
+    const etiquetaChave = ETIQUETA_POR_CODIGO[campo.codigo];
+    const etiqueta = etiquetaChave ? t(etiquetaChave) : campo.codigo;
+    const inputId = `admissao-obrigatorio-${campo.codigo}`;
+    return (
+      <div
+        key={campo.codigo}
+        className="flex items-center justify-between gap-4 border-b py-3 last:border-b-0"
+      >
+        <Label htmlFor={inputId} className="font-normal">
+          {etiqueta}
+        </Label>
+        <div className="flex items-center gap-2">
+          <Badge variant={campo.obrigatorio ? "default" : "secondary"}>
+            {campo.obrigatorio
+              ? t("hr.admissao.configObrigatorio")
+              : t("hr.admissao.configOpcional")}
+          </Badge>
+          <Switch
+            id={inputId}
+            checked={campo.obrigatorio}
+            disabled={isSaving}
+            onCheckedChange={() => alternar(campo)}
+          />
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -111,54 +149,37 @@ export default function ConfiguracaoAdmissao() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">{t("hr.convite.tituloPagina")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-1">
-          {isLoading ? (
-            <div className="flex justify-center py-12">
+      {isLoading ? (
+        <Card>
+          <CardContent className="py-12">
+            <div className="flex justify-center">
               <OlyviaLoader size={32} />
             </div>
-          ) : (
-            camposOrdenados.map((campo) => {
-              const etiquetaChave = ETIQUETA_POR_CODIGO[campo.codigo];
-              const etiqueta = etiquetaChave ? t(etiquetaChave) : campo.codigo;
-              const inputId = `admissao-obrigatorio-${campo.codigo}`;
-              return (
-                <div
-                  key={campo.codigo}
-                  className="flex items-center justify-between gap-4 border-b py-3 last:border-b-0"
-                >
-                  <div>
-                    <Label htmlFor={inputId} className="font-normal">
-                      {etiqueta}
-                    </Label>
-                    {campo.origem === "rh" && (
-                      <p className="text-xs text-muted-foreground">
-                        {t("hr.admissao.origemRh")}
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Badge variant={campo.obrigatorio ? "default" : "secondary"}>
-                      {campo.obrigatorio
-                        ? t("hr.admissao.configObrigatorio")
-                        : t("hr.admissao.configOpcional")}
-                    </Badge>
-                    <Switch
-                      id={inputId}
-                      checked={campo.obrigatorio}
-                      disabled={isSaving}
-                      onCheckedChange={() => alternar(campo)}
-                    />
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">{t("hr.admissao.configSeccaoPessoa")}</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                {t("hr.admissao.configSeccaoPessoaAjuda")}
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-1">{camposPessoa.map(renderCampo)}</CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">{t("hr.admissao.configSeccaoRh")}</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                {t("hr.admissao.configSeccaoRhAjuda")}
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-1">{camposRh.map(renderCampo)}</CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

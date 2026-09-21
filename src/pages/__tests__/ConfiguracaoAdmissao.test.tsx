@@ -82,4 +82,26 @@ describe("ConfiguracaoAdmissao", () => {
 
     expect(screen.getByText(/permission denied for function/)).toBeTruthy();
   });
+
+  it("separa os campos em duas seccoes -- preenchido pela pessoa vs. pelo RH", async () => {
+    hasPermission.mockImplementation((perm: string) => perm === "hr.admissao.obrigatorios.gerir");
+
+    renderPagina();
+
+    expect(screen.getByText("Preenchido pela pessoa")).toBeTruthy();
+    expect(screen.getByText("Preenchido pelo RH")).toBeTruthy();
+
+    // NIF/NISS (origem "pessoa") tem de aparecer ANTES do titulo da seccao
+    // do RH; "Número de conta" (origem "rh") ANTES do titulo da seccao do
+    // RH nao deve aparecer -- confirma que a separacao e por `origem`, nao
+    // so um titulo decorativo por cima da mesma lista.
+    const corpo = document.body.textContent ?? "";
+    const indiceSeccaoRh = corpo.indexOf("Preenchido pelo RH");
+    const indiceNif = corpo.indexOf("NIF");
+    const indiceConta = corpo.indexOf("Número de conta");
+
+    expect(indiceNif).toBeGreaterThanOrEqual(0);
+    expect(indiceNif).toBeLessThan(indiceSeccaoRh);
+    expect(indiceConta).toBeGreaterThan(indiceSeccaoRh);
+  });
 });
