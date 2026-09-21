@@ -3868,9 +3868,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 let hasSectionCostData = false;
                 sectionLines.filter(l => l.qt > 0).forEach(line => {
                   sectionSubtotal += getLineSubtotal(line);
-                  if (line.cost_price && line.cost_price > 0) {
+                  // getLineUnitCost (custo_material_unit + custo_mao_obra_unit) é a
+                  // fonte única de custo — usar só cost_price ignorava linhas de
+                  // bundle/secção cujo custo só vem gravado nesses dois campos.
+                  const lineCost = getLineUnitCost(line);
+                  if (lineCost > 0) {
                     hasSectionCostData = true;
-                    sectionCost += line.cost_price * line.qt;
+                    sectionCost += lineCost * line.qt;
                   }
                 });
                 const sectionMargin = hasSectionCostData && sectionSubtotal > 0 ? ((sectionSubtotal - sectionCost) / sectionSubtotal) * 100 : 0;
