@@ -59,7 +59,7 @@ const ETIQUETA_POR_CODIGO: Record<string, string> = {
   localidade: "hr.campos.localidade",
   tamanho_cima: "hr.fardamento.tamanhoCima",
   tamanho_baixo: "hr.fardamento.tamanhoBaixo",
-  tamanho_blazer: "hr.fardamento.tamanhoBlazer",
+  tamanho_calcado: "hr.fardamento.tamanhoCalcado",
   conta_numero: "hr.campos.numeroConta",
   conta_titular: "hr.campos.titularConta",
   conta_banco: "hr.campos.banco",

@@ -108,7 +108,7 @@ const COLUNAS_RETRIBUICAO =
 
 const COLUNAS_FARDAMENTO =
   "id, pessoa_id, organization_id, tamanho_cima, tamanho_cima_detalhe, " +
-  "tamanho_baixo, tamanho_baixo_detalhe, tamanho_blazer, tamanho_blazer_detalhe";
+  "tamanho_baixo, tamanho_baixo_detalhe, tamanho_calcado, tamanho_calcado_detalhe";
 
 // Nunca `sindicalizado` a NULL por omissao no ecra: le-se o que a base tiver.
 const COLUNAS_SINDICALIZACAO =

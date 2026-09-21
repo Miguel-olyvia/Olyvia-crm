@@ -50,8 +50,23 @@ export type HabilitacaoAcademica =
   | "doutoramento"
   | "outro";
 
-/** Dominio dos tres tamanhos de `pessoas_fardamento` (20261124070000). */
+/** Dominio de `pessoas_fardamento.tamanho_cima` (20261124070000) -- so letras. */
 export type TamanhoFardamento = "xs" | "s" | "m" | "l" | "xl" | "xxl" | "outro";
+
+/**
+ * Dominio de `pessoas_fardamento.tamanho_calcado` (20261202060000) -- numero
+ * europeu de sapato. Ate 20261202060000 esta coluna chamava-se
+ * `tamanho_blazer` e usava o dominio de letras de `TamanhoFardamento`.
+ */
+export type TamanhoCalcado =
+  | "35" | "36" | "37" | "38" | "39" | "40" | "41" | "42" | "43" | "44" | "45" | "46" | "47" | "48"
+  | "outro";
+
+/**
+ * Dominio de `pessoas_fardamento.tamanho_baixo` (calcas, 20261202060000) --
+ * letras E numero europeu de calcas coexistem, nunca so um dos dois.
+ */
+export type TamanhoCalcas = TamanhoFardamento | "34" | "36" | "38" | "40" | "42" | "44" | "46" | "48" | "50" | "52" | "54" | "56" | "58" | "60";
 
 /**
  * Dominio de `pessoas_vinculos.tipo_contrato` (20261120200000).
@@ -197,6 +212,15 @@ export const TAMANHOS_FARDAMENTO: readonly TamanhoFardamento[] = [
   "l",
   "xl",
   "xxl",
+  "outro",
+];
+export const TAMANHOS_CALCADO: readonly TamanhoCalcado[] = [
+  "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46", "47", "48",
+  "outro",
+];
+export const TAMANHOS_CALCAS: readonly TamanhoCalcas[] = [
+  "xs", "s", "m", "l", "xl", "xxl",
+  "34", "36", "38", "40", "42", "44", "46", "48", "50", "52", "54", "56", "58", "60",
   "outro",
 ];
 /**
@@ -682,10 +706,10 @@ export interface PessoaFardamento {
   organization_id: string;
   tamanho_cima: TamanhoFardamento | null;
   tamanho_cima_detalhe: string | null;
-  tamanho_baixo: TamanhoFardamento | null;
+  tamanho_baixo: TamanhoCalcas | null;
   tamanho_baixo_detalhe: string | null;
-  tamanho_blazer: TamanhoFardamento | null;
-  tamanho_blazer_detalhe: string | null;
+  tamanho_calcado: TamanhoCalcado | null;
+  tamanho_calcado_detalhe: string | null;
 }
 
 /**

@@ -65,8 +65,8 @@ export interface RascunhoConvite {
   tamanho_cima_detalhe: string;
   tamanho_baixo: string;
   tamanho_baixo_detalhe: string;
-  tamanho_blazer: string;
-  tamanho_blazer_detalhe: string;
+  tamanho_calcado: string;
+  tamanho_calcado_detalhe: string;
   sindicalizado: boolean;
   sindicato: string;
   assinatura_nome: string;
@@ -110,8 +110,8 @@ export const RASCUNHO_CONVITE_VAZIO: RascunhoConvite = {
   tamanho_cima_detalhe: "",
   tamanho_baixo: "",
   tamanho_baixo_detalhe: "",
-  tamanho_blazer: "",
-  tamanho_blazer_detalhe: "",
+  tamanho_calcado: "",
+  tamanho_calcado_detalhe: "",
   sindicalizado: false,
   sindicato: "",
   assinatura_nome: "",
@@ -159,8 +159,8 @@ export const CHAVES_PAYLOAD_CONVITE = [
   "sindicato",
   "tamanho_baixo",
   "tamanho_baixo_detalhe",
-  "tamanho_blazer",
-  "tamanho_blazer_detalhe",
+  "tamanho_calcado",
+  "tamanho_calcado_detalhe",
   "tamanho_cima",
   "tamanho_cima_detalhe",
   "telefone_pessoal",
@@ -225,8 +225,8 @@ export function construirPayloadConvite(
     tamanho_cima_detalhe: detalheOuNull(r.tamanho_cima, r.tamanho_cima_detalhe),
     tamanho_baixo: ouNull(r.tamanho_baixo),
     tamanho_baixo_detalhe: detalheOuNull(r.tamanho_baixo, r.tamanho_baixo_detalhe),
-    tamanho_blazer: ouNull(r.tamanho_blazer),
-    tamanho_blazer_detalhe: detalheOuNull(r.tamanho_blazer, r.tamanho_blazer_detalhe),
+    tamanho_calcado: ouNull(r.tamanho_calcado),
+    tamanho_calcado_detalhe: detalheOuNull(r.tamanho_calcado, r.tamanho_calcado_detalhe),
     sindicalizado: r.sindicalizado,
     sindicato: r.sindicalizado ? ouNull(r.sindicato) : null,
     // A conta bancaria, que ate 28/11 nao passava daqui: a Edge Function nao a

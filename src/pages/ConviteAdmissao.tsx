@@ -46,6 +46,8 @@ import {
   GENEROS,
   HABILITACOES_ACADEMICAS,
   TAMANHOS_FARDAMENTO,
+  TAMANHOS_CALCADO,
+  TAMANHOS_CALCAS,
   TIPOS_DOCUMENTO,
 } from "@/types/hr";
 import {
@@ -70,6 +72,11 @@ const DEBOUNCE_RASCUNHO_MS = 3000;
  */
 type Rascunho = RascunhoConvite;
 const VAZIO: Rascunho = RASCUNHO_CONVITE_VAZIO;
+
+/** Numeros (calcado, calcas) mostram-se como sao; letras/outro passam por i18n. */
+function rotuloTamanho(t: (chave: string) => string, tamanho: string): string {
+  return /^[0-9]+$/.test(tamanho) ? tamanho : t(`hr.tamanhoFardamento.${tamanho}`);
+}
 
 export default function ConviteAdmissao() {
   const { t } = useTranslation();
@@ -646,9 +653,9 @@ export default function ConviteAdmissao() {
                   erro={erroDe("tamanho_baixo")}
                   valor={rascunho.tamanho_baixo}
                   vazioLabel={t("hr.campos.semValor")}
-                  opcoes={TAMANHOS_FARDAMENTO.map((tm) => ({
+                  opcoes={TAMANHOS_CALCAS.map((tm) => ({
                     value: tm,
-                    label: t(`hr.tamanhoFardamento.${tm}`),
+                    label: rotuloTamanho(t, tm),
                   }))}
                   onChange={(v) => definir("tamanho_baixo", v)}
                 />
@@ -661,24 +668,24 @@ export default function ConviteAdmissao() {
                   />
                 )}
                 <CampoSelect
-                  id="convite-tamanho-blazer"
-                  label={t("hr.fardamento.tamanhoBlazer")}
+                  id="convite-tamanho-calcado"
+                  label={t("hr.fardamento.tamanhoCalcado")}
                   obrigatorio
-                  erro={erroDe("tamanho_blazer")}
-                  valor={rascunho.tamanho_blazer}
+                  erro={erroDe("tamanho_calcado")}
+                  valor={rascunho.tamanho_calcado}
                   vazioLabel={t("hr.campos.semValor")}
-                  opcoes={TAMANHOS_FARDAMENTO.map((tm) => ({
+                  opcoes={TAMANHOS_CALCADO.map((tm) => ({
                     value: tm,
-                    label: t(`hr.tamanhoFardamento.${tm}`),
+                    label: rotuloTamanho(t, tm),
                   }))}
-                  onChange={(v) => definir("tamanho_blazer", v)}
+                  onChange={(v) => definir("tamanho_calcado", v)}
                 />
-                {rascunho.tamanho_blazer === "outro" && (
+                {rascunho.tamanho_calcado === "outro" && (
                   <CampoTexto
-                    id="convite-tamanho-blazer-detalhe"
+                    id="convite-tamanho-calcado-detalhe"
                     label={t("hr.fardamento.detalhe")}
-                    valor={rascunho.tamanho_blazer_detalhe}
-                    onChange={(v) => definir("tamanho_blazer_detalhe", v)}
+                    valor={rascunho.tamanho_calcado_detalhe}
+                    onChange={(v) => definir("tamanho_calcado_detalhe", v)}
                   />
                 )}
               </CardContent>

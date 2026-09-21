@@ -30,9 +30,22 @@ import {
 import { Shirt, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { TAMANHOS_FARDAMENTO, type PessoaFardamento, type TamanhoFardamento } from "@/types/hr";
+import {
+  TAMANHOS_FARDAMENTO,
+  TAMANHOS_CALCADO,
+  TAMANHOS_CALCAS,
+  type PessoaFardamento,
+  type TamanhoFardamento,
+  type TamanhoCalcado,
+  type TamanhoCalcas,
+} from "@/types/hr";
 
 const SEM_ESCOLHA = "__sem_escolha__";
+
+/** Numeros (calcado, calcas) mostram-se como sao; letras/outro passam por i18n. */
+function rotuloTamanho(t: (chave: string) => string, tamanho: string): string {
+  return /^[0-9]+$/.test(tamanho) ? tamanho : t(`hr.tamanhoFardamento.${tamanho}`);
+}
 
 interface PessoaFardamentoCardProps {
   fardamento: PessoaFardamento | null;
@@ -47,8 +60,8 @@ type Rascunho = {
   tamanho_cima_detalhe: string;
   tamanho_baixo: string;
   tamanho_baixo_detalhe: string;
-  tamanho_blazer: string;
-  tamanho_blazer_detalhe: string;
+  tamanho_calcado: string;
+  tamanho_calcado_detalhe: string;
 };
 
 function rascunhoDe(fardamento: PessoaFardamento | null): Rascunho {
@@ -57,8 +70,8 @@ function rascunhoDe(fardamento: PessoaFardamento | null): Rascunho {
     tamanho_cima_detalhe: fardamento?.tamanho_cima_detalhe ?? "",
     tamanho_baixo: fardamento?.tamanho_baixo ?? SEM_ESCOLHA,
     tamanho_baixo_detalhe: fardamento?.tamanho_baixo_detalhe ?? "",
-    tamanho_blazer: fardamento?.tamanho_blazer ?? SEM_ESCOLHA,
-    tamanho_blazer_detalhe: fardamento?.tamanho_blazer_detalhe ?? "",
+    tamanho_calcado: fardamento?.tamanho_calcado ?? SEM_ESCOLHA,
+    tamanho_calcado_detalhe: fardamento?.tamanho_calcado_detalhe ?? "",
   };
 }
 
@@ -86,13 +99,13 @@ export function PessoaFardamentoCard({
       tamanho_baixo:
         rascunho.tamanho_baixo === SEM_ESCOLHA
           ? null
-          : (rascunho.tamanho_baixo as TamanhoFardamento),
+          : (rascunho.tamanho_baixo as TamanhoCalcas),
       tamanho_baixo_detalhe: ouNull(rascunho.tamanho_baixo_detalhe),
-      tamanho_blazer:
-        rascunho.tamanho_blazer === SEM_ESCOLHA
+      tamanho_calcado:
+        rascunho.tamanho_calcado === SEM_ESCOLHA
           ? null
-          : (rascunho.tamanho_blazer as TamanhoFardamento),
-      tamanho_blazer_detalhe: ouNull(rascunho.tamanho_blazer_detalhe),
+          : (rascunho.tamanho_calcado as TamanhoCalcado),
+      tamanho_calcado_detalhe: ouNull(rascunho.tamanho_calcado_detalhe),
     });
     if (erro) {
       toast.error(erro);
@@ -102,12 +115,13 @@ export function PessoaFardamentoCard({
   };
 
   const linhas: Array<{
-    campo: "cima" | "baixo" | "blazer";
+    campo: "cima" | "baixo" | "calcado";
     labelKey: string;
+    opcoes: readonly string[];
   }> = [
-    { campo: "cima", labelKey: "hr.fardamento.tamanhoCima" },
-    { campo: "baixo", labelKey: "hr.fardamento.tamanhoBaixo" },
-    { campo: "blazer", labelKey: "hr.fardamento.tamanhoBlazer" },
+    { campo: "cima", labelKey: "hr.fardamento.tamanhoCima", opcoes: TAMANHOS_FARDAMENTO },
+    { campo: "baixo", labelKey: "hr.fardamento.tamanhoBaixo", opcoes: TAMANHOS_CALCAS },
+    { campo: "calcado", labelKey: "hr.fardamento.tamanhoCalcado", opcoes: TAMANHOS_CALCADO },
   ];
 
   return (
@@ -120,7 +134,7 @@ export function PessoaFardamentoCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2">
-          {linhas.map(({ campo, labelKey }) => {
+          {linhas.map(({ campo, labelKey, opcoes }) => {
             const idTamanho = `hr-fardamento-${campo}`;
             const idDetalhe = `hr-fardamento-${campo}-detalhe`;
             const tamanhoChave = `tamanho_${campo}` as const;
@@ -138,9 +152,9 @@ export function PessoaFardamentoCard({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
-                    {TAMANHOS_FARDAMENTO.map((tamanho) => (
+                    {opcoes.map((tamanho) => (
                       <SelectItem key={tamanho} value={tamanho}>
-                        {t(`hr.tamanhoFardamento.${tamanho}`)}
+                        {rotuloTamanho(t, tamanho)}
                       </SelectItem>
                     ))}
                   </SelectContent>

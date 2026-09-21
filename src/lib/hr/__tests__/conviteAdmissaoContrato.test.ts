@@ -226,7 +226,7 @@ const VAZIO_OBRIGATORIOS: RascunhoConviteObrigatorios = {
   localidade: "",
   tamanho_cima: "",
   tamanho_baixo: "",
-  tamanho_blazer: "",
+  tamanho_calcado: "",
   sindicalizado: false,
   sindicato: "",
   conta_numero: "",

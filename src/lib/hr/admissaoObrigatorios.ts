@@ -70,7 +70,7 @@ export interface RascunhoConviteObrigatorios {
   // Pagina 2 -- fardamento, sindicalizacao e conta bancaria
   tamanho_cima: string;
   tamanho_baixo: string;
-  tamanho_blazer: string;
+  tamanho_calcado: string;
   sindicalizado: boolean;
   sindicato: string;
   conta_numero: string;
@@ -152,7 +152,7 @@ export const CAMPOS_OBRIGATORIOS_ADMISSAO: readonly CampoObrigatorioAdmissao[] =
   { codigo: "localidade", origem: "pessoa", condicao: sempre },
   { codigo: "tamanho_cima", origem: "pessoa", condicao: sempre },
   { codigo: "tamanho_baixo", origem: "pessoa", condicao: sempre },
-  { codigo: "tamanho_blazer", origem: "pessoa", condicao: sempre },
+  { codigo: "tamanho_calcado", origem: "pessoa", condicao: sempre },
   { codigo: "conta_numero", origem: "pessoa", condicao: sempre },
   { codigo: "conta_titular", origem: "pessoa", condicao: sempre },
   { codigo: "conta_banco", origem: "pessoa", condicao: sempre },
@@ -235,7 +235,7 @@ export function pendenciasDoRascunho(
 export const CODIGOS_PAGINA_2: ReadonlySet<CodigoCampoObrigatorioAdmissao> = new Set([
   "tamanho_cima",
   "tamanho_baixo",
-  "tamanho_blazer",
+  "tamanho_calcado",
   "sindicalizado",
   "sindicato",
   "conta_numero",
