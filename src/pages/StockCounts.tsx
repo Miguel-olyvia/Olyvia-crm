@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -32,6 +34,11 @@ import InventoryCountDetailDialog from "@/components/inventory/InventoryCountDet
 // permissão extra), suficiente com inventory.view já verificado na rota.
 
 const PAGE_SIZE = 30;
+
+// Acima disto a folha de contagem deixa de ser trabalhável de uma assentada
+// (e o diálogo de detalhe, que abre logo a seguir a criar, passa a ter de
+// paginar as linhas) — o aviso muda de tom e sugere filtrar por categoria.
+const LARGE_INITIAL_COUNT = 500;
 
 interface InventoryCountListRow {
   id: string;
@@ -106,7 +113,19 @@ const StockCounts = () => {
   const [createOpen, setCreateOpen] = useState(false);
   const [createWarehouseId, setCreateWarehouseId] = useState("");
   const [createCategoryId, setCreateCategoryId] = useState("all");
+  // "Contagem inicial": semeia TODOS os produtos do catálogo (filtrados pela
+  // categoria, se houver), incluindo os que ainda não têm linha de stock neste
+  // armazém — é o arranque de um armazém novo, em que o sistema ainda não sabe
+  // nada. Fora deste caso, a contagem só semeia o que já tem stock registado.
+  const [createInitial, setCreateInitial] = useState(false);
   const [creating, setCreating] = useState(false);
+  // Pré-visualização da dimensão da contagem inicial (nº de linhas que vão ser
+  // semeadas). Sem isto o utilizador liga o interruptor, cria, e só descobre
+  // que semeou o catálogo inteiro quando o diálogo de detalhe abre com
+  // milhares de linhas.
+  const [initialLineCount, setInitialLineCount] = useState<number | null>(null);
+  const [initialCountLoading, setInitialCountLoading] = useState(false);
+  const [initialCountError, setInitialCountError] = useState(false);
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailCountId, setDetailCountId] = useState<string | null>(null);
@@ -303,9 +322,56 @@ const StockCounts = () => {
     return () => observerRef.current?.disconnect();
   }, [loading, hasMore, loadingMore, page, loadCounts]);
 
+  // Conta as linhas que rpc_create_inventory_count(p_initial => true) vai
+  // semear. Tem de espelhar EXATAMENTE os filtros da migration
+  // 20261204000000: universo = product_organizations (products.organization_id
+  // não é fiável, facto F2 da migration), produtos não apagados
+  // (is_deleted = false E deleted_at IS NULL) e status <> 'draft'
+  // ('discontinued' entra de propósito), mais a categoria escolhida. O armazém
+  // não entra: no modo inicial o universo é o catálogo, não o stock.
+  useEffect(() => {
+    if (!createOpen || !createInitial || !activeCompany?.id) {
+      setInitialLineCount(null);
+      setInitialCountError(false);
+      setInitialCountLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setInitialCountLoading(true);
+    setInitialCountError(false);
+    (async () => {
+      try {
+        let query = supabase
+          .from("product_organizations")
+          .select("product_id, products!inner(id)", { count: "exact", head: true })
+          .eq("organization_id", activeCompany.id)
+          .eq("products.is_deleted", false)
+          .is("products.deleted_at", null)
+          .neq("products.status", "draft");
+        if (createCategoryId !== "all") {
+          query = query.eq("products.category_id", createCategoryId);
+        }
+        const { count, error } = await query;
+        if (error) throw error;
+        if (cancelled) return;
+        setInitialLineCount(count ?? 0);
+      } catch (error) {
+        if (cancelled) return;
+        // Só informativo — não bloqueia a criação nem merece um toast.
+        console.error("Error previewing initial count size:", error);
+        setInitialLineCount(null);
+        setInitialCountError(true);
+      } finally {
+        if (!cancelled) setInitialCountLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [createOpen, createInitial, createCategoryId, activeCompany?.id]);
+
   const resetCreateForm = () => {
     setCreateWarehouseId("");
     setCreateCategoryId("all");
+    setCreateInitial(false);
   };
 
   const handleCreate = async () => {
@@ -316,6 +382,7 @@ const StockCounts = () => {
         p_organization_id: activeCompany.id,
         p_warehouse_id: createWarehouseId,
         p_category_id: createCategoryId === "all" ? null : createCategoryId,
+        p_initial: createInitial,
       } as any);
       if (error) throw error;
 
@@ -556,6 +623,39 @@ const StockCounts = () => {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="rounded-md border p-3 space-y-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="stock-count-initial" className="cursor-pointer">
+                  {t('stockCounts.create.initialLabel')}
+                </Label>
+                <Switch
+                  id="stock-count-initial"
+                  checked={createInitial}
+                  onCheckedChange={setCreateInitial}
+                  disabled={creating}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t('stockCounts.create.initialHelp')}
+              </p>
+              {createInitial && (initialCountLoading || initialCountError || initialLineCount !== null) && (
+                <p
+                  className={
+                    !initialCountLoading && initialLineCount !== null && initialLineCount > LARGE_INITIAL_COUNT
+                      ? "text-xs font-medium text-warning"
+                      : "text-xs text-muted-foreground"
+                  }
+                >
+                  {initialCountLoading
+                    ? t('stockCounts.create.initialPreviewLoading')
+                    : initialCountError
+                      ? t('stockCounts.create.initialPreviewError')
+                      : initialLineCount! > LARGE_INITIAL_COUNT
+                        ? t('stockCounts.create.initialPreviewLarge', { count: initialLineCount! })
+                        : t('stockCounts.create.initialPreviewCount', { count: initialLineCount! })}
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>
