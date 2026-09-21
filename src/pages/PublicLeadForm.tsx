@@ -16,6 +16,13 @@ import { FormLoadingSkeleton } from "@/components/FormLoadingSkeleton";
 import { FormLocaleSwitcher } from "@/components/forms/FormLocaleSwitcher";
 import { PhoneInput } from "@/components/PhoneInput";
 import { COUNTRY_CODES } from "@/constants/countryCodes";
+import { useLanguage } from "@/contexts/LanguageContext";
+
+// Idiomas com traducoes estaticas no useTranslation() global (PhoneInput,
+// e qualquer outro componente partilhado). O formulario publico suporta
+// mais idiomas do que estes 5 (ver src/constants/languages.ts) -- fora
+// destes, o proprio useTranslation ja cai para "en" internamente.
+const SUPPORTED_UI_LANGUAGES = new Set(["en", "pt", "es", "fr", "de"]);
 
 import { toast } from "@/lib/toast";
 import { Progress } from "@/components/ui/progress";
@@ -665,6 +672,7 @@ function fillPlaceholders(
 export default function PublicLeadForm() {
   const { formId: routeFormId, campaignId: routeCampaignId } = useParams<{ formId?: string; campaignId?: string }>();
   const [searchParams] = useSearchParams();
+  const { setLanguage } = useLanguage();
   
   // Support both URL params and query params (query params take precedence for campaign_id)
   const queryCampaignId = searchParams.get("campaign_id");
@@ -1017,7 +1025,18 @@ export default function PublicLeadForm() {
       
       setFormConfig(data);
       // Track the resolved locale for the switcher UI.
-      setCurrentLocale(data.resolved_locale || data.default_locale || lang || null);
+      const resolvedLocale = data.resolved_locale || data.default_locale || lang || null;
+      setCurrentLocale(resolvedLocale);
+      // Segue o idioma do formulario tambem nos textos estaticos partilhados
+      // (ex.: "Full number" e o dropdown de paises do PhoneInput), que usam
+      // useTranslation()/LanguageContext -- um sistema totalmente separado do
+      // idioma por-campo do formulario, e que sem isto ficava sempre preso
+      // ao valor por omissao do browser ("en"), independente do que o
+      // visitante escolhesse aqui.
+      const normalizedLocale = (resolvedLocale || "").toLowerCase();
+      if (SUPPORTED_UI_LANGUAGES.has(normalizedLocale)) {
+        setLanguage(normalizedLocale as "en" | "pt" | "es" | "fr" | "de");
+      }
       
       // Inject all tracking pixels (GTM, Meta, TikTok, etc.) - only from form_tracking_pixels table
       if (!isLocaleSwitch && data.tracking_pixels && data.tracking_pixels.length > 0) {
