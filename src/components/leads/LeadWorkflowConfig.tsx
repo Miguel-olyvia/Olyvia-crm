@@ -78,6 +78,7 @@ import { isEmptyRule, normalizeRule } from "./workflow/conditionCatalog";
 import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
 import { LEAD_FUNNEL_PRESETS, findPresetStageRule, type FunnelPreset } from "./leadFunnelPresets";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export interface WorkflowStage {
   id: string;
@@ -159,13 +160,28 @@ const findMatchingLeadStatus = (...candidates: Array<string | null | undefined>)
  * nenhuma condição marcada.
  */
 export const isStageUnreachable = (stage: Pick<WorkflowStage, "name" | "matching_statuses" | "reached_when">): boolean => {
-  // Espelha o default de toStagePayload: matching_statuses nulo é gravado como [name].
-  const effectiveStatuses = stage.matching_statuses ?? [stage.name];
+  // `matching_statuses` vazio NÃO é o mesmo que nulo: nulo espelha o default de
+  // toStagePayload (gravado como [name]); um array vazio — o caso real das
+  // etapas "Reunião 2/3/4" — não tem nenhum status para o motor comparar, e
+  // `stage_reached` devolve false em qualquer circunstância.
+  const effectiveStatuses = Array.isArray(stage.matching_statuses)
+    ? stage.matching_statuses
+    : [stage.name];
   const hasKnownStatus = effectiveStatuses.some(value =>
     LEAD_STATUS_OPTIONS.some(opt => opt.value === value)
   );
   return !hasKnownStatus && isEmptyRule(normalizeRule(stage.reached_when));
 };
+
+/**
+ * Etapas da organização que nenhuma lead consegue alcançar. Serve o alerta no
+ * topo do editor: com o fluxo sequencial ligado, uma destas etapas no caminho
+ * das setas bloqueia tudo o que vem a seguir (o caso BMGest, em que o funil
+ * parou na "Visita Agendada").
+ */
+export const findUnreachableStages = <T extends Pick<WorkflowStage, "name" | "matching_statuses" | "reached_when">>(
+  stages: T[]
+): T[] => (stages ?? []).filter(isStageUnreachable);
 
 const UNREACHABLE_STAGE_HINT =
   "Nenhuma lead consegue chegar a esta etapa: não tem nenhum status literal associado nem condições avançadas definidas. Associe pelo menos um status em \"Status literais associados\" ou defina condições em \"Condições avançadas (motor)\".";
@@ -397,6 +413,7 @@ function SortableStageRow({
 // ─── Main Component ─────────────────────────────────────────
 export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpdated }: LeadWorkflowConfigProps) {
   const { toast } = useToast();
+  const { t } = useTranslation();
   const [stages, setStages] = useState<WorkflowStage[]>([]);
   const [templateStages, setTemplateStages] = useState<WorkflowStage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -445,6 +462,10 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     stages: pipelineStages,
     isLoading: stagesLoading,
     invalidate: invalidatePipelineRules,
+    // `lead_pipeline_settings.sequential_flow` — só para agravar o alerta de
+    // etapas inatingíveis: com o motor sequencial, uma etapa inalcançável no
+    // caminho das setas trava também todas as seguintes.
+    sequentialFlow,
   } = useLeadPipelineRules(companyId);
 
   useEffect(() => {
@@ -545,7 +566,18 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     counts_as_lost: s.counts_as_lost ?? false,
   });
 
-  const saveStages = async (payload: StagePayload[]) => {
+  /**
+   * A cópia do template global (copyTemplateToCompany) envia de propósito só
+   * os campos base e deixa a RPC aplicar os seus próprios defaults ao resto —
+   * por isso o payload aceita também essa forma reduzida. Correcção só de
+   * tipos: o JSON enviado à RPC é exactamente o mesmo de antes.
+   */
+  type TemplateStagePayload = Pick<
+    StagePayload,
+    "id" | "name" | "label" | "color" | "is_final" | "is_conversion" | "is_rejection" | "default_status"
+  >;
+
+  const saveStages = async (payload: Array<StagePayload | TemplateStagePayload>) => {
     const { data, error } = await (supabase as any).rpc("rpc_save_lead_workflow_stages", {
       p_organization_id: companyId,
       p_stages: payload,
@@ -851,7 +883,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const copyTemplateToCompany = async () => {
     if (!companyId || templateStages.length === 0) return;
 
-    const payload: StagePayload[] = templateStages
+    const payload: TemplateStagePayload[] = templateStages
       .sort((a, b) => a.stage_order - b.stage_order)
       .map(stage => ({
         id: null,
@@ -887,6 +919,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   };
 
   const displayStages = stages.length > 0 ? stages : templateStages;
+  // Só as etapas da própria organização: os templates globais não são
+  // editáveis aqui, logo o alerta não seria accionável.
+  const unreachableStages = isUsingTemplate ? [] : findUnreachableStages(stages);
   const editingStageUnreachable = editingStage ? isStageUnreachable(editingStage) : false;
   const deletableLeadCount = deletingStage ? (leadCountByStage[deletingStage.id] || 0) : 0;
   const migrationTargets = stages.filter(s => s.id !== deletingStage?.id);
@@ -926,6 +961,38 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               )}
             </DialogDescription>
           </DialogHeader>
+
+          {/* Fora das Tabs de propósito: uma etapa que nenhuma lead alcança
+              trava o funil, e o badge "Inatingível" na linha da tabela é
+              discreto de mais para um problema desta gravidade. */}
+          {unreachableStages.length > 0 && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3"
+            >
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  {unreachableStages.length === 1
+                    ? t("leads.workflow.unreachableAlertTitleOne")
+                    : t("leads.workflow.unreachableAlertTitleMany", { count: unreachableStages.length })}
+                </p>
+                <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                  {t("leads.workflow.unreachableAlertStages", {
+                    stages: unreachableStages.map(s => s.label).join(", "),
+                  })}
+                </p>
+                {sequentialFlow && (
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                    {t("leads.workflow.unreachableAlertSequential")}
+                  </p>
+                )}
+                <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                  {t("leads.workflow.unreachableAlertFix")}
+                </p>
+              </div>
+            </div>
+          )}
 
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-5">
