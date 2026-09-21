@@ -57,6 +57,7 @@ import { derivarEstadoContrato } from "@/lib/hr/estadoContrato";
 import { horasContratadasSemanaisReais } from "@/lib/hr/horas";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
+import { useCargos } from "@/hooks/useCargos";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { usePermissoesAssiduidade } from "@/hooks/usePermissoesAssiduidade";
@@ -192,6 +193,7 @@ export default function PessoaDetail() {
   // (HorarioEditor, PessoaAfectacoesSeccao) filtra os inactivos por si,
   // mantendo so o valor ja escolhido quando esse for o caso.
   const { locais, loading: locaisALoad } = useLocaisTrabalho({ apenasAtivos: false });
+  const { cargos, isLoading: cargosALoad } = useCargos();
   // Para saber se quem abre a ficha e a propria pessoa: muda o que pode pedir.
   const { pessoaId: minhaPessoaId } = useMinhaPessoa();
 
@@ -442,6 +444,8 @@ export default function PessoaDetail() {
               colegas={colegas.map((c) => ({ id: c.id, nome_completo: c.nome_completo }))}
               locais={locais}
               locaisALoad={locaisALoad}
+              cargos={cargos}
+              cargosALoad={cargosALoad}
               entidadeLegalNome={entidadeLegalNome}
               estadoContratoDerivado={estadoContratoDerivado}
               podeEditar={podeEditarLaborais}
@@ -502,6 +506,7 @@ export default function PessoaDetail() {
               podeVerRetribuicao={podeVerRetribuicao}
               podeEditarRetribuicao={podeEditarRetribuicao}
               podeCorrigirRetribuicao={podeCorrigirRetribuicaoVinculo}
+              cargo={cargos.find((c) => c.id === pessoa.cargo_id) ?? null}
               podeCorrigirHoras={podeCorrigirHorasVinculo}
               podeAnexarContratoAssinado={permissoesDocumentos.emitir}
               vinculosOpcoesDocumento={vinculosOpcoesDocumento}

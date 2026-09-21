@@ -81,6 +81,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 import { PessoaRetribuicaoCard } from "@/components/hr/PessoaRetribuicaoCard";
+import type { HrCargo } from "@/hooks/useCargos";
 
 beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
@@ -94,7 +95,13 @@ beforeAll(() => {
   } as unknown as typeof ResizeObserver;
 });
 
-function montar(overrides: { podeAlterar?: boolean; podeCorrigir?: boolean } = {}) {
+function montar(
+  overrides: {
+    podeAlterar?: boolean;
+    podeCorrigir?: boolean;
+    cargo?: HrCargo | null;
+  } = {},
+) {
   render(
     <PessoaRetribuicaoCard
       pessoaId="p1"
@@ -102,6 +109,7 @@ function montar(overrides: { podeAlterar?: boolean; podeCorrigir?: boolean } = {
       vinculoActivoId="v1"
       podeAlterar={overrides.podeAlterar ?? true}
       podeCorrigir={overrides.podeCorrigir ?? true}
+      cargo={overrides.cargo ?? null}
     />,
   );
 }

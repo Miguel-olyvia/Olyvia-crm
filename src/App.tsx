@@ -122,6 +122,7 @@ const AssiduidadeOrganizacao = lazy(() => import("./pages/AssiduidadeOrganizacao
 const AssiduidadeEAusencias = lazy(() => import("./pages/AssiduidadeEAusencias"));
 const RhCentros = lazy(() => import("./pages/RhCentros"));
 const ConfiguracaoAdmissao = lazy(() => import("./pages/ConfiguracaoAdmissao"));
+const ConfiguracaoCargos = lazy(() => import("./pages/ConfiguracaoCargos"));
 const ConfiguracaoModelosDocumentos = lazy(() => import("./pages/ConfiguracaoModelosDocumentos"));
 const ConfiguracaoClausulasDocumentos = lazy(() => import("./pages/ConfiguracaoClausulasDocumentos"));
 const Vencimento = lazy(() => import("./pages/Vencimento"));
@@ -322,6 +323,7 @@ const App = () => (
                           hr.admissao.obrigatorios.gerir -- nao atribuida a
                           nenhum papel por omissao. */}
                       <Route path="/rh/admissao/configuracao" element={<ProtectedRoute permission="hr.admissao.obrigatorios.gerir"><ConfiguracaoAdmissao /></ProtectedRoute>} />
+                      <Route path="/rh/cargos" element={<ProtectedRoute permission="hr.pessoas.laborais.view"><ConfiguracaoCargos /></ProtectedRoute>} />
                       <Route path="/rh/documentos/modelos" element={<ProtectedRoute permission="hr.pessoas.documentos.modelos.view"><ConfiguracaoModelosDocumentos /></ProtectedRoute>} />
                       <Route path="/rh/documentos/clausulas" element={<ProtectedRoute permission="hr.pessoas.documentos.modelos.view"><ConfiguracaoClausulasDocumentos /></ProtectedRoute>} />
                       {/* "Processamento Salarial" (nome de apresentacao;

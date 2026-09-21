@@ -134,6 +134,7 @@ import {
   type TipoContrato,
   type TipoTrabalho,
 } from "@/types/hr";
+import type { HrCargo } from "@/hooks/useCargos";
 
 interface PessoaContratoTabProps {
   pessoaId: string;
@@ -155,6 +156,9 @@ interface PessoaContratoTabProps {
    * (20261201040000) -- ver `PessoaRetribuicaoCard`.
    */
   podeCorrigirRetribuicao: boolean;
+  /** Cargo desta pessoa (`pessoas.cargo_id`), ou `null` sem cargo estruturado
+   *  -- ver `PessoaRetribuicaoCard`: com cargo, o salario fica imposto. */
+  cargo: HrCargo | null;
   /**
    * `hr.pessoas.vinculos.horas.corrigir`: CORRIGIR uma versao ja decorrida de
    * `pessoas_vinculos_horas` e permissao a parte, mais perigosa que ALTERAR
@@ -290,6 +294,7 @@ export function PessoaContratoTab({
   podeVerRetribuicao,
   podeEditarRetribuicao,
   podeCorrigirRetribuicao,
+  cargo,
   podeCorrigirHoras,
   podeAnexarContratoAssinado,
   vinculosOpcoesDocumento,
@@ -1010,6 +1015,7 @@ export function PessoaContratoTab({
           vinculoActivoId={activo?.id ?? null}
           podeAlterar={podeEditarRetribuicao}
           podeCorrigir={podeCorrigirRetribuicao}
+          cargo={cargo}
         />
       )}
 

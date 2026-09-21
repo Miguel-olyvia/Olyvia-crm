@@ -25,6 +25,14 @@
  * e aqui a lista ja vem filtrada pela organizacao activa -- as duas coisas de
  * acordo, nao uma a confiar na outra.
  *
+ * CARGO: TEXTO LIVRE, MAIS UM SELECTOR DO CATALOGO (20261202070000)
+ * -----------------------------------------------------------------
+ * `cargo` (texto) continua editavel -- legado, sem efeito na retribuicao.
+ * `cargo_id`, novo, aponta para `hr_cargos`: quando preenchido, o salario
+ * base da pessoa fica IMPOSTO pelo cargo (trigger em pessoas_retribuicoes,
+ * ver `PessoaRetribuicaoCard.tsx`). Sem cargo_id (o normal hoje, sem
+ * backfill), nada muda. Um cargo so aparece na lista se estiver `activo`.
+ *
  * O E-MAIL PESSOAL SAIU DAQUI. Vive agora em Detalhes pessoais
  * (`PessoaPessoaisTab.tsx`, bloco 1), a pedido do utilizador -- "se e detalhes
  * laborais o email pessoal n deve ser aqui". Nao voltar a propor este campo
@@ -54,6 +62,7 @@ import { PessoaAfectacoesSeccao } from "@/components/hr/PessoaAfectacoesSeccao";
 import { PessoaColocacaoOrganogramaSeccao } from "@/components/hr/PessoaColocacaoOrganogramaSeccao";
 import type { EstadoContratoDerivado } from "@/lib/hr/estadoContrato";
 import { type LocalTrabalho, type Pessoa } from "@/types/hr";
+import type { HrCargo } from "@/hooks/useCargos";
 
 /** Valor do Select quando nao ha escolha. O Radix nao aceita `value=""`. */
 const SEM_ESCOLHA = "__sem_escolha__";
@@ -66,6 +75,10 @@ interface PessoaLaboraisTabProps {
    *  actual e para a seccao de afectacoes. */
   locais: LocalTrabalho[];
   locaisALoad: boolean;
+  /** Cargos do catalogo da organizacao activa (`hr_cargos`) -- para o
+   *  selector que liga a pessoa a um cargo com salario imposto. */
+  cargos: HrCargo[];
+  cargosALoad: boolean;
   /** Nome da organizacao activa: a entidade legal, mostrada e nao escolhida. */
   entidadeLegalNome: string | null;
   /** So-leitura aqui -- ver o comentario de topo. `null` quando quem olha nao
@@ -93,6 +106,7 @@ type Rascunho = {
   telefone_trabalho: string;
   numero_interno: string;
   cargo: string;
+  cargo_id: string;
   data_admissao: string;
   data_antiguidade: string;
   data_saida: string;
@@ -105,6 +119,7 @@ function rascunhoDe(pessoa: Pessoa): Rascunho {
     telefone_trabalho: pessoa.telefone_trabalho ?? "",
     numero_interno: pessoa.numero_interno ?? "",
     cargo: pessoa.cargo ?? "",
+    cargo_id: pessoa.cargo_id ?? SEM_ESCOLHA,
     data_admissao: pessoa.data_admissao ?? "",
     data_antiguidade: pessoa.data_antiguidade ?? "",
     data_saida: pessoa.data_saida ?? "",
@@ -117,6 +132,8 @@ export function PessoaLaboraisTab({
   colegas,
   locais,
   locaisALoad,
+  cargos,
+  cargosALoad,
   entidadeLegalNome,
   estadoContratoDerivado,
   podeEditar,
@@ -154,6 +171,7 @@ export function PessoaLaboraisTab({
       telefone_trabalho: vazioParaNull(rascunho.telefone_trabalho),
       numero_interno: vazioParaNull(rascunho.numero_interno),
       cargo: vazioParaNull(rascunho.cargo),
+      cargo_id: rascunho.cargo_id === SEM_ESCOLHA ? null : rascunho.cargo_id,
       data_admissao: vazioParaNull(rascunho.data_admissao),
       data_antiguidade: vazioParaNull(rascunho.data_antiguidade),
       data_saida: vazioParaNull(rascunho.data_saida),
@@ -222,6 +240,30 @@ export function PessoaLaboraisTab({
                   ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="hr-laborais-cargo-id">{t("hr.laborais.cargoCatalogo")}</Label>
+            <Select
+              value={rascunho.cargo_id}
+              disabled={!podeEditar || cargosALoad}
+              onValueChange={(v) => definir("cargo_id", v)}
+            >
+              <SelectTrigger id="hr-laborais-cargo-id">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
+                {cargos
+                  .filter((c) => c.activo || c.id === pessoa.cargo_id)
+                  .map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.nome}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">{t("hr.laborais.cargoCatalogoAjuda")}</p>
           </div>
 
           {/* So-leitura: `local_id` e DERIVADO da afectacao em aberto mais

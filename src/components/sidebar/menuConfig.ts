@@ -13,6 +13,7 @@ import {
   Crosshair,
   FileText,
   BookText,
+  Briefcase,
   Megaphone,
   Shield,
   Target,
@@ -206,8 +207,8 @@ export const menuSections: MenuSection[] = [
     id: "rh",
     icon: IdCard,
     labelKey: "sidebar.hrModule",
-    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/assiduidade-e-ausencias", "/rh/centros", "/rh/admissao/configuracao", "/rh/documentos/modelos", "/rh/documentos/clausulas", "/rh/processamento-salarial"],
-    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view", "hr.admissao.obrigatorios.gerir", "hr.pessoas.documentos.modelos.view", "hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"],
+    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/assiduidade-e-ausencias", "/rh/centros", "/rh/cargos", "/rh/admissao/configuracao", "/rh/documentos/modelos", "/rh/documentos/clausulas", "/rh/processamento-salarial"],
+    permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view", "hr.pessoas.laborais.view", "hr.admissao.obrigatorios.gerir", "hr.pessoas.documentos.modelos.view", "hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"],
     items: [
       { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
       { to: "/rh/assiduidade-e-ausencias", icon: CalendarRange, labelKey: "sidebar.hrAssiduidadeEAusencias", permissions: ["hr.ausencias.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.assiduidade.view"] },
@@ -216,6 +217,9 @@ export const menuSections: MenuSection[] = [
       // desde 20261120120000 e ja esta atribuida ao super_admin
       // (20261120180000) -- nenhuma permissao nova para este ecra.
       { to: "/rh/centros", icon: MapPin, labelKey: "sidebar.hrCentros", permission: "hr.locais.view" },
+      // Cargos (20261202070000): catalogo de cargos com salario base imposto
+      // por lei -- mesma permissao ja usada para cargo/local de trabalho.
+      { to: "/rh/cargos", icon: Briefcase, labelKey: "sidebar.hrCargos", permission: "hr.pessoas.laborais.view" },
       // "Campos de admissao" (20261201050000) deixou de ter item proprio
       // aqui -- passou a um botao dentro do ecra de Pessoas (Pessoas.tsx),
       // atras da mesma permissao. A rota `/rh/admissao/configuracao`

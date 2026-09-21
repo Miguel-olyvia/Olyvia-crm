@@ -323,7 +323,15 @@ export interface Pessoa {
   email_trabalho: string | null;
   email_pessoal: string | null;
   telefone_trabalho: string | null;
+  /**
+   * LEGADO parcial desde `20261202070000`. Continua a ser o cargo mostrado
+   * quando `cargo_id` e nulo. Quando `cargo_id` esta preenchido, e o cargo do
+   * catalogo (`hr_cargos`) que manda no salario -- este texto perde efeito.
+   */
   cargo: string | null;
+  /** Cargo do catalogo (`hr_cargos`). Quando preenchido, o salario base da
+   * pessoa passa a ser IMPOSTO pelo cargo -- ver `hr_retribuicao_valor_conforme_cargo`. */
+  cargo_id: string | null;
   /**
    * LEGADO. Texto livre da ronda 1, mantido por `20261120170000` como legenda.
    * A fonte de verdade do local passou a ser `local_id`.

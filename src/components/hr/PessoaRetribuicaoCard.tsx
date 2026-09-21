@@ -20,6 +20,17 @@
  * depois da admissao. Este cartao e o UNICO caminho de escrita depois da
  * admissao; quem nao tem `podeAlterar` continua a ver o cartao (se tiver
  * `hr.pessoas.retribuicao.view`), so sem o botao.
+ *
+ * QUANDO A PESSOA TEM CARGO (20261202070000), O VALOR E A PERIODICIDADE
+ * SAO IMPOSTOS -- NAO SE EDITAM AQUI
+ * ------------------------------------------------------------------------
+ * `pessoas.cargo_id` preenchido significa que um trigger em
+ * `pessoas_retribuicoes` recusa qualquer valor_base/periodicidade diferente
+ * do definido no cargo (igualdade salarial, obrigacao legal). Quando `cargo`
+ * chega preenchido, os dois campos ficam desactivados e pre-preenchidos com
+ * o valor do cargo -- e o submit envia sempre o valor do cargo, nunca o do
+ * rascunho, para nao depender so da UI (o trigger bloqueava de qualquer
+ * forma, mas um erro em bruto da base e pior do que nunca chegar a tentar).
  */
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -45,6 +56,7 @@ import { toast } from "@/lib/toast";
 import { CampoSelect, CampoTexto } from "@/components/hr/form/Campos";
 import { dataDeHojeISO } from "@/lib/hr/afectacoes";
 import { usePessoaRetribuicao } from "@/hooks/usePessoaRetribuicao";
+import type { HrCargo } from "@/hooks/useCargos";
 import type { Periodicidade, PessoaRetribuicao, SubsidioAlimentacaoModo } from "@/types/hr";
 
 interface PessoaRetribuicaoCardProps {
@@ -55,6 +67,10 @@ interface PessoaRetribuicaoCardProps {
   vinculoActivoId: string | null;
   podeAlterar: boolean;
   podeCorrigir: boolean;
+  /** Cargo desta pessoa (`pessoas.cargo_id`), ou `null` sem cargo estruturado
+   *  -- ver o cabecalho: quando preenchido, valor e periodicidade ficam
+   *  impostos por este cargo, nunca editaveis a parte. */
+  cargo: HrCargo | null;
 }
 
 /**
@@ -114,6 +130,7 @@ export function PessoaRetribuicaoCard({
   vinculoActivoId,
   podeAlterar,
   podeCorrigir,
+  cargo,
 }: PessoaRetribuicaoCardProps) {
   const { t } = useTranslation();
   const { versoes, aberta, loading, saving, alterar, corrigir } = usePessoaRetribuicao(
@@ -131,9 +148,9 @@ export function PessoaRetribuicaoCard({
 
   const abrirAlterar = () => {
     setRascunhoAlterar({
-      valorBase: aberta ? String(aberta.valor_base) : "",
+      valorBase: cargo ? String(cargo.salario_base) : aberta ? String(aberta.valor_base) : "",
       moeda: aberta?.moeda ?? "EUR",
-      periodicidade: aberta?.periodicidade ?? "mensal",
+      periodicidade: cargo ? cargo.periodicidade : aberta?.periodicidade ?? "mensal",
       subsidioAlimentacao:
         aberta?.subsidio_alimentacao != null ? String(aberta.subsidio_alimentacao) : "",
       subsidioAlimentacaoModo: aberta?.subsidio_alimentacao_modo ?? "",
@@ -168,9 +185,12 @@ export function PessoaRetribuicaoCard({
     }
     const erro = await alterar({
       vinculoId: vinculoActivoId,
-      valorBase: numeroAlterar,
+      // Com cargo, o valor/periodicidade enviados sao SEMPRE os do cargo --
+      // os campos ficam desactivados no ecra, mas o submit nao confia so
+      // nisso (ver o cabecalho do ficheiro).
+      valorBase: cargo ? cargo.salario_base : numeroAlterar,
       moeda: rascunhoAlterar.moeda.trim().toUpperCase(),
-      periodicidade: rascunhoAlterar.periodicidade,
+      periodicidade: cargo ? cargo.periodicidade : rascunhoAlterar.periodicidade,
       subsidioAlimentacao: subsidioAlimentacaoDe(rascunhoAlterar),
       subsidioAlimentacaoModo: subsidioModoDe(rascunhoAlterar),
       duodecimosPct: duodecimosPctDe(rascunhoAlterar),
@@ -192,9 +212,9 @@ export function PessoaRetribuicaoCard({
   const abrirCorrigir = (linha: PessoaRetribuicao) => {
     setLinhaACorrigir(linha);
     setRascunhoCorrigir({
-      valorBase: String(linha.valor_base),
+      valorBase: cargo ? String(cargo.salario_base) : String(linha.valor_base),
       moeda: linha.moeda,
-      periodicidade: linha.periodicidade,
+      periodicidade: cargo ? cargo.periodicidade : linha.periodicidade,
       subsidioAlimentacao: linha.subsidio_alimentacao != null ? String(linha.subsidio_alimentacao) : "",
       subsidioAlimentacaoModo: linha.subsidio_alimentacao_modo ?? "",
       duodecimosPct: linha.duodecimos_pct != null ? (String(linha.duodecimos_pct) as "0" | "50" | "100") : "",
@@ -227,9 +247,9 @@ export function PessoaRetribuicaoCard({
       return;
     }
     const erro = await corrigir(linhaACorrigir.id, {
-      valorBase: numeroCorrigir,
+      valorBase: cargo ? cargo.salario_base : numeroCorrigir,
       moeda: rascunhoCorrigir.moeda.trim().toUpperCase(),
-      periodicidade: rascunhoCorrigir.periodicidade,
+      periodicidade: cargo ? cargo.periodicidade : rascunhoCorrigir.periodicidade,
       subsidioAlimentacao: subsidioAlimentacaoDe(rascunhoCorrigir),
       subsidioAlimentacaoModo: subsidioModoDe(rascunhoCorrigir),
       duodecimosPct: duodecimosPctDe(rascunhoCorrigir),
@@ -346,6 +366,7 @@ export function PessoaRetribuicaoCard({
                 tipo="number"
                 min={0}
                 step="0.01"
+                disabled={!!cargo}
                 valor={rascunhoAlterar.valorBase}
                 onChange={(v) => setRascunhoAlterar((a) => ({ ...a, valorBase: v }))}
               />
@@ -360,12 +381,18 @@ export function PessoaRetribuicaoCard({
               id="hr-retribuicao-alterar-periodicidade"
               label={t("hr.contrato.periodicidade")}
               valor={rascunhoAlterar.periodicidade}
+              disabled={!!cargo}
               opcoes={PERIODICIDADES_RETRIBUICAO.map((p) => ({
                 value: p,
                 label: t(`hr.periodicidade.${p}`),
               }))}
               onChange={(v) => setRascunhoAlterar((a) => ({ ...a, periodicidade: v as Periodicidade }))}
             />
+            {cargo && (
+              <p className="text-xs text-muted-foreground">
+                {t("hr.retribuicaoCartao.avisoCargo", { cargo: cargo.nome })}
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <CampoTexto
                 id="hr-retribuicao-alterar-subsidio"
@@ -449,6 +476,7 @@ export function PessoaRetribuicaoCard({
                 tipo="number"
                 min={0}
                 step="0.01"
+                disabled={!!cargo}
                 valor={rascunhoCorrigir.valorBase}
                 onChange={(v) => setRascunhoCorrigir((a) => ({ ...a, valorBase: v }))}
               />
@@ -463,6 +491,7 @@ export function PessoaRetribuicaoCard({
               id="hr-retribuicao-corrigir-periodicidade"
               label={t("hr.contrato.periodicidade")}
               valor={rascunhoCorrigir.periodicidade}
+              disabled={!!cargo}
               opcoes={PERIODICIDADES_RETRIBUICAO.map((p) => ({
                 value: p,
                 label: t(`hr.periodicidade.${p}`),
@@ -471,6 +500,11 @@ export function PessoaRetribuicaoCard({
                 setRascunhoCorrigir((a) => ({ ...a, periodicidade: v as Periodicidade }))
               }
             />
+            {cargo && (
+              <p className="text-xs text-muted-foreground">
+                {t("hr.retribuicaoCartao.avisoCargo", { cargo: cargo.nome })}
+              </p>
+            )}
             <div className="grid grid-cols-2 gap-3">
               <CampoTexto
                 id="hr-retribuicao-corrigir-subsidio"

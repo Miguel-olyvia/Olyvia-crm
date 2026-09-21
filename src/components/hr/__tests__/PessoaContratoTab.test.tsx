@@ -48,6 +48,7 @@ const PROPS_BASE = {
   podeVerRetribuicao: false,
   podeEditarRetribuicao: false,
   podeCorrigirRetribuicao: false,
+  cargo: null,
   podeCorrigirHoras: false,
   vinculosOpcoesDocumento: [],
   saving: false,

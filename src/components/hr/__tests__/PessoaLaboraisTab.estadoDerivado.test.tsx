@@ -70,6 +70,7 @@ const PESSOA: Pessoa = {
   email_pessoal: null,
   telefone_trabalho: null,
   cargo: "Gestora",
+  cargo_id: null,
   local_trabalho: null,
   local_id: null,
   entidade_legal_org_id: null,
@@ -88,6 +89,8 @@ function montar(onGuardar = vi.fn().mockResolvedValue(null)) {
       colegas={[]}
       locais={[]}
       locaisALoad={false}
+      cargos={[]}
+      cargosALoad={false}
       entidadeLegalNome="Organizacao Nike"
       estadoContratoDerivado="sem_contrato"
       podeEditar

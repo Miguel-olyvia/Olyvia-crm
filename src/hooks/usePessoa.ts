@@ -52,7 +52,7 @@ import {
 
 const COLUNAS_PESSOA =
   "id, organization_id, numero_interno, primeiro_nome, apelido, nome_completo, " +
-  "email_trabalho, email_pessoal, telefone_trabalho, cargo, local_trabalho, " +
+  "email_trabalho, email_pessoal, telefone_trabalho, cargo, cargo_id, local_trabalho, " +
   // Sem `departamento` nem `estrutura`: nao existem na base, e nao vao existir
   // como colunas de texto aqui. "Departamento" ja e um TIPO DE ORGANIZACAO no
   // produto (holding, empresa, filial, departamento, equipa, divisao,
