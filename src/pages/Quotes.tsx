@@ -1986,7 +1986,7 @@ export default function Quotes() {
                                     marginVal >= 15 ? "bg-amber-500/20 text-amber-700 dark:text-amber-400" :
                                     "bg-red-500/20 text-red-700 dark:text-red-400"
                                   )}>
-                                    {marginVal.toFixed(0)}%
+                                    {marginVal.toFixed(1)}%
                                     {marginVal >= 30 ? " ✅" : marginVal >= 15 ? " ⚠" : " ❌"}
                                   </Badge>
                                 ) : <span className="text-xs text-muted-foreground">—</span>}
