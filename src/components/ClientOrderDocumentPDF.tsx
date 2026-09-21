@@ -1,4 +1,8 @@
 import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/renderer';
+// Import só-de-tipos (apagado na compilação): não cria dependência em runtime
+// para a página que renderiza este PDF, e evita duplicar a forma do bloco
+// `diagnostic` — quem a define e a normaliza é o `ClientOrders.tsx`.
+import type { ClientOrderDiagnosticNeed } from '@/pages/ClientOrders';
 
 // Fase 5.0F do plano de inventário — PDF do documento "Encomenda Cliente"
 // (mesmo padrão/biblioteca de PurchaseOrderPDFDocument.tsx). Ao contrário
@@ -116,6 +120,76 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     marginBottom: 1,
   },
+  // --- Diagnóstico da obra (mesma linguagem visual das secções acima) ---
+  diagnosticNote: {
+    fontSize: 7,
+    color: '#6b7280',
+    marginBottom: 6,
+  },
+  diagnosticNeed: {
+    border: '1 solid #e5e7eb',
+    padding: 6,
+    marginBottom: 6,
+  },
+  diagnosticNeedHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 4,
+  },
+  diagnosticNeedTitle: {
+    fontSize: 9,
+    fontWeight: 'bold',
+    color: '#000000',
+    width: '80%',
+  },
+  diagnosticNeedArea: {
+    fontSize: 8,
+    color: '#374151',
+    width: '20%',
+    textAlign: 'right',
+  },
+  diagnosticFieldRow: {
+    flexDirection: 'row',
+    marginBottom: 2,
+  },
+  diagnosticFieldLabel: {
+    width: '30%',
+    fontWeight: 'bold',
+    color: '#374151',
+    fontSize: 8,
+  },
+  diagnosticFieldValue: {
+    width: '70%',
+    color: '#000000',
+    fontSize: 8,
+  },
+  diagnosticMaterialsBlock: {
+    marginTop: 5,
+    paddingTop: 4,
+    borderTop: '1 solid #e5e7eb',
+  },
+  diagnosticMaterialsTitle: {
+    fontSize: 8,
+    fontWeight: 'bold',
+    color: '#374151',
+    marginBottom: 1,
+  },
+  diagnosticMaterialRow: {
+    flexDirection: 'row',
+    marginBottom: 1,
+  },
+  diagnosticMaterialQty: {
+    width: '20%',
+    fontSize: 8,
+    fontWeight: 'bold',
+    color: '#000000',
+  },
+  diagnosticMaterialDescription: {
+    width: '80%',
+    fontSize: 8,
+    color: '#374151',
+  },
 });
 
 const columnStyles = {
@@ -125,13 +199,19 @@ const columnStyles = {
   status: { width: '30%', fontSize: 8 },
 };
 
+// Espelha ClientOrderDocumentLine em src/pages/ClientOrders.tsx: uma linha é de
+// produto OU de serviço, e a RPC devolve o par não aplicável a NULL.
 interface ClientOrderDocumentPDFLine {
   quote_line_id: string;
-  product_id: string;
-  product_name: string;
+  item_type?: 'product' | 'service';
+  product_id: string | null;
+  product_name: string | null;
   product_sku: string | null;
+  service_id?: string | null;
+  service_name?: string | null;
+  service_sku?: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
   purchase_order_number: string | null;
 }
 
@@ -142,7 +222,14 @@ interface ClientOrderDocumentPDFProps {
     client_name: string | null;
     signature_date: string | null;
     total_value: number | null;
+    // Preenchidos só quando a encomenda nasceu de uma venda direta (Fase 5).
+    direct_sale_number?: string | null;
+    proforma_number?: string | null;
     lines: ClientOrderDocumentPDFLine[];
+    // Cópia congelada do levantamento de necessidades (Fase 1). Opcional:
+    // vendas diretas e encomendas manuais não têm diagnóstico e a secção
+    // simplesmente não é impressa.
+    diagnostic?: ClientOrderDiagnosticNeed[];
   };
   company?: {
     name?: string | null;
@@ -166,13 +253,43 @@ const getLineStatusText = (line: ClientOrderDocumentPDFLine): string => {
       return 'Stock disponível — confirmar saída';
     case 'sem_fornecedor':
       return 'Sem fornecedor preferencial';
+    case 'servico':
+      return 'Serviço';
     default:
       return line.line_status;
   }
 };
 
+// Mesmo formato do diálogo (separador decimal PT, no máximo 2 casas), para o
+// papel e o ecrã mostrarem exactamente o mesmo número.
+const formatDiagnosticNumber = (value: number): string =>
+  new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(value);
+
+// Só os campos preenchidos entram no PDF — rótulos sem valor não se imprimem.
+// A ordem espelha a da secção "Diagnóstico da obra" do diálogo.
+const getDiagnosticFields = (need: ClientOrderDiagnosticNeed): Array<{ label: string; value: string }> => {
+  const fields: Array<{ label: string; value: string }> = [];
+  if (need.diag_demolir_descricao) {
+    fields.push({ label: 'Demolir:', value: need.diag_demolir_descricao });
+  }
+  if (need.diag_demolir_m2 !== null && need.diag_demolir_m2 !== undefined) {
+    fields.push({ label: 'Área a demolir:', value: `${formatDiagnosticNumber(need.diag_demolir_m2)} m²` });
+  }
+  if (need.diag_proteger_descricao) {
+    fields.push({ label: 'Proteger:', value: need.diag_proteger_descricao });
+  }
+  if (need.diag_intervencao_tipo) {
+    fields.push({ label: 'Tipo de intervenção:', value: need.diag_intervencao_tipo });
+  }
+  if (need.diag_intervencao_descricao) {
+    fields.push({ label: 'Descrição da intervenção:', value: need.diag_intervencao_descricao });
+  }
+  return fields;
+};
+
 export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumentPDFProps) => {
   const lines = document.lines || [];
+  const diagnostic = document.diagnostic || [];
 
   return (
     <Document>
@@ -193,6 +310,12 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
             {document.signature_date && (
               <Text style={styles.docDate}>
                 Data de Assinatura: {new Date(document.signature_date).toLocaleDateString('pt-PT')}
+              </Text>
+            )}
+            {document.direct_sale_number && (
+              <Text style={styles.docDate}>
+                Origem: Venda Direta {document.direct_sale_number}
+                {document.proforma_number ? ` · Proforma ${document.proforma_number}` : ''}
               </Text>
             )}
           </View>
@@ -232,8 +355,8 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
         <View>
           {lines.map((line) => (
             <View key={line.quote_line_id} style={styles.tableRow}>
-              <Text style={columnStyles.sku}>{line.product_sku || '-'}</Text>
-              <Text style={columnStyles.description}>{line.product_name || ''}</Text>
+              <Text style={columnStyles.sku}>{line.product_sku || line.service_sku || '-'}</Text>
+              <Text style={columnStyles.description}>{line.product_name || line.service_name || ''}</Text>
               <Text style={columnStyles.quantity}>{line.quantity}</Text>
               <Text style={columnStyles.status}>{getLineStatusText(line)}</Text>
             </View>
@@ -244,6 +367,81 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
             </View>
           )}
         </View>
+
+        {/* Diagnóstico da obra — o que o armazém vai executar. Cópia congelada
+            do levantamento de necessidades; sem diagnóstico não se imprime nada
+            (nem título, nem espaço), que é o caso das vendas diretas e das
+            encomendas manuais. */}
+        {diagnostic.length > 0 && (
+          <View style={{ marginTop: 14 }}>
+            <View wrap={false}>
+              <Text style={styles.sectionTitle}>DIAGNÓSTICO DA OBRA</Text>
+              <Text style={styles.diagnosticNote}>
+                Cópia do diagnóstico no momento em que o orçamento foi gravado. Não faz parte das
+                linhas da encomenda.
+              </Text>
+            </View>
+
+            {diagnostic.map((need, needIndex) => {
+              const fields = getDiagnosticFields(need);
+              // Uma necessidade e os seus materiais mantêm-se juntos; só se
+              // deixa partir quando o bloco é grande de mais para uma página e
+              // o `wrap={false}` passaria a cortar conteúdo.
+              const keepTogether = need.materials.length <= 12;
+
+              return (
+                <View
+                  key={need.deal_need_id || `diag-${needIndex}`}
+                  style={styles.diagnosticNeed}
+                  wrap={!keepTogether}
+                >
+                  <View style={styles.diagnosticNeedHeader}>
+                    <Text style={styles.diagnosticNeedTitle}>
+                      {need.need_title || 'Necessidade sem título'}
+                    </Text>
+                    {need.diag_area_m2 !== null && need.diag_area_m2 !== undefined && (
+                      <Text style={styles.diagnosticNeedArea}>
+                        {formatDiagnosticNumber(need.diag_area_m2)} m²
+                      </Text>
+                    )}
+                  </View>
+
+                  {fields.map((field) => (
+                    <View key={field.label} style={styles.diagnosticFieldRow}>
+                      <Text style={styles.diagnosticFieldLabel}>{field.label}</Text>
+                      <Text style={styles.diagnosticFieldValue}>{field.value}</Text>
+                    </View>
+                  ))}
+
+                  {need.materials.length > 0 && (
+                    <View style={styles.diagnosticMaterialsBlock}>
+                      <Text style={styles.diagnosticMaterialsTitle}>
+                        MATERIAIS PREVISTOS — INFORMATIVO PARA O ARMAZÉM
+                      </Text>
+                      <Text style={styles.diagnosticNote}>
+                        Não são linhas da encomenda, não têm preço e não somam ao total.
+                      </Text>
+                      {need.materials.map((material, materialIndex) => (
+                        <View
+                          key={`${need.deal_need_id || needIndex}-mat-${materialIndex}`}
+                          style={styles.diagnosticMaterialRow}
+                        >
+                          <Text style={styles.diagnosticMaterialQty}>
+                            {formatDiagnosticNumber(material.quantity)}
+                            {material.unidade ? ` ${material.unidade}` : ''}
+                          </Text>
+                          <Text style={styles.diagnosticMaterialDescription}>
+                            {material.descricao || '-'}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              );
+            })}
+          </View>
+        )}
 
         {/* Fixed Footer */}
         <View fixed style={styles.fixedFooter}>

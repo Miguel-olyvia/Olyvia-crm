@@ -45,6 +45,12 @@ import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/lo
 import { leadContactSchema } from "@/lib/validations";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
+import {
+  isLeadStageTransitionAllowed,
+  LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+  leadStageTransitionBlockedMessage,
+} from "@/lib/leads/stageTransitionGuard";
 
 interface Lead {
   id: string;
@@ -52,6 +58,8 @@ interface Lead {
   campaign_id: string | null;
   field_values: Record<string, any> | null;
   status: string;
+  /** Estágio atual — origem da validação de transições. */
+  workflow_stage_id?: string | null;
   contact_attempts?: number;
   last_contact_at?: string;
   last_contact_result?: string;
@@ -152,6 +160,14 @@ export function AnewLeadContactDialog({
   onLeadUpdated,
 }: LeadContactDialogProps) {
   const { toast } = useToast();
+  // Restrição de transições do diagrama de fluxo — aplica-se a este diálogo
+  // porque a mudança de estágio é iniciada pelo utilizador (diretamente no
+  // seletor de estado ou via workflow_next_status do resultado de contacto).
+  const {
+    stages: pipelineStages,
+    enforceStageTransitions,
+    transitions: stageTransitions,
+  } = useLeadPipelineRules(companyId);
   const [loading, setLoading] = useState(false);
   const [contactHistory, setContactHistory] = useState<ContactHistory[]>([]);
   const [users, setUsers] = useState<User[]>([]);
@@ -863,6 +879,62 @@ export function AnewLeadContactDialog({
       return;
     }
 
+    // Guarda do fluxo: corre ANTES de qualquer escrita (inclusive o registo da
+    // interação na timeline). O estado de destino é o mesmo que o resto do
+    // handler vai aplicar — incluindo o forçado pelo `workflow_next_status` do
+    // resultado de contacto — e o estágio resolvido aqui é reutilizado abaixo,
+    // para não repetir a query.
+    const selectedResult = getSelectedResult();
+    // Guard: registar um resultado de contacto negativo (ex: "Não Interessado",
+    // "Número Errado") não deve, por si só, marcar a lead como perdida.
+    // A transição para 'rejected'/'lost' só pode acontecer explicitamente
+    // através do modal "Editar Lead", que exige um lost_reason. Aqui,
+    // workflow_next_status continua a ser aplicado normalmente para
+    // progressões legítimas do pipeline (ex: 'contacted', 'no_answer',
+    // 'callback_scheduled', 'visit_scheduled'), apenas os estados terminais
+    // negativos são ignorados nesta via automática.
+    const isAutoLossTransition =
+      selectedResult?.workflow_next_status === "rejected" ||
+      selectedResult?.workflow_next_status === "lost";
+    const statusToSet =
+      selectedResult?.workflow_next_status && !isAutoLossTransition
+        ? selectedResult.workflow_next_status
+        : (newStatus || lead.status);
+    const statusChanged = statusToSet !== lead.status;
+
+    let workflowStageId: string | null = null;
+    if (statusChanged && companyId) {
+      // A resolução do estágio é assíncrona: bloquear o botão já aqui evita
+      // duplo-clique enquanto a guarda corre.
+      setLoading(true);
+      const { data: stageData, error: stageError } = await supabase
+        .from("lead_workflow_stages")
+        .select("id, organization_id")
+        .eq("name", statusToSet)
+        .or(`organization_id.eq.${companyId},organization_id.is.null`);
+      if (stageError) captureFlowError(stageError, "db-error-leaked-to-ui");
+      const orgStage = stageData?.find(s => s.organization_id === companyId);
+      workflowStageId = orgStage?.id || stageData?.find(s => s.organization_id === null)?.id || null;
+
+      if (!isLeadStageTransitionAllowed({
+        enforce: enforceStageTransitions,
+        transitions: stageTransitions,
+        fromStageId: lead.workflow_stage_id ?? null,
+        toStageId: workflowStageId,
+      })) {
+        toast({
+          title: LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+          description: leadStageTransitionBlockedMessage(
+            pipelineStages.find(s => s.id === lead.workflow_stage_id)?.label,
+            pipelineStages.find(s => s.id === workflowStageId)?.label,
+          ),
+          variant: "destructive",
+        });
+        setLoading(false);
+        return;
+      }
+    }
+
     setLoading(true);
     const { data: userData } = await supabase.auth.getUser();
 
@@ -930,23 +1002,8 @@ export function AnewLeadContactDialog({
         );
       }
 
-      // Calculate new status based on selected result's workflow
-      const selectedResult = getSelectedResult();
-      let statusToSet = newStatus || lead.status;
-      // Guard: registar um resultado de contacto negativo (ex: "Não Interessado",
-      // "Número Errado") não deve, por si só, marcar a lead como perdida.
-      // A transição para 'rejected'/'lost' só pode acontecer explicitamente
-      // através do modal "Editar Lead", que exige um lost_reason. Aqui,
-      // workflow_next_status continua a ser aplicado normalmente para
-      // progressões legítimas do pipeline (ex: 'contacted', 'no_answer',
-      // 'callback_scheduled', 'visit_scheduled'), apenas os estados terminais
-      // negativos são ignorados nesta via automática.
-      const isAutoLossTransition =
-        selectedResult?.workflow_next_status === "rejected" ||
-        selectedResult?.workflow_next_status === "lost";
-      if (selectedResult?.workflow_next_status && !isAutoLossTransition) {
-        statusToSet = selectedResult.workflow_next_status;
-      }
+      // `statusToSet`, `statusChanged` e `workflowStageId` já foram calculados
+      // no topo do handler, onde corre a guarda de transições.
 
       // assignedTo is already an anew_users.id (loaded from anew_users table)
       const resolvedAssignedTo: string | null = assignedTo || null;
@@ -955,7 +1012,6 @@ export function AnewLeadContactDialog({
       const resolvedContactBy: string | null = currentAnewUserId;
 
       // Update lead with edited field values
-      const statusChanged = statusToSet !== lead.status;
       const updateData: Record<string, any> = {
         contact_attempts: (lead.contact_attempts || 0) + 1,
         last_contact_at: new Date().toISOString(),
@@ -970,19 +1026,10 @@ export function AnewLeadContactDialog({
         ...(isEditingFields ? { field_values: editableFieldValues } : {}),
       };
 
-      // Resolve workflow stage if status changed
-      let workflowStageId: string | null = null;
-      if (statusChanged && companyId) {
-        const { data: stageData } = await supabase
-          .from("lead_workflow_stages")
-          .select("id, organization_id")
-          .eq("name", statusToSet)
-          .or(`organization_id.eq.${companyId},organization_id.is.null`);
-        const orgStage = stageData?.find(s => s.organization_id === companyId);
-        workflowStageId = orgStage?.id || stageData?.find(s => s.organization_id === null)?.id || null;
-        if (workflowStageId) {
-          updateData.workflow_stage_id = workflowStageId;
-        }
+      // O estágio já foi resolvido (e validado contra o fluxo) no topo do
+      // handler — aqui só se aplica.
+      if (statusChanged && workflowStageId) {
+        updateData.workflow_stage_id = workflowStageId;
       }
 
       const { error: updateError } = await supabase

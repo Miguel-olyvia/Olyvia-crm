@@ -1,4 +1,14 @@
 -- ============================================================
+-- 20261201080000_permissao_eliminar_propostas_enviadas
+-- ============================================================
+-- Recuperada da base de dados: esta migration foi aplicada ao projeto
+-- remoto sem ficheiro correspondente no repositorio. O SQL abaixo foi
+-- extraido de supabase_migrations.schema_migrations.statements, para o
+-- historico local voltar a refletir o estado real da base de dados.
+-- Ja aplicada e registada no remoto — nao volta a correr num db push.
+-- ============================================================
+
+-- ============================================================
 -- Eliminar uma proposta que já saiu de rascunho passa a exigir uma
 -- permissão própria: proposals.delete_sent
 -- ============================================================

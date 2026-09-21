@@ -32,6 +32,7 @@ const Quotes = lazy(() => import("./pages/Quotes"));
 const QuoteModels = lazy(() => import("./pages/QuoteModels"));
 const QuoteTemplates = lazy(() => import("./pages/QuoteTemplates"));
 const ProposalTemplates = lazy(() => import("./pages/ProposalTemplates"));
+const DirectSales = lazy(() => import("./pages/DirectSales"));
 const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
 const CatalogItems = lazy(() => import("./pages/CatalogItems"));
 
@@ -134,6 +135,8 @@ const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalPropos
 const ClientPortalContracts = lazy(() => import("./pages/ClientPortalContracts"));
 const ClientPortalContractDetail = lazy(() => import("./pages/ClientPortalContractDetail"));
 const ClientPortalDocuments = lazy(() => import("./pages/ClientPortalDocuments"));
+const ClientPortalDirectSales = lazy(() => import("./pages/ClientPortalDirectSales"));
+const ClientPortalDirectSaleDetail = lazy(() => import("./pages/ClientPortalDirectSaleDetail"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -183,6 +186,8 @@ const App = () => (
                     <Route path="/client-portal" element={<ClientPortal />} />
                     <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
                     <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
+                    <Route path="/client-portal/direct-sales" element={<ClientPortalDirectSales />} />
+                    <Route path="/client-portal/direct-sales/:id" element={<ClientPortalDirectSaleDetail />} />
                     <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
                     <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
                     <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
@@ -211,6 +216,8 @@ const App = () => (
                       <Route path="/quote-models" element={<ProtectedRoute permission="quote_templates.view"><QuoteModels /></ProtectedRoute>} />
                       <Route path="/proposal-templates" element={<ProposalTemplates />} />
                       <Route path="/quote-templates" element={<ProtectedRoute permission="proposals.manage"><QuoteTemplates /></ProtectedRoute>} />
+                      {/* Venda Direta (Fase 2) — fluxo alternativo ao Orçamento -> Proposta -> Contrato. Permissões próprias: direct_sales.view/create/edit (migration 20261130230000). */}
+                      <Route path="/direct-sales" element={<ProtectedRoute permission="direct_sales.view"><DirectSales /></ProtectedRoute>} />
                       <Route path="/catalog-items" element={<CatalogItems />} />
                       <Route path="/users" element={<ProtectedRoute permission="users.view"><UsersNew /></ProtectedRoute>} />
                       <Route path="/roles" element={<ProtectedRoute permission="roles.view"><Roles /></ProtectedRoute>} />

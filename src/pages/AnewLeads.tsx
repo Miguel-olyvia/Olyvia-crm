@@ -74,6 +74,12 @@ import { pt } from "date-fns/locale";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { LeadWorkflowConfig, WorkflowStage } from "@/components/leads/LeadWorkflowConfig";
+import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
+import {
+  isLeadStageTransitionAllowed,
+  LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+  leadStageTransitionBlockedMessage,
+} from "@/lib/leads/stageTransitionGuard";
 import { LeadAISchedulingRulesConfig } from "@/components/leads/LeadAISchedulingRulesConfig";
 import { AnewLeadContactDialog } from "@/components/leads/AnewLeadContactDialog";
 import { ScheduleLeadVisitDialog } from "@/components/leads/ScheduleLeadVisitDialog";
@@ -776,7 +782,10 @@ export default function AnewLeads() {
   // drag-and-drop and the bulk status-change flows. Only one of the two
   // pending states is ever set at a time.
   const [pendingLostDrop, setPendingLostDrop] = useState<{ leadId: string; newStage: WorkflowStage; leadTitle?: string } | null>(null);
-  const [pendingLostBulk, setPendingLostBulk] = useState<{ newStatus: string; matchingStage: WorkflowStage } | null>(null);
+  // `leadIds` guarda o subconjunto já filtrado pela restrição de transições —
+  // sem isto, confirmar o motivo de perda voltaria a aplicar a tudo o que está
+  // selecionado, incluindo as leads que a validação excluiu.
+  const [pendingLostBulk, setPendingLostBulk] = useState<{ newStatus: string; matchingStage: WorkflowStage; leadIds: string[] } | null>(null);
 
   // Visit reassign dialog state
   const [showVisitReassignDialog, setShowVisitReassignDialog] = useState(false);
@@ -1821,6 +1830,29 @@ export default function AnewLeads() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Restrição de transições desenhada no diagrama (separador Fluxo). Só é
+  // aplicada a mudanças de estágio iniciadas pelo utilizador; o motor
+  // automático (trigger trg_sync_lead_workflow_stage_id, auto_advance e a edge
+  // function execute-workflow) nunca passa por aqui e mantém-se isento.
+  const { enforceStageTransitions, transitions: stageTransitions } = useLeadPipelineRules(activeCompanyId);
+
+  /** Rótulo de um estágio, para a mensagem de erro. */
+  const stageLabelById = useCallback(
+    (stageId: string | null | undefined) => (stageId ? workflowStages.find(s => s.id === stageId)?.label : undefined),
+    [workflowStages]
+  );
+
+  const isStageTransitionAllowed = useCallback(
+    (fromStageId: string | null | undefined, toStageId: string | null | undefined) =>
+      isLeadStageTransitionAllowed({
+        enforce: enforceStageTransitions,
+        transitions: stageTransitions,
+        fromStageId,
+        toStageId,
+      }),
+    [enforceStageTransitions, stageTransitions]
+  );
+
   // Drives the Funil's "current stage" highlight via the same rule engine
   // (reached_when/matching_statuses) the Percurso tab already uses, instead
   // of a plain literal comparison against the lead's raw status text — so a
@@ -2640,6 +2672,23 @@ export default function AnewLeads() {
     const newStage = workflowStages.find(s => s.id === newStageId);
     if (!newStage) return;
 
+    // A lead arrastada já está em memória — o estágio de origem sai daqui, sem
+    // query extra.
+    const draggedLead = kanbanLeads.find(l => l.id === leadId);
+    const fromStageId = (draggedLead as any)?.workflow_stage_id as string | null | undefined;
+
+    // A validação do fluxo corre ANTES dos checks de is_conversion/is_rejection:
+    // caso contrário o diálogo de motivo de perda abria-se antes de se saber
+    // sequer se a transição é permitida.
+    if (!isStageTransitionAllowed(fromStageId, newStage.id)) {
+      toast({
+        title: LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+        description: leadStageTransitionBlockedMessage(stageLabelById(fromStageId), newStage.label),
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (newStage.is_conversion) {
       toast({
         title: "Não é possível mover diretamente para esta fase",
@@ -2653,7 +2702,6 @@ export default function AnewLeads() {
     // before writing anything — hold off and let the user confirm it in
     // LeadLostReasonDialog instead of saving immediately.
     if (newStage.is_rejection) {
-      const draggedLead = kanbanLeads.find(l => l.id === leadId);
       const identity = draggedLead?.entity_id ? getIdentity(draggedLead.entity_id) : null;
       const leadTitle = (identity?.first_name && identity?.last_name
         ? `${identity.first_name} ${identity.last_name}`
@@ -2663,7 +2711,7 @@ export default function AnewLeads() {
     }
 
     await persistKanbanStageDrop(leadId, newStage);
-  }, [workflowStages, toast, kanbanLeads, getIdentity, persistKanbanStageDrop]);
+  }, [workflowStages, toast, kanbanLeads, getIdentity, persistKanbanStageDrop, isStageTransitionAllowed, stageLabelById]);
 
   // Fetch kanban data only while that tab is visible, but keep it in sync
   // with every filter change made anywhere on the page (same dependency list
@@ -4481,7 +4529,15 @@ export default function AnewLeads() {
 
   // Extracted from handleBulkStatusChange so a stage with is_rejection = true
   // can hold off calling this until the LeadLostReasonDialog is confirmed.
-  const persistBulkStatusChange = async (newStatus: string, matchingStage: WorkflowStage | undefined, lostReason?: string) => {
+  const persistBulkStatusChange = async (
+    newStatus: string,
+    matchingStage: WorkflowStage | undefined,
+    lostReason?: string,
+    /** Subconjunto já filtrado pela restrição de transições; por omissão, tudo o que está selecionado. */
+    targetLeadIds?: string[],
+  ) => {
+    const leadIdsToUpdate = targetLeadIds ?? selectedLeadIds;
+    if (leadIdsToUpdate.length === 0) return;
     setIsBulkUpdating(true);
     const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
     const updatePayload: any = { status: newStatus };
@@ -4493,17 +4549,17 @@ export default function AnewLeads() {
     }
     try {
       const { error } = await withAuditContext(supabase, auditUserId, async () =>
-        await supabase.from("anew_leads").update(updatePayload).in("id", selectedLeadIds)
+        await supabase.from("anew_leads").update(updatePayload).in("id", leadIdsToUpdate)
       );
 
       if (error) {
         const description = await getFriendlyErrorMessage(error);
         toast({ title: t('leads.toast.statusUpdateError'), description, variant: "destructive" });
       } else {
-        toast({ title: t('leads.toast.bulkStatusUpdatedCount', { count: selectedLeadIds.length }) });
+        toast({ title: t('leads.toast.bulkStatusUpdatedCount', { count: leadIdsToUpdate.length }) });
         // Execute workflow for each lead BEFORE reloading
         if (matchingStage?.id && activeCompanyId) {
-          const workflowResults = await mapWithConcurrency(selectedLeadIds, 5, async (leadId) => {
+          const workflowResults = await mapWithConcurrency(leadIdsToUpdate, 5, async (leadId) => {
             const { error: workflowError } = await supabase.functions.invoke('execute-workflow', {
                 body: {
                   source_entity: 'lead',
@@ -4555,16 +4611,59 @@ export default function AnewLeads() {
       s => s.name === newStatus || (isLostLikeStatus && s.is_rejection)
     );
 
+    // Mesma regra que o Kanban já impunha (~handleKanbanStageDrop) e que
+    // faltava aqui: uma fase de conversão tem de passar pela ação "Converter
+    // em Contacto", nunca por uma mudança de estado em massa.
+    if (matchingStage?.is_conversion) {
+      toast({
+        title: "Não é possível mover diretamente para esta fase",
+        description: "Esta fase converte o lead num contacto — usa a ação \"Converter em Contacto\" em cada lead.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // N leads, cada uma com o seu estágio de origem: as que não têm ligação
+    // desenhada até ao destino são excluídas, as restantes avançam.
+    let leadIdsToUpdate = selectedLeadIds;
+    let blockedCount = 0;
+    if (matchingStage?.id) {
+      const leadsById = new Map(leads.map(l => [l.id, l]));
+      const allowed: string[] = [];
+      for (const leadId of selectedLeadIds) {
+        const fromStageId = (leadsById.get(leadId) as any)?.workflow_stage_id as string | null | undefined;
+        if (isStageTransitionAllowed(fromStageId, matchingStage.id)) allowed.push(leadId);
+        else blockedCount += 1;
+      }
+      leadIdsToUpdate = allowed;
+    }
+
+    if (leadIdsToUpdate.length === 0) {
+      toast({
+        title: LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+        description: `${blockedCount === 1 ? "A lead selecionada não tem" : `As ${blockedCount} leads selecionadas não têm`} uma transição desenhada para "${matchingStage?.label ?? newStatus}". ${leadStageTransitionBlockedMessage()}`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (blockedCount > 0) {
+      toast({
+        title: `${blockedCount} lead(s) ignorada(s)`,
+        description: `Não existe transição desenhada do estágio atual dessas leads para "${matchingStage?.label ?? newStatus}". A alteração segue apenas para as restantes ${leadIdsToUpdate.length}.`,
+      });
+    }
+
     // "Perdida" stages (is_rejection = true) must always capture a reason
     // before writing anything, exactly like the Kanban drag-and-drop path —
     // hold off and let the user confirm it in LeadLostReasonDialog instead
     // of saving immediately.
     if (matchingStage?.is_rejection) {
-      setPendingLostBulk({ newStatus, matchingStage });
+      setPendingLostBulk({ newStatus, matchingStage, leadIds: leadIdsToUpdate });
       return;
     }
 
-    await persistBulkStatusChange(newStatus, matchingStage);
+    await persistBulkStatusChange(newStatus, matchingStage, undefined, leadIdsToUpdate);
   };
 
   const handleBulkContactResultChange = async (resultId: string) => {
@@ -7539,9 +7638,9 @@ export default function AnewLeads() {
               setPendingLostDrop(null);
               void persistKanbanStageDrop(leadId, newStage, reason);
             } else if (pendingLostBulk) {
-              const { newStatus, matchingStage } = pendingLostBulk;
+              const { newStatus, matchingStage, leadIds } = pendingLostBulk;
               setPendingLostBulk(null);
-              void persistBulkStatusChange(newStatus, matchingStage, reason);
+              void persistBulkStatusChange(newStatus, matchingStage, reason, leadIds);
             }
           }}
         />

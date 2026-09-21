@@ -6,6 +6,10 @@ import { resolveNotifyTarget, type NotifyTarget } from "../_shared/portalNotifyT
 import { withRetryResult } from "../_shared/retry.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
 import { detectClientIp } from "../_shared/clientIp.ts";
+// Só usados pelo case "get_direct_sale_pdf_data": o NIF nunca está em claro
+// na base de dados (fiscal_entities.nif_encrypted), e o PDF da proforma
+// precisa dele. Mesmo caminho da edge function nif-reveal.
+import { decryptNif, deriveKeyFromEnv } from "../_shared/nifCrypto.ts";
 
 const requestSchema = z.object({
   action: z.string(),
@@ -79,7 +83,7 @@ serve(async (req) => {
     // Verify this user is a portal client
     const { data: portalUser } = await supabase
       .from("client_portal_users")
-      .select("id, organization_id, created_by, client_id, proposal_id, quote_id, contract_id")
+      .select("id, organization_id, created_by, client_id, proposal_id, quote_id, contract_id, direct_sale_id")
       .eq("auth_user_id", user.id)
       .limit(1)
       .maybeSingle();
@@ -93,7 +97,7 @@ serve(async (req) => {
     // ── Resolve (entity_id, organization_id) for a document column ──
     // Shared by assertOwnership and resolveAuthorizedPortalUserId.
     async function resolveDocEntity(
-      column: "proposal_id" | "quote_id" | "contract_id",
+      column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id",
       id: string,
     ): Promise<{ entityId: string | null; orgId: string | null }> {
       if (!id) return { entityId: null, orgId: null };
@@ -109,6 +113,11 @@ serve(async (req) => {
           .select("entity_id, organization_id").eq("id", id).maybeSingle();
         entityId = (c as any)?.entity_id || null;
         orgId = (c as any)?.organization_id || null;
+      } else if (column === "direct_sale_id") {
+        const { data: ds } = await supabase.from("direct_sales")
+          .select("entity_id, organization_id").eq("id", id).maybeSingle();
+        entityId = (ds as any)?.entity_id || null;
+        orgId = (ds as any)?.organization_id || null;
       } else if (column === "quote_id") {
         const { data: q } = await supabase.from("quotes")
           .select("entity_id, organization_id, deal_id, proposal_id").eq("id", id).maybeSingle();
@@ -133,7 +142,7 @@ serve(async (req) => {
     }
 
     // ── IDOR GUARD: direct portal-user row match, with entity_id fallback ──
-    async function assertOwnership(column: "proposal_id" | "quote_id" | "contract_id", id: string): Promise<boolean> {
+    async function assertOwnership(column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id", id: string): Promise<boolean> {
       if (!id) return false;
 
       // 1) Direct match: this portal user has a row for this exact document
@@ -162,7 +171,7 @@ serve(async (req) => {
     // ── Resolve which client_portal_users row authorizes this user for a doc ──
     // Returns the portal_user_id row id (for logging / rate-limit scoping).
     async function resolveAuthorizedPortalUserId(
-      column: "proposal_id" | "quote_id" | "contract_id",
+      column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id",
       id: string,
     ): Promise<string | null> {
       // 1) Direct row
@@ -196,7 +205,7 @@ serve(async (req) => {
     // the auth_user_id rollout will have auth_user_id IS NULL and will fail
     // by design — users must request a fresh code post-deploy.
     async function consumeVerifiedOtp(
-      referenceType: "proposal" | "contract",
+      referenceType: "proposal" | "contract" | "direct_sale",
       referenceId: string,
       purpose: string,
     ): Promise<{ ok: boolean; otpId?: string }> {
@@ -264,7 +273,7 @@ serve(async (req) => {
     async function maybeNotify(
       type: string,
       payload: Record<string, any>,
-      docRef: { column: "proposal_id" | "quote_id" | "contract_id"; id: string },
+      docRef: { column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id"; id: string },
     ) {
       const cacheKey = `${docRef.column}:${docRef.id}`;
       let target = notifyTargetCache.get(cacheKey);
@@ -284,6 +293,26 @@ serve(async (req) => {
         ...payload,
       });
     }
+
+    // Never leaves the server: costs and margins are internal.
+    // Declarado ao nível do serve() (e não dentro de um `case`) porque é
+    // preciso em mais do que uma rota: as linhas de orçamento do PDF da
+    // proposta e as linhas da venda direta. Corpo e lista de colunas
+    // inalterados face à declaração anterior, que vivia dentro do
+    // case "get_proposal_pdf_data".
+    const SENSITIVE_LINE_COLUMNS = [
+      "cost_price",
+      "custo_mao_obra_unit",
+      "custo_material_unit",
+      "margem_percent",
+    ];
+    const stripCosts = (row: Record<string, unknown>) => {
+      const clean: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(row)) {
+        if (!SENSITIVE_LINE_COLUMNS.includes(key)) clean[key] = value;
+      }
+      return clean;
+    };
 
     switch (action) {
       case "accept_quote": {
@@ -482,28 +511,24 @@ serve(async (req) => {
           }
         }
 
-        // Never leaves the server: costs and margins are internal.
-        const SENSITIVE_LINE_COLUMNS = [
-          "cost_price",
-          "custo_mao_obra_unit",
-          "custo_material_unit",
-          "margem_percent",
-        ];
-        const stripCosts = (row: Record<string, unknown>) => {
-          const clean: Record<string, unknown> = {};
-          for (const [key, value] of Object.entries(row)) {
-            if (!SENSITIVE_LINE_COLUMNS.includes(key)) clean[key] = value;
-          }
-          return clean;
-        };
-
+        // SENSITIVE_LINE_COLUMNS/stripCosts vivem agora no escopo do serve()
+        // (acima do switch) — mesmo corpo, mesma lista de colunas.
         const quotes: any[] = [];
         for (const quote of quoteRows) {
           const [{ data: lines }, { data: fees }] = await Promise.all([
+            // visible_to_client tem de ser filtrado AQUI. A policy de RLS
+            // "Client can view own quote lines" filtra-o, e o gerador do CRM
+            // (generateProposalPdfBlob.ts:157) também — mas esta função corre
+            // com service_role, por isso a RLS não se aplica e sem esta linha
+            // as linhas internas iam dentro do PDF que o cliente descarrega.
+            // Hoje nada no frontend marca uma linha de orçamento como interna,
+            // logo não há fuga em curso; isto é a armadilha a desarmar antes
+            // de as linhas internas voltarem aos orçamentos.
             supabase
               .from("quote_lines")
               .select("*, products (sku), services (sku)")
               .eq("quote_id", quote.id)
+              .eq("visible_to_client", true)
               .order("ordem"),
             supabase
               .from("quote_fees")
@@ -962,7 +987,19 @@ serve(async (req) => {
           return new Response(JSON.stringify({ error: "document_type and document_id required" }), { status: 400, headers: corsHeaders });
         }
 
-        const filterCol = document_type === "proposal" ? "proposal_id" : document_type === "quote" ? "quote_id" : "contract_id";
+        // Mapa explícito em vez do ternário anterior: com o ternário, o `else`
+        // era "contract_id", por isso um document_type novo (direct_sale)
+        // cairia silenciosamente na coluna do contrato. Os 3 mapeamentos
+        // anteriores mantêm-se exactamente iguais, incluindo o fallback para
+        // "contract_id" de qualquer valor não reconhecido (que continua a não
+        // resolver nenhum portal user e a devolver forbidden()).
+        const DOC_TYPE_COLUMN: Record<string, "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id"> = {
+          proposal: "proposal_id",
+          quote: "quote_id",
+          contract: "contract_id",
+          direct_sale: "direct_sale_id",
+        };
+        const filterCol = DOC_TYPE_COLUMN[document_type as string] ?? "contract_id";
 
         // resolveAuthorizedPortalUserId covers both direct (proposal/quote/contract_id)
         // and entity-scoped access. Returns null when the caller has no access.
@@ -983,18 +1020,471 @@ serve(async (req) => {
           .eq("portal_status", "sent");
 
 
-        // H7 — correct label for all three document types
-        const docLabel = document_type === "proposal" ? "proposta"
-          : document_type === "quote" ? "orçamento"
-          : "contrato";
+        // H7 — correct label for all document types.
+        // Mapa explícito pelo mesmo motivo do DOC_TYPE_COLUMN acima: com o
+        // ternário anterior o `else` era "contrato", por isso um
+        // document_type novo (direct_sale) produzia "Cliente visualizou
+        // contrato". Os 3 rótulos anteriores mantêm-se exactamente iguais,
+        // incluindo o fallback para "contrato" de qualquer valor não
+        // reconhecido (que, tal como antes, nem chega aqui — o filterCol
+        // cai em contract_id e a resolução devolve forbidden()).
+        const DOC_TYPE_LABEL: Record<string, string> = {
+          proposal: "proposta",
+          quote: "orçamento",
+          contract: "contrato",
+          direct_sale: "venda direta",
+        };
+        const docLabel = DOC_TYPE_LABEL[document_type as string] ?? "contrato";
 
         await maybeNotify(`client_viewed_${document_type}`, {
           title: `Cliente visualizou ${docLabel}`,
           message: `O cliente ${clientName} visualizou um(a) ${docLabel} no portal.`,
           priority: "low",
-        }, { column: filterCol as "proposal_id" | "quote_id" | "contract_id", id: document_id });
+        }, { column: filterCol as "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id", id: document_id });
 
         return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+      }
+
+      // Dados da Venda Direta para o portal do cliente.
+      //
+      // ATENÇÃO: esta função corre com service_role, logo a RLS de
+      // direct_sale_lines ("Client can view own direct sale lines",
+      // migration 20261201110000) NÃO se aplica aqui. O filtro
+      // visible_to_client = true tem de ser explícito — sem ele, as linhas
+      // internas da venda direta chegavam ao cliente.
+      //
+      // direct_sale_lines tem cost_price e margem_percent com o mesmo
+      // significado interno que quote_lines, por isso as linhas passam pelo
+      // mesmo stripCosts (as outras duas colunas da lista não existem nesta
+      // tabela; o helper ignora as que faltam).
+      case "get_direct_sale_data": {
+        const { direct_sale_id } = params;
+        if (!direct_sale_id) {
+          return new Response(JSON.stringify({ error: "direct_sale_id required" }), { status: 400, headers: corsHeaders });
+        }
+        if (!(await assertOwnership("direct_sale_id", direct_sale_id))) return forbidden();
+
+        const { data: directSale } = await supabase
+          .from("direct_sales")
+          // Colunas nomeadas de propósito (nunca select("*")): o cabeçalho tem
+          // campos que não dizem respeito ao cliente (client_contract_id,
+          // assigned_to, invoice_*, search_text, ...).
+          .select(
+            // `notes` NÃO entra: é o campo interno do comercial — a própria UI
+            // diz "Nunca são mostradas ao cliente" (translations/directSales).
+            // O que o cliente pode ver é `client_notes`.
+            "id, sale_number, title, description, status, client_notes, subtotal, total, iva_rate, currency, valid_until, sent_at, accepted_at, rejected_at, proforma_number, proforma_issued_at, organization_id",
+          )
+          .eq("id", direct_sale_id)
+          .maybeSingle();
+
+        const { data: saleLines } = await supabase
+          .from("direct_sale_lines")
+          .select("*")
+          .eq("direct_sale_id", direct_sale_id)
+          // Obrigatório — ver comentário acima (service_role ignora a RLS).
+          .eq("visible_to_client", true)
+          .order("ordem", { ascending: true });
+
+        return new Response(
+          JSON.stringify({
+            direct_sale: directSale,
+            lines: (saleLines || []).map((l: any) => stripCosts(l)),
+          }),
+          { headers: corsHeaders },
+        );
+      }
+
+      // Aceitação da Venda Direta no portal. Espelha sign_proposal na parte
+      // que é comum (OTP antes de qualquer escrita, prova de aceitação,
+      // portal_status, notificação), SEM nada do fluxo pesado de propostas:
+      // não há selecção de orçamentos, não há stage de pipeline e não há
+      // record_proposal_decision.
+      //
+      // A Encomenda Cliente (Fase 5) é criada por rpc_create_direct_sale_order,
+      // e NÃO por inserts encadeados aqui como faz sign_proposal: cada chamada
+      // PostgREST é a sua própria transação, e um contrato criado sem a
+      // promoção a 'signed' seria uma encomenda invisível e sem stock deduzido.
+      // A RPC é uma transação real — ou nasce tudo, ou não nasce nada.
+      case "accept_direct_sale": {
+        const { direct_sale_id, signature_image } = params;
+        if (!direct_sale_id || !signature_image) {
+          return new Response(JSON.stringify({ error: "direct_sale_id and signature_image required" }), { status: 400, headers: corsHeaders });
+        }
+        if (!(await assertOwnership("direct_sale_id", direct_sale_id))) return forbidden();
+        // B1 — atomically claim OTP BEFORE any sign-side mutation
+        {
+          const otpClaim = await consumeVerifiedOtp("direct_sale", direct_sale_id, "direct_sale_acceptance");
+          if (!otpClaim.ok) {
+            return new Response(
+              JSON.stringify({ error: "otp_required", message: "OTP inválido, expirado ou já utilizado. Peça um novo código." }),
+              { status: 403, headers: corsHeaders },
+            );
+          }
+        }
+
+        const now = new Date().toISOString();
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("direct_sales").update({
+          status: "aceite",
+          accepted_at: now,
+          signature_image,
+          acceptance_ip: detectedIp,
+          acceptance_user_agent: req.headers.get("user-agent") || null,
+        }).eq("id", direct_sale_id));
+
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("client_portal_users")
+          .update({ portal_status: "signed" })
+          .eq("auth_user_id", user.id)
+          .eq("direct_sale_id", direct_sale_id));
+
+        // Fase 5 — Encomenda Cliente. Fail-soft, como o bloco equivalente de
+        // sign_proposal: a venda JÁ está aceite e a proforma JÁ foi numerada
+        // pelo trigger, por isso uma falha aqui não pode devolver erro ao
+        // cliente nem desfazer a aceitação. A RPC é idempotente, portanto o
+        // caso falhado recupera-se voltando a chamá-la para a mesma venda.
+        let createdContractId: string | null = null;
+        try {
+          const { data: orderContract, error: orderError } = await supabase
+            .rpc("rpc_create_direct_sale_order", { p_direct_sale_id: direct_sale_id });
+          if (orderError) {
+            console.error("accept_direct_sale: create client order failed:", orderError);
+          } else {
+            createdContractId = (orderContract as { id?: string } | null)?.id ?? null;
+          }
+        } catch (e) {
+          console.error("accept_direct_sale: create client order threw:", e);
+        }
+
+        const { data: acceptedSale } = await supabase.from("direct_sales").select("sale_number, title").eq("id", direct_sale_id).maybeSingle();
+        const orderNote = createdContractId ? " Encomenda de cliente criada." : "";
+        await maybeNotify("client_accepted_direct_sale", {
+          title: "🎉 Venda direta aceite no portal!",
+          message: `O cliente ${clientName} aceitou a venda direta ${acceptedSale?.sale_number || acceptedSale?.title || ""}!${orderNote}`,
+          priority: "urgent",
+          link: `/direct-sales`,
+        }, { column: "direct_sale_id", id: direct_sale_id });
+
+        return new Response(JSON.stringify({ success: true, contract_id: createdContractId }), { headers: corsHeaders });
+      }
+
+      // Rejeição da Venda Direta no portal. O molde é o reject_proposal: tal
+      // como ele, NÃO exige OTP — só posse do documento. A prova forte (SMS)
+      // é para o compromisso (aceitar/assinar); recusar não cria obrigação
+      // nenhuma e exigir código aí só serviria para prender o cliente a um
+      // documento que ele não quer.
+      //
+      // Do molde ficam de fora, de propósito:
+      //   - a cascata para `quotes` (uma venda direta não tem orçamentos);
+      //   - o resolveProposalStageId (direct_sales não tem stage_id);
+      //   - o record_proposal_decision (é um snapshot de proposta).
+      // Também não se mexe em client_portal_users.portal_status, exactamente
+      // como o reject_proposal: esse campo só avança para "signed" nos fluxos
+      // de assinatura/aceitação e não tem valor de "rejeitado" (a coluna é
+      // NOT NULL com default 'sent' e é o que o republish repõe).
+      case "reject_direct_sale": {
+        const { direct_sale_id, reason_code, reason_text } = params;
+        if (!direct_sale_id) {
+          return new Response(JSON.stringify({ error: "direct_sale_id required" }), { status: 400, headers: corsHeaders });
+        }
+        if (!(await assertOwnership("direct_sale_id", direct_sale_id))) return forbidden();
+
+        const safeReasonText = reason_text ? sanitizeReason(reason_text) : null;
+        if (reason_text && !safeReasonText) {
+          return new Response(JSON.stringify({ error: "Motivo deve ter entre 10 e 500 caracteres" }), { status: 400, headers: corsHeaders });
+        }
+
+        const now = new Date().toISOString();
+        await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
+        await withRetryResult(() => supabase.from("direct_sales").update({
+          status: "rejeitada",
+          rejected_at: now,
+          rejection_reason_code: reason_code || null,
+          rejection_notes: safeReasonText,
+        }).eq("id", direct_sale_id));
+
+        const { data: rejSale } = await supabase.from("direct_sales").select("sale_number, title").eq("id", direct_sale_id).maybeSingle();
+        await maybeNotify("client_rejected_direct_sale", {
+          title: "Venda direta rejeitada no portal",
+          message: `O cliente ${clientName} rejeitou a venda direta ${rejSale?.sale_number || rejSale?.title || ""}.${reason_code ? ` Motivo: ${reason_code}` : ""}`,
+          priority: "high",
+          link: `/direct-sales`,
+        }, { column: "direct_sale_id", id: direct_sale_id });
+
+        return new Response(JSON.stringify({ success: true }), { headers: corsHeaders });
+      }
+
+      // Dados para gerar o PDF da PROFORMA da venda direta no browser do
+      // cliente. Molde: get_proposal_pdf_data (validar → assertOwnership →
+      // ler com service_role → devolver), pelo mesmo motivo de fundo: a RLS
+      // do portal não dá acesso a anew_organizations nem às tabelas de
+      // identificação do cliente (entidades, moradas, fiscal_entities), por
+      // isso um gerador que fosse buscá-los directamente recebia vazio em
+      // silêncio e produzia um documento sem emitente nem destinatário.
+      //
+      // Esta rota NÃO substitui o get_direct_sale_data (ecrã do portal), que
+      // fica exactamente como está: é leitura adicional, só para o documento.
+      //
+      // Tal como aí, corre com service_role e por isso a RLS de
+      // direct_sale_lines não se aplica — o filtro visible_to_client = true
+      // é explícito e obrigatório, e as linhas passam pelo mesmo stripCosts.
+      case "get_direct_sale_pdf_data": {
+        const { direct_sale_id } = params;
+        if (!direct_sale_id) {
+          return new Response(JSON.stringify({ error: "direct_sale_id required" }), { status: 400, headers: corsHeaders });
+        }
+        if (!(await assertOwnership("direct_sale_id", direct_sale_id))) return forbidden();
+
+        const { data: directSale } = await supabase
+          .from("direct_sales")
+          // Colunas nomeadas de propósito (nunca select("*")): só o que o
+          // documento mostra, mais os ids necessários para resolver emitente
+          // (organization_id) e destinatário (entity_id/client_id). Ficam de
+          // fora os campos internos do cabeçalho (assigned_to, invoice_*,
+          // client_contract_id, search_text, ...).
+          .select(
+            // client_notes entra porque o documento mostra-o (ProformaPDFDocument);
+            // sem ele a proforma do portal sairia diferente da do CRM, para a
+            // mesma venda. `notes` continua de fora — é o campo interno.
+            "id, sale_number, title, description, status, client_notes, subtotal, total, iva_rate, currency, accepted_at, proforma_number, proforma_issued_at, organization_id, entity_id, client_id",
+          )
+          .eq("id", direct_sale_id)
+          .maybeSingle();
+
+        if (!directSale) {
+          return new Response(JSON.stringify({ error: "Venda direta não encontrada" }), { status: 404, headers: corsHeaders });
+        }
+
+        // Sem número não há documento. O proforma_number é escrito pelo
+        // trigger da BD quando o status passa a 'aceite'; até lá devolvemos
+        // 404 em vez de um payload meio vazio que faria o frontend gerar uma
+        // proforma sem número — um documento inválido é pior que um erro.
+        if (!(directSale as any).proforma_number) {
+          return new Response(JSON.stringify({ error: "Proforma ainda não emitida" }), { status: 404, headers: corsHeaders });
+        }
+
+        const saleOrgId = (directSale as any).organization_id || null;
+        const saleEntityId = (directSale as any).entity_id || null;
+        const saleClientId = (directSale as any).client_id || null;
+
+        // Mesma junção de morada do useOrgHeaderData (src/components/contracts/
+        // useOrgHeaderData.ts), para a proforma ler igual aos outros documentos.
+        const joinAddress = (address: any): string | null => {
+          if (!address || typeof address !== "object") return null;
+          const joined = [address.street, address.number, address.postal_code, address.city]
+            .map((value: unknown) => (value == null ? "" : String(value).trim()))
+            .filter(Boolean)
+            .join(", ");
+          return joined || null;
+        };
+
+        // Logótipo como data URI base64. Mesmo racional do generateQuotePdfBlob
+        // no CRM (:69-85): o gerador de PDF precisa dos bytes, não de uma URL.
+        // Aqui é ainda mais necessário, porque quem vai renderizar é o browser
+        // de um cliente do portal. Timeout curto e degradação para null — uma
+        // imagem lenta ou em falta nunca pode impedir a emissão da proforma.
+        const fetchLogoAsDataUri = async (url: string | null): Promise<string | null> => {
+          if (!url) return null;
+          try {
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 5000);
+            const response = await fetch(url, { signal: controller.signal });
+            clearTimeout(timeout);
+            if (!response.ok) return null;
+
+            const contentType = response.headers.get("content-type") || "image/png";
+            if (!contentType.startsWith("image/")) return null;
+
+            const bytes = new Uint8Array(await response.arrayBuffer());
+            // 2 MB: acima disto o payload do portal fica pesado e o logótipo
+            // quase de certeza está mal configurado.
+            if (bytes.byteLength > 2_000_000) return null;
+
+            let binary = "";
+            for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+            return `data:${contentType};base64,${btoa(binary)}`;
+          } catch (logoError) {
+            console.error("proforma: logo fetch failed", logoError);
+            return null;
+          }
+        };
+
+        // NIF em claro a partir de fiscal_entities.nif_encrypted — o mesmo
+        // caminho (e só esse) da edge function nif-reveal; a coluna legada
+        // `nif` nunca é lida. Falha sempre em silêncio para null: a chave
+        // pode não estar configurada e um PDF sem NIF é melhor que um erro.
+        let nifKey: Uint8Array | null = null;
+        let nifKeyResolved = false;
+        const revealPrimaryNif = async (entityId: string | null): Promise<string | null> => {
+          if (!entityId) return null;
+          const { data: fiscalLink } = await supabase
+            .from("anew_entity_fiscal_entities")
+            .select("fiscal_entity_id")
+            .eq("entity_id", entityId)
+            .eq("is_primary", true)
+            .limit(1)
+            .maybeSingle();
+          const fiscalEntityId = (fiscalLink as any)?.fiscal_entity_id;
+          if (!fiscalEntityId) return null;
+
+          const { data: fiscalEntity } = await supabase
+            .from("fiscal_entities")
+            .select("nif_encrypted")
+            .eq("id", fiscalEntityId)
+            .maybeSingle();
+          const encryptedNif = (fiscalEntity as any)?.nif_encrypted;
+          if (!encryptedNif) return null;
+
+          if (!nifKeyResolved) {
+            nifKeyResolved = true;
+            try {
+              nifKey = deriveKeyFromEnv("NIF_ENC_KEY", "AES-GCM");
+            } catch (keyError) {
+              console.error(
+                "get_direct_sale_pdf_data: NIF decryption key unavailable:",
+                keyError instanceof Error ? keyError.message : keyError,
+              );
+            }
+          }
+          const key = nifKey;
+          if (!key) return null;
+
+          try {
+            return await decryptNif(encryptedNif, key);
+          } catch {
+            console.error(`get_direct_sale_pdf_data: failed to decrypt nif for fiscal_entity ${fiscalEntityId}`);
+            return null;
+          }
+        };
+
+        // Empresa emitente. anew_organizations não tem colunas de NIF nem de
+        // morada: a resolução canónica é a do useOrgHeaderData —
+        //   morada: anew_org_addresses (fiscal primeiro, valid_to null) →
+        //           anew_entity_addresses (primária) → metadata.address
+        //   NIF:    fiscal_entities (link primário) → metadata.vat/metadata.nif
+        const loadCompany = async () => {
+          if (!saleOrgId) return null;
+          const { data: org } = await supabase
+            .from("anew_organizations")
+            .select("id, name, entity_id, logo_url, metadata")
+            .eq("id", saleOrgId)
+            .maybeSingle();
+          if (!org) return null;
+
+          const meta = ((org as any).metadata || {}) as Record<string, any>;
+          const orgEntityId = (org as any).entity_id || null;
+
+          const { data: orgAddresses } = await supabase
+            .from("anew_org_addresses")
+            .select("anew_addresses(street, number, postal_code, city)")
+            .eq("org_id", saleOrgId)
+            .is("valid_to", null)
+            .order("is_fiscal", { ascending: false })
+            .limit(1);
+          let address = joinAddress((orgAddresses as any)?.[0]?.anew_addresses);
+
+          if (!address && orgEntityId) {
+            const { data: orgEntityAddresses } = await supabase
+              .from("anew_entity_addresses")
+              .select("anew_addresses(street, number, postal_code, city)")
+              .eq("entity_id", orgEntityId)
+              .order("is_primary", { ascending: false })
+              .limit(1);
+            address = joinAddress((orgEntityAddresses as any)?.[0]?.anew_addresses);
+          }
+          if (!address && meta.address) address = String(meta.address);
+
+          const nif = (await revealPrimaryNif(orgEntityId)) || meta.vat || meta.nif || null;
+
+          return {
+            name: (org as any).name || null,
+            // `vat`, não `nif`: é o nome do campo no contrato que o frontend já
+            // tem (ProformaPdfCompany em generateProformaPdfBlob.ts e
+            // ProformaPDFDocument, que lê company.vat). Na BD chama-se nif; o
+            // contrato do documento chama-lhe vat. Manter os dois alinhados.
+            vat: nif || null,
+            address: address || null,
+            // Data URI base64, NÃO a URL. O @react-pdf/renderer a correr no
+            // browser do cliente do portal não consegue carregar a URL crua de
+            // forma fiável, e falha em silêncio — o PDF sai sem logótipo e
+            // ninguém percebe porquê. Convertido aqui, do lado do servidor,
+            // onde não há CORS. Se falhar, vai null e o documento sai sem
+            // logótipo: nunca impedir a emissão da proforma por causa de uma
+            // imagem.
+            logo_url: await fetchLogoAsDataUri((org as any).logo_url || null),
+          };
+        };
+
+        // Cliente destinatário. entity_id é a fonte; client_id (ficha de
+        // cliente da organização) é só o caminho alternativo para lá chegar,
+        // como já faz o resto do ficheiro (ver sign_proposal / resolveDocEntity).
+        const loadClient = async () => {
+          let clientEntityId = saleEntityId;
+          if (!clientEntityId && saleClientId) {
+            const { data: anewClient } = await supabase
+              .from("anew_clients")
+              .select("entity_id")
+              .eq("id", saleClientId)
+              .maybeSingle();
+            clientEntityId = (anewClient as any)?.entity_id || null;
+          }
+          if (!clientEntityId) return null;
+
+          const { data: entity } = await supabase
+            .from("anew_entities")
+            .select("id, display_name, first_name, last_name")
+            .eq("id", clientEntityId)
+            .maybeSingle();
+          if (!entity) return null;
+
+          const { data: entityAddresses } = await supabase
+            .from("anew_entity_addresses")
+            .select("anew_addresses(street, number, postal_code, city)")
+            .eq("entity_id", clientEntityId)
+            .order("is_primary", { ascending: false })
+            .limit(1);
+
+          const displayName = (entity as any).display_name
+            || [(entity as any).first_name, (entity as any).last_name].filter(Boolean).join(" ")
+            || null;
+
+          return {
+            name: displayName || null,
+            // `vat` pelo mesmo motivo do bloco da empresa, acima.
+            vat: await revealPrimaryNif(clientEntityId),
+            address: joinAddress((entityAddresses as any)?.[0]?.anew_addresses),
+          };
+        };
+
+        // Lista branca, não select("*") + stripCosts. O stripCosts é uma lista
+        // NEGRA: qualquer coluna interna acrescentada a direct_sale_lines no
+        // futuro passaria a ser enviada ao cliente no dia em que fosse criada,
+        // sem ninguém dar por isso. Estas são exactamente as 10 colunas que o
+        // documento usa (generateProformaPdfBlob.ts:273-275). O stripCosts
+        // continua aplicado a seguir, como rede de segurança.
+        const { data: saleLines } = await supabase
+          .from("direct_sale_lines")
+          .select(
+            "id, descricao_snapshot, qt, unidade, retail_price_unit, iva_percent, total_sem_iva, total_com_iva, total_com_desconto, ordem",
+          )
+          // Obrigatório — ver comentário acima (service_role ignora a RLS).
+          .eq("visible_to_client", true)
+          .eq("direct_sale_id", direct_sale_id)
+          .order("ordem", { ascending: true });
+
+        const company = await loadCompany();
+        const client = await loadClient();
+
+        return new Response(
+          JSON.stringify({
+            direct_sale: directSale,
+            lines: (saleLines || []).map((l: any) => stripCosts(l)),
+            company,
+            client,
+          }),
+          { headers: corsHeaders },
+        );
       }
 
       default:
@@ -1003,6 +1493,10 @@ serve(async (req) => {
   } catch (err: any) {
     console.error("Error in client-portal-action:", err);
     await captureError(err, { function: "client-portal-action" });
-    return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+    // Mensagem genérica, nunca err.message: esta função passou a manipular NIF
+    // decifrado (get_direct_sale_pdf_data), e a nif-reveal tem a mesma regra
+    // escrita à mão — "never echo it raw, since this handles decrypted NIF
+    // data". O erro real vai inteiro para o console e para o Sentry acima.
+    return new Response(JSON.stringify({ error: "Internal error" }), { status: 500, headers: corsHeaders });
   }
 });

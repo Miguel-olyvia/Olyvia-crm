@@ -11,14 +11,16 @@
  *
  * The organization is always the document's own `organization_id`, and the
  * commercial is resolved WITHIN that organization, in this order:
- *   1. the document's assigned commercial (proposals/quotes/contracts.assigned_to)
+ *   1. the document's assigned commercial (proposals/quotes/contracts/
+ *      direct_sales.assigned_to)
  *   2. else the responsible for that entity in that organization
  *      (anew_clients.assigned_to for entity_id + organization_id)
- *   3. else the deal's assigned commercial
+ *   3. else the deal's assigned commercial — skipped for direct sales, which
+ *      have no `deal_id` column at all
  *   4. else whoever created the document (a CRM user of that same org)
  */
 
-export type NotifyColumn = "proposal_id" | "quote_id" | "contract_id";
+export type NotifyColumn = "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id";
 
 export type NotifyTarget = { orgId: string | null; commercialAuthId: string | null };
 
@@ -26,6 +28,21 @@ const TABLE_FOR: Record<NotifyColumn, string> = {
   proposal_id: "proposals",
   quote_id: "quotes",
   contract_id: "client_contracts",
+  direct_sale_id: "direct_sales",
+};
+
+// As colunas pedidas dependem da tabela: `direct_sales` NÃO tem `deal_id` (a
+// venda direta não nasce de um "Pedido de Proposta"/deal — decisão de
+// arquitetura, ver 20261201120000_venda_direta_paridade_e_envios.sql). Pedir
+// `deal_id` a essa tabela devolveria erro PostgREST ("column does not exist")
+// para a linha INTEIRA: `doc` ficava null e a notificação de aceitação
+// desaparecia em silêncio. Os três tipos já em produção mantêm exatamente o
+// select de sempre.
+const COLUMNS_FOR: Record<NotifyColumn, string> = {
+  proposal_id: "assigned_to, entity_id, organization_id, created_by, deal_id",
+  quote_id: "assigned_to, entity_id, organization_id, created_by, deal_id",
+  contract_id: "assigned_to, entity_id, organization_id, created_by, deal_id",
+  direct_sale_id: "assigned_to, entity_id, organization_id, created_by",
 };
 
 async function toAuthId(supabase: any, internalId: string | null): Promise<string | null> {
@@ -46,7 +63,7 @@ export async function resolveNotifyTarget(
   const table = TABLE_FOR[column];
   const { data: doc, error: docError } = await supabase
     .from(table)
-    .select("assigned_to, entity_id, organization_id, created_by, deal_id")
+    .select(COLUMNS_FOR[column])
     .eq("id", id)
     .maybeSingle();
 

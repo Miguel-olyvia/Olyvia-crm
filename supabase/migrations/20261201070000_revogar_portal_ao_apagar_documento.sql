@@ -1,4 +1,14 @@
 -- ============================================================
+-- 20261201070000_revogar_portal_ao_apagar_documento
+-- ============================================================
+-- Recuperada da base de dados: esta migration foi aplicada ao projeto
+-- remoto sem ficheiro correspondente no repositorio. O SQL abaixo foi
+-- extraido de supabase_migrations.schema_migrations.statements, para o
+-- historico local voltar a refletir o estado real da base de dados.
+-- Ja aplicada e registada no remoto — nao volta a correr num db push.
+-- ============================================================
+
+-- ============================================================
 -- Eliminar uma proposta/orçamento/contrato retira-o do portal do cliente
 -- ============================================================
 -- Problema encontrado: soft_delete_business_entity() marca a linha como

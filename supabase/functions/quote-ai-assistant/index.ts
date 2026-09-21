@@ -20,9 +20,24 @@ const RATE_LIMIT_MAX_ATTEMPTS = 30;
 const RATE_LIMIT_WINDOW_MINUTES = 1;
 
 const requestSchema = z.object({
-  query: z.string(),
+  // NOTE: relaxed from required to optional — mode="diagnostic_suggestions"
+  // has no free-text query. mode="chat" (default) is unaffected: every real
+  // chat caller still sends `query`, so this is a widening, not a behaviour
+  // change, for the existing flow.
+  query: z.string().optional(),
   company_id: z.string().optional(),
   organization_id: z.string().optional(),
+  mode: z.enum(["chat", "diagnostic_suggestions"]).optional().default("chat"),
+  diagnostic_context: z
+    .object({
+      source_field: z.enum(["area_m2", "demolir", "proteger", "intervencao"]),
+      area_m2: z.number().nullable().optional(),
+      demolir_descricao: z.string().nullable().optional(),
+      proteger_descricao: z.string().nullable().optional(),
+      intervencao_tipo: z.string().nullable().optional(),
+      intervencao_descricao: z.string().nullable().optional(),
+    })
+    .optional(),
 });
 
 serve(async (req) => {
@@ -67,7 +82,7 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
-    const { query, company_id, organization_id: org_id } = parsed.data;
+    const { query, company_id, organization_id: org_id, mode, diagnostic_context } = parsed.data;
     const effective_org_id = org_id || company_id;
 
     // Scope check: caller must belong to the organization
@@ -90,6 +105,342 @@ serve(async (req) => {
       return rateLimitResponse(rateLimit, corsHeaders);
     }
     await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT_BUCKET, effective_org_id || caller.anewUserId);
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Mode: diagnostic_suggestions — IA fallback (2ª via) para a Fase 1 do
+    // diagnóstico de orçamento, usada quando rpc_preview_diagnostic_suggestions
+    // (regras determinísticas) não devolveu nada. O catálogo é pré-filtrado por
+    // palavras-chave ANTES de chamar o modelo, e o modelo só pode escolher
+    // ids dentro dessa pré-filtragem — nunca pode inventar um produto/serviço.
+    // Reaproveita resolveCallerIdentity/validateOrgScope/checkRateLimit/
+    // recordRateLimitAttempt já executados acima (mesmo bucket, sem contagem
+    // paralela) e chama checkAndConsumeAiCredits/refundAiCredits tal como o
+    // modo chat mais abaixo (mesmo AI_CREDIT_COSTS["quote-ai-assistant"]).
+    // ────────────────────────────────────────────────────────────────────────
+    if (mode === "diagnostic_suggestions") {
+      if (!diagnostic_context) {
+        return new Response(
+          JSON.stringify({ error: "diagnostic_context é obrigatório para mode=diagnostic_suggestions" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const {
+        source_field,
+        area_m2,
+        demolir_descricao,
+        proteger_descricao,
+        intervencao_tipo,
+        intervencao_descricao,
+      } = diagnostic_context;
+
+      // Stopwords PT comuns — mantém apenas termos com carga semântica para a
+      // pesquisa ilike sobre name/sku.
+      const PT_STOPWORDS = new Set([
+        "de", "da", "do", "das", "dos", "e", "a", "o", "as", "os", "para", "com",
+        "em", "no", "na", "nos", "nas", "um", "uma", "uns", "umas", "por", "que",
+        "se", "ao", "aos", "à", "às", "é", "ou",
+      ]);
+
+      const extractKeywords = (text: string | null | undefined): string[] => {
+        if (!text) return [];
+        return text
+          .toLowerCase()
+          .split(/[^\p{L}\p{N}]+/u)
+          .map((t) => t.trim())
+          .filter((t) => t.length >= 3 && !PT_STOPWORDS.has(t));
+      };
+
+      // Pequeno mapa estático de sinónimos por source_field (complementa a
+      // extração de palavras-chave do texto livre).
+      const FIELD_SYNONYMS: Record<string, string[]> = {
+        demolir: ["demolição", "entulho"],
+        proteger: ["proteção", "proteccao"],
+        intervencao: ["sanitário", "impermeabilização", "duche", "base de duche"],
+      };
+
+      const relevantText =
+        source_field === "intervencao"
+          ? [intervencao_tipo, intervencao_descricao].filter(Boolean).join(" ")
+          : source_field === "demolir"
+          ? demolir_descricao
+          : source_field === "proteger"
+          ? proteger_descricao
+          : null; // area_m2: sem campo de texto associado — só sinónimos (nenhum definido)
+
+      const terms = Array.from(
+        new Set([...extractKeywords(relevantText), ...(FIELD_SYNONYMS[source_field] || [])])
+      );
+
+      // Sem termos de pesquisa: não há forma de filtrar candidatos com segurança
+      // (evitar mandar o catálogo inteiro para o modelo) — devolve [] sem chamar
+      // a IA nem consumir créditos.
+      if (terms.length === 0) {
+        return new Response(
+          JSON.stringify({ suggestions: [] }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const orFilter = terms.flatMap((t) => [`name.ilike.%${t}%`, `sku.ilike.%${t}%`]).join(",");
+
+      const [{ data: candidateProductsRaw, error: candidateProductsError },
+             { data: candidateServicesRaw, error: candidateServicesError }] = await Promise.all([
+        supabase
+          .from("products")
+          .select("id, name, sku")
+          .eq("organization_id", effective_org_id)
+          .eq("is_active", true)
+          .eq("is_deleted", false)
+          .or(orFilter)
+          .limit(40),
+        supabase
+          .from("services")
+          .select("id, name, sku")
+          .eq("organization_id", effective_org_id)
+          .eq("is_active", true)
+          .eq("is_deleted", false)
+          .or(orFilter)
+          .limit(40),
+      ]);
+
+      if (candidateProductsError) console.error("Error fetching candidate products:", candidateProductsError);
+      if (candidateServicesError) console.error("Error fetching candidate services:", candidateServicesError);
+
+      const candidateProducts = candidateProductsRaw || [];
+      const candidateServices = candidateServicesRaw || [];
+
+      // Sem candidatos: nada para o modelo escolher — devolve [] sem chamar a
+      // IA nem consumir créditos.
+      if (candidateProducts.length === 0 && candidateServices.length === 0) {
+        return new Response(
+          JSON.stringify({ suggestions: [] }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const validProductIds = new Set(candidateProducts.map((p: any) => p.id));
+      const validServiceIds = new Set(candidateServices.map((s: any) => s.id));
+
+      // Nomes reais do catálogo por id — usados para preencher `descricao` na
+      // resposta final em vez do campo `name` livre que a IA devolve (mesma
+      // filosofia anti-alucinação já aplicada aos ids).
+      const productNameById = new Map<string, string>(candidateProducts.map((p: any) => [p.id, p.name]));
+      const serviceNameById = new Map<string, string>(candidateServices.map((s: any) => [s.id, s.name]));
+
+      const candidatesForPrompt = [
+        ...candidateProducts.map((p: any) => ({ id: p.id, type: "product", name: p.name, sku: p.sku })),
+        ...candidateServices.map((s: any) => ({ id: s.id, type: "service", name: s.name, sku: s.sku })),
+      ];
+
+      // Distinção crítica que o modelo tem de fazer: o texto de "demolir"/
+      // "proteger" descreve um OBJETO físico já existente no espaço (que vai
+      // ser destruído, ou que precisa de proteção) — não é o nome de um
+      // produto a comprar/instalar. Sem isto, a pesquisa por palavra-chave
+      // pode devolver, por coincidência, um produto do catálogo com o mesmo
+      // nome do objeto (ex.: texto "um armário" + produto real "Armário
+      // Inferior Termolaminado"), e o modelo sugere-o como se fosse a
+      // resposta — quando devia sugerir algo para proteger/demolir esse
+      // armário, nunca o próprio armário. Só "intervencao" descreve
+      // diretamente o trabalho a fazer, por isso não precisa deste aviso.
+      const FIELD_GUIDANCE: Partial<Record<typeof source_field, string>> = {
+        demolir:
+          'O texto de "demolir" descreve o elemento físico que vai ser destruído/removido (ex.: "uma parede", "um lavatório") — NÃO é o nome de um produto a comprar. Sugere só serviços de mão-de-obra de demolição, remoção/transporte de entulho, ou consumíveis de demolição. NUNCA sugiras um produto cujo nome coincida com o próprio elemento a demolir.',
+        proteger:
+          'O texto de "proteger" descreve o elemento físico já existente no espaço que precisa de ser protegido durante a obra (ex.: "um armário") — NÃO é o nome de um produto a comprar/instalar. Sugere só consumíveis ou serviços de proteção de obra (filme plástico, fita, cartão, mantas de proteção, etc.). NUNCA sugiras o próprio objeto mencionado como se fosse um produto a comprar — esse objeto já existe e só precisa de ser protegido, não substituído.',
+      };
+      const fieldGuidance = FIELD_GUIDANCE[source_field];
+
+      const diagnosticSystemPrompt = `Tu és um assistente que sugere produtos e serviços de um catálogo já filtrado, no contexto do diagnóstico de uma obra de remodelação (Fase 1 do orçamento).
+
+CAMPO EM ANÁLISE: ${source_field}
+${fieldGuidance ? `CONTEXTO IMPORTANTE PARA ESTE CAMPO: ${fieldGuidance}\n` : ""}
+DADOS DA ÁREA:
+- área (m2): ${area_m2 ?? "não indicada"}
+- demolir: ${demolir_descricao ?? "não indicado"}
+- proteger: ${proteger_descricao ?? "não indicado"}
+- tipo de intervenção: ${intervencao_tipo ?? "não indicado"}
+- descrição da intervenção: ${intervencao_descricao ?? "não indicada"}
+
+CATÁLOGO DISPONÍVEL (escolhe exclusivamente destes, usa o id exato):
+${JSON.stringify(candidatesForPrompt, null, 2)}
+
+INSTRUÇÕES:
+1. Escolhe só produtos/serviços da lista acima que sejam relevantes para o campo em análise.
+2. Distingue sempre o objeto mencionado no texto (que já existe no espaço, ou vai ser destruído) do produto/serviço a sugerir (que serve para agir sobre esse objeto — proteger, demolir, remover). Nunca sugiras o próprio objeto como se fosse a resposta, mesmo que um produto do catálogo tenha um nome parecido ou igual.
+3. NUNCA inventes um id ou um produto/serviço que não esteja na lista.
+4. Se nenhum for adequado, devolve suggestions: [].
+5. Se nenhum item da lista for adequado, mas souberes, pelo teu conhecimento geral de obras de remodelação, que tipo de material ou serviço seria tipicamente necessário para este campo, podes devolver UMA sugestão informativa com "product_id": null, "service_id": null, "exists_in_catalog": false, "type": "product" ou "service" (o que fizer mais sentido), e "name" com o nome genérico desse material/serviço — NUNCA inventes um id nem finjas que é um item real do catálogo. Usa isto com moderação, só quando fizer mesmo sentido; caso contrário suggestions: [] continua a ser uma resposta válida.
+6. Responde SEMPRE em português e SÓ com um JSON válido, neste formato:
+{
+  "suggestions": [
+    { "product_id": "uuid ou null", "service_id": "uuid ou null", "exists_in_catalog": true ou false, "type": "product" ou "service", "name": "nome exato do catálogo OU nome genérico do que falta", "reason": "razão da sugestão", "confidence": 0.0 }
+  ]
+}`;
+
+      // AI credits — mesmo gate/bucket de custo do modo chat (AI_CREDIT_COSTS["quote-ai-assistant"]).
+      const creditsResultDiag = await checkAndConsumeAiCredits(
+        supabaseAdmin,
+        effective_org_id as string,
+        AI_CREDIT_COSTS["quote-ai-assistant"],
+      );
+      if (creditsResultDiag.blocked) {
+        return aiCreditsBlockedResponse(creditsResultDiag, corsHeaders);
+      }
+
+      let diagResponse;
+      try {
+        diagResponse = await callAiGateway({
+          model: "gemini-3.5-flash-lite",
+          messages: [
+            { role: "system", content: diagnosticSystemPrompt },
+            { role: "user", content: "Sugere produtos/serviços para este campo do diagnóstico." },
+          ],
+          temperature: 0.7,
+          response_format: { type: "json_object" },
+        });
+      } catch (gatewayError) {
+        await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
+        throw gatewayError;
+      }
+
+      if (!diagResponse.ok) {
+        const errorText = await diagResponse.text();
+        console.error("AI Gateway error (diagnostic_suggestions):", diagResponse.status, errorText);
+
+        if (diagResponse.status === 429) {
+          await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
+          return new Response(
+            JSON.stringify({ error: "Rate limit exceeded, please try again later" }),
+            { status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        if (diagResponse.status === 402) {
+          await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
+          return new Response(
+            JSON.stringify({ error: "Payment required, please add credits" }),
+            { status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        await refundAiCredits(supabaseAdmin, effective_org_id as string, AI_CREDIT_COSTS["quote-ai-assistant"]);
+        throw new Error(`AI gateway error: ${diagResponse.status}`);
+      }
+
+      const diagAiResponse = await diagResponse.json();
+      const diagContent = diagAiResponse.choices?.[0]?.message?.content || "";
+
+      // Mesma abordagem de extração de JSON já usada no modo chat abaixo
+      // (regex de salvaguarda, além do response_format:{type:"json_object"}).
+      let parsedDiagnostic: any;
+      try {
+        const jsonMatch = diagContent.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsedDiagnostic = JSON.parse(jsonMatch[0]);
+        } else {
+          parsedDiagnostic = { suggestions: [] };
+        }
+      } catch (parseError) {
+        console.error("Error parsing AI response (diagnostic_suggestions):", parseError);
+        parsedDiagnostic = { suggestions: [] };
+      }
+
+      const rawSuggestions = Array.isArray(parsedDiagnostic?.suggestions) ? parsedDiagnostic.suggestions : [];
+
+      // Validação anti-alucinação obrigatória: só passam sugestões cujo
+      // product_id/service_id esteja no conjunto de candidatos devolvidos
+      // pela query desta chamada. Descarta silenciosamente o resto (sem erro
+      // visível ao utilizador), registando um aviso via captureError. Ao
+      // mesmo tempo, mapeia cada sugestão válida para o contrato esperado
+      // pelo frontend (AiSuggestionResponseItem em useQuoteDiagnosticSuggestions.ts).
+      const mappedSuggestions = rawSuggestions.map((s: any) => {
+        // Caso B — sugestão informativa: a própria IA diz que não existe no
+        // catálogo. Ignora por completo qualquer product_id/service_id que
+        // tenha enviado (nunca confiar num id quando o modelo afirma que não
+        // é um item real) e valida só que há um nome genérico utilizável.
+        if (s?.exists_in_catalog === false) {
+          const name = typeof s?.name === "string" ? s.name.trim() : "";
+          if (!name) return null;
+
+          return {
+            target_type: (s?.type === "service" ? "service" : "product") as "product" | "service",
+            product_id: null,
+            service_id: null,
+            catalog_item_id: null,
+            descricao: name,
+            qty: 1,
+            unidade: null,
+            rationale: s?.reason ?? null,
+            confidence: typeof s?.confidence === "number" ? s.confidence : null,
+            exists_in_catalog: false,
+          };
+        }
+
+        // Caso A — comportamento atual (id undefined/true tratado da mesma
+        // forma, por compatibilidade caso o modelo omita o campo).
+        const pid = s?.product_id || null;
+        const sid = s?.service_id || null;
+
+        if (pid && validProductIds.has(pid)) {
+          return {
+            target_type: "product" as const,
+            product_id: pid,
+            service_id: null,
+            catalog_item_id: null,
+            // Nome real do catálogo, nunca o `name` livre da IA — proteção
+            // anti-alucinação extra (fallback "" nunca deve ocorrer, o id já
+            // foi validado contra validProductIds).
+            descricao: productNameById.get(pid) ?? "",
+            // A IA não estima quantidade neste modo (só a via de regras
+            // calcula por fórmula) — fixa em 1 para nunca deixar passar uma
+            // linha com qty 0 (Number(undefined) || 0 no frontend).
+            qty: 1,
+            // Nem products nem services têm coluna de unidade direta na BD
+            // (a via de regras usa default_qt_unit da própria regra).
+            unidade: null,
+            rationale: s?.reason ?? null,
+            confidence: typeof s?.confidence === "number" ? s.confidence : null,
+            exists_in_catalog: true,
+          };
+        }
+
+        if (sid && validServiceIds.has(sid)) {
+          return {
+            target_type: "service" as const,
+            product_id: null,
+            service_id: sid,
+            catalog_item_id: null,
+            descricao: serviceNameById.get(sid) ?? "",
+            qty: 1,
+            unidade: null,
+            rationale: s?.reason ?? null,
+            confidence: typeof s?.confidence === "number" ? s.confidence : null,
+            exists_in_catalog: true,
+          };
+        }
+
+        return null;
+      });
+
+      const filteredSuggestions = mappedSuggestions.filter((s: any) => s !== null);
+
+      if (filteredSuggestions.length !== rawSuggestions.length) {
+        await captureError(
+          new Error("quote-ai-assistant diagnostic_suggestions: sugestão inválida descartada (id fora do catálogo filtrado, ou sugestão sem nome)"),
+          {
+            function: "quote-ai-assistant",
+            mode: "diagnostic_suggestions",
+            organization_id: effective_org_id,
+            discarded_count: rawSuggestions.length - filteredSuggestions.length,
+          },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ suggestions: filteredSuggestions }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Fetch historical quote data for context
     const { data: recentQuotes, error: quotesError } = await supabase

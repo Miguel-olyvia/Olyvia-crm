@@ -2,7 +2,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LogOut, FileText, ScrollText, FolderOpen, Home } from "lucide-react";
+import { LogOut, FileText, ScrollText, FolderOpen, Home, Receipt } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FirstLoginModal } from "@/components/portal/FirstLoginModal";
 import { useToast } from "@/hooks/use-toast";
@@ -14,6 +14,7 @@ interface ClientPortalLayoutProps {
 const NAV_ITEMS = [
   { label: "Início", icon: Home, path: "/client-portal", matchPaths: ["/client-portal"], badgeKey: null },
   { label: "Propostas", icon: FileText, path: "/client-portal/proposals", matchPaths: ["/client-portal/proposals"], badgeKey: "proposals" as const },
+  { label: "Vendas Diretas", icon: Receipt, path: "/client-portal/direct-sales", matchPaths: ["/client-portal/direct-sales"], badgeKey: "directSales" as const },
   { label: "Contratos", icon: ScrollText, path: "/client-portal/contracts", matchPaths: ["/client-portal/contracts"], badgeKey: "contracts" as const },
   { label: "Documentos", icon: FolderOpen, path: "/client-portal/documents", matchPaths: ["/client-portal/documents"], badgeKey: null },
 ];
@@ -37,7 +38,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const [orgName, setOrgName] = useState("");
   const [orgLogo, setOrgLogo] = useState<string | null>(null);
   const [showFirstLogin, setShowFirstLogin] = useState(false);
-  const [badgeCounts, setBadgeCounts] = useState<{ proposals: number; contracts: number }>({ proposals: 0, contracts: 0 });
+  const [badgeCounts, setBadgeCounts] = useState<{ proposals: number; contracts: number; directSales: number }>({ proposals: 0, contracts: 0, directSales: 0 });
 
   useEffect(() => {
     let cancelled = false;
@@ -135,7 +136,40 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         }
 
         if (cancelled) return;
-        setBadgeCounts({ proposals: pendingProposals, contracts: pendingContracts });
+        setBadgeCounts(prev => ({ ...prev, proposals: pendingProposals, contracts: pendingContracts }));
+
+        // Venda Direta — contagem estritamente aditiva: corre DEPOIS de as
+        // contagens de propostas/contratos já estarem no estado e atualiza só a
+        // sua chave. Qualquer falha aqui (query, RLS, coluna em falta) deixa as
+        // outras duas intactas — é o motivo do try/catch e do setState
+        // funcional.
+        //
+        // Sem filtro por client_portal_users.direct_sale_id: essa coluna guarda
+        // apenas a ÚLTIMA venda direta partilhada com a conta de portal
+        // (create-client-portal-access faz update da mesma linha), por isso
+        // esconderia as anteriores. O âmbito real vem da RLS "Client can view
+        // own direct sale" (via client_portal_documents); o filtro por
+        // entidade/organização abaixo é só para estreitar a query, mesmo padrão
+        // das propostas.
+        //
+        // `(supabase as any)`: direct_sales ainda não existe em
+        // src/integrations/supabase/types.ts.
+        try {
+          if (entityPairs.length > 0) {
+            const dsEntityIds = Array.from(new Set(entityPairs.map(e => e.entity_id)));
+            const dsOrgIds = Array.from(new Set(entityPairs.map(e => e.organization_id)));
+            const { data: directSales } = await (supabase as any)
+              .from("direct_sales")
+              .select("id")
+              .in("entity_id", dsEntityIds)
+              .in("organization_id", dsOrgIds)
+              .eq("status", "enviada");
+            if (cancelled) return;
+            setBadgeCounts(prev => ({ ...prev, directSales: (directSales as any[] | null)?.length || 0 }));
+          }
+        } catch {
+          // contagem opcional — nunca deve afetar o resto do portal
+        }
       }
     }
 

@@ -34,6 +34,12 @@ import { leadEditGeneralFieldsSchema, leadEditNotesSchema } from "@/lib/validati
 import { linkEntityFiscalEntity } from "@/utils/orgFiscalEntity";
 import { linkEntityAddress, linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { checkNifCollisionOnEdit } from "@/lib/duplicateBlockingRule";
+import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
+import {
+  isLeadStageTransitionAllowed,
+  LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+  leadStageTransitionBlockedMessage,
+} from "@/lib/leads/stageTransitionGuard";
 
 interface Lead {
   id: string;
@@ -172,7 +178,15 @@ export function AnewLeadEditDialog({
 }: LeadEditDialogProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  
+
+  // Restrição de transições desenhada no diagrama de fluxo. Só se aplica a
+  // mudanças feitas por utilizadores — é exatamente o caso deste diálogo.
+  const {
+    stages: pipelineStages,
+    enforceStageTransitions,
+    transitions: stageTransitions,
+  } = useLeadPipelineRules(companyId);
+
   const [fieldDefs, setFieldDefs] = useState<LeadDialogFieldDefinition[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, any>>({});
   const [status, setStatus] = useState("new");
@@ -377,7 +391,27 @@ export function AnewLeadEditDialog({
 
       let workflowStageId = lead.workflow_stage_id || null;
       if (statusChanged) {
+        // O destino só é conhecido depois de resolvido o estágio, por isso a
+        // guarda corre imediatamente a seguir — e sempre ANTES de qualquer
+        // escrita (a RPC rpc_update_lead só é chamada mais abaixo).
         workflowStageId = await resolveWorkflowStageId(status);
+
+        if (!isLeadStageTransitionAllowed({
+          enforce: enforceStageTransitions,
+          transitions: stageTransitions,
+          fromStageId: lead.workflow_stage_id ?? null,
+          toStageId: workflowStageId,
+        })) {
+          toast({
+            title: LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+            description: leadStageTransitionBlockedMessage(
+              pipelineStages.find(s => s.id === lead.workflow_stage_id)?.label,
+              pipelineStages.find(s => s.id === workflowStageId)?.label,
+            ),
+            variant: "destructive",
+          });
+          return; // o finally envolvente limpa o `saving`
+        }
       }
 
       // Derive the same entity display-name fields the FE used to write

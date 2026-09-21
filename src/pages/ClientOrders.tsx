@@ -27,8 +27,9 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { EntitySearchInput, type EntitySearchResult } from "@/components/EntitySearchInput";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { Badge } from "@/components/ui/badge";
-import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Plus, Trash2 } from "lucide-react";
+import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Plus, ShoppingBag, Trash2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
 import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
 
@@ -93,17 +94,77 @@ interface ClientOrderAvailableWarehouse {
   quantity: number;
 }
 
+// Uma linha é de produto OU de serviço (item_type), nunca das duas. A RPC
+// rpc_get_client_order_document já devolve os dois pares de campos desde
+// 20261130190000, com o par não aplicável a NULL — daí product_id/product_name
+// serem anuláveis. Ler só o par do produto deixava as linhas de serviço sem SKU
+// e sem descrição na tabela.
 interface ClientOrderDocumentLine {
   quote_line_id: string;
-  product_id: string;
-  product_name: string;
+  item_type: 'product' | 'service';
+  product_id: string | null;
+  product_name: string | null;
   product_sku: string | null;
+  service_id: string | null;
+  service_name: string | null;
+  service_sku: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
   stock_movement_id: string | null;
   purchase_order_id: string | null;
   purchase_order_number: string | null;
   available_warehouses: ClientOrderAvailableWarehouse[] | null;
+}
+
+// Origem de uma encomenda que nasceu de uma venda direta (Fase 5). Ausente
+// quando a encomenda veio de uma proposta assinada ou foi criada à mão.
+interface DirectSaleOrigin {
+  direct_sale_id: string;
+  sale_number: string | null;
+  proforma_number: string | null;
+}
+
+// Diagnóstico da obra (Fase 1): cópia congelada do levantamento de necessidades
+// do pedido de proposta, para o armazém saber o que vai ser executado.
+//
+// Quem escreve o snapshot é o frontend, não a BD: o `QuoteBuilder` chama
+// `rpc_snapshot_quote_diagnostic(quote_id, deal_id)` em cada gravação do
+// orçamento que tenha `deal_id` (ver `handleSave` em
+// `src/components/QuoteBuilder.tsx`). Não existe nenhum trigger de assinatura
+// do contrato a preencher `quote_diagnostic_snapshot` — se um orçamento nunca
+// for gravado pelo builder, a encomenda fica sem diagnóstico. Tal como
+// `available_warehouses`, chega dentro do jsonb de
+// `rpc_get_client_order_document` — e como `supabase gen types` gera sempre
+// `Returns: Json` (opaco) para essa RPC, a tipagem tem de ser manual aqui e
+// validada defensivamente em `normalizeDiagnosticNeeds`. Não é um `as any`
+// temporário nem se edita types.ts por causa disto.
+//
+// Um material é informativo: é o que o diagnóstico previu, não é linha da
+// encomenda — não tem preço nem soma ao total.
+export interface ClientOrderDiagnosticMaterial {
+  descricao: string | null;
+  quantity: number;
+  unidade: string | null;
+  product_id: string | null;
+  service_id: string | null;
+}
+
+// Um elemento por necessidade da obra. Encomendas de venda direta e encomendas
+// manuais nunca têm diagnóstico: a RPC devolve `[]` e não se mostra nada — é o
+// comportamento correto, não é erro.
+// Exportado (só o tipo) para o PDF em `ClientOrderDocumentPDF.tsx` reutilizar
+// esta forma em vez de a duplicar. O import lá é `import type`, logo não há
+// dependência circular em runtime.
+export interface ClientOrderDiagnosticNeed {
+  deal_need_id: string;
+  need_title: string | null;
+  diag_area_m2: number | null;
+  diag_demolir_descricao: string | null;
+  diag_demolir_m2: number | null;
+  diag_proteger_descricao: string | null;
+  diag_intervencao_tipo: string | null;
+  diag_intervencao_descricao: string | null;
+  materials: ClientOrderDiagnosticMaterial[];
 }
 
 interface ClientOrderDocumentDetail {
@@ -114,7 +175,59 @@ interface ClientOrderDocumentDetail {
   total_value: number | null;
   status: string;
   lines: ClientOrderDocumentLine[];
+  // Opcional de propósito: a chave só passa a existir depois de a migração da
+  // RPC estar aplicada, e `fetchDetail` normaliza sempre para array.
+  diagnostic?: ClientOrderDiagnosticNeed[];
 }
+
+// --- Normalização defensiva do bloco `diagnostic` -------------------------
+// O jsonb da RPC não é validado pelo TypeScript: qualquer campo pode vir em
+// falta, a null, ou (no caso dos numéricos do Postgres) como string. Estas
+// funções garantem que o diálogo só lê a forma que declarámos acima.
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const asOptionalText = (value: unknown): string | null =>
+  typeof value === 'string' && value.trim() !== '' ? value.trim() : null;
+
+const asOptionalNumber = (value: unknown): number | null => {
+  const parsed = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && value.trim() !== ''
+      ? Number(value)
+      : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeDiagnosticMaterials = (raw: unknown): ClientOrderDiagnosticMaterial[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isPlainRecord).map((material) => ({
+    descricao: asOptionalText(material.descricao),
+    quantity: asOptionalNumber(material.quantity) ?? 0,
+    unidade: asOptionalText(material.unidade),
+    product_id: asOptionalText(material.product_id),
+    service_id: asOptionalText(material.service_id),
+  }));
+};
+
+const normalizeDiagnosticNeeds = (raw: unknown): ClientOrderDiagnosticNeed[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(isPlainRecord).map((need, index) => ({
+    deal_need_id: asOptionalText(need.deal_need_id) ?? `diag-${index}`,
+    need_title: asOptionalText(need.need_title),
+    diag_area_m2: asOptionalNumber(need.diag_area_m2),
+    diag_demolir_descricao: asOptionalText(need.diag_demolir_descricao),
+    diag_demolir_m2: asOptionalNumber(need.diag_demolir_m2),
+    diag_proteger_descricao: asOptionalText(need.diag_proteger_descricao),
+    diag_intervencao_tipo: asOptionalText(need.diag_intervencao_tipo),
+    diag_intervencao_descricao: asOptionalText(need.diag_intervencao_descricao),
+    materials: normalizeDiagnosticMaterials(need.materials),
+  }));
+};
+
+// Quantidades/áreas do diagnóstico: separador decimal PT e sem casas a mais.
+const formatDiagnosticNumber = (value: number): string =>
+  new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(value);
 
 const ClientOrders = () => {
   const { t } = useTranslation();
@@ -125,7 +238,24 @@ const ClientOrders = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const canConfirmStockExit = hasPermission('inventory.edit') && hasPermission('client_orders.confirm_stock_exit');
 
+  // As chaves da secção "Diagnóstico da obra" ainda não existem em
+  // src/translations/index.ts (ficheiro fora do âmbito desta alteração).
+  // `t()` devolve a própria chave quando não a encontra, pelo que `tf` mostra
+  // o texto PT de reserva entretanto — e passa a usar a tradução sozinho assim
+  // que as chaves forem acrescentadas, sem mexer neste ficheiro outra vez.
+  const tf = useCallback((key: string, fallback: string): string => {
+    const value = t(key);
+    return value === key ? fallback : value;
+  }, [t]);
+
   const [orders, setOrders] = useState<ClientOrderDocumentRow[]>([]);
+  // Origem "Venda Direta", indexada por contract_id. Vem de uma query própria a
+  // direct_sales em vez de das RPCs de encomendas: evita um CREATE OR REPLACE
+  // sobre duas funções de ~240 linhas só para acrescentar três campos, e faz
+  // com que a RLS de direct_sales.view decida quem vê a origem — quem não pode
+  // ver vendas directas não passa a vê-las através desta página.
+  const [salesByContract, setSalesByContract] = useState<Record<string, DirectSaleOrigin>>({});
+  const [proformaDownloadingId, setProformaDownloadingId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(0);
@@ -189,6 +319,58 @@ const ClientOrders = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
+  /**
+   * Descarrega a proforma da venda direta que originou esta encomenda.
+   * Reutiliza o gerador do módulo de Vendas Diretas em modo CRM (sem
+   * prefetch): é ele que lê as linhas, o emitente e o cliente, e é o mesmo
+   * que produz o PDF do portal — os dois documentos não podem divergir.
+   */
+  const handleDownloadProforma = async (contractId: string) => {
+    const origin = salesByContract[contractId];
+    if (!origin || proformaDownloadingId) return;
+    setProformaDownloadingId(contractId);
+    try {
+      const { blob, fileName } = await generateProformaPdfBlob(origin.direct_sale_id);
+      downloadBlob(blob, fileName);
+    } catch (error: any) {
+      toast({
+        title: t('clientOrders.toast.proformaError'),
+        description: error?.message,
+        variant: "destructive",
+      });
+    } finally {
+      setProformaDownloadingId(null);
+    }
+  };
+
+  const loadOrigins = useCallback(async (contractIds: string[], reset: boolean) => {
+    if (reset) setSalesByContract({});
+    if (contractIds.length === 0) return;
+    try {
+      const { data, error } = await (supabase as any)
+        .from("direct_sales")
+        .select("id, sale_number, proforma_number, client_contract_id")
+        .in("client_contract_id", contractIds)
+        .is("deleted_at", null);
+      if (error) throw error;
+      const found = (data as Array<{ id: string; sale_number: string | null; proforma_number: string | null; client_contract_id: string }> | null) || [];
+      if (found.length === 0) return;
+      setSalesByContract((prev) => {
+        const next = reset ? {} : { ...prev };
+        for (const s of found) {
+          next[s.client_contract_id] = {
+            direct_sale_id: s.id,
+            sale_number: s.sale_number,
+            proforma_number: s.proforma_number,
+          };
+        }
+        return next;
+      });
+    } catch {
+      // Silencioso por desenho — ver a chamada em loadOrders.
+    }
+  }, []);
+
   const loadOrders = useCallback(async (pageNum: number, reset: boolean) => {
     const filters = filtersRef.current;
     if (!filters.activeCompanyId) return;
@@ -223,6 +405,12 @@ const ClientOrders = () => {
           return [...prev, ...newRows.filter((o) => !existingIds.has(o.contract_id))];
         });
       }
+
+      // Origem, só para os contratos desta página. Falha em silêncio de
+      // propósito: sem permissão direct_sales.view a RLS devolve vazio, e a
+      // encomenda continua a mostrar-se — apenas sem o distintivo. Nunca pode
+      // impedir a listagem de carregar.
+      void loadOrigins(newRows.map((o) => o.contract_id), reset);
       // Sem total_count na RPC — hasMore inferido do tamanho da página devolvida.
       setHasMore(newRows.length === PAGE_SIZE);
       setPage(pageNum);
@@ -232,7 +420,7 @@ const ClientOrders = () => {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [t, toast]);
+  }, [t, toast, loadOrigins]);
 
   useEffect(() => {
     if (!activeCompany?.id) return;
@@ -260,7 +448,16 @@ const ClientOrders = () => {
       p_contract_id: contractId,
     });
     if (error) throw error;
-    return data as unknown as ClientOrderDocumentDetail;
+    const doc = data as unknown as ClientOrderDocumentDetail;
+    // Fluxo inalterado: só se acrescenta o bloco `diagnostic` já normalizado,
+    // para o diálogo ler sempre um array (a chave não existe nas encomendas
+    // sem diagnóstico, nem enquanto a migração da RPC não estiver aplicada).
+    // O cast local é mínimo — types.ts não conhece o campo e não é editado.
+    if (!doc || typeof doc !== 'object') return doc;
+    return {
+      ...doc,
+      diagnostic: normalizeDiagnosticNeeds((doc as { diagnostic?: unknown }).diagnostic),
+    };
   };
 
   const openDetail = async (contractId: string) => {
@@ -270,6 +467,9 @@ const ClientOrders = () => {
     try {
       const doc = await fetchDetail(contractId);
       setDetailData(doc);
+      // O deep-link ?open=<contract_id> pode abrir uma encomenda que não está
+      // na página carregada, e nesse caso a origem ainda não foi buscada.
+      if (!salesByContract[contractId]) void loadOrigins([contractId], false);
     } catch (error: any) {
       toast({ title: t('clientOrders.toast.detailError'), description: error.message, variant: "destructive" });
       setDetailOpen(false);
@@ -329,8 +529,19 @@ const ClientOrders = () => {
         company = { name: orgData?.name, logo_url: logoBase64 || orgData?.logo_url };
       }
 
+      // A origem pode não estar em cache quando o PDF é pedido a partir de uma
+      // linha ainda não aberta em detalhe; sem ela o PDF sai apenas sem a
+      // menção à venda direta, nunca em erro.
+      const origin = salesByContract[contractId];
       const blob = await pdf(
-        <ClientOrderDocumentPDF document={doc} company={company} />
+        <ClientOrderDocumentPDF
+          document={{
+            ...doc,
+            direct_sale_number: origin?.sale_number ?? null,
+            proforma_number: origin?.proforma_number ?? null,
+          }}
+          company={company}
+        />
       ).toBlob();
 
       const url = URL.createObjectURL(blob);
@@ -445,6 +656,10 @@ const ClientOrders = () => {
       a_aguardar_encomenda: "bg-info/10 text-info",
       stock_disponivel_confirmar: "bg-warning/10 text-warning",
       sem_fornecedor: "bg-destructive/10 text-destructive",
+      // Neutro de propósito: uma linha de serviço não tem stock nem fornecedor,
+      // por isso não é uma pendência. Sem esta entrada caía no fallback
+      // vermelho e parecia um problema por resolver.
+      servico: "bg-muted text-muted-foreground",
     };
     return colors[status] || colors.sem_fornecedor;
   };
@@ -461,6 +676,8 @@ const ClientOrders = () => {
         return t('clientOrders.lineStatus.stockAvailableConfirm');
       case 'sem_fornecedor':
         return t('clientOrders.lineStatus.noSupplier');
+      case 'servico':
+        return t('clientOrders.lineStatus.service');
       default:
         return line.line_status;
     }
@@ -471,8 +688,12 @@ const ClientOrders = () => {
   // já recalcula badges/labels da mesma forma).
   const getAvailableProductsProgress = () => {
     if (!detailData) return { done: 0, total: 0, percent: 0 };
-    const total = detailData.lines.length;
-    const done = detailData.lines.filter((line) =>
+    // Só produtos entram na contagem: uma linha de serviço nunca pode ficar
+    // "disponível", por isso contá-la no denominador tornava os 100%
+    // inalcançáveis em qualquer encomenda com serviços.
+    const productLines = detailData.lines.filter((line) => line.line_status !== 'servico');
+    const total = productLines.length;
+    const done = productLines.filter((line) =>
       ['servido_por_stock', 'recebido', 'stock_disponivel_confirmar'].includes(line.line_status)
     ).length;
     const percent = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -880,7 +1101,20 @@ const ClientOrders = () => {
             ) : (
               orders.map((order) => (
                 <TableRow key={order.contract_id}>
-                  <TableCell className="font-medium">{order.contract_number}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex flex-col gap-1">
+                      <span>{order.contract_number}</span>
+                      {salesByContract[order.contract_id] && (
+                        <Badge variant="outline" className="w-fit gap-1 font-normal text-xs">
+                          <ShoppingBag className="h-3 w-3" />
+                          {t('clientOrders.origin.directSale')}
+                          {salesByContract[order.contract_id].sale_number
+                            ? ` ${salesByContract[order.contract_id].sale_number}`
+                            : ''}
+                        </Badge>
+                      )}
+                    </div>
+                  </TableCell>
                   <TableCell>{order.client_name || '-'}</TableCell>
                   <TableCell>
                     {order.signature_date ? new Date(order.signature_date).toLocaleDateString('pt-PT') : '-'}
@@ -964,7 +1198,170 @@ const ClientOrders = () => {
                       : '-'}
                   </span>
                 </div>
+                {salesByContract[detailData.contract_id] && (
+                  <div className="col-span-2 flex flex-wrap items-center gap-2">
+                    <span className="text-muted-foreground">{t('clientOrders.dialog.origin')}: </span>
+                    <Badge variant="outline" className="gap-1 font-normal">
+                      <ShoppingBag className="h-3 w-3" />
+                      {t('clientOrders.origin.directSale')}
+                      {salesByContract[detailData.contract_id].sale_number
+                        ? ` ${salesByContract[detailData.contract_id].sale_number}`
+                        : ''}
+                    </Badge>
+                    {salesByContract[detailData.contract_id].proforma_number && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1"
+                        onClick={() => handleDownloadProforma(detailData.contract_id)}
+                        disabled={proformaDownloadingId === detailData.contract_id}
+                      >
+                        {proformaDownloadingId === detailData.contract_id
+                          ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          : <FileDown className="h-3.5 w-3.5" />}
+                        {salesByContract[detailData.contract_id].proforma_number}
+                      </Button>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* Diagnóstico da obra — só-leitura. Cópia congelada tirada pelo
+                  QuoteBuilder quando o orçamento é gravado (não há trigger de
+                  assinatura de contrato nenhum por trás disto), para o armazém
+                  saber o que vai executar. Não renderiza nada (nem título, nem
+                  caixa) quando a encomenda não tem diagnóstico: é o caso normal
+                  das vendas diretas e das encomendas manuais. */}
+              {(() => {
+                const needs = detailData.diagnostic ?? [];
+                if (needs.length === 0) return null;
+                return (
+                  <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <ClipboardCheck className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <h3 className="text-sm font-semibold">
+                        {tf('clientOrders.dialog.diagnostic.title', 'Diagnóstico da obra')}
+                      </h3>
+                      <Badge variant="outline" className="font-normal">
+                        {tf('clientOrders.dialog.diagnostic.readOnlyBadge', 'Só leitura')}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {tf(
+                        'clientOrders.dialog.diagnostic.subtitle',
+                        'Cópia do diagnóstico no momento em que o orçamento foi gravado. Não faz parte das linhas da encomenda.'
+                      )}
+                    </p>
+
+                    {needs.map((need) => {
+                      // Só os campos preenchidos entram na lista — rótulos sem
+                      // valor não se mostram.
+                      const fields: Array<{ label: string; value: string; wide?: boolean }> = [];
+                      if (need.diag_demolir_descricao) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.demolish', 'Demolir'),
+                          value: need.diag_demolir_descricao,
+                          wide: true,
+                        });
+                      }
+                      if (need.diag_demolir_m2 !== null) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.demolishArea', 'Área a demolir'),
+                          value: `${formatDiagnosticNumber(need.diag_demolir_m2)} m²`,
+                        });
+                      }
+                      if (need.diag_proteger_descricao) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.protect', 'Proteger'),
+                          value: need.diag_proteger_descricao,
+                          wide: true,
+                        });
+                      }
+                      if (need.diag_intervencao_tipo) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.interventionType', 'Tipo de intervenção'),
+                          value: need.diag_intervencao_tipo,
+                        });
+                      }
+                      if (need.diag_intervencao_descricao) {
+                        fields.push({
+                          label: tf('clientOrders.dialog.diagnostic.interventionDescription', 'Descrição da intervenção'),
+                          value: need.diag_intervencao_descricao,
+                          wide: true,
+                        });
+                      }
+
+                      return (
+                        <div
+                          key={need.deal_need_id}
+                          className="space-y-3 rounded-md border bg-background p-3"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span className="min-w-0 break-words text-sm font-medium">
+                              {need.need_title
+                                || tf('clientOrders.dialog.diagnostic.untitledNeed', 'Necessidade sem título')}
+                            </span>
+                            {need.diag_area_m2 !== null && (
+                              <Badge variant="secondary" className="shrink-0 font-normal">
+                                {formatDiagnosticNumber(need.diag_area_m2)} m²
+                              </Badge>
+                            )}
+                          </div>
+
+                          {fields.length > 0 && (
+                            <dl className="grid grid-cols-1 gap-x-4 gap-y-2 text-sm sm:grid-cols-2">
+                              {fields.map((field) => (
+                                <div key={field.label} className={field.wide ? 'sm:col-span-2' : undefined}>
+                                  <dt className="text-xs text-muted-foreground">{field.label}</dt>
+                                  <dd className="whitespace-pre-wrap break-words font-medium">{field.value}</dd>
+                                </div>
+                              ))}
+                            </dl>
+                          )}
+
+                          {need.materials.length > 0 && (
+                            <div className="space-y-1.5">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                                  {tf('clientOrders.dialog.diagnostic.materials', 'Materiais previstos')}
+                                </span>
+                                <Badge variant="outline" className="font-normal">
+                                  {tf(
+                                    'clientOrders.dialog.diagnostic.materialsBadge',
+                                    'Informativo para o armazém'
+                                  )}
+                                </Badge>
+                              </div>
+                              <p className="text-xs text-muted-foreground">
+                                {tf(
+                                  'clientOrders.dialog.diagnostic.materialsNote',
+                                  'Não são linhas da encomenda, não têm preço e não somam ao total.'
+                                )}
+                              </p>
+                              <ul className="space-y-1">
+                                {need.materials.map((material, materialIndex) => (
+                                  <li
+                                    key={`${need.deal_need_id}-mat-${materialIndex}`}
+                                    className="flex items-baseline gap-2 text-sm"
+                                  >
+                                    <span className="shrink-0 whitespace-nowrap font-medium tabular-nums">
+                                      {formatDiagnosticNumber(material.quantity)}
+                                      {material.unidade ? ` ${material.unidade}` : ''}
+                                    </span>
+                                    <span className="min-w-0 break-words text-muted-foreground">
+                                      {material.descricao || '-'}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {(() => {
                 const { done, total, percent } = getAvailableProductsProgress();
@@ -1015,8 +1412,8 @@ const ClientOrders = () => {
                   ) : (
                     detailData.lines.map((line) => (
                       <TableRow key={line.quote_line_id}>
-                        <TableCell>{line.product_sku || '-'}</TableCell>
-                        <TableCell>{line.product_name}</TableCell>
+                        <TableCell>{line.product_sku || line.service_sku || '-'}</TableCell>
+                        <TableCell>{line.product_name || line.service_name || '-'}</TableCell>
                         <TableCell className="text-right">{line.quantity}</TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">

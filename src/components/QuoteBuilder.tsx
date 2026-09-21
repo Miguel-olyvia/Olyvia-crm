@@ -27,8 +27,8 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { resolveQuoteAssignedTo } from "@/utils/quotes/resolveQuoteAssignedTo";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw, AlertTriangle } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, EyeOff, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
+import { formatCurrency, cn } from "@/lib/utils";
 import { QuotePipelineBar } from "@/components/quote/QuotePipelineBar";
 import { QuoteDealCard } from "@/components/quote/QuoteDealCard";
 import { QuoteEntityPreview } from "@/components/quote/QuoteEntityPreview";
@@ -238,8 +238,20 @@ interface QuoteLine {
   ordem: number;
   retail_price_unit?: number;
   section_name: string;
+  // Toggle manual no editor de itens — quando false, a linha existe no
+  // orçamento interno mas fica oculta do PDF/portal do cliente (ex.: notas
+  // de trabalho interno, alternativas em avaliação). Default true.
+  visible_to_client?: boolean;
   item_supplier_id?: string | null;
   supplier_sku?: string | null;
+  // Origem da linha quando foi importada do Pedido de Proposta.
+  // `source_deal_need_id` (deal_needs.id) é a chave ESTÁVEL e a única usada
+  // para decidir se uma necessidade já foi importada.
+  source_deal_need_id?: string | null;
+  // `source_deal_need_item_id` (deal_need_items.id) é só rastreabilidade:
+  // fn_apply_deal_need faz DELETE+reinsert dos itens a cada gravação da
+  // necessidade, por isso estes ids são voláteis e nunca servem de critério.
+  source_deal_need_item_id?: string | null;
 }
 
 const NEW_QUOTE_DRAFT_VERSION = 1;
@@ -251,6 +263,11 @@ const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
 
 export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null }: QuoteBuilderProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // `effectiveQuoteId` é o id do orçamento a usar em todo o componente: só
+  // existe quando se está a EDITAR um orçamento já gravado. "Novo Orçamento"
+  // abre o editor sem escrever nada na BD (o rascunho silencioso que existia
+  // aqui só servia o diagnóstico Fase 1, que saiu deste ecrã).
+  const effectiveQuoteId: string | null = quoteId ?? null;
   const [clients, setClients] = useState<Client[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -258,6 +275,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [products, setProducts] = useState<ProductCatalogItem[]>([]);
   const [services, setServices] = useState<ProductCatalogItem[]>([]);
   const [lines, setLines] = useState<QuoteLine[]>([]);
+  // Importação (explícita) dos itens do Pedido de Proposta em curso.
+  const [importingDealItems, setImportingDealItems] = useState(false);
   const [sections, setSections] = useState<string[]>(["Geral"]);
   const [activeSection, setActiveSection] = useState<string>("Geral");
   const [loading, setLoading] = useState(false);
@@ -400,10 +419,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     // Editing an existing quote: wait for fetchQuote() to finish loading the
     // server state first, so a restored draft overlays it instead of being
     // overwritten by it.
-    if (quoteId && !existingQuoteLoadedRef.current) return;
+    if (effectiveQuoteId && !existingQuoteLoadedRef.current) return;
 
     draftRestoredRef.current = activeCompany.id;
-    const rawDraft = localStorage.getItem(getQuoteDraftKey(activeCompany.id, quoteId));
+    const rawDraft = localStorage.getItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId));
     if (!rawDraft) return;
 
     try {
@@ -429,7 +448,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     } catch (error) {
       console.error("Error restoring quote draft:", error);
     }
-  }, [quoteId, activeCompany?.id, quoteLoadTick]);
+  }, [effectiveQuoteId, activeCompany?.id, quoteLoadTick]);
 
   useEffect(() => {
     if (!activeCompany?.id || draftRestoredRef.current !== activeCompany.id || typeof window === "undefined") return;
@@ -441,7 +460,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     if (!hasDraftContent) return;
 
     const timeoutId = window.setTimeout(() => {
-      localStorage.setItem(getQuoteDraftKey(activeCompany.id, quoteId), JSON.stringify({
+      localStorage.setItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId), JSON.stringify({
         version: NEW_QUOTE_DRAFT_VERSION,
         savedAt: new Date().toISOString(),
         formData,
@@ -457,7 +476,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     }, 300);
 
     return () => window.clearTimeout(timeoutId);
-  }, [quoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, selectedDeal]);
+  }, [effectiveQuoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, selectedDeal]);
 
   useEffect(() => {
     if (!activeCompany?.id || typeof window === "undefined") return;
@@ -474,13 +493,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [quoteId, activeCompany?.id, formData, lines.length, selectedDeal]);
+  }, [effectiveQuoteId, activeCompany?.id, formData, lines.length, selectedDeal]);
 
   // Generate auto-reference for new quotes
   useEffect(() => {
     if (!quoteId && !autoReference) {
       const hasSavedDraft = activeCompany?.id && typeof window !== "undefined"
-        ? localStorage.getItem(getQuoteDraftKey(activeCompany.id, quoteId))
+        ? localStorage.getItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId))
         : null;
       if (hasSavedDraft) return;
 
@@ -488,7 +507,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const seq = String(Math.floor(Math.random() * 9999) + 1).padStart(4, "0");
       setAutoReference(`Q-${year}-${seq}`);
     }
-  }, [quoteId, autoReference, activeCompany?.id]);
+  }, [quoteId, effectiveQuoteId, autoReference, activeCompany?.id]);
 
   // Check if user is system admin
   useEffect(() => {
@@ -498,10 +517,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   // Auto-set organization_id when activeCompany changes (for new quotes)
   useEffect(() => {
-    if (activeCompany?.id && !quoteId && !formData.organization_id) {
+    if (activeCompany?.id && !effectiveQuoteId && !formData.organization_id) {
       setFormData(prev => ({ ...prev, organization_id: activeCompany.id }));
     }
-  }, [activeCompany?.id, quoteId]);
+  }, [activeCompany?.id, effectiveQuoteId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -604,14 +623,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       fetchOrganizations();
       fetchCatalogItems();
       checkPermissions();
-      if (quoteId) {
+      if (effectiveQuoteId) {
         fetchQuote().finally(() => {
           existingQuoteLoadedRef.current = true;
           setQuoteLoadTick(tick => tick + 1);
         });
       }
     }
-  }, [quoteId, activeCompany?.id]);
+  }, [effectiveQuoteId, activeCompany?.id]);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -1746,7 +1765,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   };
 
   const fetchQuote = async () => {
-    if (!quoteId) return;
+    if (!effectiveQuoteId) return;
 
     try {
       const { data: quote, error: quoteError } = await supabase
@@ -1755,7 +1774,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           *,
           deals!deal_id(id, title, entity_id, organization_id, client_id, lead_id, contact_id, assigned_to)
         `)
-        .eq("id", quoteId)
+        .eq("id", effectiveQuoteId)
         .single();
 
       if (quoteError) throw quoteError;
@@ -1781,7 +1800,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       setAssignedToTouched(true);
       
       setQuoteNumber(quote.quote_number || null);
-      
+
       // Set selected deal for display with lead info
       if (quote.deals) {
         const dealData = quote.deals as any;
@@ -1856,7 +1875,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           services(sku),
           item_suppliers:item_supplier_id(supplier_sku, purchase_price, suppliers(name))
         `)
-        .eq("quote_id", quoteId)
+        .eq("quote_id", effectiveQuoteId)
         .order("ordem");
 
       if (linesError) throw linesError;
@@ -1894,6 +1913,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             : Number((line as any).retail_price_unit),
           ordem: line.ordem,
           section_name: (line as any).section_name || "Geral",
+          visible_to_client: line.visible_to_client ?? true,
+          // Sem isto, reabrir um orçamento já gravado perderia a marca de
+          // origem e o botão de importar duplicaria as linhas.
+          source_deal_need_id: line.source_deal_need_id || null,
+          source_deal_need_item_id: line.source_deal_need_item_id || null,
         }))
       );
       
@@ -1908,7 +1932,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const { data: quoteFees, error: feesError } = await supabase
         .from("quote_fees")
         .select("fee_type_id, vat_rate")
-        .eq("quote_id", quoteId);
+        .eq("quote_id", effectiveQuoteId);
 
       if (!feesError && quoteFees) {
         setSelectedFees(new Set(quoteFees.map(f => f.fee_type_id)));
@@ -1998,13 +2022,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const handleDownloadPdf = async () => {
-    if (!quoteId) {
+    if (!effectiveQuoteId) {
       toast({ title: "Guarda o orçamento primeiro", description: "É preciso guardar antes de fazer download do PDF.", variant: "destructive" });
       return;
     }
     try {
       setDownloadingPdf(true);
-      const { blob, fileName } = await generateQuotePdfBlob(quoteId);
+      const { blob, fileName } = await generateQuotePdfBlob(effectiveQuoteId);
       downloadBlob(blob, fileName);
     } catch (e: any) {
       captureFlowError(e, "quote-document-export");
@@ -2030,6 +2054,30 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [missingTemplateOpen, setMissingTemplateOpen] = useState(false);
   const missingTemplateOkRef = useRef(false);
   const pendingSaveArgRef = useRef<unknown>(undefined);
+
+  // Congela o diagnóstico do pedido de proposta no orçamento (snapshot), para
+  // que a Encomenda de Cliente (rpc_get_client_order_document) consiga mostrar
+  // o levantamento de necessidades tal como estava ao gravar.
+  //
+  // Corre sempre em handleSave, depois do rpc_save_quote, quando o orçamento
+  // tem deal_id — é o único ponto do fluxo onde o id real do orçamento existe
+  // (quoteId é uma prop e fica desatualizada num orçamento novo). A RPC é
+  // idempotente (DELETE + reinsert por quote_id), logo repetir gravações não
+  // duplica nada.
+  //
+  // Best-effort por desenho: o snapshot é secundário face a gravar o
+  // orçamento, por isso o erro é registado e engolido — nunca propaga.
+  const snapshotQuoteDiagnostic = async (quoteIdForSnapshot: string, dealId: string) => {
+    try {
+      const { error } = await supabase.rpc("rpc_snapshot_quote_diagnostic", {
+        p_quote_id: quoteIdForSnapshot,
+        p_deal_id: dealId,
+      });
+      if (error) throw error;
+    } catch (err) {
+      captureFlowError(err, "quote-lifecycle");
+    }
+  };
 
   const handleSave = async (rejectReasonOverride?: unknown) => {
     if (saveLockRef.current || loading) return;
@@ -2146,7 +2194,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         return;
       }
 
-      let savedQuoteId = quoteId;
+      let savedQuoteId = effectiveQuoteId;
 
       const dealOrgId = selectedDeal?.organization_id || formData.organization_id || activeCompany?.id;
       const dealClientId = selectedDeal?.client_id || formData.cliente_id;
@@ -2171,12 +2219,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       // Fallback chain: explicit picker selection -> async-resolved entity (deal/proposal/lead/client/contact) -> existing DB value.
       let resolvedEntityId: string | null =
         selectedDeal?.entity_id || selectedSource?.entity_id || resolvedQuoteEntityId || null;
-      if (quoteId && !resolvedEntityId) {
+      if (effectiveQuoteId && !resolvedEntityId) {
         try {
           const { data: existing } = await (supabase as any)
             .from("quotes")
             .select("entity_id")
-            .eq("id", quoteId)
+            .eq("id", effectiveQuoteId)
             .maybeSingle();
           if (existing?.entity_id) resolvedEntityId = existing.entity_id;
         } catch (e) {
@@ -2212,8 +2260,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       // Build the fully-computed lines/fees/totals payloads exactly as before —
       // the RPC persists them verbatim (business math stays in JS, single-transaction
       // persistence + single audit row happens server-side).
-      const linesToInsert = lines
-        .filter((line) => line.qt > 0)
+      const linesForInsert = lines.filter((line) => line.qt > 0);
+      const linesToInsert = linesForInsert
         .map((line) => {
           // Preço unitário e subtotal vêm da fonte única de preço da linha:
           // o preço de venda definido manda, e o unitário é fechado ao cêntimo
@@ -2260,6 +2308,18 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             // O preço de venda definido manda no preço unitário. Sem ele gravado,
             // o preço é reconstruído do custo arredondado e perde milésimos.
             retail_price_unit: (line.retail_price_unit ?? null) || null,
+            // Toggle manual "Visível ao cliente" no editor de itens — default
+            // true preserva o comportamento de sempre. Nada liga isto ao
+            // diagnóstico (Fase 1 não cria linhas; só regista sugestões
+            // aceites em quote_diagnostic_area_suggestions).
+            visible_to_client: line.visible_to_client ?? true,
+            // Marca de origem no Pedido de Proposta. A necessidade
+            // (deal_needs.id) é a chave estável que torna o botão "Importar do
+            // pedido de proposta" idempotente depois de gravar e reabrir; o id
+            // do item é volátil (fn_apply_deal_need recria-os) e fica só como
+            // rastreabilidade.
+            source_deal_need_id: line.source_deal_need_id || null,
+            source_deal_need_item_id: line.source_deal_need_item_id || null,
           };
         });
 
@@ -2291,7 +2351,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         // p_quote_id is nullable at runtime (NULL creates a new quote, a uuid
         // updates an existing one) but the generated RPC Args type widens it
         // to `string` since the SQL parameter has no default value.
-        p_quote_id: (quoteId || null) as unknown as string,
+        p_quote_id: (effectiveQuoteId || null) as unknown as string,
         p_quote_data: quoteData,
         p_lines: linesToInsert,
         p_fees: feesToInsert,
@@ -2300,6 +2360,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         // secção de itens). O parâmetro fica na RPC com DEFAULT '[]'::jsonb —
         // mexer em assinaturas de funções já causou incidentes aqui.
         p_inline_quotes: [],
+        // 7º parâmetro (DEFAULT '[]'::jsonb no lado do backend) — não é usado
+        // por este fluxo: a Fase 1 já não cria linhas, só regista sugestões
+        // aceites diretamente via rpc_record_diagnostic_suggestion_accepted
+        // (QuoteDiagnosticPhase.tsx), sem passar por aqui.
+        p_diagnostic_suggestions: [],
       });
 
       if (saveError) throw saveError;
@@ -2307,8 +2372,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const savedQuoteRow = savedQuote as Database["public"]["Tables"]["quotes"]["Row"] | null;
       savedQuoteId = savedQuoteRow?.id || savedQuoteId;
 
+      // Snapshot do diagnóstico do pedido de proposta. Aqui — e só aqui —
+      // savedQuoteId é o id real do orçamento (num orçamento novo a prop
+      // quoteId continua null). Idempotente e best-effort: engole o próprio
+      // erro, nunca faz a gravação do orçamento falhar.
+      const dealIdForSnapshot = formData.deal_id;
+      if (savedQuoteId && dealIdForSnapshot) {
+        await snapshotQuoteDiagnostic(savedQuoteId, dealIdForSnapshot);
+      }
+
       if (activeCompany?.id && typeof window !== "undefined") {
-        localStorage.removeItem(getQuoteDraftKey(activeCompany.id, quoteId));
+        localStorage.removeItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId));
       }
 
       toast({
@@ -2364,10 +2438,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       if (existingIndex >= 0) {
         const updated = [...prev];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          [field]: value,
-        };
+        const current = updated[existingIndex];
+        const next: QuoteLine = { ...current, [field]: value };
+        updated[existingIndex] = next;
         return updated;
       } else {
         const item = catalogItems.find((i) => i.id === itemId);
@@ -2885,7 +2958,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     }
   };
 
-  // Load deal items (deal_needs + deal_need_items) and auto-populate quote lines
+  // Importa os itens do Pedido de Proposta (deal_needs + deal_need_items) para
+  // linhas do orçamento. Deixou de correr sozinho ao escolher o pedido: agora é
+  // sempre explícito, pelo botão "Importar do pedido de proposta". Repetir a
+  // importação não duplica linhas — a idempotência é por NECESSIDADE
+  // (deal_needs.id, gravado em quote_lines.source_deal_need_id): uma
+  // necessidade já importada é saltada por inteiro. Comparar item a item não
+  // serviria — fn_apply_deal_need apaga e reinsere todos os deal_need_items a
+  // cada gravação da necessidade, logo esses ids mudam em uso normal.
   const loadDealItems = async (dealId: string) => {
     try {
       // Fetch deal_needs for this deal
@@ -2897,24 +2977,40 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const defaultMargin = 30;
       const defaultInt = 0;
       const newLines: QuoteLine[] = [];
+      // Necessidades que já têm linhas neste orçamento — nunca voltam a ser
+      // importadas. Cobre tanto a sessão atual como um orçamento reaberto
+      // (fetchQuote hidrata source_deal_need_id a partir da BD).
+      const alreadyImportedNeedIds = new Set(
+        lines.map((l) => l.source_deal_need_id).filter(Boolean) as string[]
+      );
+      let skippedNeedsCount = 0;
 
       if (dealNeeds && dealNeeds.length > 0) {
-        const needIds = dealNeeds.map((n: any) => n.id);
+        // Salta as necessidades já importadas antes de ir buscar seja o que
+        // for: nem os itens delas chegam a ser lidos.
+        const pendingNeedIds = dealNeeds
+          .map((n: any) => n.id)
+          .filter((id: string) => !alreadyImportedNeedIds.has(id));
+        skippedNeedsCount = dealNeeds.length - pendingNeedIds.length;
 
         // Fetch deal_need_items
-        const { data: needItems } = await (supabase as any)
-          .from("deal_need_items")
-          .select("*")
-          .in("deal_need_id", needIds)
-          .order("sort_order");
+        const { data: needItems } = pendingNeedIds.length > 0
+          ? await (supabase as any)
+              .from("deal_need_items")
+              .select("*")
+              .in("deal_need_id", pendingNeedIds)
+              .order("sort_order")
+          : { data: [] as any[] };
 
-        if (needItems && needItems.length > 0) {
+        const pendingItems = (needItems || []) as any[];
+
+        if (pendingItems.length > 0) {
           // Fetch only the specific products/services this deal's needs
           // reference — never the whole catalog.
-          const neededProductIds = needItems
+          const neededProductIds = pendingItems
             .filter((i: any) => i.item_type === "product" && i.product_id)
             .map((i: any) => i.product_id);
-          const neededServiceIds = needItems
+          const neededServiceIds = pendingItems
             .filter((i: any) => i.item_type === "service" && i.service_id)
             .map((i: any) => i.service_id);
           const [neededProductsMap, neededServicesMap] = await Promise.all([
@@ -2922,7 +3018,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             fetchServicesByIds(neededServiceIds),
           ]);
 
-          for (const item of needItems) {
+          for (const item of pendingItems) {
             let name = item.notes || "Item";
             let retailPrice = 0;
             let vatRate = 23;
@@ -2985,13 +3081,21 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               discount_percent: 0,
               ordem: 0,
               section_name: "Geral",
+              // Chave estável (decide a idempotência) + id do item só para
+              // rastreabilidade.
+              source_deal_need_id: item.deal_need_id || null,
+              source_deal_need_item_id: item.id,
             });
           }
         }
       }
 
-      // Fallback: if no items were created from deal_need_items, check deal value
-      if (newLines.length === 0) {
+      // Fallback: sem itens no pedido, usa-se o valor do negócio como linha
+      // única. Só corre quando o orçamento ainda está vazio — de outra forma
+      // cada clique no botão acrescentava outra vez a mesma linha (esta não
+      // não vem de nenhuma necessidade, logo não tem source_deal_need_id que
+      // a identifique).
+      if (newLines.length === 0 && skippedNeedsCount === 0 && lines.length === 0) {
         const { data: dealData } = await (supabase as any)
           .from("deals")
           .select("value, title")
@@ -3026,19 +3130,56 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         }
       }
 
-      if (newLines.length > 0) {
-        const updatedLines = [...lines, ...newLines].map((line, idx) => ({
-          ...line,
-          ordem: idx + 1,
-        }));
-        setLines(updatedLines);
+      if (newLines.length === 0) {
         toast({
-          title: "Itens do pedido carregados",
-          description: `${newLines.length} item(ns) adicionado(s) automaticamente ao orçamento.`,
+          title: "Nada para importar",
+          description: skippedNeedsCount > 0
+            ? `As necessidades deste pedido de proposta (${skippedNeedsCount}) já tinham sido importadas.`
+            : "Este pedido de proposta não tem itens para importar.",
         });
+        return 0;
       }
+
+      const updatedLines = [...lines, ...newLines].map((line, idx) => ({
+        ...line,
+        ordem: idx + 1,
+      }));
+      setLines(updatedLines);
+      const importedNeedsCount = new Set(
+        newLines.map((l) => l.source_deal_need_id).filter(Boolean) as string[]
+      ).size;
+      toast({
+        title: "Itens do pedido importados",
+        description: importedNeedsCount > 0
+          ? `${newLines.length} linha(s) importada(s) de ${importedNeedsCount} necessidade(s) do pedido de proposta.`
+          : `${newLines.length} linha(s) importada(s) do pedido de proposta.`,
+      });
+      return newLines.length;
     } catch (err) {
       console.error("Error loading deal items:", err);
+      captureFlowError(err, "quote-lifecycle");
+      toast({
+        title: "Erro ao importar",
+        description: "Não foi possível importar os itens do pedido de proposta.",
+        variant: "destructive",
+      });
+      return 0;
+    }
+  };
+
+  // Handler do botão "Importar do pedido de proposta".
+  // Nota: não tira snapshot do diagnóstico. O snapshot é do diagnóstico do
+  // pedido (deal), não das linhas importadas, e é tirado em handleSave — ver
+  // snapshotQuoteDiagnostic. Aqui seria redundante e, num orçamento novo,
+  // impossível (ainda não há quote_id).
+  const handleImportFromDeal = async () => {
+    const dealId = formData.deal_id;
+    if (!dealId || importingDealItems) return;
+    setImportingDealItems(true);
+    try {
+      await loadDealItems(dealId);
+    } finally {
+      setImportingDealItems(false);
     }
   };
 
@@ -3379,7 +3520,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           })()}
         </div>
         <div className="flex items-center gap-2">
-
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -3515,7 +3655,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                 }
                                 if (!inherited) inherited = r.assignedTo || null;
                                 setFormData(prev => ({ ...prev, deal_id: r.id, organization_id: r.organizationId || "", cliente_id: r.dealClientId || "", title: prev.title || r.name || "", assigned_to: assignedToTouched ? prev.assigned_to : (inherited ?? prev.assigned_to) }));
-                                if (lines.length === 0) loadDealItems(r.id);
+                                // Os itens do pedido já não entram sozinhos: a
+                                // importação passou a ser pelo botão
+                                // "Importar do pedido de proposta" logo abaixo.
                               } else {
                                 setSelectedSource({ kind: r.kind, id: r.id, name: r.name, entity_id: r.entityId, organization_id: r.organizationId });
                                 setSelectedDeal(null);
@@ -3566,6 +3708,31 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                     {fieldErrors.deal_id && <p className="text-sm text-destructive">{fieldErrors.deal_id}</p>}
                   </div>
                 )}
+                {/* Importação explícita dos itens do pedido. Antes acontecia
+                    sozinha ao escolher o pedido (e só com o orçamento vazio);
+                    agora é sempre o utilizador a decidir, e pode repetir sem
+                    duplicar linhas já importadas. */}
+                {formData.deal_id && (
+                  <div className="space-y-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleImportFromDeal}
+                      disabled={importingDealItems}
+                    >
+                      {importingDealItems ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <FileDown className="w-4 h-4 mr-1" />
+                      )}
+                      {importingDealItems ? "A importar…" : "Importar do pedido de proposta"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Acrescenta os itens do pedido ao orçamento. Necessidades já importadas não voltam a ser adicionadas.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Lead ou Cliente — hidden once a Pedido is chosen, since the
@@ -3598,7 +3765,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                         </Button>
                       </div>
                     </div>
-                    <QuoteEntityPreview entityId={selectedSource.entity_id} quoteId={quoteId} />
+                    <QuoteEntityPreview entityId={selectedSource.entity_id} quoteId={effectiveQuoteId} />
                   </div>
                   ) : (
                     <EntitySearchInput
@@ -4296,6 +4463,31 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                         }}>
                                         <Trash2 className="h-3 w-3" />
                                       </Button>
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className={cn("h-6 w-6", line.visible_to_client === false && "text-amber-600")}
+                                              onClick={() => {
+                                                const updated = [...lines];
+                                                updated[globalLineIndex] = { ...line, visible_to_client: line.visible_to_client === false };
+                                                setLines(updated);
+                                              }}
+                                            >
+                                              {line.visible_to_client === false
+                                                ? <EyeOff className="h-3 w-3" />
+                                                : <Eye className="h-3 w-3" />}
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            {line.visible_to_client === false
+                                              ? "Não visível ao cliente — clique para tornar visível"
+                                              : "Visível ao cliente — clique para ocultar (PDF/portal)"}
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
                                     </div>
                                   </TableCell>
                                 </TableRow>

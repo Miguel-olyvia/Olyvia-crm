@@ -1,5 +1,15 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  DIRECT_SALE_EVENT_TYPE,
+  PROPOSAL_EVENT_TYPE,
+  QUOTE_EVENT_TYPE,
+  CONTRACT_EVENT_TYPE,
+  DOCUMENT_INSERT_TABLES,
+  describeDocumentHistoryEvent,
+  shouldHideAuditDiff,
+} from "@/lib/timeline/documentEvents";
+import { TIMELINE_AUDIT_IGNORED_FIELDS, formatAuditDiff } from "@/lib/timeline/auditIgnoredFields";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
@@ -111,10 +121,8 @@ const CLIENT_FIELD_LABELS: Record<string, string> = {
 const clientFieldLabel = (field: string): string =>
   CLIENT_FIELD_LABELS[field] || field.replace(/_/g, " ");
 
-const CLIENT_AUDIT_IGNORED_FIELDS = new Set([
-  "id", "entity_id", "organization_id", "root_organization_id",
-  "created_at", "updated_at", "created_by", "search_text",
-]);
+// Lista partilhada com as timelines da lead e do contacto.
+const CLIENT_AUDIT_IGNORED_FIELDS = new Set(TIMELINE_AUDIT_IGNORED_FIELDS);
 
 interface Deal {
   id: string; title: string; value: number; stage_id: string;
@@ -354,7 +362,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const [lifecycleRes, auditRes] = await Promise.all([
         (supabase as any)
           .from("anew_entity_history")
-          .select("id, change_type, field_name, old_value, new_value, changed_by, created_at")
+          .select("id, change_type, field_name, old_value, new_value, changed_by, created_at, metadata")
           .eq("entity_id", entityId)
           .order("created_at", { ascending: false })
           .limit(100),
@@ -380,11 +388,18 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const lifecycleEvents: TimelineExtraEvent[] = (lifecycleRes.data || []).map((d: any) => {
         const isCreated = d.change_type === "created";
         const isRoleStatus = d.change_type === "role_status_changed" || d.change_type === "status_changed";
-        const type = isCreated ? "conversion" : isRoleStatus ? "status_change" : "field_change";
+        // Marcos da venda direta — sem este ramo caíam em "Editou campo".
+        const docEvent = describeDocumentHistoryEvent(d.change_type, d.metadata);
+        const type = docEvent
+          ? docEvent.type
+          : isCreated ? "conversion" : isRoleStatus ? "status_change" : "field_change";
 
         let title: string;
         let description: string | null = null;
-        if (isCreated) {
+        if (docEvent) {
+          title = docEvent.title;
+          description = docEvent.description;
+        } else if (isCreated) {
           title = "Entidade criada";
         } else if (isRoleStatus) {
           title = "Estado do ciclo de vida alterado";
@@ -409,15 +424,15 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         const actor = row.changed_by ? (userMapLocal[row.changed_by] || null) : null;
         if (row.operation === "UPDATE" && row.changed_fields && typeof row.changed_fields === "object") {
           Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
-            .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field))
+            .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field) && !shouldHideAuditDiff(row.table_name, field))
             .forEach(([field, diff], idx) => {
-              const oldVal = diff?.old == null ? "—" : String(diff.old);
-              const newVal = diff?.new == null ? "—" : String(diff.new);
+              const description = formatAuditDiff(field, diff?.old, diff?.new);
+              if (description === null) return;
               auditEvents.push({
                 id: `audit-${row.id}-${idx}`,
                 type: "field_change",
                 title: `Editou ${clientFieldLabel(field)}`,
-                description: `${oldVal} → ${newVal}`,
+                description,
                 date: row.created_at,
                 actor,
               });

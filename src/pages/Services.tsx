@@ -62,6 +62,7 @@ import { BulkStatusDialog, BulkDeleteDialog } from "@/components/BulkActionDialo
 import { useBulkActions } from "@/hooks/useBulkActions";
 import { OrganizationFormSection, type OrganizationSelection } from "@/components/OrganizationFormSection";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import ServiceMaterialsEditor from "@/components/ServiceMaterialsEditor";
 
 interface Service {
   id: string;
@@ -74,7 +75,7 @@ interface Service {
   service_type: string;
   organization_id?: string | null;
   root_organization_id?: string | null;
-  
+
   service_category_id?: string | null;
   service_subcategory_id?: string | null;
   service_categories?: { name: string };
@@ -83,7 +84,36 @@ interface Service {
   service_organizations?: Array<{
     organization_id: string;
   }>;
+  // Ficha técnica (migration 20261130160000_service_labor_model_fix_and_manual_diagnostic_source.sql,
+  // já aplicada à BD) — colunas nullable em services, lidas via `select("*")`
+  // em loadData (com cast `as any`, ver abaixo), por isso opcionais aqui.
+  // Custo de mão de obra = preço/hora do serviço × people_count × hours.
+  technical_sheet_labor_description?: string | null;
+  technical_sheet_labor_people_count?: number | null;
+  technical_sheet_labor_hours?: number | null;
+  // Regra de três simples opcional para a quantidade sugerida do próprio
+  // serviço no diagnóstico (migration
+  // 20261130170000_service_technical_sheet_quantity_per_area.sql, já
+  // aplicada à BD). "Para X m² preciso de Y" — ver comentário da coluna.
+  technical_sheet_reference_area_m2?: number | null;
+  technical_sheet_reference_quantity?: number | null;
 }
+
+interface TechnicalSheetFormData {
+  labor_description: string;
+  labor_people_count: string;
+  labor_hours: string;
+  reference_area_m2: string;
+  reference_quantity: string;
+}
+
+const emptyTechnicalSheet: TechnicalSheetFormData = {
+  labor_description: "",
+  labor_people_count: "",
+  labor_hours: "",
+  reference_area_m2: "",
+  reference_quantity: "",
+};
 
 const serviceSchema = z.object({
   sku: z.string().trim().min(1, "O SKU é obrigatório.").max(100, "O SKU deve ter menos de 100 caracteres."),
@@ -155,6 +185,9 @@ export default function Services() {
     currency: "EUR",
     vat_rate: 23,
   });
+
+  // Ficha técnica (mão de obra) — ver nota na interface Service acima.
+  const [technicalSheet, setTechnicalSheet] = useState<TechnicalSheetFormData>(emptyTechnicalSheet);
 
   const defaultOrgSelection = (): OrganizationSelection => ({
     tenantId: "",
@@ -352,6 +385,30 @@ export default function Services() {
         return;
       }
 
+      // Ficha técnica (mão de obra) — gravada à parte via
+      // rpc_update_service_technical_sheet, depois do create/update do
+      // serviço em si ter sucesso. Cast `as any`: RPC ainda não existe em
+      // types.ts (tipos gerados não regenerados após a migration). Campos
+      // vazios gravam como null (não forçam 0 por omissão).
+      const saveTechnicalSheet = async (serviceId: string) => {
+        const laborPeopleCount =
+          technicalSheet.labor_people_count.trim() === "" ? null : Number(technicalSheet.labor_people_count);
+        const laborHours = technicalSheet.labor_hours.trim() === "" ? null : Number(technicalSheet.labor_hours);
+        const referenceAreaM2 =
+          technicalSheet.reference_area_m2.trim() === "" ? null : Number(technicalSheet.reference_area_m2);
+        const referenceQuantity =
+          technicalSheet.reference_quantity.trim() === "" ? null : Number(technicalSheet.reference_quantity);
+        const { error } = await (supabase as any).rpc("rpc_update_service_technical_sheet", {
+          p_service_id: serviceId,
+          p_labor_description: technicalSheet.labor_description.trim() || null,
+          p_labor_people_count: laborPeopleCount,
+          p_labor_hours: laborHours,
+          p_reference_area_m2: referenceAreaM2,
+          p_reference_quantity: referenceQuantity,
+        });
+        if (error) throw error;
+      };
+
       await withAuditContext(supabase, businessUserId, async () => {
         if (editingService) {
           const { error } = await supabase.rpc("rpc_update_service", {
@@ -376,11 +433,13 @@ export default function Services() {
 
           if (error) throw error;
 
+          await saveTechnicalSheet(editingService.id);
+
           toast({
             title: t("services.toast.updateSuccess"),
           });
         } else {
-          const { error } = await supabase.rpc("rpc_create_service", {
+          const { data: createdService, error } = await supabase.rpc("rpc_create_service", {
             p_sku: formData.sku,
             p_name: formData.name,
             p_slug: slug,
@@ -398,6 +457,10 @@ export default function Services() {
           });
 
           if (error) throw error;
+
+          if (createdService?.id) {
+            await saveTechnicalSheet(createdService.id);
+          }
 
           toast({
             title: t("services.toast.createSuccess"),
@@ -562,6 +625,16 @@ export default function Services() {
       service_type: service.service_type || "both",
       status: service.is_active ? "active" : "inactive",
     });
+    setTechnicalSheet({
+      labor_description: service.technical_sheet_labor_description || "",
+      labor_people_count:
+        service.technical_sheet_labor_people_count != null ? String(service.technical_sheet_labor_people_count) : "",
+      labor_hours: service.technical_sheet_labor_hours != null ? String(service.technical_sheet_labor_hours) : "",
+      reference_area_m2:
+        service.technical_sheet_reference_area_m2 != null ? String(service.technical_sheet_reference_area_m2) : "",
+      reference_quantity:
+        service.technical_sheet_reference_quantity != null ? String(service.technical_sheet_reference_quantity) : "",
+    });
 
     // Load prices for service
     const { data: prices, error: pricesError } = await supabase
@@ -645,6 +718,7 @@ export default function Services() {
       currency: "EUR",
       vat_rate: 23,
     });
+    setTechnicalSheet(emptyTechnicalSheet);
     setOrganizationSelection(defaultOrgSelection());
   };
 
@@ -1123,6 +1197,95 @@ export default function Services() {
                   prices={priceData}
                   onChange={setPriceData}
                 />
+
+                {/* Ficha Técnica — mão de obra + materiais (migration
+                    20261130160000_service_labor_model_fix_and_manual_diagnostic_source.sql).
+                    Custo de mão de obra = preço/hora do serviço × nº de pessoas × nº de horas. */}
+                <div className="space-y-3 border-t pt-4">
+                  <h4 className="font-medium text-sm">Ficha Técnica</h4>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="labor_description">Descrição da mão de obra</Label>
+                    <Textarea
+                      id="labor_description"
+                      value={technicalSheet.labor_description}
+                      onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_description: e.target.value })}
+                      rows={2}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="labor_people_count">Número de Pessoas</Label>
+                      <Input
+                        id="labor_people_count"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={technicalSheet.labor_people_count}
+                        onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_people_count: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="labor_hours">Número de Horas</Label>
+                      <Input
+                        id="labor_hours"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={technicalSheet.labor_hours}
+                        onChange={(e) => setTechnicalSheet({ ...technicalSheet, labor_hours: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 border rounded-md p-3 bg-muted/20">
+                    <p className="text-sm text-muted-foreground">
+                      Quantidade sugerida por área (opcional) — "Para X m² preciso de Y unidades deste serviço".
+                      Deixe em branco para manter a quantidade fixa em 1.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="reference_area_m2">Para quantos m²</Label>
+                        <Input
+                          id="reference_area_m2"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={technicalSheet.reference_area_m2}
+                          onChange={(e) => setTechnicalSheet({ ...technicalSheet, reference_area_m2: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="reference_quantity">Preciso de quantas unidades</Label>
+                        <Input
+                          id="reference_quantity"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={technicalSheet.reference_quantity}
+                          onChange={(e) => setTechnicalSheet({ ...technicalSheet, reference_quantity: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Materiais só fazem sentido depois de o serviço existir de facto
+                      (precisam de service_id real) — mesmo princípio de sub-recurso
+                      dependente já usado noutros ecrãs (ex.: separadores de
+                      componentes/bundle desativados até o bundle ser gravado, em
+                      BundleFormDialog.tsx). */}
+                  {editingService ? (
+                    <ServiceMaterialsEditor
+                      serviceId={editingService.id}
+                      organizationId={editingService.organization_id || activeCompany?.id || ""}
+                    />
+                  ) : (
+                    <p className="text-sm text-muted-foreground border rounded-md p-3 bg-muted/30">
+                      Grave o serviço primeiro para poder adicionar materiais à ficha técnica.
+                    </p>
+                  )}
+                </div>
 
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => handleCloseDialog(false)}>

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
@@ -12,12 +13,22 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/lib/toast";
-import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2 } from "lucide-react";
+import { Upload, Eye, EyeOff, Download, Trash2, Paperclip, FileText, Image, File, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { generateSecureFileName } from "@/utils/secureFileUpload";
 
-export type DocumentEntityType = "quote" | "proposal" | "contract";
+// "product": fichas técnicas, certificados e manuais do artigo. Fica fora do
+// alcance do portal do cliente sem ser preciso fazer nada — ver a nota de
+// segurança na migração 20261201100000.
+export type DocumentEntityType = "quote" | "proposal" | "contract" | "product";
+
+// Lista branca das entidades que o portal do cliente lista
+// (ver ClientPortalDocuments.tsx). Só nestas é que faz sentido perguntar se o
+// anexo vai para o portal. É lista branca de propósito: um entity_type novo
+// que ninguém se lembre de avaliar cai no lado seguro — não pergunta e grava
+// visible_to_client = false.
+const PORTAL_ENTITY_TYPES: readonly DocumentEntityType[] = ["quote", "proposal", "contract"];
 
 const DOCUMENT_TYPES = [
   { value: "contract_signed", label: "Contrato Assinado (scan)", color: "bg-green-100 text-green-800" },
@@ -89,9 +100,16 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [deleteDocId, setDeleteDocId] = useState<string | null>(null);
-  const [uploadData, setUploadData] = useState({ document_type: "other", notes: "" });
+  // visible_to_client arranca sempre a false: quem anexa tem de decidir
+  // activamente expor o ficheiro ao cliente.
+  const [uploadData, setUploadData] = useState({ document_type: "other", notes: "", visible_to_client: false });
   const [selectedFiles, setSelectedFiles] = useState<{ id: string; file: File }[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [togglingDocId, setTogglingDocId] = useState<string | null>(null);
+
+  // Documentos de produto (fichas técnicas, certificados) nunca chegam ao
+  // portal: não se pergunta nada e grava-se sempre false.
+  const canShareWithClient = PORTAL_ENTITY_TYPES.includes(entityType);
 
   const queryKey = ["documents", entityType, entityId];
 
@@ -100,7 +118,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
     queryFn: async () => {
       const { data, error } = await (supabase as any)
         .from("documents")
-        .select("id, file_name, file_url, file_type, file_size, document_type, notes, uploaded_by, created_at")
+        .select("id, file_name, file_url, file_type, file_size, document_type, notes, uploaded_by, created_at, visible_to_client")
         .eq("entity_type", entityType)
         .eq("entity_id", entityId)
         .order("created_at", { ascending: false });
@@ -141,6 +159,11 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
         document_type: uploadData.document_type,
         notes: uploadData.notes || null,
         uploaded_by: uploadedBy,
+        // NUNCA deixar cair no DEFAULT da BD: documents.visible_to_client é
+        // DEFAULT true (para não esconder os anexos antigos), logo omitir esta
+        // chave publicava o ficheiro no portal. Escrever sempre, e a false
+        // quando a entidade nem sequer pode ir ao portal (produtos).
+        visible_to_client: canShareWithClient ? uploadData.visible_to_client : false,
       });
     if (dbError) {
       // Rollback do ficheiro se a row falhar
@@ -196,7 +219,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
       if (successCount > 0) {
         setIsUploadOpen(false);
         setSelectedFiles([]);
-        setUploadData({ document_type: "other", notes: "" });
+        setUploadData({ document_type: "other", notes: "", visible_to_client: false });
       }
     } catch (err: unknown) {
       toast.error(t("documentsTab.toast.attachError") + ": " + getUploadErrorMessage(err));
@@ -222,6 +245,29 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
 
   const handleRemoveSelectedFile = (id: string) => {
     setSelectedFiles(prev => prev.filter(entry => entry.id !== id));
+  };
+
+  // Fechar o diálogo repõe a resposta por omissão (não enviar). Sem isto, a
+  // escolha de um upload anterior ficava "colada" no próximo.
+  const handleUploadOpenChange = (open: boolean) => {
+    setIsUploadOpen(open);
+    if (!open) setUploadData(prev => ({ ...prev, visible_to_client: false }));
+  };
+
+  const handleToggleVisibility = async (doc: any) => {
+    if (!canShareWithClient) return;
+    const next = !doc.visible_to_client;
+    setTogglingDocId(doc.id);
+    const { error } = await (supabase as any)
+      .from("documents")
+      .update({ visible_to_client: next })
+      .eq("id", doc.id);
+    setTogglingDocId(null);
+    if (error) { toast.error("Não foi possível alterar a visibilidade do documento"); return; }
+    queryClient.invalidateQueries({ queryKey });
+    toast.success(next
+      ? "O cliente passa a ver este documento no portal"
+      : "O documento deixou de estar visível no portal do cliente");
   };
 
   const handleDelete = async (docId: string) => {
@@ -262,8 +308,12 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
           <Paperclip className="h-4 w-4" />
           Documentos ({documents.length})
         </h3>
+        {/* type="button" em todos os Button deste componente: ele é renderizado
+            dentro do <form> do produto (Products.tsx), e sem isso o botão faz
+            submit do formulário — gravava o produto e fechava o diálogo em vez
+            de abrir o seletor de ficheiros. */}
         {!readOnly && (
-          <Button size="sm" onClick={() => setIsUploadOpen(true)} className="gap-1.5">
+          <Button type="button" size="sm" onClick={() => setIsUploadOpen(true)} className="gap-1.5">
             <Paperclip className="h-3.5 w-3.5" />
             Anexar Documento
           </Button>
@@ -292,15 +342,42 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
                   </p>
                 </div>
                 <Badge className={`${typeInfo.color} text-[10px] shrink-0`}>{typeInfo.label}</Badge>
+                {/* Indicador + interruptor de visibilidade no portal. O próprio
+                    distintivo é o botão: evita um segundo ícone "olho" ao lado
+                    do de "Visualizar", que significa outra coisa. */}
+                {canShareWithClient && (
+                  <Badge
+                    {...(readOnly ? {} : {
+                      role: "button",
+                      tabIndex: 0,
+                      onClick: () => handleToggleVisibility(doc),
+                      onKeyDown: (e: React.KeyboardEvent) => {
+                        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleToggleVisibility(doc); }
+                      },
+                      title: doc.visible_to_client
+                        ? "Retirar do portal — o cliente deixa de ver este documento"
+                        : "Enviar para o portal — o cliente passa a ver este documento",
+                    })}
+                    aria-busy={togglingDocId === doc.id}
+                    className={`text-[10px] shrink-0 gap-1 ${doc.visible_to_client ? "bg-blue-100 text-blue-800" : "bg-gray-100 text-gray-600"} ${readOnly ? "" : "min-h-[24px] cursor-pointer hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary"} ${togglingDocId === doc.id ? "opacity-50" : ""}`}
+                  >
+                    {togglingDocId === doc.id
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : doc.visible_to_client
+                        ? <Eye className="h-3 w-3" />
+                        : <EyeOff className="h-3 w-3" />}
+                    {doc.visible_to_client ? "No portal" : "Interno"}
+                  </Badge>
+                )}
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleView(doc)} title="Visualizar">
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleView(doc)} title="Visualizar">
                     <Eye className="h-3.5 w-3.5" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(doc)} title="Descarregar">
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleDownload(doc)} title="Descarregar">
                     <Download className="h-3.5 w-3.5" />
                   </Button>
                   {!readOnly && (
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDeleteDocId(doc.id)} title="Eliminar">
+                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => setDeleteDocId(doc.id)} title="Eliminar">
                       <Trash2 className="h-3.5 w-3.5 text-destructive" />
                     </Button>
                   )}
@@ -311,7 +388,7 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
         </div>
       )}
 
-      <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
+      <Dialog open={isUploadOpen} onOpenChange={handleUploadOpenChange}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -388,10 +465,30 @@ export function DocumentsTab({ entityId, entityType, organizationId, readOnly }:
                 rows={2}
               />
             </div>
+            {canShareWithClient && (
+              <div className="flex items-start gap-3 rounded-lg border p-3">
+                <Checkbox
+                  id="documents-tab-visible-to-client"
+                  className="mt-0.5"
+                  checked={uploadData.visible_to_client}
+                  onCheckedChange={checked => setUploadData({ ...uploadData, visible_to_client: checked === true })}
+                />
+                <div className="space-y-1">
+                  <Label htmlFor="documents-tab-visible-to-client" className="cursor-pointer">
+                    Enviar para o portal do cliente
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Se marcar, o cliente passa a ver e a descarregar no portal
+                    {selectedFiles.length > 1 ? " estes documentos" : " este documento"}.
+                    Deixe desmarcado para anexos internos (ex.: faturas de fornecedor).
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsUploadOpen(false)} disabled={uploading}>Cancelar</Button>
-            <Button onClick={handleUpload} disabled={selectedFiles.length === 0 || uploading}>
+            <Button type="button" variant="outline" onClick={() => handleUploadOpenChange(false)} disabled={uploading}>Cancelar</Button>
+            <Button type="button" onClick={handleUpload} disabled={selectedFiles.length === 0 || uploading}>
               {uploading && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
               <Paperclip className="h-4 w-4 mr-1.5" />
               Fazer Upload{selectedFiles.length > 0 ? ` (${selectedFiles.length})` : ""}

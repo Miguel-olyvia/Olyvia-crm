@@ -19,8 +19,11 @@
 --
 -- Esta migration também acrescenta quote_lines.visible_to_client, para permitir que
 -- uma linha exista no orçamento interno mas não seja mostrada ao cliente (ex.: notas
--- de trabalho interno, alternativas em avaliação) — e propaga essa flag às duas
--- policies de leitura pública/portal já existentes, e à rpc_save_quote().
+-- de trabalho interno, alternativas em avaliação) — e propaga essa flag à ÚNICA
+-- policy de leitura de terceiros sobre quote_lines que sobrevive hoje na BD viva,
+-- "Client can view own quote lines" (portal de cliente autenticado), e à
+-- rpc_save_quote(). NÃO recria "anon_quote_lines_read"/"anon_quotes_read" — ver
+-- nota de segurança mais abaixo, secção 8.
 --
 -- Prerequisites:
 --   20260615130000_baseline_new_database.sql          — quotes, quote_lines, products,
@@ -28,13 +31,21 @@
 --                                                        anew_organizations, anew_users,
 --                                                        get_user_visible_org_ids(),
 --                                                        current_business_user_id(),
---                                                        policies anon_quote_lines_read /
---                                                        "Client can view own quote lines"
---   20261113030000_rpc_save_quote_item_supplier_reference.sql — definição atual (mais
---                                                        recente) de rpc_save_quote(),
---                                                        integralmente copiada aqui com
---                                                        a única alteração de
---                                                        visible_to_client.
+--                                                        policy "Client can view own
+--                                                        quote lines"
+--   20261029020000_remove_legacy_proposal_public_link_access.sql — removeu
+--                                                        "anon_quote_lines_read"/
+--                                                        "anon_quotes_read" e fez
+--                                                        REVOKE ALL FROM anon em
+--                                                        quotes/quote_lines; estado
+--                                                        assumido como definitivo,
+--                                                        não revertido aqui.
+--   20261117030000_quote_lines_retail_price_unit.sql  — definição viva mais recente
+--                                                        de rpc_save_quote() (já
+--                                                        incorpora a correção de
+--                                                        20261113060000), integralmente
+--                                                        copiada aqui com a única
+--                                                        alteração de visible_to_client.
 --
 -- Nota de segurança (RLS): as 3 tabelas novas são estritamente internas — sem policy
 -- "anon_*" nem baseada em portal_user_can_see_document(). O diagnóstico de obra nunca é
@@ -143,7 +154,7 @@ COMMENT ON COLUMN quotes.diagnostic_phase1_completed_at IS
 ALTER TABLE quote_lines ADD COLUMN visible_to_client boolean NOT NULL DEFAULT true;
 
 COMMENT ON COLUMN quote_lines.visible_to_client IS
-  'Quando false, a linha existe no orçamento interno mas é ocultada das vias de leitura do cliente (link público anon_quote_lines_read e portal "Client can view own quote lines"). Default true preserva o comportamento anterior a esta migration para todas as linhas já existentes.';
+  'Quando false, a linha existe no orçamento interno mas é ocultada do portal de cliente autenticado (policy "Client can view own quote lines"). O link público não-autenticado de propostas já não existe (removido em 20261029020000_remove_legacy_proposal_public_link_access.sql) — não há via anon a considerar. Default true preserva o comportamento anterior a esta migration para todas as linhas já existentes.';
 
 -- ============================================================
 -- 6. Índices
@@ -258,23 +269,29 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON quote_diagnostic_area_suggestions TO aut
 GRANT ALL ON quote_diagnostic_area_suggestions TO service_role;
 
 -- ============================================================
--- 8. Propagar visible_to_client às policies públicas/portal existentes
+-- 8. Propagar visible_to_client à policy de portal existente
 -- ============================================================
-
--- 8a. anon_quote_lines_read (baseline, linha ~23839) — mesma condição EXISTS,
---     com "AND quote_lines.visible_to_client = true" acrescentado.
-DROP POLICY IF EXISTS "anon_quote_lines_read" ON quote_lines;
-
-CREATE POLICY "anon_quote_lines_read" ON quote_lines FOR SELECT TO anon USING (
-  (EXISTS ( SELECT 1
-     FROM (quotes q
-       JOIN proposals p ON (p.id = q.proposal_id))
-    WHERE ((q.id = quote_lines.quote_id) AND (p.public_link_enabled = true))))
-  AND quote_lines.visible_to_client = true
-);
-
--- 8b. "Client can view own quote lines" (baseline, linha ~21408) — mesma
---     condição via portal_user_can_see_document(), com o mesmo AND acrescentado.
+-- CORREÇÃO (revisão do coordenador): a versão inicial desta migration recriava
+-- "anon_quote_lines_read" (e assumia a existência de "anon_quotes_read"). Ambas
+-- as policies foram REMOVIDAS DELIBERADAMENTE por segurança em
+-- 20261029020000_remove_legacy_proposal_public_link_access.sql (linhas 123-133),
+-- que faz DROP POLICY de ambas + REVOKE ALL ON TABLE quotes/quote_lines FROM anon
+-- — o fluxo de link público não-autenticado de propostas foi descontinuado a
+-- favor do portal de cliente autenticado, precisamente porque a policy antiga
+-- não validava o token do chamador (vulnerabilidade documentada nesse ficheiro).
+-- Recriar "anon_quote_lines_read" reabriria essa vulnerabilidade em produção.
+-- Confirmado por grep (`grep -rl "anon_quote_lines_read\|anon_quotes_read"
+-- supabase/migrations/`): nenhuma migration depois de 20261029020000 volta a
+-- criar nenhuma das duas — não existem hoje na BD viva e NÃO são recriadas
+-- aqui. Não há nada a repetir quanto a `anon` em quotes/quote_lines: o REVOKE
+-- ALL FROM anon já feito nessa migration cobre-o.
+--
+-- "Client can view own quote lines" (baseline, linha ~21408) continua ativa e
+-- é a ÚNICA policy de leitura de quote_lines por terceiros a corrigir aqui.
+-- Confirmado por grep (`grep -rl "Client can view own quote lines"
+-- supabase/migrations/`): só existe no baseline; 20260618220001_rls_quote_fees_
+-- portal_read.sql apenas MENCIONA o nome desta policy num comentário, ao criar
+-- uma policy nova e distinta em quote_fees — não a toca.
 DROP POLICY IF EXISTS "Client can view own quote lines" ON quote_lines;
 
 CREATE POLICY "Client can view own quote lines" ON quote_lines FOR SELECT USING (
@@ -285,16 +302,45 @@ CREATE POLICY "Client can view own quote lines" ON quote_lines FOR SELECT USING 
 -- ============================================================
 -- 9. rpc_save_quote() — re-asserted, com visible_to_client nos dois INSERTs
 -- ============================================================
--- Corpo COPIADO integralmente de 20261113030000_rpc_save_quote_item_supplier_reference.sql
--- (a definição mais recente — confirmado por
--- `grep -rl "FUNCTION public.rpc_save_quote" supabase/migrations/`), com UMA
--- alteração cirúrgica em cada um dos dois INSERT INTO quote_lines: coluna
--- `visible_to_client` acrescentada, com
+-- CORREÇÃO (revisão do coordenador): a versão inicial desta migration tinha
+-- partido de 20261113030000_rpc_save_quote_item_supplier_reference.sql, que NÃO
+-- é a definição viva mais recente — existem DUAS migrations posteriores que
+-- também redefinem rpc_save_quote() e cujas correções seriam apagadas
+-- silenciosamente por um CREATE OR REPLACE feito em cima do corpo antigo:
+--   20261113060000_fix_proposal_value_trigger_estado.sql — troca a soma manual
+--     do valor da proposta (que ignorava quotes.estado) por
+--     calculate_proposal_value_from_quotes()/calculate_proposal_value_sem_iva_from_quotes(),
+--     e passa a escrever também proposals.value_sem_iva.
+--   20261117030000_quote_lines_retail_price_unit.sql — acrescenta a coluna
+--     retail_price_unit aos dois INSERT INTO quote_lines (linhas principais e
+--     inline quotes), para o preço de venda definido sobreviver à gravação.
+-- Confirmado (grep) que 20261117030000 é a última migration do repositório que
+-- redefine rpc_save_quote() — nenhuma migration posterior a este ficheiro volta
+-- a fazer CREATE OR REPLACE FUNCTION public.rpc_save_quote(...).
+--
+-- Corpo COPIADO integralmente de 20261117030000_quote_lines_retail_price_unit.sql
+-- (que por sua vez já incorpora, byte-a-byte, a correção de
+-- 20261113060000 na secção 5), com UMA alteração cirúrgica adicional em cada um
+-- dos dois INSERT INTO quote_lines: coluna `visible_to_client` acrescentada
+-- (depois de `retail_price_unit`), com
 -- `COALESCE((v_line ->> 'visible_to_client')::boolean, true)` /
 -- `COALESCE((v_iq_line ->> 'visible_to_client')::boolean, true)` — payloads
 -- antigos sem essa chave continuam a gravar true, exatamente o comportamento
 -- anterior a esta migration. Nenhuma outra lógica, assinatura ou comportamento
--- foi alterado.
+-- foi alterado — em particular, a correção de retail_price_unit E a correção
+-- de proposals.value/value_sem_iva via calculate_proposal_value_from_quotes()
+-- ficam ambas preservadas nesta redefinição.
+--
+-- 7º parâmetro NOVO (não existe em 20261117030000): p_diagnostic_suggestions
+-- jsonb DEFAULT '[]'::jsonb — backward-compatible (default vazio; qualquer
+-- caller existente que continue a invocar a função com 6 argumentos posicionais
+-- continua a funcionar sem alterações). Fecha o gap de
+-- quote_diagnostic_area_suggestions nunca ser escrita: cada entrada do array
+-- refere uma posição (line_index, 0-based) dentro de p_lines — nunca
+-- p_inline_quotes, essas sugestões só se tornam linhas "principais" — e, depois
+-- de inserida a linha correspondente, grava uma linha de auditoria em
+-- quote_diagnostic_area_suggestions com o id real da linha
+-- (quote_lines.id) que acabou de ser inserida.
 
 CREATE OR REPLACE FUNCTION public.rpc_save_quote(
   p_quote_id      uuid,
@@ -302,7 +348,8 @@ CREATE OR REPLACE FUNCTION public.rpc_save_quote(
   p_lines         jsonb,
   p_fees          jsonb,
   p_totals        jsonb,
-  p_inline_quotes jsonb DEFAULT '[]'::jsonb
+  p_inline_quotes jsonb DEFAULT '[]'::jsonb,
+  p_diagnostic_suggestions jsonb DEFAULT '[]'::jsonb
 )
 RETURNS public.quotes
 LANGUAGE plpgsql
@@ -321,6 +368,9 @@ DECLARE
   v_deal_id      uuid;
   v_root_org_id  uuid;
   v_line         jsonb;
+  v_line_idx     bigint;
+  v_line_id      uuid;
+  v_suggestion   jsonb;
   v_fee          jsonb;
   v_existing_link uuid;
   v_link_op      text;           -- 'update' | 'insert' | NULL
@@ -444,7 +494,9 @@ BEGIN
   -- 2. quote_lines: insert the full computed set (both new and edit paths)
   -- ══════════════════════════════════════════════════════════════════════════
   IF p_lines IS NOT NULL AND jsonb_typeof(p_lines) = 'array' THEN
-    FOR v_line IN SELECT * FROM jsonb_array_elements(p_lines)
+    FOR v_line, v_line_idx IN
+      SELECT value, ordinality - 1
+      FROM jsonb_array_elements(p_lines) WITH ORDINALITY AS t(value, ordinality)
     LOOP
       INSERT INTO public.quote_lines (
         quote_id, catalog_item_id, product_id, service_id, bundle_id, item_supplier_id,
@@ -452,7 +504,7 @@ BEGIN
         custo_material_unit, custo_mao_obra_unit, margem_percent, iva_percent,
         int_percent, discount_percent, total_sem_iva, total_com_iva,
         total_com_desconto, ordem, section_name, unidade, item_description, cost_price,
-        visible_to_client
+        retail_price_unit, visible_to_client
       )
       VALUES (
         v_saved_id,
@@ -479,8 +531,39 @@ BEGIN
         nullif(v_line ->> 'unidade', ''),
         nullif(v_line ->> 'item_description', ''),
         COALESCE((v_line ->> 'cost_price')::numeric, 0),
+        nullif(v_line ->> 'retail_price_unit', '')::numeric,
         COALESCE((v_line ->> 'visible_to_client')::boolean, true)
-      );
+      )
+      RETURNING id INTO v_line_id;
+
+      -- Fecha o gap de quote_diagnostic_area_suggestions nunca ser escrita:
+      -- para cada sugestão da Fase 1 cujo line_index aponta para a posição
+      -- (0-based) desta linha dentro de p_lines, grava a auditoria de origem
+      -- (regra ou IA) já ligada ao id real da linha que acabou de ser inserida.
+      -- Nunca se aplica a p_inline_quotes — essas sugestões só se tornam
+      -- linhas "principais" (ver 7º parâmetro, comentário acima da função).
+      IF p_diagnostic_suggestions IS NOT NULL AND jsonb_typeof(p_diagnostic_suggestions) = 'array' THEN
+        FOR v_suggestion IN
+          SELECT * FROM jsonb_array_elements(p_diagnostic_suggestions)
+          WHERE (value ->> 'line_index')::integer = v_line_idx
+        LOOP
+          INSERT INTO public.quote_diagnostic_area_suggestions (
+            diagnostic_area_id, quote_line_id, source, rule_id, ai_rationale,
+            ai_confidence, source_field, suggested_qty, was_edited_by_user
+          )
+          VALUES (
+            nullif(v_suggestion ->> 'diagnostic_area_id', '')::uuid,
+            v_line_id,
+            v_suggestion ->> 'source',
+            nullif(v_suggestion ->> 'rule_id', '')::uuid,
+            v_suggestion ->> 'ai_rationale',
+            (v_suggestion ->> 'ai_confidence')::numeric,
+            v_suggestion ->> 'source_field',
+            (v_suggestion ->> 'suggested_qty')::numeric,
+            COALESCE((v_suggestion ->> 'was_edited_by_user')::boolean, false)
+          );
+        END LOOP;
+      END IF;
     END LOOP;
   END IF;
 
@@ -520,21 +603,21 @@ BEGIN
   RETURNING * INTO v_quote;
 
   -- ══════════════════════════════════════════════════════════════════════════
-  -- 5. proposals value sync (conditional) — sum of ALL quotes on the proposal
+  -- 5. proposals value sync (conditional) — regra de negócio real, via
+  --    calculate_proposal_value_from_quotes() (FIX: substitui a soma manual
+  --    ingénua que ignorava `estado`, sobrepondo-se ao valor correto que o
+  --    trigger do passo 4 acabou de calcular)
   -- ══════════════════════════════════════════════════════════════════════════
   -- Written in THIS transaction together with quotes.proposal_id + pipeline_links
   -- so the FK linkage and the aggregate can never desynchronize.
   IF v_saved_id IS NOT NULL AND v_proposal_id IS NOT NULL THEN
-    SELECT COALESCE(sum(COALESCE(q.total, 0)), 0)
-    INTO   v_proposal_val
-    FROM   public.quotes q
-    WHERE  q.proposal_id = v_proposal_id
-      AND  q.deleted_at IS NULL;
-
     SELECT value INTO v_proposal_old FROM public.proposals WHERE id = v_proposal_id;
 
+    v_proposal_val := public.calculate_proposal_value_from_quotes(v_proposal_id);
+
     UPDATE public.proposals
-    SET value = v_proposal_val
+    SET value         = v_proposal_val,
+        value_sem_iva = public.calculate_proposal_value_sem_iva_from_quotes(v_proposal_id)
     WHERE id = v_proposal_id;
   END IF;
 
@@ -614,7 +697,7 @@ BEGIN
           custo_material_unit, custo_mao_obra_unit, margem_percent, iva_percent,
           int_percent, discount_percent, total_sem_iva, total_com_iva,
           total_com_desconto, ordem, section_name, unidade, item_description, cost_price,
-          visible_to_client
+          retail_price_unit, visible_to_client
         )
         VALUES (
           v_iq_id,
@@ -643,6 +726,7 @@ BEGIN
           nullif(v_iq_line ->> 'unidade', ''),
           nullif(v_iq_line ->> 'item_description', ''),
           COALESCE((v_iq_line ->> 'cost_price')::numeric, 0),
+          nullif(v_iq_line ->> 'retail_price_unit', '')::numeric,
           COALESCE((v_iq_line ->> 'visible_to_client')::boolean, true)
         );
       END LOOP;
@@ -743,8 +827,8 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.rpc_save_quote(uuid, jsonb, jsonb, jsonb, jsonb, jsonb) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.rpc_save_quote(uuid, jsonb, jsonb, jsonb, jsonb, jsonb) TO authenticated;
+REVOKE ALL ON FUNCTION public.rpc_save_quote(uuid, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_save_quote(uuid, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb) TO authenticated;
 
 -- ============================================================
 -- 10. rpc_preview_diagnostic_suggestions() — 1ª via (regras determinísticas)
@@ -1023,16 +1107,24 @@ COMMENT ON FUNCTION public.rpc_complete_diagnostic_phase1(uuid) IS
 --      WHERE table_name = 'quote_lines' AND column_name = 'visible_to_client';
 --
 -- 2. rpc_save_quote grava visible_to_client nas duas listas de INSERT:
---      SELECT pg_get_functiondef('public.rpc_save_quote(uuid, jsonb, jsonb, jsonb, jsonb, jsonb)'::regprocedure)
+--      SELECT pg_get_functiondef('public.rpc_save_quote(uuid, jsonb, jsonb, jsonb, jsonb, jsonb, jsonb)'::regprocedure)
 --        LIKE '%visible_to_client%';
 --      -- Esperado: true.
 --
--- 3. anon_quote_lines_read / "Client can view own quote lines" continuam a
---    respeitar as condições anteriores (public_link_enabled / portal_user_can_see_document)
---    e agora também visible_to_client = true.
+-- 3. "Client can view own quote lines" continua a respeitar a condição anterior
+--    (portal_user_can_see_document) e agora também visible_to_client = true.
+--    "anon_quote_lines_read"/"anon_quotes_read" NÃO existem — confirmar que
+--    continuam ausentes: SELECT policyname FROM pg_policies WHERE tablename IN
+--    ('quotes','quote_lines') AND policyname ILIKE 'anon%'; -- Esperado: 0 linhas.
 --
 -- 4. rpc_preview_diagnostic_suggestions devolve '[]'::jsonb (nunca erro) quando
 --    nenhuma quote_suggestion_rules casa com o source_field/keyword/intervention_type.
 --
 -- 5. rpc_complete_diagnostic_phase1 rejeita quando existem 0 áreas de fase_1 ou
 --    pelo menos uma não está status=completo.
+--
+-- 6. rpc_save_quote grava quote_diagnostic_area_suggestions quando
+--    p_diagnostic_suggestions traz entradas cujo line_index bate com uma
+--    posição de p_lines; chamadas com apenas 6 argumentos (sem
+--    p_diagnostic_suggestions) continuam a funcionar sem gravar nenhuma
+--    sugestão (default '[]'::jsonb).

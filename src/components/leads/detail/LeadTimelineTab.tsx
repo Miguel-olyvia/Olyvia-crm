@@ -3,9 +3,19 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { PhoneCall, Mail, Users, StickyNote, Briefcase, ArrowRightLeft, Bot, Filter, MessageCircle, Eye, CalendarIcon, Sparkles, Pencil, RefreshCw } from "lucide-react";
+import { PhoneCall, Mail, Users, StickyNote, Briefcase, ArrowRightLeft, Bot, Filter, MessageCircle, Eye, CalendarIcon, Sparkles, Pencil, RefreshCw, ShoppingBag, FileText, Calculator, FileSignature } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { leadStatusLabel } from "@/lib/leads/statusLabels";
+import {
+  DIRECT_SALE_EVENT_TYPE,
+  PROPOSAL_EVENT_TYPE,
+  QUOTE_EVENT_TYPE,
+  CONTRACT_EVENT_TYPE,
+  DOCUMENT_INSERT_TABLES,
+  describeDocumentHistoryEvent,
+  shouldHideAuditDiff,
+} from "@/lib/timeline/documentEvents";
+import { TIMELINE_AUDIT_IGNORED_FIELDS, formatAuditDiff } from "@/lib/timeline/auditIgnoredFields";
 
 interface TimelineEvent {
   id: string;
@@ -37,6 +47,10 @@ const TYPE_CONFIG: Record<string, { icon: typeof PhoneCall; color: string; bg: s
   created: { icon: Sparkles, color: "text-emerald-600", bg: "bg-emerald-100 dark:bg-emerald-900/30", label: "Criação" },
   role_status_changed: { icon: RefreshCw, color: "text-orange-600", bg: "bg-orange-100 dark:bg-orange-900/30", label: "Lifecycle" },
   field_change: { icon: Pencil, color: "text-slate-600", bg: "bg-slate-100 dark:bg-slate-800/50", label: "Edição" },
+  [DIRECT_SALE_EVENT_TYPE]: { icon: ShoppingBag, color: "text-fuchsia-600", bg: "bg-fuchsia-100 dark:bg-fuchsia-900/30", label: "Venda direta" },
+  [PROPOSAL_EVENT_TYPE]: { icon: FileText, color: "text-indigo-600", bg: "bg-indigo-100 dark:bg-indigo-900/30", label: "Proposta" },
+  [QUOTE_EVENT_TYPE]: { icon: Calculator, color: "text-cyan-600", bg: "bg-cyan-100 dark:bg-cyan-900/30", label: "Orçamento" },
+  [CONTRACT_EVENT_TYPE]: { icon: FileSignature, color: "text-emerald-700", bg: "bg-emerald-100 dark:bg-emerald-900/30", label: "Contrato" },
 };
 
 // Human-readable PT labels for audited field names.
@@ -64,18 +78,12 @@ const fieldLabel = (field: string): string => FIELD_LABELS[field] || field.repla
 // and drowned out real actions like a registered call. Applied to BOTH the
 // entity_audit_log diffs and the anew_entity_history field_change events
 // below, which previously had no such filter at all.
-const AUDIT_IGNORED_FIELDS = new Set([
-  "id", "entity_id", "organization_id", "root_organization_id",
-  "created_at", "updated_at", "created_by", "search_text",
-  "pipeline_dirty_at", "workflow_stage_id", "raw_status", "previous_status",
-  "field_values", "needs_manual_scheduling",
-  // Written automatically by the same action that already produces a
-  // dedicated "Chamada telefónica"/"Email enviado"/etc. entry (registering
-  // an interaction updates the lead's last_contact_* bookkeeping in the
-  // same UPDATE) — showing them again as raw "Editou last contact by:
-  // <uuid>" lines is pure duplication of what's already on screen.
-  "last_contact_at", "last_contact_by", "last_contact_result",
-]);
+// A lista passou a ser partilhada com as timelines do cliente e do contacto
+// (@/lib/timeline/auditIgnoredFields), que tinham ficado com uma versão curta.
+// Todas as entradas que estavam aqui — incluindo os last_contact_*, escritos
+// pela mesma acção que já produz uma "Chamada telefónica"/"Email enviado" — vão
+// agora nessa lista.
+const AUDIT_IGNORED_FIELDS = new Set(TIMELINE_AUDIT_IGNORED_FIELDS);
 
 // Raw status/stage values -> the same PT labels shown elsewhere (funnel,
 // status pills), so "Editou estado" reads as "new → rejected" no longer.
@@ -198,11 +206,20 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
         .map((d: any) => {
         const isCreated = d.change_type === "created";
         const isRoleStatus = d.change_type === "role_status_changed" || d.change_type === "status_changed";
-        const type = isCreated ? "created" : isRoleStatus ? "role_status_changed" : "field_change";
+        // Vendas diretas têm marcos próprios (criada/enviada/aceite/rejeitada/
+        // faturada). Sem este ramo caíam em "Editou campo", que é o destino de
+        // qualquer change_type desconhecido.
+        const docEvent = describeDocumentHistoryEvent(d.change_type, d.metadata);
+        const type = docEvent
+          ? docEvent.type
+          : isCreated ? "created" : isRoleStatus ? "role_status_changed" : "field_change";
 
         let title: string;
         let description: string | null = null;
-        if (isCreated) {
+        if (docEvent) {
+          title = docEvent.title;
+          description = docEvent.description;
+        } else if (isCreated) {
           const kind = d.metadata?.kind;
           title = kind === "contact" ? "Contacto criado" : kind === "client" ? "Cliente criado" : "Lead criada";
         } else if (isRoleStatus) {
@@ -238,22 +255,25 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
 
         if (row.operation === "UPDATE" && row.changed_fields && typeof row.changed_fields === "object") {
           const entries = Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
-            .filter(([field]) => !AUDIT_IGNORED_FIELDS.has(field));
+            .filter(([field]) => !AUDIT_IGNORED_FIELDS.has(field) && !shouldHideAuditDiff(row.table_name, field));
           entries.forEach(([field, diff], idx) => {
             const translate = field === "status" ? statusValueLabel : (v: string) => v;
-            const oldVal = diff?.old == null ? "—" : translate(String(diff.old));
-            const newVal = diff?.new == null ? "—" : translate(String(diff.new));
+            // null = a linha não tem leitura humana (HTML, jsonb, uuid) e não
+            // deve sequer aparecer. Ver formatAuditDiff.
+            const description = formatAuditDiff(field, diff?.old, diff?.new, translate);
+            if (description === null) return;
             auditEvents.push({
               id: `audit-${row.id}-${idx}`,
               type: "field_change",
               title: `Editou ${fieldLabel(field)}`,
-              description: `${oldVal} → ${newVal}`,
+              description,
               date: row.created_at,
               actor,
             });
           });
         } else if (
           row.operation === "INSERT"
+          && !DOCUMENT_INSERT_TABLES.has(row.table_name)
           && row.table_name !== "anew_leads"
           && row.table_name !== "anew_entities"
           // Already shown as its own "Chamada telefónica"/"Email enviado"/etc.
