@@ -119,6 +119,15 @@ const StockCounts = () => {
   // nada. Fora deste caso, a contagem só semeia o que já tem stock registado.
   const [createInitial, setCreateInitial] = useState(false);
   const [creating, setCreating] = useState(false);
+  // O armazém escolhido tem linhas em public.stocks? null = ainda não sabemos
+  // (ou a consulta falhou). Um armazém sem stock nenhum faz com que a contagem
+  // de rotina semeie ZERO linhas em silêncio — foi assim que se criaram
+  // documentos vazios — por isso é este facto que decide o interruptor.
+  const [warehouseHasNoStock, setWarehouseHasNoStock] = useState<boolean | null>(null);
+  // Assim que o utilizador mexe no interruptor, a escolha dele manda: a
+  // decisão automática deixa de se sobrepor até ele trocar de armazém (ou
+  // reabrir o diálogo). Num ref porque não afeta a renderização.
+  const initialTouchedByUser = useRef(false);
   // Pré-visualização da dimensão da contagem inicial (nº de linhas que vão ser
   // semeadas). Sem isto o utilizador liga o interruptor, cria, e só descobre
   // que semeou o catálogo inteiro quando o diálogo de detalhe abre com
@@ -368,10 +377,47 @@ const StockCounts = () => {
     return () => { cancelled = true; };
   }, [createOpen, createInitial, createCategoryId, activeCompany?.id]);
 
+  // Decide o interruptor "Contagem inicial" a partir do armazém escolhido: sem
+  // linhas em stocks, a contagem de rotina não teria nada para semear, logo o
+  // modo inicial (catálogo) é o único que produz uma folha utilizável. Nunca
+  // se sobrepõe a uma escolha manual (initialTouchedByUser) e, se a consulta
+  // falhar, deixa tudo como está — isto informa, não bloqueia.
+  useEffect(() => {
+    if (!createOpen || !createWarehouseId) {
+      setWarehouseHasNoStock(null);
+      return;
+    }
+    let cancelled = false;
+    setWarehouseHasNoStock(null);
+    (async () => {
+      try {
+        const { count, error } = await supabase
+          .from("stocks")
+          .select("id", { count: "exact", head: true })
+          .eq("warehouse_id", createWarehouseId)
+          .is("deleted_at", null);
+        if (error) throw error;
+        // Guarda de corrida: troca rápida de armazém não pode deixar a
+        // resposta antiga aterrar por cima da nova.
+        if (cancelled) return;
+        const empty = (count ?? 0) === 0;
+        setWarehouseHasNoStock(empty);
+        if (!initialTouchedByUser.current) setCreateInitial(empty);
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Error checking warehouse stock coverage:", error);
+        setWarehouseHasNoStock(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [createOpen, createWarehouseId]);
+
   const resetCreateForm = () => {
     setCreateWarehouseId("");
     setCreateCategoryId("all");
     setCreateInitial(false);
+    setWarehouseHasNoStock(null);
+    initialTouchedByUser.current = false;
   };
 
   const handleCreate = async () => {
@@ -397,7 +443,16 @@ const StockCounts = () => {
       setDetailCountId(result.id);
       setDetailOpen(true);
     } catch (error: any) {
-      toast({ title: t('stockCounts.toast.createError'), description: error.message, variant: "destructive" });
+      // A RPC recusa criar uma contagem que ficaria com 0 linhas e explica
+      // porquê (ERRCODE no_data_found). Essa mensagem do servidor é a parte
+      // útil — mostra-se tal e qual, sem a substituir por texto genérico; o
+      // fallback só entra se vier mesmo vazia.
+      const serverMessage =
+        (typeof error?.message === "string" && error.message.trim()) ||
+        (typeof error?.hint === "string" && error.hint.trim()) ||
+        (typeof error?.details === "string" && error.details.trim()) ||
+        t('stockCounts.toast.createErrorUnknown');
+      toast({ title: t('stockCounts.toast.createError'), description: serverMessage, variant: "destructive" });
     } finally {
       setCreating(false);
     }
@@ -600,7 +655,14 @@ const StockCounts = () => {
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">{t('stockCounts.create.description')}</p>
             <div>
-              <Select value={createWarehouseId} onValueChange={setCreateWarehouseId}>
+              <Select
+                value={createWarehouseId}
+                onValueChange={(value) => {
+                  // Armazém novo, decisão nova: a automática volta a mandar.
+                  initialTouchedByUser.current = false;
+                  setCreateWarehouseId(value);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder={t('stockCounts.create.selectWarehouse')} />
                 </SelectTrigger>
@@ -632,12 +694,28 @@ const StockCounts = () => {
                 <Switch
                   id="stock-count-initial"
                   checked={createInitial}
-                  onCheckedChange={setCreateInitial}
+                  onCheckedChange={(checked) => {
+                    initialTouchedByUser.current = true;
+                    setCreateInitial(checked);
+                  }}
                   disabled={creating}
                 />
               </div>
-              <p className="text-xs text-muted-foreground">
-                {t('stockCounts.create.initialHelp')}
+              {/* Uma só linha explicativa: quando o armazém não tem stock, a
+                  razão concreta substitui a ajuda genérica (que passaria a ser
+                  ruído) — evita empilhar três parágrafos dentro da caixa. */}
+              <p
+                className={
+                  warehouseHasNoStock === true && !createInitial
+                    ? "text-xs font-medium text-warning"
+                    : "text-xs text-muted-foreground"
+                }
+              >
+                {warehouseHasNoStock === true
+                  ? createInitial
+                    ? t('stockCounts.create.initialAutoReason')
+                    : t('stockCounts.create.initialEmptyWarehouseWarning')
+                  : t('stockCounts.create.initialHelp')}
               </p>
               {createInitial && (initialCountLoading || initialCountError || initialLineCount !== null) && (
                 <p
