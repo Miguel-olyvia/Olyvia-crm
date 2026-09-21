@@ -127,6 +127,13 @@ export interface RascunhoContrato {
   regime_manual: boolean;
   data_inicio: string;
   data_fim: string;
+  /**
+   * UI, nao dados: so alimenta o calculo automatico de `data_fim` quando o
+   * tipo de contrato tem termo (certo ou incerto), o mesmo padrao de
+   * `dataDoPeriodoExperimental` -- a base nunca deriva uma data da outra por
+   * trigger, so o ecra, e so uma vez. Nunca vai para a base.
+   */
+  duracao_meses: string;
   tem_periodo_experimental: boolean;
   periodo_experimental_dias: string;
   valor_base: string;
@@ -208,6 +215,7 @@ export function rascunhoInicial(): RascunhoPessoa {
       regime_manual: false,
       data_inicio: "",
       data_fim: "",
+      duracao_meses: "",
       tem_periodo_experimental: false,
       periodo_experimental_dias: "",
       valor_base: "",
@@ -551,6 +559,26 @@ export function dataDoPeriodoExperimental(dataInicio: string, dias: number): str
   // NAO se usa `toISOString`: ela converte para UTC e, em Lisboa no horario de
   // verao, devolvia o dia ANTERIOR -- 90 dias a partir de 1 de Janeiro davam
   // 31 de Marco em vez de 1 de Abril. A data e civil, nao um instante.
+  const mes = String(inicio.getMonth() + 1).padStart(2, "0");
+  const dia = String(inicio.getDate()).padStart(2, "0");
+  return `${inicio.getFullYear()}-${mes}-${dia}`;
+}
+
+/**
+ * Mesmo padrao de `dataDoPeriodoExperimental`, para a data de termino de um
+ * contrato com prazo (termo certo/incerto): quem preenche a duracao em meses,
+ * o ecra calcula a data sozinho -- `data_fim` continua um campo normal,
+ * directamente editavel e sobreponivel a seguir, a base nunca deriva nada por
+ * trigger.
+ */
+export function dataFimPorDuracaoMeses(dataInicio: string, meses: number): string | null {
+  if (dataInicio.trim() === "") return null;
+  const inicio = new Date(`${dataInicio}T00:00:00`);
+  if (Number.isNaN(inicio.getTime())) return null;
+  inicio.setMonth(inicio.getMonth() + meses);
+  // Mesma razao do cabecalho de dataDoPeriodoExperimental: nao usar
+  // toISOString, que converte para UTC e pode devolver o dia anterior em
+  // horario de verao. A data e civil, nao um instante.
   const mes = String(inicio.getMonth() + 1).padStart(2, "0");
   const dia = String(inicio.getDate()).padStart(2, "0");
   return `${inicio.getFullYear()}-${mes}-${dia}`;

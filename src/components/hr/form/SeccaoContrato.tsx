@@ -36,7 +36,11 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { CampoInterruptor, CampoSelect, CampoTexto } from "@/components/hr/form/Campos";
 import { HorarioEditor } from "@/components/hr/HorarioEditor";
 import { type HorarioRascunho } from "@/lib/hr/horario";
-import { dataDoPeriodoExperimental, type RascunhoContrato } from "@/lib/hr/novaPessoa";
+import {
+  dataDoPeriodoExperimental,
+  dataFimPorDuracaoMeses,
+  type RascunhoContrato,
+} from "@/lib/hr/novaPessoa";
 import {
   regimeAoMudarTipoContrato,
   regimeContradizTipoContrato,
@@ -121,6 +125,21 @@ export function SeccaoContrato({
    */
   const regimeContradiz = regimeContradizTipoContrato(valor.tipo_contrato, valor.regime);
 
+  // A duracao so faz sentido num contrato com termo -- sem termo nao tem data
+  // de fim nenhuma a calcular. Mesmo padrao do periodo experimental: so
+  // deriva enquanto a duracao estiver preenchida, nunca por trigger na base.
+  const temTermo = valor.tipo_contrato === "termo_certo" || valor.tipo_contrato === "termo_incerto";
+
+  const definirDuracaoMeses = (v: string) => {
+    const patch: Partial<RascunhoContrato> = { duracao_meses: v };
+    const meses = Number(v.replace(",", "."));
+    if (v.trim() !== "" && Number.isFinite(meses)) {
+      const dataFimCalculada = dataFimPorDuracaoMeses(inicioEfectivo, meses);
+      if (dataFimCalculada) patch.data_fim = dataFimCalculada;
+    }
+    onPatch(patch);
+  };
+
   const alternarDiaUtil = (dia: DiaSemana, marcado: boolean) =>
     onPatch({
       dias_uteis: marcado
@@ -181,8 +200,25 @@ export function SeccaoContrato({
           tipo="date"
           valor={valor.data_fim}
           erro={erroDe("hr-novo-data-fim")}
+          ajuda={temTermo ? t("hr.contrato.ajudaDataFimPorDuracao") : undefined}
           onChange={(v) => onPatch({ data_fim: v })}
         />
+        {/* So para contratos com termo -- sem termo nao ha data de fim a
+            calcular. Preencher a duracao substitui a data de fim; quem
+            preferir escrever a data directamente continua a poder, o campo
+            acima nunca fica bloqueado. */}
+        {temTermo && (
+          <CampoTexto
+            id="hr-novo-duracao-meses"
+            label={t("hr.contrato.duracaoMeses")}
+            ajuda={t("hr.contrato.ajudaDuracaoMeses")}
+            tipo="number"
+            min={0}
+            max={120}
+            valor={valor.duracao_meses}
+            onChange={definirDuracaoMeses}
+          />
+        )}
       </div>
 
       <div className="space-y-3">

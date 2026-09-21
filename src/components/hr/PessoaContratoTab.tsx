@@ -86,7 +86,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { FileSignature, FileText, Loader2 } from "lucide-react";
+import { FilePlus2, FileSignature, FileText, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { usePessoaDocumentos } from "@/hooks/usePessoaDocumentos";
@@ -94,6 +94,7 @@ import {
   AnexarContratoAssinadoDialog,
   type OpcaoVinculoDocumento,
 } from "@/components/hr/AnexarContratoAssinadoDialog";
+import { InserirDocumentoDialog } from "@/components/hr/InserirDocumentoDialog";
 import {
   CamposTocadosProvider,
   CampoSelect,
@@ -303,6 +304,11 @@ export function PessoaContratoTab({
   // da lista de modelos.
   const dadosDocumentos = usePessoaDocumentos(pessoaId, false);
   const [aAnexarContrato, setAAnexarContrato] = useState(false);
+  // Aditamento: mesma permissao e mesma instancia de usePessoaDocumentos do
+  // atalho acima -- so ficheiro anexado, sem modelo, pela mesma razao ja
+  // documentada para "Anexar contrato ja assinado" (este caminho nunca passa
+  // por modelo, por isso `dadosDocumentos` nasceu com `podeVerModelos: false`).
+  const [aCriarAditamento, setACriarAditamento] = useState(false);
   // "Em vigor" e activo OU suspenso, e NAO so activo. Um contrato suspenso
   // continua a ser a relacao laboral vigente -- esta parada, nao acabada.
   //
@@ -567,6 +573,16 @@ export function PessoaContratoTab({
               >
                 <FileSignature className="mr-2 h-4 w-4" />
                 {t("hr.documentos.anexarContratoAssinado")}
+              </Button>
+            )}
+            {podeAnexarContratoAssinado && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setACriarAditamento(true)}
+              >
+                <FilePlus2 className="mr-2 h-4 w-4" />
+                {t("hr.contrato.criarAditamento")}
               </Button>
             )}
           </div>
@@ -1044,6 +1060,24 @@ export function PessoaContratoTab({
           pessoaId={pessoaId}
           organizationId={organizationId}
           vinculosOpcoes={vinculosOpcoesDocumento}
+          criarPorUpload={dadosDocumentos.criarPorUpload}
+          anexarFicheiro={dadosDocumentos.anexarFicheiro}
+          saving={dadosDocumentos.saving}
+        />
+      )}
+
+      {podeAnexarContratoAssinado && (
+        <InserirDocumentoDialog
+          open={aCriarAditamento}
+          onOpenChange={setACriarAditamento}
+          pessoaId={pessoaId}
+          organizationId={organizationId}
+          vinculosOpcoes={vinculosOpcoesDocumento}
+          modelos={dadosDocumentos.modelos}
+          podeEmitir={false}
+          podeCriarPorUpload={podeAnexarContratoAssinado}
+          tipoInicial="adenda"
+          emitir={dadosDocumentos.emitir}
           criarPorUpload={dadosDocumentos.criarPorUpload}
           anexarFicheiro={dadosDocumentos.anexarFicheiro}
           saving={dadosDocumentos.saving}

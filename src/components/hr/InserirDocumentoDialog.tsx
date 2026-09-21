@@ -61,6 +61,13 @@ export interface InserirDocumentoDialogProps {
   modelos: PessoaDocumentoModelo[];
   podeEmitir: boolean;
   podeCriarPorUpload: boolean;
+  /**
+   * Pre-seleccionar o tipo no modo "anexar ficheiro" -- usado pelo atalho
+   * "Criar aditamento" em `PessoaContratoTab.tsx`, que abre este dialogo com
+   * `'adenda'` em vez do "contrato" por omissao. So afecta o modo de anexar:
+   * o modo "a partir de um modelo" nao filtra modelos por tipo.
+   */
+  tipoInicial?: TipoDocumentoRH;
   emitir: (modeloId: string) => Promise<string | null>;
   criarPorUpload: (args: {
     tipo: TipoDocumentoRH;
@@ -82,6 +89,7 @@ export function InserirDocumentoDialog({
   modelos,
   podeEmitir,
   podeCriarPorUpload,
+  tipoInicial,
   emitir,
   criarPorUpload,
   anexarFicheiro,
@@ -119,18 +127,21 @@ export function InserirDocumentoDialog({
   );
 
   // -- Modo "anexar ficheiro" ------------------------------------------------
+  const rascunhoUploadVazio = tipoInicial
+    ? { ...RASCUNHO_UPLOAD_VAZIO, tipo: tipoInicial }
+    : RASCUNHO_UPLOAD_VAZIO;
   const [rascunhoUpload, setRascunhoUpload] = useState<{
     tipo: TipoDocumentoRH;
     titulo: string;
     vinculoId: string;
-  }>(RASCUNHO_UPLOAD_VAZIO);
+  }>(rascunhoUploadVazio);
   const [documentoParaAnexar, setDocumentoParaAnexar] = useState<PessoaDocumento | null>(null);
 
   const fechar = () => {
     onOpenChange(false);
     setModeloEscolhido("");
     setMostrarPreview(false);
-    setRascunhoUpload(RASCUNHO_UPLOAD_VAZIO);
+    setRascunhoUpload(rascunhoUploadVazio);
     setModo(modoInicial);
   };
 
