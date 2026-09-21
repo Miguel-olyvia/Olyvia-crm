@@ -131,12 +131,20 @@ export async function resolveLineDetails(
         .from("product_prices")
         .select("product_id, price")
         .in("product_id", idsArr)
-        .eq("price_type", "purchase"),
+        .eq("price_type", "purchase")
+        // Pode haver mais do que uma linha "purchase" por produto (a antiga
+        // fica lá para histórico, sem valid_from a distingui-la de uma nova).
+        // Ordenar por created_at ascendente e deixar o forEach sobrepor
+        // garante que fica sempre a mais recente — a mesma escolha feita ao
+        // adicionar o item ao orçamento (AddItemsDialog.tsx), para o preço
+        // mostrado na criação e a margem mostrada na listagem baterem certo.
+        .order("created_at", { ascending: true }),
       supabase
         .from("product_prices")
         .select("product_id, vat_rate")
         .in("product_id", idsArr)
-        .eq("price_type", "retail"),
+        .eq("price_type", "retail")
+        .order("created_at", { ascending: true }),
     ]);
     (purchase || []).forEach((row: any) => {
       productCostMap[row.product_id] = parseFloat(String(row.price || 0));
@@ -156,12 +164,15 @@ export async function resolveLineDetails(
         .from("service_prices")
         .select("service_id, price")
         .in("service_id", idsArr)
-        .eq("price_type", "purchase"),
+        .eq("price_type", "purchase")
+        // Mesmo motivo do bloco de produtos acima: fica sempre a mais recente.
+        .order("created_at", { ascending: true }),
       supabase
         .from("service_prices")
         .select("service_id, vat_rate")
         .in("service_id", idsArr)
-        .eq("price_type", "retail"),
+        .eq("price_type", "retail")
+        .order("created_at", { ascending: true }),
     ]);
     (purchase || []).forEach((row: any) => {
       serviceCostMap[row.service_id] = parseFloat(String(row.price || 0));
@@ -202,12 +213,14 @@ export async function resolveLineDetails(
           .from("product_prices")
           .select("product_id, price")
           .in("product_id", missingProductIds)
-          .eq("price_type", "purchase"),
+          .eq("price_type", "purchase")
+          .order("created_at", { ascending: true }),
         supabase
           .from("product_prices")
           .select("product_id, vat_rate")
           .in("product_id", missingProductIds)
-          .eq("price_type", "retail"),
+          .eq("price_type", "retail")
+          .order("created_at", { ascending: true }),
       ]);
       (p1 || []).forEach((row: any) => {
         productCostMap[row.product_id] = parseFloat(String(row.price || 0));
@@ -222,12 +235,14 @@ export async function resolveLineDetails(
           .from("service_prices")
           .select("service_id, price")
           .in("service_id", missingServiceIds)
-          .eq("price_type", "purchase"),
+          .eq("price_type", "purchase")
+          .order("created_at", { ascending: true }),
         supabase
           .from("service_prices")
           .select("service_id, vat_rate")
           .in("service_id", missingServiceIds)
-          .eq("price_type", "retail"),
+          .eq("price_type", "retail")
+          .order("created_at", { ascending: true }),
       ]);
       (s1 || []).forEach((row: any) => {
         serviceCostMap[row.service_id] = parseFloat(String(row.price || 0));

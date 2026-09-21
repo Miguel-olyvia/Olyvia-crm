@@ -543,7 +543,14 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             .from("product_prices")
             .select("product_id, price, vat_rate, price_type")
             .in("price_type", ["retail", "purchase"])
-            .in("product_id", batch);
+            .in("product_id", batch)
+            // product_prices pode ter mais do que uma linha "purchase"/"retail"
+            // para o mesmo produto (a antiga fica lá para histórico, sem
+            // valid_from a distingui-la de uma nova). Ordenar por created_at
+            // ascendente e deixar o forEach sobrepor garante que fica sempre
+            // a mais recente — a mesma escolha feita no cálculo da margem na
+            // listagem (quoteCostResolver.ts), para os dois ecrãs baterem certo.
+            .order("created_at", { ascending: true });
           // O preço de compra vem junto com o de venda para que a linha do
           // orçamento guarde o custo REAL, em vez de um custo inventado a
           // partir do preço de venda dividido por uma margem por omissão.
@@ -608,7 +615,9 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
             .from("service_prices")
             .select("service_id, price, vat_rate, price_type")
             .in("price_type", ["retail", "purchase"])
-            .in("service_id", batch);
+            .in("service_id", batch)
+            // Mesmo motivo do bloco de produtos acima: fica sempre a mais recente.
+            .order("created_at", { ascending: true });
           (pd || []).forEach(p => {
             const prev = pricesMap.get(p.service_id) || { price: null, vat_rate: null, cost: null };
             if (p.price_type === "purchase") pricesMap.set(p.service_id, { ...prev, cost: p.price });
