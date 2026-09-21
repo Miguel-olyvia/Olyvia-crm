@@ -100,9 +100,13 @@ function buildFieldSchema(field: ValidatableField): z.ZodTypeAny {
   }
 
   if (field.field_type === "phone") {
-    // Input already strips non-digits on change, but validate defensively
-    // in case the value came from a default_value or query param.
-    stringSchema = stringSchema.regex(/^[0-9]+$/, `${label}: deve conter apenas números`);
+    // O campo grava "+<indicativo><digitos>" (PhoneInput never assume um
+    // indicativo por omissao -- ver PublicLeadForm case "phone"). O "+"
+    // aqui nao e opcional: sem ele, o visitante nao escolheu pais nenhum.
+    stringSchema = stringSchema.regex(
+      /^\+[0-9]+$/,
+      `${label}: escolha o indicativo do país e escreva só números`
+    );
   }
 
   if (typeof field.min_length === "number") {
