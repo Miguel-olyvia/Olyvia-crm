@@ -24,14 +24,26 @@
  * ------------------------
  * O aviso continua a so aparecer quando a versao em vigor nao tem nenhum
  * documento ligado -- nao se impede a alteracao por isso. Os dialogos de
- * Alterar e Corrigir ganham um selector opcional "Documento de suporte",
- * com os documentos JA EXISTENTES desta pessoa (via `usePessoaDocumentos`,
- * o mesmo hook do separador Documentos) -- sem filtrar por vinculo nem por
+ * Alterar e Corrigir ganham um selector "Documento de suporte", com os
+ * documentos JA EXISTENTES desta pessoa (via `usePessoaDocumentos`, o mesmo
+ * hook do separador Documentos) -- sem filtrar por vinculo nem por
  * estado=assinado nesta ronda: e informacao de apoio, nao um portao. Ligar
  * um documento aqui nao o cria nem o altera -- so grava `documento_id` na
- * versao de horas.
+ * versao de horas. Ao lado do selector ha tambem "Anexar ficheiro novo":
+ * cria um documento tipo 'outro' por upload (`criarPorUpload` +
+ * `anexarFicheiro`, o MESMO caminho de dois passos que
+ * `AnexarContratoAssinadoDialog` ja usa) e liga-o de imediato -- para quem
+ * nao tem o ficheiro ja carregado no separador Documentos.
+ *
+ * O MOTIVO PASSA A SER OBRIGATORIO
+ * -----------------------------------
+ * Justificar uma mudanca de horario deixa de ser opcional -- toda a
+ * alteracao ou correccao grava uma razao, a mesma exigencia que ja existe
+ * para as datas. O campo tambem deixou de usar a etiqueta de tradução do
+ * motivo de TERMO DE CONTRATO (`hr.contrato.motivoTermo`) por engano -- tinha
+ * a etiqueta errada, agora tem a sua propria.
  */
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -104,12 +116,21 @@ export function PessoaVinculoHorasCard({
     organizationId,
   );
   // So para listar os documentos JA EXISTENTES desta pessoa no selector de
-  // apoio -- `false` porque este cartao nunca precisa da lista de modelos.
-  const { documentos: documentosDaPessoa } = usePessoaDocumentos(pessoaId, false);
+  // apoio, e para criar+anexar um ficheiro novo inline -- `false` porque
+  // este cartao nunca precisa da lista de modelos.
+  const {
+    documentos: documentosDaPessoa,
+    criarPorUpload,
+    anexarFicheiro: anexarFicheiroAoDocumento,
+    saving: aAnexarNovo,
+  } = usePessoaDocumentos(pessoaId, false);
   const opcoesDocumento = documentosDaPessoa.map((documento) => ({
     value: documento.id,
     label: `${documento.titulo} — ${t(`hr.tipoDocumentoRH.${documento.tipo}`)} · ${t(`hr.estadoDocumentoRH.${documento.estado}`)}`,
   }));
+
+  const inputFicheiroAlterarRef = useRef<HTMLInputElement>(null);
+  const inputFicheiroCorrigirRef = useRef<HTMLInputElement>(null);
 
   const historico = versoes.filter((v) => v.id !== aberta?.id);
 
@@ -142,6 +163,10 @@ export function PessoaVinculoHorasCard({
   const concluirAlterar = async () => {
     if (rascunhoAlterar.validoDe.trim() === "") {
       toast.error(t("hr.horasContratadas.erroSemData"));
+      return;
+    }
+    if (rascunhoAlterar.motivo.trim() === "") {
+      toast.error(t("hr.horasContratadas.erroSemMotivo"));
       return;
     }
     if (!horasLegiveisAlterar || numeroAlterar < 0 || numeroAlterar > maximoAlterar) {
@@ -195,6 +220,10 @@ export function PessoaVinculoHorasCard({
       toast.error(t("hr.horasContratadas.erroSemData"));
       return;
     }
+    if (rascunhoCorrigir.motivo.trim() === "") {
+      toast.error(t("hr.horasContratadas.erroSemMotivo"));
+      return;
+    }
     if (!horasLegiveisCorrigir || numeroCorrigir < 0 || numeroCorrigir > maximoCorrigir) {
       toast.error(t("hr.horasContratadas.erroHorasInvalidas", { maximo: String(maximoCorrigir) }));
       return;
@@ -217,6 +246,56 @@ export function PessoaVinculoHorasCard({
     }
     toast.success(t("hr.sucesso.guardado"));
     setLinhaACorrigir(null);
+  };
+
+  // -- Anexar ficheiro novo inline (cria documento tipo 'outro' + anexa) ----
+  // `anexarFicheiroAoDocumento` (usePessoaDocumentos.anexarFicheiro) procura
+  // o documento na lista `documentosDaPessoa` do MESMO hook -- logo a seguir
+  // a criarPorUpload() essa lista ainda nao tem a linha nova nesta mesma
+  // closure (so fica fresca no proximo render, ja com o id la). Por isso o
+  // anexo real corre num efeito que so dispara quando `documentosDaPessoa`
+  // ja inclui o id pendente -- nunca na mesma continuacao sincrona do
+  // criarPorUpload, o mesmo cuidado que AnexarContratoAssinadoDialog ja tem
+  // ("NAO procurar o documento novo numa lista qualquer").
+  const [pendente, setPendente] = useState<{
+    alvo: "alterar" | "corrigir";
+    documentoId: string;
+    ficheiro: File;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!pendente) return;
+    if (!documentosDaPessoa.some((d) => d.id === pendente.documentoId)) return;
+    let cancelado = false;
+    void (async () => {
+      const erro = await anexarFicheiroAoDocumento(pendente.documentoId, pendente.ficheiro);
+      if (cancelado) return;
+      if (erro) {
+        toast.error(erro);
+      } else if (pendente.alvo === "alterar") {
+        setRascunhoAlterar((a) => ({ ...a, documentoId: pendente.documentoId }));
+      } else {
+        setRascunhoCorrigir((a) => ({ ...a, documentoId: pendente.documentoId }));
+      }
+      setPendente(null);
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendente, documentosDaPessoa]);
+
+  const anexarFicheiroNovo = async (alvo: "alterar" | "corrigir", ficheiro: File) => {
+    const { documentoId, erro: erroCriar } = await criarPorUpload({
+      tipo: "outro",
+      titulo: t("hr.horasContratadas.anexoNovoTitulo", { data: dataDeHojeISO() }),
+      vinculoId: vinculoActivoId,
+    });
+    if (erroCriar || !documentoId) {
+      toast.error(erroCriar ?? t("hr.documentos.erroAnexar"));
+      return;
+    }
+    setPendente({ alvo, documentoId, ficheiro });
   };
 
   return (
@@ -345,7 +424,7 @@ export function PessoaVinculoHorasCard({
             />
             <CampoTexto
               id="hr-horas-alterar-motivo"
-              label={t("hr.contrato.motivoTermo")}
+              label={t("hr.horasContratadas.motivo")}
               valor={rascunhoAlterar.motivo}
               onChange={(v) => setRascunhoAlterar((a) => ({ ...a, motivo: v }))}
             />
@@ -358,6 +437,31 @@ export function PessoaVinculoHorasCard({
               placeholder={t("common.none")}
               onChange={(v) => setRascunhoAlterar((a) => ({ ...a, documentoId: v }))}
             />
+            <div className="space-y-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={aAnexarNovo || pendente !== null}
+                onClick={() => inputFicheiroAlterarRef.current?.click()}
+              >
+                {(aAnexarNovo || pendente !== null) && (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                )}
+                {t("hr.horasContratadas.anexarNovo")}
+              </Button>
+              <input
+                ref={inputFicheiroAlterarRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                className="hidden"
+                onChange={(evento) => {
+                  const ficheiro = evento.target.files?.[0];
+                  evento.target.value = "";
+                  if (ficheiro) void anexarFicheiroNovo("alterar", ficheiro);
+                }}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setAlterarAberto(false)} disabled={saving}>
@@ -422,7 +526,7 @@ export function PessoaVinculoHorasCard({
             />
             <CampoTexto
               id="hr-horas-corrigir-motivo"
-              label={t("hr.contrato.motivoTermo")}
+              label={t("hr.horasContratadas.motivo")}
               valor={rascunhoCorrigir.motivo}
               onChange={(v) => setRascunhoCorrigir((a) => ({ ...a, motivo: v }))}
             />
@@ -435,6 +539,31 @@ export function PessoaVinculoHorasCard({
               placeholder={t("common.none")}
               onChange={(v) => setRascunhoCorrigir((a) => ({ ...a, documentoId: v }))}
             />
+            <div className="space-y-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={aAnexarNovo || pendente !== null}
+                onClick={() => inputFicheiroCorrigirRef.current?.click()}
+              >
+                {(aAnexarNovo || pendente !== null) && (
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                )}
+                {t("hr.horasContratadas.anexarNovo")}
+              </Button>
+              <input
+                ref={inputFicheiroCorrigirRef}
+                type="file"
+                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                className="hidden"
+                onChange={(evento) => {
+                  const ficheiro = evento.target.files?.[0];
+                  evento.target.value = "";
+                  if (ficheiro) void anexarFicheiroNovo("corrigir", ficheiro);
+                }}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setLinhaACorrigir(null)} disabled={saving}>
