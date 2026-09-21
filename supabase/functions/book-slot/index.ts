@@ -17,6 +17,7 @@ import {
   pickTemplateId,
   buildManageUrl,
 } from '../_shared/formEmails.ts';
+import { sendSmsNow } from '../_shared/sendSms.ts';
 
 initSentry();
 
@@ -134,11 +135,16 @@ Deno.serve(async (req: Request) => {
     // 2. Get scheduling step config
     let boardId: string | null = null;
     let durationMinutes = 60;
+    // Regra 1 (antecedencia minima): reavaliada aqui, no booking em si, nao
+    // so no calendario que o mostrou -- sem isto um pedido directo a esta
+    // funcao (sem passar pelo calendario) conseguia marcar um horario
+    // demasiado proximo mesmo com a regra configurada.
+    let minAdvanceHours: number | null = null;
 
     if (step_number) {
       const { data: step } = await supabase
         .from('form_steps')
-        .select('scheduling_board_id, scheduling_duration_minutes')
+        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours')
         .eq('form_id', form_id)
         .eq('step_number', step_number)
         .single();
@@ -146,6 +152,7 @@ Deno.serve(async (req: Request) => {
       if (step) {
         boardId = step.scheduling_board_id;
         durationMinutes = step.scheduling_duration_minutes || 60;
+        minAdvanceHours = step.scheduling_min_advance_hours ?? null;
       }
     }
 
@@ -153,7 +160,7 @@ Deno.serve(async (req: Request) => {
       // Try to find any scheduling step in this form
       const { data: schedulingStep } = await supabase
         .from('form_steps')
-        .select('scheduling_board_id, scheduling_duration_minutes')
+        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours')
         .eq('form_id', form_id)
         .eq('step_type', 'scheduling')
         .limit(1)
@@ -162,6 +169,7 @@ Deno.serve(async (req: Request) => {
       if (schedulingStep) {
         boardId = schedulingStep.scheduling_board_id;
         durationMinutes = schedulingStep.scheduling_duration_minutes || 60;
+        minAdvanceHours = schedulingStep.scheduling_min_advance_hours ?? null;
       }
     }
 
@@ -237,6 +245,7 @@ Deno.serve(async (req: Request) => {
       p_duration_minutes: durationMinutes,
       p_limit: 50,
       p_district_id: district_id || null,
+      p_min_advance_hours: minAdvanceHours,
     });
 
     const candidatesWithSlot = (resources || []).filter((res: any) => {
@@ -892,6 +901,20 @@ Deno.serve(async (req: Request) => {
             subject: renderSubject(confTpl.subject || 'Confirmação', baseVars),
             html: renderHtml(confTpl.body_html, baseVars),
           });
+        }
+      }
+
+      // (0b) Client confirmation SMS -- mesma condicao/dados do email acima,
+      // canal independente. Falha de envio nao bloqueia a marcacao (fail-soft,
+      // igual ao email); a regra 11 (alerta interno quando falha) fica para
+      // outro pedido, tal como ja acontece hoje para o email.
+      if (emailCfg?.confirmation_sms_enabled && leadPhone) {
+        const smsResult = await sendSmsNow({
+          toPhone: String(leadPhone),
+          message: `${orgRow?.name || 'A empresa'}: a sua visita ficou marcada para ${whenFormatted}.${cancelLink ? ` Gerir/cancelar: ${cancelLink}` : ''}`,
+        });
+        if (!smsResult.ok) {
+          console.error('[book-slot] confirmation SMS failed (non-fatal):', smsResult.error);
         }
       }
 

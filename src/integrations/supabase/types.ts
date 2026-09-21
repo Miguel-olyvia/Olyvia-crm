@@ -8277,6 +8277,7 @@ export type Database = {
           checkbox_size: string | null
           confirmation_email_enabled: boolean
           confirmation_email_template_id: string | null
+          confirmation_sms_enabled: boolean
           contact_soon_text: string | null
           container_padding_x: string | null
           container_padding_y: string | null
@@ -8344,6 +8345,7 @@ export type Database = {
           redirecting_text: string | null
           reminder_enabled: boolean
           reminder_hours_before: number
+          reminder_sms_enabled: boolean
           reminder_template_id: string | null
           required_field_label: string | null
           scheduling_invite_delays_hours: number[]
@@ -8410,6 +8412,7 @@ export type Database = {
           checkbox_size?: string | null
           confirmation_email_enabled?: boolean
           confirmation_email_template_id?: string | null
+          confirmation_sms_enabled?: boolean
           contact_soon_text?: string | null
           container_padding_x?: string | null
           container_padding_y?: string | null
@@ -8477,6 +8480,7 @@ export type Database = {
           redirecting_text?: string | null
           reminder_enabled?: boolean
           reminder_hours_before?: number
+          reminder_sms_enabled?: boolean
           reminder_template_id?: string | null
           required_field_label?: string | null
           scheduling_invite_delays_hours?: number[]
@@ -8543,6 +8547,7 @@ export type Database = {
           checkbox_size?: string | null
           confirmation_email_enabled?: boolean
           confirmation_email_template_id?: string | null
+          confirmation_sms_enabled?: boolean
           contact_soon_text?: string | null
           container_padding_x?: string | null
           container_padding_y?: string | null
@@ -8610,6 +8615,7 @@ export type Database = {
           redirecting_text?: string | null
           reminder_enabled?: boolean
           reminder_hours_before?: number
+          reminder_sms_enabled?: boolean
           reminder_template_id?: string | null
           required_field_label?: string | null
           scheduling_invite_delays_hours?: number[]
@@ -8823,6 +8829,7 @@ export type Database = {
           scheduling_board_id: string | null
           scheduling_district_field_key: string | null
           scheduling_duration_minutes: number | null
+          scheduling_min_advance_hours: number | null
           scheduling_postal_code_field_key: string | null
           sort_order: number | null
           step_description: string | null
@@ -8841,6 +8848,7 @@ export type Database = {
           scheduling_board_id?: string | null
           scheduling_district_field_key?: string | null
           scheduling_duration_minutes?: number | null
+          scheduling_min_advance_hours?: number | null
           scheduling_postal_code_field_key?: string | null
           sort_order?: number | null
           step_description?: string | null
@@ -8859,6 +8867,7 @@ export type Database = {
           scheduling_board_id?: string | null
           scheduling_district_field_key?: string | null
           scheduling_duration_minutes?: number | null
+          scheduling_min_advance_hours?: number | null
           scheduling_postal_code_field_key?: string | null
           sort_order?: number | null
           step_description?: string | null
@@ -10321,6 +10330,7 @@ export type Database = {
           created_by: string | null
           enforce_stage_transitions: boolean
           organization_id: string
+          sequential_flow: boolean
           stage_positions: Json
           updated_at: string
           updated_by: string | null
@@ -10330,6 +10340,7 @@ export type Database = {
           created_by?: string | null
           enforce_stage_transitions?: boolean
           organization_id: string
+          sequential_flow?: boolean
           stage_positions?: Json
           updated_at?: string
           updated_by?: string | null
@@ -10339,6 +10350,7 @@ export type Database = {
           created_by?: string | null
           enforce_stage_transitions?: boolean
           organization_id?: string
+          sequential_flow?: boolean
           stage_positions?: Json
           updated_at?: string
           updated_by?: string | null
@@ -10350,6 +10362,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "anew_users"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_pipeline_settings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
           },
           {
             foreignKeyName: "lead_pipeline_settings_organization_id_fkey"
@@ -10364,6 +10383,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "anew_users"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_pipeline_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
           },
         ]
       }
@@ -20979,6 +21005,10 @@ export type Database = {
         Args: { lat1: number; lat2: number; lng1: number; lng2: number }
         Returns: number
       }
+      calculate_min_advance_datetime: {
+        Args: { p_from: string; p_hours: number; p_organization_id: string }
+        Returns: string
+      }
       calculate_product_margin: {
         Args: { p_product_id: string }
         Returns: {
@@ -21071,6 +21101,10 @@ export type Database = {
       compute_lead_furthest_progress_stage_v2: {
         Args: { p_lead_id: string }
         Returns: string
+      }
+      compute_lead_stage_path_v2: {
+        Args: { p_lead_id: string }
+        Returns: string[]
       }
       compute_lead_stage_v2: { Args: { p_lead_id: string }; Returns: string }
       compute_proposal_business_hash: {
@@ -21234,6 +21268,7 @@ export type Database = {
           p_district_id?: string
           p_duration_minutes?: number
           p_limit?: number
+          p_min_advance_hours?: number
           p_target_date?: string
           p_target_postal_code?: string
         }
@@ -21644,6 +21679,7 @@ export type Database = {
           p_district_id?: string
           p_duration_minutes?: number
           p_end_date: string
+          p_min_advance_hours?: number
           p_postal_code?: string
           p_start_date: string
         }
@@ -21776,6 +21812,7 @@ export type Database = {
         Args: {
           p_date: string
           p_duration_minutes?: number
+          p_min_advance_hours?: number
           p_organization_id?: string
           p_resource_id: string
         }
@@ -21912,6 +21949,10 @@ export type Database = {
           p_is_initial_stage: boolean
         }
         Returns: string
+      }
+      lead_qualification_overlay_v2: {
+        Args: { p_org: string; p_signals: Json; p_status: string }
+        Returns: Json
       }
       link_entity_to_org: {
         Args: { p_entity_id: string; p_target_org_id: string }
@@ -22683,6 +22724,10 @@ export type Database = {
         }
         Returns: number
       }
+      rpc_bulk_update_inventory_count_lines: {
+        Args: { p_inventory_count_id: string; p_lines: Json }
+        Returns: Json
+      }
       rpc_client_contract_stats: {
         Args: {
           p_creator_ids?: string[]
@@ -23110,6 +23155,7 @@ export type Database = {
       rpc_create_inventory_count: {
         Args: {
           p_category_id?: string
+          p_initial?: boolean
           p_organization_id: string
           p_warehouse_id: string
         }
