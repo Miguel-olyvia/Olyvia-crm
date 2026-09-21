@@ -14,6 +14,28 @@
  * keep behaving exactly as before.
  */
 import { z } from "zod";
+import { COUNTRY_CODES } from "@/constants/countryCodes";
+
+// Indicativos ordenados do mais longo para o mais curto, para o mesmo
+// motivo do PublicLeadForm case "phone": "+1" nao pode "comer" por engano
+// o prefixo de um indicativo mais longo que tambem comece por "1".
+const COUNTRY_CODES_BY_LENGTH = [...COUNTRY_CODES].sort(
+  (a, b) => b.dialCode.length - a.dialCode.length
+);
+
+/**
+ * Numero de digitos do telefone SEM o indicativo (ex.: "+351912345678" -> 9).
+ * min_length/max_length de um campo phone configurado antes deste campo
+ * passar a gravar "+<indicativo><digitos>" contavam so os digitos -- por
+ * isso continuam a validar so os digitos, nao a string toda com o "+" e o
+ * indicativo, que teria um comprimento diferente por pais e quebraria
+ * qualquer campanha ja configurada.
+ */
+function phoneNationalDigitsLength(value: string): number {
+  const matched = COUNTRY_CODES_BY_LENGTH.find((c) => value.startsWith(c.dialCode));
+  const digits = matched ? value.slice(matched.dialCode.length) : value.replace(/^\+/, "");
+  return digits.length;
+}
 
 export interface ValidatableField {
   field_key: string;
@@ -94,12 +116,13 @@ function buildFieldSchema(field: ValidatableField): z.ZodTypeAny {
   }
 
   let stringSchema = z.string();
+  const isPhone = field.field_type === "phone";
 
   if (field.field_type === "email") {
     stringSchema = stringSchema.email(`${label}: formato de email inválido`);
   }
 
-  if (field.field_type === "phone") {
+  if (isPhone) {
     // O campo grava "+<indicativo><digitos>" (PhoneInput never assume um
     // indicativo por omissao -- ver PublicLeadForm case "phone"). O "+"
     // aqui nao e opcional: sem ele, o visitante nao escolheu pais nenhum.
@@ -107,13 +130,13 @@ function buildFieldSchema(field: ValidatableField): z.ZodTypeAny {
       /^\+[0-9]+$/,
       `${label}: escolha o indicativo do país e escreva só números`
     );
-  }
-
-  if (typeof field.min_length === "number") {
-    stringSchema = stringSchema.min(field.min_length, `${label}: deve ter pelo menos ${field.min_length} caracteres`);
-  }
-  if (typeof field.max_length === "number") {
-    stringSchema = stringSchema.max(field.max_length, `${label}: deve ter no máximo ${field.max_length} caracteres`);
+  } else {
+    if (typeof field.min_length === "number") {
+      stringSchema = stringSchema.min(field.min_length, `${label}: deve ter pelo menos ${field.min_length} caracteres`);
+    }
+    if (typeof field.max_length === "number") {
+      stringSchema = stringSchema.max(field.max_length, `${label}: deve ter no máximo ${field.max_length} caracteres`);
+    }
   }
 
   if (field.pattern) {
@@ -123,7 +146,35 @@ function buildFieldSchema(field: ValidatableField): z.ZodTypeAny {
     }
   }
 
-  return stringSchema;
+  if (!isPhone) {
+    return stringSchema;
+  }
+
+  // min_length/max_length de um campo phone contam os digitos do numero,
+  // nao o indicativo -- por isso aplicados aqui, sobre stringSchema ja
+  // pronto (regex + pattern), em vez do bloco generico acima (que contaria
+  // "+351" ou "+34" como parte do comprimento e rejeitava numeros validos
+  // so por o indicativo ter um numero de digitos diferente do que a
+  // campanha configurou antes deste campo passar a incluir o indicativo).
+  // z.refine() devolve ZodEffects, não ZodString -- só entra aqui no fim,
+  // depois de stringSchema já ter os métodos de ZodString (.regex/.email)
+  // todos aplicados, para não perder acesso a eles a meio da cadeia.
+  let phoneSchema: z.ZodTypeAny = stringSchema;
+  if (typeof field.min_length === "number") {
+    const min = field.min_length;
+    phoneSchema = phoneSchema.refine(
+      (val) => phoneNationalDigitsLength(val as string) >= min,
+      `${label}: deve ter pelo menos ${min} dígitos`
+    );
+  }
+  if (typeof field.max_length === "number") {
+    const max = field.max_length;
+    phoneSchema = phoneSchema.refine(
+      (val) => phoneNationalDigitsLength(val as string) <= max,
+      `${label}: deve ter no máximo ${max} dígitos`
+    );
+  }
+  return phoneSchema;
 }
 
 /**
