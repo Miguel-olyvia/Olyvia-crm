@@ -82,7 +82,7 @@ import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialo
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { applySearchTextFilter, splitSearchWords } from "@/lib/searchTextFilter";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
-import { getLineUnitPrice, marginOnPrice } from "@/utils/quotes/quoteLinePricing";
+import { getLineUnitPrice, getLineUnitCost, marginOnPrice } from "@/utils/quotes/quoteLinePricing";
 
 // Abaixo deste comprimento a pesquisa nao e aplicada (nem na lista nem nos KPIs).
 const MIN_QUOTE_SEARCH_LENGTH = 2;
@@ -952,7 +952,12 @@ export default function Quotes() {
         }
         a.totalWithIva += base + ivaAmount;
 
-        const unitCost = detailsMap[line.id]?.unitCost || 0;
+        // O custo da margem é sempre o congelado na própria linha (custo_material_unit +
+        // custo_mao_obra_unit) — o mesmo que o editor já usa (getLineUnitCost). Reabrir e
+        // gravar o orçamento é que actualiza este valor; a listagem não o recalcula ao vivo
+        // a partir do catálogo, ou a margem de um orçamento já criado mudava sozinha sempre
+        // que um preço de compra (ou o de um componente de um kit) mudasse depois.
+        const unitCost = getLineUnitCost(line);
         if (unitCost > 0) {
           a.totalCost += unitCost * qty;
           a.totalValueWithCost += base;
@@ -1277,8 +1282,11 @@ export default function Quotes() {
     setDetailLines(linesArr);
     const details = await resolveLineDetails(linesArr as any);
     setDetailLineDetails(details);
+    // Custo congelado na linha, não recalculado ao vivo — mesmo motivo do
+    // fetchLinesAgg acima. `details` continua a ser usado só para o IVA
+    // (vatRateShares), que é uma decisão separada da do custo/margem.
     const costs: Record<string, number> = {};
-    Object.keys(details).forEach((k) => { costs[k] = details[k].unitCost; });
+    linesArr.forEach((line: any) => { costs[line.id] = getLineUnitCost(line); });
     setDetailLineCosts(costs);
     setShowDetails(true);
   };
