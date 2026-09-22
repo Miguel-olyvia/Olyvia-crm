@@ -328,6 +328,7 @@ Deno.serve(async (req: Request) => {
                   when: formattedWhen,
                   technicianName: technicianName || undefined,
                   cancelUrl: kind === 'client' ? manageLink : undefined,
+                  primaryColor: emailCfg.primary_color, logoUrl: emailCfg.logo_url,
                 });
 
             const targets: { email: string; kind: 'client' | 'technician' }[] = [];
@@ -444,6 +445,7 @@ Deno.serve(async (req: Request) => {
             location: item.location || undefined,
             technicianName: technicianName || undefined,
             cancelUrl: kind === 'client' ? (cancelLink || undefined) : undefined,
+            primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
           });
 
       // (a) Client: friendly confirmation of the new slot.

@@ -888,20 +888,37 @@ Deno.serve(async (req: Request) => {
       };
 
       // (0) Client confirmation email — includes the booked {{meeting_date}} and the
-      //     manage/cancel link {{cancel_url}}. Only when confirmation is enabled, we
-      //     have a client email, and a template resolves.
+      //     manage/cancel link {{cancel_url}}. Only when confirmation is enabled and
+      //     we have a client email; falls back to the branded default (same as
+      //     reminder/cancel/reschedule) instead of silently sending nothing when no
+      //     custom template is configured.
       if (emailCfg?.confirmation_email_enabled && leadEmail) {
         const confTemplateId = pickTemplateId(emailCfg, 'confirmation', leadLocale, emailCfg.confirmation_email_template_id);
         const confTpl = confTemplateId ? await loadTemplate(supabase, confTemplateId) : null;
-        if (confTpl?.body_html) {
-          await sendEmailNow({
-            organizationId,
-            smtpId: emailCfg.email_smtp_id,
-            to: leadEmail,
-            subject: renderSubject(confTpl.subject || 'Confirmação', baseVars),
-            html: renderHtml(confTpl.body_html, baseVars),
-          });
-        }
+        const confHtml = confTpl?.body_html
+          ? renderHtml(confTpl.body_html, baseVars)
+          : defaultMeetingHtml({
+              heading: 'Visita confirmada',
+              intro: 'A sua visita foi agendada com sucesso.',
+              leadName: leadFullName, when: whenFormatted,
+              location: fullLocation || undefined,
+              technicianName: technicianName || undefined,
+              cancelUrl: cancelLink || undefined,
+              primaryColor: emailCfg.primary_color, logoUrl: emailCfg.logo_url,
+            });
+        await sendEmailNow({
+          organizationId,
+          // userId: mesma resiliencia que o aviso ao comercial e o lembrete ja
+          // tinham -- tenta primeiro o SMTP pessoal de quem criou a marcacao,
+          // antes do SMTP por omissao da organizacao. Sem isto, a confirmacao
+          // ao cliente ficava presa ao SMTP da organizacao mesmo quando este
+          // falhava e havia alternativa disponivel.
+          userId: createdBy || undefined,
+          smtpId: emailCfg.email_smtp_id,
+          to: leadEmail,
+          subject: renderSubject(confTpl?.subject || 'Confirmação da sua visita — {{meeting_date}}', baseVars),
+          html: confHtml,
+        });
       }
 
       // (0b) Client confirmation SMS -- mesma condicao/dados do email acima,
@@ -951,7 +968,10 @@ Deno.serve(async (req: Request) => {
                 leadName: leadFullName, when: whenFormatted,
                 location: fullLocation || undefined,
                 technicianName: technicianName || undefined,
-                cancelUrl: cancelLink || undefined,
+                // Sem cancelUrl de propósito: é o link de autogestão do
+                // CLIENTE, não uma ação do comercial -- confundia quem
+                // recebia este aviso interno, parecendo um botão seu.
+                primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
               });
           await sendEmailNow({ organizationId, userId: createdBy, smtpId: emailCfg?.email_smtp_id, to: notifyList[0], recipients: notifyList, subject, html });
         }
@@ -997,6 +1017,7 @@ Deno.serve(async (req: Request) => {
                 technicianName: technicianName || undefined,
                 cancelUrl: kind === 'client' ? (cancelLink || undefined) : undefined,
                 confirmUrl: kind === 'client' ? (confirmLink || undefined) : undefined,
+                primaryColor: emailCfg.primary_color, logoUrl: emailCfg.logo_url,
               });
           const targets: { email: string; kind: 'client' | 'technician' }[] = [];
           if (leadEmail) targets.push({ email: leadEmail, kind: 'client' });

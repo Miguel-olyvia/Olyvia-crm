@@ -305,6 +305,7 @@ Deno.serve(async (req: Request) => {
         when: formattedWhen,
         location: item.location || undefined,
         technicianName: technicianName || undefined,
+        primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
       });
 
       // (a) Technician + extra notify emails: internal cancellation notice.
