@@ -18,6 +18,15 @@ export async function sendSmsNow(params: {
   }
 
   try {
+    // SMSAPI_SENDER_NAME: nome de remetente ja verificado no painel da
+    // SMSAPI (partilhado por toda a Olyvia, mesma conta do sms-otp). Sem
+    // isto, a chamada nao dizia qual remetente usar e caia sozinha no
+    // generico "Test". Testado ao vivo 22/09: usar este remetente verificado
+    // NAO desbloqueia SMS com link (erro 94 continua igual) -- e mesmo assim
+    // vale a pena, o SMS chega identificado com o nome da empresa em vez de
+    // "Test" nos SMS sem link, que ja passavam. Omitido quando o segredo nao
+    // existe, para nao partir contas que ainda nao tenham remetente nenhum.
+    const senderName = Deno.env.get("SMSAPI_SENDER_NAME");
     const res = await fetch("https://api.smsapi.com/sms.do", {
       method: "POST",
       headers: {
@@ -29,6 +38,7 @@ export async function sendSmsNow(params: {
         message: params.message,
         format: "json",
         encoding: "utf-8",
+        ...(senderName ? { from: senderName } : {}),
       }),
     });
 
