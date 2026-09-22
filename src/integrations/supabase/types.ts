@@ -19214,6 +19214,70 @@ export type Database = {
           },
         ]
       }
+      sms_logs: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          entity_id: string | null
+          entity_type: string | null
+          error_message: string | null
+          id: string
+          message: string
+          organization_id: string | null
+          sent_at: string | null
+          status: string
+          to_phone: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          error_message?: string | null
+          id?: string
+          message: string
+          organization_id?: string | null
+          sent_at?: string | null
+          status: string
+          to_phone: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          error_message?: string | null
+          id?: string
+          message?: string
+          organization_id?: string | null
+          sent_at?: string | null
+          status?: string
+          to_phone?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_logs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_logs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "sms_logs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sms_otp_codes: {
         Row: {
           attempts: number

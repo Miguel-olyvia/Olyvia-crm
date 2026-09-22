@@ -941,12 +941,32 @@ Deno.serve(async (req: Request) => {
         const smsTemplate = emailCfg.confirmation_sms_message?.trim()
           ? emailCfg.confirmation_sms_message
           : `${orgRow?.name || 'A empresa'}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita.${includeLink && cancelLink ? ' Gerir/cancelar: {{cancel_url}}' : ''}`;
+        const smsMessage = renderSubject(smsTemplate, smsBaseVars);
         const smsResult = await sendSmsNow({
           toPhone: String(leadPhone),
-          message: renderSubject(smsTemplate, smsBaseVars),
+          message: smsMessage,
         });
         if (!smsResult.ok) {
           console.error('[book-slot] confirmation SMS failed (non-fatal):', smsResult.error);
+        }
+        // Regra 11: rasto persistente do envio (sucesso ou falha) -- antes
+        // disto uma falha de SMS so ia para a consola e desaparecia, sem
+        // ninguem saber. Fail-soft: o envio ja aconteceu, o registo nunca
+        // deve derrubar a marcacao.
+        try {
+          await supabase.from('sms_logs').insert({
+            organization_id: organizationId,
+            created_by: createdBy,
+            entity_type: lead ? 'leads' : 'clients',
+            entity_id: lead?.id ?? submissionClientId ?? null,
+            to_phone: String(leadPhone),
+            message: smsMessage,
+            status: smsResult.ok ? 'sent' : 'failed',
+            error_message: smsResult.ok ? null : smsResult.error,
+            sent_at: smsResult.ok ? new Date().toISOString() : null,
+          });
+        } catch (smsLogErr) {
+          console.error('[book-slot] failed to log sms attempt (non-fatal):', smsLogErr);
         }
       }
 

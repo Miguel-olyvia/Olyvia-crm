@@ -122,6 +122,7 @@ const UsersNew = lazy(() => import("./pages/UsersNew"));
 const SmtpManagement = lazy(() => import("./pages/SmtpManagement"));
 const EmailTemplates = lazy(() => import("./pages/EmailTemplates"));
 const Trash = lazy(() => import("./pages/Trash"));
+const SendFailures = lazy(() => import("./pages/SendFailures"));
 const NotificationsPage = lazy(() => import("./pages/Notifications"));
 const AlertSettings = lazy(() => import("./pages/AlertSettings"));
 const ExportAudit = lazy(() => import("./pages/ExportAudit"));
@@ -293,6 +294,7 @@ const App = () => (
                       <Route path="/notifications" element={<NotificationsPage />} />
                       <Route path="/email-templates" element={<ProtectedRoute permission="email_templates.view"><EmailTemplates /></ProtectedRoute>} />
                       <Route path="/trash" element={<Trash />} />
+                      <Route path="/send-failures" element={<ProtectedRoute permission="scheduling.items.view"><SendFailures /></ProtectedRoute>} />
                       <Route path="/export-audit" element={<ProtectedRoute permission="exports.audit.view"><ExportAudit /></ProtectedRoute>} />
                       <Route path="/platform/support-access" element={<ProtectedRoute permission="platform.support_access.view"><SupportAccess /></ProtectedRoute>} />
                       <Route path="/platform/auth-audit-log" element={<ProtectedRoute permission="platform.auth_audit_log.view"><AuthAuditLog /></ProtectedRoute>} />
