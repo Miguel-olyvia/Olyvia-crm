@@ -2231,6 +2231,72 @@ export type Database = {
           },
         ]
       }
+      anew_leads_status_backup_20261204_rejeicao: {
+        Row: {
+          etapa_id: string | null
+          guardado_em: string
+          lead_id: string
+          lost_reason_antes: string | null
+          status_antes: string | null
+        }
+        Insert: {
+          etapa_id?: string | null
+          guardado_em?: string
+          lead_id: string
+          lost_reason_antes?: string | null
+          status_antes?: string | null
+        }
+        Update: {
+          etapa_id?: string | null
+          guardado_em?: string
+          lead_id?: string
+          lost_reason_antes?: string | null
+          status_antes?: string | null
+        }
+        Relationships: []
+      }
+      anew_leads_workflow_stage_backup_20261204: {
+        Row: {
+          guardado_em: string
+          lead_id: string
+          pipeline_dirty_at_antes: string | null
+          workflow_stage_id_antes: string | null
+        }
+        Insert: {
+          guardado_em?: string
+          lead_id: string
+          pipeline_dirty_at_antes?: string | null
+          workflow_stage_id_antes?: string | null
+        }
+        Update: {
+          guardado_em?: string
+          lead_id?: string
+          pipeline_dirty_at_antes?: string | null
+          workflow_stage_id_antes?: string | null
+        }
+        Relationships: []
+      }
+      anew_leads_workflow_stage_backup_20261204_bmgest: {
+        Row: {
+          guardado_em: string
+          lead_id: string
+          pipeline_dirty_at_antes: string | null
+          workflow_stage_id_antes: string | null
+        }
+        Insert: {
+          guardado_em?: string
+          lead_id: string
+          pipeline_dirty_at_antes?: string | null
+          workflow_stage_id_antes?: string | null
+        }
+        Update: {
+          guardado_em?: string
+          lead_id?: string
+          pipeline_dirty_at_antes?: string | null
+          workflow_stage_id_antes?: string | null
+        }
+        Relationships: []
+      }
       anew_membership_permission_scopes: {
         Row: {
           created_at: string
@@ -8278,6 +8344,7 @@ export type Database = {
           confirmation_email_enabled: boolean
           confirmation_email_template_id: string | null
           confirmation_sms_enabled: boolean
+          confirmation_sms_message: string | null
           contact_soon_text: string | null
           container_padding_x: string | null
           container_padding_y: string | null
@@ -8413,6 +8480,7 @@ export type Database = {
           confirmation_email_enabled?: boolean
           confirmation_email_template_id?: string | null
           confirmation_sms_enabled?: boolean
+          confirmation_sms_message?: string | null
           contact_soon_text?: string | null
           container_padding_x?: string | null
           container_padding_y?: string | null
@@ -8548,6 +8616,7 @@ export type Database = {
           confirmation_email_enabled?: boolean
           confirmation_email_template_id?: string | null
           confirmation_sms_enabled?: boolean
+          confirmation_sms_message?: string | null
           contact_soon_text?: string | null
           container_padding_x?: string | null
           container_padding_y?: string | null
@@ -10393,6 +10462,24 @@ export type Database = {
           },
         ]
       }
+      lead_pipeline_settings_backup_20261204_etapas56: {
+        Row: {
+          alterado_em: string
+          organization_id: string
+          sequential_flow_antes: boolean | null
+        }
+        Insert: {
+          alterado_em?: string
+          organization_id: string
+          sequential_flow_antes?: boolean | null
+        }
+        Update: {
+          alterado_em?: string
+          organization_id?: string
+          sequential_flow_antes?: boolean | null
+        }
+        Relationships: []
+      }
       lead_qualification_rules: {
         Row: {
           created_at: string
@@ -10666,6 +10753,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      lead_workflow_stages_rules_backup_20261204: {
+        Row: {
+          normalizado_em: string
+          reached_when_antes: Json | null
+          stage_id: string
+        }
+        Insert: {
+          normalizado_em?: string
+          reached_when_antes?: Json | null
+          stage_id: string
+        }
+        Update: {
+          normalizado_em?: string
+          reached_when_antes?: Json | null
+          stage_id?: string
+        }
+        Relationships: []
+      }
+      lead_workflow_stages_rules_backup_20261204_etapas56: {
+        Row: {
+          alterado_em: string
+          reached_when_antes: Json | null
+          stage_id: string
+        }
+        Insert: {
+          alterado_em?: string
+          reached_when_antes?: Json | null
+          stage_id: string
+        }
+        Update: {
+          alterado_em?: string
+          reached_when_antes?: Json | null
+          stage_id?: string
+        }
+        Relationships: []
       }
       leads_ai_config: {
         Row: {
@@ -21350,6 +21473,7 @@ export type Database = {
         Args: { p_document_type: string; p_organization_id: string }
         Returns: string
       }
+      fn_normalize_lead_rule: { Args: { p_rule: Json }; Returns: Json }
       fn_proposals_persist_relations: {
         Args: {
           p_actor: string
@@ -22320,8 +22444,10 @@ export type Database = {
         Returns: number
       }
       recompute_leads_v2_buckets: {
-        Args: { p_org: string }
+        Args: { p_after?: string; p_limit?: number; p_org: string }
         Returns: {
+          last_id: string
+          processed_count: number
           unresolved_count: number
           unresolved_lead_ids: string[]
           updated_count: number

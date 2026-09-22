@@ -20,6 +20,7 @@ export interface FormEmailConfig {
   // SMS ao lado do email correspondente -- mesma hora de reminder_hours_before,
   // desligados por omissao tal como os interruptores de email ja o sao.
   confirmation_sms_enabled: boolean;
+  confirmation_sms_message: string | null;
   reminder_sms_enabled: boolean;
   // Per-locale template overrides: { confirmation: {pt,en}, meeting_notify:{}, reminder:{} }
   email_locale_templates: Record<string, Record<string, string>> | null;
@@ -170,7 +171,7 @@ export async function loadFormEmailConfig(
   const { data } = await supabase
     .from("form_branding")
     .select(
-      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reminder_enabled, reminder_hours_before, reminder_template_id, confirmation_sms_enabled, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours",
+      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reminder_enabled, reminder_hours_before, reminder_template_id, confirmation_sms_enabled, confirmation_sms_message, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours",
     )
     .eq("form_id", formId)
     .maybeSingle();
