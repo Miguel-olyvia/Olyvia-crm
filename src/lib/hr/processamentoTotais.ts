@@ -73,7 +73,6 @@ export type AvisoProcessamento =
   | "sem_retribuicao"
   | "periodicidade_nao_convertivel"
   | "duodecimos_por_decidir"
-  | "duodecimos_50_aproximado"
   | "sem_regra_subsidio"
   | "sem_horas_planeadas_no_mes";
 
@@ -179,11 +178,22 @@ function calcularValorHoraReal(
 /**
  * Divisor de duodecimos e o aviso correspondente.
  *
- * `50` usa uma APROXIMACAO LINEAR (divisor 13) ASSUMIDA, nao confirmada com a
- * contabilidade: a mistura exacta do regime a 50% -- metade de cada subsidio
- * diluida no mes, metade paga a parte -- ainda esta por decidir. O divisor
- * 13 e so um ponto intermedio entre 14 (0%) e 12 (100%), nao o calculo legal
- * definitivo.
+ * Confirmado com a contabilidade (22/09): a 50%, de CADA subsidio (ferias e
+ * Natal) so METADE se dilui no mes -- a outra metade continua a pagar-se a
+ * parte, tal como a 0%. Nao e uma interpolacao linear entre os divisores de
+ * 0% e 100% (isso daria 13, que chegou a estar aqui como aproximacao antes
+ * de confirmado) -- e o calculo directo do montante que fica diluido:
+ *
+ *   diluido = 12 x R  +  2 x (pct/100) x R   (2 subsidios, cada um pct% diluido)
+ *   baseMes = diluido / 12 = R x (12 + 2 x pct/100) / 12
+ *
+ * O "divisor" devolvido aqui e so a forma de encaixar essa conta na mesma
+ * formula `baseMes = retribuicaoMensal * 14 / divisor` que 0% e 100% ja
+ * usam: divisor = 14 / ((12 + 2*pct/100) / 12) = 168 / (12 + 2*pct/100).
+ * A 0%: 168/12 = 14. A 100%: 168/14 = 12. A 50%: 168/13 (~12.923), NAO 13 --
+ * exemplo com R = 1200 EUR: baseMes = 1200 * 14 / (168/13) = 1300,00 EUR,
+ * que bate certo com a conta directa (12x1200 + 0,5x1200 + 0,5x1200) / 12 =
+ * 15600/12 = 1300,00 EUR.
  */
 function calcularDivisorDuodecimos(
   duodecimosPct: 0 | 50 | 100 | null,
@@ -193,12 +203,7 @@ function calcularDivisorDuodecimos(
     avisos.push("duodecimos_por_decidir");
     return 14;
   }
-  if (duodecimosPct === 50) {
-    avisos.push("duodecimos_50_aproximado");
-    return 13;
-  }
-  // 12 + 2 * (1 - pct/100): 0 -> 14, 100 -> 12.
-  return 12 + 2 * (1 - duodecimosPct / 100);
+  return 168 / (12 + 2 * (duodecimosPct / 100));
 }
 
 /**

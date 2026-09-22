@@ -122,7 +122,6 @@ const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
   sem_retribuicao: "hr.vencimento.visaoGeral.avisoSemRetribuicao",
   periodicidade_nao_convertivel: "hr.vencimento.visaoGeral.avisoPeriodicidadeNaoConvertivel",
   duodecimos_por_decidir: "hr.vencimento.visaoGeral.avisoDuodecimosPorDecidir",
-  duodecimos_50_aproximado: "hr.vencimento.visaoGeral.avisoDuodecimos50Aproximado",
   sem_regra_subsidio: "hr.vencimento.visaoGeral.avisoSemRegraSubsidio",
   sem_horas_planeadas_no_mes: "hr.vencimento.visaoGeral.avisoSemHorasPlaneadasNoMes",
 };

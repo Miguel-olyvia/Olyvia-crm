@@ -219,7 +219,7 @@ describe("calcularProcessamentoPessoa", () => {
   });
 
   describe("regimes de duodecimos", () => {
-    it("0% usa divisor 14 e nao gera aviso de aproximacao", () => {
+    it("0% usa divisor 14, sem subsidios diluidos", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ valorBase: 1400, periodicidade: "mensal", duodecimosPct: 0 }),
@@ -227,19 +227,20 @@ describe("calcularProcessamentoPessoa", () => {
       );
       expect(resultado.divisorDuodecimos).toBe(14);
       expect(resultado.baseMes).toBeCloseTo((1400 * 14) / 14, 6);
-      expect(resultado.avisos).not.toContain("duodecimos_50_aproximado");
       expect(resultado.avisos).not.toContain("duodecimos_por_decidir");
     });
 
-    it("50% usa divisor 13 com aviso de aproximacao", () => {
+    it("50% dilui metade de cada subsidio -- confirmado com a contabilidade, nao e interpolacao linear", () => {
+      // R = 1200: metade de cada subsidio (0,5 x 1200 + 0,5 x 1200 = 1200) dilui-se
+      // nos 12 meses, a par dos 12 x 1200 normais -- (12x1200 + 1200)/12 = 1300,00.
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
-          retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal", duodecimosPct: 50 }),
+          retribuicao: retribuicao({ valorBase: 1200, periodicidade: "mensal", duodecimosPct: 50 }),
         }),
       );
-      expect(resultado.divisorDuodecimos).toBe(13);
-      expect(resultado.baseMes).toBeCloseTo((1300 * 14) / 13, 6);
-      expect(resultado.avisos).toContain("duodecimos_50_aproximado");
+      expect(resultado.divisorDuodecimos).toBeCloseTo(168 / 13, 10);
+      expect(resultado.divisorDuodecimos).not.toBe(13);
+      expect(resultado.baseMes).toBeCloseTo(1300, 6);
     });
 
     it("100% usa divisor 12", () => {
@@ -346,8 +347,7 @@ describe("calcularProcessamentoPessoa", () => {
           totais: totaisBase({ planeadoMinutos: 4080 }),
         }),
       );
-      expect(resultado50.divisorDuodecimos).toBe(13);
-      expect(resultado50.avisos).toContain("duodecimos_50_aproximado");
+      expect(resultado50.divisorDuodecimos).toBeCloseTo(168 / 13, 10);
     });
 
     it("hora sem horas planeadas no mes: baseMes 0, sem valorHoraReal, mas subsidio e lancamentos continuam a contar", () => {
