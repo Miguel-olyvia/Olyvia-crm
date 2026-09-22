@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { resolvePortalContractIdsForUsers } from "@/lib/portal/contractAccess";
+import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
 
 interface PortalSummary {
   proposalCount: number;
@@ -26,6 +27,10 @@ interface PortalSummary {
 }
 
 export function useClientPortalData() {
+  // Resumo da EMPRESA ATIVA do portal. Antes agregava todas as empresas do
+  // grupo a que o email tem acesso, o que misturava números de organizações
+  // diferentes no mesmo cartão. Ver src/contexts/PortalCompanyContext.tsx.
+  const { activeOrg, isLoading: orgsLoading } = usePortalCompany();
   const [data, setData] = useState<PortalSummary>({
     proposalCount: 0,
     pendingProposals: 0,
@@ -42,13 +47,15 @@ export function useClientPortalData() {
   useEffect(() => {
     let cancelled = false;
 
-    async function load(userId: string) {
+    async function load(userId: string, org: PortalOrg) {
       try {
-        // Get portal user records
+        // Só a linha desta empresa: client_portal_users tem UNIQUE
+        // (auth_user_id, organization_id), por isso isto é no máximo uma linha.
         const { data: portalUsers } = await supabase
           .from("client_portal_users")
           .select("id, proposal_id, contract_id, quote_id, organization_id, created_by, entity_id")
-          .eq("auth_user_id", userId);
+          .eq("auth_user_id", userId)
+          .eq("organization_id", org.organizationId);
 
         if (cancelled) return;
 
@@ -63,32 +70,25 @@ export function useClientPortalData() {
         // Mesma resolução usada pela página "Os Meus Contratos": une a coluna
         // legada `contract_id` com as concessões em `client_portal_documents`.
         // Contar só a coluna legada era o que punha o cartão "Contratos" a 1
-        // enquanto a lista mostrava 5.
-        const contractIds = await resolvePortalContractIdsForUsers(portalUsers);
+        // enquanto a lista mostrava 5. O `orgScope` remove o que pertence a
+        // outra empresa do grupo.
+        const contractIds = await resolvePortalContractIdsForUsers(portalUsers, {
+          organizationId: org.organizationId,
+          entityId: org.entityId,
+        });
         if (cancelled) return;
 
-        // Build the actual granted (organization_id, entity_id) PAIRS instead of
-        // deduping each column independently — two separate `.in()` filters would
-        // form a cross-product and leak proposals from unrelated org/entity
-        // combinations that this portal user was never actually granted access to.
-        const orgEntityPairs = [
-          ...new Map(
-            portalUsers
-              .filter(p => p.organization_id && p.entity_id)
-              .map(p => [`${p.organization_id}::${p.entity_id}`, { organization_id: p.organization_id!, entity_id: p.entity_id! }])
-          ).values(),
-        ];
-
-        // Fetch proposals across all authorized group companies for this portal user
+        // Filtro pelo PAR (organização, entidade) da empresa ativa. Nunca dois
+        // `.in()` independentes: como o entity_id pode diferir entre
+        // organizações, isso formaria um produto cartesiano e traria propostas
+        // de combinações nunca concedidas.
         let proposals: any[] = [];
-        if (orgEntityPairs.length > 0) {
-          const orFilter = orgEntityPairs
-            .map(({ organization_id, entity_id }) => `and(organization_id.eq.${organization_id},entity_id.eq.${entity_id})`)
-            .join(",");
+        if (org.entityId) {
           const { data: entityProps } = await supabase
             .from("proposals")
             .select("id, title, status, created_at, created_by, deal_id, client_id")
-            .or(orFilter)
+            .eq("organization_id", org.organizationId)
+            .eq("entity_id", org.entityId)
             .order("created_at", { ascending: false });
           if (cancelled) return;
           proposals = entityProps || [];
@@ -257,6 +257,17 @@ export function useClientPortalData() {
       }
     }
 
+    // Enquanto a empresa ativa não estiver resolvida não vale a pena pedir
+    // nada; sem nenhuma empresa (conta sem linhas de portal) o ecrã tem de
+    // sair do estado de carregamento à mesma.
+    if (orgsLoading) return;
+    if (!activeOrg) {
+      setData(prev => ({ ...prev, loading: false }));
+      return;
+    }
+    const org = activeOrg;
+    setData(prev => ({ ...prev, loading: true }));
+
     // Subscribe FIRST, then check existing session
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (cancelled) return;
@@ -265,7 +276,7 @@ export function useClientPortalData() {
         setData(prev => ({ ...prev, loading: false }));
         return;
       }
-      void load(user.id);
+      void load(user.id, org);
 
       // H10: only stamp last_login_at on actual sign-in (not INITIAL_SESSION / TOKEN_REFRESHED)
       if (event === "SIGNED_IN") {
@@ -282,7 +293,7 @@ export function useClientPortalData() {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (cancelled) return;
-      if (session?.user) void load(session.user.id);
+      if (session?.user) void load(session.user.id, org);
       else setData(prev => ({ ...prev, loading: false }));
     });
 
@@ -290,7 +301,7 @@ export function useClientPortalData() {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [activeOrg, orgsLoading]);
 
   return data;
 }
