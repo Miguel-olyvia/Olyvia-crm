@@ -88,6 +88,8 @@ interface ExpandedBundleLine {
   source_id: string; // product_id or service_id
   quantity: number;
   unit_price: number;
+  /** Preço de compra real do componente (0 quando desconhecido — nunca inventado). */
+  unit_cost: number;
   vat_rate: number;
   bundle_id: string;
   bundle_name: string;
@@ -186,6 +188,49 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
   const { t } = useTranslation();
   const { toast } = useToast();
   const { activeCompany } = useCompany();
+
+  // Custo real (preço de compra) por componente, buscado só quando um bundle é
+  // seleccionado — não à lista toda, que já causou timeout uma vez por trazer
+  // o preço de compra de cada componente de cada bundle paginado. Guardado à
+  // parte de `product_prices`/`service_prices` (que só têm o preço de venda),
+  // por product_id/service_id.
+  const [componentCostMap, setComponentCostMap] = useState<Record<string, number>>({});
+
+  // Devolve o mapa JÁ COMPLETO (não só as entradas novas) para quem chama usar
+  // de imediato, sem depender do estado React ter re-renderizado entretanto.
+  const ensureComponentCosts = useCallback(async (bundle: Bundle): Promise<Record<string, number>> => {
+    const productIds = new Set<string>();
+    const serviceIds = new Set<string>();
+    bundle.components.forEach(c => {
+      if (c.product_id && componentCostMap[c.product_id] === undefined) productIds.add(c.product_id);
+      if (c.service_id && componentCostMap[c.service_id] === undefined) serviceIds.add(c.service_id);
+    });
+    if (productIds.size === 0 && serviceIds.size === 0) return componentCostMap;
+
+    const [{ data: productCosts }, { data: serviceCosts }] = await Promise.all([
+      productIds.size > 0
+        ? supabase.from("product_prices").select("product_id, price")
+            .in("product_id", Array.from(productIds)).eq("price_type", "purchase")
+            .order("created_at", { ascending: true })
+        : Promise.resolve({ data: [] as any[] }),
+      serviceIds.size > 0
+        ? supabase.from("service_prices").select("service_id, price")
+            .in("service_id", Array.from(serviceIds)).eq("price_type", "purchase")
+            .order("created_at", { ascending: true })
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    const merged = { ...componentCostMap };
+    (productCosts || []).forEach((row: any) => { merged[row.product_id] = parseFloat(String(row.price || 0)); });
+    (serviceCosts || []).forEach((row: any) => { merged[row.service_id] = parseFloat(String(row.price || 0)); });
+    // Componentes sem nenhuma linha "purchase" ficam marcados a 0 (não a "por
+    // buscar"), para não voltarmos a pedir o mesmo id sem resultado.
+    productIds.forEach(id => { if (merged[id] === undefined) merged[id] = 0; });
+    serviceIds.forEach(id => { if (merged[id] === undefined) merged[id] = 0; });
+
+    setComponentCostMap(merged);
+    return merged;
+  }, [componentCostMap]);
 
   // Debounce search
   useEffect(() => {
@@ -524,7 +569,12 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
     quantity: number,
     choiceSelections: Record<string, Record<string, number>>,
     excludedComponentIds: string[] = [],
-    choiceAttributes: Record<string, ComponentAttributeState> = {}
+    choiceAttributes: Record<string, ComponentAttributeState> = {},
+    // Explícito em vez de ler `componentCostMap` do estado directamente: esta
+    // função é redefinida a cada render, e handleSelectBundle chama-a logo a
+    // seguir a um `await` que actualiza esse estado — ler pelo estado dava
+    // sempre o valor de ANTES da busca terminar (closure desactualizada).
+    costMap: Record<string, number> = componentCostMap
   ): ExpandedBundleLine[] => {
     const lines: ExpandedBundleLine[] = [];
     const excluded = new Set(excludedComponentIds);
@@ -584,15 +634,18 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
         unitPrice = unitPrice + attributePriceAddon;
       }
 
+      const sourceId = isProduct ? comp.product_id! : comp.service_id!;
+
       lines.push({
         id: `${bundle.id}_${comp.id}`,
         name: item.name,
         description: `[${bundle.name}] ${item.name}`,
         sku: item.sku || null,
         type: isProduct ? "product" : "service",
-        source_id: isProduct ? comp.product_id! : comp.service_id!,
+        source_id: sourceId,
         quantity: comp.quantity * choiceQty * quantity,
         unit_price: unitPrice,
+        unit_cost: costMap[sourceId] || 0,
         vat_rate: getComponentVatRate(comp),
         bundle_id: bundle.id,
         bundle_name: bundle.name,
@@ -607,13 +660,14 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
   };
 
   // Handle bundle selection
-  const handleSelectBundle = (bundle: Bundle) => {
+  const handleSelectBundle = async (bundle: Bundle) => {
+    const freshCostMap = await ensureComponentCosts(bundle);
     const newSelected = new Map(selectedBundles);
 
     if (newSelected.has(bundle.id)) {
       const existing = newSelected.get(bundle.id)!;
       const newQty = existing.quantity + 1;
-      const expandedLines = expandBundleToLines(bundle, newQty, existing.choiceSelections, existing.excludedComponentIds, existing.choiceAttributes || {});
+      const expandedLines = expandBundleToLines(bundle, newQty, existing.choiceSelections, existing.excludedComponentIds, existing.choiceAttributes || {}, freshCostMap);
       newSelected.set(bundle.id, { ...existing, quantity: newQty, expandedLines });
     } else {
       const choiceSelections: Record<string, Record<string, number>> = {};
@@ -626,7 +680,7 @@ export function BundleSelectionTab({ selectedBundles, onSelectionChange, viewMod
 
       const excludedComponentIds: string[] = [];
       const choiceAttributes: Record<string, ComponentAttributeState> = {};
-      const expandedLines = expandBundleToLines(bundle, 1, choiceSelections, excludedComponentIds, choiceAttributes);
+      const expandedLines = expandBundleToLines(bundle, 1, choiceSelections, excludedComponentIds, choiceAttributes, freshCostMap);
       newSelected.set(bundle.id, { bundle, quantity: 1, choiceSelections, excludedComponentIds, choiceAttributes, expandedLines });
     }
 

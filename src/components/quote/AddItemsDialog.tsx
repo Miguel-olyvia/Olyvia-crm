@@ -87,6 +87,8 @@ interface BundleComponentInfo {
   source_id: string;
   quantity: number;
   unit_price: number;
+  /** Preço de compra real do componente (0 quando desconhecido — nunca inventado). */
+  unit_cost: number;
   vat_rate: number;
   selected_attributes?: Record<string, any>;
   attribute_price_addon?: number;
@@ -1667,6 +1669,18 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
         (sum, line) => sum + line.unit_price * (line.quantity / safeQty),
         0
       );
+      // Custo real do kit = soma do custo de compra de cada componente
+      // escolhido, à mesma quantidade. Antes disto existir, cost_price ficava
+      // sempre a null para um bundle, e QuoteBuilder.tsx assumia sempre uma
+      // margem de 30% para inventar um custo a partir do preço de venda —
+      // mesmo quando o custo real de cada peça já estava no catálogo.
+      // Um componente com custo desconhecido (unit_cost=0) entra como 0, não
+      // invalida a soma toda — só produtos/serviços totalmente sem preço de
+      // compra registado é que continuam a cair no antigo cálculo por margem.
+      const unitTotalCost = expandedLines.reduce(
+        (sum, line) => sum + line.unit_cost * (line.quantity / safeQty),
+        0
+      );
 
       // Create component info from expanded lines (per single bundle unit)
       const components: BundleComponentInfo[] = expandedLines.map(line => ({
@@ -1677,12 +1691,13 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
         source_id: line.source_id,
         quantity: line.quantity / safeQty,
         unit_price: line.unit_price,
+        unit_cost: line.unit_cost,
         vat_rate: line.vat_rate,
         selected_attributes: line.selected_attributes,
         attribute_price_addon: line.attribute_price_addon,
         choice_group_id: line.choice_group_id ?? null,
       }));
-      
+
       bundleItems.push({
         item: {
           id: bundle.id,
@@ -1692,7 +1707,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
           category_name: "Bundles",
           brand_name: null,
           retail_price: unitTotalPrice,
-          cost_price: null,
+          cost_price: unitTotalCost > 0 ? unitTotalCost : null,
           vat_rate: 23,
           organization_id: bundle.organization_id,
           type: "product",

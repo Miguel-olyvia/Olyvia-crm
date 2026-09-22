@@ -2599,9 +2599,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const defaultMargin = currentLine.margem_percent || 30;
       const defaultInt = currentLine.int_percent || 0;
       const retailPrice = bundleInfo.total_price || 0;
-      const materialCost = retailPrice > 0
-        ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) - (currentLine.custo_mao_obra_unit || 0)
-        : 0;
+      // Custo real do kit (soma dos componentes escolhidos), quando conhecido;
+      // só sem ele é que se deriva um custo a partir do preço de venda e de
+      // uma margem assumida — mesma regra da linha "adicionar" abaixo.
+      const realCost = Number(item.cost_price) > 0 ? Number(item.cost_price) : 0;
+      const materialCost = realCost > 0
+        ? realCost
+        : (retailPrice > 0
+          ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) - (currentLine.custo_mao_obra_unit || 0)
+          : 0);
 
       const bundleSelectedAttributes = {
         ...(fullAttributes || {}),
