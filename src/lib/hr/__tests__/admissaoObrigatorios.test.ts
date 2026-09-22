@@ -7,9 +7,7 @@
  *    de cidadao, e um `tipo_documento` por escolher nao arrasta a validade
  *    consigo -- so a sua propria pendencia aparece.
  *  - a situacao profissional do conjuge so e exigida a quem tem conjuge.
- *  - a carta de conducao NUNCA e exigida: nem toda a gente tem carta. Desde
- *    20261130150000, o sindicato e o interruptor de sindicalizacao tambem
- *    NUNCA sao exigidos, pela mesma razao estrutural.
+ *  - a carta de conducao NUNCA e exigida: nem toda a gente tem carta.
  *  - um rascunho completo nao deixa pendencia nenhuma.
  */
 import { describe, expect, it } from "vitest";
@@ -47,8 +45,6 @@ const VAZIO: RascunhoConviteObrigatorios = {
   tamanho_cima: "",
   tamanho_baixo: "",
   tamanho_calcado: "",
-  sindicalizado: false,
-  sindicato: "",
   conta_numero: "",
   conta_titular: "",
   conta_banco: "",
@@ -60,8 +56,7 @@ const COMPLETO: RascunhoConviteObrigatorios = {
   nacionalidade: "PT",
   telefone_pessoal: "912345678",
   email_pessoal: "pessoa@example.com",
-  // Solteira e sem sindicato: os dois condicionais ficam por exigir, e o
-  // rascunho continua completo.
+  // Solteira: o condicional fica por exigir, e o rascunho continua completo.
   estado_civil: "solteiro",
   dependentes: "0",
   dependentes_deficientes: "0",
@@ -82,8 +77,6 @@ const COMPLETO: RascunhoConviteObrigatorios = {
   tamanho_cima: "m",
   tamanho_baixo: "m",
   tamanho_calcado: "42",
-  sindicalizado: false,
-  sindicato: "",
   conta_numero: "PT50000201231234567890154",
   conta_titular: "Maria Silva",
   conta_banco: "Banco Exemplo",
@@ -100,12 +93,8 @@ describe("pendenciasDoRascunho", () => {
     expect(pendencias).toContain("conta_numero");
     // validade_documento NAO e pendencia so por o tipo ainda estar vazio.
     expect(pendencias).not.toContain("validade_documento");
-    // nem a situacao do conjuge por o estado civil ainda estar por escolher,
-    // nem o sindicato de quem nao se declarou sindicalizado.
+    // nem a situacao do conjuge por o estado civil ainda estar por escolher.
     expect(pendencias).not.toContain("conjuge_situacao_profissional");
-    expect(pendencias).not.toContain("sindicato");
-    // Um interruptor esta sempre respondido: "nao" e resposta.
-    expect(pendencias).not.toContain("sindicalizado");
   });
 
   it("a situacao profissional do conjuge so e exigida a quem tem conjuge", () => {
@@ -118,13 +107,6 @@ describe("pendenciasDoRascunho", () => {
     expect(pendenciasDoRascunho({ ...COMPLETO, estado_civil: "divorciado" })).not.toContain(
       "conjuge_situacao_profissional",
     );
-  });
-
-  it("o sindicato NUNCA e exigido, mesmo a quem se declarou sindicalizado (20261130150000: facultativo, como a carta de conducao)", () => {
-    expect(pendenciasDoRascunho({ ...COMPLETO, sindicalizado: true, sindicato: "" })).not.toContain(
-      "sindicato",
-    );
-    expect(pendenciasDoRascunho({ ...COMPLETO, sindicalizado: false })).not.toContain("sindicato");
   });
 
   it("a conta bancaria e obrigatoria, os tres campos", () => {

@@ -110,8 +110,6 @@ export default function PessoaDetail() {
       nucleoEdit: hasPermission("hr.pessoas.edit"),
       laboraisView: hasPermission("hr.pessoas.laborais.view"),
       laboraisEdit: hasPermission("hr.pessoas.laborais.edit"),
-      sindicalizacaoView: hasPermission("hr.pessoas.sindicalizacao.view"),
-      sindicalizacaoEdit: hasPermission("hr.pessoas.sindicalizacao.edit"),
     }),
     [hasPermission],
   );
@@ -477,7 +475,6 @@ export default function PessoaDetail() {
             bancarios={ficha.bancarios}
             saude={ficha.saude}
             fardamento={ficha.fardamento}
-            sindicalizacao={ficha.sindicalizacao}
             emailPessoal={pessoa.email_pessoal}
             permissoes={permissoes}
             saving={ficha.saving}
@@ -488,7 +485,6 @@ export default function PessoaDetail() {
             onGuardarEmergencia={ficha.saveEmergencia}
             onGuardarSaude={ficha.saveSaude}
             onGuardarFardamento={ficha.saveFardamento}
-            onGuardarSindicalizacao={ficha.saveSindicalizacao}
             onRevelarNiss={ficha.revelarNiss}
             onDefinirNiss={ficha.definirNiss}
             onDefinirConta={ficha.definirConta}

@@ -21,13 +21,6 @@
  * - a CARTA DE CONDUCAO (numero, categorias, validade): nem toda a gente tem
  *   carta, e exigi-la impedia essas pessoas de submeter o convite. Continua a
  *   ser capturada e gravada quando existe.
- * - a SINDICALIZACAO (sindicalizado, sindicato), desde 20261130150000:
- *   filiacao sindical e categoria especial do artigo 9.o do RGPD, e obrigar
- *   toda a gente a declara-la para poder ser admitida exige da empresa um
- *   fundamento legal que tem de conseguir justificar. Continua a ser
- *   perguntada no ecra (pagina 2) e gravada quando existe -- so deixa de
- *   travar a submissao. Os dois campos continuam nesta interface e no
- *   formulario: so saem de `CAMPOS_OBRIGATORIOS_ADMISSAO`.
  * - `conta_formato`: o convite so sabe gravar IBAN (e o unico ramo que a RPC
  *   tem), por isso o formato nao e uma escolha a fazer aqui.
  *
@@ -67,12 +60,10 @@ export interface RascunhoConviteObrigatorios {
   linha1: string;
   codigo_postal: string;
   localidade: string;
-  // Pagina 2 -- fardamento, sindicalizacao e conta bancaria
+  // Pagina 2 -- fardamento e conta bancaria
   tamanho_cima: string;
   tamanho_baixo: string;
   tamanho_calcado: string;
-  sindicalizado: boolean;
-  sindicato: string;
   conta_numero: string;
   conta_titular: string;
   conta_banco: string;
@@ -236,8 +227,6 @@ export const CODIGOS_PAGINA_2: ReadonlySet<CodigoCampoObrigatorioAdmissao> = new
   "tamanho_cima",
   "tamanho_baixo",
   "tamanho_calcado",
-  "sindicalizado",
-  "sindicato",
   "conta_numero",
   "conta_titular",
   "conta_banco",

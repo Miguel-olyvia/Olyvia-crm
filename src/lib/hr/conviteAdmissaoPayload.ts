@@ -51,7 +51,7 @@ export interface RascunhoConvite {
   localidade: string;
   distrito: string;
   pais: string;
-  // Pagina 2 -- conta bancaria, fardamento, sindicalizacao, assinatura.
+  // Pagina 2 -- conta bancaria, fardamento, assinatura.
   //
   // `conta_formato` fica FORA do contrato: o convite so sabe gravar IBAN (e o
   // unico ramo que a RPC tem) e por isso nao ha formato nenhum a escolher.
@@ -67,8 +67,6 @@ export interface RascunhoConvite {
   tamanho_baixo_detalhe: string;
   tamanho_calcado: string;
   tamanho_calcado_detalhe: string;
-  sindicalizado: boolean;
-  sindicato: string;
   assinatura_nome: string;
   aceite: boolean;
 }
@@ -112,8 +110,6 @@ export const RASCUNHO_CONVITE_VAZIO: RascunhoConvite = {
   tamanho_baixo_detalhe: "",
   tamanho_calcado: "",
   tamanho_calcado_detalhe: "",
-  sindicalizado: false,
-  sindicato: "",
   assinatura_nome: "",
   aceite: false,
 };
@@ -155,8 +151,6 @@ export const CHAVES_PAYLOAD_CONVITE = [
   "nif",
   "niss",
   "numero_documento",
-  "sindicalizado",
-  "sindicato",
   "tamanho_baixo",
   "tamanho_baixo_detalhe",
   "tamanho_calcado",
@@ -227,8 +221,6 @@ export function construirPayloadConvite(
     tamanho_baixo_detalhe: detalheOuNull(r.tamanho_baixo, r.tamanho_baixo_detalhe),
     tamanho_calcado: ouNull(r.tamanho_calcado),
     tamanho_calcado_detalhe: detalheOuNull(r.tamanho_calcado, r.tamanho_calcado_detalhe),
-    sindicalizado: r.sindicalizado,
-    sindicato: r.sindicalizado ? ouNull(r.sindicato) : null,
     // A conta bancaria, que ate 28/11 nao passava daqui: a Edge Function nao a
     // reencaminhava e o ramo do IBAN da RPC era inalcancavel. Os espacos saem
     // aqui e a RPC valida o resto -- quem escreve um IBAN copia-o com espacos.

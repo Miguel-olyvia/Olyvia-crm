@@ -47,7 +47,6 @@ import { CountrySelect } from "@/components/CountrySelect";
 import { PessoaNissField } from "@/components/hr/PessoaNissField";
 import { PessoaSaudeCard } from "@/components/hr/PessoaSaudeCard";
 import { PessoaFardamentoCard } from "@/components/hr/PessoaFardamentoCard";
-import { PessoaSindicalizacaoCard } from "@/components/hr/PessoaSindicalizacaoCard";
 import {
   CONJUGE_SITUACOES_PROFISSIONAIS,
   ESTADOS_CIVIS,
@@ -66,7 +65,6 @@ import {
   type PessoaIdentificacao,
   type FormatoConta,
   type PessoaMorada,
-  type PessoaSindicalizacao,
   type TipoDocumento,
   type Pessoa,
 } from "@/types/hr";
@@ -94,9 +92,6 @@ export interface PessoaPessoaisPermissoes {
    *  comentario do tipo `PessoaFardamento`. */
   laboraisView: boolean;
   laboraisEdit: boolean;
-  /** `hr.pessoas.sindicalizacao.*`, ambas `is_dangerous`. */
-  sindicalizacaoView: boolean;
-  sindicalizacaoEdit: boolean;
 }
 
 interface PessoaPessoaisTabProps {
@@ -107,7 +102,6 @@ interface PessoaPessoaisTabProps {
   bancarios: PessoaDadosBancarios | null;
   saude: PessoaDadosSaude | null;
   fardamento: PessoaFardamento | null;
-  sindicalizacao: PessoaSindicalizacao | null;
   /** `pessoas.email_pessoal` -- vive no nucleo, nao em `pessoas_dados_pessoais`. */
   emailPessoal: string | null;
   permissoes: PessoaPessoaisPermissoes;
@@ -119,7 +113,6 @@ interface PessoaPessoaisTabProps {
   onGuardarEmergencia: (patch: Partial<PessoaContactoEmergencia>) => Promise<string | null>;
   onGuardarSaude: (patch: Partial<PessoaDadosSaude>) => Promise<string | null>;
   onGuardarFardamento: (patch: Partial<PessoaFardamento>) => Promise<string | null>;
-  onGuardarSindicalizacao: (patch: Partial<PessoaSindicalizacao>) => Promise<string | null>;
   onRevelarNiss: () => Promise<string | null>;
   onDefinirNiss: (niss: string) => Promise<string | null>;
   onDefinirConta: (args: {
@@ -177,7 +170,6 @@ export function PessoaPessoaisTab({
   bancarios,
   saude,
   fardamento,
-  sindicalizacao,
   emailPessoal,
   permissoes,
   saving,
@@ -188,7 +180,6 @@ export function PessoaPessoaisTab({
   onGuardarEmergencia,
   onGuardarSaude,
   onGuardarFardamento,
-  onGuardarSindicalizacao,
   onRevelarNiss,
   onDefinirNiss,
   onDefinirConta,
@@ -1022,15 +1013,6 @@ export function PessoaPessoaisTab({
           podeEditar={permissoes.laboraisEdit}
           saving={saving}
           onGuardar={onGuardarFardamento}
-        />
-      )}
-
-      {permissoes.sindicalizacaoView && (
-        <PessoaSindicalizacaoCard
-          sindicalizacao={sindicalizacao}
-          podeEditar={permissoes.sindicalizacaoEdit}
-          saving={saving}
-          onGuardar={onGuardarSindicalizacao}
         />
       )}
     </div>

@@ -227,8 +227,6 @@ const VAZIO_OBRIGATORIOS: RascunhoConviteObrigatorios = {
   tamanho_cima: "",
   tamanho_baixo: "",
   tamanho_calcado: "",
-  sindicalizado: false,
-  sindicato: "",
   conta_numero: "",
   conta_titular: "",
   conta_banco: "",

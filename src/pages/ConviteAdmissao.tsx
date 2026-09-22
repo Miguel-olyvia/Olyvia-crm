@@ -3,15 +3,14 @@
  * pelo link que o e-mail de convite leva. Duas paginas:
  *
  *  1. Dados pessoais, identificacao e morada.
- *  2. Dados bancarios, fardamento, sindicalizacao e assinatura.
+ *  2. Dados bancarios, fardamento e assinatura.
  *
  * O QUE NAO SE PEDE AQUI
  * ------------------------
- * A filiacao sindical NUNCA se revela a quem reenvia este link (nao ha forma
- * mascarada -- e tudo ou nada, ver `PessoaSindicalizacaoCard.tsx`), mas o
- * CAMPO de escrita existe: quem preenche o convite pode DECLARAR a sua
- * filiacao, que so a base volta a mostrar a quem tiver
- * `hr.pessoas.sindicalizacao.view`.
+ * A filiacao sindical deixou de se pedir neste ecra e na ficha da pessoa
+ * (decisao de produto) -- a tabela `pessoas_sindicalizacao` e os dados ja
+ * recolhidos antes desta mudanca continuam na base, inertes, sem via de
+ * escrita nem de leitura pela aplicacao.
  *
  * A conta bancaria JA e gravada (desde 28/11): o IBAN viaja dentro de `dados`
  * como qualquer outra chave do contrato, e a RPC guarda-o cifrado no Vault. O
@@ -35,7 +34,6 @@ import {
 } from "@/hooks/useConviteAdmissaoPublico";
 import {
   CamposTocadosProvider,
-  CampoInterruptor,
   CampoPais,
   CampoSelect,
   CampoTexto,
@@ -686,30 +684,6 @@ export default function ConviteAdmissao() {
                     label={t("hr.fardamento.detalhe")}
                     valor={rascunho.tamanho_calcado_detalhe}
                     onChange={(v) => definir("tamanho_calcado_detalhe", v)}
-                  />
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("hr.sindicalizacao.titulo")}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <CampoInterruptor
-                  id="convite-sindicalizado"
-                  label={t("hr.campos.sindicalizado")}
-                  checked={rascunho.sindicalizado}
-                  onChange={(v) => definir("sindicalizado", v)}
-                />
-                {rascunho.sindicalizado && (
-                  <CampoTexto
-                    id="convite-sindicato"
-                    label={t("hr.campos.sindicato")}
-                    obrigatorio={obrigatorio1("sindicato")}
-                    erro={erroDe("sindicato")}
-                    valor={rascunho.sindicato}
-                    onChange={(v) => definir("sindicato", v)}
                   />
                 )}
               </CardContent>

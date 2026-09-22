@@ -76,8 +76,6 @@ const CAMPOS_CONVITE = [
   "nif",
   "niss",
   "numero_documento",
-  "sindicalizado",
-  "sindicato",
   "tamanho_baixo",
   "tamanho_baixo_detalhe",
   "tamanho_calcado",
