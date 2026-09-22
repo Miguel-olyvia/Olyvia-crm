@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "@/lib/toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
+import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -279,6 +280,8 @@ export function ContractDetailDialog({
             )}
           </div>
         </DialogHeader>
+
+        {isNew && <PlanLimitWarning organizationId={activeCompany?.id} limitType="contracts" />}
 
         {!isNew && contract && <PipelineBreadcrumb entityType="contract" entityId={contract.id} />}
 
