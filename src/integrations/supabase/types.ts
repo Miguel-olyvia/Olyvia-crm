@@ -18071,6 +18071,7 @@ export type Database = {
           client_id: string | null
           color: string | null
           company_id: string | null
+          confirmed_at: string | null
           contact_id: string | null
           created_at: string
           created_by: string
@@ -18107,6 +18108,7 @@ export type Database = {
           client_id?: string | null
           color?: string | null
           company_id?: string | null
+          confirmed_at?: string | null
           contact_id?: string | null
           created_at?: string
           created_by: string
@@ -18143,6 +18145,7 @@ export type Database = {
           client_id?: string | null
           color?: string | null
           company_id?: string | null
+          confirmed_at?: string | null
           contact_id?: string | null
           created_at?: string
           created_by?: string
@@ -23934,6 +23937,7 @@ export type Database = {
           client_id: string | null
           color: string | null
           company_id: string | null
+          confirmed_at: string | null
           contact_id: string | null
           created_at: string
           created_by: string
@@ -26156,6 +26160,7 @@ export type Database = {
           client_id: string | null
           color: string | null
           company_id: string | null
+          confirmed_at: string | null
           contact_id: string | null
           created_at: string
           created_by: string

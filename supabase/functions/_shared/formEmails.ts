@@ -324,21 +324,28 @@ export function defaultMeetingHtml(opts: {
   location?: string;
   technicianName?: string;
   cancelUrl?: string;
+  // Regra 12: link "Confirmo a visita" -- só o chamador do lembrete ao
+  // cliente o passa (nunca o do técnico, nunca a confirmação inicial).
+  confirmUrl?: string;
 }): string {
   const rows: string[] = [];
   rows.push(`<tr><td style="padding:4px 0;color:#6b7280">Cliente</td><td style="padding:4px 0;font-weight:600">${escapeHtml(opts.leadName || "-")}</td></tr>`);
   rows.push(`<tr><td style="padding:4px 0;color:#6b7280">Data / hora</td><td style="padding:4px 0;font-weight:600">${escapeHtml(opts.when || "-")}</td></tr>`);
   if (opts.location) rows.push(`<tr><td style="padding:4px 0;color:#6b7280">Local</td><td style="padding:4px 0;font-weight:600">${escapeHtml(opts.location)}</td></tr>`);
   if (opts.technicianName) rows.push(`<tr><td style="padding:4px 0;color:#6b7280">Técnico</td><td style="padding:4px 0;font-weight:600">${escapeHtml(opts.technicianName)}</td></tr>`);
-  // cancelUrl is a system-built URL (buildManageUrl), not free user text — safe as href.
+  // cancelUrl/confirmUrl are system-built URLs (buildManageUrl / confirm-booking token), not free user text — safe as href.
+  const confirm = opts.confirmUrl
+    ? `<p style="margin:20px 0 0"><a href="${encodeURI(opts.confirmUrl)}" style="color:#059669;font-weight:600">Confirmo a visita</a></p>`
+    : "";
   const cancel = opts.cancelUrl
-    ? `<p style="margin:20px 0 0"><a href="${encodeURI(opts.cancelUrl)}" style="color:#85D3BE">Gerir / cancelar agendamento</a></p>`
+    ? `<p style="margin:${opts.confirmUrl ? "8px" : "20px"} 0 0"><a href="${encodeURI(opts.cancelUrl)}" style="color:#85D3BE">Gerir / cancelar agendamento</a></p>`
     : "";
   return `
   <div style="font-family:Inter,system-ui,sans-serif;max-width:520px;margin:0 auto;color:#1F2937">
     <h2 style="margin:0 0 8px">${escapeHtml(opts.heading)}</h2>
     <p style="margin:0 0 16px;color:#4b5563">${escapeHtml(opts.intro)}</p>
     <table style="width:100%;border-collapse:collapse;font-size:14px">${rows.join("")}</table>
+    ${confirm}
     ${cancel}
   </div>`;
 }

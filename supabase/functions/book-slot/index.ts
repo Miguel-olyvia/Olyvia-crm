@@ -962,6 +962,28 @@ Deno.serve(async (req: Request) => {
         const hoursBefore = emailCfg.reminder_hours_before && emailCfg.reminder_hours_before > 0 ? emailCfg.reminder_hours_before : 2;
         const remindAt = new Date(new Date(slot_start).getTime() - hoursBefore * 3600000);
         if (remindAt.getTime() > Date.now()) {
+          // Regra 12: link "Confirmo a visita" -- só nasce aqui, porque só
+          // faz sentido pedir confirmação quando existe um lembrete a sair.
+          // Token próprio (action 'confirm'), distinto do de cancelar;
+          // expira no início da visita -- confirmar depois disso não tem
+          // sentido.
+          // Link fixo no dominio da propria app -- ao contrario do de
+          // gerir/cancelar, "confirmar" nao passa pelo dominio proprio da
+          // organizacao (booking_manage_url_template): essa pagina, quando
+          // configurada, e a deles e nao sabe lidar com esta accao nova.
+          const { data: confirmToken } = await supabase
+            .from('booking_tokens')
+            .insert({
+              schedule_item_id: scheduleItem.id,
+              action: 'confirm',
+              expires_at: slot_start,
+            })
+            .select('token')
+            .single();
+          const confirmLink = confirmToken?.token
+            ? `${siteUrlEnv}/booking/confirm?token=${confirmToken.token}`
+            : '';
+
           const reminderTemplateId = pickTemplateId(emailCfg, 'reminder', leadLocale, emailCfg.reminder_template_id);
           const tpl = await loadTemplate(supabase, reminderTemplateId);
           const subject = renderSubject(tpl?.subject || 'Lembrete: reunião {{meeting_date}}', baseVars);
@@ -974,6 +996,7 @@ Deno.serve(async (req: Request) => {
                 location: fullLocation || undefined,
                 technicianName: technicianName || undefined,
                 cancelUrl: kind === 'client' ? (cancelLink || undefined) : undefined,
+                confirmUrl: kind === 'client' ? (confirmLink || undefined) : undefined,
               });
           const targets: { email: string; kind: 'client' | 'technician' }[] = [];
           if (leadEmail) targets.push({ email: leadEmail, kind: 'client' });

@@ -129,6 +129,7 @@ const SupportAccess = lazy(() => import("./pages/SupportAccess"));
 const AuthAuditLog = lazy(() => import("./pages/AuthAuditLog"));
 const DataErasureRequests = lazy(() => import("./pages/DataErasureRequests"));
 const BookingManage = lazy(() => import("./pages/BookingManage"));
+const BookingConfirm = lazy(() => import("./pages/BookingConfirm"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
@@ -180,6 +181,7 @@ const App = () => (
                   <Route path="/test-widget" element={<TestWidget />} />
                   <Route path="/booking/manage" element={<BookingManage />} />
                   <Route path="/booking/cancel" element={<BookingManage />} />
+                  <Route path="/booking/confirm" element={<BookingConfirm />} />
 
                   {/* Client portal — guard + layout mount once for all portal routes */}
                   <Route element={<ClientRouteGuard />}>
