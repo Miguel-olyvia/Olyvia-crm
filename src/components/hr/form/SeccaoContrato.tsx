@@ -339,14 +339,11 @@ export function SeccaoContrato({
           <CampoTexto
             id="hr-novo-tempo-trabalho-pct"
             label={t("hr.contrato.tempoTrabalhoPct")}
-            ajuda={t("hr.contrato.ajudaFte")}
+            ajuda={t("hr.contrato.ajudaFteFixo")}
             tipo="number"
-            min={0}
-            max={100}
-            step="1"
-            valor={valor.tempo_trabalho_pct}
-            erro={erroDe("hr-novo-tempo-trabalho-pct")}
-            onChange={(v) => onPatch({ tempo_trabalho_pct: v })}
+            valor="100"
+            disabled
+            onChange={() => {}}
           />
           <CampoSelect
             id="hr-novo-politica-feriados"

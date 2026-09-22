@@ -224,7 +224,11 @@ export function rascunhoInicial(): RascunhoPessoa {
       tipo_trabalho: "",
       horas_trabalho: "",
       horas_frequencia: "semanal",
-      tempo_trabalho_pct: "",
+      // Sempre 100%, sem excepcao -- quem precisa de tempo parcial ja o
+      // marca em `tipo_trabalho`/regime, ter os dois campos a dizer a
+      // mesma coisa de forma independente era so uma fonte de
+      // inconsistencia silenciosa. Campo bloqueado no ecra (SeccaoContrato).
+      tempo_trabalho_pct: "100",
       dias_uteis: [],
       politica_feriados: "nao_laboral",
       horas_anuais_maximas: "",

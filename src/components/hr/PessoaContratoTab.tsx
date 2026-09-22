@@ -532,7 +532,10 @@ export function PessoaContratoTab({
             horas_frequencia: rascunho.horas_frequencia,
           }
         : {}),
-      tempo_trabalho_pct: numeroOuNull(rascunho.tempo_trabalho_pct),
+      // Sempre 100%, sem excepcao -- ver a mesma nota em novaPessoa.ts.
+      // Grava-se 100 mesmo que o rascunho mostre outro valor (contrato
+      // antigo, de antes desta regra), a partir do primeiro guardar.
+      tempo_trabalho_pct: 100,
       politica_feriados: rascunho.politica_feriados,
       horas_anuais_maximas: numeroOuNull(rascunho.horas_anuais_maximas),
       horas_semanais_maximas: numeroOuNull(rascunho.horas_semanais_maximas),
@@ -905,13 +908,11 @@ export function PessoaContratoTab({
               <CampoTexto
                 id="hr-contrato-tempo-trabalho-pct"
                 label={t("hr.contrato.tempoTrabalhoPct")}
-                erro={erroDe("hr-contrato-tempo-trabalho-pct")}
+                ajuda={t("hr.contrato.ajudaFteFixo")}
                 tipo="number"
-                min={0}
-                max={100}
-                valor={rascunho.tempo_trabalho_pct}
-                disabled={!podeEditar}
-                onChange={(v) => definir("tempo_trabalho_pct", v)}
+                valor="100"
+                disabled
+                onChange={() => {}}
               />
               <CampoSelect
                 id="hr-contrato-politica-feriados"
