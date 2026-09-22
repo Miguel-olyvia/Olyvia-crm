@@ -76,6 +76,7 @@ import { ContactTagsDialog } from "@/components/contacts/ContactTagsDialog";
 import { ClientsTableColumns, ClientColumnConfig, DEFAULT_CLIENT_COLUMNS } from "@/components/clients/ClientsTableColumns";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 
 interface ClientRecord {
   id: string;
@@ -2683,6 +2684,7 @@ const AnewClients = () => {
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogContent className="max-w-2xl">
             <DialogHeader><DialogTitle>{t('clients.newClient')}</DialogTitle></DialogHeader>
+            <PlanLimitWarning organizationId={activeCompany?.id} limitType="leads" />
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-6 max-h-[calc(100vh-300px)] overflow-y-auto pr-2">
                 <div>

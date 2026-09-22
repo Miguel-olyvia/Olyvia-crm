@@ -117,6 +117,7 @@ import {
 import { ensureEntityOrgLink, linkEntityToOrg, findEntityMatches } from "@/utils/orgEntity";
 import { assertNoSupabaseError } from "@/lib/assertNoSupabaseError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { usePermissions } from "@/hooks/usePermissions";
 import { SendEntityEmailDialog } from "@/components/email/SendEntityEmailDialog";
@@ -7300,7 +7301,9 @@ export default function AnewLeads() {
             <DialogHeader>
               <DialogTitle>{t('leads.createLead') || 'Criar Nova Lead'}</DialogTitle>
             </DialogHeader>
-            
+
+            <PlanLimitWarning organizationId={activeCompanyId} limitType="leads" />
+
             {/* ── Campaign (optional) ── */}
             <div className="space-y-3">
               <div className="flex items-center justify-between">
