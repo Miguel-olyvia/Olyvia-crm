@@ -75,6 +75,7 @@ import { DryRunPanel, type DryRunStagePayload } from "./workflow/DryRunPanel";
 import { StageRulesSimulator } from "./workflow/StageRulesSimulator";
 import type { RuleGroup } from "./workflow/conditionCatalog";
 import { isEmptyRule, normalizeRule } from "./workflow/conditionCatalog";
+import { runRecomputeBatches } from "./workflow/recomputeBatches";
 import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
 import { LEAD_FUNNEL_PRESETS, findPresetStageRule, type FunnelPreset } from "./leadFunnelPresets";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -424,6 +425,8 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const [editStageTab, setEditStageTab] = useState("general");
   const [showHelp, setShowHelp] = useState(false);
   const [recomputing, setRecomputing] = useState(false);
+  // Leads já examinadas no recálculo em curso (soma dos lotes concluídos).
+  const [recomputeProgress, setRecomputeProgress] = useState(0);
   const [showRecomputeConfirm, setShowRecomputeConfirm] = useState(false);
   const [unresolvedLeads, setUnresolvedLeads] = useState<{
     count: number;
@@ -729,20 +732,46 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     if (!companyId) return;
     setShowRecomputeConfirm(false);
     setUnresolvedLeads(null);
+    setRecomputeProgress(0);
     setRecomputing(true);
-    const { data, error } = await (supabase as any).rpc("recompute_leads_v2_buckets", {
-      p_org: companyId,
-    });
 
-    if (error) {
+    // Por lotes: o role `authenticated` tem statement_timeout de 8s e a
+    // organização inteira não cabe numa só chamada (ver recomputeBatches.ts).
+    const result = await runRecomputeBatches(
+      async ({ limit, after }) => {
+        const { data, error } = await (supabase as any).rpc("recompute_leads_v2_buckets", {
+          p_org: companyId,
+          p_limit: limit,
+          p_after: after,
+        });
+        return { data, error };
+      },
+      { onProgress: totals => setRecomputeProgress(totals.processedCount) }
+    );
+
+    if (result.error) {
       setRecomputing(false);
-      captureFlowError(error, "lead-lifecycle");
-      toast({ title: "Erro ao recalcular leads", description: error.message, variant: "destructive" });
+      captureFlowError(result.error, "lead-lifecycle");
+      // Ao contrário do comportamento antigo (uma só chamada, tudo ou nada),
+      // os lotes anteriores já estão gravados — o utilizador tem de saber.
+      const already = result.updatedCount > 0
+        ? ` ${result.updatedCount} lead${result.updatedCount === 1 ? "" : "s"} já tinha${result.updatedCount === 1 ? "" : "m"} sido recalculada${result.updatedCount === 1 ? "" : "s"} antes da falha e essa alteração ficou gravada.`
+        : " Nenhuma lead chegou a ser recalculada.";
+      toast({
+        title: "Erro ao recalcular leads",
+        description: `${result.error.message ?? "Erro desconhecido"}.${already}`,
+        variant: "destructive",
+      });
+      // O que já foi gravado tem de aparecer no ecrã, mesmo com erro.
+      if (result.updatedCount > 0) {
+        loadLeadCounts();
+        onStagesUpdated?.();
+      }
       return;
     }
-    const updatedCount = data?.[0]?.updated_count ?? 0;
-    const unresolvedCount = data?.[0]?.unresolved_count ?? 0;
-    const unresolvedLeadIds: string[] = data?.[0]?.unresolved_lead_ids ?? [];
+    const updatedCount = result.updatedCount;
+    const unresolvedCount = result.unresolvedCount;
+    const unresolvedLeadIds: string[] = result.unresolvedLeadIds;
 
     toast({ title: `${updatedCount} lead${updatedCount === 1 ? "" : "s"} recalculada${updatedCount === 1 ? "" : "s"}` });
 
@@ -753,7 +782,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
         variant: "destructive",
       });
 
-      // unresolvedLeadIds is already capped to 50 by the RPC — resolve a
+      // unresolvedLeadIds já vem limitado a 50 no total pelos lotes — resolve a
       // display name for each so the banner below is actionable, not just a count.
       if (unresolvedLeadIds.length > 0) {
         const { data: leadRows } = await (supabase as any)
@@ -1119,7 +1148,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       onClick={() => setShowRecomputeConfirm(true)}
                       disabled={recomputing}
                     >
-                      {recomputing ? "A recalcular..." : "Recalcular buckets das leads"}
+                      {recomputing
+                        ? recomputeProgress > 0
+                          ? `A recalcular... ${recomputeProgress} leads`
+                          : "A recalcular..."
+                        : "Recalcular buckets das leads"}
                     </Button>
                   </div>
 
@@ -1127,7 +1160,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     <div className="space-y-1.5">
                       <Progress indeterminate className="h-2" />
                       <p className="text-xs text-muted-foreground">
-                        A recalcular estágios de todas as leads da organização...
+                        {recomputeProgress > 0
+                          ? `A recalcular estágios das leads da organização... ${recomputeProgress} leads processadas.`
+                          : "A recalcular estágios de todas as leads da organização..."}
                       </p>
                     </div>
                   )}
