@@ -19,6 +19,7 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { leadPipelineRulesQueryKey } from "@/hooks/useLeadPipelineRules";
 import { useQueryClient } from "@tanstack/react-query";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface Props {
   stages: WorkflowStage[];
@@ -72,6 +73,7 @@ const nodeTypes = { stage: StageNode };
 
 export function WorkflowFlowchart({ stages, companyId }: Props) {
   const { toast } = useToast();
+  const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
@@ -79,6 +81,10 @@ export function WorkflowFlowchart({ stages, companyId }: Props) {
   const [saving, setSaving] = useState(false);
   const [leadCounts, setLeadCounts] = useState<Record<string, number>>({});
   const [enforceTransitions, setEnforceTransitions] = useState(false);
+  // `lead_pipeline_settings.sequential_flow` — default false, igual ao da coluna:
+  // sem linha na BD a organização corre o motor histórico (salta para a etapa
+  // mais avançada que bate).
+  const [sequentialFlow, setSequentialFlow] = useState(false);
   // `null` = definições ainda não lidas da BD. Enquanto for null NÃO construímos
   // nós, senão a grelha ganhava sempre à posição guardada (ver buildNodes).
   const [savedPositions, setSavedPositions] = useState<StagePositions | null>(null);
@@ -124,7 +130,7 @@ export function WorkflowFlowchart({ stages, companyId }: Props) {
   const loadSettings = useCallback(async (applyToNodes = false) => {
     if (!companyId) return;
     const { data, error } = await (supabase.from("lead_pipeline_settings") as any)
-      .select("stage_positions, enforce_stage_transitions")
+      .select("stage_positions, enforce_stage_transitions, sequential_flow")
       .eq("organization_id", companyId)
       .maybeSingle();
 
@@ -137,6 +143,7 @@ export function WorkflowFlowchart({ stages, companyId }: Props) {
     savedPositionsRef.current = positions;
     setSavedPositions(positions);
     setEnforceTransitions(data?.enforce_stage_transitions === true);
+    setSequentialFlow(data?.sequential_flow === true);
 
     if (applyToNodes) {
       setNodes(nds => nds.map(n => (positions[n.id] ? { ...n, position: { ...positions[n.id] } } : n)));
@@ -281,6 +288,7 @@ export function WorkflowFlowchart({ stages, companyId }: Props) {
         organization_id: companyId,
         stage_positions: stagePositions,
         enforce_stage_transitions: enforceTransitions,
+        sequential_flow: sequentialFlow,
         updated_by: businessUserId,
       }, { onConflict: "organization_id" });
       if (settingsError) throw settingsError;
@@ -334,20 +342,39 @@ export function WorkflowFlowchart({ stages, companyId }: Props) {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-start gap-2">
-            <Switch
-              id="enforce-stage-transitions"
-              checked={enforceTransitions}
-              disabled={saving || !settingsReady}
-              onCheckedChange={(checked) => { setEnforceTransitions(checked); setHasChanges(true); }}
-            />
-            <div className="max-w-[260px]">
-              <Label htmlFor="enforce-stage-transitions" className="text-xs font-medium cursor-pointer">
-                Restringir transições ao fluxo desenhado
-              </Label>
-              <p className="text-[11px] leading-tight text-muted-foreground">
-                Aplica-se apenas a mudanças de estágio feitas por utilizadores. O motor automático (avanço automático e recomputação por sinais) nunca é bloqueado.
-              </p>
+          <div className="flex flex-col gap-2">
+            <div className="flex items-start gap-2">
+              <Switch
+                id="enforce-stage-transitions"
+                checked={enforceTransitions}
+                disabled={saving || !settingsReady}
+                onCheckedChange={(checked) => { setEnforceTransitions(checked); setHasChanges(true); }}
+              />
+              <div className="max-w-[260px]">
+                <Label htmlFor="enforce-stage-transitions" className="text-xs font-medium cursor-pointer">
+                  Restringir transições ao fluxo desenhado
+                </Label>
+                <p className="text-[11px] leading-tight text-muted-foreground">
+                  Aplica-se apenas a mudanças de estágio feitas por utilizadores. O motor automático (avanço automático e recomputação por sinais) nunca é bloqueado.
+                </p>
+              </div>
+            </div>
+            {/* `sequential_flow`: escolhe o motor de cálculo da etapa. */}
+            <div className="flex items-start gap-2">
+              <Switch
+                id="sequential-flow"
+                checked={sequentialFlow}
+                disabled={saving || !settingsReady}
+                onCheckedChange={(checked) => { setSequentialFlow(checked); setHasChanges(true); }}
+              />
+              <div className="max-w-[260px]">
+                <Label htmlFor="sequential-flow" className="text-xs font-medium cursor-pointer">
+                  {t("leads.workflow.sequentialFlowLabel")}
+                </Label>
+                <p className="text-[11px] leading-tight text-muted-foreground">
+                  {t("leads.workflow.sequentialFlowHint")}
+                </p>
+              </div>
             </div>
           </div>
           <div className="flex gap-2">

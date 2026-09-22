@@ -75,9 +75,11 @@ import { DryRunPanel, type DryRunStagePayload } from "./workflow/DryRunPanel";
 import { StageRulesSimulator } from "./workflow/StageRulesSimulator";
 import type { RuleGroup } from "./workflow/conditionCatalog";
 import { isEmptyRule, normalizeRule } from "./workflow/conditionCatalog";
+import { runRecomputeBatches } from "./workflow/recomputeBatches";
 import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
 import { LEAD_FUNNEL_PRESETS, findPresetStageRule, type FunnelPreset } from "./leadFunnelPresets";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export interface WorkflowStage {
   id: string;
@@ -159,13 +161,28 @@ const findMatchingLeadStatus = (...candidates: Array<string | null | undefined>)
  * nenhuma condição marcada.
  */
 export const isStageUnreachable = (stage: Pick<WorkflowStage, "name" | "matching_statuses" | "reached_when">): boolean => {
-  // Espelha o default de toStagePayload: matching_statuses nulo é gravado como [name].
-  const effectiveStatuses = stage.matching_statuses ?? [stage.name];
+  // `matching_statuses` vazio NÃO é o mesmo que nulo: nulo espelha o default de
+  // toStagePayload (gravado como [name]); um array vazio — o caso real das
+  // etapas "Reunião 2/3/4" — não tem nenhum status para o motor comparar, e
+  // `stage_reached` devolve false em qualquer circunstância.
+  const effectiveStatuses = Array.isArray(stage.matching_statuses)
+    ? stage.matching_statuses
+    : [stage.name];
   const hasKnownStatus = effectiveStatuses.some(value =>
     LEAD_STATUS_OPTIONS.some(opt => opt.value === value)
   );
   return !hasKnownStatus && isEmptyRule(normalizeRule(stage.reached_when));
 };
+
+/**
+ * Etapas da organização que nenhuma lead consegue alcançar. Serve o alerta no
+ * topo do editor: com o fluxo sequencial ligado, uma destas etapas no caminho
+ * das setas bloqueia tudo o que vem a seguir (o caso BMGest, em que o funil
+ * parou na "Visita Agendada").
+ */
+export const findUnreachableStages = <T extends Pick<WorkflowStage, "name" | "matching_statuses" | "reached_when">>(
+  stages: T[]
+): T[] => (stages ?? []).filter(isStageUnreachable);
 
 const UNREACHABLE_STAGE_HINT =
   "Nenhuma lead consegue chegar a esta etapa: não tem nenhum status literal associado nem condições avançadas definidas. Associe pelo menos um status em \"Status literais associados\" ou defina condições em \"Condições avançadas (motor)\".";
@@ -397,6 +414,7 @@ function SortableStageRow({
 // ─── Main Component ─────────────────────────────────────────
 export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpdated }: LeadWorkflowConfigProps) {
   const { toast } = useToast();
+  const { t } = useTranslation();
   const [stages, setStages] = useState<WorkflowStage[]>([]);
   const [templateStages, setTemplateStages] = useState<WorkflowStage[]>([]);
   const [loading, setLoading] = useState(false);
@@ -407,6 +425,8 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const [editStageTab, setEditStageTab] = useState("general");
   const [showHelp, setShowHelp] = useState(false);
   const [recomputing, setRecomputing] = useState(false);
+  // Leads já examinadas no recálculo em curso (soma dos lotes concluídos).
+  const [recomputeProgress, setRecomputeProgress] = useState(0);
   const [showRecomputeConfirm, setShowRecomputeConfirm] = useState(false);
   const [unresolvedLeads, setUnresolvedLeads] = useState<{
     count: number;
@@ -445,6 +465,10 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     stages: pipelineStages,
     isLoading: stagesLoading,
     invalidate: invalidatePipelineRules,
+    // `lead_pipeline_settings.sequential_flow` — só para agravar o alerta de
+    // etapas inatingíveis: com o motor sequencial, uma etapa inalcançável no
+    // caminho das setas trava também todas as seguintes.
+    sequentialFlow,
   } = useLeadPipelineRules(companyId);
 
   useEffect(() => {
@@ -545,7 +569,18 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     counts_as_lost: s.counts_as_lost ?? false,
   });
 
-  const saveStages = async (payload: StagePayload[]) => {
+  /**
+   * A cópia do template global (copyTemplateToCompany) envia de propósito só
+   * os campos base e deixa a RPC aplicar os seus próprios defaults ao resto —
+   * por isso o payload aceita também essa forma reduzida. Correcção só de
+   * tipos: o JSON enviado à RPC é exactamente o mesmo de antes.
+   */
+  type TemplateStagePayload = Pick<
+    StagePayload,
+    "id" | "name" | "label" | "color" | "is_final" | "is_conversion" | "is_rejection" | "default_status"
+  >;
+
+  const saveStages = async (payload: Array<StagePayload | TemplateStagePayload>) => {
     const { data, error } = await (supabase as any).rpc("rpc_save_lead_workflow_stages", {
       p_organization_id: companyId,
       p_stages: payload,
@@ -697,20 +732,46 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     if (!companyId) return;
     setShowRecomputeConfirm(false);
     setUnresolvedLeads(null);
+    setRecomputeProgress(0);
     setRecomputing(true);
-    const { data, error } = await (supabase as any).rpc("recompute_leads_v2_buckets", {
-      p_org: companyId,
-    });
 
-    if (error) {
+    // Por lotes: o role `authenticated` tem statement_timeout de 8s e a
+    // organização inteira não cabe numa só chamada (ver recomputeBatches.ts).
+    const result = await runRecomputeBatches(
+      async ({ limit, after }) => {
+        const { data, error } = await (supabase as any).rpc("recompute_leads_v2_buckets", {
+          p_org: companyId,
+          p_limit: limit,
+          p_after: after,
+        });
+        return { data, error };
+      },
+      { onProgress: totals => setRecomputeProgress(totals.processedCount) }
+    );
+
+    if (result.error) {
       setRecomputing(false);
-      captureFlowError(error, "lead-lifecycle");
-      toast({ title: "Erro ao recalcular leads", description: error.message, variant: "destructive" });
+      captureFlowError(result.error, "lead-lifecycle");
+      // Ao contrário do comportamento antigo (uma só chamada, tudo ou nada),
+      // os lotes anteriores já estão gravados — o utilizador tem de saber.
+      const already = result.updatedCount > 0
+        ? ` ${result.updatedCount} lead${result.updatedCount === 1 ? "" : "s"} já tinha${result.updatedCount === 1 ? "" : "m"} sido recalculada${result.updatedCount === 1 ? "" : "s"} antes da falha e essa alteração ficou gravada.`
+        : " Nenhuma lead chegou a ser recalculada.";
+      toast({
+        title: "Erro ao recalcular leads",
+        description: `${result.error.message ?? "Erro desconhecido"}.${already}`,
+        variant: "destructive",
+      });
+      // O que já foi gravado tem de aparecer no ecrã, mesmo com erro.
+      if (result.updatedCount > 0) {
+        loadLeadCounts();
+        onStagesUpdated?.();
+      }
       return;
     }
-    const updatedCount = data?.[0]?.updated_count ?? 0;
-    const unresolvedCount = data?.[0]?.unresolved_count ?? 0;
-    const unresolvedLeadIds: string[] = data?.[0]?.unresolved_lead_ids ?? [];
+    const updatedCount = result.updatedCount;
+    const unresolvedCount = result.unresolvedCount;
+    const unresolvedLeadIds: string[] = result.unresolvedLeadIds;
 
     toast({ title: `${updatedCount} lead${updatedCount === 1 ? "" : "s"} recalculada${updatedCount === 1 ? "" : "s"}` });
 
@@ -721,7 +782,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
         variant: "destructive",
       });
 
-      // unresolvedLeadIds is already capped to 50 by the RPC — resolve a
+      // unresolvedLeadIds já vem limitado a 50 no total pelos lotes — resolve a
       // display name for each so the banner below is actionable, not just a count.
       if (unresolvedLeadIds.length > 0) {
         const { data: leadRows } = await (supabase as any)
@@ -851,7 +912,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   const copyTemplateToCompany = async () => {
     if (!companyId || templateStages.length === 0) return;
 
-    const payload: StagePayload[] = templateStages
+    const payload: TemplateStagePayload[] = templateStages
       .sort((a, b) => a.stage_order - b.stage_order)
       .map(stage => ({
         id: null,
@@ -887,6 +948,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   };
 
   const displayStages = stages.length > 0 ? stages : templateStages;
+  // Só as etapas da própria organização: os templates globais não são
+  // editáveis aqui, logo o alerta não seria accionável.
+  const unreachableStages = isUsingTemplate ? [] : findUnreachableStages(stages);
   const editingStageUnreachable = editingStage ? isStageUnreachable(editingStage) : false;
   const deletableLeadCount = deletingStage ? (leadCountByStage[deletingStage.id] || 0) : 0;
   const migrationTargets = stages.filter(s => s.id !== deletingStage?.id);
@@ -926,6 +990,38 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               )}
             </DialogDescription>
           </DialogHeader>
+
+          {/* Fora das Tabs de propósito: uma etapa que nenhuma lead alcança
+              trava o funil, e o badge "Inatingível" na linha da tabela é
+              discreto de mais para um problema desta gravidade. */}
+          {unreachableStages.length > 0 && (
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3"
+            >
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                  {unreachableStages.length === 1
+                    ? t("leads.workflow.unreachableAlertTitleOne")
+                    : t("leads.workflow.unreachableAlertTitleMany", { count: unreachableStages.length })}
+                </p>
+                <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                  {t("leads.workflow.unreachableAlertStages", {
+                    stages: unreachableStages.map(s => s.label).join(", "),
+                  })}
+                </p>
+                {sequentialFlow && (
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-300">
+                    {t("leads.workflow.unreachableAlertSequential")}
+                  </p>
+                )}
+                <p className="text-xs text-amber-800/80 dark:text-amber-300/80">
+                  {t("leads.workflow.unreachableAlertFix")}
+                </p>
+              </div>
+            </div>
+          )}
 
           <Tabs value={activeTab} onValueChange={setActiveTab}>
             <TabsList className="grid w-full grid-cols-5">
@@ -1052,7 +1148,11 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       onClick={() => setShowRecomputeConfirm(true)}
                       disabled={recomputing}
                     >
-                      {recomputing ? "A recalcular..." : "Recalcular buckets das leads"}
+                      {recomputing
+                        ? recomputeProgress > 0
+                          ? `A recalcular... ${recomputeProgress} leads`
+                          : "A recalcular..."
+                        : "Recalcular buckets das leads"}
                     </Button>
                   </div>
 
@@ -1060,7 +1160,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                     <div className="space-y-1.5">
                       <Progress indeterminate className="h-2" />
                       <p className="text-xs text-muted-foreground">
-                        A recalcular estágios de todas as leads da organização...
+                        {recomputeProgress > 0
+                          ? `A recalcular estágios das leads da organização... ${recomputeProgress} leads processadas.`
+                          : "A recalcular estágios de todas as leads da organização..."}
                       </p>
                     </div>
                   )}
