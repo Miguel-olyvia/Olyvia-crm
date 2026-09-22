@@ -256,10 +256,10 @@ interface QuoteLine {
   source_deal_need_item_id?: string | null;
 }
 
-const NEW_QUOTE_DRAFT_VERSION = 1;
-// New quotes share one draft per company; an existing quote being edited
-// gets its own key (keyed by quoteId) so autosave/recovery also covers
-// editing/finishing an already-saved quote, not just creating one.
+// Chave do antigo rascunho em localStorage (removido — sobrepunha-se para
+// sempre aos dados do servidor num browser que nunca chegasse a gravar,
+// mesmo depois de outra pessoa gravar o orçamento). Mantida só para limpar
+// entradas já gravadas em browsers antigos.
 const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
   quoteId ? `olyvia:quote-builder:edit:${quoteId}` : `olyvia:quote-builder:new:${companyId || "global"}`;
 
@@ -390,22 +390,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   const [templates, setTemplates] = useState<any[]>([]);
   const saveLockRef = useRef(false);
-  // Tracks the organization.id a draft restore attempt has already run for
-  // (null = never tried). Deliberately NOT a boolean "did it ever run" latch:
-  // right after a forced reload (e.g. the stale-chunk recovery in main.tsx),
-  // activeCompany?.id can resolve through a transient/default value before
-  // settling on the real one a render or two later. A boolean latch would
-  // burn its one-shot attempt on that transient id, find no draft there, and
-  // then — because the guard below only checks "did we ever restore" — never
-  // retry once the correct id arrives, silently stranding a real draft in
-  // localStorage under the correct key forever. Comparing against the
-  // specific id lets each distinct value get its own attempt.
-  const draftRestoredRef = useRef<string | null>(null);
-  // For an existing quote, fetchQuote() populates formData/lines from the
-  // server first; draft restore must wait for that to finish so it overlays
-  // on top of the server state instead of being clobbered by it.
-  const existingQuoteLoadedRef = useRef(false);
-  const [quoteLoadTick, setQuoteLoadTick] = useState(0);
   const postSaveActionRef = useRef<"email" | "whatsapp" | null>(null);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
   const [showSendEmailDialog, setShowSendEmailDialog] = useState(false);
@@ -416,69 +400,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [saveAsTemplateName, setSaveAsTemplateName] = useState("");
   const [savingAsTemplate, setSavingAsTemplate] = useState(false);
 
-  useEffect(() => {
-    if (!activeCompany?.id || draftRestoredRef.current === activeCompany.id || typeof window === "undefined") return;
-    // Editing an existing quote: wait for fetchQuote() to finish loading the
-    // server state first, so a restored draft overlays it instead of being
-    // overwritten by it.
-    if (effectiveQuoteId && !existingQuoteLoadedRef.current) return;
-
-    draftRestoredRef.current = activeCompany.id;
-    const rawDraft = localStorage.getItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId));
-    if (!rawDraft) return;
-
-    try {
-      const draft = JSON.parse(rawDraft);
-      if (draft?.version !== NEW_QUOTE_DRAFT_VERSION || !draft.formData) return;
-
-      setFormData(prev => ({ ...prev, ...draft.formData, organization_id: draft.formData.organization_id || activeCompany.id }));
-      setQuoteNumber(draft.quoteNumber || null);
-      setAutoReference(draft.autoReference || "");
-      setLines(Array.isArray(draft.lines) ? draft.lines : []);
-      setSections(Array.isArray(draft.sections) && draft.sections.length > 0 ? draft.sections : ["Geral"]);
-      setActiveSection(typeof draft.activeSection === "string" ? draft.activeSection : "Geral");
-      setSelectedFees(new Set(Array.isArray(draft.selectedFees) ? draft.selectedFees : []));
-      setFeeVatOverrides(draft.feeVatOverrides && typeof draft.feeVatOverrides === "object" ? draft.feeVatOverrides : {});
-      // `draft.inlineQuotes` deixa de ser restaurado de propósito. Rascunhos
-      // gravados antes desta alteração podem trazer linhas de bundle com o id do
-      // bundle em product_id (o defeito corrigido em InlineQuoteBuilder), que
-      // faziam rpc_save_quote rebentar com 23503/409. Ignorar a chave resolve
-      // esses rascunhos sem mexer em NEW_QUOTE_DRAFT_VERSION — subir a versão
-      // descartaria o rascunho INTEIRO, incluindo o orçamento principal, por
-      // causa do `!==` estrito acima.
-      setSelectedDeal(draft.selectedDeal || null);
-    } catch (error) {
-      console.error("Error restoring quote draft:", error);
-    }
-  }, [effectiveQuoteId, activeCompany?.id, quoteLoadTick]);
-
-  useEffect(() => {
-    if (!activeCompany?.id || draftRestoredRef.current !== activeCompany.id || typeof window === "undefined") return;
-
-    const hasDraftContent = Boolean(
-      formData.deal_id || formData.cliente_id || formData.title || formData.obra_notas ||
-      formData.client_notes || formData.conditions || selectedDeal || lines.length > 0
-    );
-    if (!hasDraftContent) return;
-
-    const timeoutId = window.setTimeout(() => {
-      localStorage.setItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId), JSON.stringify({
-        version: NEW_QUOTE_DRAFT_VERSION,
-        savedAt: new Date().toISOString(),
-        formData,
-        quoteNumber,
-        autoReference,
-        lines,
-        sections,
-        activeSection,
-        selectedFees: Array.from(selectedFees),
-        feeVatOverrides,
-        selectedDeal,
-      }));
-    }, 300);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [effectiveQuoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, selectedDeal]);
+  // Rascunho em localStorage removido: sobrepunha-se para sempre aos dados
+  // do servidor num browser que nunca tivesse gravado, mesmo depois de outra
+  // pessoa gravar o orçamento entretanto — mostrando valores antigos sem
+  // forma de os actualizar a não ser limpando manualmente os dados do site.
+  // O que resta desse mecanismo é só a limpeza, mais abaixo, de uma entrada
+  // que já exista de antes desta alteração.
 
   useEffect(() => {
     if (!activeCompany?.id || typeof window === "undefined") return;
@@ -500,11 +427,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   // Generate auto-reference for new quotes
   useEffect(() => {
     if (!quoteId && !autoReference) {
-      const hasSavedDraft = activeCompany?.id && typeof window !== "undefined"
-        ? localStorage.getItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId))
-        : null;
-      if (hasSavedDraft) return;
-
       const year = new Date().getFullYear();
       const seq = String(Math.floor(Math.random() * 9999) + 1).padStart(4, "0");
       setAutoReference(`Q-${year}-${seq}`);
@@ -626,10 +548,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       fetchCatalogItems();
       checkPermissions();
       if (effectiveQuoteId) {
-        fetchQuote().finally(() => {
-          existingQuoteLoadedRef.current = true;
-          setQuoteLoadTick(tick => tick + 1);
-        });
+        fetchQuote();
       }
     }
   }, [effectiveQuoteId, activeCompany?.id]);
