@@ -17,10 +17,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { ArrowRightLeft, ScanLine } from "lucide-react";
+import { ArrowRightLeft, Download, Loader2, ScanLine, Upload } from "lucide-react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import type { IScannerControls } from "@zxing/browser";
 import { NotFoundException } from "@zxing/library";
+import * as XLSX from "xlsx";
+import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 
 // Fase 5.4 do plano de inventário: diálogo de detalhe/contagem de uma sessão
 // de public.inventory_counts. Consome as 3 RPCs de escrita já aplicadas
@@ -98,6 +100,199 @@ const fetchAllRows = async (buildQuery: () => any): Promise<{ data: any[] | null
   return { data: rows, error: null };
 };
 
+// --- Exportar / importar contagem -----------------------------------------
+// O ficheiro exportado é o mesmo que o utilizador devolve preenchido, por isso
+// o cabeçalho é validado por NOME (nunca por posição): quem abre o ficheiro no
+// Excel reordena colunas, apaga as que não interessam e volta a gravar.
+
+const CHUNK_SIZE = 200;
+
+// A contagem INICIAL semeia o catálogo inteiro da organização (numa org real
+// deste projeto são ~2200 produtos, noutras pode ser mais) e o diálogo abre
+// logo a seguir a criar. Com canCount && isActive cada linha renderiza um
+// <Input type="number"> e dois refs — de uma só vez, isso congela o browser
+// durante segundos. Acima do limiar a tabela pagina no cliente; abaixo dele
+// (contagem de rotina, dezenas de linhas) fica exatamente como estava.
+const LINE_PAGE_SIZE = 200;
+const LINE_PAGINATION_THRESHOLD = 500;
+
+// Sem acentos, sem maiúsculas e sem pontuação — "Qtd. Contada", "qtd contada"
+// e "QTD CONTADA" colapsam todos para "qtd contada".
+const normalizeHeader = (value: unknown): string =>
+  String(value ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+
+// Aliases fixos (nas 5 línguas) para além do cabeçalho traduzido do idioma
+// ativo — o ficheiro pode ter sido exportado por um colega noutro idioma.
+const SKU_HEADER_ALIASES = new Set([
+  "sku", "codigo", "codigo do produto", "code", "product code",
+  "referencia", "reference", "artikelnummer", "ref",
+]);
+const COUNTED_HEADER_ALIASES = new Set([
+  "qtd contada", "qtd contada unid", "quantidade contada", "contada",
+  "counted qty", "counted quantity", "counted",
+  "cantidad contada", "cant contada",
+  "qte comptee", "quantite comptee", "comptee",
+  "gezahlte menge", "menge gezahlt", "gezahlt",
+]);
+
+// O separador NÃO pode ser assumido: o export do projeto produz ';', mas quem
+// abre o XLSX no Excel e faz "Guardar como CSV" obtém ';' ou ',' conforme o
+// locale do Windows, e há ainda quem exporte separado por tabulações. Um
+// separador errado dá UMA coluna só por linha, e o erro que chegava ao
+// utilizador era "Colunas em falta" — a apontar para o sítio errado.
+// Conta os candidatos na primeira linha não vazia (fora de aspas) e escolhe o
+// dominante; empate ou ficheiro de uma só coluna mantém ';'.
+const CSV_DELIMITER_CANDIDATES = [";", ",", "\t"] as const;
+
+const detectCsvDelimiter = (text: string): string => {
+  const counts: Record<string, number> = { ";": 0, ",": 0, "\t": 0 };
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (char === '"') {
+      if (inQuotes && text[i + 1] === '"') { i += 1; continue; }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (inQuotes) continue;
+    if (char === "\n") {
+      // Linha vazia no topo do ficheiro não termina a deteção.
+      if (counts[";"] > 0 || counts[","] > 0 || counts["\t"] > 0) break;
+      continue;
+    }
+    if (char in counts) counts[char] += 1;
+  }
+  let best: string = ";";
+  for (const candidate of CSV_DELIMITER_CANDIDATES) {
+    if (counts[candidate] > counts[best]) best = candidate;
+  }
+  return counts[best] > 0 ? best : ";";
+};
+
+// Parser de CSV tolerante a campos entre aspas com o separador lá dentro e a
+// quebras de linha dentro das aspas.
+const parseCsvToMatrix = (text: string, delimiter: string): string[][] => {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let field = "";
+  let inQuotes = false;
+  // Tira o BOM: o carácter U+FEFF tal e qual (comparado por code point, para
+  // não deixar whitespace irregular no código) e também a versão já mal
+  // descodificada ("ï»¿"), que é o que sobra quando se relê um ficheiro
+  // UTF-8 como Windows-1252.
+  const source = (text.codePointAt(0) === 0xFEFF ? text.slice(1) : text).replace(/^ï»¿/, "");
+
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (source[i + 1] === '"') { field += '"'; i += 1; } else { inQuotes = false; }
+      } else {
+        field += char;
+      }
+      continue;
+    }
+    if (char === '"') { inQuotes = true; continue; }
+    if (char === delimiter) { row.push(field); field = ""; continue; }
+    if (char === "\r") continue;
+    if (char === "\n") { row.push(field); rows.push(row); row = []; field = ""; continue; }
+    field += char;
+  }
+  if (field !== "" || row.length > 0) { row.push(field); rows.push(row); }
+  return rows;
+};
+
+const buildCsvMatrix = (text: string): string[][] => parseCsvToMatrix(text, detectCsvDelimiter(text));
+
+// O export do projeto (xlsxExport.normalizeExportCell) prefixa um apóstrofo a
+// qualquer texto começado por = + - @ — proteção contra injeção de fórmulas no
+// Excel. Um SKU como "-1234" volta do ficheiro como "'-1234" e deixava de
+// casar, com o utilizador a ver "Produto não encontrado nesta contagem" sem
+// perceber porquê. Ao ler, desfazemos esse escape.
+const stripSpreadsheetEscape = (value: unknown): string =>
+  String(value ?? "").trim().replace(/^'/, "");
+
+// Chave de comparação de SKU alinhada com a RPC (upper + btrim): é assim que
+// rpc_bulk_update_inventory_count_lines resolve o SKU dentro da contagem, por
+// isso é assim que temos de detetar duplicados no ficheiro.
+const normalizeSkuKey = (sku: string): string => sku.trim().toUpperCase();
+
+// Uma só forma (em vez de uma união discriminada): o tsconfig deste projeto
+// corre com strict: false, e nesse modo o narrowing por discriminante booleano
+// não é fiável.
+interface ImportColumnLookup {
+  status: "ok" | "empty" | "missingSku" | "missingCounted" | "missingBoth";
+  headerRowIndex: number;
+  skuIndex: number;
+  countedIndex: number;
+}
+
+// Localiza a linha de cabeçalho e as duas colunas obrigatórias. Devolve o
+// motivo em vez de lançar: quem chama pode tentar outra descodificação do
+// ficheiro antes de desistir.
+const locateImportColumns = (
+  matrix: unknown[][],
+  skuAliases: Set<string>,
+  countedAliases: Set<string>,
+): ImportColumnLookup => {
+  const headerRowIndex = matrix.findIndex(
+    (row) => Array.isArray(row) && row.some((cell) => String(cell ?? "").trim() !== ""),
+  );
+  if (headerRowIndex === -1) {
+    return { status: "empty", headerRowIndex: -1, skuIndex: -1, countedIndex: -1 };
+  }
+
+  const headerCells = (matrix[headerRowIndex] || []).map(normalizeHeader);
+  const skuIndex = headerCells.findIndex((cell) => skuAliases.has(cell));
+  const countedIndex = headerCells.findIndex((cell) => countedAliases.has(cell));
+
+  let status: ImportColumnLookup["status"] = "ok";
+  if (skuIndex === -1 && countedIndex === -1) status = "missingBoth";
+  else if (skuIndex === -1) status = "missingSku";
+  else if (countedIndex === -1) status = "missingCounted";
+
+  return { status, headerRowIndex, skuIndex, countedIndex };
+};
+
+// Devolve null quando o valor não é uma quantidade válida (inteiro >= 0).
+// Quem chama tem de tratar a célula vazia ANTES — vazia não é inválida, é uma
+// linha que o utilizador simplesmente não contou.
+const parseCountedQuantity = (raw: unknown): number | null => {
+  if (typeof raw === "number") {
+    return Number.isInteger(raw) && raw >= 0 ? raw : null;
+  }
+  // stripSpreadsheetEscape por simetria com o SKU: uma quantidade escrita à
+  // mão como "-1" chegaria aqui prefixada e tem de ser rejeitada como
+  // quantidade inválida, não confundida com texto.
+  const text = stripSpreadsheetEscape(raw).replace(/\s/g, "").replace(",", ".");
+  if (text === "") return null;
+  const parsed = Number(text);
+  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) return null;
+  return parsed;
+};
+
+interface ImportErrorRow {
+  line: number;
+  sku: string;
+  reason: string;
+}
+
+interface ImportReport {
+  updated: number;
+  skipped: number;
+  errors: ImportErrorRow[];
+  // true quando um lote falhou a meio: os lotes anteriores JÁ estão gravados
+  // (cada chamada RPC é a sua própria transação) e o resto do ficheiro nunca
+  // chegou a ser enviado.
+  incomplete: boolean;
+  notSent: number;
+}
+
 interface InventoryCountDetailDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -134,6 +329,14 @@ export default function InventoryCountDetailDialog({
   const [movements, setMovements] = useState<MovementRow[]>([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
 
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number } | null>(null);
+  const [importReport, setImportReport] = useState<ImportReport | null>(null);
+
+  // Página atual da tabela de linhas (só usada acima de LINE_PAGINATION_THRESHOLD).
+  const [linePage, setLinePage] = useState(0);
+
   // Leitor de código de barras (Fase 5.4 — localizar linha por câmara). As
   // etiquetas físicas dos produtos codificam o SKU (products.barcode está
   // vazio em toda a BD hoje) — comparamos primeiro por sku e, como fallback
@@ -161,6 +364,17 @@ export default function InventoryCountDetailDialog({
   const lastScanAtRef = useRef(0);
 
   const isActive = header?.status === "em_contagem";
+
+  // Paginação client-side da tabela de linhas. `safeLinePage` é derivado (não
+  // é estado): assim uma contagem que encolha — recarregada noutra sessão —
+  // nunca deixa a tabela presa numa página que já não existe.
+  const paginateLines = lines.length > LINE_PAGINATION_THRESHOLD;
+  const linePageCount = paginateLines ? Math.ceil(lines.length / LINE_PAGE_SIZE) : 1;
+  const safeLinePage = Math.min(Math.max(linePage, 0), linePageCount - 1);
+  const lineRangeStart = paginateLines ? safeLinePage * LINE_PAGE_SIZE : 0;
+  const visibleLines = paginateLines
+    ? lines.slice(lineRangeStart, lineRangeStart + LINE_PAGE_SIZE)
+    : lines;
 
   const loadDetail = useCallback(async () => {
     if (!countId) return;
@@ -253,8 +467,17 @@ export default function InventoryCountDetailDialog({
   // Se o diálogo principal fechar enquanto o leitor de código está aberto,
   // fecha-o também — o efeito da câmara (abaixo) trata de libertar o stream.
   useEffect(() => {
-    if (!open) setScanOpen(false);
+    if (!open) {
+      setScanOpen(false);
+      setImportOpen(false);
+      setImportReport(null);
+    }
   }, [open]);
+
+  // Abrir outra contagem (ou reabrir esta) volta sempre à primeira página.
+  useEffect(() => {
+    setLinePage(0);
+  }, [countId, open]);
 
   const findLineByCode = useCallback((code: string): InventoryCountLineRow | undefined => {
     const trimmed = code.trim();
@@ -316,6 +539,13 @@ export default function InventoryCountDetailDialog({
       });
       return;
     }
+    // Com a tabela paginada, a linha lida pode estar noutra página — sem isto
+    // o utilizador ouvia o "bip", via o toast e não via a linha a mudar.
+    if (lines.length > LINE_PAGINATION_THRESHOLD) {
+      const matchIndex = lines.findIndex((l) => l.id === match.id);
+      if (matchIndex >= 0) setLinePage(Math.floor(matchIndex / LINE_PAGE_SIZE));
+    }
+
     const newQty = (match.counted_quantity ?? 0) + 1;
     persistQuantity(match.id, newQty)
       .then(() => {
@@ -330,7 +560,7 @@ export default function InventoryCountDetailDialog({
       .catch((error: any) => {
         toast({ title: t('stockCounts.toast.quantityError'), description: error.message, variant: "destructive" });
       });
-  }, [findLineByCode, persistQuantity, t, toast]);
+  }, [findLineByCode, lines, persistQuantity, t, toast]);
 
   // Mantido em ref para o efeito da câmara (abaixo) não precisar reiniciar o
   // stream sempre que `lines`/`t`/`toast` mudam — só quando scanOpen muda.
@@ -522,6 +752,348 @@ export default function InventoryCountDetailDialog({
     }
   };
 
+  // Exporta as linhas já carregadas no diálogo para XLSX (helper partilhado
+  // do projeto — trata do anti-injeção de fórmulas e das larguras). "Qtd
+  // contada"/"Diferença" ficam VAZIAS enquanto a linha não foi contada: é
+  // este o ficheiro que o utilizador leva para o armazém e preenche.
+  const handleExport = () => {
+    if (lines.length === 0) {
+      toast({
+        title: t('stockCounts.export.emptyTitle'),
+        description: t('stockCounts.export.emptyDescription'),
+      });
+      return;
+    }
+    try {
+      const now = new Date();
+      const stamp = [
+        now.getFullYear(),
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+      ].join("-");
+      // Prefixo traduzido (sem acentos nem espaços — é um nome de ficheiro):
+      // um utilizador DE recebia um ficheiro chamado "contagem_...".
+      const prefix = (t('stockCounts.export.filenamePrefix') || "stocktake").replace(/[^\w.-]+/g, "_");
+      const documentNumber = (header?.document_number || "").replace(/[^\w.-]+/g, "_") || prefix;
+      const filename = `${prefix}_${documentNumber}_${stamp}.xlsx`;
+
+      downloadStandardXlsx(
+        {
+          sheetName: t('stockCounts.export.sheetName'),
+          columns: [
+            { key: "sku", header: t('stockCounts.export.columnSku'), type: "text" },
+            { key: "barcode", header: t('stockCounts.export.columnBarcode'), type: "text" },
+            { key: "product", header: t('stockCounts.export.columnProduct'), type: "text" },
+            { key: "system_quantity", header: t('stockCounts.export.columnSystemQty'), type: "number" },
+            { key: "counted_quantity", header: t('stockCounts.export.columnCountedQty'), type: "number" },
+            { key: "difference", header: t('stockCounts.export.columnDifference'), type: "number" },
+          ],
+          rows: lines.map((line) => ({
+            sku: line.products?.sku ?? "",
+            barcode: line.products?.barcode ?? "",
+            product: line.products?.name ?? "",
+            system_quantity: line.system_quantity_at_start,
+            // null (não 0) — normalizeExportCell devolve célula vazia.
+            counted_quantity: line.counted_quantity ?? null,
+            difference: line.counted_quantity == null
+              ? null
+              : line.counted_quantity - line.system_quantity_at_start,
+          })),
+        },
+        filename,
+      );
+
+      toast({
+        title: t('stockCounts.export.successTitle'),
+        description: t('stockCounts.export.successDescription', { count: lines.length, filename }),
+      });
+    } catch (error: any) {
+      toast({
+        title: t('stockCounts.export.errorTitle'),
+        description: error?.message,
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleImportFile = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const inputEl = event.target;
+    const file = inputEl.files?.[0];
+    if (!file) return;
+    if (!countId) {
+      inputEl.value = "";
+      return;
+    }
+
+    setImporting(true);
+    setImportProgress(null);
+
+    // Fase 1 — LEITURA E VALIDAÇÃO DO FICHEIRO. É só esta fase que o try/catch
+    // cobre: enquanto não se escreve nada na base, lançar e mostrar "erro ao
+    // importar" é honesto. A fase 2 (escrita em lotes) trata os erros dela
+    // própria, porque aí já pode haver linhas gravadas.
+    let parsed: {
+      payload: { sku: string; counted_quantity: number; input_index: number }[];
+      errors: ImportErrorRow[];
+      skipped: number;
+    };
+    try {
+      const skuAliases = new Set([
+        ...SKU_HEADER_ALIASES,
+        normalizeHeader(t('stockCounts.export.columnSku')),
+      ]);
+      const countedAliases = new Set([
+        ...COUNTED_HEADER_ALIASES,
+        normalizeHeader(t('stockCounts.export.columnCountedQty')),
+      ]);
+
+      // Mesmo padrão de leitura do import de produtos (Products.tsx): XLSX/XLS
+      // pela biblioteca, CSV pelo parser próprio (separador detetado).
+      const isExcel = /\.(xlsx|xls)$/i.test(file.name);
+      let matrix: unknown[][];
+      let located: ImportColumnLookup;
+      if (isExcel) {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" }) as unknown[][];
+        located = locateImportColumns(matrix, skuAliases, countedAliases);
+      } else {
+        const buffer = await file.arrayBuffer();
+        matrix = buildCsvMatrix(new TextDecoder("utf-8").decode(buffer));
+        located = locateImportColumns(matrix, skuAliases, countedAliases);
+        if (located.status !== "ok" && located.status !== "empty") {
+          // O Excel grava CSV em ANSI/Windows-1252 conforme o locale — lido
+          // como UTF-8, o cabeçalho "Qté comptée"/"Gezählte Menge" chega
+          // mojibake e nenhum alias casa. Segunda tentativa antes de desistir.
+          const ansiMatrix = buildCsvMatrix(new TextDecoder("windows-1252").decode(buffer));
+          const ansiLocated = locateImportColumns(ansiMatrix, skuAliases, countedAliases);
+          if (ansiLocated.status === "ok") {
+            matrix = ansiMatrix;
+            located = ansiLocated;
+          }
+        }
+      }
+
+      if (located.status !== "ok") {
+        if (located.status === "empty") {
+          throw new Error(t('stockCounts.import.emptyFile'));
+        }
+        const missingColumns: string[] = [];
+        if (located.status === "missingSku" || located.status === "missingBoth") {
+          missingColumns.push(t('stockCounts.export.columnSku'));
+        }
+        if (located.status === "missingCounted" || located.status === "missingBoth") {
+          missingColumns.push(t('stockCounts.export.columnCountedQty'));
+        }
+        throw new Error(t('stockCounts.import.missingColumns', { columns: missingColumns.join(", ") }));
+      }
+
+      const { headerRowIndex, skuIndex, countedIndex } = located;
+
+      const linesBySku = new Map<string, InventoryCountLineRow>();
+      for (const line of lines) {
+        const key = normalizeSkuKey(line.products?.sku ?? "");
+        if (key) linesBySku.set(key, line);
+      }
+
+      let payload: { sku: string; counted_quantity: number; input_index: number }[] = [];
+      const errors: ImportErrorRow[] = [];
+      let skipped = 0;
+
+      for (let i = headerRowIndex + 1; i < matrix.length; i += 1) {
+        const row = matrix[i] || [];
+        // Número da linha no ficheiro (1-based) — é o mesmo número que o
+        // utilizador vê na margem do Excel.
+        const inputIndex = i + 1;
+        const rawSku = stripSpreadsheetEscape(row[skuIndex]);
+        const rawQuantity = stripSpreadsheetEscape(row[countedIndex]);
+
+        if (rawSku === "" && rawQuantity === "") continue; // linha vazia do ficheiro
+        // Por contar: é o caso normal (só se preenche parte do ficheiro).
+        if (rawQuantity === "") { skipped += 1; continue; }
+
+        if (rawSku === "") {
+          errors.push({
+            line: inputIndex,
+            sku: t('stockCounts.import.unknownSku'),
+            reason: t('stockCounts.import.missingSku'),
+          });
+          continue;
+        }
+        const quantity = parseCountedQuantity(row[countedIndex]);
+        if (quantity === null) {
+          errors.push({
+            line: inputIndex,
+            sku: rawSku,
+            reason: t('stockCounts.import.invalidQuantity', { value: rawQuantity }),
+          });
+          continue;
+        }
+        if (!linesBySku.has(normalizeSkuKey(rawSku))) {
+          errors.push({
+            line: inputIndex,
+            sku: rawSku,
+            reason: t('stockCounts.import.productNotFound'),
+          });
+          continue;
+        }
+        payload.push({ sku: rawSku, counted_quantity: quantity, input_index: inputIndex });
+      }
+
+      // SKUs repetidos no ficheiro (a mesma prateleira contada em dois sítios):
+      // enviados tal e qual, venceria a última linha em silêncio e o relatório
+      // diria "2 atualizadas" para 1 produto. Quem decide qual vale é o
+      // utilizador — as linhas em conflito NÃO são enviadas, as outras seguem.
+      const occurrencesBySku = new Map<string, number[]>();
+      for (const entry of payload) {
+        const key = normalizeSkuKey(entry.sku);
+        const list = occurrencesBySku.get(key);
+        if (list) list.push(entry.input_index);
+        else occurrencesBySku.set(key, [entry.input_index]);
+      }
+      const duplicateKeys = new Set<string>();
+      for (const [key, occurrences] of occurrencesBySku) {
+        if (occurrences.length < 2) continue;
+        duplicateKeys.add(key);
+        const displaySku = payload.find((entry) => normalizeSkuKey(entry.sku) === key)?.sku ?? key;
+        const conflictLines = occurrences.join(", ");
+        for (const occurrence of occurrences) {
+          errors.push({
+            line: occurrence,
+            sku: displaySku,
+            reason: t('stockCounts.import.duplicateSku', { sku: displaySku, lines: conflictLines }),
+          });
+        }
+      }
+      if (duplicateKeys.size > 0) {
+        payload = payload.filter((entry) => !duplicateKeys.has(normalizeSkuKey(entry.sku)));
+      }
+
+      parsed = { payload, errors, skipped };
+    } catch (error: any) {
+      toast({
+        title: t('stockCounts.import.errorTitle'),
+        description: error?.message,
+        variant: "destructive",
+      });
+      inputEl.value = "";
+      setImporting(false);
+      setImportProgress(null);
+      return;
+    }
+
+    // Fase 2 — ESCRITA. Cada chamada RPC é a sua própria transação: se o lote
+    // 3 falhar, os lotes 1 e 2 JÁ estão gravados na base. Lançar daqui para um
+    // catch genérico deitava fora o `updated` acumulado e nunca corria o
+    // relatório nem o loadDetail — o utilizador via "Erro ao importar" e a
+    // tabela com as quantidades antigas, com meia contagem já escrita, e
+    // reimportava por cima. Por isso o erro é apanhado AQUI, registado como
+    // erro do lote (com o intervalo de linhas), e o fluxo segue normalmente.
+    const { payload, errors, skipped } = parsed;
+    let updated = 0;
+    let incomplete = false;
+    let notSent = 0;
+    try {
+      if (payload.length > 0) {
+        setImportProgress({ current: 0, total: payload.length });
+        for (let i = 0; i < payload.length; i += CHUNK_SIZE) {
+          const chunk = payload.slice(i, i + CHUNK_SIZE);
+          // (supabase.rpc as any): a RPC é nova e ainda não está no
+          // types.ts gerado — mesmo padrão já usado noutras páginas.
+          const { data, error } = await (supabase.rpc as any)('rpc_bulk_update_inventory_count_lines', {
+            p_inventory_count_id: countId,
+            p_lines: chunk,
+          });
+          if (error) {
+            const fromLine = chunk[0]?.input_index ?? 0;
+            const toLine = chunk[chunk.length - 1]?.input_index ?? fromLine;
+            errors.push({
+              line: fromLine,
+              sku: t('stockCounts.import.unknownSku'),
+              reason: t('stockCounts.import.chunkFailed', {
+                from: fromLine,
+                to: toLine,
+                error: error.message || t('stockCounts.import.unknownError'),
+              }),
+            });
+            incomplete = true;
+            notSent = payload.length - i;
+            break;
+          }
+
+          const result = (data || {}) as any;
+          const results = (result.results || []) as any[];
+          const okCount = results.filter((r) => r?.status === "ok").length;
+          updated += typeof result.updated === "number" ? result.updated : okCount;
+          for (const line of results) {
+            if (line?.status === "error") {
+              errors.push({
+                line: Number(line.input_index ?? 0),
+                sku: line.sku || t('stockCounts.import.unknownSku'),
+                reason: line.error || t('stockCounts.import.unknownError'),
+              });
+            }
+          }
+          setImportProgress({ current: Math.min(i + chunk.length, payload.length), total: payload.length });
+        }
+      }
+
+      // Por número de linha do ficheiro: os erros de parsing vinham todos
+      // primeiro e os do servidor atrás, lote a lote — os números saltavam
+      // para trás e, com mais de 50 erros, as 50 mostradas podiam ser todas de
+      // parsing, escondendo por completo os do servidor.
+      errors.sort((a, b) => a.line - b.line);
+
+      if (incomplete) {
+        toast({
+          title: t('stockCounts.import.incompleteTitle'),
+          description: t('stockCounts.import.incompleteSummary', { updated, notSent }),
+          variant: "destructive",
+        });
+      } else if (payload.length === 0 && errors.length === 0) {
+        toast({ title: t('stockCounts.import.noValidRowsTitle'), description: t('stockCounts.import.noValidRows') });
+      } else {
+        toast({
+          title: t('stockCounts.import.successTitle'),
+          description: t('stockCounts.import.summary', { updated, skipped, failed: errors.length }),
+        });
+      }
+
+      setImportOpen(false);
+      if (errors.length > 0) {
+        setImportReport({ updated, skipped, errors, incomplete, notSent });
+      }
+
+      // `incomplete` recarrega mesmo com updated = 0: um timeout de rede pode
+      // ter deixado a escrita commitada do lado do servidor sem nós sabermos.
+      if (updated > 0 || incomplete) {
+        await loadDetail();
+        onChanged();
+      }
+    } catch (error: any) {
+      // Rede de segurança para o inesperado (a falha da RPC já é tratada lote
+      // a lote acima). Mesmo aqui o relatório é mostrado com o que foi
+      // gravado, para nunca dar a entender que nada foi escrito.
+      toast({
+        title: t('stockCounts.import.errorTitle'),
+        description: error?.message,
+        variant: "destructive",
+      });
+      setImportOpen(false);
+      if (errors.length > 0 || updated > 0) {
+        errors.sort((a, b) => a.line - b.line);
+        setImportReport({ updated, skipped, errors, incomplete: true, notSent });
+      }
+    } finally {
+      // SEMPRE — sem isto, re-selecionar o mesmo ficheiro (corrigido entretanto)
+      // não volta a disparar o onChange e parece que a importação foi ignorada.
+      inputEl.value = "";
+      setImporting(false);
+      setImportProgress(null);
+    }
+  };
+
   const getDiff = (line: InventoryCountLineRow): number | null => (
     line.counted_quantity == null ? null : line.counted_quantity - line.system_quantity_at_start
   );
@@ -603,18 +1175,44 @@ export default function InventoryCountDetailDialog({
             <div>
               <div className="flex items-center justify-between mb-2">
                 <h3 className="text-sm font-semibold">{t('stockCounts.detail.lines.title')}</h3>
-                {canCount && isActive && (
+                <div className="flex items-center gap-2">
+                  {canCount && isActive && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => setScanOpen(true)}
+                    >
+                      <ScanLine className="w-4 h-4" />
+                      {t('stockCounts.scan.button')}
+                    </Button>
+                  )}
+                  {/* Sem PermissionGate próprio: quem consegue abrir o
+                      diálogo já pode ver estas mesmas linhas no ecrã. */}
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     className="gap-1.5"
-                    onClick={() => setScanOpen(true)}
+                    onClick={handleExport}
                   >
-                    <ScanLine className="w-4 h-4" />
-                    {t('stockCounts.scan.button')}
+                    <Download className="w-4 h-4" />
+                    {t('stockCounts.export.button')}
                   </Button>
-                )}
+                  {canCount && isActive && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => setImportOpen(true)}
+                    >
+                      <Upload className="w-4 h-4" />
+                      {t('stockCounts.import.button')}
+                    </Button>
+                  )}
+                </div>
               </div>
               <Table>
                 <TableHeader>
@@ -635,7 +1233,7 @@ export default function InventoryCountDetailDialog({
                       </TableCell>
                     </TableRow>
                   ) : (
-                    lines.map((line) => {
+                    visibleLines.map((line) => {
                       const diff = getDiff(line);
                       const needsResolution = diff !== null && diff !== 0 && !line.discrepancy_resolution;
                       const draft = resolutionDrafts[line.id] || { resolution: "" as const, notes: "" };
@@ -738,6 +1336,39 @@ export default function InventoryCountDetailDialog({
                   )}
                 </TableBody>
               </Table>
+              {paginateLines && (
+                <div className="flex items-center justify-between gap-3 mt-2">
+                  <span className="text-xs text-muted-foreground">
+                    {t('stockCounts.detail.lines.pageInfo', {
+                      from: lineRangeStart + 1,
+                      to: lineRangeStart + visibleLines.length,
+                      total: lines.length,
+                      page: safeLinePage + 1,
+                      pages: linePageCount,
+                    })}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={safeLinePage === 0}
+                      onClick={() => setLinePage(Math.max(safeLinePage - 1, 0))}
+                    >
+                      {t('stockCounts.detail.lines.prevPage')}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={safeLinePage >= linePageCount - 1}
+                      onClick={() => setLinePage(Math.min(safeLinePage + 1, linePageCount - 1))}
+                    >
+                      {t('stockCounts.detail.lines.nextPage')}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -833,6 +1464,116 @@ export default function InventoryCountDetailDialog({
             )}
             <p className="text-xs text-muted-foreground">{t('stockCounts.scan.hint')}</p>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={importOpen}
+        onOpenChange={(next) => {
+          // Enquanto a escrita está a decorrer, os lotes ainda estão a ser
+          // gravados — fechar aqui perdia o relatório e deixava o utilizador
+          // sem saber onde a importação parou.
+          if (importing) return;
+          setImportOpen(next);
+        }}
+      >
+        <DialogContent
+          className="max-w-md"
+          hideClose={importing}
+          onInteractOutside={(e) => { if (importing) e.preventDefault(); }}
+          onEscapeKeyDown={(e) => { if (importing) e.preventDefault(); }}
+        >
+          <DialogHeader>
+            <DialogTitle>{t('stockCounts.import.title')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">{t('stockCounts.import.description')}</p>
+            <Input
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              onChange={handleImportFile}
+              disabled={importing}
+            />
+            {importing && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                {importProgress
+                  ? t('stockCounts.import.progress', {
+                    current: importProgress.current,
+                    total: importProgress.total,
+                  })
+                  : t('stockCounts.import.progressReading')}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!importReport} onOpenChange={(next) => { if (!next) setImportReport(null); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>{t('stockCounts.import.reportTitle')}</DialogTitle>
+          </DialogHeader>
+          {importReport && (
+            <div className="space-y-4 overflow-y-auto">
+              {importReport.incomplete && (
+                <p className="text-sm border rounded-md p-3 bg-destructive/10 text-destructive">
+                  {t('stockCounts.import.incompleteNotice', {
+                    updated: importReport.updated,
+                    notSent: importReport.notSent,
+                  })}
+                </p>
+              )}
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="rounded-md border p-3">
+                  <div className="text-2xl font-semibold text-primary">{importReport.updated}</div>
+                  <div className="text-xs text-muted-foreground">{t('stockCounts.import.reportUpdated')}</div>
+                </div>
+                <div className="rounded-md border p-3">
+                  <div className="text-2xl font-semibold">{importReport.skipped}</div>
+                  <div className="text-xs text-muted-foreground">{t('stockCounts.import.reportSkipped')}</div>
+                </div>
+                <div className="rounded-md border p-3">
+                  <div className="text-2xl font-semibold text-destructive">{importReport.errors.length}</div>
+                  <div className="text-xs text-muted-foreground">{t('stockCounts.import.reportFailed')}</div>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-medium mb-2">{t('stockCounts.import.reportErrorsTitle')}</div>
+                <div className="rounded-md border max-h-64 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr>
+                        <th className="text-left p-2">{t('stockCounts.import.reportLine')}</th>
+                        <th className="text-left p-2">{t('stockCounts.import.reportSku')}</th>
+                        <th className="text-left p-2">{t('stockCounts.import.reportReason')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importReport.errors.slice(0, 50).map((row, index) => (
+                        <tr key={`${row.line}-${row.sku}-${index}`} className="border-t">
+                          <td className="p-2">{row.line}</td>
+                          <td className="p-2 font-mono">{row.sku}</td>
+                          <td className="p-2">{row.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {importReport.errors.length > 50 && (
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {t('stockCounts.import.reportMore', { count: importReport.errors.length - 50 })}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setImportReport(null)}>
+              {t('stockCounts.import.reportClose')}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </Dialog>

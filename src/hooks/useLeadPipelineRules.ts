@@ -20,18 +20,27 @@ export interface LeadStageTransitionRow {
 
 /**
  * Linha (única, por organização) de `lead_pipeline_settings`: posições
- * guardadas do diagrama + interruptor de restrição de transições.
+ * guardadas do diagrama + interruptor de restrição de transições + interruptor
+ * do motor sequencial.
+ *
+ * `sequential_flow` é lido por `compute_lead_stage_v2`: a `true` a lead avança
+ * um estágio de cada vez ao longo de `lead_stage_transitions`; a `false`
+ * (default da coluna) mantém-se o motor histórico, que ordena por
+ * `stage_order DESC` e salta directamente para o estágio mais avançado cujas
+ * condições se verifiquem.
  */
 export interface LeadPipelineSettings {
   organization_id: string;
   stage_positions: Record<string, { x: number; y: number }>;
   enforce_stage_transitions: boolean;
+  sequential_flow: boolean;
 }
 
 export const DEFAULT_LEAD_PIPELINE_SETTINGS: Omit<LeadPipelineSettings, "organization_id"> =
   Object.freeze({
     stage_positions: Object.freeze({}) as Record<string, { x: number; y: number }>,
     enforce_stage_transitions: false,
+    sequential_flow: false,
   });
 
 export interface LeadPipelineRulesData {
@@ -81,7 +90,7 @@ async function fetchLeadPipelineRules(organizationId: string): Promise<LeadPipel
       .eq("organization_id", organizationId)
       .maybeSingle(),
     (supabase.from("lead_pipeline_settings") as any)
-      .select("organization_id, stage_positions, enforce_stage_transitions")
+      .select("organization_id, stage_positions, enforce_stage_transitions, sequential_flow")
       .eq("organization_id", organizationId)
       .maybeSingle(),
     (supabase.from("lead_stage_transitions") as any)
@@ -96,7 +105,12 @@ async function fetchLeadPipelineRules(organizationId: string): Promise<LeadPipel
   if (transitionsRes.error) throw transitionsRes.error;
 
   const settingsRow = settingsRes.data as
-    | { organization_id: string; stage_positions: unknown; enforce_stage_transitions: unknown }
+    | {
+        organization_id: string;
+        stage_positions: unknown;
+        enforce_stage_transitions: unknown;
+        sequential_flow: unknown;
+      }
     | null;
 
   return {
@@ -107,6 +121,7 @@ async function fetchLeadPipelineRules(organizationId: string): Promise<LeadPipel
           organization_id: settingsRow.organization_id,
           stage_positions: normalizeStagePositions(settingsRow.stage_positions),
           enforce_stage_transitions: settingsRow.enforce_stage_transitions === true,
+          sequential_flow: settingsRow.sequential_flow === true,
         }
       : null,
     transitions: (transitionsRes.data as LeadStageTransitionRow[]) || [],
@@ -150,6 +165,8 @@ export function useLeadPipelineRules(organizationId: string | null | undefined) 
     settings: data?.settings ?? null,
     /** Default seguro: sem linha em `lead_pipeline_settings`, não se restringe nada. */
     enforceStageTransitions: data?.settings?.enforce_stage_transitions ?? false,
+    /** Default seguro: sem linha, vale o default da coluna (motor histórico). */
+    sequentialFlow: data?.settings?.sequential_flow ?? false,
     /** Default seguro: sem linha, não há layout guardado. */
     stagePositions: data?.settings?.stage_positions ?? DEFAULT_LEAD_PIPELINE_SETTINGS.stage_positions,
     /** Arestas ativas do diagrama; vazio quando a org nunca desenhou nenhuma. */

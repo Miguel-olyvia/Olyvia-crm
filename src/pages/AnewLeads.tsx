@@ -145,6 +145,11 @@ import {
   normalizeLeadScope,
   reconcileRefreshedLead,
 } from "./anewLeadsHelpers";
+import {
+  getRejectionStatusNames,
+  shouldApplyRejectionUnion,
+  sumRejectionStatusCounts,
+} from "./leads/rejectionStatuses";
 
 
 // Lead e FieldDefinition vivem em @/types/leads. Leia o cabecalho desse
@@ -281,6 +286,14 @@ interface LeadsQueryFilters {
   // status changes, so it's filtered independently (AND'ed with the other
   // clauses) rather than folded into the status filter above.
   qualificationFilter?: string;
+  /**
+   * Nomes de status que contam como rejeicao nesta organizacao. Sem isto o
+   * filtro so conseguia unir `lost`+`rejected` quando o filtro activo era
+   * literalmente a string "lost" -- numa organizacao cuja etapa se chama
+   * `rejected` a uniao nunca acontecia e o cartao contava mais leads do que a
+   * lista mostrava. Ver ./leads/rejectionStatuses.
+   */
+  rejectionStatusNames?: readonly string[];
 }
 
 // Single source of truth for the filter clauses applied to anew_leads —
@@ -291,12 +304,24 @@ function applyLeadsServerFilters(q: any, filters: LeadsQueryFilters) {
   const {
     statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
     dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
+    rejectionStatusNames,
   } = filters;
   const dateColumn: "created_at" | "last_contact_at" = dateField === "last_contact_at" ? "last_contact_at" : "created_at";
+  const rejectionNames = rejectionStatusNames ?? ["lost", "rejected", "Rejected"];
 
   if (statusFilter !== "all") {
-    if (statusFilter === "lost") {
-      q = q.in("status", ["lost", "rejected"]);
+    // Qualquer estado de rejeicao (o `lost` por omissao, o `rejected` de quem
+    // chamou assim a etapa, ou um nome proprio marcado is_rejection) une-os
+    // todos. Antes isto estava preso a string "lost" e a uniao nunca acontecia
+    // nas organizacoes que chamam `rejected` a etapa.
+    //
+    // Sem `.is("scheduled_visit_id", null)`, ao contrario do ramo generico: uma
+    // lead que foi visitada e DEPOIS se perdeu continua perdida -- a visita e
+    // historia, nao a posicao dela. Era assim que a Ma Cristina Mendes sumia do
+    // cartao. O ramo `lost` original tambem nao excluia, por isso isto nao muda
+    // o comportamento que ja existia, so o estende aos outros nomes.
+    if (shouldApplyRejectionUnion(statusFilter, rejectionNames)) {
+      q = q.in("status", rejectionNames);
     } else if (statusFilter === "visit_scheduled") {
       q = q.or("status.eq.visit_scheduled,scheduled_visit_id.not.is.null");
     } else if (statusFilter === "new") {
@@ -657,11 +682,11 @@ export default function AnewLeads() {
     Object.entries(statusCounts).filter(([key]) => key !== 'converted').reduce((a, [, b]) => a + b, 0), 
     [statusCounts]
   );
-  const paginationTotal = useMemo(() => {
-    if (statusFilter === 'all') return globalTotal;
-    if (statusFilter === 'lost') return (statusCounts['lost'] || 0) + (statusCounts['rejected'] || 0);
-    return statusCounts[statusFilter] || 0;
-  }, [statusFilter, statusCounts, globalTotal]);
+  // `paginationTotal` vive mais abaixo, logo a seguir a `workflowStages`:
+  // depende de `rejectionStatusNames`, que se deriva das etapas, e estas so
+  // sao declaradas por volta da linha 1820. Le-lo aqui dava ReferenceError
+  // (TDZ) e partia a pagina inteira -- a mesma armadilha que ja obrigou a
+  // mover `assignableCompanyUsers` (ver nota mais abaixo).
   const [assignedToFilter, setAssignedToFilter] = useState<string>("all");
   const [assignOrgFilter, setAssignOrgFilter] = useState<string>("all");
   // SECURITY: assignment/filter pickers must respect the viewer's own leads.view scope.
@@ -1831,6 +1856,31 @@ export default function AnewLeads() {
     staleTime: 5 * 60 * 1000,
   });
 
+  /**
+   * Estados que contam como rejeição nesta organização. Declarado AQUI, e não
+   * junto dos outros useMemo lá em cima, porque depende de `workflowStages`,
+   * que só existe a partir da query acima. Lê-lo antes disso dava
+   * ReferenceError (TDZ) e partia o /leads.
+   *
+   * É a fonte única do cartão e do filtro: é isso que garante que o número
+   * mostrado é o número de linhas que a lista devolve ao clicar nele.
+   */
+  const rejectionStatusNames = useMemo(
+    () => getRejectionStatusNames(workflowStages),
+    [workflowStages]
+  );
+
+  // Movido de cima (ver nota junto a `globalTotal`): depende de
+  // `rejectionStatusNames`. Só é lido a partir de `effectiveHasMore` e do JSX,
+  // muito abaixo daqui, por isso a mudança de sítio é segura.
+  const paginationTotal = useMemo(() => {
+    if (statusFilter === 'all') return globalTotal;
+    if (shouldApplyRejectionUnion(statusFilter, rejectionStatusNames)) {
+      return sumRejectionStatusCounts(statusCounts, rejectionStatusNames);
+    }
+    return statusCounts[statusFilter] || 0;
+  }, [statusFilter, statusCounts, globalTotal, rejectionStatusNames]);
+
   // Restrição de transições desenhada no diagrama (separador Fluxo). Só é
   // aplicada a mudanças de estágio iniciadas pelo utilizador; o motor
   // automático (trigger trg_sync_lead_workflow_stage_id, auto_advance e a edge
@@ -2128,6 +2178,7 @@ export default function AnewLeads() {
       filters: {
         statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
         dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
+        rejectionStatusNames,
       },
     });
 
@@ -2314,7 +2365,7 @@ export default function AnewLeads() {
         pipeline,
       };
     }
-  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine, resolveEntities]);
+  }, [activeCompanyId, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, rejectionStatusNames, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine, resolveEntities]);
 
   /**
    * A lista de leads, gerida pela cache. A chave inclui a organizacao, o ambito
@@ -2551,6 +2602,7 @@ export default function AnewLeads() {
         filters: {
           statusFilter, campaignFilter, assignedToFilter, contactResultFilter,
           dateFrom, dateTo, dateField, effectiveSearch, sourceFilter, qualificationFilter,
+          rejectionStatusNames,
         },
       });
 
@@ -2614,7 +2666,7 @@ export default function AnewLeads() {
     } finally {
       setKanbanLoading(false);
     }
-  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine, resolveEntities]);
+  }, [activeCompanyId, toast, getPermissionScope, scopeAnewUserId, scopeAuthUserId, teamMemberIds, effectiveSearch, statusFilter, rejectionStatusNames, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine, resolveEntities]);
 
   // Persist a kanban drag: same status + workflow_stage_id update and
   // execute-workflow automation trigger as handleBulkStatusChange, for a
@@ -2722,7 +2774,7 @@ export default function AnewLeads() {
     if (activeTab !== "list" || leadsSubView !== "kanban" || !activeCompanyId || scopeLoading) return;
     loadKanbanLeads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, leadsSubView, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine]);
+  }, [activeTab, leadsSubView, activeCompanyId, scopeLoading, effectiveSearch, statusFilter, rejectionStatusNames, campaignFilter, assignedToFilter, contactResultFilter, sourceFilter, qualificationFilter, dateFrom, dateTo, dateField, onlyMine]);
 
   // Refresh a single lead in-place (prevents losing infinite scroll state)
   const refreshSingleLead = useCallback(async (leadId: string) => {
@@ -5455,7 +5507,7 @@ export default function AnewLeads() {
                         />
                         <div className="text-xl font-bold">
                           {stage.is_rejection
-                            ? (statusCounts['lost'] || 0) + (statusCounts['rejected'] || 0) + (statusCounts['Rejected'] || 0)
+                            ? sumRejectionStatusCounts(statusCounts, rejectionStatusNames)
                             : (statusCounts[stage.name] || 0)}
                         </div>
                       </div>
@@ -5489,7 +5541,7 @@ export default function AnewLeads() {
                         />
                         <div className="text-xl font-bold">
                           {status.name === 'lost' 
-                            ? (statusCounts['lost'] || 0) + (statusCounts['rejected'] || 0) + (statusCounts['Rejected'] || 0)
+                            ? sumRejectionStatusCounts(statusCounts, rejectionStatusNames)
                             : (statusCounts[status.name] || 0)}
                         </div>
                       </div>
