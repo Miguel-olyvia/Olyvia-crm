@@ -7,7 +7,15 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.send-email]
-verify_jwt = true
+# false, nao true: o portao da Supabase recusava pedidos do
+# process-scheduled-emails (usa CRON_SHARED_SECRET, nao tem formato de JWT)
+# ANTES de chegarem a esta funcao -- confirmado ao vivo 22/09, resposta
+# {"code":"UNAUTHORIZED_INVALID_JWT_FORMAT"}. O proprio codigo desta funcao
+# ja valida quem chama (requireServiceRole ou getUser(token) para um JWT de
+# utilizador real), tal como process-scheduled-emails, auto-schedule e as
+# outras funcoes chamadas por cron -- desligar aqui so alinha com o mesmo
+# padrao que ja usam.
+verify_jwt = false
 
 [functions.create-user]
 verify_jwt = false

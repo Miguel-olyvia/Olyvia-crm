@@ -127,7 +127,15 @@ serve(async (req) => {
         );
 
         const sendResult = await sendResponse.json();
-        if (sendResult.error) throw new Error(sendResult.error);
+        // O portao da Supabase (verify_jwt no send-email) recusa pedidos ANTES
+        // de chegarem ao codigo quando o token nao tem formato de JWT --
+        // devolve {code, message}, nao {error}. `sendResult.error` sozinho
+        // nunca apanhava isto, e o email ficava "enviado" sem nunca ter sido
+        // tentado. `!sendResponse.ok` cobre qualquer falha HTTP, seja qual
+        // for a forma do corpo.
+        if (!sendResponse.ok || sendResult.error) {
+          throw new Error(sendResult.error || sendResult.message || `HTTP ${sendResponse.status}`);
+        }
 
         await supabase.from("scheduled_emails").update({
           status: "sent",
