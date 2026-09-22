@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { findUnreachableStages, isStageUnreachable } from "../LeadWorkflowConfig";
+import {
+  findUnreachableStages,
+  hasQualificationRulesConfigured,
+  isStageUnreachable,
+  shouldWarnAboutUnresolvedIncrease,
+  stageIgnoresLiteralStatuses,
+  stageUsesQualificationConditions,
+  unresolvedCountFromTotals,
+} from "../LeadWorkflowConfig";
 import { isEmptyRule, normalizeRule } from "../workflow/conditionCatalog";
 
 /**
@@ -163,5 +171,196 @@ describe("findUnreachableStages", () => {
 
   it("aguenta uma lista vazia", () => {
     expect(findUnreachableStages([])).toEqual([]);
+  });
+});
+
+/**
+ * Caso real: pôr condições avançadas na etapa "Contacted" desligou os status
+ * literais que a alimentavam e 32 leads ficaram sem etapa. Os badges ficam
+ * acesos no ecrã, mas `stage_reached` já não os consulta.
+ */
+describe("stageIgnoresLiteralStatuses", () => {
+  const stage = (over: Partial<Parameters<typeof stageIgnoresLiteralStatuses>[0]>) => ({
+    name: "contacted",
+    matching_statuses: null as string[] | null,
+    reached_when: null,
+    ...over,
+  });
+
+  it("avisa quando há condições avançadas E status literais associados", () => {
+    expect(
+      stageIgnoresLiteralStatuses(
+        stage({
+          matching_statuses: ["contacted", "no_answer"],
+          reached_when: { all: [{ type: "has_contact_logged" }], any: [] } as never,
+        })
+      )
+    ).toBe(true);
+  });
+
+  it("não avisa com condições avançadas e nenhum status associado", () => {
+    expect(
+      stageIgnoresLiteralStatuses(
+        stage({
+          matching_statuses: [],
+          reached_when: { all: [{ type: "has_contact_logged" }], any: [] } as never,
+        })
+      )
+    ).toBe(false);
+  });
+
+  it("não avisa sem condições avançadas, mesmo com status associados", () => {
+    expect(stageIgnoresLiteralStatuses(stage({ matching_statuses: ["contacted"] }))).toBe(false);
+  });
+
+  it("não avisa com a regra vazia {all:[],any:[]} e status associados", () => {
+    expect(
+      stageIgnoresLiteralStatuses(
+        stage({ matching_statuses: ["contacted"], reached_when: { all: [], any: [] } as never })
+      )
+    ).toBe(false);
+  });
+
+  it("não avisa com reached_when nulo", () => {
+    expect(
+      stageIgnoresLiteralStatuses(stage({ matching_statuses: ["contacted"], reached_when: null }))
+    ).toBe(false);
+  });
+
+  it("não avisa quando a regra só tem entulho legado — o motor não a avalia", () => {
+    expect(
+      stageIgnoresLiteralStatuses(
+        stage({ matching_statuses: ["contacted"], reached_when: { all: ["has_assignee"], any: [] } as never })
+      )
+    ).toBe(false);
+  });
+
+  it("uma condição só na coluna 'Qualquer (OU)' já anula os status", () => {
+    expect(
+      stageIgnoresLiteralStatuses(
+        stage({
+          matching_statuses: ["contacted"],
+          reached_when: { all: [], any: [{ type: "qualification_is", value: "mql" }] } as never,
+        })
+      )
+    ).toBe(true);
+  });
+
+  it("matching_statuses nulo conta como [name] — é o que toStagePayload grava", () => {
+    expect(
+      stageIgnoresLiteralStatuses(
+        stage({
+          matching_statuses: null,
+          reached_when: { all: [{ type: "has_assignee" }], any: [] } as never,
+        })
+      )
+    ).toBe(true);
+  });
+});
+
+describe("stageUsesQualificationConditions", () => {
+  it("detecta qualification_is na coluna Todas (E)", () => {
+    expect(
+      stageUsesQualificationConditions({
+        reached_when: { all: [{ type: "qualification_is", value: "sql" }], any: [] } as never,
+      })
+    ).toBe(true);
+  });
+
+  it("detecta qualification_is na coluna Qualquer (OU)", () => {
+    expect(
+      stageUsesQualificationConditions({
+        reached_when: {
+          all: [{ type: "has_assignee" }],
+          any: [{ type: "qualification_is", value: "mql" }],
+        } as never,
+      })
+    ).toBe(true);
+  });
+
+  it("não dispara com outras condições nem com regra vazia/nula", () => {
+    expect(
+      stageUsesQualificationConditions({
+        reached_when: { all: [{ type: "has_assignee" }], any: [] } as never,
+      })
+    ).toBe(false);
+    expect(stageUsesQualificationConditions({ reached_when: { all: [], any: [] } as never })).toBe(false);
+    expect(stageUsesQualificationConditions({ reached_when: null })).toBe(false);
+  });
+});
+
+describe("hasQualificationRulesConfigured", () => {
+  it("é falso quando a organização não tem linha de regras", () => {
+    expect(hasQualificationRulesConfigured(null)).toBe(false);
+    expect(hasQualificationRulesConfigured(undefined)).toBe(false);
+  });
+
+  it("é falso quando a linha existe mas as duas regras estão vazias", () => {
+    expect(hasQualificationRulesConfigured({ mql_when: null, sql_when: null })).toBe(false);
+    expect(
+      hasQualificationRulesConfigured({ mql_when: { all: [], any: [] }, sql_when: { all: [], any: [] } })
+    ).toBe(false);
+  });
+
+  it("é falso quando as regras só têm entulho legado (o motor não as avalia)", () => {
+    expect(hasQualificationRulesConfigured({ mql_when: { all: ["has_assignee"], any: [] } })).toBe(false);
+  });
+
+  it("basta uma das duas regras ter uma condição utilizável", () => {
+    expect(
+      hasQualificationRulesConfigured({ mql_when: { all: [{ type: "has_assignee" }], any: [] }, sql_when: null })
+    ).toBe(true);
+    expect(
+      hasQualificationRulesConfigured({ mql_when: null, sql_when: { all: [], any: [{ type: "has_active_proposal" }] } })
+    ).toBe(true);
+  });
+});
+
+describe("unresolvedCountFromTotals", () => {
+  it("lê o balde unresolved do mapa de totais", () => {
+    expect(unresolvedCountFromTotals({ unresolved: 32, qualified: 4 })).toBe(32);
+  });
+
+  it("chave ausente significa zero leads sem etapa", () => {
+    expect(unresolvedCountFromTotals({ qualified: 4 })).toBe(0);
+    expect(unresolvedCountFromTotals({})).toBe(0);
+  });
+
+  it("devolve undefined ('não sei') para totais em falta ou corrompidos", () => {
+    expect(unresolvedCountFromTotals(null)).toBeUndefined();
+    expect(unresolvedCountFromTotals(undefined)).toBeUndefined();
+    expect(unresolvedCountFromTotals([])).toBeUndefined();
+    expect(unresolvedCountFromTotals("32")).toBeUndefined();
+    expect(unresolvedCountFromTotals({ unresolved: "muitas" })).toBeUndefined();
+  });
+});
+
+/**
+ * Regra de ouro do aviso: só bloqueia quando SOBE, e nunca por falta de
+ * dados — uma simulação falhada não pode impedir ninguém de gravar.
+ */
+describe("shouldWarnAboutUnresolvedIncrease", () => {
+  it("avisa quando o número de leads sem etapa sobe", () => {
+    expect(shouldWarnAboutUnresolvedIncrease(0, 32)).toBe(true);
+    expect(shouldWarnAboutUnresolvedIncrease(5, 6)).toBe(true);
+  });
+
+  it("não avisa quando fica igual", () => {
+    expect(shouldWarnAboutUnresolvedIncrease(32, 32)).toBe(false);
+    expect(shouldWarnAboutUnresolvedIncrease(0, 0)).toBe(false);
+  });
+
+  it("não avisa quando desce", () => {
+    expect(shouldWarnAboutUnresolvedIncrease(32, 0)).toBe(false);
+    expect(shouldWarnAboutUnresolvedIncrease(6, 5)).toBe(false);
+  });
+
+  it("não avisa com valores em falta ou não numéricos", () => {
+    expect(shouldWarnAboutUnresolvedIncrease(undefined, 32)).toBe(false);
+    expect(shouldWarnAboutUnresolvedIncrease(0, undefined)).toBe(false);
+    expect(shouldWarnAboutUnresolvedIncrease(undefined, undefined)).toBe(false);
+    expect(shouldWarnAboutUnresolvedIncrease(null, null)).toBe(false);
+    expect(shouldWarnAboutUnresolvedIncrease(Number.NaN, 32)).toBe(false);
+    expect(shouldWarnAboutUnresolvedIncrease(0, Number.NaN)).toBe(false);
   });
 });

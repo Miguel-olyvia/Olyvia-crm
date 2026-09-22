@@ -40,10 +40,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Plus, Pencil, Trash2, GripVertical, Copy, AlertTriangle,
   ArrowRight, ArrowUp, ArrowDown, UserCheck, Users, Zap, HelpCircle,
-  Target, GitBranch, Settings, TrendingUp, CheckCircle2,
+  Target, GitBranch, Settings, TrendingUp, CheckCircle2, Info,
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
@@ -186,6 +187,86 @@ export const findUnreachableStages = <T extends Pick<WorkflowStage, "name" | "ma
 
 const UNREACHABLE_STAGE_HINT =
   "Nenhuma lead consegue chegar a esta etapa: não tem nenhum status literal associado nem condições avançadas definidas. Associe pelo menos um status em \"Status literais associados\" ou defina condições em \"Condições avançadas (motor)\".";
+
+/**
+ * `public.stage_reached` avalia `reached_when` OU o fallback por status
+ * literal — nunca os dois: assim que a regra tem uma condição utilizável, os
+ * `matching_statuses` deixam de ser consultados. Os badges de "Status
+ * literais associados" continuam acesos no ecrã, por isso o utilizador
+ * assume que somam com as condições, quando na verdade já não valem nada.
+ *
+ * Foi exactamente isto que tirou 32 leads do funil: pôr condições avançadas
+ * na etapa "Contacted" desligou, sem qualquer sintoma, os status que a
+ * alimentavam.
+ *
+ * O fallback `?? [stage.name]` é deliberado — é o mesmo de `toStagePayload`,
+ * ou seja, o que fica realmente gravado quando `matching_statuses` é nulo.
+ */
+export const stageIgnoresLiteralStatuses = (
+  stage: Pick<WorkflowStage, "name" | "matching_statuses" | "reached_when">
+): boolean => {
+  const effectiveStatuses = Array.isArray(stage.matching_statuses)
+    ? stage.matching_statuses
+    : [stage.name];
+  if (effectiveStatuses.length === 0) return false;
+  return !isEmptyRule(normalizeRule(stage.reached_when));
+};
+
+/**
+ * A etapa usa alguma condição `qualification_is` (MQL/SQL)? Essas condições
+ * dependem de a organização ter regras de qualificação gravadas — sem elas
+ * nenhuma lead é classificada automaticamente e a etapa fica inalcançável na
+ * prática, sem nenhum aviso do motor.
+ */
+export const stageUsesQualificationConditions = (
+  stage: Pick<WorkflowStage, "reached_when">
+): boolean => {
+  const rule = normalizeRule(stage.reached_when);
+  if (!rule) return false;
+  return [...rule.all, ...rule.any].some(condition => condition.type === "qualification_is");
+};
+
+/**
+ * Critério único de "a organização tem regras de qualificação configuradas":
+ * a linha de `lead_qualification_rules` existe e pelo menos uma das regras
+ * (MQL ou SQL) sobrevive à normalização. É o mesmo critério que o separador
+ * Qualificação usa para gravar (`mql_when`/`sql_when`), por isso o aviso
+ * apaga-se assim que o utilizador lá configurar seja o que for.
+ */
+export const hasQualificationRulesConfigured = (
+  rules: { mql_when?: unknown; sql_when?: unknown } | null | undefined
+): boolean =>
+  !isEmptyRule(normalizeRule(rules?.mql_when)) || !isEmptyRule(normalizeRule(rules?.sql_when));
+
+/**
+ * Lê o balde `unresolved` de um dos mapas `before_totals`/`after_totals`
+ * devolvidos por `simulate_lead_v2_bucket_changes`. A chave ausente significa
+ * zero leads sem etapa (o `jsonb_object_agg` só produz baldes com contagem);
+ * um mapa em falta ou corrompido devolve `undefined` — "não sei", que nunca
+ * pode bloquear uma gravação.
+ */
+export const unresolvedCountFromTotals = (totals: unknown): number | undefined => {
+  if (!totals || typeof totals !== "object" || Array.isArray(totals)) return undefined;
+  const raw = (totals as Record<string, unknown>).unresolved;
+  if (raw === undefined || raw === null) return 0;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+/**
+ * Só se avisa quando a gravação AUMENTA o número de leads sem etapa. Descer
+ * ou manter não interessa a ninguém, e dados em falta (simulação falhada,
+ * RPC indisponível) nunca geram aviso: o utilizador tem de conseguir gravar
+ * mesmo quando a simulação não corre.
+ */
+export const shouldWarnAboutUnresolvedIncrease = (
+  before: number | null | undefined,
+  after: number | null | undefined
+): boolean => {
+  if (typeof before !== "number" || !Number.isFinite(before)) return false;
+  if (typeof after !== "number" || !Number.isFinite(after)) return false;
+  return after > before;
+};
 
 interface LeadWorkflowConfigProps {
   open: boolean;
@@ -442,6 +523,17 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
   // non-default rules, so we can confirm before overwriting them.
   const [pendingPreset, setPendingPreset] = useState<FunnelPreset | null>(null);
 
+  // Gravação do editor de etapa retida à espera de confirmação porque a
+  // simulação diz que vai deixar mais leads sem etapa nenhuma.
+  const [pendingUnresolvedSave, setPendingUnresolvedSave] = useState<{
+    before: number;
+    after: number;
+    payload: StagePayload[];
+  } | null>(null);
+  // A simulação é uma ida à BD: o botão "Guardar" tem de dizer que está a
+  // trabalhar em vez de parecer morto.
+  const [checkingSaveImpact, setCheckingSaveImpact] = useState(false);
+
   const [newStage, setNewStage] = useState({
     name: "",
     label: "",
@@ -469,6 +561,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     // etapas inatingíveis: com o motor sequencial, uma etapa inalcançável no
     // caminho das setas trava também todas as seguintes.
     sequentialFlow,
+    // `lead_qualification_rules` da organização — as condições MQL/SQL de uma
+    // etapa não valem nada sem elas.
+    qualificationRules,
   } = useLeadPipelineRules(companyId);
 
   useEffect(() => {
@@ -639,22 +734,93 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
     }
   };
 
-  const handleUpdateStage = async () => {
-    if (!editingStage) return;
+  /**
+   * Corre `simulate_lead_v2_bucket_changes` (read-only, a mesma RPC do
+   * DryRunPanel) contra a lista de etapas POR GRAVAR e devolve quantas leads
+   * ficam no balde `unresolved` — ou seja, sem etapa nenhuma — antes e depois.
+   *
+   * Devolve `null` a qualquer falha: sem organização, RPC indisponível, erro
+   * de rede ou resposta com forma inesperada. Um aviso nunca pode impedir o
+   * utilizador de gravar, por isso a falha é registada no Sentry e o fluxo
+   * segue como se a simulação não existisse.
+   */
+  const simulateUnresolvedImpact = async (
+    nextStages: WorkflowStage[]
+  ): Promise<{ before: number; after: number } | null> => {
+    if (!companyId) return null;
 
-    const payload: StagePayload[] = stages.map(s =>
-      s.id === editingStage.id ? toStagePayload(editingStage) : toStagePayload(s)
-    );
+    try {
+      // A RPC ordena as etapas por `stage_order` (DISTINCT ON ... ORDER BY
+      // stage_order DESC); sem o campo caía num `-ord` que inverteria a
+      // prioridade e daria um resultado que não é o do motor real.
+      const simulationStages: DryRunStagePayload[] = nextStages.map((s, index) => ({
+        id: s.id,
+        label: s.label,
+        stage_order: s.stage_order ?? index + 1,
+        reached_when: normalizeRule(s.reached_when),
+        matching_statuses: s.matching_statuses ?? [s.name],
+        counts_as_qualified: s.counts_as_qualified ?? false,
+        counts_as_negotiation: s.counts_as_negotiation ?? false,
+        counts_as_converted: s.counts_as_converted ?? false,
+        counts_as_lost: s.counts_as_lost ?? false,
+      }));
 
+      const { data, error } = await (supabase as any).rpc("simulate_lead_v2_bucket_changes", {
+        p_org: companyId,
+        p_stages: simulationStages,
+      });
+
+      if (error) {
+        captureFlowError(error, "lead-lifecycle");
+        return null;
+      }
+
+      const before = unresolvedCountFromTotals((data as any)?.before_totals);
+      const after = unresolvedCountFromTotals((data as any)?.after_totals);
+      if (before === undefined || after === undefined) return null;
+      return { before, after };
+    } catch (error) {
+      captureFlowError(error, "lead-lifecycle");
+      return null;
+    }
+  };
+
+  const commitStageUpdate = async (payload: StagePayload[]) => {
     const { error } = await saveStages(payload);
     if (error) {
       toast({ title: "Erro ao atualizar", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Estágio atualizado" });
+      setPendingUnresolvedSave(null);
       setEditingStage(null);
       loadStages();
       onStagesUpdated?.();
     }
+  };
+
+  /**
+   * Gravação principal do funil: é por aqui que as regras editadas no diálogo
+   * de etapa (status literais, condições avançadas, buckets) chegam à BD para
+   * TODA a lista de estágios. As outras chamadas a `saveStages` não mexem em
+   * regras — reordenam (persistReorder), acrescentam, duplicam, removem ou
+   * copiam o template — por isso é só aqui que faz sentido avisar antes.
+   */
+  const handleUpdateStage = async () => {
+    if (!editingStage) return;
+
+    const nextStages = stages.map(s => (s.id === editingStage.id ? editingStage : s));
+    const payload: StagePayload[] = nextStages.map(toStagePayload);
+
+    setCheckingSaveImpact(true);
+    const impact = await simulateUnresolvedImpact(nextStages);
+    setCheckingSaveImpact(false);
+
+    if (impact && shouldWarnAboutUnresolvedIncrease(impact.before, impact.after)) {
+      setPendingUnresolvedSave({ before: impact.before, after: impact.after, payload });
+      return;
+    }
+
+    await commitStageUpdate(payload);
   };
 
   const handleDeleteStage = async () => {
@@ -1487,6 +1653,19 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       );
                     })}
                   </div>
+
+                  {/* Informativo, não erro: a etapa funciona — só não é por
+                      estes status. Ver stageIgnoresLiteralStatuses. */}
+                  {stageIgnoresLiteralStatuses(editingStage) && (
+                    <Alert className="mt-3 border-amber-500/40 bg-amber-500/5 py-2.5">
+                      <Info className="h-4 w-4 !text-amber-600 dark:!text-amber-400" />
+                      <AlertDescription className="text-xs text-amber-800/90 dark:text-amber-300/90">
+                        Esta etapa tem condições avançadas, por isso os status literais acima{" "}
+                        <strong>são ignorados</strong> pelo motor. Para os usar, apaga as condições
+                        em baixo.
+                      </AlertDescription>
+                    </Alert>
+                  )}
                 </div>
 
                 <div>
@@ -1503,6 +1682,23 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                       organizationId={companyId}
                     />
                   </div>
+
+                  {/* As condições MQL/SQL só disparam se alguém classificar as
+                      leads — regras da organização ou marcação manual. Sem
+                      nenhuma das duas, a etapa fica vazia para sempre e o motor
+                      não dá sinal nenhum. */}
+                  {stageUsesQualificationConditions(editingStage) &&
+                    !hasQualificationRulesConfigured(qualificationRules) && (
+                      <Alert className="mt-3 border-amber-500/40 bg-amber-500/5 py-2.5">
+                        <AlertTriangle className="h-4 w-4 !text-amber-600 dark:!text-amber-400" />
+                        <AlertDescription className="text-xs text-amber-800/90 dark:text-amber-300/90">
+                          Nada classifica leads como MQL/SQL nesta organização. Ou marcas à mão em
+                          cada lead (Editar Lead → Tipo de qualificação), ou configuras as regras no
+                          separador <strong>Qualificação</strong>. Enquanto isso, esta etapa só será
+                          atingida por leads marcadas manualmente.
+                        </AlertDescription>
+                      </Alert>
+                    )}
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1618,7 +1814,9 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingStage(null)}>Cancelar</Button>
-            <Button onClick={handleUpdateStage}>Guardar</Button>
+            <Button onClick={handleUpdateStage} disabled={checkingSaveImpact}>
+              {checkingSaveImpact ? "A verificar impacto..." : "Guardar"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1672,6 +1870,46 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deletableLeadCount > 0 ? `Migrar e Eliminar` : `Eliminar`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ─── Leads que ficam sem etapa ao gravar ────────────────
+          Simulação read-only corrida antes da gravação: só aparece quando o
+          balde `unresolved` SOBE. Falha de simulação não abre nada — grava-se
+          na mesma (ver simulateUnresolvedImpact). */}
+      <AlertDialog
+        open={!!pendingUnresolvedSave}
+        onOpenChange={(v) => { if (!v) setPendingUnresolvedSave(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              Estas regras deixam {pendingUnresolvedSave?.after ?? 0} lead
+              {(pendingUnresolvedSave?.after ?? 0) === 1 ? "" : "s"} sem etapa nenhuma
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Antes destas regras eram <strong>{pendingUnresolvedSave?.before ?? 0}</strong>.
+                </p>
+                <p>
+                  Elas continuam no sistema, mas desaparecem do funil e dos cartões até alguma
+                  etapa voltar a corresponder-lhes.
+                </p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Rever</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (pendingUnresolvedSave) void commitStageUpdate(pendingUnresolvedSave.payload);
+              }}
+            >
+              Gravar assim mesmo
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
