@@ -9,8 +9,62 @@ export interface PortalUserContractRef {
   contract_id?: string | null;
 }
 
+/**
+ * Empresa ativa do portal (ver src/contexts/PortalCompanyContext.tsx).
+ *
+ * O par (organização, entidade) anda sempre junto: o `entity_id` do cliente
+ * pode ser diferente de organização para organização, por isso filtrar cada um
+ * por si produziria combinações nunca concedidas.
+ */
+export interface PortalOrgScope {
+  organizationId: string;
+  entityId?: string | null;
+}
+
 function uniqueIds(values: Array<string | null | undefined>): string[] {
   return Array.from(new Set(values.filter((v): v is string => Boolean(v))));
+}
+
+/**
+ * Estreita um conjunto de contratos já resolvido à empresa ativa.
+ *
+ * Remove APENAS os ids confirmadamente de outra organização (ou de outra
+ * entidade dentro da mesma organização). Tudo o que a query não devolver fica:
+ * a RLS de `client_contracts` é por concessão (`client_portal_documents`)
+ * enquanto a de `documents` é pela coluna legada
+ * (`client_portal_users.contract_id`) — são fontes diferentes, e um contrato
+ * legado (ou cujo `publishPortalDocument` falhou em fail-soft) pode não vir
+ * nesta leitura apesar de os seus anexos serem legitimamente visíveis. Filtrar
+ * por ausência faria desaparecer esses documentos de "Os Meus Documentos".
+ *
+ * Pela mesma razão, uma falha da query devolve o conjunto original: mostrar
+ * contratos de mais do que uma empresa é um problema de apresentação, esconder
+ * os contratos do cliente é um problema a sério.
+ *
+ * Contratos sem `entity_id` (dados antigos) ficam — foram concedidos
+ * explicitamente e a RLS já os autoriza.
+ */
+async function narrowToOrgScope(contractIds: string[], scope: PortalOrgScope): Promise<string[]> {
+  if (contractIds.length === 0) return contractIds;
+
+  const { data: rows, error } = await supabase
+    .from("client_contracts")
+    .select("id, organization_id, entity_id")
+    .in("id", contractIds);
+
+  if (error || !rows) return contractIds;
+
+  const fromAnotherScope = new Set(
+    rows
+      .filter(
+        (c) =>
+          (c.organization_id && c.organization_id !== scope.organizationId) ||
+          (Boolean(scope.entityId) && Boolean(c.entity_id) && c.entity_id !== scope.entityId),
+      )
+      .map((c) => c.id),
+  );
+
+  return contractIds.filter((id) => !fromAnotherScope.has(id));
 }
 
 /**
@@ -33,15 +87,21 @@ function uniqueIds(values: Array<string | null | undefined>): string[] {
  *
  * Se não houver contas de portal, nem sequer corre a query (um `.in()` com array
  * vazio devolveria zero linhas, mas continua a ser um round-trip inútil).
+ *
+ * `orgScope` (opcional) limita o resultado à empresa ativa do portal. Sem ele o
+ * comportamento é o de sempre: todos os contratos concedidos a esta conta.
  */
 export async function resolvePortalContractIds(
   portalUserIds: Array<string | null | undefined>,
   legacyContractIds: Array<string | null | undefined>,
+  orgScope?: PortalOrgScope | null,
 ): Promise<string[]> {
   const legacy = uniqueIds(legacyContractIds);
   const userIds = uniqueIds(portalUserIds);
 
-  if (userIds.length === 0) return legacy;
+  if (userIds.length === 0) {
+    return orgScope ? narrowToOrgScope(legacy, orgScope) : legacy;
+  }
 
   const { data: docs } = await supabase
     .from("client_portal_documents")
@@ -54,19 +114,28 @@ export async function resolvePortalContractIds(
   // em vez de esvaziar a lista de contratos do cliente.
   const grantedByDocument = (docs ?? []).map((d) => d.document_id);
 
-  return uniqueIds([...legacy, ...grantedByDocument]);
+  const all = uniqueIds([...legacy, ...grantedByDocument]);
+
+  return orgScope ? narrowToOrgScope(all, orgScope) : all;
 }
 
 /**
  * Atalho para quem já tem as linhas de `client_portal_users` em mão
  * (select com `id` e `contract_id`).
+ *
+ * Quando há empresa ativa, passar só a linha dessa organização E o `orgScope`:
+ * a primeira coisa limita as concessões de `client_portal_documents` à conta
+ * dessa empresa, a segunda garante que nenhum contrato de outra organização
+ * escapa pela coluna legada.
  */
 export async function resolvePortalContractIdsForUsers(
   portalUsers: PortalUserContractRef[] | null | undefined,
+  orgScope?: PortalOrgScope | null,
 ): Promise<string[]> {
   const rows = portalUsers ?? [];
   return resolvePortalContractIds(
     rows.map((p) => p.id),
     rows.map((p) => p.contract_id),
+    orgScope,
   );
 }

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
+import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
+import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { useClientPortalData } from "@/hooks/useClientPortalData";
 import { formatCurrency } from "@/lib/utils";
 import {
@@ -46,85 +48,24 @@ const ClientPortal = () => {
   const [proposals, setProposals] = useState<any[]>([]);
   const [proposalsLoading, setProposalsLoading] = useState(true);
   const [portalCreatedAt, setPortalCreatedAt] = useState<string | null>(null);
+  // Empresa ativa do portal — antes esta página fazia `.limit(1)` sem
+  // `order by` sobre client_portal_users, ou seja, escolhia a empresa à sorte.
+  const { activeOrg, isLoading: orgsLoading, isError: orgsError, hasMultiple } = usePortalCompany();
   const portal = useClientPortalData();
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load(user: { id: string; email?: string | null; user_metadata?: any }) {
-      if (cancelled) return;
-      setUserName(user.user_metadata?.full_name || user.email || "");
-
-      const { data: portalUserOrg } = await supabase
-        .from("client_portal_users")
-        .select("organization_id")
-        .eq("auth_user_id", user.id)
-        .limit(1);
-      if (cancelled) return;
-
-      if (portalUserOrg && portalUserOrg.length > 0) {
-        const { data: org } = await supabase
-          .from("anew_organizations")
-          .select("name, metadata")
-          .eq("id", portalUserOrg[0].organization_id)
-          .maybeSingle();
-        if (cancelled) return;
-        if (org) {
-          const meta = org.metadata as any;
-          setOrgInfo({
-            name: org.name || "",
-            email: meta?.email || meta?.contact_email || null,
-            phone: meta?.phone || meta?.contact_phone || null,
-            website: meta?.website || null,
-          });
-        }
-      }
-
-      const { data: portalUserFull } = await supabase
-        .from("client_portal_users")
-        .select("proposal_id, entity_id, organization_id, created_at")
-        .eq("auth_user_id", user.id)
-        .limit(1);
-      if (cancelled) return;
-
-      const pu = portalUserFull?.[0];
-      if (pu) {
-        setPortalCreatedAt(pu.created_at);
-
-        if (!pu.entity_id && !pu.organization_id && !pu.proposal_id) {
-          setProposals([]);
-          setProposalsLoading(false);
-          return;
-        }
-
-        let query = supabase
-          .from("proposals")
-          .select("id, title, proposal_number, value, created_at, valid_until, status")
-          .order("created_at", { ascending: false });
-
-        if (pu.entity_id && pu.organization_id) {
-          query = query.eq("organization_id", pu.organization_id).eq("entity_id", pu.entity_id);
-        } else if (pu.proposal_id) {
-          query = query.eq("id", pu.proposal_id);
-        }
-
-        const { data } = await query;
-        if (cancelled) return;
-        setProposals(data || []);
-      }
-      setProposalsLoading(false);
-    }
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (cancelled) return;
       if (!session?.user) { navigate("/auth"); return; }
-      void load(session.user);
+      setUserName(session.user.user_metadata?.full_name || session.user.email || "");
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (cancelled) return;
       if (!session?.user) { navigate("/auth"); return; }
-      void load(session.user);
+      setUserName(session.user.user_metadata?.full_name || session.user.email || "");
     });
 
     return () => {
@@ -132,6 +73,65 @@ const ClientPortal = () => {
       subscription.unsubscribe();
     };
   }, [navigate]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load(org: PortalOrg) {
+      setProposalsLoading(true);
+      setPortalCreatedAt(org.createdAt);
+
+      const { data: orgRow } = await supabase
+        .from("anew_organizations")
+        .select("name, metadata")
+        .eq("id", org.organizationId)
+        .maybeSingle();
+      if (cancelled) return;
+
+      const meta = (orgRow?.metadata ?? null) as any;
+      setOrgInfo({
+        name: orgRow?.name || org.name,
+        email: meta?.email || meta?.contact_email || null,
+        phone: meta?.phone || meta?.contact_phone || null,
+        website: meta?.website || null,
+      });
+
+      if (!org.entityId && !org.proposalId) {
+        setProposals([]);
+        setProposalsLoading(false);
+        return;
+      }
+
+      let query = supabase
+        .from("proposals")
+        .select("id, title, proposal_number, value, created_at, valid_until, status")
+        .order("created_at", { ascending: false });
+
+      // Par (organização, entidade) desta empresa; sem entidade resta a coluna
+      // legada proposal_id da própria linha, que é desta organização.
+      if (org.entityId) {
+        query = query.eq("organization_id", org.organizationId).eq("entity_id", org.entityId);
+      } else {
+        query = query.eq("id", org.proposalId!);
+      }
+
+      const { data } = await query;
+      if (cancelled) return;
+      setProposals(data || []);
+      setProposalsLoading(false);
+    }
+
+    if (orgsLoading) return;
+    if (!activeOrg) {
+      setProposals([]);
+      setProposalsLoading(false);
+      return;
+    }
+
+    void load(activeOrg);
+
+    return () => { cancelled = true; };
+  }, [activeOrg, orgsLoading]);
 
   const firstName = userName.split(" ")[0] || "Cliente";
   const today = format(new Date(), "EEEE, d 'de' MMMM 'de' yyyy", { locale: pt });
@@ -176,6 +176,23 @@ const ClientPortal = () => {
       date: portalCreatedAt || proposals[proposals.length - 1]?.created_at || new Date().toISOString(),
     },
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 8);
+
+  // Falha a carregar as empresas do portal: sem âmbito, todos os números
+  // seriam zero e as listas apareceriam vazias — o que aqui seria uma mentira.
+  // Mostrar erro com "Tentar novamente" em vez de um portal vazio.
+  if (orgsError) {
+    return (
+      <ClientPortalLayout>
+        <div className="space-y-6">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Olá, {firstName} 👋</h1>
+            <p className="text-muted-foreground capitalize text-sm mt-0.5">{today}</p>
+          </div>
+          <PortalOrgsErrorState />
+        </div>
+      </ClientPortalLayout>
+    );
+  }
 
   return (
     <ClientPortalLayout>
@@ -405,7 +422,14 @@ const ClientPortal = () => {
                     {[1, 2].map(i => <Skeleton key={i} className="h-14 w-full" />)}
                   </div>
                 ) : proposals.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">Sem propostas disponíveis.</p>
+                  <div className="text-center py-4">
+                    <p className="text-sm text-muted-foreground">Sem propostas disponíveis.</p>
+                    {hasMultiple && (
+                      <p className="text-xs text-muted-foreground mt-1.5">
+                        Se esperava ver outras, troque de empresa no seletor no topo da página.
+                      </p>
+                    )}
+                  </div>
                 ) : (
                   <div className="space-y-2">
                     {proposals.slice(0, 5).map(p => {

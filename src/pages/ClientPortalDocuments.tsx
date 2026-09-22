@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { resolvePortalContractIdsForUsers } from "@/lib/portal/contractAccess";
+import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
+import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -34,38 +36,29 @@ const ClientPortalDocuments = () => {
   const { toast } = useToast();
   const [documents, setDocuments] = useState<PortalDocument[]>([]);
   const [loading, setLoading] = useState(true);
+  // Empresa ativa do portal — ver src/contexts/PortalCompanyContext.tsx.
+  const { activeOrg, isLoading: orgsLoading, isError: orgsError, hasMultiple } = usePortalCompany();
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load(uid: string | null) {
-      if (!uid) {
-        if (!cancelled) { setDocuments([]); setLoading(false); }
-        return;
-      }
+    async function load(org: PortalOrg) {
       if (!cancelled) setLoading(true);
 
       const allDocs: PortalDocument[] = [];
 
-      // Get portal user records
-      const { data: portalUsers } = await supabase
-        .from("client_portal_users")
-        .select("id, proposal_id, contract_id, quote_id")
-        .eq("auth_user_id", uid);
-      if (cancelled) return;
-
-      if (!portalUsers) {
-        if (!cancelled) { setDocuments([]); setLoading(false); }
-        return;
-      }
-
-      const proposalIds = Array.from(new Set(portalUsers.filter(p => p.proposal_id).map(p => p.proposal_id!)));
-      const quoteIds    = Array.from(new Set(portalUsers.filter(p => p.quote_id   ).map(p => p.quote_id!   )));
+      // Colunas legadas da linha de portal DESTA empresa.
+      const proposalIds = org.proposalId ? [org.proposalId] : [];
+      const quoteIds    = org.quoteId    ? [org.quoteId]    : [];
 
       // Resolução partilhada (coluna legada + client_portal_documents) — ver
       // src/lib/portal/contractAccess.ts. Usar só `contract_id` escondia aqui os
-      // anexos dos contratos concedidos por documento.
-      const contractIds = await resolvePortalContractIdsForUsers(portalUsers);
+      // anexos dos contratos concedidos por documento; o `orgScope` corta o que
+      // pertence a outra empresa do grupo.
+      const contractIds = await resolvePortalContractIdsForUsers(
+        [{ id: org.portalUserId, contract_id: org.contractId }],
+        { organizationId: org.organizationId, entityId: org.entityId },
+      );
       if (cancelled) return;
 
       // Quotes visíveis indirectamente (via proposta ou contrato)
@@ -163,13 +156,17 @@ const ClientPortalDocuments = () => {
       setLoading(false);
     }
 
-    supabase.auth.getUser().then(({ data: { user } }) => load(user?.id ?? null));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      load(session?.user?.id ?? null);
-    });
+    if (orgsLoading) return;
+    if (!activeOrg) {
+      setDocuments([]);
+      setLoading(false);
+      return;
+    }
 
-    return () => { cancelled = true; subscription.unsubscribe(); };
-  }, []);
+    void load(activeOrg);
+
+    return () => { cancelled = true; };
+  }, [activeOrg, orgsLoading]);
 
   return (
     <ClientPortalLayout>
@@ -180,6 +177,9 @@ const ClientPortalDocuments = () => {
           <div className="space-y-3">
             {[1, 2, 3].map(i => <Skeleton key={i} className="h-16 w-full" />)}
           </div>
+        ) : orgsError ? (
+          // Falha a carregar o âmbito: nunca apresentar como "não tem nada".
+          <PortalOrgsErrorState />
         ) : documents.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-center">
@@ -187,6 +187,11 @@ const ClientPortalDocuments = () => {
               <p className="text-muted-foreground">
                 Ainda não tem documentos disponíveis.
               </p>
+              {hasMultiple && (
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Se esperava ver outros, troque de empresa no seletor no topo da página.
+                </p>
+              )}
             </CardContent>
           </Card>
         ) : (

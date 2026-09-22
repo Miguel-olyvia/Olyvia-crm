@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Download, Loader2, Receipt, ShieldCheck, Smartphone, XCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
+import { useSyncActiveOrgWithDocument } from "@/contexts/PortalCompanyContext";
 import { parseEdgeFunctionPayload } from "@/utils/edgeFunctionResponse";
 import { generateProformaPdfBlob, downloadBlob, type ProformaPdfPrefetch } from "@/utils/generateProformaPdfBlob";
 import { Badge } from "@/components/ui/badge";
@@ -195,6 +196,10 @@ const ClientPortalDirectSaleDetail = () => {
   const [otpError, setOtpError] = useState("");
 
   const hasLoadedOnceRef = useRef(false);
+
+  // Link de email pode abrir uma venda direta de outra empresa do grupo: a
+  // empresa ativa acompanha o documento em vez de o esconder.
+  useSyncActiveOrgWithDocument(sale?.organization_id);
 
   const reloadSale = useCallback(async () => {
     if (!id) return;
