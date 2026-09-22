@@ -909,9 +909,13 @@ Deno.serve(async (req: Request) => {
       // igual ao email); a regra 11 (alerta interno quando falha) fica para
       // outro pedido, tal como ja acontece hoje para o email.
       if (emailCfg?.confirmation_sms_enabled && leadPhone) {
+        // Regra 2: o aviso de contacto telefónico tem de constar do SMS,
+        // não só do email/formulário. Texto fixo por agora -- ver decisão
+        // em aberto sobre tornar esta mensagem configurável por campanha,
+        // como os modelos de email já são.
         const smsResult = await sendSmsNow({
           toPhone: String(leadPhone),
-          message: `${orgRow?.name || 'A empresa'}: a sua visita ficou marcada para ${whenFormatted}.${cancelLink ? ` Gerir/cancelar: ${cancelLink}` : ''}`,
+          message: `${orgRow?.name || 'A empresa'}: a sua visita ficou marcada para ${whenFormatted}. Aguarde o nosso contacto telefónico para confirmação da visita.${cancelLink ? ` Gerir/cancelar: ${cancelLink}` : ''}`,
         });
         if (!smsResult.ok) {
           console.error('[book-slot] confirmation SMS failed (non-fatal):', smsResult.error);
