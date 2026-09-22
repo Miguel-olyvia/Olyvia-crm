@@ -1017,7 +1017,19 @@ export function AnewLeadContactDialog({
         last_contact_at: new Date().toISOString(),
         last_contact_by: resolvedContactBy,
         last_contact_result: contactResult,
-        status: statusToSet,
+        // `status` SÓ entra no payload quando muda mesmo. Gravá-lo sempre era
+        // destrutivo: o INSERT em entity_interactions acima dispara o motor
+        // (fn_pipeline_dirty/auto-lost), que pode mover a lead — por exemplo
+        // para "Lost / Rejected" quando o resultado é negativo e a regra da
+        // etapa bate. Um instante depois este UPDATE reescrevia `status` com o
+        // valor ANTIGO (statusToSet cai no estado actual sempre que o
+        // mapeamento do resultado está bloqueado por isAutoLossTransition, ou
+        // quando o resultado não tem workflow_next_status), desfazendo a
+        // decisão do motor e deixando a lead com `status` e
+        // `workflow_stage_id` em desacordo — visível como uma lead que "não se
+        // move" na lista, que mostra `status`. Reproduzido contra a base de
+        // dados: passo 3 punha status=rejected, passo 4 repunha status=new.
+        ...(statusChanged ? { status: statusToSet } : {}),
         callback_scheduled_at: callbackDatetime,
         callback_notes: scheduleCallback ? notes : null,
         assigned_to: resolvedAssignedTo,
