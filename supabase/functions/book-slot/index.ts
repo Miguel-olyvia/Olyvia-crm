@@ -914,12 +914,19 @@ Deno.serve(async (req: Request) => {
         // mesma funcao renderSubject -- texto simples, sem HTML). Sem
         // configuracao, cai para a mensagem por omissao com o aviso de
         // contacto telefonico ja incluido.
+        // Regra 2 (continuacao): a conta SMSAPI partilhada recusa SMS com link
+        // para remetentes nao verificados (erro 94, confirmado ao vivo 22/09).
+        // confirmation_sms_include_link (omissao false) decide se {{cancel_url}}
+        // leva o link real ou fica vazio -- vale tanto para a mensagem por
+        // omissao como para a personalizada, sem exigir reescrever o texto.
+        const includeLink = emailCfg.confirmation_sms_include_link === true;
+        const smsBaseVars = includeLink ? baseVars : { ...baseVars, cancel_url: '' };
         const smsTemplate = emailCfg.confirmation_sms_message?.trim()
           ? emailCfg.confirmation_sms_message
-          : `${orgRow?.name || 'A empresa'}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita.${cancelLink ? ' Gerir/cancelar: {{cancel_url}}' : ''}`;
+          : `${orgRow?.name || 'A empresa'}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita.${includeLink && cancelLink ? ' Gerir/cancelar: {{cancel_url}}' : ''}`;
         const smsResult = await sendSmsNow({
           toPhone: String(leadPhone),
-          message: renderSubject(smsTemplate, baseVars),
+          message: renderSubject(smsTemplate, smsBaseVars),
         });
         if (!smsResult.ok) {
           console.error('[book-slot] confirmation SMS failed (non-fatal):', smsResult.error);

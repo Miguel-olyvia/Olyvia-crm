@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _migration_contacts_to_leads_map: {
@@ -2230,6 +2205,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      anew_leads_status_backup_20261204_conversao: {
+        Row: {
+          guardado_em: string
+          lead_id: string
+          status_antes: string | null
+        }
+        Insert: {
+          guardado_em?: string
+          lead_id: string
+          status_antes?: string | null
+        }
+        Update: {
+          guardado_em?: string
+          lead_id?: string
+          status_antes?: string | null
+        }
+        Relationships: []
+      }
+      anew_leads_status_backup_20261204_no_answer: {
+        Row: {
+          etapa_id: string | null
+          guardado_em: string
+          lead_id: string
+          status_antes: string | null
+        }
+        Insert: {
+          etapa_id?: string | null
+          guardado_em?: string
+          lead_id: string
+          status_antes?: string | null
+        }
+        Update: {
+          etapa_id?: string | null
+          guardado_em?: string
+          lead_id?: string
+          status_antes?: string | null
+        }
+        Relationships: []
       }
       anew_leads_status_backup_20261204_rejeicao: {
         Row: {
@@ -8344,6 +8358,7 @@ export type Database = {
           confirmation_email_enabled: boolean
           confirmation_email_template_id: string | null
           confirmation_sms_enabled: boolean
+          confirmation_sms_include_link: boolean
           confirmation_sms_message: string | null
           contact_soon_text: string | null
           container_padding_x: string | null
@@ -8480,6 +8495,7 @@ export type Database = {
           confirmation_email_enabled?: boolean
           confirmation_email_template_id?: string | null
           confirmation_sms_enabled?: boolean
+          confirmation_sms_include_link?: boolean
           confirmation_sms_message?: string | null
           contact_soon_text?: string | null
           container_padding_x?: string | null
@@ -8616,6 +8632,7 @@ export type Database = {
           confirmation_email_enabled?: boolean
           confirmation_email_template_id?: string | null
           confirmation_sms_enabled?: boolean
+          confirmation_sms_include_link?: boolean
           confirmation_sms_message?: string | null
           contact_soon_text?: string | null
           container_padding_x?: string | null
@@ -10255,6 +10272,24 @@ export type Database = {
           updated_at?: string
           workflow_action?: string | null
           workflow_next_status?: string | null
+        }
+        Relationships: []
+      }
+      lead_contact_results_backup_20261204: {
+        Row: {
+          alterado_em: string
+          result_id: string
+          workflow_next_status_antes: string | null
+        }
+        Insert: {
+          alterado_em?: string
+          result_id: string
+          workflow_next_status_antes?: string | null
+        }
+        Update: {
+          alterado_em?: string
+          result_id?: string
+          workflow_next_status_antes?: string | null
         }
         Relationships: []
       }
@@ -21489,6 +21524,15 @@ export type Database = {
         }
         Returns: string[]
       }
+      fn_reconcile_dirty_lead_pipelines: {
+        Args: { p_limit?: number }
+        Returns: {
+          estados_avancados: number
+          etapas_sincronizadas: number
+          examinadas: number
+          restantes: number
+        }[]
+      }
       fn_refund_ai_credits: {
         Args: { _amount: number; _organization_id: string }
         Returns: Json
@@ -26915,9 +26959,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       anew_scope_level: ["NONE", "OWNED", "TEAM", "ORG"],

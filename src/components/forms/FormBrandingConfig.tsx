@@ -99,6 +99,7 @@ interface BrandingData {
   reminder_template_id: string | null;
   confirmation_sms_enabled: boolean;
   confirmation_sms_message: string;
+  confirmation_sms_include_link: boolean;
   reminder_sms_enabled: boolean;
   booking_manage_url_template: string;
   public_form_url_template: string;
@@ -154,6 +155,7 @@ const defaultBranding: BrandingData = {
   reminder_template_id: null,
   confirmation_sms_enabled: false,
   confirmation_sms_message: "",
+  confirmation_sms_include_link: false,
   reminder_sms_enabled: false,
   booking_manage_url_template: "",
   public_form_url_template: "",
@@ -396,6 +398,7 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
           reminder_template_id: (data as any).reminder_template_id ?? null,
           confirmation_sms_enabled: (data as any).confirmation_sms_enabled ?? false,
           confirmation_sms_message: (data as any).confirmation_sms_message ?? "",
+          confirmation_sms_include_link: (data as any).confirmation_sms_include_link ?? false,
           reminder_sms_enabled: (data as any).reminder_sms_enabled ?? false,
           booking_manage_url_template: (data as any).booking_manage_url_template ?? "",
           public_form_url_template: (data as any).public_form_url_template ?? "",
@@ -1021,17 +1024,31 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
                     />
                   </div>
                   {branding.confirmation_sms_enabled && (
-                    <div className="space-y-1">
-                      <Label className="text-xs">Mensagem do SMS</Label>
-                      <Textarea
-                        value={branding.confirmation_sms_message}
-                        onChange={(e) => setBranding({ ...branding, confirmation_sms_message: e.target.value })}
-                        placeholder="Deixe vazio para usar a mensagem por omissão (já inclui o aviso de contacto telefónico e o link de gerir/cancelar)."
-                        rows={3}
-                      />
-                      <p className="text-[10px] text-muted-foreground">
-                        Aceita as mesmas variáveis do email: {"{{lead_name}}"}, {"{{meeting_date}}"}, {"{{company_name}}"}, {"{{cancel_url}}"}.
-                      </p>
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Mensagem do SMS</Label>
+                        <Textarea
+                          value={branding.confirmation_sms_message}
+                          onChange={(e) => setBranding({ ...branding, confirmation_sms_message: e.target.value })}
+                          placeholder="Deixe vazio para usar a mensagem por omissão (já inclui o aviso de contacto telefónico)."
+                          rows={3}
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Aceita as mesmas variáveis do email: {"{{lead_name}}"}, {"{{meeting_date}}"}, {"{{company_name}}"}, {"{{cancel_url}}"}.
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-xs">Incluir link de gerir/cancelar no SMS</Label>
+                          <p className="text-[10px] text-muted-foreground">
+                            Desligado por omissão: a operadora de SMS recusa mensagens com link enquanto o remetente não estiver verificado. Só ligue depois de confirmar que a verificação foi feita.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={branding.confirmation_sms_include_link}
+                          onCheckedChange={(v) => setBranding({ ...branding, confirmation_sms_include_link: v })}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
