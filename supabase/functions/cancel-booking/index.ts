@@ -203,7 +203,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 6. Cancel pending reminders for this lead
+    // 6. Cancel pending reminders for this lead (email and SMS)
     if (leadId) {
       const { error: emailError } = await supabase
         .from('scheduled_emails')
@@ -213,6 +213,15 @@ Deno.serve(async (req: Request) => {
         .eq('status', 'pending');
       if (emailError) {
         console.error('[cancel-booking] failed to cancel scheduled_emails:', emailError);
+      }
+      const { error: smsError } = await supabase
+        .from('scheduled_sms')
+        .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancel_reason: 'Visita cancelada' })
+        .eq('entity_type', 'leads')
+        .eq('entity_id', leadId)
+        .eq('status', 'pending');
+      if (smsError) {
+        console.error('[cancel-booking] failed to cancel scheduled_sms:', smsError);
       }
     }
 

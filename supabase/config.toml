@@ -92,6 +92,12 @@ verify_jwt = true
 [functions.pipeline-automation]
 verify_jwt = false
 
+[functions.process-scheduled-sms]
+# false: chamada por pg_cron com CRON_SHARED_SECRET, sem formato de JWT --
+# mesmo padrao de process-scheduled-emails. O proprio codigo valida
+# requireServiceRole.
+verify_jwt = false
+
 [functions.send-quote-email]
 verify_jwt = true
 

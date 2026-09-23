@@ -17,7 +17,7 @@ import {
   pickTemplateId,
   buildManageUrl,
 } from '../_shared/formEmails.ts';
-import { sendSmsNow } from '../_shared/sendSms.ts';
+import { sendSmsNow, scheduleSms } from '../_shared/sendSms.ts';
 
 initSentry();
 
@@ -1047,6 +1047,25 @@ Deno.serve(async (req: Request) => {
               organizationId, userId: createdBy, toEmail: t.email,
               subject, bodyHtml: htmlFor(t.kind), scheduledFor: remindAt.toISOString(),
               entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId!, templateId: reminderTemplateId || null, smtpId: emailCfg.email_smtp_id,
+            });
+          }
+
+          // Regra 3 (continuação): lembrete por SMS, mesma hora do lembrete
+          // por email, só ao cliente (o técnico já vê a agenda dele — o
+          // email extra ao técnico é herdado de quando não havia app própria
+          // para ele consultar; não faz sentido duplicar isso em SMS, que
+          // tem custo por envio).
+          if (emailCfg.reminder_sms_enabled && leadPhone) {
+            const includeLinkReminder = emailCfg.confirmation_sms_include_link === true;
+            const reminderSmsVars = includeLinkReminder ? baseVars : { ...baseVars, cancel_url: '' };
+            const reminderSmsMessage = `${orgRow?.name || 'A empresa'}: lembrete da sua visita para {{meeting_date}}.${includeLinkReminder && confirmLink ? ' Confirme: {{confirm_url}}' : ''}`
+              .replace('{{confirm_url}}', confirmLink || '');
+            await scheduleSms(supabase, {
+              organizationId, createdBy,
+              toPhone: String(leadPhone),
+              message: renderSubject(reminderSmsMessage, reminderSmsVars),
+              scheduledFor: remindAt.toISOString(),
+              entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId ?? null,
             });
           }
         }

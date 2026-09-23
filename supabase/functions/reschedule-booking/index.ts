@@ -14,6 +14,7 @@ import {
 } from '../_shared/formEmails.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { scheduleSms } from "../_shared/sendSms.ts";
 
 initSentry();
 
@@ -246,6 +247,13 @@ Deno.serve(async (req: Request) => {
           .eq('entity_id', leadId)
           .eq('status', 'pending');
 
+        await supabase
+          .from('scheduled_sms')
+          .update({ status: 'cancelled' })
+          .eq('entity_type', 'leads')
+          .eq('entity_id', leadId)
+          .eq('status', 'pending');
+
         const emailCfg = formId ? await loadFormEmailConfig(supabase, formId) : null;
 
         if (emailCfg?.reminder_enabled) {
@@ -271,6 +279,7 @@ Deno.serve(async (req: Request) => {
               fv.first_name || fv.po_nome || fv.nome || '',
               fv.last_name || fv.po_apelido || fv.apelido || '',
             ].filter(Boolean).join(' ').trim() || 'Cliente';
+            const leadPhone = String(fv.phone || fv.po_telefone || fv.telefone || '');
 
             const userId = lead?.assigned_to || lead?.created_by || null;
 
@@ -351,6 +360,21 @@ Deno.serve(async (req: Request) => {
                   templateId: reminderTemplateId || null,
                 });
               }
+            }
+
+            if (emailCfg.reminder_sms_enabled && leadPhone) {
+              const includeLinkReminder = emailCfg.confirmation_sms_include_link === true;
+              const reminderSmsVars = includeLinkReminder ? baseVars : { ...baseVars, cancel_url: '' };
+              const reminderSmsMessage = `${orgRow?.name || 'A empresa'}: lembrete da sua visita reagendada para {{meeting_date}}.${includeLinkReminder ? ' Gerir: {{cancel_url}}' : ''}`;
+              await scheduleSms(supabase, {
+                organizationId,
+                createdBy: userId,
+                toPhone: leadPhone,
+                message: renderSubject(reminderSmsMessage, reminderSmsVars),
+                scheduledFor: remindAt.toISOString(),
+                entityType: 'leads',
+                entityId: leadId,
+              });
             }
           }
         }

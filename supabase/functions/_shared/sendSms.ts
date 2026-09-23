@@ -51,3 +51,35 @@ export async function sendSmsNow(params: {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   }
 }
+
+/**
+ * Insert a scheduled_sms row (regra 3 — lembrete por SMS X horas antes),
+ * processed later by process-scheduled-sms. Mirrors scheduleEmail() in
+ * formEmails.ts.
+ */
+export async function scheduleSms(
+  supabase: any,
+  row: {
+    organizationId: string;
+    createdBy: string | null;
+    toPhone: string;
+    message: string;
+    scheduledFor: string; // ISO
+    entityType?: string;
+    entityId?: string | null;
+  },
+): Promise<void> {
+  try {
+    await supabase.from("scheduled_sms").insert({
+      organization_id: row.organizationId,
+      created_by: row.createdBy,
+      entity_type: row.entityType || "leads",
+      entity_id: row.entityId,
+      to_phone: row.toPhone,
+      message: row.message,
+      scheduled_for: row.scheduledFor,
+    });
+  } catch (err) {
+    console.error("[sendSms] scheduleSms failed:", err);
+  }
+}

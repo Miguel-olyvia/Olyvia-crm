@@ -18445,6 +18445,79 @@ export type Database = {
           },
         ]
       }
+      scheduled_sms: {
+        Row: {
+          cancel_reason: string | null
+          cancelled_at: string | null
+          created_at: string
+          created_by: string | null
+          entity_id: string | null
+          entity_type: string | null
+          error_message: string | null
+          id: string
+          message: string
+          organization_id: string | null
+          scheduled_for: string
+          sent_at: string | null
+          status: string
+          to_phone: string
+        }
+        Insert: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          error_message?: string | null
+          id?: string
+          message: string
+          organization_id?: string | null
+          scheduled_for: string
+          sent_at?: string | null
+          status?: string
+          to_phone: string
+        }
+        Update: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          error_message?: string | null
+          id?: string
+          message?: string
+          organization_id?: string | null
+          scheduled_for?: string
+          sent_at?: string | null
+          status?: string
+          to_phone?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_sms_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_sms_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "scheduled_sms_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scheduling_invites: {
         Row: {
           created_at: string
