@@ -19,6 +19,9 @@ import { callAiGateway } from "../_shared/aiGateway.ts";
 import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
 import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
+import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
+import { haversineKm } from "../_shared/distance.ts";
+import { checkTravelFeasible } from "../_shared/travelFeasibility.ts";
 
 initSentry();
 
@@ -90,6 +93,23 @@ serve(async (req) => {
       lead_postal_code,
     } = parsed.data;
     const duration_minutes = parsed.data.duration_minutes ?? 60;
+
+    // Regra 13: coordenadas exactas do cliente via CP7 (API Olyvia de
+    // códigos postais), reaproveitando o mesmo mecanismo já testado ao vivo
+    // em book-slot (regras 4/5/13/15) -- geocodificado uma só vez, usado
+    // para distância real ao comercial e para verificar tempo de
+    // deslocação real face às outras visitas desse dia. Nulo (código
+    // ausente, incompleto, ou não encontrado na fonte) faz tudo o resto
+    // degradar de volta ao comportamento antigo, sem bloquear nada.
+    let clientLat: number | null = null;
+    let clientLng: number | null = null;
+    if (lead_postal_code) {
+      const geo = await geocodePostalCode(lead_postal_code);
+      if (geo) {
+        clientLat = geo.latitude;
+        clientLng = geo.longitude;
+      }
+    }
 
     // Scope check: caller must belong to the requested organization
     const hasAccess = await validateOrgScope(supabase, caller, organization_id);
@@ -210,7 +230,7 @@ serve(async (req) => {
     // 2b. Get schedule resources for this organization
     const { data: resources } = await supabase
       .from("schedule_resources")
-      .select("id, user_id, name, metadata")
+      .select("id, user_id, name, metadata, postal_code, latitude, longitude")
       .eq("is_active", true)
       .eq("organization_id", organization_id)
       .limit(500);
@@ -225,9 +245,16 @@ serve(async (req) => {
       resource_id: string | null;
       name: string;
       postal_code: string | null;
+      latitude: number | null;
+      longitude: number | null;
     }[] = [];
 
-    // First add schedule_resources (user_id is already anew_users.id)
+    // First add schedule_resources (user_id is already anew_users.id).
+    // postal_code/latitude/longitude vêm agora das colunas próprias do
+    // recurso (migration 20261204210000, regras 4/5) -- (r.metadata as
+    // any)?.postal_code era um campo JSON solto, nunca preenchido por
+    // nenhum ecrã; as colunas novas são as mesmas já geocodificadas no
+    // ecrã de configurar o comercial.
     (resources || []).forEach(r => {
       if (r.user_id && !seenAnewUserIds.has(r.user_id)) {
         seenAnewUserIds.add(r.user_id);
@@ -237,7 +264,9 @@ serve(async (req) => {
           user_id: r.user_id,         // anew_users.id (internal)
           resource_id: r.id,           // schedule_resources.id (for scheduling)
           name: r.name,
-          postal_code: (r.metadata as any)?.postal_code || null,
+          postal_code: r.postal_code || (r.metadata as any)?.postal_code || null,
+          latitude: r.latitude ?? null,
+          longitude: r.longitude ?? null,
         });
       }
     });
@@ -253,6 +282,8 @@ serve(async (req) => {
           resource_id: null,
           name: profile.display_name || "Utilizador",
           postal_code: null,
+          latitude: null,
+          longitude: null,
         });
       }
     });
@@ -294,7 +325,7 @@ serve(async (req) => {
         .select(`
           resource_id,
           schedule_items!inner (
-            id, start_datetime, end_datetime, status, location
+            id, start_datetime, end_datetime, status, location, location_lat, location_lng
           )
         `)
         .in("resource_id", resourceIds)
@@ -369,13 +400,28 @@ serve(async (req) => {
       const dailyCount = assigneeItems.length;
       const lastVisit = lastVisits[assignee.id] || null;
       
+      // Regra 13: distância real (Haversine) quando ambos têm coordenadas
+      // -- substitui o antigo booleano de "primeiros 4 dígitos batem",
+      // sem tirar o campo da resposta (a UI já lê postal_code_match para
+      // mostrar a badge "Zona próxima"). "Zona próxima" passa a ter uma
+      // definição real (<=15km) em vez de coincidência de prefixo, quando
+      // há coordenadas; sem coordenadas, cai para o comportamento antigo.
+      const distanceKm = (clientLat !== null && clientLng !== null && assignee.latitude !== null && assignee.longitude !== null)
+        ? haversineKm(clientLat, clientLng, assignee.latitude, assignee.longitude)
+        : null;
+      const postalPrefixMatch = !!(lead_postal_code && assignee.postal_code &&
+        assignee.postal_code.substring(0, 4) === lead_postal_code.substring(0, 4));
+      const isNearZone = distanceKm !== null ? distanceKm <= 15 : postalPrefixMatch;
+
       return {
         ...assignee,
         scheduled_items: assigneeItems.map(item => ({
           start: item.start_datetime,
           end: item.end_datetime,
           status: item.status,
-          location: item.location
+          location: item.location,
+          location_lat: (item as any).location_lat ?? null,
+          location_lng: (item as any).location_lng ?? null,
         })),
         daily_visits_count: dailyCount,
         weekly_visits_count: weeklyCount,
@@ -383,8 +429,8 @@ serve(async (req) => {
           date: lastVisit.date,
           location: lastVisit.location
         } : null,
-        postal_code_match: lead_postal_code && assignee.postal_code && 
-          assignee.postal_code.substring(0, 4) === lead_postal_code.substring(0, 4)
+        distance_km: distanceKm,
+        postal_code_match: isNearZone,
       };
     });
 
@@ -405,7 +451,7 @@ serve(async (req) => {
           for (const item of assignee.scheduled_items) {
             const itemStart = new Date(item.start).getTime();
             const itemEnd = new Date(item.end).getTime();
-            
+
             if (
               (requestedStartTime >= itemStart - bufferMs && requestedStartTime < itemEnd + bufferMs) ||
               (requestedEndTime > itemStart - bufferMs && requestedEndTime <= itemEnd + bufferMs) ||
@@ -414,9 +460,33 @@ serve(async (req) => {
               return false;
             }
           }
+
+          // Regra 13: tempo real de deslocação desde/para a visita vizinha
+          // desse dia, quando há coordenadas do cliente -- no-op (sempre
+          // feasible) sem elas, mantendo o comportamento antigo (só o
+          // buffer fixo acima) para quem ainda não tem morada.
+          if (clientLat !== null && clientLng !== null) {
+            const { feasible } = checkTravelFeasible({
+              clientLat,
+              clientLng,
+              slotStart: requestedStart,
+              slotEnd: requestedEnd!,
+              neighbors: assignee.scheduled_items.map(item => ({
+                start_datetime: item.start,
+                end_datetime: item.end,
+                location_lat: item.location_lat,
+                location_lng: item.location_lng,
+              })),
+            });
+            if (!feasible) return false;
+          }
+
           return true;
         })
         .sort((a, b) => {
+          if (a.distance_km !== null && b.distance_km !== null) return a.distance_km - b.distance_km;
+          if (a.distance_km !== null) return -1;
+          if (b.distance_km !== null) return 1;
           if (a.postal_code_match && !b.postal_code_match) return -1;
           if (!a.postal_code_match && b.postal_code_match) return 1;
           return a.weekly_visits_count - b.weekly_visits_count;
@@ -430,14 +500,15 @@ serve(async (req) => {
             type: a.type,
             resource_id: a.resource_id || null,
             score: 100 - idx * 10,
-            reason: a.postal_code_match 
-              ? "Código postal próximo" 
-              : `${a.weekly_visits_count} visitas esta semana`,
+            reason: a.distance_km !== null
+              ? `${a.distance_km.toFixed(1)} km de distância`
+              : (a.postal_code_match ? "Código postal próximo" : `${a.weekly_visits_count} visitas esta semana`),
             available: true,
             daily_visits: a.daily_visits_count,
             weekly_visits: a.weekly_visits_count,
             last_visit: a.last_visit,
-            postal_code_match: a.postal_code_match
+            postal_code_match: a.postal_code_match,
+            distance_km: a.distance_km,
           })).slice(0, 5),
           ai_used: false,
           rules_applied: {
@@ -478,12 +549,14 @@ ${JSON.stringify(assigneeSchedules.map(a => ({
   user_id: a.user_id,
   name: a.name,
   postal_code: a.postal_code,
+  distance_km: a.distance_km,
   daily_visits: a.daily_visits_count,
   weekly_visits: a.weekly_visits_count,
   last_visit: a.last_visit,
   scheduled_today: a.scheduled_items,
   postal_code_match: a.postal_code_match
 })), null, 2)}
+${clientLat !== null ? "distance_km é a distância real (linha recta, km) entre o colaborador e o cliente -- prefere quem tiver o valor mais baixo, quando a proximidade importar." : ""}
 
 Responde APENAS com um JSON array contendo os colaboradores ordenados do mais adequado para o menos adequado:
 [
@@ -571,7 +644,8 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
         resource_id: assignee?.resource_id || null,      // schedule_resources.id
         type: assignee?.type || "unknown",
         last_visit: scheduleData?.last_visit || null,
-        postal_code_match: scheduleData?.postal_code_match || false
+        postal_code_match: scheduleData?.postal_code_match || false,
+        distance_km: scheduleData?.distance_km ?? null,
       };
     });
 
