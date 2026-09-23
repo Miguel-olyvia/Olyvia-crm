@@ -7424,6 +7424,8 @@ export type Database = {
           total_com_iva: number | null
           total_sem_iva: number | null
           unidade: string | null
+          units_per_uom: number
+          uom_id: string | null
           visible_to_client: boolean
         }
         Insert: {
@@ -7444,6 +7446,8 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          units_per_uom?: number
+          uom_id?: string | null
           visible_to_client?: boolean
         }
         Update: {
@@ -7464,6 +7468,8 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          units_per_uom?: number
+          uom_id?: string | null
           visible_to_client?: boolean
         }
         Relationships: [
@@ -7486,6 +7492,13 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_lines_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
             referencedColumns: ["id"]
           },
         ]
@@ -16240,8 +16253,11 @@ export type Database = {
           selected_attributes: Json | null
           service_id: string | null
           sku: string | null
+          supplier_sku: string | null
           total_price: number
           unit_price: number
+          units_per_uom: number
+          uom_id: string | null
           updated_at: string
           vat_amount: number | null
           vat_rate: number | null
@@ -16259,8 +16275,11 @@ export type Database = {
           selected_attributes?: Json | null
           service_id?: string | null
           sku?: string | null
+          supplier_sku?: string | null
           total_price?: number
           unit_price?: number
+          units_per_uom?: number
+          uom_id?: string | null
           updated_at?: string
           vat_amount?: number | null
           vat_rate?: number | null
@@ -16278,8 +16297,11 @@ export type Database = {
           selected_attributes?: Json | null
           service_id?: string | null
           sku?: string | null
+          supplier_sku?: string | null
           total_price?: number
           unit_price?: number
+          units_per_uom?: number
+          uom_id?: string | null
           updated_at?: string
           vat_amount?: number | null
           vat_rate?: number | null
@@ -16311,6 +16333,13 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
             referencedColumns: ["id"]
           },
         ]
@@ -16766,6 +16795,8 @@ export type Database = {
           total_com_iva: number | null
           total_sem_iva: number | null
           unidade: string | null
+          units_per_uom: number
+          uom_id: string | null
           visible_to_client: boolean
         }
         Insert: {
@@ -16798,6 +16829,8 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          units_per_uom?: number
+          uom_id?: string | null
           visible_to_client?: boolean
         }
         Update: {
@@ -16830,6 +16863,8 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          units_per_uom?: number
+          uom_id?: string | null
           visible_to_client?: boolean
         }
         Relationships: [
@@ -16894,6 +16929,13 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_lines_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
             referencedColumns: ["id"]
           },
         ]
@@ -18233,10 +18275,13 @@ export type Database = {
           employee_id: string | null
           id: string
           is_active: boolean | null
+          latitude: number | null
+          longitude: number | null
           max_daily_capacity: number | null
           metadata: Json | null
           name: string
           organization_id: string | null
+          postal_code: string | null
           resource_type: string
           updated_at: string
           user_id: string | null
@@ -18248,10 +18293,13 @@ export type Database = {
           employee_id?: string | null
           id?: string
           is_active?: boolean | null
+          latitude?: number | null
+          longitude?: number | null
           max_daily_capacity?: number | null
           metadata?: Json | null
           name: string
           organization_id?: string | null
+          postal_code?: string | null
           resource_type?: string
           updated_at?: string
           user_id?: string | null
@@ -18263,10 +18311,13 @@ export type Database = {
           employee_id?: string | null
           id?: string
           is_active?: boolean | null
+          latitude?: number | null
+          longitude?: number | null
           max_daily_capacity?: number | null
           metadata?: Json | null
           name?: string
           organization_id?: string | null
+          postal_code?: string | null
           resource_type?: string
           updated_at?: string
           user_id?: string | null
@@ -19685,6 +19736,7 @@ export type Database = {
           address: string | null
           business_unit_id: string | null
           city: string | null
+          code: string | null
           contact_person: string | null
           country: string | null
           created_at: string
@@ -19717,6 +19769,7 @@ export type Database = {
           address?: string | null
           business_unit_id?: string | null
           city?: string | null
+          code?: string | null
           contact_person?: string | null
           country?: string | null
           created_at?: string
@@ -19749,6 +19802,7 @@ export type Database = {
           address?: string | null
           business_unit_id?: string | null
           city?: string | null
+          code?: string | null
           contact_person?: string | null
           country?: string | null
           created_at?: string
@@ -21560,25 +21614,44 @@ export type Database = {
               scope: string
             }[]
           }
-      find_nearest_resources: {
-        Args: {
-          p_board_id: string
-          p_district_id?: string
-          p_duration_minutes?: number
-          p_limit?: number
-          p_min_advance_hours?: number
-          p_target_date?: string
-          p_target_postal_code?: string
-        }
-        Returns: {
-          available_slots: Json
-          distance_km: number
-          priority: number
-          resource_id: string
-          resource_name: string
-          resource_type: string
-        }[]
-      }
+      find_nearest_resources:
+        | {
+            Args: {
+              p_board_id: string
+              p_district_id?: string
+              p_duration_minutes?: number
+              p_limit?: number
+              p_target_date?: string
+              p_target_postal_code?: string
+            }
+            Returns: {
+              available_slots: Json
+              distance_km: number
+              priority: number
+              resource_id: string
+              resource_name: string
+              resource_type: string
+            }[]
+          }
+        | {
+            Args: {
+              p_board_id: string
+              p_district_id?: string
+              p_duration_minutes?: number
+              p_limit?: number
+              p_min_advance_hours?: number
+              p_target_date?: string
+              p_target_postal_code?: string
+            }
+            Returns: {
+              available_slots: Json
+              distance_km: number
+              priority: number
+              resource_id: string
+              resource_name: string
+              resource_type: string
+            }[]
+          }
       fn_apply_deal_need: {
         Args: {
           p_created_by: string
@@ -21684,6 +21757,11 @@ export type Database = {
           origin_source: string
           origin_source_id: string
         }[]
+      }
+      fn_uom_is_used_in_lines: { Args: { p_uom_id: string }; Returns: boolean }
+      fn_uom_units_per: {
+        Args: { p_product_id: string; p_uom_id: string }
+        Returns: number
       }
       fn_write_entity_history: {
         Args: {
@@ -22000,6 +22078,10 @@ export type Database = {
       get_org_subtree_ids: { Args: { _root_org_id: string }; Returns: string[] }
       get_permission_scope_context: {
         Args: { _organization_id: string }
+        Returns: Json
+      }
+      get_portal_commercial: {
+        Args: { p_organization_id: string }
         Returns: Json
       }
       get_product_category_org_id: {
@@ -25452,6 +25534,51 @@ export type Database = {
       rpc_snapshot_quote_diagnostic: {
         Args: { p_deal_id: string; p_quote_id: string }
         Returns: number
+      }
+      rpc_supplier_catalog: {
+        Args: { p_supplier_id: string }
+        Returns: {
+          barcode: string
+          currency: string
+          is_active: boolean
+          is_preferred: boolean
+          item_supplier_id: string
+          lead_time_days: number
+          moq: number
+          product_id: string
+          product_name: string
+          product_uom_code: string
+          product_uom_id: string
+          purchase_price: number
+          sku: string
+          supplier_sku: string
+          units_per_uom: number
+          uom_code: string
+          uom_id: string
+        }[]
+      }
+      rpc_supplier_catalog_search: {
+        Args: { p_limit?: number; p_query: string; p_supplier_id: string }
+        Returns: {
+          barcode: string
+          currency: string
+          is_active: boolean
+          is_preferred: boolean
+          item_supplier_id: string
+          lead_time_days: number
+          match_rank: number
+          moq: number
+          product_id: string
+          product_name: string
+          product_uom_code: string
+          product_uom_id: string
+          purchase_price: number
+          sku: string
+          supplier_sku: string
+          units_per_uom: number
+          uom_code: string
+          uom_id: string
+        }[]
       }
       rpc_toggle_client_vip: {
         Args: {
