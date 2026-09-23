@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
+import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
+import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,58 +48,43 @@ const ClientPortalDirectSales = () => {
   const navigate = useNavigate();
   const [sales, setSales] = useState<PortalDirectSaleRow[]>([]);
   const [loading, setLoading] = useState(true);
+  // Empresa ativa do portal — ver src/contexts/PortalCompanyContext.tsx.
+  const { activeOrg, isLoading: orgsLoading, isError: orgsError, hasMultiple } = usePortalCompany();
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load(uid: string | null) {
-      if (!uid) {
-        if (!cancelled) { setSales([]); setLoading(false); }
-        return;
-      }
+    async function load(org: PortalOrg) {
       if (!cancelled) setLoading(true);
 
-      // client_portal_users lido com `as any` por causa de direct_sale_id, que
-      // também ainda não está nos tipos gerados.
-      const { data: portalUsers } = await (supabase as any)
-        .from("client_portal_users")
-        .select("direct_sale_id, entity_id, organization_id")
-        .eq("auth_user_id", uid);
-      if (cancelled) return;
-
-      const portalRows = (portalUsers as any[] | null) || [];
-      if (portalRows.length === 0) {
-        if (!cancelled) { setSales([]); setLoading(false); }
-        return;
-      }
-
-      const entityIds = [...new Set(portalRows.map(p => p.entity_id).filter(Boolean))] as string[];
-      const organizationIds = [...new Set(portalRows.map(p => p.organization_id).filter(Boolean))] as string[];
       // direct_sale_id guarda só a última venda direta partilhada com esta
-      // conta (create-client-portal-access faz update da mesma linha), por isso
-      // serve de complemento à query por entidade, nunca de filtro único.
-      const directSaleIds = [...new Set(portalRows.map(p => p.direct_sale_id).filter(Boolean))] as string[];
-
-      if ((entityIds.length === 0 || organizationIds.length === 0) && directSaleIds.length === 0) {
+      // conta nesta empresa (create-client-portal-access faz update da mesma
+      // linha), por isso serve de complemento à query por entidade, nunca de
+      // filtro único.
+      if (!org.entityId && !org.directSaleId) {
         if (!cancelled) { setSales([]); setLoading(false); }
         return;
       }
 
       const COLUMNS = "id, sale_number, title, status, total, created_at, sent_at, valid_until";
 
+      // Par (organização, entidade) da empresa ativa, com `.eq` + `.eq`. Antes
+      // eram dois `.in()` independentes sobre todas as empresas do grupo, o que
+      // formava um produto cartesiano (o entity_id pode diferir entre
+      // organizações) e podia mostrar combinações nunca concedidas.
       const [entitySalesRes, directSalesRes] = await Promise.all([
-        entityIds.length > 0 && organizationIds.length > 0
+        org.entityId
           ? (supabase as any)
               .from("direct_sales")
               .select(COLUMNS)
-              .in("organization_id", organizationIds)
-              .in("entity_id", entityIds)
+              .eq("organization_id", org.organizationId)
+              .eq("entity_id", org.entityId)
           : Promise.resolve({ data: [] as any[] }),
-        directSaleIds.length > 0
+        org.directSaleId
           ? (supabase as any)
               .from("direct_sales")
               .select(COLUMNS)
-              .in("id", directSaleIds)
+              .eq("id", org.directSaleId)
           : Promise.resolve({ data: [] as any[] }),
       ]);
       if (cancelled) return;
@@ -113,13 +100,17 @@ const ClientPortalDirectSales = () => {
       setLoading(false);
     }
 
-    supabase.auth.getUser().then(({ data: { user } }) => load(user?.id ?? null));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      load(session?.user?.id ?? null);
-    });
+    if (orgsLoading) return;
+    if (!activeOrg) {
+      setSales([]);
+      setLoading(false);
+      return;
+    }
 
-    return () => { cancelled = true; subscription.unsubscribe(); };
-  }, []);
+    void load(activeOrg);
+
+    return () => { cancelled = true; };
+  }, [activeOrg, orgsLoading]);
 
   return (
     <ClientPortalLayout>
@@ -130,11 +121,19 @@ const ClientPortalDirectSales = () => {
           <div className="space-y-3">
             {[1, 2, 3].map(i => <Skeleton key={i} className="h-20 w-full" />)}
           </div>
+        ) : orgsError ? (
+          // Falha a carregar o âmbito: nunca apresentar como "não tem nada".
+          <PortalOrgsErrorState />
         ) : sales.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-center">
               <Receipt className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
               <p className="text-muted-foreground">Não tem vendas diretas disponíveis.</p>
+              {hasMultiple && (
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Se esperava ver outras, troque de empresa no seletor no topo da página.
+                </p>
+              )}
             </CardContent>
           </Card>
         ) : (

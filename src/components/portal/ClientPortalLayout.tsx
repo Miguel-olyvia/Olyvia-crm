@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { LogOut, FileText, ScrollText, FolderOpen, Home, Receipt } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FirstLoginModal } from "@/components/portal/FirstLoginModal";
+import { PortalCompanySwitcher } from "@/components/portal/PortalCompanySwitcher";
+import { PORTAL_ORGS_QUERY_KEY, usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface ClientPortalLayoutProps {
   children: ReactNode;
@@ -18,6 +21,22 @@ const NAV_ITEMS = [
   { label: "Contratos", icon: ScrollText, path: "/client-portal/contracts", matchPaths: ["/client-portal/contracts"], badgeKey: "contracts" as const },
   { label: "Documentos", icon: FolderOpen, path: "/client-portal/documents", matchPaths: ["/client-portal/documents"], badgeKey: null },
 ];
+
+// Quem já mudou a palavra-passe nesta aba, POR UTILIZADOR.
+//
+// Âmbito de módulo e não `useRef` porque este layout é remontado a cada
+// navegação entre páginas do portal: um ref voltaria a zero e o modal de
+// primeiro login — que é não-dispensável — podia reabrir depois de a
+// palavra-passe já ter sido mudada, se o cliente clicasse noutro separador
+// antes do refetch (ou se este falhasse).
+//
+// Guardar o `user.id` em vez de um booleano é o que impede o buraco: logout de
+// A + login de B na mesma aba (tudo navegação de SPA, o módulo nunca é
+// reavaliado) deixaria B sem modal, com a palavra-passe temporária do email.
+// Cobre pela mesma via a expiração de sessão, o logout noutra aba e a
+// reemissão de acesso com `force_new_password` (que volta a pôr
+// first_login = true).
+let passwordChangedForUserId: string | null = null;
 
 function getInitials(name?: string | null): string {
   if (!name) return "?";
@@ -34,155 +53,35 @@ function getInitials(name?: string | null): string {
 export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
+  // Empresa ativa do portal — branding e contagens seguem-na. Antes o
+  // cabeçalho usava a primeira linha devolvida por client_portal_users (sem
+  // `order by`, logo não determinística) e as contagens somavam todas as
+  // empresas do grupo. Ver src/contexts/PortalCompanyContext.tsx.
+  const { activeOrg, portalOrgs, hasMultiple, isLoading: orgsLoading } = usePortalCompany();
+  const queryClient = useQueryClient();
   const [userName, setUserName] = useState("");
-  const [orgName, setOrgName] = useState("");
-  const [orgLogo, setOrgLogo] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showFirstLogin, setShowFirstLogin] = useState(false);
   const [badgeCounts, setBadgeCounts] = useState<{ proposals: number; contracts: number; directSales: number }>({ proposals: 0, contracts: 0, directSales: 0 });
+
+  const orgName = activeOrg?.name || "";
+  const orgLogo = activeOrg?.logoUrl ?? null;
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load(user: { id: string; email?: string | null; user_metadata?: any }) {
-      if (cancelled) return;
-      setUserName(user.user_metadata?.full_name || user.email || "");
-
-      const { data: portalUser } = await supabase
-        .from("client_portal_users")
-        .select("organization_id, first_login, proposal_id, contract_id, entity_id")
-        .eq("auth_user_id", user.id);
-      if (cancelled) return;
-
-      if (portalUser && portalUser.length > 0) {
-        const firstRecord = portalUser[0];
-        if (firstRecord.first_login) {
-          setShowFirstLogin(true);
-        }
-
-        const { data: org } = await supabase
-          .from("anew_organizations")
-          .select("name, logo_url")
-          .eq("id", firstRecord.organization_id)
-          .maybeSingle();
-        if (cancelled) return;
-
-        if (org) {
-          setOrgName(org.name || "");
-          setOrgLogo(org.logo_url);
-        }
-
-        const proposalIdSet = new Set<string>(
-          portalUser.filter(p => p.proposal_id).map(p => p.proposal_id!)
-        );
-        const contractIdSet = new Set<string>(
-          portalUser.filter(p => p.contract_id).map(p => p.contract_id!)
-        );
-
-        const entityPairs = portalUser
-          .filter(p => p.entity_id && p.organization_id)
-          .map(p => ({ entity_id: p.entity_id!, organization_id: p.organization_id! }));
-
-        if (entityPairs.length > 0) {
-          const entityIds = Array.from(new Set(entityPairs.map(e => e.entity_id)));
-          const orgIds = Array.from(new Set(entityPairs.map(e => e.organization_id)));
-
-          const [propsEnt, contractsEnt] = await Promise.all([
-            supabase.from("proposals").select("id, entity_id, organization_id")
-              .in("entity_id", entityIds).in("organization_id", orgIds),
-            supabase.from("client_contracts").select("id, entity_id, organization_id")
-              .in("entity_id", entityIds).in("organization_id", orgIds),
-          ]);
-          if (cancelled) return;
-
-          const pairKey = (e: string, o: string) => `${e}::${o}`;
-          const allowed = new Set(entityPairs.map(p => pairKey(p.entity_id, p.organization_id)));
-
-          (propsEnt.data || []).forEach((r: any) => {
-            if (r.entity_id && r.organization_id && allowed.has(pairKey(r.entity_id, r.organization_id))) {
-              proposalIdSet.add(r.id);
-            }
-          });
-          (contractsEnt.data || []).forEach((r: any) => {
-            if (r.entity_id && r.organization_id && allowed.has(pairKey(r.entity_id, r.organization_id))) {
-              contractIdSet.add(r.id);
-            }
-          });
-        }
-
-        const proposalIds = Array.from(proposalIdSet);
-        const contractIds = Array.from(contractIdSet);
-
-        let pendingProposals = 0;
-        let pendingContracts = 0;
-
-        if (proposalIds.length > 0) {
-          const { data: props } = await supabase
-            .from("proposals")
-            .select("id, status")
-            .in("id", proposalIds)
-            .in("status", ["sent", "pending"]);
-          if (cancelled) return;
-          pendingProposals = props?.length || 0;
-        }
-
-        if (contractIds.length > 0) {
-          const { data: conts } = await supabase
-            .from("client_contracts")
-            .select("id, status")
-            .in("id", contractIds)
-            .in("status", ["sent", "pending"]);
-          if (cancelled) return;
-          pendingContracts = conts?.length || 0;
-        }
-
-        if (cancelled) return;
-        setBadgeCounts(prev => ({ ...prev, proposals: pendingProposals, contracts: pendingContracts }));
-
-        // Venda Direta — contagem estritamente aditiva: corre DEPOIS de as
-        // contagens de propostas/contratos já estarem no estado e atualiza só a
-        // sua chave. Qualquer falha aqui (query, RLS, coluna em falta) deixa as
-        // outras duas intactas — é o motivo do try/catch e do setState
-        // funcional.
-        //
-        // Sem filtro por client_portal_users.direct_sale_id: essa coluna guarda
-        // apenas a ÚLTIMA venda direta partilhada com a conta de portal
-        // (create-client-portal-access faz update da mesma linha), por isso
-        // esconderia as anteriores. O âmbito real vem da RLS "Client can view
-        // own direct sale" (via client_portal_documents); o filtro por
-        // entidade/organização abaixo é só para estreitar a query, mesmo padrão
-        // das propostas.
-        //
-        // `(supabase as any)`: direct_sales ainda não existe em
-        // src/integrations/supabase/types.ts.
-        try {
-          if (entityPairs.length > 0) {
-            const dsEntityIds = Array.from(new Set(entityPairs.map(e => e.entity_id)));
-            const dsOrgIds = Array.from(new Set(entityPairs.map(e => e.organization_id)));
-            const { data: directSales } = await (supabase as any)
-              .from("direct_sales")
-              .select("id")
-              .in("entity_id", dsEntityIds)
-              .in("organization_id", dsOrgIds)
-              .eq("status", "enviada");
-            if (cancelled) return;
-            setBadgeCounts(prev => ({ ...prev, directSales: (directSales as any[] | null)?.length || 0 }));
-          }
-        } catch {
-          // contagem opcional — nunca deve afetar o resto do portal
-        }
-      }
-    }
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (cancelled) return;
-      if (!session?.user) { navigate("/auth"); return; }
-      void load(session.user);
+      if (!session?.user) { setCurrentUserId(null); navigate("/auth"); return; }
+      setCurrentUserId(session.user.id);
+      setUserName(session.user.user_metadata?.full_name || session.user.email || "");
     });
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (cancelled) return;
-      if (!session?.user) { navigate("/auth"); return; }
-      void load(session.user);
+      if (!session?.user) { setCurrentUserId(null); navigate("/auth"); return; }
+      setCurrentUserId(session.user.id);
+      setUserName(session.user.user_metadata?.full_name || session.user.email || "");
     });
 
     return () => {
@@ -190,6 +89,111 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       subscription.unsubscribe();
     };
   }, [navigate]);
+
+  // A palavra-passe é da conta, não da empresa: basta uma das linhas de portal
+  // ter first_login para o cliente ter de a mudar (e o handlePasswordChanged
+  // limpa a marca em todas).
+  useEffect(() => {
+    // Só salta o modal para a conta que mudou mesmo a palavra-passe nesta aba.
+    if (currentUserId && passwordChangedForUserId === currentUserId) return;
+    if (portalOrgs.some(o => o.firstLogin)) setShowFirstLogin(true);
+  }, [portalOrgs, currentUserId]);
+
+  useEffect(() => {
+    if (!activeOrg) return;
+    let cancelled = false;
+
+    async function loadBadges(org: PortalOrg) {
+      // Zerar antes de recontar: ao trocar de empresa não podem ficar à vista
+      // os números da anterior.
+      setBadgeCounts({ proposals: 0, contracts: 0, directSales: 0 });
+
+      // Colunas legadas da linha desta empresa (só guardam o último documento
+      // partilhado por esse canal) + tudo o que casa com o par
+      // (organização, entidade).
+      const proposalIdSet = new Set<string>();
+      const contractIdSet = new Set<string>();
+      if (org.proposalId) proposalIdSet.add(org.proposalId);
+      if (org.contractId) contractIdSet.add(org.contractId);
+
+      if (org.entityId) {
+        const [propsEnt, contractsEnt] = await Promise.all([
+          supabase.from("proposals").select("id")
+            .eq("organization_id", org.organizationId).eq("entity_id", org.entityId),
+          supabase.from("client_contracts").select("id")
+            .eq("organization_id", org.organizationId).eq("entity_id", org.entityId),
+        ]);
+        if (cancelled) return;
+
+        (propsEnt.data || []).forEach((r: any) => proposalIdSet.add(r.id));
+        (contractsEnt.data || []).forEach((r: any) => contractIdSet.add(r.id));
+      }
+
+      const proposalIds = Array.from(proposalIdSet);
+      const contractIds = Array.from(contractIdSet);
+
+      let pendingProposals = 0;
+      let pendingContracts = 0;
+
+      if (proposalIds.length > 0) {
+        const { data: props } = await supabase
+          .from("proposals")
+          .select("id, status")
+          .in("id", proposalIds)
+          .in("status", ["sent", "pending"]);
+        if (cancelled) return;
+        pendingProposals = props?.length || 0;
+      }
+
+      if (contractIds.length > 0) {
+        const { data: conts } = await supabase
+          .from("client_contracts")
+          .select("id, status")
+          .in("id", contractIds)
+          .in("status", ["sent", "pending"]);
+        if (cancelled) return;
+        pendingContracts = conts?.length || 0;
+      }
+
+      if (cancelled) return;
+      setBadgeCounts(prev => ({ ...prev, proposals: pendingProposals, contracts: pendingContracts }));
+
+      // Venda Direta — contagem estritamente aditiva: corre DEPOIS de as
+      // contagens de propostas/contratos já estarem no estado e atualiza só a
+      // sua chave. Qualquer falha aqui (query, RLS, coluna em falta) deixa as
+      // outras duas intactas — é o motivo do try/catch e do setState
+      // funcional.
+      //
+      // Sem filtro por client_portal_users.direct_sale_id: essa coluna guarda
+      // apenas a ÚLTIMA venda direta partilhada com a conta de portal
+      // (create-client-portal-access faz update da mesma linha), por isso
+      // esconderia as anteriores. O âmbito real vem da RLS "Client can view
+      // own direct sale" (via client_portal_documents); o filtro pelo par
+      // (organização, entidade) abaixo é só para estreitar a query, mesmo
+      // padrão das propostas.
+      //
+      // `(supabase as any)`: direct_sales ainda não existe em
+      // src/integrations/supabase/types.ts.
+      try {
+        if (org.entityId) {
+          const { data: directSales } = await (supabase as any)
+            .from("direct_sales")
+            .select("id")
+            .eq("organization_id", org.organizationId)
+            .eq("entity_id", org.entityId)
+            .eq("status", "enviada");
+          if (cancelled) return;
+          setBadgeCounts(prev => ({ ...prev, directSales: (directSales as any[] | null)?.length || 0 }));
+        }
+      } catch {
+        // contagem opcional — nunca deve afetar o resto do portal
+      }
+    }
+
+    void loadBadges(activeOrg);
+
+    return () => { cancelled = true; };
+  }, [activeOrg]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -215,6 +219,21 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       });
       return; // keep modal open
     }
+    // A marca first_login acabou de mudar na BD. Escrever na cache é SÍNCRONO e
+    // é o que impede a reabertura do modal: o invalidateQueries é
+    // fire-and-forget e o layout remonta a cada navegação. O sinalizador por
+    // utilizador é o cinto de segurança para o caso de o refetch falhar.
+    //
+    // Chave EXATA (com o user.id): só o prefixo escreveria em todas as entradas
+    // [portal-orgs, <qualquer userId>] ainda em cache (gcTime de 10 min) e
+    // apagaria a marca de primeiro login de outra conta que tivesse usado esta
+    // aba.
+    passwordChangedForUserId = user.id;
+    queryClient.setQueryData<PortalOrg[]>(
+      [PORTAL_ORGS_QUERY_KEY, user.id],
+      (old) => (old ? old.map(o => ({ ...o, firstLogin: false })) : old),
+    );
+    void queryClient.invalidateQueries({ queryKey: [PORTAL_ORGS_QUERY_KEY, user.id] });
     setShowFirstLogin(false);
   };
 
@@ -224,21 +243,33 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: "#F8F7FC" }}>
       {/* Top Bar */}
       <header className="border-b bg-white px-4 md:px-6 py-3 flex items-center justify-between shrink-0 shadow-sm">
-        <div className="flex items-center gap-3">
-          {orgLogo ? (
-            <img src={orgLogo} alt={orgName} className="h-9 w-9 rounded-lg object-contain" />
+        <div className="flex items-center gap-3 min-w-0">
+          {/* Sem empresa resolvida (a carregar ou falha da query) não se inventa
+              branding: o "O" genérico do placeholder dava a entender que estava
+              tudo bem. */}
+          {activeOrg && (orgLogo ? (
+            <img src={orgLogo} alt={orgName} width={36} height={36} className="h-9 w-9 rounded-lg object-contain shrink-0" />
           ) : (
-            <div className="h-9 w-9 rounded-lg flex items-center justify-center text-white font-bold text-sm" style={{ backgroundColor: "#7C3AED" }}>
+            <div className="h-9 w-9 rounded-lg flex items-center justify-center text-white font-bold text-sm shrink-0" style={{ backgroundColor: "#7C3AED" }}>
               {orgName?.charAt(0) || "O"}
             </div>
+          ))}
+          {/* Com acesso a mais do que uma empresa, o nome passa a ser o botão
+              do seletor (visível também no telemóvel, onde o bloco estático
+              está escondido). Com uma só empresa o seletor devolve null. */}
+          <PortalCompanySwitcher />
+          {/* `!orgsLoading`: durante o carregamento ainda não se sabe se há uma
+              ou várias empresas, e sem ele este bloco renderizava com o nome
+              vazio. */}
+          {!hasMultiple && !orgsLoading && activeOrg && (
+            <div className="hidden sm:block min-w-0">
+              <p className="text-sm font-semibold text-foreground leading-tight truncate">{orgName}</p>
+              <p className="text-[11px] font-medium" style={{ color: "#7C3AED" }}>Portal do Cliente</p>
+            </div>
           )}
-          <div className="hidden sm:block">
-            <p className="text-sm font-semibold text-foreground leading-tight">{orgName}</p>
-            <p className="text-[11px] font-medium" style={{ color: "#7C3AED" }}>Portal do Cliente</p>
-          </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 shrink-0">
           <div className="flex items-center gap-2.5">
             <div
               className="h-8 w-8 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0"

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
+import { useSyncActiveOrgWithDocument } from "@/contexts/PortalCompanyContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,10 @@ const ClientPortalContractDetail = () => {
 
   const [showQuestion, setShowQuestion] = useState(false);
   const [questionText, setQuestionText] = useState("");
+
+  // Link de email pode abrir um contrato de outra empresa do grupo: a empresa
+  // ativa acompanha o documento em vez de o esconder.
+  useSyncActiveOrgWithDocument(contract?.organization_id);
 
   useEffect(() => {
     if (!id) return;

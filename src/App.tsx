@@ -3,8 +3,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { CompanyProvider } from "@/contexts/CompanyContext";
+import { PortalCompanyProvider } from "@/contexts/PortalCompanyContext";
 import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import { SidebarExpandProvider } from "@/contexts/SidebarContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -151,6 +152,15 @@ const queryClient = new QueryClient({
   },
 });
 
+// Empresa ativa do portal — monta uma só vez para todas as rotas do portal,
+// fora do CRM: uma conta de portal não tem work-orgs e o CompanyProvider não
+// lhe serve de nada (ver src/contexts/PortalCompanyContext.tsx).
+const PortalCompanyRoute = () => (
+  <PortalCompanyProvider>
+    <Outlet />
+  </PortalCompanyProvider>
+);
+
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
     <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -186,14 +196,16 @@ const App = () => (
 
                   {/* Client portal — guard + layout mount once for all portal routes */}
                   <Route element={<ClientRouteGuard />}>
-                    <Route path="/client-portal" element={<ClientPortal />} />
-                    <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
-                    <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
-                    <Route path="/client-portal/direct-sales" element={<ClientPortalDirectSales />} />
-                    <Route path="/client-portal/direct-sales/:id" element={<ClientPortalDirectSaleDetail />} />
-                    <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
-                    <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
-                    <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
+                    <Route element={<PortalCompanyRoute />}>
+                      <Route path="/client-portal" element={<ClientPortal />} />
+                      <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
+                      <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
+                      <Route path="/client-portal/direct-sales" element={<ClientPortalDirectSales />} />
+                      <Route path="/client-portal/direct-sales/:id" element={<ClientPortalDirectSaleDetail />} />
+                      <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
+                      <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
+                      <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
+                    </Route>
                   </Route>
 
                   {/* CRM routes — guard + Layout mount once; pages render via Outlet */}

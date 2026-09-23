@@ -9,6 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ScrollText, ArrowRight } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
 import { resolvePortalContractIdsForUsers } from "@/lib/portal/contractAccess";
+import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
+import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 
@@ -18,27 +20,26 @@ const ClientPortalContracts = () => {
   const navigate = useNavigate();
   const [contracts, setContracts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // Empresa ativa do portal — ver src/contexts/PortalCompanyContext.tsx.
+  const { activeOrg, isLoading: orgsLoading, isError: orgsError, hasMultiple } = usePortalCompany();
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load(uid: string | null) {
-      if (!uid) {
-        if (!cancelled) { setContracts([]); setLoading(false); }
-        return;
-      }
+    async function load(org: PortalOrg) {
       if (!cancelled) setLoading(true);
-
-      const { data: portalUsers } = await supabase
-        .from("client_portal_users")
-        .select("id, contract_id")
-        .eq("auth_user_id", uid);
-      if (cancelled) return;
 
       // Resolução partilhada (coluna legada + client_portal_documents) — ver
       // src/lib/portal/contractAccess.ts. Duplicá-la aqui foi o que fez o cartão
       // da página inicial divergir desta lista.
-      const contractIds = await resolvePortalContractIdsForUsers(portalUsers);
+      //
+      // Só a conta de portal DESTA empresa (as concessões em
+      // client_portal_documents são por portal_user_id) e, por segurança, o
+      // `orgScope` corta o que pertença a outra organização.
+      const contractIds = await resolvePortalContractIdsForUsers(
+        [{ id: org.portalUserId, contract_id: org.contractId }],
+        { organizationId: org.organizationId, entityId: org.entityId },
+      );
       if (cancelled) return;
 
       if (contractIds.length === 0) {
@@ -57,13 +58,17 @@ const ClientPortalContracts = () => {
       setLoading(false);
     }
 
-    supabase.auth.getUser().then(({ data: { user } }) => load(user?.id ?? null));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      load(session?.user?.id ?? null);
-    });
+    if (orgsLoading) return;
+    if (!activeOrg) {
+      setContracts([]);
+      setLoading(false);
+      return;
+    }
 
-    return () => { cancelled = true; subscription.unsubscribe(); };
-  }, []);
+    void load(activeOrg);
+
+    return () => { cancelled = true; };
+  }, [activeOrg, orgsLoading]);
 
   const fmtCurrency = (val: number) => formatCurrency(val || 0);
 
@@ -76,11 +81,19 @@ const ClientPortalContracts = () => {
           <div className="space-y-3">
             {[1, 2, 3].map(i => <Skeleton key={i} className="h-20 w-full" />)}
           </div>
+        ) : orgsError ? (
+          // Falha a carregar o âmbito: nunca apresentar como "não tem nada".
+          <PortalOrgsErrorState />
         ) : contracts.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-center">
               <ScrollText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
               <p className="text-muted-foreground">Não tem contratos disponíveis.</p>
+              {hasMultiple && (
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Se esperava ver outros, troque de empresa no seletor no topo da página.
+                </p>
+              )}
             </CardContent>
           </Card>
         ) : (
