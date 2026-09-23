@@ -126,6 +126,7 @@ interface FormStep {
   sort_order: number;
   step_type: string;
   scheduling_duration_minutes: number | null;
+  scheduling_min_advance_hours: number | null;
   scheduling_board_id: string | null;
   scheduling_postal_code_field_key: string | null;
   scheduling_district_field_key: string | null;
@@ -1735,6 +1736,26 @@ export function FormBuilder({
                         min={15}
                         step={15}
                       />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs">Antecedência mínima (horas úteis)</Label>
+                      <Input
+                        type="number"
+                        value={activeStep.scheduling_min_advance_hours ?? ""}
+                        placeholder="Sem restrição"
+                        onChange={async (e) => {
+                          const raw = e.target.value;
+                          const val = raw === "" ? null : (parseInt(raw, 10) || null);
+                          const { error } = await supabase.from("form_steps").update({ scheduling_min_advance_hours: val }).eq("id", activeStep.id);
+                          if (error) captureFlowError(error, "config-partial-write");
+                          setSteps(steps.map(s => s.id === activeStep.id ? { ...s, scheduling_min_advance_hours: val } : s));
+                        }}
+                        className="h-8 text-sm"
+                        min={0}
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Contadas pelo calendário da organização (dias úteis + feriados). Em branco = sem antecedência mínima.
+                      </p>
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs">Campo de Código Postal (proximidade)</Label>
