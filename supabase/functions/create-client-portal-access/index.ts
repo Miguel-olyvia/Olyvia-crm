@@ -409,6 +409,9 @@ serve(async (req: Request) => {
     let isNewAccount = false;
     let tempPassword = "";
     let existingPortalUser: any = null;
+    // Existing account (with its own password) getting access to a NEW org: the
+    // email tells the client to sign in with the credentials they already have.
+    let linkedExistingAccount = false;
     let portalEmailMigratedFrom: string | null = null;
 
     // The email was edited after portal access already existed: no auth account
@@ -567,7 +570,28 @@ serve(async (req: Request) => {
       const portalUserRecord = portalUserRecords?.[0];
 
       existingPortalUser = portalUserRecord;
-      const shouldIssueCredentials = !!force_new_password || !existingPortalUser || !!existingPortalUser.first_login;
+
+      // One account, one password — across every organization. The portal is
+      // the same for a client of several companies (they pick the company after
+      // login), so a second org sending a document must NOT mint a new password:
+      // that silently replaced the one the client already used with the first
+      // org (inventario.olyvia@gmail.com, 2026-09-23, Mudelar → BMGest).
+      // Only reset when the account has no credentials yet: never signed in and
+      // no portal access in any other org (their temp password from that org
+      // would be invalidated too). "Reenviar credenciais" still forces it.
+      const { data: otherOrgPortalRows } = await supabase
+        .from("client_portal_users")
+        .select("id")
+        .eq("auth_user_id", authUserId)
+        .neq("organization_id", organization_id)
+        .limit(1);
+      const hasEstablishedCredentials =
+        !!existingUser.last_sign_in_at || (otherOrgPortalRows?.length ?? 0) > 0;
+      linkedExistingAccount = hasEstablishedCredentials && !existingPortalUser;
+
+      const shouldIssueCredentials =
+        !!force_new_password ||
+        (!hasEstablishedCredentials && (!existingPortalUser || !!existingPortalUser.first_login));
 
       if (shouldIssueCredentials) {
         tempPassword = generateTempPassword();
@@ -990,6 +1014,9 @@ serve(async (req: Request) => {
           <h2 style="color: #333;">Ol&aacute;, ${safeContactName}!</h2>
           <p>Tem uma nova <strong>${safeDocLabel}</strong> dispon&iacute;vel no seu portal: <em>${safeDocumentTitle}</em></p>
           <p>Aceda em: <a href="${finalLoginUrl}" style="color: #2563eb;">${finalLoginUrl}</a></p>
+          ${linkedExistingAccount
+            ? `<p>Entre com o email e a password que j&aacute; usa no portal. Depois de entrar, escolha <strong>${safeOrgName}</strong> no seletor de empresa.</p>`
+            : ""}
 
           <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
           <p style="color: #999; font-size: 13px;">Enviado por ${safeCallerName} &mdash; ${safeOrgName}</p>
