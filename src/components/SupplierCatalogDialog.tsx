@@ -11,12 +11,14 @@ import { Loader2, Star, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
+import SupplierCatalogPanel from "@/components/SupplierCatalogPanel";
 
 interface SupplierCatalogDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   supplierId: string;
   supplierName: string;
+  organizationId?: string | null;
 }
 
 interface CatalogRow {
@@ -37,13 +39,17 @@ interface CatalogRow {
 // remover associação — adicionar faz-se do lado do Produto/Serviço
 // (ProductSuppliersDialog / ServiceSuppliersDialog), para não duplicar o
 // mesmo formulário de adicionar nos dois sentidos.
-export default function SupplierCatalogDialog({ open, onOpenChange, supplierId, supplierName }: SupplierCatalogDialogProps) {
+export default function SupplierCatalogDialog({ open, onOpenChange, supplierId, supplierName, organizationId = null }: SupplierCatalogDialogProps) {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
   // Ecrã de Fornecedores: custo de compra e código do fornecedor exigem
   // suppliers.view_pricing — sem ela, lê-se item_suppliers_public (sem
   // purchase_price/currency/supplier_sku) em vez de item_suppliers.
   const canViewPricing = hasPermission("suppliers.view_pricing");
+  // Com preços visíveis, os produtos vêm do catálogo por unidade de compra
+  // (SupplierCatalogPanel); esta tabela fica só com os serviços. Sem preços,
+  // mantém-se a vista antiga (item_suppliers_public) para produtos e serviços.
+  const showPanel = canViewPricing || hasPermission("products.view_cost");
   const [loading, setLoading] = useState(false);
   const [rows, setRows] = useState<CatalogRow[]>([]);
   const [deletingRow, setDeletingRow] = useState<CatalogRow | null>(null);
@@ -96,6 +102,8 @@ export default function SupplierCatalogDialog({ open, onOpenChange, supplierId, 
     loadRows();
   };
 
+  const tableRows = showPanel ? rows.filter((r) => r.item_type !== "product") : rows;
+
   const itemLabel = (row: CatalogRow) => {
     if (row.item_type === "product") return row.products?.name || "-";
     return row.services?.name || "-";
@@ -110,9 +118,20 @@ export default function SupplierCatalogDialog({ open, onOpenChange, supplierId, 
           <DialogDescription>Produtos e serviços associados a este fornecedor</DialogDescription>
         </DialogHeader>
 
-        {loading ? (
+        {showPanel && (
+          <SupplierCatalogPanel
+            supplierId={supplierId}
+            supplierName={supplierName}
+            organizationId={organizationId}
+          />
+        )}
+        {showPanel && tableRows.length > 0 && (
+          <h3 className="text-sm font-medium pt-4">Serviços</h3>
+        )}
+
+        {showPanel && tableRows.length === 0 ? null : loading ? (
           <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
-        ) : rows.length === 0 ? (
+        ) : tableRows.length === 0 ? (
           <p className="text-center text-muted-foreground py-6">Nenhum produto ou serviço associado a este fornecedor.</p>
         ) : (
           <Table>
@@ -130,7 +149,7 @@ export default function SupplierCatalogDialog({ open, onOpenChange, supplierId, 
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((row) => (
+              {tableRows.map((row) => (
                 <TableRow key={row.id}>
                   <TableCell>
                     {row.is_preferred && (

@@ -25,6 +25,9 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { resolveEntityCommercial } from "@/utils/entityCommercial";
 import { getLineSubtotal, markupFromCostAndPrice, round2 } from "@/utils/quotes/quoteLinePricing";
 import { cn, formatCurrency } from "@/lib/utils";
+import { applyUomOptionToLine, type LineUomFields } from "@/utils/quotes/lineUom";
+import { useLineUomOptions } from "@/hooks/useLineUomOptions";
+import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
 
 // Venda Direta — Fase 2: criar/editar o cabeçalho e as linhas de uma venda
 // direta em RASCUNHO. Tudo o que vem depois (envio ao portal, aceitação,
@@ -58,7 +61,9 @@ const resolveVatRate = (raw: unknown, fallback: number): number => {
  * escreve; `key` é só para o React (as linhas são apagadas e reinseridas ao
  * gravar, por isso o id da BD não sobrevive à gravação).
  */
-export interface DirectSaleLineDraft {
+// LineUomFields: embalagem da linha (uom_id vai no insert; units_per_uom é
+// calculado pelo gatilho no servidor — ver src/utils/quotes/lineUom.ts).
+export interface DirectSaleLineDraft extends LineUomFields {
   key: string;
   product_id: string | null;
   service_id: string | null;
@@ -125,6 +130,8 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
   const [ivaRate, setIvaRate] = useState<number>(DEFAULT_VAT_RATE);
   const [lines, setLines] = useState<DirectSaleLineDraft[]>([]);
   const [showItemsDialog, setShowItemsDialog] = useState(false);
+  // Seletor "Unidade" (embalagens) das linhas de produto.
+  const lineUom = useLineUomOptions(lines.map((l) => l.product_id));
 
   // Trava de duplo-submit (o botão também fica disabled, mas o clique duplo
   // rápido chega a passar antes do re-render) — mesmo padrão de Proposals.tsx.
@@ -186,7 +193,7 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
 
         const { data: lineRows, error: linesError } = await (supabase as any)
           .from("direct_sale_lines")
-          .select("id, product_id, service_id, descricao_snapshot, unidade, qt, cost_price, retail_price_unit, iva_percent, discount_percent, visible_to_client, ordem")
+          .select("id, product_id, service_id, descricao_snapshot, unidade, qt, cost_price, retail_price_unit, iva_percent, discount_percent, visible_to_client, ordem, uom_id, units_per_uom")
           .eq("direct_sale_id", saleId)
           .order("ordem", { ascending: true });
         if (linesError) throw linesError;
@@ -239,6 +246,9 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
             iva_percent: Number(row.iva_percent ?? DEFAULT_VAT_RATE),
             discount_percent: Number(row.discount_percent) || 0,
             visible_to_client: row.visible_to_client !== false,
+            // Embalagem gravada: preço/custo já vêm por embalagem, não se recalculam.
+            uom_id: row.uom_id ?? null,
+            units_per_uom: Number(row.units_per_uom) || 1,
           })),
         );
       } catch (error: any) {
@@ -346,6 +356,11 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
       next[index] = { ...next[index], [field]: Number.isNaN(parsed) ? 0 : parsed };
       return next;
     });
+  };
+
+  // Embalagem: preço de venda e custo = valor da unidade do produto × fator.
+  const handleLineUomChange = (index: number, option: Parameters<typeof applyUomOptionToLine>[1]) => {
+    setLines((prev) => prev.map((line, i) => (i === index ? applyUomOptionToLine(line, option) : line)));
   };
 
   const handleToggleVisible = (index: number) => {
@@ -586,6 +601,9 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
           total_com_desconto: totalComIva,
           ordem: index + 1,
           visible_to_client: line.visible_to_client,
+          // NULL = unidade do produto. units_per_uom e o texto `unidade` são
+          // alinhados pelo gatilho trg_direct_sale_lines_units_per_uom.
+          uom_id: line.uom_id || null,
         };
       });
 
@@ -780,6 +798,7 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
                         <TableBody>
                           {lines.map((line, index) => {
                             const { totalComIva } = getDirectSaleLineTotals(line);
+                            const lineUomOptions = lineUom.getOptions(line.product_id);
                             return (
                               <TableRow key={line.key}>
                                 <TableCell>
@@ -811,6 +830,16 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
                                     onChange={(e) => handleLineChange(index, "qt", e.target.value)}
                                     disabled={readOnly || saving}
                                   />
+                                  {lineUomOptions.length > 0 && (
+                                    <LineUomSelect
+                                      options={lineUomOptions}
+                                      line={line}
+                                      className="mt-1 w-20"
+                                      onChange={(option) => handleLineUomChange(index, option)}
+                                      disabled={readOnly || saving}
+                                    />
+                                  )}
+                                  <PackQuantityHint qt={line.qt} line={line} baseCode={lineUom.getBaseCode(line.product_id)} className="mt-0.5" />
                                 </TableCell>
                                 <TableCell>
                                   <Input

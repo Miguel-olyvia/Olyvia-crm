@@ -8,7 +8,10 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck } from "lucide-react";
+import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck, ChevronsUpDown, Check, ScanBarcode } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { PermissionGate } from "@/components/PermissionGate";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
@@ -51,7 +54,58 @@ type PurchaseOrderItem = {
   total_price: number;
   selected_attributes?: Record<string, any>;
   notes?: string;
+  // Embalagens (20261204202500/20261204204500): unidade da linha (ex. PK100)
+  // e referência do fornecedor, enviadas em p_items. units_per_uom é só para
+  // mostrar — o servidor calcula-o sempre pelo gatilho e nunca o lê do payload.
+  uom_id?: string | null;
+  uom_code?: string | null;
+  units_per_uom?: number | null;
+  product_uom_code?: string | null;
+  supplier_sku?: string | null;
 };
+
+// Uma ligação item_suppliers do fornecedor escolhido, por unidade/embalagem
+// (rpc_supplier_catalog / rpc_supplier_catalog_search, 20261204205500). O
+// mesmo produto pode aparecer várias vezes (un e PK100) — opções distintas.
+type SupplierCatalogEntry = Database["public"]["Functions"]["rpc_supplier_catalog"]["Returns"][number];
+type SupplierCatalogSearchEntry = Database["public"]["Functions"]["rpc_supplier_catalog_search"]["Returns"][number];
+
+// NULL e a unidade do produto são a mesma coisa (fator 1) — normaliza para
+// comparar a unidade de uma linha com a de uma ligação.
+const normUomKey = (uomId: string | null | undefined, productUomId: string | null | undefined) =>
+  !uomId || uomId === productUomId ? "__base__" : uomId;
+
+// Ligação por omissão de um produto neste fornecedor: a da unidade do produto
+// (fator 1) primeiro, preferencial primeiro; só depois as embalagens.
+const pickDefaultLink = (links: SupplierCatalogEntry[] | undefined): SupplierCatalogEntry | null => {
+  if (!links || links.length === 0) return null;
+  return [...links].sort((a, b) => {
+    // units_per_uom NULL = unidade incompatível — nunca conta como base.
+    const aBase = a.units_per_uom === 1 ? 0 : 1;
+    const bBase = b.units_per_uom === 1 ? 0 : 1;
+    if (aBase !== bBase) return aBase - bBase;
+    return Number(b.is_preferred) - Number(a.is_preferred);
+  })[0];
+};
+
+const formatMoney = (value: number | null | undefined, currency?: string | null) => {
+  if (value == null) return "sem preço";
+  try {
+    return new Intl.NumberFormat("pt-PT", { style: "currency", currency: currency || "EUR" }).format(value);
+  } catch {
+    return `${value.toFixed(2)} ${currency || "€"}`;
+  }
+};
+
+// "PK100 (100 un)" quando é embalagem, "un" quando é a unidade do produto.
+const formatUomLabel = (uomCode: string | null | undefined, units: number | null | undefined, baseCode: string | null | undefined) => {
+  const code = uomCode || baseCode || "";
+  if (units && units > 1) return `${code || "emb."} (${units} ${baseCode || "un"})`;
+  return code;
+};
+
+const formatSupplierLabel = (supplier: { name?: string | null; code?: string | null } | null | undefined) =>
+  supplier ? (supplier.code ? `${supplier.code} · ${supplier.name || ""}` : supplier.name || "") : "";
 
 // Receção parcial (migration 20261114040000): tipo de conveniência para as
 // linhas de purchase_order_items usadas no fluxo de receção.
@@ -60,7 +114,8 @@ type PurchaseOrderItem = {
 // não distingue variantes cujo nome só difere na medida (ex.: "Base Duche
 // Stone Plus" 70x70 vs 70x90 guardam a mesma description genérica).
 type PurchaseOrderItemWithReceipt = Database["public"]["Tables"]["purchase_order_items"]["Row"] & {
-  products?: { name: string } | null;
+  products?: { name: string; uom?: { code: string } | null } | null;
+  uom?: { code: string } | null;
 };
 
 type ProductCatalogItem = {
@@ -72,6 +127,9 @@ type ProductCatalogItem = {
   brand_name: string | null;
   purchase_price: number | null;
   vat_rate: number | null;
+  // Só produtos, só para o fornecedor escolhido: a ligação usada ao adicionar
+  // pela lista (define unidade, referência e preço da linha).
+  default_link?: SupplierCatalogEntry | null;
 };
 
 type PriceInfo = {
@@ -137,7 +195,7 @@ const PurchaseOrders = () => {
   // armazém de destino e liga-se a rpc_receive_purchase_order (gera a entrada
   // em stock_movements na mesma transação que muda o estado para 'received').
   const [receiveDialogOpen, setReceiveDialogOpen] = useState(false);
-  const [receivingOrder, setReceivingOrder] = useState<{ id: string; order_number: string } | null>(null);
+  const [receivingOrder, setReceivingOrder] = useState<{ id: string; order_number: string; stockSkipped: boolean } | null>(null);
   const [receiveWarehouses, setReceiveWarehouses] = useState<{ id: string; name: string }[]>([]);
   const [receiveWarehouseId, setReceiveWarehouseId] = useState("");
   // Receção parcial (20261114040000): linhas de produto desta encomenda e a
@@ -190,8 +248,31 @@ const PurchaseOrders = () => {
   // resolved from item_suppliers (Fase 1). Determines which catalog items are eligible
   // to add to this order and at what price — replaces the deprecated
   // products.supplier_id/services.supplier_id single-supplier match.
+  // Só ligações na unidade do produto (uom_id NULL ou = products.uom_id): o
+  // preço daqui é SEMPRE por unidade do produto — nunca o de uma embalagem.
   const [supplierProductRefs, setSupplierProductRefs] = useState<Map<string, { purchase_price: number | null; supplier_sku: string | null }>>(new Map());
+  // Todas as ligações (un e embalagens) por produto, lidas de item_suppliers —
+  // define que produtos o fornecedor fornece e serve de reserva ao catálogo
+  // (rpc_supplier_catalog) se este falhar ou ainda não tiver carregado.
+  const [supplierProductLinks, setSupplierProductLinks] = useState<Map<string, SupplierCatalogEntry[]>>(new Map());
   const [supplierServiceRefs, setSupplierServiceRefs] = useState<Map<string, { purchase_price: number | null; supplier_sku: string | null }>>(new Map());
+  // Catálogo do fornecedor escolhido, por unidade/embalagem (rpc_supplier_catalog)
+  // — dá, por produto, as unidades em que este fornecedor o vende (troca de
+  // unidade na linha) e a ligação por omissão ao adicionar pela lista.
+  const [supplierCatalog, setSupplierCatalog] = useState<SupplierCatalogEntry[]>([]);
+  // Fornecedor a que o catálogo acima corresponde (também definido se falhar).
+  const [supplierCatalogSupplierId, setSupplierCatalogSupplierId] = useState("");
+  // Pesquisa no catálogo (rpc_supplier_catalog_search): SKU, ref. do
+  // fornecedor, código de barras ou nome. `catalogSearchResultsQuery` diz a
+  // que texto correspondem os resultados mostrados (para o Enter do leitor).
+  const [supplierPickerOpen, setSupplierPickerOpen] = useState(false);
+  const [catalogSearchOpen, setCatalogSearchOpen] = useState(false);
+  const [catalogSearchQuery, setCatalogSearchQuery] = useState("");
+  const [catalogSearchResults, setCatalogSearchResults] = useState<SupplierCatalogSearchEntry[]>([]);
+  const [catalogSearchResultsQuery, setCatalogSearchResultsQuery] = useState("");
+  const [catalogSearchLoading, setCatalogSearchLoading] = useState(false);
+  const [catalogSearchHighlighted, setCatalogSearchHighlighted] = useState("");
+  const catalogSearchRequestRef = useRef(0);
   const [selectedItemAttributes, setSelectedItemAttributes] = useState<Record<string, Record<string, string>>>({});
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
@@ -230,7 +311,7 @@ const PurchaseOrders = () => {
       try {
         const { data, error } = await supabase
           .from("suppliers")
-          .select("id, name")
+          .select("id, name, code")
           .eq("organization_id", companyId);
         
         if (error) throw error;
@@ -264,6 +345,7 @@ const PurchaseOrders = () => {
 
       if (!companyId || !supplierId) {
         setSupplierProductRefs(new Map());
+        setSupplierProductLinks(new Map());
         setSupplierServiceRefs(new Map());
         return;
       }
@@ -271,7 +353,11 @@ const PurchaseOrders = () => {
       try {
         const { data, error } = await (supabase as any)
           .from("item_suppliers")
-          .select("product_id, service_id, purchase_price, supplier_sku")
+          .select(`
+            id, product_id, service_id, purchase_price, supplier_sku, uom_id, currency, moq, lead_time_days, is_preferred, is_active,
+            uom:uom!item_suppliers_uom_id_fkey(code, base_uom_id, conversion_factor),
+            product:products!item_suppliers_product_id_fkey(name, sku, barcode, uom_id, product_uom:uom!products_uom_id_fkey(code))
+          `)
           .eq("organization_id", companyId)
           .eq("supplier_id", supplierId)
           .eq("is_active", true)
@@ -280,25 +366,145 @@ const PurchaseOrders = () => {
         if (error) throw error;
 
         const productMap = new Map<string, { purchase_price: number | null; supplier_sku: string | null }>();
+        const linksMap = new Map<string, SupplierCatalogEntry[]>();
         const serviceMap = new Map<string, { purchase_price: number | null; supplier_sku: string | null }>();
 
         (data || []).forEach((row: any) => {
           const info = { purchase_price: row.purchase_price ?? null, supplier_sku: row.supplier_sku ?? null };
-          if (row.product_id) productMap.set(row.product_id, info);
           if (row.service_id) serviceMap.set(row.service_id, info);
+          if (!row.product_id) return;
+
+          // Mesmo cálculo que rpc_supplier_catalog: 1 na unidade do produto,
+          // conversion_factor numa embalagem dessa unidade, NULL se incompatível.
+          const productUomId: string | null = row.product?.uom_id ?? null;
+          const units: number | null =
+            !row.uom_id || row.uom_id === productUomId ? 1
+            : row.uom?.base_uom_id == null && productUomId == null ? 1
+            : row.uom?.base_uom_id && row.uom.base_uom_id === productUomId ? Math.trunc(Number(row.uom.conversion_factor)) || null
+            : null;
+
+          const link: SupplierCatalogEntry = {
+            item_supplier_id: row.id,
+            product_id: row.product_id,
+            product_name: row.product?.name ?? "",
+            sku: row.product?.sku ?? null,
+            barcode: row.product?.barcode ?? null,
+            supplier_sku: row.supplier_sku ?? null,
+            uom_id: row.uom_id ?? null,
+            uom_code: row.uom?.code ?? null,
+            units_per_uom: units,
+            product_uom_id: productUomId,
+            product_uom_code: row.product?.product_uom?.code ?? null,
+            purchase_price: row.purchase_price ?? null,
+            currency: row.currency ?? null,
+            moq: row.moq ?? null,
+            lead_time_days: row.lead_time_days ?? null,
+            is_preferred: !!row.is_preferred,
+            is_active: !!row.is_active,
+          } as SupplierCatalogEntry;
+          const list = linksMap.get(row.product_id) || [];
+          list.push(link);
+          linksMap.set(row.product_id, list);
+
+          // Só a unidade do produto entra no mapa de preço por produto; entre
+          // duas ligações base (NULL e = uom do produto) fica a que tem preço.
+          if (units === 1) {
+            const current = productMap.get(row.product_id);
+            if (!current || (current.purchase_price == null && info.purchase_price != null)) {
+              productMap.set(row.product_id, info);
+            }
+          }
         });
 
         setSupplierProductRefs(productMap);
+        setSupplierProductLinks(linksMap);
         setSupplierServiceRefs(serviceMap);
       } catch (error: any) {
         console.error("Error loading supplier item references:", error);
         setSupplierProductRefs(new Map());
+        setSupplierProductLinks(new Map());
         setSupplierServiceRefs(new Map());
       }
     };
 
     loadSupplierItemRefs();
   }, [organizationSelection.companyId, formData.supplier_id]);
+
+  // Catálogo por unidade/embalagem do fornecedor escolhido (20261204205500).
+  // Best-effort: se falhar, a lista de produtos continua a funcionar como
+  // antes (sem troca de unidade), só perde as embalagens.
+  useEffect(() => {
+    const supplierId = formData.supplier_id;
+    setCatalogSearchQuery("");
+    setCatalogSearchResults([]);
+    setCatalogSearchResultsQuery("");
+    setSupplierCatalog([]);
+    setSupplierCatalogSupplierId("");
+    if (!supplierId) return;
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase.rpc("rpc_supplier_catalog", { p_supplier_id: supplierId });
+      if (cancelled) return;
+      if (error) {
+        console.error("Error loading supplier catalog:", error);
+      } else {
+        setSupplierCatalog((data || []).filter((row) => row.is_active));
+      }
+      setSupplierCatalogSupplierId(supplierId);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.supplier_id]);
+
+  const supplierCatalogByProduct = useMemo(() => {
+    const map = new Map<string, SupplierCatalogEntry[]>();
+    supplierCatalog.forEach((entry) => {
+      const list = map.get(entry.product_id) || [];
+      list.push(entry);
+      map.set(entry.product_id, list);
+    });
+    return map;
+  }, [supplierCatalog]);
+
+  const runCatalogSearch = async (query: string): Promise<SupplierCatalogSearchEntry[]> => {
+    const supplierId = formData.supplier_id;
+    const term = query.trim();
+    const requestId = ++catalogSearchRequestRef.current;
+    if (!supplierId || !term) {
+      setCatalogSearchResults([]);
+      setCatalogSearchResultsQuery(term);
+      setCatalogSearchLoading(false);
+      return [];
+    }
+    setCatalogSearchLoading(true);
+    const { data, error } = await supabase.rpc("rpc_supplier_catalog_search", {
+      p_supplier_id: supplierId,
+      p_query: term,
+      p_limit: 50,
+    });
+    // Um pedido mais recente já está em curso — descarta este.
+    if (catalogSearchRequestRef.current !== requestId) return [];
+    setCatalogSearchLoading(false);
+    if (error) {
+      console.error("Error searching supplier catalog:", error);
+      toast({ title: "Erro na pesquisa do catálogo", description: error.message, variant: "destructive" });
+      return [];
+    }
+    const rows = (data || []).filter((row) => row.is_active);
+    setCatalogSearchResults(rows);
+    setCatalogSearchResultsQuery(term);
+    return rows;
+  };
+
+  useEffect(() => {
+    if (!catalogSearchOpen) return;
+    const handle = setTimeout(() => {
+      runCatalogSearch(catalogSearchQuery);
+    }, 250);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [catalogSearchQuery, catalogSearchOpen, formData.supplier_id]);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -404,7 +610,7 @@ const PurchaseOrders = () => {
                 .is("deleted_at", null)
                 .order("created_at", { ascending: false })
         ),
-        supabase.from("suppliers").select("id, name").eq("organization_id", companyId).is("deleted_at", null),
+        supabase.from("suppliers").select("id, name, code").eq("organization_id", companyId).is("deleted_at", null),
       ]);
 
       // Um loadData() mais recente (ex.: alternou "Ver eliminados" outra vez antes
@@ -712,11 +918,11 @@ const PurchaseOrders = () => {
     // Load existing items
     const { data: items } = await supabase
       .from("purchase_order_items")
-      .select("*")
+      .select("*, uom:uom_id(code), products(uom:uom_id(code))")
       .eq("purchase_order_id", order.id);
-    
+
     if (items) {
-      setOrderItems(items.map(item => ({
+      setOrderItems((items as unknown as Array<PurchaseOrderItemWithReceipt>).map(item => ({
         id: item.id,
         item_type: item.item_type as 'product' | 'service',
         product_id: item.product_id,
@@ -730,6 +936,11 @@ const PurchaseOrders = () => {
         total_price: item.total_price,
         selected_attributes: item.selected_attributes as Record<string, string> || {},
         notes: item.notes,
+        uom_id: item.uom_id,
+        uom_code: item.uom?.code ?? null,
+        units_per_uom: item.units_per_uom ?? 1,
+        product_uom_code: item.products?.uom?.code ?? null,
+        supplier_sku: item.supplier_sku,
       })));
     }
     
@@ -778,7 +989,8 @@ const PurchaseOrders = () => {
   };
 
   const openReceiveDialog = async (order: PurchaseOrder) => {
-    setReceivingOrder({ id: order.id, order_number: order.order_number });
+    // Ligada a uma Encomenda Cliente = não entra no stock geral (20261115210000).
+    setReceivingOrder({ id: order.id, order_number: order.order_number, stockSkipped: (order as any).source_type === "contract" });
     setReceiveWarehouseId("");
     setReceiveLines([]);
     setReceiveLineQuantities({});
@@ -796,7 +1008,7 @@ const PurchaseOrders = () => {
         .order("name"),
       supabase
         .from("purchase_order_items")
-        .select("*, products(name)")
+        .select("*, uom:uom_id(code), products(name, uom:uom_id(code))")
         .eq("purchase_order_id", order.id)
         .eq("item_type", "product"),
     ]);
@@ -811,7 +1023,7 @@ const PurchaseOrders = () => {
       toast({ title: t('purchaseOrders.toast.error'), description: itemsRes.error.message, variant: "destructive" });
       return;
     }
-    const items = (itemsRes.data as PurchaseOrderItemWithReceipt[] | null) || [];
+    const items = (itemsRes.data as unknown as PurchaseOrderItemWithReceipt[] | null) || [];
     setReceiveLines(items);
 
     const initialQuantities: Record<string, number> = {};
@@ -868,13 +1080,23 @@ const PurchaseOrders = () => {
 
       // O status devolvido pelo RPC é a fonte da verdade — não assumir
       // 'received' (pode ter ficado 'partially_received').
-      const result = data as { status?: string; stock_skipped?: boolean } | null;
+      const result = data as {
+        status?: string;
+        stock_skipped?: boolean;
+        lines?: Array<{ units_per_uom?: number | null; stock_quantity_now?: number | null }>;
+      } | null;
       const isFullyReceived = result?.status === 'received';
+      // Embalagens (20261204203500): stock_quantity_now = unidades de stock
+      // que entraram agora (quantidade × fator da linha).
+      const stockUnitsNow = (result?.lines || []).reduce((sum, l) => sum + (Number(l.stock_quantity_now) || 0), 0);
+      const hasPacks = (result?.lines || []).some((l) => (l.units_per_uom ?? 1) > 1);
       // Ligada a uma Encomenda Cliente (já tem destino certo) — a receção
       // não infla o stock geral, ver 20261115210000.
       const stockNote = result?.stock_skipped
         ? " Ligada a uma Encomenda Cliente — o stock geral não foi alterado."
-        : " Stock atualizado.";
+        : hasPacks
+          ? ` Stock atualizado: entraram ${stockUnitsNow} unidades de stock.`
+          : " Stock atualizado.";
 
       toast({
         title: isFullyReceived ? "Encomenda totalmente recebida" : "Receção parcial registada",
@@ -923,12 +1145,25 @@ const PurchaseOrders = () => {
   const availableProductsForSupplier = useMemo(() => {
     if (!formData.supplier_id) return [];
     return products
-      .filter(p => supplierProductRefs.has(p.id))
+      .filter(p => supplierProductLinks.has(p.id) || supplierProductRefs.has(p.id))
       .map(p => {
         const ref = supplierProductRefs.get(p.id);
+        // Embalagens: com várias ligações (un e PK100) usa a da unidade do
+        // produto; o preço é o dessa ligação. Numa embalagem nunca cai para o
+        // preço de product_prices (esse é por unidade do produto). Se o
+        // catálogo (RPC) falhou ou ainda não carregou, usa as ligações lidas
+        // de item_suppliers — a linha sai sempre com a unidade da ligação.
+        const catalogLinks = supplierCatalogByProduct.get(p.id);
+        const link = pickDefaultLink(catalogLinks && catalogLinks.length > 0 ? catalogLinks : supplierProductLinks.get(p.id));
+        if (link) {
+          const price = link.purchase_price != null
+            ? (link.units_per_uom != null ? link.purchase_price : null)
+            : link.units_per_uom === 1 ? (ref?.purchase_price ?? p.purchase_price) : null;
+          return { ...p, purchase_price: price, default_link: link };
+        }
         return ref?.purchase_price != null ? { ...p, purchase_price: ref.purchase_price } : p;
       });
-  }, [products, supplierProductRefs, formData.supplier_id]);
+  }, [products, supplierProductRefs, supplierProductLinks, supplierCatalogByProduct, formData.supplier_id]);
 
   const availableServicesForSupplier = useMemo(() => {
     if (!formData.supplier_id) return [];
@@ -1016,6 +1251,9 @@ const PurchaseOrders = () => {
   // nunca inventa preço.
   useEffect(() => {
     if (editingId || pendingClientOrderLines.length === 0 || !formData.supplier_id || orderItems.length > 0) return;
+    // Espera pelo catálogo por unidade deste fornecedor (ou pela falha dele),
+    // para a linha já sair com a unidade/referência certas.
+    if (supplierCatalogSupplierId !== formData.supplier_id) return;
 
     const matched: PurchaseOrderItem[] = [];
     const unmatched: string[] = [];
@@ -1026,20 +1264,31 @@ const PurchaseOrders = () => {
         unmatched.push(line.product_id);
         return;
       }
+      const link = product.default_link || null;
+      const units = link?.units_per_uom ?? 1;
+      // A quantidade do contrato está na unidade do produto; numa embalagem
+      // arredonda para cima (12 un com ligação PK100 => 1 PK100), como o
+      // pedido automático ao fornecedor (20261204203500).
+      const quantity = units > 1 ? Math.ceil(line.quantity / units) : line.quantity;
       const vatRate = product.vat_rate || 23;
-      const subtotal = product.purchase_price * line.quantity;
+      const subtotal = product.purchase_price * quantity;
       const vatAmount = subtotal * (vatRate / 100);
       matched.push({
         item_type: 'product',
         product_id: product.id,
         description: product.name,
         sku: product.sku || undefined,
-        quantity: line.quantity,
+        quantity,
         unit_price: product.purchase_price,
         vat_rate: vatRate,
         vat_amount: vatAmount,
         total_price: subtotal + vatAmount,
         selected_attributes: {},
+        uom_id: link?.uom_id ?? null,
+        uom_code: link?.uom_code ?? null,
+        units_per_uom: units,
+        product_uom_code: link?.product_uom_code ?? null,
+        supplier_sku: link?.supplier_sku ?? null,
       });
     });
 
@@ -1058,7 +1307,7 @@ const PurchaseOrders = () => {
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.supplier_id, pendingClientOrderLines, availableProductsForSupplier]);
+  }, [formData.supplier_id, pendingClientOrderLines, availableProductsForSupplier, supplierCatalogSupplierId]);
 
   const getAvailableItems = () => {
     return selectedItemType === 'product' ? availableProductsForSupplier : availableServicesForSupplier;
@@ -1125,7 +1374,8 @@ const PurchaseOrders = () => {
       const subtotal = purchasePrice * quantity;
       const vatAmount = subtotal * (vatRate / 100);
       const totalPrice = subtotal + vatAmount;
-      
+      const link = selectedItemType === 'product' ? item.default_link || null : null;
+
       return {
         item_type: selectedItemType,
         product_id: selectedItemType === 'product' ? item.id : undefined,
@@ -1138,6 +1388,11 @@ const PurchaseOrders = () => {
         vat_amount: vatAmount,
         total_price: totalPrice,
         selected_attributes: fullAttributes,
+        uom_id: link?.uom_id ?? null,
+        uom_code: link?.uom_code ?? null,
+        units_per_uom: link?.units_per_uom ?? 1,
+        product_uom_code: link?.product_uom_code ?? null,
+        supplier_sku: link?.supplier_sku ?? (selectedItemType === 'service' ? supplierServiceRefs.get(item.id)?.supplier_sku ?? null : null),
       };
     }).filter(item => item.unit_price > 0);
     
@@ -1158,6 +1413,153 @@ const PurchaseOrders = () => {
 
   const handleRemoveItem = (index: number) => {
     setOrderItems(orderItems.filter((_, i) => i !== index));
+  };
+
+  // Adiciona uma ligação do catálogo (produto + unidade + ref. + preço dessa
+  // unidade). Se já houver uma linha do mesmo produto na mesma unidade e sem
+  // atributos, soma 1 à quantidade (leitor de código de barras: cada leitura
+  // é mais uma embalagem).
+  const addCatalogEntryAsLine = (entry: SupplierCatalogEntry): boolean => {
+    // NULL = ligação numa unidade incompatível com a do produto (o gatilho de
+    // item_suppliers impede-o; defesa) — o servidor recusaria a linha.
+    if (entry.units_per_uom == null) {
+      toast({
+        title: "Unidade incompatível",
+        description: `A unidade "${entry.uom_code || "—"}" desta ligação não é compatível com a unidade do produto ${entry.product_name}.`,
+        variant: "destructive",
+      });
+      return false;
+    }
+    const units = entry.units_per_uom;
+    const catalogProduct = products.find((p) => p.id === entry.product_id);
+    // Sem preço na ligação: só na unidade do produto se pode usar o preço de
+    // compra geral (product_prices) — numa embalagem seria o preço errado.
+    const price = entry.purchase_price != null
+      ? entry.purchase_price
+      : units === 1 ? (supplierProductRefs.get(entry.product_id)?.purchase_price ?? catalogProduct?.purchase_price ?? null) : null;
+
+    if (!price || price <= 0) {
+      toast({
+        title: t('purchaseOrders.toast.missingPrice'),
+        description: `${entry.product_name}${entry.uom_code ? ` (${entry.uom_code})` : ""} não tem preço de compra neste fornecedor — define-o na ligação ao fornecedor.`,
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    const vatRate = catalogProduct?.vat_rate || 23;
+    const entryKey = normUomKey(entry.uom_id, entry.product_uom_id);
+
+    setOrderItems((prev) => {
+      const existingIndex = prev.findIndex((line) =>
+        line.item_type === 'product'
+        && line.product_id === entry.product_id
+        && normUomKey(line.uom_id, entry.product_uom_id) === entryKey
+        && Object.keys(line.selected_attributes || {}).length === 0
+      );
+      if (existingIndex >= 0) {
+        const line = prev[existingIndex];
+        const quantity = line.quantity + 1;
+        const subtotal = quantity * line.unit_price;
+        const vatAmount = subtotal * (line.vat_rate / 100);
+        const next = [...prev];
+        next[existingIndex] = { ...line, quantity, vat_amount: vatAmount, total_price: subtotal + vatAmount };
+        return next;
+      }
+      const vatAmount = price * (vatRate / 100);
+      return [...prev, {
+        item_type: 'product',
+        product_id: entry.product_id,
+        description: catalogProduct?.name || entry.product_name,
+        sku: entry.sku || undefined,
+        quantity: 1,
+        unit_price: price,
+        vat_rate: vatRate,
+        vat_amount: vatAmount,
+        total_price: price + vatAmount,
+        selected_attributes: {},
+        uom_id: entry.uom_id,
+        uom_code: entry.uom_code,
+        units_per_uom: units,
+        product_uom_code: entry.product_uom_code,
+        supplier_sku: entry.supplier_sku,
+      }];
+    });
+    return true;
+  };
+
+  const handleSelectCatalogSearchEntry = (entry: SupplierCatalogEntry) => {
+    if (addCatalogEntryAsLine(entry)) {
+      toast({
+        title: t('purchaseOrders.toast.itemsAdded'),
+        description: `${entry.product_name}${entry.uom_code ? ` · ${formatUomLabel(entry.uom_code, entry.units_per_uom, entry.product_uom_code)}` : ""}`,
+      });
+      // Fica aberto e limpo para a leitura seguinte.
+      setCatalogSearchQuery("");
+      setCatalogSearchResults([]);
+      setCatalogSearchResultsQuery("");
+    }
+  };
+
+  // Enter: se houver exatamente uma correspondência exata de código
+  // (match_rank 0 — SKU, ref. do fornecedor ou código de barras), adiciona-a
+  // logo, mesmo que o leitor tenha escrito mais depressa do que a pesquisa
+  // com atraso. Caso contrário, o Enter escolhe o resultado realçado (cmdk).
+  const handleCatalogSearchKeyDown = async (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Enter") return;
+    const term = catalogSearchQuery.trim();
+    if (!term) {
+      e.preventDefault();
+      return;
+    }
+    const resultsAreCurrent = catalogSearchResultsQuery === term && !catalogSearchLoading;
+    if (resultsAreCurrent) {
+      const exact = catalogSearchResults.filter((r) => r.match_rank === 0);
+      if (exact.length === 1) {
+        e.preventDefault();
+        handleSelectCatalogSearchEntry(exact[0]);
+      }
+      return;
+    }
+    e.preventDefault();
+    const rows = await runCatalogSearch(term);
+    const exact = rows.filter((r) => r.match_rank === 0);
+    if (exact.length === 1) handleSelectCatalogSearchEntry(exact[0]);
+  };
+
+  // Troca a unidade de uma linha entre as ligações deste produto neste
+  // fornecedor (un ↔ PK100): atualiza unidade, referência e preço dessa unidade.
+  const handleChangeLineUom = (index: number, itemSupplierId: string) => {
+    const item = orderItems[index];
+    if (!item?.product_id) return;
+    const entry = (supplierCatalogByProduct.get(item.product_id) || []).find((l) => l.item_supplier_id === itemSupplierId);
+    if (!entry) return;
+    const units = entry.units_per_uom ?? 1;
+    // Sem preço na ligação: o preço anterior era de outra unidade — fica a 0
+    // (a validação unit_price > 0 impede gravar até ser definido).
+    const unitPrice = entry.purchase_price != null ? entry.purchase_price : 0;
+    const subtotal = item.quantity * unitPrice;
+    const vatAmount = subtotal * (item.vat_rate / 100);
+    const newItems = [...orderItems];
+    newItems[index] = {
+      ...item,
+      uom_id: entry.uom_id,
+      uom_code: entry.uom_code,
+      units_per_uom: units,
+      product_uom_code: entry.product_uom_code,
+      supplier_sku: entry.supplier_sku,
+      unit_price: unitPrice,
+      vat_amount: vatAmount,
+      total_price: subtotal + vatAmount,
+    };
+    setOrderItems(newItems);
+    if (entry.purchase_price == null) {
+      toast({
+        title: t('purchaseOrders.toast.missingPrice'),
+        description: `A ligação em ${entry.uom_code || "unidade do produto"} não tem preço — define o preço unitário da linha antes de gravar.`,
+        variant: "destructive",
+      });
+    }
   };
 
   const handleItemChange = (index: number, field: keyof PurchaseOrderItem, value: any) => {
@@ -1215,6 +1617,21 @@ const PurchaseOrders = () => {
       return;
     }
 
+    // Linha em embalagem (fator > 1) sem preço (ex. unidade trocada para uma
+    // ligação sem preço) não grava a 0 €. Linhas sem pack a 0 € (amostras)
+    // gravam como antes.
+    const noPriceLines = orderItems.filter(
+      (item) => !!item.uom_id && (item.units_per_uom ?? 1) > 1 && !(Number(item.unit_price) > 0),
+    );
+    if (noPriceLines.length > 0) {
+      toast({
+        title: t('purchaseOrders.toast.missingPrice'),
+        description: `${noPriceLines.length} linha(s) sem preço unitário: ${noPriceLines.slice(0, 3).map((i) => i.description).join(", ")}${noPriceLines.length > 3 ? "…" : ""}. Define o preço antes de gravar.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     const { total } = calculateTotals();
 
     try {
@@ -1255,6 +1672,10 @@ const PurchaseOrders = () => {
         total_price: item.total_price,
         selected_attributes: item.selected_attributes || {},
         notes: item.notes || null,
+        // Embalagens (20261204204500): unidade da linha e ref. do fornecedor.
+        // units_per_uom NUNCA vai no payload — é calculado no servidor.
+        uom_id: item.uom_id || null,
+        supplier_sku: item.supplier_sku || null,
       }));
 
       if (editingId) {
@@ -1352,9 +1773,11 @@ const PurchaseOrders = () => {
       if (orderError) throw orderError;
 
       // Fetch order items
+      // Unidade da linha (ex. PK100) e unidade base do produto, para o PDF
+      // mostrar a referência do fornecedor e em que unidade se encomenda.
       const { data: itemsData, error: itemsError } = await supabase
         .from('purchase_order_items')
-        .select('*')
+        .select('*, uom:uom_id(code), products(uom:uom_id(code))')
         .eq('purchase_order_id', orderId);
 
       if (itemsError) throw itemsError;
@@ -1733,21 +2156,58 @@ const PurchaseOrders = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="supplier_id">{t('purchaseOrders.form.supplier')} *</Label>
-                      <Select value={formData.supplier_id} onValueChange={(value) => {
-                        setFormData({ ...formData, supplier_id: value });
-                        setOrderItems([]);
-                      }} required>
-                        <SelectTrigger>
-                          <SelectValue placeholder={t('purchaseOrders.form.selectSupplier')} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {suppliers.map((supplier) => (
-                            <SelectItem key={supplier.id} value={supplier.id}>
-                              {supplier.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {/* Pesquisável por nome e por código do fornecedor (suppliers.code).
+                          `modal`: o PopoverContent vai para um portal fora do
+                          DialogContent — sem isto o focus trap do diálogo rouba o
+                          foco ao CommandInput e o popover fecha-se sozinho. */}
+                      <Popover modal open={supplierPickerOpen} onOpenChange={setSupplierPickerOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            id="supplier_id"
+                            type="button"
+                            variant="outline"
+                            role="combobox"
+                            aria-expanded={supplierPickerOpen}
+                            className={cn("w-full justify-between font-normal", !formData.supplier_id && "text-muted-foreground", fieldErrors.supplier_id && "border-destructive")}
+                          >
+                            <span className="truncate">
+                              {formData.supplier_id
+                                ? formatSupplierLabel(suppliers.find((s) => s.id === formData.supplier_id)) || t('purchaseOrders.form.selectSupplier')
+                                : t('purchaseOrders.form.selectSupplier')}
+                            </span>
+                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[20rem] p-0 z-[700]" align="start">
+                          <Command>
+                            <CommandInput placeholder="Pesquisar por código ou nome…" />
+                            <CommandList className="max-h-72 overflow-y-auto" onWheel={(e) => e.stopPropagation()}>
+                              <CommandEmpty>Nenhum fornecedor encontrado.</CommandEmpty>
+                              <CommandGroup>
+                                {suppliers.map((supplier) => (
+                                  <CommandItem
+                                    key={supplier.id}
+                                    // O id garante valor único (cmdk) com nomes repetidos sem código.
+                                    value={`${supplier.code || ""} ${supplier.name || ""} ${supplier.id}`.trim()}
+                                    onSelect={() => {
+                                      if (supplier.id !== formData.supplier_id) {
+                                        setFormData({ ...formData, supplier_id: supplier.id });
+                                        setOrderItems([]);
+                                      }
+                                      setSupplierPickerOpen(false);
+                                    }}
+                                    className="gap-2"
+                                  >
+                                    <Check className={cn("h-4 w-4 shrink-0", supplier.id === formData.supplier_id ? "opacity-100" : "opacity-0")} />
+                                    {supplier.code && <span className="font-mono text-xs text-muted-foreground">{supplier.code}</span>}
+                                    <span className="truncate">{supplier.name}</span>
+                                  </CommandItem>
+                                ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
                       {fieldErrors.supplier_id && <p className="text-xs text-destructive">{fieldErrors.supplier_id}</p>}
                     </div>
                     <div className="space-y-2">
@@ -1840,14 +2300,93 @@ const PurchaseOrders = () => {
                   <div className="border-t pt-4">
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-semibold">{t('purchaseOrders.form.orderItems')}</h3>
-                      <Button 
-                        type="button" 
-                        onClick={() => setShowItemsDialog(true)}
-                        disabled={!formData.supplier_id}
-                      >
-                        <Plus className="w-4 h-4 mr-2" />
-                        {t('purchaseOrders.form.addItems')}
-                      </Button>
+                      <div className="flex gap-2">
+                        {/* Pesquisa no catálogo do fornecedor (rpc_supplier_catalog_search):
+                            SKU, ref. do fornecedor, código de barras ou nome. Cada
+                            resultado é uma ligação (produto + unidade) — o mesmo produto
+                            pode aparecer em "un" e em "PK100". `modal`: ver o seletor de
+                            fornecedor acima. */}
+                        <Popover
+                          modal
+                          open={catalogSearchOpen}
+                          onOpenChange={(isOpen) => {
+                            setCatalogSearchOpen(isOpen);
+                            if (!isOpen) {
+                              setCatalogSearchQuery("");
+                              setCatalogSearchResults([]);
+                              setCatalogSearchResultsQuery("");
+                            }
+                          }}
+                        >
+                          <PopoverTrigger asChild>
+                            <Button type="button" variant="outline" disabled={!formData.supplier_id}>
+                              <ScanBarcode className="w-4 h-4 mr-2" />
+                              Pesquisar no catálogo
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[36rem] max-w-[90vw] p-0 z-[700]" align="end">
+                            <Command
+                              shouldFilter={false}
+                              value={catalogSearchHighlighted}
+                              onValueChange={setCatalogSearchHighlighted}
+                              onKeyDown={handleCatalogSearchKeyDown}
+                            >
+                              <CommandInput
+                                placeholder="Ref. do fornecedor, SKU, código de barras ou nome…"
+                                value={catalogSearchQuery}
+                                onValueChange={setCatalogSearchQuery}
+                              />
+                              <CommandList className="max-h-80 overflow-y-auto" onWheel={(e) => e.stopPropagation()}>
+                                {!catalogSearchQuery.trim() ? (
+                                  <div className="py-6 text-center text-sm text-muted-foreground">
+                                    Escreve ou lê um código. Enter com correspondência exata adiciona logo.
+                                  </div>
+                                ) : catalogSearchLoading && catalogSearchResultsQuery !== catalogSearchQuery.trim() ? (
+                                  <div className="py-6 text-center text-sm text-muted-foreground">A pesquisar…</div>
+                                ) : (
+                                  <>
+                                    <CommandEmpty>Nenhum produto deste fornecedor corresponde à pesquisa.</CommandEmpty>
+                                    <CommandGroup>
+                                      {catalogSearchResults.map((entry) => (
+                                        <CommandItem
+                                          key={entry.item_supplier_id}
+                                          value={entry.item_supplier_id}
+                                          onSelect={() => handleSelectCatalogSearchEntry(entry)}
+                                          className="flex items-center gap-2 text-xs"
+                                        >
+                                          <span className="font-mono shrink-0 min-w-[5rem]">{entry.supplier_sku || "—"}</span>
+                                          <span className="text-muted-foreground">·</span>
+                                          <span className="flex-1 truncate">{entry.product_name}</span>
+                                          {entry.sku && (
+                                            <>
+                                              <span className="text-muted-foreground">·</span>
+                                              <span className="font-mono text-muted-foreground shrink-0">{entry.sku}</span>
+                                            </>
+                                          )}
+                                          <span className="text-muted-foreground">·</span>
+                                          <Badge variant="outline" className="shrink-0 font-normal">
+                                            {formatUomLabel(entry.uom_code, entry.units_per_uom, entry.product_uom_code) || "un"}
+                                          </Badge>
+                                          <span className="text-muted-foreground">·</span>
+                                          <span className="shrink-0 tabular-nums">{formatMoney(entry.purchase_price, entry.currency)}</span>
+                                        </CommandItem>
+                                      ))}
+                                    </CommandGroup>
+                                  </>
+                                )}
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        <Button
+                          type="button"
+                          onClick={() => setShowItemsDialog(true)}
+                          disabled={!formData.supplier_id}
+                        >
+                          <Plus className="w-4 h-4 mr-2" />
+                          {t('purchaseOrders.form.addItems')}
+                        </Button>
+                      </div>
                     </div>
 
                     {orderItems.length > 0 ? (
@@ -1859,6 +2398,7 @@ const PurchaseOrders = () => {
                                 <TableHead>{t('purchaseOrders.items.sku')}</TableHead>
                                 <TableHead>{t('purchaseOrders.items.description')}</TableHead>
                                 <TableHead>{t('purchaseOrders.items.quantity')}</TableHead>
+                                <TableHead>Unidade</TableHead>
                                 <TableHead>{t('purchaseOrders.items.unitPrice')}</TableHead>
                                 <TableHead>{t('purchaseOrders.items.vat')}</TableHead>
                                 <TableHead>{t('purchaseOrders.items.total')}</TableHead>
@@ -1866,9 +2406,21 @@ const PurchaseOrders = () => {
                               </TableRow>
                             </TableHeader>
                              <TableBody>
-                               {orderItems.map((item, index) => (
+                               {orderItems.map((item, index) => {
+                                 const units = item.units_per_uom ?? 1;
+                                 const lineLinks = item.product_id ? supplierCatalogByProduct.get(item.product_id) || [] : [];
+                                 const productUomId = lineLinks[0]?.product_uom_id ?? null;
+                                 const currentLink = lineLinks.find((l) => normUomKey(l.uom_id, productUomId) === normUomKey(item.uom_id, productUomId));
+                                 const baseCode = item.product_uom_code || lineLinks[0]?.product_uom_code || "un";
+                                 const uomLabel = item.uom_code || (units === 1 ? item.product_uom_code : null) || (item.item_type === 'product' ? baseCode : "—");
+                                 return (
                                  <TableRow key={index}>
-                                   <TableCell className="font-mono text-xs">{item.sku || "N/A"}</TableCell>
+                                   <TableCell className="font-mono text-xs">
+                                     <div>{item.sku || "N/A"}</div>
+                                     {item.supplier_sku && (
+                                       <div className="text-muted-foreground" title="Referência do fornecedor">Ref.: {item.supplier_sku}</div>
+                                     )}
+                                   </TableCell>
                                    <TableCell>{item.description}</TableCell>
                                    <TableCell>
                                      <Input
@@ -1879,6 +2431,34 @@ const PurchaseOrders = () => {
                                        min="0"
                                        step="0.01"
                                      />
+                                     {units > 1 && (
+                                       <div className="text-xs text-muted-foreground mt-1 whitespace-nowrap">
+                                         = {(item.quantity * units).toLocaleString("pt-PT")} {baseCode}
+                                       </div>
+                                     )}
+                                   </TableCell>
+                                   <TableCell>
+                                     {lineLinks.length > 1 ? (
+                                       <Select
+                                         value={currentLink?.item_supplier_id ?? ""}
+                                         onValueChange={(value) => handleChangeLineUom(index, value)}
+                                       >
+                                         <SelectTrigger className="h-9 w-32" aria-label="Unidade da linha">
+                                           <SelectValue placeholder={uomLabel || "—"} />
+                                         </SelectTrigger>
+                                         <SelectContent>
+                                           {lineLinks.map((l) => (
+                                             <SelectItem key={l.item_supplier_id} value={l.item_supplier_id}>
+                                               {formatUomLabel(l.uom_code, l.units_per_uom, l.product_uom_code) || "un"} · {formatMoney(l.purchase_price, l.currency)}
+                                             </SelectItem>
+                                           ))}
+                                         </SelectContent>
+                                       </Select>
+                                     ) : (
+                                       <span className="text-sm whitespace-nowrap">
+                                         {units > 1 ? formatUomLabel(uomLabel, units, baseCode) : uomLabel}
+                                       </span>
+                                     )}
                                    </TableCell>
                                    <TableCell>
                                      <Input
@@ -1921,7 +2501,8 @@ const PurchaseOrders = () => {
                                      </div>
                                    </TableCell>
                                  </TableRow>
-                               ))}
+                                 );
+                               })}
                              </TableBody>
                           </Table>
                         </div>
@@ -1986,7 +2567,7 @@ const PurchaseOrders = () => {
                     <SelectItem value="all">{t('purchaseOrders.filters.all')}</SelectItem>
                     {suppliers.map((supplier) => (
                       <SelectItem key={supplier.id} value={supplier.id}>
-                        {supplier.name}
+                        {formatSupplierLabel(supplier)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -2177,7 +2758,16 @@ const PurchaseOrders = () => {
                     <div>
                       <div className="font-semibold">{product.name}</div>
                       <div className="text-sm text-muted-foreground">
-                        SKU: {product.sku || "N/A"} | {t('purchaseOrders.items.price')}: €{product.purchase_price?.toFixed(2) || "N/A"} | {t('purchaseOrders.items.vat')}: {product.vat_rate}%
+                        SKU: {product.sku || "N/A"}
+                        {product.default_link?.supplier_sku ? ` | Ref.: ${product.default_link.supplier_sku}` : ""}
+                        {" | "}{t('purchaseOrders.items.price')}: €{product.purchase_price?.toFixed(2) || "N/A"}
+                        {(product.default_link?.units_per_uom ?? 1) > 1
+                          ? ` / ${formatUomLabel(product.default_link?.uom_code, product.default_link?.units_per_uom, product.default_link?.product_uom_code)}`
+                          : ""}
+                        {" | "}{t('purchaseOrders.items.vat')}: {product.vat_rate}%
+                        {(supplierCatalogByProduct.get(product.id)?.length ?? 0) > 1 && (
+                          <span className="ml-1">(outras unidades disponíveis na linha)</span>
+                        )}
                       </div>
                     </div>
                     
@@ -2359,40 +2949,62 @@ const PurchaseOrders = () => {
                       <TableHead>Item</TableHead>
                       <TableHead className="text-right">Encomendada</TableHead>
                       <TableHead className="text-right">Já recebida</TableHead>
-                      <TableHead className="text-right">Receber agora</TableHead>
+                      <TableHead className="text-right">Receber agora (unid. da linha)</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {receiveLines.map((item) => {
                       const remaining = getReceiveRemaining(item);
                       const fullyReceived = remaining <= 0;
+                      // Embalagens (20261204203500): as quantidades estão na unidade
+                      // da linha (ex. PK100); o stock entra na unidade do produto.
+                      const units = item.units_per_uom ?? 1;
+                      const baseCode = item.products?.uom?.code || "un";
+                      const lineUomCode = item.uom?.code || (units === 1 ? item.products?.uom?.code : null) || "";
+                      const toReceive = receiveLineQuantities[item.id] ?? 0;
                       return (
                         <TableRow key={item.id} className={fullyReceived ? "opacity-50" : ""}>
                           <TableCell className={fullyReceived ? "line-through" : ""}>
                             <div className="font-medium">{item.products?.name || item.description}</div>
-                            {item.sku && (
-                              <div className="text-xs text-muted-foreground font-mono">{item.sku}</div>
+                            {(item.sku || item.supplier_sku) && (
+                              <div className="text-xs text-muted-foreground font-mono">
+                                {item.sku}
+                                {item.sku && item.supplier_sku ? " · " : ""}
+                                {item.supplier_sku ? `Ref.: ${item.supplier_sku}` : ""}
+                              </div>
+                            )}
+                            {units > 1 && (
+                              <div className="text-xs text-muted-foreground">
+                                {formatUomLabel(lineUomCode, units, baseCode)}
+                              </div>
                             )}
                           </TableCell>
-                          <TableCell className="text-right">{item.quantity}</TableCell>
+                          <TableCell className="text-right whitespace-nowrap">{item.quantity}{lineUomCode ? ` ${lineUomCode}` : ""}</TableCell>
                           <TableCell className="text-right">{item.received_quantity || 0}</TableCell>
                           <TableCell className="text-right">
                             {fullyReceived ? (
                               <span className="text-xs text-muted-foreground">já recebida</span>
                             ) : (
-                              <Input
-                                type="number"
-                                min={0}
-                                max={remaining}
-                                step="1"
-                                className="w-24 ml-auto"
-                                value={receiveLineQuantities[item.id] ?? 0}
-                                onChange={(e) => {
-                                  const raw = parseFloat(e.target.value);
-                                  const clamped = isNaN(raw) ? 0 : Math.min(Math.max(raw, 0), remaining);
-                                  setReceiveLineQuantities((prev) => ({ ...prev, [item.id]: clamped }));
-                                }}
-                              />
+                              <>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  max={remaining}
+                                  step="1"
+                                  className="w-24 ml-auto"
+                                  value={toReceive}
+                                  onChange={(e) => {
+                                    const raw = parseFloat(e.target.value);
+                                    const clamped = isNaN(raw) ? 0 : Math.min(Math.max(raw, 0), remaining);
+                                    setReceiveLineQuantities((prev) => ({ ...prev, [item.id]: clamped }));
+                                  }}
+                                />
+                                <div className="text-xs text-muted-foreground mt-1 whitespace-nowrap">
+                                  {receivingOrder?.stockSkipped
+                                    ? "sem entrada no stock geral"
+                                    : `entram ${(toReceive * units).toLocaleString("pt-PT")} ${baseCode} em stock`}
+                                </div>
+                              </>
                             )}
                           </TableCell>
                         </TableRow>

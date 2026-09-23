@@ -7344,6 +7344,8 @@ export type Database = {
           total_com_iva: number | null
           total_sem_iva: number | null
           unidade: string | null
+          units_per_uom: number
+          uom_id: string | null
           visible_to_client: boolean
         }
         Insert: {
@@ -7364,6 +7366,8 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          units_per_uom?: number
+          uom_id?: string | null
           visible_to_client?: boolean
         }
         Update: {
@@ -7384,6 +7388,8 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          units_per_uom?: number
+          uom_id?: string | null
           visible_to_client?: boolean
         }
         Relationships: [
@@ -7406,6 +7412,13 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "direct_sale_lines_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
             referencedColumns: ["id"]
           },
         ]
@@ -16056,8 +16069,11 @@ export type Database = {
           selected_attributes: Json | null
           service_id: string | null
           sku: string | null
+          supplier_sku: string | null
           total_price: number
           unit_price: number
+          units_per_uom: number
+          uom_id: string | null
           updated_at: string
           vat_amount: number | null
           vat_rate: number | null
@@ -16075,8 +16091,11 @@ export type Database = {
           selected_attributes?: Json | null
           service_id?: string | null
           sku?: string | null
+          supplier_sku?: string | null
           total_price?: number
           unit_price?: number
+          units_per_uom?: number
+          uom_id?: string | null
           updated_at?: string
           vat_amount?: number | null
           vat_rate?: number | null
@@ -16094,8 +16113,11 @@ export type Database = {
           selected_attributes?: Json | null
           service_id?: string | null
           sku?: string | null
+          supplier_sku?: string | null
           total_price?: number
           unit_price?: number
+          units_per_uom?: number
+          uom_id?: string | null
           updated_at?: string
           vat_amount?: number | null
           vat_rate?: number | null
@@ -16127,6 +16149,13 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
             referencedColumns: ["id"]
           },
         ]
@@ -16582,6 +16611,8 @@ export type Database = {
           total_com_iva: number | null
           total_sem_iva: number | null
           unidade: string | null
+          units_per_uom: number
+          uom_id: string | null
           visible_to_client: boolean
         }
         Insert: {
@@ -16614,6 +16645,8 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          units_per_uom?: number
+          uom_id?: string | null
           visible_to_client?: boolean
         }
         Update: {
@@ -16646,6 +16679,8 @@ export type Database = {
           total_com_iva?: number | null
           total_sem_iva?: number | null
           unidade?: string | null
+          units_per_uom?: number
+          uom_id?: string | null
           visible_to_client?: boolean
         }
         Relationships: [
@@ -16710,6 +16745,13 @@ export type Database = {
             columns: ["service_id"]
             isOneToOne: false
             referencedRelation: "services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_lines_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
             referencedColumns: ["id"]
           },
         ]
@@ -19361,6 +19403,7 @@ export type Database = {
           address: string | null
           business_unit_id: string | null
           city: string | null
+          code: string | null
           contact_person: string | null
           country: string | null
           created_at: string
@@ -19393,6 +19436,7 @@ export type Database = {
           address?: string | null
           business_unit_id?: string | null
           city?: string | null
+          code?: string | null
           contact_person?: string | null
           country?: string | null
           created_at?: string
@@ -19425,6 +19469,7 @@ export type Database = {
           address?: string | null
           business_unit_id?: string | null
           city?: string | null
+          code?: string | null
           contact_person?: string | null
           country?: string | null
           created_at?: string
@@ -21341,6 +21386,10 @@ export type Database = {
           origin_source: string
           origin_source_id: string
         }[]
+      }
+      fn_uom_units_per: {
+        Args: { p_product_id: string; p_uom_id: string }
+        Returns: number
       }
       fn_write_entity_history: {
         Args: {
@@ -25095,6 +25144,51 @@ export type Database = {
       rpc_snapshot_quote_diagnostic: {
         Args: { p_deal_id: string; p_quote_id: string }
         Returns: number
+      }
+      rpc_supplier_catalog: {
+        Args: { p_supplier_id: string }
+        Returns: {
+          barcode: string | null
+          currency: string
+          is_active: boolean
+          is_preferred: boolean
+          item_supplier_id: string
+          lead_time_days: number | null
+          moq: number | null
+          product_id: string
+          product_name: string
+          product_uom_code: string | null
+          product_uom_id: string | null
+          purchase_price: number | null
+          sku: string | null
+          supplier_sku: string | null
+          units_per_uom: number | null
+          uom_code: string | null
+          uom_id: string | null
+        }[]
+      }
+      rpc_supplier_catalog_search: {
+        Args: { p_limit?: number; p_query: string; p_supplier_id: string }
+        Returns: {
+          barcode: string | null
+          currency: string
+          is_active: boolean
+          is_preferred: boolean
+          item_supplier_id: string
+          lead_time_days: number | null
+          match_rank: number
+          moq: number | null
+          product_id: string
+          product_name: string
+          product_uom_code: string | null
+          product_uom_id: string | null
+          purchase_price: number | null
+          sku: string | null
+          supplier_sku: string | null
+          units_per_uom: number | null
+          uom_code: string | null
+          uom_id: string | null
+        }[]
       }
       rpc_toggle_client_vip: {
         Args: {

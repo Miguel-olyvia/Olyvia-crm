@@ -19,8 +19,13 @@ import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { calculateInlineQuoteTotals, getLineBundleComponents } from "@/utils/quotes/inlineQuoteVatCalculation";
 import { getLineUnitPrice, getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { applyUomOptionToLine, type LineUomFields } from "@/utils/quotes/lineUom";
+import { useLineUomOptions } from "@/hooks/useLineUomOptions";
+import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
 
-export interface InlineQuoteLine {
+// LineUomFields: embalagem da linha (uom_id vai no payload; units_per_uom é
+// só do UI — ver src/utils/quotes/lineUom.ts).
+export interface InlineQuoteLine extends LineUomFields {
   id: string;
   section_name: string;
   descricao_snapshot: string;
@@ -104,6 +109,9 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
   const [catalogLoading, setCatalogLoading] = useState(true);
 
   const orgId = organizationId || activeCompany?.id;
+
+  // Seletor "Unidade" (embalagens) das linhas de produto.
+  const lineUom = useLineUomOptions(quote.lines.map((l) => (l.bundle_id ? null : l.product_id)));
 
   // Load products and services for catalog
   useEffect(() => {
@@ -731,6 +739,7 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
                       const unitPrice = getLineUnitPrice(line);
                       const lineTotal = calcLinePrice(line);
                       const isBundleLine = getLineBundleComponents(line).length > 0;
+                      const lineUomOptions = line.bundle_id ? [] : lineUom.getOptions(line.product_id);
 
                       return (
                         <div key={line.id} className="grid grid-cols-[1fr_60px_60px_80px_80px_60px_80px_28px] gap-1 items-center">
@@ -761,12 +770,29 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
                                 </Tooltip>
                               </TooltipProvider>
                             )}
+                            <PackQuantityHint qt={line.qt} line={line} baseCode={lineUom.getBaseCode(line.product_id)} className="mt-0.5 text-center whitespace-normal" />
                           </div>
-                          <Input
-                            value={line.unidade || "un"}
-                            onChange={(e) => updateLine(line.id, "unidade", e.target.value)}
-                            className="h-8 text-xs text-center"
-                          />
+                          {lineUomOptions.length > 0 ? (
+                            <LineUomSelect
+                              options={lineUomOptions}
+                              line={line}
+                              className="px-1"
+                              onChange={(option) => {
+                                // Uma só atualização: preço, custo, unidade e uom_id mudam juntos.
+                                onChange({
+                                  ...quote,
+                                  lines: quote.lines.map(l => (l.id === line.id ? applyUomOptionToLine(l, option) : l)),
+                                });
+                              }}
+                            />
+                          ) : (
+                            <Input
+                              value={line.unidade || "un"}
+                              onChange={(e) => updateLine(line.id, "unidade", e.target.value)}
+                              className="h-8 text-xs text-center"
+                              disabled={!!line.uom_id}
+                            />
+                          )}
                           <Input
                             type="number"
                             value={custoUnit || ""}

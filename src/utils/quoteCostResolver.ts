@@ -12,6 +12,12 @@ export interface QuoteLineForCost {
   custo_mao_obra_unit?: number | string | null;
   iva_percent?: number | string | null;
   /**
+   * Unidades de stock por unidade da linha (gatilho do servidor; 1 sem
+   * embalagem). O preço de compra do catálogo é por unidade de stock, por isso
+   * uma linha em PK10 custa esse valor × 10. Sem a coluna no select = 1.
+   */
+  units_per_uom?: number | string | null;
+  /**
    * Snapshot of the components actually selected for this bundle line
    * (lives in quote_lines.selected_attributes.bundle_components).
    * When present, ONLY these are used to compute the bundle cost — we do NOT
@@ -289,15 +295,20 @@ export async function resolveLineDetails(
       return shares;
     };
 
+    // Só os custos lidos do catálogo (ramos 1 e 2) são por unidade de stock;
+    // o último recurso (6) usa o custo gravado na linha, que já é por embalagem.
+    const rawUpu = Number(line.units_per_uom);
+    const unitsPerUom = Number.isFinite(rawUpu) && rawUpu >= 1 ? rawUpu : 1;
+
     // 1) Direct product line
     if (line.product_id && productCostMap[line.product_id] != null) {
-      unitCost = productCostMap[line.product_id];
+      unitCost = productCostMap[line.product_id] * unitsPerUom;
       const rate = productVatMap[line.product_id] ?? parseFloat(String(line.iva_percent ?? 23));
       vatRateShares = { [rate]: 1 };
     }
     // 2) Direct service line
     else if (line.service_id && serviceCostMap[line.service_id] != null) {
-      unitCost = serviceCostMap[line.service_id];
+      unitCost = serviceCostMap[line.service_id] * unitsPerUom;
       const rate = serviceVatMap[line.service_id] ?? parseFloat(String(line.iva_percent ?? 23));
       vatRateShares = { [rate]: 1 };
     }

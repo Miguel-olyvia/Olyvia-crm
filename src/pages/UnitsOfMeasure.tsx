@@ -33,6 +33,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useCompany } from "@/contexts/CompanyContext";
 
 interface UnitOfMeasure {
@@ -40,6 +47,19 @@ interface UnitOfMeasure {
   code: string;
   description: string | null;
   organization_id: string | null;
+  base_uom_id: string | null;
+  conversion_factor: number | null;
+}
+
+const NO_BASE = "__none__";
+// Igual ao CHECK uom_conversion_factor_inteiro.
+const MAX_FACTOR = 1000000;
+
+// Unidade com quantidade (pack): "PK100 = 100 × un".
+function formatPack(unit: UnitOfMeasure, units: UnitOfMeasure[]): string | null {
+  if (!unit.base_uom_id) return null;
+  const base = units.find((u) => u.id === unit.base_uom_id);
+  return `${unit.code} = ${Number(unit.conversion_factor ?? 0)} × ${base?.code ?? "?"}`;
 }
 
 // Supabase's PostgrestError (e.g. an RLS 403) is a plain object, not an
@@ -53,6 +73,30 @@ function getErrorMessage(error: unknown): string {
   return String(error);
 }
 
+function getErrorCode(error: unknown): string {
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as { code: unknown }).code ?? "");
+  }
+  return "";
+}
+
+// Os gatilhos da BD (fn_uom_validate) já devolvem mensagens em PT — passam
+// tal como vêm. Só o índice único, o CHECK do fator e as FKs chegam em inglês.
+function getUomErrorMessage(error: unknown, code: string): string {
+  const msg = getErrorMessage(error);
+  const pgCode = getErrorCode(error);
+  if (msg.includes("uom_code_scope_uniq")) {
+    return `Já existe uma unidade com o código "${code}".`;
+  }
+  if (msg.includes("uom_conversion_factor_inteiro")) {
+    return `A quantidade tem de ser um número inteiro entre 2 e ${MAX_FACTOR.toLocaleString("pt-PT")}.`;
+  }
+  if (pgCode === "23503") {
+    return `A unidade "${code}" está em uso (produtos, fornecedores, documentos ou outras unidades) e não pode ser apagada.`;
+  }
+  return msg;
+}
+
 export default function UnitsOfMeasure() {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -64,7 +108,12 @@ export default function UnitsOfMeasure() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<UnitOfMeasure | null>(null);
   const [unitToDelete, setUnitToDelete] = useState<UnitOfMeasure | null>(null);
-  const [formData, setFormData] = useState({ code: "", description: "" });
+  const [formData, setFormData] = useState({
+    code: "",
+    description: "",
+    baseUomId: "",
+    factor: "",
+  });
   const [saving, setSaving] = useState(false);
 
   const loadUnits = useCallback(async () => {
@@ -75,7 +124,7 @@ export default function UnitsOfMeasure() {
       // Show both the org's own records and the global ones.
       let uomQuery = supabase
         .from("uom")
-        .select("id, code, description, organization_id")
+        .select("id, code, description, organization_id, base_uom_id, conversion_factor")
         .order("code");
       if (activeCompany?.id) {
         uomQuery = uomQuery.or(`organization_id.eq.${activeCompany.id},organization_id.is.null`);
@@ -107,13 +156,27 @@ export default function UnitsOfMeasure() {
       (unit.description?.toLowerCase() || "").includes(searchTerm.toLowerCase())
   );
 
+  // Só um nível: a base é sempre uma unidade simples, e nunca a própria.
+  const baseOptions = units.filter(
+    (u) => !u.base_uom_id && u.id !== editingUnit?.id
+  );
+  const selectedBase = units.find((u) => u.id === formData.baseUomId);
+
   const handleOpenDialog = (unit?: UnitOfMeasure) => {
     if (unit) {
       setEditingUnit(unit);
-      setFormData({ code: unit.code, description: unit.description || "" });
+      setFormData({
+        code: unit.code,
+        description: unit.description || "",
+        baseUomId: unit.base_uom_id || "",
+        factor:
+          unit.base_uom_id && unit.conversion_factor != null
+            ? String(Number(unit.conversion_factor))
+            : "",
+      });
     } else {
       setEditingUnit(null);
-      setFormData({ code: "", description: "" });
+      setFormData({ code: "", description: "", baseUomId: "", factor: "" });
     }
     setDialogOpen(true);
   };
@@ -126,6 +189,22 @@ export default function UnitsOfMeasure() {
         variant: "destructive",
       });
       return;
+    }
+
+    const baseUomId = formData.baseUomId || null;
+    let conversionFactor: number | null = null;
+    if (baseUomId) {
+      const raw = formData.factor.trim();
+      const n = Number(raw);
+      if (!raw || !Number.isInteger(n) || n < 2 || n > MAX_FACTOR) {
+        toast({
+          title: t("common.error"),
+          description: `Indique a quantidade: um número inteiro entre 2 e ${MAX_FACTOR.toLocaleString("pt-PT")}.`,
+          variant: "destructive",
+        });
+        return;
+      }
+      conversionFactor = n;
     }
 
     setSaving(true);
@@ -146,6 +225,8 @@ export default function UnitsOfMeasure() {
             .update({
               code: formData.code.trim(),
               description: formData.description.trim() || null,
+              base_uom_id: baseUomId,
+              conversion_factor: conversionFactor,
             })
             .eq("id", editingUnit.id)
             .eq("organization_id", activeCompany.id);
@@ -160,6 +241,8 @@ export default function UnitsOfMeasure() {
           const { error } = await supabase.from("uom").insert({
             code: formData.code.trim(),
             description: formData.description.trim() || null,
+            base_uom_id: baseUomId,
+            conversion_factor: conversionFactor,
             organization_id: activeCompany.id,
           });
           if (error) throw error;
@@ -172,7 +255,7 @@ export default function UnitsOfMeasure() {
     } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: getErrorMessage(error),
+        description: getUomErrorMessage(error, formData.code.trim()),
         variant: "destructive",
       });
     } finally {
@@ -207,7 +290,7 @@ export default function UnitsOfMeasure() {
     } catch (error: unknown) {
       toast({
         title: t("common.error"),
-        description: getErrorMessage(error),
+        description: getUomErrorMessage(error, unitToDelete.code),
         variant: "destructive",
       });
     }
@@ -240,19 +323,20 @@ export default function UnitsOfMeasure() {
               <TableRow>
                 <TableHead>{t("uom.code")}</TableHead>
                 <TableHead>{t("uom.description")}</TableHead>
+                <TableHead>Quantidade</TableHead>
                 <TableHead className="w-24 text-right">{t("common.actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center py-8">
+                  <TableCell colSpan={4} className="text-center py-8">
                     {t("common.loading")}
                   </TableCell>
                 </TableRow>
               ) : filteredUnits.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={3} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={4} className="text-center py-8 text-muted-foreground">
                     {t("common.noResults")}
                   </TableCell>
                 </TableRow>
@@ -261,6 +345,9 @@ export default function UnitsOfMeasure() {
                   <TableRow key={unit.id}>
                     <TableCell className="font-medium">{unit.code}</TableCell>
                     <TableCell>{unit.description || "-"}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {formatPack(unit, units) ?? "-"}
+                    </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-1">
                         <Button
@@ -322,6 +409,59 @@ export default function UnitsOfMeasure() {
                 placeholder={t("uom.descriptionPlaceholder")}
               />
             </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="base-uom">Unidade base</Label>
+                <Select
+                  value={formData.baseUomId || NO_BASE}
+                  onValueChange={(v) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      baseUomId: v === NO_BASE ? "" : v,
+                      factor: v === NO_BASE ? "" : prev.factor,
+                    }))
+                  }
+                >
+                  <SelectTrigger id="base-uom">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_BASE}>Nenhuma (unidade simples)</SelectItem>
+                    {baseOptions.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.code}
+                        {u.description ? ` — ${u.description}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="factor">
+                  Quantidade{formData.baseUomId ? " *" : ""}
+                </Label>
+                <Input
+                  id="factor"
+                  type="number"
+                  inputMode="numeric"
+                  min={2}
+                  max={MAX_FACTOR}
+                  step={1}
+                  value={formData.factor}
+                  disabled={!formData.baseUomId}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, factor: e.target.value }))
+                  }
+                  placeholder="100"
+                />
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Use para packs: o stock conta-se sempre na unidade base.
+              {selectedBase && formData.code.trim() && formData.factor.trim()
+                ? ` ${formData.code.trim()} = ${formData.factor.trim()} × ${selectedBase.code}`
+                : ""}
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>

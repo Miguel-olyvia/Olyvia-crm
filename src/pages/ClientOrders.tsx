@@ -32,6 +32,12 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
 import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
+import { applyUomOptionToLine, formatOrderLineQuantity, type LineUomFields } from "@/utils/quotes/lineUom";
+import { useLineUomOptions } from "@/hooks/useLineUomOptions";
+import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
+
+// Na criação manual o único valor por unidade é o preço (não há custo aqui).
+const MANUAL_ORDER_PRICE_FIELDS = ["unit_price"] as const;
 
 // Fase 5.0F do plano de inventário: página só-leitura "Encomendas Clientes" —
 // 1 linha por Contrato assinado, derivada ao momento da leitura de
@@ -58,7 +64,10 @@ const DEFAULT_VAT_RATE = 23;
 // categoria + qt + preco_unit + iva_percent). Estrutura deliberadamente igual
 // à de `PurchaseOrderItem` em PurchaseOrders.tsx, para a tabela editável e a
 // validação seguirem exatamente o mesmo padrão.
-interface ManualClientOrderItem {
+// LineUomFields: embalagem da linha (uom_id vai no payload; `unit_price` é por
+// unidade da linha, i.e. por embalagem — ver src/utils/quotes/lineUom.ts).
+interface ManualClientOrderItem extends LineUomFields {
+  unidade?: string | null;
   item_type: 'product' | 'service';
   product_id: string | null;
   service_id: string | null;
@@ -108,7 +117,17 @@ interface ClientOrderDocumentLine {
   service_id: string | null;
   service_name: string | null;
   service_sku: string | null;
+  // 20261204203500: `quantity` vem em UNIDADES DE STOCK (qt × fator) — é o
+  // valor que se envia a rpc_confirm_client_order_stock_exit. A quantidade e a
+  // unidade da linha (ex. 2 PK10) vêm em line_quantity/unidade; opcionais
+  // porque o jsonb não é validado. `stock_unidade` é preenchido no cliente
+  // (fetchDetail) com o código da unidade base, para "= 20 un".
   quantity: number;
+  line_quantity?: number | null;
+  uom_id?: string | null;
+  unidade?: string | null;
+  units_per_uom?: number | null;
+  stock_unidade?: string | null;
   line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
   stock_movement_id: string | null;
   purchase_order_id: string | null;
@@ -286,6 +305,8 @@ const ClientOrders = () => {
   const [createDate, setCreateDate] = useState(new Date().toISOString().split('T')[0]);
   const [createNotes, setCreateNotes] = useState("");
   const [createItems, setCreateItems] = useState<ManualClientOrderItem[]>([]);
+  // Seletor "Unidade" (embalagens) das linhas de produto da criação manual.
+  const lineUom = useLineUomOptions(createItems.map((item) => item.product_id));
   const [showItemsDialog, setShowItemsDialog] = useState(false);
 
   // Checklist de saída de stock (linhas stock_disponivel_confirmar):
@@ -456,8 +477,42 @@ const ClientOrders = () => {
     if (!doc || typeof doc !== 'object') return doc;
     return {
       ...doc,
+      lines: await withStockUnitCodes(Array.isArray(doc.lines) ? doc.lines : []),
       diagnostic: normalizeDiagnosticNeeds((doc as { diagnostic?: unknown }).diagnostic),
     };
+  };
+
+  // Linhas em embalagem (units_per_uom > 1): a RPC traz o código da embalagem
+  // (`unidade`, ex. PK10) mas não o da unidade de stock. Resolve-se aqui, só
+  // quando há embalagens, para o ecrã e o PDF mostrarem "= 20 un". Falhar isto
+  // nunca impede o documento de abrir — fica "= 20 un. de stock".
+  const withStockUnitCodes = async (docLines: ClientOrderDocumentLine[]): Promise<ClientOrderDocumentLine[]> => {
+    const packUomIds = Array.from(new Set(
+      docLines.filter((l) => Number(l.units_per_uom) > 1 && l.uom_id).map((l) => l.uom_id as string),
+    ));
+    if (packUomIds.length === 0) return docLines;
+    try {
+      const { data: packs, error: packsError } = await supabase
+        .from('uom')
+        .select('id, base_uom_id')
+        .in('id', packUomIds);
+      if (packsError) throw packsError;
+      const baseIds = Array.from(new Set((packs || []).map((p) => p.base_uom_id).filter(Boolean))) as string[];
+      if (baseIds.length === 0) return docLines;
+      const { data: bases, error: basesError } = await supabase
+        .from('uom')
+        .select('id, code')
+        .in('id', baseIds);
+      if (basesError) throw basesError;
+      const baseCodeById = new Map((bases || []).map((b) => [b.id, b.code]));
+      const stockCodeByPack = new Map((packs || []).map((p) => [p.id, p.base_uom_id ? baseCodeById.get(p.base_uom_id) ?? null : null]));
+      return docLines.map((l) => (
+        l.uom_id && stockCodeByPack.has(l.uom_id) ? { ...l, stock_unidade: stockCodeByPack.get(l.uom_id) ?? null } : l
+      ));
+    } catch (e) {
+      console.warn('[ClientOrders] não foi possível resolver a unidade de stock das embalagens', e);
+      return docLines;
+    }
   };
 
   const openDetail = async (contractId: string) => {
@@ -891,6 +946,13 @@ const ClientOrders = () => {
     });
   };
 
+  // Embalagem: preço unitário = preço da unidade do produto × fator.
+  const handleCreateItemUomChange = (index: number, option: Parameters<typeof applyUomOptionToLine>[1]) => {
+    setCreateItems((prev) => prev.map((item, i) => (
+      i === index ? applyUomOptionToLine(item, option, MANUAL_ORDER_PRICE_FIELDS) : item
+    )));
+  };
+
   const handleRemoveCreateItem = (index: number) => {
     setCreateItems((prev) => prev.filter((_, i) => i !== index));
   };
@@ -957,8 +1019,11 @@ const ClientOrders = () => {
           descricao: item.description,
           categoria: item.categoria,
           qt: item.quantity,
+          // Por unidade da linha (por embalagem quando há uom_id).
           preco_unit: item.unit_price,
           iva_percent: item.vat_rate,
+          // NULL = unidade do produto; o fator é calculado no servidor.
+          uom_id: item.uom_id || null,
         })),
       });
 
@@ -1414,7 +1479,19 @@ const ClientOrders = () => {
                       <TableRow key={line.quote_line_id}>
                         <TableCell>{line.product_sku || line.service_sku || '-'}</TableCell>
                         <TableCell>{line.product_name || line.service_name || '-'}</TableCell>
-                        <TableCell className="text-right">{line.quantity}</TableCell>
+                        <TableCell className="text-right">
+                          {(() => {
+                            // "2 PK10" + "= 20 un" (unidades de stock). A saída de
+                            // stock continua a usar line.quantity, já em stock.
+                            const qty = formatOrderLineQuantity(line);
+                            return (
+                              <>
+                                <div>{qty.main}</div>
+                                {qty.stock && <div className="text-xs text-muted-foreground">{qty.stock}</div>}
+                              </>
+                            );
+                          })()}
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Badge className={getLineStatusColor(line.line_status)}>
@@ -1519,6 +1596,7 @@ const ClientOrders = () => {
                         {createItems.map((item, index) => {
                           const lineSubtotal = item.unit_price * item.quantity;
                           const lineTotal = lineSubtotal * (1 + item.vat_rate / 100);
+                          const itemUomOptions = lineUom.getOptions(item.product_id);
                           return (
                             <TableRow key={`${item.product_id || item.service_id}-${index}`}>
                               <TableCell>
@@ -1544,6 +1622,16 @@ const ClientOrders = () => {
                                   step="0.01"
                                   disabled={creating}
                                 />
+                                {itemUomOptions.length > 0 && (
+                                  <LineUomSelect
+                                    options={itemUomOptions}
+                                    line={item}
+                                    className="mt-1 w-20"
+                                    onChange={(option) => handleCreateItemUomChange(index, option)}
+                                    disabled={creating}
+                                  />
+                                )}
+                                <PackQuantityHint qt={item.quantity} line={item} baseCode={lineUom.getBaseCode(item.product_id)} className="mt-0.5" />
                               </TableCell>
                               <TableCell>
                                 <Input

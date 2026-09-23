@@ -3,6 +3,7 @@ import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/
 // para a página que renderiza este PDF, e evita duplicar a forma do bloco
 // `diagnostic` — quem a define e a normaliza é o `ClientOrders.tsx`.
 import type { ClientOrderDiagnosticNeed } from '@/pages/ClientOrders';
+import { formatOrderLineQuantity } from '@/utils/quotes/lineUom';
 
 // Fase 5.0F do plano de inventário — PDF do documento "Encomenda Cliente"
 // (mesmo padrão/biblioteca de PurchaseOrderPDFDocument.tsx). Ao contrário
@@ -210,7 +211,13 @@ interface ClientOrderDocumentPDFLine {
   service_id?: string | null;
   service_name?: string | null;
   service_sku?: string | null;
+  // `quantity` em unidades de stock; line_quantity/unidade = como foi vendido
+  // (ex. 2 PK10). stock_unidade é resolvido em ClientOrders.fetchDetail.
   quantity: number;
+  line_quantity?: number | null;
+  unidade?: string | null;
+  units_per_uom?: number | null;
+  stock_unidade?: string | null;
   line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
   purchase_order_number: string | null;
 }
@@ -357,7 +364,12 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
             <View key={line.quote_line_id} style={styles.tableRow}>
               <Text style={columnStyles.sku}>{line.product_sku || line.service_sku || '-'}</Text>
               <Text style={columnStyles.description}>{line.product_name || line.service_name || ''}</Text>
-              <Text style={columnStyles.quantity}>{line.quantity}</Text>
+              <Text style={columnStyles.quantity}>
+                {(() => {
+                  const qty = formatOrderLineQuantity(line);
+                  return qty.stock ? `${qty.main}\n${qty.stock}` : qty.main;
+                })()}
+              </Text>
               <Text style={columnStyles.status}>{getLineStatusText(line)}</Text>
             </View>
           ))}

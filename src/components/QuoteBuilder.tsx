@@ -64,6 +64,9 @@ import {
   markupFromCostAndPrice,
 } from "@/utils/quotes/quoteLinePricing";
 import { computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
+import { applyUomOptionToLine, clearLineUom, getLineUnitsPerUom, setLineBasePrices, type LineUomFields } from "@/utils/quotes/lineUom";
+import { useLineUomOptions } from "@/hooks/useLineUomOptions";
+import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
 import {
   Dialog,
   DialogContent,
@@ -213,7 +216,9 @@ const isBundleComponentLine = (value: any): value is BundleComponentLine => {
   return !!value && typeof value === "object" && typeof value.name === "string" && typeof value.quantity === "number";
 };
 
-interface QuoteLine {
+// uom_id / units_per_uom: unidade da linha (embalagens) —
+// ver src/utils/quotes/lineUom.ts. units_per_uom nunca é enviado à RPC.
+interface QuoteLine extends LineUomFields {
   id?: string;
   catalog_item_id: string | null;
   product_id?: string | null;
@@ -275,6 +280,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [products, setProducts] = useState<ProductCatalogItem[]>([]);
   const [services, setServices] = useState<ProductCatalogItem[]>([]);
   const [lines, setLines] = useState<QuoteLine[]>([]);
+  // Seletor "Unidade" (embalagens) das linhas de produto. Fica aqui, no topo do
+  // componente, porque é usado dentro do IIFE da tabela de itens.
+  const lineUom = useLineUomOptions(lines.map((l) => (l.bundle_id ? null : l.product_id)));
   // Importação (explícita) dos itens do Pedido de Proposta em curso.
   const [importingDealItems, setImportingDealItems] = useState(false);
   const [sections, setSections] = useState<string[]>(["Geral"]);
@@ -763,15 +771,18 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       const key = `${itemType}:${line.product_id || line.service_id || line.bundle_id}`;
       const existing = mergedItems.get(key);
+      // O template não guarda unidade: a quantidade vai na unidade do produto
+      // (2 × PK10 => 20), senão somar linhas em unidades diferentes dava lixo.
+      const qtInBaseUnits = (line.qt || 0) * getLineUnitsPerUom(line);
       if (existing) {
-        existing.default_qt += line.qt || 0;
+        existing.default_qt += qtInBaseUnits;
       } else {
         mergedItems.set(key, {
           item_type: itemType,
           product_id: itemType === "product" ? line.product_id! : null,
           service_id: itemType === "service" ? line.service_id! : null,
           bundle_id: itemType === "bundle" ? line.bundle_id! : null,
-          default_qt: line.qt || 0,
+          default_qt: qtInBaseUnits,
           default_attributes: line.selected_attributes || {},
         });
       }
@@ -1918,6 +1929,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           // origem e o botão de importar duplicaria as linhas.
           source_deal_need_id: line.source_deal_need_id || null,
           source_deal_need_item_id: line.source_deal_need_item_id || null,
+          // Unidade gravada (embalagem). Os preços já vêm por embalagem — não se
+          // recalculam ao abrir; só mudam se o utilizador trocar a unidade.
+          uom_id: line.uom_id ?? null,
+          units_per_uom: Number(line.units_per_uom) || 1,
         }))
       );
       
@@ -2320,6 +2335,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             // rastreabilidade.
             source_deal_need_id: line.source_deal_need_id || null,
             source_deal_need_item_id: line.source_deal_need_item_id || null,
+            // Embalagem da linha (NULL = unidade do produto). units_per_uom é
+            // calculado pelo gatilho no servidor e não se envia.
+            uom_id: line.bundle_id ? null : (line.uom_id || null),
           };
         });
 
@@ -2516,7 +2534,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const isProduct = newProduct.type === "product" || (!newProduct.type && !!currentLine.product_id);
     
     updatedLines[lineIndex] = {
-      ...currentLine,
+      // Artigo novo => unidade base (a embalagem era do artigo anterior).
+      ...clearLineUom(currentLine),
       product_id: isProduct ? newProduct.id : null,
       service_id: !isProduct ? newProduct.id : null,
       catalog_item_id: null,
@@ -2609,7 +2628,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       };
 
       updatedLines[replaceLineIndex] = {
-        ...currentLine,
+        ...clearLineUom(currentLine),
         product_id: null,
         service_id: null,
         catalog_item_id: null,
@@ -4184,6 +4203,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             const isBundleLine = lineBundleComponents.length > 0 && lineComponentsTotal > 0;
 
                             const unitOptions = ["un", "m²", "ml", "dia", "hora", "kg", "m", "vg"];
+                            // Produto com embalagens => seletor de unidade com conversão de preço.
+                            const lineUomOptions = isBundle ? [] : lineUom.getOptions(line.product_id);
 
                             return (
                               <SortableQuoteRow key={sortableId} id={sortableId}>
@@ -4297,18 +4318,36 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                         setLines(updated);
                                       }}
                                       className="w-16 mx-auto text-center h-8" />
+                                    {!isBundle && (
+                                      <PackQuantityHint qt={line.qt} line={line} baseCode={lineUom.getBaseCode(line.product_id)} className="mt-0.5" />
+                                    )}
                                   </TableCell>
                                   <TableCell className="text-center">
-                                    <Select value={line.unidade || "un"} onValueChange={(v) => {
-                                      const updated = [...lines];
-                                      updated[globalLineIndex] = { ...line, unidade: v };
-                                      setLines(updated);
-                                    }}>
-                                      <SelectTrigger className="w-16 h-8 text-xs mx-auto"><SelectValue /></SelectTrigger>
-                                      <SelectContent>
-                                        {unitOptions.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
-                                      </SelectContent>
-                                    </Select>
+                                    {lineUomOptions.length > 0 ? (
+                                      <LineUomSelect
+                                        options={lineUomOptions}
+                                        line={line}
+                                        className="w-20 mx-auto"
+                                        onChange={(option) => {
+                                          setLines(prev => prev.map((l, i) => (i === globalLineIndex ? applyUomOptionToLine(l, option) : l)));
+                                        }}
+                                      />
+                                    ) : line.uom_id && !isBundle ? (
+                                      // Embalagem gravada cuja uom já não está na lista (inativa, ou
+                                      // ainda a carregar): mostra-se o código, sem texto livre por cima.
+                                      <span className="text-xs">{line.unidade || "—"}</span>
+                                    ) : (
+                                      <Select value={line.unidade || "un"} onValueChange={(v) => {
+                                        const updated = [...lines];
+                                        updated[globalLineIndex] = { ...line, unidade: v };
+                                        setLines(updated);
+                                      }}>
+                                        <SelectTrigger className="w-16 h-8 text-xs mx-auto"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                          {unitOptions.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                                        </SelectContent>
+                                      </Select>
+                                    )}
                                   </TableCell>
                                   <TableCell className="text-center">
                                     <Input type="number" min="0" step="0.01"
@@ -4636,14 +4675,20 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               const newRetailPrice = basePrice + (attributePriceAddon || 0);
               const defaultMargin = line.margem_percent || 30;
               const defaultInt = line.int_percent || 0;
-              const laborCost = line.custo_mao_obra_unit || 0;
+              // Contas na unidade do produto; numa embalagem a linha guarda
+              // valor × fator (setLineBasePrices). Fator 1 = exatamente como antes.
+              const uomFactor = getLineUnitsPerUom(line);
+              const laborCost = (line.custo_mao_obra_unit || 0) / uomFactor;
               const newMaterialCost = newRetailPrice > 0
                 ? (newRetailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)) - laborCost
                 : 0;
               // O novo preço de venda fica na linha e manda no preço unitário.
-              updatedLines[editingLineIndex] = { ...line, selected_attributes: attributes, custo_material_unit: Math.max(0, newMaterialCost), retail_price_unit: newRetailPrice };
+              updatedLines[editingLineIndex] = setLineBasePrices(
+                { ...line, selected_attributes: attributes },
+                { custo_material_unit: Math.max(0, newMaterialCost), retail_price_unit: newRetailPrice },
+              );
               setLines(updatedLines);
-              toast({ title: "Atributos atualizados", description: `Preço atualizado: €${newRetailPrice.toFixed(2)}` });
+              toast({ title: "Atributos atualizados", description: `Preço atualizado: €${(newRetailPrice * uomFactor).toFixed(2)}` });
             }
           }}
         />

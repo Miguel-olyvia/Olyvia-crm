@@ -353,7 +353,7 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
           
           <View style={styles.table}>
             <View style={styles.tableHeader}>
-              <Text style={columnStyles.sku}>SKU</Text>
+              <Text style={columnStyles.sku}>Ref. Forn. / SKU</Text>
               <Text style={columnStyles.description}>Descrição</Text>
               {attributeColumns.map((attr) => (
                 <Text key={attr.id} style={columnStyles.attribute}>{attr.label}</Text>
@@ -371,17 +371,36 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
           {items.map((item, index) => {
             const lineSubtotal = item.unit_price * item.quantity;
             const lineTotal = lineSubtotal + (item.vat_amount || 0);
-            
+            // Embalagens (20261204202500): a linha está na unidade de compra
+            // (ex. PK100); o fornecedor vê a referência dele e essa unidade.
+            const units = Number(item.units_per_uom) || 1;
+            const baseCode = item.products?.uom?.code || 'un';
+            const lineUomCode = item.uom?.code || (units === 1 ? item.products?.uom?.code : null) || '';
+
             return (
               <View key={item.id || index} style={styles.tableRow}>
-                <Text style={columnStyles.sku}>{item.sku || '-'}</Text>
+                <View style={columnStyles.sku}>
+                  {item.supplier_sku ? (
+                    <>
+                      <Text style={{ fontWeight: 'bold' }}>{item.supplier_sku}</Text>
+                      {item.sku && <Text style={{ fontSize: 7, color: '#6b7280' }}>{item.sku}</Text>}
+                    </>
+                  ) : (
+                    <Text>{item.sku || '-'}</Text>
+                  )}
+                </View>
                 <Text style={columnStyles.description}>{item.description || ''}</Text>
                 {attributeColumns.map((attr) => (
                   <Text key={attr.id} style={columnStyles.attribute}>
                     {getAttributeValue(item, attr.id)}
                   </Text>
                 ))}
-                <Text style={columnStyles.quantity}>{item.quantity}</Text>
+                <View style={columnStyles.quantity}>
+                  <Text>{item.quantity}{lineUomCode ? ` ${lineUomCode}` : ''}</Text>
+                  {units > 1 && (
+                    <Text style={{ fontSize: 7, color: '#6b7280' }}>= {item.quantity * units} {baseCode}</Text>
+                  )}
+                </View>
                 <Text style={columnStyles.unitPrice}>€{item.unit_price?.toFixed(2)}</Text>
                 <Text style={columnStyles.vat}>{item.vat_rate}%</Text>
                 <Text style={columnStyles.total}>€{lineTotal.toFixed(2)}</Text>

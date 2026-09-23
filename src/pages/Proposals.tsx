@@ -2046,6 +2046,8 @@ const Proposals = () => {
             // O preço de venda definido manda no preço unitário; sem ele gravado,
             // o preço é reconstruído do custo arredondado e perde milésimos.
             retail_price_unit: (l.retail_price_unit ?? null) || null,
+            // Embalagem da linha (NULL = unidade do produto); o fator é do servidor.
+            uom_id: l.bundle_id ? null : (l.uom_id || null),
           };
         });
 

@@ -44,7 +44,7 @@ export async function generateInternalSalePdfBlob(
     // buscar ao catálogo. Sem eles no select, resolveUnitCost não encontra nada
     // e o documento inteiro sai "sem preço de compra".
     .select(
-      'id, descricao_snapshot, qt, unidade, cost_price, retail_price_unit, total_sem_iva, total_com_desconto, visible_to_client, ordem, product_id, service_id',
+      'id, descricao_snapshot, qt, unidade, cost_price, retail_price_unit, total_sem_iva, total_com_desconto, visible_to_client, ordem, product_id, service_id, units_per_uom',
     )
     .eq('direct_sale_id', directSaleId)
     .order('ordem', { ascending: true });
@@ -111,8 +111,14 @@ export async function generateInternalSalePdfBlob(
    * à mão) cai no valor gravado, que é a única fonte que tem.
    */
   const resolveUnitCost = (row: any): number | null => {
-    if (row.product_id) return costByProduct.get(row.product_id) ?? null;
-    if (row.service_id) return costByService.get(row.service_id) ?? null;
+    // O preço de compra do catálogo é por unidade de stock; uma linha numa
+    // embalagem (ex. PK10) custa esse valor × fator (units_per_uom, gravado
+    // pelo servidor; 1 em todas as linhas sem embalagem).
+    const unitsPerUom = Number(row.units_per_uom) >= 1 ? Number(row.units_per_uom) : 1;
+    const perLineUnit = (cost: number | undefined): number | null =>
+      cost === undefined ? null : cost * unitsPerUom;
+    if (row.product_id) return perLineUnit(costByProduct.get(row.product_id));
+    if (row.service_id) return perLineUnit(costByService.get(row.service_id));
     const stored = num(row.cost_price);
     return stored && stored > 0 ? stored : null;
   };

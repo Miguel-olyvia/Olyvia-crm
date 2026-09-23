@@ -86,6 +86,8 @@ interface QuoteLine {
   product_id?: string | null;
   service_id?: string | null;
   bundle_id?: string | null;
+  /** Unidades de stock por unidade da linha (1 sem embalagem) — escala o custo do catálogo no resolver. */
+  units_per_uom?: number | null;
 }
 
 interface QuoteItem {
@@ -245,7 +247,7 @@ export function ProposalDetailsDialog({
           .order("sort_order"),
         supabase
           .from("quotes")
-          .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id)")
+          .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, units_per_uom)")
           .eq("proposal_id", proposal.id),
         supabase
           .from("proposals")
@@ -286,7 +288,7 @@ export function ProposalDetailsDialog({
         if (pLink?.quote_id) {
           const { data: linkedQuote } = await supabase
             .from("quotes")
-            .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id)")
+            .select("id, quote_number, total, estado, created_at, desconto_global_percent, quote_lines(id, descricao_snapshot, qt, total_sem_iva, total_com_iva, iva_percent, ordem, section_name, custo_material_unit, custo_mao_obra_unit, margem_percent, int_percent, discount_percent, cost_price, unidade, item_description, selected_attributes, product_id, service_id, bundle_id, units_per_uom)")
             .eq("id", pLink.quote_id)
             .single();
           if (linkedQuote) {

@@ -25,10 +25,20 @@ interface Supplier {
   name: string;
 }
 
+interface PackUom {
+  id: string;
+  code: string;
+  conversion_factor: number;
+}
+
+// Mesmo valor que o Select usa para "unidade do produto" (uom_id NULL).
+const PRODUCT_UNIT = "__product_unit__";
+
 interface ItemSupplierRow {
   id: string;
   supplier_id: string;
   supplier_sku: string | null;
+  uom_id: string | null;
   purchase_price: number | null;
   currency: string;
   lead_time_days: number | null;
@@ -36,11 +46,13 @@ interface ItemSupplierRow {
   is_preferred: boolean;
   is_active: boolean;
   suppliers?: { name: string } | null;
+  uom?: { code: string } | null;
 }
 
 interface RowFormState {
   supplier_id: string;
   supplier_sku: string;
+  uom_id: string; // "" = unidade do produto
   purchase_price: string;
   currency: string;
   lead_time_days: string;
@@ -51,6 +63,7 @@ interface RowFormState {
 const EMPTY_FORM: RowFormState = {
   supplier_id: "",
   supplier_sku: "",
+  uom_id: "",
   purchase_price: "",
   currency: "EUR",
   lead_time_days: "",
@@ -89,8 +102,17 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
   const [editForm, setEditForm] = useState<RowFormState>(EMPTY_FORM);
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
   const [deletingRow, setDeletingRow] = useState<ItemSupplierRow | null>(null);
+  // Unidade de compra (só produtos): a unidade do produto (uom_id NULL) ou
+  // uma embalagem cuja base é a unidade do produto (ex. PK100 = 100 × un).
+  // O stock conta-se sempre na unidade do produto.
+  const [productUom, setProductUom] = useState<{ id: string; code: string } | null>(null);
+  const [packs, setPacks] = useState<PackUom[]>([]);
 
   const itemColumn = itemType === "product" ? "product_id" : "service_id";
+  // Sem permissão de custo, a vista item_suppliers_public não traz uom_id —
+  // a unidade de compra fica oculta e nunca é escrita pelo formulário.
+  const showUom = itemType === "product";
+  const canEditUom = showUom && canViewCost;
 
   useEffect(() => {
     if (itemId && organizationId) {
@@ -100,6 +122,94 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [itemId, organizationId, canViewCost]);
 
+  useEffect(() => {
+    if (itemId && organizationId && showUom) {
+      loadUnits();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [itemId, organizationId, showUom]);
+
+  const loadUnits = async () => {
+    const { data: product } = await supabase
+      .from("products")
+      .select("uom_id, uom:uom_id(id, code)")
+      .eq("id", itemId)
+      .maybeSingle();
+    const uom = (product as { uom: { id: string; code: string } | null } | null)?.uom ?? null;
+    setProductUom(uom);
+    if (!uom) {
+      setPacks([]);
+      return;
+    }
+    const { data } = await supabase
+      .from("uom")
+      .select("id, code, conversion_factor")
+      .eq("base_uom_id", uom.id)
+      .eq("is_active", true)
+      .or(`organization_id.eq.${organizationId},organization_id.is.null`)
+      .order("conversion_factor");
+    setPacks(
+      (data || [])
+        .filter((u) => u.conversion_factor != null)
+        .map((u) => ({ id: u.id, code: u.code, conversion_factor: Number(u.conversion_factor) }))
+    );
+  };
+
+  const packById = (uomId: string | null) =>
+    uomId ? packs.find((p) => p.id === uomId) ?? null : null;
+
+  // Rótulo da unidade de compra de uma ligação.
+  const uomLabel = (row: ItemSupplierRow): string => {
+    if (!row.uom_id || row.uom_id === productUom?.id) return productUom?.code ?? row.uom?.code ?? "unidade";
+    const pack = packById(row.uom_id);
+    return pack ? `${pack.code} · ${pack.conversion_factor} ${productUom?.code ?? "un"}` : row.uom?.code ?? "?";
+  };
+
+  const uomShortCode = (uomId: string | null): string => {
+    if (!uomId || uomId === productUom?.id) return productUom?.code ?? "unidade";
+    return packById(uomId)?.code ?? "?";
+  };
+
+  // Custo por unidade base quando a compra é em embalagem.
+  const baseUnitCost = (price: number | null, uomId: string | null): string | null => {
+    const pack = packById(uomId);
+    if (price == null || !pack || pack.conversion_factor < 2) return null;
+    return (price / pack.conversion_factor).toLocaleString("pt-PT", { maximumFractionDigits: 4 });
+  };
+
+  const renderUomSelect = (
+    value: string,
+    onChange: (v: string) => void,
+    usedUomIds: (string | null)[],
+  ) => (
+    <Select
+      value={value || PRODUCT_UNIT}
+      onValueChange={(v) => onChange(v === PRODUCT_UNIT ? "" : v)}
+      disabled={!productUom}
+    >
+      <SelectTrigger className="h-8 w-36"><SelectValue /></SelectTrigger>
+      <SelectContent>
+        <SelectItem value={PRODUCT_UNIT} disabled={value !== "" && usedUomIds.includes(null)}>
+          {productUom?.code ?? "Unidade do produto"}
+        </SelectItem>
+        {packs.map((p) => (
+          <SelectItem key={p.id} value={p.id} disabled={value !== p.id && usedUomIds.includes(p.id)}>
+            {p.code} · {p.conversion_factor} {productUom?.code}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
+  // Traduz os erros da BD que chegam em inglês (índice único por unidade).
+  const describeError = (error: { message?: string; code?: string }): string => {
+    const msg = error.message || "";
+    if (msg.includes("item_suppliers_product_supplier_uom_active_uniq")) {
+      return "Este fornecedor já está associado a este artigo nessa unidade de compra.";
+    }
+    return msg;
+  };
+
   const loadRows = async () => {
     setLoading(true);
     // Sem products.view_cost/services.view_cost: lê-se item_suppliers_public
@@ -107,7 +217,7 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
     const { data, error } = canViewCost
       ? await (supabase as any)
           .from("item_suppliers")
-          .select("id, supplier_id, supplier_sku, purchase_price, currency, lead_time_days, moq, is_preferred, is_active, suppliers(name)")
+          .select("id, supplier_id, supplier_sku, uom_id, purchase_price, currency, lead_time_days, moq, is_preferred, is_active, suppliers(name), uom:uom_id(code)")
           .eq(itemColumn, itemId)
           .is("deleted_at", null)
           .order("is_preferred", { ascending: false })
@@ -124,6 +234,7 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
         : ((data || []) as any[]).map((row) => ({
             ...row,
             supplier_sku: null,
+            uom_id: null,
             purchase_price: null,
             currency: "",
           })) as ItemSupplierRow[];
@@ -142,7 +253,19 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
     setSuppliers((data || []) as Supplier[]);
   };
 
-  const availableSuppliers = suppliers.filter((s) => !rows.some((r) => r.supplier_id === s.id));
+  // O mesmo fornecedor pode ter uma ligação por unidade de compra (ex. à
+  // unidade e em PK100) — só fica indisponível quando todas estão usadas.
+  const unitSlots = canEditUom ? 1 + packs.length : 1;
+  const usedUomIdsFor = (supplierId: string, exceptRowId?: string) =>
+    rows
+      .filter((r) => r.supplier_id === supplierId && r.id !== exceptRowId)
+      .map((r) => (r.uom_id && r.uom_id !== productUom?.id ? r.uom_id : null));
+  const firstFreeUom = (used: (string | null)[]): string => {
+    if (!used.includes(null)) return "";
+    return packs.find((p) => !used.includes(p.id))?.id ?? "";
+  };
+  const availableSuppliers = suppliers.filter((s) => usedUomIdsFor(s.id).length < unitSlots);
+  const addUsedUomIds = addForm.supplier_id ? usedUomIdsFor(addForm.supplier_id) : [];
 
   const resolveActor = async (): Promise<string | null> => {
     const businessUserId = await resolveCurrentBusinessUserId();
@@ -166,7 +289,8 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
       item_type: itemType,
       [itemColumn]: itemId,
       supplier_id: addForm.supplier_id,
-      supplier_sku: addForm.supplier_sku || null,
+      supplier_sku: addForm.supplier_sku.trim() || null,
+      ...(canEditUom ? { uom_id: addForm.uom_id || null } : {}),
       purchase_price: addForm.purchase_price ? Number(addForm.purchase_price) : null,
       currency: addForm.currency,
       lead_time_days: addForm.lead_time_days ? Number(addForm.lead_time_days) : null,
@@ -177,7 +301,7 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
     });
 
     if (error) {
-      toast({ title: "Erro ao adicionar fornecedor", description: error.message, variant: "destructive" });
+      toast({ title: "Erro ao adicionar fornecedor", description: describeError(error), variant: "destructive" });
       return;
     }
     toast({ title: "Fornecedor adicionado" });
@@ -192,12 +316,18 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
     setEditForm({
       supplier_id: row.supplier_id,
       supplier_sku: row.supplier_sku || "",
+      uom_id: row.uom_id && row.uom_id !== productUom?.id ? row.uom_id : "",
       purchase_price: row.purchase_price != null ? String(row.purchase_price) : "",
       currency: row.currency || "EUR",
       lead_time_days: row.lead_time_days != null ? String(row.lead_time_days) : "",
       moq: row.moq != null ? String(row.moq) : "",
       is_active: row.is_active,
     });
+  };
+
+  const editRowOriginalUom = (rowId: string): string | null => {
+    const r = rows.find((x) => x.id === rowId);
+    return r?.uom_id && r.uom_id !== productUom?.id ? r.uom_id : null;
   };
 
   const handleSaveEdit = async (rowId: string) => {
@@ -211,10 +341,15 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
       .update({
         ...(canViewCost
           ? {
-              supplier_sku: editForm.supplier_sku || null,
+              supplier_sku: editForm.supplier_sku.trim() || null,
               purchase_price: editForm.purchase_price ? Number(editForm.purchase_price) : null,
               currency: editForm.currency,
             }
+          : {}),
+        // Só se a unidade mudou: uma ligação gravada com uom_id = unidade do
+        // produto (equivalente a NULL) não é reescrita só por abrir o editor.
+        ...(canEditUom && editForm.uom_id !== (editRowOriginalUom(rowId) ?? "")
+          ? { uom_id: editForm.uom_id || null }
           : {}),
         lead_time_days: editForm.lead_time_days ? Number(editForm.lead_time_days) : null,
         moq: editForm.moq ? Number(editForm.moq) : null,
@@ -225,7 +360,7 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
     setSavingRowId(null);
 
     if (error) {
-      toast({ title: "Erro ao guardar", description: error.message, variant: "destructive" });
+      toast({ title: "Erro ao guardar", description: describeError(error), variant: "destructive" });
       return;
     }
     setEditingRowId(null);
@@ -287,8 +422,9 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
             <TableRow>
               <TableHead className="w-8"></TableHead>
               <TableHead>Fornecedor</TableHead>
-              <TableHead>Código de compra</TableHead>
-              <TableHead>Preço</TableHead>
+              <TableHead>Ref. fornecedor</TableHead>
+              {showUom && <TableHead>Unidade de compra</TableHead>}
+              <TableHead>{showUom ? "Preço (por unidade de compra)" : "Preço"}</TableHead>
               <TableHead>Prazo (dias)</TableHead>
               <TableHead>MOQ</TableHead>
               <TableHead>Ativo</TableHead>
@@ -298,7 +434,7 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
           <TableBody>
             {rows.length === 0 && !isAdding && (
               <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-6">
+                <TableCell colSpan={showUom ? 9 : 8} className="text-center text-muted-foreground py-6">
                   Nenhum fornecedor associado a este artigo.
                 </TableCell>
               </TableRow>
@@ -325,9 +461,25 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
                         <span className="text-xs text-muted-foreground italic">Sem permissão</span>
                       )}
                     </TableCell>
+                    {showUom && (
+                      <TableCell>
+                        {canEditUom ? (
+                          renderUomSelect(
+                            editForm.uom_id,
+                            (v) => setEditForm({ ...editForm, uom_id: v }),
+                            usedUomIdsFor(row.supplier_id, row.id),
+                          )
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">Sem permissão</span>
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell>
                       {canViewCost ? (
-                        <Input type="number" step="0.01" value={editForm.purchase_price} onChange={(e) => setEditForm({ ...editForm, purchase_price: e.target.value })} className="h-8 w-24" />
+                        <div className="flex items-center gap-1">
+                          <Input type="number" step="0.01" value={editForm.purchase_price} onChange={(e) => setEditForm({ ...editForm, purchase_price: e.target.value })} className="h-8 w-24" />
+                          {showUom && <span className="text-xs text-muted-foreground whitespace-nowrap">/ {uomShortCode(editForm.uom_id || null)}</span>}
+                        </div>
                       ) : (
                         <span className="text-xs text-muted-foreground italic">Sem permissão</span>
                       )}
@@ -352,7 +504,23 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
                   <>
                     <TableCell className="font-medium">{row.suppliers?.name || "-"}</TableCell>
                     <TableCell>{canViewCost ? (row.supplier_sku || "-") : <span className="text-muted-foreground italic">Sem permissão</span>}</TableCell>
-                    <TableCell>{canViewCost ? (row.purchase_price != null ? `${row.purchase_price} ${row.currency}` : "-") : <span className="text-muted-foreground italic">Sem permissão</span>}</TableCell>
+                    {showUom && (
+                      <TableCell>{canViewCost ? uomLabel(row) :<span className="text-muted-foreground italic">Sem permissão</span>}</TableCell>
+                    )}
+                    <TableCell>
+                      {canViewCost ? (
+                        row.purchase_price != null ? (
+                          <div>
+                            <div>{`${row.purchase_price} ${row.currency}`}{showUom ? ` por ${packById(row.uom_id) ? uomShortCode(row.uom_id) : uomLabel(row)}` : ""}</div>
+                            {showUom && baseUnitCost(row.purchase_price, row.uom_id) && (
+                              <div className="text-xs text-muted-foreground">
+                                {baseUnitCost(row.purchase_price, row.uom_id)} {row.currency} por {productUom?.code}
+                              </div>
+                            )}
+                          </div>
+                        ) : "-"
+                      ) : <span className="text-muted-foreground italic">Sem permissão</span>}
+                    </TableCell>
                     <TableCell>{row.lead_time_days ?? "-"}</TableCell>
                     <TableCell>{row.moq ?? "-"}</TableCell>
                     <TableCell>
@@ -376,7 +544,7 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
               <TableRow>
                 <TableCell></TableCell>
                 <TableCell>
-                  <Select value={addForm.supplier_id} onValueChange={(v) => setAddForm({ ...addForm, supplier_id: v })}>
+                  <Select value={addForm.supplier_id} onValueChange={(v) => setAddForm({ ...addForm, supplier_id: v, uom_id: canEditUom ? firstFreeUom(usedUomIdsFor(v)) : "" })}>
                     <SelectTrigger className="h-8 w-40"><SelectValue placeholder="Fornecedor..." /></SelectTrigger>
                     <SelectContent>
                       {availableSuppliers.map((s) => (
@@ -387,14 +555,30 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
                 </TableCell>
                 <TableCell>
                   {canViewCost ? (
-                    <Input value={addForm.supplier_sku} onChange={(e) => setAddForm({ ...addForm, supplier_sku: e.target.value })} className="h-8 w-32" placeholder="Código" />
+                    <Input value={addForm.supplier_sku} onChange={(e) => setAddForm({ ...addForm, supplier_sku: e.target.value })} className="h-8 w-32" placeholder="Ref." />
                   ) : (
                     <span className="text-xs text-muted-foreground italic">Sem permissão</span>
                   )}
                 </TableCell>
+                {showUom && (
+                  <TableCell>
+                    {canEditUom ? (
+                      renderUomSelect(
+                        addForm.uom_id,
+                        (v) => setAddForm({ ...addForm, uom_id: v }),
+                        addUsedUomIds,
+                      )
+                    ) : (
+                      <span className="text-xs text-muted-foreground italic">Sem permissão</span>
+                    )}
+                  </TableCell>
+                )}
                 <TableCell>
                   {canViewCost ? (
-                    <Input type="number" step="0.01" value={addForm.purchase_price} onChange={(e) => setAddForm({ ...addForm, purchase_price: e.target.value })} className="h-8 w-24" placeholder="0.00" />
+                    <div className="flex items-center gap-1">
+                      <Input type="number" step="0.01" value={addForm.purchase_price} onChange={(e) => setAddForm({ ...addForm, purchase_price: e.target.value })} className="h-8 w-24" placeholder="0.00" />
+                      {showUom && <span className="text-xs text-muted-foreground whitespace-nowrap">/ {uomShortCode(addForm.uom_id || null)}</span>}
+                    </div>
                   ) : (
                     <span className="text-xs text-muted-foreground italic">Sem permissão</span>
                   )}
@@ -431,6 +615,14 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
       )}
       {!isAdding && availableSuppliers.length === 0 && suppliers.length > 0 && (
         <p className="text-xs text-muted-foreground">Todos os fornecedores da organização já estão associados a este artigo.</p>
+      )}
+      {canEditUom && !productUom && (
+        <p className="text-xs text-muted-foreground">Defina a unidade do produto para usar packs.</p>
+      )}
+      {canEditUom && productUom && packs.length === 0 && (
+        <p className="text-xs text-muted-foreground">
+          Sem packs de "{productUom.code}". Crie-os em Unidades de medida (ex. PK100 = 100 × {productUom.code}).
+        </p>
       )}
 
       <AlertDialog open={!!deletingRow} onOpenChange={(v) => { if (!v) setDeletingRow(null); }}>

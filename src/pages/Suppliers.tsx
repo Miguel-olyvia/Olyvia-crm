@@ -29,6 +29,8 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
 import SupplierCatalogDialog from "@/components/SupplierCatalogDialog";
+import SupplierCatalogPanel from "@/components/SupplierCatalogPanel";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SupplierSlaReportDialog from "@/components/SupplierSlaReportDialog";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -42,6 +44,7 @@ interface FilterOrganization {
 
 const supplierSchema = z.object({
   name: z.string().trim().min(1, "O nome é obrigatório.").max(200, "O nome deve ter menos de 200 caracteres."),
+  code: z.string().trim().max(50, "O código deve ter menos de 50 caracteres.").optional().or(z.literal("")),
   contact_person: z.string().trim().max(200, "O contacto deve ter menos de 200 caracteres.").optional().or(z.literal("")),
   email: z.string().trim().email("Formato de email inválido.").max(255, "O email deve ter menos de 255 caracteres.").optional().or(z.literal("")),
   phone: z.string().trim().max(20, "O telefone deve ter menos de 20 caracteres.").optional().or(z.literal("")),
@@ -71,6 +74,9 @@ const Suppliers = () => {
   const [open, setOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Ficha em edição: o separador Catálogo usa a empresa/nome gravados.
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [formTab, setFormTab] = useState<"dados" | "catalogo">("dados");
   const { toast } = useToast();
   const { activeCompany, userType, companies, isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
@@ -105,6 +111,7 @@ const Suppliers = () => {
 
   const [formData, setFormData] = useState({
     name: "",
+    code: "",
     contact_person: "",
     email: "",
     phone: "",
@@ -193,7 +200,7 @@ const Suppliers = () => {
 
       // Apply search filter
       if (searchQuery) {
-        countQuery = countQuery.or(`name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,contact_person.ilike.%${searchQuery}%`);
+        countQuery = countQuery.or(`name.ilike.%${searchQuery}%,code.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,contact_person.ilike.%${searchQuery}%`);
       }
 
       const { count } = await countQuery;
@@ -228,7 +235,7 @@ const Suppliers = () => {
 
       // Apply search filter
       if (searchQuery) {
-        dataQuery = dataQuery.or(`name.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,contact_person.ilike.%${searchQuery}%`);
+        dataQuery = dataQuery.or(`name.ilike.%${searchQuery}%,code.ilike.%${searchQuery}%,email.ilike.%${searchQuery}%,contact_person.ilike.%${searchQuery}%`);
       }
 
       const { data, error } = await dataQuery;
@@ -296,8 +303,11 @@ const Suppliers = () => {
 
   const handleEdit = async (supplier: Supplier) => {
     setEditingId(supplier.id);
+    setEditingSupplier(supplier);
+    setFormTab("dados");
     setFormData({
       name: supplier.name,
+      code: supplier.code || "",
       contact_person: (supplier as any).contact_person || "",
       email: supplier.email || "",
       phone: supplier.phone || "",
@@ -415,6 +425,7 @@ const Suppliers = () => {
 
       const supplierData: any = {
         name: formData.name,
+        code: formData.code.trim() || null,
         contact_person: formData.contact_person || null,
         email: formData.email || null,
         phone: formData.phone || null,
@@ -468,17 +479,27 @@ const Suppliers = () => {
       setHasMore(true);
       loadSuppliers(0, true);
     } catch (error: any) {
+      // suppliers_org_code_active_uniq: código único por empresa (sem
+      // distinguir maiúsculas, ignorando a lixeira).
+      const duplicateCode = String(error?.message || "").includes("suppliers_org_code_active_uniq");
+      const duplicateMessage = `Já existe um fornecedor com o código "${formData.code.trim()}" nesta empresa.`;
+      if (duplicateCode) {
+        setFieldErrors((prev) => ({ ...prev, code: duplicateMessage }));
+      }
       toast({
         title: editingId ? t("suppliers.toast.updateError") : t("suppliers.toast.createError"),
-        description: error.message,
+        description: duplicateCode ? duplicateMessage : error.message,
         variant: "destructive",
       });
     }
   };
 
   const resetForm = () => {
+    setEditingSupplier(null);
+    setFormTab("dados");
     setFormData({
       name: "",
+      code: "",
       contact_person: "",
       email: "",
       phone: "",
@@ -632,6 +653,7 @@ const Suppliers = () => {
       sheetName: "Fornecedores",
       columns: [
         { key: "name", header: t("suppliers.form.name"), width: 30 },
+        { key: "code", header: "Código", width: 14 },
         { key: "contact", header: t("suppliers.form.contactPerson"), width: 26 },
         { key: "email", header: t("suppliers.form.email"), width: 30 },
         { key: "phone", header: t("suppliers.form.phone"), width: 18 },
@@ -646,6 +668,7 @@ const Suppliers = () => {
       ],
       rows: suppliers.map((supplier) => ({
         name: supplier.name,
+        code: supplier.code,
         contact: (supplier as any).contact_person,
         email: supplier.email,
         phone: supplier.phone,
@@ -1009,6 +1032,7 @@ const Suppliers = () => {
                       />
                     </TableHead>
                     <TableHead>{t('suppliers.form.name')}</TableHead>
+                    <TableHead>Código</TableHead>
                     <TableHead>{t('common.company')}</TableHead>
                     <TableHead>{t('suppliers.form.contactPerson')}</TableHead>
                     <TableHead>{t('suppliers.form.email')}</TableHead>
@@ -1033,6 +1057,7 @@ const Suppliers = () => {
                           {supplier.name}
                         </div>
                       </TableCell>
+                      <TableCell className="font-mono text-xs">{supplier.code || "-"}</TableCell>
                       <TableCell>
                         {(supplier as any).anew_organizations?.name || "-"}
                       </TableCell>
@@ -1168,10 +1193,18 @@ const Suppliers = () => {
             resetForm();
           }
         }}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className={`${editingId && formTab === "catalogo" ? "max-w-5xl" : "max-w-3xl"} max-h-[90vh] overflow-y-auto`}>
             <DialogHeader>
               <DialogTitle>{editingId ? t("suppliers.editSupplier") : t("suppliers.newSupplier")}</DialogTitle>
             </DialogHeader>
+            <Tabs value={editingId ? formTab : "dados"} onValueChange={(v) => setFormTab(v as "dados" | "catalogo")}>
+            {editingId && (
+              <TabsList className="mb-2">
+                <TabsTrigger value="dados">Dados</TabsTrigger>
+                <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
+              </TabsList>
+            )}
+            <TabsContent value="dados" className="mt-0">
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Organization Selection */}
               <OrganizationFormSection
@@ -1192,6 +1225,19 @@ const Suppliers = () => {
                     className={fieldErrors.name ? "border-destructive" : ""}
                   />
                   {fieldErrors.name && <p className="text-sm text-destructive">{fieldErrors.name}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="code">Código</Label>
+                  <Input
+                    id="code"
+                    value={formData.code}
+                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                    placeholder="Opcional, único na empresa"
+                    maxLength={50}
+                    aria-invalid={!!fieldErrors.code}
+                    className={fieldErrors.code ? "border-destructive" : ""}
+                  />
+                  {fieldErrors.code && <p className="text-sm text-destructive">{fieldErrors.code}</p>}
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="contact_person">{t("suppliers.form.contactPerson")}</Label>
@@ -1324,6 +1370,17 @@ const Suppliers = () => {
                 <Button type="submit">{editingId ? t("suppliers.form.update") : t("suppliers.form.create")}</Button>
               </DialogFooter>
             </form>
+            </TabsContent>
+            {editingId && (
+              <TabsContent value="catalogo" className="mt-0">
+                <SupplierCatalogPanel
+                  supplierId={editingId}
+                  supplierName={editingSupplier?.name || formData.name}
+                  organizationId={editingSupplier?.organization_id ?? null}
+                />
+              </TabsContent>
+            )}
+            </Tabs>
           </DialogContent>
         </Dialog>
 
@@ -1336,6 +1393,7 @@ const Suppliers = () => {
             }}
             supplierId={catalogSupplier.id}
             supplierName={catalogSupplier.name}
+            organizationId={catalogSupplier.organization_id}
           />
         )}
 
