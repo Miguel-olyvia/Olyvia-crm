@@ -18,6 +18,8 @@ import {
   buildManageUrl,
 } from '../_shared/formEmails.ts';
 import { sendSmsNow, scheduleSms } from '../_shared/sendSms.ts';
+import { geocodePostalCode } from '../_shared/postcodeGeocode.ts';
+import { checkTravelFeasible } from '../_shared/travelFeasibility.ts';
 
 initSentry();
 
@@ -140,11 +142,12 @@ Deno.serve(async (req: Request) => {
     // funcao (sem passar pelo calendario) conseguia marcar um horario
     // demasiado proximo mesmo com a regra configurada.
     let minAdvanceHours: number | null = null;
+    let requiresLocation = false;
 
     if (step_number) {
       const { data: step } = await supabase
         .from('form_steps')
-        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours')
+        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours, scheduling_requires_location')
         .eq('form_id', form_id)
         .eq('step_number', step_number)
         .single();
@@ -153,6 +156,7 @@ Deno.serve(async (req: Request) => {
         boardId = step.scheduling_board_id;
         durationMinutes = step.scheduling_duration_minutes || 60;
         minAdvanceHours = step.scheduling_min_advance_hours ?? null;
+        requiresLocation = step.scheduling_requires_location === true;
       }
     }
 
@@ -160,7 +164,7 @@ Deno.serve(async (req: Request) => {
       // Try to find any scheduling step in this form
       const { data: schedulingStep } = await supabase
         .from('form_steps')
-        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours')
+        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours, scheduling_requires_location')
         .eq('form_id', form_id)
         .eq('step_type', 'scheduling')
         .limit(1)
@@ -170,7 +174,21 @@ Deno.serve(async (req: Request) => {
         boardId = schedulingStep.scheduling_board_id;
         durationMinutes = schedulingStep.scheduling_duration_minutes || 60;
         minAdvanceHours = schedulingStep.scheduling_min_advance_hours ?? null;
+        requiresLocation = schedulingStep.scheduling_requires_location === true;
       }
+    }
+
+    // Regra 13/15: quando o passo exige localização, o código postal tem de
+    // ser um CP7 completo ("XXXX-XXX") -- é o que dá coordenadas exactas
+    // para o tempo de deslocação real. Repetido aqui (já validado no
+    // formulário) porque este endpoint é chamável directamente, sem passar
+    // pelo formulário.
+    const cp7Digits = (postal_code || '').replace(/[^0-9]/g, '');
+    if (requiresLocation && cp7Digits.length !== 7) {
+      return new Response(
+        JSON.stringify({ error: 'Complete postal code (CP7) is required for this scheduling step' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     if (!boardId) {
@@ -238,6 +256,20 @@ Deno.serve(async (req: Request) => {
     // "fewest bookings" implementation.
     let assignedResourceId: string | null = null;
 
+    // Regra 13: coordenadas exactas do cliente via CP7 (Olyvia Postcodes),
+    // quando disponível. Geocodificado uma só vez -- usado para verificar
+    // viabilidade de deslocação contra as visitas vizinhas de cada
+    // candidato, e guardado na própria visita para futuras verificações.
+    let clientLat: number | null = null;
+    let clientLng: number | null = null;
+    if (cp7Digits.length === 7) {
+      const geo = await geocodePostalCode(cp7Digits);
+      if (geo) {
+        clientLat = geo.latitude;
+        clientLng = geo.longitude;
+      }
+    }
+
     const { data: resources } = await supabase.rpc('find_nearest_resources', {
       p_target_postal_code: postal_code || null,
       p_board_id: boardId,
@@ -275,10 +307,38 @@ Deno.serve(async (req: Request) => {
         p_start: slot_start,
         p_end: slot_end,
       });
-      if (!conflict) {
-        assignedResourceId = candidate.id;
-        break;
+      if (conflict) continue;
+
+      // Regra 13, Lógica 1: entre os candidatos sem conflito, salta quem não
+      // tem tempo real de deslocação para a visita imediatamente antes/depois
+      // nesse dia. No-op (sempre feasible) quando clientLat/Lng são nulos --
+      // ver checkTravelFeasible.
+      if (clientLat !== null && clientLng !== null) {
+        const dayStart = `${slot_start.split('T')[0]}T00:00:00.000Z`;
+        const dayEnd = `${slot_start.split('T')[0]}T23:59:59.999Z`;
+        const { data: assignedItems } = await supabase
+          .from('schedule_item_assignees')
+          .select('schedule_items(start_datetime, end_datetime, location_lat, location_lng, status)')
+          .eq('resource_id', candidate.id);
+
+        const neighbors = (assignedItems || [])
+          .map((a: any) => a.schedule_items)
+          .filter((si: any) =>
+            si
+            && si.status !== 'cancelled'
+            && si.start_datetime >= dayStart
+            && si.start_datetime <= dayEnd
+          );
+
+        const { feasible } = checkTravelFeasible({
+          clientLat, clientLng, slotStart: slot_start, slotEnd: slot_end,
+          neighbors,
+        });
+        if (!feasible) continue;
       }
+
+      assignedResourceId = candidate.id;
+      break;
     }
 
     // O comercial da pessoa nao esta livre a esta hora, ou nao cobre o
@@ -655,6 +715,8 @@ Deno.serve(async (req: Request) => {
         end_datetime: slot_end,
         // duration_minutes is a generated column, skip it
         location: fullLocation || null,
+        location_lat: clientLat,
+        location_lng: clientLng,
         priority: 0,
         metadata: {
           ...(lead ? { lead_id: lead.id } : {}),

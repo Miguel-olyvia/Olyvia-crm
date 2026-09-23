@@ -8930,6 +8930,7 @@ export type Database = {
           scheduling_duration_minutes: number | null
           scheduling_min_advance_hours: number | null
           scheduling_postal_code_field_key: string | null
+          scheduling_requires_location: boolean
           sort_order: number | null
           step_description: string | null
           step_number: number
@@ -8949,6 +8950,7 @@ export type Database = {
           scheduling_duration_minutes?: number | null
           scheduling_min_advance_hours?: number | null
           scheduling_postal_code_field_key?: string | null
+          scheduling_requires_location?: boolean
           sort_order?: number | null
           step_description?: string | null
           step_number?: number
@@ -8968,6 +8970,7 @@ export type Database = {
           scheduling_duration_minutes?: number | null
           scheduling_min_advance_hours?: number | null
           scheduling_postal_code_field_key?: string | null
+          scheduling_requires_location?: boolean
           sort_order?: number | null
           step_description?: string | null
           step_number?: number
@@ -21614,44 +21617,25 @@ export type Database = {
               scope: string
             }[]
           }
-      find_nearest_resources:
-        | {
-            Args: {
-              p_board_id: string
-              p_district_id?: string
-              p_duration_minutes?: number
-              p_limit?: number
-              p_target_date?: string
-              p_target_postal_code?: string
-            }
-            Returns: {
-              available_slots: Json
-              distance_km: number
-              priority: number
-              resource_id: string
-              resource_name: string
-              resource_type: string
-            }[]
-          }
-        | {
-            Args: {
-              p_board_id: string
-              p_district_id?: string
-              p_duration_minutes?: number
-              p_limit?: number
-              p_min_advance_hours?: number
-              p_target_date?: string
-              p_target_postal_code?: string
-            }
-            Returns: {
-              available_slots: Json
-              distance_km: number
-              priority: number
-              resource_id: string
-              resource_name: string
-              resource_type: string
-            }[]
-          }
+      find_nearest_resources: {
+        Args: {
+          p_board_id: string
+          p_district_id?: string
+          p_duration_minutes?: number
+          p_limit?: number
+          p_min_advance_hours?: number
+          p_target_date?: string
+          p_target_postal_code?: string
+        }
+        Returns: {
+          available_slots: Json
+          distance_km: number
+          priority: number
+          resource_id: string
+          resource_name: string
+          resource_type: string
+        }[]
+      }
       fn_apply_deal_need: {
         Args: {
           p_created_by: string

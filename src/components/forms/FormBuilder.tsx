@@ -130,6 +130,7 @@ interface FormStep {
   scheduling_board_id: string | null;
   scheduling_postal_code_field_key: string | null;
   scheduling_district_field_key: string | null;
+  scheduling_requires_location: boolean;
 }
 
 interface FormField {
@@ -1787,6 +1788,22 @@ export function FormBuilder({
                         </SelectContent>
                       </Select>
                       <p className="text-[10px] text-muted-foreground">Selecione o campo que contém o código postal para filtrar recursos por proximidade.</p>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 rounded-md border p-3">
+                      <div>
+                        <Label className="text-xs">Exigir código postal completo antes de agendar</Label>
+                        <p className="text-[10px] text-muted-foreground">
+                          Necessário para calcular tempo de deslocação real entre visitas (regra 13). Ligado: o código postal (campo acima) tem de estar preenchido, no formato completo XXXX-XXX, num passo anterior. Desligado (omissão): nada obrigatório, formulário continua dinâmico.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={activeStep.scheduling_requires_location}
+                        onCheckedChange={async (checked) => {
+                          const { error } = await supabase.from("form_steps").update({ scheduling_requires_location: checked }).eq("id", activeStep.id);
+                          if (error) captureFlowError(error, "config-partial-write");
+                          setSteps(steps.map(s => s.id === activeStep.id ? { ...s, scheduling_requires_location: checked } : s));
+                        }}
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs">Campo de Distrito</Label>

@@ -454,6 +454,7 @@ interface FormStep {
   scheduling_board_id?: string | null;
   scheduling_postal_code_field_key?: string | null;
   scheduling_district_field_key?: string | null;
+  scheduling_requires_location?: boolean;
   fields: FormField[];
   info_blocks?: InfoBlock[];
   sections?: FormSection[];
@@ -1207,6 +1208,18 @@ export default function PublicLeadForm() {
 
     // Scheduling step: require a slot to be selected
     if (step.step_type === 'scheduling') {
+      // Regra 13/15: quando este passo exige localização, o código postal
+      // (recolhido num passo ANTERIOR) tem de ser um CP7 completo
+      // ("XXXX-XXX") -- é o que dá coordenadas exactas para o tempo de
+      // deslocação real entre visitas.
+      if (step.scheduling_requires_location) {
+        const postalRaw = resolveSchedulingPostalCode(step);
+        const cp7Digits = String(postalRaw || '').replace(/[^0-9]/g, '');
+        if (cp7Digits.length !== 7) {
+          toast.error("É necessário indicar o código postal completo (ex.: 1000-001) antes de escolher a data.");
+          return false;
+        }
+      }
       if (!schedulingSlot) {
         toast.error("Por favor selecione uma data e hora para a visita.");
         return false;
