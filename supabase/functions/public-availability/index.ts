@@ -2,6 +2,8 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
+import { checkTravelFeasible } from "../_shared/travelFeasibility.ts";
 
 initSentry();
 
@@ -274,9 +276,54 @@ Deno.serve(async (req: Request) => {
       const coverage = resources && resources.length > 0;
       const slotMap = new Map<string, { start: string; end: string; available_count: number; resource_ids: string[] }>();
 
+      // Regra 13, no calendário (não só na confirmação final): um horário só
+      // deve aparecer como escolhível se pelo menos UM comercial candidato
+      // conseguir mesmo lá chegar a tempo -- não basta ter a agenda livre.
+      // Antes disto, o calendário mostrava horários que o book-slot recusava
+      // depois, na confirmação. Cada comercial é verificado contra os SEUS
+      // próprios compromissos vizinhos nesse dia; se um não der, outro pode
+      // dar -- só se nenhum der é que o horário desaparece de vez.
+      const cp7Digits = (postal_code || '').replace(/[^0-9]/g, '');
+      let clientLat: number | null = null;
+      let clientLng: number | null = null;
+      if (cp7Digits.length === 7) {
+        const geo = await geocodePostalCode(cp7Digits);
+        if (geo) {
+          clientLat = geo.latitude;
+          clientLng = geo.longitude;
+        }
+      }
+
+      const dayStart = `${date}T00:00:00.000Z`;
+      const dayEnd = `${date}T23:59:59.999Z`;
+
       for (const resource of (resources || [])) {
         const slots = resource.available_slots || [];
+        if (slots.length === 0) continue;
+
+        let neighbors: { start_datetime: string; end_datetime: string; location_lat: number | null; location_lng: number | null }[] = [];
+        if (clientLat !== null && clientLng !== null) {
+          const { data: assignedItems } = await supabase
+            .from('schedule_item_assignees')
+            .select('schedule_items(start_datetime, end_datetime, location_lat, location_lng, status)')
+            .eq('resource_id', resource.resource_id);
+
+          neighbors = (assignedItems || [])
+            .map((a: any) => a.schedule_items)
+            .filter((si: any) =>
+              si
+              && si.status !== 'cancelled'
+              && si.start_datetime >= dayStart
+              && si.start_datetime <= dayEnd
+            );
+        }
+
         for (const slot of slots) {
+          const { feasible } = checkTravelFeasible({
+            clientLat, clientLng, slotStart: slot.start, slotEnd: slot.end, neighbors,
+          });
+          if (!feasible) continue;
+
           const key = `${slot.start}|${slot.end}`;
           if (slotMap.has(key)) {
             const existing = slotMap.get(key)!;
