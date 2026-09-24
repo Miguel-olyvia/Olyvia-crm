@@ -31,7 +31,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Pencil, Plus, ShoppingBag, Trash2, Undo2 } from "lucide-react";
+import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Pencil, Plus, ShoppingBag, Trash2, Truck, Undo2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
@@ -122,7 +122,10 @@ interface ClientOrderDocumentRow {
 interface ClientOrderAvailableWarehouse {
   warehouse_id: string;
   warehouse_name: string;
+  // 20261204310000: `quantity` = LEAST(stock do armazém, qty_reserved da
+  // linha); `physical_quantity` = stock físico do armazém.
   quantity: number;
+  physical_quantity?: number | null;
 }
 
 // Uma linha é de produto OU de serviço (item_type), nunca das duas. A RPC
@@ -140,7 +143,7 @@ interface ClientOrderDocumentLine {
   service_name: string | null;
   service_sku: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'parcial' | 'sem_fornecedor' | 'servico';
   stock_movement_id: string | null;
   purchase_order_id: string | null;
   purchase_order_number: string | null;
@@ -150,6 +153,83 @@ interface ClientOrderDocumentLine {
   stock_exit_movement_id?: string | null;
   // Linha já servida/pedida: não pode ser alterada nem removida na edição.
   line_locked?: boolean;
+  // 20261204310000: reserva de stock por ordem de assinatura. Unidades base;
+  // null em serviços e em encomendas não assinadas. component_index distingue
+  // os componentes de um bundle (várias linhas com o mesmo quote_line_id).
+  component_index?: number | null;
+  qty_needed?: number | null;
+  qty_reserved?: number | null;
+  qty_ordered?: number | null;
+  qty_received?: number | null;
+  qty_missing?: number | null;
+  // 20261204340000: quantidade já servida por stock (unidades base); null em
+  // serviços. Fonte de verdade para "X servido" — não inferir pelos movimentos.
+  qty_served?: number | null;
+  // Só em linhas de produto: o produto tem fornecedor preferencial. Distingue,
+  // em 'sem_fornecedor', "falta pedir ao fornecedor" (true) de "não há
+  // fornecedor preferencial" (false). null/ausente = desconhecido (serviços ou
+  // RPC ainda sem o campo).
+  has_preferred_supplier?: boolean | null;
+}
+
+// 'sem_fornecedor' = quantidade em falta sem pedido ao fornecedor. A causa
+// depende de has_preferred_supplier; ver getLineStatusColor/Label.
+type MissingSupplierKind = 'toRequest' | 'noPreferred' | 'unknown';
+const getMissingSupplierKind = (line: Pick<ClientOrderDocumentLine, 'has_preferred_supplier'>): MissingSupplierKind =>
+  line.has_preferred_supplier === true
+    ? 'toRequest'
+    : line.has_preferred_supplier === false
+      ? 'noPreferred'
+      : 'unknown';
+
+// Chave única por linha do documento: um bundle devolve várias linhas com o
+// mesmo quote_line_id (uma por componente).
+const lineKey = (line: Pick<ClientOrderDocumentLine, 'quote_line_id' | 'component_index'>) =>
+  `${line.quote_line_id}:${line.component_index ?? 0}`;
+
+const asQty = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+// Arredonda o ruído de vírgula flutuante antes de testes de inteiro/limites.
+const roundQty = (value: number): number => Math.round(value * 1e6) / 1e6;
+
+// Linha cuja saída de stock se pode confirmar daqui: stock disponível ou
+// parcial com parte reservada. Encomendas antigas/não assinadas não trazem
+// qty_reserved (null) — mantém-se o comportamento anterior (quantity).
+const isStockExitConfirmable = (line: ClientOrderDocumentLine): boolean => {
+  if (!line.product_id) return false;
+  if (line.line_status === 'stock_disponivel_confirmar') {
+    return line.qty_reserved === null || line.qty_reserved === undefined || asQty(line.qty_reserved) > 0;
+  }
+  return line.line_status === 'parcial' && asQty(line.qty_reserved) > 0;
+};
+
+// Saída manual estornável: tem movimento de saída próprio e a linha está
+// servida por stock, ou (20261204340000) 'parcial'/'recebido' com parte já
+// servida por stock (qty_served > 0).
+const isStockExitRevertible = (line: ClientOrderDocumentLine): boolean => {
+  if (!line.stock_exit_movement_id) return false;
+  if (line.line_status === 'servido_por_stock') return true;
+  return (line.line_status === 'parcial' || line.line_status === 'recebido') && asQty(line.qty_served) > 0;
+};
+
+// Quantidade que a linha pode consumir do stock (unidades base).
+const confirmableQty = (line: ClientOrderDocumentLine): number =>
+  line.qty_reserved === null || line.qty_reserved === undefined
+    ? asQty(line.quantity)
+    : asQty(line.qty_reserved);
+
+// Resultado de rpc_request_missing_from_supplier (e chave supplier_request de
+// rpc_update_manual_client_order).
+interface SupplierRequestResult {
+  success?: boolean;
+  purchase_orders_created?: number;
+  items_created?: number;
+  skipped_no_supplier?: number;
+  skipped_other?: number;
+  errors?: number;
 }
 
 // Origem de uma encomenda que nasceu de uma venda direta (Fase 5). Ausente
@@ -220,6 +300,13 @@ interface ClientOrderDocumentDetail {
   origin_number?: string | null;
   delivery_address?: string | null;
   is_editable?: boolean;
+  // 20261204310000
+  // 20261204340000: missing_lines_count/can_request_missing só contam linhas que
+  // o pedido ao fornecedor consegue fazer; missing_units_total = soma dessas
+  // faltas (unidades base).
+  missing_lines_count?: number | null;
+  can_request_missing?: boolean;
+  missing_units_total?: number | null;
 }
 
 // --- Normalização defensiva do bloco `diagnostic` -------------------------
@@ -281,6 +368,9 @@ const ClientOrders = () => {
   const canConfirmStockExit = hasPermission('inventory.edit') && hasPermission('client_orders.confirm_stock_exit');
   // Editar encomenda manual (rpc_update_manual_client_order exige o mesmo).
   const canEditOrder = hasPermission('client_contracts.edit');
+  // Pedir em falta ao fornecedor (rpc_request_missing_from_supplier exige
+  // purchase_orders.create + client_contracts.view).
+  const canRequestMissing = hasPermission('purchase_orders.create') && hasPermission('client_contracts.view');
 
   // As chaves da secção "Diagnóstico da obra" ainda não existem em
   // src/translations/index.ts (ficheiro fora do âmbito desta alteração).
@@ -336,12 +426,13 @@ const ClientOrders = () => {
   const productUom = useProductBaseUomCodes(createItems.map((item) => item.product_id));
   const [showItemsDialog, setShowItemsDialog] = useState(false);
 
-  // Checklist de saída de stock (linhas stock_disponivel_confirmar):
+  // Checklist de saída de stock (linhas stock_disponivel_confirmar e
+  // 'parcial' com reserva):
   // - checklistActiveLineIds: linhas onde o checkbox foi marcado E há mais de
   //   1 armazém disponível, pelo que o Select + botão "Confirmar" ficam
   //   visíveis à espera de escolha.
   // - selectedWarehouseByLine: armazém escolhido no Select acima, por
-  //   quote_line_id.
+  //   lineKey (quote_line_id + component_index).
   // - confirmingLineId: linha atualmente a chamar
   //   rpc_confirm_client_order_stock_exit (mostra spinner em vez do checkbox).
   const [checklistActiveLineIds, setChecklistActiveLineIds] = useState<Set<string>>(new Set());
@@ -356,6 +447,11 @@ const ClientOrders = () => {
   // Estorno de saída manual (rpc_revert_client_order_stock_exit).
   const [revertTarget, setRevertTarget] = useState<ClientOrderDocumentLine | null>(null);
   const [reverting, setReverting] = useState(false);
+
+  // Pedido ao fornecedor do que falta (rpc_request_missing_from_supplier).
+  const [requestingMissing, setRequestingMissing] = useState(false);
+  // Confirmação antes do pedido: o material pode já ter chegado por outra via.
+  const [requestMissingConfirmOpen, setRequestMissingConfirmOpen] = useState(false);
 
   // Edição de encomenda manual: reutiliza o diálogo de criação. Com
   // editingContractId preenchido o diálogo grava via
@@ -625,15 +721,56 @@ const ClientOrders = () => {
     }
   };
 
+  // Saída por produto (20261204310000): a RPC é por contrato+produto, recusa
+  // uma segunda saída do mesmo produto e aceita no máximo a soma de
+  // qty_reserved das linhas desse produto. Por isso a quantidade enviada é
+  // essa soma (não line.quantity). Capacidade de cada armazém = stock físico
+  // (physical_quantity); sem esse campo, o maior `quantity` das linhas (que já
+  // vem limitado à reserva DESSA linha).
+  // 20261204340000: a RPC de saída recusa um armazém sem stock suficiente, por
+  // isso `warehouses` só traz os armazéns cuja capacidade ≥ quantity (é o que se
+  // mostra e permite); sem nenhum, a confirmação da linha fica desativada.
+  // `quantity` de cada armazém devolvido = essa capacidade (stock a mostrar).
+  const getProductExitGroup = (productId: string, docLines: ClientOrderDocumentLine[]) => {
+    const groupLines = docLines.filter((l) => l.product_id === productId && isStockExitConfirmable(l));
+    const quantity = roundQty(groupLines.reduce((sum, l) => sum + confirmableQty(l), 0));
+    const byId = new Map<string, ClientOrderAvailableWarehouse>();
+    groupLines.forEach((l) => (l.available_warehouses || []).forEach((wh) => {
+      const physical = wh.physical_quantity === null || wh.physical_quantity === undefined
+        ? null
+        : asQty(wh.physical_quantity);
+      const prev = byId.get(wh.warehouse_id);
+      const capacity = physical === null
+        ? Math.max(asQty(wh.quantity), prev ? asQty(prev.quantity) : 0)
+        : physical;
+      byId.set(wh.warehouse_id, { ...wh, quantity: roundQty(capacity) });
+    }));
+    const warehouses = Array.from(byId.values())
+      .filter((wh) => quantity > 0 && asQty(wh.quantity) >= quantity)
+      .sort((a, b) => asQty(b.quantity) - asQty(a.quantity));
+    return { product_id: productId, quantity, warehouses, lineKeys: groupLines.map(lineKey) };
+  };
+
   // Checklist de saída de stock (fase pós-20261130070000).
   const handleConfirmStockExit = async (line: ClientOrderDocumentLine, warehouseId: string) => {
-    if (!detailData) return;
-    setConfirmingLineId(line.quote_line_id);
+    if (!detailData || !line.product_id) return;
+    const group = getProductExitGroup(line.product_id, detailData.lines);
+    const key = lineKey(line);
+    // p_quantity é integer na RPC — a reserva em unidades base pode não ser.
+    if (!(group.quantity > 0) || !Number.isInteger(group.quantity)) {
+      toast({
+        title: t('clientOrders.toast.stockExitError'),
+        description: t('clientOrders.toast.confirmAllSkippedNonInteger', { count: 1 }),
+        variant: "destructive",
+      });
+      return;
+    }
+    setConfirmingLineId(key);
     try {
       const { error } = await supabase.rpc('rpc_confirm_client_order_stock_exit', {
         p_contract_id: detailData.contract_id,
         p_product_id: line.product_id,
-        p_quantity: line.quantity,
+        p_quantity: group.quantity,
         p_warehouse_id: warehouseId,
       });
       if (error) throw error;
@@ -641,12 +778,12 @@ const ClientOrders = () => {
       toast({ title: t('clientOrders.dialog.stockExitSuccess') });
       setChecklistActiveLineIds((prev) => {
         const next = new Set(prev);
-        next.delete(line.quote_line_id);
+        group.lineKeys.forEach((k) => next.delete(k));
         return next;
       });
       setSelectedWarehouseByLine((prev) => {
         const next = { ...prev };
-        delete next[line.quote_line_id];
+        group.lineKeys.forEach((k) => { delete next[k]; });
         return next;
       });
 
@@ -655,6 +792,7 @@ const ClientOrders = () => {
       // line_status, em vez de tentar recalcular a cascata no frontend.
       const refreshed = await fetchDetail(detailData.contract_id);
       setDetailData(refreshed);
+      loadOrders(0, true);
     } catch (error: any) {
       toast({ title: t('clientOrders.toast.stockExitError'), description: error.message, variant: "destructive" });
     } finally {
@@ -663,17 +801,20 @@ const ClientOrders = () => {
   };
 
   const handleChecklistCheckboxChange = (line: ClientOrderDocumentLine, checked: boolean) => {
-    const warehouses = line.available_warehouses || [];
+    const key = lineKey(line);
+    const warehouses = line.product_id && detailData
+      ? getProductExitGroup(line.product_id, detailData.lines).warehouses
+      : [];
 
     if (!checked) {
       setChecklistActiveLineIds((prev) => {
         const next = new Set(prev);
-        next.delete(line.quote_line_id);
+        next.delete(key);
         return next;
       });
       setSelectedWarehouseByLine((prev) => {
         const next = { ...prev };
-        delete next[line.quote_line_id];
+        delete next[key];
         return next;
       });
       return;
@@ -685,7 +826,7 @@ const ClientOrders = () => {
     }
 
     if (warehouses.length > 1) {
-      setChecklistActiveLineIds((prev) => new Set(prev).add(line.quote_line_id));
+      setChecklistActiveLineIds((prev) => new Set(prev).add(key));
     }
   };
 
@@ -698,54 +839,41 @@ const ClientOrders = () => {
   // perguntar; caso contrário o utilizador escolhe um armazém e aplica-se aos
   // produtos onde esse armazém cobre a quantidade somada — os restantes ficam
   // pendentes.
+  // 20261204310000: entram também as linhas 'parcial' com parte reservada, e
+  // a quantidade de cada produto é a soma de qty_reserved (getProductExitGroup).
   const getConfirmAllInfo = () => {
-    const pendingLines = (detailData?.lines || []).filter(
-      (l) => l.line_status === 'stock_disponivel_confirmar' && !!l.product_id,
-    );
-    const groups = new Map<string, {
-      product_id: string;
-      quantity: number;
-      warehouses: Map<string, ClientOrderAvailableWarehouse>;
-    }>();
-    pendingLines.forEach((l) => {
-      const pid = l.product_id as string;
-      let g = groups.get(pid);
-      if (!g) {
-        g = { product_id: pid, quantity: 0, warehouses: new Map() };
-        groups.set(pid, g);
-      }
-      g.quantity += Number(l.quantity) || 0;
-      (l.available_warehouses || []).forEach((wh) => {
-        const prev = g!.warehouses.get(wh.warehouse_id);
-        if (!prev || Number(wh.quantity) > Number(prev.quantity)) g!.warehouses.set(wh.warehouse_id, wh);
-      });
-    });
-    const pending = Array.from(groups.values(), (g) => ({
-      product_id: g.product_id,
-      // Arredonda o ruído de vírgula flutuante da soma antes do teste de inteiro.
-      quantity: Math.round(g.quantity * 1e6) / 1e6,
-      warehouses: Array.from(g.warehouses.values()),
-    }));
+    const docLines = detailData?.lines || [];
+    const productIds = Array.from(new Set(
+      docLines.filter(isStockExitConfirmable).map((l) => l.product_id as string),
+    ));
+    // Só entram produtos com pelo menos um armazém que cubra a quantidade
+    // (getProductExitGroup já filtra); os restantes ficam pendentes e contam em
+    // `uncovered` — mesma regra da confirmação por linha.
+    const groups = productIds
+      .map((pid) => getProductExitGroup(pid, docLines))
+      .filter((g) => g.quantity > 0);
+    const pending = groups.filter((g) => g.warehouses.length > 0);
+    const uncovered = groups.length - pending.length;
     const byId = new Map<string, string>();
     pending.forEach((p) => p.warehouses.forEach((wh) => {
       if (!byId.has(wh.warehouse_id)) byId.set(wh.warehouse_id, wh.warehouse_name);
     }));
     const warehouses = Array.from(byId, ([warehouse_id, warehouse_name]) => ({ warehouse_id, warehouse_name }));
     const singleEach = pending.every((p) => p.warehouses.length === 1);
-    return { pending, warehouses, singleEach };
+    return { pending, warehouses, singleEach, uncovered };
   };
 
   const handleConfirmAllStockExits = async () => {
     if (!detailData || confirmingAll) return;
     const contractId = detailData.contract_id;
-    const { pending, singleEach } = getConfirmAllInfo();
+    const { pending, singleEach, uncovered } = getConfirmAllInfo();
     if (pending.length === 0) return;
     if (!singleEach && !confirmAllWarehouseId) return;
 
     let ok = 0;
     let failed = 0;
     let skippedNonInteger = 0;
-    let leftPending = 0;
+    let leftPending = uncovered;
     let firstError: string | null = null;
 
     setConfirmingAll(true);
@@ -832,6 +960,56 @@ const ClientOrders = () => {
     }
   };
 
+  // Resumo de um pedido ao fornecedor (botão "Pedir em falta" e edição).
+  const describeSupplierRequest = (result: SupplierRequestResult | null | undefined): string => {
+    const parts: string[] = [];
+    const orders = asQty(result?.purchase_orders_created);
+    const items = asQty(result?.items_created);
+    const noSupplier = asQty(result?.skipped_no_supplier);
+    const other = asQty(result?.skipped_other) + asQty(result?.errors);
+    parts.push(t('clientOrders.requestMissing.summary', { orders, items }));
+    if (noSupplier > 0) parts.push(t('clientOrders.requestMissing.noSupplier', { count: noSupplier }));
+    if (other > 0) parts.push(t('clientOrders.requestMissing.skippedOther', { count: other }));
+    return parts.join(' · ');
+  };
+
+  // ── Pedir em falta ao fornecedor ─────────────────────────────────────────
+  // Cria encomendas a fornecedor para a parte das linhas sem reserva nem
+  // pedido (can_request_missing). O servidor decide fornecedor e quantidades.
+  // Só é chamado a partir do AlertDialog de confirmação (requestMissingConfirmOpen).
+  const handleRequestMissing = async () => {
+    if (!detailData || requestingMissing) return;
+    const contractId = detailData.contract_id;
+    setRequestingMissing(true);
+    try {
+      const { data, error } = await (supabase as any).rpc('rpc_request_missing_from_supplier', {
+        p_contract_id: contractId,
+      });
+      if (error) throw error;
+      const result = (data || {}) as SupplierRequestResult;
+      const created = asQty(result.items_created) > 0;
+      toast({
+        title: created
+          ? t('clientOrders.requestMissing.success')
+          : t('clientOrders.requestMissing.nothingCreated'),
+        description: describeSupplierRequest(result),
+        variant: !created && asQty(result.errors) > 0 ? "destructive" : undefined,
+      });
+      try {
+        const refreshed = await fetchDetail(contractId);
+        setDetailData(refreshed);
+      } catch (refreshError: any) {
+        toast({ title: t('clientOrders.toast.detailError'), description: refreshError?.message, variant: "destructive" });
+      }
+      loadOrders(0, true);
+    } catch (error: any) {
+      toast({ title: t('clientOrders.requestMissing.error'), description: error?.message, variant: "destructive" });
+    } finally {
+      setRequestingMissing(false);
+      setRequestMissingConfirmOpen(false);
+    }
+  };
+
   const openPurchaseOrder = (purchaseOrderId: string) => {
     // Mesmo padrão de cross-link já usado em ClientContracts.tsx
     // (?open=<id>) — replicado em PurchaseOrders.tsx para este caso.
@@ -895,12 +1073,22 @@ const ClientOrders = () => {
     return labels[status] || status;
   };
 
-  const getLineStatusColor = (status: string) => {
+  const getLineStatusColor = (line: ClientOrderDocumentLine) => {
+    const status = line.line_status;
+    if (status === 'sem_fornecedor') {
+      const kind = getMissingSupplierKind(line);
+      // Âmbar: resolve-se com "Pedir em falta ao fornecedor". Vermelho só
+      // quando não há fornecedor preferencial. Neutro quando não se sabe.
+      if (kind === 'toRequest') return "bg-amber-500/10 text-amber-600";
+      if (kind === 'unknown') return "bg-muted text-muted-foreground";
+    }
     const colors: Record<string, string> = {
       servido_por_stock: "bg-success/10 text-success",
       recebido: "bg-teal-500/10 text-teal-600",
       a_aguardar_encomenda: "bg-info/10 text-info",
       stock_disponivel_confirmar: "bg-warning/10 text-warning",
+      // 20261204310000: parte reservada do stock + parte pedida/em falta.
+      parcial: "bg-orange-500/10 text-orange-600",
       sem_fornecedor: "bg-destructive/10 text-destructive",
       // Neutro de propósito: uma linha de serviço não tem stock nem fornecedor,
       // por isso não é uma pendência. Sem esta entrada caía no fallback
@@ -908,6 +1096,49 @@ const ClientOrders = () => {
       servico: "bg-muted text-muted-foreground",
     };
     return colors[status] || colors.sem_fornecedor;
+  };
+
+  // Quantidade em unidades de stock (reserva/pedido/falta).
+  const formatBaseQty = (value: unknown): string => formatDiagnosticNumber(asQty(value));
+
+  // "Parcial — X servido · Y em stock · Z a aguardar fornecedor · W em falta"
+  // (só as partes > 0). "Servido" vem de qty_served (20261204340000), não se
+  // infere pelos movimentos de stock.
+  const getPartialDetail = (line: ClientOrderDocumentLine): string => {
+    const parts: string[] = [];
+    const served = asQty(line.qty_served);
+    const reserved = asQty(line.qty_reserved);
+    const ordered = asQty(line.qty_ordered);
+    const received = asQty(line.qty_received);
+    const missing = asQty(line.qty_missing);
+    if (served > 0) parts.push(t('clientOrders.lineStatus.partServed', { qty: formatBaseQty(served) }));
+    if (reserved > 0) parts.push(t('clientOrders.lineStatus.partInStock', { qty: formatBaseQty(reserved) }));
+    if (ordered > 0) {
+      const pending = roundQty(ordered - received);
+      if (pending > 0) parts.push(t('clientOrders.lineStatus.partAwaitingSupplier', { qty: formatBaseQty(pending) }));
+      if (received > 0) parts.push(t('clientOrders.lineStatus.partReceived', { qty: formatBaseQty(received) }));
+    }
+    if (missing > 0) parts.push(t('clientOrders.lineStatus.partMissing', { qty: formatBaseQty(missing) }));
+    return parts.join(' · ');
+  };
+
+  // Resumo compacto da reserva para as restantes linhas de produto pendentes
+  // (o 'parcial' já o mostra no próprio rótulo). Vazio quando não acrescenta.
+  // Linhas servidas/recebidas: "X servido do stock" quando qty_served > 0.
+  const getReservationSummary = (line: ClientOrderDocumentLine): string => {
+    if (line.item_type === 'service') return '';
+    if (['servido_por_stock', 'recebido'].includes(line.line_status)) {
+      return asQty(line.qty_served) > 0
+        ? t('clientOrders.dialog.qtyServed', { qty: formatBaseQty(line.qty_served) })
+        : '';
+    }
+    if (line.qty_needed === null || line.qty_needed === undefined) return '';
+    if (!['stock_disponivel_confirmar', 'a_aguardar_encomenda', 'sem_fornecedor'].includes(line.line_status)) return '';
+    const parts: string[] = [];
+    if (asQty(line.qty_reserved) > 0) parts.push(t('clientOrders.dialog.qtyReserved', { qty: formatBaseQty(line.qty_reserved) }));
+    if (asQty(line.qty_ordered) > 0) parts.push(t('clientOrders.dialog.qtyOrdered', { qty: formatBaseQty(line.qty_ordered) }));
+    if (asQty(line.qty_missing) > 0) parts.push(t('clientOrders.dialog.qtyMissing', { qty: formatBaseQty(line.qty_missing) }));
+    return parts.join(' · ');
   };
 
   const getLineStatusLabel = (line: ClientOrderDocumentLine) => {
@@ -920,8 +1151,18 @@ const ClientOrders = () => {
         return t('clientOrders.lineStatus.awaitingOrder', { number: line.purchase_order_number || '' });
       case 'stock_disponivel_confirmar':
         return t('clientOrders.lineStatus.stockAvailableConfirm');
-      case 'sem_fornecedor':
-        return t('clientOrders.lineStatus.noSupplier');
+      case 'parcial': {
+        const detail = getPartialDetail(line);
+        return detail
+          ? `${t('clientOrders.lineStatus.partial')} — ${detail}`
+          : t('clientOrders.lineStatus.partial');
+      }
+      case 'sem_fornecedor': {
+        const kind = getMissingSupplierKind(line);
+        if (kind === 'toRequest') return t('clientOrders.lineStatus.missingToRequest');
+        if (kind === 'noPreferred') return t('clientOrders.lineStatus.noSupplier');
+        return t('clientOrders.lineStatus.missingNoRequest');
+      }
       case 'servico':
         return t('clientOrders.lineStatus.service');
       default:
@@ -939,6 +1180,7 @@ const ClientOrders = () => {
     // inalcançáveis em qualquer encomenda com serviços.
     const productLines = detailData.lines.filter((line) => line.line_status !== 'servico');
     const total = productLines.length;
+    // 'parcial' não conta como disponível: parte ainda depende do fornecedor.
     const done = productLines.filter((line) =>
       ['servido_por_stock', 'recebido', 'stock_disponivel_confirmar'].includes(line.line_status)
     ).length;
@@ -947,16 +1189,21 @@ const ClientOrders = () => {
   };
 
   // Checklist inline da célula "Estado" — só para linhas
-  // stock_disponivel_confirmar (fase pós-20261130070000). Estados possíveis:
+  // stock_disponivel_confirmar e 'parcial' com reserva (isStockExitConfirmable).
+  // Armazéns e quantidade são os do produto (getProductExitGroup). Estados:
   // 1) sem permissão inventory.edit → checkbox desativado + tooltip;
-  // 2) sem armazéns disponíveis (não devia acontecer, dado o próprio
-  //    line_status) → checkbox desativado + tooltip;
+  // 2) nenhum armazém com stock suficiente para a quantidade a enviar (a RPC
+  //    recusaria) → checkbox desativado + tooltip com a quantidade;
   // 3) 1 armazém → checkbox dispara logo a confirmação;
   // 4) 2+ armazéns → checkbox revela Select + botão "Confirmar";
   // 5) a processar → spinner em vez do checkbox.
   const renderStockExitChecklist = (line: ClientOrderDocumentLine) => {
-    const warehouses = line.available_warehouses || [];
-    const isProcessing = confirmingLineId === line.quote_line_id || confirmingAll;
+    const key = lineKey(line);
+    const group = line.product_id && detailData
+      ? getProductExitGroup(line.product_id, detailData.lines)
+      : null;
+    const warehouses = group?.warehouses ?? [];
+    const isProcessing = confirmingLineId === key || confirmingAll;
 
     if (isProcessing) {
       return <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />;
@@ -976,20 +1223,23 @@ const ClientOrders = () => {
     }
 
     if (warehouses.length === 0) {
+      const message = group && group.quantity > 0
+        ? t('clientOrders.dialog.noWarehouseEnoughStock', { qty: formatDiagnosticNumber(group.quantity) })
+        : t('clientOrders.dialog.noWarehouseAvailable');
       return (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex">
+            <span className="inline-flex" tabIndex={0} aria-label={message}>
               <Checkbox checked={false} disabled />
             </span>
           </TooltipTrigger>
-          <TooltipContent>{t('clientOrders.dialog.noWarehouseAvailable')}</TooltipContent>
+          <TooltipContent>{message}</TooltipContent>
         </Tooltip>
       );
     }
 
-    const isActive = checklistActiveLineIds.has(line.quote_line_id);
-    const selectedWarehouseId = selectedWarehouseByLine[line.quote_line_id];
+    const isActive = checklistActiveLineIds.has(key);
+    const selectedWarehouseId = selectedWarehouseByLine[key];
 
     if (warehouses.length > 1 && isActive) {
       return (
@@ -1001,7 +1251,7 @@ const ClientOrders = () => {
           <Select
             value={selectedWarehouseId || ""}
             onValueChange={(value) =>
-              setSelectedWarehouseByLine((prev) => ({ ...prev, [line.quote_line_id]: value }))
+              setSelectedWarehouseByLine((prev) => ({ ...prev, [key]: value }))
             }
           >
             <SelectTrigger className="h-8 w-[190px] text-xs">
@@ -1010,7 +1260,7 @@ const ClientOrders = () => {
             <SelectContent>
               {warehouses.map((wh) => (
                 <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
-                  {wh.warehouse_name} ({wh.quantity})
+                  {wh.warehouse_name} ({formatDiagnosticNumber(asQty(wh.quantity))})
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1359,7 +1609,7 @@ const ClientOrders = () => {
       // `rpc_update_manual_client_order` ainda não está nos tipos gerados.
       // Linhas existentes ausentes do payload são removidas pelo servidor,
       // por isso vão todas — as trancadas com os valores exatos lidos.
-      const { error } = await (supabase as any).rpc('rpc_update_manual_client_order', {
+      const { data: updateResult, error } = await (supabase as any).rpc('rpc_update_manual_client_order', {
         p_contract_id: contractId,
         p_items: createItems.map((item) => (
           item.locked && item.locked_payload
@@ -1380,7 +1630,15 @@ const ClientOrders = () => {
       });
       if (error) throw error;
 
-      toast({ title: t('clientOrders.toast.updateSuccess') });
+      // 20261204310000: o servidor pede logo ao fornecedor o que falta nas
+      // linhas novas/aumentadas — mostra-se o resumo quando criou alguma coisa.
+      const supplierRequest = (updateResult as { supplier_request?: SupplierRequestResult } | null)?.supplier_request;
+      toast({
+        title: t('clientOrders.toast.updateSuccess'),
+        description: asQty(supplierRequest?.items_created) > 0
+          ? `${t('clientOrders.requestMissing.autoRequested')} ${describeSupplierRequest(supplierRequest)}`
+          : undefined,
+      });
       setCreateOpen(false);
       resetCreateForm();
       loadOrders(0, true);
@@ -1896,6 +2154,22 @@ const ClientOrders = () => {
                     </>
                   );
                 })()}
+                {/* Pedir ao fornecedor a parte das linhas sem reserva nem pedido. */}
+                {detailData.can_request_missing && canRequestMissing && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRequestMissingConfirmOpen(true)}
+                    disabled={requestingMissing || confirmingAll}
+                  >
+                    {requestingMissing
+                      ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      : <Truck className="w-4 h-4 mr-2" />}
+                    {asQty(detailData.missing_lines_count) > 0
+                      ? t('clientOrders.requestMissing.buttonCount', { count: asQty(detailData.missing_lines_count) })
+                      : t('clientOrders.requestMissing.button')}
+                  </Button>
+                )}
                 {detailData.is_editable && canEditOrder && (
                   <Button
                     variant="outline"
@@ -1938,19 +2212,28 @@ const ClientOrders = () => {
                     </TableRow>
                   ) : (
                     detailData.lines.map((line) => (
-                      <TableRow key={line.quote_line_id}>
+                      <TableRow key={lineKey(line)}>
                         <TableCell>{line.product_sku || line.service_sku || '-'}</TableCell>
                         <TableCell>{line.product_name || line.service_name || '-'}</TableCell>
-                        <TableCell className="text-right">{line.quantity}</TableCell>
+                        <TableCell className="text-right">
+                          <div>{line.quantity}</div>
+                          {(() => {
+                            const summary = getReservationSummary(line);
+                            return summary
+                              ? <div className="text-xs text-muted-foreground">{summary}</div>
+                              : null;
+                          })()}
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <Badge className={getLineStatusColor(line.line_status)}>
+                            <Badge className={getLineStatusColor(line)}>
                               {getLineStatusLabel(line)}
                             </Badge>
-                            {line.line_status === 'stock_disponivel_confirmar' && renderStockExitChecklist(line)}
+                            {isStockExitConfirmable(line) && renderStockExitChecklist(line)}
                             {/* Só saídas manuais (com movimento próprio) se
-                                revertem; a baixa automática na assinatura não. */}
-                            {line.line_status === 'servido_por_stock' && line.stock_exit_movement_id && canConfirmStockExit && (
+                                revertem; a baixa automática na assinatura não.
+                                Também em 'parcial'/'recebido' com parte servida. */}
+                            {isStockExitRevertible(line) && canConfirmStockExit && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -2011,6 +2294,38 @@ const ClientOrders = () => {
             >
               {reverting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {t('clientOrders.dialog.revert')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmação do pedido do material em falta ao fornecedor */}
+      <AlertDialog
+        open={requestMissingConfirmOpen}
+        onOpenChange={(isOpen) => { if (!isOpen && !requestingMissing) setRequestMissingConfirmOpen(false); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('clientOrders.requestMissing.confirmTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('clientOrders.requestMissing.confirmDescription', {
+                units: formatDiagnosticNumber(asQty(detailData?.missing_units_total)),
+                lines: asQty(detailData?.missing_lines_count),
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={requestingMissing}>{t('clientOrders.create.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={requestingMissing}
+              onClick={(e) => {
+                // Mantém o diálogo aberto até a RPC responder.
+                e.preventDefault();
+                handleRequestMissing();
+              }}
+            >
+              {requestingMissing && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {t('clientOrders.requestMissing.confirmAction')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
