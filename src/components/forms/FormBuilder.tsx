@@ -79,6 +79,7 @@ import {
   X,
   Zap,
   Image as ImageIcon,
+  MapPin,
 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CONTACT_FIELDS, CLIENT_FIELDS, CONTACT_FIELD_DEFAULTS, LEAD_FORM_BASE_FIELDS } from "@/constants/fieldMappings";
@@ -852,6 +853,111 @@ export function FormBuilder({
     }
   };
 
+  // Passo de morada pronto a usar (Morada + Código Postal + Cidade, os três
+  // já mapeados por contact_field_mapping) -- em vez de o cliente montar
+  // campo a campo. Se já houver um passo de agendamento, o passo de morada
+  // é colocado ANTES dele automaticamente: código postal recolhido depois
+  // do agendamento chega tarde de mais para a distância real (achado 24/09).
+  const handleAddAddressStep = async () => {
+    const nextNumber = steps.length > 0 ? Math.max(...steps.map(s => s.step_number)) + 1 : 1;
+
+    const { data: newStep, error: stepError } = await supabase
+      .from("form_steps")
+      .insert({
+        form_id: formId,
+        step_number: nextNumber,
+        step_title: "Morada",
+        sort_order: nextNumber - 1,
+        step_type: 'fields',
+      })
+      .select()
+      .single();
+
+    if (stepError || !newStep) {
+      toast({ title: "Erro ao adicionar passo de morada", variant: "destructive" });
+      return;
+    }
+
+    const businessUserId = await resolveCurrentBusinessUserId();
+    if (!businessUserId) throw new Error("Business user not resolved");
+
+    const ADDRESS_MAPPINGS = ["address", "postal_code", "city"];
+    const newFields: FormField[] = [];
+    let sortOrder = 0;
+    for (const mapping of ADDRESS_MAPPINGS) {
+      // Não duplica: se já existir um campo com este mapeamento noutro
+      // passo, deixa-o ficar lá (o admin decide se o move para aqui).
+      if (fields.some(f => f.contact_field_mapping === mapping)) continue;
+      const prop = CONTACT_FIELDS.find(f => f.value === mapping);
+      const defaults = CONTACT_FIELD_DEFAULTS[mapping] || { field_type: "text", is_required: false };
+      const { data: fieldData, error: fieldError } = await supabase
+        .from("form_fields")
+        .insert({
+          form_id: formId,
+          field_key: mapping,
+          field_label: prop?.label || mapping,
+          field_type: defaults.field_type,
+          is_required: true,
+          is_unique: false,
+          is_active: true,
+          sort_order: sortOrder++,
+          step_number: newStep.step_number,
+          contact_field_mapping: mapping,
+          created_by: businessUserId,
+        })
+        .select()
+        .single();
+      if (fieldError) {
+        captureFlowError(fieldError, "config-partial-write");
+        continue;
+      }
+      if (fieldData) newFields.push(fieldData);
+    }
+
+    let allSteps = [...steps, newStep];
+    let allFields = [...fields, ...newFields];
+
+    const firstSchedulingIndex = allSteps.findIndex(s => s.step_type === 'scheduling');
+    if (firstSchedulingIndex !== -1) {
+      const newStepIndex = allSteps.findIndex(s => s.id === newStep.id);
+      if (newStepIndex > firstSchedulingIndex) {
+        const reordered = arrayMove(allSteps, newStepIndex, firstSchedulingIndex);
+        const renumbered = reordered.map((s, i) => ({ ...s, step_number: i + 1, sort_order: i }));
+
+        const stepNumberMap: Record<number, number> = {};
+        allSteps.forEach(oldStep => {
+          const updated = renumbered.find(s => s.id === oldStep.id);
+          if (updated) stepNumberMap[oldStep.step_number] = updated.step_number;
+        });
+
+        allFields = allFields.map(f => {
+          const mapped = stepNumberMap[f.step_number];
+          return mapped !== undefined ? { ...f, step_number: mapped } : f;
+        });
+        allSteps = renumbered;
+
+        for (const step of renumbered) {
+          const { error } = await supabase.from("form_steps").update({ step_number: step.step_number, sort_order: step.sort_order }).eq("id", step.id);
+          if (error) captureFlowError(error, "config-partial-write");
+        }
+        for (const field of allFields) {
+          const { error } = await supabase.from("form_fields").update({ step_number: field.step_number }).eq("id", field.id);
+          if (error) captureFlowError(error, "config-partial-write");
+        }
+      }
+    }
+
+    setSteps(allSteps);
+    setFields(allFields);
+    const finalStep = allSteps.find(s => s.id === newStep.id) || newStep;
+    setActiveStepId(finalStep.id);
+    setShowStepTypeMenu(false);
+    toast({
+      title: "Passo de morada adicionado",
+      description: "Morada, Código Postal e Cidade -- já colocado antes do agendamento, se o formulário tiver um.",
+    });
+  };
+
   const handleDeleteStep = async (stepId: string) => {
     const step = steps.find(s => s.id === stepId);
     if (!step) return;
@@ -1358,6 +1464,13 @@ export function FormBuilder({
                       <Calendar className="h-4 w-4" />
                       Passo de Agendamento
                     </button>
+                    <button
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2"
+                      onClick={() => void handleAddAddressStep()}
+                    >
+                      <MapPin className="h-4 w-4" />
+                      Passo de Morada
+                    </button>
                   </div>
                 )}
               </div>
@@ -1807,7 +1920,7 @@ export function FormBuilder({
                             if (!hasValidEarlierPostalField) {
                               toast({
                                 title: "Falta um passo de morada antes do agendamento",
-                                description: "Para exigir geolocalização, escolha primeiro (no campo acima) um código postal que esteja num passo ANTES deste. Se o formulário não tiver nenhum passo de morada antes do agendamento, crie um (ex.: um passo \"Morada\" com os campos Morada/Código Postal/Localidade) e mova-o para antes deste passo.",
+                                description: "Use o botão \"Passo\" → \"Passo de Morada\" (Morada + Código Postal + Cidade) -- fica automaticamente antes deste passo. Depois volte aqui e escolha o campo de código postal.",
                                 variant: "destructive",
                               });
                               return;
