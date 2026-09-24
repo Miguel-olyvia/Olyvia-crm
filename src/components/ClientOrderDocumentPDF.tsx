@@ -218,9 +218,48 @@ interface ClientOrderDocumentPDFLine {
   unidade?: string | null;
   units_per_uom?: number | null;
   stock_unidade?: string | null;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'parcial' | 'sem_fornecedor' | 'servico';
   purchase_order_number: string | null;
+  // 20261204310000: reserva por ordem de assinatura (unidades base).
+  component_index?: number | null;
+  qty_reserved?: number | null;
+  qty_ordered?: number | null;
+  qty_received?: number | null;
+  qty_missing?: number | null;
+  stock_movement_id?: string | null;
+  stock_exit_movement_id?: string | null;
 }
+
+const pdfQty = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+// Quantidade em unidades base com o código da unidade de stock, quando se
+// conhece (mesma regra do ecrã em ClientOrders.formatBaseQty).
+const formatBaseQty = (value: number, line: ClientOrderDocumentPDFLine): string => {
+  const unit = line.stock_unidade || (Number(line.units_per_uom) > 1 ? null : line.unidade) || '';
+  const n = new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(value);
+  return `${n}${unit ? ` ${unit}` : ''}`;
+};
+
+// "Parcial — X em stock · Y a aguardar fornecedor · Z em falta".
+const getPartialText = (line: ClientOrderDocumentPDFLine): string => {
+  const parts: string[] = [];
+  const reserved = pdfQty(line.qty_reserved);
+  const ordered = pdfQty(line.qty_ordered);
+  const received = pdfQty(line.qty_received);
+  const missing = pdfQty(line.qty_missing);
+  if (reserved > 0) parts.push(`${formatBaseQty(reserved, line)} em stock`);
+  else if (line.stock_movement_id || line.stock_exit_movement_id) parts.push('servido do stock');
+  if (ordered > 0) {
+    const pending = Math.round((ordered - received) * 1e6) / 1e6;
+    if (pending > 0) parts.push(`${formatBaseQty(pending, line)} a aguardar fornecedor${line.purchase_order_number ? ` (${line.purchase_order_number})` : ''}`);
+    if (received > 0) parts.push(`${formatBaseQty(received, line)} recebido`);
+  }
+  if (missing > 0) parts.push(`${formatBaseQty(missing, line)} em falta`);
+  return parts.length > 0 ? `Parcial — ${parts.join(' · ')}` : 'Parcial';
+};
 
 interface ClientOrderDocumentPDFProps {
   document: {
@@ -264,6 +303,8 @@ const getLineStatusText = (line: ClientOrderDocumentPDFLine): string => {
       return line.purchase_order_number ? `A aguardar Encomenda ${line.purchase_order_number}` : 'A aguardar Encomenda';
     case 'stock_disponivel_confirmar':
       return 'Stock disponível — confirmar saída';
+    case 'parcial':
+      return getPartialText(line);
     case 'sem_fornecedor':
       return 'Sem fornecedor preferencial';
     case 'servico':
@@ -388,7 +429,7 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
 
         <View>
           {lines.map((line) => (
-            <View key={line.quote_line_id} style={styles.tableRow}>
+            <View key={`${line.quote_line_id}:${line.component_index ?? 0}`} style={styles.tableRow}>
               <Text style={columnStyles.sku}>{line.product_sku || line.service_sku || '-'}</Text>
               <Text style={columnStyles.description}>{line.product_name || line.service_name || ''}</Text>
               <Text style={columnStyles.quantity}>

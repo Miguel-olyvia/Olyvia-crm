@@ -34,6 +34,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { Plus, Pencil, Trash2, Package, Download, Upload, ArrowLeftRight, History } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -95,6 +96,26 @@ const fetchAllRows = async (
   return { data: rows, error: null };
 };
 
+// Reserva de stock para Encomendas Clientes assinadas (20261204310000). É por
+// produto ao nível da ORGANIZAÇÃO (todos os armazéns), não por armazém — por
+// isso "Livre" compara com o stock total da organização, não com a linha.
+interface ProductReservation {
+  qty_reserved: number;
+  qty_missing: number;
+  orders_count: number;
+}
+
+const toNum = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatQty = (value: number): string =>
+  new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(value);
+
+// .in() vai no URL — lotes pequenos para não passar o limite com muitos ids.
+const RESERVATION_CHUNK = 150;
+
 const STOCK_SELECT = `
   *,
   products!inner(name, category_id, product_categories!category_id(name)),
@@ -139,6 +160,13 @@ const Stocks = () => {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [warehouseFilter, setWarehouseFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "low" | "normal" | "overstock">("all");
+
+  // Reservado/Livre por produto (rpc_get_product_stock_reservations) e stock
+  // total da organização (armazéns ativos) + nº de armazéns com o produto.
+  const [reservationByProduct, setReservationByProduct] = useState<Record<string, ProductReservation>>({});
+  const [orgStockByProduct, setOrgStockByProduct] = useState<Record<string, { total: number; warehouses: number }>>({});
+  const requestedReservationIdsRef = useRef<Set<string>>(new Set());
+  const reservationGenerationRef = useRef(0);
 
   // Debounce search — server-side now, a network call per keystroke would be wasteful.
   useEffect(() => {
@@ -312,6 +340,75 @@ const Stocks = () => {
     observerRef.current = observer;
     return () => observerRef.current?.disconnect();
   }, [loading, hasMore, loadingMore, page, loadStocks]);
+
+  // Reservas dos produtos visíveis — só os ainda não pedidos, em lotes. Uma
+  // listagem reiniciada (filtros, refresh depois de um movimento, outra
+  // empresa) limpa a cache, para os valores refletirem o estado atual. Falhar
+  // isto nunca parte o ecrã: as colunas mostram "-".
+  useEffect(() => {
+    const orgId = activeCompany?.id;
+    if (!orgId) return;
+    if (stocks.length === 0) {
+      reservationGenerationRef.current += 1;
+      requestedReservationIdsRef.current = new Set();
+      setReservationByProduct({});
+      setOrgStockByProduct({});
+      return;
+    }
+    const missing = Array.from(new Set(stocks.map((s) => s.product_id)))
+      .filter((id) => id && !requestedReservationIdsRef.current.has(id));
+    if (missing.length === 0) return;
+    missing.forEach((id) => requestedReservationIdsRef.current.add(id));
+    const generation = reservationGenerationRef.current;
+
+    (async () => {
+      try {
+        const nextReservations: Record<string, ProductReservation> = {};
+        const nextOrgStock: Record<string, { total: number; warehouses: number }> = {};
+        for (let i = 0; i < missing.length; i += RESERVATION_CHUNK) {
+          const chunk = missing.slice(i, i + RESERVATION_CHUNK);
+          const { data, error } = await (supabase as any).rpc("rpc_get_product_stock_reservations", {
+            p_organization_id: orgId,
+            p_product_ids: chunk,
+          });
+          if (error) throw error;
+          chunk.forEach((id) => { nextReservations[id] = { qty_reserved: 0, qty_missing: 0, orders_count: 0 }; });
+          ((data as any[]) || []).forEach((r) => {
+            if (!r?.product_id) return;
+            nextReservations[r.product_id] = {
+              qty_reserved: toNum(r.qty_reserved),
+              qty_missing: toNum(r.qty_missing),
+              orders_count: toNum(r.orders_count),
+            };
+          });
+
+          const { data: stockRows, error: stockError } = await fetchAllRows(() =>
+            (supabase as any)
+              .from("stocks")
+              .select("id, product_id, quantity, warehouses!inner(deleted_at)")
+              .eq("organization_id", orgId)
+              .is("deleted_at", null)
+              .is("warehouses.deleted_at", null)
+              .in("product_id", chunk)
+              .order("id", { ascending: true })
+          );
+          if (stockError) throw stockError;
+          chunk.forEach((id) => { nextOrgStock[id] = { total: 0, warehouses: 0 }; });
+          (stockRows || []).forEach((row: any) => {
+            const entry = nextOrgStock[row.product_id] || { total: 0, warehouses: 0 };
+            entry.total += toNum(row.quantity);
+            entry.warehouses += 1;
+            nextOrgStock[row.product_id] = entry;
+          });
+        }
+        if (generation !== reservationGenerationRef.current) return;
+        setReservationByProduct((prev) => ({ ...prev, ...nextReservations }));
+        setOrgStockByProduct((prev) => ({ ...prev, ...nextOrgStock }));
+      } catch (error) {
+        console.warn("[Stocks] não foi possível obter as reservas de stock", error);
+      }
+    })();
+  }, [stocks, activeCompany?.id]);
 
   // Group the currently loaded stocks by the product's category, sorted
   // alphabetically (uncategorized last); products within a category sorted
@@ -1067,6 +1164,22 @@ const Stocks = () => {
                 <TableHead>{t('stocks.table.warehouse')}</TableHead>
                 <TableHead>{t('stocks.table.location')}</TableHead>
                 <TableHead className="text-right">{t('stocks.table.quantity')}</TableHead>
+                <TableHead className="text-right">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-help underline decoration-dotted underline-offset-4">{t('stocks.table.reserved')}</span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">{t('stocks.table.reservedHint')}</TooltipContent>
+                  </Tooltip>
+                </TableHead>
+                <TableHead className="text-right">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-help underline decoration-dotted underline-offset-4">{t('stocks.table.free')}</span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">{t('stocks.table.freeHint')}</TooltipContent>
+                  </Tooltip>
+                </TableHead>
                 <TableHead className="text-right">{t('stocks.table.min')}</TableHead>
                 <TableHead className="text-right">{t('stocks.table.max')}</TableHead>
                 <TableHead className="text-right">{t('stocks.table.reorder')}</TableHead>
@@ -1077,13 +1190,13 @@ const Stocks = () => {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center">
+                  <TableCell colSpan={11} className="text-center">
                     {t('stocks.loading')}
                   </TableCell>
                 </TableRow>
               ) : stocks.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center">
+                  <TableCell colSpan={11} className="text-center">
                     {t('stocks.noStocks')}
                   </TableCell>
                 </TableRow>
@@ -1091,7 +1204,7 @@ const Stocks = () => {
                 groupedStocks.map(([categoryName, categoryStocks]) => (
                   <Fragment key={categoryName}>
                     <TableRow className="bg-muted/50 hover:bg-muted/50">
-                      <TableCell colSpan={9} className="font-semibold text-sm">
+                      <TableCell colSpan={11} className="font-semibold text-sm">
                         {categoryName} <span className="font-normal text-muted-foreground">({categoryStocks.length})</span>
                       </TableCell>
                     </TableRow>
@@ -1108,6 +1221,64 @@ const Stocks = () => {
                         <TableCell className="text-right">
                           {stock.quantity}
                         </TableCell>
+                        {(() => {
+                          // Reserva ao nível da organização: igual em todas as
+                          // linhas (armazéns) do mesmo produto.
+                          const res = reservationByProduct[stock.product_id];
+                          const org = orgStockByProduct[stock.product_id];
+                          if (showDeleted || !res || !org) {
+                            return (
+                              <>
+                                <TableCell className="text-right text-muted-foreground">-</TableCell>
+                                <TableCell className="text-right text-muted-foreground">-</TableCell>
+                              </>
+                            );
+                          }
+                          const free = Math.round((org.total - res.qty_reserved) * 1e6) / 1e6;
+                          const multiWarehouse = org.warehouses > 1;
+                          return (
+                            <>
+                              <TableCell className="text-right">
+                                {res.qty_reserved > 0 ? (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="cursor-help">{formatQty(res.qty_reserved)}</span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      {t('stocks.table.reservedTooltip', { count: res.orders_count })}
+                                      {res.qty_missing > 0 && (
+                                        <> {t('stocks.table.reservedMissing', { qty: formatQty(res.qty_missing) })}</>
+                                      )}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ) : (
+                                  <span className="text-muted-foreground">0</span>
+                                )}
+                              </TableCell>
+                              <TableCell className={`text-right ${free < 0 ? "text-destructive font-medium" : ""}`}>
+                                {multiWarehouse ? (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="cursor-help">
+                                        {formatQty(free)}
+                                        <span className="ml-1 text-xs font-normal text-muted-foreground">{t('stocks.table.orgSuffix')}</span>
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      {t('stocks.table.freeOrgTooltip', {
+                                        total: formatQty(org.total),
+                                        reserved: formatQty(res.qty_reserved),
+                                        count: org.warehouses,
+                                      })}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ) : (
+                                  formatQty(free)
+                                )}
+                              </TableCell>
+                            </>
+                          );
+                        })()}
                         <TableCell className="text-right">
                           {stock.minimum_quantity}
                         </TableCell>
