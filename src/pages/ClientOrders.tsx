@@ -304,6 +304,8 @@ const ClientOrders = () => {
   const [createClient, setCreateClient] = useState<EntitySearchResult | null>(null);
   const [createDate, setCreateDate] = useState(new Date().toISOString().split('T')[0]);
   const [createNotes, setCreateNotes] = useState("");
+  const [createDeliveryAddress, setCreateDeliveryAddress] = useState("");
+  const deliveryAddressRequestRef = useRef<string | null>(null);
   const [createItems, setCreateItems] = useState<ManualClientOrderItem[]>([]);
   // Seletor "Unidade" (embalagens) das linhas de produto da criação manual.
   const lineUom = useLineUomOptions(createItems.map((item) => item.product_id));
@@ -857,9 +859,45 @@ const ClientOrders = () => {
 
   const resetCreateForm = () => {
     setCreateClient(null);
+    deliveryAddressRequestRef.current = null;
+    setCreateDeliveryAddress("");
     setCreateDate(new Date().toISOString().split('T')[0]);
     setCreateNotes("");
     setCreateItems([]);
+  };
+
+  // Ao escolher o cliente, pré-preenche a morada de entrega com a morada
+  // principal da entidade (editável). O ref guarda o último entityId pedido
+  // para ignorar respostas que cheguem fora de ordem.
+  const handleCreateClientChange = async (client: EntitySearchResult | null) => {
+    setCreateClient(client);
+    const entityId = client?.entityId ?? null;
+    deliveryAddressRequestRef.current = entityId;
+    if (!entityId) {
+      setCreateDeliveryAddress("");
+      return;
+    }
+    let address = "";
+    try {
+      const { data, error } = await (supabase as any)
+        .from('anew_entity_addresses')
+        .select('is_primary, anew_addresses(street, number, postal_code, city)')
+        .eq('entity_id', entityId)
+        .order('is_primary', { ascending: false })
+        .limit(1);
+      if (error) throw error;
+      const addr = data?.[0]?.anew_addresses;
+      if (addr) {
+        address = [addr.street, addr.number, addr.postal_code, addr.city]
+          .map((part: unknown) => (typeof part === 'string' ? part.trim() : part != null ? String(part).trim() : ''))
+          .filter(Boolean)
+          .join(', ');
+      }
+    } catch (error) {
+      console.error('Error loading client delivery address:', error);
+    }
+    if (deliveryAddressRequestRef.current !== entityId) return;
+    setCreateDeliveryAddress(address);
   };
 
   const getCreateTotals = () => {
@@ -1020,6 +1058,7 @@ const ClientOrders = () => {
           categoria: item.categoria,
           qt: item.quantity,
           // Por unidade da linha (por embalagem quando há uom_id).
+          delivery_address: createDeliveryAddress.trim() || null,
           preco_unit: item.unit_price,
           iva_percent: item.vat_rate,
           // NULL = unidade do produto; o fator é calculado no servidor.
@@ -1538,7 +1577,7 @@ const ClientOrders = () => {
               <Label>{t('clientOrders.create.client')} *</Label>
               <EntitySearchInput
                 value={createClient}
-                onChange={setCreateClient}
+                onChange={handleCreateClientChange}
                 searchTypes={["client"]}
                 placeholder={t('clientOrders.create.clientPlaceholder')}
                 disabled={creating}
@@ -1553,6 +1592,18 @@ const ClientOrders = () => {
                   type="date"
                   value={createDate}
                   onChange={(e) => setCreateDate(e.target.value)}
+            <div className="space-y-2">
+              <Label htmlFor="client_order_delivery_address">{t('clientOrders.create.deliveryAddress')}</Label>
+              <Textarea
+                id="client_order_delivery_address"
+                value={createDeliveryAddress}
+                onChange={(e) => setCreateDeliveryAddress(e.target.value)}
+                placeholder={t('clientOrders.create.deliveryAddressPlaceholder')}
+                rows={2}
+                disabled={creating}
+              />
+            </div>
+
                   disabled={creating}
                 />
               </div>
