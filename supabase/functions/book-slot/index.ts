@@ -990,12 +990,17 @@ Deno.serve(async (req: Request) => {
             });
         await sendEmailNow({
           organizationId,
-          // userId: mesma resiliencia que o aviso ao comercial e o lembrete ja
-          // tinham -- tenta primeiro o SMTP pessoal de quem criou a marcacao,
-          // antes do SMTP por omissao da organizacao. Sem isto, a confirmacao
-          // ao cliente ficava presa ao SMTP da organizacao mesmo quando este
-          // falhava e havia alternativa disponivel.
-          userId: createdBy || undefined,
+          // SEM userId de proposito: esta marcacao vem sempre de um formulario
+          // PUBLICO, nao existe "quem criou" a serio -- createdBy e so o primeiro
+          // membro activo da organizacao (sem ordenacao nenhuma, sem ligacao a
+          // esta marcacao). Passar isso como userId fazia o send-email ir buscar
+          // a SMTP PESSOAL desse membro ao acaso (resolveSmtpForScheduledEmail
+          // nem olha para smtpId quando ha user_id), ignorando o SMTP do
+          // formulario -- confirmado ao vivo: a confirmacao de uma marcacao real
+          // da Mudelar saiu da caixa pessoal de um funcionario sem nada a ver com
+          // a visita, em vez de "Agenda Mudelar (padrao)" configurado no ecra do
+          // formulario. Sem userId, o send-email usa sempre o smtpId abaixo (o
+          // configurado), nunca uma identidade pessoal.
           smtpId: emailCfg.email_smtp_id,
           to: leadEmail,
           subject: renderSubject(confTpl?.subject || 'Confirmação da sua visita — {{meeting_date}}', baseVars),
