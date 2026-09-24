@@ -1050,6 +1050,7 @@ const ClientOrders = () => {
           entity_id: entityId,
           notes: createNotes.trim() || null,
           start_date: createDate || null,
+          delivery_address: createDeliveryAddress.trim() || null,
         },
         p_items: createItems.map((item) => ({
           product_id: item.product_id,
@@ -1058,7 +1059,6 @@ const ClientOrders = () => {
           categoria: item.categoria,
           qt: item.quantity,
           // Por unidade da linha (por embalagem quando há uom_id).
-          delivery_address: createDeliveryAddress.trim() || null,
           preco_unit: item.unit_price,
           iva_percent: item.vat_rate,
           // NULL = unidade do produto; o fator é calculado no servidor.
@@ -1584,14 +1584,6 @@ const ClientOrders = () => {
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="client_order_date">{t('clientOrders.create.date')} *</Label>
-                <Input
-                  id="client_order_date"
-                  type="date"
-                  value={createDate}
-                  onChange={(e) => setCreateDate(e.target.value)}
             <div className="space-y-2">
               <Label htmlFor="client_order_delivery_address">{t('clientOrders.create.deliveryAddress')}</Label>
               <Textarea
@@ -1604,6 +1596,14 @@ const ClientOrders = () => {
               />
             </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="client_order_date">{t('clientOrders.create.date')} *</Label>
+                <Input
+                  id="client_order_date"
+                  type="date"
+                  value={createDate}
+                  onChange={(e) => setCreateDate(e.target.value)}
                   disabled={creating}
                 />
               </div>
