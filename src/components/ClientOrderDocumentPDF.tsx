@@ -225,6 +225,12 @@ interface ClientOrderDocumentPDFProps {
     // Preenchidos só quando a encomenda nasceu de uma venda direta (Fase 5).
     direct_sale_number?: string | null;
     proforma_number?: string | null;
+    // 20261204290000: número próprio da encomenda, origem e morada de entrega.
+    // Opcionais — sem order_number cai para o nº do contrato.
+    order_number?: string | null;
+    origin_type?: 'contract' | 'direct_sale' | 'manual' | null;
+    origin_number?: string | null;
+    delivery_address?: string | null;
     lines: ClientOrderDocumentPDFLine[];
     // Cópia congelada do levantamento de necessidades (Fase 1). Opcional:
     // vendas diretas e encomendas manuais não têm diagnóstico e a secção
@@ -287,9 +293,25 @@ const getDiagnosticFields = (need: ClientOrderDiagnosticNeed): Array<{ label: st
   return fields;
 };
 
+// Texto da origem para o cabeçalho — mesma regra do ecrã (ClientOrders.tsx):
+// contrato → "Contrato CC-…"; venda direta → "Venda Direta VD-…" (nº da query a
+// direct_sales se origin_number vier null); manual → "Sem documento anterior".
+// Sem origin_type (RPC antiga) só se mostra a venda direta, como antes.
+const getOriginText = (doc: ClientOrderDocumentPDFProps['document']): string | null => {
+  const proforma = doc.proforma_number ? ` · Proforma ${doc.proforma_number}` : '';
+  if (doc.origin_type === 'direct_sale' || (!doc.origin_type && doc.direct_sale_number)) {
+    const number = doc.origin_number || doc.direct_sale_number || '';
+    return `Venda Direta${number ? ` ${number}` : ''}${proforma}`;
+  }
+  if (doc.origin_type === 'contract') return `Contrato ${doc.origin_number || doc.contract_number || ''}`.trim();
+  if (doc.origin_type === 'manual') return 'Sem documento anterior';
+  return null;
+};
+
 export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumentPDFProps) => {
   const lines = document.lines || [];
   const diagnostic = document.diagnostic || [];
+  const originText = getOriginText(document);
 
   return (
     <Document>
@@ -306,17 +328,16 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
           <View style={styles.headerLeft}>
             <Text style={styles.title}>ENCOMENDA CLIENTE</Text>
             <Text style={styles.subtitle}>Nota de Satisfação de Encomenda</Text>
-            <Text style={styles.contractNumber}>Contrato: {document.contract_number || 'N/A'}</Text>
+            <Text style={styles.contractNumber}>
+              Encomenda: {document.order_number || document.contract_number || 'N/A'}
+            </Text>
             {document.signature_date && (
               <Text style={styles.docDate}>
                 Data de Assinatura: {new Date(document.signature_date).toLocaleDateString('pt-PT')}
               </Text>
             )}
-            {document.direct_sale_number && (
-              <Text style={styles.docDate}>
-                Origem: Venda Direta {document.direct_sale_number}
-                {document.proforma_number ? ` · Proforma ${document.proforma_number}` : ''}
-              </Text>
+            {originText && (
+              <Text style={styles.docDate}>Origem: {originText}</Text>
             )}
           </View>
           {company?.logo_url && (
@@ -331,6 +352,12 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
             <Text style={styles.label}>Nome:</Text>
             <Text style={styles.value}>{document.client_name || ''}</Text>
           </View>
+          {document.delivery_address && (
+            <View style={styles.row}>
+              <Text style={styles.label}>Morada de entrega:</Text>
+              <Text style={styles.value}>{document.delivery_address}</Text>
+            </View>
+          )}
           {document.total_value !== null && document.total_value !== undefined && (
             <View style={styles.row}>
               <Text style={styles.label}>Valor Total:</Text>

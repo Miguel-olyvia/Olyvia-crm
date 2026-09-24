@@ -76,6 +76,8 @@ interface MovementLine {
   sourceLineStatus?: "servido_por_stock" | "recebido" | "a_aguardar_encomenda" | "sem_fornecedor";
 }
 
+const STOCK_INTEGER_ONLY_MSG = "O stock só regista unidades inteiras.";
+
 const makeEmptyLine = (productId = ""): MovementLine => ({
   key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
   productId,
@@ -306,16 +308,22 @@ export default function StockMovementDialog({
   const addLine = () => setLines((prev) => [...prev, makeEmptyLine()]);
   const removeLine = (key: string) => setLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== key) : prev));
 
+  // O stock conta-se em unidades inteiras. Antes era parseInt, que truncava
+  // em silêncio (1,5 → 1); agora um decimal é recusado na validação.
+  const parseLineQty = (raw: string): number => Number(String(raw).trim().replace(",", "."));
+
   const validateLine = (line: MovementLine): string | null => {
     if (!line.productId) return "Escolhe um produto.";
-    const qty = parseInt(line.quantity, 10);
-    if (!qty || qty <= 0) return "Quantidade tem de ser positiva.";
+    const qty = parseLineQty(line.quantity);
+    if (!line.quantity.trim() || !Number.isFinite(qty) || qty <= 0) return "Quantidade tem de ser positiva.";
+    if (!Number.isInteger(qty)) return STOCK_INTEGER_ONLY_MSG;
     if (needsSupplier && !line.itemSupplierId) return "Escolhe o fornecedor.";
     return null;
   };
 
   const runLineRpc = async (line: MovementLine): Promise<{ error: any }> => {
-    const qty = parseInt(line.quantity, 10);
+    // validateLine já garantiu um inteiro positivo.
+    const qty = parseLineQty(line.quantity);
     switch (movementType) {
       case "entrada":
         return supabase.rpc("rpc_register_stock_entry", {
@@ -400,7 +408,11 @@ export default function StockMovementDialog({
     const lineErrors = lines.map((l) => validateLine(l));
     if (lineErrors.some((e) => e)) {
       setLines((prev) => prev.map((l, i) => ({ ...l, error: lineErrors[i] || undefined })));
-      toast({ title: "Erro", description: "Corrige as linhas assinaladas antes de continuar.", variant: "destructive" });
+      toast({
+        title: "Erro",
+        description: lineErrors.includes(STOCK_INTEGER_ONLY_MSG) ? STOCK_INTEGER_ONLY_MSG : "Corrige as linhas assinaladas antes de continuar.",
+        variant: "destructive",
+      });
       return;
     }
     // Produtos repetidos na mesma submissão — evita 2 movimentos concorrentes
@@ -580,6 +592,8 @@ export default function StockMovementDialog({
                     <Input
                       type="number"
                       min={1}
+                      step={1}
+                      inputMode="numeric"
                       value={line.quantity}
                       onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
                     />

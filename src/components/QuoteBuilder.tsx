@@ -64,6 +64,8 @@ import {
   markupFromCostAndPrice,
 } from "@/utils/quotes/quoteLinePricing";
 import { computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
+import { useProductBaseUomCodes } from "@/hooks/useProductBaseUomCodes";
+import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 import {
   Dialog,
   DialogContent,
@@ -277,6 +279,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [products, setProducts] = useState<ProductCatalogItem[]>([]);
   const [services, setServices] = useState<ProductCatalogItem[]>([]);
   const [lines, setLines] = useState<QuoteLine[]>([]);
+  // Unidade de stock dos produtos das linhas — quantidade inteira em unidades contáveis.
+  const productUom = useProductBaseUomCodes(lines.map((l) => (l.bundle_id ? null : l.product_id)));
   // Importação (explícita) dos itens do Pedido de Proposta em curso.
   const [importingDealItems, setImportingDealItems] = useState(false);
   const [sections, setSections] = useState<string[]>(["Geral"]);
@@ -2139,6 +2143,23 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         toast({
           title: t('quoteBuilder.toast.lineValidationError'),
           description: `${line.descricao_snapshot}: ${firstError.message}`,
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
+    // Unidade contável / embalagem: a quantidade tem de ser inteira (o input já
+    // arredonda; isto apanha linhas antigas ou importadas com decimais).
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!(line.qt > 0) || line.bundle_id) continue;
+      const baseCode = productUom.getBaseCode(line.product_id);
+      const integer = requiresIntegerQty({ hasProduct: !!line.product_id, lineUomId: null, baseUomCode: baseCode });
+      if (!isValidQtyFor(line.qt, integer)) {
+        toast({
+          title: t('quoteBuilder.toast.lineValidationError'),
+          description: integerQtyMessage(i + 1, baseCode),
           variant: "destructive",
         });
         return;
@@ -4183,6 +4204,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             const isBundleLine = lineBundleComponents.length > 0 && lineComponentsTotal > 0;
 
                             const unitOptions = ["un", "m²", "ml", "dia", "hora", "kg", "m", "vg"];
+                            // Produto em unidade contável => só quantidades inteiras.
+                            const lineIntegerQty = requiresIntegerQty({
+                              hasProduct: !isBundle && !!line.product_id,
+                              lineUomId: null,
+                              baseUomCode: productUom.getBaseCode(line.product_id),
+                            });
 
                             return (
                               <SortableQuoteRow key={sortableId} id={sortableId}>
@@ -4290,9 +4317,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                   </TableCell>
                                   <TableCell className="text-center">
                                     <Input type="number" min="0" step="1" value={line.qt}
+                                      inputMode={lineIntegerQty ? "numeric" : undefined}
                                       onChange={(e) => {
+                                        const raw = Number(e.target.value);
                                         const updated = [...lines];
-                                        updated[globalLineIndex] = { ...line, qt: Number(e.target.value) };
+                                        // Unidade contável / embalagem => só quantidades inteiras.
+                                        updated[globalLineIndex] = { ...line, qt: lineIntegerQty ? roundToIntegerQty(raw) : raw };
                                         setLines(updated);
                                       }}
                                       className="w-16 mx-auto text-center h-8" />
