@@ -20,6 +20,7 @@ import {
 import { sendSmsNow, scheduleSms } from '../_shared/sendSms.ts';
 import { geocodePostalCode } from '../_shared/postcodeGeocode.ts';
 import { checkTravelFeasible } from '../_shared/travelFeasibility.ts';
+import { ensureHolidaysPersisted } from '../_shared/ensureHolidays.ts';
 
 initSentry();
 
@@ -133,6 +134,25 @@ Deno.serve(async (req: Request) => {
     }
 
     const organizationId = form.organization_id;
+
+    // Regra 16: garante que o feriado do ano da marcação já está gravado em
+    // schedule_holidays antes de qualquer RPC correr -- ver ensureHolidays.ts
+    // (mesma lacuna do calendário, aqui para quem chama book-slot
+    // directamente, sem passar pelo calendário público).
+    try {
+      const { data: orgSettings } = await supabase
+        .from('schedule_settings')
+        .select('country_code')
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      await ensureHolidaysPersisted(
+        supabase,
+        orgSettings?.country_code || 'PT',
+        [parseInt(slot_start.split('T')[0].substring(0, 4))],
+      );
+    } catch (e) {
+      console.error('[book-slot] ensureHolidaysPersisted failed (non-fatal):', e);
+    }
 
     // 2. Get scheduling step config
     let boardId: string | null = null;

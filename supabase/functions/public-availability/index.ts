@@ -4,6 +4,7 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
 import { checkTravelFeasible } from "../_shared/travelFeasibility.ts";
+import { ensureHolidaysPersisted } from "../_shared/ensureHolidays.ts";
 
 initSentry();
 
@@ -143,6 +144,27 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: 'Board not found or has no organization' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // Regra 16: garante que os feriados do(s) ano(s) pedidos já estão
+    // gravados em schedule_holidays ANTES de qualquer RPC de disponibilidade
+    // correr -- sem isto, um feriado nunca gravado deixava marcar na mesma,
+    // mesmo aparecendo riscado no calendário (ver ensureHolidays.ts).
+    {
+      const { data: orgSettings } = await supabase
+        .from('schedule_settings')
+        .select('country_code')
+        .eq('organization_id', orgId)
+        .maybeSingle();
+      const countryCode = orgSettings?.country_code || 'PT';
+      const refDate = start_date || date;
+      if (refDate) {
+        const startYear = parseInt(refDate.substring(0, 4));
+        const endYear = end_date ? parseInt(end_date.substring(0, 4)) : startYear;
+        const years: number[] = [];
+        for (let y = startYear; y <= endYear; y++) years.push(y);
+        await ensureHolidaysPersisted(supabase, countryCode, years);
+      }
     }
 
     // Helper: fetch schedule config for the org
