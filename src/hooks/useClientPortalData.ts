@@ -127,17 +127,6 @@ export function useClientPortalData() {
           quotes = qts || [];
         }
 
-        const resolveCommercial = async (identifier: string): Promise<PortalSummary["commercial"]> => {
-          // Use SECURITY DEFINER function to bypass RLS
-          const { data: info } = await (supabase as any).rpc("get_commercial_info", { p_user_id: identifier });
-          if (!info) return null;
-          return {
-            name: info.name || "Comercial",
-            phone: info.phone || null,
-            email: info.email || null,
-          };
-        };
-
         // Pending actions
         const pendingActions: PortalSummary["pendingActions"] = [];
 
@@ -165,63 +154,21 @@ export function useClientPortalData() {
         // the portal has no dedicated quote detail route, so they would
         // mislabel as "Contrato" and 404 on click.
 
-        // Get commercial info — priority: deal client > proposal client > deal assigned_to > proposal created_by
+        // Comercial da empresa ATIVA, resolvido na BD (get_portal_commercial):
+        // Resp. Comercial da lead > ficha de cliente > documento mais recente.
+        // Nunca quem carregou em "Enviar para o portal" — era o que acontecia
+        // antes sem proposta, e esse não é necessariamente o comercial.
         let commercial: PortalSummary["commercial"] = null;
-        const proposalForCommercial =
-          proposals.find((p) => p.status === "sent" || p.status === "pending") ||
-          proposals[0] ||
-          null;
-
-        let commercialIdentifier = proposalForCommercial?.created_by || portalUsers[0]?.created_by || null;
-
-        let dealClientId: string | null = null;
-
-        if (proposalForCommercial?.deal_id) {
-          const { data: deal } = await supabase
-            .from("deals")
-            .select("assigned_to, client_id")
-            .eq("id", proposalForCommercial.deal_id)
-            .maybeSingle();
-          if (cancelled) return;
-
-          if (deal?.assigned_to) {
-            commercialIdentifier = deal.assigned_to;
-          }
-
-          if (deal?.client_id) {
-            dealClientId = deal.client_id;
-          }
-        }
-
-        if (proposalForCommercial?.client_id) {
-          const { data: proposalClient } = await supabase
-            .from("anew_clients")
-            .select("assigned_to")
-            .eq("id", proposalForCommercial.client_id)
-            .maybeSingle();
-          if (cancelled) return;
-
-          if (proposalClient?.assigned_to) {
-            commercialIdentifier = proposalClient.assigned_to;
-          }
-        }
-
-        if (dealClientId) {
-          const { data: dealClient } = await supabase
-            .from("anew_clients")
-            .select("assigned_to")
-            .eq("id", dealClientId)
-            .maybeSingle();
-          if (cancelled) return;
-
-          if (dealClient?.assigned_to) {
-            commercialIdentifier = dealClient.assigned_to;
-          }
-        }
-
-        if (commercialIdentifier) {
-          commercial = await resolveCommercial(commercialIdentifier);
-          if (cancelled) return;
+        const { data: commercialInfo } = await (supabase as any).rpc("get_portal_commercial", {
+          p_organization_id: org.organizationId,
+        });
+        if (cancelled) return;
+        if (commercialInfo) {
+          commercial = {
+            name: commercialInfo.name || "Comercial",
+            phone: commercialInfo.phone || null,
+            email: commercialInfo.email || null,
+          };
         }
 
         // Fetch document count from unified `documents` table (RLS handles visibility)
