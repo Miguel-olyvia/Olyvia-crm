@@ -1777,7 +1777,7 @@ export function FormBuilder({
                           {fields
                             .filter(f => {
                               const fieldStep = steps.find(s => s.step_number === f.step_number);
-                              return !fieldStep || fieldStep.step_type !== 'scheduling';
+                              return fieldStep && fieldStep.step_type !== 'scheduling' && fieldStep.step_number < activeStep.step_number;
                             })
                             .map(f => (
                               <SelectItem key={f.id} value={f.field_key}>
@@ -1787,7 +1787,7 @@ export function FormBuilder({
                           }
                         </SelectContent>
                       </Select>
-                      <p className="text-[10px] text-muted-foreground">Selecione o campo que contém o código postal para filtrar recursos por proximidade.</p>
+                      <p className="text-[10px] text-muted-foreground">Só mostra campos de passos ANTERIORES a este — um código postal recolhido depois do agendamento chega tarde de mais para calcular distância.</p>
                     </div>
                     <div className="flex items-center justify-between gap-2 rounded-md border p-3">
                       <div>
@@ -1799,12 +1799,35 @@ export function FormBuilder({
                       <Switch
                         checked={activeStep.scheduling_requires_location}
                         onCheckedChange={async (checked) => {
+                          if (checked) {
+                            const postalStep = activeStep.scheduling_postal_code_field_key
+                              ? steps.find(s => fields.some(f => f.field_key === activeStep.scheduling_postal_code_field_key && f.step_number === s.step_number))
+                              : null;
+                            const hasValidEarlierPostalField = !!postalStep && postalStep.step_number < activeStep.step_number;
+                            if (!hasValidEarlierPostalField) {
+                              toast({
+                                title: "Falta um passo de morada antes do agendamento",
+                                description: "Para exigir geolocalização, escolha primeiro (no campo acima) um código postal que esteja num passo ANTES deste. Se o formulário não tiver nenhum passo de morada antes do agendamento, crie um (ex.: um passo \"Morada\" com os campos Morada/Código Postal/Localidade) e mova-o para antes deste passo.",
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+                          }
                           const { error } = await supabase.from("form_steps").update({ scheduling_requires_location: checked }).eq("id", activeStep.id);
                           if (error) captureFlowError(error, "config-partial-write");
                           setSteps(steps.map(s => s.id === activeStep.id ? { ...s, scheduling_requires_location: checked } : s));
                         }}
                       />
                     </div>
+                    {activeStep.scheduling_requires_location && !fields.some(f => {
+                      if (f.field_key !== activeStep.scheduling_postal_code_field_key) return false;
+                      const fieldStep = steps.find(s => s.step_number === f.step_number);
+                      return !!fieldStep && fieldStep.step_number < activeStep.step_number;
+                    }) && (
+                      <p className="text-[10px] text-destructive">
+                        Aviso: a geolocalização está exigida, mas o código postal seleccionado já não está num passo anterior (foi movido, ou o passo foi apagado). O formulário vai bloquear todas as marcações até corrigir isto.
+                      </p>
+                    )}
                     <div className="space-y-2">
                       <Label className="text-xs">Campo de Distrito</Label>
                       <Select
