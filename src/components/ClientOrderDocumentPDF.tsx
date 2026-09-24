@@ -226,6 +226,10 @@ interface ClientOrderDocumentPDFLine {
   qty_ordered?: number | null;
   qty_received?: number | null;
   qty_missing?: number | null;
+  // 20261204340000: quantidade já servida por stock; null em serviços.
+  qty_served?: number | null;
+  // Só em produtos; null/ausente = desconhecido. Ver ClientOrders.
+  has_preferred_supplier?: boolean | null;
   stock_movement_id?: string | null;
   stock_exit_movement_id?: string | null;
 }
@@ -243,15 +247,17 @@ const formatBaseQty = (value: number, line: ClientOrderDocumentPDFLine): string 
   return `${n}${unit ? ` ${unit}` : ''}`;
 };
 
-// "Parcial — X em stock · Y a aguardar fornecedor · Z em falta".
+// "Parcial — X servido · Y em stock · Z a aguardar fornecedor · W em falta"
+// (só as partes > 0; "servido" vem de qty_served, como no ecrã).
 const getPartialText = (line: ClientOrderDocumentPDFLine): string => {
   const parts: string[] = [];
+  const served = pdfQty(line.qty_served);
   const reserved = pdfQty(line.qty_reserved);
   const ordered = pdfQty(line.qty_ordered);
   const received = pdfQty(line.qty_received);
   const missing = pdfQty(line.qty_missing);
+  if (served > 0) parts.push(`${formatBaseQty(served, line)} servido`);
   if (reserved > 0) parts.push(`${formatBaseQty(reserved, line)} em stock`);
-  else if (line.stock_movement_id || line.stock_exit_movement_id) parts.push('servido do stock');
   if (ordered > 0) {
     const pending = Math.round((ordered - received) * 1e6) / 1e6;
     if (pending > 0) parts.push(`${formatBaseQty(pending, line)} a aguardar fornecedor${line.purchase_order_number ? ` (${line.purchase_order_number})` : ''}`);
@@ -297,8 +303,11 @@ const getLineStatusText = (line: ClientOrderDocumentPDFLine): string => {
   switch (line.line_status) {
     case 'servido_por_stock':
       return 'Servido por Stock';
-    case 'recebido':
-      return line.purchase_order_number ? `Recebido (${line.purchase_order_number})` : 'Recebido';
+    case 'recebido': {
+      const base = line.purchase_order_number ? `Recebido (${line.purchase_order_number})` : 'Recebido';
+      const served = pdfQty(line.qty_served);
+      return served > 0 ? `${base} — ${formatBaseQty(served, line)} servido do stock` : base;
+    }
     case 'a_aguardar_encomenda':
       return line.purchase_order_number ? `A aguardar Encomenda ${line.purchase_order_number}` : 'A aguardar Encomenda';
     case 'stock_disponivel_confirmar':
@@ -306,7 +315,11 @@ const getLineStatusText = (line: ClientOrderDocumentPDFLine): string => {
     case 'parcial':
       return getPartialText(line);
     case 'sem_fornecedor':
-      return 'Sem fornecedor preferencial';
+      // Quantidade em falta sem pedido ao fornecedor; a causa depende de
+      // has_preferred_supplier (mesmos textos do ecrã).
+      if (line.has_preferred_supplier === true) return 'Em falta — por pedir ao fornecedor';
+      if (line.has_preferred_supplier === false) return 'Sem fornecedor preferencial';
+      return 'Em falta — sem pedido ao fornecedor';
     case 'servico':
       return 'Serviço';
     default:
