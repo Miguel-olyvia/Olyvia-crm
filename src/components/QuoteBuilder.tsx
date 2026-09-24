@@ -66,6 +66,7 @@ import {
 import { computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
 import { applyUomOptionToLine, clearLineUom, getLineUnitsPerUom, setLineBasePrices, type LineUomFields } from "@/utils/quotes/lineUom";
 import { useLineUomOptions } from "@/hooks/useLineUomOptions";
+import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
 import {
   Dialog,
@@ -2181,6 +2182,23 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
     }
 
+    // Unidade contável / embalagem: a quantidade tem de ser inteira (o input já
+    // arredonda; isto apanha linhas antigas ou importadas com decimais).
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!(line.qt > 0) || line.bundle_id) continue;
+      const baseCode = lineUom.getBaseCode(line.product_id);
+      const integer = requiresIntegerQty({ hasProduct: !!line.product_id, lineUomId: line.uom_id, baseUomCode: baseCode });
+      if (!isValidQtyFor(line.qt, integer)) {
+        toast({
+          title: t('quoteBuilder.toast.lineValidationError'),
+          description: integerQtyMessage(i + 1, line.uom_id ? line.unidade : baseCode),
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     // Ultima porta antes de gravar: sem template escolhido, confirmar. Fica DEPOIS
     // de todas as validacoes de proposito -- nao vale a pena perguntar "guardar
     // assim?" a quem vai levar com um erro de validacao a seguir. E, sobretudo,
@@ -4205,6 +4223,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             const unitOptions = ["un", "m²", "ml", "dia", "hora", "kg", "m", "vg"];
                             // Produto com embalagens => seletor de unidade com conversão de preço.
                             const lineUomOptions = isBundle ? [] : lineUom.getOptions(line.product_id);
+                            const lineIntegerQty = requiresIntegerQty({
+                              hasProduct: !isBundle && !!line.product_id,
+                              lineUomId: line.uom_id,
+                              baseUomCode: lineUom.getBaseCode(line.product_id),
+                            });
 
                             return (
                               <SortableQuoteRow key={sortableId} id={sortableId}>
@@ -4312,9 +4335,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                   </TableCell>
                                   <TableCell className="text-center">
                                     <Input type="number" min="0" step="1" value={line.qt}
+                                      inputMode={lineIntegerQty ? "numeric" : undefined}
                                       onChange={(e) => {
+                                        const raw = Number(e.target.value);
                                         const updated = [...lines];
-                                        updated[globalLineIndex] = { ...line, qt: Number(e.target.value) };
+                                        // Unidade contável / embalagem => só quantidades inteiras.
+                                        updated[globalLineIndex] = { ...line, qt: lineIntegerQty ? roundToIntegerQty(raw) : raw };
                                         setLines(updated);
                                       }}
                                       className="w-16 mx-auto text-center h-8" />

@@ -21,6 +21,7 @@ import { getLineUnitPrice, getLineSubtotal, markupFromCostAndPrice } from "@/uti
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { applyUomOptionToLine, type LineUomFields } from "@/utils/quotes/lineUom";
 import { useLineUomOptions } from "@/hooks/useLineUomOptions";
+import { isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
 
 // LineUomFields: embalagem da linha (uom_id vai no payload; units_per_uom é
@@ -740,6 +741,12 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
                       const lineTotal = calcLinePrice(line);
                       const isBundleLine = getLineBundleComponents(line).length > 0;
                       const lineUomOptions = line.bundle_id ? [] : lineUom.getOptions(line.product_id);
+                      // Unidade contável / embalagem => só quantidades inteiras.
+                      const lineIntegerQty = requiresIntegerQty({
+                        hasProduct: !line.bundle_id && !!line.product_id,
+                        lineUomId: line.uom_id,
+                        baseUomCode: lineUom.getBaseCode(line.product_id),
+                      });
 
                       return (
                         <div key={line.id} className="grid grid-cols-[1fr_60px_60px_80px_80px_60px_80px_28px] gap-1 items-center">
@@ -752,21 +759,24 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
                           <div className="relative">
                             <Input
                               type="text"
-                              inputMode="decimal"
+                              inputMode={lineIntegerQty ? "numeric" : "decimal"}
+                              step={lineIntegerQty ? "1" : undefined}
                               value={line.qt === 0 ? "" : String(line.qt).replace(".", ",")}
                               onChange={(e) => {
                                 const parsed = parseQty(e.target.value);
-                                updateLine(line.id, "qt", parsed === null ? 0 : parsed);
+                                const qty = parsed === null ? 0 : parsed;
+                                updateLine(line.id, "qt", lineIntegerQty ? roundToIntegerQty(qty) : qty);
                               }}
-                              className={`h-8 text-xs text-center pr-5 ${(!line.qt || line.qt <= 0) ? "border-destructive focus-visible:ring-destructive" : ""}`}
+                              className={`h-8 text-xs text-center pr-5 ${!isValidQtyFor(line.qt, lineIntegerQty) ? "border-destructive focus-visible:ring-destructive" : ""}`}
                             />
-                            {(!line.qt || line.qt <= 0) && (
+                            {!isValidQtyFor(line.qt, lineIntegerQty) && (
                               <TooltipProvider>
                                 <Tooltip>
                                   <TooltipTrigger asChild>
                                     <AlertTriangle className="absolute right-1 top-1/2 -translate-y-1/2 h-3 w-3 text-destructive pointer-events-auto" />
                                   </TooltipTrigger>
-                                  <TooltipContent>Quantidade obrigatória (&gt; 0)</TooltipContent>
+                                  {/* Decimal numa linha contável: só entra por template/catálogo (o input arredonda). */}
+                                  <TooltipContent>{(!line.qt || line.qt <= 0) ? <>Quantidade obrigatória (&gt; 0)</> : "Quantidade tem de ser um número inteiro"}</TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>
                             )}

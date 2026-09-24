@@ -35,6 +35,7 @@ import { pdf } from '@react-pdf/renderer';
 import { PurchaseOrderPDFDocument } from "@/components/PurchaseOrderPDFDocument";
 import { purchaseOrderSchema } from "@/lib/validations";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
@@ -103,6 +104,16 @@ const formatUomLabel = (uomCode: string | null | undefined, units: number | null
   if (units && units > 1) return `${code || "emb."} (${units} ${baseCode || "un"})`;
   return code;
 };
+
+// Quantidade inteira: produto em unidade contável (item.product_uom_code) ou
+// linha numa embalagem. Aqui uom_id pode ser a própria unidade do produto
+// (ligação base), por isso só conta como embalagem com fator > 1.
+const itemRequiresIntegerQty = (item: PurchaseOrderItem) =>
+  requiresIntegerQty({
+    hasProduct: item.item_type === "product" && !!item.product_id,
+    lineUomId: (item.units_per_uom ?? 1) > 1 ? item.uom_id : null,
+    baseUomCode: item.product_uom_code,
+  });
 
 const formatSupplierLabel = (supplier: { name?: string | null; code?: string | null } | null | undefined) =>
   supplier ? (supplier.code ? `${supplier.code} · ${supplier.name || ""}` : supplier.name || "") : "";
@@ -1567,7 +1578,9 @@ const PurchaseOrders = () => {
     const item = newItems[index];
     
     if (field === 'quantity' || field === 'unit_price') {
-      const quantity = field === 'quantity' ? parseFloat(value) || 0 : item.quantity;
+      const parsedQty = field === 'quantity' ? parseFloat(value) || 0 : item.quantity;
+      // Unidade contável / embalagem => quantidade inteira.
+      const quantity = field === 'quantity' && itemRequiresIntegerQty(item) ? roundToIntegerQty(parsedQty) : parsedQty;
       const unitPrice = field === 'unit_price' ? parseFloat(value) || 0 : item.unit_price;
       const subtotal = quantity * unitPrice;
       const vatAmount = subtotal * (item.vat_rate / 100);
@@ -1627,6 +1640,21 @@ const PurchaseOrders = () => {
       toast({
         title: t('purchaseOrders.toast.missingPrice'),
         description: `${noPriceLines.length} linha(s) sem preço unitário: ${noPriceLines.slice(0, 3).map((i) => i.description).join(", ")}${noPriceLines.length > 3 ? "…" : ""}. Define o preço antes de gravar.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Unidade contável / embalagem: só quantidades inteiras (o input já
+    // arredonda; isto apanha linhas carregadas com decimais).
+    const nonIntegerIndex = orderItems.findIndex(
+      (item) => Number(item.quantity) > 0 && itemRequiresIntegerQty(item) && !isValidQtyFor(Number(item.quantity), true),
+    );
+    if (nonIntegerIndex >= 0) {
+      const item = orderItems[nonIntegerIndex];
+      toast({
+        title: t('purchaseOrders.toast.createError'),
+        description: integerQtyMessage(nonIntegerIndex + 1, (item.units_per_uom ?? 1) > 1 ? item.uom_code : item.product_uom_code),
         variant: "destructive",
       });
       return;
@@ -2429,7 +2457,8 @@ const PurchaseOrders = () => {
                                        onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
                                        className="w-20"
                                        min="0"
-                                       step="0.01"
+                                       step={itemRequiresIntegerQty(item) ? "1" : "0.01"}
+                                       inputMode={itemRequiresIntegerQty(item) ? "numeric" : undefined}
                                      />
                                      {units > 1 && (
                                        <div className="text-xs text-muted-foreground mt-1 whitespace-nowrap">

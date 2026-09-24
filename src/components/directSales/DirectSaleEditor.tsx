@@ -27,6 +27,7 @@ import { getLineSubtotal, markupFromCostAndPrice, round2 } from "@/utils/quotes/
 import { cn, formatCurrency } from "@/lib/utils";
 import { applyUomOptionToLine, type LineUomFields } from "@/utils/quotes/lineUom";
 import { useLineUomOptions } from "@/hooks/useLineUomOptions";
+import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
 
 // Venda Direta — Fase 2: criar/editar o cabeçalho e as linhas de uma venda
@@ -349,11 +350,14 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
     index: number,
     field: "qt" | "retail_price_unit" | "discount_percent" | "iva_percent",
     value: string,
+    integerQty = false,
   ) => {
     setLines((prev) => {
       const next = [...prev];
       const parsed = parseFloat(value);
-      next[index] = { ...next[index], [field]: Number.isNaN(parsed) ? 0 : parsed };
+      const num = Number.isNaN(parsed) ? 0 : parsed;
+      // Quantidade de unidade contável / embalagem => inteiro.
+      next[index] = { ...next[index], [field]: field === "qt" && integerQty ? roundToIntegerQty(num) : num };
       return next;
     });
   };
@@ -445,6 +449,16 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
         toast({
           title: t("directSales.validation.invalidQuantity"),
           description: t("directSales.validation.invalidQuantityDesc", { line: lineNumber }),
+          variant: "destructive",
+        });
+        return;
+      }
+      // Unidade contável / embalagem: só quantidades inteiras.
+      const baseCode = lineUom.getBaseCode(line.product_id);
+      if (!isValidQtyFor(qt, requiresIntegerQty({ hasProduct: !!line.product_id, lineUomId: line.uom_id, baseUomCode: baseCode }))) {
+        toast({
+          title: t("directSales.validation.invalidQuantity"),
+          description: integerQtyMessage(lineNumber, line.uom_id ? line.unidade : baseCode),
           variant: "destructive",
         });
         return;
@@ -799,6 +813,12 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
                           {lines.map((line, index) => {
                             const { totalComIva } = getDirectSaleLineTotals(line);
                             const lineUomOptions = lineUom.getOptions(line.product_id);
+                            // Unidade contável / embalagem => só quantidades inteiras.
+                            const lineIntegerQty = requiresIntegerQty({
+                              hasProduct: !!line.product_id,
+                              lineUomId: line.uom_id,
+                              baseUomCode: lineUom.getBaseCode(line.product_id),
+                            });
                             return (
                               <TableRow key={line.key}>
                                 <TableCell>
@@ -824,10 +844,11 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
                                   <Input
                                     type="number"
                                     min="0"
-                                    step="0.01"
+                                    step={lineIntegerQty ? "1" : "0.01"}
+                                    inputMode={lineIntegerQty ? "numeric" : undefined}
                                     className="w-20"
                                     value={line.qt}
-                                    onChange={(e) => handleLineChange(index, "qt", e.target.value)}
+                                    onChange={(e) => handleLineChange(index, "qt", e.target.value, lineIntegerQty)}
                                     disabled={readOnly || saving}
                                   />
                                   {lineUomOptions.length > 0 && (

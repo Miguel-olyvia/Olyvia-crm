@@ -27,7 +27,11 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { EntitySearchInput, type EntitySearchResult } from "@/components/EntitySearchInput";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { Badge } from "@/components/ui/badge";
-import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Pencil, Plus, ShoppingBag, Trash2, Undo2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
@@ -35,6 +39,7 @@ import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
 import { applyUomOptionToLine, formatOrderLineQuantity, type LineUomFields } from "@/utils/quotes/lineUom";
 import { useLineUomOptions } from "@/hooks/useLineUomOptions";
 import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
+import { requiresIntegerQty, isValidQtyFor, roundToIntegerQty, integerQtyMessage } from "@/utils/quotes/integerQty";
 
 // Na criação manual o único valor por unidade é o preço (não há custo aqui).
 const MANUAL_ORDER_PRICE_FIELDS = ["unit_price"] as const;
@@ -77,11 +82,33 @@ interface ManualClientOrderItem extends LineUomFields {
   quantity: number;
   unit_price: number;
   vat_rate: number;
+  // Só em modo edição (rpc_update_manual_client_order): linha já gravada.
+  // null/ausente = linha nova.
+  quote_line_id?: string | null;
+  // Linha trancada (já saiu de stock ou tem pedido a fornecedor): mostrada
+  // mas não editável. `locked_payload` guarda os valores EXATOS lidos de
+  // quote_lines — o servidor rejeita qualquer diferença, mesmo na descrição.
+  locked?: boolean;
+  locked_payload?: Record<string, unknown>;
+  // Linha existente não trancada: produto/quantidade/embalagem como foram
+  // lidos, para saber se o utilizador a alterou (ver handleUpdateOrder).
+  original_key?: string;
 }
+
+const manualItemKey = (item: Pick<ManualClientOrderItem, 'product_id' | 'quantity' | 'uom_id'>) =>
+  `${item.product_id ?? ''}|${Number(item.quantity) || 0}|${item.uom_id ?? ''}`;
+
+// Origem de uma Encomenda Cliente (20261204290000).
+type ClientOrderOriginType = 'contract' | 'direct_sale' | 'manual';
 
 interface ClientOrderDocumentRow {
   contract_id: string;
   contract_number: string;
+  // 20261204290000: número próprio da encomenda (EC-AAAA-NNNN) e origem.
+  // Opcionais: fallback para contract_number se vierem null.
+  order_number?: string | null;
+  origin_type?: ClientOrderOriginType | null;
+  origin_number?: string | null;
   client_name: string | null;
   signature_date: string | null;
   total_lines: number;
@@ -133,6 +160,11 @@ interface ClientOrderDocumentLine {
   purchase_order_id: string | null;
   purchase_order_number: string | null;
   available_warehouses: ClientOrderAvailableWarehouse[] | null;
+  // 20261204290000: saída manual (estornável) que serve a linha — null nas
+  // baixas automáticas na assinatura, que não se revertem daqui.
+  stock_exit_movement_id?: string | null;
+  // Linha já servida/pedida: não pode ser alterada nem removida na edição.
+  line_locked?: boolean;
 }
 
 // Origem de uma encomenda que nasceu de uma venda direta (Fase 5). Ausente
@@ -197,6 +229,12 @@ interface ClientOrderDocumentDetail {
   // Opcional de propósito: a chave só passa a existir depois de a migração da
   // RPC estar aplicada, e `fetchDetail` normaliza sempre para array.
   diagnostic?: ClientOrderDiagnosticNeed[];
+  // 20261204290000
+  order_number?: string | null;
+  origin_type?: ClientOrderOriginType | null;
+  origin_number?: string | null;
+  delivery_address?: string | null;
+  is_editable?: boolean;
 }
 
 // --- Normalização defensiva do bloco `diagnostic` -------------------------
@@ -256,6 +294,8 @@ const ClientOrders = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const canConfirmStockExit = hasPermission('inventory.edit') && hasPermission('client_orders.confirm_stock_exit');
+  // Editar encomenda manual (rpc_update_manual_client_order exige o mesmo).
+  const canEditOrder = hasPermission('client_contracts.edit');
 
   // As chaves da secção "Diagnóstico da obra" ainda não existem em
   // src/translations/index.ts (ficheiro fora do âmbito desta alteração).
@@ -322,6 +362,23 @@ const ClientOrders = () => {
   const [checklistActiveLineIds, setChecklistActiveLineIds] = useState<Set<string>>(new Set());
   const [selectedWarehouseByLine, setSelectedWarehouseByLine] = useState<Record<string, string>>({});
   const [confirmingLineId, setConfirmingLineId] = useState<string | null>(null);
+
+  // "Confirmar saída de todas": armazém escolhido quando as linhas pendentes
+  // têm mais de um armazém possível, e flag de processamento em lote.
+  const [confirmAllWarehouseId, setConfirmAllWarehouseId] = useState<string>("");
+  const [confirmingAll, setConfirmingAll] = useState(false);
+
+  // Estorno de saída manual (rpc_revert_client_order_stock_exit).
+  const [revertTarget, setRevertTarget] = useState<ClientOrderDocumentLine | null>(null);
+  const [reverting, setReverting] = useState(false);
+
+  // Edição de encomenda manual: reutiliza o diálogo de criação. Com
+  // editingContractId preenchido o diálogo grava via
+  // rpc_update_manual_client_order; cliente e data ficam só de leitura.
+  const [editingContractId, setEditingContractId] = useState<string | null>(null);
+  const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
+  const [editingClientName, setEditingClientName] = useState<string | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
 
   // Filtros num ref (não recria loadOrders a cada keystroke) — mesmo truque
   // já usado em Stocks.tsx para manter a identidade do IntersectionObserver
@@ -521,6 +578,7 @@ const ClientOrders = () => {
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailData(null);
+    setConfirmAllWarehouseId("");
     try {
       const doc = await fetchDetail(contractId);
       setDetailData(doc);
@@ -604,7 +662,7 @@ const ClientOrders = () => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `EncomendaCliente_${contractNumber || contractId}_${new Date().toISOString().split('T')[0]}.pdf`;
+      link.download = `EncomendaCliente_${doc.order_number || contractNumber || contractId}_${new Date().toISOString().split('T')[0]}.pdf`;
       link.click();
       URL.revokeObjectURL(url);
 
@@ -680,10 +738,190 @@ const ClientOrders = () => {
     }
   };
 
+  // ── Confirmar saída de todas ─────────────────────────────────────────────
+  // Linhas pendentes de confirmação agrupadas por produto (a RPC é por
+  // contrato+produto e recusa uma segunda saída do mesmo produto, por isso
+  // várias linhas do mesmo produto vão numa só saída com a quantidade somada
+  // em unidades de stock). `pending` e o contador do botão/toast contam
+  // PRODUTOS, não linhas. Se cada produto tem um único armazém, usa-se esse sem
+  // perguntar; caso contrário o utilizador escolhe um armazém e aplica-se aos
+  // produtos onde esse armazém cobre a quantidade somada — os restantes ficam
+  // pendentes.
+  const getConfirmAllInfo = () => {
+    const pendingLines = (detailData?.lines || []).filter(
+      (l) => l.line_status === 'stock_disponivel_confirmar' && !!l.product_id,
+    );
+    const groups = new Map<string, {
+      product_id: string;
+      quantity: number;
+      warehouses: Map<string, ClientOrderAvailableWarehouse>;
+    }>();
+    pendingLines.forEach((l) => {
+      const pid = l.product_id as string;
+      let g = groups.get(pid);
+      if (!g) {
+        g = { product_id: pid, quantity: 0, warehouses: new Map() };
+        groups.set(pid, g);
+      }
+      g.quantity += Number(l.quantity) || 0;
+      (l.available_warehouses || []).forEach((wh) => {
+        const prev = g!.warehouses.get(wh.warehouse_id);
+        if (!prev || Number(wh.quantity) > Number(prev.quantity)) g!.warehouses.set(wh.warehouse_id, wh);
+      });
+    });
+    const pending = Array.from(groups.values(), (g) => ({
+      product_id: g.product_id,
+      // Arredonda o ruído de vírgula flutuante da soma antes do teste de inteiro.
+      quantity: Math.round(g.quantity * 1e6) / 1e6,
+      warehouses: Array.from(g.warehouses.values()),
+    }));
+    const byId = new Map<string, string>();
+    pending.forEach((p) => p.warehouses.forEach((wh) => {
+      if (!byId.has(wh.warehouse_id)) byId.set(wh.warehouse_id, wh.warehouse_name);
+    }));
+    const warehouses = Array.from(byId, ([warehouse_id, warehouse_name]) => ({ warehouse_id, warehouse_name }));
+    const singleEach = pending.every((p) => p.warehouses.length === 1);
+    return { pending, warehouses, singleEach };
+  };
+
+  const handleConfirmAllStockExits = async () => {
+    if (!detailData || confirmingAll) return;
+    const contractId = detailData.contract_id;
+    const { pending, singleEach } = getConfirmAllInfo();
+    if (pending.length === 0) return;
+    if (!singleEach && !confirmAllWarehouseId) return;
+
+    let ok = 0;
+    let failed = 0;
+    let skippedNonInteger = 0;
+    let leftPending = 0;
+    let firstError: string | null = null;
+
+    setConfirmingAll(true);
+    try {
+      // Sequencial de propósito: cada saída mexe no saldo do mesmo armazém e
+      // a RPC valida o stock disponível no momento.
+      for (const group of pending) {
+        // p_quantity é integer na RPC — uma quantidade decimal em unidades de
+        // stock não pode ser confirmada daqui.
+        if (!Number.isInteger(group.quantity)) {
+          skippedNonInteger++;
+          continue;
+        }
+        // O armazém tem de cobrir a quantidade somada do produto; se não
+        // cobrir, o produto fica pendente (não conta como falha).
+        const targetId = singleEach ? group.warehouses[0]?.warehouse_id : confirmAllWarehouseId;
+        const wh = group.warehouses.find((w) => w.warehouse_id === targetId);
+        if (!wh || !(Number(wh.quantity) >= group.quantity)) {
+          leftPending++;
+          continue;
+        }
+        const { error } = await supabase.rpc('rpc_confirm_client_order_stock_exit', {
+          p_contract_id: contractId,
+          p_product_id: group.product_id,
+          p_quantity: group.quantity,
+          p_warehouse_id: wh.warehouse_id,
+        });
+        if (error) {
+          failed++;
+          if (!firstError) firstError = error.message;
+        } else {
+          ok++;
+        }
+      }
+
+      setChecklistActiveLineIds(new Set());
+      setSelectedWarehouseByLine({});
+      setConfirmAllWarehouseId("");
+
+      try {
+        const refreshed = await fetchDetail(contractId);
+        setDetailData(refreshed);
+      } catch (error: any) {
+        toast({ title: t('clientOrders.toast.detailError'), description: error?.message, variant: "destructive" });
+      }
+
+      const details: string[] = [];
+      if (firstError) details.push(firstError);
+      if (skippedNonInteger > 0) details.push(t('clientOrders.toast.confirmAllSkippedNonInteger', { count: skippedNonInteger }));
+      if (leftPending > 0) details.push(t('clientOrders.toast.confirmAllLeftPending', { count: leftPending }));
+      toast({
+        title: t('clientOrders.toast.confirmAllResult', { ok, failed }),
+        description: details.length > 0 ? details.join(' · ') : undefined,
+        variant: failed > 0 && ok === 0 ? "destructive" : undefined,
+      });
+    } finally {
+      setConfirmingAll(false);
+    }
+  };
+
+  // ── Reverter saída manual ────────────────────────────────────────────────
+  // Estorna o movimento de saída (o servidor cria o movimento inverso e repõe
+  // o stock). Só existe para saídas manuais — as baixas automáticas na
+  // assinatura não trazem stock_exit_movement_id.
+  const handleRevertStockExit = async () => {
+    if (!detailData || !revertTarget?.stock_exit_movement_id) return;
+    const contractId = detailData.contract_id;
+    setReverting(true);
+    try {
+      const { error } = await (supabase as any).rpc('rpc_revert_client_order_stock_exit', {
+        p_contract_id: contractId,
+        p_movement_id: revertTarget.stock_exit_movement_id,
+      });
+      if (error) throw error;
+      toast({ title: t('clientOrders.toast.revertSuccess') });
+      setRevertTarget(null);
+      const refreshed = await fetchDetail(contractId);
+      setDetailData(refreshed);
+      loadOrders(0, true);
+    } catch (error: any) {
+      toast({ title: t('clientOrders.toast.revertError'), description: error?.message, variant: "destructive" });
+    } finally {
+      setReverting(false);
+    }
+  };
+
   const openPurchaseOrder = (purchaseOrderId: string) => {
     // Mesmo padrão de cross-link já usado em ClientContracts.tsx
     // (?open=<id>) — replicado em PurchaseOrders.tsx para este caso.
     navigate(`/purchase-orders?open=${purchaseOrderId}`);
+  };
+
+  // Origem da encomenda (20261204290000): contrato → "Contrato CC-…"; venda
+  // direta → distintivo + nº VD (origin_number pode vir null por permissões —
+  // cai para a query própria a direct_sales); manual → "Sem documento
+  // anterior". Sem origin_type (RPC antiga) mantém-se o comportamento
+  // anterior: só o distintivo de venda direta, quando existe.
+  const renderOrigin = (
+    contractId: string,
+    originType: ClientOrderOriginType | null | undefined,
+    originNumber: string | null | undefined,
+    contractNumber: string,
+  ) => {
+    const sale = salesByContract[contractId];
+    if (originType === 'direct_sale' || (!originType && sale)) {
+      const number = originNumber || sale?.sale_number || sale?.proforma_number || '';
+      return (
+        <Badge variant="outline" className="w-fit gap-1 font-normal text-xs">
+          <ShoppingBag className="h-3 w-3" />
+          {t('clientOrders.origin.directSale')}
+          {number ? ` ${number}` : ''}
+        </Badge>
+      );
+    }
+    if (originType === 'contract') {
+      return (
+        <span className="text-xs text-muted-foreground font-normal">
+          {t('clientOrders.origin.contract', { number: originNumber || contractNumber })}
+        </span>
+      );
+    }
+    if (originType === 'manual') {
+      return (
+        <span className="text-xs text-muted-foreground font-normal">{t('clientOrders.origin.manual')}</span>
+      );
+    }
+    return null;
   };
 
   const getOverallStatusColor = (status: string) => {
@@ -767,7 +1005,7 @@ const ClientOrders = () => {
   // 5) a processar → spinner em vez do checkbox.
   const renderStockExitChecklist = (line: ClientOrderDocumentLine) => {
     const warehouses = line.available_warehouses || [];
-    const isProcessing = confirmingLineId === line.quote_line_id;
+    const isProcessing = confirmingLineId === line.quote_line_id || confirmingAll;
 
     if (isProcessing) {
       return <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />;
@@ -864,6 +1102,109 @@ const ClientOrders = () => {
     setCreateDate(new Date().toISOString().split('T')[0]);
     setCreateNotes("");
     setCreateItems([]);
+    setEditingContractId(null);
+    setEditingOrderNumber(null);
+    setEditingClientName(null);
+  };
+
+  // Fecha o diálogo de criação/edição. Ao sair da edição sem gravar volta a
+  // abrir o detalhe de onde se partiu.
+  const closeCreateDialog = () => {
+    const returnTo = editingContractId;
+    setCreateOpen(false);
+    resetCreateForm();
+    if (returnTo) openDetail(returnTo);
+  };
+
+  // A linha exige quantidade inteira? (embalagem escolhida, ou produto cuja
+  // unidade de stock é contável — mesma regra que o servidor valida).
+  const itemRequiresInteger = (item: ManualClientOrderItem) => requiresIntegerQty({
+    hasProduct: !!item.product_id,
+    lineUomId: item.uom_id ?? null,
+    baseUomCode: lineUom.getBaseCode(item.product_id),
+  });
+
+  // ── Edição de encomenda manual ──────────────────────────────────────────
+  // Pré-preenche o diálogo a partir de quote_lines (lidas diretamente pelo
+  // orçamento interno do contrato): é a única fonte com preço, IVA, categoria
+  // e descrição exatamente como gravados — e as linhas trancadas têm de ser
+  // reenviadas com esses valores exatos. O detalhe só dá o estado/trancado e o
+  // SKU de cada linha.
+  const openEditOrder = async () => {
+    if (!detailData || editLoading) return;
+    const doc = detailData;
+    setEditLoading(true);
+    try {
+      const { data: contract, error: contractError } = await (supabase as any)
+        .from('client_contracts')
+        .select('quote_id')
+        .eq('id', doc.contract_id)
+        .single();
+      if (contractError) throw contractError;
+      if (!contract?.quote_id) throw new Error(t('clientOrders.toast.editLoadError'));
+
+      const { data: quoteLines, error: linesError } = await (supabase as any)
+        .from('quote_lines')
+        .select('id, product_id, service_id, descricao_snapshot, categoria, qt, custo_material_unit, iva_percent, uom_id, units_per_uom, unidade, ordem')
+        .eq('quote_id', contract.quote_id)
+        .order('ordem', { ascending: true });
+      if (linesError) throw linesError;
+
+      const detailByLineId = new Map(doc.lines.map((l) => [l.quote_line_id, l]));
+      const items: ManualClientOrderItem[] = ((quoteLines as any[]) || [])
+        .filter((row) => row.product_id || row.service_id)
+        .map((row) => {
+          const detailLine = detailByLineId.get(row.id);
+          const locked = detailLine?.line_locked === true;
+          const isProduct = !!row.product_id;
+          return {
+            quote_line_id: row.id,
+            locked,
+            locked_payload: locked
+              ? {
+                  quote_line_id: row.id,
+                  product_id: row.product_id,
+                  service_id: row.service_id,
+                  descricao: row.descricao_snapshot,
+                  categoria: row.categoria,
+                  qt: row.qt,
+                  preco_unit: row.custo_material_unit,
+                  iva_percent: row.iva_percent,
+                  uom_id: row.uom_id,
+                }
+              : undefined,
+            original_key: locked
+              ? undefined
+              : manualItemKey({ product_id: row.product_id ?? null, quantity: Number(row.qt) || 0, uom_id: row.uom_id ?? null }),
+            item_type: isProduct ? 'product' : 'service',
+            product_id: row.product_id ?? null,
+            service_id: isProduct ? null : row.service_id ?? null,
+            description: row.descricao_snapshot ?? '',
+            categoria: row.categoria ?? '',
+            sku: detailLine?.product_sku || detailLine?.service_sku || null,
+            quantity: Number(row.qt) || 0,
+            unit_price: Number(row.custo_material_unit) || 0,
+            vat_rate: row.iva_percent === null || row.iva_percent === undefined ? DEFAULT_VAT_RATE : Number(row.iva_percent),
+            uom_id: row.uom_id ?? null,
+            units_per_uom: Number(row.units_per_uom) || 1,
+            unidade: row.unidade ?? null,
+          };
+        });
+
+      resetCreateForm();
+      setEditingContractId(doc.contract_id);
+      setEditingOrderNumber(doc.order_number || doc.contract_number);
+      setEditingClientName(doc.client_name);
+      setCreateDeliveryAddress(doc.delivery_address ?? "");
+      setCreateDate(doc.signature_date ? doc.signature_date.split('T')[0] : "");
+      setCreateItems(items);
+      setDetailOpen(false);
+      setCreateOpen(true);
+    } catch (error: any) {
+      toast({ title: t('clientOrders.toast.editLoadError'), description: error?.message, variant: "destructive" });
+    } finally {
+      setEditLoading(false);
+    }
   };
 
   // Ao escolher o cliente, pré-preenche a morada de entrega com a morada
@@ -978,8 +1319,12 @@ const ClientOrders = () => {
   const handleCreateItemChange = (index: number, field: 'quantity' | 'unit_price' | 'vat_rate', value: string) => {
     setCreateItems((prev) => {
       const next = [...prev];
+      if (next[index]?.locked) return prev;
       const parsed = parseFloat(value);
-      next[index] = { ...next[index], [field]: isNaN(parsed) ? 0 : parsed };
+      let numeric = isNaN(parsed) ? 0 : parsed;
+      // Unidade contável: arredonda logo para inteiro.
+      if (field === 'quantity' && itemRequiresInteger(next[index])) numeric = roundToIntegerQty(numeric);
+      next[index] = { ...next[index], [field]: numeric };
       return next;
     });
   };
@@ -987,12 +1332,126 @@ const ClientOrders = () => {
   // Embalagem: preço unitário = preço da unidade do produto × fator.
   const handleCreateItemUomChange = (index: number, option: Parameters<typeof applyUomOptionToLine>[1]) => {
     setCreateItems((prev) => prev.map((item, i) => (
-      i === index ? applyUomOptionToLine(item, option, MANUAL_ORDER_PRICE_FIELDS) : item
+      i === index && !item.locked ? applyUomOptionToLine(item, option, MANUAL_ORDER_PRICE_FIELDS) : item
     )));
   };
 
   const handleRemoveCreateItem = (index: number) => {
-    setCreateItems((prev) => prev.filter((_, i) => i !== index));
+    setCreateItems((prev) => prev.filter((item, i) => i !== index || item.locked));
+  };
+
+  // Validação comum a criar/editar — um toast por erro, mesmo padrão de
+  // PurchaseOrders.tsx (o backend valida na mesma; isto é só UX). As linhas
+  // trancadas não se validam: seguem tal como estão gravadas.
+  const validateOrderItems = (): boolean => {
+    if (createItems.length === 0) {
+      toast({
+        title: t('clientOrders.create.validation.itemsRequired'),
+        description: t('clientOrders.create.validation.itemsRequiredDesc'),
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    for (let i = 0; i < createItems.length; i++) {
+      const item = createItems[i];
+      if (item.locked) continue;
+      if (!item.product_id && !item.service_id) {
+        toast({
+          title: t('clientOrders.create.validation.lineWithoutItem'),
+          description: t('clientOrders.create.validation.lineWithoutItemDesc', { line: i + 1 }),
+          variant: "destructive",
+        });
+        return false;
+      }
+      if (!(item.quantity > 0)) {
+        toast({
+          title: t('clientOrders.create.validation.invalidQuantity'),
+          description: t('clientOrders.create.validation.invalidQuantityDesc', { line: i + 1 }),
+          variant: "destructive",
+        });
+        return false;
+      }
+      const integer = itemRequiresInteger(item);
+      if (!isValidQtyFor(item.quantity, integer)) {
+        toast({
+          title: t('clientOrders.create.validation.invalidQuantity'),
+          description: integerQtyMessage(i + 1, item.uom_id ? item.unidade : lineUom.getBaseCode(item.product_id)),
+          variant: "destructive",
+        });
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleUpdateOrder = async () => {
+    if (!editingContractId) return;
+    if (!validateOrderItems()) return;
+    const contractId = editingContractId;
+
+    // Produto já servido/pedido (linha trancada) não pode ganhar quantidade
+    // noutra linha nova ou alterada: a saída de stock é por (contrato,
+    // produto) e não há segunda. O servidor também valida; isto é só UX.
+    const lockedProductIds = new Set(
+      createItems.filter((item) => item.locked && item.product_id).map((item) => item.product_id as string),
+    );
+    const conflicting = createItems.find((item) => (
+      !item.locked
+      && !!item.product_id
+      && lockedProductIds.has(item.product_id)
+      && (!item.quote_line_id || item.original_key !== manualItemKey(item))
+    ));
+    if (conflicting) {
+      const productLabel = conflicting.description || conflicting.sku || conflicting.product_id;
+      toast({
+        title: t('clientOrders.toast.updateError'),
+        description: `O produto ${productLabel} já foi servido ou pedido a fornecedor — reverta a saída antes de acrescentar quantidade`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setCreating(true);
+    try {
+      // `rpc_update_manual_client_order` ainda não está nos tipos gerados.
+      // Linhas existentes ausentes do payload são removidas pelo servidor,
+      // por isso vão todas — as trancadas com os valores exatos lidos.
+      const { error } = await (supabase as any).rpc('rpc_update_manual_client_order', {
+        p_contract_id: contractId,
+        p_items: createItems.map((item) => (
+          item.locked && item.locked_payload
+            ? item.locked_payload
+            : {
+                quote_line_id: item.quote_line_id ?? null,
+                product_id: item.product_id,
+                service_id: item.service_id,
+                descricao: item.description,
+                categoria: item.categoria,
+                qt: item.quantity,
+                preco_unit: item.unit_price,
+                iva_percent: item.vat_rate,
+                uom_id: item.uom_id || null,
+              }
+        )),
+        p_delivery_address: createDeliveryAddress.trim() || null,
+      });
+      if (error) throw error;
+
+      toast({ title: t('clientOrders.toast.updateSuccess') });
+      setCreateOpen(false);
+      resetCreateForm();
+      loadOrders(0, true);
+      openDetail(contractId);
+    } catch (error: any) {
+      toast({
+        title: t('clientOrders.toast.updateError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setCreating(false);
+    }
   };
 
   const handleCreateOrder = async () => {
@@ -1010,34 +1469,7 @@ const ClientOrders = () => {
       return;
     }
 
-    if (createItems.length === 0) {
-      toast({
-        title: t('clientOrders.create.validation.itemsRequired'),
-        description: t('clientOrders.create.validation.itemsRequiredDesc'),
-        variant: "destructive",
-      });
-      return;
-    }
-
-    for (let i = 0; i < createItems.length; i++) {
-      const item = createItems[i];
-      if (!item.product_id && !item.service_id) {
-        toast({
-          title: t('clientOrders.create.validation.lineWithoutItem'),
-          description: t('clientOrders.create.validation.lineWithoutItemDesc', { line: i + 1 }),
-          variant: "destructive",
-        });
-        return;
-      }
-      if (!(item.quantity > 0)) {
-        toast({
-          title: t('clientOrders.create.validation.invalidQuantity'),
-          description: t('clientOrders.create.validation.invalidQuantityDesc', { line: i + 1 }),
-          variant: "destructive",
-        });
-        return;
-      }
-    }
+    if (!validateOrderItems()) return;
 
     setCreating(true);
     try {
@@ -1185,7 +1617,7 @@ const ClientOrders = () => {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t('clientOrders.table.contractNumber')}</TableHead>
+              <TableHead>{t('clientOrders.table.orderNumber')}</TableHead>
               <TableHead>{t('clientOrders.table.client')}</TableHead>
               <TableHead>{t('clientOrders.table.signatureDate')}</TableHead>
               <TableHead className="text-right">{t('clientOrders.table.lines')}</TableHead>
@@ -1207,16 +1639,8 @@ const ClientOrders = () => {
                 <TableRow key={order.contract_id}>
                   <TableCell className="font-medium">
                     <div className="flex flex-col gap-1">
-                      <span>{order.contract_number}</span>
-                      {salesByContract[order.contract_id] && (
-                        <Badge variant="outline" className="w-fit gap-1 font-normal text-xs">
-                          <ShoppingBag className="h-3 w-3" />
-                          {t('clientOrders.origin.directSale')}
-                          {salesByContract[order.contract_id].sale_number
-                            ? ` ${salesByContract[order.contract_id].sale_number}`
-                            : ''}
-                        </Badge>
-                      )}
+                      <span>{order.order_number || order.contract_number}</span>
+                      {renderOrigin(order.contract_id, order.origin_type, order.origin_number, order.contract_number)}
                     </div>
                   </TableCell>
                   <TableCell>{order.client_name || '-'}</TableCell>
@@ -1241,7 +1665,7 @@ const ClientOrders = () => {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleGeneratePdf(order.contract_id, order.contract_number)}
+                      onClick={() => handleGeneratePdf(order.contract_id, order.order_number || order.contract_number)}
                       title={t('clientOrders.downloadPdf')}
                       disabled={pdfGeneratingId === order.contract_id}
                     >
@@ -1264,12 +1688,19 @@ const ClientOrders = () => {
         </div>
       </div>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <Dialog
+        open={detailOpen}
+        onOpenChange={(o) => {
+          // Não fechar a meio de "Confirmar saída de todas".
+          if (!o && confirmingAll) return;
+          setDetailOpen(o);
+        }}
+      >
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {t('clientOrders.dialog.title')}
-              {detailData ? ` — ${detailData.contract_number}` : ""}
+              {detailData ? ` — ${detailData.order_number || detailData.contract_number}` : ""}
             </DialogTitle>
           </DialogHeader>
 
@@ -1285,8 +1716,8 @@ const ClientOrders = () => {
                   <span className="font-medium">{detailData.client_name || '-'}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">{t('clientOrders.dialog.contract')}: </span>
-                  <span className="font-medium">{detailData.contract_number}</span>
+                  <span className="text-muted-foreground">{t('clientOrders.dialog.order')}: </span>
+                  <span className="font-medium">{detailData.order_number || detailData.contract_number}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">{t('clientOrders.dialog.signatureDate')}: </span>
@@ -1302,17 +1733,17 @@ const ClientOrders = () => {
                       : '-'}
                   </span>
                 </div>
-                {salesByContract[detailData.contract_id] && (
+                {detailData.delivery_address && (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">{t('clientOrders.dialog.deliveryAddress')}: </span>
+                    <span className="font-medium whitespace-pre-wrap break-words">{detailData.delivery_address}</span>
+                  </div>
+                )}
+                {(detailData.origin_type || salesByContract[detailData.contract_id]) && (
                   <div className="col-span-2 flex flex-wrap items-center gap-2">
                     <span className="text-muted-foreground">{t('clientOrders.dialog.origin')}: </span>
-                    <Badge variant="outline" className="gap-1 font-normal">
-                      <ShoppingBag className="h-3 w-3" />
-                      {t('clientOrders.origin.directSale')}
-                      {salesByContract[detailData.contract_id].sale_number
-                        ? ` ${salesByContract[detailData.contract_id].sale_number}`
-                        : ''}
-                    </Badge>
-                    {salesByContract[detailData.contract_id].proforma_number && (
+                    {renderOrigin(detailData.contract_id, detailData.origin_type, detailData.origin_number, detailData.contract_number)}
+                    {salesByContract[detailData.contract_id]?.proforma_number && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -1485,11 +1916,64 @@ const ClientOrders = () => {
                 );
               })()}
 
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {/* Confirmar saída de todas as linhas pendentes. Com vários
+                    armazéns possíveis pede-se um; aplica-se só onde tem stock. */}
+                {canConfirmStockExit && (() => {
+                  const { pending, warehouses, singleEach } = getConfirmAllInfo();
+                  if (pending.length === 0) return null;
+                  const busy = confirmingAll || confirmingLineId !== null;
+                  return (
+                    <>
+                      {!singleEach && (
+                        <Select
+                          value={confirmAllWarehouseId}
+                          onValueChange={setConfirmAllWarehouseId}
+                          disabled={busy}
+                        >
+                          <SelectTrigger className="h-9 w-[200px] text-xs" aria-label={t('clientOrders.dialog.confirmAllWarehouse')}>
+                            <SelectValue placeholder={t('clientOrders.dialog.confirmAllWarehouse')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {warehouses.map((wh) => (
+                              <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
+                                {wh.warehouse_name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleConfirmAllStockExits}
+                        disabled={busy || (!singleEach && !confirmAllWarehouseId)}
+                      >
+                        {confirmingAll
+                          ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          : <ClipboardCheck className="w-4 h-4 mr-2" />}
+                        {t('clientOrders.dialog.confirmAll', { count: pending.length })}
+                      </Button>
+                    </>
+                  );
+                })()}
+                {detailData.is_editable && canEditOrder && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={openEditOrder}
+                    disabled={editLoading || confirmingAll}
+                  >
+                    {editLoading
+                      ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      : <Pencil className="w-4 h-4 mr-2" />}
+                    {t('clientOrders.dialog.editOrder')}
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleGeneratePdf(detailData.contract_id, detailData.contract_number)}
+                  onClick={() => handleGeneratePdf(detailData.contract_id, detailData.order_number || detailData.contract_number)}
                   disabled={pdfGeneratingId === detailData.contract_id}
                 >
                   <FileDown className="w-4 h-4 mr-2" />
@@ -1537,6 +2021,20 @@ const ClientOrders = () => {
                               {getLineStatusLabel(line)}
                             </Badge>
                             {line.line_status === 'stock_disponivel_confirmar' && renderStockExitChecklist(line)}
+                            {/* Só saídas manuais (com movimento próprio) se
+                                revertem; a baixa automática na assinatura não. */}
+                            {line.line_status === 'servido_por_stock' && line.stock_exit_movement_id && canConfirmStockExit && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 gap-1 px-2 text-xs"
+                                onClick={() => setRevertTarget(line)}
+                                disabled={reverting || confirmingAll}
+                              >
+                                <Undo2 className="h-3.5 w-3.5" />
+                                {t('clientOrders.dialog.revert')}
+                              </Button>
+                            )}
                             {line.purchase_order_id && (
                               <Button
                                 variant="ghost"
@@ -1559,29 +2057,70 @@ const ClientOrders = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Criação manual de Encomenda Cliente */}
+      {/* Confirmação do estorno de uma saída de stock manual */}
+      <AlertDialog
+        open={revertTarget !== null}
+        onOpenChange={(isOpen) => { if (!isOpen && !reverting) setRevertTarget(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('clientOrders.dialog.revertTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {revertTarget && (revertTarget.product_name || revertTarget.service_name)
+                ? `${revertTarget.product_name || revertTarget.service_name} — `
+                : ''}
+              {t('clientOrders.dialog.revertDescription')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reverting}>{t('clientOrders.create.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={reverting}
+              onClick={(e) => {
+                // Mantém o diálogo aberto até a RPC responder.
+                e.preventDefault();
+                handleRevertStockExit();
+              }}
+            >
+              {reverting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {t('clientOrders.dialog.revert')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Criação manual de Encomenda Cliente (e edição, com editingContractId) */}
       <Dialog
         open={createOpen}
         onOpenChange={(isOpen) => {
-          setCreateOpen(isOpen);
-          if (!isOpen) resetCreateForm();
+          if (isOpen) setCreateOpen(true);
+          else if (!creating) closeCreateDialog();
         }}
       >
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{t('clientOrders.create.title')}</DialogTitle>
+            <DialogTitle>
+              {editingContractId
+                ? t('clientOrders.edit.title', { number: editingOrderNumber || '' })
+                : t('clientOrders.create.title')}
+            </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-6">
             <div className="space-y-2">
               <Label>{t('clientOrders.create.client')} *</Label>
-              <EntitySearchInput
-                value={createClient}
-                onChange={handleCreateClientChange}
-                searchTypes={["client"]}
-                placeholder={t('clientOrders.create.clientPlaceholder')}
-                disabled={creating}
-              />
+              {editingContractId ? (
+                // Em edição o cliente não muda (o contrato já está assinado para ele).
+                <Input value={editingClientName || '-'} disabled readOnly />
+              ) : (
+                <EntitySearchInput
+                  value={createClient}
+                  onChange={handleCreateClientChange}
+                  searchTypes={["client"]}
+                  placeholder={t('clientOrders.create.clientPlaceholder')}
+                  disabled={creating}
+                />
+              )}
             </div>
 
             <div className="space-y-2">
@@ -1604,19 +2143,22 @@ const ClientOrders = () => {
                   type="date"
                   value={createDate}
                   onChange={(e) => setCreateDate(e.target.value)}
-                  disabled={creating}
+                  disabled={creating || !!editingContractId}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="client_order_notes">{t('clientOrders.create.notes')}</Label>
-                <Textarea
-                  id="client_order_notes"
-                  value={createNotes}
-                  onChange={(e) => setCreateNotes(e.target.value)}
-                  rows={2}
-                  disabled={creating}
-                />
-              </div>
+              {/* As notas só se definem na criação — a RPC de edição não as recebe. */}
+              {!editingContractId && (
+                <div className="space-y-2">
+                  <Label htmlFor="client_order_notes">{t('clientOrders.create.notes')}</Label>
+                  <Textarea
+                    id="client_order_notes"
+                    value={createNotes}
+                    onChange={(e) => setCreateNotes(e.target.value)}
+                    rows={2}
+                    disabled={creating}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="border-t pt-4">
@@ -1648,8 +2190,14 @@ const ClientOrders = () => {
                           const lineSubtotal = item.unit_price * item.quantity;
                           const lineTotal = lineSubtotal * (1 + item.vat_rate / 100);
                           const itemUomOptions = lineUom.getOptions(item.product_id);
+                          const integerQty = itemRequiresInteger(item);
+                          // Linha trancada (já servida/pedida): só leitura.
+                          const rowDisabled = creating || !!item.locked;
                           return (
-                            <TableRow key={`${item.product_id || item.service_id}-${index}`}>
+                            <TableRow
+                              key={item.quote_line_id || `${item.product_id || item.service_id}-${index}`}
+                              className={item.locked ? 'bg-muted/40' : undefined}
+                            >
                               <TableCell>
                                 <Badge variant="outline">
                                   {item.item_type === 'product'
@@ -1662,6 +2210,9 @@ const ClientOrders = () => {
                                 <div className="text-xs text-muted-foreground">
                                   {item.sku ? `${item.sku} · ` : ''}{item.categoria}
                                 </div>
+                                {item.locked && (
+                                  <div className="text-xs text-warning mt-0.5">{t('clientOrders.edit.lockedNote')}</div>
+                                )}
                               </TableCell>
                               <TableCell>
                                 <Input
@@ -1670,8 +2221,9 @@ const ClientOrders = () => {
                                   onChange={(e) => handleCreateItemChange(index, 'quantity', e.target.value)}
                                   className="w-20"
                                   min="0"
-                                  step="0.01"
-                                  disabled={creating}
+                                  step={integerQty ? 1 : 0.01}
+                                  inputMode={integerQty ? 'numeric' : 'decimal'}
+                                  disabled={rowDisabled}
                                 />
                                 {itemUomOptions.length > 0 && (
                                   <LineUomSelect
@@ -1679,7 +2231,7 @@ const ClientOrders = () => {
                                     line={item}
                                     className="mt-1 w-20"
                                     onChange={(option) => handleCreateItemUomChange(index, option)}
-                                    disabled={creating}
+                                    disabled={rowDisabled}
                                   />
                                 )}
                                 <PackQuantityHint qt={item.quantity} line={item} baseCode={lineUom.getBaseCode(item.product_id)} className="mt-0.5" />
@@ -1692,7 +2244,7 @@ const ClientOrders = () => {
                                   className="w-24"
                                   min="0"
                                   step="0.01"
-                                  disabled={creating}
+                                  disabled={rowDisabled}
                                 />
                               </TableCell>
                               <TableCell>
@@ -1703,7 +2255,7 @@ const ClientOrders = () => {
                                   className="w-20"
                                   min="0"
                                   step="0.5"
-                                  disabled={creating}
+                                  disabled={rowDisabled}
                                 />
                               </TableCell>
                               <TableCell className="text-right font-semibold">€{lineTotal.toFixed(2)}</TableCell>
@@ -1713,8 +2265,8 @@ const ClientOrders = () => {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => handleRemoveCreateItem(index)}
-                                  title={t('clientOrders.create.removeItem')}
-                                  disabled={creating}
+                                  title={item.locked ? t('clientOrders.edit.lockedNote') : t('clientOrders.create.removeItem')}
+                                  disabled={rowDisabled}
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>
@@ -1767,14 +2319,20 @@ const ClientOrders = () => {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setCreateOpen(false)}
+                onClick={closeCreateDialog}
                 disabled={creating}
               >
                 {t('clientOrders.create.cancel')}
               </Button>
-              <Button type="button" onClick={handleCreateOrder} disabled={creating}>
+              <Button
+                type="button"
+                onClick={editingContractId ? handleUpdateOrder : handleCreateOrder}
+                disabled={creating}
+              >
                 {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                {creating ? t('clientOrders.create.submitting') : t('clientOrders.create.submit')}
+                {editingContractId
+                  ? (creating ? t('clientOrders.edit.submitting') : t('clientOrders.edit.submit'))
+                  : (creating ? t('clientOrders.create.submitting') : t('clientOrders.create.submit'))}
               </Button>
             </div>
           </div>
