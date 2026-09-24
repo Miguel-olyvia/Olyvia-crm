@@ -24,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Plus, FileText, MapPin, ListPlus, Trash2, Undo2 } from "lucide-react";
+import { Loader2, Plus, FileText, MapPin, ListPlus, Trash2, Undo2, User, Building2 } from "lucide-react";
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
 import { useConversionRevert, revertToLeadConfirmationText } from "@/hooks/useConversionRevert";
 import { Separator } from "@/components/ui/separator";
@@ -66,6 +66,7 @@ type RpcUpdateClientArgs = {
   p_address_city?: string | null;
   p_address_postal_code?: string | null;
   p_address_number?: string | null;
+  p_entity_type?: string | null;
 };
 
 import { ClientDetailHeader } from "@/components/clients/detail/ClientDetailHeader";
@@ -776,6 +777,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
             p_address_city: editFormData.city || null,
             p_address_postal_code: editFormData.postal_code || null,
             p_address_number: null,
+            p_entity_type: entityType,
           } satisfies RpcUpdateClientArgs, nif);
           if (rpcError) throw rpcError;
         });
@@ -1270,9 +1272,20 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                 fallback={<p className="text-sm text-muted-foreground py-8 text-center">Sem permissão para editar clientes.</p>}
               >
                 <form onSubmit={handleUpdateClient} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Tipo</Label>
+                    <Tabs value={entityType} onValueChange={(v) => { setEntityType(v); if (v === "organization") setEditFormData(prev => ({ ...prev, last_name: "" })); }}>
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="person"><User className="w-4 h-4 mr-2" />Pessoa</TabsTrigger>
+                        <TabsTrigger value="organization"><Building2 className="w-4 h-4 mr-2" />Empresa</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2"><Label>Nome *</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
-                    <div className="space-y-2"><Label>Apelido{entityType !== "organization" ? " *" : ""}</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required={entityType !== "organization"} aria-invalid={!!editFormErrors.last_name} />{editFormErrors.last_name && <p className="text-xs text-destructive">{editFormErrors.last_name}</p>}</div>
+                    <div className="space-y-2"><Label>{entityType === "organization" ? "Nome da Empresa *" : "Nome *"}</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
+                    {entityType !== "organization" && (
+                    <div className="space-y-2"><Label>Apelido *</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required aria-invalid={!!editFormErrors.last_name} />{editFormErrors.last_name && <p className="text-xs text-destructive">{editFormErrors.last_name}</p>}</div>
+                    )}
                     <div className="space-y-2"><Label>Email</Label><Input type="email" value={editFormData.email} onChange={e => setEditFormData({ ...editFormData, email: e.target.value })} aria-invalid={!!editFormErrors.email} />{editFormErrors.email && <p className="text-xs text-destructive">{editFormErrors.email}</p>}</div>
                     <div className="space-y-2"><PhoneInput label="Telefone" phoneValue={editFormData.phone} countryCodeValue={editFormData.phone_country_code} onPhoneChange={v => setEditFormData({ ...editFormData, phone: v })} onCountryCodeChange={v => setEditFormData({ ...editFormData, phone_country_code: v })} />{editFormErrors.phone && <p className="text-xs text-destructive">{editFormErrors.phone}</p>}</div>
                     <div className="space-y-2"><Label>NIF</Label><Input value={editFormData.vat} onChange={e => setEditFormData({ ...editFormData, vat: e.target.value })} placeholder="PT123456789" aria-invalid={!!editFormErrors.vat} />{editFormErrors.vat && <p className="text-xs text-destructive">{editFormErrors.vat}</p>}</div>

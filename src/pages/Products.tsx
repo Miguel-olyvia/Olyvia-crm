@@ -35,6 +35,25 @@ const productSchema = z.object({
   product_type: z.enum(["sale", "purchase", "both"]),
 });
 
+// "Tipo de Produto" no ecrã é is_sellable/is_purchasable, não product_kind
+// (esse é outro campo, sem UI própria) — mesmo par de colunas usado no
+// formulário de criação/edição (ver product_type mais acima e as linhas
+// 813-814, 1067-1071).
+type ProductTypeFilter = "all" | "sale" | "purchase" | "both";
+type ProductStatusFilter = "all" | Database["public"]["Enums"]["product_status"];
+
+const PRODUCT_TYPE_OPTIONS: { value: "sale" | "purchase" | "both"; labelKey: string }[] = [
+  { value: "sale", labelKey: "products.form.saleOnly" },
+  { value: "purchase", labelKey: "products.form.purchaseOnly" },
+  { value: "both", labelKey: "products.form.salePurchase" },
+];
+
+const PRODUCT_STATUS_OPTIONS: { value: Database["public"]["Enums"]["product_status"]; labelKey: string }[] = [
+  { value: "active", labelKey: "products.form.active" },
+  { value: "draft", labelKey: "products.form.draft" },
+  { value: "discontinued", labelKey: "products.form.discontinued" },
+];
+
 const getPrimaryOrgId = (sel: any): string | null => sel?.companyId || sel?.levelSelections?.[0]?.id || null;
 const getAllOrgIds = (sel: any): string[] => {
   if (sel?.selectedCompanyIds?.length) return sel.selectedCompanyIds;
@@ -143,7 +162,8 @@ export default function Products() {
   const [brandFilter, setBrandFilter] = useState("all");
   const [companyFilter, setCompanyFilter] = useState("all");
   
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<ProductStatusFilter>("all");
+  const [productTypeFilter, setProductTypeFilter] = useState<ProductTypeFilter>("all");
   const [sortField, setSortField] = useState<'name' | 'sku' | 'brand_name'>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [open, setOpen] = useState(false);
@@ -262,6 +282,8 @@ export default function Products() {
     categoryFilter,
     subcategoryFilter,
     brandFilter,
+    statusFilter,
+    productTypeFilter,
     debouncedSearchTerm,
     sortField,
     sortDirection,
@@ -274,12 +296,14 @@ export default function Products() {
       categoryFilter,
       subcategoryFilter,
       brandFilter,
+      statusFilter,
+      productTypeFilter,
     debouncedSearchTerm,
     sortField,
     sortDirection,
     activeCompanyId: activeCompany?.id,
   };
-}, [categoryFilter, subcategoryFilter, brandFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id]);
+}, [categoryFilter, subcategoryFilter, brandFilter, statusFilter, productTypeFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id]);
 
   // Resolve all descendant org IDs for the active company (as state to trigger dependents)
   const [descendantIds, setDescendantIds] = useState<string[]>([]);
@@ -379,6 +403,21 @@ export default function Products() {
       // Apply brand filter
       if (filters.brandFilter !== "all") {
         query = query.eq("brand_id", filters.brandFilter);
+      }
+
+      // Apply status filter
+      if (filters.statusFilter !== "all") {
+        query = query.eq("status", filters.statusFilter);
+      }
+
+      // Apply product type filter (is_sellable/is_purchasable, same pair the
+      // create/edit form uses for "Tipo de Produto" — see product_type above)
+      if (filters.productTypeFilter === "sale") {
+        query = query.eq("is_sellable", true).eq("is_purchasable", false);
+      } else if (filters.productTypeFilter === "purchase") {
+        query = query.eq("is_purchasable", true).eq("is_sellable", false);
+      } else if (filters.productTypeFilter === "both") {
+        query = query.eq("is_sellable", true).eq("is_purchasable", true);
       }
 
       // Apply search filter (server-side)
@@ -639,7 +678,7 @@ export default function Products() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // loadProducts is stable (dep array is [t, toast]); descendantIds is the intentional trigger
     // for company switches; the filter values are read via filtersRef inside loadProducts.
-  }, [categoryFilter, subcategoryFilter, brandFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id, descendantIds]);
+  }, [categoryFilter, subcategoryFilter, brandFilter, statusFilter, productTypeFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id, descendantIds]);
 
   // Load metadata separately (only when company changes)
   useEffect(() => {
@@ -1559,9 +1598,9 @@ export default function Products() {
   };
 
   // Busca TODOS os ids que respeitam os filtros atuais (organização, categoria,
-  // subcategoria, marca, pesquisa) — não só os já carregados na tela pelo
-  // infinite scroll. Sem isto, "Exportar" só exportava a página visível (por
-  // vezes uma dúzia de produtos), silenciosamente, sem qualquer aviso.
+  // subcategoria, marca, tipo, estado, pesquisa) — não só os já carregados na
+  // tela pelo infinite scroll. Sem isto, "Exportar" só exportava a página
+  // visível (por vezes uma dúzia de produtos), silenciosamente, sem aviso.
   const fetchAllFilteredProductIds = async (): Promise<string[]> => {
     const filters = filtersRef.current;
     const effectiveOrgIds = descendantIdsRef.current.length > 0
@@ -1586,6 +1625,14 @@ export default function Products() {
       if (filters.categoryFilter !== "all") query = query.eq("category_id", filters.categoryFilter);
       if (filters.subcategoryFilter !== "all") query = query.eq("subcategory_id", filters.subcategoryFilter);
       if (filters.brandFilter !== "all") query = query.eq("brand_id", filters.brandFilter);
+      if (filters.statusFilter !== "all") query = query.eq("status", filters.statusFilter);
+      if (filters.productTypeFilter === "sale") {
+        query = query.eq("is_sellable", true).eq("is_purchasable", false);
+      } else if (filters.productTypeFilter === "purchase") {
+        query = query.eq("is_purchasable", true).eq("is_sellable", false);
+      } else if (filters.productTypeFilter === "both") {
+        query = query.eq("is_sellable", true).eq("is_purchasable", true);
+      }
       if (filters.debouncedSearchTerm.trim()) {
         const searchLower = escapePostgrestOrTerm(filters.debouncedSearchTerm.toLowerCase().trim());
         if (searchLower) {
@@ -2423,7 +2470,7 @@ export default function Products() {
             />
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
             <Select value={categoryFilter} onValueChange={(value) => {
               setCategoryFilter(value);
               // Reset subcategory filter when category changes
@@ -2473,6 +2520,34 @@ export default function Products() {
                 {brands.map((brand) => (
                   <SelectItem key={brand.id} value={brand.id}>
                     {brand.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={productTypeFilter} onValueChange={(value) => setProductTypeFilter(value as ProductTypeFilter)}>
+              <SelectTrigger>
+                <SelectValue placeholder={t('products.allKinds')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('products.allKinds')}</SelectItem>
+                {PRODUCT_TYPE_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ProductStatusFilter)}>
+              <SelectTrigger>
+                <SelectValue placeholder={t('products.allStatuses')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('products.allStatuses')}</SelectItem>
+                {PRODUCT_STATUS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
                   </SelectItem>
                 ))}
               </SelectContent>

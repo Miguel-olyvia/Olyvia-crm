@@ -149,7 +149,9 @@ const Auth = () => {
       message.includes("demorou demasiado tempo") ||
       message.includes("timeout") ||
       message.includes("network") ||
-      message.includes("failed to fetch")
+      message.includes("failed to fetch") ||
+      message.includes("failed to send a request") ||
+      message.includes("edge function")
     ) {
       return `${fallbackAction} indisponível de momento. O servidor está lento. Tente novamente dentro de instantes.`;
     }

@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _migration_contacts_to_leads_map: {
@@ -2230,6 +2205,111 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      anew_leads_status_backup_20261204_conversao: {
+        Row: {
+          guardado_em: string
+          lead_id: string
+          status_antes: string | null
+        }
+        Insert: {
+          guardado_em?: string
+          lead_id: string
+          status_antes?: string | null
+        }
+        Update: {
+          guardado_em?: string
+          lead_id?: string
+          status_antes?: string | null
+        }
+        Relationships: []
+      }
+      anew_leads_status_backup_20261204_no_answer: {
+        Row: {
+          etapa_id: string | null
+          guardado_em: string
+          lead_id: string
+          status_antes: string | null
+        }
+        Insert: {
+          etapa_id?: string | null
+          guardado_em?: string
+          lead_id: string
+          status_antes?: string | null
+        }
+        Update: {
+          etapa_id?: string | null
+          guardado_em?: string
+          lead_id?: string
+          status_antes?: string | null
+        }
+        Relationships: []
+      }
+      anew_leads_status_backup_20261204_rejeicao: {
+        Row: {
+          etapa_id: string | null
+          guardado_em: string
+          lead_id: string
+          lost_reason_antes: string | null
+          status_antes: string | null
+        }
+        Insert: {
+          etapa_id?: string | null
+          guardado_em?: string
+          lead_id: string
+          lost_reason_antes?: string | null
+          status_antes?: string | null
+        }
+        Update: {
+          etapa_id?: string | null
+          guardado_em?: string
+          lead_id?: string
+          lost_reason_antes?: string | null
+          status_antes?: string | null
+        }
+        Relationships: []
+      }
+      anew_leads_workflow_stage_backup_20261204: {
+        Row: {
+          guardado_em: string
+          lead_id: string
+          pipeline_dirty_at_antes: string | null
+          workflow_stage_id_antes: string | null
+        }
+        Insert: {
+          guardado_em?: string
+          lead_id: string
+          pipeline_dirty_at_antes?: string | null
+          workflow_stage_id_antes?: string | null
+        }
+        Update: {
+          guardado_em?: string
+          lead_id?: string
+          pipeline_dirty_at_antes?: string | null
+          workflow_stage_id_antes?: string | null
+        }
+        Relationships: []
+      }
+      anew_leads_workflow_stage_backup_20261204_bmgest: {
+        Row: {
+          guardado_em: string
+          lead_id: string
+          pipeline_dirty_at_antes: string | null
+          workflow_stage_id_antes: string | null
+        }
+        Insert: {
+          guardado_em?: string
+          lead_id: string
+          pipeline_dirty_at_antes?: string | null
+          workflow_stage_id_antes?: string | null
+        }
+        Update: {
+          guardado_em?: string
+          lead_id?: string
+          pipeline_dirty_at_antes?: string | null
+          workflow_stage_id_antes?: string | null
+        }
+        Relationships: []
       }
       anew_membership_permission_scopes: {
         Row: {
@@ -8290,6 +8370,9 @@ export type Database = {
           checkbox_size: string | null
           confirmation_email_enabled: boolean
           confirmation_email_template_id: string | null
+          confirmation_sms_enabled: boolean
+          confirmation_sms_include_link: boolean
+          confirmation_sms_message: string | null
           contact_soon_text: string | null
           container_padding_x: string | null
           container_padding_y: string | null
@@ -8357,6 +8440,7 @@ export type Database = {
           redirecting_text: string | null
           reminder_enabled: boolean
           reminder_hours_before: number
+          reminder_sms_enabled: boolean
           reminder_template_id: string | null
           required_field_label: string | null
           scheduling_invite_delays_hours: number[]
@@ -8423,6 +8507,9 @@ export type Database = {
           checkbox_size?: string | null
           confirmation_email_enabled?: boolean
           confirmation_email_template_id?: string | null
+          confirmation_sms_enabled?: boolean
+          confirmation_sms_include_link?: boolean
+          confirmation_sms_message?: string | null
           contact_soon_text?: string | null
           container_padding_x?: string | null
           container_padding_y?: string | null
@@ -8490,6 +8577,7 @@ export type Database = {
           redirecting_text?: string | null
           reminder_enabled?: boolean
           reminder_hours_before?: number
+          reminder_sms_enabled?: boolean
           reminder_template_id?: string | null
           required_field_label?: string | null
           scheduling_invite_delays_hours?: number[]
@@ -8556,6 +8644,9 @@ export type Database = {
           checkbox_size?: string | null
           confirmation_email_enabled?: boolean
           confirmation_email_template_id?: string | null
+          confirmation_sms_enabled?: boolean
+          confirmation_sms_include_link?: boolean
+          confirmation_sms_message?: string | null
           contact_soon_text?: string | null
           container_padding_x?: string | null
           container_padding_y?: string | null
@@ -8623,6 +8714,7 @@ export type Database = {
           redirecting_text?: string | null
           reminder_enabled?: boolean
           reminder_hours_before?: number
+          reminder_sms_enabled?: boolean
           reminder_template_id?: string | null
           required_field_label?: string | null
           scheduling_invite_delays_hours?: number[]
@@ -8836,7 +8928,9 @@ export type Database = {
           scheduling_board_id: string | null
           scheduling_district_field_key: string | null
           scheduling_duration_minutes: number | null
+          scheduling_min_advance_hours: number | null
           scheduling_postal_code_field_key: string | null
+          scheduling_requires_location: boolean
           sort_order: number | null
           step_description: string | null
           step_number: number
@@ -8854,7 +8948,9 @@ export type Database = {
           scheduling_board_id?: string | null
           scheduling_district_field_key?: string | null
           scheduling_duration_minutes?: number | null
+          scheduling_min_advance_hours?: number | null
           scheduling_postal_code_field_key?: string | null
+          scheduling_requires_location?: boolean
           sort_order?: number | null
           step_description?: string | null
           step_number?: number
@@ -8872,7 +8968,9 @@ export type Database = {
           scheduling_board_id?: string | null
           scheduling_district_field_key?: string | null
           scheduling_duration_minutes?: number | null
+          scheduling_min_advance_hours?: number | null
           scheduling_postal_code_field_key?: string | null
+          scheduling_requires_location?: boolean
           sort_order?: number | null
           step_description?: string | null
           step_number?: number
@@ -10193,6 +10291,24 @@ export type Database = {
         }
         Relationships: []
       }
+      lead_contact_results_backup_20261204: {
+        Row: {
+          alterado_em: string
+          result_id: string
+          workflow_next_status_antes: string | null
+        }
+        Insert: {
+          alterado_em?: string
+          result_id: string
+          workflow_next_status_antes?: string | null
+        }
+        Update: {
+          alterado_em?: string
+          result_id?: string
+          workflow_next_status_antes?: string | null
+        }
+        Relationships: []
+      }
       lead_field_definitions: {
         Row: {
           campaign_id: string | null
@@ -10334,6 +10450,7 @@ export type Database = {
           created_by: string | null
           enforce_stage_transitions: boolean
           organization_id: string
+          sequential_flow: boolean
           stage_positions: Json
           updated_at: string
           updated_by: string | null
@@ -10343,6 +10460,7 @@ export type Database = {
           created_by?: string | null
           enforce_stage_transitions?: boolean
           organization_id: string
+          sequential_flow?: boolean
           stage_positions?: Json
           updated_at?: string
           updated_by?: string | null
@@ -10352,6 +10470,7 @@ export type Database = {
           created_by?: string | null
           enforce_stage_transitions?: boolean
           organization_id?: string
+          sequential_flow?: boolean
           stage_positions?: Json
           updated_at?: string
           updated_by?: string | null
@@ -10363,6 +10482,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "anew_users"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lead_pipeline_settings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
           },
           {
             foreignKeyName: "lead_pipeline_settings_organization_id_fkey"
@@ -10378,7 +10504,32 @@ export type Database = {
             referencedRelation: "anew_users"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "lead_pipeline_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
         ]
+      }
+      lead_pipeline_settings_backup_20261204_etapas56: {
+        Row: {
+          alterado_em: string
+          organization_id: string
+          sequential_flow_antes: boolean | null
+        }
+        Insert: {
+          alterado_em?: string
+          organization_id: string
+          sequential_flow_antes?: boolean | null
+        }
+        Update: {
+          alterado_em?: string
+          organization_id?: string
+          sequential_flow_antes?: boolean | null
+        }
+        Relationships: []
       }
       lead_qualification_rules: {
         Row: {
@@ -10653,6 +10804,42 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      lead_workflow_stages_rules_backup_20261204: {
+        Row: {
+          normalizado_em: string
+          reached_when_antes: Json | null
+          stage_id: string
+        }
+        Insert: {
+          normalizado_em?: string
+          reached_when_antes?: Json | null
+          stage_id: string
+        }
+        Update: {
+          normalizado_em?: string
+          reached_when_antes?: Json | null
+          stage_id?: string
+        }
+        Relationships: []
+      }
+      lead_workflow_stages_rules_backup_20261204_etapas56: {
+        Row: {
+          alterado_em: string
+          reached_when_antes: Json | null
+          stage_id: string
+        }
+        Insert: {
+          alterado_em?: string
+          reached_when_antes?: Json | null
+          stage_id: string
+        }
+        Update: {
+          alterado_em?: string
+          reached_when_antes?: Json | null
+          stage_id?: string
+        }
+        Relationships: []
       }
       leads_ai_config: {
         Row: {
@@ -17929,6 +18116,7 @@ export type Database = {
           client_id: string | null
           color: string | null
           company_id: string | null
+          confirmed_at: string | null
           contact_id: string | null
           created_at: string
           created_by: string
@@ -17965,6 +18153,7 @@ export type Database = {
           client_id?: string | null
           color?: string | null
           company_id?: string | null
+          confirmed_at?: string | null
           contact_id?: string | null
           created_at?: string
           created_by: string
@@ -18001,6 +18190,7 @@ export type Database = {
           client_id?: string | null
           color?: string | null
           company_id?: string | null
+          confirmed_at?: string | null
           contact_id?: string | null
           created_at?: string
           created_by?: string
@@ -18088,10 +18278,13 @@ export type Database = {
           employee_id: string | null
           id: string
           is_active: boolean | null
+          latitude: number | null
+          longitude: number | null
           max_daily_capacity: number | null
           metadata: Json | null
           name: string
           organization_id: string | null
+          postal_code: string | null
           resource_type: string
           updated_at: string
           user_id: string | null
@@ -18103,10 +18296,13 @@ export type Database = {
           employee_id?: string | null
           id?: string
           is_active?: boolean | null
+          latitude?: number | null
+          longitude?: number | null
           max_daily_capacity?: number | null
           metadata?: Json | null
           name: string
           organization_id?: string | null
+          postal_code?: string | null
           resource_type?: string
           updated_at?: string
           user_id?: string | null
@@ -18118,10 +18314,13 @@ export type Database = {
           employee_id?: string | null
           id?: string
           is_active?: boolean | null
+          latitude?: number | null
+          longitude?: number | null
           max_daily_capacity?: number | null
           metadata?: Json | null
           name?: string
           organization_id?: string | null
+          postal_code?: string | null
           resource_type?: string
           updated_at?: string
           user_id?: string | null
@@ -18296,6 +18495,79 @@ export type Database = {
             columns: ["template_id"]
             isOneToOne: false
             referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      scheduled_sms: {
+        Row: {
+          cancel_reason: string | null
+          cancelled_at: string | null
+          created_at: string
+          created_by: string | null
+          entity_id: string | null
+          entity_type: string | null
+          error_message: string | null
+          id: string
+          message: string
+          organization_id: string | null
+          scheduled_for: string
+          sent_at: string | null
+          status: string
+          to_phone: string
+        }
+        Insert: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          error_message?: string | null
+          id?: string
+          message: string
+          organization_id?: string | null
+          scheduled_for: string
+          sent_at?: string | null
+          status?: string
+          to_phone: string
+        }
+        Update: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          error_message?: string | null
+          id?: string
+          message?: string
+          organization_id?: string | null
+          scheduled_for?: string
+          sent_at?: string | null
+          status?: string
+          to_phone?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_sms_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "scheduled_sms_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "scheduled_sms_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -19066,6 +19338,70 @@ export type Database = {
             isOneToOne: true
             referencedRelation: "ops_v_pessoas"
             referencedColumns: ["utilizador_id"]
+          },
+        ]
+      }
+      sms_logs: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          entity_id: string | null
+          entity_type: string | null
+          error_message: string | null
+          id: string
+          message: string
+          organization_id: string | null
+          sent_at: string | null
+          status: string
+          to_phone: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          error_message?: string | null
+          id?: string
+          message: string
+          organization_id?: string | null
+          sent_at?: string | null
+          status: string
+          to_phone: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          entity_id?: string | null
+          entity_type?: string | null
+          error_message?: string | null
+          id?: string
+          message?: string
+          organization_id?: string | null
+          sent_at?: string | null
+          status?: string
+          to_phone?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_logs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_logs_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "sms_logs_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -21024,6 +21360,10 @@ export type Database = {
         Args: { lat1: number; lat2: number; lng1: number; lng2: number }
         Returns: number
       }
+      calculate_min_advance_datetime: {
+        Args: { p_from: string; p_hours: number; p_organization_id: string }
+        Returns: string
+      }
       calculate_product_margin: {
         Args: { p_product_id: string }
         Returns: {
@@ -21116,6 +21456,10 @@ export type Database = {
       compute_lead_furthest_progress_stage_v2: {
         Args: { p_lead_id: string }
         Returns: string
+      }
+      compute_lead_stage_path_v2: {
+        Args: { p_lead_id: string }
+        Returns: string[]
       }
       compute_lead_stage_v2: { Args: { p_lead_id: string }; Returns: string }
       compute_proposal_business_hash: {
@@ -21279,6 +21623,7 @@ export type Database = {
           p_district_id?: string
           p_duration_minutes?: number
           p_limit?: number
+          p_min_advance_hours?: number
           p_target_date?: string
           p_target_postal_code?: string
         }
@@ -21360,6 +21705,7 @@ export type Database = {
         Args: { p_document_type: string; p_organization_id: string }
         Returns: string
       }
+      fn_normalize_lead_rule: { Args: { p_rule: Json }; Returns: Json }
       fn_proposals_persist_relations: {
         Args: {
           p_actor: string
@@ -21375,6 +21721,15 @@ export type Database = {
         }
         Returns: string[]
       }
+      fn_reconcile_dirty_lead_pipelines: {
+        Args: { p_limit?: number }
+        Returns: {
+          estados_avancados: number
+          etapas_sincronizadas: number
+          examinadas: number
+          restantes: number
+        }[]
+      }
       fn_refund_ai_credits: {
         Args: { _amount: number; _organization_id: string }
         Returns: Json
@@ -21387,6 +21742,7 @@ export type Database = {
           origin_source_id: string
         }[]
       }
+      fn_uom_is_used_in_lines: { Args: { p_uom_id: string }; Returns: boolean }
       fn_uom_units_per: {
         Args: { p_product_id: string; p_uom_id: string }
         Returns: number
@@ -21693,6 +22049,7 @@ export type Database = {
           p_district_id?: string
           p_duration_minutes?: number
           p_end_date: string
+          p_min_advance_hours?: number
           p_postal_code?: string
           p_start_date: string
         }
@@ -21705,6 +22062,10 @@ export type Database = {
       get_org_subtree_ids: { Args: { _root_org_id: string }; Returns: string[] }
       get_permission_scope_context: {
         Args: { _organization_id: string }
+        Returns: Json
+      }
+      get_portal_commercial: {
+        Args: { p_organization_id: string }
         Returns: Json
       }
       get_product_category_org_id: {
@@ -21825,6 +22186,7 @@ export type Database = {
         Args: {
           p_date: string
           p_duration_minutes?: number
+          p_min_advance_hours?: number
           p_organization_id?: string
           p_resource_id: string
         }
@@ -21961,6 +22323,10 @@ export type Database = {
           p_is_initial_stage: boolean
         }
         Returns: string
+      }
+      lead_qualification_overlay_v2: {
+        Args: { p_org: string; p_signals: Json; p_status: string }
+        Returns: Json
       }
       link_entity_to_org: {
         Args: { p_entity_id: string; p_target_org_id: string }
@@ -22328,8 +22694,10 @@ export type Database = {
         Returns: number
       }
       recompute_leads_v2_buckets: {
-        Args: { p_org: string }
+        Args: { p_after?: string; p_limit?: number; p_org: string }
         Returns: {
+          last_id: string
+          processed_count: number
           unresolved_count: number
           unresolved_lead_ids: string[]
           updated_count: number
@@ -22731,6 +23099,10 @@ export type Database = {
           p_organization_id: string
         }
         Returns: number
+      }
+      rpc_bulk_update_inventory_count_lines: {
+        Args: { p_inventory_count_id: string; p_lines: Json }
+        Returns: Json
       }
       rpc_client_contract_stats: {
         Args: {
@@ -23159,6 +23531,7 @@ export type Database = {
       rpc_create_inventory_count: {
         Args: {
           p_category_id?: string
+          p_initial?: boolean
           p_organization_id: string
           p_warehouse_id: string
         }
@@ -23767,6 +24140,7 @@ export type Database = {
           client_id: string | null
           color: string | null
           company_id: string | null
+          confirmed_at: string | null
           contact_id: string | null
           created_at: string
           created_by: string
@@ -26034,6 +26408,7 @@ export type Database = {
           client_id: string | null
           color: string | null
           company_id: string | null
+          confirmed_at: string | null
           contact_id: string | null
           created_at: string
           created_by: string
@@ -26837,9 +27212,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       anew_scope_level: ["NONE", "OWNED", "TEAM", "ORG"],

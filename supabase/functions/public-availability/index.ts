@@ -81,12 +81,23 @@ Deno.serve(async (req: Request) => {
 
     let boardId = directBoardId || null;
     let durationMinutes = directDuration || 60;
+    // Regra 1 (antecedencia minima): so resolvida a partir do passo do
+    // formulario, tal como a duracao -- um pedido que passe board_id/duration
+    // directos (sem form_id) fica sem restricao, mesmo padrao ja existente
+    // para durationMinutes acima.
+    let minAdvanceHours: number | null = null;
 
-    // Resolve board_id and duration from form_steps if form_id provided
-    if (form_id && step_number && !boardId) {
+    // Resolve minAdvanceHours (and board/duration when not passed directly)
+    // from form_steps whenever form_id+step_number are given. Antes disto só
+    // corria quando board_id não vinha no pedido -- mas o formulário público
+    // (SchedulingStep.tsx) manda SEMPRE board_id e duration_minutes como
+    // props diretas, então este bloco nunca chegava a correr em produção e a
+    // antecedência mínima nunca era lida para o calendário de nenhum
+    // formulário real (só passava quando testado sem esses parâmetros).
+    if (form_id && step_number) {
       const { data: step, error: stepError } = await supabase
         .from('form_steps')
-        .select('scheduling_board_id, scheduling_duration_minutes, step_type')
+        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours, step_type')
         .eq('form_id', form_id)
         .eq('step_number', step_number)
         .single();
@@ -105,8 +116,9 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      boardId = step.scheduling_board_id;
-      durationMinutes = step.scheduling_duration_minutes || 60;
+      boardId = boardId || step.scheduling_board_id;
+      durationMinutes = directDuration || step.scheduling_duration_minutes || 60;
+      minAdvanceHours = step.scheduling_min_advance_hours ?? null;
     }
 
     if (!boardId) {
@@ -190,6 +202,7 @@ Deno.serve(async (req: Request) => {
         p_duration_minutes: durationMinutes,
         p_postal_code: postal_code || null,
         p_district_id: district_id || null,
+        p_min_advance_hours: minAdvanceHours,
       });
 
       if (monthError) {
@@ -247,6 +260,7 @@ Deno.serve(async (req: Request) => {
           p_duration_minutes: durationMinutes,
           p_limit: 10,
           p_district_id: district_id || null,
+          p_min_advance_hours: minAdvanceHours,
         });
 
       if (rpcError) {
@@ -321,6 +335,7 @@ Deno.serve(async (req: Request) => {
           p_date: date,
           p_duration_minutes: durationMinutes,
           p_organization_id: orgId,
+          p_min_advance_hours: minAdvanceHours,
         });
 
       for (const slot of (slots || [])) {

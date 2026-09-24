@@ -173,6 +173,7 @@ interface QuoteLine {
   margem_percent?: number;
   iva_percent?: number;
   total_sem_iva?: number;
+  total_com_iva?: number;
   seccao?: string | null;
 }
 
@@ -235,6 +236,7 @@ export default function Quotes() {
   const [detailLines, setDetailLines] = useState<QuoteLine[]>([]);
   const [detailLineCosts, setDetailLineCosts] = useState<Record<string, number>>({});
   const [detailLineDetails, setDetailLineDetails] = useState<Record<string, LineResolution>>({});
+  const [detailFees, setDetailFees] = useState<Array<{ id: string; name: string; calculated_value: number; vat_rate: number; vat_amount: number }>>([]);
   const [viewMode, setViewMode] = useState<ViewMode>('lista');
   const [linesAgg, setLinesAgg] = useState<Record<string, QuoteLinesAgg>>({});
   
@@ -1288,6 +1290,19 @@ export default function Quotes() {
     const costs: Record<string, number> = {};
     linesArr.forEach((line: any) => { costs[line.id] = getLineUnitCost(line); });
     setDetailLineCosts(costs);
+
+    const { data: fees } = await supabase
+      .from('quote_fees')
+      .select('id, fee_type_id, calculated_value, vat_rate, vat_amount, service_fee_types(name)')
+      .eq('quote_id', quote.id);
+    setDetailFees(((fees as any[]) || []).map((f) => ({
+      id: f.id,
+      name: f.service_fee_types?.name || '—',
+      calculated_value: parseFloat(String(f.calculated_value || 0)),
+      vat_rate: parseFloat(String(f.vat_rate || 0)),
+      vat_amount: parseFloat(String(f.vat_amount || 0)),
+    })));
+
     setShowDetails(true);
   };
 
@@ -2406,7 +2421,12 @@ export default function Quotes() {
                             </TableBody>
                           </Table>
                           {(() => {
-                            const subtotal = detailLines.reduce((sum, l) => sum + parseFloat(String(l.total_sem_iva || 0)), 0);
+                            // Subtotal, taxas e total vêm gravados no próprio orçamento —
+                            // não se recalculam aqui. `quotes.select('*')` já os traz;
+                            // só não estavam na interface Quote local.
+                            const q = detailQuote as any;
+                            const subtotal = parseFloat(String(q?.subtotal ?? 0)) || detailLines.reduce((sum, l) => sum + parseFloat(String(l.total_sem_iva || 0)), 0);
+                            const total = parseFloat(String(q?.total ?? 0));
                             const totalCost = detailLines.reduce((sum, l) => {
                               const qty = parseFloat(String(l.qt || 0));
                               const c = detailLineCosts[l.id] ?? 0;
@@ -2415,27 +2435,16 @@ export default function Quotes() {
                             const globalMargin = subtotal > 0 && totalCost > 0
                               ? ((subtotal - totalCost) / subtotal) * 100
                               : null;
-                            // Agrupar IVA por taxa real do catálogo (product_prices/service_prices).
-                            // Para bundles com componentes mistos, usa a distribuição calculada pelo resolver.
+                            // IVA por linha, só para mostrar a repartição por taxa — a
+                            // partir do que já foi gravado (total_com_iva - total_sem_iva),
+                            // não recalculado. O Total acima não depende desta soma.
                             const ivaByRate = new Map<number, number>();
                             detailLines.forEach((l) => {
-                              const base = parseFloat(String(l.total_sem_iva || 0));
-                              const shares = detailLineDetails[l.id]?.vatRateShares;
-                              if (shares && Object.keys(shares).length > 0) {
-                                Object.entries(shares).forEach(([rateStr, share]) => {
-                                  const rate = parseFloat(rateStr);
-                                  const amount = base * share * (rate / 100);
-                                  ivaByRate.set(rate, (ivaByRate.get(rate) || 0) + amount);
-                                });
-                              } else {
-                                const rate = parseFloat(String(l.iva_percent ?? 23));
-                                const amount = base * (rate / 100);
-                                ivaByRate.set(rate, (ivaByRate.get(rate) || 0) + amount);
-                              }
+                              const lineIva = parseFloat(String(l.total_com_iva || 0)) - parseFloat(String(l.total_sem_iva || 0));
+                              const rate = parseFloat(String(l.iva_percent ?? 23));
+                              ivaByRate.set(rate, (ivaByRate.get(rate) || 0) + lineIva);
                             });
                             const ivaRates = Array.from(ivaByRate.entries()).sort((a, b) => a[0] - b[0]);
-                            const ivaTotal = ivaRates.reduce((s, [, v]) => s + v, 0);
-                            const total = subtotal + ivaTotal;
                             const marginColor = globalMargin == null
                               ? ""
                               : globalMargin >= 30 ? "text-green-600 dark:text-green-400"
@@ -2451,10 +2460,22 @@ export default function Quotes() {
                                       <div className="flex justify-between"><span className="text-muted-foreground">Margem global</span><span className={`font-medium ${marginColor}`}>{globalMargin!.toFixed(1)}%</span></div>
                                     </>
                                   )}
+                                  {detailFees.map((f) => (
+                                    <div key={f.id} className="flex justify-between">
+                                      <span className="text-muted-foreground">{f.name}</span>
+                                      <span>{formatCurrency(f.calculated_value)}</span>
+                                    </div>
+                                  ))}
                                   {ivaRates.map(([rate, amount]) => (
                                     <div key={rate} className="flex justify-between">
                                       <span className="text-muted-foreground">IVA ({rate}%)</span>
                                       <span>{formatCurrency(amount)}</span>
+                                    </div>
+                                  ))}
+                                  {detailFees.filter(f => f.vat_amount > 0).map((f) => (
+                                    <div key={`${f.id}-vat`} className="flex justify-between">
+                                      <span className="text-muted-foreground">IVA ({f.vat_rate}%) — {f.name}</span>
+                                      <span>{formatCurrency(f.vat_amount)}</span>
                                     </div>
                                   ))}
                                   <Separator />

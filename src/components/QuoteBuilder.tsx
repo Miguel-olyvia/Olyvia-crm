@@ -174,6 +174,8 @@ interface ProductCatalogItem {
   category_name: string | null;
   brand_name: string | null;
   retail_price: number | null;
+  /** Preço de compra real (price_type='purchase'), quando existe. */
+  cost_price: number | null;
   vat_rate: number | null;
   organization_id: string | null;
   uom_symbol: string | null;
@@ -260,10 +262,10 @@ interface QuoteLine extends LineUomFields {
   source_deal_need_item_id?: string | null;
 }
 
-const NEW_QUOTE_DRAFT_VERSION = 1;
-// New quotes share one draft per company; an existing quote being edited
-// gets its own key (keyed by quoteId) so autosave/recovery also covers
-// editing/finishing an already-saved quote, not just creating one.
+// Chave do antigo rascunho em localStorage (removido — sobrepunha-se para
+// sempre aos dados do servidor num browser que nunca chegasse a gravar,
+// mesmo depois de outra pessoa gravar o orçamento). Mantida só para limpar
+// entradas já gravadas em browsers antigos.
 const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
   quoteId ? `olyvia:quote-builder:edit:${quoteId}` : `olyvia:quote-builder:new:${companyId || "global"}`;
 
@@ -397,22 +399,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   const [templates, setTemplates] = useState<any[]>([]);
   const saveLockRef = useRef(false);
-  // Tracks the organization.id a draft restore attempt has already run for
-  // (null = never tried). Deliberately NOT a boolean "did it ever run" latch:
-  // right after a forced reload (e.g. the stale-chunk recovery in main.tsx),
-  // activeCompany?.id can resolve through a transient/default value before
-  // settling on the real one a render or two later. A boolean latch would
-  // burn its one-shot attempt on that transient id, find no draft there, and
-  // then — because the guard below only checks "did we ever restore" — never
-  // retry once the correct id arrives, silently stranding a real draft in
-  // localStorage under the correct key forever. Comparing against the
-  // specific id lets each distinct value get its own attempt.
-  const draftRestoredRef = useRef<string | null>(null);
-  // For an existing quote, fetchQuote() populates formData/lines from the
-  // server first; draft restore must wait for that to finish so it overlays
-  // on top of the server state instead of being clobbered by it.
-  const existingQuoteLoadedRef = useRef(false);
-  const [quoteLoadTick, setQuoteLoadTick] = useState(0);
   const postSaveActionRef = useRef<"email" | "whatsapp" | null>(null);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
   const [showSendEmailDialog, setShowSendEmailDialog] = useState(false);
@@ -423,69 +409,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [saveAsTemplateName, setSaveAsTemplateName] = useState("");
   const [savingAsTemplate, setSavingAsTemplate] = useState(false);
 
-  useEffect(() => {
-    if (!activeCompany?.id || draftRestoredRef.current === activeCompany.id || typeof window === "undefined") return;
-    // Editing an existing quote: wait for fetchQuote() to finish loading the
-    // server state first, so a restored draft overlays it instead of being
-    // overwritten by it.
-    if (effectiveQuoteId && !existingQuoteLoadedRef.current) return;
-
-    draftRestoredRef.current = activeCompany.id;
-    const rawDraft = localStorage.getItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId));
-    if (!rawDraft) return;
-
-    try {
-      const draft = JSON.parse(rawDraft);
-      if (draft?.version !== NEW_QUOTE_DRAFT_VERSION || !draft.formData) return;
-
-      setFormData(prev => ({ ...prev, ...draft.formData, organization_id: draft.formData.organization_id || activeCompany.id }));
-      setQuoteNumber(draft.quoteNumber || null);
-      setAutoReference(draft.autoReference || "");
-      setLines(Array.isArray(draft.lines) ? draft.lines : []);
-      setSections(Array.isArray(draft.sections) && draft.sections.length > 0 ? draft.sections : ["Geral"]);
-      setActiveSection(typeof draft.activeSection === "string" ? draft.activeSection : "Geral");
-      setSelectedFees(new Set(Array.isArray(draft.selectedFees) ? draft.selectedFees : []));
-      setFeeVatOverrides(draft.feeVatOverrides && typeof draft.feeVatOverrides === "object" ? draft.feeVatOverrides : {});
-      // `draft.inlineQuotes` deixa de ser restaurado de propósito. Rascunhos
-      // gravados antes desta alteração podem trazer linhas de bundle com o id do
-      // bundle em product_id (o defeito corrigido em InlineQuoteBuilder), que
-      // faziam rpc_save_quote rebentar com 23503/409. Ignorar a chave resolve
-      // esses rascunhos sem mexer em NEW_QUOTE_DRAFT_VERSION — subir a versão
-      // descartaria o rascunho INTEIRO, incluindo o orçamento principal, por
-      // causa do `!==` estrito acima.
-      setSelectedDeal(draft.selectedDeal || null);
-    } catch (error) {
-      console.error("Error restoring quote draft:", error);
-    }
-  }, [effectiveQuoteId, activeCompany?.id, quoteLoadTick]);
-
-  useEffect(() => {
-    if (!activeCompany?.id || draftRestoredRef.current !== activeCompany.id || typeof window === "undefined") return;
-
-    const hasDraftContent = Boolean(
-      formData.deal_id || formData.cliente_id || formData.title || formData.obra_notas ||
-      formData.client_notes || formData.conditions || selectedDeal || lines.length > 0
-    );
-    if (!hasDraftContent) return;
-
-    const timeoutId = window.setTimeout(() => {
-      localStorage.setItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId), JSON.stringify({
-        version: NEW_QUOTE_DRAFT_VERSION,
-        savedAt: new Date().toISOString(),
-        formData,
-        quoteNumber,
-        autoReference,
-        lines,
-        sections,
-        activeSection,
-        selectedFees: Array.from(selectedFees),
-        feeVatOverrides,
-        selectedDeal,
-      }));
-    }, 300);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [effectiveQuoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, selectedDeal]);
+  // Rascunho em localStorage removido: sobrepunha-se para sempre aos dados
+  // do servidor num browser que nunca tivesse gravado, mesmo depois de outra
+  // pessoa gravar o orçamento entretanto — mostrando valores antigos sem
+  // forma de os actualizar a não ser limpando manualmente os dados do site.
+  // O que resta desse mecanismo é só a limpeza, mais abaixo, de uma entrada
+  // que já exista de antes desta alteração.
 
   useEffect(() => {
     if (!activeCompany?.id || typeof window === "undefined") return;
@@ -507,11 +436,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   // Generate auto-reference for new quotes
   useEffect(() => {
     if (!quoteId && !autoReference) {
-      const hasSavedDraft = activeCompany?.id && typeof window !== "undefined"
-        ? localStorage.getItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId))
-        : null;
-      if (hasSavedDraft) return;
-
       const year = new Date().getFullYear();
       const seq = String(Math.floor(Math.random() * 9999) + 1).padStart(4, "0");
       setAutoReference(`Q-${year}-${seq}`);
@@ -633,10 +557,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       fetchCatalogItems();
       checkPermissions();
       if (effectiveQuoteId) {
-        fetchQuote().finally(() => {
-          existingQuoteLoadedRef.current = true;
-          setQuoteLoadTick(tick => tick + 1);
-        });
+        fetchQuote();
       }
     }
   }, [effectiveQuoteId, activeCompany?.id]);
@@ -950,13 +871,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const bundleIds = templateItems.filter(i => (i as any).item_type === 'bundle' && (i as any).bundle_id).map(i => (i as any).bundle_id as string);
 
       // Fetch all pricing data in parallel
-      const [productPricesResult, servicePricesResult, attrRangesResult, optionPricesByProduct] = await Promise.all([
+      const [productPricesResult, servicePricesResult, attrRangesResult, optionPricesByProduct, productCostResult, serviceCostResult] = await Promise.all([
         // Fetch prices for products
-        productIds.length > 0 
+        productIds.length > 0
           ? supabase.from("product_prices").select("product_id, price, vat_rate").eq("price_type", "retail").in("product_id", productIds)
           : Promise.resolve({ data: [] }),
         // Fetch prices for services
-        serviceIds.length > 0 
+        serviceIds.length > 0
           ? supabase.from("service_prices").select("service_id, price, vat_rate").eq("price_type", "retail").in("service_id", serviceIds)
           : Promise.resolve({ data: [] }),
         // Fetch attribute price ranges via unified helper, per product (Product → Subcategory → Category → Ancestor → Global)
@@ -984,8 +905,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               });
               return [pid, list] as const;
             })).then((entries) => new Map(entries))
-          : Promise.resolve(new Map<string, Awaited<ReturnType<typeof getEffectiveProductOptionPrices>>>())
-
+          : Promise.resolve(new Map<string, Awaited<ReturnType<typeof getEffectiveProductOptionPrices>>>()),
+        // Custo real de compra — pode haver mais do que uma linha "purchase"
+        // por produto/serviço (a antiga fica lá para histórico); ordenar por
+        // created_at ascendente e deixar o Map sobrepor garante que fica
+        // sempre a mais recente.
+        productIds.length > 0
+          ? supabase.from("product_prices").select("product_id, price").eq("price_type", "purchase").in("product_id", productIds).order("created_at", { ascending: true })
+          : Promise.resolve({ data: [] }),
+        serviceIds.length > 0
+          ? supabase.from("service_prices").select("service_id, price").eq("price_type", "purchase").in("service_id", serviceIds).order("created_at", { ascending: true })
+          : Promise.resolve({ data: [] }),
       ]);
 
       const productPricesMap = new Map<string, { price: number; vat_rate: number }>(
@@ -995,6 +925,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const servicePricesMap = new Map<string, { price: number; vat_rate: number }>(
         (servicePricesResult.data || []).map(p => [p.service_id, { price: p.price as number, vat_rate: p.vat_rate as number ?? 23 }])
       );
+
+      // Custo real (preço de compra) — quando existe, manda sempre sobre a
+      // margem assumida de 30%.
+      const productCostMap = new Map<string, number>();
+      ((productCostResult as any)?.data || []).forEach((c: any) => { productCostMap.set(c.product_id, parseFloat(String(c.price || 0))); });
+      const serviceCostMap = new Map<string, number>();
+      ((serviceCostResult as any)?.data || []).forEach((c: any) => { serviceCostMap.set(c.service_id, parseFloat(String(c.price || 0))); });
 
       // Fetch bundles + components + prices for any bundle template items
       const bundlesMap = new Map<string, { name: string; sku: string; description: string | null; pricing_type: string; fixed_price: number | null; discount_percent: number | null; discount_fixed: number | null; components: any[]; choice_groups: any[] }>();
@@ -1169,8 +1106,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
             const retailPrice = priceInfo.price + attributePriceAddon;
             const defaultMargin = 30;
-            const materialCost = retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0;
-            
+            // Custo real de compra do produto, quando existe — só sem ele é
+            // que se deriva um custo a partir do preço de venda e de 30%.
+            const realCost = productCostMap.get(item.product.id) || 0;
+            const materialCost = realCost > 0
+              ? realCost
+              : (retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0);
+
             return {
               catalog_item_id: null,
               product_id: item.product.id,
@@ -1183,7 +1125,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               qt: item.default_qt,
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
-              margem_percent: defaultMargin,
+              margem_percent: realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice) : defaultMargin,
               // O preço de venda definido fica sempre na linha e manda no preço unitário.
               retail_price_unit: retailPrice,
               iva_percent: vatRate,
@@ -1198,8 +1140,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             const retailPrice = priceInfo.price;
             const vatRate = priceInfo.vat_rate;
             const defaultMargin = 30;
-            const materialCost = retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0;
-            
+            // Custo real de compra do serviço, quando existe.
+            const realCost = serviceCostMap.get(item.service.id) || 0;
+            const materialCost = realCost > 0
+              ? realCost
+              : (retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0);
+
             return {
               catalog_item_id: null,
               service_id: item.service.id,
@@ -1211,7 +1157,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               qt: item.default_qt,
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
-              margem_percent: defaultMargin,
+              margem_percent: realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice) : defaultMargin,
               // O preço de venda definido fica sempre na linha e manda no preço unitário.
               retail_price_unit: retailPrice,
               iva_percent: vatRate,
@@ -1241,6 +1187,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               }
               if (c.service_id && c.services?.service_prices) {
                 return c.services.service_prices.find((p: any) => p.price_type === 'retail')?.price || 0;
+              }
+              return 0;
+            };
+            const compCostPrice = (c: any): number => {
+              if (c.product_id && c.products?.product_prices) {
+                return c.products.product_prices.find((p: any) => p.price_type === 'purchase')?.price || 0;
+              }
+              if (c.service_id && c.services?.service_prices) {
+                return c.services.service_prices.find((p: any) => p.price_type === 'purchase')?.price || 0;
               }
               return 0;
             };
@@ -1290,11 +1245,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             });
 
             const unitTotalPrice = components.reduce((s, c) => s + c.unit_price * c.quantity, 0);
+            // Custo real do kit = soma do custo de compra de cada componente
+            // escolhido, quando conhecido — só sem ele é que se assume 30%.
+            const unitTotalCost = allComps.reduce((s, c) => s + compCostPrice(c) * (c.quantity || 1), 0);
             const defaultMargin = 30;
             const defaultInt = 0;
-            const materialCost = unitTotalPrice > 0
-              ? unitTotalPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)
-              : 0;
+            const materialCost = unitTotalCost > 0
+              ? unitTotalCost
+              : (unitTotalPrice > 0 ? unitTotalPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) : 0);
 
             return {
               catalog_item_id: null,
@@ -1311,7 +1269,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               qt: item.default_qt,
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
-              margem_percent: defaultMargin,
+              margem_percent: unitTotalCost > 0 ? markupFromCostAndPrice(unitTotalCost, unitTotalPrice) : defaultMargin,
               // O preço total do bundle é o preço de venda da linha.
               retail_price_unit: unitTotalPrice,
               iva_percent: 23,
@@ -1678,7 +1636,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const BATCH_SIZE = 200;
     for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
       const batch = uniqueIds.slice(i, i + BATCH_SIZE);
-      const [{ data: productsData }, { data: pricesData }] = await Promise.all([
+      const [{ data: productsData }, { data: pricesData }, { data: costData }] = await Promise.all([
         supabase
           .from("products")
           .select(`
@@ -1693,8 +1651,19 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           .select("product_id, price, vat_rate")
           .eq("price_type", "retail")
           .in("product_id", batch),
+        // Pode haver mais do que uma linha "purchase" por produto (a antiga
+        // fica lá para histórico) — ordenar por created_at ascendente e
+        // deixar o forEach sobrepor garante que fica sempre a mais recente.
+        supabase
+          .from("product_prices")
+          .select("product_id, price")
+          .eq("price_type", "purchase")
+          .in("product_id", batch)
+          .order("created_at", { ascending: true }),
       ]);
       const pricesMap = new Map((pricesData || []).map((p: any) => [p.product_id, { price: p.price, vat_rate: p.vat_rate }]));
+      const costMap = new Map<string, number>();
+      (costData || []).forEach((c: any) => { costMap.set(c.product_id, parseFloat(String(c.price || 0))); });
       (productsData || []).forEach((product: any) => {
         const priceInfo = pricesMap.get(product.id);
         map.set(product.id, {
@@ -1705,6 +1674,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           category_name: product.product_categories?.name || null,
           brand_name: product.brands?.name || null,
           retail_price: priceInfo?.price || null,
+          cost_price: costMap.get(product.id) ?? null,
           vat_rate: priceInfo?.vat_rate || 23,
           organization_id: product.organization_id,
           uom_symbol: product.uom?.code || null,
@@ -1723,7 +1693,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const BATCH_SIZE = 200;
     for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
       const batch = uniqueIds.slice(i, i + BATCH_SIZE);
-      const [{ data: servicesData }, { data: pricesData }] = await Promise.all([
+      const [{ data: servicesData }, { data: pricesData }, { data: costData }] = await Promise.all([
         supabase
           .from("services")
           .select(`
@@ -1736,8 +1706,16 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           .select("service_id, price, vat_rate")
           .eq("price_type", "retail")
           .in("service_id", batch),
+        supabase
+          .from("service_prices")
+          .select("service_id, price")
+          .eq("price_type", "purchase")
+          .in("service_id", batch)
+          .order("created_at", { ascending: true }),
       ]);
       const pricesMap = new Map((pricesData || []).map((p: any) => [p.service_id, { price: p.price, vat_rate: p.vat_rate }]));
+      const costMap = new Map<string, number>();
+      (costData || []).forEach((c: any) => { costMap.set(c.service_id, parseFloat(String(c.price || 0))); });
       (servicesData || []).forEach((service: any) => {
         const priceInfo = pricesMap.get(service.id);
         map.set(service.id, {
@@ -1748,6 +1726,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           category_name: service.service_categories?.name || null,
           brand_name: null,
           retail_price: priceInfo?.price || null,
+          cost_price: costMap.get(service.id) ?? null,
           vat_rate: priceInfo?.vat_rate || 23,
           organization_id: service.organization_id,
           uom_symbol: null,
@@ -2636,9 +2615,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const defaultMargin = currentLine.margem_percent || 30;
       const defaultInt = currentLine.int_percent || 0;
       const retailPrice = bundleInfo.total_price || 0;
-      const materialCost = retailPrice > 0
-        ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) - (currentLine.custo_mao_obra_unit || 0)
-        : 0;
+      // Custo real do kit (soma dos componentes escolhidos), quando conhecido;
+      // só sem ele é que se deriva um custo a partir do preço de venda e de
+      // uma margem assumida — mesma regra da linha "adicionar" abaixo.
+      const realCost = Number(item.cost_price) > 0 ? Number(item.cost_price) : 0;
+      const materialCost = realCost > 0
+        ? realCost
+        : (retailPrice > 0
+          ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) - (currentLine.custo_mao_obra_unit || 0)
+          : 0);
 
       const bundleSelectedAttributes = {
         ...(fullAttributes || {}),
@@ -2746,8 +2731,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         continue;
       }
       
-      const materialCost = retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100);
-      
+      // Custo real do artigo (preço de compra), quando existe — só sem ele é
+      // que se deriva um custo a partir do preço de venda e da margem
+      // assumida (mesma regra dos outros caminhos de adicionar).
+      const realCost = Number(item.cost_price) > 0 ? Number(item.cost_price) : 0;
+      const materialCost = realCost > 0
+        ? realCost
+        : retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100);
+
       // Get selected attributes and transform to full format
       const selectedAttrs = selectedItemAttributes[itemId] || {};
       const fullAttributes: Record<string, any> = {};
@@ -2795,7 +2786,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         qt: 1,
         custo_material_unit: materialCost,
         custo_mao_obra_unit: 0,
-        margem_percent: defaultMargin,
+        margem_percent: realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice, defaultInt) : defaultMargin,
         // O preço de venda definido fica sempre na linha e manda no preço unitário.
         retail_price_unit: retailPrice,
         iva_percent: vatRate,
@@ -3062,6 +3053,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             let sku: string | null = null;
             let category = "Geral";
             let uom: string | null = null;
+            // Custo real do artigo (preço de compra), quando existe — só sem
+            // ele é que se deriva um custo a partir do preço de venda e da
+            // margem assumida, tal como nos outros caminhos de adicionar.
+            let realCost = 0;
             const manualUnitPrice = item.unit_price ? parseFloat(item.unit_price) : null;
 
             if (item.item_type === "product" && item.product_id) {
@@ -3073,6 +3068,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 retailPrice = manualUnitPrice ?? (prod.retail_price || 0);
                 vatRate = prod.vat_rate || 23;
                 uom = prod.uom_symbol || prod.uom_name || null;
+                realCost = Number(prod.cost_price) > 0 ? Number(prod.cost_price) : 0;
               }
             } else if (item.item_type === "service" && item.service_id) {
               const svc = neededServicesMap.get(item.service_id);
@@ -3083,6 +3079,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 retailPrice = manualUnitPrice ?? (svc.retail_price || 0);
                 vatRate = svc.vat_rate || 23;
                 uom = svc.uom_symbol || svc.uom_name || null;
+                realCost = Number(svc.cost_price) > 0 ? Number(svc.cost_price) : 0;
               }
             } else if (manualUnitPrice && manualUnitPrice > 0) {
               // Manual item without catalog reference
@@ -3094,9 +3091,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               retailPrice = manualUnitPrice;
             }
 
-            const materialCost = retailPrice > 0
-              ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)
-              : 0;
+            const materialCost = realCost > 0
+              ? realCost
+              : (retailPrice > 0
+                ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)
+                : 0);
 
             newLines.push({
               catalog_item_id: null,
@@ -3110,7 +3109,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               qt: item.quantity || 1,
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
-              margem_percent: defaultMargin,
+              margem_percent: realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice, defaultInt) : defaultMargin,
               // O preço de venda apurado fica sempre na linha e manda no preço unitário.
               retail_price_unit: retailPrice,
               iva_percent: vatRate,
@@ -4705,9 +4704,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               // valor × fator (setLineBasePrices). Fator 1 = exatamente como antes.
               const uomFactor = getLineUnitsPerUom(line);
               const laborCost = (line.custo_mao_obra_unit || 0) / uomFactor;
-              const newMaterialCost = newRetailPrice > 0
-                ? (newRetailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)) - laborCost
+              // Custo real do artigo — a selecção de atributos muda o preço
+              // (addon), não o custo base do produto/serviço em si. laborCost
+              // é um campo à parte (custo_mao_obra_unit) e não entra aqui.
+              const realCost = Number(product?.cost_price ?? service?.cost_price) > 0
+                ? Number(product?.cost_price ?? service?.cost_price)
                 : 0;
+              const newMaterialCost = realCost > 0
+                ? realCost
+                : (newRetailPrice > 0
+                  ? (newRetailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)) - laborCost
+                  : 0);
               // O novo preço de venda fica na linha e manda no preço unitário.
               updatedLines[editingLineIndex] = setLineBasePrices(
                 { ...line, selected_attributes: attributes },
