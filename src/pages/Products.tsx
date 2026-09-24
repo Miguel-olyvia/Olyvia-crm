@@ -35,6 +35,22 @@ const productSchema = z.object({
   product_type: z.enum(["sale", "purchase", "both"]),
 });
 
+type ProductKindValue = "simple" | "component" | "configurable";
+type ProductKindFilter = "all" | "none" | ProductKindValue;
+type ProductStatusFilter = "all" | Database["public"]["Enums"]["product_status"];
+
+const PRODUCT_KIND_OPTIONS: { value: ProductKindValue; labelKey: string }[] = [
+  { value: "simple", labelKey: "products.kind.simple" },
+  { value: "component", labelKey: "products.kind.component" },
+  { value: "configurable", labelKey: "products.kind.configurable" },
+];
+
+const PRODUCT_STATUS_OPTIONS: { value: Database["public"]["Enums"]["product_status"]; labelKey: string }[] = [
+  { value: "active", labelKey: "products.form.active" },
+  { value: "draft", labelKey: "products.form.draft" },
+  { value: "discontinued", labelKey: "products.form.discontinued" },
+];
+
 const getPrimaryOrgId = (sel: any): string | null => sel?.companyId || sel?.levelSelections?.[0]?.id || null;
 const getAllOrgIds = (sel: any): string[] => {
   if (sel?.selectedCompanyIds?.length) return sel.selectedCompanyIds;
@@ -143,7 +159,8 @@ export default function Products() {
   const [brandFilter, setBrandFilter] = useState("all");
   const [companyFilter, setCompanyFilter] = useState("all");
   
-  const [statusFilter, setStatusFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<ProductStatusFilter>("all");
+  const [productKindFilter, setProductKindFilter] = useState<ProductKindFilter>("all");
   const [sortField, setSortField] = useState<'name' | 'sku' | 'brand_name'>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [open, setOpen] = useState(false);
@@ -262,6 +279,8 @@ export default function Products() {
     categoryFilter,
     subcategoryFilter,
     brandFilter,
+    statusFilter,
+    productKindFilter,
     debouncedSearchTerm,
     sortField,
     sortDirection,
@@ -274,12 +293,14 @@ export default function Products() {
       categoryFilter,
       subcategoryFilter,
       brandFilter,
+      statusFilter,
+      productKindFilter,
     debouncedSearchTerm,
     sortField,
     sortDirection,
     activeCompanyId: activeCompany?.id,
   };
-}, [categoryFilter, subcategoryFilter, brandFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id]);
+}, [categoryFilter, subcategoryFilter, brandFilter, statusFilter, productKindFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id]);
 
   // Resolve all descendant org IDs for the active company (as state to trigger dependents)
   const [descendantIds, setDescendantIds] = useState<string[]>([]);
@@ -379,6 +400,18 @@ export default function Products() {
       // Apply brand filter
       if (filters.brandFilter !== "all") {
         query = query.eq("brand_id", filters.brandFilter);
+      }
+
+      // Apply status filter
+      if (filters.statusFilter !== "all") {
+        query = query.eq("status", filters.statusFilter);
+      }
+
+      // Apply product kind filter
+      if (filters.productKindFilter === "none") {
+        query = query.is("product_kind", null);
+      } else if (filters.productKindFilter !== "all") {
+        query = query.eq("product_kind", filters.productKindFilter);
       }
 
       // Apply search filter (server-side)
@@ -639,7 +672,7 @@ export default function Products() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // loadProducts is stable (dep array is [t, toast]); descendantIds is the intentional trigger
     // for company switches; the filter values are read via filtersRef inside loadProducts.
-  }, [categoryFilter, subcategoryFilter, brandFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id, descendantIds]);
+  }, [categoryFilter, subcategoryFilter, brandFilter, statusFilter, productKindFilter, debouncedSearchTerm, sortField, sortDirection, activeCompany?.id, descendantIds]);
 
   // Load metadata separately (only when company changes)
   useEffect(() => {
@@ -1559,9 +1592,9 @@ export default function Products() {
   };
 
   // Busca TODOS os ids que respeitam os filtros atuais (organização, categoria,
-  // subcategoria, marca, pesquisa) — não só os já carregados na tela pelo
-  // infinite scroll. Sem isto, "Exportar" só exportava a página visível (por
-  // vezes uma dúzia de produtos), silenciosamente, sem qualquer aviso.
+  // subcategoria, marca, tipo, estado, pesquisa) — não só os já carregados na
+  // tela pelo infinite scroll. Sem isto, "Exportar" só exportava a página
+  // visível (por vezes uma dúzia de produtos), silenciosamente, sem aviso.
   const fetchAllFilteredProductIds = async (): Promise<string[]> => {
     const filters = filtersRef.current;
     const effectiveOrgIds = descendantIdsRef.current.length > 0
@@ -1586,6 +1619,12 @@ export default function Products() {
       if (filters.categoryFilter !== "all") query = query.eq("category_id", filters.categoryFilter);
       if (filters.subcategoryFilter !== "all") query = query.eq("subcategory_id", filters.subcategoryFilter);
       if (filters.brandFilter !== "all") query = query.eq("brand_id", filters.brandFilter);
+      if (filters.statusFilter !== "all") query = query.eq("status", filters.statusFilter);
+      if (filters.productKindFilter === "none") {
+        query = query.is("product_kind", null);
+      } else if (filters.productKindFilter !== "all") {
+        query = query.eq("product_kind", filters.productKindFilter);
+      }
       if (filters.debouncedSearchTerm.trim()) {
         const searchLower = escapePostgrestOrTerm(filters.debouncedSearchTerm.toLowerCase().trim());
         if (searchLower) {
@@ -2423,7 +2462,7 @@ export default function Products() {
             />
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
             <Select value={categoryFilter} onValueChange={(value) => {
               setCategoryFilter(value);
               // Reset subcategory filter when category changes
@@ -2473,6 +2512,35 @@ export default function Products() {
                 {brands.map((brand) => (
                   <SelectItem key={brand.id} value={brand.id}>
                     {brand.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={productKindFilter} onValueChange={(value) => setProductKindFilter(value as ProductKindFilter)}>
+              <SelectTrigger>
+                <SelectValue placeholder={t('products.allKinds')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('products.allKinds')}</SelectItem>
+                {PRODUCT_KIND_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
+                  </SelectItem>
+                ))}
+                <SelectItem value="none">{t('products.kind.none')}</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as ProductStatusFilter)}>
+              <SelectTrigger>
+                <SelectValue placeholder={t('products.allStatuses')} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t('products.allStatuses')}</SelectItem>
+                {PRODUCT_STATUS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {t(option.labelKey)}
                   </SelectItem>
                 ))}
               </SelectContent>
