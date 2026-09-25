@@ -1440,7 +1440,7 @@ export function FormBuilder({
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left Panel */}
-          <div className="w-80 flex-shrink-0 border-r bg-muted/30 overflow-hidden flex flex-col">
+          <div className="w-96 flex-shrink-0 border-r bg-muted/30 overflow-hidden flex flex-col">
             <div className="p-3 border-b bg-background flex items-center justify-between">
               <span className="font-medium text-sm">Estrutura</span>
               <div className="relative">
