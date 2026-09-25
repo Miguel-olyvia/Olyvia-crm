@@ -370,7 +370,17 @@ Deno.serve(async (req: Request) => {
 
       return new Response(
         JSON.stringify({
-          slots: aggregatedSlots.map(s => ({ start: s.start, end: s.end, available_count: s.available_count })),
+          slots: aggregatedSlots.map(s => ({
+            start: s.start,
+            end: s.end,
+            available_count: s.available_count,
+            // Ordem de resource_ids reflete a ordem de processamento (por
+            // proximidade, herdada de find_nearest_resources) -- o primeiro
+            // e o comercial prioritario para este horario. Informativo: o
+            // book-slot revalida no momento do submit e pode escolher outro
+            // se este ja nao servir.
+            preferred_resource_id: s.resource_ids[0],
+          })),
           timezone: scheduleConfig?.timezone || 'Europe/Lisbon',
           coverage,
           duration_minutes: durationMinutes,

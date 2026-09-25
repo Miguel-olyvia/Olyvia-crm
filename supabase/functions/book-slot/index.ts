@@ -2,7 +2,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
-import { orderByLeastBusy } from "../_shared/leastBusy.ts";
 import { findLocalEntityForOrg } from "../_shared/entityScopedLookup.ts";
 import {
   loadFormEmailConfig,
@@ -308,16 +307,19 @@ Deno.serve(async (req: Request) => {
       );
     });
 
-    const orderedCandidates = await orderByLeastBusy(
-      supabase,
-      candidatesWithSlot.map((res: any) => ({ id: res.resource_id }))
-    );
+    // Regra 13, Logica "quem": candidatesWithSlot ja vem ordenado por
+    // proximidade (herdado de find_nearest_resources) -- NAO reordenar por
+    // orderByLeastBusy aqui. Essa ordenacao e por numero total de marcacoes
+    // de sempre, sem nada a ver com distancia, e substituia por completo a
+    // prioridade "mais perto primeiro" que o calendario publico ja promete
+    // ao cliente (public-availability, preferred_resource_id).
+    const proximityOrdered = candidatesWithSlot.map((res: any) => ({ id: res.resource_id }));
 
     // O comercial da pessoa vai a frente de todos. Se ele nao estiver entre os
     // que tem esta hora livre, NAO se marca a mais ninguem -- ver abaixo.
     const ordered = ownerResourceIds.length > 0
-      ? orderedCandidates.filter((cand: { id: string }) => ownerResourceIds.includes(cand.id))
-      : orderedCandidates;
+      ? proximityOrdered.filter((cand: { id: string }) => ownerResourceIds.includes(cand.id))
+      : proximityOrdered;
 
     for (const candidate of ordered) {
       // Re-verify at confirmation time — availability may have been computed
