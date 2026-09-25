@@ -883,11 +883,28 @@ export function FormBuilder({
 
     const ADDRESS_MAPPINGS = ["address", "postal_code", "city"];
     const newFields: FormField[] = [];
+    const movedLabels: string[] = [];
     let sortOrder = 0;
     for (const mapping of ADDRESS_MAPPINGS) {
       // Não duplica: se já existir um campo com este mapeamento noutro
-      // passo, deixa-o ficar lá (o admin decide se o move para aqui).
-      if (fields.some(f => f.contact_field_mapping === mapping)) continue;
+      // passo, move-o para aqui em vez de o ignorar em silêncio -- deixá-lo
+      // ficar lá dava um passo "pronto a usar" completamente vazio quando os
+      // três mapeamentos já existiam espalhados por outros passos (achado
+      // 25/09, ex.: Localização já tinha o código postal).
+      const existing = fields.find(f => f.contact_field_mapping === mapping);
+      if (existing) {
+        const { error: moveError } = await supabase
+          .from("form_fields")
+          .update({ step_number: newStep.step_number, sort_order: sortOrder++ })
+          .eq("id", existing.id);
+        if (moveError) {
+          captureFlowError(moveError, "config-partial-write");
+          continue;
+        }
+        newFields.push({ ...existing, step_number: newStep.step_number, sort_order: sortOrder - 1 });
+        movedLabels.push(existing.field_label || mapping);
+        continue;
+      }
       const prop = CONTACT_FIELDS.find(f => f.value === mapping);
       const defaults = CONTACT_FIELD_DEFAULTS[mapping] || { field_type: "text", is_required: false };
       const { data: fieldData, error: fieldError } = await supabase
@@ -914,8 +931,9 @@ export function FormBuilder({
       if (fieldData) newFields.push(fieldData);
     }
 
+    const movedFieldIds = new Set(newFields.map(f => f.id));
     let allSteps = [...steps, newStep];
-    let allFields = [...fields, ...newFields];
+    let allFields = [...fields.filter(f => !movedFieldIds.has(f.id)), ...newFields];
 
     const firstSchedulingIndex = allSteps.findIndex(s => s.step_type === 'scheduling');
     if (firstSchedulingIndex !== -1) {
@@ -954,7 +972,9 @@ export function FormBuilder({
     setShowStepTypeMenu(false);
     toast({
       title: "Passo de morada adicionado",
-      description: "Morada, Código Postal e Cidade -- já colocado antes do agendamento, se o formulário tiver um.",
+      description: movedLabels.length > 0
+        ? `${movedLabels.join(", ")} movido${movedLabels.length > 1 ? "s" : ""} de outro passo para aqui -- já colocado antes do agendamento, se o formulário tiver um.`
+        : "Morada, Código Postal e Cidade -- já colocado antes do agendamento, se o formulário tiver um.",
     });
   };
 
