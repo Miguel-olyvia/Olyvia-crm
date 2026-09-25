@@ -22929,6 +22929,18 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      rpc_add_entity_delivery_address: {
+        Args: {
+          p_city?: string
+          p_entity_id: string
+          p_floor?: string
+          p_number?: string
+          p_postal_code?: string
+          p_street: string
+          p_unit?: string
+        }
+        Returns: Json
+      }
       rpc_adjust_stock: {
         Args: {
           p_direction: string
@@ -24671,6 +24683,7 @@ export type Database = {
           client_name: string
           contract_id: string
           contract_number: string
+          delivery_address: string
           lines_awaiting_order: number
           lines_from_stock: number
           lines_no_supplier: number
@@ -24679,6 +24692,21 @@ export type Database = {
           overall_status: string
           signature_date: string
           total_lines: number
+        }[]
+      }
+      rpc_list_entity_delivery_addresses: {
+        Args: { p_entity_id: string }
+        Returns: {
+          address_id: string
+          city: string
+          created_at: string
+          entity_address_id: string
+          floor: string
+          formatted: string
+          number: string
+          postal_code: string
+          street: string
+          unit: string
         }[]
       }
       rpc_manage_attribute_option_group: {
@@ -25251,6 +25279,10 @@ export type Database = {
           p_warehouse_id: string
         }
         Returns: number
+      }
+      rpc_remove_entity_delivery_address: {
+        Args: { p_entity_address_id: string }
+        Returns: Json
       }
       rpc_resolve_form_submission: {
         Args: {
