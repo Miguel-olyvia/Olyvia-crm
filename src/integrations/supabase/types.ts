@@ -24623,6 +24623,10 @@ export type Database = {
         Args: { p_contract_id: string }
         Returns: Json
       }
+      rpc_get_manual_client_order_edit: {
+        Args: { p_contract_id: string }
+        Returns: Json
+      }
       rpc_get_supplier_sla_orders: {
         Args: { p_supplier_id: string }
         Returns: {

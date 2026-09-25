@@ -1416,20 +1416,21 @@ const ClientOrders = () => {
     const doc = detailData;
     setEditLoading(true);
     try {
-      const { data: contract, error: contractError } = await (supabase as any)
-        .from('client_contracts')
-        .select('quote_id, entity_id')
-        .eq('id', doc.contract_id)
-        .single();
+      // RPC SECURITY DEFINER com as mesmas verificações da gravação
+      // (rpc_update_manual_client_order): a leitura direta falhava pela RLS
+      // de client_contracts para quem vê a organização pela hierarquia.
+      const { data: contractData, error: contractError } = await supabase
+        .rpc('rpc_get_manual_client_order_edit', { p_contract_id: doc.contract_id });
       if (contractError) throw contractError;
+      const contract = contractData as unknown as { quote_id: string | null; entity_id: string | null; lines: any[] | null } | null;
       if (!contract?.quote_id) throw new Error(t('clientOrders.toast.editLoadError'));
 
-      const { data: quoteLines, error: linesError } = await (supabase as any)
-        .from('quote_lines')
-        .select('id, product_id, service_id, descricao_snapshot, categoria, qt, custo_material_unit, iva_percent, uom_id, units_per_uom, unidade, ordem')
-        .eq('quote_id', contract.quote_id)
-        .order('ordem', { ascending: true });
-      if (linesError) throw linesError;
+      const quoteLines = contract.lines || [];
+      // Proteção: nunca abrir o diálogo vazio sobre uma encomenda com linhas —
+      // gravar assim apagaria as linhas.
+      if (quoteLines.length === 0 && (doc.lines?.length ?? 0) > 0) {
+        throw new Error(t('clientOrders.toast.editLoadError'));
+      }
 
       const detailByLineId = new Map(doc.lines.map((l) => [l.quote_line_id, l]));
       const items: ManualClientOrderItem[] = ((quoteLines as any[]) || [])
