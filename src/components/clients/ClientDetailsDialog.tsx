@@ -39,6 +39,7 @@ import { differenceInDays } from "date-fns";
 import { calculateClientHealth, type ClientContractInfo, type ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 import { RequestErasureButton } from "@/components/RequestErasureButton";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { ClientDeliveryAddressesSection } from "@/components/clients/ClientDeliveryAddressesSection";
 
 /**
  * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
@@ -281,10 +282,14 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     return () => { isCancelled = true; };
   }, [open, client]);
 
-  // Populate edit form address from loaded entity addresses (primary first)
+  // Populate edit form address from loaded entity addresses (primary first).
+  // O fallback ignora as moradas de entrega (address_type 'delivery'): sem
+  // isto, um cliente sem morada principal mostraria aqui uma de entrega, e o
+  // Guardar gravá-la-ia como principal.
   useEffect(() => {
     if (addresses.length > 0) {
-      const primary = addresses.find((a: any) => a.is_primary) || addresses[0];
+      const primary = addresses.find((a: any) => a.is_primary)
+        || addresses.find((a: any) => a.address_type !== "delivery");
       if (primary) {
         setEditFormData(prev => ({
           ...prev,
@@ -1322,6 +1327,8 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                       </div>
                     </div>
                   </div>
+                  {/* Moradas de entrega: gravam logo por RPC, fora do Guardar da ficha. */}
+                  {client.entity_id && <ClientDeliveryAddressesSection entityId={client.entity_id} />}
                   <div className="space-y-2"><Label>Notas</Label><Textarea value={editFormData.notes} onChange={e => setEditFormData({ ...editFormData, notes: e.target.value })} rows={4} /></div>
                   <div className="flex justify-end gap-2">
                     <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>

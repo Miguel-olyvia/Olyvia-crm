@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -12,7 +12,8 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Plus, Trash2, AlertCircle } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Plus, Trash2, AlertCircle, AlertTriangle } from "lucide-react";
 
 type MovementType = "entrada" | "saida" | "transferencia" | "ajuste" | "devolucao" | "quebra";
 
@@ -75,6 +76,22 @@ interface MovementLine {
   // (o utilizador pode sempre confirmar/editar/remover manualmente).
   sourceLineStatus?: "servido_por_stock" | "recebido" | "a_aguardar_encomenda" | "sem_fornecedor";
 }
+
+const STOCK_INTEGER_ONLY_MSG = "O stock só regista unidades inteiras.";
+
+// Reserva de stock para Encomendas Clientes assinadas (20261204310000), por
+// produto e ao nível da ORGANIZAÇÃO (todos os armazéns) — resultado de
+// rpc_get_product_stock_reservations.
+interface ProductReservation {
+  qty_reserved: number;
+  qty_missing: number;
+  orders_count: number;
+}
+
+const toNum = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
 
 const makeEmptyLine = (productId = ""): MovementLine => ({
   key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -141,6 +158,13 @@ export default function StockMovementDialog({
   const [clientOrders, setClientOrders] = useState<ClientOrderOption[]>([]);
   const [clientOrdersLoaded, setClientOrdersLoaded] = useState(false);
   const [clientOrderLoading, setClientOrderLoading] = useState(false);
+  // Reserva da própria Encomenda Cliente ligada (qty_reserved somado por
+  // produto): uma saída para essa encomenda pode consumir a sua reserva.
+  const [clientOrderReservedByProduct, setClientOrderReservedByProduct] = useState<Record<string, number>>({});
+
+  // Aviso não bloqueante: reservas e stock total da organização por produto.
+  const [reservations, setReservations] = useState<Record<string, ProductReservation>>({});
+  const [orgStockByProduct, setOrgStockByProduct] = useState<Record<string, number>>({});
 
   const isProductLocked = Boolean(defaultProductId);
   const isWarehouseLocked = Boolean(defaultWarehouseId) && movementType !== "transferencia";
@@ -158,6 +182,9 @@ export default function StockMovementDialog({
     setCounterparty("");
     setNotes("");
     setClientOrderId("");
+    setClientOrderReservedByProduct({});
+    setReservations({});
+    setOrgStockByProduct({});
     setLines([makeEmptyLine(defaultProductId)]);
   }, [open, defaultProductId, defaultWarehouseId]);
 
@@ -219,6 +246,7 @@ export default function StockMovementDialog({
   const handleClientOrderChange = async (value: string) => {
     const id = value === "none" ? "" : value;
     setClientOrderId(id);
+    setClientOrderReservedByProduct({});
     if (!id) return;
 
     setClientOrderLoading(true);
@@ -240,6 +268,14 @@ export default function StockMovementDialog({
         quantity: String(l.quantity ?? ""),
         sourceLineStatus: l.line_status,
       })));
+
+      const ownReserved: Record<string, number> = {};
+      docLines.forEach((l) => {
+        if (l.product_id && toNum(l.qty_reserved) > 0) {
+          ownReserved[l.product_id] = (ownReserved[l.product_id] || 0) + toNum(l.qty_reserved);
+        }
+      });
+      setClientOrderReservedByProduct(ownReserved);
 
       const alreadyServed = docLines.filter((l) => l.line_status === "servido_por_stock" || l.line_status === "recebido").length;
       if (alreadyServed > 0) {
@@ -303,19 +339,108 @@ export default function StockMovementDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [needsSupplier]);
 
+  // Movimentos que tiram stock da organização (a transferência só o muda de
+  // armazém, não mexe no total da organização, logo não consome reservas).
+  const consumesOrgStock = movementType === "saida"
+    || movementType === "quebra"
+    || movementType === "devolucao"
+    || (movementType === "ajuste" && direction === "negativo");
+
+  const productIdsKey = useMemo(
+    () => Array.from(new Set(lines.map((l) => l.productId).filter(Boolean))).sort().join(","),
+    [lines],
+  );
+
+  // Reservas por produto (rpc_get_product_stock_reservations) + stock total da
+  // organização (armazéns ativos, a mesma base da reserva). Falhar isto nunca
+  // impede o registo: o aviso simplesmente não aparece.
+  useEffect(() => {
+    if (!open || !consumesOrgStock || !organizationId || !productIdsKey) return;
+    const productIds = productIdsKey.split(",");
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await (supabase as any).rpc("rpc_get_product_stock_reservations", {
+          p_organization_id: organizationId,
+          p_product_ids: productIds,
+        });
+        if (error) throw error;
+        const nextReservations: Record<string, ProductReservation> = {};
+        ((data as any[]) || []).forEach((r) => {
+          if (!r?.product_id) return;
+          nextReservations[r.product_id] = {
+            qty_reserved: toNum(r.qty_reserved),
+            qty_missing: toNum(r.qty_missing),
+            orders_count: toNum(r.orders_count),
+          };
+        });
+        const reservedIds = Object.keys(nextReservations).filter((id) => nextReservations[id].qty_reserved > 0);
+        const nextOrgStock: Record<string, number> = {};
+        if (reservedIds.length > 0) {
+          const { data: stockRows, error: stockError } = await (supabase as any)
+            .from("stocks")
+            .select("product_id, quantity, warehouses!inner(deleted_at)")
+            .eq("organization_id", organizationId)
+            .is("deleted_at", null)
+            .is("warehouses.deleted_at", null)
+            .in("product_id", reservedIds);
+          if (stockError) throw stockError;
+          ((stockRows as any[]) || []).forEach((row) => {
+            nextOrgStock[row.product_id] = (nextOrgStock[row.product_id] || 0) + toNum(row.quantity);
+          });
+        }
+        if (cancelled) return;
+        setReservations(nextReservations);
+        setOrgStockByProduct(nextOrgStock);
+      } catch (error) {
+        console.warn("[StockMovementDialog] não foi possível obter as reservas de stock", error);
+        if (cancelled) return;
+        setReservations({});
+        setOrgStockByProduct({});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [open, consumesOrgStock, organizationId, productIdsKey]);
+
+  // Quanto desta linha sai de stock reservado para OUTRAS encomendas:
+  // livre = stock da organização − reservado (sem a reserva da própria
+  // encomenda ligada, numa saída); consome o que a quantidade passar do livre.
+  const getReservedConsumption = (line: MovementLine): { qty: number; orders: number } | null => {
+    if (!consumesOrgStock || !line.productId) return null;
+    const res = reservations[line.productId];
+    if (!res || res.qty_reserved <= 0) return null;
+    const qty = parseLineQty(line.quantity);
+    if (!Number.isFinite(qty) || qty <= 0) return null;
+    const own = movementType === "saida" && clientOrderId ? (clientOrderReservedByProduct[line.productId] || 0) : 0;
+    const otherReserved = Math.max(0, res.qty_reserved - own);
+    if (otherReserved <= 0) return null;
+    const orgStock = Math.max(0, orgStockByProduct[line.productId] || 0);
+    const free = Math.max(0, orgStock - otherReserved);
+    const consumed = Math.min(otherReserved, Math.max(0, qty - free));
+    if (consumed <= 0) return null;
+    const orders = Math.max(1, res.orders_count - (own > 0 ? 1 : 0));
+    return { qty: Math.round(consumed * 1e6) / 1e6, orders };
+  };
+
   const addLine = () => setLines((prev) => [...prev, makeEmptyLine()]);
   const removeLine = (key: string) => setLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== key) : prev));
 
+  // O stock conta-se em unidades inteiras. Antes era parseInt, que truncava
+  // em silêncio (1,5 → 1); agora um decimal é recusado na validação.
+  const parseLineQty = (raw: string): number => Number(String(raw).trim().replace(",", "."));
+
   const validateLine = (line: MovementLine): string | null => {
     if (!line.productId) return "Escolhe um produto.";
-    const qty = parseInt(line.quantity, 10);
-    if (!qty || qty <= 0) return "Quantidade tem de ser positiva.";
+    const qty = parseLineQty(line.quantity);
+    if (!line.quantity.trim() || !Number.isFinite(qty) || qty <= 0) return "Quantidade tem de ser positiva.";
+    if (!Number.isInteger(qty)) return STOCK_INTEGER_ONLY_MSG;
     if (needsSupplier && !line.itemSupplierId) return "Escolhe o fornecedor.";
     return null;
   };
 
   const runLineRpc = async (line: MovementLine): Promise<{ error: any }> => {
-    const qty = parseInt(line.quantity, 10);
+    // validateLine já garantiu um inteiro positivo.
+    const qty = parseLineQty(line.quantity);
     switch (movementType) {
       case "entrada":
         return supabase.rpc("rpc_register_stock_entry", {
@@ -400,7 +525,11 @@ export default function StockMovementDialog({
     const lineErrors = lines.map((l) => validateLine(l));
     if (lineErrors.some((e) => e)) {
       setLines((prev) => prev.map((l, i) => ({ ...l, error: lineErrors[i] || undefined })));
-      toast({ title: "Erro", description: "Corrige as linhas assinaladas antes de continuar.", variant: "destructive" });
+      toast({
+        title: "Erro",
+        description: lineErrors.includes(STOCK_INTEGER_ONLY_MSG) ? STOCK_INTEGER_ONLY_MSG : "Corrige as linhas assinaladas antes de continuar.",
+        variant: "destructive",
+      });
       return;
     }
     // Produtos repetidos na mesma submissão — evita 2 movimentos concorrentes
@@ -580,6 +709,8 @@ export default function StockMovementDialog({
                     <Input
                       type="number"
                       min={1}
+                      step={1}
+                      inputMode="numeric"
                       value={line.quantity}
                       onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
                     />
@@ -649,6 +780,19 @@ export default function StockMovementDialog({
                     Esta linha já consta como {line.sourceLineStatus === "servido_por_stock" ? "servida por stock" : "recebida"} na Encomenda Cliente — confirma que não é duplicação antes de registar.
                   </p>
                 )}
+
+                {(() => {
+                  const consumption = getReservedConsumption(line);
+                  if (!consumption) return null;
+                  return (
+                    <Alert className="border-amber-500/50 bg-amber-50 py-2 dark:bg-amber-950/20">
+                      <AlertTriangle className="h-4 w-4 text-amber-600" />
+                      <AlertDescription className="text-xs text-amber-900 dark:text-amber-200">
+                        {t('inventory.movement.reservedWarning', { qty: consumption.qty, count: consumption.orders })}
+                      </AlertDescription>
+                    </Alert>
+                  );
+                })()}
 
                 {line.error && (
                   <p className="text-xs text-destructive flex items-center gap-1">

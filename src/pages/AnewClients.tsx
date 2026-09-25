@@ -1430,9 +1430,9 @@ const AnewClients = () => {
       // leads/contacts/clients tied to it, so skip the query entirely.
       const [{ data: existingLeads }, { data: existingContacts }, { data: existingClientsCheck }] = entityResolved
         ? await Promise.all([
-            (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
-            supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-            supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+            (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")').is("deleted_at", null),
+            supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive").is("deleted_at", null),
+            supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive").is("deleted_at", null),
           ])
         : [{ data: [] }, { data: [] }, { data: [] }];
 

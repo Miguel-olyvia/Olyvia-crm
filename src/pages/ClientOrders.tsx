@@ -27,11 +27,25 @@ import { PermissionGate } from "@/components/PermissionGate";
 import { EntitySearchInput, type EntitySearchResult } from "@/components/EntitySearchInput";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { Badge } from "@/components/ui/badge";
-import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { ClipboardCheck, Eye, FileDown, ExternalLink, Loader2, Pencil, Plus, ShoppingBag, Trash2, Truck, Undo2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
 import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
+import { useProductBaseUomCodes } from "@/hooks/useProductBaseUomCodes";
+import { requiresIntegerQty, isValidQtyFor, roundToIntegerQty, integerQtyMessage } from "@/utils/quotes/integerQty";
+import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
+import {
+  fetchEntityDeliveryAddresses,
+  formatDeliveryAddress,
+  type AddDeliveryAddressResult,
+  type DeliveryAddressInput,
+  type EntityDeliveryAddress,
+} from "@/lib/addresses/entityDeliveryAddresses";
 
 // Fase 5.0F do plano de inventário: página só-leitura "Encomendas Clientes" —
 // 1 linha por Contrato assinado, derivada ao momento da leitura de
@@ -68,11 +82,39 @@ interface ManualClientOrderItem {
   quantity: number;
   unit_price: number;
   vat_rate: number;
+  // Só em modo edição (rpc_update_manual_client_order): linha já gravada.
+  // null/ausente = linha nova.
+  quote_line_id?: string | null;
+  // Linha trancada (já saiu de stock ou tem pedido a fornecedor): mostrada
+  // mas não editável. `locked_payload` guarda os valores EXATOS lidos de
+  // quote_lines — o servidor rejeita qualquer diferença, mesmo na descrição.
+  locked?: boolean;
+  locked_payload?: Record<string, unknown>;
+  // Linha existente não trancada: produto/quantidade/embalagem como foram
+  // lidos, para saber se o utilizador a alterou (ver handleUpdateOrder).
+  original_key?: string;
+  // Linha existente: quote_lines.uom_id tal como lido, reenviado sem alteração
+  // (este ecrã não escolhe unidade). Linhas novas: null/ausente.
+  uom_id?: string | null;
 }
+
+// Valor da opção "+ Nova morada…" no Select de moradas de entrega.
+const NEW_DELIVERY_ADDRESS_VALUE = "__new_delivery_address__";
+
+const manualItemKey = (item: Pick<ManualClientOrderItem, 'product_id' | 'quantity' | 'uom_id'>) =>
+  `${item.product_id ?? ''}|${Number(item.quantity) || 0}|${item.uom_id ?? ''}`;
+
+// Origem de uma Encomenda Cliente (20261204290000).
+type ClientOrderOriginType = 'contract' | 'direct_sale' | 'manual';
 
 interface ClientOrderDocumentRow {
   contract_id: string;
   contract_number: string;
+  // 20261204290000: número próprio da encomenda (EC-AAAA-NNNN) e origem.
+  // Opcionais: fallback para contract_number se vierem null.
+  order_number?: string | null;
+  origin_type?: ClientOrderOriginType | null;
+  origin_number?: string | null;
   client_name: string | null;
   signature_date: string | null;
   total_lines: number;
@@ -81,6 +123,8 @@ interface ClientOrderDocumentRow {
   lines_received: number;
   lines_no_supplier: number;
   overall_status: string;
+  // 20261204400000: morada de entrega gravada na encomenda (pode ser nula).
+  delivery_address?: string | null;
 }
 
 // 20261130070000: armazém(ns) com stock deste produto, só preenchido nas
@@ -91,7 +135,10 @@ interface ClientOrderDocumentRow {
 interface ClientOrderAvailableWarehouse {
   warehouse_id: string;
   warehouse_name: string;
+  // 20261204310000: `quantity` = LEAST(stock do armazém, qty_reserved da
+  // linha); `physical_quantity` = stock físico do armazém.
   quantity: number;
+  physical_quantity?: number | null;
 }
 
 // Uma linha é de produto OU de serviço (item_type), nunca das duas. A RPC
@@ -109,11 +156,93 @@ interface ClientOrderDocumentLine {
   service_name: string | null;
   service_sku: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'parcial' | 'sem_fornecedor' | 'servico';
   stock_movement_id: string | null;
   purchase_order_id: string | null;
   purchase_order_number: string | null;
   available_warehouses: ClientOrderAvailableWarehouse[] | null;
+  // 20261204290000: saída manual (estornável) que serve a linha — null nas
+  // baixas automáticas na assinatura, que não se revertem daqui.
+  stock_exit_movement_id?: string | null;
+  // Linha já servida/pedida: não pode ser alterada nem removida na edição.
+  line_locked?: boolean;
+  // 20261204310000: reserva de stock por ordem de assinatura. Unidades base;
+  // null em serviços e em encomendas não assinadas. component_index distingue
+  // os componentes de um bundle (várias linhas com o mesmo quote_line_id).
+  component_index?: number | null;
+  qty_needed?: number | null;
+  qty_reserved?: number | null;
+  qty_ordered?: number | null;
+  qty_received?: number | null;
+  qty_missing?: number | null;
+  // 20261204340000: quantidade já servida por stock (unidades base); null em
+  // serviços. Fonte de verdade para "X servido" — não inferir pelos movimentos.
+  qty_served?: number | null;
+  // Só em linhas de produto: o produto tem fornecedor preferencial. Distingue,
+  // em 'sem_fornecedor', "falta pedir ao fornecedor" (true) de "não há
+  // fornecedor preferencial" (false). null/ausente = desconhecido (serviços ou
+  // RPC ainda sem o campo).
+  has_preferred_supplier?: boolean | null;
+}
+
+// 'sem_fornecedor' = quantidade em falta sem pedido ao fornecedor. A causa
+// depende de has_preferred_supplier; ver getLineStatusColor/Label.
+type MissingSupplierKind = 'toRequest' | 'noPreferred' | 'unknown';
+const getMissingSupplierKind = (line: Pick<ClientOrderDocumentLine, 'has_preferred_supplier'>): MissingSupplierKind =>
+  line.has_preferred_supplier === true
+    ? 'toRequest'
+    : line.has_preferred_supplier === false
+      ? 'noPreferred'
+      : 'unknown';
+
+// Chave única por linha do documento: um bundle devolve várias linhas com o
+// mesmo quote_line_id (uma por componente).
+const lineKey = (line: Pick<ClientOrderDocumentLine, 'quote_line_id' | 'component_index'>) =>
+  `${line.quote_line_id}:${line.component_index ?? 0}`;
+
+const asQty = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+// Arredonda o ruído de vírgula flutuante antes de testes de inteiro/limites.
+const roundQty = (value: number): number => Math.round(value * 1e6) / 1e6;
+
+// Linha cuja saída de stock se pode confirmar daqui: stock disponível ou
+// parcial com parte reservada. Encomendas antigas/não assinadas não trazem
+// qty_reserved (null) — mantém-se o comportamento anterior (quantity).
+const isStockExitConfirmable = (line: ClientOrderDocumentLine): boolean => {
+  if (!line.product_id) return false;
+  if (line.line_status === 'stock_disponivel_confirmar') {
+    return line.qty_reserved === null || line.qty_reserved === undefined || asQty(line.qty_reserved) > 0;
+  }
+  return line.line_status === 'parcial' && asQty(line.qty_reserved) > 0;
+};
+
+// Saída manual estornável: tem movimento de saída próprio e a linha está
+// servida por stock, ou (20261204340000) 'parcial'/'recebido' com parte já
+// servida por stock (qty_served > 0).
+const isStockExitRevertible = (line: ClientOrderDocumentLine): boolean => {
+  if (!line.stock_exit_movement_id) return false;
+  if (line.line_status === 'servido_por_stock') return true;
+  return (line.line_status === 'parcial' || line.line_status === 'recebido') && asQty(line.qty_served) > 0;
+};
+
+// Quantidade que a linha pode consumir do stock (unidades base).
+const confirmableQty = (line: ClientOrderDocumentLine): number =>
+  line.qty_reserved === null || line.qty_reserved === undefined
+    ? asQty(line.quantity)
+    : asQty(line.qty_reserved);
+
+// Resultado de rpc_request_missing_from_supplier (e chave supplier_request de
+// rpc_update_manual_client_order).
+interface SupplierRequestResult {
+  success?: boolean;
+  purchase_orders_created?: number;
+  items_created?: number;
+  skipped_no_supplier?: number;
+  skipped_other?: number;
+  errors?: number;
 }
 
 // Origem de uma encomenda que nasceu de uma venda direta (Fase 5). Ausente
@@ -178,6 +307,19 @@ interface ClientOrderDocumentDetail {
   // Opcional de propósito: a chave só passa a existir depois de a migração da
   // RPC estar aplicada, e `fetchDetail` normaliza sempre para array.
   diagnostic?: ClientOrderDiagnosticNeed[];
+  // 20261204290000
+  order_number?: string | null;
+  origin_type?: ClientOrderOriginType | null;
+  origin_number?: string | null;
+  delivery_address?: string | null;
+  is_editable?: boolean;
+  // 20261204310000
+  // 20261204340000: missing_lines_count/can_request_missing só contam linhas que
+  // o pedido ao fornecedor consegue fazer; missing_units_total = soma dessas
+  // faltas (unidades base).
+  missing_lines_count?: number | null;
+  can_request_missing?: boolean;
+  missing_units_total?: number | null;
 }
 
 // --- Normalização defensiva do bloco `diagnostic` -------------------------
@@ -237,6 +379,11 @@ const ClientOrders = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const canConfirmStockExit = hasPermission('inventory.edit') && hasPermission('client_orders.confirm_stock_exit');
+  // Editar encomenda manual (rpc_update_manual_client_order exige o mesmo).
+  const canEditOrder = hasPermission('client_contracts.edit');
+  // Pedir em falta ao fornecedor (rpc_request_missing_from_supplier exige
+  // purchase_orders.create + client_contracts.view).
+  const canRequestMissing = hasPermission('purchase_orders.create') && hasPermission('client_contracts.view');
 
   // As chaves da secção "Diagnóstico da obra" ainda não existem em
   // src/translations/index.ts (ficheiro fora do âmbito desta alteração).
@@ -287,20 +434,54 @@ const ClientOrders = () => {
   const [createNotes, setCreateNotes] = useState("");
   const [createDeliveryAddress, setCreateDeliveryAddress] = useState("");
   const deliveryAddressRequestRef = useRef<string | null>(null);
+  // Moradas de entrega do cliente (rpc_list_entity_delivery_addresses) para o
+  // Select acima da Textarea. deliveryEntityId = cliente escolhido na criação,
+  // ou o entity_id do contrato na edição. deliveryChoice = entity_address_id
+  // escolhido ("" = placeholder). A Textarea continua a ser o que se grava.
+  const [deliveryEntityId, setDeliveryEntityId] = useState<string | null>(null);
+  const [deliveryOptions, setDeliveryOptions] = useState<EntityDeliveryAddress[]>([]);
+  const [deliveryOptionsLoading, setDeliveryOptionsLoading] = useState(false);
+  const [deliveryChoice, setDeliveryChoice] = useState("");
+  const [showNewDeliveryForm, setShowNewDeliveryForm] = useState(false);
   const [createItems,setCreateItems] = useState<ManualClientOrderItem[]>([]);
+  // Unidade de stock dos produtos das linhas — quantidade inteira em unidades contáveis.
+  const productUom = useProductBaseUomCodes(createItems.map((item) => item.product_id));
   const [showItemsDialog, setShowItemsDialog] = useState(false);
 
-  // Checklist de saída de stock (linhas stock_disponivel_confirmar):
+  // Checklist de saída de stock (linhas stock_disponivel_confirmar e
+  // 'parcial' com reserva):
   // - checklistActiveLineIds: linhas onde o checkbox foi marcado E há mais de
   //   1 armazém disponível, pelo que o Select + botão "Confirmar" ficam
   //   visíveis à espera de escolha.
   // - selectedWarehouseByLine: armazém escolhido no Select acima, por
-  //   quote_line_id.
+  //   lineKey (quote_line_id + component_index).
   // - confirmingLineId: linha atualmente a chamar
   //   rpc_confirm_client_order_stock_exit (mostra spinner em vez do checkbox).
   const [checklistActiveLineIds, setChecklistActiveLineIds] = useState<Set<string>>(new Set());
   const [selectedWarehouseByLine, setSelectedWarehouseByLine] = useState<Record<string, string>>({});
   const [confirmingLineId, setConfirmingLineId] = useState<string | null>(null);
+
+  // "Confirmar saída de todas": armazém escolhido quando as linhas pendentes
+  // têm mais de um armazém possível, e flag de processamento em lote.
+  const [confirmAllWarehouseId, setConfirmAllWarehouseId] = useState<string>("");
+  const [confirmingAll, setConfirmingAll] = useState(false);
+
+  // Estorno de saída manual (rpc_revert_client_order_stock_exit).
+  const [revertTarget, setRevertTarget] = useState<ClientOrderDocumentLine | null>(null);
+  const [reverting, setReverting] = useState(false);
+
+  // Pedido ao fornecedor do que falta (rpc_request_missing_from_supplier).
+  const [requestingMissing, setRequestingMissing] = useState(false);
+  // Confirmação antes do pedido: o material pode já ter chegado por outra via.
+  const [requestMissingConfirmOpen, setRequestMissingConfirmOpen] = useState(false);
+
+  // Edição de encomenda manual: reutiliza o diálogo de criação. Com
+  // editingContractId preenchido o diálogo grava via
+  // rpc_update_manual_client_order; cliente e data ficam só de leitura.
+  const [editingContractId, setEditingContractId] = useState<string | null>(null);
+  const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
+  const [editingClientName, setEditingClientName] = useState<string | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
 
   // Filtros num ref (não recria loadOrders a cada keystroke) — mesmo truque
   // já usado em Stocks.tsx para manter a identidade do IntersectionObserver
@@ -466,6 +647,7 @@ const ClientOrders = () => {
     setDetailOpen(true);
     setDetailLoading(true);
     setDetailData(null);
+    setConfirmAllWarehouseId("");
     try {
       const doc = await fetchDetail(contractId);
       setDetailData(doc);
@@ -549,7 +731,7 @@ const ClientOrders = () => {
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `EncomendaCliente_${contractNumber || contractId}_${new Date().toISOString().split('T')[0]}.pdf`;
+      link.download = `EncomendaCliente_${doc.order_number || contractNumber || contractId}_${new Date().toISOString().split('T')[0]}.pdf`;
       link.click();
       URL.revokeObjectURL(url);
 
@@ -561,15 +743,56 @@ const ClientOrders = () => {
     }
   };
 
+  // Saída por produto (20261204310000): a RPC é por contrato+produto, recusa
+  // uma segunda saída do mesmo produto e aceita no máximo a soma de
+  // qty_reserved das linhas desse produto. Por isso a quantidade enviada é
+  // essa soma (não line.quantity). Capacidade de cada armazém = stock físico
+  // (physical_quantity); sem esse campo, o maior `quantity` das linhas (que já
+  // vem limitado à reserva DESSA linha).
+  // 20261204340000: a RPC de saída recusa um armazém sem stock suficiente, por
+  // isso `warehouses` só traz os armazéns cuja capacidade ≥ quantity (é o que se
+  // mostra e permite); sem nenhum, a confirmação da linha fica desativada.
+  // `quantity` de cada armazém devolvido = essa capacidade (stock a mostrar).
+  const getProductExitGroup = (productId: string, docLines: ClientOrderDocumentLine[]) => {
+    const groupLines = docLines.filter((l) => l.product_id === productId && isStockExitConfirmable(l));
+    const quantity = roundQty(groupLines.reduce((sum, l) => sum + confirmableQty(l), 0));
+    const byId = new Map<string, ClientOrderAvailableWarehouse>();
+    groupLines.forEach((l) => (l.available_warehouses || []).forEach((wh) => {
+      const physical = wh.physical_quantity === null || wh.physical_quantity === undefined
+        ? null
+        : asQty(wh.physical_quantity);
+      const prev = byId.get(wh.warehouse_id);
+      const capacity = physical === null
+        ? Math.max(asQty(wh.quantity), prev ? asQty(prev.quantity) : 0)
+        : physical;
+      byId.set(wh.warehouse_id, { ...wh, quantity: roundQty(capacity) });
+    }));
+    const warehouses = Array.from(byId.values())
+      .filter((wh) => quantity > 0 && asQty(wh.quantity) >= quantity)
+      .sort((a, b) => asQty(b.quantity) - asQty(a.quantity));
+    return { product_id: productId, quantity, warehouses, lineKeys: groupLines.map(lineKey) };
+  };
+
   // Checklist de saída de stock (fase pós-20261130070000).
   const handleConfirmStockExit = async (line: ClientOrderDocumentLine, warehouseId: string) => {
-    if (!detailData) return;
-    setConfirmingLineId(line.quote_line_id);
+    if (!detailData || !line.product_id) return;
+    const group = getProductExitGroup(line.product_id, detailData.lines);
+    const key = lineKey(line);
+    // p_quantity é integer na RPC — a reserva em unidades base pode não ser.
+    if (!(group.quantity > 0) || !Number.isInteger(group.quantity)) {
+      toast({
+        title: t('clientOrders.toast.stockExitError'),
+        description: t('clientOrders.toast.confirmAllSkippedNonInteger', { count: 1 }),
+        variant: "destructive",
+      });
+      return;
+    }
+    setConfirmingLineId(key);
     try {
       const { error } = await supabase.rpc('rpc_confirm_client_order_stock_exit', {
         p_contract_id: detailData.contract_id,
         p_product_id: line.product_id,
-        p_quantity: line.quantity,
+        p_quantity: group.quantity,
         p_warehouse_id: warehouseId,
       });
       if (error) throw error;
@@ -577,12 +800,12 @@ const ClientOrders = () => {
       toast({ title: t('clientOrders.dialog.stockExitSuccess') });
       setChecklistActiveLineIds((prev) => {
         const next = new Set(prev);
-        next.delete(line.quote_line_id);
+        group.lineKeys.forEach((k) => next.delete(k));
         return next;
       });
       setSelectedWarehouseByLine((prev) => {
         const next = { ...prev };
-        delete next[line.quote_line_id];
+        group.lineKeys.forEach((k) => { delete next[k]; });
         return next;
       });
 
@@ -591,6 +814,7 @@ const ClientOrders = () => {
       // line_status, em vez de tentar recalcular a cascata no frontend.
       const refreshed = await fetchDetail(detailData.contract_id);
       setDetailData(refreshed);
+      loadOrders(0, true);
     } catch (error: any) {
       toast({ title: t('clientOrders.toast.stockExitError'), description: error.message, variant: "destructive" });
     } finally {
@@ -599,17 +823,20 @@ const ClientOrders = () => {
   };
 
   const handleChecklistCheckboxChange = (line: ClientOrderDocumentLine, checked: boolean) => {
-    const warehouses = line.available_warehouses || [];
+    const key = lineKey(line);
+    const warehouses = line.product_id && detailData
+      ? getProductExitGroup(line.product_id, detailData.lines).warehouses
+      : [];
 
     if (!checked) {
       setChecklistActiveLineIds((prev) => {
         const next = new Set(prev);
-        next.delete(line.quote_line_id);
+        next.delete(key);
         return next;
       });
       setSelectedWarehouseByLine((prev) => {
         const next = { ...prev };
-        delete next[line.quote_line_id];
+        delete next[key];
         return next;
       });
       return;
@@ -621,7 +848,187 @@ const ClientOrders = () => {
     }
 
     if (warehouses.length > 1) {
-      setChecklistActiveLineIds((prev) => new Set(prev).add(line.quote_line_id));
+      setChecklistActiveLineIds((prev) => new Set(prev).add(key));
+    }
+  };
+
+  // ── Confirmar saída de todas ─────────────────────────────────────────────
+  // Linhas pendentes de confirmação agrupadas por produto (a RPC é por
+  // contrato+produto e recusa uma segunda saída do mesmo produto, por isso
+  // várias linhas do mesmo produto vão numa só saída com a quantidade somada
+  // em unidades de stock). `pending` e o contador do botão/toast contam
+  // PRODUTOS, não linhas. Se cada produto tem um único armazém, usa-se esse sem
+  // perguntar; caso contrário o utilizador escolhe um armazém e aplica-se aos
+  // produtos onde esse armazém cobre a quantidade somada — os restantes ficam
+  // pendentes.
+  // 20261204310000: entram também as linhas 'parcial' com parte reservada, e
+  // a quantidade de cada produto é a soma de qty_reserved (getProductExitGroup).
+  const getConfirmAllInfo = () => {
+    const docLines = detailData?.lines || [];
+    const productIds = Array.from(new Set(
+      docLines.filter(isStockExitConfirmable).map((l) => l.product_id as string),
+    ));
+    // Só entram produtos com pelo menos um armazém que cubra a quantidade
+    // (getProductExitGroup já filtra); os restantes ficam pendentes e contam em
+    // `uncovered` — mesma regra da confirmação por linha.
+    const groups = productIds
+      .map((pid) => getProductExitGroup(pid, docLines))
+      .filter((g) => g.quantity > 0);
+    const pending = groups.filter((g) => g.warehouses.length > 0);
+    const uncovered = groups.length - pending.length;
+    const byId = new Map<string, string>();
+    pending.forEach((p) => p.warehouses.forEach((wh) => {
+      if (!byId.has(wh.warehouse_id)) byId.set(wh.warehouse_id, wh.warehouse_name);
+    }));
+    const warehouses = Array.from(byId, ([warehouse_id, warehouse_name]) => ({ warehouse_id, warehouse_name }));
+    const singleEach = pending.every((p) => p.warehouses.length === 1);
+    return { pending, warehouses, singleEach, uncovered };
+  };
+
+  const handleConfirmAllStockExits = async () => {
+    if (!detailData || confirmingAll) return;
+    const contractId = detailData.contract_id;
+    const { pending, singleEach, uncovered } = getConfirmAllInfo();
+    if (pending.length === 0) return;
+    if (!singleEach && !confirmAllWarehouseId) return;
+
+    let ok = 0;
+    let failed = 0;
+    let skippedNonInteger = 0;
+    let leftPending = uncovered;
+    let firstError: string | null = null;
+
+    setConfirmingAll(true);
+    try {
+      // Sequencial de propósito: cada saída mexe no saldo do mesmo armazém e
+      // a RPC valida o stock disponível no momento.
+      for (const group of pending) {
+        // p_quantity é integer na RPC — uma quantidade decimal em unidades de
+        // stock não pode ser confirmada daqui.
+        if (!Number.isInteger(group.quantity)) {
+          skippedNonInteger++;
+          continue;
+        }
+        // O armazém tem de cobrir a quantidade somada do produto; se não
+        // cobrir, o produto fica pendente (não conta como falha).
+        const targetId = singleEach ? group.warehouses[0]?.warehouse_id : confirmAllWarehouseId;
+        const wh = group.warehouses.find((w) => w.warehouse_id === targetId);
+        if (!wh || !(Number(wh.quantity) >= group.quantity)) {
+          leftPending++;
+          continue;
+        }
+        const { error } = await supabase.rpc('rpc_confirm_client_order_stock_exit', {
+          p_contract_id: contractId,
+          p_product_id: group.product_id,
+          p_quantity: group.quantity,
+          p_warehouse_id: wh.warehouse_id,
+        });
+        if (error) {
+          failed++;
+          if (!firstError) firstError = error.message;
+        } else {
+          ok++;
+        }
+      }
+
+      setChecklistActiveLineIds(new Set());
+      setSelectedWarehouseByLine({});
+      setConfirmAllWarehouseId("");
+
+      try {
+        const refreshed = await fetchDetail(contractId);
+        setDetailData(refreshed);
+      } catch (error: any) {
+        toast({ title: t('clientOrders.toast.detailError'), description: error?.message, variant: "destructive" });
+      }
+
+      const details: string[] = [];
+      if (firstError) details.push(firstError);
+      if (skippedNonInteger > 0) details.push(t('clientOrders.toast.confirmAllSkippedNonInteger', { count: skippedNonInteger }));
+      if (leftPending > 0) details.push(t('clientOrders.toast.confirmAllLeftPending', { count: leftPending }));
+      toast({
+        title: t('clientOrders.toast.confirmAllResult', { ok, failed }),
+        description: details.length > 0 ? details.join(' · ') : undefined,
+        variant: failed > 0 && ok === 0 ? "destructive" : undefined,
+      });
+    } finally {
+      setConfirmingAll(false);
+    }
+  };
+
+  // ── Reverter saída manual ────────────────────────────────────────────────
+  // Estorna o movimento de saída (o servidor cria o movimento inverso e repõe
+  // o stock). Só existe para saídas manuais — as baixas automáticas na
+  // assinatura não trazem stock_exit_movement_id.
+  const handleRevertStockExit = async () => {
+    if (!detailData || !revertTarget?.stock_exit_movement_id) return;
+    const contractId = detailData.contract_id;
+    setReverting(true);
+    try {
+      const { error } = await (supabase as any).rpc('rpc_revert_client_order_stock_exit', {
+        p_contract_id: contractId,
+        p_movement_id: revertTarget.stock_exit_movement_id,
+      });
+      if (error) throw error;
+      toast({ title: t('clientOrders.toast.revertSuccess') });
+      setRevertTarget(null);
+      const refreshed = await fetchDetail(contractId);
+      setDetailData(refreshed);
+      loadOrders(0, true);
+    } catch (error: any) {
+      toast({ title: t('clientOrders.toast.revertError'), description: error?.message, variant: "destructive" });
+    } finally {
+      setReverting(false);
+    }
+  };
+
+  // Resumo de um pedido ao fornecedor (botão "Pedir em falta" e edição).
+  const describeSupplierRequest = (result: SupplierRequestResult | null | undefined): string => {
+    const parts: string[] = [];
+    const orders = asQty(result?.purchase_orders_created);
+    const items = asQty(result?.items_created);
+    const noSupplier = asQty(result?.skipped_no_supplier);
+    const other = asQty(result?.skipped_other) + asQty(result?.errors);
+    parts.push(t('clientOrders.requestMissing.summary', { orders, items }));
+    if (noSupplier > 0) parts.push(t('clientOrders.requestMissing.noSupplier', { count: noSupplier }));
+    if (other > 0) parts.push(t('clientOrders.requestMissing.skippedOther', { count: other }));
+    return parts.join(' · ');
+  };
+
+  // ── Pedir em falta ao fornecedor ─────────────────────────────────────────
+  // Cria encomendas a fornecedor para a parte das linhas sem reserva nem
+  // pedido (can_request_missing). O servidor decide fornecedor e quantidades.
+  // Só é chamado a partir do AlertDialog de confirmação (requestMissingConfirmOpen).
+  const handleRequestMissing = async () => {
+    if (!detailData || requestingMissing) return;
+    const contractId = detailData.contract_id;
+    setRequestingMissing(true);
+    try {
+      const { data, error } = await (supabase as any).rpc('rpc_request_missing_from_supplier', {
+        p_contract_id: contractId,
+      });
+      if (error) throw error;
+      const result = (data || {}) as SupplierRequestResult;
+      const created = asQty(result.items_created) > 0;
+      toast({
+        title: created
+          ? t('clientOrders.requestMissing.success')
+          : t('clientOrders.requestMissing.nothingCreated'),
+        description: describeSupplierRequest(result),
+        variant: !created && asQty(result.errors) > 0 ? "destructive" : undefined,
+      });
+      try {
+        const refreshed = await fetchDetail(contractId);
+        setDetailData(refreshed);
+      } catch (refreshError: any) {
+        toast({ title: t('clientOrders.toast.detailError'), description: refreshError?.message, variant: "destructive" });
+      }
+      loadOrders(0, true);
+    } catch (error: any) {
+      toast({ title: t('clientOrders.requestMissing.error'), description: error?.message, variant: "destructive" });
+    } finally {
+      setRequestingMissing(false);
+      setRequestMissingConfirmOpen(false);
     }
   };
 
@@ -629,6 +1036,43 @@ const ClientOrders = () => {
     // Mesmo padrão de cross-link já usado em ClientContracts.tsx
     // (?open=<id>) — replicado em PurchaseOrders.tsx para este caso.
     navigate(`/purchase-orders?open=${purchaseOrderId}`);
+  };
+
+  // Origem da encomenda (20261204290000): contrato → "Contrato CC-…"; venda
+  // direta → distintivo + nº VD (origin_number pode vir null por permissões —
+  // cai para a query própria a direct_sales); manual → "Sem documento
+  // anterior". Sem origin_type (RPC antiga) mantém-se o comportamento
+  // anterior: só o distintivo de venda direta, quando existe.
+  const renderOrigin = (
+    contractId: string,
+    originType: ClientOrderOriginType | null | undefined,
+    originNumber: string | null | undefined,
+    contractNumber: string,
+  ) => {
+    const sale = salesByContract[contractId];
+    if (originType === 'direct_sale' || (!originType && sale)) {
+      const number = originNumber || sale?.sale_number || sale?.proforma_number || '';
+      return (
+        <Badge variant="outline" className="w-fit gap-1 font-normal text-xs">
+          <ShoppingBag className="h-3 w-3" />
+          {t('clientOrders.origin.directSale')}
+          {number ? ` ${number}` : ''}
+        </Badge>
+      );
+    }
+    if (originType === 'contract') {
+      return (
+        <span className="text-xs text-muted-foreground font-normal">
+          {t('clientOrders.origin.contract', { number: originNumber || contractNumber })}
+        </span>
+      );
+    }
+    if (originType === 'manual') {
+      return (
+        <span className="text-xs text-muted-foreground font-normal">{t('clientOrders.origin.manual')}</span>
+      );
+    }
+    return null;
   };
 
   const getOverallStatusColor = (status: string) => {
@@ -651,12 +1095,22 @@ const ClientOrders = () => {
     return labels[status] || status;
   };
 
-  const getLineStatusColor = (status: string) => {
+  const getLineStatusColor = (line: ClientOrderDocumentLine) => {
+    const status = line.line_status;
+    if (status === 'sem_fornecedor') {
+      const kind = getMissingSupplierKind(line);
+      // Âmbar: resolve-se com "Pedir em falta ao fornecedor". Vermelho só
+      // quando não há fornecedor preferencial. Neutro quando não se sabe.
+      if (kind === 'toRequest') return "bg-amber-500/10 text-amber-600";
+      if (kind === 'unknown') return "bg-muted text-muted-foreground";
+    }
     const colors: Record<string, string> = {
       servido_por_stock: "bg-success/10 text-success",
       recebido: "bg-teal-500/10 text-teal-600",
       a_aguardar_encomenda: "bg-info/10 text-info",
       stock_disponivel_confirmar: "bg-warning/10 text-warning",
+      // 20261204310000: parte reservada do stock + parte pedida/em falta.
+      parcial: "bg-orange-500/10 text-orange-600",
       sem_fornecedor: "bg-destructive/10 text-destructive",
       // Neutro de propósito: uma linha de serviço não tem stock nem fornecedor,
       // por isso não é uma pendência. Sem esta entrada caía no fallback
@@ -664,6 +1118,49 @@ const ClientOrders = () => {
       servico: "bg-muted text-muted-foreground",
     };
     return colors[status] || colors.sem_fornecedor;
+  };
+
+  // Quantidade em unidades de stock (reserva/pedido/falta).
+  const formatBaseQty = (value: unknown): string => formatDiagnosticNumber(asQty(value));
+
+  // "Parcial — X servido · Y em stock · Z a aguardar fornecedor · W em falta"
+  // (só as partes > 0). "Servido" vem de qty_served (20261204340000), não se
+  // infere pelos movimentos de stock.
+  const getPartialDetail = (line: ClientOrderDocumentLine): string => {
+    const parts: string[] = [];
+    const served = asQty(line.qty_served);
+    const reserved = asQty(line.qty_reserved);
+    const ordered = asQty(line.qty_ordered);
+    const received = asQty(line.qty_received);
+    const missing = asQty(line.qty_missing);
+    if (served > 0) parts.push(t('clientOrders.lineStatus.partServed', { qty: formatBaseQty(served) }));
+    if (reserved > 0) parts.push(t('clientOrders.lineStatus.partInStock', { qty: formatBaseQty(reserved) }));
+    if (ordered > 0) {
+      const pending = roundQty(ordered - received);
+      if (pending > 0) parts.push(t('clientOrders.lineStatus.partAwaitingSupplier', { qty: formatBaseQty(pending) }));
+      if (received > 0) parts.push(t('clientOrders.lineStatus.partReceived', { qty: formatBaseQty(received) }));
+    }
+    if (missing > 0) parts.push(t('clientOrders.lineStatus.partMissing', { qty: formatBaseQty(missing) }));
+    return parts.join(' · ');
+  };
+
+  // Resumo compacto da reserva para as restantes linhas de produto pendentes
+  // (o 'parcial' já o mostra no próprio rótulo). Vazio quando não acrescenta.
+  // Linhas servidas/recebidas: "X servido do stock" quando qty_served > 0.
+  const getReservationSummary = (line: ClientOrderDocumentLine): string => {
+    if (line.item_type === 'service') return '';
+    if (['servido_por_stock', 'recebido'].includes(line.line_status)) {
+      return asQty(line.qty_served) > 0
+        ? t('clientOrders.dialog.qtyServed', { qty: formatBaseQty(line.qty_served) })
+        : '';
+    }
+    if (line.qty_needed === null || line.qty_needed === undefined) return '';
+    if (!['stock_disponivel_confirmar', 'a_aguardar_encomenda', 'sem_fornecedor'].includes(line.line_status)) return '';
+    const parts: string[] = [];
+    if (asQty(line.qty_reserved) > 0) parts.push(t('clientOrders.dialog.qtyReserved', { qty: formatBaseQty(line.qty_reserved) }));
+    if (asQty(line.qty_ordered) > 0) parts.push(t('clientOrders.dialog.qtyOrdered', { qty: formatBaseQty(line.qty_ordered) }));
+    if (asQty(line.qty_missing) > 0) parts.push(t('clientOrders.dialog.qtyMissing', { qty: formatBaseQty(line.qty_missing) }));
+    return parts.join(' · ');
   };
 
   const getLineStatusLabel = (line: ClientOrderDocumentLine) => {
@@ -676,8 +1173,18 @@ const ClientOrders = () => {
         return t('clientOrders.lineStatus.awaitingOrder', { number: line.purchase_order_number || '' });
       case 'stock_disponivel_confirmar':
         return t('clientOrders.lineStatus.stockAvailableConfirm');
-      case 'sem_fornecedor':
-        return t('clientOrders.lineStatus.noSupplier');
+      case 'parcial': {
+        const detail = getPartialDetail(line);
+        return detail
+          ? `${t('clientOrders.lineStatus.partial')} — ${detail}`
+          : t('clientOrders.lineStatus.partial');
+      }
+      case 'sem_fornecedor': {
+        const kind = getMissingSupplierKind(line);
+        if (kind === 'toRequest') return t('clientOrders.lineStatus.missingToRequest');
+        if (kind === 'noPreferred') return t('clientOrders.lineStatus.noSupplier');
+        return t('clientOrders.lineStatus.missingNoRequest');
+      }
       case 'servico':
         return t('clientOrders.lineStatus.service');
       default:
@@ -695,6 +1202,7 @@ const ClientOrders = () => {
     // inalcançáveis em qualquer encomenda com serviços.
     const productLines = detailData.lines.filter((line) => line.line_status !== 'servico');
     const total = productLines.length;
+    // 'parcial' não conta como disponível: parte ainda depende do fornecedor.
     const done = productLines.filter((line) =>
       ['servido_por_stock', 'recebido', 'stock_disponivel_confirmar'].includes(line.line_status)
     ).length;
@@ -703,16 +1211,21 @@ const ClientOrders = () => {
   };
 
   // Checklist inline da célula "Estado" — só para linhas
-  // stock_disponivel_confirmar (fase pós-20261130070000). Estados possíveis:
+  // stock_disponivel_confirmar e 'parcial' com reserva (isStockExitConfirmable).
+  // Armazéns e quantidade são os do produto (getProductExitGroup). Estados:
   // 1) sem permissão inventory.edit → checkbox desativado + tooltip;
-  // 2) sem armazéns disponíveis (não devia acontecer, dado o próprio
-  //    line_status) → checkbox desativado + tooltip;
+  // 2) nenhum armazém com stock suficiente para a quantidade a enviar (a RPC
+  //    recusaria) → checkbox desativado + tooltip com a quantidade;
   // 3) 1 armazém → checkbox dispara logo a confirmação;
   // 4) 2+ armazéns → checkbox revela Select + botão "Confirmar";
   // 5) a processar → spinner em vez do checkbox.
   const renderStockExitChecklist = (line: ClientOrderDocumentLine) => {
-    const warehouses = line.available_warehouses || [];
-    const isProcessing = confirmingLineId === line.quote_line_id;
+    const key = lineKey(line);
+    const group = line.product_id && detailData
+      ? getProductExitGroup(line.product_id, detailData.lines)
+      : null;
+    const warehouses = group?.warehouses ?? [];
+    const isProcessing = confirmingLineId === key || confirmingAll;
 
     if (isProcessing) {
       return <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />;
@@ -732,20 +1245,23 @@ const ClientOrders = () => {
     }
 
     if (warehouses.length === 0) {
+      const message = group && group.quantity > 0
+        ? t('clientOrders.dialog.noWarehouseEnoughStock', { qty: formatDiagnosticNumber(group.quantity) })
+        : t('clientOrders.dialog.noWarehouseAvailable');
       return (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="inline-flex">
+            <span className="inline-flex" tabIndex={0} aria-label={message}>
               <Checkbox checked={false} disabled />
             </span>
           </TooltipTrigger>
-          <TooltipContent>{t('clientOrders.dialog.noWarehouseAvailable')}</TooltipContent>
+          <TooltipContent>{message}</TooltipContent>
         </Tooltip>
       );
     }
 
-    const isActive = checklistActiveLineIds.has(line.quote_line_id);
-    const selectedWarehouseId = selectedWarehouseByLine[line.quote_line_id];
+    const isActive = checklistActiveLineIds.has(key);
+    const selectedWarehouseId = selectedWarehouseByLine[key];
 
     if (warehouses.length > 1 && isActive) {
       return (
@@ -757,7 +1273,7 @@ const ClientOrders = () => {
           <Select
             value={selectedWarehouseId || ""}
             onValueChange={(value) =>
-              setSelectedWarehouseByLine((prev) => ({ ...prev, [line.quote_line_id]: value }))
+              setSelectedWarehouseByLine((prev) => ({ ...prev, [key]: value }))
             }
           >
             <SelectTrigger className="h-8 w-[190px] text-xs">
@@ -766,7 +1282,7 @@ const ClientOrders = () => {
             <SelectContent>
               {warehouses.map((wh) => (
                 <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
-                  {wh.warehouse_name} ({wh.quantity})
+                  {wh.warehouse_name} ({formatDiagnosticNumber(asQty(wh.quantity))})
                 </SelectItem>
               ))}
             </SelectContent>
@@ -806,43 +1322,233 @@ const ClientOrders = () => {
     setCreateClient(null);
     deliveryAddressRequestRef.current = null;
     setCreateDeliveryAddress("");
+    setDeliveryEntityId(null);
+    setDeliveryOptions([]);
+    setDeliveryOptionsLoading(false);
+    setDeliveryChoice("");
+    setShowNewDeliveryForm(false);
     setCreateDate(new Date().toISOString().split('T')[0]);
     setCreateNotes("");
     setCreateItems([]);
+    setEditingContractId(null);
+    setEditingOrderNumber(null);
+    setEditingClientName(null);
   };
 
-  // Ao escolher o cliente, pré-preenche a morada de entrega com a morada
-  // principal da entidade (editável). O ref guarda o último entityId pedido
-  // para ignorar respostas que cheguem fora de ordem.
+  // Fecha o diálogo de criação/edição. Ao sair da edição sem gravar volta a
+  // abrir o detalhe de onde se partiu.
+  const closeCreateDialog = () => {
+    const returnTo = editingContractId;
+    setCreateOpen(false);
+    resetCreateForm();
+    if (returnTo) openDetail(returnTo);
+  };
+
+  // A linha exige quantidade inteira? (produto cuja unidade de stock é
+  // contável — mesma regra que o servidor valida).
+  const itemRequiresInteger = (item: ManualClientOrderItem) => requiresIntegerQty({
+    hasProduct: !!item.product_id,
+    lineUomId: null,
+    baseUomCode: productUom.getBaseCode(item.product_id),
+  });
+
+  // ── Edição de encomenda manual ──────────────────────────────────────────
+  // Pré-preenche o diálogo a partir de quote_lines (lidas diretamente pelo
+  // orçamento interno do contrato): é a única fonte com preço, IVA, categoria
+  // e descrição exatamente como gravados — e as linhas trancadas têm de ser
+  // reenviadas com esses valores exatos. O detalhe só dá o estado/trancado e o
+  // SKU de cada linha.
+  const openEditOrder = async () => {
+    if (!detailData || editLoading) return;
+    const doc = detailData;
+    setEditLoading(true);
+    try {
+      const { data: contract, error: contractError } = await (supabase as any)
+        .from('client_contracts')
+        .select('quote_id, entity_id')
+        .eq('id', doc.contract_id)
+        .single();
+      if (contractError) throw contractError;
+      if (!contract?.quote_id) throw new Error(t('clientOrders.toast.editLoadError'));
+
+      const { data: quoteLines, error: linesError } = await (supabase as any)
+        .from('quote_lines')
+        .select('id, product_id, service_id, descricao_snapshot, categoria, qt, custo_material_unit, iva_percent, uom_id, ordem')
+        .eq('quote_id', contract.quote_id)
+        .order('ordem', { ascending: true });
+      if (linesError) throw linesError;
+
+      const detailByLineId = new Map(doc.lines.map((l) => [l.quote_line_id, l]));
+      const items: ManualClientOrderItem[] = ((quoteLines as any[]) || [])
+        .filter((row) => row.product_id || row.service_id)
+        .map((row) => {
+          const detailLine = detailByLineId.get(row.id);
+          const locked = detailLine?.line_locked === true;
+          const isProduct = !!row.product_id;
+          return {
+            quote_line_id: row.id,
+            locked,
+            locked_payload: locked
+              ? {
+                  quote_line_id: row.id,
+                  product_id: row.product_id,
+                  service_id: row.service_id,
+                  descricao: row.descricao_snapshot,
+                  categoria: row.categoria,
+                  qt: row.qt,
+                  preco_unit: row.custo_material_unit,
+                  iva_percent: row.iva_percent,
+                  uom_id: row.uom_id,
+                }
+              : undefined,
+            original_key: locked
+              ? undefined
+              : manualItemKey({ product_id: row.product_id ?? null, quantity: Number(row.qt) || 0, uom_id: row.uom_id ?? null }),
+            item_type: isProduct ? 'product' : 'service',
+            product_id: row.product_id ?? null,
+            service_id: isProduct ? null : row.service_id ?? null,
+            description: row.descricao_snapshot ?? '',
+            categoria: row.categoria ?? '',
+            sku: detailLine?.product_sku || detailLine?.service_sku || null,
+            quantity: Number(row.qt) || 0,
+            unit_price: Number(row.custo_material_unit) || 0,
+            vat_rate: row.iva_percent === null || row.iva_percent === undefined ? DEFAULT_VAT_RATE : Number(row.iva_percent),
+            uom_id: row.uom_id ?? null,
+          };
+        });
+
+      resetCreateForm();
+      setEditingContractId(doc.contract_id);
+      setEditingOrderNumber(doc.order_number || doc.contract_number);
+      setEditingClientName(doc.client_name);
+      setCreateDeliveryAddress(doc.delivery_address ?? "");
+      setCreateDate(doc.signature_date ? doc.signature_date.split('T')[0] : "");
+      setCreateItems(items);
+      setDetailOpen(false);
+      setCreateOpen(true);
+
+      // Moradas de entrega do cliente da encomenda, para o Select. Não
+      // substitui a morada já gravada: só marca a opção que lhe corresponde.
+      const orderEntityId: string | null = contract.entity_id ?? null;
+      deliveryAddressRequestRef.current = orderEntityId;
+      setDeliveryEntityId(orderEntityId);
+      if (orderEntityId) {
+        const savedAddress = (doc.delivery_address ?? "").trim();
+        void loadDeliveryOptions(orderEntityId).then((options) => {
+          if (!options || deliveryAddressRequestRef.current !== orderEntityId) return;
+          const match = options.find((option) => formatDeliveryAddress(option) === savedAddress);
+          if (match) setDeliveryChoice(match.entity_address_id);
+        });
+      }
+    } catch (error: any) {
+      toast({ title: t('clientOrders.toast.editLoadError'), description: error?.message, variant: "destructive" });
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  // Carrega as moradas de entrega de um cliente para o Select. Devolve null se
+  // entretanto se mudou de cliente (resposta fora de ordem, ignorada).
+  const loadDeliveryOptions = async (entityId: string): Promise<EntityDeliveryAddress[] | null> => {
+    setDeliveryOptionsLoading(true);
+    try {
+      const rows = await fetchEntityDeliveryAddresses(entityId);
+      if (deliveryAddressRequestRef.current !== entityId) return null;
+      setDeliveryOptions(rows);
+      return rows;
+    } catch (error: any) {
+      if (deliveryAddressRequestRef.current !== entityId) return null;
+      console.error('Error loading client delivery addresses:', error);
+      toast({ title: t('deliveryAddresses.toast.loadError'), description: error?.message, variant: "destructive" });
+      setDeliveryOptions([]);
+      return [];
+    } finally {
+      if (deliveryAddressRequestRef.current === entityId) setDeliveryOptionsLoading(false);
+    }
+  };
+
+  // Morada principal da entidade em texto, para quando não há moradas de
+  // entrega. Só ligações ativas (valid_to nulo ou futuro) e nunca uma de
+  // entrega (address_type 'delivery' fica para o Select).
+  const loadPrimaryAddressText = async (entityId: string): Promise<string> => {
+    try {
+      const { data, error } = await (supabase as any)
+        .from('anew_entity_addresses')
+        .select('is_primary, address_type, anew_addresses(street, number, postal_code, city)')
+        .eq('entity_id', entityId)
+        .or(`valid_to.is.null,valid_to.gt.${new Date().toISOString()}`)
+        .order('is_primary', { ascending: false });
+      if (error) throw error;
+      const row = ((data as any[]) || []).find((item) => item?.address_type !== 'delivery');
+      const addr = row?.anew_addresses;
+      if (!addr) return "";
+      return [addr.street, addr.number, addr.postal_code, addr.city]
+        .map((part: unknown) => (typeof part === 'string' ? part.trim() : part != null ? String(part).trim() : ''))
+        .filter(Boolean)
+        .join(', ');
+    } catch (error) {
+      console.error('Error loading client delivery address:', error);
+      return "";
+    }
+  };
+
+  // Ao escolher o cliente carrega as moradas de entrega: com uma só, escolhe-a;
+  // com várias, deixa o Select no placeholder; sem nenhuma, pré-preenche com a
+  // morada principal (editável). O ref guarda o último entityId pedido para
+  // ignorar respostas que cheguem fora de ordem.
   const handleCreateClientChange = async (client: EntitySearchResult | null) => {
     setCreateClient(client);
     const entityId = client?.entityId ?? null;
     deliveryAddressRequestRef.current = entityId;
+    setDeliveryEntityId(entityId);
+    setDeliveryOptions([]);
+    setDeliveryChoice("");
+    setShowNewDeliveryForm(false);
     if (!entityId) {
+      setDeliveryOptionsLoading(false);
       setCreateDeliveryAddress("");
       return;
     }
-    let address = "";
-    try {
-      const { data, error } = await (supabase as any)
-        .from('anew_entity_addresses')
-        .select('is_primary, anew_addresses(street, number, postal_code, city)')
-        .eq('entity_id', entityId)
-        .order('is_primary', { ascending: false })
-        .limit(1);
-      if (error) throw error;
-      const addr = data?.[0]?.anew_addresses;
-      if (addr) {
-        address = [addr.street, addr.number, addr.postal_code, addr.city]
-          .map((part: unknown) => (typeof part === 'string' ? part.trim() : part != null ? String(part).trim() : ''))
-          .filter(Boolean)
-          .join(', ');
-      }
-    } catch (error) {
-      console.error('Error loading client delivery address:', error);
+    const [options, primaryText] = await Promise.all([
+      loadDeliveryOptions(entityId),
+      loadPrimaryAddressText(entityId),
+    ]);
+    if (options === null || deliveryAddressRequestRef.current !== entityId) return;
+    if (options.length === 1) {
+      const only = options[0];
+      setDeliveryChoice(only.entity_address_id);
+      setCreateDeliveryAddress(formatDeliveryAddress(only) || only.formatted || "");
+    } else if (options.length > 1) {
+      setCreateDeliveryAddress("");
+    } else {
+      setCreateDeliveryAddress(primaryText);
     }
-    if (deliveryAddressRequestRef.current !== entityId) return;
-    setCreateDeliveryAddress(address);
+  };
+
+  // Select de moradas de entrega: preenche a Textarea com o texto formatado
+  // (com andar e fração). "+ Nova morada…" só abre o formulário.
+  const handleDeliveryChoiceChange = (value: string) => {
+    if (value === NEW_DELIVERY_ADDRESS_VALUE) {
+      setShowNewDeliveryForm(true);
+      return;
+    }
+    const option = deliveryOptions.find((o) => o.entity_address_id === value);
+    if (!option) return;
+    setDeliveryChoice(value);
+    setCreateDeliveryAddress(formatDeliveryAddress(option) || option.formatted || "");
+  };
+
+  // Nova morada gravada (rpc_add_entity_delivery_address): recarrega a lista
+  // e escolhe-a.
+  const handleDeliveryAddressAdded = async (result: AddDeliveryAddressResult, input: DeliveryAddressInput) => {
+    const entityId = deliveryEntityId;
+    if (!entityId) return;
+    setShowNewDeliveryForm(false);
+    const options = await loadDeliveryOptions(entityId);
+    if (options === null) return;
+    const added = options.find((o) => o.entity_address_id === result?.entity_address_id);
+    setDeliveryChoice(added ? added.entity_address_id : "");
+    setCreateDeliveryAddress(formatDeliveryAddress(added ?? input));
   };
 
   const getCreateTotals = () => {
@@ -923,14 +1629,140 @@ const ClientOrders = () => {
   const handleCreateItemChange = (index: number, field: 'quantity' | 'unit_price' | 'vat_rate', value: string) => {
     setCreateItems((prev) => {
       const next = [...prev];
+      if (next[index]?.locked) return prev;
       const parsed = parseFloat(value);
-      next[index] = { ...next[index], [field]: isNaN(parsed) ? 0 : parsed };
+      let numeric = isNaN(parsed) ? 0 : parsed;
+      // Unidade contável: arredonda logo para inteiro.
+      if (field === 'quantity' && itemRequiresInteger(next[index])) numeric = roundToIntegerQty(numeric);
+      next[index] = { ...next[index], [field]: numeric };
       return next;
     });
   };
 
   const handleRemoveCreateItem = (index: number) => {
-    setCreateItems((prev) => prev.filter((_, i) => i !== index));
+    setCreateItems((prev) => prev.filter((item, i) => i !== index || item.locked));
+  };
+
+  // Validação comum a criar/editar — um toast por erro, mesmo padrão de
+  // PurchaseOrders.tsx (o backend valida na mesma; isto é só UX). As linhas
+  // trancadas não se validam: seguem tal como estão gravadas.
+  const validateOrderItems = (): boolean => {
+    if (createItems.length === 0) {
+      toast({
+        title: t('clientOrders.create.validation.itemsRequired'),
+        description: t('clientOrders.create.validation.itemsRequiredDesc'),
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    for (let i = 0; i < createItems.length; i++) {
+      const item = createItems[i];
+      if (item.locked) continue;
+      if (!item.product_id && !item.service_id) {
+        toast({
+          title: t('clientOrders.create.validation.lineWithoutItem'),
+          description: t('clientOrders.create.validation.lineWithoutItemDesc', { line: i + 1 }),
+          variant: "destructive",
+        });
+        return false;
+      }
+      if (!(item.quantity > 0)) {
+        toast({
+          title: t('clientOrders.create.validation.invalidQuantity'),
+          description: t('clientOrders.create.validation.invalidQuantityDesc', { line: i + 1 }),
+          variant: "destructive",
+        });
+        return false;
+      }
+      const integer = itemRequiresInteger(item);
+      if (!isValidQtyFor(item.quantity, integer)) {
+        toast({
+          title: t('clientOrders.create.validation.invalidQuantity'),
+          description: integerQtyMessage(i + 1, productUom.getBaseCode(item.product_id)),
+          variant: "destructive",
+        });
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const handleUpdateOrder = async () => {
+    if (!editingContractId) return;
+    if (!validateOrderItems()) return;
+    const contractId = editingContractId;
+
+    // Produto já servido/pedido (linha trancada) não pode ganhar quantidade
+    // noutra linha nova ou alterada: a saída de stock é por (contrato,
+    // produto) e não há segunda. O servidor também valida; isto é só UX.
+    const lockedProductIds = new Set(
+      createItems.filter((item) => item.locked && item.product_id).map((item) => item.product_id as string),
+    );
+    const conflicting = createItems.find((item) => (
+      !item.locked
+      && !!item.product_id
+      && lockedProductIds.has(item.product_id)
+      && (!item.quote_line_id || item.original_key !== manualItemKey(item))
+    ));
+    if (conflicting) {
+      const productLabel = conflicting.description || conflicting.sku || conflicting.product_id;
+      toast({
+        title: t('clientOrders.toast.updateError'),
+        description: `O produto ${productLabel} já foi servido ou pedido a fornecedor — reverta a saída antes de acrescentar quantidade`,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setCreating(true);
+    try {
+      // `rpc_update_manual_client_order` ainda não está nos tipos gerados.
+      // Linhas existentes ausentes do payload são removidas pelo servidor,
+      // por isso vão todas — as trancadas com os valores exatos lidos.
+      const { data: updateResult, error } = await (supabase as any).rpc('rpc_update_manual_client_order', {
+        p_contract_id: contractId,
+        p_items: createItems.map((item) => (
+          item.locked && item.locked_payload
+            ? item.locked_payload
+            : {
+                quote_line_id: item.quote_line_id ?? null,
+                product_id: item.product_id,
+                service_id: item.service_id,
+                descricao: item.description,
+                categoria: item.categoria,
+                qt: item.quantity,
+                preco_unit: item.unit_price,
+                iva_percent: item.vat_rate,
+                uom_id: item.uom_id || null,
+              }
+        )),
+        p_delivery_address: createDeliveryAddress.trim() || null,
+      });
+      if (error) throw error;
+
+      // 20261204310000: o servidor pede logo ao fornecedor o que falta nas
+      // linhas novas/aumentadas — mostra-se o resumo quando criou alguma coisa.
+      const supplierRequest = (updateResult as { supplier_request?: SupplierRequestResult } | null)?.supplier_request;
+      toast({
+        title: t('clientOrders.toast.updateSuccess'),
+        description: asQty(supplierRequest?.items_created) > 0
+          ? `${t('clientOrders.requestMissing.autoRequested')} ${describeSupplierRequest(supplierRequest)}`
+          : undefined,
+      });
+      setCreateOpen(false);
+      resetCreateForm();
+      loadOrders(0, true);
+      openDetail(contractId);
+    } catch (error: any) {
+      toast({
+        title: t('clientOrders.toast.updateError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setCreating(false);
+    }
   };
 
   const handleCreateOrder = async () => {
@@ -948,34 +1780,7 @@ const ClientOrders = () => {
       return;
     }
 
-    if (createItems.length === 0) {
-      toast({
-        title: t('clientOrders.create.validation.itemsRequired'),
-        description: t('clientOrders.create.validation.itemsRequiredDesc'),
-        variant: "destructive",
-      });
-      return;
-    }
-
-    for (let i = 0; i < createItems.length; i++) {
-      const item = createItems[i];
-      if (!item.product_id && !item.service_id) {
-        toast({
-          title: t('clientOrders.create.validation.lineWithoutItem'),
-          description: t('clientOrders.create.validation.lineWithoutItemDesc', { line: i + 1 }),
-          variant: "destructive",
-        });
-        return;
-      }
-      if (!(item.quantity > 0)) {
-        toast({
-          title: t('clientOrders.create.validation.invalidQuantity'),
-          description: t('clientOrders.create.validation.invalidQuantityDesc', { line: i + 1 }),
-          variant: "destructive",
-        });
-        return;
-      }
-    }
+    if (!validateOrderItems()) return;
 
     setCreating(true);
     try {
@@ -1120,8 +1925,9 @@ const ClientOrders = () => {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{t('clientOrders.table.contractNumber')}</TableHead>
+              <TableHead>{t('clientOrders.table.orderNumber')}</TableHead>
               <TableHead>{t('clientOrders.table.client')}</TableHead>
+              <TableHead>{t('clientOrders.table.deliveryAddress')}</TableHead>
               <TableHead>{t('clientOrders.table.signatureDate')}</TableHead>
               <TableHead className="text-right">{t('clientOrders.table.lines')}</TableHead>
               <TableHead>{t('clientOrders.table.status')}</TableHead>
@@ -1131,30 +1937,31 @@ const ClientOrders = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center">{t('clientOrders.loading')}</TableCell>
+                <TableCell colSpan={7} className="text-center">{t('clientOrders.loading')}</TableCell>
               </TableRow>
             ) : orders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center">{t('clientOrders.noOrders')}</TableCell>
+                <TableCell colSpan={7} className="text-center">{t('clientOrders.noOrders')}</TableCell>
               </TableRow>
             ) : (
               orders.map((order) => (
                 <TableRow key={order.contract_id}>
                   <TableCell className="font-medium">
                     <div className="flex flex-col gap-1">
-                      <span>{order.contract_number}</span>
-                      {salesByContract[order.contract_id] && (
-                        <Badge variant="outline" className="w-fit gap-1 font-normal text-xs">
-                          <ShoppingBag className="h-3 w-3" />
-                          {t('clientOrders.origin.directSale')}
-                          {salesByContract[order.contract_id].sale_number
-                            ? ` ${salesByContract[order.contract_id].sale_number}`
-                            : ''}
-                        </Badge>
-                      )}
+                      <span>{order.order_number || order.contract_number}</span>
+                      {renderOrigin(order.contract_id, order.origin_type, order.origin_number, order.contract_number)}
                     </div>
                   </TableCell>
                   <TableCell>{order.client_name || '-'}</TableCell>
+                  <TableCell>
+                    {order.delivery_address?.trim() ? (
+                      <span className="block max-w-[16rem] truncate" title={order.delivery_address}>
+                        {order.delivery_address}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {order.signature_date ? new Date(order.signature_date).toLocaleDateString('pt-PT') : '-'}
                   </TableCell>
@@ -1176,7 +1983,7 @@ const ClientOrders = () => {
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleGeneratePdf(order.contract_id, order.contract_number)}
+                      onClick={() => handleGeneratePdf(order.contract_id, order.order_number || order.contract_number)}
                       title={t('clientOrders.downloadPdf')}
                       disabled={pdfGeneratingId === order.contract_id}
                     >
@@ -1199,12 +2006,19 @@ const ClientOrders = () => {
         </div>
       </div>
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+      <Dialog
+        open={detailOpen}
+        onOpenChange={(o) => {
+          // Não fechar a meio de "Confirmar saída de todas".
+          if (!o && confirmingAll) return;
+          setDetailOpen(o);
+        }}
+      >
         <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {t('clientOrders.dialog.title')}
-              {detailData ? ` — ${detailData.contract_number}` : ""}
+              {detailData ? ` — ${detailData.order_number || detailData.contract_number}` : ""}
             </DialogTitle>
           </DialogHeader>
 
@@ -1220,8 +2034,8 @@ const ClientOrders = () => {
                   <span className="font-medium">{detailData.client_name || '-'}</span>
                 </div>
                 <div>
-                  <span className="text-muted-foreground">{t('clientOrders.dialog.contract')}: </span>
-                  <span className="font-medium">{detailData.contract_number}</span>
+                  <span className="text-muted-foreground">{t('clientOrders.dialog.order')}: </span>
+                  <span className="font-medium">{detailData.order_number || detailData.contract_number}</span>
                 </div>
                 <div>
                   <span className="text-muted-foreground">{t('clientOrders.dialog.signatureDate')}: </span>
@@ -1237,17 +2051,17 @@ const ClientOrders = () => {
                       : '-'}
                   </span>
                 </div>
-                {salesByContract[detailData.contract_id] && (
+                {detailData.delivery_address && (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">{t('clientOrders.dialog.deliveryAddress')}: </span>
+                    <span className="font-medium whitespace-pre-wrap break-words">{detailData.delivery_address}</span>
+                  </div>
+                )}
+                {(detailData.origin_type || salesByContract[detailData.contract_id]) && (
                   <div className="col-span-2 flex flex-wrap items-center gap-2">
                     <span className="text-muted-foreground">{t('clientOrders.dialog.origin')}: </span>
-                    <Badge variant="outline" className="gap-1 font-normal">
-                      <ShoppingBag className="h-3 w-3" />
-                      {t('clientOrders.origin.directSale')}
-                      {salesByContract[detailData.contract_id].sale_number
-                        ? ` ${salesByContract[detailData.contract_id].sale_number}`
-                        : ''}
-                    </Badge>
-                    {salesByContract[detailData.contract_id].proforma_number && (
+                    {renderOrigin(detailData.contract_id, detailData.origin_type, detailData.origin_number, detailData.contract_number)}
+                    {salesByContract[detailData.contract_id]?.proforma_number && (
                       <Button
                         variant="outline"
                         size="sm"
@@ -1420,11 +2234,80 @@ const ClientOrders = () => {
                 );
               })()}
 
-              <div className="flex justify-end">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {/* Confirmar saída de todas as linhas pendentes. Com vários
+                    armazéns possíveis pede-se um; aplica-se só onde tem stock. */}
+                {canConfirmStockExit && (() => {
+                  const { pending, warehouses, singleEach } = getConfirmAllInfo();
+                  if (pending.length === 0) return null;
+                  const busy = confirmingAll || confirmingLineId !== null;
+                  return (
+                    <>
+                      {!singleEach && (
+                        <Select
+                          value={confirmAllWarehouseId}
+                          onValueChange={setConfirmAllWarehouseId}
+                          disabled={busy}
+                        >
+                          <SelectTrigger className="h-9 w-[200px] text-xs" aria-label={t('clientOrders.dialog.confirmAllWarehouse')}>
+                            <SelectValue placeholder={t('clientOrders.dialog.confirmAllWarehouse')} />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {warehouses.map((wh) => (
+                              <SelectItem key={wh.warehouse_id} value={wh.warehouse_id}>
+                                {wh.warehouse_name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleConfirmAllStockExits}
+                        disabled={busy || (!singleEach && !confirmAllWarehouseId)}
+                      >
+                        {confirmingAll
+                          ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          : <ClipboardCheck className="w-4 h-4 mr-2" />}
+                        {t('clientOrders.dialog.confirmAll', { count: pending.length })}
+                      </Button>
+                    </>
+                  );
+                })()}
+                {/* Pedir ao fornecedor a parte das linhas sem reserva nem pedido. */}
+                {detailData.can_request_missing && canRequestMissing && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setRequestMissingConfirmOpen(true)}
+                    disabled={requestingMissing || confirmingAll}
+                  >
+                    {requestingMissing
+                      ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      : <Truck className="w-4 h-4 mr-2" />}
+                    {asQty(detailData.missing_lines_count) > 0
+                      ? t('clientOrders.requestMissing.buttonCount', { count: asQty(detailData.missing_lines_count) })
+                      : t('clientOrders.requestMissing.button')}
+                  </Button>
+                )}
+                {detailData.is_editable && canEditOrder && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={openEditOrder}
+                    disabled={editLoading || confirmingAll}
+                  >
+                    {editLoading
+                      ? <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      : <Pencil className="w-4 h-4 mr-2" />}
+                    {t('clientOrders.dialog.editOrder')}
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => handleGeneratePdf(detailData.contract_id, detailData.contract_number)}
+                  onClick={() => handleGeneratePdf(detailData.contract_id, detailData.order_number || detailData.contract_number)}
                   disabled={pdfGeneratingId === detailData.contract_id}
                 >
                   <FileDown className="w-4 h-4 mr-2" />
@@ -1450,16 +2333,39 @@ const ClientOrders = () => {
                     </TableRow>
                   ) : (
                     detailData.lines.map((line) => (
-                      <TableRow key={line.quote_line_id}>
+                      <TableRow key={lineKey(line)}>
                         <TableCell>{line.product_sku || line.service_sku || '-'}</TableCell>
                         <TableCell>{line.product_name || line.service_name || '-'}</TableCell>
-                        <TableCell className="text-right">{line.quantity}</TableCell>
+                        <TableCell className="text-right">
+                          <div>{line.quantity}</div>
+                          {(() => {
+                            const summary = getReservationSummary(line);
+                            return summary
+                              ? <div className="text-xs text-muted-foreground">{summary}</div>
+                              : null;
+                          })()}
+                        </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-2">
-                            <Badge className={getLineStatusColor(line.line_status)}>
+                            <Badge className={getLineStatusColor(line)}>
                               {getLineStatusLabel(line)}
                             </Badge>
-                            {line.line_status === 'stock_disponivel_confirmar' && renderStockExitChecklist(line)}
+                            {isStockExitConfirmable(line) && renderStockExitChecklist(line)}
+                            {/* Só saídas manuais (com movimento próprio) se
+                                revertem; a baixa automática na assinatura não.
+                                Também em 'parcial'/'recebido' com parte servida. */}
+                            {isStockExitRevertible(line) && canConfirmStockExit && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 gap-1 px-2 text-xs"
+                                onClick={() => setRevertTarget(line)}
+                                disabled={reverting || confirmingAll}
+                              >
+                                <Undo2 className="h-3.5 w-3.5" />
+                                {t('clientOrders.dialog.revert')}
+                              </Button>
+                            )}
                             {line.purchase_order_id && (
                               <Button
                                 variant="ghost"
@@ -1482,33 +2388,147 @@ const ClientOrders = () => {
         </DialogContent>
       </Dialog>
 
-      {/* Criação manual de Encomenda Cliente */}
+      {/* Confirmação do estorno de uma saída de stock manual */}
+      <AlertDialog
+        open={revertTarget !== null}
+        onOpenChange={(isOpen) => { if (!isOpen && !reverting) setRevertTarget(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('clientOrders.dialog.revertTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {revertTarget && (revertTarget.product_name || revertTarget.service_name)
+                ? `${revertTarget.product_name || revertTarget.service_name} — `
+                : ''}
+              {t('clientOrders.dialog.revertDescription')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={reverting}>{t('clientOrders.create.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={reverting}
+              onClick={(e) => {
+                // Mantém o diálogo aberto até a RPC responder.
+                e.preventDefault();
+                handleRevertStockExit();
+              }}
+            >
+              {reverting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {t('clientOrders.dialog.revert')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmação do pedido do material em falta ao fornecedor */}
+      <AlertDialog
+        open={requestMissingConfirmOpen}
+        onOpenChange={(isOpen) => { if (!isOpen && !requestingMissing) setRequestMissingConfirmOpen(false); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('clientOrders.requestMissing.confirmTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('clientOrders.requestMissing.confirmDescription', {
+                units: formatDiagnosticNumber(asQty(detailData?.missing_units_total)),
+                lines: asQty(detailData?.missing_lines_count),
+              })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={requestingMissing}>{t('clientOrders.create.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={requestingMissing}
+              onClick={(e) => {
+                // Mantém o diálogo aberto até a RPC responder.
+                e.preventDefault();
+                handleRequestMissing();
+              }}
+            >
+              {requestingMissing && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {t('clientOrders.requestMissing.confirmAction')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Criação manual de Encomenda Cliente (e edição, com editingContractId) */}
       <Dialog
         open={createOpen}
         onOpenChange={(isOpen) => {
-          setCreateOpen(isOpen);
-          if (!isOpen) resetCreateForm();
+          if (isOpen) setCreateOpen(true);
+          else if (!creating) closeCreateDialog();
         }}
       >
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{t('clientOrders.create.title')}</DialogTitle>
+            <DialogTitle>
+              {editingContractId
+                ? t('clientOrders.edit.title', { number: editingOrderNumber || '' })
+                : t('clientOrders.create.title')}
+            </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-6">
             <div className="space-y-2">
               <Label>{t('clientOrders.create.client')} *</Label>
-              <EntitySearchInput
-                value={createClient}
-                onChange={handleCreateClientChange}
-                searchTypes={["client"]}
-                placeholder={t('clientOrders.create.clientPlaceholder')}
-                disabled={creating}
-              />
+              {editingContractId ? (
+                // Em edição o cliente não muda (o contrato já está assinado para ele).
+                <Input value={editingClientName || '-'} disabled readOnly />
+              ) : (
+                <EntitySearchInput
+                  value={createClient}
+                  onChange={handleCreateClientChange}
+                  searchTypes={["client"]}
+                  placeholder={t('clientOrders.create.clientPlaceholder')}
+                  disabled={creating}
+                />
+              )}
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="client_order_delivery_address">{t('clientOrders.create.deliveryAddress')}</Label>
+              {deliveryEntityId && deliveryOptions.length > 0 && (
+                <Select value={deliveryChoice} onValueChange={handleDeliveryChoiceChange} disabled={creating}>
+                  <SelectTrigger aria-label={t('clientOrders.create.deliveryAddressChoose')}>
+                    <SelectValue placeholder={t('clientOrders.create.deliveryAddressChoose')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {deliveryOptions.map((option) => (
+                      <SelectItem key={option.entity_address_id} value={option.entity_address_id}>
+                        {formatDeliveryAddress(option) || option.formatted || '—'}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={NEW_DELIVERY_ADDRESS_VALUE}>{t('clientOrders.create.deliveryAddressNew')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              {deliveryEntityId && !deliveryOptionsLoading && deliveryOptions.length === 0 && !showNewDeliveryForm && (
+                <div>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto min-h-6 px-0"
+                    onClick={() => setShowNewDeliveryForm(true)}
+                    disabled={creating}
+                  >
+                    {t('clientOrders.create.deliveryAddressAddNew')}
+                  </Button>
+                </div>
+              )}
+              {deliveryEntityId && showNewDeliveryForm && (
+                <div className="rounded-md border p-3 space-y-2">
+                  <p className="text-sm font-medium">{t('deliveryAddresses.newTitle')}</p>
+                  <DeliveryAddressForm
+                    entityId={deliveryEntityId}
+                    idPrefix="client_order_new_delivery"
+                    disabled={creating}
+                    onAdded={handleDeliveryAddressAdded}
+                    onCancel={() => setShowNewDeliveryForm(false)}
+                  />
+                </div>
+              )}
               <Textarea
                 id="client_order_delivery_address"
                 value={createDeliveryAddress}
@@ -1527,19 +2547,22 @@ const ClientOrders = () => {
                   type="date"
                   value={createDate}
                   onChange={(e) => setCreateDate(e.target.value)}
-                  disabled={creating}
+                  disabled={creating || !!editingContractId}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="client_order_notes">{t('clientOrders.create.notes')}</Label>
-                <Textarea
-                  id="client_order_notes"
-                  value={createNotes}
-                  onChange={(e) => setCreateNotes(e.target.value)}
-                  rows={2}
-                  disabled={creating}
-                />
-              </div>
+              {/* As notas só se definem na criação — a RPC de edição não as recebe. */}
+              {!editingContractId && (
+                <div className="space-y-2">
+                  <Label htmlFor="client_order_notes">{t('clientOrders.create.notes')}</Label>
+                  <Textarea
+                    id="client_order_notes"
+                    value={createNotes}
+                    onChange={(e) => setCreateNotes(e.target.value)}
+                    rows={2}
+                    disabled={creating}
+                  />
+                </div>
+              )}
             </div>
 
             <div className="border-t pt-4">
@@ -1570,8 +2593,14 @@ const ClientOrders = () => {
                         {createItems.map((item, index) => {
                           const lineSubtotal = item.unit_price * item.quantity;
                           const lineTotal = lineSubtotal * (1 + item.vat_rate / 100);
+                          const integerQty = itemRequiresInteger(item);
+                          // Linha trancada (já servida/pedida): só leitura.
+                          const rowDisabled = creating || !!item.locked;
                           return (
-                            <TableRow key={`${item.product_id || item.service_id}-${index}`}>
+                            <TableRow
+                              key={item.quote_line_id || `${item.product_id || item.service_id}-${index}`}
+                              className={item.locked ? 'bg-muted/40' : undefined}
+                            >
                               <TableCell>
                                 <Badge variant="outline">
                                   {item.item_type === 'product'
@@ -1584,6 +2613,9 @@ const ClientOrders = () => {
                                 <div className="text-xs text-muted-foreground">
                                   {item.sku ? `${item.sku} · ` : ''}{item.categoria}
                                 </div>
+                                {item.locked && (
+                                  <div className="text-xs text-warning mt-0.5">{t('clientOrders.edit.lockedNote')}</div>
+                                )}
                               </TableCell>
                               <TableCell>
                                 <Input
@@ -1592,8 +2624,9 @@ const ClientOrders = () => {
                                   onChange={(e) => handleCreateItemChange(index, 'quantity', e.target.value)}
                                   className="w-20"
                                   min="0"
-                                  step="0.01"
-                                  disabled={creating}
+                                  step={integerQty ? 1 : 0.01}
+                                  inputMode={integerQty ? 'numeric' : 'decimal'}
+                                  disabled={rowDisabled}
                                 />
                               </TableCell>
                               <TableCell>
@@ -1604,7 +2637,7 @@ const ClientOrders = () => {
                                   className="w-24"
                                   min="0"
                                   step="0.01"
-                                  disabled={creating}
+                                  disabled={rowDisabled}
                                 />
                               </TableCell>
                               <TableCell>
@@ -1615,7 +2648,7 @@ const ClientOrders = () => {
                                   className="w-20"
                                   min="0"
                                   step="0.5"
-                                  disabled={creating}
+                                  disabled={rowDisabled}
                                 />
                               </TableCell>
                               <TableCell className="text-right font-semibold">€{lineTotal.toFixed(2)}</TableCell>
@@ -1625,8 +2658,8 @@ const ClientOrders = () => {
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => handleRemoveCreateItem(index)}
-                                  title={t('clientOrders.create.removeItem')}
-                                  disabled={creating}
+                                  title={item.locked ? t('clientOrders.edit.lockedNote') : t('clientOrders.create.removeItem')}
+                                  disabled={rowDisabled}
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>
@@ -1679,14 +2712,20 @@ const ClientOrders = () => {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setCreateOpen(false)}
+                onClick={closeCreateDialog}
                 disabled={creating}
               >
                 {t('clientOrders.create.cancel')}
               </Button>
-              <Button type="button" onClick={handleCreateOrder} disabled={creating}>
+              <Button
+                type="button"
+                onClick={editingContractId ? handleUpdateOrder : handleCreateOrder}
+                disabled={creating}
+              >
                 {creating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                {creating ? t('clientOrders.create.submitting') : t('clientOrders.create.submit')}
+                {editingContractId
+                  ? (creating ? t('clientOrders.edit.submitting') : t('clientOrders.edit.submit'))
+                  : (creating ? t('clientOrders.create.submitting') : t('clientOrders.create.submit'))}
               </Button>
             </div>
           </div>

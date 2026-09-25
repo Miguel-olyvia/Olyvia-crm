@@ -25,6 +25,8 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { resolveEntityCommercial } from "@/utils/entityCommercial";
 import { getLineSubtotal, markupFromCostAndPrice, round2 } from "@/utils/quotes/quoteLinePricing";
 import { cn, formatCurrency } from "@/lib/utils";
+import { useProductBaseUomCodes } from "@/hooks/useProductBaseUomCodes";
+import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 
 // Venda Direta — Fase 2: criar/editar o cabeçalho e as linhas de uma venda
 // direta em RASCUNHO. Tudo o que vem depois (envio ao portal, aceitação,
@@ -124,6 +126,8 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
   const [notes, setNotes] = useState("");
   const [ivaRate, setIvaRate] = useState<number>(DEFAULT_VAT_RATE);
   const [lines, setLines] = useState<DirectSaleLineDraft[]>([]);
+  // Unidade de stock dos produtos das linhas — quantidade inteira em unidades contáveis.
+  const productUom = useProductBaseUomCodes(lines.map((l) => l.product_id));
   const [showItemsDialog, setShowItemsDialog] = useState(false);
 
   // Trava de duplo-submit (o botão também fica disabled, mas o clique duplo
@@ -339,11 +343,14 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
     index: number,
     field: "qt" | "retail_price_unit" | "discount_percent" | "iva_percent",
     value: string,
+    integerQty = false,
   ) => {
     setLines((prev) => {
       const next = [...prev];
       const parsed = parseFloat(value);
-      next[index] = { ...next[index], [field]: Number.isNaN(parsed) ? 0 : parsed };
+      const num = Number.isNaN(parsed) ? 0 : parsed;
+      // Quantidade de unidade contável / embalagem => inteiro.
+      next[index] = { ...next[index], [field]: field === "qt" && integerQty ? roundToIntegerQty(num) : num };
       return next;
     });
   };
@@ -430,6 +437,16 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
         toast({
           title: t("directSales.validation.invalidQuantity"),
           description: t("directSales.validation.invalidQuantityDesc", { line: lineNumber }),
+          variant: "destructive",
+        });
+        return;
+      }
+      // Unidade contável / embalagem: só quantidades inteiras.
+      const baseCode = productUom.getBaseCode(line.product_id);
+      if (!isValidQtyFor(qt, requiresIntegerQty({ hasProduct: !!line.product_id, lineUomId: null, baseUomCode: baseCode }))) {
+        toast({
+          title: t("directSales.validation.invalidQuantity"),
+          description: integerQtyMessage(lineNumber, baseCode),
           variant: "destructive",
         });
         return;
@@ -780,6 +797,12 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
                         <TableBody>
                           {lines.map((line, index) => {
                             const { totalComIva } = getDirectSaleLineTotals(line);
+                            // Produto em unidade contável => só quantidades inteiras.
+                            const lineIntegerQty = requiresIntegerQty({
+                              hasProduct: !!line.product_id,
+                              lineUomId: null,
+                              baseUomCode: productUom.getBaseCode(line.product_id),
+                            });
                             return (
                               <TableRow key={line.key}>
                                 <TableCell>
@@ -805,10 +828,11 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
                                   <Input
                                     type="number"
                                     min="0"
-                                    step="0.01"
+                                    step={lineIntegerQty ? "1" : "0.01"}
+                                    inputMode={lineIntegerQty ? "numeric" : undefined}
                                     className="w-20"
                                     value={line.qt}
-                                    onChange={(e) => handleLineChange(index, "qt", e.target.value)}
+                                    onChange={(e) => handleLineChange(index, "qt", e.target.value, lineIntegerQty)}
                                     disabled={readOnly || saving}
                                   />
                                 </TableCell>

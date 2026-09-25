@@ -211,9 +211,51 @@ interface ClientOrderDocumentPDFLine {
   service_name?: string | null;
   service_sku?: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'sem_fornecedor' | 'servico';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'parcial' | 'sem_fornecedor' | 'servico';
   purchase_order_number: string | null;
+  // 20261204310000: reserva por ordem de assinatura (unidades base).
+  component_index?: number | null;
+  qty_reserved?: number | null;
+  qty_ordered?: number | null;
+  qty_received?: number | null;
+  qty_missing?: number | null;
+  // 20261204340000: quantidade já servida por stock; null em serviços.
+  qty_served?: number | null;
+  // Só em produtos; null/ausente = desconhecido. Ver ClientOrders.
+  has_preferred_supplier?: boolean | null;
+  stock_movement_id?: string | null;
+  stock_exit_movement_id?: string | null;
 }
+
+const pdfQty = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+// Quantidade em unidades de stock (mesma regra do ecrã em
+// ClientOrders.formatBaseQty).
+const formatBaseQty = (value: number): string =>
+  new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(value);
+
+// "Parcial — X servido · Y em stock · Z a aguardar fornecedor · W em falta"
+// (só as partes > 0; "servido" vem de qty_served, como no ecrã).
+const getPartialText = (line: ClientOrderDocumentPDFLine): string => {
+  const parts: string[] = [];
+  const served = pdfQty(line.qty_served);
+  const reserved = pdfQty(line.qty_reserved);
+  const ordered = pdfQty(line.qty_ordered);
+  const received = pdfQty(line.qty_received);
+  const missing = pdfQty(line.qty_missing);
+  if (served > 0) parts.push(`${formatBaseQty(served)} servido`);
+  if (reserved > 0) parts.push(`${formatBaseQty(reserved)} em stock`);
+  if (ordered > 0) {
+    const pending = Math.round((ordered - received) * 1e6) / 1e6;
+    if (pending > 0) parts.push(`${formatBaseQty(pending)} a aguardar fornecedor${line.purchase_order_number ? ` (${line.purchase_order_number})` : ''}`);
+    if (received > 0) parts.push(`${formatBaseQty(received)} recebido`);
+  }
+  if (missing > 0) parts.push(`${formatBaseQty(missing)} em falta`);
+  return parts.length > 0 ? `Parcial — ${parts.join(' · ')}` : 'Parcial';
+};
 
 interface ClientOrderDocumentPDFProps {
   document: {
@@ -225,6 +267,12 @@ interface ClientOrderDocumentPDFProps {
     // Preenchidos só quando a encomenda nasceu de uma venda direta (Fase 5).
     direct_sale_number?: string | null;
     proforma_number?: string | null;
+    // 20261204290000: número próprio da encomenda, origem e morada de entrega.
+    // Opcionais — sem order_number cai para o nº do contrato.
+    order_number?: string | null;
+    origin_type?: 'contract' | 'direct_sale' | 'manual' | null;
+    origin_number?: string | null;
+    delivery_address?: string | null;
     lines: ClientOrderDocumentPDFLine[];
     // Cópia congelada do levantamento de necessidades (Fase 1). Opcional:
     // vendas diretas e encomendas manuais não têm diagnóstico e a secção
@@ -245,14 +293,23 @@ const getLineStatusText = (line: ClientOrderDocumentPDFLine): string => {
   switch (line.line_status) {
     case 'servido_por_stock':
       return 'Servido por Stock';
-    case 'recebido':
-      return line.purchase_order_number ? `Recebido (${line.purchase_order_number})` : 'Recebido';
+    case 'recebido': {
+      const base = line.purchase_order_number ? `Recebido (${line.purchase_order_number})` : 'Recebido';
+      const served = pdfQty(line.qty_served);
+      return served > 0 ? `${base} — ${formatBaseQty(served)} servido do stock` : base;
+    }
     case 'a_aguardar_encomenda':
       return line.purchase_order_number ? `A aguardar Encomenda ${line.purchase_order_number}` : 'A aguardar Encomenda';
     case 'stock_disponivel_confirmar':
       return 'Stock disponível — confirmar saída';
+    case 'parcial':
+      return getPartialText(line);
     case 'sem_fornecedor':
-      return 'Sem fornecedor preferencial';
+      // Quantidade em falta sem pedido ao fornecedor; a causa depende de
+      // has_preferred_supplier (mesmos textos do ecrã).
+      if (line.has_preferred_supplier === true) return 'Em falta — por pedir ao fornecedor';
+      if (line.has_preferred_supplier === false) return 'Sem fornecedor preferencial';
+      return 'Em falta — sem pedido ao fornecedor';
     case 'servico':
       return 'Serviço';
     default:
@@ -287,9 +344,25 @@ const getDiagnosticFields = (need: ClientOrderDiagnosticNeed): Array<{ label: st
   return fields;
 };
 
+// Texto da origem para o cabeçalho — mesma regra do ecrã (ClientOrders.tsx):
+// contrato → "Contrato CC-…"; venda direta → "Venda Direta VD-…" (nº da query a
+// direct_sales se origin_number vier null); manual → "Sem documento anterior".
+// Sem origin_type (RPC antiga) só se mostra a venda direta, como antes.
+const getOriginText = (doc: ClientOrderDocumentPDFProps['document']): string | null => {
+  const proforma = doc.proforma_number ? ` · Proforma ${doc.proforma_number}` : '';
+  if (doc.origin_type === 'direct_sale' || (!doc.origin_type && doc.direct_sale_number)) {
+    const number = doc.origin_number || doc.direct_sale_number || '';
+    return `Venda Direta${number ? ` ${number}` : ''}${proforma}`;
+  }
+  if (doc.origin_type === 'contract') return `Contrato ${doc.origin_number || doc.contract_number || ''}`.trim();
+  if (doc.origin_type === 'manual') return 'Sem documento anterior';
+  return null;
+};
+
 export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumentPDFProps) => {
   const lines = document.lines || [];
   const diagnostic = document.diagnostic || [];
+  const originText = getOriginText(document);
 
   return (
     <Document>
@@ -306,17 +379,16 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
           <View style={styles.headerLeft}>
             <Text style={styles.title}>ENCOMENDA CLIENTE</Text>
             <Text style={styles.subtitle}>Nota de Satisfação de Encomenda</Text>
-            <Text style={styles.contractNumber}>Contrato: {document.contract_number || 'N/A'}</Text>
+            <Text style={styles.contractNumber}>
+              Encomenda: {document.order_number || document.contract_number || 'N/A'}
+            </Text>
             {document.signature_date && (
               <Text style={styles.docDate}>
                 Data de Assinatura: {new Date(document.signature_date).toLocaleDateString('pt-PT')}
               </Text>
             )}
-            {document.direct_sale_number && (
-              <Text style={styles.docDate}>
-                Origem: Venda Direta {document.direct_sale_number}
-                {document.proforma_number ? ` · Proforma ${document.proforma_number}` : ''}
-              </Text>
+            {originText && (
+              <Text style={styles.docDate}>Origem: {originText}</Text>
             )}
           </View>
           {company?.logo_url && (
@@ -331,6 +403,12 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
             <Text style={styles.label}>Nome:</Text>
             <Text style={styles.value}>{document.client_name || ''}</Text>
           </View>
+          {document.delivery_address && (
+            <View style={styles.row}>
+              <Text style={styles.label}>Morada de entrega:</Text>
+              <Text style={styles.value}>{document.delivery_address}</Text>
+            </View>
+          )}
           {document.total_value !== null && document.total_value !== undefined && (
             <View style={styles.row}>
               <Text style={styles.label}>Valor Total:</Text>
@@ -354,7 +432,7 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
 
         <View>
           {lines.map((line) => (
-            <View key={line.quote_line_id} style={styles.tableRow}>
+            <View key={`${line.quote_line_id}:${line.component_index ?? 0}`} style={styles.tableRow}>
               <Text style={columnStyles.sku}>{line.product_sku || line.service_sku || '-'}</Text>
               <Text style={columnStyles.description}>{line.product_name || line.service_name || ''}</Text>
               <Text style={columnStyles.quantity}>{line.quantity}</Text>
