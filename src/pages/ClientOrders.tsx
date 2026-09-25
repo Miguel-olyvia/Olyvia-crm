@@ -38,6 +38,14 @@ import { pdf } from '@react-pdf/renderer';
 import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
 import { useProductBaseUomCodes } from "@/hooks/useProductBaseUomCodes";
 import { requiresIntegerQty, isValidQtyFor, roundToIntegerQty, integerQtyMessage } from "@/utils/quotes/integerQty";
+import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
+import {
+  fetchEntityDeliveryAddresses,
+  formatDeliveryAddress,
+  type AddDeliveryAddressResult,
+  type DeliveryAddressInput,
+  type EntityDeliveryAddress,
+} from "@/lib/addresses/entityDeliveryAddresses";
 
 // Fase 5.0F do plano de inventário: página só-leitura "Encomendas Clientes" —
 // 1 linha por Contrato assinado, derivada ao momento da leitura de
@@ -90,6 +98,9 @@ interface ManualClientOrderItem {
   uom_id?: string | null;
 }
 
+// Valor da opção "+ Nova morada…" no Select de moradas de entrega.
+const NEW_DELIVERY_ADDRESS_VALUE = "__new_delivery_address__";
+
 const manualItemKey = (item: Pick<ManualClientOrderItem, 'product_id' | 'quantity' | 'uom_id'>) =>
   `${item.product_id ?? ''}|${Number(item.quantity) || 0}|${item.uom_id ?? ''}`;
 
@@ -112,6 +123,8 @@ interface ClientOrderDocumentRow {
   lines_received: number;
   lines_no_supplier: number;
   overall_status: string;
+  // 20261204400000: morada de entrega gravada na encomenda (pode ser nula).
+  delivery_address?: string | null;
 }
 
 // 20261130070000: armazém(ns) com stock deste produto, só preenchido nas
@@ -421,6 +434,15 @@ const ClientOrders = () => {
   const [createNotes, setCreateNotes] = useState("");
   const [createDeliveryAddress, setCreateDeliveryAddress] = useState("");
   const deliveryAddressRequestRef = useRef<string | null>(null);
+  // Moradas de entrega do cliente (rpc_list_entity_delivery_addresses) para o
+  // Select acima da Textarea. deliveryEntityId = cliente escolhido na criação,
+  // ou o entity_id do contrato na edição. deliveryChoice = entity_address_id
+  // escolhido ("" = placeholder). A Textarea continua a ser o que se grava.
+  const [deliveryEntityId, setDeliveryEntityId] = useState<string | null>(null);
+  const [deliveryOptions, setDeliveryOptions] = useState<EntityDeliveryAddress[]>([]);
+  const [deliveryOptionsLoading, setDeliveryOptionsLoading] = useState(false);
+  const [deliveryChoice, setDeliveryChoice] = useState("");
+  const [showNewDeliveryForm, setShowNewDeliveryForm] = useState(false);
   const [createItems,setCreateItems] = useState<ManualClientOrderItem[]>([]);
   // Unidade de stock dos produtos das linhas — quantidade inteira em unidades contáveis.
   const productUom = useProductBaseUomCodes(createItems.map((item) => item.product_id));
@@ -1300,6 +1322,11 @@ const ClientOrders = () => {
     setCreateClient(null);
     deliveryAddressRequestRef.current = null;
     setCreateDeliveryAddress("");
+    setDeliveryEntityId(null);
+    setDeliveryOptions([]);
+    setDeliveryOptionsLoading(false);
+    setDeliveryChoice("");
+    setShowNewDeliveryForm(false);
     setCreateDate(new Date().toISOString().split('T')[0]);
     setCreateNotes("");
     setCreateItems([]);
@@ -1338,7 +1365,7 @@ const ClientOrders = () => {
     try {
       const { data: contract, error: contractError } = await (supabase as any)
         .from('client_contracts')
-        .select('quote_id')
+        .select('quote_id, entity_id')
         .eq('id', doc.contract_id)
         .single();
       if (contractError) throw contractError;
@@ -1399,6 +1426,20 @@ const ClientOrders = () => {
       setCreateItems(items);
       setDetailOpen(false);
       setCreateOpen(true);
+
+      // Moradas de entrega do cliente da encomenda, para o Select. Não
+      // substitui a morada já gravada: só marca a opção que lhe corresponde.
+      const orderEntityId: string | null = contract.entity_id ?? null;
+      deliveryAddressRequestRef.current = orderEntityId;
+      setDeliveryEntityId(orderEntityId);
+      if (orderEntityId) {
+        const savedAddress = (doc.delivery_address ?? "").trim();
+        void loadDeliveryOptions(orderEntityId).then((options) => {
+          if (!options || deliveryAddressRequestRef.current !== orderEntityId) return;
+          const match = options.find((option) => formatDeliveryAddress(option) === savedAddress);
+          if (match) setDeliveryChoice(match.entity_address_id);
+        });
+      }
     } catch (error: any) {
       toast({ title: t('clientOrders.toast.editLoadError'), description: error?.message, variant: "destructive" });
     } finally {
@@ -1406,38 +1447,108 @@ const ClientOrders = () => {
     }
   };
 
-  // Ao escolher o cliente, pré-preenche a morada de entrega com a morada
-  // principal da entidade (editável). O ref guarda o último entityId pedido
-  // para ignorar respostas que cheguem fora de ordem.
+  // Carrega as moradas de entrega de um cliente para o Select. Devolve null se
+  // entretanto se mudou de cliente (resposta fora de ordem, ignorada).
+  const loadDeliveryOptions = async (entityId: string): Promise<EntityDeliveryAddress[] | null> => {
+    setDeliveryOptionsLoading(true);
+    try {
+      const rows = await fetchEntityDeliveryAddresses(entityId);
+      if (deliveryAddressRequestRef.current !== entityId) return null;
+      setDeliveryOptions(rows);
+      return rows;
+    } catch (error: any) {
+      if (deliveryAddressRequestRef.current !== entityId) return null;
+      console.error('Error loading client delivery addresses:', error);
+      toast({ title: t('deliveryAddresses.toast.loadError'), description: error?.message, variant: "destructive" });
+      setDeliveryOptions([]);
+      return [];
+    } finally {
+      if (deliveryAddressRequestRef.current === entityId) setDeliveryOptionsLoading(false);
+    }
+  };
+
+  // Morada principal da entidade em texto, para quando não há moradas de
+  // entrega. Só ligações ativas (valid_to nulo ou futuro) e nunca uma de
+  // entrega (address_type 'delivery' fica para o Select).
+  const loadPrimaryAddressText = async (entityId: string): Promise<string> => {
+    try {
+      const { data, error } = await (supabase as any)
+        .from('anew_entity_addresses')
+        .select('is_primary, address_type, anew_addresses(street, number, postal_code, city)')
+        .eq('entity_id', entityId)
+        .or(`valid_to.is.null,valid_to.gt.${new Date().toISOString()}`)
+        .order('is_primary', { ascending: false });
+      if (error) throw error;
+      const row = ((data as any[]) || []).find((item) => item?.address_type !== 'delivery');
+      const addr = row?.anew_addresses;
+      if (!addr) return "";
+      return [addr.street, addr.number, addr.postal_code, addr.city]
+        .map((part: unknown) => (typeof part === 'string' ? part.trim() : part != null ? String(part).trim() : ''))
+        .filter(Boolean)
+        .join(', ');
+    } catch (error) {
+      console.error('Error loading client delivery address:', error);
+      return "";
+    }
+  };
+
+  // Ao escolher o cliente carrega as moradas de entrega: com uma só, escolhe-a;
+  // com várias, deixa o Select no placeholder; sem nenhuma, pré-preenche com a
+  // morada principal (editável). O ref guarda o último entityId pedido para
+  // ignorar respostas que cheguem fora de ordem.
   const handleCreateClientChange = async (client: EntitySearchResult | null) => {
     setCreateClient(client);
     const entityId = client?.entityId ?? null;
     deliveryAddressRequestRef.current = entityId;
+    setDeliveryEntityId(entityId);
+    setDeliveryOptions([]);
+    setDeliveryChoice("");
+    setShowNewDeliveryForm(false);
     if (!entityId) {
+      setDeliveryOptionsLoading(false);
       setCreateDeliveryAddress("");
       return;
     }
-    let address = "";
-    try {
-      const { data, error } = await (supabase as any)
-        .from('anew_entity_addresses')
-        .select('is_primary, anew_addresses(street, number, postal_code, city)')
-        .eq('entity_id', entityId)
-        .order('is_primary', { ascending: false })
-        .limit(1);
-      if (error) throw error;
-      const addr = data?.[0]?.anew_addresses;
-      if (addr) {
-        address = [addr.street, addr.number, addr.postal_code, addr.city]
-          .map((part: unknown) => (typeof part === 'string' ? part.trim() : part != null ? String(part).trim() : ''))
-          .filter(Boolean)
-          .join(', ');
-      }
-    } catch (error) {
-      console.error('Error loading client delivery address:', error);
+    const [options, primaryText] = await Promise.all([
+      loadDeliveryOptions(entityId),
+      loadPrimaryAddressText(entityId),
+    ]);
+    if (options === null || deliveryAddressRequestRef.current !== entityId) return;
+    if (options.length === 1) {
+      const only = options[0];
+      setDeliveryChoice(only.entity_address_id);
+      setCreateDeliveryAddress(formatDeliveryAddress(only) || only.formatted || "");
+    } else if (options.length > 1) {
+      setCreateDeliveryAddress("");
+    } else {
+      setCreateDeliveryAddress(primaryText);
     }
-    if (deliveryAddressRequestRef.current !== entityId) return;
-    setCreateDeliveryAddress(address);
+  };
+
+  // Select de moradas de entrega: preenche a Textarea com o texto formatado
+  // (com andar e fração). "+ Nova morada…" só abre o formulário.
+  const handleDeliveryChoiceChange = (value: string) => {
+    if (value === NEW_DELIVERY_ADDRESS_VALUE) {
+      setShowNewDeliveryForm(true);
+      return;
+    }
+    const option = deliveryOptions.find((o) => o.entity_address_id === value);
+    if (!option) return;
+    setDeliveryChoice(value);
+    setCreateDeliveryAddress(formatDeliveryAddress(option) || option.formatted || "");
+  };
+
+  // Nova morada gravada (rpc_add_entity_delivery_address): recarrega a lista
+  // e escolhe-a.
+  const handleDeliveryAddressAdded = async (result: AddDeliveryAddressResult, input: DeliveryAddressInput) => {
+    const entityId = deliveryEntityId;
+    if (!entityId) return;
+    setShowNewDeliveryForm(false);
+    const options = await loadDeliveryOptions(entityId);
+    if (options === null) return;
+    const added = options.find((o) => o.entity_address_id === result?.entity_address_id);
+    setDeliveryChoice(added ? added.entity_address_id : "");
+    setCreateDeliveryAddress(formatDeliveryAddress(added ?? input));
   };
 
   const getCreateTotals = () => {
@@ -1816,6 +1927,7 @@ const ClientOrders = () => {
             <TableRow>
               <TableHead>{t('clientOrders.table.orderNumber')}</TableHead>
               <TableHead>{t('clientOrders.table.client')}</TableHead>
+              <TableHead>{t('clientOrders.table.deliveryAddress')}</TableHead>
               <TableHead>{t('clientOrders.table.signatureDate')}</TableHead>
               <TableHead className="text-right">{t('clientOrders.table.lines')}</TableHead>
               <TableHead>{t('clientOrders.table.status')}</TableHead>
@@ -1825,11 +1937,11 @@ const ClientOrders = () => {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center">{t('clientOrders.loading')}</TableCell>
+                <TableCell colSpan={7} className="text-center">{t('clientOrders.loading')}</TableCell>
               </TableRow>
             ) : orders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center">{t('clientOrders.noOrders')}</TableCell>
+                <TableCell colSpan={7} className="text-center">{t('clientOrders.noOrders')}</TableCell>
               </TableRow>
             ) : (
               orders.map((order) => (
@@ -1841,6 +1953,15 @@ const ClientOrders = () => {
                     </div>
                   </TableCell>
                   <TableCell>{order.client_name || '-'}</TableCell>
+                  <TableCell>
+                    {order.delivery_address?.trim() ? (
+                      <span className="block max-w-[16rem] truncate" title={order.delivery_address}>
+                        {order.delivery_address}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell>
                     {order.signature_date ? new Date(order.signature_date).toLocaleDateString('pt-PT') : '-'}
                   </TableCell>
@@ -2367,6 +2488,47 @@ const ClientOrders = () => {
 
             <div className="space-y-2">
               <Label htmlFor="client_order_delivery_address">{t('clientOrders.create.deliveryAddress')}</Label>
+              {deliveryEntityId && deliveryOptions.length > 0 && (
+                <Select value={deliveryChoice} onValueChange={handleDeliveryChoiceChange} disabled={creating}>
+                  <SelectTrigger aria-label={t('clientOrders.create.deliveryAddressChoose')}>
+                    <SelectValue placeholder={t('clientOrders.create.deliveryAddressChoose')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {deliveryOptions.map((option) => (
+                      <SelectItem key={option.entity_address_id} value={option.entity_address_id}>
+                        {formatDeliveryAddress(option) || option.formatted || '—'}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value={NEW_DELIVERY_ADDRESS_VALUE}>{t('clientOrders.create.deliveryAddressNew')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+              {deliveryEntityId && !deliveryOptionsLoading && deliveryOptions.length === 0 && !showNewDeliveryForm && (
+                <div>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto min-h-6 px-0"
+                    onClick={() => setShowNewDeliveryForm(true)}
+                    disabled={creating}
+                  >
+                    {t('clientOrders.create.deliveryAddressAddNew')}
+                  </Button>
+                </div>
+              )}
+              {deliveryEntityId && showNewDeliveryForm && (
+                <div className="rounded-md border p-3 space-y-2">
+                  <p className="text-sm font-medium">{t('deliveryAddresses.newTitle')}</p>
+                  <DeliveryAddressForm
+                    entityId={deliveryEntityId}
+                    idPrefix="client_order_new_delivery"
+                    disabled={creating}
+                    onAdded={handleDeliveryAddressAdded}
+                    onCancel={() => setShowNewDeliveryForm(false)}
+                  />
+                </div>
+              )}
               <Textarea
                 id="client_order_delivery_address"
                 value={createDeliveryAddress}
