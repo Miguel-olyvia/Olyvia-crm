@@ -227,7 +227,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     setEditFormData({
       first_name: client.first_name || "", last_name: client.last_name || "",
       email: client.email || "", phone: client.phone || "", phone_country_code: client.phone_country_code || "+351",
-      vat: client.vat || "", position: client.position || "", status: client.status || "customer",
+      vat: client.vat || "", position: client.position || "", status: client.status || "active",
       notes: client.notes || "", organization_id: client.organization_id || "",
       address: client.address || "", city: client.city || "", postal_code: client.postal_code || "",
       assigned_to: client.assigned_to || null,
@@ -1291,16 +1291,11 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                     <div className="space-y-2"><Label>NIF</Label><Input value={editFormData.vat} onChange={e => setEditFormData({ ...editFormData, vat: e.target.value })} placeholder="PT123456789" aria-invalid={!!editFormErrors.vat} />{editFormErrors.vat && <p className="text-xs text-destructive">{editFormErrors.vat}</p>}</div>
                     <div className="space-y-2">
                       <Label>Estado</Label>
-                      <Select value={editFormData.status} onValueChange={v => setEditFormData({ ...editFormData, status: v })}>
+                      <Select value={editFormData.status === "inactive" ? "inactive" : "active"} onValueChange={v => setEditFormData({ ...editFormData, status: v })}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="lead">Lead</SelectItem>
-                          <SelectItem value="prospect">Prospect</SelectItem>
-                          <SelectItem value="customer">Cliente</SelectItem>
-                          <SelectItem value="partner">Parceiro</SelectItem>
+                          <SelectItem value="active">Ativo</SelectItem>
                           <SelectItem value="inactive">Inativo</SelectItem>
-                          <SelectItem value="churned">Perdido</SelectItem>
-                          <SelectItem value="lost">Perdido (Definitivo)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
