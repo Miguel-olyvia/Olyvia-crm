@@ -1827,6 +1827,7 @@ export function FormBuilder({
                   <div className="p-3 border-b">
                     <span className="font-medium text-sm">Configurar Agendamento</span>
                   </div>
+                  <ScrollArea className="flex-1">
                   <div className="p-4 space-y-4">
                     <div className="space-y-2">
                       <Label className="text-xs">Título do Passo</Label>
@@ -1938,7 +1939,21 @@ export function FormBuilder({
                               : null;
                             const hasValidEarlierPostalField = !!postalStep && postalStep.step_number < activeStep.step_number;
                             if (!hasValidEarlierPostalField) {
-                              toast({
+                              // Só exigir um passo novo quando não há mesmo
+                              // nenhum campo disponível num passo anterior --
+                              // se já houver (ex.: "Localização" já tem o
+                              // código postal), bastava escolhê-lo no select
+                              // acima; pedir para criar um passo inteiro
+                              // confundia o admin (achado 25/09).
+                              const hasCandidateField = fields.some(f => {
+                                const fieldStep = steps.find(s => s.step_number === f.step_number);
+                                return fieldStep && fieldStep.step_type !== 'scheduling' && fieldStep.step_number < activeStep.step_number;
+                              });
+                              toast(hasCandidateField ? {
+                                title: "Escolha o campo de código postal",
+                                description: "Já há campos em passos anteriores -- selecione um em \"Campo de Código Postal (proximidade)\", acima, antes de ligar isto.",
+                                variant: "destructive",
+                              } : {
                                 title: "Falta um passo de morada antes do agendamento",
                                 description: "Use o botão \"Passo\" → \"Passo de Morada\" (Morada + Código Postal + Cidade) -- fica automaticamente antes deste passo. Depois volte aqui e escolha o campo de código postal.",
                                 variant: "destructive",
@@ -1995,6 +2010,7 @@ export function FormBuilder({
                       </p>
                     </div>
                   </div>
+                  </ScrollArea>
                 </div>
               );
             }
