@@ -1082,7 +1082,13 @@ Deno.serve(async (req: Request) => {
                 // recebia este aviso interno, parecendo um botão seu.
                 primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
               });
-          await sendEmailNow({ organizationId, userId: createdBy, smtpId: emailCfg?.email_smtp_id, to: notifyList[0], recipients: notifyList, subject, html });
+          // SEM userId, mesmo motivo do email ao cliente (regra 13, ver acima):
+          // com userId presente, o envio ia pelo SMTP PESSOAL de quem calhava
+          // ser createdBy (o primeiro membro activo da organizacao, ao acaso),
+          // nunca pelo SMTP do formulario que emailCfg.email_smtp_id ja
+          // resolve -- confirmado ao vivo: o aviso ao comercial falhava por
+          // autenticacao mesmo com o SMTP da organizacao correcto e testado.
+          await sendEmailNow({ organizationId, smtpId: emailCfg?.email_smtp_id, to: notifyList[0], recipients: notifyList, subject, html });
         }
       }
 
