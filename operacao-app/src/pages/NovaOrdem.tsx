@@ -30,7 +30,7 @@ import {
 import { ChevronLeft } from "../components/icons";
 import SeletorDeLocal from "../components/SeletorDeLocal";
 import { contactosDoCliente, type ContactoDoCliente } from "../lib/config";
-import { ROTULO_ORIGEM, ROTULO_PRIORIDADE, ORIGENS, PRIORIDADES } from "../domain/tipos";
+import { useRotulos } from "../auth/Rotulos";
 
 /**
  * Abrir uma ordem — o caso do telefone a tocar.
@@ -51,6 +51,7 @@ import { ROTULO_ORIGEM, ROTULO_PRIORIDADE, ORIGENS, PRIORIDADES } from "../domai
 export default function NovaOrdem() {
   const navegar = useNavigate();
   const { activeOrgId, funcao } = useAuth();
+  const rotulos = useRotulos();
 
   const [clientes, setClientes] = useState<Cliente[]>([]);
   const [locais, setLocais] = useState<LocalRow[]>([]);
@@ -283,9 +284,9 @@ export default function NovaOrdem() {
                 onChange={(e) => setOrigem(e.target.value)}
                 className="w-full"
               >
-                {ORIGENS.map((o) => (
-                  <option key={o} value={o}>
-                    {ROTULO_ORIGEM[o]}
+                {rotulos.opcoes("origem").map((o) => (
+                  <option key={o.valor} value={o.valor}>
+                    {o.nome}
                   </option>
                 ))}
               </Select>
@@ -297,9 +298,9 @@ export default function NovaOrdem() {
                 onChange={(e) => setPrioridade(e.target.value)}
                 className="w-full"
               >
-                {PRIORIDADES.map((p) => (
-                  <option key={p} value={p}>
-                    {ROTULO_PRIORIDADE[p]}
+                {rotulos.opcoes("prioridade").map((p) => (
+                  <option key={p.valor} value={p.valor}>
+                    {p.nome}
                   </option>
                 ))}
               </Select>

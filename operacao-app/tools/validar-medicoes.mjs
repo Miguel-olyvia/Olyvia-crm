@@ -493,6 +493,67 @@ await deveSerRecusado(
   "ordem em curso"
 );
 
+/* ── A ordem inicia-se sozinha ────────────────────────────────── */
+// Chegar ao local e responder à primeira coisa É começar o trabalho. Antes
+// disto, quem se esquecesse de carregar em "Iniciar" descobria-o com uma recusa
+// — em cima de um telhado, com uma luva na mão.
+console.log("\n─── a ordem inicia-se sozinha ───────");
+
+const ORDEM3 = await um(`
+  SELECT id, codigo FROM public.ops_ordem
+   WHERE origem='preventiva' AND id NOT IN ('${ORDEM.id}','${ORDEM2.id}')
+   ORDER BY agendada_para LIMIT 1`);
+
+if (!ORDEM3) {
+  mau("faltou uma terceira ordem preventiva para este teste");
+} else {
+  await db.exec(`
+    UPDATE public.ops_ordem SET responsavel_id = '${TECNICO}' WHERE id = '${ORDEM3.id}';`);
+  for (const t of ["confirmar", "aprovar"]) {
+    await como(AUTH.tecnico, `SELECT public.rpc_ops_transitar_ordem('${ORDEM3.id}','${t}',NULL,NULL);`)
+      .catch(async () => { await db.exec("ROLLBACK").catch(() => {}); });
+  }
+  {
+    const e = await um(`SELECT estado FROM public.ops_ordem WHERE id='${ORDEM3.id}'`);
+    e.estado === "agendada"
+      ? ok("a ordem está agendada, e ninguém carregou em Iniciar")
+      : mau(`a ordem ficou em ${e.estado}, esperava agendada`);
+  }
+
+  const T1C = (await um(`
+    SELECT id FROM public.ops_ordem_tarefa
+     WHERE ordem_id='${ORDEM3.id}' AND nome='Verificacao do extintor'`)).id;
+
+  await deveCorrer(
+    "ler a pressão numa ordem apenas agendada",
+    AUTH.tecnico,
+    responder(T1C, PRESSAO, { num: 12 })
+  );
+  {
+    const e = await um(`SELECT estado, iniciada_em FROM public.ops_ordem WHERE id='${ORDEM3.id}'`);
+    e.estado === "em_curso"
+      ? ok("a leitura pôs a ordem em curso, sem se pedir")
+      : mau(`a ordem ficou em ${e.estado}`);
+    e.iniciada_em ? ok("e ficou com a hora de início") : mau("ficou sem iniciada_em");
+  }
+  {
+    const n = await um(`
+      SELECT count(*)::int AS n FROM public.ops_sessao_trabalho
+       WHERE ordem_id='${ORDEM3.id}'`);
+    n.n === 1
+      ? ok("o cronómetro começou — uma sessão de trabalho aberta")
+      : mau(`${n.n} sessões de trabalho, esperava 1`);
+  }
+  {
+    const n = await um(`
+      SELECT count(*)::int AS n FROM public.ops_evento
+       WHERE entidade_id='${ORDEM3.id}' AND tipo='iniciar'`);
+    n.n >= 1
+      ? ok("e ficou escrito no histórico, como qualquer outro início")
+      : mau("o início automático não deixou rasto no histórico");
+  }
+}
+
 /* ── O registo ──────────────────────────────────────────────────────────── */
 console.log("\n─── fica escrito quem leu o quê ─────────");
 {

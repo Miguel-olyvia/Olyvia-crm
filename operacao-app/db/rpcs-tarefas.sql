@@ -162,6 +162,23 @@ BEGIN
      'Gerada a partir da tarefa "' || v_t.nome || '" da ordem ' || v_o.codigo,
      _autor_id, NULL, jsonb_build_object('codigo', v_nova_cod));
 
+  -- Trabalho novo apareceu do nada, e ainda está por aprovar. Quem coordena
+  -- tem de saber hoje, não quando der com ele na lista.
+  --
+  -- O guarda existe para o módulo poder ser instalado sem notificações:
+  -- `notificacoes.sql` é opcional, e sem ele isto não é chamado. Sem o
+  -- guarda, uma não conformidade rebentava numa base sem esse ficheiro.
+  IF to_regprocedure('public.ops_notificar_coordenacao(uuid,text,text,text,text,uuid,text,uuid)')
+     IS NOT NULL THEN
+    PERFORM public.ops_notificar_coordenacao(
+      v_o.organization_id, 'operacoes_corretiva_gerada',
+      v_nova_cod || ' precisa de aprovação',
+      'Nasceu de uma não conformidade em "' || v_t.nome || '", na ordem '
+        || v_o.codigo || '.'
+        || CASE WHEN v_onde IS NOT NULL THEN ' ' || v_onde || '.' ELSE '' END,
+      '/operacao/ordens/' || v_nova_cod, v_nova_id, 'high', _autor_id);
+  END IF;
+
   RETURN v_nova_cod;
 END
 $$;
@@ -228,6 +245,18 @@ BEGIN
     ELSE RAISE EXCEPTION 'Sem função atribuída em Operações nesta organização.'
       USING ERRCODE = 'insufficient_privilege';
     END IF;
+  END IF;
+
+  -- Chegar ao local e responder à primeira tarefa É iniciar a ordem. Quem está
+  -- em cima de um telhado não tem de se lembrar de carregar num botão antes, e
+  -- esquecer-se disso só se descobre quando a resposta é recusada.
+  --
+  -- Não se salta regra nenhuma: a transição passa pela RPC de sempre, que volta
+  -- a verificar quem pode iniciar, escreve o evento e abre a sessão de trabalho.
+  -- O cronómetro começa aqui — que é quando o trabalho começou mesmo.
+  IF v_o.estado = 'agendada' THEN
+    PERFORM public.rpc_ops_transitar_ordem(v_o.id, 'iniciar');
+    SELECT * INTO v_o FROM public.ops_ordem WHERE id = v_o.id;
   END IF;
 
   -- Responder é executar. Só se executa uma ordem em curso: numa fechada

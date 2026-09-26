@@ -34,10 +34,33 @@ describe("quem pode responder", () => {
       .toBe(true);
   });
 
-  it("diz o passo em falta, não só que não pode", () => {
+  it("numa ordem agendada deixa responder, e avisa que a primeira resposta a inicia", () => {
     const r = podeResponder({ estadoOrdem: "agendada", funcao: "tecnico", atribuido: true });
+    expect(r.pode).toBe(true);
+    expect(r.aviso).toContain("inicia a ordem");
+  });
+
+  it("mas só a quem a ordem é — iniciar sem querer a ordem de outro é pior", () => {
+    const r = podeResponder({ estadoOrdem: "agendada", funcao: "tecnico", atribuido: false });
     expect(r.pode).toBe(false);
-    expect(r.motivo).toContain("Inicia a ordem");
+    expect(r.motivo).toContain("outra pessoa");
+  });
+
+  it("diz o passo em falta, não só que não pode", () => {
+    const r = podeResponder({ estadoOrdem: "por_aprovar", funcao: "tecnico", atribuido: true });
+    expect(r.pode).toBe(false);
+    expect(r.motivo).toContain("por aprovar");
+  });
+
+  it("quem coordena também arranca a ordem ao responder", () => {
+    const r = podeResponder({ estadoOrdem: "agendada", funcao: "gestor", atribuido: false });
+    expect(r.pode).toBe(true);
+    expect(r.aviso).toBeTruthy();
+  });
+
+  it("uma ordem em curso já não traz aviso nenhum", () => {
+    expect(podeResponder({ estadoOrdem: "em_curso", funcao: "tecnico", atribuido: true }).aviso)
+      .toBeUndefined();
   });
 
   it("explica a pausa em vez de calar", () => {

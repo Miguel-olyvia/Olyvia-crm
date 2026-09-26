@@ -9,6 +9,7 @@
 
 import { supabase } from "./supabase";
 import type { Estado, Origem, Prioridade } from "../domain/tipos";
+import type { Intervencao, Leitura, LinhaPmp } from "../domain/analises";
 
 export class ErroDeDados extends Error {}
 
@@ -81,6 +82,42 @@ export async function listarOrdens(
   return (data ?? []) as unknown as LinhaOrdem[];
 }
 
+/** O mínimo para contar uma ordem sem a carregar inteira. */
+export interface OrdemParaContar {
+  estado: Estado;
+  agendada_para: string | null;
+}
+
+/**
+ * O suficiente para pôr um número em cada vista da lista.
+ *
+ * Sem os números, saber que há quatro ordens atrasadas obriga a carregar em
+ * "Atrasadas" — e ninguém carrega num separador só para descobrir que está
+ * vazio. Com eles, a lista diz onde é que está o problema antes de se lhe
+ * tocar.
+ *
+ * Duas colunas, e mais nada: o pedido é pequeno mesmo com setecentas ordens
+ * abertas. O histórico fica de fora de propósito — cresce para sempre, e um
+ * número que diz "4318" não ajuda ninguém a decidir nada.
+ */
+export async function ordensParaContar(orgId: string): Promise<OrdemParaContar[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select("estado, agendada_para")
+    .eq("organization_id", orgId)
+    .in("estado", ["por_aprovar", "agendada", "em_curso", "pausada", "fechada"])
+    .limit(2000);
+
+  if (error) {
+    // Um número em falta num separador é um contratempo; um ecrã em branco
+    // por causa dele é um problema. Por isso este erro não rebenta.
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem contagens para as vistas:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as OrdemParaContar[];
+}
+
 export interface OrdemCompleta extends LinhaOrdem {
   /** A lista não seleciona esta coluna; a ficha sim, e precisa dela para auditar. */
   organization_id: string;
@@ -98,6 +135,11 @@ export interface OrdemCompleta extends LinhaOrdem {
   pausa_motivo: string | null;
   plano_id: string | null;
   gerada_por_tarefa_id: string | null;
+  tipo_trabalho_id: string | null;
+  centro_custo_id: string | null;
+  /** → suppliers.id do CRM. Sem chave estrangeira, de propósito. */
+  fornecedor_id: string | null;
+  fecha_automatico: boolean;
 }
 
 export async function obterOrdem(codigo: string, orgId: string): Promise<OrdemCompleta | null> {
@@ -162,6 +204,42 @@ export async function tarefasDaOrdem(ordemId: string): Promise<TarefaDaOrdem[]> 
     .order("posicao");
   rebentar("carregar as tarefas", error);
   return (data ?? []) as unknown as TarefaDaOrdem[];
+}
+
+/**
+ * As especialidades que o trabalho desta ordem pede.
+ *
+ * Vem das tarefas, e as tarefas vêm da checklist do plano — por isso, na
+ * prática, é o **plano** que diz o que é preciso saber para fazer aquilo. Uma
+ * ordem cujas tarefas não têm especialidade devolve uma lista vazia, e isso
+ * não é um erro: é uma ordem que qualquer pessoa pode fazer.
+ *
+ * Só os ids. Os nomes vêm de `listarEspecialidades`, que já é lido para os
+ * filtros da agenda — não vale a pena juntar as duas coisas numa consulta com
+ * `join` para poupar um pedido que já estava a ser feito.
+ */
+export async function especialidadesDaOrdem(ordemId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem_tarefa")
+    .select("skill_id")
+    .eq("ordem_id", ordemId)
+    .not("skill_id", "is", null);
+
+  if (error) {
+    // Sem `correcoes-modelo.sql` a coluna não existe. A sugestão continua a
+    // funcionar — fica só sem a pergunta "quem sabe fazer isto?".
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem especialidades na ordem:", error.message);
+    return [];
+  }
+
+  return [
+    ...new Set(
+      ((data ?? []) as { skill_id: string | null }[])
+        .map((t) => t.skill_id)
+        .filter((x): x is string => !!x)
+    ),
+  ];
 }
 
 /* ────────────────────────────── Sessões ────────────────────────────── */
@@ -238,19 +316,43 @@ export interface LocalRow {
   codigo: string;
   nome: string;
   tipo: string;
+  morada: string | null;
   cidade: string | null;
   zona: string | null;
+  latitude: number | null;
+  longitude: number | null;
+}
+
+/**
+ * As coordenadas como número, venham elas como vierem.
+ *
+ * Na base são `numeric`, e um `numeric` chega aqui como número — mas há
+ * versões do PostgREST que o mandam como texto, para não perder casas. Se isso
+ * acontecesse, o botão de navegação desaparecia sem nada explicar: as guardas
+ * em `domain/mapa.ts` exigem número, e exigem bem. Normaliza-se à entrada, uma
+ * vez, e o resto do código deixa de ter de saber disto.
+ */
+function comCoordenadas(l: LocalRow): LocalRow {
+  const n = (v: unknown): number | null => {
+    if (v === null || v === undefined || v === "") return null;
+    const x = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(x) ? x : null;
+  };
+  return { ...l, latitude: n(l.latitude), longitude: n(l.longitude) };
 }
 
 export async function listarLocais(orgId: string): Promise<LocalRow[]> {
   const { data, error } = await supabase
     .from("ops_local")
-    .select("id, parent_id, cliente_id, codigo, nome, tipo, cidade, zona")
+    .select(
+      "id, parent_id, cliente_id, codigo, nome, tipo, morada, cidade, zona, " +
+        "latitude, longitude"
+    )
     .eq("organization_id", orgId)
     .eq("ativo", true)
     .order("nome");
   rebentar("carregar os locais", error);
-  return (data ?? []) as unknown as LocalRow[];
+  return ((data ?? []) as unknown as LocalRow[]).map(comCoordenadas);
 }
 
 export interface AtivoRow {
@@ -261,19 +363,197 @@ export interface AtivoRow {
   nome: string;
   marca: string | null;
   modelo: string | null;
+  num_serie: string | null;
   criticidade: string;
+  centro_custo_id: string | null;
+  data_instalacao: string | null;
+  garantia_ate: string | null;
 }
 
 export async function ativosDoLocal(localId: string): Promise<AtivoRow[]> {
   const { data, error } = await supabase
     .from("ops_ativo")
-    .select("id, local_id, categoria_id, codigo, nome, marca, modelo, criticidade")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, num_serie, " +
+        "criticidade, centro_custo_id, data_instalacao, garantia_ate"
+    )
     .eq("local_id", localId)
     .eq("ativo", true)
     .order("codigo");
   rebentar("carregar os ativos", error);
   return (data ?? []) as unknown as AtivoRow[];
 }
+
+/**
+ * Os equipamentos de vários sítios de uma vez.
+ *
+ * A ficha de um sítio mostra o que está nele **e** o que está em cada espaço
+ * lá dentro. Uma chamada por espaço davam sete idas à base para uma torre de
+ * sete pisos, e o ecrã montava-se aos bocados à frente de quem olhava.
+ */
+export async function ativosDeLocais(localIds: readonly string[]): Promise<AtivoRow[]> {
+  if (localIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_ativo")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, num_serie, " +
+        "criticidade, centro_custo_id, data_instalacao, garantia_ate"
+    )
+    .in("local_id", localIds)
+    .eq("ativo", true)
+    .order("codigo");
+  rebentar("carregar os ativos", error);
+  return (data ?? []) as unknown as AtivoRow[];
+}
+
+/**
+ * O que foi tirado de vista, para se poder repor.
+ *
+ * Remover aqui nunca apaga: põe `ativo = false`. Apagar a sério levaria
+ * atrás o histórico — as ordens apontam para o equipamento, e a chave é em
+ * cascata. Um engano numa lista não pode custar dois anos de trabalho.
+ */
+export async function ativosRemovidosDe(localIds: readonly string[]): Promise<AtivoRow[]> {
+  if (localIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_ativo")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, num_serie, " +
+        "criticidade, centro_custo_id, data_instalacao, garantia_ate"
+    )
+    .in("local_id", localIds)
+    .eq("ativo", false)
+    .order("codigo");
+  rebentar("carregar os equipamentos removidos", error);
+  return (data ?? []) as unknown as AtivoRow[];
+}
+
+/** Os espaços que foram tirados de vista, em qualquer degrau da árvore. */
+export async function locaisRemovidosDe(paiIds: readonly string[]): Promise<LocalRow[]> {
+  if (paiIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_local")
+    .select(
+      "id, parent_id, cliente_id, codigo, nome, tipo, morada, cidade, zona, " +
+        "latitude, longitude"
+    )
+    .in("parent_id", paiIds)
+    .eq("ativo", false)
+    .order("nome");
+  rebentar("carregar os espaços removidos", error);
+  return ((data ?? []) as unknown as LocalRow[]).map(comCoordenadas);
+}
+
+
+/* ────────────── Acrescentar trabalho na própria ordem ───────────── */
+
+/**
+ * Uma tarefa a mais, só nesta ordem.
+ *
+ * O caminho longo — medição, checklist, publicar, escolher — continua a ser
+ * o certo para o que se repete. Isto é para o que não se repete: o técnico
+ * que chega ao local e encontra mais uma coisa. Ou regista ali, ou não
+ * regista.
+ *
+ * Com limites, a tarefa passa a ser uma leitura com veredicto — sem precisar
+ * de definição de medição nenhuma. Ver `db/tarefas-na-ordem.sql`.
+ */
+export async function acrescentarTarefa(t: {
+  ordemId: string;
+  nome: string;
+  tipo?: string;
+  obrigatoria?: boolean;
+  unidade?: string | null;
+  limiteMin?: number | null;
+  limiteMax?: number | null;
+  observacoes?: string | null;
+}): Promise<string> {
+  const { data, error } = await supabase.rpc("rpc_ops_acrescentar_tarefa", {
+    p_ordem_id: t.ordemId,
+    p_nome: t.nome,
+    p_tipo: t.tipo ?? "inspecao",
+    p_obrigatoria: t.obrigatoria ?? true,
+    p_unidade: t.unidade ?? null,
+    p_limite_min: t.limiteMin ?? null,
+    p_limite_max: t.limiteMax ?? null,
+    p_observacoes: t.observacoes ?? null,
+  });
+  if (error)
+    throw new ErroDeEscrita(error.message || "Não foi possível acrescentar a tarefa.");
+  return String((data as { id?: string } | null)?.id ?? "");
+}
+
+/** Tirar uma tarefa acrescentada por engano. Só por responder. */
+export async function removerTarefa(tarefaId: string): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_remover_tarefa", {
+    p_tarefa_id: tarefaId,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível remover a tarefa.");
+}
+
+
+/* ─────────────────────── O sino, deste lado ───────────────────── */
+
+/**
+ * As notificações do módulo, lidas do sino do CRM.
+ *
+ * ⚠ Isto lê uma tabela do CRM — `public.notifications`. É leitura, como
+ * fornecedores e clientes, e não precisou de uma única linha de SQL: o CRM já
+ * tem, desde sempre, uma política que deixa cada pessoa ver e marcar as
+ * **suas** notificações (`user_id = auth.uid()`). O módulo usa exatamente a
+ * mesma porta que o sino do CRM usa.
+ *
+ * Não é um segundo sino: é o mesmo, mostrado onde a pessoa está. Marcar como
+ * lida aqui apaga-a lá, e ao contrário também — que era a razão pela qual o
+ * módulo tinha nascido sem sino nenhum.
+ *
+ * Filtra por `data->>'modulo' = 'operacoes'`: o que é do CRM lê-se no CRM.
+ */
+export interface AvisoDoSino {
+  id: string;
+  tipo: string;
+  titulo: string;
+  mensagem: string | null;
+  link: string | null;
+  prioridade: string | null;
+  criado_em: string;
+  lido: boolean;
+}
+
+export async function avisosDeOperacoes(limite = 20): Promise<AvisoDoSino[]> {
+  const { data, error } = await supabase
+    .from("notifications")
+    .select("id, type, title, message, link, priority, created_at, is_read")
+    .eq("kind", "notification")
+    .contains("data", { modulo: "operacoes" })
+    .eq("is_dismissed", false)
+    .order("created_at", { ascending: false })
+    .limit(limite);
+
+  // Um sino avariado não pode deitar abaixo o cabeçalho. Se a leitura falhar
+  // — tabela em falta numa base antiga, política mudada — fica sem avisos.
+  if (error) return [];
+  return ((data ?? []) as unknown as Array<Record<string, unknown>>).map((r) => ({
+    id: String(r.id),
+    tipo: String(r.type ?? ""),
+    titulo: String(r.title ?? ""),
+    mensagem: (r.message as string | null) ?? null,
+    link: (r.link as string | null) ?? null,
+    prioridade: (r.priority as string | null) ?? null,
+    criado_em: String(r.created_at ?? ""),
+    lido: r.is_read === true,
+  }));
+}
+
+/** Marcar como lida. A política do CRM já limita isto às próprias. */
+export async function marcarAvisoLido(ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await supabase
+    .from("notifications")
+    .update({ is_read: true, read_at: new Date().toISOString() })
+    .in("id", ids as string[]);
+}
+
 
 /* ─────────────────────────── Árvore de locais ─────────────────────────── */
 
@@ -503,12 +783,25 @@ export interface Conflito {
   agendada_para: string;
 }
 
+/**
+ * Um impedimento vindo da agenda do CRM: férias, horário ou feriado.
+ *
+ * Nunca traz o motivo da ausência — pode ser uma baixa médica, e quem marca
+ * a visita só precisa de saber que a pessoa não está. Ver `db/agenda.sql`.
+ */
+export interface AvisoDeAgenda {
+  tipo: "ausente" | "fora_de_horario" | "feriado";
+  detalhe: string;
+  desde: string;
+  ate: string;
+}
+
 export async function agendarOrdem(args: {
   ordemId: string;
   agendadaPara: string;
   janelaInicio?: string | null;
   janelaFim?: string | null;
-}): Promise<{ ok: boolean; conflitos: Conflito[] }> {
+}): Promise<{ ok: boolean; conflitos: Conflito[]; avisos: AvisoDeAgenda[] }> {
   const { data, error } = await supabase.rpc("rpc_ops_agendar_ordem", {
     p_ordem_id: args.ordemId,
     p_agendada_para: args.agendadaPara,
@@ -516,7 +809,10 @@ export async function agendarOrdem(args: {
     p_janela_fim: args.janelaFim ?? null,
   });
   if (error) throw new ErroDeEscrita(error.message || "Não foi possível agendar a ordem.");
-  return data as unknown as { ok: boolean; conflitos: Conflito[] };
+  // `avisos` só existe se `db/agenda.sql` estiver instalado. Sem ele a RPC
+  // devolve o resto na mesma, e o ecrã fica simplesmente sem estes avisos.
+  const r = data as unknown as { ok: boolean; conflitos: Conflito[]; avisos?: AvisoDeAgenda[] };
+  return { ...r, avisos: r.avisos ?? [] };
 }
 
 /** Quem já está na ordem. Serve para desenhar a equipa e saber quem a executa. */
@@ -951,4 +1247,825 @@ export async function materializarPlanos(
     planos_vistos: number;
     ignorados: unknown[];
   };
+}
+
+/* ─────────────────────────────── Análises ─────────────────────────────── */
+/*
+ * As três vistas de `db/analises.sql`. São vistas com `security_invoker`, por
+ * isso a RLS das tabelas por baixo continua a decidir o que cada pessoa vê —
+ * não é preciso filtrar por organização aqui a não ser para reduzir o volume.
+ */
+
+/** Todas as visitas feitas a um equipamento, da mais recente para trás. */
+export async function intervencoesDoAtivo(ativoId: string): Promise<Intervencao[]> {
+  const { data, error } = await supabase
+    .from("ops_v_ativo_intervencao")
+    .select("ordem_id, codigo, origem, estado, titulo, quando, nao_conformidades, tarefas")
+    .eq("ativo_id", ativoId)
+    .order("quando", { ascending: false });
+  rebentar("carregar o histórico do equipamento", error);
+  return (data ?? []) as unknown as Intervencao[];
+}
+
+/** Todas as leituras feitas a um equipamento. A ordem final é do domínio. */
+export async function leiturasDoAtivo(ativoId: string): Promise<Leitura[]> {
+  const { data, error } = await supabase
+    .from("ops_v_ativo_leitura")
+    .select(
+      "leitura_id, medicao_def_id, nome, tipo, unidade, limite_min, limite_max, " +
+        "valor_num, valor_texto, conforme, lida_em, codigo"
+    )
+    .eq("ativo_id", ativoId)
+    .order("lida_em");
+  rebentar("carregar as leituras do equipamento", error);
+  return (data ?? []) as unknown as Leitura[];
+}
+
+/**
+ * As ordens preventivas previstas num período.
+ *
+ * O corte é pela data prometida (`agendada_para`), não pela de fecho: a
+ * pergunta é "o que estava prometido para março foi feito?", e uma ordem de
+ * março fechada em abril continua a ser de março.
+ */
+export async function pmpDoPeriodo(
+  orgId: string,
+  desde: string,
+  ate: string
+): Promise<LinhaPmp[]> {
+  const { data, error } = await supabase
+    .from("ops_v_pmp")
+    .select(
+      "ordem_id, cliente_id, codigo, titulo, estado, agendada_para, fechada_em, " +
+        "mes, cumprida, a_horas, em_atraso"
+    )
+    .eq("organization_id", orgId)
+    .gte("agendada_para", desde)
+    .lte("agendada_para", ate)
+    .order("agendada_para");
+  rebentar("carregar a manutenção preventiva", error);
+  return (data ?? []) as unknown as LinhaPmp[];
+}
+
+export interface AtivoComLocal extends AtivoRow {
+  local_nome: string;
+  cliente_id: string;
+}
+
+/**
+ * Todos os equipamentos da organização, para se poder escolher um.
+ *
+ * Traz o nome do local junto: "Extintor 3" sozinho não identifica nada quando
+ * há quarenta extintores.
+ */
+export async function listarAtivos(orgId: string): Promise<AtivoComLocal[]> {
+  const { data, error } = await supabase
+    .from("ops_ativo")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, criticidade, " +
+        "ops_local!inner(nome, cliente_id)"
+    )
+    .eq("organization_id", orgId)
+    .eq("ativo", true)
+    .order("codigo");
+  rebentar("carregar os equipamentos", error);
+  const linhas = (data ?? []) as unknown as Record<string, unknown>[];
+  return linhas.map((a) => {
+    const local = a.ops_local as { nome: string; cliente_id: string };
+    return {
+      ...(a as unknown as AtivoRow),
+      local_nome: local?.nome ?? "—",
+      cliente_id: local?.cliente_id ?? "",
+    };
+  });
+}
+
+/**
+ * Manda a base procurar ordens atrasadas e pausas expiradas, e avisar quem
+ * tem de saber.
+ *
+ * Existe porque essas duas falhas não geram evento nenhum — são a ausência de
+ * um. Só se descobrem a olhar para o relógio, e alguém tem de olhar.
+ *
+ * Idempotente do lado da base: o mesmo aviso não se repete enquanto o primeiro
+ * estiver por ler. Falhar aqui não é motivo para estragar um ecrã, por isso
+ * quem chama isto ignora o erro.
+ */
+export async function avisarAtrasos(): Promise<number> {
+  const { data, error } = await supabase.rpc("rpc_ops_avisar_atrasos");
+  if (error) throw new ErroDeEscrita(error.message);
+  return (data as unknown as { avisos?: number })?.avisos ?? 0;
+}
+
+/* ────────────────────── Exportar leituras ────────────────────── */
+
+/** Uma leitura com o contexto todo, como sai de `ops_v_leitura`. */
+export interface LeituraExportavel {
+  leitura_id: string;
+  ordem: string;
+  cliente_id: string;
+  medicao_def_id: string;
+  nome: string;
+  tipo: string;
+  unidade: string | null;
+  limite_min: number | null;
+  limite_max: number | null;
+  valor_num: number | null;
+  valor_texto: string | null;
+  conforme: boolean | null;
+  lida_em: string;
+  lida_por: string | null;
+  tarefa: string | null;
+  local: string | null;
+  local_codigo: string | null;
+  ativo: string | null;
+  ativo_codigo: string | null;
+}
+
+/** O PostgREST devolve no máximo 1000 linhas de cada vez. */
+const PAGINA = 1000;
+
+/**
+ * Todas as leituras que satisfazem os filtros — **todas**, não as primeiras mil.
+ *
+ * Sem a paginação, uma exportação de dois anos de leituras vinha cortada nas
+ * 1000 primeiras linhas sem erro nenhum, e quem a entregasse a um regulador não
+ * dava por isso. É por isso que o `while` existe.
+ *
+ * `limite` existe para o caso patológico: se alguém pedir dez anos de tudo, é
+ * melhor parar e dizer que é demais do que ficar a puxar páginas para sempre.
+ */
+export async function leiturasParaExportar(
+  orgId: string,
+  filtros: { defId?: string | null; clienteId?: string | null; desde: string; ate: string },
+  limite = 50_000
+): Promise<{ linhas: LeituraExportavel[]; truncado: boolean }> {
+  const linhas: LeituraExportavel[] = [];
+
+  for (let inicio = 0; inicio < limite; inicio += PAGINA) {
+    let q = supabase
+      .from("ops_v_leitura")
+      .select(
+        "leitura_id, ordem, cliente_id, medicao_def_id, nome, tipo, unidade, " +
+          "limite_min, limite_max, valor_num, valor_texto, conforme, lida_em, " +
+          "lida_por, tarefa, local, local_codigo, ativo, ativo_codigo"
+      )
+      .eq("organization_id", orgId)
+      .gte("lida_em", filtros.desde)
+      .lte("lida_em", filtros.ate)
+      .order("lida_em")
+      .range(inicio, inicio + PAGINA - 1);
+
+    if (filtros.defId) q = q.eq("medicao_def_id", filtros.defId);
+    if (filtros.clienteId) q = q.eq("cliente_id", filtros.clienteId);
+
+    const { data, error } = await q;
+    rebentar("carregar as leituras", error);
+
+    const pagina = (data ?? []) as unknown as LeituraExportavel[];
+    linhas.push(...pagina);
+    if (pagina.length < PAGINA) return { linhas, truncado: false };
+  }
+
+  return { linhas, truncado: true };
+}
+
+/* ─────────────────────────────── Agenda ─────────────────────────────── */
+
+import type { Compromisso, ImpedimentoDaEquipa, OrdemNaAgenda } from "../domain/agenda";
+import type { OrdemDoPeriodo } from "../domain/resumo-do-periodo";
+
+/**
+ * As ordens de um dia, com a janela de visita.
+ *
+ * `listarOrdens` não serve aqui: não traz `janela_inicio`/`janela_fim`, e sem
+ * eles todas as barras teriam a mesma largura.
+ *
+ * Traz também as **pausadas**: uma ordem em pausa continua a ocupar o dia de
+ * quem a tem, e escondê-la faria a agenda parecer mais livre do que está.
+ */
+export async function ordensDoDia(orgId: string, dia: Date): Promise<OrdemNaAgenda[]> {
+  const inicio = new Date(dia);
+  inicio.setHours(0, 0, 0, 0);
+  const fim = new Date(dia);
+  fim.setHours(23, 59, 59, 999);
+
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select(
+      "id, codigo, titulo, estado, origem, prioridade, responsavel_id, " +
+        "local_id, cliente_id, tipo_trabalho_id, fornecedor_id, " +
+        "agendada_para, janela_inicio, janela_fim"
+    )
+    .eq("organization_id", orgId)
+    .in("estado", ["por_aprovar", "agendada", "em_curso", "pausada"])
+    .gte("agendada_para", inicio.toISOString())
+    .lte("agendada_para", fim.toISOString())
+    .order("agendada_para");
+
+  rebentar("carregar a agenda do dia", error);
+  return (data ?? []) as unknown as OrdemNaAgenda[];
+}
+
+/**
+ * Férias, horários e feriados da equipa toda, num pedido só.
+ *
+ * Se `db/agenda.sql` não estiver instalado, a RPC não existe — e a agenda
+ * desenha-se na mesma, só sem as faixas de ausência. Por isso o erro é
+ * engolido aqui em vez de levar o ecrã à frente.
+ */
+export async function impedimentosDoDia(
+  orgId: string,
+  dia: Date
+): Promise<ImpedimentoDaEquipa[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_agenda_do_dia", {
+    _org_id: orgId,
+    _dia: dia.toISOString().slice(0, 10),
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem disponibilidade da equipa:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as ImpedimentoDaEquipa[];
+}
+
+/* ───────────────────────── Assinatura do cliente ───────────────────────── */
+
+export interface Assinatura {
+  id: string;
+  ordem_id: string;
+  nome: string;
+  qualidade: string | null;
+  caminho: string;
+  recolhida_por: string | null;
+  assinada_em: string;
+}
+
+export async function assinaturaDaOrdem(ordemId: string): Promise<Assinatura | null> {
+  const { data, error } = await supabase
+    .from("ops_assinatura")
+    .select("id, ordem_id, nome, qualidade, caminho, recolhida_por, assinada_em")
+    .eq("ordem_id", ordemId)
+    .maybeSingle();
+  // A tabela é opcional: sem `db/assinaturas.sql` a ficha da ordem continua a
+  // abrir, só sem o painel.
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem assinatura:", error.message);
+    return null;
+  }
+  return (data as unknown as Assinatura) ?? null;
+}
+
+/**
+ * Sobe a imagem e regista a assinatura.
+ *
+ * Mesma coreografia dos anexos, e pela mesma razão: são duas escritas em
+ * sítios diferentes, e se a segunda falhar o ficheiro não pode ficar órfão.
+ */
+export async function assinarOrdem(args: {
+  ordemId: string;
+  organizationId: string;
+  imagem: Blob;
+  nome: string;
+  qualidade?: string | null;
+}): Promise<{ ok: boolean; substituiu: boolean; caminho: string }> {
+  const caminho = `${args.organizationId}/${args.ordemId}/assinatura-${nomeSorteado()}.png`;
+
+  const { error: erroUpload } = await supabase.storage
+    .from(BUCKET)
+    .upload(caminho, args.imagem, { contentType: "image/png", upsert: false });
+
+  if (erroUpload) {
+    const m = erroUpload.message ?? "";
+    throw new ErroDeEscrita(
+      m.includes("Bucket not found")
+        ? "O armazenamento de Operações não está criado. Falta correr db/anexos.sql."
+        : m || "Não foi possível guardar a assinatura."
+    );
+  }
+
+  const { data, error } = await supabase.rpc("rpc_ops_assinar_ordem", {
+    p_ordem_id: args.ordemId,
+    p_caminho: caminho,
+    p_nome: args.nome,
+    p_qualidade: args.qualidade ?? null,
+  });
+
+  if (error) {
+    await supabase.storage.from(BUCKET).remove([caminho]);
+    throw new ErroDeEscrita(error.message || "Não foi possível registar a assinatura.");
+  }
+
+  const r = data as unknown as { substituiu: boolean };
+  return { ok: true, substituiu: Boolean(r?.substituiu), caminho };
+}
+
+/** Uma indisponibilidade num dia concreto, para as vistas de semana e mês. */
+export interface IndisponibilidadeNoDia {
+  utilizador_id: string;
+  dia: string;
+  tipo: "ausente" | "fora_de_horario" | "feriado";
+  detalhe: string;
+}
+
+/** As ordens de um período, para a semana e o mês. */
+export async function ordensDoPeriodo(
+  orgId: string,
+  de: Date,
+  ate: Date
+): Promise<OrdemNaAgenda[]> {
+  const inicio = new Date(de);
+  inicio.setHours(0, 0, 0, 0);
+  const fim = new Date(ate);
+  fim.setHours(23, 59, 59, 999);
+
+  /*
+   * As colunas de classificação e o local vinham em falta, e o tipo dizia que
+   * estavam cá. O efeito era silencioso e feio: na semana e no mês, filtrar
+   * por cliente ou por tipo de trabalho nunca dava nada — `undefined` não é
+   * igual a coisa nenhuma. E sem `local_id` não há como saber onde é que cada
+   * pessoa já vai estar, que é metade do que a sugestão de técnico precisa.
+   */
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select(
+      "id, codigo, titulo, estado, origem, prioridade, responsavel_id, " +
+        "local_id, cliente_id, tipo_trabalho_id, fornecedor_id, " +
+        "agendada_para, janela_inicio, janela_fim"
+    )
+    .eq("organization_id", orgId)
+    .in("estado", ["por_aprovar", "agendada", "em_curso", "pausada"])
+    .gte("agendada_para", inicio.toISOString())
+    .lte("agendada_para", fim.toISOString())
+    .order("agendada_para");
+
+  rebentar("carregar a agenda", error);
+  return (data ?? []) as unknown as OrdemNaAgenda[];
+}
+
+/**
+ * Férias, horários e feriados de um período, por pessoa e por dia.
+ *
+ * Como `impedimentosDoDia`, o erro é engolido: sem `db/agenda.sql` a agenda
+ * desenha-se na mesma, só sem as faixas de ausência.
+ */
+export async function indisponibilidadesDoPeriodo(
+  orgId: string,
+  de: Date,
+  ate: Date
+): Promise<IndisponibilidadeNoDia[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_agenda_periodo", {
+    _org_id: orgId,
+    _de: isoDia(de),
+    _ate: isoDia(ate),
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem indisponibilidades:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as IndisponibilidadeNoDia[];
+}
+
+/**
+ * Os compromissos que já estão na agenda do CRM.
+ *
+ * A agenda é uma só: uma pessoa com uma visita comercial marcada às 10h não
+ * está livre às 10h.
+ */
+export async function compromissosDoCRM(
+  orgId: string,
+  de: Date,
+  ate: Date
+): Promise<Compromisso[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_compromissos_crm", {
+    _org_id: orgId,
+    _de: isoDia(de),
+    _ate: isoDia(ate),
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem compromissos do CRM:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as Compromisso[];
+}
+
+/**
+ * `2026-09-16` no fuso local.
+ *
+ * `toISOString().slice(0,10)` daria o dia em UTC — e às 23h de Lisboa isso é
+ * já o dia seguinte, o que faria a agenda carregar o período errado.
+ */
+function isoDia(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate()
+  ).padStart(2, "0")}`;
+}
+
+/**
+ * O local de uma ordem, com a morada e o ponto no mapa.
+ *
+ * Só isto — a ficha da ordem não precisa da árvore toda de locais para
+ * desenhar um botão de navegação.
+ */
+export async function localDaOrdem(localId: string | null): Promise<LocalRow | null> {
+  if (!localId) return null;
+  const { data, error } = await supabase
+    .from("ops_local")
+    .select(
+      "id, parent_id, cliente_id, codigo, nome, tipo, morada, cidade, zona, latitude, longitude"
+    )
+    .eq("id", localId)
+    .maybeSingle();
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem o local da ordem:", error.message);
+    return null;
+  }
+  return data ? comCoordenadas(data as unknown as LocalRow) : null;
+}
+
+/* ─────────────────────── Definições da organização ─────────────────────── */
+
+/** As chaves que existem. Fechadas, tal como na base. */
+export type ChaveDeDefinicao = "relatorio_automatico";
+
+/**
+ * As definições da organização, já com os valores por omissão aplicados.
+ *
+ * Uma organização que nunca mexeu em nada não tem linha nenhuma na tabela —
+ * e a resposta certa nesse caso não é "vazio", é "desligado".
+ */
+export async function lerDefinicoes(
+  orgId: string
+): Promise<Record<ChaveDeDefinicao, string>> {
+  const { data, error } = await supabase
+    .from("ops_definicao")
+    .select("chave, valor")
+    .eq("organization_id", orgId);
+
+  rebentar("ler as definições", error);
+
+  const fora: Record<ChaveDeDefinicao, string> = { relatorio_automatico: "nao" };
+  for (const l of (data ?? []) as { chave: string; valor: string }[]) {
+    if (l.chave in fora) fora[l.chave as ChaveDeDefinicao] = l.valor;
+  }
+  return fora;
+}
+
+export async function definirDefinicao(
+  orgId: string,
+  chave: ChaveDeDefinicao,
+  valor: string
+): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_definir", {
+    p_org_id: orgId,
+    p_chave: chave,
+    p_valor: valor,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível gravar a definição.");
+}
+
+/* ─────────────────── Classificação de uma ordem ────────────────────────── */
+
+/**
+ * Tipo de trabalho, centro de custo, fornecedor e o fecho automático.
+ *
+ * Vai por UPDATE direto e não por RPC porque **não mexe no estado** — e o
+ * estado é a única coisa que a base tranca. Título, responsável e descrição
+ * seguem o mesmo caminho desde o início.
+ */
+export async function gravarClassificacao(
+  ordemId: string,
+  c: {
+    tipoTrabalhoId?: string | null;
+    centroCustoId?: string | null;
+    fornecedorId?: string | null;
+    fechaAutomatico?: boolean;
+  }
+): Promise<void> {
+  const linha: Record<string, unknown> = { atualizada_em: new Date().toISOString() };
+  if ("tipoTrabalhoId" in c) linha.tipo_trabalho_id = c.tipoTrabalhoId || null;
+  if ("centroCustoId" in c) linha.centro_custo_id = c.centroCustoId || null;
+  if ("fornecedorId" in c) linha.fornecedor_id = c.fornecedorId || null;
+  if ("fechaAutomatico" in c) linha.fecha_automatico = c.fechaAutomatico;
+
+  const { error } = await supabase.from("ops_ordem").update(linha).eq("id", ordemId);
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível gravar.");
+}
+
+/**
+ * Fecha a ordem se ela for das que se fecham sozinhas e já não faltar nada.
+ *
+ * Chamada depois de cada resposta. Não é erro não ser altura — a base devolve
+ * o motivo e a aplicação segue. Falhar aqui nunca pode estragar uma resposta
+ * que já foi gravada, e por isso o erro é engolido.
+ */
+export async function fecharSeCompleta(ordemId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("rpc_ops_fechar_se_completa", {
+    p_ordem_id: ordemId,
+  });
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] fecho automático não correu:", error.message);
+    return false;
+  }
+  return (data as { fechou?: boolean } | null)?.fechou === true;
+}
+
+/* ────────────────────────── Um local em detalhe ────────────────────────── */
+
+/** As ordens que passaram por um sítio. É a memória dele. */
+export async function ordensDoLocal(
+  orgId: string,
+  localId: string,
+  limite = 20
+): Promise<LinhaOrdem[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select(COLUNAS_ORDEM)
+    .eq("organization_id", orgId)
+    .eq("local_id", localId)
+    .order("criada_em", { ascending: false })
+    .limit(limite);
+
+  rebentar("carregar as ordens do local", error);
+  return (data ?? []) as unknown as LinhaOrdem[];
+}
+
+/**
+ * As ordens que entram no resumo de um período, nas Análises.
+ *
+ * ⚠ Não confundir com `ordensDoPeriodo`, mais acima: essa serve a agenda e
+ * traz o que está **marcado** para um intervalo. Esta traz o que **aconteceu**
+ * nele. São perguntas diferentes e as respostas raramente coincidem.
+ *
+ * Traz as que **nasceram** ou **fecharam** dentro do período, mais todas as
+ * que continuam por fechar — essas contam sempre, tenham nascido quando
+ * tiverem. Um resumo que ignora uma ordem de março ainda aberta em setembro
+ * está a esconder precisamente o que interessa.
+ *
+ * Sem SQL novo: as colunas já existem desde o `schema.sql`. O que faltava era
+ * somá-las — e isso faz-se em `domain/resumo-do-periodo.ts`, sem base de
+ * dados pelo meio.
+ */
+export async function ordensParaResumo(
+  orgId: string,
+  de: Date,
+  ate: Date
+): Promise<OrdemDoPeriodo[]> {
+  const colunas =
+    "id, codigo, estado, origem, prioridade, cliente_id, local_id, " +
+    "responsavel_id, criada_em, agendada_para, iniciada_em, fechada_em";
+
+  const porFechar = ["por_aprovar", "agendada", "em_curso", "pausada"];
+
+  const [nascidas, fechadas, abertas] = await Promise.all([
+    supabase.from("ops_ordem").select(colunas).eq("organization_id", orgId)
+      .gte("criada_em", de.toISOString()).lte("criada_em", ate.toISOString()),
+    supabase.from("ops_ordem").select(colunas).eq("organization_id", orgId)
+      .gte("fechada_em", de.toISOString()).lte("fechada_em", ate.toISOString()),
+    supabase.from("ops_ordem").select(colunas).eq("organization_id", orgId)
+      .in("estado", porFechar),
+  ]);
+
+  for (const r of [nascidas, fechadas, abertas]) {
+    rebentar("carregar as ordens do período", r.error);
+  }
+
+  // Três consultas, uma lista: a mesma ordem pode vir em duas delas, e contada
+  // duas vezes qualquer média sai errada.
+  const porId = new Map<string, OrdemDoPeriodo>();
+  for (const r of [nascidas, fechadas, abertas]) {
+    for (const linha of (r.data ?? []) as unknown as OrdemDoPeriodo[]) {
+      porId.set(linha.id, linha);
+    }
+  }
+  return [...porId.values()];
+}
+
+/**
+ * As ordens de um sítio **e** de todos os espaços lá dentro.
+ *
+ * A ficha de uma morada passou a ser uma página só, e a pergunta que se faz a
+ * olhar para ela — "esta torre tem dado problemas?" — não distingue o piso 3
+ * da garagem. Perguntar só pelo nó de cima dava sempre uma lista vazia, porque
+ * o trabalho acontece nos espaços.
+ */
+export async function ordensDeLocais(
+  orgId: string,
+  localIds: readonly string[],
+  limite = 20
+): Promise<LinhaOrdem[]> {
+  if (localIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("ops_ordem")
+    .select(COLUNAS_ORDEM)
+    .eq("organization_id", orgId)
+    .in("local_id", localIds)
+    .order("criada_em", { ascending: false })
+    .limit(limite);
+
+  rebentar("carregar as ordens do local", error);
+  return (data ?? []) as unknown as LinhaOrdem[];
+}
+
+/**
+ * O caminho desde a raiz até este local: Cliente › Torre › Piso › Espaço.
+ *
+ * Pura, e a partir da lista que a página já tem — não vale um pedido à base
+ * para subir três níveis. Pára a subir se encontrar um ciclo: dados errados
+ * não podem pendurar o ecrã.
+ */
+export function caminhoAteLocal(
+  locais: readonly LocalRow[],
+  localId: string
+): LocalRow[] {
+  const porId = new Map(locais.map((l) => [l.id, l]));
+  const caminho: LocalRow[] = [];
+  const vistos = new Set<string>();
+
+  let atual = porId.get(localId);
+  while (atual && !vistos.has(atual.id)) {
+    vistos.add(atual.id);
+    caminho.unshift(atual);
+    atual = atual.parent_id ? porId.get(atual.parent_id) : undefined;
+  }
+  return caminho;
+}
+
+/* ─────────────────────────────── Histórico ─────────────────────────────── */
+
+export interface EventoRow {
+  id: string;
+  entidade: string;
+  entidade_id: string;
+  tipo: string;
+  descricao: string | null;
+  autor_id: string | null;
+  antes: Record<string, unknown> | null;
+  depois: Record<string, unknown> | null;
+  criado_em: string;
+}
+
+/**
+ * O que aconteceu a uma coisa, do mais recente para trás.
+ *
+ * O módulo escreve histórico desde o primeiro dia e nunca o mostrou a
+ * ninguém. Isto é a porta que faltava — serve para o equipamento, e serve
+ * para tudo o resto que a use a seguir.
+ */
+export async function historicoDe(
+  entidade: string,
+  entidadeId: string,
+  limite = 30
+): Promise<EventoRow[]> {
+  const { data, error } = await supabase
+    .from("ops_evento")
+    .select("id, entidade, entidade_id, tipo, descricao, autor_id, antes, depois, criado_em")
+    .eq("entidade", entidade)
+    .eq("entidade_id", entidadeId)
+    .order("criado_em", { ascending: false })
+    .limit(limite);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem histórico:", error.message);
+    return [];
+  }
+  return (data ?? []) as unknown as EventoRow[];
+}
+
+/* ─────────────────────── Um equipamento em detalhe ─────────────────────── */
+
+/**
+ * O equipamento pelo código, que é o que a etiqueta QR carrega.
+ *
+ * O código é único por organização — e é por isso que serve de endereço. Um
+ * uuid numa etiqueta seria ilegível para quem a colasse ao contrário.
+ */
+export async function ativoPorCodigo(
+  orgId: string,
+  codigo: string
+): Promise<AtivoRow | null> {
+  const { data, error } = await supabase
+    .from("ops_ativo")
+    .select(
+      "id, local_id, categoria_id, codigo, nome, marca, modelo, num_serie, " +
+        "criticidade, centro_custo_id, data_instalacao, garantia_ate"
+    )
+    .eq("organization_id", orgId)
+    .eq("codigo", codigo)
+    .maybeSingle();
+
+  rebentar("carregar o equipamento", error);
+  return (data as unknown as AtivoRow) ?? null;
+}
+
+/** As ordens que passaram por um equipamento, pelos alvos dela. */
+export async function ordensDoAtivo(
+  orgId: string,
+  ativoId: string,
+  limite = 20
+): Promise<LinhaOrdem[]> {
+  const { data, error } = await supabase
+    .from("ops_ordem_alvo")
+    .select(`ordem_id, ops_ordem!inner(${COLUNAS_ORDEM}, organization_id)`)
+    .eq("ativo_id", ativoId)
+    .limit(limite);
+
+  if (error) {
+    // eslint-disable-next-line no-console
+    console.warn("[Operações] sem ordens do equipamento:", error.message);
+    return [];
+  }
+
+  const linhas = ((data ?? []) as unknown as { ops_ordem: LinhaOrdem & { organization_id: string } }[])
+    .map((l) => l.ops_ordem)
+    .filter((o) => o && o.organization_id === orgId);
+
+  // Da mais recente para trás — é a ordem por que a memória se lê.
+  return linhas.sort((a, b) => (b.criada_em ?? "").localeCompare(a.criada_em ?? ""));
+}
+
+/* ────────────────────────── A conversa da ordem ────────────────────────── */
+
+/**
+ * Uma mensagem escrita dentro da ordem.
+ *
+ * Não é WhatsApp nem chat com o cliente: é a conversa entre colegas sobre
+ * *este* trabalho, guardada onde o trabalho está. Ver `db/mensagens.sql` para
+ * a razão de não se poder apagar nem reescrever.
+ */
+export interface Mensagem {
+  id: string;
+  ordem_id: string;
+  autor_id: string | null;
+  texto: string;
+  criada_em: string;
+}
+
+export async function mensagensDaOrdem(ordemId: string): Promise<Mensagem[]> {
+  const { data, error } = await supabase
+    .from("ops_mensagem")
+    .select("id, ordem_id, autor_id, texto, criada_em")
+    .eq("ordem_id", ordemId)
+    .eq("canal", "interno")
+    // Do princípio para o fim, como se lê uma conversa.
+    .order("criada_em", { ascending: true });
+  rebentar("carregar as mensagens", error);
+  return (data ?? []) as unknown as Mensagem[];
+}
+
+/**
+ * Escrever uma mensagem.
+ *
+ * Passa pela RPC e não por um INSERT direto porque escrever é metade do
+ * trabalho: a outra metade é tocar o sino a quem está na ordem. Uma mensagem
+ * que ninguém lê não serve para nada.
+ */
+export async function escreverMensagem(
+  ordemId: string,
+  texto: string
+): Promise<{ ok: boolean; id: string }> {
+  const { data, error } = await supabase.rpc("rpc_ops_escrever_mensagem", {
+    p_ordem_id: ordemId,
+    p_texto: texto,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível enviar a mensagem.");
+  return data as unknown as { ok: boolean; id: string };
+}
+
+/* ─────────────────────── O relatório ao cliente ─────────────────────── */
+
+/** Para onde ia o relatório desta ordem, e se já foi algum. */
+export interface DestinoDoRelatorio {
+  email: string | null;
+  estado: string;
+  ja_enviado: string | null;
+}
+
+export async function destinoDoRelatorio(ordemId: string): Promise<DestinoDoRelatorio> {
+  const { data, error } = await supabase.rpc("rpc_ops_destino_do_relatorio", {
+    p_ordem_id: ordemId,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível saber o destinatário.");
+  return data as unknown as DestinoDoRelatorio;
+}
+
+/**
+ * Mandar o relatório ao cliente agora.
+ *
+ * Não leva destinatário: vai para o email da ficha do cliente e mais nenhum.
+ * Ver `db/relatorio-manual.sql` para a razão.
+ */
+export async function enviarRelatorio(ordemId: string): Promise<{ ok: boolean; para: string }> {
+  const { data, error } = await supabase.rpc("rpc_ops_enviar_relatorio", {
+    p_ordem_id: ordemId,
+  });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível enviar o relatório.");
+  return data as unknown as { ok: boolean; para: string };
 }

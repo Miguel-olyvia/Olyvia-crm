@@ -14,7 +14,7 @@ import { toast } from "@/lib/toast";
 import { useNavigate } from "react-router-dom";
 import { useCompany } from "@/contexts/CompanyContext";
 import { resolveOrgSubtree } from "@/lib/orgSubtree";
-import { appendTimestamp, getNotificationRoute, notificationPriorityColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
+import { abrirNotificacao, getNotificationRoute, notificationPriorityColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
 
 interface NotificationRow {
   id: string;
@@ -160,7 +160,7 @@ export default function Notifications() {
   const handleAction = async (n: NotificationRow) => {
     await markAsRead(n.id);
     const route = await getNotificationRoute(n);
-    if (route) navigate(appendTimestamp(route), { replace: true });
+    if (route) abrirNotificacao(route, navigate);
   };
 
   return (

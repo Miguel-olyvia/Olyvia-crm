@@ -4,12 +4,15 @@ import {
   ErroDeEscrita,
   agendarOrdem,
   atribuirOrdem,
+  type AvisoDeAgenda,
   type Conflito,
+  type LocalRow,
   type MembroEquipa,
 } from "../lib/dados";
-import { Badge, Button, Card, Combobox, Field, Input, cx } from "./ui";
+import { Badge, Button, Card, Combobox, Field, Input, Seccao, cx } from "./ui";
 import { AlertTriangle, Check, Clock, User } from "./icons";
 import { ROTULO_FUNCAO, type Funcao } from "../domain/tipos";
+import SugerirTecnico from "./SugerirTecnico";
 
 /**
  * Quem vai, e quando.
@@ -26,6 +29,8 @@ import { ROTULO_FUNCAO, type Funcao } from "../domain/tipos";
 
 export default function PainelDespacho({
   ordemId,
+  orgId,
+  local,
   estado,
   responsavelId,
   equipaDaOrdem,
@@ -37,6 +42,9 @@ export default function PainelDespacho({
   aoGravar,
 }: {
   ordemId: string;
+  orgId: string;
+  /** Onde é o trabalho — é daqui que sai a distância na sugestão. */
+  local: LocalRow | null;
   estado: string;
   responsavelId: string | null;
   equipaDaOrdem: readonly string[];
@@ -59,6 +67,7 @@ export default function PainelDespacho({
   const [aGravar, setAGravar] = useState<"atribuir" | "agendar" | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const [conflitos, setConflitos] = useState<Conflito[] | null>(null);
+  const [avisos, setAvisos] = useState<AvisoDeAgenda[]>([]);
 
   const fechada = ["fechada", "confirmada", "cancelada"].includes(estado);
   const ativo = podeDespachar && !fechada;
@@ -88,6 +97,7 @@ export default function PainelDespacho({
         equipa: [...extra, ...(resp ? [resp] : [])],
       });
       setConflitos(null);
+      setAvisos([]);
     });
 
   const gravarAgenda = () =>
@@ -99,6 +109,7 @@ export default function PainelDespacho({
         janelaFim: fim ? new Date(fim).toISOString() : null,
       });
       setConflitos(r.conflitos);
+      setAvisos(r.avisos);
     });
 
   if (fechada) return null;
@@ -108,9 +119,47 @@ export default function PainelDespacho({
     label: `${m.nome} · ${ROTULO_FUNCAO[m.funcao as Funcao] ?? m.funcao}`,
   }));
 
+  /**
+   * O que a sugestão deixa nos campos.
+   *
+   * Não grava nada: preenche, e quem coordena confirma com os botões que já lá
+   * estavam. Uma sugestão que gravasse sozinha seria uma decisão tomada por um
+   * botão chamado "sugerir".
+   *
+   * Com dia proposto, a hora vai a 09:00. É a única hora inventada em toda a
+   * aplicação, e só existe porque um campo de data-e-hora não aceita metade —
+   * fica num input à espera de confirmação, e não numa agenda a fingir que
+   * alguém marcou aquilo.
+   */
+  const aplicarSugestao = (utilizadorId: string, dia: Date | null) => {
+    setResp(utilizadorId);
+    setExtra((xs) => xs.filter((x) => x !== utilizadorId));
+    if (dia) {
+      const d = new Date(dia);
+      d.setHours(9, 0, 0, 0);
+      setQuando(paraInput(d.toISOString()));
+    }
+  };
+
   return (
     <Card className="p-4 sm:p-5">
-      <h2 className="text-sm font-semibold text-slate-800">Quem vai, e quando</h2>
+      <Seccao
+        icone={<User width={15} height={15} />}
+        titulo="Quem vai, e quando"
+        acao={
+          ativo ? (
+            <SugerirTecnico
+              ordemId={ordemId}
+              orgId={orgId}
+              local={local}
+              agendadaPara={agendadaPara}
+              equipa={equipa}
+              aoEscolher={aplicarSugestao}
+              desativado={aGravar !== null}
+            />
+          ) : undefined
+        }
+      />
 
       {!podeDespachar && (
         <p className="mt-2 text-sm text-slate-400">
@@ -226,10 +275,37 @@ export default function PainelDespacho({
 
       {erro && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
 
-      {conflitos !== null && conflitos.length === 0 && (
+      {conflitos !== null && conflitos.length === 0 && avisos.length === 0 && (
         <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-emerald-700">
           <Check width={14} height={14} /> Marcado. Ninguém fica com duas coisas à mesma hora.
         </p>
+      )}
+
+      {/* Férias, horário e feriados, vindos da agenda do CRM. Nenhum destes
+          impede a marcação — há dias em que se vai na mesma, e quem coordena
+          é que decide. Por isso são avisos e não erros. */}
+      {avisos.length > 0 && (
+        <div className="mt-3 rounded-lg bg-sky-50 px-3 py-2.5">
+          <p className="flex items-center gap-1.5 text-sm font-medium text-sky-900">
+            <AlertTriangle width={14} height={14} />
+            Marcado — mas repara nisto.
+          </p>
+          <ul className="mt-1.5 space-y-1">
+            {avisos.map((a, i) => (
+              <li key={`${a.tipo}-${i}`} className="text-sm text-sky-800">
+                {a.tipo === "ausente" && (
+                  <>
+                    Esta pessoa tem ausência aprovada de{" "}
+                    <strong>{new Date(a.desde).toLocaleDateString("pt-PT")}</strong> a{" "}
+                    <strong>{new Date(a.ate).toLocaleDateString("pt-PT")}</strong>.
+                  </>
+                )}
+                {a.tipo === "fora_de_horario" && "Está fora do horário declarado desta pessoa."}
+                {a.tipo === "feriado" && <>É feriado: <strong>{a.detalhe}</strong>.</>}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
 
       {conflitos !== null && conflitos.length > 0 && (

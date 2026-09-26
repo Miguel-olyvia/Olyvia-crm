@@ -34,6 +34,8 @@ import {
 import { AlertTriangle, Clock, Plus, Layers } from "../components/icons";
 import { data } from "../lib/formatar";
 import SeletorDeLocal from "../components/SeletorDeLocal";
+import BotaoDuplicar from "../components/BotaoDuplicar";
+import { duplicarPlano } from "../lib/config";
 import {
   DIAS,
   RECORRENCIA_VAZIA,
@@ -217,9 +219,22 @@ export default function Planos() {
                   </p>
                 </div>
 
-                <Button size="sm" variant="secondary" onClick={() => setAEditar(p)}>
-                  Editar
-                </Button>
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  {/* Doze edifícios iguais escreviam-se doze vezes. */}
+                  <BotaoDuplicar
+                    titulo="Duplicar o plano"
+                    nomeSugerido={`${p.nome} (cópia)`}
+                    oQueNaoLeva={[
+                      "as ordens que a original já gerou",
+                      "o estado — a cópia nasce SUSPENSA, para se rever antes de começar",
+                    ]}
+                    duplicar={(nome) => duplicarPlano(p.id, nome)}
+                    paraOnde={() => "/planos"}
+                  />
+                  <Button size="sm" variant="secondary" onClick={() => setAEditar(p)}>
+                    Editar
+                  </Button>
+                </div>
               </div>
             </Card>
           ))}

@@ -5,6 +5,8 @@ import { supabase } from "../lib/supabase";
 import {
   ErroDeDados,
   alvosDaOrdem,
+  localDaOrdem,
+  type LocalRow,
   listarClientes,
   listarEquipa,
   medicoesDaOrdem,
@@ -36,12 +38,15 @@ import {
   Modal,
   OrigemOrdem,
   PrioridadeOrdem,
+  Seccao,
   Skeleton,
   Textarea,
   Input,
+  Select,
   Field,
   cx,
 } from "../components/ui";
+import { linkParaIr, temSitio } from "../domain/mapa";
 import {
   AlertTriangle,
   Check,
@@ -56,11 +61,22 @@ import {
 import { avaliar, transicoesPossiveis, type Transicao } from "../domain/estados";
 import { formatarDuracao, tempoTotalSegundos, type Sessao } from "../domain/tempo";
 import { alertasDaOrdem } from "../domain/alertas";
+import { oQueFaltaAgora, percursoDaOrdem, type Situacao } from "../domain/percurso";
 import { podeResponder } from "../domain/respostas";
 import PainelTarefas from "../components/PainelTarefas";
+import PainelClassificacao from "../components/PainelClassificacao";
+import BotaoDuplicar from "../components/BotaoDuplicar";
+import BotaoRelatorio from "../components/BotaoRelatorio";
+import {
+  duplicarOrdem,
+  listarMotivosDePausa,
+  type MotivoDePausa,
+} from "../lib/config";
 import PainelDespacho from "../components/PainelDespacho";
 import PainelCusto from "../components/PainelCusto";
 import PainelAnexos from "../components/PainelAnexos";
+import PainelAssinatura from "../components/PainelAssinatura";
+import PainelMensagens from "../components/PainelMensagens";
 import PainelCustos from "../components/PainelCustos";
 import { comparacaoPorItem, custosDaOrdem, type ComparacaoPorItem, type LinhaDeCusto } from "../lib/custos";
 import type { Estado, EstadoTarefa } from "../domain/tipos";
@@ -73,6 +89,28 @@ import type { Estado, EstadoTarefa } from "../domain/tipos";
  * registar uma leitura — e cada uma dessas tabelas tem um trigger que recusa
  * um UPDATE direto. O que o browser calcula (que botões mostrar, que veredicto
  * um valor vai ter) serve para responder de imediato; quem decide é a base.
+ *
+ * ─────────────────────────── O layout ───────────────────────────
+ *
+ * A ficha eram dez cartões empilhados numa coluna só. Isso tinha dois custos
+ * que só apareceram ao usar:
+ *
+ *  1. **Os botões fugiam.** Iniciar, pausar e fechar viviam no cartão de cima.
+ *     Quem responde a doze tarefas no telemóvel desce meia página — e depois
+ *     tem de subir tudo outra vez para fechar a ordem. Agora as ações andam
+ *     com a pessoa: barra colada ao topo no computador, barra fixa em baixo no
+ *     telemóvel.
+ *
+ *  2. **Num ecrã largo, metade do espaço era margem.** Passou a duas colunas a
+ *     partir de `lg`: à esquerda o trabalho (tarefas, custos, fotos, conversa),
+ *     à direita o contexto (onde é, quem vai, como se classifica, quanto tempo
+ *     levou). No telemóvel volta a ser uma coluna — e o contexto vem primeiro,
+ *     porque quem chega ao local quer saber *onde é* antes de tudo o resto.
+ *
+ * E uma coisa que faltava: a ficha dizia o estado e não dizia **o que falta a
+ * seguir**. Uma ordem fechada há três semanas parecia estar bem — está verde —
+ * quando o que está a acontecer é que ninguém a confirmou e o cliente nunca
+ * recebeu o relatório. Ver `domain/percurso.ts`.
  */
 
 export default function OrdemDetalhe() {
@@ -81,6 +119,7 @@ export default function OrdemDetalhe() {
 
   const [ordem, setOrdem] = useState<OrdemCompleta | null>(null);
   const [alvos, setAlvos] = useState<AlvoDaOrdem[]>([]);
+  const [local, setLocal] = useState<LocalRow | null>(null);
   const [tarefas, setTarefas] = useState<TarefaDaOrdem[]>([]);
   const [sessoes, setSessoes] = useState<SessaoDaOrdem[]>([]);
   const [medicoes, setMedicoes] = useState<MedicaoDaTarefa[]>([]);
@@ -99,6 +138,10 @@ export default function OrdemDetalhe() {
 
   const [dialogo, setDialogo] = useState<Transicao | null>(null);
   const [motivo, setMotivo] = useState("");
+  /* Os motivos que ESTA pessoa pode usar. A lista completa tem motivos que são
+     decisão de quem gere, e a base filtra-os — aqui só se desenha o que veio. */
+  const [motivos, setMotivos] = useState<MotivoDePausa[]>([]);
+  const [motivoId, setMotivoId] = useState("");
   const [retoma, setRetoma] = useState("");
   const [aGravar, setAGravar] = useState(false);
   const [erroAcao, setErroAcao] = useState<string | null>(null);
@@ -114,8 +157,9 @@ export default function OrdemDetalhe() {
         setOrdem(null);
         return;
       }
-      const [als, tfs, sss, eq, cls, pes] = await Promise.all([
+      const [als, loc, tfs, sss, eq, cls, pes] = await Promise.all([
         alvosDaOrdem(o.id),
+        localDaOrdem(o.local_id),
         tarefasDaOrdem(o.id),
         sessoesDaOrdem(o.id),
         listarEquipa(activeOrgId),
@@ -141,6 +185,7 @@ export default function OrdemDetalhe() {
 
       setOrdem(o);
       setAlvos(als);
+      setLocal(loc);
       setTarefas(tfs);
       setSessoes(sss);
       setMedicoes(meds);
@@ -163,6 +208,35 @@ export default function OrdemDetalhe() {
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  useEffect(() => {
+    if (!activeOrgId) return;
+    let vivo = true;
+    void listarMotivosDePausa(activeOrgId).then((m) => {
+      if (vivo) setMotivos(m);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [activeOrgId]);
+
+  /*
+   * O relógio de uma sessão aberta anda.
+   *
+   * Antes, o tempo era o que era no instante em que a página carregou, e ficava
+   * lá parado — um técnico que abre a ordem às 9h e olha para ela às 11h via
+   * "0h04". Um contador parado numa ordem em curso não é só feio: faz duvidar
+   * de que o tempo esteja mesmo a ser contado.
+   *
+   * O intervalo só existe enquanto houver sessão aberta.
+   */
+  const [, setTique] = useState(0);
+  const aDecorrer = sessoes.some((s) => !s.fim);
+  useEffect(() => {
+    if (!aDecorrer) return;
+    const i = setInterval(() => setTique((t) => t + 1), 1000);
+    return () => clearInterval(i);
+  }, [aDecorrer]);
 
   const contexto = useMemo(
     () => ({
@@ -197,12 +271,44 @@ export default function OrdemDetalhe() {
   }));
   const tempoTotal = tempoTotalSegundos(sessoesDominio);
 
+  const pedirTransicao = (t: Transicao) => {
+    setErroAcao(null);
+    setMotivo("");
+    setRetoma("");
+    // Motivo/retoma obrigatórios? Abre diálogo. Senão, executa já.
+    if (t === "pausar" || t === "cancelar" || t === "rejeitar") setDialogo(t);
+    else void executar(t);
+  };
+
   const executar = async (t: Transicao) => {
     if (!ordem || !businessUserId) return;
 
+    /* Numa pausa com lista, o texto que vai para a base é o nome do motivo
+       mais o detalhe. Assim o histórico continua a ler-se sozinho, sem ter de
+       ir buscar o nome a outra tabela. */
+    const escolhido = nomeDoMotivo(motivos, motivoId);
+    const detalhe = motivo.trim();
+    const texto =
+      t === "pausar" && escolhido
+        ? detalhe
+          ? `${escolhido} — ${detalhe}`
+          : escolhido
+        : detalhe;
+
+    if (t === "pausar" && motivos.length > 0) {
+      if (!motivoId) {
+        setErroAcao("Escolhe o motivo da pausa.");
+        return;
+      }
+      if (escolhido === "Outro" && !detalhe) {
+        setErroAcao('“Outro” sem detalhe não diz nada. Escreve o que se passa.');
+        return;
+      }
+    }
+
     const ctx = {
       ...contexto,
-      motivo: motivo.trim() || null,
+      motivo: texto || null,
       retomaPrevista: retoma ? new Date(retoma) : null,
     };
     const decisao = avaliar(ordem.estado, t, ctx);
@@ -236,8 +342,23 @@ export default function OrdemDetalhe() {
         return;
       }
 
+      /* O id do motivo grava-se à parte: não é estado, e o estado é a única
+         coisa que a base tranca. Falhar aqui não desfaz a pausa — o texto já
+         lá está, e é o que uma pessoa lê. */
+      if (t === "pausar" && motivoId) {
+        const { error: e2 } = await supabase
+          .from("ops_ordem")
+          .update({ pausa_motivo_id: motivoId })
+          .eq("id", ordem.id);
+        if (e2) {
+          // eslint-disable-next-line no-console
+          console.warn("[Operações] motivo da pausa sem id:", e2.message);
+        }
+      }
+
       setDialogo(null);
       setMotivo("");
+      setMotivoId("");
       setRetoma("");
       setRecarga((r) => r + 1);
     } catch (e) {
@@ -251,10 +372,19 @@ export default function OrdemDetalhe() {
 
   if (aCarregar && !ordem) {
     return (
-      <div className="space-y-3">
-        <Skeleton className="h-6 w-40" />
-        <Skeleton className="h-32 w-full rounded-xl" />
-        <Skeleton className="h-48 w-full rounded-xl" />
+      <div className="space-y-4">
+        <Skeleton className="h-5 w-24" />
+        <Skeleton className="h-40 w-full rounded-xl" />
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_21rem]">
+          <div className="space-y-4">
+            <Skeleton className="h-56 w-full rounded-xl" />
+            <Skeleton className="h-40 w-full rounded-xl" />
+          </div>
+          <div className="space-y-4">
+            <Skeleton className="h-48 w-full rounded-xl" />
+            <Skeleton className="h-32 w-full rounded-xl" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -283,15 +413,52 @@ export default function OrdemDetalhe() {
   );
 
   const responsavel = ordem.responsavel_id ? equipa.get(ordem.responsavel_id) : null;
+  const oQueFalta = oQueFaltaAgora(ordem.estado);
+  const acabada = ["fechada", "confirmada"].includes(ordem.estado);
+
+  const botoes = (
+    <Acoes
+      possiveis={possiveis}
+      aGravar={aGravar}
+      aoEscolher={pedirTransicao}
+    />
+  );
 
   return (
     <div className="space-y-4">
-      <Voltar />
+      {/*
+        A barra que não sai do ecrã.
 
-      {/* Cabeçalho */}
+        Leva o código, o estado e as ações. Numa ficha comprida, é a única
+        coisa que garante que "Fechar" está sempre a um toque de distância —
+        e o código à vista evita a dúvida de "em que ordem é que eu estou?"
+        depois de se descer três painéis.
+      */}
+      <div className="sticky top-16 z-10 -mx-4 flex items-center gap-3 border-b border-slate-200/70 bg-slate-100/90 px-4 py-2 backdrop-blur">
+        <Link
+          to="/ordens"
+          aria-label="Voltar às ordens"
+          className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-slate-500 transition-colors hover:text-brand"
+        >
+          <ChevronLeft width={16} height={16} />
+          <span className="hidden sm:inline">Ordens</span>
+        </Link>
+        <span className="h-4 w-px shrink-0 bg-slate-300" />
+        <span className="shrink-0 font-mono text-xs font-medium tabular text-slate-500">
+          {ordem.codigo}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-sm text-slate-500 lg:block">
+          {ordem.titulo}
+        </span>
+        <div className="hidden shrink-0 md:block">{botoes}</div>
+        <div className="shrink-0 md:hidden">
+          <EstadoOrdem estado={ordem.estado} />
+        </div>
+      </div>
+
+      {/* ─────────────────────────── Cabeçalho ─────────────────────────── */}
       <Card className="p-4 sm:p-5">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-sm font-medium tabular text-slate-500">{ordem.codigo}</span>
           <OrigemOrdem origem={ordem.origem} />
           <EstadoOrdem estado={ordem.estado} />
           <PrioridadeOrdem prioridade={ordem.prioridade} />
@@ -310,7 +477,9 @@ export default function OrdemDetalhe() {
           ))}
         </div>
 
-        <h1 className="mt-2 text-lg font-semibold tracking-tight text-slate-900">{ordem.titulo}</h1>
+        <h1 className="mt-2 text-lg font-semibold tracking-tight text-slate-900 sm:text-xl">
+          {ordem.titulo}
+        </h1>
 
         {ordem.descricao && (
           <p className="mt-2 whitespace-pre-line text-sm leading-relaxed text-slate-600">
@@ -318,41 +487,37 @@ export default function OrdemDetalhe() {
           </p>
         )}
 
-        {/* Ações — só as que a máquina de estados permite mesmo */}
-        {possiveis.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-            {possiveis.map((t) => (
-              <Button
-                key={t}
-                size="sm"
-                variant={t === "cancelar" || t === "rejeitar" ? "secondary" : "primary"}
-                onClick={() => {
-                  setErroAcao(null);
-                  setMotivo("");
-                  setRetoma("");
-                  // Motivo/retoma obrigatórios? Abre diálogo. Senão, executa já.
-                  if (t === "pausar" || t === "cancelar" || t === "rejeitar") setDialogo(t);
-                  else void executar(t);
-                }}
-                disabled={aGravar}
-              >
-                {ICONE_ACAO[t]}
-                {ROTULO_ACAO[t]}
-              </Button>
-            ))}
-          </div>
-        )}
+        <Percurso estado={ordem.estado} oQueFalta={oQueFalta} />
 
         {/* O relatório só faz sentido quando há trabalho feito para mostrar.
             Antes disso o botão seria uma promessa vazia. */}
-        {["fechada", "confirmada"].includes(ordem.estado) && (
-          <div className="mt-4 border-t border-slate-100 pt-4">
+        {acabada && (
+          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
+            <BotaoDuplicar
+              rotulo="Duplicar"
+              titulo="Duplicar a ordem"
+              nomeSugerido={ordem.titulo}
+              oQueNaoLeva={[
+                "as respostas — as tarefas vão por fazer",
+                "os custos, os anexos e a assinatura",
+                "as datas de início e de fecho",
+                "o histórico",
+              ]}
+              duplicar={(nome) => duplicarOrdem(ordem.id, nome)}
+              paraOnde={(r) => `/ordens/${r.codigo}`}
+            />
             <Link
               to={`/ordens/${ordem.codigo}/relatorio`}
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50 hover:border-slate-300"
             >
               Relatório para o cliente
             </Link>
+            {/* Ver o relatório e mandá-lo são a mesma decisão em dois passos:
+                por isso o botão está ao lado, e não noutro ecrã. */}
+            <BotaoRelatorio
+              ordemId={ordem.id}
+              podeMandar={funcao === "gestor" || funcao === "admin"}
+            />
           </div>
         )}
 
@@ -361,147 +526,269 @@ export default function OrdemDetalhe() {
         )}
       </Card>
 
-      {/* Contexto — campos próprios, não texto solto nas observações */}
-      <Card className="divide-y divide-slate-100">
-        <Linha rotulo="Cliente" valor={cliente ?? "—"} />
-        {responsavel && (
-          <Linha
-            rotulo="Responsável"
-            valor={responsavel.nome}
-            icone={<User width={14} height={14} />}
+      {/*
+        A assinatura de quem recebeu o trabalho.
+
+        ⚠ **Muda de sítio conforme o estado, e é de propósito.** Só se recolhe
+        entre fechar e confirmar — antes disso o trabalho não acabou, depois
+        disso a confirmação já disse o mesmo. Nessa janela **é o passo
+        seguinte**, e um passo seguinte a nove cartões de distância é um passo
+        que ninguém dá: fica aqui, fora da grelha, logo a seguir ao cabeçalho,
+        para ser a primeira coisa em qualquer tamanho de ecrã.
+
+        Fora dessa janela volta ao meio da coluna do trabalho, onde é só mais
+        uma coisa da ficha.
+      */}
+      {ordem.estado === "fechada" && (
+        <PainelAssinatura
+          ordemId={ordem.id}
+          organizationId={activeOrgId ?? ""}
+          estado={ordem.estado}
+          podeAssinar={!!businessUserId}
+        />
+      )}
+
+      {/*
+        Duas colunas a partir de `lg`. `items-start` para as colunas não
+        esticarem uma à altura da outra, e `order` para o contexto vir primeiro
+        no telemóvel — quem chega ao local quer saber onde é, e não responder a
+        tarefas de uma ordem que ainda não sabe onde fica.
+      */}
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_21rem] lg:items-start">
+        {/* ── O trabalho ────────────────────────────────────────────────── */}
+        <div className="order-2 space-y-4 lg:order-1">
+          <PainelTarefas
+            ordemId={ordem.id}
+            tarefas={tarefas}
+            medicoes={medicoes}
+            opcoes={opcoes}
+            permissao={permissaoResponder}
+            aoGravar={() => setRecarga((r) => r + 1)}
           />
-        )}
-        {(ordem.area || ordem.tipo) && (
-          <Linha rotulo="Área e tipo" valor={[ordem.area, ordem.tipo].filter(Boolean).join(" › ")} />
-        )}
-        {ordem.contacto_nome && (
-          <Linha
-            rotulo="Contacto no local"
-            valor={[ordem.contacto_nome, ordem.contacto_telefone].filter(Boolean).join(" · ")}
+
+          {/* Orçamentado contra gasto — só aparece se houve orçamento */}
+          <PainelCusto custo={custo} previsto={previsto} porItem={porItem} />
+
+          {/* O que se gastou, e de onde veio */}
+          <PainelCustos
+            ordemId={ordem.id}
+            estado={ordem.estado}
+            custos={custos}
+            podeVer={custo !== null || custos.length > 0}
+            aoMudar={() => setRecarga((r) => r + 1)}
           />
-        )}
-        {(ordem.janela_inicio || ordem.janela_fim) && (
-          <Linha
-            rotulo="Janela de visita"
-            valor={formatarJanela(ordem.janela_inicio, ordem.janela_fim)}
-            icone={<Clock width={14} height={14} />}
+
+          {/* Fotos e ficheiros */}
+          <PainelAnexos
+            ordemId={ordem.id}
+            organizationId={activeOrgId ?? ""}
+            estado={ordem.estado}
+            anexos={anexos}
+            equipa={equipa}
+            podeAnexar={!!businessUserId}
+            aoMudar={() => setRecarga((r) => r + 1)}
           />
-        )}
-        {ordem.estado === "pausada" && ordem.pausa_motivo && (
-          <Linha
-            rotulo="Motivo da pausa"
-            valor={`${ordem.pausa_motivo}${
-              ordem.pausa_retoma_prevista
-                ? ` · retoma ${new Date(ordem.pausa_retoma_prevista).toLocaleDateString("pt-PT")}`
-                : ""
-            }`}
-          />
-        )}
-        {ordem.motivo_cancelamento && (
-          <Linha rotulo="Motivo do cancelamento" valor={ordem.motivo_cancelamento} />
-        )}
-      </Card>
 
-      {/* Orçamentado contra gasto — só aparece se houve orçamento */}
-      <PainelCusto custo={custo} previsto={previsto} porItem={porItem} />
+          {/* A assinatura, quando NÃO é o passo seguinte — ver a nota acima. */}
+          {ordem.estado !== "fechada" && (
+            <PainelAssinatura
+              ordemId={ordem.id}
+              organizationId={activeOrgId ?? ""}
+              estado={ordem.estado}
+              podeAssinar={!!businessUserId}
+            />
+          )}
 
-      {/* O que se gastou, e de onde veio */}
-      <PainelCustos
-        ordemId={ordem.id}
-        estado={ordem.estado}
-        custos={custos}
-        podeVer={custo !== null || custos.length > 0}
-        aoMudar={() => setRecarga((r) => r + 1)}
-      />
-
-      {/* Quem vai, e quando */}
-      <PainelDespacho
-        ordemId={ordem.id}
-        estado={ordem.estado}
-        responsavelId={ordem.responsavel_id}
-        equipaDaOrdem={naOrdem}
-        agendadaPara={ordem.agendada_para}
-        janelaInicio={ordem.janela_inicio}
-        janelaFim={ordem.janela_fim}
-        equipa={[...equipa.values()]}
-        podeDespachar={contexto.funcao !== "tecnico"}
-        aoGravar={() => setRecarga((r) => r + 1)}
-      />
-
-      {/* Onde o trabalho acontece */}
-      <PainelTarefas
-        tarefas={tarefas}
-        medicoes={medicoes}
-        opcoes={opcoes}
-        permissao={permissaoResponder}
-        aoGravar={() => setRecarga((r) => r + 1)}
-      />
-
-      {/* Fotos e ficheiros */}
-      <PainelAnexos
-        ordemId={ordem.id}
-        organizationId={activeOrgId ?? ""}
-        estado={ordem.estado}
-        anexos={anexos}
-        equipa={equipa}
-        podeAnexar={!!businessUserId}
-        aoMudar={() => setRecarga((r) => r + 1)}
-      />
-
-      {/* Sessões — o que faz o custo de mão de obra existir */}
-      <Card className="p-4 sm:p-5">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-slate-800">Sessões de trabalho</h2>
-          <span className="font-mono text-sm font-medium tabular text-slate-700">
-            {formatarDuracao(tempoTotal)}
-          </span>
+          {/* A conversa. É onde se explica o que os números não explicam. */}
+          <PainelMensagens ordemId={ordem.id} equipa={equipa} euId={businessUserId ?? null} />
         </div>
 
-        {sessoes.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-400">
-            Ainda ninguém trabalhou nesta ordem. O tempo conta-se a partir de quem a inicia.
-          </p>
-        ) : (
-          <ul className="mt-2 divide-y divide-slate-100">
-            {sessoes.map((s) => {
-              const membro = equipa.get(s.utilizador_id);
-              const dur = formatarDuracao(
-                Math.max(
-                  0,
-                  Math.floor(
-                    ((s.fim ? new Date(s.fim) : new Date()).getTime() -
-                      new Date(s.inicio).getTime()) / 1000
-                  )
-                )
-              );
-              return (
-                <li key={s.id} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <span className="min-w-0 truncate text-slate-700">
-                    {membro?.nome ?? "—"}
-                    {!s.fim && (
-                      <Badge className="ml-2 bg-brand-50 text-brand-800 ring-brand-200">a decorrer</Badge>
-                    )}
+        {/* ── O contexto ────────────────────────────────────────────────── */}
+        <aside className="order-1 space-y-4 lg:order-2">
+          {/* Campos próprios, não texto solto nas observações */}
+          <Card className="divide-y divide-slate-100">
+            <div className="px-4 pb-2 pt-3.5 sm:px-5">
+              <Seccao icone={<MapPin width={15} height={15} />} titulo="Onde e para quem" />
+            </div>
+            <Linha rotulo="Cliente" valor={cliente ?? "—"} />
+            {/* Onde é, e o botão que o técnico carrega no carro: abre a
+                navegação já apontada. Usa o ponto no mapa quando o local o tem
+                — uma morada escrita à mão tem gralhas e ruas com o mesmo nome
+                noutra cidade. */}
+            {local && (
+              <div className="px-4 py-2.5 sm:px-5">
+                <span className="block text-[11px] uppercase tracking-wide text-slate-400">
+                  Onde é
+                </span>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                  <span className="min-w-0 break-words text-sm text-slate-700">
+                    {local.morada?.trim() || local.nome}
                   </span>
-                  <span className="shrink-0 font-mono text-xs tabular text-slate-500">
-                    {new Date(s.inicio).toLocaleString("pt-PT", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                    <span className="ml-2 text-slate-700">{dur}</span>
-                  </span>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </Card>
+                  {temSitio(local) && (
+                    <a
+                      href={linkParaIr(local) ?? "#"}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-200"
+                    >
+                      <MapPin width={13} height={13} />
+                      Como lá chegar
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+            {responsavel && (
+              <Linha
+                rotulo="Responsável"
+                valor={responsavel.nome}
+                icone={<User width={14} height={14} />}
+              />
+            )}
+            {(ordem.area || ordem.tipo) && (
+              <Linha
+                rotulo="Área e tipo"
+                valor={[ordem.area, ordem.tipo].filter(Boolean).join(" › ")}
+              />
+            )}
+            {ordem.contacto_nome && (
+              <Linha
+                rotulo="Contacto no local"
+                valor={[ordem.contacto_nome, ordem.contacto_telefone].filter(Boolean).join(" · ")}
+              />
+            )}
+            {(ordem.janela_inicio || ordem.janela_fim) && (
+              <Linha
+                rotulo="Janela de visita"
+                valor={formatarJanela(ordem.janela_inicio, ordem.janela_fim)}
+                icone={<Clock width={14} height={14} />}
+              />
+            )}
+            {ordem.estado === "pausada" && ordem.pausa_motivo && (
+              <Linha
+                rotulo="Motivo da pausa"
+                valor={`${ordem.pausa_motivo}${
+                  ordem.pausa_retoma_prevista
+                    ? ` · retoma ${new Date(ordem.pausa_retoma_prevista).toLocaleDateString("pt-PT")}`
+                    : ""
+                }`}
+              />
+            )}
+            {ordem.motivo_cancelamento && (
+              <Linha rotulo="Motivo do cancelamento" valor={ordem.motivo_cancelamento} />
+            )}
+            {alvos.length > 0 && (
+              <Linha
+                rotulo="Alvos"
+                valor={alvos.length === 1 ? "1 equipamento ou espaço" : `${alvos.length} alvos`}
+              />
+            )}
+          </Card>
 
-      {alvos.length > 0 && (
-        <p className="px-1 text-xs text-slate-400">
-          {alvos.length === 1 ? "1 alvo" : `${alvos.length} alvos`} nesta ordem.
-        </p>
+          {/* Quem vai, e quando */}
+          <PainelDespacho
+            ordemId={ordem.id}
+            orgId={activeOrgId ?? ""}
+            local={local}
+            estado={ordem.estado}
+            responsavelId={ordem.responsavel_id}
+            equipaDaOrdem={naOrdem}
+            agendadaPara={ordem.agendada_para}
+            janelaInicio={ordem.janela_inicio}
+            janelaFim={ordem.janela_fim}
+            equipa={[...equipa.values()]}
+            podeDespachar={contexto.funcao !== "tecnico"}
+            aoGravar={() => setRecarga((r) => r + 1)}
+          />
+
+          <PainelClassificacao
+            ordemId={ordem.id}
+            orgId={ordem.organization_id}
+            tipoTrabalhoId={ordem.tipo_trabalho_id}
+            centroCustoId={ordem.centro_custo_id}
+            fornecedorId={ordem.fornecedor_id}
+            fechaAutomatico={ordem.fecha_automatico}
+            podeEditar={funcao === "admin" || funcao === "gestor" || funcao === "operador"}
+            aoGravar={() => setRecarga((r) => r + 1)}
+          />
+
+          {/* Sessões — o que faz o custo de mão de obra existir */}
+          <Card className="p-4 sm:p-5">
+            <Seccao
+              icone={<Clock width={15} height={15} />}
+              titulo="Sessões de trabalho"
+              acao={
+                <span
+                  className={cx(
+                    "font-mono text-sm font-medium tabular",
+                    aDecorrer ? "text-brand" : "text-slate-700"
+                  )}
+                >
+                  {formatarDuracao(tempoTotal)}
+                </span>
+              }
+            />
+
+            {sessoes.length === 0 ? (
+              <p className="mt-2 text-sm text-slate-400">
+                Ainda ninguém trabalhou nesta ordem. O tempo conta-se a partir de quem a inicia.
+              </p>
+            ) : (
+              <ul className="mt-2 divide-y divide-slate-100">
+                {sessoes.map((s) => {
+                  const membro = equipa.get(s.utilizador_id);
+                  const dur = formatarDuracao(
+                    Math.max(
+                      0,
+                      Math.floor(
+                        ((s.fim ? new Date(s.fim) : new Date()).getTime() -
+                          new Date(s.inicio).getTime()) / 1000
+                      )
+                    )
+                  );
+                  return (
+                    <li key={s.id} className="flex items-center justify-between gap-2 py-2 text-sm">
+                      <span className="min-w-0 truncate text-slate-700">
+                        {membro?.nome ?? "—"}
+                        {!s.fim && (
+                          <Badge className="ml-2 bg-brand-50 text-brand-800 ring-brand-200">
+                            a decorrer
+                          </Badge>
+                        )}
+                      </span>
+                      <span className="shrink-0 text-right font-mono text-[11px] tabular text-slate-500">
+                        {new Date(s.inicio).toLocaleString("pt-PT", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                        <span className="ml-1.5 text-slate-700">{dur}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+        </aside>
+      </div>
+
+      {/*
+        No telemóvel as ações vivem em baixo, por cima da navegação.
+
+        É onde o polegar está, e é o único sítio em que continuam a existir
+        depois de se descer a página inteira a responder a tarefas. O espaçador
+        por baixo existe para a última linha da página não ficar escondida
+        debaixo da barra.
+      */}
+      {possiveis.length > 0 && (
+        <>
+          <div className="h-16 md:hidden" aria-hidden="true" />
+          <div className="fixed inset-x-0 bottom-[calc(3.4rem+env(safe-area-inset-bottom))] z-20 border-t border-slate-200 bg-white/95 px-3 py-2 backdrop-blur md:hidden print:hidden">
+            <div className="-mx-1 flex justify-end gap-2 overflow-x-auto px-1">{botoes}</div>
+          </div>
+        </>
       )}
 
       {/* Diálogo para as transições que exigem justificação */}
@@ -521,11 +808,35 @@ export default function OrdemDetalhe() {
           }
         >
           <div className="space-y-4">
+            {/* Numa pausa, o motivo vem de uma lista. Texto livre dava oito
+                maneiras de escrever "à espera de material", e nenhum relatório
+                as consegue somar. */}
+            {dialogo === "pausar" && motivos.length > 0 && (
+              <Field label="Motivo" hint="Obrigatório. Sem motivo ninguém sabe porque parou.">
+                <Select
+                  value={motivoId}
+                  onChange={(e) => setMotivoId(e.target.value)}
+                  className="w-full"
+                >
+                  <option value="">— escolhe —</option>
+                  {motivos.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.nome}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            )}
+
             <Field
-              label="Motivo"
+              label={dialogo === "pausar" && motivos.length > 0 ? "Detalhe" : "Motivo"}
               hint={
                 dialogo === "pausar"
-                  ? "Obrigatório. Sem motivo ninguém sabe porque parou."
+                  ? motivos.length > 0
+                    ? nomeDoMotivo(motivos, motivoId) === "Outro"
+                      ? "Obrigatório: “Outro” sem detalhe não diz nada."
+                      : "Opcional. O que falta, ao certo."
+                    : "Obrigatório. Sem motivo ninguém sabe porque parou."
                   : "Obrigatório."
               }
             >
@@ -534,7 +845,7 @@ export default function OrdemDetalhe() {
                 value={motivo}
                 onChange={(e) => setMotivo(e.target.value)}
                 placeholder={
-                  dialogo === "pausar" ? "Ex.: à espera de material" : "Ex.: pedido duplicado"
+                  dialogo === "pausar" ? "Ex.: falta o regulador" : "Ex.: pedido duplicado"
                 }
               />
             </Field>
@@ -560,6 +871,115 @@ export default function OrdemDetalhe() {
       )}
     </div>
   );
+}
+
+/* ──────────────────────────── Peças da ficha ────────────────────────────── */
+
+/** Só as que a máquina de estados permite mesmo. */
+function Acoes({
+  possiveis,
+  aGravar,
+  aoEscolher,
+}: {
+  possiveis: readonly Transicao[];
+  aGravar: boolean;
+  aoEscolher: (t: Transicao) => void;
+}) {
+  return (
+    <>
+      {possiveis.map((t) => (
+        <Button
+          key={t}
+          size="sm"
+          variant={t === "cancelar" || t === "rejeitar" ? "secondary" : "primary"}
+          onClick={() => aoEscolher(t)}
+          disabled={aGravar}
+          className="shrink-0"
+        >
+          {ICONE_ACAO[t]}
+          {ROTULO_ACAO[t]}
+        </Button>
+      ))}
+    </>
+  );
+}
+
+const CORES_DEGRAU: Record<Situacao, string> = {
+  feito: "bg-brand",
+  atual: "bg-brand ring-4 ring-brand/20",
+  futuro: "bg-slate-200",
+  desviado: "bg-slate-200",
+};
+
+/**
+ * A régua do caminho, com a marca onde a ordem está.
+ *
+ * Cinco degraus, sempre os mesmos. Por baixo, uma frase que diz o que falta
+ * para o seguinte — que é a informação que a ficha nunca teve e que explica
+ * porque é que há ordens fechadas há três semanas.
+ */
+function Percurso({ estado, oQueFalta }: { estado: Estado; oQueFalta: string | null }) {
+  const degraus = percursoDaOrdem(estado);
+
+  return (
+    <div className="mt-4 border-t border-slate-100 pt-4">
+      <ol className="flex items-start gap-1">
+        {degraus.map((d, i) => (
+          <li key={d.chave} className="flex min-w-0 flex-1 flex-col items-center gap-1.5">
+            <div className="flex w-full items-center" aria-hidden="true">
+              <span
+                className={cx(
+                  "h-0.5 flex-1 rounded-full",
+                  i === 0 ? "bg-transparent" : d.situacao === "futuro" || d.situacao === "desviado" ? "bg-slate-200" : "bg-brand"
+                )}
+              />
+              <span
+                title={d.oQueFalta}
+                className={cx(
+                  "mx-1 h-2.5 w-2.5 shrink-0 rounded-full transition-colors",
+                  CORES_DEGRAU[d.situacao]
+                )}
+              />
+              <span
+                className={cx(
+                  "h-0.5 flex-1 rounded-full",
+                  i === degraus.length - 1
+                    ? "bg-transparent"
+                    : degraus[i + 1].situacao === "feito" || degraus[i + 1].situacao === "atual"
+                      ? "bg-brand"
+                      : "bg-slate-200"
+                )}
+              />
+            </div>
+            <span
+              className={cx(
+                "w-full truncate text-center text-[10px] leading-tight",
+                d.situacao === "atual"
+                  ? "font-semibold text-brand-800"
+                  : d.situacao === "feito"
+                    ? "text-slate-500"
+                    : "text-slate-300"
+              )}
+            >
+              {d.rotulo}
+            </span>
+          </li>
+        ))}
+      </ol>
+
+      {oQueFalta && (
+        <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+          <span className="font-medium text-slate-700">A seguir: </span>
+          {oQueFalta}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** O nome do motivo escolhido, ou vazio se não houver lista nem escolha. */
+function nomeDoMotivo(motivos: readonly MotivoDePausa[], id: string): string {
+  return motivos.find((m) => m.id === id)?.nome ?? "";
 }
 
 const ROTULO_ACAO: Record<Transicao, string> = {
@@ -597,6 +1017,14 @@ function Voltar() {
   );
 }
 
+/**
+ * Uma linha de ficha: rótulo em cima, valor por baixo.
+ *
+ * Era rótulo à esquerda numa coluna de 9 rem, com o valor a truncar. Numa
+ * coluna estreita isso deixava metade da largura para uma morada — e uma
+ * morada cortada a meio não serve para chegar a lado nenhum. Agora o valor tem
+ * a largura toda e parte a linha em vez de desaparecer.
+ */
 function Linha({
   rotulo,
   valor,
@@ -607,11 +1035,11 @@ function Linha({
   icone?: JSX.Element;
 }) {
   return (
-    <div className="flex items-start gap-3 px-4 py-2.5 sm:px-5">
-      <span className="w-36 shrink-0 text-xs uppercase tracking-wide text-slate-400">{rotulo}</span>
-      <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-slate-700">
-        {icone && <span className="shrink-0 text-slate-400">{icone}</span>}
-        <span className="min-w-0 truncate">{valor}</span>
+    <div className="px-4 py-2.5 sm:px-5">
+      <span className="block text-[11px] uppercase tracking-wide text-slate-400">{rotulo}</span>
+      <span className="mt-0.5 flex items-start gap-1.5 text-sm text-slate-700">
+        {icone && <span className="mt-0.5 shrink-0 text-slate-400">{icone}</span>}
+        <span className="min-w-0 break-words">{valor}</span>
       </span>
     </div>
   );

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useRotulos } from "../auth/Rotulos";
 import { ErroDeEscrita, type LocalRow } from "../lib/dados";
 import {
   criarLocal,
@@ -28,6 +29,11 @@ import { MapPin, Plus, X } from "./icons";
  * Usado em Nova ordem, Planos e Orçamentos. A mesma fricção estava nos três.
  */
 
+/** Distingue um sítio já existente das outras duas coisas que cabem no estado. */
+function eLocal(x: MoradaDoCliente | "novo" | LocalRow | null): x is LocalRow {
+  return typeof x === "object" && x !== null && "codigo" in x;
+}
+
 export default function SeletorDeLocal({
   clienteId,
   locais,
@@ -49,13 +55,19 @@ export default function SeletorDeLocal({
   // Enquanto não se souber, não se diz nada. Dizer "não tem morada" e depois
   // aparecerem duas é pior do que esperar meio segundo.
   const [aProcurar, setAProcurar] = useState(false);
-  const [aCriar, setACriar] = useState<MoradaDoCliente | "novo" | null>(null);
+  // "novo" = um sítio do zero. Um `LocalRow` = um espaço dentro dele.
+  const [aCriar, setACriar] = useState<MoradaDoCliente | "novo" | LocalRow | null>(null);
   const [aGravar, setAGravar] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
 
   const doCliente = useMemo(
     () => (clienteId ? locais.filter((l) => l.cliente_id === clienteId) : []),
     [locais, clienteId]
+  );
+
+  const escolhido = useMemo(
+    () => doCliente.find((l) => l.id === valor) ?? null,
+    [doCliente, valor]
   );
 
   useEffect(() => {
@@ -116,7 +128,7 @@ export default function SeletorDeLocal({
         label="Local"
         hint={
           doCliente.length === 0 && porUsar.length === 0
-            ? "Este cliente ainda não tem sítios. Cria um aqui mesmo."
+            ? "Este cliente ainda não tem locais. Cria um aqui mesmo."
             : undefined
         }
       >
@@ -137,10 +149,25 @@ export default function SeletorDeLocal({
             onClick={() => setACriar("novo")}
             className="shrink-0"
           >
-            <Plus width={14} height={14} /> Novo
+            <Plus width={14} height={14} /> Local
           </Button>
         </div>
       </Field>
+
+      {/*
+        O espaço só aparece depois de haver sítio, porque um espaço sem sítio
+        não existe. Foi a confusão de quem experimentou: a árvore tem dois
+        degraus e o ecrã mostrava uma lista plana onde não se via qual era qual.
+      */}
+      {escolhido && !desativado && (
+        <button
+          type="button"
+          onClick={() => setACriar(escolhido)}
+          className="inline-flex items-center gap-1 text-xs font-medium text-brand hover:underline"
+        >
+          <Plus width={12} height={12} /> Novo espaço dentro de {escolhido.nome}
+        </button>
+      )}
 
       {/*
         Vazio sem explicação é pior do que um erro: quem não vê a caixa fica
@@ -149,7 +176,7 @@ export default function SeletorDeLocal({
       */}
       {!aProcurar && moradas.length === 0 && (
         <p className="text-xs text-slate-400">
-          Este cliente não tem morada na ficha do CRM. Cria o sítio no botão acima.
+          Este cliente não tem morada na ficha do CRM. Cria o local no botão acima.
         </p>
       )}
 
@@ -203,7 +230,7 @@ export default function SeletorDeLocal({
             ))}
           </ul>
           <p className="mt-1.5 text-[11px] text-brand-800/70">
-            Um toque cria o sítio com a morada já preenchida.
+            Um toque cria o local com a morada já preenchida.
           </p>
         </div>
       )}
@@ -214,6 +241,7 @@ export default function SeletorDeLocal({
         <FormLocalRapido
           clienteId={clienteId}
           locais={doCliente}
+          dentroDe={eLocal(aCriar) ? aCriar : null}
           aoFechar={() => setACriar(null)}
           aoCriar={(id) => {
             setACriar(null);
@@ -229,24 +257,33 @@ export default function SeletorDeLocal({
 /**
  * O formulário mínimo.
  *
- * Nome, tipo, e dentro de quê. Mais nada — o resto edita-se em Definições, e
- * quem está a abrir uma ordem com um cliente à espera não quer preencher
- * código postal.
+ * Nome, tipo, e dentro de quê. Mais nada — o resto edita-se na ficha do
+ * sítio, e quem está a abrir uma ordem com um cliente à espera não quer
+ * preencher código postal.
+ *
+ * Com `dentroDe`, o pai deixa de ser uma pergunta: está escrito por extenso e
+ * não se pode mudar. Era aí que a confusão entrava — uma caixa "dentro de…"
+ * opcional, no meio de uma lista plana, não diz a ninguém que a árvore tem
+ * dois degraus.
  */
 function FormLocalRapido({
   clienteId,
   locais,
+  dentroDe,
   aoFechar,
   aoCriar,
 }: {
   clienteId: string;
   locais: readonly LocalRow[];
+  /** O sítio onde este espaço vai viver. Nulo = um sítio novo. */
+  dentroDe?: LocalRow | null;
   aoFechar: () => void;
   aoCriar: (id: string) => void;
 }) {
+  const rotulos = useRotulos();
   const [nome, setNome] = useState("");
-  const [tipo, setTipo] = useState("morada");
-  const [parentId, setParentId] = useState("");
+  const [tipo, setTipo] = useState(dentroDe ? "espaco" : "morada");
+  const [parentId, setParentId] = useState(dentroDe?.id ?? "");
   const [aGravar, setAGravar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
@@ -272,7 +309,9 @@ function FormLocalRapido({
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-3">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[13px] font-medium text-slate-700">Sítio novo</span>
+        <span className="min-w-0 text-[13px] font-medium text-slate-700">
+          {dentroDe ? `Novo espaço em ${dentroDe.nome}` : "Local novo"}
+        </span>
         <button
           type="button"
           onClick={aoFechar}
@@ -290,20 +329,22 @@ function FormLocalRapido({
           onKeyDown={(e) => {
             if (e.key === "Enter" && nome.trim()) void gravar();
           }}
-          placeholder="Ex.: Torre A — Garagem −2"
+          placeholder={dentroDe ? "Ex.: Garagem −2" : "Ex.: Torre A"}
           className="w-full"
           autoFocus
         />
 
         <div className="grid gap-2 sm:grid-cols-2">
           <Select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full text-sm">
-            <option value="morada">Morada</option>
-            <option value="edificio">Edifício</option>
-            <option value="piso">Piso</option>
-            <option value="espaco">Espaço</option>
+            {rotulos.opcoes("tipo_local").map((x) => (
+              <option key={x.valor} value={x.valor}>
+                {x.nome}
+              </option>
+            ))}
           </Select>
 
-          {locais.length > 0 && (
+          {/* Com o pai já decidido, perguntar outra vez só dá para errar. */}
+          {!dentroDe && locais.length > 0 && (
             <Combobox
               value={parentId}
               onChange={setParentId}
