@@ -1,47 +1,9 @@
 import { PDFDocument } from 'pdf-lib';
 import { supabase } from '@/integrations/supabase/client';
 import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
-import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate } from '@/utils/quotePdfTemplate';
+import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate, mergeProposalBranding } from '@/utils/quotePdfTemplate';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 import { captureFlowError } from '@/lib/observability/captureFlowError';
-
-// Proposal-type templates ("Templates de Proposta") use a different section
-// layout convention (client_info/company_info as "card"/"inline" blocks)
-// than quote-type templates (`layout: "quote_pdf"`), which is the only
-// convention QuotePDFDocument's items table/bundle rendering actually knows
-// how to lay out correctly. Swapping the whole template object for a
-// proposal-type one breaks that layout (overlapping bundle rows). Instead,
-// keep the quote-compatible template's structure and only patch the visible
-// branding — title, colors, footer/terms/thank-you text — from the
-// proposal's own selected template on top of it.
-function mergeProposalBranding(structuralTemplate: any | null, proposalTemplate: any | null) {
-  if (!proposalTemplate) return structuralTemplate;
-  if (!structuralTemplate) return proposalTemplate;
-
-  const proposalHeaderTitle = Array.isArray(proposalTemplate.sections)
-    ? proposalTemplate.sections.find((s: any) => s?.type === 'header')?.settings?.customTitle
-    : null;
-
-  const sections = Array.isArray(structuralTemplate.sections)
-    ? structuralTemplate.sections.map((s: any) =>
-        s?.type === 'header' && proposalHeaderTitle
-          ? { ...s, settings: { ...s.settings, customTitle: proposalHeaderTitle } }
-          : s
-      )
-    : structuralTemplate.sections;
-
-  return {
-    ...structuralTemplate,
-    sections,
-    primary_color: proposalTemplate.primary_color ?? structuralTemplate.primary_color,
-    secondary_color: proposalTemplate.secondary_color ?? structuralTemplate.secondary_color,
-    accent_color: proposalTemplate.accent_color ?? structuralTemplate.accent_color,
-    logo_url: proposalTemplate.logo_url ?? structuralTemplate.logo_url,
-    footer_text: proposalTemplate.footer_text ?? structuralTemplate.footer_text,
-    terms_conditions: proposalTemplate.terms_conditions ?? structuralTemplate.terms_conditions,
-    thank_you_message: proposalTemplate.thank_you_message ?? structuralTemplate.thank_you_message,
-  };
-}
 
 /**
  * Proposal, quotes, lines and fees already loaded by the caller.
@@ -80,7 +42,8 @@ async function generateFromQuotePdfs(
   }
 
   // Template explicitly selected on the proposal — used for branding only
-  // (see mergeProposalBranding above), never as the structural template.
+  // (see mergeProposalBranding in quotePdfTemplate.ts), never as the
+  // structural template.
   // A copia congelada na proposta manda sobre o modelo vivo -- ver
   // resolveProposalBrandingTemplate.
   const explicitProposalTemplate = await resolveProposalBrandingTemplate(proposal);

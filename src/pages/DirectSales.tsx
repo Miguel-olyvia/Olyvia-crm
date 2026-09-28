@@ -31,6 +31,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadBlob, generateProformaPdfBlob } from "@/utils/generateProformaPdfBlob";
 import { generateInternalSalePdfBlob } from "@/utils/generateInternalSalePdfBlob";
+import { generateDirectSalePdfBlob } from "@/utils/generateDirectSalePdfBlob";
 import { resolveEntityCommercials } from "@/utils/entityCommercial";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
@@ -185,6 +186,9 @@ const DirectSales = () => {
 
   /** Venda cuja proforma está a ser gerada — a geração do PDF demora, trava só esse item. */
   const [generatingProformaId, setGeneratingProformaId] = useState<string | null>(null);
+
+  /** Idem, para o PDF da venda direta (mesmo aspecto das propostas). */
+  const [generatingSalePdfId, setGeneratingSalePdfId] = useState<string | null>(null);
 
   /** Idem, para o documento interno de custo e margem (Fase 6A). */
   const [generatingInternalId, setGeneratingInternalId] = useState<string | null>(null);
@@ -539,6 +543,30 @@ const DirectSales = () => {
       });
     } finally {
       setGeneratingProformaId(null);
+    }
+  };
+
+  /**
+   * PDF da venda direta para o cliente, com o mesmo aspecto das propostas.
+   *
+   * Em qualquer estado: é o documento da proposta de venda, não a proforma —
+   * não depende de aceitação nem de proforma_number. Mesmo padrão de
+   * handleDownloadProforma (trava por venda, toast com o motivo).
+   */
+  const handleDownloadSalePdf = async (sale: DirectSaleRow) => {
+    if (generatingSalePdfId) return;
+    setGeneratingSalePdfId(sale.id);
+    try {
+      const { blob, fileName } = await generateDirectSalePdfBlob(sale.id);
+      downloadBlob(blob, fileName);
+    } catch (error: any) {
+      toast({
+        title: t("directSales.pdf.error"),
+        description: error?.message,
+        variant: "destructive",
+      });
+    } finally {
+      setGeneratingSalePdfId(null);
     }
   };
 
@@ -912,15 +940,27 @@ const DirectSales = () => {
 
                               Fora do PermissionGate de direct_sales.edit de
                               propósito: descarregar um documento é leitura, e a
-                              rota já exige direct_sales.view. */}
-                          {(sale.proforma_number || canViewCosts) && (
-                            <>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
-                                Documentos
-                              </DropdownMenuLabel>
-                            </>
-                          )}
+                              rota já exige direct_sales.view.
+
+                              O grupo aparece sempre: o PDF da venda direta
+                              existe em qualquer estado. */}
+                          <DropdownMenuSeparator />
+                          <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
+                            Documentos
+                          </DropdownMenuLabel>
+                          <DropdownMenuItem
+                            disabled={generatingSalePdfId === sale.id}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleDownloadSalePdf(sale);
+                            }}
+                          >
+                            <FileDown className="mr-2 h-3.5 w-3.5 text-blue-600" />
+                            {generatingSalePdfId === sale.id
+                              ? t("directSales.pdf.generating")
+                              : t("directSales.pdf.download")}
+                          </DropdownMenuItem>
                           {sale.proforma_number && (
                             <>
                               <DropdownMenuItem

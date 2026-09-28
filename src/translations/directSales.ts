@@ -111,6 +111,10 @@ export const directSalesTranslations: Record<string, Record<string, string>> = {
     'directSales.validation.invalidVatDesc': 'The VAT rate on line {line} must be between 0 and 100.',
     'directSales.validation.invalidIvaRate': 'Invalid default VAT rate',
     'directSales.validation.invalidIvaRateDesc': 'The default VAT rate must be between 0 and 100.',
+
+    'directSales.pdf.download': 'Download PDF',
+    'directSales.pdf.generating': 'Generating PDF…',
+    'directSales.pdf.error': 'Could not generate the PDF',
   },
   pt: {
     'sidebar.directSale': 'Venda Direta',
@@ -216,5 +220,9 @@ export const directSalesTranslations: Record<string, Record<string, string>> = {
     'directSales.validation.invalidVatDesc': 'A taxa de IVA da linha {line} tem de estar entre 0 e 100.',
     'directSales.validation.invalidIvaRate': 'IVA por omissão inválido',
     'directSales.validation.invalidIvaRateDesc': 'O IVA por omissão tem de estar entre 0 e 100.',
+
+    'directSales.pdf.download': 'Descarregar PDF',
+    'directSales.pdf.generating': 'A gerar PDF…',
+    'directSales.pdf.error': 'Não foi possível gerar o PDF',
   },
 };
