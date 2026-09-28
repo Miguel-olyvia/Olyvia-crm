@@ -17,9 +17,11 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Loader2, Plus, Calendar, LayoutGrid, List, Settings2, Users, Layers, HelpCircle, Settings, Trash2, RotateCcw } from 'lucide-react';
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from '@/integrations/supabase/client';
+import { toast } from '@/lib/toast';
 import { useCompany } from '@/contexts/CompanyContext';
 import { useScheduling } from '@/hooks/useScheduling';
 import { useScheduleSettings } from '@/hooks/useScheduleSettings';
+import { notifyClientOfScheduleChange, detectScheduleChanges, type ScheduleChange } from '@/lib/scheduling/notifyClientOfScheduleChange';
 import { useTranslation } from '@/hooks/useTranslation';
 import { ScheduleCalendarView } from '@/components/scheduling/ScheduleCalendarView';
 import { ScheduleItemDialog } from '@/components/scheduling/ScheduleItemDialog';
@@ -293,9 +295,28 @@ export default function Scheduling() {
 
   const handleItemClick = (item: ScheduleItem) => { setSelectedItem(item); setDefaultDate(undefined); setPrefill({}); setItemDialogOpen(true); };
   const handleAddClick = (date?: Date) => { setSelectedItem(null); setDefaultDate(date); setPrefill({}); setItemDialogOpen(true); };
+
+  // Dispara o aviso ao cliente/lead, so para as mudancas cujo interruptor da
+  // organizacao (schedule_settings) esta ligado. Corre em segundo plano: a
+  // gravacao ja terminou antes disto ser chamado.
+  const notifyIfEnabled = (itemId: string, changes: ScheduleChange[]) => {
+    const wanted = changes.filter(c =>
+      (c === 'datetime' && settings?.notify_client_on_reschedule) ||
+      (c === 'assignee' && settings?.notify_client_on_reassign)
+    );
+    if (wanted.length === 0) return;
+    void notifyClientOfScheduleChange(itemId, wanted).then(r => {
+      if (r && (r.sent.email || r.sent.sms)) {
+        toast.info(t('scheduling.notify.clientNotified'));
+      }
+    });
+  };
+
   const handleItemDrop = async (itemId: string, newStart: Date, newEnd: Date) => {
+    const prevItem = items.find(i => i.id === itemId);
     if (await rescheduleItem(itemId, newStart, newEnd)) {
       setItems(prev => prev.map(item => item.id === itemId ? { ...item, start_datetime: newStart.toISOString(), end_datetime: newEnd.toISOString() } : item));
+      notifyIfEnabled(itemId, detectScheduleChanges(prevItem ?? null, { start_datetime: newStart.toISOString(), end_datetime: newEnd.toISOString() }, null));
     }
   };
   const handleSaveItem = async (data: Partial<ScheduleItem>, assigneeIds: string[]) => {
@@ -327,9 +348,11 @@ export default function Scheduling() {
     };
 
     if (data.id) {
+      const prevItem = selectedItem && selectedItem.id === data.id ? selectedItem : items.find(i => i.id === data.id) ?? null;
       if (await updateItem(data.id, data)) {
-        await updateAssignees(data.id, assigneeIds);
+        const assigneesOk = await updateAssignees(data.id, assigneeIds);
         setItems(await fetchItemsRef.current(filters));
+        notifyIfEnabled(data.id, detectScheduleChanges(prevItem, data, assigneesOk ? assigneeIds : null));
       }
     } else {
       const newItem = await createItem(data, assigneeIds);

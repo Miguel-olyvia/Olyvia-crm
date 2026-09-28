@@ -17,6 +17,8 @@ export interface ScheduleSettings {
   working_hours_start: string;
   working_hours_end: string;
   working_days: number[];
+  notify_client_on_reschedule: boolean;
+  notify_client_on_reassign: boolean;
 }
 
 export interface ScheduleHoliday {
@@ -40,6 +42,8 @@ const DEFAULT_SETTINGS: Omit<ScheduleSettings, 'id' | 'organization_id'> = {
   working_hours_start: '09:00',
   working_hours_end: '18:00',
   working_days: [1, 2, 3, 4, 5],
+  notify_client_on_reschedule: false,
+  notify_client_on_reassign: false,
 };
 
 export function useScheduleSettings(companyId?: string) {
