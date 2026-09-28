@@ -1459,8 +1459,9 @@ const ClientOrders = () => {
       return rows;
     } catch (error: any) {
       if (deliveryAddressRequestRef.current !== entityId) return null;
-      console.error('Error loading client delivery addresses:', error);
-      toast({ title: t('deliveryAddresses.toast.loadError'), description: error?.message, variant: "destructive" });
+      // Sem toast: sem acesso às moradas de entrega, a encomenda continua a
+      // funcionar com a morada principal (ou a já gravada, ao editar).
+      console.warn('Error loading client delivery addresses:', error);
       setDeliveryOptions([]);
       return [];
     } finally {
