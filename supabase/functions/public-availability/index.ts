@@ -3,7 +3,7 @@ import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
-import { checkTravelFeasible } from "../_shared/travelFeasibility.ts";
+import { checkTravelFeasible, buildLunchBreakConfig, type LunchBreakConfig } from "../_shared/travelFeasibility.ts";
 import { ensureHolidaysPersisted } from "../_shared/ensureHolidays.ts";
 
 initSentry();
@@ -150,12 +150,14 @@ Deno.serve(async (req: Request) => {
     // gravados em schedule_holidays ANTES de qualquer RPC de disponibilidade
     // correr -- sem isto, um feriado nunca gravado deixava marcar na mesma,
     // mesmo aparecendo riscado no calendário (ver ensureHolidays.ts).
+    let lunchBreak: LunchBreakConfig | null = null;
     {
       const { data: orgSettings } = await supabase
         .from('schedule_settings')
-        .select('country_code')
+        .select('country_code, timezone, lunch_window_start, lunch_window_end, lunch_duration_minutes')
         .eq('organization_id', orgId)
         .maybeSingle();
+      lunchBreak = buildLunchBreakConfig(orgSettings);
       const countryCode = orgSettings?.country_code || 'PT';
       const refDate = start_date || date;
       if (refDate) {
@@ -324,7 +326,7 @@ Deno.serve(async (req: Request) => {
         if (slots.length === 0) continue;
 
         let neighbors: { start_datetime: string; end_datetime: string; location_lat: number | null; location_lng: number | null }[] = [];
-        if (clientLat !== null && clientLng !== null) {
+        if ((clientLat !== null && clientLng !== null) || lunchBreak) {
           const { data: assignedItems } = await supabase
             .from('schedule_item_assignees')
             .select('schedule_items(start_datetime, end_datetime, location_lat, location_lng, status)')
@@ -342,7 +344,7 @@ Deno.serve(async (req: Request) => {
 
         for (const slot of slots) {
           const { feasible } = checkTravelFeasible({
-            clientLat, clientLng, slotStart: slot.start, slotEnd: slot.end, neighbors,
+            clientLat, clientLng, slotStart: slot.start, slotEnd: slot.end, neighbors, lunchBreak,
           });
           if (!feasible) continue;
 

@@ -21,7 +21,7 @@ import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
 import { haversineKm } from "../_shared/distance.ts";
-import { checkTravelFeasible } from "../_shared/travelFeasibility.ts";
+import { checkTravelFeasible, buildLunchBreakConfig } from "../_shared/travelFeasibility.ts";
 
 initSentry();
 
@@ -201,6 +201,13 @@ serve(async (req) => {
     }
 
     const totalBuffer = rules.buffer_before_minutes + rules.buffer_after_minutes;
+
+    const { data: orgScheduleSettings } = await supabase
+      .from("schedule_settings")
+      .select("timezone, lunch_window_start, lunch_window_end, lunch_duration_minutes")
+      .eq("organization_id", organization_id)
+      .maybeSingle();
+    const lunchBreak = buildLunchBreakConfig(orgScheduleSettings);
 
     // 2. Get assignees via anew_memberships + anew_users + schedule_resources
     
@@ -465,7 +472,7 @@ serve(async (req) => {
           // desse dia, quando há coordenadas do cliente -- no-op (sempre
           // feasible) sem elas, mantendo o comportamento antigo (só o
           // buffer fixo acima) para quem ainda não tem morada.
-          if (clientLat !== null && clientLng !== null) {
+          if ((clientLat !== null && clientLng !== null) || lunchBreak) {
             const { feasible } = checkTravelFeasible({
               clientLat,
               clientLng,
@@ -477,6 +484,7 @@ serve(async (req) => {
                 location_lat: item.location_lat,
                 location_lng: item.location_lng,
               })),
+              lunchBreak,
             });
             if (!feasible) return false;
           }

@@ -18423,6 +18423,9 @@ export type Database = {
           created_by: string
           holiday_color: string | null
           id: string
+          lunch_duration_minutes: number | null
+          lunch_window_end: string | null
+          lunch_window_start: string | null
           notify_client_on_reassign: boolean
           notify_client_on_reschedule: boolean
           organization_id: string | null
@@ -18442,6 +18445,9 @@ export type Database = {
           created_by: string
           holiday_color?: string | null
           id?: string
+          lunch_duration_minutes?: number | null
+          lunch_window_end?: string | null
+          lunch_window_start?: string | null
           notify_client_on_reassign?: boolean
           notify_client_on_reschedule?: boolean
           organization_id?: string | null
@@ -18461,6 +18467,9 @@ export type Database = {
           created_by?: string
           holiday_color?: string | null
           id?: string
+          lunch_duration_minutes?: number | null
+          lunch_window_end?: string | null
+          lunch_window_start?: string | null
           notify_client_on_reassign?: boolean
           notify_client_on_reschedule?: boolean
           organization_id?: string | null
