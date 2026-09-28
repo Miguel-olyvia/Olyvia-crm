@@ -1030,7 +1030,7 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
                         <Textarea
                           value={branding.confirmation_sms_message}
                           onChange={(e) => setBranding({ ...branding, confirmation_sms_message: e.target.value })}
-                          placeholder="Deixe vazio para usar a mensagem por omissão (já inclui o aviso de contacto telefónico)."
+                          placeholder='Deixe vazio para usar a mensagem base: "{{company_name}}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita."'
                           rows={3}
                         />
                         <p className="text-[10px] text-muted-foreground">
@@ -1041,7 +1041,7 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
                         <div>
                           <Label className="text-xs">Incluir link de gerir/cancelar no SMS</Label>
                           <p className="text-[10px] text-muted-foreground">
-                            Desligado por omissão: a operadora de SMS recusa mensagens com link enquanto o remetente não estiver verificado. Só ligue depois de confirmar que a verificação foi feita.
+                            Desligado por omissão. Só ligue depois de confirmar o envio de um SMS de teste com o link.
                           </p>
                         </div>
                         <Switch
