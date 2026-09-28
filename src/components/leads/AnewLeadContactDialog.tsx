@@ -1209,6 +1209,7 @@ export function AnewLeadContactDialog({
                 end_datetime: visitEnd,
                 status: "scheduled",
                 origin: "manual",
+                lead_id: lead.id,
                 metadata: {
                   lead_id: lead.id,
                   ...(leadInfo.email ? { lead_email: leadInfo.email } : {}),

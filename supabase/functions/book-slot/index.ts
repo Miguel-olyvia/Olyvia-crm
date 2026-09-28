@@ -731,9 +731,8 @@ Deno.serve(async (req: Request) => {
         board_id: boardId,
         title,
         description: submissionClientId ? `Cliente: ${submissionClientId}` : `Lead: ${lead!.id}`,
-        // A agenda liga-se ao cliente por coluna propria; a lead vive na nota
-        // lateral, porque schedule_items nao tem coluna para ela.
         client_id: submissionClientId,
+        lead_id: lead ? lead.id : null,
         status: 'scheduled',
         origin: 'api',
         start_datetime: slot_start,
