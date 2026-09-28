@@ -43,15 +43,17 @@ import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { escapeIlike } from "@/lib/clientSearch";
 import StockMovementDialog from "@/components/inventory/StockMovementDialog";
 import StockMovementsHistoryDialog from "@/components/inventory/StockMovementsHistoryDialog";
+import CategorySubcategoryFilter, { UNCATEGORIZED_CATEGORY_VALUE } from "@/components/inventory/CategorySubcategoryFilter";
+import { useProductCategories } from "@/hooks/useProductCategories";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
-  products?: { name: string; category_id?: string | null; product_categories?: { name: string } | null };
+  products?: { name: string; category_id?: string | null; subcategory_id?: string | null; product_categories?: { name: string } | null };
   warehouses?: { name: string };
 };
 
 const UNCATEGORIZED_LABEL = "Sem categoria";
-const UNCATEGORIZED_VALUE = "__uncategorized__";
+const UNCATEGORIZED_VALUE = UNCATEGORIZED_CATEGORY_VALUE;
 const PAGE_SIZE = 30;
 
 function getStockStatusCode(stock: Stock): "low" | "overstock" | "normal" {
@@ -118,7 +120,7 @@ const RESERVATION_CHUNK = 150;
 
 const STOCK_SELECT = `
   *,
-  products!inner(name, category_id, product_categories!category_id(name)),
+  products!inner(name, category_id, subcategory_id, product_categories!category_id(name)),
   warehouses(name)
 `;
 
@@ -130,7 +132,6 @@ const Stocks = () => {
   const [products, setProducts] = useState<any[]>([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
   const [warehouses, setWarehouses] = useState<any[]>([]);
-  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [page, setPage] = useState(0);
@@ -158,6 +159,7 @@ const Stocks = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [subcategoryFilter, setSubcategoryFilter] = useState("all");
   const [warehouseFilter, setWarehouseFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "low" | "normal" | "overstock">("all");
 
@@ -174,12 +176,24 @@ const Stocks = () => {
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
+  // Ids a comparar com products.category_id/subcategory_id (categoria + as suas
+  // subcategorias, ou só a subcategoria escolhida). Recalculado quando as
+  // categorias acabam de carregar — a chave entra nas dependências do reload.
+  const { resolveFilterIds } = useProductCategories();
+  const categoryFilterIds = useMemo(
+    () => (categoryFilter === UNCATEGORIZED_VALUE ? null : resolveFilterIds(categoryFilter, subcategoryFilter)),
+    [categoryFilter, subcategoryFilter, resolveFilterIds],
+  );
+  const categoryFilterKey = categoryFilterIds ? categoryFilterIds.join(",") : "";
+
   // Stable refs so loadStocks doesn't need to be recreated (and re-wired to the
   // IntersectionObserver) on every filter keystroke — same pattern as Products.tsx.
   const filtersRef = useRef({
     showDeleted,
     debouncedSearchTerm,
     categoryFilter,
+    subcategoryFilter,
+    categoryFilterIds,
     warehouseFilter,
     statusFilter,
     activeCompanyId: activeCompany?.id,
@@ -189,11 +203,13 @@ const Stocks = () => {
       showDeleted,
       debouncedSearchTerm,
       categoryFilter,
+      subcategoryFilter,
+      categoryFilterIds,
       warehouseFilter,
       statusFilter,
       activeCompanyId: activeCompany?.id,
     };
-  }, [showDeleted, debouncedSearchTerm, categoryFilter, warehouseFilter, statusFilter, activeCompany?.id]);
+  }, [showDeleted, debouncedSearchTerm, categoryFilter, subcategoryFilter, categoryFilterIds, warehouseFilter, statusFilter, activeCompany?.id]);
 
   // status (low/normal/overstock) compares two columns of the SAME row
   // (quantity vs reorder_point / maximum_quantity) — PostgREST filters only
@@ -224,8 +240,15 @@ const Stocks = () => {
     }
     if (filters.categoryFilter === UNCATEGORIZED_VALUE) {
       query = (query as any).is("products.category_id", null);
-    } else if (filters.categoryFilter !== "all") {
-      query = (query as any).eq("products.category_id", filters.categoryFilter);
+    } else if (filters.categoryFilterIds && filters.categoryFilterIds.length > 0) {
+      // OR sobre o recurso embebido products!inner: com referencedTable o
+      // supabase-js envia `products.or=(...)`, que o PostgREST aplica dentro do
+      // embed; como o embed é !inner, as linhas de stock sem produto a
+      // corresponder ficam de fora (igual ao .eq("products.category_id") de
+      // antes). category_id OU subcategory_id porque há produtos com o id da
+      // subcategoria guardado em category_id.
+      const ids = filters.categoryFilterIds.join(",");
+      query = (query as any).or(`category_id.in.(${ids}),subcategory_id.in.(${ids})`, { referencedTable: "products" });
     }
     if (filters.debouncedSearchTerm.trim()) {
       query = (query as any).ilike("products.name", `%${escapeIlike(filters.debouncedSearchTerm.trim())}%`);
@@ -322,7 +345,7 @@ const Stocks = () => {
     if (!activeCompany?.id) return;
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id, showDeleted, debouncedSearchTerm, categoryFilter, warehouseFilter, statusFilter]);
+  }, [activeCompany?.id, showDeleted, debouncedSearchTerm, categoryFilter, subcategoryFilter, categoryFilterKey, warehouseFilter, statusFilter]);
 
   // Infinite scroll observer — inert while a status filter is active (hasMore is
   // false in that mode, since loadAllForStatusFilter already loaded everything).
@@ -432,23 +455,6 @@ const Stocks = () => {
     });
   }, [stocks]);
 
-  const fetchCategories = async () => {
-    if (!activeCompany?.id) return;
-    try {
-      const { data, error } = await fetchAllRows(() =>
-        supabase
-          .from("product_categories")
-          .select("id, name")
-          .or(`organization_id.eq.${activeCompany.id},organization_id.is.null`)
-          .order("id", { ascending: true })
-      );
-      if (error) throw error;
-      setCategories((data || []) as { id: string; name: string }[]);
-    } catch (error: any) {
-      console.error("Error loading categories:", error);
-    }
-  };
-
   const fetchWarehouses = async () => {
     if (!activeCompany?.id) return;
 
@@ -473,7 +479,6 @@ const Stocks = () => {
 
   useEffect(() => {
     if (activeCompany?.id) {
-      fetchCategories();
       fetchWarehouses();
       setProductsLoaded(false);
       setProducts([]);
@@ -1103,18 +1108,15 @@ const Stocks = () => {
             onChange={(e) => setSearchTerm(e.target.value)}
             className="max-w-xs"
           />
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-[200px]">
-              <SelectValue placeholder="Categoria" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todas as categorias</SelectItem>
-              <SelectItem value={UNCATEGORIZED_VALUE}>{UNCATEGORIZED_LABEL}</SelectItem>
-              {categories.map((category) => (
-                <SelectItem key={category.id} value={category.id}>{category.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <CategorySubcategoryFilter
+            categoryId={categoryFilter}
+            subcategoryId={subcategoryFilter}
+            onChange={({ categoryId, subcategoryId }) => {
+              setCategoryFilter(categoryId);
+              setSubcategoryFilter(subcategoryId);
+            }}
+            includeUncategorized
+          />
           <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder={t('stocks.table.warehouse')} />
@@ -1137,13 +1139,14 @@ const Stocks = () => {
               <SelectItem value="overstock">{t('stocks.status.overstock')}</SelectItem>
             </SelectContent>
           </Select>
-          {(searchTerm || categoryFilter !== "all" || warehouseFilter !== "all" || statusFilter !== "all") && (
+          {(searchTerm || categoryFilter !== "all" || subcategoryFilter !== "all" || warehouseFilter !== "all" || statusFilter !== "all") && (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => {
                 setSearchTerm("");
                 setCategoryFilter("all");
+                setSubcategoryFilter("all");
                 setWarehouseFilter("all");
                 setStatusFilter("all");
               }}
