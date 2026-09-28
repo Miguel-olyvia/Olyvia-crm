@@ -637,9 +637,31 @@ export const scheduleSettingsSchema = z.object({
   show_holidays: z.boolean(),
   notify_client_on_reschedule: z.boolean(),
   notify_client_on_reassign: z.boolean(),
+  lunch_window_start: timeOfDaySchema.nullable(),
+  lunch_window_end: timeOfDaySchema.nullable(),
+  lunch_duration_minutes: z.number().int().min(1, "Duração mínima 1 minuto").max(240, "Duração máxima 240 minutos").nullable(),
 }).refine((data) => data.working_hours_start < data.working_hours_end, {
   message: "A hora de início deve ser anterior à hora de fim",
   path: ["working_hours_end"],
+}).superRefine((data, ctx) => {
+  const filled = [data.lunch_window_start, data.lunch_window_end, data.lunch_duration_minutes].filter((v) => v !== null).length;
+  if (filled !== 0 && filled !== 3) {
+    // Anchor the error under the first field the user actually left empty,
+    // not always lunch_window_start -- otherwise filling window_start/end
+    // and forgetting only the duration shows the error under the wrong field.
+    const missingField = data.lunch_window_start === null
+      ? "lunch_window_start"
+      : data.lunch_window_end === null
+        ? "lunch_window_end"
+        : "lunch_duration_minutes";
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Preencha início, fim e duração do almoço", path: [missingField] });
+  }
+}).refine((data) => {
+  if (data.lunch_window_start === null || data.lunch_window_end === null) return true;
+  return data.lunch_window_start < data.lunch_window_end;
+}, {
+  message: "O início da janela de almoço deve ser anterior ao fim",
+  path: ["lunch_window_end"],
 });
 
 // Schedule settings dialog — new holiday entry validation schema

@@ -19,6 +19,9 @@ export interface ScheduleSettings {
   working_days: number[];
   notify_client_on_reschedule: boolean;
   notify_client_on_reassign: boolean;
+  lunch_window_start: string | null;
+  lunch_window_end: string | null;
+  lunch_duration_minutes: number | null;
 }
 
 export interface ScheduleHoliday {
@@ -44,6 +47,9 @@ const DEFAULT_SETTINGS: Omit<ScheduleSettings, 'id' | 'organization_id'> = {
   working_days: [1, 2, 3, 4, 5],
   notify_client_on_reschedule: false,
   notify_client_on_reassign: false,
+  lunch_window_start: null,
+  lunch_window_end: null,
+  lunch_duration_minutes: null,
 };
 
 export function useScheduleSettings(companyId?: string) {

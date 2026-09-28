@@ -18,7 +18,7 @@ import {
 } from '../_shared/formEmails.ts';
 import { sendSmsNow, scheduleSms } from '../_shared/sendSms.ts';
 import { geocodePostalCode } from '../_shared/postcodeGeocode.ts';
-import { checkTravelFeasible } from '../_shared/travelFeasibility.ts';
+import { checkTravelFeasible, buildLunchBreakConfig, type LunchBreakConfig } from '../_shared/travelFeasibility.ts';
 import { ensureHolidaysPersisted } from '../_shared/ensureHolidays.ts';
 
 initSentry();
@@ -138,12 +138,14 @@ Deno.serve(async (req: Request) => {
     // schedule_holidays antes de qualquer RPC correr -- ver ensureHolidays.ts
     // (mesma lacuna do calendário, aqui para quem chama book-slot
     // directamente, sem passar pelo calendário público).
+    let lunchBreak: LunchBreakConfig | null = null;
     try {
       const { data: orgSettings } = await supabase
         .from('schedule_settings')
-        .select('country_code')
+        .select('country_code, timezone, lunch_window_start, lunch_window_end, lunch_duration_minutes')
         .eq('organization_id', organizationId)
         .maybeSingle();
+      lunchBreak = buildLunchBreakConfig(orgSettings);
       await ensureHolidaysPersisted(
         supabase,
         orgSettings?.country_code || 'PT',
@@ -335,7 +337,7 @@ Deno.serve(async (req: Request) => {
       // tem tempo real de deslocação para a visita imediatamente antes/depois
       // nesse dia. No-op (sempre feasible) quando clientLat/Lng são nulos --
       // ver checkTravelFeasible.
-      if (clientLat !== null && clientLng !== null) {
+      if ((clientLat !== null && clientLng !== null) || lunchBreak) {
         const dayStart = `${slot_start.split('T')[0]}T00:00:00.000Z`;
         const dayEnd = `${slot_start.split('T')[0]}T23:59:59.999Z`;
         const { data: assignedItems } = await supabase
@@ -354,7 +356,7 @@ Deno.serve(async (req: Request) => {
 
         const { feasible } = checkTravelFeasible({
           clientLat, clientLng, slotStart: slot_start, slotEnd: slot_end,
-          neighbors,
+          neighbors, lunchBreak,
         });
         if (!feasible) continue;
       }

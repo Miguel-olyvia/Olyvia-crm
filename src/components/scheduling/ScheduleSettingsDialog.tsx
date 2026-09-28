@@ -37,6 +37,7 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
   const [saving, setSaving] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [holidayErrors, setHolidayErrors] = useState<Record<string, string>>({});
+  const [lunchEnabled, setLunchEnabled] = useState(false);
 
   const locale = useMemo(() => {
     const locales: Record<string, typeof enUS> = { en: enUS, pt, es, fr, de };
@@ -67,10 +68,42 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
   useEffect(() => {
     if (settings) {
       setFormData(settings);
+      setLunchEnabled(
+        settings.lunch_window_start != null
+        && settings.lunch_window_end != null
+        && settings.lunch_duration_minutes != null
+      );
     }
   }, [settings]);
 
   const handleSave = async () => {
+    const lunch = lunchEnabled
+      ? {
+          lunch_window_start: formData.lunch_window_start || null,
+          lunch_window_end: formData.lunch_window_end || null,
+          lunch_duration_minutes: formData.lunch_duration_minutes ?? null,
+        }
+      : {
+          lunch_window_start: null,
+          lunch_window_end: null,
+          lunch_duration_minutes: null,
+        };
+
+    // The toggle is UI-only state, invisible to the schema: with it on but a
+    // field left empty, the "all-or-none" refine below sees zero fields
+    // filled and passes silently, saving the toggle as if it had never been
+    // turned on. Catch that here, before it ever reaches the schema.
+    if (lunchEnabled && (lunch.lunch_window_start === null || lunch.lunch_window_end === null || lunch.lunch_duration_minutes === null)) {
+      const missingField = lunch.lunch_window_start === null
+        ? 'lunch_window_start'
+        : lunch.lunch_window_end === null
+          ? 'lunch_window_end'
+          : 'lunch_duration_minutes';
+      setFieldErrors({ [missingField]: t('scheduling.settings.lunchBreakIncomplete') });
+      toast({ title: t('scheduling.settings.lunchBreakIncomplete'), variant: 'destructive' });
+      return;
+    }
+
     const validation = scheduleSettingsSchema.safeParse({
       country_code: formData.country_code || 'PT',
       timezone: formData.timezone || '',
@@ -84,6 +117,7 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
       show_holidays: formData.show_holidays ?? true,
       notify_client_on_reschedule: formData.notify_client_on_reschedule ?? false,
       notify_client_on_reassign: formData.notify_client_on_reassign ?? false,
+      ...lunch,
     });
     if (!validation.success) {
       const errors: Record<string, string> = {};
@@ -95,7 +129,7 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
     setFieldErrors({});
 
     setSaving(true);
-    await saveSettings(formData);
+    await saveSettings({ ...formData, ...lunch });
     setSaving(false);
     onOpenChange(false);
   };
@@ -310,6 +344,63 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
               <p className="text-xs text-muted-foreground">
                 {t('scheduling.settings.clickToToggle')}
               </p>
+            </div>
+
+            <div className="space-y-2 border-t pt-4">
+              <Label className="text-base">{t('scheduling.settings.lunchBreak')}</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="lunch-break-toggle">{t('scheduling.settings.lunchBreakToggle')}</Label>
+                <Switch
+                  id="lunch-break-toggle"
+                  checked={lunchEnabled}
+                  onCheckedChange={setLunchEnabled}
+                  disabled={!canEditSettings}
+                />
+              </div>
+              {lunchEnabled && (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label>{t('scheduling.settings.lunchWindowStart')}</Label>
+                      <Input
+                        type="time"
+                        value={formData.lunch_window_start || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, lunch_window_start: e.target.value }))}
+                        className={fieldErrors.lunch_window_start ? 'border-destructive' : ''}
+                      />
+                      {fieldErrors.lunch_window_start && <p className="text-sm text-destructive mt-1">{fieldErrors.lunch_window_start}</p>}
+                    </div>
+                    <div className="space-y-1">
+                      <Label>{t('scheduling.settings.lunchWindowEnd')}</Label>
+                      <Input
+                        type="time"
+                        value={formData.lunch_window_end || ''}
+                        onChange={(e) => setFormData(prev => ({ ...prev, lunch_window_end: e.target.value }))}
+                        className={fieldErrors.lunch_window_end ? 'border-destructive' : ''}
+                      />
+                      {fieldErrors.lunch_window_end && <p className="text-sm text-destructive mt-1">{fieldErrors.lunch_window_end}</p>}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <Label>{t('scheduling.settings.lunchDuration')}</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={240}
+                      value={formData.lunch_duration_minutes ?? ''}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        lunch_duration_minutes: e.target.value === '' ? null : Number(e.target.value),
+                      }))}
+                      className={fieldErrors.lunch_duration_minutes ? 'border-destructive' : ''}
+                    />
+                    {fieldErrors.lunch_duration_minutes && <p className="text-sm text-destructive mt-1">{fieldErrors.lunch_duration_minutes}</p>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t('scheduling.settings.lunchBreakHelp')}
+                  </p>
+                </div>
+              )}
             </div>
           </TabsContent>
 
