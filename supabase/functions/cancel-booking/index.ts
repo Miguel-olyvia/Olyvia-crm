@@ -318,11 +318,11 @@ Deno.serve(async (req: Request) => {
       });
 
       // (a) Technician + extra notify emails: internal cancellation notice.
-      // Technician inclusion respects the same "Aviso de reunião ao comercial"
-      // toggle as book-slot; extra emails always notify regardless of it.
-      const extra = parseEmailList(emailCfg?.meeting_notify_emails);
+      // Its own toggle ("Aviso ao comercial ao cancelar"), independent from
+      // the new-booking and reschedule toggles.
+      const extra = parseEmailList(emailCfg?.cancel_notify_emails);
       const notifyList = uniqueEmails([
-        emailCfg?.meeting_notify_commercial ? technicianEmail : null,
+        emailCfg?.cancel_notify_commercial ? technicianEmail : null,
         ...extra,
       ]);
       if (notifyList.length > 0) {
