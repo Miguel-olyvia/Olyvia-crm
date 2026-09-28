@@ -23,6 +23,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { PermissionGate } from "@/components/PermissionGate";
 import { escapeIlike } from "@/lib/clientSearch";
 import InventoryCountDetailDialog from "@/components/inventory/InventoryCountDetailDialog";
+import { useProductCategories } from "@/hooks/useProductCategories";
 
 // Fase 5.4 do plano de inventário: "Contagem de Inventário" (Stocktake) —
 // listagem de sessões de public.inventory_counts. Mesmo padrão de paginação
@@ -68,11 +69,6 @@ interface WarehouseOption {
   name: string;
 }
 
-interface CategoryOption {
-  id: string;
-  name: string;
-}
-
 // PostgREST caps an unranged response at 1000 rows — paginado por segurança,
 // mesmo padrão já usado em Stocks.tsx.
 const fetchAllRows = async (buildQuery: () => any): Promise<{ data: any[] | null; error: any }> => {
@@ -106,9 +102,14 @@ const StockCounts = () => {
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [warehouseFilter, setWarehouseFilter] = useState<string>("all");
+  // Filtra por inventory_counts.category_id (a categoria com que a contagem
+  // foi criada) — só categorias de topo, como no diálogo de criação.
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
 
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
-  const [categories, setCategories] = useState<CategoryOption[]>([]);
+  // Só categorias de topo (sem parent_id), por ordem alfabética — lista e
+  // diálogo de criação. Cache partilhada com Stocks/folha de contagem.
+  const { topLevelCategories: categories, error: categoriesError } = useProductCategories();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createWarehouseId, setCreateWarehouseId] = useState("");
@@ -152,10 +153,11 @@ const StockCounts = () => {
     debouncedSearchTerm,
     statusFilter,
     warehouseFilter,
+    categoryFilter,
   });
   useEffect(() => {
-    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter };
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter]);
+    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter, categoryFilter };
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter, categoryFilter]);
 
   const fetchWarehouses = useCallback(async () => {
     if (!activeCompany?.id) return;
@@ -173,29 +175,16 @@ const StockCounts = () => {
     }
   }, [activeCompany?.id, t, toast]);
 
-  const fetchCategories = useCallback(async () => {
-    if (!activeCompany?.id) return;
-    try {
-      const { data, error } = await fetchAllRows(() =>
-        supabase
-          .from("product_categories")
-          .select("id, name")
-          .or(`organization_id.eq.${activeCompany.id},organization_id.is.null`)
-          .order("id", { ascending: true })
-      );
-      if (error) throw error;
-      setCategories((data || []) as CategoryOption[]);
-    } catch (error: any) {
-      toast({ title: t('stockCounts.toast.loadCategoriesError'), description: error.message, variant: "destructive" });
-    }
-  }, [activeCompany?.id, t, toast]);
+  useEffect(() => {
+    if (!categoriesError) return;
+    toast({ title: t('stockCounts.toast.loadCategoriesError'), description: (categoriesError as any)?.message, variant: "destructive" });
+  }, [categoriesError, t, toast]);
 
   useEffect(() => {
     if (activeCompany?.id) {
       fetchWarehouses();
-      fetchCategories();
     }
-  }, [activeCompany?.id, fetchWarehouses, fetchCategories]);
+  }, [activeCompany?.id, fetchWarehouses]);
 
   // Agregados por sessão (total de linhas, linhas contadas, discrepâncias por
   // resolver) — calculados a partir de inventory_count_lines, filtrados às
@@ -259,6 +248,9 @@ const StockCounts = () => {
     if (filters.warehouseFilter !== "all") {
       query = query.eq("warehouse_id", filters.warehouseFilter);
     }
+    if (filters.categoryFilter !== "all") {
+      query = query.eq("category_id", filters.categoryFilter);
+    }
     if (filters.debouncedSearchTerm.trim()) {
       query = query.ilike("document_number", `%${escapeIlike(filters.debouncedSearchTerm.trim())}%`);
     }
@@ -314,7 +306,7 @@ const StockCounts = () => {
     if (!activeCompany?.id) return;
     refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter]);
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter, categoryFilter]);
 
   useEffect(() => {
     if (loading) return;
@@ -542,6 +534,17 @@ const StockCounts = () => {
               ))}
             </SelectContent>
           </Select>
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-[200px]" aria-label={t('stockCounts.table.category')}>
+              <SelectValue placeholder={t('stockCounts.table.category')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('stockCounts.allCategories')}</SelectItem>
+              {categories.map((c) => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Select value={statusFilter} onValueChange={setStatusFilter}>
             <SelectTrigger className="w-[200px]">
               <SelectValue placeholder={t('stockCounts.table.status')} />
@@ -553,7 +556,7 @@ const StockCounts = () => {
               <SelectItem value="cancelada">{t('stockCounts.status.cancelada')}</SelectItem>
             </SelectContent>
           </Select>
-          {(searchTerm || statusFilter !== "all" || warehouseFilter !== "all") && (
+          {(searchTerm || statusFilter !== "all" || warehouseFilter !== "all" || categoryFilter !== "all") && (
             <Button
               variant="ghost"
               size="sm"
@@ -561,6 +564,7 @@ const StockCounts = () => {
                 setSearchTerm("");
                 setStatusFilter("all");
                 setWarehouseFilter("all");
+                setCategoryFilter("all");
               }}
             >
               {t('stockCounts.clearFilters')}
