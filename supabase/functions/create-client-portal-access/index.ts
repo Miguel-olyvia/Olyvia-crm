@@ -1,12 +1,12 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { createClient } from "npm:@supabase/supabase-js@2.80.0";
 import { z } from "npm:zod";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
 import { validateOrgScope, checkUserPermission } from "../_shared/auth.ts";
 import { withRetryResult } from "../_shared/retry.ts";
 
 const requestSchema = z.object({
-  document_type: z.enum(["proposal", "contract", "quote"]),
+  document_type: z.enum(["proposal", "contract", "quote", "direct_sale"]),
   document_id: z.string(),
   organization_id: z.string(),
   login_url: z.string().optional(),
@@ -148,11 +148,17 @@ serve(async (req: Request) => {
     // Contracts use client_contracts.send_signature (NOT client_contracts.edit — a role can
     // be allowed to edit a contract's fields without being allowed to send it anywhere,
     // e.g. Sales Technician; the roles screen exposes these as two separate checkboxes).
+    // Direct sales live outside the client_contracts permission family, so they gate on
+    // their own direct_sales.edit (created in 20261130230000_venda_direta_base.sql).
+    const sendPermissionByType: Record<typeof document_type, string> = {
+      contract: "client_contracts.send_signature",
+      proposal: "client_contracts.edit",
+      quote: "client_contracts.edit",
+      direct_sale: "direct_sales.edit",
+    };
     const hasPermission =
       await checkUserPermission(supabase, callerAnew.id, "portal.manage", organization_id) ||
-      (document_type === "contract"
-        ? await checkUserPermission(supabase, callerAnew.id, "client_contracts.send_signature", organization_id)
-        : await checkUserPermission(supabase, callerAnew.id, "client_contracts.edit", organization_id));
+      await checkUserPermission(supabase, callerAnew.id, sendPermissionByType[document_type], organization_id);
     if (!hasPermission) {
       return new Response(
         JSON.stringify({ error: "Sem permissão para gerir acessos ao portal de clientes" }),
@@ -253,7 +259,7 @@ serve(async (req: Request) => {
           entityId = client?.entity_id || null;
         }
       }
-    } else {
+    } else if (document_type === "contract") {
       const { data: contract } = await supabase
         .from("client_contracts")
         .select("id, contract_number, entity_id, client_id")
@@ -271,6 +277,30 @@ serve(async (req: Request) => {
         const { data: client } = await supabase.from("anew_clients").select("entity_id").eq("id", contract.client_id).maybeSingle();
         entityId = client?.entity_id || null;
       }
+    } else if (document_type === "direct_sale") {
+      const { data: sale } = await supabase
+        .from("direct_sales")
+        .select("id, sale_number, title, entity_id, client_id")
+        .eq("id", document_id)
+        .eq("organization_id", organization_id)
+        .maybeSingle();
+
+      if (!sale) {
+        return new Response(JSON.stringify({ error: "Venda direta não encontrada" }), { status: 404, headers: corsHeaders });
+      }
+      documentTitle = sale.title || sale.sale_number || "Venda Direta";
+      entityId = sale.entity_id || null;
+
+      // fallback to client_id (anew_clients). direct_sales has NO deal_id
+      // (20261130230000_venda_direta_base.sql) — there is no deal fallback here.
+      if (!entityId && sale.client_id) {
+        const { data: client } = await supabase.from("anew_clients").select("entity_id").eq("id", sale.client_id).maybeSingle();
+        entityId = client?.entity_id || null;
+      }
+    } else {
+      // Unreachable for the four values allowed by requestSchema — kept so a
+      // future enum entry fails loudly instead of silently reading nothing.
+      return new Response(JSON.stringify({ error: "Tipo de documento não suportado" }), { status: 400, headers: corsHeaders });
     }
 
     if (!entityId) {
@@ -280,6 +310,14 @@ serve(async (req: Request) => {
     // 2. Get entity email — usa limit(1) em vez de maybeSingle() para tolerar
     // duplicados de is_primary (caso existam várias linhas marcadas como primary,
     // maybeSingle devolve erro e perderíamos o email). Fallback: qualquer email da entity.
+    //
+    // Desempate por created_at DESCENDENTE (o mais recente primeiro): uma
+    // substituição de email numa lead/entidade é feita por um DELETE seguido
+    // de um INSERT (linkEntityEmail em entityContactSync.ts) — se o DELETE
+    // for bloqueado por RLS (falta leads.delete/clients.delete, que nada tem
+    // a ver com editar a lead), o email antigo fica para trás, marcado
+    // is_primary=true na mesma, e ambos ficam empatados. Nesse empate o mais
+    // novo é sempre o que reflete a substituição pretendida, nunca o antigo.
     let email: string | undefined;
     {
       const { data: primaryEmails } = await supabase
@@ -287,7 +325,7 @@ serve(async (req: Request) => {
         .select("email, is_primary, created_at")
         .eq("entity_id", entityId)
         .order("is_primary", { ascending: false })
-        .order("created_at", { ascending: true })
+        .order("created_at", { ascending: false })
         .limit(1);
       email = primaryEmails?.[0]?.email;
     }
@@ -371,6 +409,9 @@ serve(async (req: Request) => {
     let isNewAccount = false;
     let tempPassword = "";
     let existingPortalUser: any = null;
+    // Existing account (with its own password) getting access to a NEW org: the
+    // email tells the client to sign in with the credentials they already have.
+    let linkedExistingAccount = false;
     let portalEmailMigratedFrom: string | null = null;
 
     // The email was edited after portal access already existed: no auth account
@@ -529,7 +570,28 @@ serve(async (req: Request) => {
       const portalUserRecord = portalUserRecords?.[0];
 
       existingPortalUser = portalUserRecord;
-      const shouldIssueCredentials = !!force_new_password || !existingPortalUser || !!existingPortalUser.first_login;
+
+      // One account, one password — across every organization. The portal is
+      // the same for a client of several companies (they pick the company after
+      // login), so a second org sending a document must NOT mint a new password:
+      // that silently replaced the one the client already used with the first
+      // org (inventario.olyvia@gmail.com, 2026-09-23, Mudelar → BMGest).
+      // Only reset when the account has no credentials yet: never signed in and
+      // no portal access in any other org (their temp password from that org
+      // would be invalidated too). "Reenviar credenciais" still forces it.
+      const { data: otherOrgPortalRows } = await supabase
+        .from("client_portal_users")
+        .select("id")
+        .eq("auth_user_id", authUserId)
+        .neq("organization_id", organization_id)
+        .limit(1);
+      const hasEstablishedCredentials =
+        !!existingUser.last_sign_in_at || (otherOrgPortalRows?.length ?? 0) > 0;
+      linkedExistingAccount = hasEstablishedCredentials && !existingPortalUser;
+
+      const shouldIssueCredentials =
+        !!force_new_password ||
+        (!hasEstablishedCredentials && (!existingPortalUser || !!existingPortalUser.first_login));
 
       if (shouldIssueCredentials) {
         tempPassword = generateTempPassword();
@@ -647,7 +709,10 @@ serve(async (req: Request) => {
       portalUserPayload.proposal_id = document_id;
     } else if (document_type === "quote") {
       portalUserPayload.quote_id = document_id;
-    } else {
+    } else if (document_type === "direct_sale") {
+      portalUserPayload.direct_sale_id = document_id;
+    } else if (document_type === "contract") {
+      // explicit: a new document type must never fall through into contract_id
       portalUserPayload.contract_id = document_id;
     }
 
@@ -671,11 +736,14 @@ serve(async (req: Request) => {
     // Upsert portal user
     let portalUserId: string | null = null;
     if (existingPortalUser) {
-      const docUpdate = document_type === "proposal"
-        ? { proposal_id: document_id }
-        : document_type === "quote"
-          ? { quote_id: document_id }
-          : { contract_id: document_id };
+      // explicit per type: a new document type must never fall through into contract_id
+      const docUpdateByType: Record<typeof document_type, Record<string, string>> = {
+        proposal: { proposal_id: document_id },
+        quote: { quote_id: document_id },
+        contract: { contract_id: document_id },
+        direct_sale: { direct_sale_id: document_id },
+      };
+      const docUpdate = docUpdateByType[document_type];
 
       const portalUpdatePayload: any = {
         portal_status: "sent",
@@ -702,7 +770,7 @@ serve(async (req: Request) => {
     }
 
     // Publish document visibility for portal (required by RLS portal_user_can_see_document)
-    async function publishPortalDocument(docType: "proposal" | "quote" | "contract", docId: string) {
+    async function publishPortalDocument(docType: "proposal" | "quote" | "contract" | "direct_sale", docId: string) {
       try {
         // Re-activate if previously revoked, or insert fresh
         const { data: existingDoc } = await supabase
@@ -713,8 +781,10 @@ serve(async (req: Request) => {
           .eq("document_id", docId)
           .maybeSingle();
 
+        let publishError: any = null;
+
         if (existingDoc) {
-          await supabase
+          const { error } = await supabase
             .from("client_portal_documents")
             .update({
               is_visible: true,
@@ -725,8 +795,9 @@ serve(async (req: Request) => {
               updated_at: new Date().toISOString(),
             })
             .eq("id", existingDoc.id);
+          publishError = error;
         } else {
-          await supabase.from("client_portal_documents").insert({
+          const { error } = await supabase.from("client_portal_documents").insert({
             portal_user_id: portalUserId,
             organization_id,
             entity_id: entityId,
@@ -735,6 +806,62 @@ serve(async (req: Request) => {
             is_visible: true,
             published_by: callerAnew?.id || null,
           });
+          publishError = error;
+        }
+
+        if (publishError) {
+          // Fail-soft as before (the caller still gets a 200 and the email is
+          // sent), but now it is visible in the logs AND it stops the contract
+          // status transition below from claiming a publication that failed.
+          console.error("Error publishing document to portal:", publishError);
+          return;
+        }
+
+        // ── Contract sent to the portal ⇒ status draft → pending_signature ────
+        // Nothing in the codebase ever wrote 'pending_signature' (every other
+        // reference is a READ: rpc_client_contracts_list_metrics, dashboards,
+        // alerts, notifications, exports, filters). The consequence was that a
+        // contract sent for signature stayed 'draft' — the client opened the
+        // portal and saw "Rascunho" on a document he was being asked to sign,
+        // and the "Enviado" counter / sent→signed conversion rate were pinned
+        // at zero because the denominator was never populated.
+        //
+        // Only 'draft' may transition. The guard lives in the UPDATE itself
+        // (.eq("status", "draft")) rather than in a SELECT-then-UPDATE, so a
+        // contract that was signed/cancelled concurrently is never overwritten:
+        // the WHERE simply matches zero rows.
+        //
+        // Safety: the three AFTER UPDATE OF status triggers on client_contracts
+        // (fn_contract_stock_deduction, fn_contract_supplier_request,
+        // fn_contract_cancelled_stock_reversal) all return immediately unless
+        // NEW.status is in the signature aliases ARRAY['signed','assinado'] or
+        // the cancellation aliases. 'pending_signature' is in neither, so this
+        // transition moves no stock and raises no supplier purchase order. The
+        // only trigger that reacts is fn_contract_timeline_history, which
+        // already had a 'contract_pending_signature' branch waiting for an
+        // event that until now never arrived.
+        //
+        // Never fatal: a failure here must not cost the client the document he
+        // has to sign. A wrong status is preferable to an unsent contract.
+        if (docType === "contract") {
+          try {
+            const { error: statusError } = await supabase
+              .from("client_contracts")
+              .update({
+                status: "pending_signature",
+                status_changed_at: new Date().toISOString(),
+                status_changed_by: callerAnew?.id || null,
+              })
+              .eq("id", docId)
+              .eq("organization_id", organization_id)
+              .eq("status", "draft");
+
+            if (statusError) {
+              console.error("Error moving contract to pending_signature:", statusError);
+            }
+          } catch (statusErr) {
+            console.error("Error moving contract to pending_signature:", statusErr);
+          }
         }
       } catch (e) {
         console.error("Error publishing document to portal:", e);
@@ -779,7 +906,7 @@ serve(async (req: Request) => {
       }
     }
 
-    // Record in proposal_sends / quote_sends / contract_sends for history tracking
+    // Record in proposal_sends / quote_sends / contract_sends / direct_sale_sends for history tracking
     await supabase.rpc('set_audit_context', { p_user_id: callerAnew!.id, p_source: 'web_app' });
     try {
       const sendRecord = {
@@ -798,6 +925,8 @@ serve(async (req: Request) => {
         await supabase.from("quote_sends").insert({ ...sendRecord, quote_id: document_id });
       } else if (document_type === "contract") {
         await supabase.from("contract_sends").insert({ ...sendRecord, contract_id: document_id });
+      } else if (document_type === "direct_sale") {
+        await supabase.from("direct_sale_sends").insert({ ...sendRecord, direct_sale_id: document_id });
       }
     } catch (e) {
       console.error("Error recording send history:", e);
@@ -839,7 +968,13 @@ serve(async (req: Request) => {
 
     const smtpConfig = resolvedSmtp.smtp;
     const callerName = callerAnew?.name || caller.email || "A equipa";
-    const docLabel = document_type === "proposal" ? "proposta" : document_type === "quote" ? "orçamento" : "contrato";
+    const docLabelByType: Record<typeof document_type, string> = {
+      proposal: "proposta",
+      quote: "orçamento",
+      contract: "contrato",
+      direct_sale: "venda direta",
+    };
+    const docLabel = docLabelByType[document_type];
 
     // BASE-USR-012: escape all user-controlled strings before interpolating into HTML
     const safeContactName = escapeHtml(contactName);
@@ -879,6 +1014,9 @@ serve(async (req: Request) => {
           <h2 style="color: #333;">Ol&aacute;, ${safeContactName}!</h2>
           <p>Tem uma nova <strong>${safeDocLabel}</strong> dispon&iacute;vel no seu portal: <em>${safeDocumentTitle}</em></p>
           <p>Aceda em: <a href="${finalLoginUrl}" style="color: #2563eb;">${finalLoginUrl}</a></p>
+          ${linkedExistingAccount
+            ? `<p>Entre com o email e a password que j&aacute; usa no portal. Depois de entrar, escolha <strong>${safeOrgName}</strong> no seletor de empresa.</p>`
+            : ""}
 
           <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
           <p style="color: #999; font-size: 13px;">Enviado por ${safeCallerName} &mdash; ${safeOrgName}</p>

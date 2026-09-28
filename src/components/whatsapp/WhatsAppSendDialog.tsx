@@ -14,9 +14,24 @@ interface WhatsAppSendDialogProps {
   onOpenChange: (open: boolean) => void;
   context: WhatsAppContext | null;
   initialMessage?: string;
+  /**
+   * Disparado uma única vez, quando o WhatsApp foi mesmo aberto com a mensagem
+   * (openWhatsApp devolveu true) — ou seja, no momento em que este diálogo
+   * considera o envio feito e passa ao ecrã "O WhatsApp foi aberto".
+   *
+   * NÃO é o registo na timeline: registar é opcional e o utilizador pode
+   * escolher "Não registar" depois de ter enviado. Quem precisa de saber "já
+   * foi enviado?" tem de ser avisado aqui; quem precisa de saber "por onde?"
+   * usa a timeline. São perguntas diferentes e não se misturam.
+   *
+   * Opcional de propósito: nenhum dos restantes módulos que usam este diálogo
+   * (leads, clientes, propostas, orçamentos, header) o passa, e para esses o
+   * comportamento fica exactamente como estava.
+   */
+  onSent?: () => void;
 }
 
-export function WhatsAppSendDialog({ open, onOpenChange, context, initialMessage }: WhatsAppSendDialogProps) {
+export function WhatsAppSendDialog({ open, onOpenChange, context, initialMessage, onSent }: WhatsAppSendDialogProps) {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -64,7 +79,10 @@ export function WhatsAppSendDialog({ open, onOpenChange, context, initialMessage
   const handleSend = () => {
     if (!context || !phone || !message) return;
     const opened = openWhatsApp(phone, message);
-    if (opened) setSent(true);
+    if (opened) {
+      setSent(true);
+      onSent?.();
+    }
   };
 
   const handleRegisterTimeline = async () => {

@@ -47,6 +47,7 @@ interface Organization {
   parent_name?: string;
   depth?: number;
   children_count?: number;
+  logo_url?: string | null;
 }
 
 const SUGGESTED_TYPES = [
@@ -117,6 +118,7 @@ export default function Organizations() {
     parentId: "", sector: "", phone: "", isFiscal: false, nif: "", commercialName: "",
     addresses: [], address: { ...emptyAddress },
     fiscalAddressOption: 'same', fiscalAddress: { ...emptyAddress },
+    logo_url: null,
   });
 
   const { districts, municipalities, fetchMunicipalities } = useAdministrativeDivisions(formData.address.country);
@@ -184,7 +186,7 @@ export default function Organizations() {
         scopedOrgIds = Array.from(scopeSet);
       }
 
-      let orgsQuery = (supabase as any).from("anew_organizations").select("id, name, type, description, status, deleted_at, created_by, created_at, sector, is_fiscal").order("created_at", { ascending: false });
+      let orgsQuery = (supabase as any).from("anew_organizations").select("id, name, type, description, status, deleted_at, created_by, created_at, sector, is_fiscal, logo_url").order("created_at", { ascending: false });
       orgsQuery = showDeleted ? orgsQuery.not("deleted_at", "is", null) : orgsQuery.is("deleted_at", null);
       const isGlobalAdmin = userType === "system_admin";
       if (isGlobalAdmin) {
@@ -298,6 +300,20 @@ export default function Organizations() {
     }
   };
 
+  /**
+   * Writes anew_organizations.logo_url directly (none of the create/update RPCs
+   * accept a logo_url parameter). Non-blocking: the organization itself is
+   * already created/saved by the time this runs, so a failure here is
+   * surfaced as a toast without rolling back or re-throwing.
+   */
+  const updateOrgLogoUrl = async (orgId: string, logoUrl: string | null) => {
+    const { error } = await (supabase as any).from("anew_organizations").update({ logo_url: logoUrl }).eq("id", orgId);
+    if (error) {
+      console.error("Error saving organization logo:", error);
+      toast.error("Organização guardada, mas não foi possível guardar o ícone.");
+    }
+  };
+
   const handleCreate = async () => {
     if (isSubmitting) return;
     if (!formData.name) { toast.error(t("common.requiredFields")); return; }
@@ -314,6 +330,9 @@ export default function Organizations() {
         if (error) throw error;
         if (userData.user?.id && rootOrgId) {
           await assignCreatorAsAdminToHierarchy(rootOrgId, formData.name, userData.user.id);
+        }
+        if (formData.logo_url && rootOrgId) {
+          await updateOrgLogoUrl(rootOrgId as string, formData.logo_url);
         }
         toast.success(t("common.created"));
         setPanelMode('closed'); resetForm();
@@ -367,6 +386,10 @@ export default function Organizations() {
           }
         }
 
+        if (formData.logo_url) {
+          await updateOrgLogoUrl(initialOrgId, formData.logo_url);
+        }
+
         toast.success(t("common.created"));
         setPanelMode('closed'); resetForm();
         await refreshCompanies(); setRefreshCounter(c => c + 1);
@@ -382,8 +405,8 @@ export default function Organizations() {
         }));
 
       const nif = hasFiscalData ? formData.nif : null;
-      const { error } = await withAuditContext(supabase, businessUserId, () =>
-        callNifWriteProxy("rpc_create_organization", {
+      const { data: newOrgData, error } = await withAuditContext(supabase, businessUserId, () =>
+        callNifWriteProxy<{ data: { id: string } }>("rpc_create_organization", {
           p_name: newOrgName,
           p_type: typeToUse,
           p_description: formData.description || null,
@@ -399,6 +422,10 @@ export default function Organizations() {
         }, nif)
       );
       if (error) throw error;
+
+      if (formData.logo_url && newOrgData?.data?.id) {
+        await updateOrgLogoUrl(newOrgData.data.id, formData.logo_url);
+      }
 
       toast.success(t("common.created"));
       setPanelMode('closed'); resetForm();
@@ -446,6 +473,8 @@ export default function Organizations() {
         }, nif)
       );
       if (error) throw error;
+
+      await updateOrgLogoUrl(selectedOrg.id, formData.logo_url);
 
       toast.success(t("common.saved"));
       setPanelMode('closed'); resetForm();
@@ -684,6 +713,7 @@ export default function Organizations() {
       sector: (org as any).sector || "", phone: (org as any).phone || "", isFiscal: (org as any).is_fiscal || false,
       nif: fiscalNif, commercialName: fiscalCommercialName, addresses: loadedAddresses,
       address: { ...emptyAddress }, fiscalAddressOption: 'same', fiscalAddress: { ...emptyAddress },
+      logo_url: (org as any).logo_url ?? null,
     });
     setPanelMode('edit');
   };
@@ -699,7 +729,7 @@ export default function Organizations() {
   };
 
   const resetForm = () => {
-    setFormData({ name: "", type: "", customType: "", description: "", status: "active", parentId: "", sector: "", phone: "", isFiscal: false, nif: "", commercialName: "", addresses: [], address: { ...emptyAddress }, fiscalAddressOption: 'same', fiscalAddress: { ...emptyAddress } });
+    setFormData({ name: "", type: "", customType: "", description: "", status: "active", parentId: "", sector: "", phone: "", isFiscal: false, nif: "", commercialName: "", addresses: [], address: { ...emptyAddress }, fiscalAddressOption: 'same', fiscalAddress: { ...emptyAddress }, logo_url: null });
     setSelectedOrg(null); clearSelectedTemplate();
   };
 

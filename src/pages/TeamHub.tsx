@@ -51,6 +51,7 @@ import {
 import { EntryComments } from "@/components/team-hub/EntryComments";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { useCompany } from "@/contexts/CompanyContext";
 import { teamHubEntrySchema, teamHubFilterTypeSchema } from "@/lib/validations";
 
 type EntryType = "bug" | "improvement" | "task" | "knowledge";
@@ -116,6 +117,8 @@ export default function TeamHub() {
     tags: ""
   });
 
+  const { activeCompany } = useCompany();
+
   // Fetch current user + admin status
   useEffect(() => {
     const fetchUser = async () => {
@@ -140,11 +143,14 @@ export default function TeamHub() {
       setCurrentUserName(anewUser?.name || user.email || "Utilizador");
 
       let isAnewAdmin = false;
-      if (anewUser?.id) {
+      // Só conta o papel NESTA organização. Sem o filtro por organização, quem
+      // fosse admin em qualquer outra empresa ficava moderador do Team Hub aqui.
+      if (anewUser?.id && activeCompany?.id) {
         const { data: memberships } = await (supabase as any)
           .from("anew_memberships")
           .select("role_id")
           .eq("user_id", anewUser.id)
+          .eq("organization_id", activeCompany.id)
           .eq("status", "active");
 
         const roleIds = [...new Set((memberships || []).map((m: any) => m.role_id).filter(Boolean))];
@@ -165,7 +171,7 @@ export default function TeamHub() {
     };
 
     fetchUser();
-  }, []);
+  }, [activeCompany?.id]);
 
   // Fetch entries
   const fetchEntries = async () => {

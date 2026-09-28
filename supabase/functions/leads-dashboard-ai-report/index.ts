@@ -30,6 +30,7 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
+import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 
 initSentry();
@@ -336,6 +337,8 @@ Exactamente 3 bullets accionáveis para a semana seguinte.`;
 
     const data = await aiRes.json();
     const report = data?.choices?.[0]?.message?.content ?? "";
+
+    await logAiGatewayUsage(supabase, organization_id, "leads-dashboard-ai-report", AI_CREDIT_COSTS["leads-dashboard-ai-report"], data?.usage);
 
     return new Response(JSON.stringify({ report }), {
       status: 200,

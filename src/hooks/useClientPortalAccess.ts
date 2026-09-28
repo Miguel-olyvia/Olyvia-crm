@@ -14,6 +14,20 @@ const PORTAL_ERROR_MESSAGES: Record<string, string> = {
     "Esta proposta tem um contrato já assinado. Para enviar valores alterados, crie uma nova proposta/adenda.",
 };
 
+/**
+ * Tipos de documento aceites pela edge function create-client-portal-access.
+ * `quote` e `direct_sale` já eram suportados no backend; faltava a união aqui.
+ */
+export type PortalDocumentType = "proposal" | "contract" | "quote" | "direct_sale";
+
+/** Rótulo usado nos toasts de sucesso. Proposta/Contrato mantêm-se inalterados. */
+const PORTAL_DOC_LABELS: Record<PortalDocumentType, string> = {
+  proposal: "Proposta",
+  contract: "Contrato",
+  quote: "Orçamento",
+  direct_sale: "Venda Direta",
+};
+
 interface UseClientPortalAccessOptions {
   onSuccess?: () => void;
 }
@@ -25,7 +39,7 @@ export function useClientPortalAccess(options?: UseClientPortalAccessOptions) {
   const { activeCompany } = useCompany();
 
   const generatePortalAccess = async (
-    documentType: "proposal" | "contract",
+    documentType: PortalDocumentType,
     documentId: string,
     forceNewPassword?: boolean
   ) => {
@@ -80,7 +94,7 @@ export function useClientPortalAccess(options?: UseClientPortalAccessOptions) {
         // clipboard may fail in some contexts
       }
 
-      const docLabel = documentType === "contract" ? "Contrato" : "Proposta";
+      const docLabel = PORTAL_DOC_LABELS[documentType];
 
       // BASE-USR-012: backend suppresses temp_password when SMTP succeeds.
       // Cases after the security fix:

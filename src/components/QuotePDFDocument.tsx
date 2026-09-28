@@ -208,8 +208,15 @@ interface QuotePDFProps {
    * dos seus orçamentos, mas o cabeçalho tem de identificar a PROPOSTA — caso
    * contrário sai o número do orçamento (Q-...) num documento intitulado
    * "Proposta", que foi exactamente o defeito reportado.
+   *
+   * 'direct_sale': PDF da venda direta para o cliente. Reaproveita este
+   * documento para sair igual às propostas; `validUntil` (data ISO) substitui
+   * a validade em dias dos orçamentos.
    */
-  documentContext?: { kind: 'quote' } | { kind: 'proposal'; number?: string | null; title?: string | null };
+  documentContext?:
+    | { kind: 'quote' }
+    | { kind: 'proposal'; number?: string | null; title?: string | null }
+    | { kind: 'direct_sale'; number?: string | null; validUntil?: string | null };
 }
 
 // Extract attributes from a line as a list of { label, value, priceImpact }
@@ -287,9 +294,14 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // mais abaixo); faltava saber para o titulo e para os rotulos das seccoes.
   // Calculado aqui em cima, e nao junto ao numero, porque o titulo precisa dele.
   const ehProposta = documentContext?.kind === 'proposal';
-  const rotuloDocumento = ehProposta ? 'PROPOSTA' : 'ORÇAMENTO';
-  const rotuloDetalhes = ehProposta ? 'DETALHES DA PROPOSTA' : 'DETALHES DO ORÇAMENTO';
-  const rotuloValor = ehProposta ? 'VALOR DA PROPOSTA' : 'VALOR DO ORÇAMENTO';
+  // Venda direta: os modelos da empresa trazem titulos e rotulos de orcamento
+  // ou de proposta ("PROPOSTA", "DETALHES DO ORÇAMENTO"). Aqui mandam sempre os
+  // rotulos da venda direta -- o resto do modelo (cores, logotipo, rodape,
+  // termos) aplica-se tal e qual.
+  const ehVendaDireta = documentContext?.kind === 'direct_sale';
+  const rotuloDocumento = ehVendaDireta ? 'VENDA DIRETA' : ehProposta ? 'PROPOSTA' : 'ORÇAMENTO';
+  const rotuloDetalhes = ehVendaDireta ? 'DETALHES DA VENDA DIRETA' : ehProposta ? 'DETALHES DA PROPOSTA' : 'DETALHES DO ORÇAMENTO';
+  const rotuloValor = ehVendaDireta ? 'VALOR DA VENDA DIRETA' : ehProposta ? 'VALOR DA PROPOSTA' : 'VALOR DO ORÇAMENTO';
 
   const headerTitle = proposalTemplate?.sections?.find?.((section: any) => section?.type === 'header')?.settings?.customTitle || rotuloDocumento;
   const showCompanyInfo = proposalTemplate?.show_company_info !== false;
@@ -438,14 +450,14 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // documento sem qualquer identificação.
   const isProposalDocument = ehProposta;
   const headerNumber =
-    (isProposalDocument ? (documentContext as { number?: string | null }).number : null)
+    (isProposalDocument || ehVendaDireta ? (documentContext as { number?: string | null }).number : null)
     || quote.quote_number
     || 'N/A';
 
   const renderHeader = (section: any) => (
     <View fixed style={headerStyle}>
       <View style={styles.headerLeft}>
-        <Text style={[styles.title, { color: textColor }]}>{section?.settings?.customTitle || headerTitle}</Text>
+        <Text style={[styles.title, { color: textColor }]}>{ehVendaDireta ? rotuloDocumento : (section?.settings?.customTitle || headerTitle)}</Text>
         <Text style={styles.quoteNumber}>{headerNumber}</Text>
         <Text style={styles.quoteDate}>Data: {new Date(quote.created_at).toLocaleDateString('pt-PT')}</Text>
       </View>
@@ -518,7 +530,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const renderQuoteItems = (section: any) => (
     <View>
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, rotuloDetalhes)}</Text>
+        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{ehVendaDireta ? rotuloDetalhes : sectionLabel(section, rotuloDetalhes)}</Text>
         <View style={styles.table}>
           <View style={[styles.tableHeader, { backgroundColor: quoteHeaderBg, color: quoteHeaderText }]}> 
             <Text style={columnStyles.sku}>SKU</Text>
@@ -643,7 +655,26 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     </View>
   ) : null;
 
-  const renderValidity = (section: any) => showValidity ? (
+  // Venda direta: validade por data (direct_sales.valid_until), nao em dias.
+  // Sem data gravada nao ha nada de verdadeiro a dizer, e o bloco nao sai.
+  const vendaDiretaValidaAte = (() => {
+    if (!ehVendaDireta) return null;
+    const raw = (documentContext as { validUntil?: string | null }).validUntil;
+    if (!raw) return null;
+    // valid_until e uma coluna date ("yyyy-MM-dd"): ler as partes evita que o
+    // fuso horario mude o dia ao passar por new Date().
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : null;
+  })();
+
+  const renderValidity = (section: any) => ehVendaDireta ? (showValidity && vendaDiretaValidaAte ? (
+    <View style={styles.section}>
+      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'VALIDADE')}</Text>
+      <View style={{ padding: 8, backgroundColor: contentBlockBg, borderWidth: 1, borderColor, borderRadius: 4 }}>
+        <Text style={{ fontSize: 9, color: secondaryTextColor }}>Esta proposta de venda é válida até {vendaDiretaValidaAte}.</Text>
+      </View>
+    </View>
+  ) : null) : showValidity ? (
     <View style={styles.section}>
       <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'VALIDADE')}</Text>
       <View style={{ padding: 8, backgroundColor: contentBlockBg, borderWidth: 1, borderColor, borderRadius: 4 }}>
@@ -689,7 +720,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     if (hideTotals) return null;
     return (
     <View style={styles.section} wrap={false} minPresenceAhead={115}>
-      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, rotuloValor)}</Text>
+      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{ehVendaDireta ? rotuloValor : sectionLabel(section, rotuloValor)}</Text>
       {renderTotals()}
     </View>
     );
@@ -771,7 +802,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
               })()}
             </View>
             {footerText && <Text style={[styles.footerText, { textAlign: 'center', marginTop: 2 }]}>{footerText}</Text>}
-            <View style={footerBottomRowStyle}><Text style={footerBrandTextStyle}>{company?.name || 'Orçamento'}</Text></View>
+            <View style={footerBottomRowStyle}><Text style={footerBrandTextStyle}>{company?.name || (ehVendaDireta ? 'Venda Direta' : 'Orçamento')}</Text></View>
           </View>
         )}
       </Page>

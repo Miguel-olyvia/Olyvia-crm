@@ -64,7 +64,14 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
       const orgId = activeCompany?.id || settings.organization_id;
       const ext = getSafeFileExtension(file);
       const filePath = `${orgId}/doc-logo-${crypto.randomUUID()}.${ext}`;
-      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file, { upsert: true });
+      // Sem upsert: o caminho já leva um crypto.randomUUID() novo em cada
+      // envio, nunca colide — e "company-logos-quarantine" não tem política
+      // de UPDATE para authenticated (só INSERT). Com upsert:true o Postgres
+      // trata o envio como INSERT ... ON CONFLICT DO UPDATE, que exige também
+      // UPDATE mesmo sem conflito real, e a falta dela recusava sempre o
+      // envio como "violates row-level security policy" (mesmo bug já
+      // corrigido em ProposalTemplateEditor.handleLogoUpload).
+      const { error: uploadError } = await supabase.storage.from("company-logos-quarantine").upload(filePath, file);
       if (uploadError) throw uploadError;
 
       const { data: validateData, error: validateError } = await supabase.functions.invoke("validate-upload", {
@@ -137,10 +144,10 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
             <div className="flex-1 min-w-0">
               <p className="text-xs text-muted-foreground truncate">Logo carregado</p>
             </div>
-            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => fileInputRef.current?.click()}>
+            <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => fileInputRef.current?.click()}>
               Alterar
             </Button>
-            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onChange({ logo_url: null })}>
+            <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => onChange({ logo_url: null })}>
               <X className="h-3.5 w-3.5" />
             </Button>
           </div>

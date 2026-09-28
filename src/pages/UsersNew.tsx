@@ -227,7 +227,7 @@ export default function UsersNew() {
   const { language } = useLanguage();
   const { activeCompany, userType, companies, isLoading: companyLoading } = useCompany();
   const { hasPermission } = usePermissions();
-  const { getPermissionScope, anewUserId: scopeAnewUserId, authUserId: scopeAuthUserId } = usePermissionScope();
+  const { getPermissionScope, anewUserId: scopeAnewUserId, authUserId: scopeAuthUserId, anewRoleCode } = usePermissionScope();
   const canCreate = hasPermission("users.create");
   const canEdit = hasPermission("users.edit");
   const canDelete = hasPermission("users.delete");
@@ -267,11 +267,15 @@ export default function UsersNew() {
       (m) => m.status === "active" && m.organization_id === activeCompany.id && protectedRoles.includes(m.role_code || "")
     );
   };
-  const callerCanEditOwner = ["org_admin", "super_admin", "system_admin"].includes(userType);
+  // O papel tem de ser o da ORGANIZAÇÃO ATIVA, não o mais alto que a pessoa
+  // tenha em qualquer empresa. `userType` é só etiqueta (ver CompanyContext) e
+  // pode trazer um super_admin de outra organização; usá-lo aqui deixava quem é
+  // super_admin noutra empresa gerir owners e super_admins DESTA.
+  const callerCanEditOwner = ["org_admin", "super_admin", "system_admin"].includes(anewRoleCode || "");
 
   // Helper: check if the current caller is the account creator
   const callerIsAccountCreator = (): boolean => {
-    return userType === "super_admin" && users.some(u => isSelf(u) && isAccountCreator(u));
+    return anewRoleCode === "super_admin" && users.some(u => isSelf(u) && isAccountCreator(u));
   };
 
   const canEditUser = (user: AnewUser) => {

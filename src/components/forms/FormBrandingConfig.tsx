@@ -97,6 +97,10 @@ interface BrandingData {
   reminder_enabled: boolean;
   reminder_hours_before: number;
   reminder_template_id: string | null;
+  confirmation_sms_enabled: boolean;
+  confirmation_sms_message: string;
+  confirmation_sms_include_link: boolean;
+  reminder_sms_enabled: boolean;
   booking_manage_url_template: string;
   public_form_url_template: string;
   email_smtp_id: string | null;
@@ -149,6 +153,10 @@ const defaultBranding: BrandingData = {
   reminder_enabled: false,
   reminder_hours_before: 2,
   reminder_template_id: null,
+  confirmation_sms_enabled: false,
+  confirmation_sms_message: "",
+  confirmation_sms_include_link: false,
+  reminder_sms_enabled: false,
   booking_manage_url_template: "",
   public_form_url_template: "",
   email_smtp_id: null,
@@ -388,6 +396,10 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
           reminder_enabled: (data as any).reminder_enabled ?? false,
           reminder_hours_before: (data as any).reminder_hours_before ?? 2,
           reminder_template_id: (data as any).reminder_template_id ?? null,
+          confirmation_sms_enabled: (data as any).confirmation_sms_enabled ?? false,
+          confirmation_sms_message: (data as any).confirmation_sms_message ?? "",
+          confirmation_sms_include_link: (data as any).confirmation_sms_include_link ?? false,
+          reminder_sms_enabled: (data as any).reminder_sms_enabled ?? false,
           booking_manage_url_template: (data as any).booking_manage_url_template ?? "",
           public_form_url_template: (data as any).public_form_url_template ?? "",
           email_smtp_id: (data as any).email_smtp_id ?? null,
@@ -997,6 +1009,46 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
                           ))}
                         </SelectContent>
                       </Select>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between border-t pt-3">
+                    <div>
+                      <Label className="text-xs">Também por SMS</Label>
+                      <p className="text-[10px] text-muted-foreground">
+                        Além do email, envia um SMS de confirmação ao número indicado pelo cliente.
+                      </p>
+                    </div>
+                    <Switch
+                      checked={branding.confirmation_sms_enabled}
+                      onCheckedChange={(v) => setBranding({ ...branding, confirmation_sms_enabled: v })}
+                    />
+                  </div>
+                  {branding.confirmation_sms_enabled && (
+                    <div className="space-y-3">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Mensagem do SMS</Label>
+                        <Textarea
+                          value={branding.confirmation_sms_message}
+                          onChange={(e) => setBranding({ ...branding, confirmation_sms_message: e.target.value })}
+                          placeholder='Deixe vazio para usar a mensagem base: "{{company_name}}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita."'
+                          rows={3}
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Aceita as mesmas variáveis do email: {"{{lead_name}}"}, {"{{meeting_date}}"}, {"{{company_name}}"}, {"{{cancel_url}}"}.
+                        </p>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <Label className="text-xs">Incluir link de gerir/cancelar no SMS</Label>
+                          <p className="text-[10px] text-muted-foreground">
+                            Desligado por omissão. Só ligue depois de confirmar o envio de um SMS de teste com o link.
+                          </p>
+                        </div>
+                        <Switch
+                          checked={branding.confirmation_sms_include_link}
+                          onCheckedChange={(v) => setBranding({ ...branding, confirmation_sms_include_link: v })}
+                        />
+                      </div>
                     </div>
                   )}
                 </div>

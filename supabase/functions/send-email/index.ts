@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, resolveSmtpForScheduledEmail, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
-import { requireServiceRole } from "../_shared/auth.ts";
+import { requireServiceRole, getServiceRoleKey } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
 import { getCorsHeadersExtended } from "../_shared/cors.ts";
@@ -85,10 +85,18 @@ const handler = async (req: Request): Promise<Response> => {
     return new Response(null, { headers: corsHeaders });
   }
 
+  // Regra 11: contexto para o registo de falha (catch, mais abaixo) --
+  // preenchido assim que o corpo for validado, para o ecra de falhas de
+  // envio conseguir filtrar por organizacao/scope mesmo quando o envio
+  // falhou antes de sair um email. Antes disto, toda a linha de falha
+  // gravava organization_id/user_id/entity_id vazios -- inutilizavel para
+  // filtrar por quem tem acesso a que.
+  let logCtx: { organizationId?: string | null; userId?: string | null; entityId?: string | null; to?: string; subject?: string; html?: string; smtpId?: string | null } = {};
+
   try {
     const supabaseClient = createClient(
       Deno.env.get("SUPABASE_URL") ?? "",
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+      getServiceRoleKey()
     );
 
     // ── Auth: mandatory — either SERVICE_ROLE (internal/cron) or valid user JWT ──
@@ -137,6 +145,7 @@ const handler = async (req: Request): Promise<Response> => {
     }
     const body: EmailRequest = parsed.data as EmailRequest;
     const { company_id, organization_id, user_id, smtp_id, entity_id, to, recipients, cc, subject, html, text, test, smtp_config, attachments } = body;
+    logCtx = { organizationId: organization_id || company_id || null, userId: user_id || null, entityId: entity_id || null, to, subject, html, smtpId: smtp_id || null };
     const toListInput = sanitizeEmailList(recipients, 10);
     if (to && !toListInput.some((e) => e.toLowerCase() === to.toLowerCase())) {
       toListInput.unshift(to);
@@ -276,14 +285,19 @@ const handler = async (req: Request): Promise<Response> => {
     try {
       const supabaseClient = createClient(
         Deno.env.get("SUPABASE_URL") ?? "",
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+        getServiceRoleKey()
       );
       await supabaseClient.from("email_logs").insert({
-        to_email: "",
+        to_email: logCtx.to || "",
         from_email: "",
-        subject: "",
+        subject: logCtx.subject || "",
+        body_html: logCtx.html || "",
         status: "failed",
         error_message: safeError,
+        organization_id: logCtx.organizationId || null,
+        user_id: logCtx.userId || null,
+        entity_id: logCtx.entityId || null,
+        smtp_id: logCtx.smtpId || null,
       });
     } catch (logError) {
       console.error("Failed to log error:", logError);

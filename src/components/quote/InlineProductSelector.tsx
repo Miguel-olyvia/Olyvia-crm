@@ -6,16 +6,21 @@ interface InlineProductSelectorProps {
   currentSku: string | null;
   onEditClick: () => void;
   isProduct: boolean;
+  supplierSku?: string | null;
 }
 
 export function InlineProductSelector({
   currentDescription,
   onEditClick,
+  supplierSku,
 }: InlineProductSelectorProps) {
   return (
     <div className="flex items-center gap-2 group/desc">
       <div className="flex-1 min-w-0">
         <p className="font-medium truncate">{currentDescription}</p>
+        {supplierSku && (
+          <p className="text-xs text-muted-foreground truncate">Ref: {supplierSku}</p>
+        )}
       </div>
       <Button
         variant="ghost"

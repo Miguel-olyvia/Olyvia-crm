@@ -58,6 +58,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
+import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 import { userFormSchema } from "@/lib/validations";
 
 interface RoleOption {
@@ -201,7 +202,7 @@ export function UserFormEnhanced({
   const [templateCustomAttrs, setTemplateCustomAttrs] = useState<FieldConfig[]>([]);
   const { countries } = useCountries();
   const { hasPermission, permissions: currentUserPermissions, isSystemAdmin } = usePermissions();
-  const { userType: currentUserType } = useCompany();
+  const { userType: currentUserType, activeCompany } = useCompany();
   // Stable key for permissions to avoid infinite useEffect re-runs
   const permissionsKey = useMemo(() => currentUserPermissions.slice().sort().join(","), [currentUserPermissions]);
   // Roles indexed by organization_id – each org only sees its own roles (no global/system roles)
@@ -1051,6 +1052,12 @@ export function UserFormEnhanced({
           />
         </div>
       </CardHeader>
+
+      {!isEdit && (
+        <div className="px-4 pt-4">
+          <PlanLimitWarning organizationId={activeCompany?.id} limitType="users" />
+        </div>
+      )}
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex-1 flex flex-col overflow-hidden">
         <div className="border-b px-4">

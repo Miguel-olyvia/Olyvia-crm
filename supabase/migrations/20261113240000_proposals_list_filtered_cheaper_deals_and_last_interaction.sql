@@ -251,8 +251,7 @@ AS $function$
           AND (d.valid_until::timestamp AT TIME ZONE _tz) < _now)
     )
     AND (NOT _no_validity OR d.valid_until IS NULL)
-$function$
-;
+$function$;
 
 COMMENT ON FUNCTION public.proposals_list_filtered(uuid, text, uuid[], uuid[], boolean, uuid[], text, text, uuid[], timestamptz, timestamptz, uuid, uuid, boolean, boolean, boolean, boolean, integer, timestamptz, text) IS
   'Ambito resolvido + filtros da UI da listagem de Propostas, com o estado '

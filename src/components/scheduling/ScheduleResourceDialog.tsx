@@ -11,6 +11,7 @@ import { usePermissions } from '@/hooks/usePermissions';
 import { useToast } from '@/hooks/use-toast';
 import { scheduleResourceSchema } from '@/lib/validations';
 import { ResourceServiceAreas } from './ResourceServiceAreas';
+import { supabase } from '@/integrations/supabase/client';
 import type { ScheduleResource } from '@/types/scheduling';
 
 interface ScheduleResourceDialogProps {
@@ -58,8 +59,10 @@ export function ScheduleResourceDialog({
     employee_id: '',
     color: '#10b981',
     max_daily_capacity: 8,
+    postal_code: '',
     is_active: true,
   });
+  const [geocoding, setGeocoding] = useState(false);
 
   // Reset form when dialog opens or resource changes
   useEffect(() => {
@@ -71,6 +74,7 @@ export function ScheduleResourceDialog({
         employee_id: resource?.employee_id || '',
         color: resource?.color || '#10b981',
         max_daily_capacity: resource?.max_daily_capacity || 8,
+        postal_code: resource?.postal_code || '',
         // Recursos antigos podem ter a coluna a null; nesse caso contam como
         // activos, que e o que a base assume por omissao.
         is_active: resource?.is_active ?? true,
@@ -107,8 +111,32 @@ export function ScheduleResourceDialog({
 
     setLoading(true);
     try {
+      // Geocodifica o código postal sempre que estiver preenchido -- mantém
+      // latitude/longitude alinhadas mesmo que o código postal mude sem o
+      // resto do formulário mudar. Código vazio limpa as coordenadas.
+      let latitude: number | null = null;
+      let longitude: number | null = null;
+      const postalCode = formData.postal_code.trim();
+      if (postalCode) {
+        setGeocoding(true);
+        const { data, error } = await supabase.functions.invoke('geocode-postal-code', {
+          body: { postalCode },
+        });
+        setGeocoding(false);
+        if (error || !data?.latitude) {
+          toast({ title: t('scheduling.resource.postalCodeNotFound'), variant: 'destructive' });
+          setLoading(false);
+          return;
+        }
+        latitude = data.latitude;
+        longitude = data.longitude;
+      }
+
       await onSave({
         ...formData,
+        postal_code: postalCode || null,
+        latitude,
+        longitude,
         id: resource?.id,
         user_id: formData.user_id || undefined,
         employee_id: formData.employee_id || undefined,
@@ -332,6 +360,19 @@ export function ScheduleResourceDialog({
               className={fieldErrors.max_daily_capacity ? 'border-destructive' : ''}
             />
             {fieldErrors.max_daily_capacity && <p className="text-sm text-destructive mt-1">{fieldErrors.max_daily_capacity}</p>}
+          </div>
+
+          <div className="space-y-2">
+            <Label>{t('scheduling.resource.postalCode')}</Label>
+            <Input
+              value={formData.postal_code}
+              onChange={(e) => setFormData(f => ({ ...f, postal_code: e.target.value }))}
+              placeholder="1990-125"
+              disabled={isViewOnly || geocoding}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t('scheduling.resource.postalCodeHint')}
+            </p>
           </div>
 
           <ResourceServiceAreas resourceId={resource?.id} disabled={isViewOnly} />

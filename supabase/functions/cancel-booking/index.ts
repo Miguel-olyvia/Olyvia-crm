@@ -203,7 +203,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 6. Cancel pending reminders for this lead
+    // 6. Cancel pending reminders for this lead (email and SMS)
     if (leadId) {
       const { error: emailError } = await supabase
         .from('scheduled_emails')
@@ -213,6 +213,15 @@ Deno.serve(async (req: Request) => {
         .eq('status', 'pending');
       if (emailError) {
         console.error('[cancel-booking] failed to cancel scheduled_emails:', emailError);
+      }
+      const { error: smsError } = await supabase
+        .from('scheduled_sms')
+        .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancel_reason: 'Visita cancelada' })
+        .eq('entity_type', 'leads')
+        .eq('entity_id', leadId)
+        .eq('status', 'pending');
+      if (smsError) {
+        console.error('[cancel-booking] failed to cancel scheduled_sms:', smsError);
       }
     }
 
@@ -305,11 +314,17 @@ Deno.serve(async (req: Request) => {
         when: formattedWhen,
         location: item.location || undefined,
         technicianName: technicianName || undefined,
+        primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
       });
 
       // (a) Technician + extra notify emails: internal cancellation notice.
+      // Technician inclusion respects the same "Aviso de reunião ao comercial"
+      // toggle as book-slot; extra emails always notify regardless of it.
       const extra = parseEmailList(emailCfg?.meeting_notify_emails);
-      const notifyList = uniqueEmails([technicianEmail, ...extra]);
+      const notifyList = uniqueEmails([
+        emailCfg?.meeting_notify_commercial ? technicianEmail : null,
+        ...extra,
+      ]);
       if (notifyList.length > 0) {
         await sendEmailNow({
           organizationId,

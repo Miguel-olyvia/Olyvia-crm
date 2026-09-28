@@ -12,8 +12,10 @@ import { useNavigate } from "react-router-dom";
 interface ProtectedRouteProps {
   /** The permission code required to view this page (e.g., "organizations.view") */
   permission?: string;
-  /** OR-logic: user needs at least one of these permissions */
+  /** OR-logic (default) or AND-logic (with requireAll): permissions the user needs */
   permissions?: string[];
+  /** When `permissions` is set, require ALL of them instead of the default ANY (OR) logic. */
+  requireAll?: boolean;
   /**
    * Só administradores (`super_admin` ou `system_admin`) entram.
    *
@@ -32,7 +34,7 @@ interface ProtectedRouteProps {
  * Wraps a page component and blocks access if the user lacks the required permission.
  * Shows a localized "Access Denied" page inside the Layout shell.
  */
-export function ProtectedRoute({ permission, permissions, adminOnly, children }: ProtectedRouteProps) {
+export function ProtectedRoute({ permission, permissions, requireAll = false, adminOnly, children }: ProtectedRouteProps) {
   const { hasPermission, hasAnyPermission, loading: permissionsLoading } = usePermissions();
   const { anewRoleCode, loading: scopeLoading } = usePermissionScope();
   const { isLoading: companyLoading } = useCompany();
@@ -57,7 +59,9 @@ export function ProtectedRoute({ permission, permissions, adminOnly, children }:
   } else if (permission) {
     hasAccess = hasPermission(permission);
   } else if (permissions && permissions.length > 0) {
-    hasAccess = hasAnyPermission(permissions);
+    hasAccess = requireAll
+      ? permissions.every((p) => hasPermission(p))
+      : hasAnyPermission(permissions);
   }
 
   if (!hasAccess) {

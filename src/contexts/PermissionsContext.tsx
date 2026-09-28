@@ -71,10 +71,21 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
         // Transient network blips (e.g. a dropped fetch) have no retry at the
         // supabase-js layer for rpc() calls, so a single retry with a short
         // backoff is done here before failing closed.
+        //
+        // A request that never responds at all (connection drops mid-flight,
+        // no error, no data) isn't a blip a retry can fix — without a ceiling
+        // here, `loading` never becomes false and the calling page's skeleton
+        // is stuck forever, with nothing in the console to explain why. Race
+        // each attempt against a timeout so it fails the same way an RPC
+        // error already does, instead of hanging indefinitely.
+        const RPC_TIMEOUT_MS = 15000;
         let rawCtx: unknown = null;
         let ctxError: unknown = null;
         for (let attempt = 0; attempt < 2; attempt++) {
-          const result = await (supabase as any).rpc("get_user_context");
+          const timeout = new Promise<{ data: null; error: Error }>((resolve) =>
+            setTimeout(() => resolve({ data: null, error: new Error("get_user_context timed out") }), RPC_TIMEOUT_MS)
+          );
+          const result = await Promise.race([(supabase as any).rpc("get_user_context"), timeout]);
           rawCtx = result.data;
           ctxError = result.error;
           if (version !== versionRef.current) return;

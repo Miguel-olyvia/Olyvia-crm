@@ -2,6 +2,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
+import { checkTravelFeasible } from "../_shared/travelFeasibility.ts";
+import { ensureHolidaysPersisted } from "../_shared/ensureHolidays.ts";
 
 initSentry();
 
@@ -81,12 +84,23 @@ Deno.serve(async (req: Request) => {
 
     let boardId = directBoardId || null;
     let durationMinutes = directDuration || 60;
+    // Regra 1 (antecedencia minima): so resolvida a partir do passo do
+    // formulario, tal como a duracao -- um pedido que passe board_id/duration
+    // directos (sem form_id) fica sem restricao, mesmo padrao ja existente
+    // para durationMinutes acima.
+    let minAdvanceHours: number | null = null;
 
-    // Resolve board_id and duration from form_steps if form_id provided
-    if (form_id && step_number && !boardId) {
+    // Resolve minAdvanceHours (and board/duration when not passed directly)
+    // from form_steps whenever form_id+step_number are given. Antes disto só
+    // corria quando board_id não vinha no pedido -- mas o formulário público
+    // (SchedulingStep.tsx) manda SEMPRE board_id e duration_minutes como
+    // props diretas, então este bloco nunca chegava a correr em produção e a
+    // antecedência mínima nunca era lida para o calendário de nenhum
+    // formulário real (só passava quando testado sem esses parâmetros).
+    if (form_id && step_number) {
       const { data: step, error: stepError } = await supabase
         .from('form_steps')
-        .select('scheduling_board_id, scheduling_duration_minutes, step_type')
+        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours, step_type')
         .eq('form_id', form_id)
         .eq('step_number', step_number)
         .single();
@@ -105,8 +119,9 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      boardId = step.scheduling_board_id;
-      durationMinutes = step.scheduling_duration_minutes || 60;
+      boardId = boardId || step.scheduling_board_id;
+      durationMinutes = directDuration || step.scheduling_duration_minutes || 60;
+      minAdvanceHours = step.scheduling_min_advance_hours ?? null;
     }
 
     if (!boardId) {
@@ -129,6 +144,27 @@ Deno.serve(async (req: Request) => {
         JSON.stringify({ error: 'Board not found or has no organization' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
+    }
+
+    // Regra 16: garante que os feriados do(s) ano(s) pedidos já estão
+    // gravados em schedule_holidays ANTES de qualquer RPC de disponibilidade
+    // correr -- sem isto, um feriado nunca gravado deixava marcar na mesma,
+    // mesmo aparecendo riscado no calendário (ver ensureHolidays.ts).
+    {
+      const { data: orgSettings } = await supabase
+        .from('schedule_settings')
+        .select('country_code')
+        .eq('organization_id', orgId)
+        .maybeSingle();
+      const countryCode = orgSettings?.country_code || 'PT';
+      const refDate = start_date || date;
+      if (refDate) {
+        const startYear = parseInt(refDate.substring(0, 4));
+        const endYear = end_date ? parseInt(end_date.substring(0, 4)) : startYear;
+        const years: number[] = [];
+        for (let y = startYear; y <= endYear; y++) years.push(y);
+        await ensureHolidaysPersisted(supabase, countryCode, years);
+      }
     }
 
     // Helper: fetch schedule config for the org
@@ -190,6 +226,7 @@ Deno.serve(async (req: Request) => {
         p_duration_minutes: durationMinutes,
         p_postal_code: postal_code || null,
         p_district_id: district_id || null,
+        p_min_advance_hours: minAdvanceHours,
       });
 
       if (monthError) {
@@ -247,6 +284,7 @@ Deno.serve(async (req: Request) => {
           p_duration_minutes: durationMinutes,
           p_limit: 10,
           p_district_id: district_id || null,
+          p_min_advance_hours: minAdvanceHours,
         });
 
       if (rpcError) {
@@ -260,9 +298,54 @@ Deno.serve(async (req: Request) => {
       const coverage = resources && resources.length > 0;
       const slotMap = new Map<string, { start: string; end: string; available_count: number; resource_ids: string[] }>();
 
+      // Regra 13, no calendário (não só na confirmação final): um horário só
+      // deve aparecer como escolhível se pelo menos UM comercial candidato
+      // conseguir mesmo lá chegar a tempo -- não basta ter a agenda livre.
+      // Antes disto, o calendário mostrava horários que o book-slot recusava
+      // depois, na confirmação. Cada comercial é verificado contra os SEUS
+      // próprios compromissos vizinhos nesse dia; se um não der, outro pode
+      // dar -- só se nenhum der é que o horário desaparece de vez.
+      const cp7Digits = (postal_code || '').replace(/[^0-9]/g, '');
+      let clientLat: number | null = null;
+      let clientLng: number | null = null;
+      if (cp7Digits.length === 7) {
+        const geo = await geocodePostalCode(cp7Digits);
+        if (geo) {
+          clientLat = geo.latitude;
+          clientLng = geo.longitude;
+        }
+      }
+
+      const dayStart = `${date}T00:00:00.000Z`;
+      const dayEnd = `${date}T23:59:59.999Z`;
+
       for (const resource of (resources || [])) {
         const slots = resource.available_slots || [];
+        if (slots.length === 0) continue;
+
+        let neighbors: { start_datetime: string; end_datetime: string; location_lat: number | null; location_lng: number | null }[] = [];
+        if (clientLat !== null && clientLng !== null) {
+          const { data: assignedItems } = await supabase
+            .from('schedule_item_assignees')
+            .select('schedule_items(start_datetime, end_datetime, location_lat, location_lng, status)')
+            .eq('resource_id', resource.resource_id);
+
+          neighbors = (assignedItems || [])
+            .map((a: any) => a.schedule_items)
+            .filter((si: any) =>
+              si
+              && si.status !== 'cancelled'
+              && si.start_datetime >= dayStart
+              && si.start_datetime <= dayEnd
+            );
+        }
+
         for (const slot of slots) {
+          const { feasible } = checkTravelFeasible({
+            clientLat, clientLng, slotStart: slot.start, slotEnd: slot.end, neighbors,
+          });
+          if (!feasible) continue;
+
           const key = `${slot.start}|${slot.end}`;
           if (slotMap.has(key)) {
             const existing = slotMap.get(key)!;
@@ -287,7 +370,17 @@ Deno.serve(async (req: Request) => {
 
       return new Response(
         JSON.stringify({
-          slots: aggregatedSlots.map(s => ({ start: s.start, end: s.end, available_count: s.available_count })),
+          slots: aggregatedSlots.map(s => ({
+            start: s.start,
+            end: s.end,
+            available_count: s.available_count,
+            // Ordem de resource_ids reflete a ordem de processamento (por
+            // proximidade, herdada de find_nearest_resources) -- o primeiro
+            // e o comercial prioritario para este horario. Informativo: o
+            // book-slot revalida no momento do submit e pode escolher outro
+            // se este ja nao servir.
+            preferred_resource_id: s.resource_ids[0],
+          })),
           timezone: scheduleConfig?.timezone || 'Europe/Lisbon',
           coverage,
           duration_minutes: durationMinutes,
@@ -321,6 +414,7 @@ Deno.serve(async (req: Request) => {
           p_date: date,
           p_duration_minutes: durationMinutes,
           p_organization_id: orgId,
+          p_min_advance_hours: minAdvanceHours,
         });
 
       for (const slot of (slots || [])) {

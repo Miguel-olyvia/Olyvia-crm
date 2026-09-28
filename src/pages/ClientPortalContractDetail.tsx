@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
+import { useSyncActiveOrgWithDocument } from "@/contexts/PortalCompanyContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -55,6 +56,10 @@ const ClientPortalContractDetail = () => {
   const [showQuestion, setShowQuestion] = useState(false);
   const [questionText, setQuestionText] = useState("");
 
+  // Link de email pode abrir um contrato de outra empresa do grupo: a empresa
+  // ativa acompanha o documento em vez de o esconder.
+  useSyncActiveOrgWithDocument(contract?.organization_id);
+
   useEffect(() => {
     if (!id) return;
     loadData();
@@ -94,7 +99,10 @@ const ClientPortalContractDetail = () => {
   // M2: formatCurrency now imported from @/lib/utils (preserves sign for negatives)
 
 
-  const canSign = contract && (contract.status === "draft" || contract.status === "pending" || contract.status === "sent");
+  // "pending_signature" e o nome actual do estado (ver ClientContracts.tsx) --
+  // "pending"/"sent" mantidos so por seguranca, para contratos antigos que
+  // possam ainda ter esses valores gravados.
+  const canSign = contract && (contract.status === "pending_signature" || contract.status === "draft" || contract.status === "pending" || contract.status === "sent");
   const isSigned = contract?.status === "signed";
 
   // Descarregar o PDF do contrato. Usa exactamente o mesmo caminho do CRM

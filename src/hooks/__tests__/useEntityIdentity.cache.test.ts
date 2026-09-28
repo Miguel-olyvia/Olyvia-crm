@@ -40,6 +40,7 @@ function buildChain(table: string) {
     },
     eq: () => chain,
     is: () => chain,
+    order: () => chain,
     limit: () => chain,
     maybeSingle: () => Promise.resolve({ data: null }),
     then: (onFulfilled: any, onRejected: any) => {

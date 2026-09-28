@@ -194,8 +194,24 @@ export function buildContactResultCatalogRows(results: ContactResultCatalogSourc
  * signal can independently be part of the "all" (AND) set, the "any" (OR)
  * set, both, or neither (two-column checkbox layout, see StageRulesEditor).
  */
+/**
+ * Existem regras legadas em que os elementos de `all`/`any` são strings soltas
+ * (ex: "has_assignee") em vez de objetos `{type: ...}`. Não são avaliáveis pelo
+ * evaluator SQL nem reconhecíveis pelos `matches` do catálogo, por isso são
+ * descartadas — tanto ao ler (para as checkboxes refletirem o que é real) como
+ * ao gravar (para abrir e guardar um estágio auto-reparar a regra). Não se
+ * tenta adivinhar/traduzir o valor legado: o que é inválido desaparece.
+ */
+function sanitizeConditions(list: unknown): RuleCondition[] {
+  if (!Array.isArray(list)) return [];
+  return list.filter(
+    (c): c is RuleCondition =>
+      !!c && typeof c === "object" && !Array.isArray(c) && typeof (c as { type?: unknown }).type === "string"
+  );
+}
+
 export function isRowInBucket(rule: RuleGroup | null, row: CatalogRow, bucket: "all" | "any"): boolean {
-  const list = bucket === "all" ? (rule?.all ?? []) : (rule?.any ?? []);
+  const list = sanitizeConditions(bucket === "all" ? rule?.all : rule?.any);
   return list.some(row.matches);
 }
 
@@ -204,7 +220,7 @@ export function conditionForRowInBucket(
   row: CatalogRow,
   bucket: "all" | "any"
 ): RuleCondition | undefined {
-  const list = bucket === "all" ? (rule?.all ?? []) : (rule?.any ?? []);
+  const list = sanitizeConditions(bucket === "all" ? rule?.all : rule?.any);
   return list.find(row.matches);
 }
 
@@ -219,8 +235,10 @@ export function setRowInBucket(
   bucket: "all" | "any",
   checked: boolean
 ): RuleGroup | null {
-  const all = rule?.all ?? [];
-  const any = rule?.any ?? [];
+  // Reescrever a partir das listas saneadas é o que faz o auto-reparo: o lixo
+  // legado não volta a ser gravado.
+  const all = sanitizeConditions(rule?.all);
+  const any = sanitizeConditions(rule?.any);
   const list = bucket === "all" ? all : any;
   const existing = list.find(row.matches);
 
@@ -249,8 +267,8 @@ export function setNumericValueInBucket(
 ): RuleGroup | null {
   if (!row.numericParam) return rule;
 
-  const all = rule?.all ?? [];
-  const any = rule?.any ?? [];
+  const all = sanitizeConditions(rule?.all);
+  const any = sanitizeConditions(rule?.any);
   const list = bucket === "all" ? all : any;
   if (!list.some(row.matches)) return rule;
 
@@ -288,4 +306,28 @@ export const QUALIFICATION_LEGACY_KEYS = [
 
 export function isEmptyRule(rule: RuleGroup | null | undefined): boolean {
   return !rule || ((rule.all?.length ?? 0) === 0 && (rule.any?.length ?? 0) === 0);
+}
+
+/**
+ * Saneia uma regra inteira vinda da base de dados (onde `reached_when` é
+ * jsonb livre e pode conter entulho legado) e devolve-a na forma canónica
+ * que o editor e o payload de gravação usam.
+ *
+ * Devolve `null` — e não `{all:[],any:[]}` — quando não sobra nenhuma
+ * condição utilizável, para que o motor SQL (public.stage_reached) caia de
+ * forma limpa no fallback por status literal e para que `isEmptyRule` e as
+ * comparações de "tem regras personalizadas" concordem com o que o
+ * utilizador vê nas checkboxes.
+ *
+ * Aplicar isto ao CARREGAR e ao GRAVAR é o que faz abrir-e-guardar um
+ * estágio reparar mesmo a regra, em vez de preservar o entulho.
+ */
+export function normalizeRule(rule: unknown): RuleGroup | null {
+  if (!rule || typeof rule !== "object" || Array.isArray(rule)) return null;
+  const source = rule as { all?: unknown; any?: unknown };
+  const normalized: RuleGroup = {
+    all: sanitizeConditions(source.all),
+    any: sanitizeConditions(source.any),
+  };
+  return isEmptyRule(normalized) ? null : normalized;
 }

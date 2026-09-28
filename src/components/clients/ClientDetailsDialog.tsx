@@ -1,5 +1,15 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import {
+  DIRECT_SALE_EVENT_TYPE,
+  PROPOSAL_EVENT_TYPE,
+  QUOTE_EVENT_TYPE,
+  CONTRACT_EVENT_TYPE,
+  DOCUMENT_INSERT_TABLES,
+  describeDocumentHistoryEvent,
+  shouldHideAuditDiff,
+} from "@/lib/timeline/documentEvents";
+import { TIMELINE_AUDIT_IGNORED_FIELDS, formatAuditDiff } from "@/lib/timeline/auditIgnoredFields";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
@@ -14,7 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Loader2, Plus, FileText, MapPin, ListPlus, Trash2, Undo2 } from "lucide-react";
+import { Loader2, Plus, FileText, MapPin, ListPlus, Trash2, Undo2, User, Building2 } from "lucide-react";
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction } from "@/components/ui/alert-dialog";
 import { useConversionRevert, revertToLeadConfirmationText } from "@/hooks/useConversionRevert";
 import { Separator } from "@/components/ui/separator";
@@ -29,6 +39,7 @@ import { differenceInDays } from "date-fns";
 import { calculateClientHealth, type ClientContractInfo, type ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 import { RequestErasureButton } from "@/components/RequestErasureButton";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { ClientDeliveryAddressesSection } from "@/components/clients/ClientDeliveryAddressesSection";
 
 /**
  * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
@@ -56,6 +67,7 @@ type RpcUpdateClientArgs = {
   p_address_city?: string | null;
   p_address_postal_code?: string | null;
   p_address_number?: string | null;
+  p_entity_type?: string | null;
 };
 
 import { ClientDetailHeader } from "@/components/clients/detail/ClientDetailHeader";
@@ -111,10 +123,8 @@ const CLIENT_FIELD_LABELS: Record<string, string> = {
 const clientFieldLabel = (field: string): string =>
   CLIENT_FIELD_LABELS[field] || field.replace(/_/g, " ");
 
-const CLIENT_AUDIT_IGNORED_FIELDS = new Set([
-  "id", "entity_id", "organization_id", "root_organization_id",
-  "created_at", "updated_at", "created_by", "search_text",
-]);
+// Lista partilhada com as timelines da lead e do contacto.
+const CLIENT_AUDIT_IGNORED_FIELDS = new Set(TIMELINE_AUDIT_IGNORED_FIELDS);
 
 interface Deal {
   id: string; title: string; value: number; stage_id: string;
@@ -218,7 +228,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     setEditFormData({
       first_name: client.first_name || "", last_name: client.last_name || "",
       email: client.email || "", phone: client.phone || "", phone_country_code: client.phone_country_code || "+351",
-      vat: client.vat || "", position: client.position || "", status: client.status || "customer",
+      vat: client.vat || "", position: client.position || "", status: client.status || "active",
       notes: client.notes || "", organization_id: client.organization_id || "",
       address: client.address || "", city: client.city || "", postal_code: client.postal_code || "",
       assigned_to: client.assigned_to || null,
@@ -272,10 +282,14 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     return () => { isCancelled = true; };
   }, [open, client]);
 
-  // Populate edit form address from loaded entity addresses (primary first)
+  // Populate edit form address from loaded entity addresses (primary first).
+  // O fallback ignora as moradas de entrega (address_type 'delivery'): sem
+  // isto, um cliente sem morada principal mostraria aqui uma de entrega, e o
+  // Guardar gravá-la-ia como principal.
   useEffect(() => {
     if (addresses.length > 0) {
-      const primary = addresses.find((a: any) => a.is_primary) || addresses[0];
+      const primary = addresses.find((a: any) => a.is_primary)
+        || addresses.find((a: any) => a.address_type !== "delivery");
       if (primary) {
         setEditFormData(prev => ({
           ...prev,
@@ -354,7 +368,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const [lifecycleRes, auditRes] = await Promise.all([
         (supabase as any)
           .from("anew_entity_history")
-          .select("id, change_type, field_name, old_value, new_value, changed_by, created_at")
+          .select("id, change_type, field_name, old_value, new_value, changed_by, created_at, metadata")
           .eq("entity_id", entityId)
           .order("created_at", { ascending: false })
           .limit(100),
@@ -380,11 +394,18 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const lifecycleEvents: TimelineExtraEvent[] = (lifecycleRes.data || []).map((d: any) => {
         const isCreated = d.change_type === "created";
         const isRoleStatus = d.change_type === "role_status_changed" || d.change_type === "status_changed";
-        const type = isCreated ? "conversion" : isRoleStatus ? "status_change" : "field_change";
+        // Marcos da venda direta — sem este ramo caíam em "Editou campo".
+        const docEvent = describeDocumentHistoryEvent(d.change_type, d.metadata);
+        const type = docEvent
+          ? docEvent.type
+          : isCreated ? "conversion" : isRoleStatus ? "status_change" : "field_change";
 
         let title: string;
         let description: string | null = null;
-        if (isCreated) {
+        if (docEvent) {
+          title = docEvent.title;
+          description = docEvent.description;
+        } else if (isCreated) {
           title = "Entidade criada";
         } else if (isRoleStatus) {
           title = "Estado do ciclo de vida alterado";
@@ -409,15 +430,15 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         const actor = row.changed_by ? (userMapLocal[row.changed_by] || null) : null;
         if (row.operation === "UPDATE" && row.changed_fields && typeof row.changed_fields === "object") {
           Object.entries(row.changed_fields as Record<string, { old: unknown; new: unknown }>)
-            .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field))
+            .filter(([field]) => !CLIENT_AUDIT_IGNORED_FIELDS.has(field) && !shouldHideAuditDiff(row.table_name, field))
             .forEach(([field, diff], idx) => {
-              const oldVal = diff?.old == null ? "—" : String(diff.old);
-              const newVal = diff?.new == null ? "—" : String(diff.new);
+              const description = formatAuditDiff(field, diff?.old, diff?.new);
+              if (description === null) return;
               auditEvents.push({
                 id: `audit-${row.id}-${idx}`,
                 type: "field_change",
                 title: `Editou ${clientFieldLabel(field)}`,
-                description: `${oldVal} → ${newVal}`,
+                description,
                 date: row.created_at,
                 actor,
               });
@@ -761,6 +782,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
             p_address_city: editFormData.city || null,
             p_address_postal_code: editFormData.postal_code || null,
             p_address_number: null,
+            p_entity_type: entityType,
           } satisfies RpcUpdateClientArgs, nif);
           if (rpcError) throw rpcError;
         });
@@ -1255,24 +1277,30 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                 fallback={<p className="text-sm text-muted-foreground py-8 text-center">Sem permissão para editar clientes.</p>}
               >
                 <form onSubmit={handleUpdateClient} className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Tipo</Label>
+                    <Tabs value={entityType} onValueChange={(v) => { setEntityType(v); if (v === "organization") setEditFormData(prev => ({ ...prev, last_name: "" })); }}>
+                      <TabsList className="grid w-full grid-cols-2">
+                        <TabsTrigger value="person"><User className="w-4 h-4 mr-2" />Pessoa</TabsTrigger>
+                        <TabsTrigger value="organization"><Building2 className="w-4 h-4 mr-2" />Empresa</TabsTrigger>
+                      </TabsList>
+                    </Tabs>
+                  </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2"><Label>Nome *</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
-                    <div className="space-y-2"><Label>Apelido{entityType !== "organization" ? " *" : ""}</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required={entityType !== "organization"} aria-invalid={!!editFormErrors.last_name} />{editFormErrors.last_name && <p className="text-xs text-destructive">{editFormErrors.last_name}</p>}</div>
+                    <div className="space-y-2"><Label>{entityType === "organization" ? "Nome da Empresa *" : "Nome *"}</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
+                    {entityType !== "organization" && (
+                    <div className="space-y-2"><Label>Apelido *</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required aria-invalid={!!editFormErrors.last_name} />{editFormErrors.last_name && <p className="text-xs text-destructive">{editFormErrors.last_name}</p>}</div>
+                    )}
                     <div className="space-y-2"><Label>Email</Label><Input type="email" value={editFormData.email} onChange={e => setEditFormData({ ...editFormData, email: e.target.value })} aria-invalid={!!editFormErrors.email} />{editFormErrors.email && <p className="text-xs text-destructive">{editFormErrors.email}</p>}</div>
                     <div className="space-y-2"><PhoneInput label="Telefone" phoneValue={editFormData.phone} countryCodeValue={editFormData.phone_country_code} onPhoneChange={v => setEditFormData({ ...editFormData, phone: v })} onCountryCodeChange={v => setEditFormData({ ...editFormData, phone_country_code: v })} />{editFormErrors.phone && <p className="text-xs text-destructive">{editFormErrors.phone}</p>}</div>
                     <div className="space-y-2"><Label>NIF</Label><Input value={editFormData.vat} onChange={e => setEditFormData({ ...editFormData, vat: e.target.value })} placeholder="PT123456789" aria-invalid={!!editFormErrors.vat} />{editFormErrors.vat && <p className="text-xs text-destructive">{editFormErrors.vat}</p>}</div>
                     <div className="space-y-2">
                       <Label>Estado</Label>
-                      <Select value={editFormData.status} onValueChange={v => setEditFormData({ ...editFormData, status: v })}>
+                      <Select value={editFormData.status === "inactive" ? "inactive" : "active"} onValueChange={v => setEditFormData({ ...editFormData, status: v })}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="lead">Lead</SelectItem>
-                          <SelectItem value="prospect">Prospect</SelectItem>
-                          <SelectItem value="customer">Cliente</SelectItem>
-                          <SelectItem value="partner">Parceiro</SelectItem>
+                          <SelectItem value="active">Ativo</SelectItem>
                           <SelectItem value="inactive">Inativo</SelectItem>
-                          <SelectItem value="churned">Perdido</SelectItem>
-                          <SelectItem value="lost">Perdido (Definitivo)</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -1299,6 +1327,8 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                       </div>
                     </div>
                   </div>
+                  {/* Moradas de entrega: gravam logo por RPC, fora do Guardar da ficha. */}
+                  {client.entity_id && <ClientDeliveryAddressesSection entityId={client.entity_id} />}
                   <div className="space-y-2"><Label>Notas</Label><Textarea value={editFormData.notes} onChange={e => setEditFormData({ ...editFormData, notes: e.target.value })} rows={4} /></div>
                   <div className="flex justify-end gap-2">
                     <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>

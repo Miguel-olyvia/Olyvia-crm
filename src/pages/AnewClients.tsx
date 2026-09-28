@@ -75,6 +75,8 @@ import { ScheduleClientMeetingDialog } from "@/components/clients/ScheduleClient
 import { ContactTagsDialog } from "@/components/contacts/ContactTagsDialog";
 import { ClientsTableColumns, ClientColumnConfig, DEFAULT_CLIENT_COLUMNS } from "@/components/clients/ClientsTableColumns";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 
 interface ClientRecord {
   id: string;
@@ -1428,9 +1430,9 @@ const AnewClients = () => {
       // leads/contacts/clients tied to it, so skip the query entirely.
       const [{ data: existingLeads }, { data: existingContacts }, { data: existingClientsCheck }] = entityResolved
         ? await Promise.all([
-            (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")'),
-            supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
-            supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive"),
+            (supabase as any).from("anew_leads").select("id, entity_id, status, created_at, campaign_id, campaigns:campaigns!anew_leads_campaign_id_fkey(name), assigned_user:anew_users!anew_leads_assigned_to_fkey(name)").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "in", '("converted","lost","rejected")').is("deleted_at", null),
+            supabase.from("anew_contacts").select("id, entity_id, status, created_at, assigned_to, source_type").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive").is("deleted_at", null),
+            supabase.from("anew_clients").select("id, entity_id, status, created_at, assigned_to").eq("entity_id", entityId).eq("organization_id", organizationId).not("status", "eq", "inactive").is("deleted_at", null),
           ])
         : [{ data: [] }, { data: [] }, { data: [] }];
 
@@ -1516,7 +1518,7 @@ const AnewClients = () => {
       setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
       setFieldErrors({});
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
-    } catch (error: any) { captureFlowError(error, "client-lifecycle"); toast({ title: t('clients.toast.createError'), description: error.message, variant: "destructive" }); }
+    } catch (error: any) { captureFlowError(error, "client-lifecycle"); const description = await getFriendlyErrorMessage(error); toast({ title: t('clients.toast.createError'), description, variant: "destructive" }); }
     } finally { submitLockRef.current = false; setSavingClient(false); }
   };
 
@@ -1661,7 +1663,8 @@ const AnewClients = () => {
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
       captureFlowError(err, "client-lifecycle");
-      toast({ title: t('clients.toast.shareEntityError'), description: err.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(err);
+      toast({ title: t('clients.toast.shareEntityError'), description, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
@@ -1707,7 +1710,8 @@ const AnewClients = () => {
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
       captureFlowError(err, "client-lifecycle");
-      toast({ title: t('clients.toast.createError'), description: err.message, variant: "destructive" });
+      const description = await getFriendlyErrorMessage(err);
+      toast({ title: t('clients.toast.createError'), description, variant: "destructive" });
     } finally { setSavingClient(false); }
   };
 
@@ -2680,6 +2684,7 @@ const AnewClients = () => {
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogContent className="max-w-2xl">
             <DialogHeader><DialogTitle>{t('clients.newClient')}</DialogTitle></DialogHeader>
+            <PlanLimitWarning organizationId={activeCompany?.id} limitType="leads" />
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="space-y-6 max-h-[calc(100vh-300px)] overflow-y-auto pr-2">
                 <div>

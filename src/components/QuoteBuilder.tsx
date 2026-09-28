@@ -27,8 +27,8 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { resolveQuoteAssignedTo } from "@/utils/quotes/resolveQuoteAssignedTo";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw, AlertTriangle } from "lucide-react";
-import { formatCurrency } from "@/lib/utils";
+import { ArrowLeft, Save, Plus, Trash2, Tag, X, Percent, ChevronDown, ChevronRight, Layers, Eye, EyeOff, Copy, FileDown, GripVertical, Search, Package, Pencil, FileText, RotateCcw, AlertTriangle, Loader2 } from "lucide-react";
+import { formatCurrency, cn } from "@/lib/utils";
 import { QuotePipelineBar } from "@/components/quote/QuotePipelineBar";
 import { QuoteDealCard } from "@/components/quote/QuoteDealCard";
 import { QuoteEntityPreview } from "@/components/quote/QuoteEntityPreview";
@@ -51,7 +51,6 @@ import { resolveQuotePdfEntityId } from "@/utils/quotePdfClient";
 import { fetchActivePdfTemplates } from "@/utils/quotePdfTemplate";
 
 import LineAttributesDialog from "@/components/LineAttributesDialog";
-import { InlineQuoteBuilder, InlineQuoteData, createEmptyInlineQuote } from "@/components/proposals/InlineQuoteBuilder";
 import { AddItemsDialog } from "@/components/quote/AddItemsDialog";
 import { BundleEditAttributesDialog } from "@/components/quote/BundleEditAttributesDialog";
 import { InlineProductSelector } from "@/components/quote/InlineProductSelector";
@@ -64,6 +63,9 @@ import {
   getLineSubtotal,
   markupFromCostAndPrice,
 } from "@/utils/quotes/quoteLinePricing";
+import { computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
+import { useProductBaseUomCodes } from "@/hooks/useProductBaseUomCodes";
+import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 import {
   Dialog,
   DialogContent,
@@ -98,6 +100,8 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 
 // Sortable row wrapper for quote items
 function SortableQuoteRow({ id, children }: { id: string; children: (args: { setNodeRef: (el: HTMLElement | null) => void; style: React.CSSProperties; attributes: any; listeners: any; isDragging: boolean }) => React.ReactNode }) {
@@ -168,6 +172,8 @@ interface ProductCatalogItem {
   category_name: string | null;
   brand_name: string | null;
   retail_price: number | null;
+  /** Preço de compra real (price_type='purchase'), quando existe. */
+  cost_price: number | null;
   vat_rate: number | null;
   organization_id: string | null;
   uom_symbol: string | null;
@@ -236,17 +242,36 @@ interface QuoteLine {
   ordem: number;
   retail_price_unit?: number;
   section_name: string;
+  // Toggle manual no editor de itens — quando false, a linha existe no
+  // orçamento interno mas fica oculta do PDF/portal do cliente (ex.: notas
+  // de trabalho interno, alternativas em avaliação). Default true.
+  visible_to_client?: boolean;
+  item_supplier_id?: string | null;
+  supplier_sku?: string | null;
+  // Origem da linha quando foi importada do Pedido de Proposta.
+  // `source_deal_need_id` (deal_needs.id) é a chave ESTÁVEL e a única usada
+  // para decidir se uma necessidade já foi importada.
+  source_deal_need_id?: string | null;
+  // `source_deal_need_item_id` (deal_need_items.id) é só rastreabilidade:
+  // fn_apply_deal_need faz DELETE+reinsert dos itens a cada gravação da
+  // necessidade, por isso estes ids são voláteis e nunca servem de critério.
+  source_deal_need_item_id?: string | null;
 }
 
-const NEW_QUOTE_DRAFT_VERSION = 1;
-// New quotes share one draft per company; an existing quote being edited
-// gets its own key (keyed by quoteId) so autosave/recovery also covers
-// editing/finishing an already-saved quote, not just creating one.
+// Chave do antigo rascunho em localStorage (removido — sobrepunha-se para
+// sempre aos dados do servidor num browser que nunca chegasse a gravar,
+// mesmo depois de outra pessoa gravar o orçamento). Mantida só para limpar
+// entradas já gravadas em browsers antigos.
 const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
   quoteId ? `olyvia:quote-builder:edit:${quoteId}` : `olyvia:quote-builder:new:${companyId || "global"}`;
 
 export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null }: QuoteBuilderProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  // `effectiveQuoteId` é o id do orçamento a usar em todo o componente: só
+  // existe quando se está a EDITAR um orçamento já gravado. "Novo Orçamento"
+  // abre o editor sem escrever nada na BD (o rascunho silencioso que existia
+  // aqui só servia o diagnóstico Fase 1, que saiu deste ecrã).
+  const effectiveQuoteId: string | null = quoteId ?? null;
   const [clients, setClients] = useState<Client[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
@@ -254,6 +279,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [products, setProducts] = useState<ProductCatalogItem[]>([]);
   const [services, setServices] = useState<ProductCatalogItem[]>([]);
   const [lines, setLines] = useState<QuoteLine[]>([]);
+  // Unidade de stock dos produtos das linhas — quantidade inteira em unidades contáveis.
+  const productUom = useProductBaseUomCodes(lines.map((l) => (l.bundle_id ? null : l.product_id)));
+  // Importação (explícita) dos itens do Pedido de Proposta em curso.
+  const [importingDealItems, setImportingDealItems] = useState(false);
   const [sections, setSections] = useState<string[]>(["Geral"]);
   const [activeSection, setActiveSection] = useState<string>("Geral");
   const [loading, setLoading] = useState(false);
@@ -364,24 +393,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const [templates, setTemplates] = useState<any[]>([]);
-  const [inlineQuotes, setInlineQuotes] = useState<InlineQuoteData[]>([]);
   const saveLockRef = useRef(false);
-  // Tracks the organization.id a draft restore attempt has already run for
-  // (null = never tried). Deliberately NOT a boolean "did it ever run" latch:
-  // right after a forced reload (e.g. the stale-chunk recovery in main.tsx),
-  // activeCompany?.id can resolve through a transient/default value before
-  // settling on the real one a render or two later. A boolean latch would
-  // burn its one-shot attempt on that transient id, find no draft there, and
-  // then — because the guard below only checks "did we ever restore" — never
-  // retry once the correct id arrives, silently stranding a real draft in
-  // localStorage under the correct key forever. Comparing against the
-  // specific id lets each distinct value get its own attempt.
-  const draftRestoredRef = useRef<string | null>(null);
-  // For an existing quote, fetchQuote() populates formData/lines from the
-  // server first; draft restore must wait for that to finish so it overlays
-  // on top of the server state instead of being clobbered by it.
-  const existingQuoteLoadedRef = useRef(false);
-  const [quoteLoadTick, setQuoteLoadTick] = useState(0);
   const postSaveActionRef = useRef<"email" | "whatsapp" | null>(null);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
   const [showSendEmailDialog, setShowSendEmailDialog] = useState(false);
@@ -392,64 +404,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [saveAsTemplateName, setSaveAsTemplateName] = useState("");
   const [savingAsTemplate, setSavingAsTemplate] = useState(false);
 
-  useEffect(() => {
-    if (!activeCompany?.id || draftRestoredRef.current === activeCompany.id || typeof window === "undefined") return;
-    // Editing an existing quote: wait for fetchQuote() to finish loading the
-    // server state first, so a restored draft overlays it instead of being
-    // overwritten by it.
-    if (quoteId && !existingQuoteLoadedRef.current) return;
-
-    draftRestoredRef.current = activeCompany.id;
-    const rawDraft = localStorage.getItem(getQuoteDraftKey(activeCompany.id, quoteId));
-    if (!rawDraft) return;
-
-    try {
-      const draft = JSON.parse(rawDraft);
-      if (draft?.version !== NEW_QUOTE_DRAFT_VERSION || !draft.formData) return;
-
-      setFormData(prev => ({ ...prev, ...draft.formData, organization_id: draft.formData.organization_id || activeCompany.id }));
-      setQuoteNumber(draft.quoteNumber || null);
-      setAutoReference(draft.autoReference || "");
-      setLines(Array.isArray(draft.lines) ? draft.lines : []);
-      setSections(Array.isArray(draft.sections) && draft.sections.length > 0 ? draft.sections : ["Geral"]);
-      setActiveSection(typeof draft.activeSection === "string" ? draft.activeSection : "Geral");
-      setSelectedFees(new Set(Array.isArray(draft.selectedFees) ? draft.selectedFees : []));
-      setFeeVatOverrides(draft.feeVatOverrides && typeof draft.feeVatOverrides === "object" ? draft.feeVatOverrides : {});
-      setInlineQuotes(Array.isArray(draft.inlineQuotes) ? draft.inlineQuotes : []);
-      setSelectedDeal(draft.selectedDeal || null);
-    } catch (error) {
-      console.error("Error restoring quote draft:", error);
-    }
-  }, [quoteId, activeCompany?.id, quoteLoadTick]);
-
-  useEffect(() => {
-    if (!activeCompany?.id || draftRestoredRef.current !== activeCompany.id || typeof window === "undefined") return;
-
-    const hasDraftContent = Boolean(
-      formData.deal_id || formData.cliente_id || formData.title || formData.obra_notas ||
-      formData.client_notes || formData.conditions || selectedDeal || lines.length > 0 || inlineQuotes.length > 0
-    );
-    if (!hasDraftContent) return;
-
-    const timeoutId = window.setTimeout(() => {
-      localStorage.setItem(getQuoteDraftKey(activeCompany.id, quoteId), JSON.stringify({
-        version: NEW_QUOTE_DRAFT_VERSION,
-        savedAt: new Date().toISOString(),
-        formData,
-        quoteNumber,
-        autoReference,
-        lines,
-        sections,
-        activeSection,
-        selectedFees: Array.from(selectedFees),
-        feeVatOverrides,
-        inlineQuotes,
-        selectedDeal,
-      }));
-    }, 300);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [quoteId, activeCompany?.id, formData, quoteNumber, autoReference, lines, sections, activeSection, selectedFees, feeVatOverrides, inlineQuotes, selectedDeal]);
+  // Rascunho em localStorage removido: sobrepunha-se para sempre aos dados
+  // do servidor num browser que nunca tivesse gravado, mesmo depois de outra
+  // pessoa gravar o orçamento entretanto — mostrando valores antigos sem
+  // forma de os actualizar a não ser limpando manualmente os dados do site.
+  // O que resta desse mecanismo é só a limpeza, mais abaixo, de uma entrada
+  // que já exista de antes desta alteração.
 
   useEffect(() => {
     if (!activeCompany?.id || typeof window === "undefined") return;
@@ -457,7 +417,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
       const hasDraftContent = Boolean(
         formData.deal_id || formData.cliente_id || formData.title || formData.obra_notas ||
-        formData.client_notes || formData.conditions || selectedDeal || lines.length > 0 || inlineQuotes.length > 0
+        formData.client_notes || formData.conditions || selectedDeal || lines.length > 0
       );
       if (!hasDraftContent) return;
       event.preventDefault();
@@ -466,21 +426,16 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
     window.addEventListener("beforeunload", handleBeforeUnload);
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [quoteId, activeCompany?.id, formData, lines.length, inlineQuotes.length, selectedDeal]);
+  }, [effectiveQuoteId, activeCompany?.id, formData, lines.length, selectedDeal]);
 
   // Generate auto-reference for new quotes
   useEffect(() => {
     if (!quoteId && !autoReference) {
-      const hasSavedDraft = activeCompany?.id && typeof window !== "undefined"
-        ? localStorage.getItem(getQuoteDraftKey(activeCompany.id, quoteId))
-        : null;
-      if (hasSavedDraft) return;
-
       const year = new Date().getFullYear();
       const seq = String(Math.floor(Math.random() * 9999) + 1).padStart(4, "0");
       setAutoReference(`Q-${year}-${seq}`);
     }
-  }, [quoteId, autoReference, activeCompany?.id]);
+  }, [quoteId, effectiveQuoteId, autoReference, activeCompany?.id]);
 
   // Check if user is system admin
   useEffect(() => {
@@ -490,10 +445,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   // Auto-set organization_id when activeCompany changes (for new quotes)
   useEffect(() => {
-    if (activeCompany?.id && !quoteId && !formData.organization_id) {
+    if (activeCompany?.id && !effectiveQuoteId && !formData.organization_id) {
       setFormData(prev => ({ ...prev, organization_id: activeCompany.id }));
     }
-  }, [activeCompany?.id, quoteId]);
+  }, [activeCompany?.id, effectiveQuoteId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -596,14 +551,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       fetchOrganizations();
       fetchCatalogItems();
       checkPermissions();
-      if (quoteId) {
-        fetchQuote().finally(() => {
-          existingQuoteLoadedRef.current = true;
-          setQuoteLoadTick(tick => tick + 1);
-        });
+      if (effectiveQuoteId) {
+        fetchQuote();
       }
     }
-  }, [quoteId, activeCompany?.id]);
+  }, [effectiveQuoteId, activeCompany?.id]);
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -911,13 +863,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const bundleIds = templateItems.filter(i => (i as any).item_type === 'bundle' && (i as any).bundle_id).map(i => (i as any).bundle_id as string);
 
       // Fetch all pricing data in parallel
-      const [productPricesResult, servicePricesResult, attrRangesResult, optionPricesByProduct] = await Promise.all([
+      const [productPricesResult, servicePricesResult, attrRangesResult, optionPricesByProduct, productCostResult, serviceCostResult] = await Promise.all([
         // Fetch prices for products
-        productIds.length > 0 
+        productIds.length > 0
           ? supabase.from("product_prices").select("product_id, price, vat_rate").eq("price_type", "retail").in("product_id", productIds)
           : Promise.resolve({ data: [] }),
         // Fetch prices for services
-        serviceIds.length > 0 
+        serviceIds.length > 0
           ? supabase.from("service_prices").select("service_id, price, vat_rate").eq("price_type", "retail").in("service_id", serviceIds)
           : Promise.resolve({ data: [] }),
         // Fetch attribute price ranges via unified helper, per product (Product → Subcategory → Category → Ancestor → Global)
@@ -945,8 +897,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               });
               return [pid, list] as const;
             })).then((entries) => new Map(entries))
-          : Promise.resolve(new Map<string, Awaited<ReturnType<typeof getEffectiveProductOptionPrices>>>())
-
+          : Promise.resolve(new Map<string, Awaited<ReturnType<typeof getEffectiveProductOptionPrices>>>()),
+        // Custo real de compra — pode haver mais do que uma linha "purchase"
+        // por produto/serviço (a antiga fica lá para histórico); ordenar por
+        // created_at ascendente e deixar o Map sobrepor garante que fica
+        // sempre a mais recente.
+        productIds.length > 0
+          ? supabase.from("product_prices").select("product_id, price").eq("price_type", "purchase").in("product_id", productIds).order("created_at", { ascending: true })
+          : Promise.resolve({ data: [] }),
+        serviceIds.length > 0
+          ? supabase.from("service_prices").select("service_id, price").eq("price_type", "purchase").in("service_id", serviceIds).order("created_at", { ascending: true })
+          : Promise.resolve({ data: [] }),
       ]);
 
       const productPricesMap = new Map<string, { price: number; vat_rate: number }>(
@@ -956,6 +917,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const servicePricesMap = new Map<string, { price: number; vat_rate: number }>(
         (servicePricesResult.data || []).map(p => [p.service_id, { price: p.price as number, vat_rate: p.vat_rate as number ?? 23 }])
       );
+
+      // Custo real (preço de compra) — quando existe, manda sempre sobre a
+      // margem assumida de 30%.
+      const productCostMap = new Map<string, number>();
+      ((productCostResult as any)?.data || []).forEach((c: any) => { productCostMap.set(c.product_id, parseFloat(String(c.price || 0))); });
+      const serviceCostMap = new Map<string, number>();
+      ((serviceCostResult as any)?.data || []).forEach((c: any) => { serviceCostMap.set(c.service_id, parseFloat(String(c.price || 0))); });
 
       // Fetch bundles + components + prices for any bundle template items
       const bundlesMap = new Map<string, { name: string; sku: string; description: string | null; pricing_type: string; fixed_price: number | null; discount_percent: number | null; discount_fixed: number | null; components: any[]; choice_groups: any[] }>();
@@ -1130,8 +1098,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
             const retailPrice = priceInfo.price + attributePriceAddon;
             const defaultMargin = 30;
-            const materialCost = retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0;
-            
+            // Custo real de compra do produto, quando existe — só sem ele é
+            // que se deriva um custo a partir do preço de venda e de 30%.
+            const realCost = productCostMap.get(item.product.id) || 0;
+            const materialCost = realCost > 0
+              ? realCost
+              : (retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0);
+
             return {
               catalog_item_id: null,
               product_id: item.product.id,
@@ -1144,7 +1117,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               qt: item.default_qt,
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
-              margem_percent: defaultMargin,
+              margem_percent: realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice) : defaultMargin,
               // O preço de venda definido fica sempre na linha e manda no preço unitário.
               retail_price_unit: retailPrice,
               iva_percent: vatRate,
@@ -1159,8 +1132,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             const retailPrice = priceInfo.price;
             const vatRate = priceInfo.vat_rate;
             const defaultMargin = 30;
-            const materialCost = retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0;
-            
+            // Custo real de compra do serviço, quando existe.
+            const realCost = serviceCostMap.get(item.service.id) || 0;
+            const materialCost = realCost > 0
+              ? realCost
+              : (retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0);
+
             return {
               catalog_item_id: null,
               service_id: item.service.id,
@@ -1172,7 +1149,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               qt: item.default_qt,
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
-              margem_percent: defaultMargin,
+              margem_percent: realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice) : defaultMargin,
               // O preço de venda definido fica sempre na linha e manda no preço unitário.
               retail_price_unit: retailPrice,
               iva_percent: vatRate,
@@ -1202,6 +1179,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               }
               if (c.service_id && c.services?.service_prices) {
                 return c.services.service_prices.find((p: any) => p.price_type === 'retail')?.price || 0;
+              }
+              return 0;
+            };
+            const compCostPrice = (c: any): number => {
+              if (c.product_id && c.products?.product_prices) {
+                return c.products.product_prices.find((p: any) => p.price_type === 'purchase')?.price || 0;
+              }
+              if (c.service_id && c.services?.service_prices) {
+                return c.services.service_prices.find((p: any) => p.price_type === 'purchase')?.price || 0;
               }
               return 0;
             };
@@ -1251,11 +1237,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             });
 
             const unitTotalPrice = components.reduce((s, c) => s + c.unit_price * c.quantity, 0);
+            // Custo real do kit = soma do custo de compra de cada componente
+            // escolhido, quando conhecido — só sem ele é que se assume 30%.
+            const unitTotalCost = allComps.reduce((s, c) => s + compCostPrice(c) * (c.quantity || 1), 0);
             const defaultMargin = 30;
             const defaultInt = 0;
-            const materialCost = unitTotalPrice > 0
-              ? unitTotalPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)
-              : 0;
+            const materialCost = unitTotalCost > 0
+              ? unitTotalCost
+              : (unitTotalPrice > 0 ? unitTotalPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) : 0);
 
             return {
               catalog_item_id: null,
@@ -1272,7 +1261,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               qt: item.default_qt,
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
-              margem_percent: defaultMargin,
+              margem_percent: unitTotalCost > 0 ? markupFromCostAndPrice(unitTotalCost, unitTotalPrice) : defaultMargin,
               // O preço total do bundle é o preço de venda da linha.
               retail_price_unit: unitTotalPrice,
               iva_percent: 23,
@@ -1639,7 +1628,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const BATCH_SIZE = 200;
     for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
       const batch = uniqueIds.slice(i, i + BATCH_SIZE);
-      const [{ data: productsData }, { data: pricesData }] = await Promise.all([
+      const [{ data: productsData }, { data: pricesData }, { data: costData }] = await Promise.all([
         supabase
           .from("products")
           .select(`
@@ -1654,8 +1643,19 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           .select("product_id, price, vat_rate")
           .eq("price_type", "retail")
           .in("product_id", batch),
+        // Pode haver mais do que uma linha "purchase" por produto (a antiga
+        // fica lá para histórico) — ordenar por created_at ascendente e
+        // deixar o forEach sobrepor garante que fica sempre a mais recente.
+        supabase
+          .from("product_prices")
+          .select("product_id, price")
+          .eq("price_type", "purchase")
+          .in("product_id", batch)
+          .order("created_at", { ascending: true }),
       ]);
       const pricesMap = new Map((pricesData || []).map((p: any) => [p.product_id, { price: p.price, vat_rate: p.vat_rate }]));
+      const costMap = new Map<string, number>();
+      (costData || []).forEach((c: any) => { costMap.set(c.product_id, parseFloat(String(c.price || 0))); });
       (productsData || []).forEach((product: any) => {
         const priceInfo = pricesMap.get(product.id);
         map.set(product.id, {
@@ -1666,6 +1666,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           category_name: product.product_categories?.name || null,
           brand_name: product.brands?.name || null,
           retail_price: priceInfo?.price || null,
+          cost_price: costMap.get(product.id) ?? null,
           vat_rate: priceInfo?.vat_rate || 23,
           organization_id: product.organization_id,
           uom_symbol: product.uom?.code || null,
@@ -1684,7 +1685,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const BATCH_SIZE = 200;
     for (let i = 0; i < uniqueIds.length; i += BATCH_SIZE) {
       const batch = uniqueIds.slice(i, i + BATCH_SIZE);
-      const [{ data: servicesData }, { data: pricesData }] = await Promise.all([
+      const [{ data: servicesData }, { data: pricesData }, { data: costData }] = await Promise.all([
         supabase
           .from("services")
           .select(`
@@ -1697,8 +1698,16 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           .select("service_id, price, vat_rate")
           .eq("price_type", "retail")
           .in("service_id", batch),
+        supabase
+          .from("service_prices")
+          .select("service_id, price")
+          .eq("price_type", "purchase")
+          .in("service_id", batch)
+          .order("created_at", { ascending: true }),
       ]);
       const pricesMap = new Map((pricesData || []).map((p: any) => [p.service_id, { price: p.price, vat_rate: p.vat_rate }]));
+      const costMap = new Map<string, number>();
+      (costData || []).forEach((c: any) => { costMap.set(c.service_id, parseFloat(String(c.price || 0))); });
       (servicesData || []).forEach((service: any) => {
         const priceInfo = pricesMap.get(service.id);
         map.set(service.id, {
@@ -1709,6 +1718,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           category_name: service.service_categories?.name || null,
           brand_name: null,
           retail_price: priceInfo?.price || null,
+          cost_price: costMap.get(service.id) ?? null,
           vat_rate: priceInfo?.vat_rate || 23,
           organization_id: service.organization_id,
           uom_symbol: null,
@@ -1738,7 +1748,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   };
 
   const fetchQuote = async () => {
-    if (!quoteId) return;
+    if (!effectiveQuoteId) return;
 
     try {
       const { data: quote, error: quoteError } = await supabase
@@ -1747,7 +1757,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           *,
           deals!deal_id(id, title, entity_id, organization_id, client_id, lead_id, contact_id, assigned_to)
         `)
-        .eq("id", quoteId)
+        .eq("id", effectiveQuoteId)
         .single();
 
       if (quoteError) throw quoteError;
@@ -1773,7 +1783,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       setAssignedToTouched(true);
       
       setQuoteNumber(quote.quote_number || null);
-      
+
       // Set selected deal for display with lead info
       if (quote.deals) {
         const dealData = quote.deals as any;
@@ -1845,9 +1855,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         .select(`
           *,
           products(sku),
-          services(sku)
+          services(sku),
+          item_suppliers:item_supplier_id(supplier_sku, purchase_price, suppliers(name))
         `)
-        .eq("quote_id", quoteId)
+        .eq("quote_id", effectiveQuoteId)
         .order("ordem");
 
       if (linesError) throw linesError;
@@ -1866,6 +1877,8 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           categoria: line.categoria,
           descricao_snapshot: line.descricao_snapshot,
           sku: (line.products as any)?.sku || (line.services as any)?.sku || null,
+          item_supplier_id: (line as any).item_supplier_id || null,
+          supplier_sku: (line as any).item_suppliers?.supplier_sku ?? null,
           unidade: (line as any).unidade || null,
           item_description: (line as any).item_description || "",
           cost_price: Number((line as any).cost_price) || 0,
@@ -1883,6 +1896,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             : Number((line as any).retail_price_unit),
           ordem: line.ordem,
           section_name: (line as any).section_name || "Geral",
+          visible_to_client: line.visible_to_client ?? true,
+          // Sem isto, reabrir um orçamento já gravado perderia a marca de
+          // origem e o botão de importar duplicaria as linhas.
+          source_deal_need_id: line.source_deal_need_id || null,
+          source_deal_need_item_id: line.source_deal_need_item_id || null,
         }))
       );
       
@@ -1897,7 +1915,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const { data: quoteFees, error: feesError } = await supabase
         .from("quote_fees")
         .select("fee_type_id, vat_rate")
-        .eq("quote_id", quoteId);
+        .eq("quote_id", effectiveQuoteId);
 
       if (!feesError && quoteFees) {
         setSelectedFees(new Set(quoteFees.map(f => f.fee_type_id)));
@@ -1987,13 +2005,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const handleDownloadPdf = async () => {
-    if (!quoteId) {
+    if (!effectiveQuoteId) {
       toast({ title: "Guarda o orçamento primeiro", description: "É preciso guardar antes de fazer download do PDF.", variant: "destructive" });
       return;
     }
     try {
       setDownloadingPdf(true);
-      const { blob, fileName } = await generateQuotePdfBlob(quoteId);
+      const { blob, fileName } = await generateQuotePdfBlob(effectiveQuoteId);
       downloadBlob(blob, fileName);
     } catch (e: any) {
       captureFlowError(e, "quote-document-export");
@@ -2019,6 +2037,30 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [missingTemplateOpen, setMissingTemplateOpen] = useState(false);
   const missingTemplateOkRef = useRef(false);
   const pendingSaveArgRef = useRef<unknown>(undefined);
+
+  // Congela o diagnóstico do pedido de proposta no orçamento (snapshot), para
+  // que a Encomenda de Cliente (rpc_get_client_order_document) consiga mostrar
+  // o levantamento de necessidades tal como estava ao gravar.
+  //
+  // Corre sempre em handleSave, depois do rpc_save_quote, quando o orçamento
+  // tem deal_id — é o único ponto do fluxo onde o id real do orçamento existe
+  // (quoteId é uma prop e fica desatualizada num orçamento novo). A RPC é
+  // idempotente (DELETE + reinsert por quote_id), logo repetir gravações não
+  // duplica nada.
+  //
+  // Best-effort por desenho: o snapshot é secundário face a gravar o
+  // orçamento, por isso o erro é registado e engolido — nunca propaga.
+  const snapshotQuoteDiagnostic = async (quoteIdForSnapshot: string, dealId: string) => {
+    try {
+      const { error } = await supabase.rpc("rpc_snapshot_quote_diagnostic", {
+        p_quote_id: quoteIdForSnapshot,
+        p_deal_id: dealId,
+      });
+      if (error) throw error;
+    } catch (err) {
+      captureFlowError(err, "quote-lifecycle");
+    }
+  };
 
   const handleSave = async (rejectReasonOverride?: unknown) => {
     if (saveLockRef.current || loading) return;
@@ -2107,6 +2149,23 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
     }
 
+    // Unidade contável / embalagem: a quantidade tem de ser inteira (o input já
+    // arredonda; isto apanha linhas antigas ou importadas com decimais).
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!(line.qt > 0) || line.bundle_id) continue;
+      const baseCode = productUom.getBaseCode(line.product_id);
+      const integer = requiresIntegerQty({ hasProduct: !!line.product_id, lineUomId: null, baseUomCode: baseCode });
+      if (!isValidQtyFor(line.qt, integer)) {
+        toast({
+          title: t('quoteBuilder.toast.lineValidationError'),
+          description: integerQtyMessage(i + 1, baseCode),
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     // Ultima porta antes de gravar: sem template escolhido, confirmar. Fica DEPOIS
     // de todas as validacoes de proposito -- nao vale a pena perguntar "guardar
     // assim?" a quem vai levar com um erro de validacao a seguir. E, sobretudo,
@@ -2135,7 +2194,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         return;
       }
 
-      let savedQuoteId = quoteId;
+      let savedQuoteId = effectiveQuoteId;
 
       const dealOrgId = selectedDeal?.organization_id || formData.organization_id || activeCompany?.id;
       const dealClientId = selectedDeal?.client_id || formData.cliente_id;
@@ -2160,12 +2219,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       // Fallback chain: explicit picker selection -> async-resolved entity (deal/proposal/lead/client/contact) -> existing DB value.
       let resolvedEntityId: string | null =
         selectedDeal?.entity_id || selectedSource?.entity_id || resolvedQuoteEntityId || null;
-      if (quoteId && !resolvedEntityId) {
+      if (effectiveQuoteId && !resolvedEntityId) {
         try {
           const { data: existing } = await (supabase as any)
             .from("quotes")
             .select("entity_id")
-            .eq("id", quoteId)
+            .eq("id", effectiveQuoteId)
             .maybeSingle();
           if (existing?.entity_id) resolvedEntityId = existing.entity_id;
         } catch (e) {
@@ -2201,15 +2260,23 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       // Build the fully-computed lines/fees/totals payloads exactly as before —
       // the RPC persists them verbatim (business math stays in JS, single-transaction
       // persistence + single audit row happens server-side).
-      const linesToInsert = lines
-        .filter((line) => line.qt > 0)
+      const linesForInsert = lines.filter((line) => line.qt > 0);
+      const linesToInsert = linesForInsert
         .map((line) => {
           // Preço unitário e subtotal vêm da fonte única de preço da linha:
           // o preço de venda definido manda, e o unitário é fechado ao cêntimo
           // antes de multiplicar pela quantidade.
           const lineDiscount = line.discount_percent || 0;
           const precoSemIva = getLineSubtotal(line);
-          const ivaValor = precoSemIva * (line.iva_percent / 100);
+          // O IVA da linha é o mesmo que o total do orçamento usa: num bundle
+          // reparte-se pelos componentes (material a 23%, mão de obra a 6%) em
+          // vez de aplicar o iva_percent da linha, que o AddItemsDialog fixa em
+          // 23. Antes divergia: o total do orçamento repartia, a linha não, e o
+          // portal do cliente — que soma estas colunas por secção — mostrava
+          // secções que não somavam para o total logo abaixo delas.
+          // O total do orçamento não muda com isto; só as parcelas passam a
+          // fechar com ele.
+          const ivaValor = computeLineVatAmount(line, precoSemIva);
           const totalComIva = precoSemIva + ivaValor;
           const totalComDesconto =
             totalComIva * (1 - formData.desconto_global_percent / 100);
@@ -2219,6 +2286,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             product_id: line.product_id || null,
             service_id: line.service_id || null,
             bundle_id: line.bundle_id || null,
+            item_supplier_id: line.item_supplier_id || null,
             selected_attributes: line.selected_attributes || {},
             categoria: line.categoria,
             descricao_snapshot: line.descricao_snapshot,
@@ -2240,6 +2308,18 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             // O preço de venda definido manda no preço unitário. Sem ele gravado,
             // o preço é reconstruído do custo arredondado e perde milésimos.
             retail_price_unit: (line.retail_price_unit ?? null) || null,
+            // Toggle manual "Visível ao cliente" no editor de itens — default
+            // true preserva o comportamento de sempre. Nada liga isto ao
+            // diagnóstico (Fase 1 não cria linhas; só regista sugestões
+            // aceites em quote_diagnostic_area_suggestions).
+            visible_to_client: line.visible_to_client ?? true,
+            // Marca de origem no Pedido de Proposta. A necessidade
+            // (deal_needs.id) é a chave estável que torna o botão "Importar do
+            // pedido de proposta" idempotente depois de gravar e reabrir; o id
+            // do item é volátil (fn_apply_deal_need recria-os) e fica só como
+            // rastreabilidade.
+            source_deal_need_id: line.source_deal_need_id || null,
+            source_deal_need_item_id: line.source_deal_need_item_id || null,
           };
         });
 
@@ -2259,73 +2339,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         total: totals.grandTotal,
       };
 
-      // Inline quotes (additional quotes created within the builder) — same shape
-      // handleSave() used to build per-iteration, now batched into one RPC argument.
-      const inlineQuotesPayload = inlineQuotes
-        .filter((iq) => iq.lines.length > 0 && iq.lines.filter(l => l.qt > 0).length > 0)
-        .map((iq) => {
-          const iqData = {
-            deal_id: formData.deal_id || null,
-            organization_id: dealOrgId || activeCompany?.id || null,
-            root_organization_id: resolvedRootOrgId || activeCompany?.id || null,
-            title: iq.title || null,
-            obra_notas: iq.obra_notas || null,
-            modelo_base: iq.modelo_base && iq.modelo_base !== "0" ? iq.modelo_base : "default",
-            desconto_global_percent: iq.desconto_global_percent,
-            estado: "rascunho",
-            validade_dias: iq.validade_dias,
-            iva_rate: iq.iva_rate,
-            client_notes: iq.client_notes || null,
-            conditions: iq.conditions || null,
-          };
-
-          const iqLinesToInsert = iq.lines
-            .filter(l => l.qt > 0)
-            .map(l => {
-              // Mesma fonte única de preço usada no orçamento principal.
-              const lineDiscount = l.discount_percent || 0;
-              const precoSemIva = getLineSubtotal(l);
-              const ivaValor = precoSemIva * (l.iva_percent / 100);
-              const totalComIva = precoSemIva + ivaValor;
-              const totalComDesconto = totalComIva * (1 - iq.desconto_global_percent / 100);
-
-              return {
-                catalog_item_id: l.catalog_item_id || null,
-                product_id: l.product_id || null,
-                service_id: l.service_id || null,
-                bundle_id: l.bundle_id || null,
-                selected_attributes: l.selected_attributes || {},
-                categoria: "",
-                descricao_snapshot: l.descricao_snapshot,
-                qt: l.qt,
-                custo_material_unit: l.custo_material_unit,
-                custo_mao_obra_unit: l.custo_mao_obra_unit,
-                margem_percent: l.margem_percent,
-                iva_percent: l.iva_percent,
-                int_percent: l.int_percent,
-                discount_percent: lineDiscount,
-                total_sem_iva: precoSemIva,
-                total_com_iva: totalComIva,
-                total_com_desconto: totalComDesconto,
-                ordem: l.ordem,
-                section_name: l.section_name || "Geral",
-                unidade: l.unidade || null,
-                item_description: l.item_description || null,
-                cost_price: l.cost_price || 0,
-                retail_price_unit: (l.retail_price_unit ?? null) || null,
-              };
-            });
-
-          const iqTotalSemIva = iqLinesToInsert.reduce((s, l) => s + l.total_sem_iva, 0);
-          const iqGrandTotal = iqLinesToInsert.reduce((s, l) => s + l.total_com_desconto, 0);
-
-          return {
-            data: iqData,
-            lines: iqLinesToInsert,
-            totals: { subtotal: iqTotalSemIva, total: iqGrandTotal },
-          };
-        });
-
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
 
       // KNOWN GAP: quoteData may carry lost_reason (set above when estado === "rejeitado"),
@@ -2338,12 +2351,20 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         // p_quote_id is nullable at runtime (NULL creates a new quote, a uuid
         // updates an existing one) but the generated RPC Args type widens it
         // to `string` since the SQL parameter has no default value.
-        p_quote_id: (quoteId || null) as unknown as string,
+        p_quote_id: (effectiveQuoteId || null) as unknown as string,
         p_quote_data: quoteData,
         p_lines: linesToInsert,
         p_fees: feesToInsert,
         p_totals: totalsPayload,
-        p_inline_quotes: inlineQuotesPayload,
+        // Orçamentos inline foram removidos deste builder (ver comentário na
+        // secção de itens). O parâmetro fica na RPC com DEFAULT '[]'::jsonb —
+        // mexer em assinaturas de funções já causou incidentes aqui.
+        p_inline_quotes: [],
+        // 7º parâmetro (DEFAULT '[]'::jsonb no lado do backend) — não é usado
+        // por este fluxo: a Fase 1 já não cria linhas, só regista sugestões
+        // aceites diretamente via rpc_record_diagnostic_suggestion_accepted
+        // (QuoteDiagnosticPhase.tsx), sem passar por aqui.
+        p_diagnostic_suggestions: [],
       });
 
       if (saveError) throw saveError;
@@ -2351,10 +2372,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const savedQuoteRow = savedQuote as Database["public"]["Tables"]["quotes"]["Row"] | null;
       savedQuoteId = savedQuoteRow?.id || savedQuoteId;
 
-      // Clear inline quotes after saving
-      setInlineQuotes([]);
+      // Snapshot do diagnóstico do pedido de proposta. Aqui — e só aqui —
+      // savedQuoteId é o id real do orçamento (num orçamento novo a prop
+      // quoteId continua null). Idempotente e best-effort: engole o próprio
+      // erro, nunca faz a gravação do orçamento falhar.
+      const dealIdForSnapshot = formData.deal_id;
+      if (savedQuoteId && dealIdForSnapshot) {
+        await snapshotQuoteDiagnostic(savedQuoteId, dealIdForSnapshot);
+      }
+
       if (activeCompany?.id && typeof window !== "undefined") {
-        localStorage.removeItem(getQuoteDraftKey(activeCompany.id, quoteId));
+        localStorage.removeItem(getQuoteDraftKey(activeCompany.id, effectiveQuoteId));
       }
 
       toast({
@@ -2386,9 +2414,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
     } catch (error: any) {
       captureFlowError(error, "quote-lifecycle");
+      const description = await getFriendlyErrorMessage(error);
       toast({
         title: t('quoteBuilder.toast.errorSavingQuote'),
-        description: error.message,
+        description,
         variant: "destructive",
       });
     } finally {
@@ -2409,10 +2438,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       if (existingIndex >= 0) {
         const updated = [...prev];
-        updated[existingIndex] = {
-          ...updated[existingIndex],
-          [field]: value,
-        };
+        const current = updated[existingIndex];
+        const next: QuoteLine = { ...current, [field]: value };
+        updated[existingIndex] = next;
         return updated;
       } else {
         const item = catalogItems.find((i) => i.id === itemId);
@@ -2464,6 +2492,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     uom_name: string | null;
     type?: "product" | "service";
     description?: string | null;
+    item_supplier_id?: string | null;
   }, selectedAttributes?: Record<string, any>, attributePriceAddon?: number) => {
     const updatedLines = [...lines];
     const currentLine = updatedLines[lineIndex];
@@ -2504,6 +2533,10 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       iva_percent: vatRate,
       selected_attributes: selectedAttributes || {},
       attribute_price_addon: addonPrice,
+      item_supplier_id: newProduct.item_supplier_id ?? null,
+      // supplier_sku is read-only, hydrated via the item_suppliers join on load;
+      // reset here so a stale badge from the replaced item isn't shown until reload.
+      supplier_sku: null,
     };
     
     setLines(updatedLines);
@@ -2535,6 +2568,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     attributes: Record<string, string>;
     fullAttributes?: Record<string, { attribute_code: string; label: string; value_type: string; unit?: string; value: string; pricing_type?: string }>;
     attributePriceAddon?: number;
+    item_supplier_id?: string | null;
     bundleInfo?: {
       bundle_id: string;
       bundle_sku: string;
@@ -2556,7 +2590,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     if (replaceLineIndex === null || selectedItems.length === 0) return;
     
     const selected = selectedItems[0]; // Only use the first item for replacement
-    const { item, fullAttributes, attributePriceAddon, bundleInfo } = selected;
+    const { item, fullAttributes, attributePriceAddon, bundleInfo, item_supplier_id } = selected;
     
     if (bundleInfo) {
       // Replace with a bundle
@@ -2565,9 +2599,15 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const defaultMargin = currentLine.margem_percent || 30;
       const defaultInt = currentLine.int_percent || 0;
       const retailPrice = bundleInfo.total_price || 0;
-      const materialCost = retailPrice > 0
-        ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) - (currentLine.custo_mao_obra_unit || 0)
-        : 0;
+      // Custo real do kit (soma dos componentes escolhidos), quando conhecido;
+      // só sem ele é que se deriva um custo a partir do preço de venda e de
+      // uma margem assumida — mesma regra da linha "adicionar" abaixo.
+      const realCost = Number(item.cost_price) > 0 ? Number(item.cost_price) : 0;
+      const materialCost = realCost > 0
+        ? realCost
+        : (retailPrice > 0
+          ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100) - (currentLine.custo_mao_obra_unit || 0)
+          : 0);
 
       const bundleSelectedAttributes = {
         ...(fullAttributes || {}),
@@ -2590,6 +2630,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         retail_price_unit: retailPrice,
         selected_attributes: bundleSelectedAttributes,
         categoria: "Bundles",
+        // Bundles are out of scope for supplier-reference tracking (known limitation).
+        item_supplier_id: null,
+        supplier_sku: null,
       };
 
       setLines(updatedLines);
@@ -2609,6 +2652,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         uom_name: item.uom_name || null,
         type: item.type,
         description: item.description,
+        item_supplier_id: item_supplier_id ?? null,
       }, fullAttributes, attributePriceAddon);
     }
     
@@ -2671,8 +2715,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         continue;
       }
       
-      const materialCost = retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100);
-      
+      // Custo real do artigo (preço de compra), quando existe — só sem ele é
+      // que se deriva um custo a partir do preço de venda e da margem
+      // assumida (mesma regra dos outros caminhos de adicionar).
+      const realCost = Number(item.cost_price) > 0 ? Number(item.cost_price) : 0;
+      const materialCost = realCost > 0
+        ? realCost
+        : retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100);
+
       // Get selected attributes and transform to full format
       const selectedAttrs = selectedItemAttributes[itemId] || {};
       const fullAttributes: Record<string, any> = {};
@@ -2720,7 +2770,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         qt: 1,
         custo_material_unit: materialCost,
         custo_mao_obra_unit: 0,
-        margem_percent: defaultMargin,
+        margem_percent: realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice, defaultInt) : defaultMargin,
         // O preço de venda definido fica sempre na linha e manda no preço unitário.
         retail_price_unit: retailPrice,
         iva_percent: vatRate,
@@ -2773,6 +2823,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     attributes: Record<string, string>;
     fullAttributes?: Record<string, { attribute_code: string; label: string; value_type: string; unit?: string; value: string; pricing_type?: string }>;
     attributePriceAddon?: number;
+    item_supplier_id?: string | null;
     bundleInfo?: {
       bundle_id: string;
       bundle_sku: string;
@@ -2794,11 +2845,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     const quoteOrgId = formData.organization_id || activeCompany?.id;
     const defaultMargin = 30;
     const defaultInt = 0;
-    
+
     const newLines: QuoteLine[] = [];
-    
+
     selectedItems.forEach((selected, index) => {
-      const { item, quantity, attributes, fullAttributes, attributePriceAddon, bundleInfo } = selected;
+      const { item, quantity, attributes, fullAttributes, attributePriceAddon, bundleInfo, item_supplier_id } = selected;
       const basePrice = item.retail_price ?? 0;
       const vatRate = item.vat_rate || 23;
       
@@ -2865,6 +2916,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           catalog_item_id: null,
           product_id: item.type === "product" ? item.id : null,
           service_id: item.type === "service" ? item.id : null,
+          item_supplier_id: item_supplier_id ?? null,
           selected_attributes: lineAttributes,
           categoria: item.category_name || "General",
           descricao_snapshot: item.name,
@@ -2918,7 +2970,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     }
   };
 
-  // Load deal items (deal_needs + deal_need_items) and auto-populate quote lines
+  // Importa os itens do Pedido de Proposta (deal_needs + deal_need_items) para
+  // linhas do orçamento. Deixou de correr sozinho ao escolher o pedido: agora é
+  // sempre explícito, pelo botão "Importar do pedido de proposta". Repetir a
+  // importação não duplica linhas — a idempotência é por NECESSIDADE
+  // (deal_needs.id, gravado em quote_lines.source_deal_need_id): uma
+  // necessidade já importada é saltada por inteiro. Comparar item a item não
+  // serviria — fn_apply_deal_need apaga e reinsere todos os deal_need_items a
+  // cada gravação da necessidade, logo esses ids mudam em uso normal.
   const loadDealItems = async (dealId: string) => {
     try {
       // Fetch deal_needs for this deal
@@ -2930,24 +2989,40 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       const defaultMargin = 30;
       const defaultInt = 0;
       const newLines: QuoteLine[] = [];
+      // Necessidades que já têm linhas neste orçamento — nunca voltam a ser
+      // importadas. Cobre tanto a sessão atual como um orçamento reaberto
+      // (fetchQuote hidrata source_deal_need_id a partir da BD).
+      const alreadyImportedNeedIds = new Set(
+        lines.map((l) => l.source_deal_need_id).filter(Boolean) as string[]
+      );
+      let skippedNeedsCount = 0;
 
       if (dealNeeds && dealNeeds.length > 0) {
-        const needIds = dealNeeds.map((n: any) => n.id);
+        // Salta as necessidades já importadas antes de ir buscar seja o que
+        // for: nem os itens delas chegam a ser lidos.
+        const pendingNeedIds = dealNeeds
+          .map((n: any) => n.id)
+          .filter((id: string) => !alreadyImportedNeedIds.has(id));
+        skippedNeedsCount = dealNeeds.length - pendingNeedIds.length;
 
         // Fetch deal_need_items
-        const { data: needItems } = await (supabase as any)
-          .from("deal_need_items")
-          .select("*")
-          .in("deal_need_id", needIds)
-          .order("sort_order");
+        const { data: needItems } = pendingNeedIds.length > 0
+          ? await (supabase as any)
+              .from("deal_need_items")
+              .select("*")
+              .in("deal_need_id", pendingNeedIds)
+              .order("sort_order")
+          : { data: [] as any[] };
 
-        if (needItems && needItems.length > 0) {
+        const pendingItems = (needItems || []) as any[];
+
+        if (pendingItems.length > 0) {
           // Fetch only the specific products/services this deal's needs
           // reference — never the whole catalog.
-          const neededProductIds = needItems
+          const neededProductIds = pendingItems
             .filter((i: any) => i.item_type === "product" && i.product_id)
             .map((i: any) => i.product_id);
-          const neededServiceIds = needItems
+          const neededServiceIds = pendingItems
             .filter((i: any) => i.item_type === "service" && i.service_id)
             .map((i: any) => i.service_id);
           const [neededProductsMap, neededServicesMap] = await Promise.all([
@@ -2955,13 +3030,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
             fetchServicesByIds(neededServiceIds),
           ]);
 
-          for (const item of needItems) {
+          for (const item of pendingItems) {
             let name = item.notes || "Item";
             let retailPrice = 0;
             let vatRate = 23;
             let sku: string | null = null;
             let category = "Geral";
             let uom: string | null = null;
+            // Custo real do artigo (preço de compra), quando existe — só sem
+            // ele é que se deriva um custo a partir do preço de venda e da
+            // margem assumida, tal como nos outros caminhos de adicionar.
+            let realCost = 0;
             const manualUnitPrice = item.unit_price ? parseFloat(item.unit_price) : null;
 
             if (item.item_type === "product" && item.product_id) {
@@ -2973,6 +3052,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 retailPrice = manualUnitPrice ?? (prod.retail_price || 0);
                 vatRate = prod.vat_rate || 23;
                 uom = prod.uom_symbol || prod.uom_name || null;
+                realCost = Number(prod.cost_price) > 0 ? Number(prod.cost_price) : 0;
               }
             } else if (item.item_type === "service" && item.service_id) {
               const svc = neededServicesMap.get(item.service_id);
@@ -2983,6 +3063,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 retailPrice = manualUnitPrice ?? (svc.retail_price || 0);
                 vatRate = svc.vat_rate || 23;
                 uom = svc.uom_symbol || svc.uom_name || null;
+                realCost = Number(svc.cost_price) > 0 ? Number(svc.cost_price) : 0;
               }
             } else if (manualUnitPrice && manualUnitPrice > 0) {
               // Manual item without catalog reference
@@ -2994,9 +3075,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               retailPrice = manualUnitPrice;
             }
 
-            const materialCost = retailPrice > 0
-              ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)
-              : 0;
+            const materialCost = realCost > 0
+              ? realCost
+              : (retailPrice > 0
+                ? retailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)
+                : 0);
 
             newLines.push({
               catalog_item_id: null,
@@ -3010,7 +3093,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               qt: item.quantity || 1,
               custo_material_unit: materialCost,
               custo_mao_obra_unit: 0,
-              margem_percent: defaultMargin,
+              margem_percent: realCost > 0 ? markupFromCostAndPrice(realCost, retailPrice, defaultInt) : defaultMargin,
               // O preço de venda apurado fica sempre na linha e manda no preço unitário.
               retail_price_unit: retailPrice,
               iva_percent: vatRate,
@@ -3018,13 +3101,21 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               discount_percent: 0,
               ordem: 0,
               section_name: "Geral",
+              // Chave estável (decide a idempotência) + id do item só para
+              // rastreabilidade.
+              source_deal_need_id: item.deal_need_id || null,
+              source_deal_need_item_id: item.id,
             });
           }
         }
       }
 
-      // Fallback: if no items were created from deal_need_items, check deal value
-      if (newLines.length === 0) {
+      // Fallback: sem itens no pedido, usa-se o valor do negócio como linha
+      // única. Só corre quando o orçamento ainda está vazio — de outra forma
+      // cada clique no botão acrescentava outra vez a mesma linha (esta não
+      // não vem de nenhuma necessidade, logo não tem source_deal_need_id que
+      // a identifique).
+      if (newLines.length === 0 && skippedNeedsCount === 0 && lines.length === 0) {
         const { data: dealData } = await (supabase as any)
           .from("deals")
           .select("value, title")
@@ -3059,19 +3150,56 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         }
       }
 
-      if (newLines.length > 0) {
-        const updatedLines = [...lines, ...newLines].map((line, idx) => ({
-          ...line,
-          ordem: idx + 1,
-        }));
-        setLines(updatedLines);
+      if (newLines.length === 0) {
         toast({
-          title: "Itens do pedido carregados",
-          description: `${newLines.length} item(ns) adicionado(s) automaticamente ao orçamento.`,
+          title: "Nada para importar",
+          description: skippedNeedsCount > 0
+            ? `As necessidades deste pedido de proposta (${skippedNeedsCount}) já tinham sido importadas.`
+            : "Este pedido de proposta não tem itens para importar.",
         });
+        return 0;
       }
+
+      const updatedLines = [...lines, ...newLines].map((line, idx) => ({
+        ...line,
+        ordem: idx + 1,
+      }));
+      setLines(updatedLines);
+      const importedNeedsCount = new Set(
+        newLines.map((l) => l.source_deal_need_id).filter(Boolean) as string[]
+      ).size;
+      toast({
+        title: "Itens do pedido importados",
+        description: importedNeedsCount > 0
+          ? `${newLines.length} linha(s) importada(s) de ${importedNeedsCount} necessidade(s) do pedido de proposta.`
+          : `${newLines.length} linha(s) importada(s) do pedido de proposta.`,
+      });
+      return newLines.length;
     } catch (err) {
       console.error("Error loading deal items:", err);
+      captureFlowError(err, "quote-lifecycle");
+      toast({
+        title: "Erro ao importar",
+        description: "Não foi possível importar os itens do pedido de proposta.",
+        variant: "destructive",
+      });
+      return 0;
+    }
+  };
+
+  // Handler do botão "Importar do pedido de proposta".
+  // Nota: não tira snapshot do diagnóstico. O snapshot é do diagnóstico do
+  // pedido (deal), não das linhas importadas, e é tirado em handleSave — ver
+  // snapshotQuoteDiagnostic. Aqui seria redundante e, num orçamento novo,
+  // impossível (ainda não há quote_id).
+  const handleImportFromDeal = async () => {
+    const dealId = formData.deal_id;
+    if (!dealId || importingDealItems) return;
+    setImportingDealItems(true);
+    try {
+      await loadDealItems(dealId);
+    } finally {
+      setImportingDealItems(false);
     }
   };
 
@@ -3387,6 +3515,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
   return (
     <div className="container mx-auto py-4 max-w-[1600px]">
+      {!quoteId && (
+        <div className="mb-4">
+          <PlanLimitWarning organizationId={activeCompany?.id} limitType="quotes" />
+        </div>
+      )}
       {/* Enhanced Header */}
       <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-3">
@@ -3407,7 +3540,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           })()}
         </div>
         <div className="flex items-center gap-2">
-
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -3477,7 +3609,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                       setAssignedToTouched(false);
                       setSelectedFees(new Set());
                       setLines([]);
-                      setInlineQuotes([]);
                     }}
                   />
                 ) : (
@@ -3544,7 +3675,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                 }
                                 if (!inherited) inherited = r.assignedTo || null;
                                 setFormData(prev => ({ ...prev, deal_id: r.id, organization_id: r.organizationId || "", cliente_id: r.dealClientId || "", title: prev.title || r.name || "", assigned_to: assignedToTouched ? prev.assigned_to : (inherited ?? prev.assigned_to) }));
-                                if (lines.length === 0) loadDealItems(r.id);
+                                // Os itens do pedido já não entram sozinhos: a
+                                // importação passou a ser pelo botão
+                                // "Importar do pedido de proposta" logo abaixo.
                               } else {
                                 setSelectedSource({ kind: r.kind, id: r.id, name: r.name, entity_id: r.entityId, organization_id: r.organizationId });
                                 setSelectedDeal(null);
@@ -3595,6 +3728,31 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                     {fieldErrors.deal_id && <p className="text-sm text-destructive">{fieldErrors.deal_id}</p>}
                   </div>
                 )}
+                {/* Importação explícita dos itens do pedido. Antes acontecia
+                    sozinha ao escolher o pedido (e só com o orçamento vazio);
+                    agora é sempre o utilizador a decidir, e pode repetir sem
+                    duplicar linhas já importadas. */}
+                {formData.deal_id && (
+                  <div className="space-y-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleImportFromDeal}
+                      disabled={importingDealItems}
+                    >
+                      {importingDealItems ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <FileDown className="w-4 h-4 mr-1" />
+                      )}
+                      {importingDealItems ? "A importar…" : "Importar do pedido de proposta"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Acrescenta os itens do pedido ao orçamento. Necessidades já importadas não voltam a ser adicionadas.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Lead ou Cliente — hidden once a Pedido is chosen, since the
@@ -3622,13 +3780,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             setAssignedToTouched(false);
                             setSelectedFees(new Set());
                             setLines([]);
-                            setInlineQuotes([]);
                           }}>
                           <X className="h-3 w-3 mr-1" /> Desligar
                         </Button>
                       </div>
                     </div>
-                    <QuoteEntityPreview entityId={selectedSource.entity_id} quoteId={quoteId} />
+                    <QuoteEntityPreview entityId={selectedSource.entity_id} quoteId={effectiveQuoteId} />
                   </div>
                   ) : (
                     <EntitySearchInput
@@ -3898,9 +4055,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 let hasSectionCostData = false;
                 sectionLines.filter(l => l.qt > 0).forEach(line => {
                   sectionSubtotal += getLineSubtotal(line);
-                  if (line.cost_price && line.cost_price > 0) {
+                  // getLineUnitCost (custo_material_unit + custo_mao_obra_unit) é a
+                  // fonte única de custo — usar só cost_price ignorava linhas de
+                  // bundle/secção cujo custo só vem gravado nesses dois campos.
+                  const lineCost = getLineUnitCost(line);
+                  if (lineCost > 0) {
                     hasSectionCostData = true;
-                    sectionCost += line.cost_price * line.qt;
+                    sectionCost += lineCost * line.qt;
                   }
                 });
                 const sectionMargin = hasSectionCostData && sectionSubtotal > 0 ? ((sectionSubtotal - sectionCost) / sectionSubtotal) * 100 : 0;
@@ -4043,6 +4204,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                             const isBundleLine = lineBundleComponents.length > 0 && lineComponentsTotal > 0;
 
                             const unitOptions = ["un", "m²", "ml", "dia", "hora", "kg", "m", "vg"];
+                            // Produto em unidade contável => só quantidades inteiras.
+                            const lineIntegerQty = requiresIntegerQty({
+                              hasProduct: !isBundle && !!line.product_id,
+                              lineUomId: null,
+                              baseUomCode: productUom.getBaseCode(line.product_id),
+                            });
 
                             return (
                               <SortableQuoteRow key={sortableId} id={sortableId}>
@@ -4117,6 +4284,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                             setShowReplaceDialog(true);
                                           }}
                                           isProduct={!!line.product_id}
+                                          supplierSku={line.supplier_sku || null}
                                         />
                                       )}
                                       {/* Item description */}
@@ -4149,9 +4317,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                   </TableCell>
                                   <TableCell className="text-center">
                                     <Input type="number" min="0" step="1" value={line.qt}
+                                      inputMode={lineIntegerQty ? "numeric" : undefined}
                                       onChange={(e) => {
+                                        const raw = Number(e.target.value);
                                         const updated = [...lines];
-                                        updated[globalLineIndex] = { ...line, qt: Number(e.target.value) };
+                                        // Unidade contável / embalagem => só quantidades inteiras.
+                                        updated[globalLineIndex] = { ...line, qt: lineIntegerQty ? roundToIntegerQty(raw) : raw };
                                         setLines(updated);
                                       }}
                                       className="w-16 mx-auto text-center h-8" />
@@ -4321,6 +4492,31 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                                         }}>
                                         <Trash2 className="h-3 w-3" />
                                       </Button>
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <Button
+                                              variant="ghost"
+                                              size="icon"
+                                              className={cn("h-6 w-6", line.visible_to_client === false && "text-amber-600")}
+                                              onClick={() => {
+                                                const updated = [...lines];
+                                                updated[globalLineIndex] = { ...line, visible_to_client: line.visible_to_client === false };
+                                                setLines(updated);
+                                              }}
+                                            >
+                                              {line.visible_to_client === false
+                                                ? <EyeOff className="h-3 w-3" />
+                                                : <Eye className="h-3 w-3" />}
+                                            </Button>
+                                          </TooltipTrigger>
+                                          <TooltipContent>
+                                            {line.visible_to_client === false
+                                              ? "Não visível ao cliente — clique para tornar visível"
+                                              : "Visível ao cliente — clique para ocultar (PDF/portal)"}
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
                                     </div>
                                   </TableCell>
                                 </TableRow>
@@ -4379,30 +4575,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 </Button>
               </div>
 
-              {/* Inline Quotes */}
-              {inlineQuotes.map((iq, idx) => (
-                <InlineQuoteBuilder
-                  key={iq.tempId}
-                  quote={iq}
-                  onChange={(updated) => {
-                    const newInline = [...inlineQuotes];
-                    newInline[idx] = updated;
-                    setInlineQuotes(newInline);
-                  }}
-                  onRemove={() => setInlineQuotes(inlineQuotes.filter((_, i) => i !== idx))}
-                  proposalTitle={formData.title}
-                  organizationId={activeCompany?.id}
-                />
-              ))}
-
-              {/* Add Another Quote Button */}
-              <div className="border-2 border-dashed rounded-lg p-4 text-center">
-                <Button variant="ghost" onClick={() => {
-                  setInlineQuotes([...inlineQuotes, createEmptyInlineQuote(formData.title)]);
-                }}>
-                  <Plus className="w-4 h-4 mr-1" /> Adicionar outro orçamento
-                </Button>
-              </div>
+              {/* Orçamentos inline removidos: eram gravados como registos soltos em
+                  `quotes`, sem proposal_id/entity_id/cliente_id, e por isso nunca
+                  apareciam na proposta, no PDF, no portal do cliente nem no
+                  proposals.value. O caminho correto para vários orçamentos é
+                  criá-los dentro da Proposta (Proposals.tsx / ProposalCreateDialog),
+                  onde fn_proposals_persist_relations preenche a ligação. */}
             </CardContent>
           </Card>
 
@@ -4435,7 +4613,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               onPreviewPdf={() => setShowPdfPreview(true)}
               onDownloadPdf={handleDownloadPdf}
               downloadingPdf={downloadingPdf}
-              inlineQuotes={inlineQuotes}
               onSaveAsTemplate={handleOpenSaveAsTemplateDialog}
               canViewCosts={canViewCosts}
             />
@@ -4489,9 +4666,17 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
               const defaultMargin = line.margem_percent || 30;
               const defaultInt = line.int_percent || 0;
               const laborCost = line.custo_mao_obra_unit || 0;
-              const newMaterialCost = newRetailPrice > 0
-                ? (newRetailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)) - laborCost
+              // Custo real do artigo — a selecção de atributos muda o preço
+              // (addon), não o custo base do produto/serviço em si. laborCost
+              // é um campo à parte (custo_mao_obra_unit) e não entra aqui.
+              const realCost = Number(product?.cost_price ?? service?.cost_price) > 0
+                ? Number(product?.cost_price ?? service?.cost_price)
                 : 0;
+              const newMaterialCost = realCost > 0
+                ? realCost
+                : (newRetailPrice > 0
+                  ? (newRetailPrice / (1 + defaultMargin / 100) / (1 + defaultInt / 100)) - laborCost
+                  : 0);
               // O novo preço de venda fica na linha e manda no preço unitário.
               updatedLines[editingLineIndex] = { ...line, selected_attributes: attributes, custo_material_unit: Math.max(0, newMaterialCost), retail_price_unit: newRetailPrice };
               setLines(updatedLines);
@@ -4605,7 +4790,6 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         lines={lines}
         organizationId={formData.organization_id || selectedSource?.organization_id || activeCompany?.id || null}
         entityId={resolvedQuoteEntityId}
-        inlineQuotes={inlineQuotes}
         initialTemplateId={formData.pdf_template_id || null}
         onTemplateChange={(id) => setFormData(prev => ({ ...prev, pdf_template_id: id || "" }))}
         fees={totals.fees.map(f => ({

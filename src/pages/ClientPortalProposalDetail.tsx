@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Paperclip, Download, FileText, Image as ImageIcon, File as FileIcon } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
+import { useSyncActiveOrgWithDocument } from "@/contexts/PortalCompanyContext";
 import { ProposalPortalDocument } from "@/components/proposals/ProposalPortalDocument";
 import { loadProposalPortalData, type ProposalPortalData } from "@/components/proposals/proposalPortalData";
 import { generateProposalPdfBlob, downloadBlob, type ProposalPdfPrefetch } from "@/utils/generateProposalPdfBlob";
@@ -64,6 +65,10 @@ const ClientPortalProposalDetail = () => {
   const [otpError, setOtpError] = useState("");
 
   const hasLoadedOnceRef = useRef(false);
+
+  // Link de email pode abrir uma proposta de outra empresa do grupo: a empresa
+  // ativa acompanha o documento em vez de o esconder.
+  useSyncActiveOrgWithDocument(portalData?.proposal?.organization_id);
 
   const reloadPortalData = useCallback(async () => {
     if (!id) return;

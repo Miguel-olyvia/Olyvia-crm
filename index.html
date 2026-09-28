@@ -1,10 +1,17 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" translate="no" class="notranslate">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" href="/favicon.png" type="image/png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    
+    <!-- Impede o Chrome (sobretudo Android) de traduzir automaticamente a app.
+         O React gere este DOM directamente; a tradução automática mexe no
+         texto por fora do React e faz o próximo re-render rebentar com
+         "insertBefore ... not a child of this node" assim que o React tenta
+         inserir/remover um nó nessa mesma zona (ex.: ClientPortalLayout.tsx,
+         confirmado no Sentry a 21/09 — Chrome Mobile/Android). -->
+    <meta name="google" content="notranslate" />
+
     <!-- Preconnect for performance -->
     <link rel="preconnect" href="https://jfuyxszlgetnmdwfdmgw.supabase.co" crossorigin />
     <link rel="dns-prefetch" href="https://jfuyxszlgetnmdwfdmgw.supabase.co" />

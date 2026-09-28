@@ -1,3 +1,8 @@
+-- Recuperado via 'supabase db query --linked' contra
+-- supabase_migrations.schema_migrations.statements -- já aplicada
+-- remotamente (drift concorrente de outra sessão), só faltava o ficheiro.
+-- Mesmo padrão de recuperação já usado neste branch para 450000-520000.
+
 -- Fixes two measured defects in the Propostas search
 -- (src/pages/Proposals.tsx / proposals_list_filtered, see
 -- 20261113070000_proposals_list_pagination_and_metrics_rpcs.sql):

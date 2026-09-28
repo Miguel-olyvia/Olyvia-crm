@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { z } from "https://deno.land/x/zod@v3.22.4/mod.ts";
-import { requireServiceRole } from "../_shared/auth.ts";
+import { requireServiceRole, getServiceRoleKey } from "../_shared/auth.ts";
 
 // This function is invoked by the Supabase scheduler (service role) — no external input.
 // The schema is empty; input validation is enforced by the requireServiceRole guard above.
@@ -30,7 +30,7 @@ serve(async (req) => {
   try {
     const supabase = createClient(
       Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      getServiceRoleKey()
     );
 
     const { data: pendingEmails, error: fetchError } = await supabase
@@ -113,7 +113,7 @@ serve(async (req) => {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+              "Authorization": `Bearer ${Deno.env.get("CRON_SHARED_SECRET") || Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
             },
             body: JSON.stringify({
               user_id: email.user_id,
@@ -127,7 +127,15 @@ serve(async (req) => {
         );
 
         const sendResult = await sendResponse.json();
-        if (sendResult.error) throw new Error(sendResult.error);
+        // O portao da Supabase (verify_jwt no send-email) recusa pedidos ANTES
+        // de chegarem ao codigo quando o token nao tem formato de JWT --
+        // devolve {code, message}, nao {error}. `sendResult.error` sozinho
+        // nunca apanhava isto, e o email ficava "enviado" sem nunca ter sido
+        // tentado. `!sendResponse.ok` cobre qualquer falha HTTP, seja qual
+        // for a forma do corpo.
+        if (!sendResponse.ok || sendResult.error) {
+          throw new Error(sendResult.error || sendResult.message || `HTTP ${sendResponse.status}`);
+        }
 
         await supabase.from("scheduled_emails").update({
           status: "sent",

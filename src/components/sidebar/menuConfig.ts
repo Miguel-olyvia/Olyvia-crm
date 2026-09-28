@@ -8,6 +8,7 @@ import {
   Settings,
   Network,
   UserCog,
+  AlertTriangle,
   HelpCircle,
   UsersRound,
   Crosshair,
@@ -34,7 +35,9 @@ import {
   Trash2,
   FileDown,
   ShieldAlert,
+  ClipboardCheck,
   ListChecks,
+  Receipt,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -43,6 +46,8 @@ export interface MenuItem {
   labelKey: string;
   permission?: string;
   permissions?: string[];
+  /** When `permissions` is set, require ALL of them instead of the default ANY (OR) logic. */
+  requireAll?: boolean;
 }
 
 export interface MenuSubSection {
@@ -164,8 +169,8 @@ export const menuSections: MenuSection[] = [
     id: "acquisition",
     icon: Target,
     labelKey: "sidebar.acquisition",
-    paths: ["/deals", "/proposals", "/quotes", "/quote-models", "/quote-templates", "/modelos-orcamento", "/proposal-templates", "/client-contracts", "/contract-templates", "/acquisition-help", "/needs-assessment-config"],
-    permissions: ["deals.view", "proposals.view", "quotes.view"],
+    paths: ["/deals", "/proposals", "/quotes", "/quote-models", "/quote-templates", "/modelos-orcamento", "/proposal-templates", "/direct-sales", "/client-contracts", "/contract-templates", "/acquisition-help", "/needs-assessment-config"],
+    permissions: ["deals.view", "proposals.view", "quotes.view", "direct_sales.view"],
     items: [
       { to: "/deals", icon: Handshake, labelKey: "sidebar.proposalRequests", permission: "deals.view" },
     ],
@@ -176,6 +181,17 @@ export const menuSections: MenuSection[] = [
         items: [
           { to: "/proposals", icon: FileText, labelKey: "sidebar.proposals", permission: "proposals.view" },
           { to: "/quotes", icon: FileCheck, labelKey: "sidebar.quotes", permission: "quotes.view" },
+        ],
+      },
+      // Venda Direta (Fase 2): fluxo alternativo, mais leve, ao caminho
+      // Orçamento -> Proposta -> Contrato. Fica entre "proposals" e
+      // "contracts" porque é exatamente aí que entra no percurso comercial —
+      // substitui a proposta e dispensa o contrato.
+      {
+        key: "direct-sale",
+        labelKey: "sidebar.directSale",
+        items: [
+          { to: "/direct-sales", icon: Receipt, labelKey: "sidebar.directSales", permission: "direct_sales.view" },
         ],
       },
       {
@@ -210,13 +226,20 @@ export const menuSections: MenuSection[] = [
     id: "inventory",
     icon: ShoppingCart,
     labelKey: "sidebar.inventory",
-    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/stocks"],
+    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/stocks", "/client-orders", "/stock-counts"],
     permissions: ["suppliers.view"],
     items: [
       { to: "/suppliers", icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view" },
       { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses" },
       { to: "/purchase-orders", icon: ShoppingCart, labelKey: "sidebar.purchaseOrders" },
       { to: "/stocks", icon: BarChart3, labelKey: "sidebar.stocks" },
+      // Fase 5.0F: só visível para quem tem inventory.view E client_contracts.view
+      // em simultâneo (decisão do plano — evita expor nomes/valores de contratos
+      // de clientes a quem só tem acesso a Inventário).
+      { to: "/client-orders", icon: ClipboardCheck, labelKey: "sidebar.clientOrders", permissions: ["inventory.view", "client_contracts.view"], requireAll: true },
+      // Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/
+      // inventory.edit controlam ações dentro da página, não a visibilidade do menu.
+      { to: "/stock-counts", icon: ListChecks, labelKey: "sidebar.stockCounts", permission: "inventory.view" },
     ],
   },
   {
@@ -235,12 +258,13 @@ export const menuSections: MenuSection[] = [
     id: "settings",
     icon: Settings,
     labelKey: "sidebar.settings",
-    paths: ["/settings", "/smtp-management", "/email-templates", "/trash"],
+    paths: ["/settings", "/smtp-management", "/email-templates", "/trash", "/send-failures"],
     permissions: [],
     items: [
       { to: "/settings", icon: Settings, labelKey: "sidebar.settings", permission: "settings.update" },
       { to: "/smtp-management", icon: Mail, labelKey: "sidebar.smtpManagement", permission: "smtp.view" },
       { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates", permission: "email_templates.view" },
+      { to: "/send-failures", icon: AlertTriangle, labelKey: "sidebar.sendFailures", permission: "scheduling.items.view" },
       { to: "/trash", icon: Trash2, labelKey: "sidebar.trash", permission: "settings.update" },
     ],
   },

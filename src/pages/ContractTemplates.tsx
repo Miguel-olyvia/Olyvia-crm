@@ -82,7 +82,7 @@ const ContractTemplates = () => {
   const [pendingSignatory, setPendingSignatory] = useState<Signatory | null>(null);
   
   const editorRef = useRef<RichTextEditorHandle>(null);
-  const { settings: docSettings } = useDocumentSettings();
+  const { settings: docSettings, save: saveDocSettings } = useDocumentSettings();
   const [liveDocSettings, setLiveDocSettings] = useState<typeof docSettings>(null);
   const [isVariableAssistantOpen, setIsVariableAssistantOpen] = useState(false);
 
@@ -474,6 +474,21 @@ const ContractTemplates = () => {
       toast.error(validation.error.issues[0].message);
       return;
     }
+    // O separador "Layout Global" (DocumentSettingsPanel) grava numa tabela
+    // à parte (organization_document_settings), com o seu próprio botão
+    // "Guardar Configurações" — mas fica sempre montado (forceMount), por
+    // isso liveDocSettings já existe mesmo que o utilizador nunca tenha
+    // aberto esse separador. Se ele mudou o logotipo ali e clicou só no
+    // "Guardar" principal (o caminho óbvio), essa alteração nunca era
+    // escrita em lado nenhum — voltava sempre o logotipo antigo. Só grava
+    // aqui quando liveDocSettings difere mesmo do que já estava, para não
+    // reescrever a cada gravação de template com um valor sem alterações.
+    if (liveDocSettings && JSON.stringify(liveDocSettings) !== JSON.stringify(docSettings)) {
+      saveDocSettings(liveDocSettings, {
+        onError: (e: any) => toast.error("Erro ao guardar o layout global: " + e.message),
+      });
+    }
+
     if (editingTemplate) {
       updateMutation.mutate({ ...formData, id: editingTemplate.id });
     } else {

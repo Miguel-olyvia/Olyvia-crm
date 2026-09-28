@@ -18,6 +18,7 @@ export interface CatalogItem {
   sku?: string;
   type: 'product' | 'service';
   retail_price: number;
+  cost_price: number;
 }
 
 interface CacheEntry {
@@ -141,13 +142,22 @@ export function useBundleCatalogItems(companyId: string | undefined) {
         const productIds = productsData.map(p => p.id);
 
         const priceMap = new Map<string, number>();
+        const costMap = new Map<string, number>();
         if (productIds.length > 0) {
-          const { data: pricesData } = await supabase
-            .from("product_prices")
-            .select("product_id, price")
-            .in("product_id", productIds)
-            .eq("price_type", "retail");
+          const [{ data: pricesData }, { data: costsData }] = await Promise.all([
+            supabase
+              .from("product_prices")
+              .select("product_id, price")
+              .in("product_id", productIds)
+              .eq("price_type", "retail"),
+            supabase
+              .from("product_prices")
+              .select("product_id, price")
+              .in("product_id", productIds)
+              .eq("price_type", "purchase"),
+          ]);
           (pricesData || []).forEach(p => priceMap.set(p.product_id, p.price));
+          (costsData || []).forEach(p => costMap.set(p.product_id, p.price));
         }
 
         fetchedItems = productsData.map(p => ({
@@ -156,6 +166,7 @@ export function useBundleCatalogItems(companyId: string | undefined) {
           sku: p.sku,
           type: 'product' as const,
           retail_price: priceMap.get(p.id) || 0,
+          cost_price: costMap.get(p.id) || 0,
         }));
         totalFetched = productsData.length;
       } else {
@@ -176,48 +187,66 @@ export function useBundleCatalogItems(companyId: string | undefined) {
           
           const servicesData = data || [];
           const serviceIds = servicesData.map(s => s.id);
-          
+
           // Batch load prices for all services at once
-          const { data: pricesData } = serviceIds.length > 0 
-            ? await supabase
-                .from("service_prices")
-                .select("service_id, price")
-                .in("service_id", serviceIds)
-                .eq("price_type", "retail")
-            : { data: [] };
-          
+          const [{ data: pricesData }, { data: costsData }] = serviceIds.length > 0
+            ? await Promise.all([
+                supabase
+                  .from("service_prices")
+                  .select("service_id, price")
+                  .in("service_id", serviceIds)
+                  .eq("price_type", "retail"),
+                supabase
+                  .from("service_prices")
+                  .select("service_id, price")
+                  .in("service_id", serviceIds)
+                  .eq("price_type", "purchase"),
+              ])
+            : [{ data: [] }, { data: [] }];
+
           const priceMap = new Map((pricesData || []).map(p => [p.service_id, p.price]));
-          
+          const costMap = new Map((costsData || []).map(p => [p.service_id, p.price]));
+
           fetchedItems = servicesData.map(s => ({
             id: s.id,
             name: s.name,
             type: 'service' as const,
             retail_price: priceMap.get(s.id) || 0,
+            cost_price: costMap.get(s.id) || 0,
           }));
           totalFetched = servicesData.length;
         } else {
           const { data, error } = await servicesQuery;
           if (error) throw error;
-          
+
           const servicesData = data || [];
           const serviceIds = servicesData.map(s => s.id);
-          
+
           // Batch load prices for all services at once
-          const { data: pricesData } = serviceIds.length > 0 
-            ? await supabase
-                .from("service_prices")
-                .select("service_id, price")
-                .in("service_id", serviceIds)
-                .eq("price_type", "retail")
-            : { data: [] };
-          
+          const [{ data: pricesData }, { data: costsData }] = serviceIds.length > 0
+            ? await Promise.all([
+                supabase
+                  .from("service_prices")
+                  .select("service_id, price")
+                  .in("service_id", serviceIds)
+                  .eq("price_type", "retail"),
+                supabase
+                  .from("service_prices")
+                  .select("service_id, price")
+                  .in("service_id", serviceIds)
+                  .eq("price_type", "purchase"),
+              ])
+            : [{ data: [] }, { data: [] }];
+
           const priceMap = new Map((pricesData || []).map(p => [p.service_id, p.price]));
-          
+          const costMap = new Map((costsData || []).map(p => [p.service_id, p.price]));
+
           fetchedItems = servicesData.map(s => ({
             id: s.id,
             name: s.name,
             type: 'service' as const,
             retail_price: priceMap.get(s.id) || 0,
+            cost_price: costMap.get(s.id) || 0,
           }));
           totalFetched = servicesData.length;
         }

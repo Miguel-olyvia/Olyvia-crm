@@ -7,12 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "@/lib/toast";
-import { Upload, Eye, Download, Trash2, Paperclip, FileText, Image, File, Loader2, Search, Filter } from "lucide-react";
+import { Upload, Eye, EyeOff, Download, Trash2, Paperclip, FileText, Image, File, Loader2, Search, Filter } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { generateSecureFileName } from "@/utils/secureFileUpload";
@@ -89,9 +90,12 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [contractFilter, setContractFilter] = useState("all");
-  const [uploadData, setUploadData] = useState({ contract_id: "", document_type: "other", notes: "" });
+  // visible_to_client arranca sempre a false: um anexo de contrato só vai para
+  // o portal se quem o anexa disser explicitamente que sim.
+  const [uploadData, setUploadData] = useState({ contract_id: "", document_type: "other", notes: "", visible_to_client: false });
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [togglingDocId, setTogglingDocId] = useState<string | null>(null);
 
   const { data: documents = [], isLoading } = useQuery({
     queryKey: ["all-contract-documents", activeCompany?.id],
@@ -101,7 +105,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
       if (contractIds.length === 0) return [];
       const { data, error } = await (supabase as any)
         .from("documents")
-        .select("id, file_name, file_url, file_type, file_size, document_type, notes, uploaded_by, created_at, entity_id, organization_id")
+        .select("id, file_name, file_url, file_type, file_size, document_type, notes, uploaded_by, created_at, entity_id, organization_id, visible_to_client")
         .eq("entity_type", "contract")
         .in("entity_id", contractIds)
         .order("created_at", { ascending: false });
@@ -201,6 +205,10 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
           document_type: uploadData.document_type,
           notes: uploadData.notes || null,
           uploaded_by: businessUser?.id ?? null,
+          // NUNCA deixar cair no DEFAULT da BD: documents.visible_to_client é
+          // DEFAULT true (para preservar os anexos antigos), logo omitir esta
+          // chave publicaria o ficheiro no portal do cliente sem ninguém pedir.
+          visible_to_client: uploadData.visible_to_client,
         });
       if (dbError) {
         await supabase.storage.from("documents").remove([filePath]);
@@ -211,12 +219,34 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
       toast.success("Documento anexado com sucesso");
       setIsUploadOpen(false);
       setSelectedFile(null);
-      setUploadData({ contract_id: "", document_type: "other", notes: "" });
+      setUploadData({ contract_id: "", document_type: "other", notes: "", visible_to_client: false });
     } catch (err: unknown) {
       toast.error(t("contracts.toast.attachError") + ": " + getUploadErrorMessage(err));
     } finally {
       setUploading(false);
     }
+  };
+
+  // Fechar o diálogo repõe a resposta por omissão (não enviar), para a escolha
+  // de um upload anterior não ficar "colada" no seguinte.
+  const handleUploadOpenChange = (open: boolean) => {
+    setIsUploadOpen(open);
+    if (!open) setUploadData(prev => ({ ...prev, visible_to_client: false }));
+  };
+
+  const handleToggleVisibility = async (doc: any) => {
+    const next = !doc.visible_to_client;
+    setTogglingDocId(doc.id);
+    const { error } = await (supabase as any)
+      .from("documents")
+      .update({ visible_to_client: next })
+      .eq("id", doc.id);
+    setTogglingDocId(null);
+    if (error) { toast.error("Não foi possível alterar a visibilidade do documento"); return; }
+    queryClient.invalidateQueries({ queryKey: ["all-contract-documents"] });
+    toast.success(next
+      ? "O cliente passa a ver este documento no portal"
+      : "O documento deixou de estar visível no portal do cliente");
   };
 
   const handleDelete = async (docId: string) => {
@@ -323,6 +353,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
               <TableRow>
                 <TableHead className="text-[10px] uppercase">Ficheiro</TableHead>
                 <TableHead className="text-[10px] uppercase">Tipo Documento</TableHead>
+                <TableHead className="text-[10px] uppercase">Portal</TableHead>
                 <TableHead className="text-[10px] uppercase">Contrato</TableHead>
                 <TableHead className="text-[10px] uppercase">Cliente</TableHead>
                 <TableHead className="text-[10px] uppercase">Tamanho</TableHead>
@@ -353,6 +384,33 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
                     </TableCell>
                     <TableCell>
                       <Badge className={`${typeInfo.color} text-[10px]`}>{typeInfo.label}</Badge>
+                    </TableCell>
+                    {/* Indicador + interruptor de visibilidade no portal. O
+                        próprio distintivo é o botão: evita mais um ícone "olho"
+                        nas acções, onde já significa "visualizar". */}
+                    <TableCell>
+                      <Badge
+                        role="button"
+                        tabIndex={0}
+                        aria-busy={togglingDocId === doc.id}
+                        onClick={() => handleToggleVisibility(doc)}
+                        onKeyDown={(e: React.KeyboardEvent) => {
+                          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleToggleVisibility(doc); }
+                        }}
+                        title={doc.visible_to_client
+                          ? "Retirar do portal — o cliente deixa de ver este documento"
+                          : "Enviar para o portal — o cliente passa a ver este documento"}
+                        className={`text-[10px] gap-1 min-h-[24px] cursor-pointer hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${doc.visible_to_client
+                          ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400"
+                          : "bg-muted text-muted-foreground"} ${togglingDocId === doc.id ? "opacity-50" : ""}`}
+                      >
+                        {togglingDocId === doc.id
+                          ? <Loader2 className="h-3 w-3 animate-spin" />
+                          : doc.visible_to_client
+                            ? <Eye className="h-3 w-3" />
+                            : <EyeOff className="h-3 w-3" />}
+                        {doc.visible_to_client ? "No portal" : "Interno"}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <span className="text-xs font-mono text-primary">{contract?.contract_number || "—"}</span>
@@ -393,7 +451,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
       )}
 
       {/* Upload Dialog */}
-      <Dialog open={isUploadOpen} onOpenChange={setIsUploadOpen}>
+      <Dialog open={isUploadOpen} onOpenChange={handleUploadOpenChange}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -462,9 +520,26 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
                 rows={2}
               />
             </div>
+            <div className="flex items-start gap-3 rounded-lg border p-3">
+              <Checkbox
+                id="contract-doc-visible-to-client"
+                className="mt-0.5"
+                checked={uploadData.visible_to_client}
+                onCheckedChange={checked => setUploadData({ ...uploadData, visible_to_client: checked === true })}
+              />
+              <div className="space-y-1">
+                <Label htmlFor="contract-doc-visible-to-client" className="cursor-pointer">
+                  Enviar para o portal do cliente
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Se marcar, o cliente passa a ver e a descarregar este documento no portal.
+                  Deixe desmarcado para anexos internos (ex.: faturas de fornecedor).
+                </p>
+              </div>
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsUploadOpen(false)} disabled={uploading}>Cancelar</Button>
+            <Button variant="outline" onClick={() => handleUploadOpenChange(false)} disabled={uploading}>Cancelar</Button>
             <Button onClick={handleUpload} disabled={!selectedFile || !uploadData.contract_id || uploading}>
               {uploading && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
               <Paperclip className="h-4 w-4 mr-1.5" />

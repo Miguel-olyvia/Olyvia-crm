@@ -30,9 +30,12 @@ jobs:
         run: |
           deno test --no-lock --allow-none -R \
             supabase/functions/_shared/orgScopedQuery.test.ts \
+            supabase/functions/_shared/__tests__/portalNotifyTarget.test.ts \
             supabase/functions/auto-schedule/index.test.ts \
             supabase/functions/create-user/index.test.ts \
             supabase/functions/send-schedule-invite/index.test.ts \
             supabase/functions/suggest-schedule-assignee/index.test.ts \
             supabase/functions/export-data/index.test.ts \
-            supabase/functions/generate-notifications/alertTiers.test.ts
+            supabase/functions/generate-notifications/alertTiers.test.ts \
+            supabase/functions/client-portal-action/index.test.ts \
+            supabase/functions/client-portal-action/sourceDrift.test.ts

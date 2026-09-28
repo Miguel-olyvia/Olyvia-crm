@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
+import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
+import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -24,51 +26,40 @@ const ClientPortalProposals = () => {
   const navigate = useNavigate();
   const [proposals, setProposals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  // Empresa ativa do portal — ver src/contexts/PortalCompanyContext.tsx.
+  const { activeOrg, isLoading: orgsLoading, isError: orgsError, hasMultiple } = usePortalCompany();
 
   useEffect(() => {
     let cancelled = false;
 
-    async function load(uid: string | null) {
-      if (!uid) {
-        if (!cancelled) { setProposals([]); setLoading(false); }
-        return;
-      }
+    const COLUMNS = "id, title, proposal_number, value, created_at, valid_until, status, organization_id, anew_organizations:anew_organizations!proposals_organization_id_fkey(name)";
+
+    async function load(org: PortalOrg) {
       if (!cancelled) setLoading(true);
 
-      // Get portal user info including entity_id and organization_id
-      const { data: portalUsers } = await supabase
-        .from("client_portal_users")
-        .select("proposal_id, entity_id, organization_id")
-        .eq("auth_user_id", uid);
-      if (cancelled) return;
-
-      if (!portalUsers || portalUsers.length === 0) {
+      if (!org.entityId && !org.proposalId) {
         if (!cancelled) { setProposals([]); setLoading(false); }
         return;
       }
 
-      const entityIds = [...new Set(portalUsers.map(p => p.entity_id).filter(Boolean))];
-      const organizationIds = [...new Set(portalUsers.map(p => p.organization_id).filter(Boolean))];
-      const directProposalIds = [...new Set(portalUsers.map(p => p.proposal_id).filter(Boolean))];
-
-      if ((entityIds.length === 0 || organizationIds.length === 0) && directProposalIds.length === 0) {
-        if (!cancelled) { setProposals([]); setLoading(false); }
-        return;
-      }
-
+      // Par (organização, entidade) da empresa ativa, com `.eq` + `.eq`. Antes
+      // eram dois `.in()` independentes sobre as listas de todas as empresas:
+      // como o entity_id pode diferir entre organizações, isso formava um
+      // produto cartesiano e podia mostrar combinações nunca concedidas.
       const [entityPropsRes, directPropsRes] = await Promise.all([
-        entityIds.length > 0 && organizationIds.length > 0
+        org.entityId
           ? supabase
               .from("proposals")
-              .select("id, title, proposal_number, value, created_at, valid_until, status, organization_id, anew_organizations:anew_organizations!proposals_organization_id_fkey(name)")
-              .in("organization_id", organizationIds)
-              .in("entity_id", entityIds)
+              .select(COLUMNS)
+              .eq("organization_id", org.organizationId)
+              .eq("entity_id", org.entityId)
           : Promise.resolve({ data: [] as any[] }),
-        directProposalIds.length > 0
+        // Coluna legada da linha desta empresa — é sempre desta organização.
+        org.proposalId
           ? supabase
               .from("proposals")
-              .select("id, title, proposal_number, value, created_at, valid_until, status, organization_id, anew_organizations:anew_organizations!proposals_organization_id_fkey(name)")
-              .in("id", directProposalIds)
+              .select(COLUMNS)
+              .eq("id", org.proposalId)
           : Promise.resolve({ data: [] as any[] }),
       ]);
       if (cancelled) return;
@@ -79,13 +70,17 @@ const ClientPortalProposals = () => {
       setLoading(false);
     }
 
-    supabase.auth.getUser().then(({ data: { user } }) => load(user?.id ?? null));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      load(session?.user?.id ?? null);
-    });
+    if (orgsLoading) return;
+    if (!activeOrg) {
+      setProposals([]);
+      setLoading(false);
+      return;
+    }
 
-    return () => { cancelled = true; subscription.unsubscribe(); };
-  }, []);
+    void load(activeOrg);
+
+    return () => { cancelled = true; };
+  }, [activeOrg, orgsLoading]);
 
   // M2: formatCurrency now imported from @/lib/utils
 
@@ -99,11 +94,19 @@ const ClientPortalProposals = () => {
           <div className="space-y-3">
             {[1, 2, 3].map(i => <Skeleton key={i} className="h-20 w-full" />)}
           </div>
+        ) : orgsError ? (
+          // Falha a carregar o âmbito: nunca apresentar como "não tem nada".
+          <PortalOrgsErrorState />
         ) : proposals.length === 0 ? (
           <Card>
             <CardContent className="py-8 text-center">
               <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
               <p className="text-muted-foreground">Não tem propostas disponíveis.</p>
+              {hasMultiple && (
+                <p className="text-xs text-muted-foreground mt-1.5">
+                  Se esperava ver outras, troque de empresa no seletor no topo da página.
+                </p>
+              )}
             </CardContent>
           </Card>
         ) : (

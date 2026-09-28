@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from "react";
 import { z } from "zod";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import Layout from "@/components/Layout";
@@ -32,19 +32,39 @@ import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
-import { Plus, Pencil, Trash2, Package, Download, Upload } from "lucide-react";
+import { Plus, Pencil, Trash2, Package, Download, Upload, ArrowLeftRight, History } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
+import { escapeIlike } from "@/lib/clientSearch";
+import StockMovementDialog from "@/components/inventory/StockMovementDialog";
+import StockMovementsHistoryDialog from "@/components/inventory/StockMovementsHistoryDialog";
+import CategorySubcategoryFilter, { UNCATEGORIZED_CATEGORY_VALUE } from "@/components/inventory/CategorySubcategoryFilter";
+import { useProductCategories } from "@/hooks/useProductCategories";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
-  products?: { name: string };
+  products?: { name: string; sku?: string | null; category_id?: string | null; subcategory_id?: string | null; product_categories?: { name: string } | null };
   warehouses?: { name: string };
 };
+
+const UNCATEGORIZED_LABEL = "Sem categoria";
+const UNCATEGORIZED_VALUE = UNCATEGORIZED_CATEGORY_VALUE;
+const PAGE_SIZE = 30;
+
+function getStockStatusCode(stock: Stock): "low" | "overstock" | "normal" {
+  // reorder_point/maximum_quantity = 0 means "never configured", not "reencomendar
+  // já" — sem isto, qualquer stock nunca configurado (0/0) aparecia sempre como
+  // "Stock Baixo", mesmo sem limiar nenhum definido. Alinhado com a mesma regra
+  // já usada no motor de alertas (generate-notifications, stock_low).
+  if (stock.reorder_point > 0 && stock.quantity <= stock.reorder_point) return "low";
+  if (stock.maximum_quantity > 0 && stock.quantity >= stock.maximum_quantity) return "overstock";
+  return "normal";
+}
 
 const stockSchema = z.object({
   product_id: z.string().trim().min(1, "O produto é obrigatório."),
@@ -59,17 +79,72 @@ const stockSchema = z.object({
   path: ["maximum_quantity"],
 });
 
+// PostgREST caps an unranged response at 1000 rows — a plain .select() silently
+// truncates for catalogs bigger than that. Paginates past that cap instead of
+// ever relying on a single unranged request. Same helper as PurchaseOrders.tsx.
+const fetchAllRows = async (
+  buildQuery: () => any
+): Promise<{ data: any[] | null; error: any }> => {
+  const PAGE = 1000;
+  const rows: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) return { data: null, error };
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+    from += PAGE;
+  }
+  return { data: rows, error: null };
+};
+
+// Reserva de stock para Encomendas Clientes assinadas (20261204310000). É por
+// produto ao nível da ORGANIZAÇÃO (todos os armazéns), não por armazém — por
+// isso "Livre" compara com o stock total da organização, não com a linha.
+interface ProductReservation {
+  qty_reserved: number;
+  qty_missing: number;
+  orders_count: number;
+}
+
+const toNum = (value: unknown): number => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const formatQty = (value: number): string =>
+  new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(value);
+
+// .in() vai no URL — lotes pequenos para não passar o limite com muitos ids.
+const RESERVATION_CHUNK = 150;
+
+const STOCK_SELECT = `
+  *,
+  products!inner(name, sku, category_id, subcategory_id, product_categories!category_id(name)),
+  warehouses(name)
+`;
+
 const Stocks = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [productsLoaded, setProductsLoaded] = useState(false);
   const [warehouses, setWarehouses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingStock, setEditingStock] = useState<Stock | null>(null);
+  const [movementDialogOpen, setMovementDialogOpen] = useState(false);
+  const [movementContext, setMovementContext] = useState<{ productId?: string; warehouseId?: string }>({});
+  const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
+  const [historyContext, setHistoryContext] = useState<{ productId: string; warehouseId: string; productName?: string; warehouseName?: string } | null>(null);
   const [formData, setFormData] = useState({
     product_id: "",
     warehouse_id: "",
@@ -81,36 +156,169 @@ const Stocks = () => {
   });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [showDeleted, setShowDeleted] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [subcategoryFilter, setSubcategoryFilter] = useState("all");
+  const [warehouseFilter, setWarehouseFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "low" | "normal" | "overstock">("all");
 
+  // Reservado/Livre por produto (rpc_get_product_stock_reservations) e stock
+  // total da organização (armazéns ativos) + nº de armazéns com o produto.
+  const [reservationByProduct, setReservationByProduct] = useState<Record<string, ProductReservation>>({});
+  const [orgStockByProduct, setOrgStockByProduct] = useState<Record<string, { total: number; warehouses: number }>>({});
+  const requestedReservationIdsRef = useRef<Set<string>>(new Set());
+  const reservationGenerationRef = useRef(0);
+
+  // Debounce search — server-side now, a network call per keystroke would be wasteful.
   useEffect(() => {
-    if (activeCompany?.id) {
-      fetchStocks();
-      fetchProducts();
-      fetchWarehouses();
-    }
-  }, [activeCompany?.id, showDeleted]);
+    const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
 
-  const fetchStocks = async () => {
-    if (!activeCompany?.id) return;
+  // Ids a comparar com products.category_id/subcategory_id (categoria + as suas
+  // subcategorias, ou só a subcategoria escolhida). Recalculado quando as
+  // categorias acabam de carregar — a chave entra nas dependências do reload.
+  const { resolveFilterIds } = useProductCategories();
+  const categoryFilterIds = useMemo(
+    () => (categoryFilter === UNCATEGORIZED_VALUE ? null : resolveFilterIds(categoryFilter, subcategoryFilter)),
+    [categoryFilter, subcategoryFilter, resolveFilterIds],
+  );
+  const categoryFilterKey = categoryFilterIds ? categoryFilterIds.join(",") : "";
+
+  // Stable refs so loadStocks doesn't need to be recreated (and re-wired to the
+  // IntersectionObserver) on every filter keystroke — same pattern as Products.tsx.
+  const filtersRef = useRef({
+    showDeleted,
+    debouncedSearchTerm,
+    categoryFilter,
+    subcategoryFilter,
+    categoryFilterIds,
+    warehouseFilter,
+    statusFilter,
+    activeCompanyId: activeCompany?.id,
+  });
+  useEffect(() => {
+    filtersRef.current = {
+      showDeleted,
+      debouncedSearchTerm,
+      categoryFilter,
+      subcategoryFilter,
+      categoryFilterIds,
+      warehouseFilter,
+      statusFilter,
+      activeCompanyId: activeCompany?.id,
+    };
+  }, [showDeleted, debouncedSearchTerm, categoryFilter, subcategoryFilter, categoryFilterIds, warehouseFilter, statusFilter, activeCompany?.id]);
+
+  // status (low/normal/overstock) compares two columns of the SAME row
+  // (quantity vs reorder_point / maximum_quantity) — PostgREST filters only
+  // compare a column to a literal value, not to another column, so this can't
+  // be pushed into the query without a DB view/generated column. While a
+  // status filter is active, we fall back to looping through every stock that
+  // matches the OTHER filters (still safely paginated, never a single
+  // unranged request) and filter status client-side, instead of the normal
+  // 30-at-a-time infinite scroll.
+  //
+  // Takes `status` explicitly (read from filtersRef by callers) rather than
+  // closing over the `statusFilter` state directly: loadAllForStatusFilter is a
+  // useCallback with a narrow dep array ([t, toast]), so a plain closure over
+  // `statusFilter` would go stale after the first status change.
+  const applyStatusFilter = (rows: Stock[], status: typeof statusFilter) =>
+    status === "all" ? rows : rows.filter((s) => getStockStatusCode(s) === status);
+
+  const buildStocksQuery = (filters: typeof filtersRef.current) => {
+    let query = supabase
+      .from("stocks")
+      .select(STOCK_SELECT)
+      .eq("organization_id", filters.activeCompanyId);
+
+    query = filters.showDeleted ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
+
+    if (filters.warehouseFilter !== "all") {
+      query = query.eq("warehouse_id", filters.warehouseFilter);
+    }
+    if (filters.categoryFilter === UNCATEGORIZED_VALUE) {
+      query = (query as any).is("products.category_id", null);
+    } else if (filters.categoryFilterIds && filters.categoryFilterIds.length > 0) {
+      // OR sobre o recurso embebido products!inner: com referencedTable o
+      // supabase-js envia `products.or=(...)`, que o PostgREST aplica dentro do
+      // embed; como o embed é !inner, as linhas de stock sem produto a
+      // corresponder ficam de fora (igual ao .eq("products.category_id") de
+      // antes). category_id OU subcategory_id porque há produtos com o id da
+      // subcategoria guardado em category_id.
+      const ids = filters.categoryFilterIds.join(",");
+      query = (query as any).or(`category_id.in.(${ids}),subcategory_id.in.(${ids})`, { referencedTable: "products" });
+    }
+    if (filters.debouncedSearchTerm.trim()) {
+      query = (query as any).ilike("products.name", `%${escapeIlike(filters.debouncedSearchTerm.trim())}%`);
+    }
+    return query;
+  };
+
+  const loadStocks = useCallback(async (pageNum: number, reset: boolean) => {
+    const filters = filtersRef.current;
+    if (!filters.activeCompanyId) return;
+
+    if (reset) {
+      setLoading(true);
+      setStocks([]);
+    } else {
+      setLoadingMore(true);
+    }
 
     try {
-      let query = supabase
-        .from("stocks")
-        .select(`
-          *,
-          products(name),
-          warehouses(name)
-        `)
-        .eq("organization_id", activeCompany.id)
-        .order("created_at", { ascending: false });
-
-      // Soft-deleted stocks are hidden from the normal list by default.
-      query = showDeleted ? query.not("deleted_at", "is", null) : query.is("deleted_at", null);
+      const from = pageNum * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const query = buildStocksQuery(filters)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to);
 
       const { data, error } = await query;
-
       if (error) throw error;
-      setStocks(data as Stock[] || []);
+      const newStocks = (data as Stock[]) || [];
+
+      if (reset) {
+        setStocks(newStocks);
+      } else {
+        setStocks((prev) => {
+          const existingIds = new Set(prev.map((s) => s.id));
+          return [...prev, ...newStocks.filter((s) => !existingIds.has(s.id))];
+        });
+      }
+      setHasMore(newStocks.length === PAGE_SIZE);
+      setPage(pageNum);
+    } catch (error: any) {
+      toast({
+        title: t('stocks.toast.loadError'),
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [t, toast]);
+
+  // Full loop (still batched at 1000/req, never a single unranged request) across
+  // every stock matching search/category/warehouse — only used while a status
+  // filter is active, since status can't be filtered server-side. See comment
+  // on applyStatusFilter above.
+  const loadAllForStatusFilter = useCallback(async () => {
+    const filters = filtersRef.current;
+    if (!filters.activeCompanyId) return;
+
+    setLoading(true);
+    setStocks([]);
+    try {
+      const { data, error } = await fetchAllRows(() =>
+        buildStocksQuery(filters).order("created_at", { ascending: false }).order("id", { ascending: true })
+      );
+      if (error) throw error;
+      setStocks(applyStatusFilter((data as Stock[]) || [], filters.statusFilter));
+      setHasMore(false);
+      setPage(0);
     } catch (error: any) {
       captureFlowError(error, "stock-lifecycle");
       toast({
@@ -121,32 +329,135 @@ const Stocks = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [t, toast]);
 
-  const fetchProducts = async () => {
-    if (!activeCompany?.id) return;
-    
-    try {
-      const { data, error } = await (supabase as any)
-        .from("products")
-        .select("id, name")
-        .eq("organization_id", activeCompany.id)
-        .order("name");
-
-      if (error) throw error;
-      setProducts(data || []);
-    } catch (error: any) {
-      toast({
-        title: t('stocks.toast.loadProductsError'),
-        description: error.message,
-        variant: "destructive",
-      });
+  const refresh = useCallback(() => {
+    if (statusFilter !== "all") {
+      loadAllForStatusFilter();
+    } else {
+      setHasMore(true);
+      loadStocks(0, true);
     }
-  };
+  }, [statusFilter, loadAllForStatusFilter, loadStocks]);
+
+  // Reload from scratch whenever a filter changes.
+  useEffect(() => {
+    if (!activeCompany?.id) return;
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id, showDeleted, debouncedSearchTerm, categoryFilter, subcategoryFilter, categoryFilterKey, warehouseFilter, statusFilter]);
+
+  // Infinite scroll observer — inert while a status filter is active (hasMore is
+  // false in that mode, since loadAllForStatusFilter already loaded everything).
+  useEffect(() => {
+    if (loading) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore) {
+          loadStocks(page + 1, false);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+    observerRef.current = observer;
+    return () => observerRef.current?.disconnect();
+  }, [loading, hasMore, loadingMore, page, loadStocks]);
+
+  // Reservas dos produtos visíveis — só os ainda não pedidos, em lotes. Uma
+  // listagem reiniciada (filtros, refresh depois de um movimento, outra
+  // empresa) limpa a cache, para os valores refletirem o estado atual. Falhar
+  // isto nunca parte o ecrã: as colunas mostram "-".
+  useEffect(() => {
+    const orgId = activeCompany?.id;
+    if (!orgId) return;
+    if (stocks.length === 0) {
+      reservationGenerationRef.current += 1;
+      requestedReservationIdsRef.current = new Set();
+      setReservationByProduct({});
+      setOrgStockByProduct({});
+      return;
+    }
+    const missing = Array.from(new Set(stocks.map((s) => s.product_id)))
+      .filter((id) => id && !requestedReservationIdsRef.current.has(id));
+    if (missing.length === 0) return;
+    missing.forEach((id) => requestedReservationIdsRef.current.add(id));
+    const generation = reservationGenerationRef.current;
+
+    (async () => {
+      try {
+        const nextReservations: Record<string, ProductReservation> = {};
+        const nextOrgStock: Record<string, { total: number; warehouses: number }> = {};
+        for (let i = 0; i < missing.length; i += RESERVATION_CHUNK) {
+          const chunk = missing.slice(i, i + RESERVATION_CHUNK);
+          const { data, error } = await (supabase as any).rpc("rpc_get_product_stock_reservations", {
+            p_organization_id: orgId,
+            p_product_ids: chunk,
+          });
+          if (error) throw error;
+          chunk.forEach((id) => { nextReservations[id] = { qty_reserved: 0, qty_missing: 0, orders_count: 0 }; });
+          ((data as any[]) || []).forEach((r) => {
+            if (!r?.product_id) return;
+            nextReservations[r.product_id] = {
+              qty_reserved: toNum(r.qty_reserved),
+              qty_missing: toNum(r.qty_missing),
+              orders_count: toNum(r.orders_count),
+            };
+          });
+
+          const { data: stockRows, error: stockError } = await fetchAllRows(() =>
+            (supabase as any)
+              .from("stocks")
+              .select("id, product_id, quantity, warehouses!inner(deleted_at)")
+              .eq("organization_id", orgId)
+              .is("deleted_at", null)
+              .is("warehouses.deleted_at", null)
+              .in("product_id", chunk)
+              .order("id", { ascending: true })
+          );
+          if (stockError) throw stockError;
+          chunk.forEach((id) => { nextOrgStock[id] = { total: 0, warehouses: 0 }; });
+          (stockRows || []).forEach((row: any) => {
+            const entry = nextOrgStock[row.product_id] || { total: 0, warehouses: 0 };
+            entry.total += toNum(row.quantity);
+            entry.warehouses += 1;
+            nextOrgStock[row.product_id] = entry;
+          });
+        }
+        if (generation !== reservationGenerationRef.current) return;
+        setReservationByProduct((prev) => ({ ...prev, ...nextReservations }));
+        setOrgStockByProduct((prev) => ({ ...prev, ...nextOrgStock }));
+      } catch (error) {
+        console.warn("[Stocks] não foi possível obter as reservas de stock", error);
+      }
+    })();
+  }, [stocks, activeCompany?.id]);
+
+  // Group the currently loaded stocks by the product's category, sorted
+  // alphabetically (uncategorized last); products within a category sorted
+  // alphabetically too. Purely a render grouping — grows incrementally as more
+  // pages load, same as any infinite-scroll list.
+  const groupedStocks = useMemo(() => {
+    const groups = new Map<string, Stock[]>();
+    for (const stock of stocks) {
+      const categoryName = stock.products?.product_categories?.name || UNCATEGORIZED_LABEL;
+      const list = groups.get(categoryName) || [];
+      list.push(stock);
+      groups.set(categoryName, list);
+    }
+    for (const list of groups.values()) {
+      list.sort((a, b) => (a.products?.name || "").localeCompare(b.products?.name || ""));
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === UNCATEGORIZED_LABEL) return 1;
+      if (b === UNCATEGORIZED_LABEL) return -1;
+      return a.localeCompare(b);
+    });
+  }, [stocks]);
 
   const fetchWarehouses = async () => {
     if (!activeCompany?.id) return;
-    
+
     try {
       const { data, error } = await supabase
         .from("warehouses")
@@ -165,6 +476,45 @@ const Stocks = () => {
       });
     }
   };
+
+  useEffect(() => {
+    if (activeCompany?.id) {
+      fetchWarehouses();
+      setProductsLoaded(false);
+      setProducts([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id]);
+
+  // Products (for the create/edit dialog's <Select> and the CSV import's
+  // name-matching) — only needed when a dialog that uses them is open, not on
+  // every visit to the page. Paginated to avoid truncating above 1000 products.
+  useEffect(() => {
+    if (!activeCompany?.id || productsLoaded || !(dialogOpen || importDialogOpen)) return;
+
+    (async () => {
+      try {
+        const { data, error } = await fetchAllRows(() =>
+          (supabase as any)
+            .from("products")
+            .select("id, name")
+            .eq("organization_id", activeCompany.id)
+            .order("name", { ascending: true })
+            .order("id", { ascending: true })
+        );
+        if (error) throw error;
+        setProducts(data || []);
+        setProductsLoaded(true);
+      } catch (error: any) {
+        toast({
+          title: t('stocks.toast.loadProductsError'),
+          description: error.message,
+          variant: "destructive",
+        });
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id, dialogOpen, importDialogOpen, productsLoaded]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -228,7 +578,7 @@ const Stocks = () => {
 
       setDialogOpen(false);
       resetForm();
-      fetchStocks();
+      refresh();
     } catch (error: any) {
       captureFlowError(error, "stock-lifecycle");
       toast({
@@ -251,7 +601,7 @@ const Stocks = () => {
         description: t('stocks.toast.deleteSuccessDesc'),
       });
 
-      fetchStocks();
+      refresh();
     } catch (error: any) {
       captureFlowError(error, "stock-lifecycle");
       toast({
@@ -269,7 +619,7 @@ const Stocks = () => {
 
       toast({ title: t('stocks.toast.restoreSuccess') || "Stock restaurado" });
 
-      fetchStocks();
+      refresh();
     } catch (error: any) {
       captureFlowError(error, "stock-lifecycle");
       toast({
@@ -309,42 +659,70 @@ const Stocks = () => {
   };
 
   const getStockStatus = (stock: Stock) => {
-    if (stock.quantity <= stock.reorder_point) {
-      return <Badge variant="destructive">{t('stocks.status.lowStock')}</Badge>;
-    } else if (stock.quantity >= stock.maximum_quantity) {
-      return <Badge variant="outline">{t('stocks.status.overstock')}</Badge>;
-    } else {
-      return <Badge variant="default">{t('stocks.status.normal')}</Badge>;
-    }
+    const code = getStockStatusCode(stock);
+    if (code === "low") return <Badge variant="destructive">{t('stocks.status.lowStock')}</Badge>;
+    if (code === "overstock") return <Badge variant="outline">{t('stocks.status.overstock')}</Badge>;
+    return <Badge variant="default">{t('stocks.status.normal')}</Badge>;
   };
 
-  const handleExport = () => {
-    downloadStandardXlsx({
-      sheetName: "Stocks",
-      columns: [
-        { key: "product", header: t('stocks.table.product'), width: 30 },
-        { key: "warehouse", header: t('stocks.table.warehouse'), width: 26 },
-        { key: "quantity", header: t('stocks.table.quantity'), type: "number", width: 14 },
-        { key: "minimum", header: t('stocks.form.minimumQuantity'), type: "number", width: 14 },
-        { key: "maximum", header: t('stocks.form.maximumQuantity'), type: "number", width: 14 },
-        { key: "reorderPoint", header: t('stocks.form.reorderPoint'), type: "number", width: 16 },
-        { key: "location", header: t('stocks.table.location'), width: 24 },
-      ],
-      rows: stocks.map((stock) => ({
-        product: stock.products?.name,
-        warehouse: stock.warehouses?.name,
-        quantity: stock.quantity,
-        minimum: stock.minimum_quantity,
-        maximum: stock.maximum_quantity,
-        reorderPoint: stock.reorder_point,
-        location: stock.location,
-      })),
-    }, `stocks_${new Date().toISOString().slice(0, 10)}.xlsx`);
-    
-    toast({
-      title: t('stocks.toast.exportSuccess'),
-      description: t('stocks.toast.exportSuccessDesc'),
-    });
+  // Exports every stock matching the current filters, not just what's been
+  // paginated into the browser so far — loops in batches of 1000 (fetchAllRows),
+  // same fix already applied to Products.tsx's export.
+  const handleExport = async () => {
+    try {
+      const filters = filtersRef.current;
+      const { data, error } = await fetchAllRows(() =>
+        buildStocksQuery(filters).order("created_at", { ascending: false }).order("id", { ascending: true })
+      );
+      if (error) throw error;
+      const rows = applyStatusFilter((data as Stock[]) || [], filters.statusFilter);
+
+      if (rows.length === 0) {
+        toast({
+          title: t('stocks.toast.error'),
+          description: "Não existem stocks para exportar com os filtros atuais",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      downloadStandardXlsx({
+        sheetName: "Stocks",
+        columns: [
+          { key: "category", header: "Categoria", width: 22 },
+          { key: "reference", header: "Referência", width: 18 },
+          { key: "product", header: t('stocks.table.product'), width: 30 },
+          { key: "warehouse", header: t('stocks.table.warehouse'), width: 26 },
+          { key: "quantity", header: t('stocks.table.quantity'), type: "number", width: 14 },
+          { key: "minimum", header: t('stocks.form.minimumQuantity'), type: "number", width: 14 },
+          { key: "maximum", header: t('stocks.form.maximumQuantity'), type: "number", width: 14 },
+          { key: "reorderPoint", header: t('stocks.form.reorderPoint'), type: "number", width: 16 },
+          { key: "location", header: t('stocks.table.location'), width: 24 },
+        ],
+        rows: rows.map((stock) => ({
+          category: stock.products?.product_categories?.name || UNCATEGORIZED_LABEL,
+          reference: stock.products?.sku,
+          product: stock.products?.name,
+          warehouse: stock.warehouses?.name,
+          quantity: stock.quantity,
+          minimum: stock.minimum_quantity,
+          maximum: stock.maximum_quantity,
+          reorderPoint: stock.reorder_point,
+          location: stock.location,
+        })),
+      }, `stocks_${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+      toast({
+        title: t('stocks.toast.exportSuccess'),
+        description: t('stocks.toast.exportSuccessDesc'),
+      });
+    } catch (error: any) {
+      toast({
+        title: t('stocks.toast.error'),
+        description: error.message,
+        variant: "destructive",
+      });
+    }
   };
 
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -358,19 +736,22 @@ const Stocks = () => {
       if (!businessUserId) throw new Error("Business user not resolved");
       const text = await file.text();
       const lines = text.split(/\r?\n/).filter(line => line.trim());
-      
+
       if (lines.length < 2) {
         throw new Error(t('stocks.toast.emptyFile'));
       }
 
       // Pre-check existing (product_id, warehouse_id) pairs already tracked for this
       // org, so a collision can be skipped/reported per-row instead of failing the
-      // whole batch atomically.
-      const { data: existingStockPairs, error: existingStockPairsError } = await supabase
-        .from("stocks")
-        .select("product_id, warehouse_id")
-        .eq("organization_id", activeCompany.id)
-        .is("deleted_at", null);
+      // whole batch atomically. Paginated — a plain unranged .select() would
+      // silently truncate above 1000 existing stock rows.
+      const { data: existingStockPairs, error: existingStockPairsError } = await fetchAllRows(() =>
+        supabase
+          .from("stocks")
+          .select("product_id, warehouse_id")
+          .eq("organization_id", activeCompany.id)
+          .is("deleted_at", null)
+      );
 
       if (existingStockPairsError) throw existingStockPairsError;
 
@@ -474,7 +855,7 @@ const Stocks = () => {
       });
 
       setImportDialogOpen(false);
-      fetchStocks();
+      refresh();
     } catch (error: any) {
       captureFlowError(error, "record-export-import");
       toast({
@@ -483,7 +864,7 @@ const Stocks = () => {
         variant: "destructive",
       });
     }
-    
+
     e.target.value = '';
   };
 
@@ -554,6 +935,17 @@ const Stocks = () => {
                   </div>
                 </DialogContent>
               </Dialog>
+            </PermissionGate>
+            <PermissionGate permission="stocks.edit">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setMovementContext({});
+                  setMovementDialogOpen(true);
+                }}
+              >
+                <ArrowLeftRight className="mr-2 h-4 w-4" /> Registar movimento
+              </Button>
             </PermissionGate>
             <PermissionGate permission="stocks.create">
               <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -711,6 +1103,64 @@ const Stocks = () => {
           </div>
         </div>
 
+        <div className="flex flex-wrap gap-3 items-center">
+          <Input
+            placeholder="Pesquisar por produto..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="max-w-xs"
+          />
+          <CategorySubcategoryFilter
+            categoryId={categoryFilter}
+            subcategoryId={subcategoryFilter}
+            onChange={({ categoryId, subcategoryId }) => {
+              setCategoryFilter(categoryId);
+              setSubcategoryFilter(subcategoryId);
+            }}
+            includeUncategorized
+          />
+          <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder={t('stocks.table.warehouse')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os armazéns</SelectItem>
+              {warehouses.map((warehouse) => (
+                <SelectItem key={warehouse.id} value={warehouse.id}>{warehouse.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder={t('stocks.table.status')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os estados</SelectItem>
+              <SelectItem value="low">{t('stocks.status.lowStock')}</SelectItem>
+              <SelectItem value="normal">{t('stocks.status.normal')}</SelectItem>
+              <SelectItem value="overstock">{t('stocks.status.overstock')}</SelectItem>
+            </SelectContent>
+          </Select>
+          {(searchTerm || categoryFilter !== "all" || subcategoryFilter !== "all" || warehouseFilter !== "all" || statusFilter !== "all") && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearchTerm("");
+                setCategoryFilter("all");
+                setSubcategoryFilter("all");
+                setWarehouseFilter("all");
+                setStatusFilter("all");
+              }}
+            >
+              Limpar filtros
+            </Button>
+          )}
+          <span className="text-sm text-muted-foreground ml-auto">
+            {stocks.length} carregado{stocks.length === 1 ? "" : "s"}
+          </span>
+        </div>
+
         <div className="border rounded-lg">
           <Table>
             <TableHeader>
@@ -719,6 +1169,22 @@ const Stocks = () => {
                 <TableHead>{t('stocks.table.warehouse')}</TableHead>
                 <TableHead>{t('stocks.table.location')}</TableHead>
                 <TableHead className="text-right">{t('stocks.table.quantity')}</TableHead>
+                <TableHead className="text-right">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-help underline decoration-dotted underline-offset-4">{t('stocks.table.reserved')}</span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">{t('stocks.table.reservedHint')}</TooltipContent>
+                  </Tooltip>
+                </TableHead>
+                <TableHead className="text-right">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-help underline decoration-dotted underline-offset-4">{t('stocks.table.free')}</span>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs">{t('stocks.table.freeHint')}</TooltipContent>
+                  </Tooltip>
+                </TableHead>
                 <TableHead className="text-right">{t('stocks.table.min')}</TableHead>
                 <TableHead className="text-right">{t('stocks.table.max')}</TableHead>
                 <TableHead className="text-right">{t('stocks.table.reorder')}</TableHead>
@@ -729,83 +1195,210 @@ const Stocks = () => {
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center">
+                  <TableCell colSpan={11} className="text-center">
                     {t('stocks.loading')}
                   </TableCell>
                 </TableRow>
               ) : stocks.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={9} className="text-center">
+                  <TableCell colSpan={11} className="text-center">
                     {t('stocks.noStocks')}
                   </TableCell>
                 </TableRow>
               ) : (
-                stocks.map((stock) => (
-                  <TableRow key={stock.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Package className="w-4 h-4 text-muted-foreground" />
-                        {stock.products?.name}
-                      </div>
-                    </TableCell>
-                    <TableCell>{stock.warehouses?.name}</TableCell>
-                    <TableCell>{stock.location || "-"}</TableCell>
-                    <TableCell className="text-right">
-                      {stock.quantity}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {stock.minimum_quantity}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {stock.maximum_quantity}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {stock.reorder_point}
-                    </TableCell>
-                    <TableCell>{getStockStatus(stock)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {showDeleted ? (
-                          <PermissionGate permission="stocks.delete">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleRestore(stock.id)}
-                            >
-                              {t('stocks.restore') || 'Restaurar'}
-                            </Button>
-                          </PermissionGate>
-                        ) : (
-                          <>
-                            <PermissionGate permission="stocks.edit">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => openEditDialog(stock)}
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                            <PermissionGate permission="stocks.delete">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDelete(stock.id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                groupedStocks.map(([categoryName, categoryStocks]) => (
+                  <Fragment key={categoryName}>
+                    <TableRow className="bg-muted/50 hover:bg-muted/50">
+                      <TableCell colSpan={11} className="font-semibold text-sm">
+                        {categoryName} <span className="font-normal text-muted-foreground">({categoryStocks.length})</span>
+                      </TableCell>
+                    </TableRow>
+                    {categoryStocks.map((stock) => (
+                      <TableRow key={stock.id}>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2 pl-4">
+                            <Package className="w-4 h-4 text-muted-foreground" />
+                            {stock.products?.name}
+                          </div>
+                        </TableCell>
+                        <TableCell>{stock.warehouses?.name}</TableCell>
+                        <TableCell>{stock.location || "-"}</TableCell>
+                        <TableCell className="text-right">
+                          {stock.quantity}
+                        </TableCell>
+                        {(() => {
+                          // Reserva ao nível da organização: igual em todas as
+                          // linhas (armazéns) do mesmo produto.
+                          const res = reservationByProduct[stock.product_id];
+                          const org = orgStockByProduct[stock.product_id];
+                          if (showDeleted || !res || !org) {
+                            return (
+                              <>
+                                <TableCell className="text-right text-muted-foreground">-</TableCell>
+                                <TableCell className="text-right text-muted-foreground">-</TableCell>
+                              </>
+                            );
+                          }
+                          const free = Math.round((org.total - res.qty_reserved) * 1e6) / 1e6;
+                          const multiWarehouse = org.warehouses > 1;
+                          return (
+                            <>
+                              <TableCell className="text-right">
+                                {res.qty_reserved > 0 ? (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="cursor-help">{formatQty(res.qty_reserved)}</span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      {t('stocks.table.reservedTooltip', { count: res.orders_count })}
+                                      {res.qty_missing > 0 && (
+                                        <> {t('stocks.table.reservedMissing', { qty: formatQty(res.qty_missing) })}</>
+                                      )}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ) : (
+                                  <span className="text-muted-foreground">0</span>
+                                )}
+                              </TableCell>
+                              <TableCell className={`text-right ${free < 0 ? "text-destructive font-medium" : ""}`}>
+                                {multiWarehouse ? (
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <span className="cursor-help">
+                                        {formatQty(free)}
+                                        <span className="ml-1 text-xs font-normal text-muted-foreground">{t('stocks.table.orgSuffix')}</span>
+                                      </span>
+                                    </TooltipTrigger>
+                                    <TooltipContent className="max-w-xs">
+                                      {t('stocks.table.freeOrgTooltip', {
+                                        total: formatQty(org.total),
+                                        reserved: formatQty(res.qty_reserved),
+                                        count: org.warehouses,
+                                      })}
+                                    </TooltipContent>
+                                  </Tooltip>
+                                ) : (
+                                  formatQty(free)
+                                )}
+                              </TableCell>
+                            </>
+                          );
+                        })()}
+                        <TableCell className="text-right">
+                          {stock.minimum_quantity}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {stock.maximum_quantity}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {stock.reorder_point}
+                        </TableCell>
+                        <TableCell>{getStockStatus(stock)}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            {showDeleted ? (
+                              <PermissionGate permission="stocks.delete">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleRestore(stock.id)}
+                                >
+                                  {t('stocks.restore') || 'Restaurar'}
+                                </Button>
+                              </PermissionGate>
+                            ) : (
+                              <>
+                                <PermissionGate permission="stocks.edit">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    title="Registar movimento"
+                                    onClick={() => {
+                                      setMovementContext({ productId: stock.product_id, warehouseId: stock.warehouse_id });
+                                      setMovementDialogOpen(true);
+                                    }}
+                                  >
+                                    <ArrowLeftRight className="w-4 h-4" />
+                                  </Button>
+                                </PermissionGate>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  title="Ver histórico de movimentos"
+                                  onClick={() => {
+                                    setHistoryContext({
+                                      productId: stock.product_id,
+                                      warehouseId: stock.warehouse_id,
+                                      productName: stock.products?.name,
+                                      warehouseName: stock.warehouses?.name,
+                                    });
+                                    setHistoryDialogOpen(true);
+                                  }}
+                                >
+                                  <History className="w-4 h-4" />
+                                </Button>
+                                <PermissionGate permission="stocks.edit">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => openEditDialog(stock)}
+                                  >
+                                    <Pencil className="w-4 h-4" />
+                                  </Button>
+                                </PermissionGate>
+                                <PermissionGate permission="stocks.delete">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleDelete(stock.id)}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </PermissionGate>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </Fragment>
                 ))
               )}
             </TableBody>
           </Table>
+          {/* Infinite scroll loader — inert (never shows "a carregar mais") while a
+              status filter is active, since hasMore is false in that mode. */}
+          <div ref={loadMoreRef} className="py-4 flex justify-center">
+            {loadingMore && (
+              <div className="text-sm text-muted-foreground">{t('stocks.loadingMore') || 'A carregar mais...'}</div>
+            )}
+            {!hasMore && !loading && stocks.length > 0 && (
+              <div className="text-sm text-muted-foreground">{t('stocks.allLoaded') || 'Todos carregados'}</div>
+            )}
+          </div>
         </div>
       </div>
+
+      <StockMovementDialog
+        open={movementDialogOpen}
+        onOpenChange={setMovementDialogOpen}
+        organizationId={activeCompany.id}
+        warehouses={warehouses}
+        defaultProductId={movementContext.productId}
+        defaultWarehouseId={movementContext.warehouseId}
+        onSuccess={refresh}
+      />
+
+      {historyContext && (
+        <StockMovementsHistoryDialog
+          open={historyDialogOpen}
+          onOpenChange={setHistoryDialogOpen}
+          productId={historyContext.productId}
+          warehouseId={historyContext.warehouseId}
+          productName={historyContext.productName}
+          warehouseName={historyContext.warehouseName}
+        />
+      )}
     </>
   );
 };

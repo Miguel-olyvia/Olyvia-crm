@@ -34,6 +34,12 @@ import { leadEditGeneralFieldsSchema, leadEditNotesSchema } from "@/lib/validati
 import { linkEntityFiscalEntity } from "@/utils/orgFiscalEntity";
 import { linkEntityAddress, linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { checkNifCollisionOnEdit } from "@/lib/duplicateBlockingRule";
+import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
+import {
+  isLeadStageTransitionAllowed,
+  LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+  leadStageTransitionBlockedMessage,
+} from "@/lib/leads/stageTransitionGuard";
 
 interface Lead {
   id: string;
@@ -172,7 +178,15 @@ export function AnewLeadEditDialog({
 }: LeadEditDialogProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
-  
+
+  // Restrição de transições desenhada no diagrama de fluxo. Só se aplica a
+  // mudanças feitas por utilizadores — é exatamente o caso deste diálogo.
+  const {
+    stages: pipelineStages,
+    enforceStageTransitions,
+    transitions: stageTransitions,
+  } = useLeadPipelineRules(companyId);
+
   const [fieldDefs, setFieldDefs] = useState<LeadDialogFieldDefinition[]>([]);
   const [fieldValues, setFieldValues] = useState<Record<string, any>>({});
   const [status, setStatus] = useState("new");
@@ -311,14 +325,23 @@ export function AnewLeadEditDialog({
   const resolveWorkflowStageId = async (statusValue: string) => {
     const { data, error } = await supabase
       .from("lead_workflow_stages")
-      .select("id, organization_id")
-      .eq("name", statusValue)
+      .select("id, organization_id, name, is_rejection")
       .or(`organization_id.eq.${companyId},organization_id.is.null`);
 
     if (error) throw error;
 
-    const organizationStage = data?.find((stage) => stage.organization_id === companyId);
-    return organizationStage?.id || data?.find((stage) => stage.organization_id === null)?.id || null;
+    // "lost" e "rejected" são tratados como o mesmo estado terminal em todo o
+    // resto da app (contadores, filtros, bucket "Lost" do Kanban), mas nenhuma
+    // org tem um estágio literalmente chamado "lost" — só "rejected". Usar
+    // is_rejection em vez de igualdade literal de name evita que a resolução
+    // falhe silenciosamente e deixe workflow_stage_id por atualizar.
+    const isLostLikeStatus = statusValue === "lost" || statusValue === "rejected";
+    const candidates = (data ?? []).filter(
+      (stage) => stage.name === statusValue || (isLostLikeStatus && stage.is_rejection)
+    );
+
+    const organizationStage = candidates.find((stage) => stage.organization_id === companyId);
+    return organizationStage?.id || candidates.find((stage) => stage.organization_id === null)?.id || null;
   };
 
   const handleSave = async () => {
@@ -368,7 +391,27 @@ export function AnewLeadEditDialog({
 
       let workflowStageId = lead.workflow_stage_id || null;
       if (statusChanged) {
+        // O destino só é conhecido depois de resolvido o estágio, por isso a
+        // guarda corre imediatamente a seguir — e sempre ANTES de qualquer
+        // escrita (a RPC rpc_update_lead só é chamada mais abaixo).
         workflowStageId = await resolveWorkflowStageId(status);
+
+        if (!isLeadStageTransitionAllowed({
+          enforce: enforceStageTransitions,
+          transitions: stageTransitions,
+          fromStageId: lead.workflow_stage_id ?? null,
+          toStageId: workflowStageId,
+        })) {
+          toast({
+            title: LEAD_STAGE_TRANSITION_BLOCKED_TITLE,
+            description: leadStageTransitionBlockedMessage(
+              pipelineStages.find(s => s.id === lead.workflow_stage_id)?.label,
+              pipelineStages.find(s => s.id === workflowStageId)?.label,
+            ),
+            variant: "destructive",
+          });
+          return; // o finally envolvente limpa o `saving`
+        }
       }
 
       // Derive the same entity display-name fields the FE used to write

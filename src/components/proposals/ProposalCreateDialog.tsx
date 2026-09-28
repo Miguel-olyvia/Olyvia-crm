@@ -29,6 +29,7 @@ import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
 import { ProposalManualItemsEditor } from "@/components/pipeline/ProposalManualItemsEditor";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog";
+import { proposalTitleFromTemplate } from "@/lib/proposalTitleFromTemplate";
 import { getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 
 /**
@@ -796,7 +797,21 @@ export function ProposalCreateDialog({
               <Label className="flex items-center gap-2">
                 <Palette className="h-4 w-4" /> Template de Proposta
               </Label>
-              <Select value={formData.template_id} onValueChange={(value) => setFormData({ ...formData, template_id: value === "none" ? "" : value })}>
+              <Select
+                value={formData.template_id}
+                onValueChange={(value) => {
+                  const nextId = value === "none" ? "" : value;
+                  setFormData((prev) => ({
+                    ...prev,
+                    template_id: nextId,
+                    title: proposalTitleFromTemplate(
+                      prev.title,
+                      proposalTemplates.find((t) => t.id === prev.template_id),
+                      proposalTemplates.find((t) => t.id === nextId),
+                    ),
+                  }));
+                }}
+              >
                 <SelectTrigger><SelectValue placeholder="Escolher template" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Nenhum</SelectItem>

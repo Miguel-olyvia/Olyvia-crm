@@ -3,8 +3,9 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
 import { CompanyProvider } from "@/contexts/CompanyContext";
+import { PortalCompanyProvider } from "@/contexts/PortalCompanyContext";
 import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import { SidebarExpandProvider } from "@/contexts/SidebarContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -32,6 +33,7 @@ const Quotes = lazy(() => import("./pages/Quotes"));
 const QuoteModels = lazy(() => import("./pages/QuoteModels"));
 const QuoteTemplates = lazy(() => import("./pages/QuoteTemplates"));
 const ProposalTemplates = lazy(() => import("./pages/ProposalTemplates"));
+const DirectSales = lazy(() => import("./pages/DirectSales"));
 const FlowBuilder = lazy(() => import("./pages/FlowBuilder"));
 const CatalogItems = lazy(() => import("./pages/CatalogItems"));
 
@@ -58,6 +60,8 @@ const Bundles = lazy(() => import("./pages/Bundles"));
 const Stocks = lazy(() => import("./pages/Stocks"));
 const Warehouses = lazy(() => import("./pages/Warehouses"));
 const PurchaseOrders = lazy(() => import("./pages/PurchaseOrders"));
+const ClientOrders = lazy(() => import("./pages/ClientOrders"));
+const StockCounts = lazy(() => import("./pages/StockCounts"));
 const Suppliers = lazy(() => import("./pages/Suppliers"));
 const Services = lazy(() => import("./pages/Services"));
 const ServiceCategories = lazy(() => import("./pages/ServiceCategories"));
@@ -119,6 +123,7 @@ const UsersNew = lazy(() => import("./pages/UsersNew"));
 const SmtpManagement = lazy(() => import("./pages/SmtpManagement"));
 const EmailTemplates = lazy(() => import("./pages/EmailTemplates"));
 const Trash = lazy(() => import("./pages/Trash"));
+const SendFailures = lazy(() => import("./pages/SendFailures"));
 const NotificationsPage = lazy(() => import("./pages/Notifications"));
 const AlertSettings = lazy(() => import("./pages/AlertSettings"));
 const ExportAudit = lazy(() => import("./pages/ExportAudit"));
@@ -126,12 +131,15 @@ const SupportAccess = lazy(() => import("./pages/SupportAccess"));
 const AuthAuditLog = lazy(() => import("./pages/AuthAuditLog"));
 const DataErasureRequests = lazy(() => import("./pages/DataErasureRequests"));
 const BookingManage = lazy(() => import("./pages/BookingManage"));
+const BookingConfirm = lazy(() => import("./pages/BookingConfirm"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
 const ClientPortalContracts = lazy(() => import("./pages/ClientPortalContracts"));
 const ClientPortalContractDetail = lazy(() => import("./pages/ClientPortalContractDetail"));
 const ClientPortalDocuments = lazy(() => import("./pages/ClientPortalDocuments"));
+const ClientPortalDirectSales = lazy(() => import("./pages/ClientPortalDirectSales"));
+const ClientPortalDirectSaleDetail = lazy(() => import("./pages/ClientPortalDirectSaleDetail"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -143,6 +151,15 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// Empresa ativa do portal — monta uma só vez para todas as rotas do portal,
+// fora do CRM: uma conta de portal não tem work-orgs e o CompanyProvider não
+// lhe serve de nada (ver src/contexts/PortalCompanyContext.tsx).
+const PortalCompanyRoute = () => (
+  <PortalCompanyProvider>
+    <Outlet />
+  </PortalCompanyProvider>
+);
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
@@ -175,15 +192,20 @@ const App = () => (
                   <Route path="/test-widget" element={<TestWidget />} />
                   <Route path="/booking/manage" element={<BookingManage />} />
                   <Route path="/booking/cancel" element={<BookingManage />} />
+                  <Route path="/booking/confirm" element={<BookingConfirm />} />
 
                   {/* Client portal — guard + layout mount once for all portal routes */}
                   <Route element={<ClientRouteGuard />}>
-                    <Route path="/client-portal" element={<ClientPortal />} />
-                    <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
-                    <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
-                    <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
-                    <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
-                    <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
+                    <Route element={<PortalCompanyRoute />}>
+                      <Route path="/client-portal" element={<ClientPortal />} />
+                      <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
+                      <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
+                      <Route path="/client-portal/direct-sales" element={<ClientPortalDirectSales />} />
+                      <Route path="/client-portal/direct-sales/:id" element={<ClientPortalDirectSaleDetail />} />
+                      <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
+                      <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
+                      <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
+                    </Route>
                   </Route>
 
                   {/* CRM routes — guard + Layout mount once; pages render via Outlet */}
@@ -209,6 +231,8 @@ const App = () => (
                       <Route path="/quote-models" element={<ProtectedRoute permission="quote_templates.view"><QuoteModels /></ProtectedRoute>} />
                       <Route path="/proposal-templates" element={<ProposalTemplates />} />
                       <Route path="/quote-templates" element={<ProtectedRoute permission="proposals.manage"><QuoteTemplates /></ProtectedRoute>} />
+                      {/* Venda Direta (Fase 2) — fluxo alternativo ao Orçamento -> Proposta -> Contrato. Permissões próprias: direct_sales.view/create/edit (migration 20261130230000). */}
+                      <Route path="/direct-sales" element={<ProtectedRoute permission="direct_sales.view"><DirectSales /></ProtectedRoute>} />
                       <Route path="/catalog-items" element={<CatalogItems />} />
                       <Route path="/users" element={<ProtectedRoute permission="users.view"><UsersNew /></ProtectedRoute>} />
                       <Route path="/roles" element={<ProtectedRoute permission="roles.view"><Roles /></ProtectedRoute>} />
@@ -232,6 +256,10 @@ const App = () => (
                       <Route path="/stocks" element={<ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
                       <Route path="/warehouses" element={<ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />
                       <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
+                      {/* Fase 5.0F: exige inventory.view E client_contracts.view em simultâneo — mesma dupla verificação dos RPCs (rpc_list_client_order_documents/rpc_get_client_order_document). */}
+                      <Route path="/client-orders" element={<ProtectedRoute permissions={["inventory.view", "client_contracts.view"]} requireAll><ClientOrders /></ProtectedRoute>} />
+                      {/* Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/inventory.edit controlam ações DENTRO da página (contar/resolver/finalizar), não o acesso à rota. */}
+                      <Route path="/stock-counts" element={<ProtectedRoute permission="inventory.view"><StockCounts /></ProtectedRoute>} />
                       <Route path="/suppliers" element={<ProtectedRoute permission="suppliers.view"><Suppliers /></ProtectedRoute>} />
                       <Route path="/services" element={<Services />} />
                       <Route path="/service-categories" element={<ServiceCategories />} />
@@ -278,6 +306,7 @@ const App = () => (
                       <Route path="/notifications" element={<NotificationsPage />} />
                       <Route path="/email-templates" element={<ProtectedRoute permission="email_templates.view"><EmailTemplates /></ProtectedRoute>} />
                       <Route path="/trash" element={<Trash />} />
+                      <Route path="/send-failures" element={<ProtectedRoute permission="scheduling.items.view"><SendFailures /></ProtectedRoute>} />
                       <Route path="/export-audit" element={<ProtectedRoute permission="exports.audit.view"><ExportAudit /></ProtectedRoute>} />
                       <Route path="/platform/support-access" element={<ProtectedRoute permission="platform.support_access.view"><SupportAccess /></ProtectedRoute>} />
                       <Route path="/platform/auth-audit-log" element={<ProtectedRoute permission="platform.auth_audit_log.view"><AuthAuditLog /></ProtectedRoute>} />

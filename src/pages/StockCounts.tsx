@@ -1,0 +1,768 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import { OlyviaLoader } from "@/components/ui/olyvia-loader";
+import { NoOrganizationState } from "@/components/NoOrganizationState";
+import { Button } from "@/components/ui/button";
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { useCompany } from "@/contexts/CompanyContext";
+import { Badge } from "@/components/ui/badge";
+import { ListChecks, Plus, Eye } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
+import { PermissionGate } from "@/components/PermissionGate";
+import { escapeIlike } from "@/lib/clientSearch";
+import InventoryCountDetailDialog from "@/components/inventory/InventoryCountDetailDialog";
+import { useProductCategories } from "@/hooks/useProductCategories";
+
+// Fase 5.4 do plano de inventário: "Contagem de Inventário" (Stocktake) —
+// listagem de sessões de public.inventory_counts. Mesmo padrão de paginação
+// de servidor de Stocks.tsx (PAGE_SIZE + .range()) combinado com o padrão de
+// listagem+dialog de detalhe de ClientOrders.tsx. Leitura direta via
+// .from() (sem RPC de listagem dedicada — só as 4 RPCs de escrita existem,
+// ver migration 20261116020000) já que inventory_counts/inventory_count_lines/
+// warehouses/product_categories têm SELECT liberado por organização (sem
+// permissão extra), suficiente com inventory.view já verificado na rota.
+
+const PAGE_SIZE = 30;
+
+// Acima disto a folha de contagem deixa de ser trabalhável de uma assentada
+// (e o diálogo de detalhe, que abre logo a seguir a criar, passa a ter de
+// paginar as linhas) — o aviso muda de tom e sugere filtrar por categoria.
+const LARGE_INITIAL_COUNT = 500;
+
+interface InventoryCountListRow {
+  id: string;
+  document_number: string;
+  status: string;
+  started_at: string;
+  finalized_at: string | null;
+  warehouse_id: string;
+  category_id: string | null;
+  warehouses?: { name: string } | null;
+  product_categories?: { name: string } | null;
+  // Agregados calculados client-side a partir de inventory_count_lines
+  // (ver loadLineAggregates) — não vêm da query de cabeçalho.
+  total_lines?: number;
+  counted_lines?: number;
+  pending_discrepancies?: number;
+  // Linhas nunca contadas (Qtd. contada vazia) mas com stock real no
+  // sistema (system_quantity_at_start > 0) — não são "discrepâncias" (não
+  // há nada para comparar), mas finalizar a contagem com produtos destes
+  // por contar não deve poder mostrar "Sem discrepâncias" como se tudo
+  // tivesse sido verificado.
+  uncounted_with_stock?: number;
+}
+
+interface WarehouseOption {
+  id: string;
+  name: string;
+}
+
+// PostgREST caps an unranged response at 1000 rows — paginado por segurança,
+// mesmo padrão já usado em Stocks.tsx.
+const fetchAllRows = async (buildQuery: () => any): Promise<{ data: any[] | null; error: any }> => {
+  const PAGE = 1000;
+  const rows: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + PAGE - 1);
+    if (error) return { data: null, error };
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+    from += PAGE;
+  }
+  return { data: rows, error: null };
+};
+
+const StockCounts = () => {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const { activeCompany, isLoading: companyLoading } = useCompany();
+
+  const [counts, setCounts] = useState<InventoryCountListRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [warehouseFilter, setWarehouseFilter] = useState<string>("all");
+  // Filtra por inventory_counts.category_id (a categoria com que a contagem
+  // foi criada) — só categorias de topo, como no diálogo de criação.
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  // Só categorias de topo (sem parent_id), por ordem alfabética — lista e
+  // diálogo de criação. Cache partilhada com Stocks/folha de contagem.
+  const { topLevelCategories: categories, resolveFilterIds, error: categoriesError } = useProductCategories();
+
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createWarehouseId, setCreateWarehouseId] = useState("");
+  const [createCategoryId, setCreateCategoryId] = useState("all");
+  // "Contagem inicial": semeia TODOS os produtos do catálogo (filtrados pela
+  // categoria, se houver), incluindo os que ainda não têm linha de stock neste
+  // armazém — é o arranque de um armazém novo, em que o sistema ainda não sabe
+  // nada. Fora deste caso, a contagem só semeia o que já tem stock registado.
+  const [createInitial, setCreateInitial] = useState(false);
+  const [creating, setCreating] = useState(false);
+  // O armazém escolhido tem linhas em public.stocks? null = ainda não sabemos
+  // (ou a consulta falhou). Um armazém sem stock nenhum faz com que a contagem
+  // de rotina semeie ZERO linhas em silêncio — foi assim que se criaram
+  // documentos vazios — por isso é este facto que decide o interruptor.
+  const [warehouseHasNoStock, setWarehouseHasNoStock] = useState<boolean | null>(null);
+  // Assim que o utilizador mexe no interruptor, a escolha dele manda: a
+  // decisão automática deixa de se sobrepor até ele trocar de armazém (ou
+  // reabrir o diálogo). Num ref porque não afeta a renderização.
+  const initialTouchedByUser = useRef(false);
+  // Pré-visualização da dimensão da contagem inicial (nº de linhas que vão ser
+  // semeadas). Sem isto o utilizador liga o interruptor, cria, e só descobre
+  // que semeou o catálogo inteiro quando o diálogo de detalhe abre com
+  // milhares de linhas.
+  const [initialLineCount, setInitialLineCount] = useState<number | null>(null);
+  const [initialCountLoading, setInitialCountLoading] = useState(false);
+  const [initialCountError, setInitialCountError] = useState(false);
+
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailCountId, setDetailCountId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Filtros num ref (não recria loadCounts a cada keystroke) — mesmo padrão
+  // já usado em Stocks.tsx/ClientOrders.tsx para manter a identidade do
+  // IntersectionObserver estável.
+  const filtersRef = useRef({
+    activeCompanyId: activeCompany?.id,
+    debouncedSearchTerm,
+    statusFilter,
+    warehouseFilter,
+    categoryFilter,
+  });
+  useEffect(() => {
+    filtersRef.current = { activeCompanyId: activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter, categoryFilter };
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter, categoryFilter]);
+
+  const fetchWarehouses = useCallback(async () => {
+    if (!activeCompany?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from("warehouses")
+        .select("id, name")
+        .eq("organization_id", activeCompany.id)
+        .is("deleted_at", null)
+        .order("name");
+      if (error) throw error;
+      setWarehouses((data || []) as WarehouseOption[]);
+    } catch (error: any) {
+      toast({ title: t('stockCounts.toast.loadWarehousesError'), description: error.message, variant: "destructive" });
+    }
+  }, [activeCompany?.id, t, toast]);
+
+  useEffect(() => {
+    if (!categoriesError) return;
+    toast({ title: t('stockCounts.toast.loadCategoriesError'), description: (categoriesError as any)?.message, variant: "destructive" });
+  }, [categoriesError, t, toast]);
+
+  useEffect(() => {
+    if (activeCompany?.id) {
+      fetchWarehouses();
+    }
+  }, [activeCompany?.id, fetchWarehouses]);
+
+  // Agregados por sessão (total de linhas, linhas contadas, discrepâncias por
+  // resolver) — calculados a partir de inventory_count_lines, filtrados às
+  // sessões da página atual (não há RPC de leitura agregada, ver cabeçalho).
+  // Mesma condição de "por resolver" usada por rpc_finalize_inventory_count.
+  const loadLineAggregates = async (rows: InventoryCountListRow[]): Promise<InventoryCountListRow[]> => {
+    if (rows.length === 0) return rows;
+    const ids = rows.map((r) => r.id);
+    const { data, error } = await fetchAllRows(() =>
+      supabase
+        .from("inventory_count_lines")
+        .select("inventory_count_id, counted_quantity, system_quantity_at_start, discrepancy_resolution")
+        .in("inventory_count_id", ids)
+    );
+    if (error) {
+      console.error("Error loading inventory count line aggregates:", error);
+      return rows;
+    }
+
+    const agg = new Map<string, { total: number; counted: number; pending: number; uncountedWithStock: number }>();
+    for (const line of (data || []) as any[]) {
+      const entry = agg.get(line.inventory_count_id) || { total: 0, counted: 0, pending: 0, uncountedWithStock: 0 };
+      entry.total += 1;
+      if (line.counted_quantity !== null) {
+        entry.counted += 1;
+        if (
+          line.counted_quantity !== line.system_quantity_at_start &&
+          !line.discrepancy_resolution
+        ) {
+          entry.pending += 1;
+        }
+      } else if ((line.system_quantity_at_start ?? 0) > 0) {
+        // Nunca contada, mas o sistema diz que há stock — ninguém foi
+        // verificar fisicamente esta linha antes de a contagem terminar.
+        entry.uncountedWithStock += 1;
+      }
+      agg.set(line.inventory_count_id, entry);
+    }
+
+    return rows.map((r) => {
+      const entry = agg.get(r.id) || { total: 0, counted: 0, pending: 0, uncountedWithStock: 0 };
+      return {
+        ...r,
+        total_lines: entry.total,
+        counted_lines: entry.counted,
+        pending_discrepancies: entry.pending,
+        uncounted_with_stock: entry.uncountedWithStock,
+      };
+    });
+  };
+
+  const buildCountsQuery = (filters: typeof filtersRef.current) => {
+    let query = supabase
+      .from("inventory_counts")
+      .select("id, document_number, status, started_at, finalized_at, warehouse_id, category_id, warehouses(name), product_categories(name)")
+      .eq("organization_id", filters.activeCompanyId);
+
+    if (filters.statusFilter !== "all") {
+      query = query.eq("status", filters.statusFilter);
+    }
+    if (filters.warehouseFilter !== "all") {
+      query = query.eq("warehouse_id", filters.warehouseFilter);
+    }
+    if (filters.categoryFilter !== "all") {
+      query = query.eq("category_id", filters.categoryFilter);
+    }
+    if (filters.debouncedSearchTerm.trim()) {
+      query = query.ilike("document_number", `%${escapeIlike(filters.debouncedSearchTerm.trim())}%`);
+    }
+    return query;
+  };
+
+  const loadCounts = useCallback(async (pageNum: number, reset: boolean) => {
+    const filters = filtersRef.current;
+    if (!filters.activeCompanyId) return;
+
+    if (reset) {
+      setLoading(true);
+      setCounts([]);
+    } else {
+      setLoadingMore(true);
+    }
+
+    try {
+      const from = pageNum * PAGE_SIZE;
+      const to = from + PAGE_SIZE - 1;
+      const { data, error } = await buildCountsQuery(filters)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to);
+
+      if (error) throw error;
+      const newRows = await loadLineAggregates((data || []) as unknown as InventoryCountListRow[]);
+
+      if (reset) {
+        setCounts(newRows);
+      } else {
+        setCounts((prev) => {
+          const existingIds = new Set(prev.map((c) => c.id));
+          return [...prev, ...newRows.filter((c) => !existingIds.has(c.id))];
+        });
+      }
+      setHasMore(newRows.length === PAGE_SIZE);
+      setPage(pageNum);
+    } catch (error: any) {
+      toast({ title: t('stockCounts.toast.loadError'), description: error.message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [t, toast]);
+
+  const refresh = useCallback(() => {
+    setHasMore(true);
+    loadCounts(0, true);
+  }, [loadCounts]);
+
+  useEffect(() => {
+    if (!activeCompany?.id) return;
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeCompany?.id, debouncedSearchTerm, statusFilter, warehouseFilter, categoryFilter]);
+
+  useEffect(() => {
+    if (loading) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore) {
+          loadCounts(page + 1, false);
+        }
+      },
+      { threshold: 0.1 }
+    );
+    if (loadMoreRef.current) observer.observe(loadMoreRef.current);
+    observerRef.current = observer;
+    return () => observerRef.current?.disconnect();
+  }, [loading, hasMore, loadingMore, page, loadCounts]);
+
+  // Conta as linhas que rpc_create_inventory_count(p_initial => true) vai
+  // semear. Tem de espelhar EXATAMENTE os filtros da migration
+  // 20261204000000: universo = product_organizations (products.organization_id
+  // não é fiável, facto F2 da migration), produtos não apagados
+  // (is_deleted = false E deleted_at IS NULL) e status <> 'draft'
+  // ('discontinued' entra de propósito), mais a categoria escolhida — com as
+  // suas subcategorias, em category_id OU subcategory_id (migration
+  // 20261204430000). O armazém não entra: no modo inicial o universo é o
+  // catálogo, não o stock.
+  useEffect(() => {
+    if (!createOpen || !createInitial || !activeCompany?.id) {
+      setInitialLineCount(null);
+      setInitialCountError(false);
+      setInitialCountLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setInitialCountLoading(true);
+    setInitialCountError(false);
+    (async () => {
+      try {
+        let query = supabase
+          .from("product_organizations")
+          .select("product_id, products!inner(id)", { count: "exact", head: true })
+          .eq("organization_id", activeCompany.id)
+          .eq("products.is_deleted", false)
+          .is("products.deleted_at", null)
+          .neq("products.status", "draft");
+        const categoryIds = resolveFilterIds(createCategoryId, "all");
+        if (categoryIds && categoryIds.length > 0) {
+          const ids = categoryIds.join(",");
+          query = (query as any).or(`category_id.in.(${ids}),subcategory_id.in.(${ids})`, { referencedTable: "products" });
+        }
+        const { count, error } = await query;
+        if (error) throw error;
+        if (cancelled) return;
+        setInitialLineCount(count ?? 0);
+      } catch (error) {
+        if (cancelled) return;
+        // Só informativo — não bloqueia a criação nem merece um toast.
+        console.error("Error previewing initial count size:", error);
+        setInitialLineCount(null);
+        setInitialCountError(true);
+      } finally {
+        if (!cancelled) setInitialCountLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [createOpen, createInitial, createCategoryId, activeCompany?.id, resolveFilterIds]);
+
+  // Decide o interruptor "Contagem inicial" a partir do armazém escolhido: sem
+  // linhas em stocks, a contagem de rotina não teria nada para semear, logo o
+  // modo inicial (catálogo) é o único que produz uma folha utilizável. Nunca
+  // se sobrepõe a uma escolha manual (initialTouchedByUser) e, se a consulta
+  // falhar, deixa tudo como está — isto informa, não bloqueia.
+  useEffect(() => {
+    if (!createOpen || !createWarehouseId) {
+      setWarehouseHasNoStock(null);
+      return;
+    }
+    let cancelled = false;
+    setWarehouseHasNoStock(null);
+    (async () => {
+      try {
+        const { count, error } = await supabase
+          .from("stocks")
+          .select("id", { count: "exact", head: true })
+          .eq("warehouse_id", createWarehouseId)
+          .is("deleted_at", null);
+        if (error) throw error;
+        // Guarda de corrida: troca rápida de armazém não pode deixar a
+        // resposta antiga aterrar por cima da nova.
+        if (cancelled) return;
+        const empty = (count ?? 0) === 0;
+        setWarehouseHasNoStock(empty);
+        if (!initialTouchedByUser.current) setCreateInitial(empty);
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Error checking warehouse stock coverage:", error);
+        setWarehouseHasNoStock(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [createOpen, createWarehouseId]);
+
+  const resetCreateForm = () => {
+    setCreateWarehouseId("");
+    setCreateCategoryId("all");
+    setCreateInitial(false);
+    setWarehouseHasNoStock(null);
+    initialTouchedByUser.current = false;
+  };
+
+  const handleCreate = async () => {
+    if (!activeCompany?.id || !createWarehouseId) return;
+    setCreating(true);
+    try {
+      const { data, error } = await supabase.rpc('rpc_create_inventory_count', {
+        p_organization_id: activeCompany.id,
+        p_warehouse_id: createWarehouseId,
+        p_category_id: createCategoryId === "all" ? null : createCategoryId,
+        p_initial: createInitial,
+      } as any);
+      if (error) throw error;
+
+      const result = data as any;
+      toast({
+        title: t('stockCounts.toast.createSuccess'),
+        description: t('stockCounts.toast.createSuccessDesc', { document: result.document_number, count: result.lines_seeded }),
+      });
+      setCreateOpen(false);
+      resetCreateForm();
+      refresh();
+      setDetailCountId(result.id);
+      setDetailOpen(true);
+    } catch (error: any) {
+      // A RPC recusa criar uma contagem que ficaria com 0 linhas e explica
+      // porquê (ERRCODE no_data_found). Essa mensagem do servidor é a parte
+      // útil — mostra-se tal e qual, sem a substituir por texto genérico; o
+      // fallback só entra se vier mesmo vazia.
+      const serverMessage =
+        (typeof error?.message === "string" && error.message.trim()) ||
+        (typeof error?.hint === "string" && error.hint.trim()) ||
+        (typeof error?.details === "string" && error.details.trim()) ||
+        t('stockCounts.toast.createErrorUnknown');
+      toast({ title: t('stockCounts.toast.createError'), description: serverMessage, variant: "destructive" });
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const openDetail = (id: string) => {
+    setDetailCountId(id);
+    setDetailOpen(true);
+  };
+
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case "em_contagem": return t('stockCounts.status.emContagem');
+      case "finalizada": return t('stockCounts.status.finalizada');
+      case "cancelada": return t('stockCounts.status.cancelada');
+      default: return status;
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      em_contagem: "bg-info/10 text-info",
+      finalizada: "bg-success/10 text-success",
+      cancelada: "bg-muted text-muted-foreground",
+    };
+    return colors[status] || colors.em_contagem;
+  };
+
+  if (companyLoading) {
+    return (
+      <>
+        <div className="flex items-center justify-center h-64">
+          <OlyviaLoader size={40} />
+        </div>
+      </>
+    );
+  }
+
+  if (!activeCompany) {
+    return (
+      <>
+        <div className="space-y-6 p-6">
+          <div>
+            <h1 className="text-3xl font-bold">{t('stockCounts.title')}</h1>
+            <p className="text-muted-foreground">{t('stockCounts.description')}</p>
+          </div>
+          <NoOrganizationState inline />
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <div className="space-y-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <ListChecks className="w-7 h-7 text-muted-foreground" />
+            <div>
+              <h1 className="text-3xl font-bold mb-1">{t('stockCounts.title')}</h1>
+              <p className="text-muted-foreground">{t('stockCounts.description')}</p>
+            </div>
+          </div>
+          <PermissionGate permissions={["inventory.count", "inventory.edit"]}>
+            <Button onClick={() => { resetCreateForm(); setCreateOpen(true); }}>
+              <Plus className="w-4 h-4 mr-2" />
+              {t('stockCounts.newCount')}
+            </Button>
+          </PermissionGate>
+        </div>
+
+        <div className="flex flex-wrap gap-3 items-center">
+          <Input
+            placeholder={t('stockCounts.searchPlaceholder')}
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="max-w-xs"
+          />
+          <Select value={warehouseFilter} onValueChange={setWarehouseFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder={t('stockCounts.table.warehouse')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('stockCounts.filterWarehouseAll')}</SelectItem>
+              {warehouses.map((w) => (
+                <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <SelectTrigger className="w-[200px]" aria-label={t('stockCounts.table.category')}>
+              <SelectValue placeholder={t('stockCounts.table.category')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('stockCounts.allCategories')}</SelectItem>
+              {categories.map((c) => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[200px]">
+              <SelectValue placeholder={t('stockCounts.table.status')} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t('stockCounts.filterStatusAll')}</SelectItem>
+              <SelectItem value="em_contagem">{t('stockCounts.status.emContagem')}</SelectItem>
+              <SelectItem value="finalizada">{t('stockCounts.status.finalizada')}</SelectItem>
+              <SelectItem value="cancelada">{t('stockCounts.status.cancelada')}</SelectItem>
+            </SelectContent>
+          </Select>
+          {(searchTerm || statusFilter !== "all" || warehouseFilter !== "all" || categoryFilter !== "all") && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setSearchTerm("");
+                setStatusFilter("all");
+                setWarehouseFilter("all");
+                setCategoryFilter("all");
+              }}
+            >
+              {t('stockCounts.clearFilters')}
+            </Button>
+          )}
+        </div>
+
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t('stockCounts.table.document')}</TableHead>
+              <TableHead>{t('stockCounts.table.warehouse')}</TableHead>
+              <TableHead>{t('stockCounts.table.category')}</TableHead>
+              <TableHead>{t('stockCounts.table.status')}</TableHead>
+              <TableHead>{t('stockCounts.table.startedAt')}</TableHead>
+              <TableHead className="text-right">{t('stockCounts.table.lines')}</TableHead>
+              <TableHead>{t('stockCounts.table.discrepancies')}</TableHead>
+              <TableHead className="text-right">{t('stockCounts.table.actions')}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loading ? (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center">{t('stockCounts.loading')}</TableCell>
+              </TableRow>
+            ) : counts.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={8} className="text-center">{t('stockCounts.noCounts')}</TableCell>
+              </TableRow>
+            ) : (
+              counts.map((count) => (
+                <TableRow key={count.id}>
+                  <TableCell className="font-medium font-mono text-xs">{count.document_number}</TableCell>
+                  <TableCell>{count.warehouses?.name || '-'}</TableCell>
+                  <TableCell>{count.product_categories?.name || t('stockCounts.allCategories')}</TableCell>
+                  <TableCell>
+                    <Badge className={getStatusColor(count.status)}>{getStatusLabel(count.status)}</Badge>
+                  </TableCell>
+                  <TableCell>{new Date(count.started_at).toLocaleDateString('pt-PT')}</TableCell>
+                  <TableCell className="text-right">
+                    {count.counted_lines ?? 0}/{count.total_lines ?? 0}
+                  </TableCell>
+                  <TableCell>
+                    {/* Badge destacado — é o propósito central do ecrã, não uma
+                        informação secundária. */}
+                    {(count.pending_discrepancies ?? 0) > 0 ? (
+                      <Badge variant="destructive">
+                        {t('stockCounts.discrepanciesBadge', { count: count.pending_discrepancies ?? 0 })}
+                      </Badge>
+                    ) : (count.uncounted_with_stock ?? 0) > 0 ? (
+                      // Não é uma discrepância (nada foi comparado) — mas
+                      // "Sem discrepâncias" mentiria: há produtos com stock
+                      // no sistema que ninguém foi verificar fisicamente.
+                      <Badge className="bg-warning/10 text-warning">
+                        {t('stockCounts.uncountedWithStockBadge', { count: count.uncounted_with_stock ?? 0 })}
+                      </Badge>
+                    ) : (
+                      <Badge className="bg-success/10 text-success">{t('stockCounts.discrepanciesNone')}</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openDetail(count.id)}
+                      title={t('stockCounts.viewDetail')}
+                    >
+                      <Eye className="w-4 h-4" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+
+        <div ref={loadMoreRef} className="py-4 flex justify-center">
+          {loadingMore && (
+            <div className="text-sm text-muted-foreground">{t('stockCounts.loadingMore')}</div>
+          )}
+          {!hasMore && !loading && counts.length > 0 && (
+            <div className="text-sm text-muted-foreground">{t('stockCounts.allLoaded')}</div>
+          )}
+        </div>
+      </div>
+
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('stockCounts.create.title')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">{t('stockCounts.create.description')}</p>
+            <div>
+              <Select
+                value={createWarehouseId}
+                onValueChange={(value) => {
+                  // Armazém novo, decisão nova: a automática volta a mandar.
+                  initialTouchedByUser.current = false;
+                  setCreateWarehouseId(value);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={t('stockCounts.create.selectWarehouse')} />
+                </SelectTrigger>
+                <SelectContent>
+                  {warehouses.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Select value={createCategoryId} onValueChange={setCreateCategoryId}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t('stockCounts.create.selectCategory')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('stockCounts.create.allCategoriesOption')}</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="rounded-md border p-3 space-y-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <Label htmlFor="stock-count-initial" className="cursor-pointer">
+                  {t('stockCounts.create.initialLabel')}
+                </Label>
+                <Switch
+                  id="stock-count-initial"
+                  checked={createInitial}
+                  onCheckedChange={(checked) => {
+                    initialTouchedByUser.current = true;
+                    setCreateInitial(checked);
+                  }}
+                  disabled={creating}
+                />
+              </div>
+              {/* Uma só linha explicativa: quando o armazém não tem stock, a
+                  razão concreta substitui a ajuda genérica (que passaria a ser
+                  ruído) — evita empilhar três parágrafos dentro da caixa. */}
+              <p
+                className={
+                  warehouseHasNoStock === true && !createInitial
+                    ? "text-xs font-medium text-warning"
+                    : "text-xs text-muted-foreground"
+                }
+              >
+                {warehouseHasNoStock === true
+                  ? createInitial
+                    ? t('stockCounts.create.initialAutoReason')
+                    : t('stockCounts.create.initialEmptyWarehouseWarning')
+                  : t('stockCounts.create.initialHelp')}
+              </p>
+              {createInitial && (initialCountLoading || initialCountError || initialLineCount !== null) && (
+                <p
+                  className={
+                    !initialCountLoading && initialLineCount !== null && initialLineCount > LARGE_INITIAL_COUNT
+                      ? "text-xs font-medium text-warning"
+                      : "text-xs text-muted-foreground"
+                  }
+                >
+                  {initialCountLoading
+                    ? t('stockCounts.create.initialPreviewLoading')
+                    : initialCountError
+                      ? t('stockCounts.create.initialPreviewError')
+                      : initialLineCount! > LARGE_INITIAL_COUNT
+                        ? t('stockCounts.create.initialPreviewLarge', { count: initialLineCount! })
+                        : t('stockCounts.create.initialPreviewCount', { count: initialLineCount! })}
+                </p>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={creating}>
+              {t('stockCounts.create.cancel')}
+            </Button>
+            <Button onClick={handleCreate} disabled={creating || !createWarehouseId}>
+              {creating ? t('stockCounts.create.submitting') : t('stockCounts.create.submit')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <InventoryCountDetailDialog
+        open={detailOpen}
+        onOpenChange={setDetailOpen}
+        countId={detailCountId}
+        onChanged={refresh}
+      />
+    </>
+  );
+};
+
+export default StockCounts;
