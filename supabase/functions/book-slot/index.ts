@@ -20,6 +20,7 @@ import { sendSmsNow, scheduleSms } from '../_shared/sendSms.ts';
 import { geocodePostalCode } from '../_shared/postcodeGeocode.ts';
 import { checkTravelFeasible, buildLunchBreakConfig, type LunchBreakConfig } from '../_shared/travelFeasibility.ts';
 import { ensureHolidaysPersisted } from '../_shared/ensureHolidays.ts';
+import { pickReminderSender } from '../_shared/reminderSender.ts';
 
 initSentry();
 
@@ -1139,11 +1140,40 @@ Deno.serve(async (req: Request) => {
           const targets: { email: string; kind: 'client' | 'technician' }[] = [];
           if (leadEmail) targets.push({ email: leadEmail, kind: 'client' });
           if (technicianEmail) targets.push({ email: technicianEmail, kind: 'technician' });
+
+          // Regra 3 (continuacao): o lembrete AO TECNICO usa a identidade do
+          // proprio comercial atribuido a ESTA visita (schedule_resources.user_id),
+          // nunca o membro ao acaso que createdBy resolve (anew_memberships ...
+          // LIMIT 1, sem ORDER BY) -- confirmado ao vivo que era sempre a mesma
+          // pessoa em todas as linhas de uma organizacao. O lembrete AO CLIENTE
+          // nunca depende de uma identidade pessoal: usa o SMTP do formulario,
+          // com a SMTP por omissao da organizacao como reserva, exactamente como
+          // a confirmacao e o aviso ao comercial (ver comentarios acima).
+          let orgDefaultSmtpId: string | null = null;
+          if (!emailCfg.email_smtp_id) {
+            const { data: orgSmtp } = await supabase
+              .from('organization_smtp_settings')
+              .select('id')
+              .eq('organization_id', organizationId)
+              .eq('is_active', true)
+              .order('is_default', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            orgDefaultSmtpId = orgSmtp?.id ?? null;
+          }
+
           for (const t of targets) {
+            const sender = pickReminderSender({
+              kind: t.kind,
+              technicianUserId: assignedResource?.user_id,
+              createdBy: createdBy!,
+              formSmtpId: emailCfg.email_smtp_id,
+              orgDefaultSmtpId,
+            });
             await scheduleEmail(supabase, {
-              organizationId, userId: createdBy, toEmail: t.email,
+              organizationId, userId: sender.userId, toEmail: t.email,
               subject, bodyHtml: htmlFor(t.kind), scheduledFor: remindAt.toISOString(),
-              entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId!, templateId: reminderTemplateId || null, smtpId: emailCfg.email_smtp_id,
+              entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId!, templateId: reminderTemplateId || null, smtpId: sender.smtpId,
             });
           }
 

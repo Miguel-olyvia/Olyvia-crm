@@ -18179,6 +18179,7 @@ export type Database = {
           employee_id: string | null
           end_datetime: string
           id: string
+          lead_id: string | null
           location: string | null
           location_lat: number | null
           location_lng: number | null
@@ -18216,6 +18217,7 @@ export type Database = {
           employee_id?: string | null
           end_datetime: string
           id?: string
+          lead_id?: string | null
           location?: string | null
           location_lat?: number | null
           location_lng?: number | null
@@ -18253,6 +18255,7 @@ export type Database = {
           employee_id?: string | null
           end_datetime?: string
           id?: string
+          lead_id?: string | null
           location?: string | null
           location_lat?: number | null
           location_lng?: number | null
@@ -18298,6 +18301,13 @@ export type Database = {
             columns: ["deal_id"]
             isOneToOne: false
             referencedRelation: "deals"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "schedule_items_lead_id_fkey"
+            columns: ["lead_id"]
+            isOneToOne: false
+            referencedRelation: "anew_leads"
             referencedColumns: ["id"]
           },
           {
@@ -24237,6 +24247,7 @@ export type Database = {
           p_description?: string
           p_employee_id?: string
           p_end_datetime?: string
+          p_lead_id?: string
           p_location?: string
           p_location_lat?: number
           p_location_lng?: number
@@ -24271,6 +24282,7 @@ export type Database = {
           employee_id: string | null
           end_datetime: string
           id: string
+          lead_id: string | null
           location: string | null
           location_lat: number | null
           location_lng: number | null
@@ -26543,6 +26555,7 @@ export type Database = {
           p_employee_id?: string
           p_end_datetime?: string
           p_id: string
+          p_lead_id?: string
           p_location?: string
           p_metadata?: Json
           p_notes?: string
@@ -26557,6 +26570,7 @@ export type Database = {
           p_set_description?: boolean
           p_set_employee_id?: boolean
           p_set_end_datetime?: boolean
+          p_set_lead_id?: boolean
           p_set_location?: boolean
           p_set_metadata?: boolean
           p_set_notes?: boolean
@@ -26592,6 +26606,7 @@ export type Database = {
           employee_id: string | null
           end_datetime: string
           id: string
+          lead_id: string | null
           location: string | null
           location_lat: number | null
           location_lng: number | null

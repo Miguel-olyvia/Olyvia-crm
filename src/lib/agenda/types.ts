@@ -30,7 +30,7 @@ export interface AgendaItemRow {
   all_day?: boolean | null;
   location?: string | null;
   client_id?: string | null;
-  contact_id?: string | null;
+  lead_id?: string | null;
   deal_id?: string | null;
   /**
    * Caminho de dono directo (escrito só pelo assistente de IA). Em produção
