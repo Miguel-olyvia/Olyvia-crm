@@ -339,8 +339,8 @@ export function useScheduling(companyId?: string) {
         query = query.eq('client_id', filters.clientId);
       }
 
-      if (filters.contactId) {
-        query = query.eq('contact_id', filters.contactId);
+      if (filters.leadId) {
+        query = query.eq('lead_id', filters.leadId);
       }
 
       if (filters.status?.length) {
@@ -404,7 +404,7 @@ export function useScheduling(companyId?: string) {
         p_end_datetime: item.end_datetime!,
         p_all_day: item.all_day ?? false,
         p_client_id: item.client_id,
-        p_contact_id: item.contact_id,
+        p_lead_id: item.lead_id,
         p_deal_id: item.deal_id,
         p_employee_id: item.employee_id,
         p_user_id: item.user_id,
@@ -446,7 +446,7 @@ export function useScheduling(companyId?: string) {
       // mirroring the previous cleanUpdates whitelist-and-presence semantics.
       const validColumns = [
         'board_id', 'title', 'description', 'location', 'start_datetime', 'end_datetime',
-        'status', 'origin', 'contact_id', 'client_id', 'employee_id', 'user_id',
+        'status', 'origin', 'lead_id', 'client_id', 'employee_id', 'user_id',
         'notes', 'metadata', 'time_off_type',
         'approval_status', 'approved_by', 'approved_at',
       ] as const;

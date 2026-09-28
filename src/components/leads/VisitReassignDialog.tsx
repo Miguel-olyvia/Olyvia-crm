@@ -453,22 +453,19 @@ export function VisitReassignDialog({
         }
       }
 
-      // 1b) Legacy-safe: try linking via relational references (contact/client) if present
+      // 1b) Legacy-safe: try linking via relational references (lead/client) if present
       // Using converted_to_* (preferred) only; legacy contact_id/client_id columns are deprecated.
       const relationalCandidates: Array<{
         label: string;
-        column: "contact_id" | "client_id";
+        column: "lead_id" | "client_id";
         value: string;
       }> = [];
 
-      const leadContactId = leadForLookup.converted_to_contact_id || null;
-      if (leadContactId) {
-        relationalCandidates.push({
-          label: "lead.converted_to_contact_id",
-          column: "contact_id",
-          value: leadContactId,
-        });
-      }
+      relationalCandidates.push({
+        label: "schedule_items.lead_id",
+        column: "lead_id",
+        value: leadForLookup.id,
+      });
 
       const leadClientId = (leadForLookup as any).converted_to_client_id || null;
       if (leadClientId) {

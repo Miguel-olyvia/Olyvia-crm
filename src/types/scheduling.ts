@@ -80,7 +80,7 @@ export interface ScheduleItem {
   all_day: boolean;
   duration_minutes?: number;
   client_id?: string;
-  contact_id?: string;
+  lead_id?: string;
   deal_id?: string;
   employee_id?: string;
   user_id?: string;
@@ -224,7 +224,7 @@ export interface ScheduleFilters {
   boardIds?: string[];
   resourceIds?: string[];
   clientId?: string;
-  contactId?: string;
+  leadId?: string;
   status?: ScheduleItemStatus[];
   dateFrom: Date;
   dateTo: Date;

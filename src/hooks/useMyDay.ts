@@ -33,7 +33,7 @@ const AGENDA_SELECT = `
   all_day,
   location,
   client_id,
-  contact_id,
+  lead_id,
   deal_id,
   user_id,
   metadata,
