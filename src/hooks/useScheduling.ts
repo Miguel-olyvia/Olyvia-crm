@@ -506,6 +506,7 @@ export function useScheduling(companyId?: string) {
           .update({
             start_datetime: newStart.toISOString(),
             end_datetime: newEnd.toISOString(),
+            status: 'rescheduled',
           })
           .eq('id', id);
 
