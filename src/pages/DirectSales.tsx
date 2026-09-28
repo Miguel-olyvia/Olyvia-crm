@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { format, parseISO } from "date-fns";
-import { FileDown, KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send, SendHorizontal, TrendingUp } from "lucide-react";
+import { endOfDay, format, parseISO, startOfDay, subDays } from "date-fns";
+import { pt } from "date-fns/locale";
+import { CalendarIcon, FileDown, KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send, SendHorizontal, TrendingUp, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -30,6 +33,9 @@ import { downloadBlob, generateProformaPdfBlob } from "@/utils/generateProformaP
 import { generateInternalSalePdfBlob } from "@/utils/generateInternalSalePdfBlob";
 import { resolveEntityCommercials } from "@/utils/entityCommercial";
 import { usePermissions } from "@/hooks/usePermissions";
+import { usePermissionScope } from "@/hooks/usePermissionScope";
+import { useComercialUsers } from "@/hooks/useComercialUsers";
+import { applySearchTextFilter, splitSearchWords } from "@/lib/searchTextFilter";
 import { cn, formatCurrency } from "@/lib/utils";
 
 // Venda Direta — Fase 2: listagem. Fluxo alternativo, mais leve, ao caminho
@@ -46,6 +52,12 @@ import { cn, formatCurrency } from "@/lib/utils";
 // ServiceMaterialsEditor.tsx e Services.tsx.
 
 const PAGE_SIZE = 50;
+
+/** Mesmo limiar de Quotes.tsx (MIN_QUOTE_SEARCH_LENGTH): com 1 caracter ninguém filtra. */
+const MIN_SEARCH_LENGTH = 2;
+
+/** "Sem resposta": enviada há mais de N dias — o mesmo +5d do atalho das Propostas. */
+const NO_RESPONSE_DAYS = 5;
 
 type DirectSaleStatus = "rascunho" | "enviada" | "aceite" | "rejeitada" | "cancelada";
 
@@ -106,13 +118,64 @@ const DirectSales = () => {
   const canViewCosts = hasPermission("quotes.view_costs");
   const { activeCompany, isLoading: companyLoading } = useCompany();
 
+  // Mesma fonte de Propostas/Orçamentos: `anewUserId` do scope é o id de
+  // negócio (anew_users.id), que é o que `direct_sales.assigned_to` guarda.
+  const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
+  const { comercialUsers } = useComercialUsers(activeCompany?.id || null, {
+    viewerScope: getPermissionScope("direct_sales.view"),
+    viewerAnewUserId: scopeAnewUserId,
+    teamMemberIds,
+    scopeLoading,
+  });
+
   const [sales, setSales] = useState<DirectSaleRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
 
+  // Filtros — mesma barra de Propostas/Orçamentos, todos aplicados no servidor.
   const [searchTerm, setSearchTerm] = useState("");
+  // A pesquisa vai para a query: sem debounce cada tecla era um pedido.
+  // 400ms, como em Propostas/Orçamentos.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm), 400);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [onlyMine, setOnlyMine] = useState(false);
+  const [comercialFilter, setComercialFilter] = useState<string>("all");
+  const [dateFrom, setDateFrom] = useState<Date | undefined>(undefined);
+  const [dateTo, setDateTo] = useState<Date | undefined>(undefined);
+  const [noResponseFilter, setNoResponseFilter] = useState(false);
+  const [expiredFilter, setExpiredFilter] = useState(false);
+  const [invoicePendingFilter, setInvoicePendingFilter] = useState(false);
+
+  /**
+   * Predicado dos filtros, num objeto só para `loadSales` depender de um valor
+   * e não de dez. Mudar qualquer filtro recria `loadSales`, e o efeito que a
+   * chama volta a pedir a página 0 com `replace` — é esse o reset da paginação.
+   *
+   * "Só as minhas" enquanto o scope ainda não resolveu fica sem efeito (como em
+   * Propostas); quando o id chega o objeto muda e a lista recarrega.
+   */
+  const saleFilters = useMemo(() => {
+    const rawSearch = debouncedSearch.trim();
+    return {
+      status: statusFilter !== "all" ? statusFilter : null,
+      searchWords: rawSearch.length >= MIN_SEARCH_LENGTH ? splitSearchWords(rawSearch) : [],
+      onlyMineUserId: onlyMine && scopeAnewUserId ? scopeAnewUserId : null,
+      comercial: comercialFilter !== "all" ? comercialFilter : null,
+      dateFromIso: dateFrom ? startOfDay(dateFrom).toISOString() : null,
+      dateToIso: dateTo ? endOfDay(dateTo).toISOString() : null,
+      noResponse: noResponseFilter,
+      expired: expiredFilter,
+      invoicePending: invoicePendingFilter,
+    };
+  }, [
+    statusFilter, debouncedSearch, onlyMine, scopeAnewUserId, comercialFilter,
+    dateFrom, dateTo, noResponseFilter, expiredFilter, invoicePendingFilter,
+  ]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -135,11 +198,12 @@ const DirectSales = () => {
   /**
    * Carrega uma página de vendas diretas da empresa ativa.
    *
-   * O estado é filtrado no servidor; a pesquisa por número/cliente/título é
-   * aplicada em memória sobre as linhas já carregadas — o nome do cliente vive
-   * em anew_entities (tabela diferente, com RLS própria), logo não dá para o
-   * incluir num `.or()` sobre direct_sales sem perder as correspondências por
-   * nome. Com "Carregar mais" o utilizador alarga o conjunto pesquisável.
+   * Todos os filtros são aplicados no servidor. A pesquisa usa
+   * `direct_sales.search_text` (trigger, índice trigram — migration
+   * 20261201120000), que já junta número, título, descrição e nome/email/
+   * telefone do cliente; por isso deixou de ser preciso filtrar em memória só
+   * sobre as linhas já carregadas. Os atalhos (sem resposta, expiradas, fatura
+   * pendente) somam-se aos restantes filtros por AND.
    *
    * Guarda de resposta obsoleta (mesmo efeito do `cancelled` usado no editor,
    * mas por id de pedido, porque esta função é chamada de vários sítios —
@@ -161,8 +225,29 @@ const DirectSales = () => {
         .order("created_at", { ascending: false })
         .range(offset, offset + PAGE_SIZE - 1);
 
-      if (statusFilter !== "all") {
-        query = query.eq("status", statusFilter);
+      const f = saleFilters;
+      if (f.status) query = query.eq("status", f.status);
+      if (f.searchWords.length > 0) query = applySearchTextFilter(query, f.searchWords);
+      if (f.onlyMineUserId) query = query.eq("assigned_to", f.onlyMineUserId);
+      if (f.comercial === "none") query = query.is("assigned_to", null);
+      else if (f.comercial) query = query.eq("assigned_to", f.comercial);
+      if (f.dateFromIso) query = query.gte("created_at", f.dateFromIso);
+      if (f.dateToIso) query = query.lte("created_at", f.dateToIso);
+      // Os limites temporais calculam-se no momento do pedido e não no memo:
+      // uma página aberta de um dia para o outro não fica com o "hoje" antigo.
+      if (f.noResponse) {
+        query = query
+          .eq("status", "enviada")
+          .lte("sent_at", subDays(new Date(), NO_RESPONSE_DAYS).toISOString());
+      }
+      if (f.expired) {
+        // valid_until é `date`: compara-se com a data local, não com um ISO UTC.
+        query = query
+          .eq("status", "enviada")
+          .lt("valid_until", format(new Date(), "yyyy-MM-dd"));
+      }
+      if (f.invoicePending) {
+        query = query.eq("status", "aceite").eq("invoice_status", "pendente");
       }
 
       const { data, error } = await query;
@@ -252,7 +337,7 @@ const DirectSales = () => {
     }
     // `t`/`toast` são estáveis o suficiente; incluí-los só recriava a função.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCompany?.id, statusFilter]);
+  }, [activeCompany?.id, saleFilters]);
 
   /**
    * Escreve `status = 'enviada'` (única escrita deste estado no ficheiro — o
@@ -362,17 +447,30 @@ const DirectSales = () => {
     loadSales(0, true);
   }, [activeCompany?.id, loadSales]);
 
-  const filteredSales = useMemo(() => {
-    const term = searchTerm.trim().toLowerCase();
-    if (!term) return sales;
-    return sales.filter((sale) =>
-      [sale.sale_number, sale.client_name, sale.title]
-        .filter(Boolean)
-        .some((field) => String(field).toLowerCase().includes(term)),
-    );
-  }, [sales, searchTerm]);
+  const hasActiveFilters =
+    searchTerm.trim().length > 0 ||
+    statusFilter !== "all" ||
+    onlyMine ||
+    comercialFilter !== "all" ||
+    !!dateFrom ||
+    !!dateTo ||
+    noResponseFilter ||
+    expiredFilter ||
+    invoicePendingFilter;
 
-  const hasActiveFilters = searchTerm.trim().length > 0 || statusFilter !== "all";
+  /** Um só sítio para limpar — usado pela barra e pelo estado vazio. */
+  const clearFilters = () => {
+    setSearchTerm("");
+    setDebouncedSearch("");
+    setStatusFilter("all");
+    setOnlyMine(false);
+    setComercialFilter("all");
+    setDateFrom(undefined);
+    setDateTo(undefined);
+    setNoResponseFilter(false);
+    setExpiredFilter(false);
+    setInvoicePendingFilter(false);
+  };
 
   const handleOpenNew = () => {
     setEditingId(null);
@@ -517,19 +615,33 @@ const DirectSales = () => {
           </PermissionGate>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative max-w-xs flex-1">
+        {/* Barra de filtros copiada de Propostas/Orçamentos (não há componente
+            partilhado): Pesquisa → Só as minhas → Estado → Comercial → Data →
+            atalhos → Limpar. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-[200px] max-w-md flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
-              className="pl-9"
+              className="h-9 pl-9"
               placeholder={t("directSales.searchPlaceholder")}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               aria-label={t("directSales.searchPlaceholder")}
             />
           </div>
+
+          <Button
+            variant={onlyMine ? "default" : "outline"}
+            size="sm"
+            className="h-9 gap-1.5"
+            aria-pressed={onlyMine}
+            onClick={() => setOnlyMine(!onlyMine)}
+          >
+            👤 {t("directSales.filters.onlyMine")}
+          </Button>
+
           <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[200px]">
+            <SelectTrigger className="h-9 w-[160px]" aria-label={t("directSales.table.status")}>
               <SelectValue placeholder={t("directSales.table.status")} />
             </SelectTrigger>
             <SelectContent>
@@ -541,15 +653,89 @@ const DirectSales = () => {
               ))}
             </SelectContent>
           </Select>
+
+          <Select value={comercialFilter} onValueChange={setComercialFilter}>
+            <SelectTrigger className="h-9 w-[160px]" aria-label={t("directSales.table.commercial")}>
+              <SelectValue placeholder={t("directSales.table.commercial")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">{t("directSales.filters.commercialAll")}</SelectItem>
+              <SelectItem value="none">{t("directSales.filters.commercialNone")}</SelectItem>
+              {comercialUsers.map((u) => (
+                <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9 gap-1.5 font-normal">
+                <CalendarIcon className="h-4 w-4" />
+                {dateFrom && dateTo
+                  ? `${format(dateFrom, "dd/MM/yy")} - ${format(dateTo, "dd/MM/yy")}`
+                  : dateFrom
+                  ? t("directSales.filters.dateFrom", { date: format(dateFrom, "dd/MM/yy") })
+                  : dateTo
+                  ? t("directSales.filters.dateTo", { date: format(dateTo, "dd/MM/yy") })
+                  : t("directSales.filters.date")}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="range"
+                selected={{ from: dateFrom, to: dateTo }}
+                onSelect={(range: any) => {
+                  setDateFrom(range?.from);
+                  setDateTo(range?.to);
+                }}
+                numberOfMonths={2}
+                locale={pt}
+              />
+              {(dateFrom || dateTo) && (
+                <div className="flex justify-end border-t p-2">
+                  <Button variant="ghost" size="sm" onClick={() => { setDateFrom(undefined); setDateTo(undefined); }}>
+                    {t("directSales.filters.clearDates")}
+                  </Button>
+                </div>
+              )}
+            </PopoverContent>
+          </Popover>
+
+          <Button
+            variant={noResponseFilter ? "default" : "outline"}
+            size="sm"
+            className={cn("h-9 gap-1", noResponseFilter && "bg-orange-600 hover:bg-orange-700")}
+            aria-pressed={noResponseFilter}
+            onClick={() => setNoResponseFilter(!noResponseFilter)}
+          >
+            ⏰ {t("directSales.filters.noResponse")}
+          </Button>
+
+          <Button
+            variant={expiredFilter ? "default" : "outline"}
+            size="sm"
+            className={cn("h-9 gap-1", expiredFilter && "bg-red-600 hover:bg-red-700")}
+            aria-pressed={expiredFilter}
+            onClick={() => setExpiredFilter(!expiredFilter)}
+          >
+            ⏳ {t("directSales.filters.expired")}
+          </Button>
+
+          {/* Azul-céu, a cor do "Registar fatura" no menu — distinto do
+              laranja/vermelho dos atalhos de seguimento. */}
+          <Button
+            variant={invoicePendingFilter ? "default" : "outline"}
+            size="sm"
+            className={cn("h-9 gap-1", invoicePendingFilter && "bg-sky-600 hover:bg-sky-700")}
+            aria-pressed={invoicePendingFilter}
+            onClick={() => setInvoicePendingFilter(!invoicePendingFilter)}
+          >
+            🧾 {t("directSales.filters.invoicePending")}
+          </Button>
+
           {hasActiveFilters && (
-            <Button
-              variant="outline"
-              onClick={() => {
-                setSearchTerm("");
-                setStatusFilter("all");
-              }}
-            >
-              {t("directSales.filters.clear")}
+            <Button variant="ghost" size="sm" className="h-9" onClick={clearFilters}>
+              <X className="mr-1 h-4 w-4" /> {t("directSales.filters.clearShort")}
             </Button>
           )}
         </div>
@@ -558,7 +744,7 @@ const DirectSales = () => {
           <div className="flex h-48 items-center justify-center">
             <OlyviaLoader size={36} />
           </div>
-        ) : filteredSales.length === 0 ? (
+        ) : sales.length === 0 ? (
           <Card>
             <CardContent className="flex flex-col items-center gap-3 py-16 text-center">
               <Receipt className="h-10 w-10 text-muted-foreground" />
@@ -571,13 +757,7 @@ const DirectSales = () => {
                   : t("directSales.empty.description")}
               </p>
               {hasActiveFilters ? (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setSearchTerm("");
-                    setStatusFilter("all");
-                  }}
-                >
+                <Button variant="outline" onClick={clearFilters}>
                   {t("directSales.filters.clear")}
                 </Button>
               ) : (
@@ -607,7 +787,7 @@ const DirectSales = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredSales.map((sale) => (
+                {sales.map((sale) => (
                   <TableRow
                     key={sale.id}
                     className="cursor-pointer"
