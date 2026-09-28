@@ -236,5 +236,13 @@ export async function sendEmailViaSMTP(
   }
 
   const info = await transporter.sendMail(mailOptions);
-  return { messageId: info.messageId || `${Date.now()}@${host}` };
+  return {
+    messageId: info.messageId || `${Date.now()}@${host}`,
+    // nodemailer reports, per recipient, whether the SMTP server actually
+    // accepted or rejected it -- a multi-recipient send can partially fail
+    // (one address accepted, another refused) with no thrown error at all,
+    // so callers need these to know who really got the message.
+    accepted: (info.accepted || []).map(String),
+    rejected: (info.rejected || []).map(String),
+  };
 }

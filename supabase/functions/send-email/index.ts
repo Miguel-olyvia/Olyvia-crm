@@ -252,6 +252,20 @@ const handler = async (req: Request): Promise<Response> => {
 
     const emailResult = await sendEmailViaSMTP(smtpConfig, { to: toListInput.length ? toListInput : to, cc: ccList.length ? ccList : undefined, subject, html, text, attachments });
 
+    // A multi-recipient send can be accepted by the SMTP server for some
+    // addresses and refused for others, with sendMail() resolving normally
+    // either way -- surface both lists here (not just rejections) so a
+    // multi-recipient send's real per-recipient outcome is visible from
+    // email_logs alone, without needing to tail function logs.
+    const accepted = emailResult.accepted || [];
+    const rejected = emailResult.rejected || [];
+    if (rejected.length > 0) {
+      console.error("[send-email] SMTP server rejected some recipients:", rejected);
+    }
+    const diagnosticNote = toListInput.length > 1
+      ? `Aceite: ${accepted.join(", ") || "(nenhum)"}${rejected.length ? ` | Recusado: ${rejected.join(", ")}` : ""}`
+      : null;
+
     try {
       await supabaseClient.from("email_logs").insert({
         organization_id: organization_id || null,
@@ -263,6 +277,9 @@ const handler = async (req: Request): Promise<Response> => {
         from_email: smtpConfig.from_email,
         subject,
         status: "sent",
+        error_message: rejected.length > 0
+          ? `Recusado pela operadora para: ${rejected.join(", ")}`
+          : diagnosticNote,
         smtp_source: source,
         smtp_id: smtpConfig.id,
         sent_at: new Date().toISOString(),
@@ -271,7 +288,7 @@ const handler = async (req: Request): Promise<Response> => {
       console.error("[send-email] tracking incomplete", logErr);
     }
 
-    console.log("Email sent", { ...resolved.metadata, messageId: emailResult.messageId });
+    console.log("Email sent", { ...resolved.metadata, messageId: emailResult.messageId, accepted: emailResult.accepted, rejected });
 
     return new Response(
       JSON.stringify({ success: true, messageId: emailResult.messageId, source }),
