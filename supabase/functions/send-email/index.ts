@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, resolveSmtpForScheduledEmail, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
 import { requireServiceRole, getServiceRoleKey } from "../_shared/auth.ts";
+import { resolveDocumentOwner, type DocumentOwner } from "../_shared/documentOwnerSender.ts";
 import { z } from "npm:zod";
 
 import { getCorsHeadersExtended } from "../_shared/cors.ts";
@@ -21,6 +22,7 @@ interface EmailRequest {
   user_id?: string;
   smtp_id?: string;
   entity_id?: string;
+  contract_id?: string;
   to: string;
   recipients?: string[];
   cc?: string[];
@@ -44,6 +46,7 @@ const requestSchema = z.object({
   user_id: z.string().optional(),
   smtp_id: z.string().optional(),
   entity_id: z.string().optional(),
+  contract_id: z.string().uuid().optional(),
   to: z.string().email(),
   recipients: z.array(z.string().email()).optional(),
   cc: z.array(z.string()).optional(),
@@ -144,7 +147,7 @@ const handler = async (req: Request): Promise<Response> => {
       );
     }
     const body: EmailRequest = parsed.data as EmailRequest;
-    const { company_id, organization_id, user_id, smtp_id, entity_id, to, recipients, cc, subject, html, text, test, smtp_config, attachments } = body;
+    const { company_id, organization_id, user_id, smtp_id, entity_id, contract_id, to, recipients, cc, subject, html, text, test, smtp_config, attachments } = body;
     logCtx = { organizationId: organization_id || company_id || null, userId: user_id || null, entityId: entity_id || null, to, subject, html, smtpId: smtp_id || null };
     const toListInput = sanitizeEmailList(recipients, 10);
     if (to && !toListInput.some((e) => e.toLowerCase() === to.toLowerCase())) {
@@ -197,6 +200,39 @@ const handler = async (req: Request): Promise<Response> => {
     // SMTP identity: auth_user_id for user calls; service-role scheduled/internal calls resolve user_id defensively.
     const resolvedAuthUserId = isServiceRole ? undefined : callerAuthUid;
 
+    // Contratos: o "De:" passa a ser o comercial DONO do contrato, nao quem
+    // clicou em enviar. So para chamadas de utilizador (nao service-role/test)
+    // e so quando o caller nao escolheu um smtp_id explicito -- uma escolha
+    // explicita de SMTP ganha sempre. A auditoria (email_logs.sent_by =
+    // callerAnewUserId) nao muda.
+    //
+    // SEGURANCA: resolveDocumentOwner corre com o supabaseClient de service
+    // role (sem RLS), por isso NUNCA se pode chamar com um contract_id vindo
+    // do corpo do pedido sem antes confirmar que o CALLER consegue mesmo ver
+    // esse contrato -- caso contrario qualquer membro da organizacao podia
+    // passar o contract_id de outro comercial e enviar html/destinatario a
+    // sua escolha pela caixa SMTP pessoal desse comercial. A verificacao de
+    // organizacao mais acima confirma so que o caller pertence a organizacao,
+    // nao que pode ver ESTE contrato em concreto.
+    const ownerOrgId = organization_id || company_id || null;
+    let documentOwner: DocumentOwner | null = null;
+    if (!isServiceRole && !test && contract_id && !smtp_id && ownerOrgId && authHeader) {
+      const callerScopedClient = createClient(
+        Deno.env.get("SUPABASE_URL") ?? "",
+        Deno.env.get("SUPABASE_ANON_KEY") ?? "",
+        { global: { headers: { Authorization: authHeader } } }
+      );
+      const { data: visibleContract } = await callerScopedClient
+        .from("client_contracts")
+        .select("id")
+        .eq("id", contract_id)
+        .eq("organization_id", ownerOrgId)
+        .maybeSingle();
+      if (visibleContract) {
+        documentOwner = await resolveDocumentOwner(supabaseClient, "contract", contract_id, ownerOrgId);
+      }
+    }
+
     // Test mode: keep HTTP 200 so the UI can show the real sanitized SMTP error
     // instead of the generic "Edge Function returned a non-2xx status code".
     if (test && smtp_config && to && subject && html) {
@@ -222,13 +258,21 @@ const handler = async (req: Request): Promise<Response> => {
       throw new Error("Missing required fields: to, subject, html");
     }
 
-    const resolved = isServiceRole && user_id
-      ? await resolveSmtpForScheduledEmail(supabaseClient, { scheduledUserId: user_id, organizationId: organization_id || company_id })
+    let resolved = isServiceRole && user_id
+      ? await resolveSmtpForScheduledEmail(supabaseClient, { scheduledUserId: user_id, organizationId: organization_id || company_id, smtpId: smtp_id })
       : await resolveSmtpForAuthenticatedUser(supabaseClient, {
-          authUserId: resolvedAuthUserId,
+          authUserId: documentOwner?.authUserId ?? resolvedAuthUserId,
           organizationId: organization_id || company_id,
           smtpId: smtp_id,
         });
+
+    if (!resolved && documentOwner && documentOwner.authUserId !== resolvedAuthUserId) {
+      resolved = await resolveSmtpForAuthenticatedUser(supabaseClient, {
+        authUserId: resolvedAuthUserId,
+        organizationId: organization_id || company_id,
+        smtpId: smtp_id,
+      });
+    }
 
     if (!resolved) {
       throw new Error(smtpNotFoundMessage());
