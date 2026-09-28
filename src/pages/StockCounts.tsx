@@ -109,7 +109,7 @@ const StockCounts = () => {
   const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
   // Só categorias de topo (sem parent_id), por ordem alfabética — lista e
   // diálogo de criação. Cache partilhada com Stocks/folha de contagem.
-  const { topLevelCategories: categories, error: categoriesError } = useProductCategories();
+  const { topLevelCategories: categories, resolveFilterIds, error: categoriesError } = useProductCategories();
 
   const [createOpen, setCreateOpen] = useState(false);
   const [createWarehouseId, setCreateWarehouseId] = useState("");
@@ -328,8 +328,10 @@ const StockCounts = () => {
   // 20261204000000: universo = product_organizations (products.organization_id
   // não é fiável, facto F2 da migration), produtos não apagados
   // (is_deleted = false E deleted_at IS NULL) e status <> 'draft'
-  // ('discontinued' entra de propósito), mais a categoria escolhida. O armazém
-  // não entra: no modo inicial o universo é o catálogo, não o stock.
+  // ('discontinued' entra de propósito), mais a categoria escolhida — com as
+  // suas subcategorias, em category_id OU subcategory_id (migration
+  // 20261204430000). O armazém não entra: no modo inicial o universo é o
+  // catálogo, não o stock.
   useEffect(() => {
     if (!createOpen || !createInitial || !activeCompany?.id) {
       setInitialLineCount(null);
@@ -349,8 +351,10 @@ const StockCounts = () => {
           .eq("products.is_deleted", false)
           .is("products.deleted_at", null)
           .neq("products.status", "draft");
-        if (createCategoryId !== "all") {
-          query = query.eq("products.category_id", createCategoryId);
+        const categoryIds = resolveFilterIds(createCategoryId, "all");
+        if (categoryIds && categoryIds.length > 0) {
+          const ids = categoryIds.join(",");
+          query = (query as any).or(`category_id.in.(${ids}),subcategory_id.in.(${ids})`, { referencedTable: "products" });
         }
         const { count, error } = await query;
         if (error) throw error;
@@ -367,7 +371,7 @@ const StockCounts = () => {
       }
     })();
     return () => { cancelled = true; };
-  }, [createOpen, createInitial, createCategoryId, activeCompany?.id]);
+  }, [createOpen, createInitial, createCategoryId, activeCompany?.id, resolveFilterIds]);
 
   // Decide o interruptor "Contagem inicial" a partir do armazém escolhido: sem
   // linhas em stocks, a contagem de rotina não teria nada para semear, logo o
