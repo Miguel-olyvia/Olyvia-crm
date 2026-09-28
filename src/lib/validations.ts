@@ -635,6 +635,8 @@ export const scheduleSettingsSchema = z.object({
   holiday_color: scheduleHexColor,
   show_weekends: z.boolean(),
   show_holidays: z.boolean(),
+  notify_client_on_reschedule: z.boolean(),
+  notify_client_on_reassign: z.boolean(),
 }).refine((data) => data.working_hours_start < data.working_hours_end, {
   message: "A hora de início deve ser anterior à hora de fim",
   path: ["working_hours_end"],

@@ -82,6 +82,8 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
       holiday_color: formData.holiday_color || '#fef3c7',
       show_weekends: formData.show_weekends ?? true,
       show_holidays: formData.show_holidays ?? true,
+      notify_client_on_reschedule: formData.notify_client_on_reschedule ?? false,
+      notify_client_on_reassign: formData.notify_client_on_reassign ?? false,
     });
     if (!validation.success) {
       const errors: Record<string, string> = {};
@@ -161,10 +163,11 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
         </DialogHeader>
 
         <Tabs defaultValue="general" className="w-full">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="general">{t('scheduling.settings.general')}</TabsTrigger>
             <TabsTrigger value="working">{t('scheduling.settings.working')}</TabsTrigger>
             <TabsTrigger value="holidays">{t('scheduling.settings.holidays')}</TabsTrigger>
+            <TabsTrigger value="notifications">{t('scheduling.settings.notifications')}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="space-y-4 mt-4">
@@ -380,6 +383,42 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
                 )}
               </TableBody>
             </Table>
+          </TabsContent>
+
+          <TabsContent value="notifications" className="space-y-4 mt-4">
+            <p className="text-sm text-muted-foreground">
+              {t('scheduling.settings.notificationsIntro')}
+            </p>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="notify-reschedule">{t('scheduling.settings.notifyOnReschedule')}</Label>
+                <p className="text-sm text-muted-foreground">{t('scheduling.settings.notifyOnRescheduleDesc')}</p>
+              </div>
+              <Switch
+                id="notify-reschedule"
+                checked={formData.notify_client_on_reschedule ?? false}
+                onCheckedChange={(v) => setFormData(prev => ({ ...prev, notify_client_on_reschedule: v }))}
+                disabled={!canEditSettings}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="notify-reassign">{t('scheduling.settings.notifyOnReassign')}</Label>
+                <p className="text-sm text-muted-foreground">{t('scheduling.settings.notifyOnReassignDesc')}</p>
+              </div>
+              <Switch
+                id="notify-reassign"
+                checked={formData.notify_client_on_reassign ?? false}
+                onCheckedChange={(v) => setFormData(prev => ({ ...prev, notify_client_on_reassign: v }))}
+                disabled={!canEditSettings}
+              />
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              {t('scheduling.settings.notifyChannelsNote')}
+            </p>
           </TabsContent>
         </Tabs>
 

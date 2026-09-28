@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "14.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       _migration_contacts_to_leads_map: {
@@ -5680,6 +5705,7 @@ export type Database = {
           id: string
           is_manual_order: boolean
           notes: string | null
+          order_number: string | null
           organization_id: string
           payment_terms: string | null
           prompt_values: Json | null
@@ -5728,6 +5754,7 @@ export type Database = {
           id?: string
           is_manual_order?: boolean
           notes?: string | null
+          order_number?: string | null
           organization_id: string
           payment_terms?: string | null
           prompt_values?: Json | null
@@ -5776,6 +5803,7 @@ export type Database = {
           id?: string
           is_manual_order?: boolean
           notes?: string | null
+          order_number?: string | null
           organization_id?: string
           payment_terms?: string | null
           prompt_values?: Json | null
@@ -8356,6 +8384,8 @@ export type Database = {
           button_option_border_width: string | null
           button_option_padding: string | null
           button_text_color: string | null
+          cancel_notify_commercial: boolean
+          cancel_notify_emails: string | null
           card_border_color: string | null
           card_border_radius: string | null
           card_border_width: string | null
@@ -8443,6 +8473,8 @@ export type Database = {
           reminder_sms_enabled: boolean
           reminder_template_id: string | null
           required_field_label: string | null
+          reschedule_notify_commercial: boolean
+          reschedule_notify_emails: string | null
           scheduling_invite_delays_hours: number[]
           scheduling_invite_enabled: boolean
           secondary_color: string | null
@@ -8493,6 +8525,8 @@ export type Database = {
           button_option_border_width?: string | null
           button_option_padding?: string | null
           button_text_color?: string | null
+          cancel_notify_commercial?: boolean
+          cancel_notify_emails?: string | null
           card_border_color?: string | null
           card_border_radius?: string | null
           card_border_width?: string | null
@@ -8580,6 +8614,8 @@ export type Database = {
           reminder_sms_enabled?: boolean
           reminder_template_id?: string | null
           required_field_label?: string | null
+          reschedule_notify_commercial?: boolean
+          reschedule_notify_emails?: string | null
           scheduling_invite_delays_hours?: number[]
           scheduling_invite_enabled?: boolean
           secondary_color?: string | null
@@ -8630,6 +8666,8 @@ export type Database = {
           button_option_border_width?: string | null
           button_option_padding?: string | null
           button_text_color?: string | null
+          cancel_notify_commercial?: boolean
+          cancel_notify_emails?: string | null
           card_border_color?: string | null
           card_border_radius?: string | null
           card_border_width?: string | null
@@ -8717,6 +8755,8 @@ export type Database = {
           reminder_sms_enabled?: boolean
           reminder_template_id?: string | null
           required_field_label?: string | null
+          reschedule_notify_commercial?: boolean
+          reschedule_notify_emails?: string | null
           scheduling_invite_delays_hours?: number[]
           scheduling_invite_enabled?: boolean
           secondary_color?: string | null
@@ -16244,6 +16284,7 @@ export type Database = {
       }
       purchase_order_items: {
         Row: {
+          component_index: number | null
           created_at: string
           description: string
           id: string
@@ -16252,6 +16293,7 @@ export type Database = {
           product_id: string | null
           purchase_order_id: string
           quantity: number
+          quote_line_id: string | null
           received_quantity: number
           selected_attributes: Json | null
           service_id: string | null
@@ -16266,6 +16308,7 @@ export type Database = {
           vat_rate: number | null
         }
         Insert: {
+          component_index?: number | null
           created_at?: string
           description: string
           id?: string
@@ -16274,6 +16317,7 @@ export type Database = {
           product_id?: string | null
           purchase_order_id: string
           quantity?: number
+          quote_line_id?: string | null
           received_quantity?: number
           selected_attributes?: Json | null
           service_id?: string | null
@@ -16288,6 +16332,7 @@ export type Database = {
           vat_rate?: number | null
         }
         Update: {
+          component_index?: number | null
           created_at?: string
           description?: string
           id?: string
@@ -16296,6 +16341,7 @@ export type Database = {
           product_id?: string | null
           purchase_order_id?: string
           quantity?: number
+          quote_line_id?: string | null
           received_quantity?: number
           selected_attributes?: Json | null
           service_id?: string | null
@@ -16329,6 +16375,13 @@ export type Database = {
             columns: ["purchase_order_id"]
             isOneToOne: false
             referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_items_quote_line_id_fkey"
+            columns: ["quote_line_id"]
+            isOneToOne: false
+            referencedRelation: "quote_lines"
             referencedColumns: ["id"]
           },
           {
@@ -18370,6 +18423,8 @@ export type Database = {
           created_by: string
           holiday_color: string | null
           id: string
+          notify_client_on_reassign: boolean
+          notify_client_on_reschedule: boolean
           organization_id: string | null
           show_holidays: boolean
           show_weekends: boolean
@@ -18387,6 +18442,8 @@ export type Database = {
           created_by: string
           holiday_color?: string | null
           id?: string
+          notify_client_on_reassign?: boolean
+          notify_client_on_reschedule?: boolean
           organization_id?: string | null
           show_holidays?: boolean
           show_weekends?: boolean
@@ -18404,6 +18461,8 @@ export type Database = {
           created_by?: string
           holiday_color?: string | null
           id?: string
+          notify_client_on_reassign?: boolean
+          notify_client_on_reschedule?: boolean
           organization_id?: string | null
           show_holidays?: boolean
           show_weekends?: boolean
@@ -21676,7 +21735,45 @@ export type Database = {
         Args: { _organization_id: string }
         Returns: Json
       }
+      fn_client_order_line_reservations: {
+        Args: { p_organization_id: string; p_product_ids?: string[] }
+        Returns: {
+          component_index: number
+          contract_id: string
+          is_served: boolean
+          is_sold: boolean
+          product_id: string
+          qty_missing: number
+          qty_needed: number
+          qty_ordered: number
+          qty_received: number
+          qty_reserved: number
+          qty_served: number
+          quote_line_id: string
+          seq: number
+        }[]
+      }
+      fn_client_order_product_locked: {
+        Args: {
+          p_contract_id: string
+          p_product_id: string
+          p_quote_line_id: string
+        }
+        Returns: boolean
+      }
+      fn_client_order_request_missing: {
+        Args: {
+          p_actor: string
+          p_contract_id: string
+          p_quote_line_ids?: string[]
+        }
+        Returns: Json
+      }
       fn_deal_org_in_scope: { Args: { p_org_id: string }; Returns: boolean }
+      fn_entity_delivery_address_access: {
+        Args: { p_entity_id: string; p_mode: string }
+        Returns: boolean
+      }
       fn_get_plan_usage_summary: {
         Args: { _organization_id: string }
         Returns: Json
@@ -21758,6 +21855,7 @@ export type Database = {
       }
       generate_api_key: { Args: never; Returns: string }
       generate_client_contract_number: { Args: never; Returns: string }
+      generate_client_order_number: { Args: never; Returns: string }
       generate_direct_sale_number: { Args: never; Returns: string }
       generate_po_number: {
         Args: { p_organization_id: string }
@@ -23511,6 +23609,7 @@ export type Database = {
           id: string
           is_manual_order: boolean
           notes: string | null
+          order_number: string | null
           organization_id: string
           payment_terms: string | null
           prompt_values: Json | null
@@ -23719,6 +23818,7 @@ export type Database = {
           id: string
           is_manual_order: boolean
           notes: string | null
+          order_number: string | null
           organization_id: string
           payment_terms: string | null
           prompt_values: Json | null
@@ -24627,6 +24727,15 @@ export type Database = {
         Args: { p_contract_id: string }
         Returns: Json
       }
+      rpc_get_product_stock_reservations: {
+        Args: { p_organization_id: string; p_product_ids?: string[] }
+        Returns: {
+          orders_count: number
+          product_id: string
+          qty_missing: number
+          qty_reserved: number
+        }[]
+      }
       rpc_get_supplier_sla_orders: {
         Args: { p_supplier_id: string }
         Returns: {
@@ -24693,6 +24802,9 @@ export type Database = {
           lines_no_supplier: number
           lines_received: number
           lines_service: number
+          order_number: string
+          origin_number: string
+          origin_type: string
           overall_status: string
           signature_date: string
           total_lines: number
@@ -25288,6 +25400,10 @@ export type Database = {
         Args: { p_entity_address_id: string }
         Returns: Json
       }
+      rpc_request_missing_from_supplier: {
+        Args: { p_contract_id: string }
+        Returns: Json
+      }
       rpc_resolve_form_submission: {
         Args: {
           p_action: string
@@ -25349,6 +25465,10 @@ export type Database = {
       rpc_restore_supplier: { Args: { p_id: string }; Returns: undefined }
       rpc_restore_user: { Args: { p_user_id: string }; Returns: undefined }
       rpc_restore_warehouse: { Args: { p_id: string }; Returns: undefined }
+      rpc_revert_client_order_stock_exit: {
+        Args: { p_contract_id: string; p_movement_id: string }
+        Returns: Json
+      }
       rpc_revert_client_to_lead: {
         Args: { p_client_id: string }
         Returns: Json
@@ -25749,6 +25869,7 @@ export type Database = {
           p_display_name: string
           p_email: string
           p_entity_id: string
+          p_entity_type?: string
           p_nif_encrypted?: string
           p_nif_hash?: string
           p_nif_tokens?: string[]
@@ -26065,6 +26186,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      rpc_update_manual_client_order: {
+        Args: {
+          p_contract_id: string
+          p_delivery_address: string
+          p_items: Json
+        }
+        Returns: Json
       }
       rpc_update_organization: {
         Args: {
@@ -27248,6 +27377,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       anew_scope_level: ["NONE", "OWNED", "TEAM", "ORG"],
