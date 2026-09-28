@@ -5976,6 +5976,11 @@ export const translations = {
     'stockCounts.detail.lines.pageInfo': 'Showing {from}-{to} of {total} lines (page {page} of {pages})',
     'stockCounts.detail.lines.prevPage': 'Previous',
     'stockCounts.detail.lines.nextPage': 'Next',
+    'stockCounts.detail.lines.filteredInfo': '{shown} of {total} lines',
+    'stockCounts.detail.lines.noFilteredLines': 'No lines match the selected category.',
+    'inventory.categoryFilter.category': 'Category',
+    'inventory.categoryFilter.subcategory': 'Subcategory',
+    'inventory.categoryFilter.uncategorized': 'No category',
 
     // Stocks Module
     'stocks.title': 'Stocks',
@@ -13931,6 +13936,11 @@ export const translations = {
     'stockCounts.detail.lines.pageInfo': 'A mostrar {from}-{to} de {total} linhas (página {page} de {pages})',
     'stockCounts.detail.lines.prevPage': 'Anterior',
     'stockCounts.detail.lines.nextPage': 'Seguinte',
+    'stockCounts.detail.lines.filteredInfo': '{shown} de {total} linhas',
+    'stockCounts.detail.lines.noFilteredLines': 'Nenhuma linha corresponde à categoria escolhida.',
+    'inventory.categoryFilter.category': 'Categoria',
+    'inventory.categoryFilter.subcategory': 'Subcategoria',
+    'inventory.categoryFilter.uncategorized': 'Sem categoria',
 
     // Stocks Module
     'stocks.title': 'Stocks',

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -23,6 +23,8 @@ import type { IScannerControls } from "@zxing/browser";
 import { NotFoundException } from "@zxing/library";
 import * as XLSX from "xlsx";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
+import CategorySubcategoryFilter from "@/components/inventory/CategorySubcategoryFilter";
+import { productMatchesCategoryIds, useProductCategories } from "@/hooks/useProductCategories";
 
 // Fase 5.4 do plano de inventário: diálogo de detalhe/contagem de uma sessão
 // de public.inventory_counts. Consome as 3 RPCs de escrita já aplicadas
@@ -58,7 +60,13 @@ interface InventoryCountLineRow {
   resolution_notes: string | null;
   moved_during_count: boolean;
   stock_movement_id: string | null;
-  products?: { name: string; sku: string | null; barcode: string | null } | null;
+  products?: {
+    name: string;
+    sku: string | null;
+    barcode: string | null;
+    category_id: string | null;
+    subcategory_id: string | null;
+  } | null;
 }
 
 interface MovementRow {
@@ -337,6 +345,27 @@ export default function InventoryCountDetailDialog({
   // Página atual da tabela de linhas (só usada acima de LINE_PAGINATION_THRESHOLD).
   const [linePage, setLinePage] = useState(0);
 
+  // Filtro Categoria/Subcategoria da folha — só muda o que a TABELA mostra.
+  // Exportar, importar, finalizar e os agregados da listagem continuam a usar
+  // todas as linhas (`lines`).
+  const [lineCategoryFilter, setLineCategoryFilter] = useState("all");
+  const [lineSubcategoryFilter, setLineSubcategoryFilter] = useState("all");
+  const { resolveFilterIds } = useProductCategories();
+  const lineFilterIds = useMemo(
+    () => resolveFilterIds(lineCategoryFilter, lineSubcategoryFilter),
+    [lineCategoryFilter, lineSubcategoryFilter, resolveFilterIds],
+  );
+  const lineFilterActive = lineFilterIds !== null;
+  const filteredLines = useMemo(
+    () => (lineFilterIds ? lines.filter((l) => productMatchesCategoryIds(l.products, lineFilterIds)) : lines),
+    [lines, lineFilterIds],
+  );
+  const clearLineFilters = useCallback(() => {
+    setLineCategoryFilter("all");
+    setLineSubcategoryFilter("all");
+    setLinePage(0);
+  }, []);
+
   // Leitor de código de barras (Fase 5.4 — localizar linha por câmara). As
   // etiquetas físicas dos produtos codificam o SKU (products.barcode está
   // vazio em toda a BD hoje) — comparamos primeiro por sku e, como fallback
@@ -367,14 +396,15 @@ export default function InventoryCountDetailDialog({
 
   // Paginação client-side da tabela de linhas. `safeLinePage` é derivado (não
   // é estado): assim uma contagem que encolha — recarregada noutra sessão —
-  // nunca deixa a tabela presa numa página que já não existe.
-  const paginateLines = lines.length > LINE_PAGINATION_THRESHOLD;
-  const linePageCount = paginateLines ? Math.ceil(lines.length / LINE_PAGE_SIZE) : 1;
+  // nunca deixa a tabela presa numa página que já não existe. Pagina sobre as
+  // linhas filtradas (filteredLines === lines sem filtro).
+  const paginateLines = filteredLines.length > LINE_PAGINATION_THRESHOLD;
+  const linePageCount = paginateLines ? Math.ceil(filteredLines.length / LINE_PAGE_SIZE) : 1;
   const safeLinePage = Math.min(Math.max(linePage, 0), linePageCount - 1);
   const lineRangeStart = paginateLines ? safeLinePage * LINE_PAGE_SIZE : 0;
   const visibleLines = paginateLines
-    ? lines.slice(lineRangeStart, lineRangeStart + LINE_PAGE_SIZE)
-    : lines;
+    ? filteredLines.slice(lineRangeStart, lineRangeStart + LINE_PAGE_SIZE)
+    : filteredLines;
 
   const loadDetail = useCallback(async () => {
     if (!countId) return;
@@ -391,7 +421,7 @@ export default function InventoryCountDetailDialog({
       const { data: lineData, error: lineError } = await fetchAllRows(() =>
         supabase
           .from("inventory_count_lines")
-          .select("id, product_id, system_quantity_at_start, counted_quantity, counted_at, discrepancy_resolution, resolution_notes, moved_during_count, stock_movement_id, products(name, sku, barcode)")
+          .select("id, product_id, system_quantity_at_start, counted_quantity, counted_at, discrepancy_resolution, resolution_notes, moved_during_count, stock_movement_id, products(name, sku, barcode, category_id, subcategory_id)")
           .eq("inventory_count_id", countId)
           .order("name", { foreignTable: "products", ascending: true })
       );
@@ -474,9 +504,12 @@ export default function InventoryCountDetailDialog({
     }
   }, [open]);
 
-  // Abrir outra contagem (ou reabrir esta) volta sempre à primeira página.
+  // Abrir outra contagem (ou reabrir esta) volta sempre à primeira página e
+  // sem filtro de categoria.
   useEffect(() => {
     setLinePage(0);
+    setLineCategoryFilter("all");
+    setLineSubcategoryFilter("all");
   }, [countId, open]);
 
   const findLineByCode = useCallback((code: string): InventoryCountLineRow | undefined => {
@@ -540,10 +573,21 @@ export default function InventoryCountDetailDialog({
       return;
     }
     // Com a tabela paginada, a linha lida pode estar noutra página — sem isto
-    // o utilizador ouvia o "bip", via o toast e não via a linha a mudar.
-    if (lines.length > LINE_PAGINATION_THRESHOLD) {
-      const matchIndex = lines.findIndex((l) => l.id === match.id);
-      if (matchIndex >= 0) setLinePage(Math.floor(matchIndex / LINE_PAGE_SIZE));
+    // o utilizador ouvia o "bip", via o toast e não via a linha a mudar. O
+    // scan procura sempre em TODAS as linhas; se o produto lido está escondido
+    // pelo filtro de categoria, o filtro é limpo e salta-se para ele na lista
+    // completa.
+    const hiddenByFilter = lineFilterActive && !filteredLines.some((l) => l.id === match.id);
+    const targetList = hiddenByFilter ? lines : filteredLines;
+    if (hiddenByFilter) {
+      setLineCategoryFilter("all");
+      setLineSubcategoryFilter("all");
+    }
+    if (targetList.length > LINE_PAGINATION_THRESHOLD) {
+      const matchIndex = targetList.findIndex((l) => l.id === match.id);
+      setLinePage(matchIndex >= 0 ? Math.floor(matchIndex / LINE_PAGE_SIZE) : 0);
+    } else if (hiddenByFilter) {
+      setLinePage(0);
     }
 
     const newQty = (match.counted_quantity ?? 0) + 1;
@@ -560,7 +604,7 @@ export default function InventoryCountDetailDialog({
       .catch((error: any) => {
         toast({ title: t('stockCounts.toast.quantityError'), description: error.message, variant: "destructive" });
       });
-  }, [findLineByCode, lines, persistQuantity, t, toast]);
+  }, [findLineByCode, lines, filteredLines, lineFilterActive, persistQuantity, t, toast]);
 
   // Mantido em ref para o efeito da câmara (abaixo) não precisar reiniciar o
   // stream sempre que `lines`/`t`/`toast` mudam — só quando scanOpen muda.
@@ -1214,6 +1258,30 @@ export default function InventoryCountDetailDialog({
                   )}
                 </div>
               </div>
+              {lines.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 mb-2">
+                  <CategorySubcategoryFilter
+                    categoryId={lineCategoryFilter}
+                    subcategoryId={lineSubcategoryFilter}
+                    onChange={({ categoryId, subcategoryId }) => {
+                      setLineCategoryFilter(categoryId);
+                      setLineSubcategoryFilter(subcategoryId);
+                      setLinePage(0);
+                    }}
+                    triggerClassName="h-9 w-[200px]"
+                  />
+                  {lineFilterActive && (
+                    <>
+                      <Button type="button" variant="ghost" size="sm" onClick={clearLineFilters}>
+                        {t('stockCounts.clearFilters')}
+                      </Button>
+                      <span className="text-xs text-muted-foreground" aria-live="polite">
+                        {t('stockCounts.detail.lines.filteredInfo', { shown: filteredLines.length, total: lines.length })}
+                      </span>
+                    </>
+                  )}
+                </div>
+              )}
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -1230,6 +1298,12 @@ export default function InventoryCountDetailDialog({
                     <TableRow>
                       <TableCell colSpan={6} className="text-center text-muted-foreground">
                         {t('stockCounts.detail.lines.noLines')}
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredLines.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-muted-foreground">
+                        {t('stockCounts.detail.lines.noFilteredLines')}
                       </TableCell>
                     </TableRow>
                   ) : (
@@ -1342,7 +1416,7 @@ export default function InventoryCountDetailDialog({
                     {t('stockCounts.detail.lines.pageInfo', {
                       from: lineRangeStart + 1,
                       to: lineRangeStart + visibleLines.length,
-                      total: lines.length,
+                      total: filteredLines.length,
                       page: safeLinePage + 1,
                       pages: linePageCount,
                     })}
