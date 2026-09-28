@@ -48,7 +48,7 @@ import { useProductCategories } from "@/hooks/useProductCategories";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
-  products?: { name: string; category_id?: string | null; subcategory_id?: string | null; product_categories?: { name: string } | null };
+  products?: { name: string; sku?: string | null; category_id?: string | null; subcategory_id?: string | null; product_categories?: { name: string } | null };
   warehouses?: { name: string };
 };
 
@@ -120,7 +120,7 @@ const RESERVATION_CHUNK = 150;
 
 const STOCK_SELECT = `
   *,
-  products!inner(name, category_id, subcategory_id, product_categories!category_id(name)),
+  products!inner(name, sku, category_id, subcategory_id, product_categories!category_id(name)),
   warehouses(name)
 `;
 
@@ -690,6 +690,7 @@ const Stocks = () => {
         sheetName: "Stocks",
         columns: [
           { key: "category", header: "Categoria", width: 22 },
+          { key: "reference", header: "Referência", width: 18 },
           { key: "product", header: t('stocks.table.product'), width: 30 },
           { key: "warehouse", header: t('stocks.table.warehouse'), width: 26 },
           { key: "quantity", header: t('stocks.table.quantity'), type: "number", width: 14 },
@@ -700,6 +701,7 @@ const Stocks = () => {
         ],
         rows: rows.map((stock) => ({
           category: stock.products?.product_categories?.name || UNCATEGORIZED_LABEL,
+          reference: stock.products?.sku,
           product: stock.products?.name,
           warehouse: stock.warehouses?.name,
           quantity: stock.quantity,
