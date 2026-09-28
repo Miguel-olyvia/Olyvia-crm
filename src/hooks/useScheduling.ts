@@ -179,13 +179,16 @@ export function useScheduling(companyId?: string) {
   }, [t]);
 
   // RESOURCES
-  const fetchResources = useCallback(async (): Promise<ScheduleResource[]> => {
+  const fetchResources = useCallback(async (includeInactive: boolean = false): Promise<ScheduleResource[]> => {
     try {
       let query = supabase
         .from('schedule_resources')
         .select('*')
-        .eq('is_active', true)
         .order('name');
+
+      if (!includeInactive) {
+        query = query.eq('is_active', true);
+      }
 
       if (companyId) {
         query = query.eq('organization_id', companyId);
