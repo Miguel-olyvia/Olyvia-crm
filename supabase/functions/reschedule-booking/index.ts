@@ -484,8 +484,13 @@ Deno.serve(async (req: Request) => {
       }
 
       // (b) Technician + extra notify emails: internal notification.
+      // Technician inclusion respects the same "Aviso de reunião ao comercial"
+      // toggle as book-slot; extra emails always notify regardless of it.
       const extra = parseEmailList(emailCfg?.meeting_notify_emails);
-      const notifyList = uniqueEmails([technicianEmail, ...extra]);
+      const notifyList = uniqueEmails([
+        emailCfg?.meeting_notify_commercial ? technicianEmail : null,
+        ...extra,
+      ]);
       if (notifyList.length > 0) {
         await sendEmailNow({
           organizationId,
