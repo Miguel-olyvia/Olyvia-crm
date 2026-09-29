@@ -115,15 +115,15 @@ describe('checkTravelFeasible - termina fora da janela', () => {
   });
 });
 
-describe('checkTravelFeasible - termina no inicio da janela (extremo incluido)', () => {
+describe('checkTravelFeasible - termina exactamente no inicio da janela (12h00 nao conta como dentro)', () => {
   const neighbors = [
     { start_datetime: iso('10:00:00'), end_datetime: iso('11:00:00'), location_lat: A.lat, location_lng: A.lng },
   ];
   const base = { clientLat: A.lat, clientLng: A.lng, neighbors, lunchBreak: LUNCH };
 
-  it('12h59 infeasible', () => {
+  it('12h59 feasible (a visita das 12h00 exactas nao conta como dentro do almoco)', () => {
     const r = checkTravelFeasible({ ...base, slotStart: iso('11:59:00'), slotEnd: iso('11:59:00') });
-    expect(r.feasible).toBe(false);
+    expect(r.feasible).toBe(true);
   });
 
   it('13h00 feasible', () => {
@@ -167,7 +167,7 @@ describe('checkTravelFeasible - vizinha anterior sem coordenadas, cliente com co
 });
 
 describe('checkTravelFeasible - lado seguinte', () => {
-  it('candidato 11h-13h com vizinha seguinte em A: 13h30 infeasible, 14h00 feasible', () => {
+  it('candidato 11h-13h com vizinha seguinte em A: o almoco nao o recusa (feasible nos dois casos)', () => {
     const neighbors = [
       { start_datetime: iso('12:30:00'), end_datetime: iso('13:00:00'), location_lat: A.lat, location_lng: A.lng },
     ];
@@ -179,7 +179,7 @@ describe('checkTravelFeasible - lado seguinte', () => {
       neighbors,
       lunchBreak: LUNCH,
     };
-    expect(checkTravelFeasible(base).feasible).toBe(false);
+    expect(checkTravelFeasible(base).feasible).toBe(true);
 
     const neighborsLater = [
       { start_datetime: iso('13:00:00'), end_datetime: iso('13:30:00'), location_lat: A.lat, location_lng: A.lng },
@@ -295,8 +295,8 @@ describe('buildLunchBreakConfig', () => {
 });
 
 describe('endsInsideLunchWindow', () => {
-  it('extremos incluidos', () => {
-    expect(endsInsideLunchWindow(iso('11:00:00'), LUNCH)).toBe(true); // 12h00 local
+  it('inicio excluido, fim incluido', () => {
+    expect(endsInsideLunchWindow(iso('11:00:00'), LUNCH)).toBe(false); // 12h00 local
     expect(endsInsideLunchWindow(iso('12:00:00'), LUNCH)).toBe(true); // 13h00 local
     expect(endsInsideLunchWindow(iso('12:01:00'), LUNCH)).toBe(false); // 13h01 local
     expect(endsInsideLunchWindow(iso('10:59:00'), LUNCH)).toBe(false); // 11h59 local
@@ -367,9 +367,9 @@ describe('checkTravelFeasible - almoco nao livre na janela (Regra B)', () => {
     expect(run(n, '13:30:00', '15:30:00', V).feasible).toBe(false);
   });
 
-  it('6: visita 14-16, candidato 11-13 (e o ultimo a tocar a janela) recusa', () => {
+  it('6: visita 14-16, candidato 11-13 cobre a janela mas o almoco fica livre sem ele: aceita', () => {
     const n = [visit('13:00:00', '15:00:00')];
-    expect(run(n, '10:00:00', '12:00:00', NEAR).feasible).toBe(false);
+    expect(run(n, '10:00:00', '12:00:00', NEAR).feasible).toBe(true);
   });
 
   it('7: visita 14:30-16, candidato 11-13 (desloc. 0) aceita, 90 >= 60', () => {
@@ -428,5 +428,120 @@ describe('lunchWindowBounds e freeLunchMinutes', () => {
     expect(freeLunchMinutes([m(-30, 20), m(10, 30)], w)).toBe(30);
     expect(freeLunchMinutes([m(60, 120), m(-60, 0)], w)).toBe(60);
     expect(freeLunchMinutes([m(0, 20), m(40, 60)], w)).toBe(20);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regra do almoco (30/09, pedido do utilizador): uma visita que ocupa o almoco
+// (ou acaba dentro dele, ou as 12h00 exactas) NUNCA e recusada por causa do
+// almoco; so a marcacao SEGUINTE conta com deslocacao + almoco depois dela.
+// Horas locais Lisboa (UTC+1): local HH:MM = (HH-1):MM Z. Dia 2026-09-29.
+// ---------------------------------------------------------------------------
+describe('checkTravelFeasible - o almoco so pesa na marcacao seguinte', () => {
+  const V = { lat: 38.7078, lng: -9.1366 };
+  const NEAR = { lat: 38.7078 + 0.0446, lng: -9.1366 };
+  const visit = (from: string, to: string, at = V) => ({
+    start_datetime: iso(from),
+    end_datetime: iso(to),
+    location_lat: at.lat,
+    location_lng: at.lng,
+  });
+  const run = (
+    neighbors: ReturnType<typeof visit>[],
+    from: string,
+    to: string,
+    client: { lat: number; lng: number } | null,
+    lunchBreak: typeof LUNCH | null = LUNCH,
+  ) =>
+    checkTravelFeasible({
+      clientLat: client ? client.lat : null,
+      clientLng: client ? client.lng : null,
+      slotStart: iso(from),
+      slotEnd: iso(to),
+      neighbors,
+      lunchBreak,
+    });
+
+  describe('visita existente 12:00-14:00', () => {
+    const n = [visit('11:00:00', '13:00:00')];
+
+    it('candidato 11:00-12:00 aceite, com cliente em V e sem coordenadas', () => {
+      expect(run(n, '10:00:00', '11:00:00', V).feasible).toBe(true);
+      expect(run(n, '10:00:00', '11:00:00', null).feasible).toBe(true);
+    });
+
+    it('candidato 11:00-13:00 (cobre a janela) aceite', () => {
+      expect(run(n, '10:00:00', '12:00:00', V).feasible).toBe(true);
+    });
+
+    it('14:00 e 14:30 recusados', () => {
+      expect(run(n, '13:00:00', '14:00:00', V).feasible).toBe(false);
+      expect(run(n, '13:30:00', '14:30:00', V).feasible).toBe(false);
+    });
+
+    it('15:00 aceite com deslocacao 0, 14:59 recusado (limite 60/59)', () => {
+      expect(run(n, '14:00:00', '15:00:00', V).feasible).toBe(true);
+      expect(run(n, '13:59:00', '14:59:00', V).feasible).toBe(false);
+    });
+
+    it('15:30 aceite com deslocacao de 8,5 min', () => {
+      expect(run(n, '14:30:00', '15:30:00', NEAR).feasible).toBe(true);
+    });
+  });
+
+  it('candidato 11:00-13:00 com uma visita as 14:00: aceite', () => {
+    const n = [visit('13:00:00', '14:00:00')];
+    expect(run(n, '10:00:00', '12:00:00', V).feasible).toBe(true);
+  });
+
+  it('candidato 11:00-12:00 com visita as 12:00 ou as 12:59: aceite', () => {
+    expect(run([visit('11:00:00', '12:00:00')], '10:00:00', '11:00:00', V).feasible).toBe(true);
+    expect(run([visit('11:59:00', '13:00:00')], '10:00:00', '11:00:00', V).feasible).toBe(true);
+  });
+
+  it('visitas 11:30-12:20 e 12:20-12:50: 13:00 recusa, 13:50 aceita', () => {
+    const n = [visit('10:30:00', '11:20:00'), visit('11:20:00', '11:50:00')];
+    expect(run(n, '12:00:00', '13:00:00', V).feasible).toBe(false);
+    expect(run(n, '12:50:00', '13:50:00', V).feasible).toBe(true);
+  });
+
+  describe('visita existente 11:00-12:00', () => {
+    it('candidatos 12:00-13:00 e 12:30 aceites', () => {
+      const n = [visit('10:00:00', '11:00:00')];
+      expect(run(n, '11:00:00', '12:00:00', V).feasible).toBe(true);
+      expect(run(n, '11:30:00', '12:30:00', V).feasible).toBe(true);
+    });
+
+    it('com 11-12 e 12-13 ja marcadas, 13:00 recusa e 14:00 aceita', () => {
+      const n = [visit('10:00:00', '11:00:00'), visit('11:00:00', '12:00:00')];
+      expect(run(n, '12:00:00', '13:00:00', V).feasible).toBe(false);
+      expect(run(n, '13:00:00', '14:00:00', V).feasible).toBe(true);
+    });
+  });
+
+  it('janela ou duracao a NULL desliga a regra: visita 12-14, candidato 14:00 aceite', () => {
+    const n = [visit('11:00:00', '13:00:00')];
+    const semJanela = buildLunchBreakConfig({
+      timezone: 'Europe/Lisbon',
+      lunch_window_start: null,
+      lunch_window_end: '13:00:00',
+      lunch_duration_minutes: 60,
+    });
+    const semDuracao = buildLunchBreakConfig({
+      timezone: 'Europe/Lisbon',
+      lunch_window_start: '12:00:00',
+      lunch_window_end: '13:00:00',
+      lunch_duration_minutes: null,
+    });
+    expect(run(n, '13:00:00', '14:00:00', V, semJanela).feasible).toBe(true);
+    expect(run(n, '13:00:00', '14:00:00', V, semDuracao).feasible).toBe(true);
+  });
+
+  it('a deslocacao fisica continua a valer do lado seguinte', () => {
+    const n = [visit('11:00:00', '13:00:00', B)];
+    const recusado = run(n, '10:00:00', '11:00:00', A);
+    expect(recusado.feasible).toBe(false);
+    expect(recusado.reason).toContain('to next visit');
+    expect(run(n, '10:00:00', '10:40:00', A).feasible).toBe(true);
   });
 });

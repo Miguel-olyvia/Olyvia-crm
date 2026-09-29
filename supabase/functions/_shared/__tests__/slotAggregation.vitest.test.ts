@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aggregateDayWithoutPostal,
   aggregateFeasibleSlots,
   intersectMonthDays,
   restrictResourcesToOwner,
@@ -132,19 +133,62 @@ describe('aggregateFeasibleSlots - a regra 13 continua a aplicar-se ao recurso d
       lunch_window_end: '13:00:00',
       lunch_duration_minutes: 60,
     });
-    // Visita do dono termina 12:00 locais (11:00Z), dentro da janela de almoco:
-    // a proxima so pode comecar 60 min depois (13:00 locais = 12:00Z).
+    // Visita do dono termina 12:30 locais (11:30Z), dentro da janela de almoco:
+    // a proxima so pode comecar 60 min depois (13:30 locais = 12:30Z).
     const neighbors = new Map<string, NeighborVisitLike[]>([
-      [OWNER, [{ start_datetime: iso('10:00:00'), end_datetime: iso('11:00:00'), location_lat: null, location_lng: null }]],
+      [OWNER, [{ start_datetime: iso('09:30:00'), end_datetime: iso('11:30:00'), location_lat: null, location_lng: null }]],
     ]);
     const rs: CandidateResource[] = [
-      { resource_id: OWNER, available_slots: [slot('11:00:00', '12:00:00'), slot('12:00:00', '13:00:00')] },
+      { resource_id: OWNER, available_slots: [slot('11:30:00', '12:30:00'), slot('12:30:00', '13:30:00')] },
     ];
     const own = aggregateFeasibleSlots({
       ...base, resources: rs, ownerResourceIds: [OWNER], neighborsByResource: neighbors,
       clientLat: null, clientLng: null, lunchBreak: lunch,
     });
-    expect(keys(own)).toEqual([`${iso('12:00:00')}|${iso('13:00:00')}`]);
+    expect(keys(own)).toEqual([`${iso('12:30:00')}|${iso('13:30:00')}`]);
+  });
+});
+
+describe('aggregateDayWithoutPostal - calendario sem codigo postal aplica o almoco como a marcacao', () => {
+  const lunch = buildLunchBreakConfig({
+    timezone: 'Europe/Lisbon',
+    lunch_window_start: '12:00:00',
+    lunch_window_end: '13:00:00',
+    lunch_duration_minutes: 60,
+  });
+  // Visita 12:00-14:00 locais (11:00Z-13:00Z), sem coordenadas do cliente.
+  const visit: NeighborVisitLike = {
+    start_datetime: iso('11:00:00'), end_datetime: iso('13:00:00'), location_lat: null, location_lng: null,
+  };
+  const daySlots = [
+    slot('09:00:00', '10:00:00'), // 10:00 locais, acaba as 11:00 locais
+    slot('13:00:00', '14:00:00'), // 14:00 locais, cola na visita
+    slot('13:30:00', '14:30:00'), // 14:30 locais, 30 min de folga
+    slot('14:00:00', '15:00:00'), // 15:00 locais, 60 min de folga
+  ];
+
+  it('tira as horas que o book-slot recusaria e mantem as que aceita', async () => {
+    const out = await aggregateDayWithoutPostal({
+      resourceIds: [OWNER],
+      getSlots: async () => daySlots,
+      getNeighbors: async () => [visit],
+      lunchBreak: lunch,
+    });
+    expect(keys(out)).toEqual([
+      `${iso('09:00:00')}|${iso('10:00:00')}`,
+      `${iso('14:00:00')}|${iso('15:00:00')}`,
+    ]);
+  });
+
+  it('sem regra de almoco devolve tudo (comportamento antigo intacto) e conta recursos', async () => {
+    const out = await aggregateDayWithoutPostal({
+      resourceIds: [OWNER, OTHER],
+      getSlots: async () => daySlots,
+      getNeighbors: async () => [],
+      lunchBreak: null,
+    });
+    expect(out).toHaveLength(4);
+    expect(out.every((s) => s.available_count === 2)).toBe(true);
   });
 });
 
