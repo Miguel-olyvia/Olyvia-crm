@@ -36,7 +36,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
 import { ClientOrderDocumentPDF } from "@/components/ClientOrderDocumentPDF";
-import { applyUomOptionToLine, formatOrderLineQuantity, type LineUomFields } from "@/utils/quotes/lineUom";
+import { applyDefaultLineUom, applyUomOptionToLine, formatOrderLineQuantity, type LineUomFields } from "@/utils/quotes/lineUom";
 import { useLineUomOptions } from "@/hooks/useLineUomOptions";
 import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
 import { requiresIntegerQty, isValidQtyFor, roundToIntegerQty, integerQtyMessage } from "@/utils/quotes/integerQty";
@@ -1619,7 +1619,15 @@ const ClientOrders = () => {
     return { subtotal, totalVat, total: subtotal + totalVat };
   };
 
-  const handleAddCatalogItems = (selected: any[]) => {
+  const handleAddCatalogItems = async (selected: any[]) => {
+    // Unidade de venda por omissão (products.sale_uom_id) das linhas novas de
+    // produto. Os componentes de bundle ficam à unidade (quantidade da
+    // composição). Em erro as linhas nascem à unidade.
+    const resolveDefaultUom = await lineUom.loadDefaultOptions(
+      selected
+        .filter((sel) => !sel?.bundleInfo && sel?.item?.type === 'product')
+        .map((sel) => sel.item.id as string),
+    );
     const newItems: ManualClientOrderItem[] = [];
 
     selected.forEach((sel) => {
@@ -1662,7 +1670,7 @@ const ClientOrders = () => {
         : item.name;
 
       const isProduct = item.type === 'product';
-      newItems.push({
+      newItems.push(applyDefaultLineUom<ManualClientOrderItem>({
         item_type: isProduct ? 'product' : 'service',
         product_id: isProduct ? item.id : null,
         service_id: isProduct ? null : item.id,
@@ -1672,7 +1680,7 @@ const ClientOrders = () => {
         quantity: Number(quantity) || 1,
         unit_price: (Number(item.retail_price) || 0) + (Number(attributePriceAddon) || 0),
         vat_rate: Number(item.vat_rate) || DEFAULT_VAT_RATE,
-      });
+      }, isProduct ? resolveDefaultUom(item.id) : null, MANUAL_ORDER_PRICE_FIELDS));
     });
 
     if (newItems.length === 0) return;

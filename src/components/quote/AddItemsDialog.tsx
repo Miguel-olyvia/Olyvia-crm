@@ -39,6 +39,7 @@ import { getEffectiveProductOptionPrices } from "@/lib/product-attribute-option-
 import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { quoteAddItemsSchema } from "@/lib/validations";
 import { escapeIlike, escapePostgrestOrTerm } from "@/lib/clientSearch";
+import { formatExactMoney, formatPackMoney, normalizePackQty, supplierUnitCost } from "@/utils/products/productPacks";
 
 interface ProductAttribute {
   id: string;
@@ -55,9 +56,55 @@ interface SupplierRef {
   id: string;
   supplier_id: string;
   supplier_sku: string | null;
+  /** Preço da unidade de compra da ligação (num pack de N, o preço do pack). */
   purchase_price: number | null;
   is_preferred: boolean;
   supplier_name: string | null;
+  /** Unidades de stock por unidade de compra (1 sem pack). */
+  units_per: number;
+  /** Código da unidade de compra quando é pack (ex.: PK100). */
+  pack_code: string | null;
+  /** Custo por unidade de stock (purchase_price ÷ units_per). */
+  unit_cost: number | null;
+}
+
+// uom da ligação (pack de compra) para ordenar e mostrar pelo custo por
+// unidade de stock, e não pelo preço do pack.
+const SUPPLIER_REFS_SELECT =
+  "id, product_id, service_id, supplier_id, supplier_sku, purchase_price, is_preferred, uom_id, uom:uom_id(code, conversion_factor), suppliers(name)";
+
+function toSupplierRef(r: any): SupplierRef {
+  const unitsPer = r.uom_id ? normalizePackQty(r.uom?.conversion_factor) : 1;
+  const purchasePrice = r.purchase_price ?? null;
+  return {
+    id: r.id,
+    supplier_id: r.supplier_id,
+    supplier_sku: r.supplier_sku ?? null,
+    purchase_price: purchasePrice,
+    is_preferred: !!r.is_preferred,
+    supplier_name: r.suppliers?.name ?? null,
+    units_per: unitsPer,
+    pack_code: unitsPer >= 2 ? (r.uom?.code ?? null) : null,
+    unit_cost: supplierUnitCost(purchasePrice, unitsPer),
+  };
+}
+
+/** Preferida primeiro, depois o custo por unidade de stock (sem preço no fim). Estável. */
+function sortSupplierRefs(list: SupplierRef[]): SupplierRef[] {
+  return list.sort((a, b) => {
+    if (a.is_preferred !== b.is_preferred) return a.is_preferred ? -1 : 1;
+    if (a.unit_cost == null || b.unit_cost == null) {
+      return a.unit_cost == null ? (b.unit_cost == null ? 0 : 1) : -1;
+    }
+    return a.unit_cost - b.unit_cost;
+  });
+}
+
+/** "50.00€" sem pack (como antes); "50,00 €/PK100 (0,50 €/un)" em pack. */
+function formatSupplierRefPrice(ref: SupplierRef, stockUnit: string | null): string {
+  if (ref.purchase_price == null) return "s/ preço";
+  if (ref.units_per < 2) return ref.purchase_price.toFixed(2) + "€";
+  return `${formatPackMoney(ref.purchase_price)} €/${ref.pack_code ?? `pack ${ref.units_per}`} (${formatExactMoney(ref.unit_cost ?? 0)} €/${stockUnit || "un"})`;
 }
 
 interface CatalogItem {
@@ -567,7 +614,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
           const batch = ids.slice(i, i + BATCH);
           if (batch.length === 0) continue;
           const { data: refsData } = await (supabase as any).from("item_suppliers")
-            .select("id, product_id, service_id, supplier_id, supplier_sku, purchase_price, is_preferred, suppliers(name)")
+            .select(SUPPLIER_REFS_SELECT)
             .in("product_id", batch)
             .is("deleted_at", null)
             .eq("is_active", true)
@@ -576,17 +623,11 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
           (refsData || []).forEach((r: any) => {
             if (!r.product_id) return;
             const list = supplierRefsMap.get(r.product_id) || [];
-            list.push({
-              id: r.id,
-              supplier_id: r.supplier_id,
-              supplier_sku: r.supplier_sku ?? null,
-              purchase_price: r.purchase_price ?? null,
-              is_preferred: !!r.is_preferred,
-              supplier_name: r.suppliers?.name ?? null,
-            });
+            list.push(toSupplierRef(r));
             supplierRefsMap.set(r.product_id, list);
           });
         }
+        supplierRefsMap.forEach(sortSupplierRefs);
         mapped = rows.map(r => {
           const pi = pricesMap.get(r.id);
           return {
@@ -631,7 +672,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
           const batch = ids.slice(i, i + BATCH);
           if (batch.length === 0) continue;
           const { data: refsData } = await (supabase as any).from("item_suppliers")
-            .select("id, product_id, service_id, supplier_id, supplier_sku, purchase_price, is_preferred, suppliers(name)")
+            .select(SUPPLIER_REFS_SELECT)
             .in("service_id", batch)
             .is("deleted_at", null)
             .eq("is_active", true)
@@ -640,17 +681,11 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
           (refsData || []).forEach((r: any) => {
             if (!r.service_id) return;
             const list = supplierRefsMap.get(r.service_id) || [];
-            list.push({
-              id: r.id,
-              supplier_id: r.supplier_id,
-              supplier_sku: r.supplier_sku ?? null,
-              purchase_price: r.purchase_price ?? null,
-              is_preferred: !!r.is_preferred,
-              supplier_name: r.suppliers?.name ?? null,
-            });
+            list.push(toSupplierRef(r));
             supplierRefsMap.set(r.service_id, list);
           });
         }
+        supplierRefsMap.forEach(sortSupplierRefs);
         mapped = rows.map(r => {
           const pi = pricesMap.get(r.id);
           return {
@@ -2504,7 +2539,7 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
                                     <SelectContent className="z-[9999] bg-popover border shadow-lg" position="popper" sideOffset={4}>
                                       {item.supplierRefs.map((ref) => (
                                         <SelectItem key={ref.id} value={ref.id}>
-                                          {`${ref.supplier_name ?? "Fornecedor"} — ${ref.supplier_sku ?? "sem ref."} — ${ref.purchase_price != null ? ref.purchase_price.toFixed(2) + "€" : "s/ preço"}${ref.is_preferred ? " ★" : ""}`}
+                                          {`${ref.supplier_name ?? "Fornecedor"} — ${ref.supplier_sku ?? "sem ref."} — ${formatSupplierRefPrice(ref, item.uom_symbol)}${ref.is_preferred ? " ★" : ""}`}
                                         </SelectItem>
                                       ))}
                                     </SelectContent>

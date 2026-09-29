@@ -135,7 +135,10 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
       .select("uom_id, uom:uom_id(id, code)")
       .eq("id", itemId)
       .maybeSingle();
-    const uom = (product as { uom: { id: string; code: string } | null } | null)?.uom ?? null;
+    // `as unknown`: com products.sale_uom_id no types.ts há duas relações
+    // products→uom e o parser de tipos não resolve a dica por coluna (uom_id);
+    // em runtime o PostgREST resolve-a.
+    const uom = (product as unknown as { uom: { id: string; code: string } | null } | null)?.uom ?? null;
     setProductUom(uom);
     if (!uom) {
       setPacks([]);

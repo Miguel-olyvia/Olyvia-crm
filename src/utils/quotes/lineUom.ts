@@ -94,6 +94,34 @@ export function buildLineUomOptions(
   ];
 }
 
+/**
+ * Unidade de venda por omissão de um produto (products.sale_uom_id): a opção
+ * de embalagem com esse id, se existir entre as opções do produto. Devolve
+ * null quando o produto se vende à unidade, quando a embalagem já não está
+ * disponível (inativa/de outra base) ou quando é a própria unidade base.
+ */
+export function pickDefaultLineUomOption(
+  options: LineUomOption[],
+  saleUomId: string | null | undefined,
+): LineUomOption | null {
+  if (!saleUomId) return null;
+  return options.find((o) => !o.isBase && o.id === saleUomId) ?? null;
+}
+
+/**
+ * Aplica a unidade de venda por omissão a uma linha ACABADA DE CRIAR (fator 1).
+ * Sem opção, ou se a linha já tem embalagem, devolve a linha tal como está —
+ * nunca se usa ao reabrir linhas gravadas.
+ */
+export function applyDefaultLineUom<T extends LineUomFields>(
+  line: T,
+  option: LineUomOption | null,
+  fields: readonly string[] = LINE_PRICE_FIELDS,
+): T {
+  if (!option || line.uom_id) return line;
+  return applyUomOptionToLine(line, option, fields);
+}
+
 /** Fator atual da linha (1 quando não tem embalagem). */
 export const getLineUnitsPerUom = (line: LineUomFields): number =>
   line.uom_id ? toFactor(line.units_per_uom) : 1;

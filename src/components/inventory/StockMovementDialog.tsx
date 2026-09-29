@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Plus, Trash2, AlertCircle, AlertTriangle } from "lucide-react";
+import { formatExactMoney, formatPackMoney, normalizePackQty, supplierUnitCost } from "@/utils/products/productPacks";
 
 type MovementType = "entrada" | "saida" | "transferencia" | "ajuste" | "devolucao" | "quebra";
 
@@ -39,10 +40,29 @@ interface ProductOption {
 interface ItemSupplierOption {
   id: string;
   supplier_id: string;
+  /** Preço da unidade de compra da ligação (num pack de N, o preço do pack). */
   purchase_price: number | null;
   supplier_sku: string | null;
   suppliers?: { name: string } | null;
+  /** Unidade de compra da ligação (NULL = unidade do produto). */
+  uom_id?: string | null;
+  uom?: { code: string | null; base_uom_id: string | null; conversion_factor: number | null } | null;
 }
+
+// Unidades de stock por unidade de compra da ligação (1 sem pack). Mesmo
+// critério de fn_uom_units_per: só um pack (uom com base) tem fator.
+const linkUnitsPer = (s: ItemSupplierOption): number =>
+  s.uom_id && s.uom?.base_uom_id ? normalizePackQty(s.uom.conversion_factor) : 1;
+
+// "Preço do fornecedor" por unidade de stock — é o que rpc_register_stock_entry
+// grava como custo quando o campo fica vazio (purchase_price ÷ fator).
+const supplierCostPlaceholder = (s: ItemSupplierOption | undefined): string => {
+  if (!s || s.purchase_price == null) return "—";
+  const factor = linkUnitsPer(s);
+  const unitCost = supplierUnitCost(s.purchase_price, factor) ?? 0;
+  if (factor < 2) return `Preço do fornecedor: ${unitCost.toFixed(2)}€`;
+  return `Preço do fornecedor: ${formatExactMoney(unitCost)}€ por unidade (pack ${s.uom?.code || factor} a ${formatPackMoney(Number(s.purchase_price))}€)`;
+};
 
 // Fase 5.0F (pedido do utilizador, 2026-08-31): quando o profissional regista
 // manualmente uma Saída para satisfazer uma Encomenda Cliente concreta, dá
@@ -299,7 +319,7 @@ export default function StockMovementDialog({
     if (!productId) return;
     const { data, error } = await supabase
       .from("item_suppliers")
-      .select("id, supplier_id, purchase_price, supplier_sku, suppliers(name)")
+      .select("id, supplier_id, purchase_price, supplier_sku, suppliers(name), uom_id, uom:uom_id(code, base_uom_id, conversion_factor)")
       .eq("product_id", productId)
       .eq("is_active", true)
       .is("deleted_at", null)
@@ -743,7 +763,11 @@ export default function StockMovementDialog({
                         {line.itemSuppliers.map((s) => (
                           <SelectItem key={s.id} value={s.id}>
                             {s.suppliers?.name || "—"}
-                            {s.purchase_price != null ? ` · ${s.purchase_price.toFixed(2)}€` : ""}
+                            {s.purchase_price != null
+                              ? (linkUnitsPer(s) >= 2
+                                ? ` · ${Number(s.purchase_price).toFixed(2)}€/${s.uom?.code || `pack ${linkUnitsPer(s)}`}`
+                                : ` · ${Number(s.purchase_price).toFixed(2)}€`)
+                              : ""}
                             {s.supplier_sku ? ` · ${s.supplier_sku}` : ""}
                           </SelectItem>
                         ))}
@@ -763,11 +787,7 @@ export default function StockMovementDialog({
                     <Input
                       type="number"
                       step="0.01"
-                      placeholder={
-                        line.itemSuppliers.find((s) => s.id === line.itemSupplierId)?.purchase_price != null
-                          ? `Preço do fornecedor: ${line.itemSuppliers.find((s) => s.id === line.itemSupplierId)!.purchase_price!.toFixed(2)}€`
-                          : "—"
-                      }
+                      placeholder={supplierCostPlaceholder(line.itemSuppliers.find((s) => s.id === line.itemSupplierId))}
                       value={line.unitCost}
                       onChange={(e) => updateLine(line.key, { unitCost: e.target.value })}
                     />

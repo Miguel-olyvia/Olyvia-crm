@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
 import {
+  applyDefaultLineUom,
   applyUomOptionToLine,
   buildLineUomOptions,
+  pickDefaultLineUomOption,
   clearLineUom,
   formatOrderLineQuantity,
   formatPackBreakdown,
@@ -180,6 +182,49 @@ describe("trocar a unidade da linha", () => {
     const cleared = clearLineUom(applyUomOptionToLine(baseLine(), pk10));
     expect(cleared.uom_id).toBeNull();
     expect(getLineUnitsPerUom(cleared)).toBe(1);
+  });
+});
+
+describe("unidade de venda por omissão (products.sale_uom_id)", () => {
+  const options = buildLineUomOptions("un", UOMS);
+
+  it("escolhe a embalagem indicada quando existe nas opções", () => {
+    expect(pickDefaultLineUomOption(options, "pk10")?.code).toBe("PK10");
+  });
+
+  it("sem sale_uom_id, com a unidade base ou com uma uom fora das opções => null", () => {
+    expect(pickDefaultLineUomOption(options, null)).toBeNull();
+    expect(pickDefaultLineUomOption(options, undefined)).toBeNull();
+    expect(pickDefaultLineUomOption(options, "un")).toBeNull();
+    expect(pickDefaultLineUomOption(options, "rolo")).toBeNull();
+    expect(pickDefaultLineUomOption([], "pk10")).toBeNull();
+  });
+
+  it("linha nova: aplica a embalagem e escala preço e custo", () => {
+    const line = applyDefaultLineUom(baseLine(), pickDefaultLineUomOption(options, "pk10"));
+    expect(line.uom_id).toBe("pk10");
+    expect(line.units_per_uom).toBe(10);
+    expect(line.unidade).toBe("PK10");
+    expect(line.retail_price_unit).toBe(12.3);
+    expect(line.cost_price).toBe(11);
+    expect(line.qt).toBe(2);
+  });
+
+  it("sem opção a linha fica igual (mesma referência)", () => {
+    const line = baseLine();
+    expect(applyDefaultLineUom(line, null)).toBe(line);
+  });
+
+  it("nunca mexe numa linha que já tem embalagem", () => {
+    const saved = { ...baseLine(), uom_id: "cx50", units_per_uom: 50, retail_price_unit: 61.5 };
+    expect(applyDefaultLineUom(saved, pickDefaultLineUomOption(options, "pk10"))).toBe(saved);
+  });
+
+  it("respeita os campos indicados (encomenda manual: unit_price)", () => {
+    const item = { unit_price: 2.5, quantity: 3, uom_id: null as string | null };
+    const next = applyDefaultLineUom(item, pickDefaultLineUomOption(options, "cx50"), ["unit_price"]);
+    expect(next.unit_price).toBe(125);
+    expect(next.quantity).toBe(3);
   });
 });
 

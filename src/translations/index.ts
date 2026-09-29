@@ -14459,7 +14459,7 @@ export const translations = {
 
     // Units of Measure
     'uom.title': 'Unidades de Medida',
-    'uom.code': 'Código',
+    'uom.code': 'Sigla',
     'uom.description': 'Descrição',
     'uom.descriptionPlaceholder': 'ex: Metro Quadrado',
     'uom.addNew': 'Adicionar Unidade de Medida',
@@ -21786,7 +21786,7 @@ export const translations = {
 
     // Units of Measure
     'uom.title': 'Unidades de Medida',
-    'uom.code': 'Código',
+    'uom.code': 'Sigla',
     'uom.description': 'Descripción',
     'uom.descriptionPlaceholder': 'ej: Metro Cuadrado',
     'uom.addNew': 'Añadir Unidad de Medida',

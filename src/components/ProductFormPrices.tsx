@@ -14,6 +14,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  MAX_PACK_QTY,
+  effectivePackQtys,
+  formatPackMoney,
+  normalizePackQty,
+  packPriceFromUnit,
+  packUnitCostRounding,
+} from "@/utils/products/productPacks";
 
 export interface PriceFormData {
   purchase: number;
@@ -23,6 +31,13 @@ export interface PriceFormData {
   currency: string;
   vat_rate: number;
   uom_id: string;
+  /**
+   * "Compra-se em N": quando N ≥ 2, `purchase` é o preço do PACK de N
+   * unidades de stock (o custo unitário é purchase / N). Omisso = 1.
+   */
+  purchase_pack_qty?: number;
+  /** "Vende-se em N": unidade de venda por omissão. `retail` é sempre unitário. Omisso = 1. */
+  sale_pack_qty?: number;
 }
 
 interface UOM {
@@ -30,11 +45,31 @@ interface UOM {
   code: string;
   description: string | null;
   is_active: boolean;
+  base_uom_id: string | null;
 }
 
 interface ProductFormPricesProps {
   prices: PriceFormData;
   onChange: (prices: PriceFormData) => void;
+  /**
+   * Há fornecedor preferido (na criação: o fornecedor escolhido; na edição: a
+   * ligação preferida ativa). Sem ele a compra em pack fica desativada.
+   * Omisso = true (retrocompatível).
+   */
+  hasPreferredSupplier?: boolean;
+  /**
+   * O utilizador pode ver/alterar o custo da ligação ao fornecedor
+   * (products.view_cost). Sem isso a compra em pack fica desativada. Omisso = true.
+   */
+  canEditPurchasePack?: boolean;
+  /**
+   * Os packs só se definem na empresa principal do produto. Quando a empresa
+   * principal (seleção) ≠ empresa ativa, os dois campos ficam só de leitura com
+   * as quantidades com que a ficha abriu, e mostra-se esta nota.
+   */
+  packsLockedNote?: string | null;
+  /** Erros de validação vindos do submit (ex. quantidade do pack vazia). */
+  submitErrors?: Record<string, string>;
 }
 
 // Validates the per-UOM pricing fields (financially sensitive business data).
@@ -48,6 +83,8 @@ const productPricesSchema = z.object({
   currency: z.enum(["EUR", "USD", "GBP"], { errorMap: () => ({ message: "Moeda inválida" }) }),
   vat_rate: z.number().min(0, "A taxa de IVA deve ser pelo menos 0").max(100, "A taxa de IVA deve ser no máximo 100"),
   uom_id: z.string().trim().max(100).optional().or(z.literal("")),
+  purchase_pack_qty: z.number().int("A quantidade deve ser um número inteiro").min(1, "Indique a quantidade (1 = à unidade)").max(MAX_PACK_QTY, "A quantidade é demasiado elevada").optional(),
+  sale_pack_qty: z.number().int("A quantidade deve ser um número inteiro").min(1, "Indique a quantidade (1 = à unidade)").max(MAX_PACK_QTY, "A quantidade é demasiado elevada").optional(),
 });
 
 function calculateMargin(purchase: number, retail: number): number {
@@ -61,12 +98,66 @@ function formatMarginBadge(margin: number): { label: string; variant: string } {
   return { label: `${margin.toFixed(1)}%`, variant: "default" };
 }
 
-export default function ProductFormPrices({ prices, onChange }: ProductFormPricesProps) {
+export default function ProductFormPrices({
+  prices,
+  onChange,
+  hasPreferredSupplier = true,
+  canEditPurchasePack = true,
+  packsLockedNote = null,
+  submitErrors,
+}: ProductFormPricesProps) {
   const { t } = useTranslation();
   const [uomList, setUomList] = useState<UOM[]>([]);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const margin = calculateMargin(prices.purchase, prices.retail);
+  const [localFieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // Erros do submit só aparecem enquanto o campo não tiver erro "ao vivo".
+  const fieldErrors: Record<string, string> = { ...(submitErrors || {}), ...localFieldErrors };
+
+  // Packs: só existem sobre uma unidade de stock; a compra em pack precisa de
+  // um fornecedor preferido (é lá que fica a unidade de compra e o preço do pack).
+  const packsLocked = !!packsLockedNote;
+  const hasStockUom = !!prices.uom_id;
+  const stockUomCode = uomList.find((u) => u.id === prices.uom_id)?.code || "un";
+  const purchasePackEnabled = !packsLocked && hasStockUom && hasPreferredSupplier && canEditPurchasePack;
+  const salePackEnabled = !packsLocked && hasStockUom;
+  const effective = effectivePackQtys({
+    purchaseQty: prices.purchase_pack_qty,
+    saleQty: prices.sale_pack_qty,
+    hasStockUom,
+    purchaseEnabled: purchasePackEnabled,
+  });
+  // Bloqueado (outra empresa principal): mantém-se a leitura com que a ficha
+  // abriu — o preço de compra mostrado continua a ser o desse pack.
+  const purchaseQty = packsLocked ? normalizePackQty(prices.purchase_pack_qty) : effective.purchaseQty;
+  const saleQty = packsLocked ? normalizePackQty(prices.sale_pack_qty) : effective.saleQty;
+  const purchaseDisabledNote = packsLocked
+    ? null
+    : !hasStockUom
+      ? "Defina a unidade de stock"
+      : !hasPreferredSupplier
+        ? "Escolha um fornecedor"
+        : !canEditPurchasePack
+          ? "Sem permissão para alterar o custo do fornecedor"
+          : null;
+  const rounding = packUnitCostRounding(prices.purchase, purchaseQty);
+
+  // A margem compara sempre valores unitários: custo = preço escrito / N.
+  const unitPurchase = purchaseQty >= 2 ? (prices.purchase || 0) / purchaseQty : prices.purchase;
+  const margin = calculateMargin(unitPurchase, prices.retail);
   const marginInfo = formatMarginBadge(margin);
+
+  // Mostra-se o valor escrito; 0 = campo vazio (a validação do submit bloqueia).
+  // Desativado => a quantidade efetiva (1, ou a que abriu se bloqueado).
+  const packInputValue = (raw: number | undefined, enabled: boolean, effectiveQty: number): number | "" => {
+    if (!enabled) return effectiveQty;
+    if (raw === undefined) return 1;
+    return raw === 0 ? "" : raw;
+  };
+  // Sem parseInt: "2.5" tem de chegar à validação (inteiro), não virar 2.
+  const parsePackInput = (value: string): number => {
+    if (value.trim() === "") return 0;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : 0;
+  };
 
   // Validates the next price state on every change and surfaces per-field
   // errors, while still propagating the value upward so typing behavior
@@ -87,10 +178,10 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
     const fetchUomList = async () => {
       const { data } = await supabase
         .from("uom")
-        .select("id, code, description, is_active")
+        .select("id, code, description, is_active, base_uom_id")
         .eq("is_active", true)
         .order("code");
-      setUomList(data || []);
+      setUomList((data || []) as UOM[]);
     };
     fetchUomList();
   }, []);
@@ -107,7 +198,7 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
       
 
       {/* Margin Display */}
-      {prices.purchase > 0 && prices.retail > 0 && (
+      {unitPurchase > 0 && prices.retail > 0 && (
         <div className="p-3 bg-muted rounded-lg">
           <div className="flex items-center justify-between">
             <span className="text-sm">{t('productPrices.profitMargin')}</span>
@@ -153,7 +244,7 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
         <div className="space-y-2">
           <Label className="flex items-center gap-2">
             <Ruler className="w-3 h-3" />
-            {t('uom.title')}
+            Unidade de stock
           </Label>
           <Select
             value={prices.uom_id || ""}
@@ -163,7 +254,10 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
               <SelectValue placeholder={t('common.select')} />
             </SelectTrigger>
             <SelectContent>
-              {uomList.map((uom) => (
+              {/* Os packs (uoms com base) não são unidade de stock — escolhem-se
+                  em "Compra-se em" / "Vende-se em". Mantém-se a uom já gravada
+                  mesmo que seja um pack, para não esvaziar o seletor. */}
+              {uomList.filter((uom) => !uom.base_uom_id || uom.id === prices.uom_id).map((uom) => (
                 <SelectItem key={uom.id} value={uom.id}>
                   {uom.code} {uom.description ? `- ${uom.description}` : ''}
                 </SelectItem>
@@ -190,6 +284,38 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
             className={fieldErrors.purchase ? "border-destructive" : ""}
           />
           {fieldErrors.purchase && <p className="text-xs text-destructive">{fieldErrors.purchase}</p>}
+          <div className="flex items-center gap-2 text-sm">
+            <Label htmlFor="purchase_pack_qty" className="font-normal text-muted-foreground whitespace-nowrap">
+              Compra-se em:
+            </Label>
+            <Input
+              id="purchase_pack_qty"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              step="1"
+              className={`h-8 w-20 ${fieldErrors.purchase_pack_qty ? "border-destructive" : ""}`}
+              disabled={!purchasePackEnabled}
+              value={packInputValue(prices.purchase_pack_qty, purchasePackEnabled, purchaseQty)}
+              onChange={(e) => handlePricesChange({ ...prices, purchase_pack_qty: parsePackInput(e.target.value) })}
+              aria-describedby="purchase_pack_qty_hint"
+              aria-invalid={!!fieldErrors.purchase_pack_qty}
+            />
+            <span className="text-muted-foreground">{stockUomCode}</span>
+          </div>
+          {(purchaseDisabledNote || purchaseQty >= 2) && (
+            <p id="purchase_pack_qty_hint" className="text-xs text-muted-foreground">
+              {purchaseDisabledNote
+                ?? `= ${formatPackMoney(unitPurchase)} € / ${stockUomCode} (o preço acima é do pack de ${purchaseQty})`}
+            </p>
+          )}
+          {rounding.warning && (
+            <p className="text-xs text-amber-600 flex items-start gap-1" role="status">
+              <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
+              <span>{rounding.warning}</span>
+            </p>
+          )}
+          {fieldErrors.purchase_pack_qty && <p className="text-xs text-destructive">{fieldErrors.purchase_pack_qty}</p>}
         </div>
         <div className="space-y-2">
           <Label className="flex items-center gap-2">
@@ -205,8 +331,38 @@ export default function ProductFormPrices({ prices, onChange }: ProductFormPrice
             className={fieldErrors.retail ? "border-destructive" : ""}
           />
           {fieldErrors.retail && <p className="text-xs text-destructive">{fieldErrors.retail}</p>}
+          <div className="flex items-center gap-2 text-sm">
+            <Label htmlFor="sale_pack_qty" className="font-normal text-muted-foreground whitespace-nowrap">
+              Vende-se em:
+            </Label>
+            <Input
+              id="sale_pack_qty"
+              type="number"
+              inputMode="numeric"
+              min="1"
+              step="1"
+              className={`h-8 w-20 ${fieldErrors.sale_pack_qty ? "border-destructive" : ""}`}
+              disabled={!salePackEnabled}
+              value={packInputValue(prices.sale_pack_qty, salePackEnabled, saleQty)}
+              onChange={(e) => handlePricesChange({ ...prices, sale_pack_qty: parsePackInput(e.target.value) })}
+              aria-describedby="sale_pack_qty_hint"
+              aria-invalid={!!fieldErrors.sale_pack_qty}
+            />
+            <span className="text-muted-foreground">{stockUomCode}</span>
+          </div>
+          {((!packsLocked && !hasStockUom) || saleQty >= 2) && (
+            <p id="sale_pack_qty_hint" className="text-xs text-muted-foreground">
+              {!packsLocked && !hasStockUom
+                ? "Defina a unidade de stock"
+                : `= ${formatPackMoney(packPriceFromUnit(prices.retail, saleQty))} € por pack de ${saleQty} (o preço acima é por ${stockUomCode})`}
+            </p>
+          )}
+          {fieldErrors.sale_pack_qty && <p className="text-xs text-destructive">{fieldErrors.sale_pack_qty}</p>}
         </div>
       </div>
+      {packsLockedNote && (
+        <p className="text-xs text-muted-foreground" role="note">{packsLockedNote}</p>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div className="space-y-2">

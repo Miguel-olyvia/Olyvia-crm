@@ -16,6 +16,8 @@ import ProductConfigurableOptionsDialog from "@/components/ProductConfigurableOp
 import ProductSuppliersDialog from "@/components/ProductSuppliersDialog";
 import ProductFormPrices, { PriceFormData } from "@/components/ProductFormPrices";
 import ProductFormAttributes, { AttributeFormValue } from "@/components/ProductFormAttributes";
+import { effectivePackQtys, normalizePackQty, unitCostFromPackPrice, validatePackQtyInput } from "@/utils/products/productPacks";
+import { useQueryClient } from "@tanstack/react-query";
 import { exportProductsToCSV, parseProductsCSV, downloadProductsTemplate } from "@/utils/productsExportImport";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -147,7 +149,12 @@ export default function Products() {
   const { toast } = useToast();
   const { t } = useTranslation();
   const { activeCompany, userType } = useCompany();
-  const { isSystemAdmin } = usePermissions();
+  const { isSystemAdmin, hasPermission } = usePermissions();
+  // Mesmo critério de ItemSuppliersTable: sem products.view_cost não se lê o
+  // custo da ligação ao fornecedor (item_suppliers_public) nem se escreve a
+  // compra em pack.
+  const canViewProductCost = hasPermission("products.view_cost");
+  const queryClient = useQueryClient();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -205,6 +212,79 @@ export default function Products() {
   const [companies, setCompanies] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
   const [selectedSupplierId, setSelectedSupplierId] = useState("");
+  // Packs (rpc_set_product_packs): na edição, se o produto tem ligação
+  // preferida ativa na empresa ativa, e as quantidades com que a ficha abriu —
+  // para só chamar a RPC quando há packs (ou havia), e os produtos sem packs
+  // gravarem exatamente como antes.
+  const [editingHasPreferredSupplier, setEditingHasPreferredSupplier] = useState(false);
+  const [loadedPackQtys, setLoadedPackQtys] = useState<{ purchase: number; sale: number }>({ purchase: 1, sale: 1 });
+  // Preço de compra MOSTRADO e "Compra-se em" com que a ficha de edição abriu.
+  // Se o utilizador não mexer em nenhum dos dois, a compra não é gravada: o
+  // campo pode vir de duas fontes (product_prices.purchase ou o preço do pack
+  // na ligação) e regravar uma a partir da outra alterava o custo em silêncio.
+  // null = criação/cópia (grava-se sempre o que está escrito).
+  // storedUnit = product_prices.purchase tal como lido (0 se não havia): sem
+  // mexer na compra é reenviado, para a linha purchase receber a moeda/IVA.
+  const [openedPurchase, setOpenedPurchase] = useState<{ price: number; qty: number; uomId: string | null; storedUnit: number } | null>(null);
+  // Erros de validação dos packs vindos do submit (mostrados no campo).
+  const [packSubmitErrors, setPackSubmitErrors] = useState<Record<string, string>>({});
+  // Na criação o fornecedor preferido é o escolhido no seletor; na edição é a
+  // ligação preferida já existente (gerida no ProductSuppliersDialog).
+  const hasPreferredSupplierForPacks = editingProduct ? editingHasPreferredSupplier : !!selectedSupplierId;
+
+  /**
+   * Unidade de venda por omissão: fator do pack em products.sale_uom_id (1 sem
+   * pack). Consulta à parte e tolerante a erro — se a coluna ainda não existir
+   * na BD a ficha abre como antes (à unidade).
+   */
+  const loadSalePackQty = async (productId: string): Promise<number> => {
+    const { data, error } = await (supabase as any)
+      .from("products")
+      .select("sale_uom_id, sale_uom:sale_uom_id(conversion_factor)")
+      .eq("id", productId)
+      .maybeSingle();
+    if (error || !data?.sale_uom_id) return 1;
+    return normalizePackQty(data.sale_uom?.conversion_factor);
+  };
+
+  /**
+   * Ligação preferida ativa em item_suppliers na empresa ativa: se existe e,
+   * com products.view_cost, o fator da unidade de compra (uom_id NULL = 1) e o
+   * preço dessa unidade. Sem a permissão lê-se item_suppliers_public (sem
+   * custo nem unidade) e a compra fica à unidade no formulário.
+   */
+  const loadPreferredPurchasePack = async (
+    productId: string,
+  ): Promise<{ exists: boolean; qty: number; packPrice: number | null }> => {
+    const none = { exists: false, qty: 1, packPrice: null };
+    if (!activeCompany?.id) return none;
+    if (!canViewProductCost) {
+      const { data, error } = await (supabase as any)
+        .from("item_suppliers_public")
+        .select("id")
+        .eq("product_id", productId)
+        .eq("organization_id", activeCompany.id)
+        .eq("is_preferred", true)
+        .eq("is_active", true)
+        .limit(1);
+      if (error) return none;
+      return { exists: (data || []).length > 0, qty: 1, packPrice: null };
+    }
+    const { data, error } = await (supabase as any)
+      .from("item_suppliers")
+      .select("id, uom_id, purchase_price, uom:uom_id(conversion_factor)")
+      .eq("product_id", productId)
+      .eq("organization_id", activeCompany.id)
+      .eq("is_preferred", true)
+      .eq("is_active", true)
+      .is("deleted_at", null)
+      .limit(1);
+    const row = !error ? (data || [])[0] : null;
+    if (!row) return none;
+    const qty = row.uom_id ? normalizePackQty(row.uom?.conversion_factor) : 1;
+    const packPrice = row.purchase_price != null ? Number(row.purchase_price) : null;
+    return { exists: true, qty, packPrice };
+  };
   const [formData, setFormData] = useState({
     sku: "",
     name: "",
@@ -262,6 +342,16 @@ export default function Products() {
   });
 
   const [attributeFormData, setAttributeFormData] = useState<AttributeFormValue[]>([]);
+
+  // Packs só na empresa principal do produto: rpc_set_product_packs lê o
+  // produto por (id, organization_id = empresa ativa). Se a empresa principal
+  // escolhida (ou a atual, na edição) não é a ativa, os campos ficam só de
+  // leitura e a RPC não é chamada.
+  const packsPrimaryOrgId = getPrimaryOrgId(organizationSelection) || activeCompany?.id || null;
+  const packsLocked = !!activeCompany?.id && (
+    packsPrimaryOrgId !== activeCompany.id
+    || (!!editingProduct && (editingProduct.organization_id ?? activeCompany.id) !== activeCompany.id)
+  );
 
   const isAdmin = isSystemAdmin;
 
@@ -800,7 +890,39 @@ export default function Products() {
       return;
     }
 
+    // Packs: "Compra-se em" / "Vende-se em" vazio, 0 ou decimal bloqueia — não
+    // se normaliza para 1 (o preço escrito para o pack passava a unitário).
+    // Só se validam os campos ativos (os desativados não são gravados).
+    const packStockUom = !!priceFormData.uom_id;
+    const purchasePackFieldEnabled = !packsLocked && packStockUom && hasPreferredSupplierForPacks && canViewProductCost;
+    const salePackFieldEnabled = !packsLocked && packStockUom;
+    const packErrors: Record<string, string> = {};
+    if (purchasePackFieldEnabled) {
+      const err = validatePackQtyInput(priceFormData.purchase_pack_qty ?? 1);
+      if (err) packErrors.purchase_pack_qty = err;
+    }
+    if (salePackFieldEnabled) {
+      const err = validatePackQtyInput(priceFormData.sale_pack_qty ?? 1);
+      if (err) packErrors.sale_pack_qty = err;
+    }
+    if (Object.keys(packErrors).length > 0) {
+      setPackSubmitErrors(packErrors);
+      toast({
+        title: t('common.error'),
+        description: packErrors.purchase_pack_qty
+          ? `Compra-se em: ${packErrors.purchase_pack_qty}`
+          : `Vende-se em: ${packErrors.sale_pack_qty}`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setPackSubmitErrors({});
+
     // Category and organization are optional - they may not exist yet
+
+    // Ligação já passada à unidade (clearPurchasePackFirst) e rpc_update_product
+    // ainda por confirmar: se falhar, o erro avisa que a ligação ficou assim.
+    let purchasePackClearedFirst = false;
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -827,9 +949,118 @@ export default function Products() {
       getAllOrgIds(organizationSelection).forEach(id => uniqueOrgIds.add(id));
       const allOrgIds = Array.from(uniqueOrgIds);
 
+      // Packs: quantidades efetivas. Campos ativos já foram validados acima
+      // (inteiros ≥ 1). Bloqueado (outra empresa principal): mantém-se a
+      // quantidade com que a ficha abriu, que é a leitura do preço mostrado.
+      // Sem unidade de stock, sem fornecedor preferido ou sem products.view_cost
+      // a compra é à unidade.
+      const packQtys = packsLocked
+        ? {
+            purchaseQty: packStockUom ? normalizePackQty(priceFormData.purchase_pack_qty) : 1,
+            saleQty: packStockUom ? normalizePackQty(priceFormData.sale_pack_qty) : 1,
+          }
+        : effectivePackQtys({
+            purchaseQty: priceFormData.purchase_pack_qty,
+            saleQty: priceFormData.sale_pack_qty,
+            hasStockUom: packStockUom,
+            purchaseEnabled: purchasePackFieldEnabled,
+          });
+
+      // Compra tocada? Na edição, só se o preço mostrado ou (com o campo ativo)
+      // o "Compra-se em" mudaram face ao que a ficha abriu. Não tocada => não se
+      // grava product_prices.purchase nem o preço da ligação.
+      const purchaseTouched = !editingProduct || !openedPurchase
+        || priceFormData.purchase !== openedPurchase.price
+        || (purchasePackFieldEnabled && packQtys.purchaseQty !== openedPurchase.qty);
+      const stockUomChanged = !!editingProduct && !!openedPurchase
+        && (priceFormData.uom_id || null) !== (openedPurchase.uomId || null);
+      // Preço do pack para a ligação: vazio/≤ 0 => null (a RPC mantém o preço
+      // se o fator não mudar, senão limpa-o; nunca grava 0).
+      const packPriceParam = purchaseTouched && priceFormData.purchase > 0 ? priceFormData.purchase : null;
+
+      // Mudar a unidade de stock com a compra em pack (≥ 2): o pack antigo é da
+      // unidade antiga e fn_products_validate_uom rejeitava rpc_update_product.
+      // A ligação passa a 1 (à unidade) ANTES do update; se a compra continua
+      // em pack, applyProductPacks reaplica-o depois na unidade nova. Não é
+      // atómico: se o update falhar, a ligação fica à unidade (o erro diz isso).
+      // A venda fica como abriu (a da unidade antiga limpa-se sozinha quando a
+      // unidade muda).
+      const clearPurchasePackFirst = !!editingProduct && !packsLocked && stockUomChanged
+        && loadedPackQtys.purchase >= 2;
+
+      // product_prices.purchase é SEMPRE o custo unitário (numeric(10,2)): com
+      // compra em pack, o preço escrito é o do pack e divide-se por N. Com N = 1
+      // é o valor escrito, tal como antes. Um unitário que arredonda a 0 não é
+      // enviado (filtro > 0) — a ficha avisa disso.
+      const unitPurchasePrice = unitCostFromPackPrice(priceFormData.purchase, packQtys.purchaseQty);
+      // Valor de product_prices.purchase a enviar SEMPRE (a RPC só faz upsert
+      // dos tipos recebidos: sem a linha purchase ela não recebia a moeda/IVA
+      // novos). Compra não tocada => reenvia o que foi lido da BD, não o preço
+      // do pack mostrado. Sem packs é igual ao valor do campo (como na HEAD).
+      const purchasePriceToStore = purchaseTouched
+        ? unitPurchasePrice
+        : (openedPurchase?.storedUnit ?? unitPurchasePrice);
+      // Só se chama rpc_set_product_packs quando há (ou havia) packs — um
+      // produto sem packs grava exatamente como antes. p_purchase_qty null =
+      // não mexe na compra. Depois de limpar primeiro, só se reaplica se a
+      // compra continua em pack.
+      const packPurchaseParam = purchasePackFieldEnabled
+        && (clearPurchasePackFirst
+          ? packQtys.purchaseQty >= 2
+          : (packQtys.purchaseQty >= 2 || loadedPackQtys.purchase >= 2) && (purchaseTouched || stockUomChanged))
+        ? packQtys.purchaseQty
+        : null;
+      // Preço a enviar com packPurchaseParam. Ao reaplicar depois de limpar, o
+      // fator passou por 1 e a RPC limparia o preço: envia-se o preço do pack
+      // que está no campo.
+      const packPurchasePriceParam = clearPurchasePackFirst
+        ? (priceFormData.purchase > 0 ? priceFormData.purchase : null)
+        : packPriceParam;
+      // Preço da ligação à unidade no passo "limpar primeiro": o mesmo custo
+      // unitário que fica em product_prices.purchase.
+      const clearPackUnitPrice = purchasePriceToStore > 0 ? purchasePriceToStore : null;
+      const shouldSetPacks = !packsLocked
+        && (packPurchaseParam !== null || packQtys.saleQty >= 2 || loadedPackQtys.sale >= 2);
+
+      const invalidateLineUomCaches = () => {
+        // Um pack novo pode ter criado uma uom; a unidade de venda por omissão
+        // do produto mudou. Chaves de useLineUomOptions.
+        queryClient.invalidateQueries({ queryKey: ["line-uom-catalog"] });
+        queryClient.invalidateQueries({ queryKey: ["line-uom-products"] });
+      };
+
+      /**
+       * Devolve true se gravou (ou não havia nada a gravar). Em erro mostra o
+       * toast destrutivo e devolve false — quem chama não mostra o de sucesso
+       * (TOAST_LIMIT = 1: o de sucesso substituía o de erro).
+       */
+      const applyProductPacks = async (productId: string, savedLabel: string): Promise<boolean> => {
+        if (!shouldSetPacks || !activeCompany?.id) return true;
+        // `as any`: rpc_set_product_packs ainda não está no types.ts gerado.
+        const { error: packsError } = await (supabase as any).rpc("rpc_set_product_packs", {
+          p_product_id: productId,
+          p_organization_id: activeCompany.id,
+          p_purchase_qty: packPurchaseParam,
+          p_purchase_pack_price: packPurchaseParam !== null ? packPurchasePriceParam : null,
+          p_sale_qty: packQtys.saleQty,
+        });
+        if (packsError) {
+          console.error("Erro ao gravar packs do produto:", packsError);
+          toast({
+            title: t('common.error'),
+            description: `${savedLabel}, mas os packs não: ${packsError.message || "tente novamente."}`,
+            variant: "destructive",
+          });
+          return false;
+        }
+        invalidateLineUomCaches();
+        return true;
+      };
+
       // Reduce prices to only the entries the FE would have written (value > 0).
+      // A compra vai sempre (ver purchasePriceToStore).
       const priceTypes: Array<{ type: 'purchase' | 'retail' | 'wholesale' | 'distributor', value: number }> = [
-        { type: 'purchase', value: priceFormData.purchase },
+        { type: 'purchase', value: purchasePriceToStore },
         { type: 'retail', value: priceFormData.retail },
         { type: 'wholesale', value: priceFormData.wholesale },
         { type: 'distributor', value: priceFormData.distributor },
@@ -896,9 +1127,27 @@ export default function Products() {
           p_attribute_ids: attributeFormData.map(av => av.attribute_id),
           p_attribute_values: attributeValuesPayload,
         };
+        // Unidade de stock muda com a compra em pack: tirar a ligação do pack
+        // (da unidade antiga) ANTES de mudar a unidade (ver
+        // clearPurchasePackFirst). Se este passo falhar, não se grava nada.
+        if (clearPurchasePackFirst) {
+          // `as any`: rpc_set_product_packs ainda não está no types.ts gerado.
+          const { error: clearPackError } = await (supabase as any).rpc("rpc_set_product_packs", {
+            p_product_id: editingProduct.id,
+            p_organization_id: activeCompany.id,
+            p_purchase_qty: 1,
+            p_purchase_pack_price: clearPackUnitPrice,
+            p_sale_qty: loadedPackQtys.sale,
+          });
+          if (clearPackError) throw clearPackError;
+          purchasePackClearedFirst = true;
+          invalidateLineUomCaches();
+        }
+
         const { error } = await supabase.rpc('rpc_update_product', updateProductArgs);
 
         if (error) throw error;
+        purchasePackClearedFirst = false;
 
         // As fotos ficam fora da RPC de propósito: rpc_update_product já leva 20
         // parâmetros, e acrescentar um obrigaria a uma assinatura nova com
@@ -919,9 +1168,14 @@ export default function Products() {
           toast({ title: "Produto guardado, fotos não", description: "As fotos não foram gravadas. Tente novamente.", variant: "destructive" });
         }
 
-        toast({
-          title: t('products.toast.updateSuccess'),
-        });
+        // Packs depois da RPC: um erro aqui não desfaz o produto já gravado.
+        const packsSaved = await applyProductPacks(editingProduct.id, "Produto guardado");
+
+        if (packsSaved) {
+          toast({
+            title: t('products.toast.updateSuccess'),
+          });
+        }
       } else {
         const createProductArgs: Database['public']['Functions']['rpc_create_product']['Args'] = {
           p_sku: formData.sku,
@@ -979,9 +1233,17 @@ export default function Products() {
           }
         }
 
-        toast({
-          title: t('products.toast.createSuccess'),
-        });
+        // Packs depois da ligação preferida (a compra em pack vive nela). Um
+        // erro aqui não desfaz o produto já criado.
+        const packsSaved = newProductId
+          ? await applyProductPacks(String(newProductId), "Produto criado")
+          : true;
+
+        if (packsSaved) {
+          toast({
+            title: t('products.toast.createSuccess'),
+          });
+        }
       }
 
       }); // end withAuditContext
@@ -991,7 +1253,9 @@ export default function Products() {
     } catch (error: any) {
       toast({
         title: editingProduct ? t('products.toast.updateError') : t('products.toast.createError'),
-        description: error.message,
+        description: purchasePackClearedFirst
+          ? `${error.message} A compra na ligação ao fornecedor já tinha passado à unidade e ficou assim — volte a indicar o pack.`
+          : error.message,
         variant: "destructive",
       });
     }
@@ -1039,7 +1303,7 @@ export default function Products() {
   const openEditDialog = async (product: Product) => {
     try {
       // Fetch full product data including is_sellable and is_purchasable
-      const [productRes, companyRes, pricesRes, attributesRes] = await Promise.all([
+      const [productRes, companyRes, pricesRes, attributesRes, salePackQty, preferredPack] = await Promise.all([
         supabase
           .from("products")
           .select("is_sellable, is_purchasable, manages_stock, uom_id")
@@ -1064,6 +1328,8 @@ export default function Products() {
             product_attributes(id, code, label, value_type, unit, allowed_values)
           `)
           .eq("product_id", product.id),
+        loadSalePackQty(product.id),
+        loadPreferredPurchasePack(product.id),
       ]);
 
       if (productRes.error) throw productRes.error;
@@ -1098,7 +1364,30 @@ export default function Products() {
         if (p.currency) loadedPrices.currency = p.currency;
         if (p.vat_rate !== null) loadedPrices.vat_rate = p.vat_rate;
       });
+      // Packs: sem unidade de stock não há packs. Na compra em pack o campo
+      // mostra o preço do PACK (purchase_price da ligação preferida); o
+      // product_prices.purchase continua a ser o custo unitário.
+      const storedUnitPurchase = loadedPrices.purchase;
+      const hasStockUom = !!loadedPrices.uom_id;
+      const openedPurchaseQty = hasStockUom ? preferredPack.qty : 1;
+      const openedSaleQty = hasStockUom ? salePackQty : 1;
+      loadedPrices.purchase_pack_qty = openedPurchaseQty;
+      loadedPrices.sale_pack_qty = openedSaleQty;
+      // Ligação em pack sem purchase_price: não se inventa unitário × N — o
+      // campo abre vazio (e, sem mexer, nada se grava na ligação nem no custo).
+      if (openedPurchaseQty >= 2) {
+        loadedPrices.purchase = preferredPack.packPrice != null ? preferredPack.packPrice : 0;
+      }
       setPriceFormData(loadedPrices);
+      setEditingHasPreferredSupplier(preferredPack.exists);
+      setLoadedPackQtys({ purchase: openedPurchaseQty, sale: openedSaleQty });
+      setOpenedPurchase({
+        price: loadedPrices.purchase,
+        qty: openedPurchaseQty,
+        uomId: loadedPrices.uom_id || null,
+        storedUnit: storedUnitPurchase,
+      });
+      setPackSubmitErrors({});
 
       // Set attributes
       const loadedAttributes: AttributeFormValue[] = (attributesRes.data || []).map((av: any) => ({
@@ -1189,10 +1478,16 @@ export default function Products() {
       distributor: 0,
       currency: 'EUR',
       vat_rate: 23,
-      uom_id: ''
+      uom_id: '',
+      purchase_pack_qty: 1,
+      sale_pack_qty: 1,
     });
     setAttributeFormData([]);
     setSelectedSupplierId("");
+    setEditingHasPreferredSupplier(false);
+    setLoadedPackQtys({ purchase: 1, sale: 1 });
+    setOpenedPurchase(null);
+    setPackSubmitErrors({});
   };
 
   const copyLastProduct = async () => {
@@ -1225,7 +1520,7 @@ export default function Products() {
       }
 
       // Fetch prices and attributes
-      const [pricesRes, attributesRes] = await Promise.all([
+      const [pricesRes, attributesRes, copySalePackQty] = await Promise.all([
         supabase
           .from("product_prices")
           .select("price_type, price, currency, vat_rate")
@@ -1239,7 +1534,8 @@ export default function Products() {
             value_bool,
             product_attributes(id, code, label, value_type, unit, allowed_values)
           `)
-          .eq("product_id", lastProduct.id)
+          .eq("product_id", lastProduct.id),
+        loadSalePackQty(lastProduct.id),
       ]);
 
       // Set form data (with new SKU)
@@ -1295,7 +1591,15 @@ export default function Products() {
         if (p.currency) loadedPrices.currency = p.currency;
         if (p.vat_rate !== null) loadedPrices.vat_rate = p.vat_rate;
       });
+      // Packs: a venda em pack copia-se. A compra NÃO: o fornecedor não é
+      // copiado (o produto novo nasce sem ligação preferida), e sem fornecedor
+      // o preço de compra é unitário — fica o custo unitário gravado, à unidade.
+      loadedPrices.purchase_pack_qty = 1;
+      loadedPrices.sale_pack_qty = loadedPrices.uom_id ? copySalePackQty : 1;
       setPriceFormData(loadedPrices);
+      setLoadedPackQtys({ purchase: 1, sale: 1 });
+      setOpenedPurchase(null);
+      setPackSubmitErrors({});
 
       // Set attributes
       const loadedAttributes: AttributeFormValue[] = (attributesRes.data || []).map((av: any) => ({
@@ -2437,7 +2741,17 @@ export default function Products() {
                   </p>
                 </div>
 
-                <ProductFormPrices prices={priceFormData} onChange={setPriceFormData} />
+                <ProductFormPrices
+                  prices={priceFormData}
+                  onChange={(next) => {
+                    setPriceFormData(next);
+                    if (Object.keys(packSubmitErrors).length > 0) setPackSubmitErrors({});
+                  }}
+                  hasPreferredSupplier={hasPreferredSupplierForPacks}
+                  canEditPurchasePack={canViewProductCost}
+                  packsLockedNote={packsLocked ? "Os packs definem-se na empresa principal do produto" : null}
+                  submitErrors={packSubmitErrors}
+                />
 
                 <ProductFormAttributes 
                   attributes={attributeFormData} 

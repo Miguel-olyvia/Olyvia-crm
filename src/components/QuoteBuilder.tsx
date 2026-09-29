@@ -64,7 +64,7 @@ import {
   markupFromCostAndPrice,
 } from "@/utils/quotes/quoteLinePricing";
 import { computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
-import { applyUomOptionToLine, clearLineUom, getLineUnitsPerUom, setLineBasePrices, type LineUomFields } from "@/utils/quotes/lineUom";
+import { applyDefaultLineUom, applyUomOptionToLine, clearLineUom, getLineUnitsPerUom, setLineBasePrices, type LineUomFields, type LineUomOption } from "@/utils/quotes/lineUom";
 import { useLineUomOptions } from "@/hooks/useLineUomOptions";
 import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
@@ -2508,10 +2508,23 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     type?: "product" | "service";
     description?: string | null;
     item_supplier_id?: string | null;
-  }, selectedAttributes?: Record<string, any>, attributePriceAddon?: number) => {
-    const updatedLines = [...lines];
-    const currentLine = updatedLines[lineIndex];
-    
+  }, selectedAttributes?: Record<string, any>, attributePriceAddon?: number, defaultUom?: LineUomOption | null) => {
+    // Atualização funcional: quem chama pode ter feito um await (unidade de
+    // venda por omissão), por isso a linha lê-se de `prev`, não de `lines`.
+    setLines((prev) => {
+      const currentLine = prev[lineIndex];
+      if (!currentLine) return prev;
+      const updatedLines = [...prev];
+      updatedLines[lineIndex] = buildReplacedLine(currentLine);
+      return updatedLines;
+    });
+
+    toast({
+      title: t('quoteBuilder.toast.productChanged') || "Produto alterado",
+      description: t('quoteBuilder.toast.productChangedDesc') || "O produto foi substituído com sucesso.",
+    });
+
+    function buildReplacedLine(currentLine: QuoteLine): QuoteLine {
     const basePrice = newProduct.retail_price || 0;
     const addonPrice = attributePriceAddon || 0;
     const retailPrice = basePrice + addonPrice;
@@ -2530,8 +2543,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
     
     const isProduct = newProduct.type === "product" || (!newProduct.type && !!currentLine.product_id);
     
-    updatedLines[lineIndex] = {
-      // Artigo novo => unidade base (a embalagem era do artigo anterior).
+    // Artigo novo => unidade base (a embalagem era do artigo anterior) e, a
+    // seguir, a unidade de venda por omissão do produto novo, se tiver.
+    return applyDefaultLineUom<QuoteLine>({
       ...clearLineUom(currentLine),
       product_id: isProduct ? newProduct.id : null,
       service_id: !isProduct ? newProduct.id : null,
@@ -2553,18 +2567,12 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       // supplier_sku is read-only, hydrated via the item_suppliers join on load;
       // reset here so a stale badge from the replaced item isn't shown until reload.
       supplier_sku: null,
-    };
-    
-    setLines(updatedLines);
-    
-    toast({
-      title: t('quoteBuilder.toast.productChanged') || "Produto alterado",
-      description: t('quoteBuilder.toast.productChangedDesc') || "O produto foi substituído com sucesso.",
-    });
+    }, isProduct ? defaultUom ?? null : null);
+    }
   };
 
   // Handler for replacing items from AddItemsDialog
-  const handleReplaceItemFromDialog = (selectedItems: Array<{
+  const handleReplaceItemFromDialog = async (selectedItems: Array<{
     item: {
       id: string;
       name: string;
@@ -2657,7 +2665,13 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         description: "O bundle foi substituído com sucesso.",
       });
     } else {
-      handleReplaceProduct(replaceLineIndex, {
+      // O índice guarda-se antes do await: o diálogo fecha-se logo a seguir e
+      // o onOpenChange limpa replaceLineIndex.
+      const targetLineIndex = replaceLineIndex;
+      const resolveDefaultUom = item.type === "product"
+        ? await lineUom.loadDefaultOptions([item.id])
+        : () => null;
+      handleReplaceProduct(targetLineIndex, {
         id: item.id,
         name: item.name,
         sku: item.sku,
@@ -2669,7 +2683,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
         type: item.type,
         description: item.description,
         item_supplier_id: item_supplier_id ?? null,
-      }, fullAttributes, attributePriceAddon);
+      }, fullAttributes, attributePriceAddon, resolveDefaultUom(item.id));
     }
     
     // Reset replace mode state
@@ -2819,7 +2833,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   };
 
   // Handler for new AddItemsDialog
-  const handleAddItemsFromDialog = (selectedItems: Array<{
+  const handleAddItemsFromDialog = async (selectedItems: Array<{
     item: {
       id: string;
       name: string;
@@ -2858,6 +2872,14 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       total_price: number;
     };
   }>) => {
+    // Unidade de venda por omissão (products.sale_uom_id) das linhas novas de
+    // produto — bundles excluídos. Resolve-se antes de montar as linhas; em
+    // erro as linhas nascem à unidade, como antes. A posição de inserção
+    // guarda-se antes do await (é a do clique).
+    const targetInsertIndex = insertAtIndex;
+    const resolveDefaultUom = await lineUom.loadDefaultOptions(
+      selectedItems.filter((s) => !s.bundleInfo && s.item.type === "product").map((s) => s.item.id),
+    );
     const quoteOrgId = formData.organization_id || activeCompany?.id;
     const defaultMargin = 30;
     const defaultInt = 0;
@@ -2928,7 +2950,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           section_name: activeSection,
         });
       } else {
-        newLines.push({
+        newLines.push(applyDefaultLineUom<QuoteLine>({
           catalog_item_id: null,
           product_id: item.type === "product" ? item.id : null,
           service_id: item.type === "service" ? item.id : null,
@@ -2951,32 +2973,33 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           discount_percent: 0,
           ordem: 0, // Will be recalculated
           section_name: activeSection,
-        });
+        }, item.type === "product" ? resolveDefaultUom(item.id) : null));
       }
     });
 
     if (newLines.length > 0) {
-      let updatedLines: QuoteLine[];
-      
-      if (insertAtIndex !== null && insertAtIndex >= 0 && insertAtIndex <= lines.length) {
-        // Insert at specific position
-        updatedLines = [
-          ...lines.slice(0, insertAtIndex),
-          ...newLines,
-          ...lines.slice(insertAtIndex)
-        ];
-      } else {
-        // Append to end (default behavior)
-        updatedLines = [...lines, ...newLines];
-      }
-      
-      // Recalculate ordem for all lines
-      updatedLines = updatedLines.map((line, idx) => ({
-        ...line,
-        ordem: idx + 1
-      }));
-      
-      setLines(updatedLines);
+      // Atualização funcional: houve um await acima (unidade de venda por
+      // omissão) e `lines` deste fecho pode já estar desatualizado — as linhas
+      // editadas entretanto não se perdem.
+      setLines((prev) => {
+        let updatedLines: QuoteLine[];
+        if (targetInsertIndex !== null && targetInsertIndex >= 0 && targetInsertIndex <= prev.length) {
+          // Insert at specific position
+          updatedLines = [
+            ...prev.slice(0, targetInsertIndex),
+            ...newLines,
+            ...prev.slice(targetInsertIndex)
+          ];
+        } else {
+          // Append to end (default behavior)
+          updatedLines = [...prev, ...newLines];
+        }
+        // Recalculate ordem for all lines
+        return updatedLines.map((line, idx) => ({
+          ...line,
+          ordem: idx + 1
+        }));
+      });
       setInsertAtIndex(null); // Reset insert position
       
       toast({

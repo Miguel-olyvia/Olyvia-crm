@@ -25,7 +25,7 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { resolveEntityCommercial } from "@/utils/entityCommercial";
 import { getLineSubtotal, markupFromCostAndPrice, round2 } from "@/utils/quotes/quoteLinePricing";
 import { cn, formatCurrency } from "@/lib/utils";
-import { applyUomOptionToLine, type LineUomFields } from "@/utils/quotes/lineUom";
+import { applyDefaultLineUom, applyUomOptionToLine, type LineUomFields } from "@/utils/quotes/lineUom";
 import { useLineUomOptions } from "@/hooks/useLineUomOptions";
 import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
@@ -279,7 +279,15 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
   // tem essas colunas (quote_lines-like) — o IVA por omissão vem do cabeçalho
   // (iva_rate) em vez da constante, quando o artigo não traz taxa, e o 0%
   // sobrevive (ver `resolveVatRate`).
-  const handleAddCatalogItems = (selected: any[]) => {
+  const handleAddCatalogItems = async (selected: any[]) => {
+    // Unidade de venda por omissão (products.sale_uom_id) das linhas novas de
+    // produto. Os componentes de bundle ficam à unidade: a quantidade deles é
+    // a da composição. Em erro as linhas nascem à unidade.
+    const resolveDefaultUom = await lineUom.loadDefaultOptions(
+      selected
+        .filter((sel) => !sel?.bundleInfo && sel?.item?.type === "product")
+        .map((sel) => sel.item.id as string),
+    );
     const fallbackVat = resolveVatRate(ivaRate, DEFAULT_VAT_RATE);
     const newLines: DirectSaleLineDraft[] = [];
 
@@ -325,7 +333,7 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
         : item.name;
 
       const isProduct = item.type === "product";
-      newLines.push({
+      newLines.push(applyDefaultLineUom<DirectSaleLineDraft>({
         key: nextLineKey(),
         product_id: isProduct ? item.id : null,
         service_id: isProduct ? null : item.id,
@@ -339,7 +347,7 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
         iva_percent: resolveVatRate(item.vat_rate, fallbackVat),
         discount_percent: 0,
         visible_to_client: true,
-      });
+      }, isProduct ? resolveDefaultUom(item.id) : null));
     });
 
     if (newLines.length === 0) return;

@@ -15309,6 +15309,7 @@ export type Database = {
           name: string
           organization_id: string | null
           product_kind: string | null
+          sale_uom_id: string | null
           short_description: string | null
           sku: string
           status: Database["public"]["Enums"]["product_status"]
@@ -15339,6 +15340,7 @@ export type Database = {
           name: string
           organization_id?: string | null
           product_kind?: string | null
+          sale_uom_id?: string | null
           short_description?: string | null
           sku: string
           status?: Database["public"]["Enums"]["product_status"]
@@ -15369,6 +15371,7 @@ export type Database = {
           name?: string
           organization_id?: string | null
           product_kind?: string | null
+          sale_uom_id?: string | null
           short_description?: string | null
           sku?: string
           status?: Database["public"]["Enums"]["product_status"]
@@ -15411,6 +15414,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_sale_uom_id_fkey"
+            columns: ["sale_uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
             referencedColumns: ["id"]
           },
           {
@@ -21742,6 +21752,14 @@ export type Database = {
           origin_source_id: string
         }[]
       }
+      fn_uom_get_or_create_pack: {
+        Args: {
+          p_base_uom_id: string
+          p_organization_id: string
+          p_qty: number
+        }
+        Returns: string
+      }
       fn_uom_is_used_in_lines: { Args: { p_uom_id: string }; Returns: boolean }
       fn_uom_units_per: {
         Args: { p_product_id: string; p_uom_id: string }
@@ -25550,6 +25568,16 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      rpc_set_product_packs: {
+        Args: {
+          p_organization_id: string
+          p_product_id: string
+          p_purchase_pack_price: number | null
+          p_purchase_qty: number | null
+          p_sale_qty: number | null
+        }
+        Returns: Json
       }
       rpc_snapshot_quote_diagnostic: {
         Args: { p_deal_id: string; p_quote_id: string }

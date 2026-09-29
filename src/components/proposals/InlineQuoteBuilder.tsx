@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
@@ -19,7 +19,7 @@ import { getEffectiveProductRanges } from "@/lib/product-attribute-ranges";
 import { calculateInlineQuoteTotals, getLineBundleComponents } from "@/utils/quotes/inlineQuoteVatCalculation";
 import { getLineUnitPrice, getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
-import { applyUomOptionToLine, type LineUomFields } from "@/utils/quotes/lineUom";
+import { applyDefaultLineUom, applyUomOptionToLine, type LineUomFields } from "@/utils/quotes/lineUom";
 import { useLineUomOptions } from "@/hooks/useLineUomOptions";
 import { isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 import { LineUomSelect, PackQuantityHint } from "@/components/quote/LineUomSelect";
@@ -99,7 +99,14 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
   const [collapsed, setCollapsed] = useState(false);
   const [templates, setTemplates] = useState<Array<{ id: string; codigo: string; description: string | null; name: string }>>([]);
   const { activeCompany, companies: userCompanies } = useCompany();
-  
+  // Versão mais recente do orçamento, para handlers com await pelo meio: o
+  // `onChange` do pai recebe o objeto inteiro (não é funcional), e o `quote`
+  // do fecho pode já não ter as linhas editadas durante a espera.
+  const latestQuoteRef = useRef(quote);
+  useEffect(() => {
+    latestQuoteRef.current = quote;
+  }, [quote]);
+
   // Catalog dialog state
   const [showCatalogDialog, setShowCatalogDialog] = useState(false);
   const [catalogSection, setCatalogSection] = useState("Geral");
@@ -213,7 +220,18 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
     loadCatalog();
   }, [orgId, userCompanies]);
 
-  const handleAddItemsFromDialog = (selectedItems: Array<any>) => {
+  const handleAddItemsFromDialog = async (selectedItems: Array<any>) => {
+    // Unidade de venda por omissão (products.sale_uom_id) das linhas novas de
+    // produto — bundles excluídos. Em erro as linhas nascem à unidade. A
+    // secção guarda-se antes do await (é a do clique).
+    const targetSection = catalogSection;
+    const resolveDefaultUom = await lineUom.loadDefaultOptions(
+      selectedItems
+        .filter((s) => !s?.bundleInfo && s?.item?.type === "product")
+        .map((s) => s.item.id as string),
+    );
+    // Depois do await: ler a versão mais recente, não a do fecho.
+    const currentQuote = latestQuoteRef.current;
     const defaultMargin = DEFAULT_MARGIN;
     const newLines: InlineQuoteLine[] = [];
     
@@ -232,13 +250,13 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         ? definedCost
         : (retailPrice > 0 ? retailPrice / (1 + defaultMargin / 100) : 0);
       
-      const maxOrdem = quote.lines.length + newLines.length > 0 
-        ? Math.max(...[...quote.lines, ...newLines].map(l => l.ordem)) + 1 
+      const maxOrdem = currentQuote.lines.length + newLines.length > 0
+        ? Math.max(...[...currentQuote.lines, ...newLines].map(l => l.ordem)) + 1
         : 0;
 
-      newLines.push({
+      newLines.push(applyDefaultLineUom<InlineQuoteLine>({
         id: genTempId(),
-        section_name: catalogSection,
+        section_name: targetSection,
         descricao_snapshot: item.name,
         qt: quantity,
         // Paridade com QuoteBuilder.tsx:2953: um bundle não tem unidade de medida
@@ -277,11 +295,11 @@ export const InlineQuoteBuilder = ({ quote, onChange, onRemove, proposalTitle, o
         selected_attributes: bundleInfo
           ? { ...(fullAttributes || {}), bundle_components: bundleInfo.components }
           : (fullAttributes || {}),
-      });
+      }, !bundleInfo && item.type === "product" ? resolveDefaultUom(item.id) : null));
     });
 
     if (newLines.length > 0) {
-      onChange({ ...quote, lines: [...quote.lines, ...newLines] });
+      onChange({ ...currentQuote, lines: [...currentQuote.lines, ...newLines] });
     }
   };
 
