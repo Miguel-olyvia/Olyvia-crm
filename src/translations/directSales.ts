@@ -43,7 +43,7 @@ export const directSalesTranslations: Record<string, Record<string, string>> = {
 
     'directSales.status.rascunho': 'Draft',
     'directSales.status.enviada': 'Sent',
-    'directSales.status.aceite': 'Accepted',
+    'directSales.status.aceite': 'Confirmed',
     'directSales.status.rejeitada': 'Rejected',
     'directSales.status.cancelada': 'Cancelled',
 
@@ -152,7 +152,7 @@ export const directSalesTranslations: Record<string, Record<string, string>> = {
 
     'directSales.status.rascunho': 'Rascunho',
     'directSales.status.enviada': 'Enviada',
-    'directSales.status.aceite': 'Aceite',
+    'directSales.status.aceite': 'Confirmada',
     'directSales.status.rejeitada': 'Rejeitada',
     'directSales.status.cancelada': 'Cancelada',
 
