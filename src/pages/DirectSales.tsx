@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { endOfDay, format, parseISO, startOfDay, subDays } from "date-fns";
 import { pt } from "date-fns/locale";
-import { CalendarIcon, FileDown, KeyRound, MoreHorizontal, Pencil, Plus, Receipt, Search, Send, SendHorizontal, TrendingUp, X } from "lucide-react";
+import { CalendarIcon, CheckCircle2, FileDown, MoreHorizontal, Pencil, Plus, Receipt, Search, TrendingUp, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -18,6 +18,10 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PermissionGate } from "@/components/PermissionGate";
@@ -25,10 +29,8 @@ import { DirectSaleEditor } from "@/components/directSales/DirectSaleEditor";
 import { InvoiceRegistrationDialog } from "@/components/directSales/InvoiceRegistrationDialog";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
-import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
-import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadBlob, generateProformaPdfBlob } from "@/utils/generateProformaPdfBlob";
 import { generateInternalSalePdfBlob } from "@/utils/generateInternalSalePdfBlob";
 import { generateDirectSalePdfBlob } from "@/utils/generateDirectSalePdfBlob";
@@ -42,10 +44,9 @@ import { cn, formatCurrency } from "@/lib/utils";
 // Venda Direta — Fase 2: listagem. Fluxo alternativo, mais leve, ao caminho
 // Orçamento -> Proposta -> Contrato (migration 20261130230000).
 //
-// Fora do âmbito desta fase (colunas já existem em direct_sales, mas NÃO são
-// mostradas nem escritas aqui): envio ao portal/aceitação (sent_at/accepted_at),
-// proforma, PDF, ligação a Encomendas Clientes (client_contract_id) e o
-// documento interno com margem.
+// A venda direta NÃO passa pelo portal do cliente: é confirmada no CRM
+// ("Confirmar venda" -> rpc_confirm_direct_sale), que a passa a 'aceite',
+// emite a proforma e cria a Encomenda de Cliente.
 //
 // `(supabase as any)`: direct_sales ainda não existe em
 // src/integrations/supabase/types.ts (tipos gerados não regenerados após a
@@ -106,7 +107,14 @@ const INVOICE_BADGE_CLASS: Record<string, string> = {
   emitida: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300",
 };
 
-const STATUS_OPTIONS: DirectSaleStatus[] = ["rascunho", "enviada", "aceite", "rejeitada", "cancelada"];
+// Opções do filtro. 'enviada' e 'rejeitada' saíram: a venda direta deixou de
+// passar pelo portal do cliente, logo ninguém chega a esses estados. As vendas
+// antigas que lá estejam continuam a mostrar o badge (STATUS_BADGE_CLASS e as
+// traduções mantêm-nos).
+const STATUS_OPTIONS: DirectSaleStatus[] = ["rascunho", "aceite", "cancelada"];
+
+/** Estados a partir dos quais o CRM pode confirmar a venda (rpc_confirm_direct_sale). */
+const CONFIRMABLE_STATUSES: ReadonlyArray<string> = ["rascunho", "enviada"];
 
 const DirectSales = () => {
   const { t } = useTranslation();
@@ -181,8 +189,10 @@ const DirectSales = () => {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
 
-  /** Venda cujo "Marcar como enviada" está em curso — trava só esse item. */
-  const [markingSentId, setMarkingSentId] = useState<string | null>(null);
+  /** Venda cuja confirmação se está a pedir (AlertDialog aberto); null = fechado. */
+  const [confirmSale, setConfirmSale] = useState<DirectSaleRow | null>(null);
+  /** A RPC de confirmação está em curso — trava o diálogo contra cliques repetidos. */
+  const [confirming, setConfirming] = useState(false);
 
   /** Venda cuja proforma está a ser gerada — a geração do PDF demora, trava só esse item. */
   const [generatingProformaId, setGeneratingProformaId] = useState<string | null>(null);
@@ -343,102 +353,6 @@ const DirectSales = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompany?.id, saleFilters]);
 
-  /**
-   * Escreve `status = 'enviada'` (única escrita deste estado no ficheiro — o
-   * item de menu e o envio para o portal passam os dois por aqui).
-   *
-   * Sem estágios/workflow, ao contrário do molde `handleMarkAsSent` de
-   * Proposals.tsx: `direct_sales` não tem `stage_id`, o ciclo de vida vive só
-   * na coluna `status`.
-   *
-   * A guarda de `rascunho` é feita no próprio UPDATE (`.eq("status",
-   * "rascunho")`) e não em memória: é o servidor a decidir, logo uma venda
-   * entretanto aceite/cancelada noutro separador nunca é puxada para trás. Por
-   * isso o retorno distingue "skipped" (nenhuma linha correspondeu — já não
-   * estava em rascunho) de "error" (a escrita falhou de facto).
-   *
-   * Não faz toasts nem recarrega a lista: cada chamador decide o que dizer ao
-   * utilizador, porque o significado da falha é diferente nos dois caminhos.
-   */
-  const markSaleAsSent = useCallback(
-    async (saleId: string): Promise<{ outcome: "updated" | "skipped" | "error"; message?: string }> => {
-      if (!activeCompany?.id) return { outcome: "error", message: "Nenhuma organização ativa." };
-      try {
-        // Identidade de negócio (anew_users.id), não o auth uid — é o que os
-        // triggers de auditoria esperam em `set_audit_context`.
-        const businessUserId = await resolveCurrentBusinessUserId();
-        if (!businessUserId) return { outcome: "error", message: "Utilizador não identificado." };
-        await supabase.rpc("set_audit_context", { p_user_id: businessUserId, p_source: "ui" });
-
-        // Filtro pela organização ativa além do id, como em `loadSales`: a RLS
-        // já protege, mas o scoping explícito impede que um id de outra
-        // organização (lista obsoleta, empresa trocada entretanto) seja tocado.
-        const { data, error } = await (supabase as any)
-          .from("direct_sales")
-          .update({ status: "enviada", sent_at: new Date().toISOString() })
-          .eq("id", saleId)
-          .eq("organization_id", activeCompany.id)
-          .eq("status", "rascunho")
-          .select("id")
-          .maybeSingle();
-        if (error) throw error;
-        return { outcome: data ? "updated" : "skipped" };
-      } catch (error: any) {
-        return { outcome: "error", message: error?.message };
-      }
-    },
-    [activeCompany?.id],
-  );
-
-  /**
-   * Envio ao portal do cliente — mesma edge function usada por Propostas e
-   * Encomendas Clientes.
-   *
-   * Nas propostas quem marca `sent` é a edge function send-proposal-email
-   * (index.ts:352), não a publicação no portal. A venda direta não tem função
-   * de email própria: o email de credenciais do portal É o ato de envio, logo
-   * o equivalente fiel é publicar no portal marcar `enviada` — caso contrário
-   * a venda ficava em `rascunho` e o portal não deixava o cliente aceitar.
-   *
-   * Só promove a partir de `rascunho`: reenviar credenciais ou republicar uma
-   * venda já aceite não pode reverter o estado (garantido no UPDATE).
-   *
-   * Declarado depois de `loadSales`/`markSaleAsSent` porque o callback depende
-   * das duas. O id vai num ref preenchido imediatamente antes da chamada
-   * porque `onSuccess` do hook não recebe argumentos; um ref (e não estado)
-   * evita um render extra e é lido de forma síncrona no callback.
-   */
-  const portalTargetSaleIdRef = useRef<string | null>(null);
-
-  const { generatePortalAccess, loading: portalAccessLoading } = useClientPortalAccess({
-    onSuccess: async () => {
-      const saleId = portalTargetSaleIdRef.current;
-      portalTargetSaleIdRef.current = null;
-      if (saleId) {
-        const result = await markSaleAsSent(saleId);
-        // O acesso ao portal já foi criado e o email já saiu. Um toast de erro
-        // aqui levava o utilizador a pensar que o envio falhou e a repeti-lo —
-        // avisamos apenas que o estado não acompanhou, com o item "Marcar como
-        // enviada" ainda disponível para corrigir à mão.
-        if (result.outcome === "error") {
-          toast({
-            title: "Enviado, mas o estado não foi atualizado",
-            description:
-              "O cliente recebeu o acesso ao portal. A venda continua em rascunho — use \"Marcar como enviada\" para corrigir.",
-          });
-        }
-      }
-      // Sempre depois da escrita: recarregar antes mostrava o estado antigo.
-      await loadSales(0, true);
-    },
-  });
-
-  /** Envolve a chamada ao portal para o `onSuccess` saber de que venda se trata. */
-  const handleSendToPortal = (saleId: string, forceNewPassword?: boolean) => {
-    portalTargetSaleIdRef.current = saleId;
-    generatePortalAccess("direct_sale", saleId, forceNewPassword);
-  };
-
   useEffect(() => {
     if (!activeCompany?.id) {
       // Invalida qualquer pedido em voo antes de limpar, senão uma resposta
@@ -487,35 +401,45 @@ const DirectSales = () => {
   };
 
   /**
-   * Ação de ESTADO no menu, para quem faça chegar a venda ao cliente por outra
-   * via que não o portal. As propostas têm o equivalente (`handleMarkAsSent` em
-   * Proposals.tsx), por isso mantém-se mesmo com o portal já a marcar sozinho.
+   * Confirmação manual da venda no CRM (substitui o envio/aceitação pelo
+   * portal do cliente, que deixou de existir para a venda direta).
    *
-   * Consequência intencional: ao sair de `rascunho` o editor passa a leitura
-   * (DirectSaleEditor) — é o mesmo corte que o portal exige para permitir a
-   * aceitação, que só está disponível a partir de `enviada`.
+   * Toda a regra vive em rpc_confirm_direct_sale: passa a venda a 'aceite',
+   * atribui a proforma e cria a Encomenda de Cliente (que reserva stock / pede
+   * ao fornecedor). Aqui só se chama e se recarrega a lista.
+   *
+   * `(supabase as any)`: a RPC ainda não existe em types.ts — mesmo padrão de
+   * InvoiceRegistrationDialog.tsx.
    */
-  const handleMarkAsSent = async (sale: DirectSaleRow) => {
-    if (markingSentId) return;
-    setMarkingSentId(sale.id);
+  const handleConfirmSale = async () => {
+    const sale = confirmSale;
+    if (!sale || confirming) return;
+    setConfirming(true);
     try {
-      const result = await markSaleAsSent(sale.id);
-      if (result.outcome === "error") {
-        toast({ title: "Erro", description: result.message, variant: "destructive" });
-      } else if (result.outcome === "skipped") {
-        // A lista dizia rascunho, o servidor já não concorda (outro separador,
-        // outro utilizador). Recarregar abaixo mostra o estado real.
-        toast({
-          title: "A venda já não está em rascunho",
-          description: "O estado foi entretanto alterado — a listagem foi atualizada.",
-        });
-      } else {
-        toast({ title: "Venda direta marcada como enviada" });
-      }
-      await loadSales(0, true);
+      const { data, error } = await (supabase as any).rpc("rpc_confirm_direct_sale", {
+        p_direct_sale_id: sale.id,
+      });
+      if (error) throw error;
+      const proformaNumber = (data as { proforma_number?: string | null } | null)?.proforma_number ?? null;
+      toast({
+        title: "Venda confirmada",
+        description: proformaNumber
+          ? `Proforma ${proformaNumber} emitida e Encomenda de Cliente criada.`
+          : "Encomenda de Cliente criada.",
+      });
+      setConfirmSale(null);
+    } catch (error: any) {
+      toast({
+        title: "Não foi possível confirmar a venda",
+        description: error?.message,
+        variant: "destructive",
+      });
     } finally {
-      setMarkingSentId(null);
+      setConfirming(false);
     }
+    // Sempre, mesmo em erro: se a venda foi entretanto confirmada noutro
+    // separador, a lista passa a mostrar o estado real.
+    await loadSales(0, true);
   };
 
   /**
@@ -886,53 +810,28 @@ const DirectSales = () => {
                           >
                             <Pencil className="mr-2 h-3.5 w-3.5" /> Editar
                           </DropdownMenuItem>
-                          <PermissionGate permission="direct_sales.edit">
-                            {/* Só faz sentido em rascunho: marcar como enviada
-                                uma venda já aceite/rejeitada/cancelada andaria
-                                para trás no ciclo de vida. */}
-                            {sale.status === "rascunho" && (
-                              <>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
-                                  Estado
-                                </DropdownMenuLabel>
-                                <DropdownMenuItem
-                                  disabled={markingSentId === sale.id}
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    handleMarkAsSent(sale);
-                                  }}
-                                >
-                                  <SendHorizontal className="mr-2 h-3.5 w-3.5 text-blue-600" /> Marcar como enviada
-                                </DropdownMenuItem>
-                              </>
-                            )}
-                            <DropdownMenuSeparator />
-                            <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
-                              Portal
-                            </DropdownMenuLabel>
-                            <DropdownMenuItem
-                              disabled={portalAccessLoading}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                handleSendToPortal(sale.id);
-                              }}
-                            >
-                              <Send className="mr-2 h-3.5 w-3.5 text-purple-600" /> Enviar para Portal Cliente
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={portalAccessLoading}
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                handleSendToPortal(sale.id, true);
-                              }}
-                            >
-                              <KeyRound className="mr-2 h-3.5 w-3.5" /> Reenviar credenciais
-                            </DropdownMenuItem>
-                          </PermissionGate>
+                          {/* Confirmação manual (substitui o portal). Só a partir
+                              de rascunho ou de uma 'enviada' antiga: confirmar
+                              uma venda já aceite/rejeitada/cancelada não faz
+                              sentido — a RPC volta a validar do lado dela. */}
+                          {CONFIRMABLE_STATUSES.includes(sale.status) && (
+                            <PermissionGate permission="direct_sales.edit">
+                              <DropdownMenuSeparator />
+                              <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
+                                Estado
+                              </DropdownMenuLabel>
+                              <DropdownMenuItem
+                                disabled={confirming}
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setConfirmSale(sale);
+                                }}
+                              >
+                                <CheckCircle2 className="mr-2 h-3.5 w-3.5 text-emerald-600" /> Confirmar venda
+                              </DropdownMenuItem>
+                            </PermissionGate>
+                          )}
                           {/* Proforma: documento NÃO fiscal, só existe depois de
                               a venda ser aceite (é aí que o trigger atribui o
                               proforma_number). Sem número não há documento, por
@@ -1064,6 +963,35 @@ const DirectSales = () => {
         saleNumber={invoiceSale?.sale_number ?? null}
         onSaved={() => loadSales(0, true)}
       />
+
+      <AlertDialog
+        open={confirmSale !== null}
+        onOpenChange={(next) => { if (!next && !confirming) setConfirmSale(null); }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar venda</AlertDialogTitle>
+            <AlertDialogDescription>
+              Confirmar a venda {confirmSale?.sale_number || ""}? Vai ser criada a Encomenda de
+              Cliente e o stock reservado/pedido ao fornecedor. A venda deixa de poder ser editada.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={confirming}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={confirming}
+              onClick={(e) => {
+                // Sem preventDefault o AlertDialog fecha logo, antes de a RPC
+                // responder; fecha-se à mão no sucesso.
+                e.preventDefault();
+                void handleConfirmSale();
+              }}
+            >
+              {confirming ? "A confirmar…" : "Confirmar venda"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 };
