@@ -350,6 +350,7 @@ export default function Scheduling() {
     if (data.id) {
       const prevItem = selectedItem && selectedItem.id === data.id ? selectedItem : items.find(i => i.id === data.id) ?? null;
       if (await updateItem(data.id, data)) {
+        toast.success(t('scheduling.item.updateSuccess'));
         const assigneesOk = await updateAssignees(data.id, assigneeIds);
         setItems(await fetchItemsRef.current(filters));
         notifyIfEnabled(data.id, detectScheduleChanges(prevItem, data, assigneesOk ? assigneeIds : null));
