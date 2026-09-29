@@ -4,6 +4,8 @@ import { toast } from '@/lib/toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUserId';
 import { withAuditContext } from '@/utils/auditContext';
+import { getFriendlyErrorMessage } from '@/utils/friendlyError';
+import { parseAssigneesUpdateResult, type AssigneesUpdateResult } from '@/lib/scheduling/assigneesUpdateResult';
 import type {
   ScheduleBoard,
   ScheduleItem,
@@ -525,27 +527,32 @@ export function useScheduling(companyId?: string) {
   const updateAssignees = useCallback(async (
     itemId: string,
     resourceIds: string[]
-  ): Promise<boolean> => {
+  ): Promise<AssigneesUpdateResult | null> => {
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error('Perfil de utilizador não encontrado');
 
+      // A RPC devolve o que mudou no dono da lead/cliente ligado à visita
+      // (vazio quando o conjunto de recursos não mudou ou não há ficha ligada).
+      let result: AssigneesUpdateResult = { leadOwnerChanged: false, newOwnerId: null, otherVisitIds: [] };
       await withAuditContext(supabase, businessUserId, async () => {
         // RPC atómica (delete+insert numa única transação, sem passar por RLS
         // direta do cliente) — evita a janela em que um utilizador com scope
         // OWNED perde a visibilidade do item a meio da troca de assignee.
-        const { error } = await supabase.rpc('rpc_update_schedule_item_assignees', {
+        const { data, error } = await supabase.rpc('rpc_update_schedule_item_assignees', {
           p_item_id: itemId,
           p_resource_ids: resourceIds,
         });
 
         if (error) throw error;
+        result = parseAssigneesUpdateResult(data);
       }, 'web_app');
 
-      return true;
+      return result;
     } catch (error: any) {
-      toast.error(t('scheduling.item.assigneesError') + ': ' + error.message);
-      return false;
+      const description = await getFriendlyErrorMessage(error, error?.message);
+      toast.error(t('scheduling.item.assigneesError') + ': ' + description);
+      return null;
     }
   }, []);
 
