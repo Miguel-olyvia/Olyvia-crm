@@ -7,7 +7,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -313,6 +313,16 @@ interface ClientOrderDocumentDetail {
   origin_number?: string | null;
   delivery_address?: string | null;
   is_editable?: boolean;
+  // Edição do cabeçalho das encomendas com documento de origem
+  // (rpc_update_client_order_header): opcionais até a RPC nova estar aplicada.
+  // entity_id: só se a RPC o vier a devolver — senão lê-se de client_contracts.
+  notes?: string | null;
+  can_edit_header?: boolean;
+  entity_id?: string | null;
+  // Morada gravada em bruto (client_contracts.delivery_address), sem o
+  // COALESCE com a obra/morada principal de delivery_address. Ausente com a
+  // RPC antiga; null = sem morada fixada na encomenda.
+  delivery_address_override?: string | null;
   // 20261204310000
   // 20261204340000: missing_lines_count/can_request_missing só contam linhas que
   // o pedido ao fornecedor consegue fazer; missing_units_total = soma dessas
@@ -370,6 +380,86 @@ const normalizeDiagnosticNeeds = (raw: unknown): ClientOrderDiagnosticNeed[] => 
 // Quantidades/áreas do diagnóstico: separador decimal PT e sem casas a mais.
 const formatDiagnosticNumber = (value: number): string =>
   new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(value);
+
+// Morada de entrega: Select com as moradas de entrega do cliente, "+ Nova
+// morada…" (DeliveryAddressForm) e a Textarea com o texto que é gravado.
+// Partilhado pelo diálogo da encomenda manual e pelo de edição do cabeçalho;
+// o estado vive na página (ver loadDeliveryOptions e handlers associados).
+interface DeliveryAddressPickerProps {
+  entityId: string | null;
+  options: EntityDeliveryAddress[];
+  optionsLoading: boolean;
+  choice: string;
+  onChoiceChange: (value: string) => void;
+  showNewForm: boolean;
+  onShowNewFormChange: (show: boolean) => void;
+  onAdded: (result: AddDeliveryAddressResult, input: DeliveryAddressInput) => void | Promise<void>;
+  value: string;
+  onValueChange: (value: string) => void;
+  textareaId: string;
+  newFormIdPrefix: string;
+  label: string;
+  disabled: boolean;
+  t: (key: string, params?: Record<string, string | number>) => string;
+}
+
+const DeliveryAddressPicker = ({
+  entityId, options, optionsLoading, choice, onChoiceChange, showNewForm, onShowNewFormChange,
+  onAdded, value, onValueChange, textareaId, newFormIdPrefix, label, disabled, t,
+}: DeliveryAddressPickerProps) => (
+  <div className="space-y-2">
+    <Label htmlFor={textareaId}>{label}</Label>
+    {entityId && options.length > 0 && (
+      <Select value={choice} onValueChange={onChoiceChange} disabled={disabled}>
+        <SelectTrigger aria-label={t('clientOrders.create.deliveryAddressChoose')}>
+          <SelectValue placeholder={t('clientOrders.create.deliveryAddressChoose')} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.entity_address_id} value={option.entity_address_id}>
+              {formatDeliveryAddress(option) || option.formatted || '—'}
+            </SelectItem>
+          ))}
+          <SelectItem value={NEW_DELIVERY_ADDRESS_VALUE}>{t('clientOrders.create.deliveryAddressNew')}</SelectItem>
+        </SelectContent>
+      </Select>
+    )}
+    {entityId && !optionsLoading && options.length === 0 && !showNewForm && (
+      <div>
+        <Button
+          type="button"
+          variant="link"
+          size="sm"
+          className="h-auto min-h-6 px-0"
+          onClick={() => onShowNewFormChange(true)}
+          disabled={disabled}
+        >
+          {t('clientOrders.create.deliveryAddressAddNew')}
+        </Button>
+      </div>
+    )}
+    {entityId && showNewForm && (
+      <div className="rounded-md border p-3 space-y-2">
+        <p className="text-sm font-medium">{t('deliveryAddresses.newTitle')}</p>
+        <DeliveryAddressForm
+          entityId={entityId}
+          idPrefix={newFormIdPrefix}
+          disabled={disabled}
+          onAdded={onAdded}
+          onCancel={() => onShowNewFormChange(false)}
+        />
+      </div>
+    )}
+    <Textarea
+      id={textareaId}
+      value={value}
+      onChange={(e) => onValueChange(e.target.value)}
+      placeholder={t('clientOrders.create.deliveryAddressPlaceholder')}
+      rows={2}
+      disabled={disabled}
+    />
+  </div>
+);
 
 const ClientOrders = () => {
   const { t } = useTranslation();
@@ -482,6 +572,19 @@ const ClientOrders = () => {
   const [editingOrderNumber, setEditingOrderNumber] = useState<string | null>(null);
   const [editingClientName, setEditingClientName] = useState<string | null>(null);
   const [editLoading, setEditLoading] = useState(false);
+
+  // Edição do cabeçalho de encomendas com documento de origem (contrato real
+  // ou venda direta): só morada de entrega e notas, via
+  // rpc_update_client_order_header. Partilha com o diálogo manual o estado do
+  // Select de moradas (deliveryEntityId/deliveryOptions/deliveryChoice…) — os
+  // dois diálogos nunca estão abertos ao mesmo tempo.
+  const [headerEditOpen, setHeaderEditOpen] = useState(false);
+  const [headerEditSaving, setHeaderEditSaving] = useState(false);
+  const [headerDeliveryAddress, setHeaderDeliveryAddress] = useState("");
+  const [headerNotes, setHeaderNotes] = useState("");
+  // Texto mostrado na Textarea ao abrir (morada calculada). Se não mudar, não
+  // se grava a calculada — envia-se o override em bruto.
+  const [headerInitialAddress, setHeaderInitialAddress] = useState("");
 
   // Filtros num ref (não recria loadOrders a cada keystroke) — mesmo truque
   // já usado em Stocks.tsx para manter a identidade do IntersectionObserver
@@ -1529,6 +1632,13 @@ const ClientOrders = () => {
 
   // Select de moradas de entrega: preenche a Textarea com o texto formatado
   // (com andar e fração). "+ Nova morada…" só abre o formulário.
+  // Textarea de destino: a do diálogo de cabeçalho quando está aberto, senão a
+  // do diálogo manual (comportamento anterior).
+  const setDeliveryText = (text: string) => {
+    if (headerEditOpen) setHeaderDeliveryAddress(text);
+    else setCreateDeliveryAddress(text);
+  };
+
   const handleDeliveryChoiceChange = (value: string) => {
     if (value === NEW_DELIVERY_ADDRESS_VALUE) {
       setShowNewDeliveryForm(true);
@@ -1537,7 +1647,7 @@ const ClientOrders = () => {
     const option = deliveryOptions.find((o) => o.entity_address_id === value);
     if (!option) return;
     setDeliveryChoice(value);
-    setCreateDeliveryAddress(formatDeliveryAddress(option) || option.formatted || "");
+    setDeliveryText(formatDeliveryAddress(option) || option.formatted || "");
   };
 
   // Nova morada gravada (rpc_add_entity_delivery_address): recarrega a lista
@@ -1550,7 +1660,123 @@ const ClientOrders = () => {
     if (options === null) return;
     const added = options.find((o) => o.entity_address_id === result?.entity_address_id);
     setDeliveryChoice(added ? added.entity_address_id : "");
-    setCreateDeliveryAddress(formatDeliveryAddress(added ?? input));
+    setDeliveryText(formatDeliveryAddress(added ?? input));
+  };
+
+  // ── Edição do cabeçalho (encomendas com documento de origem) ────────────
+  // Limpa o estado partilhado do Select de moradas, para o diálogo manual não
+  // herdar as moradas deste cliente (o botão "Nova encomenda" não o repõe).
+  const resetHeaderEdit = () => {
+    deliveryAddressRequestRef.current = null;
+    setDeliveryEntityId(null);
+    setDeliveryOptions([]);
+    setDeliveryOptionsLoading(false);
+    setDeliveryChoice("");
+    setShowNewDeliveryForm(false);
+    setHeaderDeliveryAddress("");
+    setHeaderInitialAddress("");
+    setHeaderNotes("");
+  };
+
+  // Cliente da encomenda para o Select de moradas. Primeiro o entity_id da RPC
+  // do detalhe; com a RPC antiga lê-se de client_contracts. Se a RLS não deixar (ex.: system
+  // admin por hierarquia), fica só a Textarea — a gravação continua a funcionar.
+  const resolveOrderEntityId = async (doc: ClientOrderDocumentDetail): Promise<string | null> => {
+    if (doc.entity_id) return doc.entity_id;
+    try {
+      const { data, error } = await (supabase as any)
+        .from('client_contracts')
+        .select('entity_id')
+        .eq('id', doc.contract_id)
+        .maybeSingle();
+      if (error) throw error;
+      return (data?.entity_id as string | null | undefined) ?? null;
+    } catch (error) {
+      console.warn('[ClientOrders] não foi possível obter o cliente da encomenda', error);
+      return null;
+    }
+  };
+
+  const openHeaderEdit = () => {
+    if (!detailData) return;
+    const doc = detailData;
+    resetHeaderEdit();
+    setHeaderDeliveryAddress(doc.delivery_address ?? "");
+    setHeaderInitialAddress(doc.delivery_address ?? "");
+    setHeaderNotes(doc.notes ?? "");
+    setHeaderEditOpen(true);
+
+    // Igual ao diálogo manual: não substitui a morada gravada, só marca a
+    // opção do Select cujo texto lhe corresponde.
+    const savedAddress = (doc.delivery_address ?? "").trim();
+    const requestKey = `header:${doc.contract_id}`;
+    deliveryAddressRequestRef.current = requestKey;
+    void resolveOrderEntityId(doc).then((entityId) => {
+      if (deliveryAddressRequestRef.current !== requestKey) return;
+      deliveryAddressRequestRef.current = entityId;
+      setDeliveryEntityId(entityId);
+      if (!entityId) return;
+      void loadDeliveryOptions(entityId).then((options) => {
+        if (!options || deliveryAddressRequestRef.current !== entityId) return;
+        const match = options.find((option) => formatDeliveryAddress(option) === savedAddress);
+        if (match) setDeliveryChoice(match.entity_address_id);
+      });
+    });
+  };
+
+  const closeHeaderEdit = () => {
+    setHeaderEditOpen(false);
+    resetHeaderEdit();
+  };
+
+  const handleSaveHeader = async () => {
+    if (!detailData || headerEditSaving) return;
+    const contractId = detailData.contract_id;
+    // Morada: se o texto não mudou, não gravar a calculada (COALESCE com a
+    // obra/morada principal) — mantém-se o override em bruto. Com a RPC antiga
+    // (sem a chave) não há como saber: envia-se o texto, como antes.
+    const typedAddress = headerDeliveryAddress.trim();
+    const addressUnchanged = typedAddress === headerInitialAddress.trim();
+    const hasOverrideKey = 'delivery_address_override' in detailData;
+    const deliveryAddressParam = addressUnchanged && hasOverrideKey
+      ? (detailData.delivery_address_override ?? null)
+      : (typedAddress || null);
+    setHeaderEditSaving(true);
+    try {
+      const { error } = await (supabase as any).rpc('rpc_update_client_order_header', {
+        p_contract_id: contractId,
+        p_delivery_address: deliveryAddressParam,
+        p_notes: headerNotes.trim() || null,
+      });
+      if (error) throw error;
+      toast({ title: tf('clientOrders.headerEdit.success', 'Encomenda atualizada') });
+      closeHeaderEdit();
+      try {
+        const refreshed = await fetchDetail(contractId);
+        setDetailData(refreshed);
+      } catch (refreshError: any) {
+        toast({ title: t('clientOrders.toast.detailError'), description: refreshError?.message, variant: "destructive" });
+      }
+      loadOrders(0, true);
+    } catch (error: any) {
+      toast({
+        title: tf('clientOrders.headerEdit.error', 'Erro ao atualizar a encomenda'),
+        description: error?.message,
+        variant: "destructive",
+      });
+    } finally {
+      setHeaderEditSaving(false);
+    }
+  };
+
+  // "Contrato CC-…" / "Venda Direta VD-…" para a descrição do diálogo.
+  const describeOrigin = (doc: ClientOrderDocumentDetail): string => {
+    const sale = salesByContract[doc.contract_id];
+    if (doc.origin_type === 'direct_sale' || (!doc.origin_type && sale)) {
+      const number = doc.origin_number || sale?.sale_number || sale?.proforma_number || '';
+      return `${t('clientOrders.origin.directSale')}${number ? ` ${number}` : ''}`;
+    }
+    return t('clientOrders.origin.contract', { number: doc.origin_number || doc.contract_number });
   };
 
   const getCreateTotals = () => {
@@ -2059,6 +2285,12 @@ const ClientOrders = () => {
                     <span className="font-medium whitespace-pre-wrap break-words">{detailData.delivery_address}</span>
                   </div>
                 )}
+                {detailData.notes?.trim() && (
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">{t('clientOrders.create.notes')}: </span>
+                    <span className="font-medium whitespace-pre-wrap break-words">{detailData.notes}</span>
+                  </div>
+                )}
                 {(detailData.origin_type || salesByContract[detailData.contract_id]) && (
                   <div className="col-span-2 flex flex-wrap items-center gap-2">
                     <span className="text-muted-foreground">{t('clientOrders.dialog.origin')}: </span>
@@ -2306,6 +2538,18 @@ const ClientOrders = () => {
                     {t('clientOrders.dialog.editOrder')}
                   </Button>
                 )}
+                {/* Com documento de origem: só morada de entrega e notas. */}
+                {!detailData.is_editable && detailData.can_edit_header && canEditOrder && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={openHeaderEdit}
+                    disabled={headerEditSaving || confirmingAll}
+                  >
+                    <Pencil className="w-4 h-4 mr-2" />
+                    {t('clientOrders.dialog.editOrder')}
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
@@ -2454,6 +2698,81 @@ const ClientOrders = () => {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* Edição do cabeçalho — encomendas com documento de origem */}
+      <Dialog
+        open={headerEditOpen}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && !headerEditSaving) closeHeaderEdit();
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t('clientOrders.dialog.editOrder')}</DialogTitle>
+            {detailData && (
+              <DialogDescription>
+                {tf(
+                  'clientOrders.headerEdit.description',
+                  'Esta encomenda vem de {origin}: só a morada de entrega e as notas podem ser alteradas.',
+                ).replace('{origin}', describeOrigin(detailData))}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <DeliveryAddressPicker
+              entityId={deliveryEntityId}
+              options={deliveryOptions}
+              optionsLoading={deliveryOptionsLoading}
+              choice={deliveryChoice}
+              onChoiceChange={handleDeliveryChoiceChange}
+              showNewForm={showNewDeliveryForm}
+              onShowNewFormChange={setShowNewDeliveryForm}
+              onAdded={handleDeliveryAddressAdded}
+              value={headerDeliveryAddress}
+              onValueChange={setHeaderDeliveryAddress}
+              textareaId="client_order_header_delivery_address"
+              newFormIdPrefix="client_order_header_new_delivery"
+              label={t('clientOrders.dialog.deliveryAddress')}
+              disabled={headerEditSaving}
+              t={t}
+            />
+            {detailData && 'delivery_address_override' in detailData && (
+              <p className="-mt-2 text-xs text-muted-foreground">
+                {detailData.delivery_address_override == null
+                  ? tf(
+                      'clientOrders.headerEdit.addressDefaultHint',
+                      'A morada mostrada é a da obra/cliente; escolha ou escreva outra para a fixar nesta encomenda.',
+                    )
+                  : tf(
+                      'clientOrders.headerEdit.addressClearHint',
+                      'Deixe vazio para usar a morada por omissão.',
+                    )}
+              </p>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="client_order_header_notes">{t('clientOrders.create.notes')}</Label>
+              <Textarea
+                id="client_order_header_notes"
+                value={headerNotes}
+                onChange={(e) => setHeaderNotes(e.target.value)}
+                rows={3}
+                disabled={headerEditSaving}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={closeHeaderEdit} disabled={headerEditSaving}>
+              {t('clientOrders.create.cancel')}
+            </Button>
+            <Button type="button" onClick={handleSaveHeader} disabled={headerEditSaving}>
+              {headerEditSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              {headerEditSaving ? t('clientOrders.edit.submitting') : t('clientOrders.edit.submit')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Criação manual de Encomenda Cliente (e edição, com editingContractId) */}
       <Dialog
         open={createOpen}
@@ -2488,58 +2807,23 @@ const ClientOrders = () => {
               )}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="client_order_delivery_address">{t('clientOrders.create.deliveryAddress')}</Label>
-              {deliveryEntityId && deliveryOptions.length > 0 && (
-                <Select value={deliveryChoice} onValueChange={handleDeliveryChoiceChange} disabled={creating}>
-                  <SelectTrigger aria-label={t('clientOrders.create.deliveryAddressChoose')}>
-                    <SelectValue placeholder={t('clientOrders.create.deliveryAddressChoose')} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {deliveryOptions.map((option) => (
-                      <SelectItem key={option.entity_address_id} value={option.entity_address_id}>
-                        {formatDeliveryAddress(option) || option.formatted || '—'}
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={NEW_DELIVERY_ADDRESS_VALUE}>{t('clientOrders.create.deliveryAddressNew')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-              {deliveryEntityId && !deliveryOptionsLoading && deliveryOptions.length === 0 && !showNewDeliveryForm && (
-                <div>
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto min-h-6 px-0"
-                    onClick={() => setShowNewDeliveryForm(true)}
-                    disabled={creating}
-                  >
-                    {t('clientOrders.create.deliveryAddressAddNew')}
-                  </Button>
-                </div>
-              )}
-              {deliveryEntityId && showNewDeliveryForm && (
-                <div className="rounded-md border p-3 space-y-2">
-                  <p className="text-sm font-medium">{t('deliveryAddresses.newTitle')}</p>
-                  <DeliveryAddressForm
-                    entityId={deliveryEntityId}
-                    idPrefix="client_order_new_delivery"
-                    disabled={creating}
-                    onAdded={handleDeliveryAddressAdded}
-                    onCancel={() => setShowNewDeliveryForm(false)}
-                  />
-                </div>
-              )}
-              <Textarea
-                id="client_order_delivery_address"
-                value={createDeliveryAddress}
-                onChange={(e) => setCreateDeliveryAddress(e.target.value)}
-                placeholder={t('clientOrders.create.deliveryAddressPlaceholder')}
-                rows={2}
-                disabled={creating}
-              />
-            </div>
+            <DeliveryAddressPicker
+              entityId={deliveryEntityId}
+              options={deliveryOptions}
+              optionsLoading={deliveryOptionsLoading}
+              choice={deliveryChoice}
+              onChoiceChange={handleDeliveryChoiceChange}
+              showNewForm={showNewDeliveryForm}
+              onShowNewFormChange={setShowNewDeliveryForm}
+              onAdded={handleDeliveryAddressAdded}
+              value={createDeliveryAddress}
+              onValueChange={setCreateDeliveryAddress}
+              textareaId="client_order_delivery_address"
+              newFormIdPrefix="client_order_new_delivery"
+              label={t('clientOrders.create.deliveryAddress')}
+              disabled={creating}
+              t={t}
+            />
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
