@@ -177,6 +177,8 @@
         "npm:@vitejs/plugin-react@^4.3.0",
         "npm:@vitest/ui@^4.1.5",
         "npm:@xyflow/react@^12.10.1",
+        "npm:@zxing/browser@~0.2.1",
+        "npm:@zxing/library@0.23",
         "npm:autoprefixer@^10.4.21",
         "npm:buffer@^6.0.3",
         "npm:class-variance-authority@~0.7.1",

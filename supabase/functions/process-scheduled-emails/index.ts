@@ -63,6 +63,7 @@ serve(async (req) => {
     let cancelled = 0;
     let failed = 0;
     const smtpResolutionSummary = {
+      smtp_resolved_by_explicit_smtp_id: 0,
       smtp_resolved_by_auth_user_id_direct: 0,
       smtp_resolved_by_anew_user_id_fallback: 0,
       smtp_resolved_by_organization_fallback: 0,
@@ -85,9 +86,11 @@ serve(async (req) => {
         const resolvedSmtp = await resolveSmtpForScheduledEmail(supabase, {
           scheduledUserId: email.user_id,
           organizationId: email.organization_id,
+          smtpId: email.smtp_id,
         });
 
-        if (resolvedSmtp?.resolution_mode === "auth_user_id_direct") smtpResolutionSummary.smtp_resolved_by_auth_user_id_direct++;
+        if (resolvedSmtp?.resolution_mode === "explicit_smtp_id") smtpResolutionSummary.smtp_resolved_by_explicit_smtp_id++;
+        else if (resolvedSmtp?.resolution_mode === "auth_user_id_direct") smtpResolutionSummary.smtp_resolved_by_auth_user_id_direct++;
         else if (resolvedSmtp?.resolution_mode === "anew_user_id_fallback") smtpResolutionSummary.smtp_resolved_by_anew_user_id_fallback++;
         else if (resolvedSmtp?.resolution_mode === "organization_fallback") smtpResolutionSummary.smtp_resolved_by_organization_fallback++;
         else smtpResolutionSummary.smtp_not_found++;
@@ -127,7 +130,15 @@ serve(async (req) => {
         );
 
         const sendResult = await sendResponse.json();
-        if (sendResult.error) throw new Error(sendResult.error);
+        // O portao da Supabase (verify_jwt no send-email) recusa pedidos ANTES
+        // de chegarem ao codigo quando o token nao tem formato de JWT --
+        // devolve {code, message}, nao {error}. `sendResult.error` sozinho
+        // nunca apanhava isto, e o email ficava "enviado" sem nunca ter sido
+        // tentado. `!sendResponse.ok` cobre qualquer falha HTTP, seja qual
+        // for a forma do corpo.
+        if (!sendResponse.ok || sendResult.error) {
+          throw new Error(sendResult.error || sendResult.message || `HTTP ${sendResponse.status}`);
+        }
 
         await supabase.from("scheduled_emails").update({
           status: "sent",

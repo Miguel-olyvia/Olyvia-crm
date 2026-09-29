@@ -461,7 +461,7 @@ Deno.serve(async (req: Request) => {
     // Get form_steps metadata (step_type, scheduling config)
     const { data: formSteps } = await supabase
       .from("form_steps")
-      .select("id, step_number, step_title, step_description, step_type, scheduling_duration_minutes, scheduling_board_id, scheduling_postal_code_field_key")
+      .select("id, step_number, step_title, step_description, step_type, scheduling_duration_minutes, scheduling_board_id, scheduling_postal_code_field_key, scheduling_requires_location")
       .eq("form_id", form.id)
       .order("step_number");
 
@@ -555,6 +555,7 @@ Deno.serve(async (req: Request) => {
         stepData.scheduling_duration_minutes = meta?.scheduling_duration_minutes || 60;
         stepData.scheduling_board_id = meta?.scheduling_board_id || null;
         stepData.scheduling_postal_code_field_key = meta?.scheduling_postal_code_field_key || null;
+        stepData.scheduling_requires_location = meta?.scheduling_requires_location || false;
       }
 
       return stepData;

@@ -8,6 +8,7 @@ export interface EmailAttachment {
 
 export type SmtpSource = "user" | "organization";
 export type ScheduledSmtpResolutionMode =
+  | "explicit_smtp_id"
   | "auth_user_id_direct"
   | "anew_user_id_fallback"
   | "organization_fallback"
@@ -156,9 +157,27 @@ export async function resolveSmtpForAuthenticatedUser(
 
 export async function resolveSmtpForScheduledEmail(
   supabase: any,
-  options: { scheduledUserId?: string | null; organizationId?: string | null }
+  options: { scheduledUserId?: string | null; organizationId?: string | null; smtpId?: string | null }
 ): Promise<ResolvedScheduledSmtp | null> {
-  const { scheduledUserId, organizationId } = options;
+  const { scheduledUserId, organizationId, smtpId } = options;
+
+  if (smtpId) {
+    const { data: orgSmtpRaw } = await supabase
+      .from("organization_smtp_settings")
+      .select("*")
+      .eq("id", smtpId)
+      .eq("is_active", true)
+      .maybeSingle();
+    if (orgSmtpRaw && (!organizationId || orgSmtpRaw.organization_id === organizationId)) {
+      const orgSmtp = await attachDecryptedPassword(supabase, orgSmtpRaw);
+      return {
+        smtp: orgSmtp,
+        source: "organization",
+        resolution_mode: "explicit_smtp_id",
+        metadata: safeSmtpMetadata(orgSmtp, "organization", { organization_id: organizationId }),
+      };
+    }
+  }
 
   if (scheduledUserId) {
     const directUserSmtp = await getActiveUserSmtp(supabase, scheduledUserId, organizationId);
@@ -236,5 +255,13 @@ export async function sendEmailViaSMTP(
   }
 
   const info = await transporter.sendMail(mailOptions);
-  return { messageId: info.messageId || `${Date.now()}@${host}` };
+  return {
+    messageId: info.messageId || `${Date.now()}@${host}`,
+    // nodemailer reports, per recipient, whether the SMTP server actually
+    // accepted or rejected it -- a multi-recipient send can partially fail
+    // (one address accepted, another refused) with no thrown error at all,
+    // so callers need these to know who really got the message.
+    accepted: (info.accepted || []).map(String),
+    rejected: (info.rejected || []).map(String),
+  };
 }

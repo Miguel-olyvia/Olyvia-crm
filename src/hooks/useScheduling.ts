@@ -179,13 +179,16 @@ export function useScheduling(companyId?: string) {
   }, [t]);
 
   // RESOURCES
-  const fetchResources = useCallback(async (): Promise<ScheduleResource[]> => {
+  const fetchResources = useCallback(async (includeInactive: boolean = false): Promise<ScheduleResource[]> => {
     try {
       let query = supabase
         .from('schedule_resources')
         .select('*')
-        .eq('is_active', true)
         .order('name');
+
+      if (!includeInactive) {
+        query = query.eq('is_active', true);
+      }
 
       if (companyId) {
         query = query.eq('organization_id', companyId);
@@ -235,6 +238,9 @@ export function useScheduling(companyId?: string) {
         employee_id: resource.employee_id,
         color: resource.color || '#10b981',
         max_daily_capacity: resource.max_daily_capacity || 8,
+        postal_code: resource.postal_code || null,
+        latitude: resource.latitude ?? null,
+        longitude: resource.longitude ?? null,
         is_active: resource.is_active ?? true,
         metadata: resource.metadata || {},
         created_by: businessUserId,
@@ -500,6 +506,7 @@ export function useScheduling(companyId?: string) {
           .update({
             start_datetime: newStart.toISOString(),
             end_datetime: newEnd.toISOString(),
+            status: 'rescheduled',
           })
           .eq('id', id);
 

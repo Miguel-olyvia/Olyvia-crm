@@ -12,8 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Switch } from '@/components/ui/switch';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Loader2, Plus, Calendar, LayoutGrid, List, Settings2, Users, Layers, HelpCircle, Settings, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Calendar, LayoutGrid, List, Settings2, Users, Layers, HelpCircle, Settings, Trash2, RotateCcw } from 'lucide-react';
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from '@/integrations/supabase/client';
 import { useCompany } from '@/contexts/CompanyContext';
@@ -144,8 +145,25 @@ export default function Scheduling() {
   const [boardToDelete, setBoardToDelete] = useState<string | null>(null);
   const [resourceToDelete, setResourceToDelete] = useState<string | null>(null);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [showInactiveResources, setShowInactiveResources] = useState(false);
+  const [inactiveResources, setInactiveResources] = useState<ScheduleResource[]>([]);
+  const [reactivatingResourceId, setReactivatingResourceId] = useState<string | null>(null);
 
   const { settings, holidays } = useScheduleSettings(activeCompany?.id);
+
+  // Recursos inactivos ficam de fora do fetchResources normal (schedule_resources.is_active = true).
+  // Só se pede a lista completa quando o utilizador liga "Mostrar inactivos" — evita um pedido extra
+  // em cada carregamento da página quando ninguém precisa de ver quem foi desactivado.
+  useEffect(() => {
+    if (!showInactiveResources || !activeCompany?.id) return;
+    let cancelled = false;
+    (async () => {
+      const all = await fetchResourcesRef.current(true);
+      if (cancelled) return;
+      setInactiveResources(all.filter(r => r.is_active === false));
+    })();
+    return () => { cancelled = true; };
+  }, [showInactiveResources, activeCompany?.id]);
 
   useEffect(() => {
     if (!activeCompany?.id) return;
@@ -348,7 +366,28 @@ export default function Scheduling() {
       }
     }
   };
-  const handleDeleteResource = async (rid: string) => { if (await deleteResource(rid)) { setResources(prev => prev.filter(r => r.id !== rid)); setResourceDialogOpen(false); } };
+  const handleDeleteResource = async (rid: string) => {
+    if (!(await deleteResource(rid))) return;
+    setResources(prev => {
+      const removed = prev.find(r => r.id === rid);
+      if (removed) {
+        setInactiveResources(inactivePrev => [...inactivePrev, { ...removed, is_active: false }]);
+      }
+      return prev.filter(r => r.id !== rid);
+    });
+    setResourceDialogOpen(false);
+  };
+  const handleReactivateResource = async (resource: ScheduleResource) => {
+    setReactivatingResourceId(resource.id);
+    try {
+      if (await updateResource(resource.id, { is_active: true })) {
+        setInactiveResources(prev => prev.filter(r => r.id !== resource.id));
+        setResources(prev => [...prev, { ...resource, is_active: true }]);
+      }
+    } finally {
+      setReactivatingResourceId(null);
+    }
+  };
   const handleDeleteBoard = async (bid: string) => { if (await deleteBoard(bid)) { setBoards(prev => prev.filter(b => b.id !== bid)); setBoardDialogOpen(false); } };
   const toggleBoardFilter = (id: string) => setSelectedBoardIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   const toggleResourceFilter = (id: string) => setSelectedResourceIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
@@ -520,21 +559,41 @@ export default function Scheduling() {
           </TabsContent>
 
           <TabsContent value="resources" className="space-y-4">
-            <div className="flex justify-end">
+            <div className="flex items-center justify-end gap-4">
+              <div className="flex items-center gap-2">
+                <Switch checked={showInactiveResources} onCheckedChange={setShowInactiveResources} id="show-inactive-resources" />
+                <label htmlFor="show-inactive-resources" className="text-sm text-muted-foreground cursor-pointer">
+                  Mostrar inactivos
+                </label>
+              </div>
               <PermissionGate permission="scheduling.resources.create"><Button onClick={() => { setSelectedResource(null); setResourceDialogOpen(true); }}><Plus className="h-4 w-4 mr-2" />{t('scheduling.newResource')}</Button></PermissionGate>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {resources.map(resource => (
-                <Card key={resource.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSelectedResource(resource); setResourceDialogOpen(true); }}>
+              {[...resources, ...(showInactiveResources ? inactiveResources : [])].map(resource => (
+                <Card key={resource.id} className={`cursor-pointer hover:shadow-md transition-shadow ${resource.is_active === false ? 'opacity-60' : ''}`} onClick={() => { setSelectedResource(resource); setResourceDialogOpen(true); }}>
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3 flex-1">
                         <div className="w-4 h-4 rounded-full shrink-0" style={{ backgroundColor: resource.color }} />
                         <CardTitle className="text-lg">{resource.name}</CardTitle>
                       </div>
-                      {hasPermission('scheduling.resources.delete') && (
-                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive shrink-0" onClick={(e) => { e.stopPropagation(); setResourceToDelete(resource.id); }}><Trash2 className="h-4 w-4" /></Button>
-                      )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {resource.is_active === false && hasPermission('scheduling.resources.create') && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-primary hover:text-primary"
+                            disabled={reactivatingResourceId === resource.id}
+                            onClick={(e) => { e.stopPropagation(); handleReactivateResource(resource); }}
+                            title="Reativar"
+                          >
+                            <RotateCcw className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {resource.is_active !== false && hasPermission('scheduling.resources.delete') && (
+                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={(e) => { e.stopPropagation(); setResourceToDelete(resource.id); }}><Trash2 className="h-4 w-4" /></Button>
+                        )}
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-2">
@@ -569,7 +628,7 @@ export default function Scheduling() {
                   </CardContent>
                 </Card>
               ))}
-              {resources.length === 0 && (
+              {resources.length === 0 && !(showInactiveResources && inactiveResources.length > 0) && (
                 <Card className="col-span-full p-8 text-center">
                   <Users className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                   <h3 className="text-lg font-semibold mb-2">{t('scheduling.noResources')}</h3>

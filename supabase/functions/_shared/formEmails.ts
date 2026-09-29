@@ -14,9 +14,24 @@ export interface FormEmailConfig {
   meeting_notify_commercial: boolean;
   meeting_notify_emails: string | null;
   meeting_notify_template_id: string | null;
+  // Independent toggles for the other two lifecycle events -- each event
+  // notifies only the technician/extras it is switched on for.
+  reschedule_notify_commercial: boolean;
+  reschedule_notify_emails: string | null;
+  cancel_notify_commercial: boolean;
+  cancel_notify_emails: string | null;
   reminder_enabled: boolean;
   reminder_hours_before: number | null;
   reminder_template_id: string | null;
+  // SMS ao lado do email correspondente -- mesma hora de reminder_hours_before,
+  // desligados por omissao tal como os interruptores de email ja o sao.
+  confirmation_sms_enabled: boolean;
+  confirmation_sms_message: string | null;
+  // Omissao false: a conta SMSAPI partilhada da Olyvia recusa SMS com link
+  // para remetentes nao verificados (erro 94). Quando false, {{cancel_url}}
+  // fica vazio no SMS (default e mensagem personalizada); nao afecta o email.
+  confirmation_sms_include_link: boolean;
+  reminder_sms_enabled: boolean;
   // Per-locale template overrides: { confirmation: {pt,en}, meeting_notify:{}, reminder:{} }
   email_locale_templates: Record<string, Record<string, string>> | null;
   // "manage booking" URL with a {lang} placeholder, e.g. https://www.mudelar.pt/{lang}/updateagenda
@@ -31,6 +46,13 @@ export interface FormEmailConfig {
   // the lead was created; one element per email, e.g. [24] or [72,168,336]).
   scheduling_invite_enabled: boolean;
   scheduling_invite_delays_hours: number[] | null;
+  // Cor/logo ja configurados em Personalizacao -> Cores (mesma linha de
+  // form_branding). Entram sozinhos no design por omissao dos emails
+  // (lembrete, cancelar, remarcar, confirmacao) -- a empresa nao escreve
+  // HTML para ter a marca certa, so configura o que ja configura no resto
+  // do formulario.
+  primary_color: string | null;
+  logo_url: string | null;
 }
 
 export type EmailPurpose = "confirmation" | "meeting_notify" | "reminder";
@@ -166,7 +188,7 @@ export async function loadFormEmailConfig(
   const { data } = await supabase
     .from("form_branding")
     .select(
-      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reminder_enabled, reminder_hours_before, reminder_template_id, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours",
+      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reschedule_notify_commercial, reschedule_notify_emails, cancel_notify_commercial, cancel_notify_emails, reminder_enabled, reminder_hours_before, reminder_template_id, confirmation_sms_enabled, confirmation_sms_message, confirmation_sms_include_link, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours, primary_color, logo_url",
     )
     .eq("form_id", formId)
     .maybeSingle();
@@ -306,6 +328,14 @@ export function defaultSchedulingInviteHtml(opts: {
   </div>`;
 }
 
+// Valida um #hex antes de o injetar num style inline -- primary_color vem de
+// um campo de texto livre em Personalizacao -> Cores, nunca confiar sem
+// verificar a forma.
+function safeHexColor(color: string | null | undefined, fallback: string): string {
+  if (color && /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(color.trim())) return color.trim();
+  return fallback;
+}
+
 /** A neutral, branded-enough default HTML for meeting notifications/reminders. */
 export function defaultMeetingHtml(opts: {
   heading: string;
@@ -315,22 +345,53 @@ export function defaultMeetingHtml(opts: {
   location?: string;
   technicianName?: string;
   cancelUrl?: string;
+  // Regra 12: link "Confirmo a visita" -- só o chamador do lembrete ao
+  // cliente o passa (nunca o do técnico, nunca a confirmação inicial).
+  confirmUrl?: string;
+  // Cor/logo da organizacao (form_branding.primary_color/logo_url) -- entram
+  // sozinhos aqui, sem a empresa escrever HTML nenhum.
+  primaryColor?: string | null;
+  logoUrl?: string | null;
 }): string {
+  const brand = safeHexColor(opts.primaryColor, "#85D3BE");
+  // logoUrl e um URL guardado pelo proprio sistema (upload em Personalizacao),
+  // nao texto livre digitado no email -- seguro como src.
+  const badge = opts.logoUrl
+    ? `<img src="${encodeURI(opts.logoUrl)}" alt="" width="44" height="44" style="width:44px;height:44px;border-radius:12px;object-fit:cover;display:block;margin:0 0 20px">`
+    : `<div style="width:44px;height:44px;border-radius:12px;background:${brand};margin:0 0 20px"></div>`;
+  const row = (label: string, value: string) => `
+      <tr>
+        <td style="padding:10px 0;border-top:1px solid #EEF2F0;color:#6b7280;font-size:13px;white-space:nowrap;vertical-align:top">${escapeHtml(label)}</td>
+        <td style="padding:10px 0 10px 16px;border-top:1px solid #EEF2F0;color:#111827;font-size:14px;font-weight:600;text-align:right">${escapeHtml(value)}</td>
+      </tr>`;
   const rows: string[] = [];
-  rows.push(`<tr><td style="padding:4px 0;color:#6b7280">Cliente</td><td style="padding:4px 0;font-weight:600">${escapeHtml(opts.leadName || "-")}</td></tr>`);
-  rows.push(`<tr><td style="padding:4px 0;color:#6b7280">Data / hora</td><td style="padding:4px 0;font-weight:600">${escapeHtml(opts.when || "-")}</td></tr>`);
-  if (opts.location) rows.push(`<tr><td style="padding:4px 0;color:#6b7280">Local</td><td style="padding:4px 0;font-weight:600">${escapeHtml(opts.location)}</td></tr>`);
-  if (opts.technicianName) rows.push(`<tr><td style="padding:4px 0;color:#6b7280">Técnico</td><td style="padding:4px 0;font-weight:600">${escapeHtml(opts.technicianName)}</td></tr>`);
-  // cancelUrl is a system-built URL (buildManageUrl), not free user text — safe as href.
-  const cancel = opts.cancelUrl
-    ? `<p style="margin:20px 0 0"><a href="${encodeURI(opts.cancelUrl)}" style="color:#85D3BE">Gerir / cancelar agendamento</a></p>`
+  rows.push(row("Cliente", opts.leadName || "-"));
+  rows.push(row("Data / hora", opts.when || "-"));
+  if (opts.location) rows.push(row("Local", opts.location));
+  if (opts.technicianName) rows.push(row("Técnico", opts.technicianName));
+
+  // cancelUrl/confirmUrl are system-built URLs (buildManageUrl / confirm-booking token), not free user text — safe as href.
+  const confirmButton = opts.confirmUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px auto 0"><tr><td style="border-radius:10px;background:#059669">
+        <a href="${encodeURI(opts.confirmUrl)}" style="display:inline-block;padding:13px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;font-family:Inter,system-ui,sans-serif">Confirmo a visita</a>
+      </td></tr></table>`
     : "";
+  const cancel = opts.cancelUrl
+    ? `<p style="margin:${opts.confirmUrl ? "14px" : "24px"} 0 0;text-align:center"><a href="${encodeURI(opts.cancelUrl)}" style="color:#6b7280;font-size:13px;text-decoration:underline">Gerir ou cancelar agendamento</a></p>`
+    : "";
+
   return `
-  <div style="font-family:Inter,system-ui,sans-serif;max-width:520px;margin:0 auto;color:#1F2937">
-    <h2 style="margin:0 0 8px">${escapeHtml(opts.heading)}</h2>
-    <p style="margin:0 0 16px;color:#4b5563">${escapeHtml(opts.intro)}</p>
-    <table style="width:100%;border-collapse:collapse;font-size:14px">${rows.join("")}</table>
-    ${cancel}
+  <div style="font-family:Inter,system-ui,sans-serif;background:#F4F6F5;padding:32px 16px">
+    <div style="max-width:480px;margin:0 auto">
+      ${badge}
+      <div style="background:#ffffff;border-radius:16px;padding:32px;border:1px solid #E5E9E7">
+        <h1 style="margin:0 0 8px;font-size:20px;font-weight:700;color:#111827">${escapeHtml(opts.heading)}</h1>
+        <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.5">${escapeHtml(opts.intro)}</p>
+        <table role="presentation" style="width:100%;border-collapse:collapse">${rows.join("")}</table>
+        ${confirmButton}
+        ${cancel}
+      </div>
+    </div>
   </div>`;
 }
 

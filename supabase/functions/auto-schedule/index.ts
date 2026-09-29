@@ -413,6 +413,7 @@ Deno.serve(async (req) => {
         .select('id')
         .eq('id', resourceId)
         .eq('organization_id', companyId)
+        .eq('is_active', true)
         .maybeSingle();
 
       if (ownedResourceError || !ownedResource) {

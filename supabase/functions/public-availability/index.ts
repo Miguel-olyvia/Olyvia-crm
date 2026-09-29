@@ -2,6 +2,9 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
+import { checkTravelFeasible } from "../_shared/travelFeasibility.ts";
+import { ensureHolidaysPersisted } from "../_shared/ensureHolidays.ts";
 
 initSentry();
 
@@ -143,6 +146,27 @@ Deno.serve(async (req: Request) => {
       );
     }
 
+    // Regra 16: garante que os feriados do(s) ano(s) pedidos já estão
+    // gravados em schedule_holidays ANTES de qualquer RPC de disponibilidade
+    // correr -- sem isto, um feriado nunca gravado deixava marcar na mesma,
+    // mesmo aparecendo riscado no calendário (ver ensureHolidays.ts).
+    {
+      const { data: orgSettings } = await supabase
+        .from('schedule_settings')
+        .select('country_code')
+        .eq('organization_id', orgId)
+        .maybeSingle();
+      const countryCode = orgSettings?.country_code || 'PT';
+      const refDate = start_date || date;
+      if (refDate) {
+        const startYear = parseInt(refDate.substring(0, 4));
+        const endYear = end_date ? parseInt(end_date.substring(0, 4)) : startYear;
+        const years: number[] = [];
+        for (let y = startYear; y <= endYear; y++) years.push(y);
+        await ensureHolidaysPersisted(supabase, countryCode, years);
+      }
+    }
+
     // Helper: fetch schedule config for the org
     const fetchScheduleConfig = async () => {
       const [settingsRes, holidaysRes] = await Promise.all([
@@ -274,9 +298,54 @@ Deno.serve(async (req: Request) => {
       const coverage = resources && resources.length > 0;
       const slotMap = new Map<string, { start: string; end: string; available_count: number; resource_ids: string[] }>();
 
+      // Regra 13, no calendário (não só na confirmação final): um horário só
+      // deve aparecer como escolhível se pelo menos UM comercial candidato
+      // conseguir mesmo lá chegar a tempo -- não basta ter a agenda livre.
+      // Antes disto, o calendário mostrava horários que o book-slot recusava
+      // depois, na confirmação. Cada comercial é verificado contra os SEUS
+      // próprios compromissos vizinhos nesse dia; se um não der, outro pode
+      // dar -- só se nenhum der é que o horário desaparece de vez.
+      const cp7Digits = (postal_code || '').replace(/[^0-9]/g, '');
+      let clientLat: number | null = null;
+      let clientLng: number | null = null;
+      if (cp7Digits.length === 7) {
+        const geo = await geocodePostalCode(cp7Digits);
+        if (geo) {
+          clientLat = geo.latitude;
+          clientLng = geo.longitude;
+        }
+      }
+
+      const dayStart = `${date}T00:00:00.000Z`;
+      const dayEnd = `${date}T23:59:59.999Z`;
+
       for (const resource of (resources || [])) {
         const slots = resource.available_slots || [];
+        if (slots.length === 0) continue;
+
+        let neighbors: { start_datetime: string; end_datetime: string; location_lat: number | null; location_lng: number | null }[] = [];
+        if (clientLat !== null && clientLng !== null) {
+          const { data: assignedItems } = await supabase
+            .from('schedule_item_assignees')
+            .select('schedule_items(start_datetime, end_datetime, location_lat, location_lng, status)')
+            .eq('resource_id', resource.resource_id);
+
+          neighbors = (assignedItems || [])
+            .map((a: any) => a.schedule_items)
+            .filter((si: any) =>
+              si
+              && si.status !== 'cancelled'
+              && si.start_datetime >= dayStart
+              && si.start_datetime <= dayEnd
+            );
+        }
+
         for (const slot of slots) {
+          const { feasible } = checkTravelFeasible({
+            clientLat, clientLng, slotStart: slot.start, slotEnd: slot.end, neighbors,
+          });
+          if (!feasible) continue;
+
           const key = `${slot.start}|${slot.end}`;
           if (slotMap.has(key)) {
             const existing = slotMap.get(key)!;
@@ -301,7 +370,17 @@ Deno.serve(async (req: Request) => {
 
       return new Response(
         JSON.stringify({
-          slots: aggregatedSlots.map(s => ({ start: s.start, end: s.end, available_count: s.available_count })),
+          slots: aggregatedSlots.map(s => ({
+            start: s.start,
+            end: s.end,
+            available_count: s.available_count,
+            // Ordem de resource_ids reflete a ordem de processamento (por
+            // proximidade, herdada de find_nearest_resources) -- o primeiro
+            // e o comercial prioritario para este horario. Informativo: o
+            // book-slot revalida no momento do submit e pode escolher outro
+            // se este ja nao servir.
+            preferred_resource_id: s.resource_ids[0],
+          })),
           timezone: scheduleConfig?.timezone || 'Europe/Lisbon',
           coverage,
           duration_minutes: durationMinutes,

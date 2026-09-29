@@ -2,7 +2,6 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
-import { orderByLeastBusy } from "../_shared/leastBusy.ts";
 import { findLocalEntityForOrg } from "../_shared/entityScopedLookup.ts";
 import {
   loadFormEmailConfig,
@@ -17,6 +16,10 @@ import {
   pickTemplateId,
   buildManageUrl,
 } from '../_shared/formEmails.ts';
+import { sendSmsNow, scheduleSms } from '../_shared/sendSms.ts';
+import { geocodePostalCode } from '../_shared/postcodeGeocode.ts';
+import { checkTravelFeasible } from '../_shared/travelFeasibility.ts';
+import { ensureHolidaysPersisted } from '../_shared/ensureHolidays.ts';
 
 initSentry();
 
@@ -131,6 +134,25 @@ Deno.serve(async (req: Request) => {
 
     const organizationId = form.organization_id;
 
+    // Regra 16: garante que o feriado do ano da marcação já está gravado em
+    // schedule_holidays antes de qualquer RPC correr -- ver ensureHolidays.ts
+    // (mesma lacuna do calendário, aqui para quem chama book-slot
+    // directamente, sem passar pelo calendário público).
+    try {
+      const { data: orgSettings } = await supabase
+        .from('schedule_settings')
+        .select('country_code')
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      await ensureHolidaysPersisted(
+        supabase,
+        orgSettings?.country_code || 'PT',
+        [parseInt(slot_start.split('T')[0].substring(0, 4))],
+      );
+    } catch (e) {
+      console.error('[book-slot] ensureHolidaysPersisted failed (non-fatal):', e);
+    }
+
     // 2. Get scheduling step config
     let boardId: string | null = null;
     let durationMinutes = 60;
@@ -139,11 +161,12 @@ Deno.serve(async (req: Request) => {
     // funcao (sem passar pelo calendario) conseguia marcar um horario
     // demasiado proximo mesmo com a regra configurada.
     let minAdvanceHours: number | null = null;
+    let requiresLocation = false;
 
     if (step_number) {
       const { data: step } = await supabase
         .from('form_steps')
-        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours')
+        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours, scheduling_requires_location')
         .eq('form_id', form_id)
         .eq('step_number', step_number)
         .single();
@@ -152,6 +175,7 @@ Deno.serve(async (req: Request) => {
         boardId = step.scheduling_board_id;
         durationMinutes = step.scheduling_duration_minutes || 60;
         minAdvanceHours = step.scheduling_min_advance_hours ?? null;
+        requiresLocation = step.scheduling_requires_location === true;
       }
     }
 
@@ -159,7 +183,7 @@ Deno.serve(async (req: Request) => {
       // Try to find any scheduling step in this form
       const { data: schedulingStep } = await supabase
         .from('form_steps')
-        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours')
+        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours, scheduling_requires_location')
         .eq('form_id', form_id)
         .eq('step_type', 'scheduling')
         .limit(1)
@@ -169,7 +193,21 @@ Deno.serve(async (req: Request) => {
         boardId = schedulingStep.scheduling_board_id;
         durationMinutes = schedulingStep.scheduling_duration_minutes || 60;
         minAdvanceHours = schedulingStep.scheduling_min_advance_hours ?? null;
+        requiresLocation = schedulingStep.scheduling_requires_location === true;
       }
+    }
+
+    // Regra 13/15: quando o passo exige localização, o código postal tem de
+    // ser um CP7 completo ("XXXX-XXX") -- é o que dá coordenadas exactas
+    // para o tempo de deslocação real. Repetido aqui (já validado no
+    // formulário) porque este endpoint é chamável directamente, sem passar
+    // pelo formulário.
+    const cp7Digits = (postal_code || '').replace(/[^0-9]/g, '');
+    if (requiresLocation && cp7Digits.length !== 7) {
+      return new Response(
+        JSON.stringify({ error: 'Complete postal code (CP7) is required for this scheduling step' }),
+        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     if (!boardId) {
@@ -237,6 +275,20 @@ Deno.serve(async (req: Request) => {
     // "fewest bookings" implementation.
     let assignedResourceId: string | null = null;
 
+    // Regra 13: coordenadas exactas do cliente via CP7 (Olyvia Postcodes),
+    // quando disponível. Geocodificado uma só vez -- usado para verificar
+    // viabilidade de deslocação contra as visitas vizinhas de cada
+    // candidato, e guardado na própria visita para futuras verificações.
+    let clientLat: number | null = null;
+    let clientLng: number | null = null;
+    if (cp7Digits.length === 7) {
+      const geo = await geocodePostalCode(cp7Digits);
+      if (geo) {
+        clientLat = geo.latitude;
+        clientLng = geo.longitude;
+      }
+    }
+
     const { data: resources } = await supabase.rpc('find_nearest_resources', {
       p_target_postal_code: postal_code || null,
       p_board_id: boardId,
@@ -255,16 +307,19 @@ Deno.serve(async (req: Request) => {
       );
     });
 
-    const orderedCandidates = await orderByLeastBusy(
-      supabase,
-      candidatesWithSlot.map((res: any) => ({ id: res.resource_id }))
-    );
+    // Regra 13, Logica "quem": candidatesWithSlot ja vem ordenado por
+    // proximidade (herdado de find_nearest_resources) -- NAO reordenar por
+    // orderByLeastBusy aqui. Essa ordenacao e por numero total de marcacoes
+    // de sempre, sem nada a ver com distancia, e substituia por completo a
+    // prioridade "mais perto primeiro" que o calendario publico ja promete
+    // ao cliente (public-availability, preferred_resource_id).
+    const proximityOrdered = candidatesWithSlot.map((res: any) => ({ id: res.resource_id }));
 
     // O comercial da pessoa vai a frente de todos. Se ele nao estiver entre os
     // que tem esta hora livre, NAO se marca a mais ninguem -- ver abaixo.
     const ordered = ownerResourceIds.length > 0
-      ? orderedCandidates.filter((cand: { id: string }) => ownerResourceIds.includes(cand.id))
-      : orderedCandidates;
+      ? proximityOrdered.filter((cand: { id: string }) => ownerResourceIds.includes(cand.id))
+      : proximityOrdered;
 
     for (const candidate of ordered) {
       // Re-verify at confirmation time — availability may have been computed
@@ -274,10 +329,38 @@ Deno.serve(async (req: Request) => {
         p_start: slot_start,
         p_end: slot_end,
       });
-      if (!conflict) {
-        assignedResourceId = candidate.id;
-        break;
+      if (conflict) continue;
+
+      // Regra 13, Lógica 1: entre os candidatos sem conflito, salta quem não
+      // tem tempo real de deslocação para a visita imediatamente antes/depois
+      // nesse dia. No-op (sempre feasible) quando clientLat/Lng são nulos --
+      // ver checkTravelFeasible.
+      if (clientLat !== null && clientLng !== null) {
+        const dayStart = `${slot_start.split('T')[0]}T00:00:00.000Z`;
+        const dayEnd = `${slot_start.split('T')[0]}T23:59:59.999Z`;
+        const { data: assignedItems } = await supabase
+          .from('schedule_item_assignees')
+          .select('schedule_items(start_datetime, end_datetime, location_lat, location_lng, status)')
+          .eq('resource_id', candidate.id);
+
+        const neighbors = (assignedItems || [])
+          .map((a: any) => a.schedule_items)
+          .filter((si: any) =>
+            si
+            && si.status !== 'cancelled'
+            && si.start_datetime >= dayStart
+            && si.start_datetime <= dayEnd
+          );
+
+        const { feasible } = checkTravelFeasible({
+          clientLat, clientLng, slotStart: slot_start, slotEnd: slot_end,
+          neighbors,
+        });
+        if (!feasible) continue;
       }
+
+      assignedResourceId = candidate.id;
+      break;
     }
 
     // O comercial da pessoa nao esta livre a esta hora, ou nao cobre o
@@ -654,6 +737,8 @@ Deno.serve(async (req: Request) => {
         end_datetime: slot_end,
         // duration_minutes is a generated column, skip it
         location: fullLocation || null,
+        location_lat: clientLat,
+        location_lng: clientLng,
         priority: 0,
         metadata: {
           ...(lead ? { lead_id: lead.id } : {}),
@@ -887,19 +972,90 @@ Deno.serve(async (req: Request) => {
       };
 
       // (0) Client confirmation email — includes the booked {{meeting_date}} and the
-      //     manage/cancel link {{cancel_url}}. Only when confirmation is enabled, we
-      //     have a client email, and a template resolves.
+      //     manage/cancel link {{cancel_url}}. Only when confirmation is enabled and
+      //     we have a client email; falls back to the branded default (same as
+      //     reminder/cancel/reschedule) instead of silently sending nothing when no
+      //     custom template is configured.
       if (emailCfg?.confirmation_email_enabled && leadEmail) {
         const confTemplateId = pickTemplateId(emailCfg, 'confirmation', leadLocale, emailCfg.confirmation_email_template_id);
         const confTpl = confTemplateId ? await loadTemplate(supabase, confTemplateId) : null;
-        if (confTpl?.body_html) {
-          await sendEmailNow({
-            organizationId,
-            smtpId: emailCfg.email_smtp_id,
-            to: leadEmail,
-            subject: renderSubject(confTpl.subject || 'Confirmação', baseVars),
-            html: renderHtml(confTpl.body_html, baseVars),
+        const confHtml = confTpl?.body_html
+          ? renderHtml(confTpl.body_html, baseVars)
+          : defaultMeetingHtml({
+              heading: 'Visita confirmada',
+              intro: 'A sua visita foi agendada com sucesso.',
+              leadName: leadFullName, when: whenFormatted,
+              location: fullLocation || undefined,
+              technicianName: technicianName || undefined,
+              cancelUrl: cancelLink || undefined,
+              primaryColor: emailCfg.primary_color, logoUrl: emailCfg.logo_url,
+            });
+        await sendEmailNow({
+          organizationId,
+          // SEM userId de proposito: esta marcacao vem sempre de um formulario
+          // PUBLICO, nao existe "quem criou" a serio -- createdBy e so o primeiro
+          // membro activo da organizacao (sem ordenacao nenhuma, sem ligacao a
+          // esta marcacao). Passar isso como userId fazia o send-email ir buscar
+          // a SMTP PESSOAL desse membro ao acaso (resolveSmtpForScheduledEmail
+          // nem olha para smtpId quando ha user_id), ignorando o SMTP do
+          // formulario -- confirmado ao vivo: a confirmacao de uma marcacao real
+          // da Mudelar saiu da caixa pessoal de um funcionario sem nada a ver com
+          // a visita, em vez de "Agenda Mudelar (padrao)" configurado no ecra do
+          // formulario. Sem userId, o send-email usa sempre o smtpId abaixo (o
+          // configurado), nunca uma identidade pessoal.
+          smtpId: emailCfg.email_smtp_id,
+          to: leadEmail,
+          subject: renderSubject(confTpl?.subject || 'Confirmação da sua visita — {{meeting_date}}', baseVars),
+          html: confHtml,
+        });
+      }
+
+      // (0b) Client confirmation SMS -- mesma condicao/dados do email acima,
+      // canal independente. Falha de envio nao bloqueia a marcacao (fail-soft,
+      // igual ao email); a regra 11 (alerta interno quando falha) fica para
+      // outro pedido, tal como ja acontece hoje para o email.
+      if (emailCfg?.confirmation_sms_enabled && leadPhone) {
+        // Regra 2: mensagem configuravel por campanha (confirmation_sms_message,
+        // mesmas variaveis {{...}} que os modelos de email, renderizadas com a
+        // mesma funcao renderSubject -- texto simples, sem HTML). Sem
+        // configuracao, cai para a mensagem por omissao com o aviso de
+        // contacto telefonico ja incluido.
+        // Regra 2 (continuacao): a conta SMSAPI partilhada recusa SMS com link
+        // para remetentes nao verificados (erro 94, confirmado ao vivo 22/09).
+        // confirmation_sms_include_link (omissao false) decide se {{cancel_url}}
+        // leva o link real ou fica vazio -- vale tanto para a mensagem por
+        // omissao como para a personalizada, sem exigir reescrever o texto.
+        const includeLink = emailCfg.confirmation_sms_include_link === true;
+        const smsBaseVars = includeLink ? baseVars : { ...baseVars, cancel_url: '' };
+        const smsTemplate = emailCfg.confirmation_sms_message?.trim()
+          ? emailCfg.confirmation_sms_message
+          : `${orgRow?.name || 'A empresa'}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita.${includeLink && cancelLink ? ' Gerir/cancelar: {{cancel_url}}' : ''}`;
+        const smsMessage = renderSubject(smsTemplate, smsBaseVars);
+        const smsResult = await sendSmsNow({
+          toPhone: String(leadPhone),
+          message: smsMessage,
+        });
+        if (!smsResult.ok) {
+          console.error('[book-slot] confirmation SMS failed (non-fatal):', smsResult.error);
+        }
+        // Regra 11: rasto persistente do envio (sucesso ou falha) -- antes
+        // disto uma falha de SMS so ia para a consola e desaparecia, sem
+        // ninguem saber. Fail-soft: o envio ja aconteceu, o registo nunca
+        // deve derrubar a marcacao.
+        try {
+          await supabase.from('sms_logs').insert({
+            organization_id: organizationId,
+            created_by: createdBy,
+            entity_type: lead ? 'leads' : 'clients',
+            entity_id: lead?.id ?? submissionClientId ?? null,
+            to_phone: String(leadPhone),
+            message: smsMessage,
+            status: smsResult.ok ? 'sent' : 'failed',
+            error_message: smsResult.ok ? null : smsResult.error,
+            sent_at: smsResult.ok ? new Date().toISOString() : null,
           });
+        } catch (smsLogErr) {
+          console.error('[book-slot] failed to log sms attempt (non-fatal):', smsLogErr);
         }
       }
 
@@ -921,9 +1077,18 @@ Deno.serve(async (req: Request) => {
                 leadName: leadFullName, when: whenFormatted,
                 location: fullLocation || undefined,
                 technicianName: technicianName || undefined,
-                cancelUrl: cancelLink || undefined,
+                // Sem cancelUrl de propósito: é o link de autogestão do
+                // CLIENTE, não uma ação do comercial -- confundia quem
+                // recebia este aviso interno, parecendo um botão seu.
+                primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
               });
-          await sendEmailNow({ organizationId, userId: createdBy, smtpId: emailCfg?.email_smtp_id, to: notifyList[0], recipients: notifyList, subject, html });
+          // SEM userId, mesmo motivo do email ao cliente (regra 13, ver acima):
+          // com userId presente, o envio ia pelo SMTP PESSOAL de quem calhava
+          // ser createdBy (o primeiro membro activo da organizacao, ao acaso),
+          // nunca pelo SMTP do formulario que emailCfg.email_smtp_id ja
+          // resolve -- confirmado ao vivo: o aviso ao comercial falhava por
+          // autenticacao mesmo com o SMTP da organizacao correcto e testado.
+          await sendEmailNow({ organizationId, smtpId: emailCfg?.email_smtp_id, to: notifyList[0], recipients: notifyList, subject, html });
         }
       }
 
@@ -932,6 +1097,28 @@ Deno.serve(async (req: Request) => {
         const hoursBefore = emailCfg.reminder_hours_before && emailCfg.reminder_hours_before > 0 ? emailCfg.reminder_hours_before : 2;
         const remindAt = new Date(new Date(slot_start).getTime() - hoursBefore * 3600000);
         if (remindAt.getTime() > Date.now()) {
+          // Regra 12: link "Confirmo a visita" -- só nasce aqui, porque só
+          // faz sentido pedir confirmação quando existe um lembrete a sair.
+          // Token próprio (action 'confirm'), distinto do de cancelar;
+          // expira no início da visita -- confirmar depois disso não tem
+          // sentido.
+          // Link fixo no dominio da propria app -- ao contrario do de
+          // gerir/cancelar, "confirmar" nao passa pelo dominio proprio da
+          // organizacao (booking_manage_url_template): essa pagina, quando
+          // configurada, e a deles e nao sabe lidar com esta accao nova.
+          const { data: confirmToken } = await supabase
+            .from('booking_tokens')
+            .insert({
+              schedule_item_id: scheduleItem.id,
+              action: 'confirm',
+              expires_at: slot_start,
+            })
+            .select('token')
+            .single();
+          const confirmLink = confirmToken?.token
+            ? `${siteUrlEnv}/booking/confirm?token=${confirmToken.token}`
+            : '';
+
           const reminderTemplateId = pickTemplateId(emailCfg, 'reminder', leadLocale, emailCfg.reminder_template_id);
           const tpl = await loadTemplate(supabase, reminderTemplateId);
           const subject = renderSubject(tpl?.subject || 'Lembrete: reunião {{meeting_date}}', baseVars);
@@ -944,6 +1131,8 @@ Deno.serve(async (req: Request) => {
                 location: fullLocation || undefined,
                 technicianName: technicianName || undefined,
                 cancelUrl: kind === 'client' ? (cancelLink || undefined) : undefined,
+                confirmUrl: kind === 'client' ? (confirmLink || undefined) : undefined,
+                primaryColor: emailCfg.primary_color, logoUrl: emailCfg.logo_url,
               });
           const targets: { email: string; kind: 'client' | 'technician' }[] = [];
           if (leadEmail) targets.push({ email: leadEmail, kind: 'client' });
@@ -953,6 +1142,25 @@ Deno.serve(async (req: Request) => {
               organizationId, userId: createdBy, toEmail: t.email,
               subject, bodyHtml: htmlFor(t.kind), scheduledFor: remindAt.toISOString(),
               entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId!, templateId: reminderTemplateId || null, smtpId: emailCfg.email_smtp_id,
+            });
+          }
+
+          // Regra 3 (continuação): lembrete por SMS, mesma hora do lembrete
+          // por email, só ao cliente (o técnico já vê a agenda dele — o
+          // email extra ao técnico é herdado de quando não havia app própria
+          // para ele consultar; não faz sentido duplicar isso em SMS, que
+          // tem custo por envio).
+          if (emailCfg.reminder_sms_enabled && leadPhone) {
+            const includeLinkReminder = emailCfg.confirmation_sms_include_link === true;
+            const reminderSmsVars = includeLinkReminder ? baseVars : { ...baseVars, cancel_url: '' };
+            const reminderSmsMessage = `${orgRow?.name || 'A empresa'}: lembrete da sua visita para {{meeting_date}}.${includeLinkReminder && confirmLink ? ' Confirme: {{confirm_url}}' : ''}`
+              .replace('{{confirm_url}}', confirmLink || '');
+            await scheduleSms(supabase, {
+              organizationId, createdBy,
+              toPhone: String(leadPhone),
+              message: renderSubject(reminderSmsMessage, reminderSmsVars),
+              scheduledFor: remindAt.toISOString(),
+              entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId ?? null,
             });
           }
         }

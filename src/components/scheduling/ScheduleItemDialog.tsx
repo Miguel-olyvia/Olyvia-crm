@@ -12,7 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { X, ChevronDown, Send, Check, XCircle, HelpCircle, User, Mail, Phone } from 'lucide-react';
 import { extractLeadContactInfo } from '@/utils/leadContactInfo';
 import { ClientMentionInput } from './ClientMentionInput';
-import { ContactMentionInput } from './ContactMentionInput';
+import { ContactMentionInput } from './LeadMentionInput';
 import { InviteeSelector } from './InviteeSelector';
 import { useScheduleInvitations } from '@/hooks/useScheduleInvitations';
 import { useTranslation } from '@/hooks/useTranslation';

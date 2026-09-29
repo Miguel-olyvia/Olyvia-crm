@@ -54,6 +54,9 @@ export interface ScheduleResource {
   employee_id?: string;
   color: string;
   max_daily_capacity: number;
+  postal_code?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
   organization_id?: string;
   is_active: boolean;
   metadata: Record<string, any>;

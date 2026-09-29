@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
+import { resolveDocumentOwner } from "../_shared/documentOwnerSender.ts";
 import { z } from "npm:zod";
 
 import { getCorsHeadersExtended } from "../_shared/cors.ts";
@@ -275,15 +276,16 @@ const handler = async (req: Request): Promise<Response> => {
       }
     }
 
-    // Get sender info from anew_users
-    let senderName: string | null = null;
+    // Get sender info from anew_users (quem clicou -- ainda usado se o
+    // documento nao tiver um comercial dono valido).
+    let callerDisplayName: string | null = null;
     if (userId) {
       const { data: sender } = await supabaseClient
         .from("anew_users")
         .select("display_name")
         .eq("auth_user_id", userId)
         .maybeSingle();
-      senderName = sender?.display_name || null;
+      callerDisplayName = sender?.display_name || null;
     }
 
     // SMTP resolution needs a service-role client: passwords are stored in
@@ -295,15 +297,26 @@ const handler = async (req: Request): Promise<Response> => {
       Deno.env.get("SUPABASE_URL") ?? "",
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
     );
-    const resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseAdmin, {
-      authUserId: userId,
+    // "De:" (SMTP + nome mostrado) passa a ser o comercial DONO do negocio a
+    // que a proposta pertence, nao quem clicou em enviar. A auditoria
+    // (senderAnewUserId / proposal_sends.sent_by, acima) nao muda.
+    const documentOwner = await resolveDocumentOwner(supabaseAdmin, "proposal", proposal.id, proposal.organization_id);
+    let resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseAdmin, {
+      authUserId: documentOwner?.authUserId ?? userId,
       organizationId: proposal.organization_id,
     });
+    if (!resolvedSmtp && documentOwner && documentOwner.authUserId !== userId) {
+      resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabaseAdmin, {
+        authUserId: userId,
+        organizationId: proposal.organization_id,
+      });
+    }
 
     if (!resolvedSmtp) {
       throw new Error(smtpNotFoundMessage());
     }
     const smtpConfig = resolvedSmtp.smtp;
+    const senderName: string | null = documentOwner?.displayName ?? callerDisplayName;
 
     // Link to the authenticated client portal proposal view (see src/App.tsx,
     // route "/client-portal/proposals/:id" rendered by

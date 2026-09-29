@@ -14,6 +14,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ChevronLeft, ChevronRight, Check, Loader2, AlertCircle, Zap, Clock, Home, Utensils, Bath, Wrench, HelpCircle, Info, AlertTriangle, CheckCircle, User, Mail, Phone } from "lucide-react";
 import { FormLoadingSkeleton } from "@/components/FormLoadingSkeleton";
 import { FormLocaleSwitcher } from "@/components/forms/FormLocaleSwitcher";
+import { PhoneInput } from "@/components/PhoneInput";
+import { COUNTRY_CODES } from "@/constants/countryCodes";
+import { useLanguage } from "@/contexts/LanguageContext";
+
+// Idiomas com traducoes estaticas no useTranslation() global (PhoneInput,
+// e qualquer outro componente partilhado). O formulario publico suporta
+// mais idiomas do que estes 5 (ver src/constants/languages.ts) -- fora
+// destes, o proprio useTranslation ja cai para "en" internamente.
+const SUPPORTED_UI_LANGUAGES = new Set(["en", "pt", "es", "fr", "de"]);
 
 import { toast } from "@/lib/toast";
 import { Progress } from "@/components/ui/progress";
@@ -445,6 +454,7 @@ interface FormStep {
   scheduling_board_id?: string | null;
   scheduling_postal_code_field_key?: string | null;
   scheduling_district_field_key?: string | null;
+  scheduling_requires_location?: boolean;
   fields: FormField[];
   info_blocks?: InfoBlock[];
   sections?: FormSection[];
@@ -663,6 +673,7 @@ function fillPlaceholders(
 export default function PublicLeadForm() {
   const { formId: routeFormId, campaignId: routeCampaignId } = useParams<{ formId?: string; campaignId?: string }>();
   const [searchParams] = useSearchParams();
+  const { setLanguage } = useLanguage();
   
   // Support both URL params and query params (query params take precedence for campaign_id)
   const queryCampaignId = searchParams.get("campaign_id");
@@ -1015,7 +1026,18 @@ export default function PublicLeadForm() {
       
       setFormConfig(data);
       // Track the resolved locale for the switcher UI.
-      setCurrentLocale(data.resolved_locale || data.default_locale || lang || null);
+      const resolvedLocale = data.resolved_locale || data.default_locale || lang || null;
+      setCurrentLocale(resolvedLocale);
+      // Segue o idioma do formulario tambem nos textos estaticos partilhados
+      // (ex.: "Full number" e o dropdown de paises do PhoneInput), que usam
+      // useTranslation()/LanguageContext -- um sistema totalmente separado do
+      // idioma por-campo do formulario, e que sem isto ficava sempre preso
+      // ao valor por omissao do browser ("en"), independente do que o
+      // visitante escolhesse aqui.
+      const normalizedLocale = (resolvedLocale || "").toLowerCase();
+      if (SUPPORTED_UI_LANGUAGES.has(normalizedLocale)) {
+        setLanguage(normalizedLocale as "en" | "pt" | "es" | "fr" | "de");
+      }
       
       // Inject all tracking pixels (GTM, Meta, TikTok, etc.) - only from form_tracking_pixels table
       if (!isLocaleSwitch && data.tracking_pixels && data.tracking_pixels.length > 0) {
@@ -1186,6 +1208,18 @@ export default function PublicLeadForm() {
 
     // Scheduling step: require a slot to be selected
     if (step.step_type === 'scheduling') {
+      // Regra 13/15: quando este passo exige localização, o código postal
+      // (recolhido num passo ANTERIOR) tem de ser um CP7 completo
+      // ("XXXX-XXX") -- é o que dá coordenadas exactas para o tempo de
+      // deslocação real entre visitas.
+      if (step.scheduling_requires_location) {
+        const postalRaw = resolveSchedulingPostalCode(step);
+        const cp7Digits = String(postalRaw || '').replace(/[^0-9]/g, '');
+        if (cp7Digits.length !== 7) {
+          toast.error("É necessário indicar o código postal completo (ex.: 1000-001) antes de escolher a data.");
+          return false;
+        }
+      }
       if (!schedulingSlot) {
         toast.error("Por favor selecione uma data e hora para a visita.");
         return false;
@@ -1914,31 +1948,41 @@ export default function PublicLeadForm() {
           </div>
         );
 
-      case "phone":
+      case "phone": {
+        // Guardado como uma unica string "+<indicativo><digitos>" (ex.:
+        // "+351912345678") em formValues[field.field_key] -- o backend
+        // (sanitizePhone) ja aceita este formato. O indicativo nunca tem
+        // valor por omissao: sem "+" reconhecido, countryCodeValue fica
+        // vazio e o utilizador tem de o escolher, mesmo que ja existam
+        // digitos escritos.
+        const fullValue = value || "";
+        const matchedCountry = [...COUNTRY_CODES]
+          .sort((a, b) => b.dialCode.length - a.dialCode.length)
+          .find((country) => fullValue.startsWith(country.dialCode));
+        const countryCodeValue = matchedCountry ? matchedCountry.dialCode : "";
+        const phoneDigits = matchedCountry
+          ? fullValue.slice(matchedCountry.dialCode.length)
+          : fullValue.replace(/^\+/, "");
+
         return (
           <div className="space-y-1" data-field-key={field.field_key}>
-            <div className="relative">
-              <Phone className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
-              <Input
-                id={field.field_key}
-                name={field.field_key}
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                value={value || ""}
-                onChange={(e) => {
-                  // Only allow numbers for phone
-                  const numericValue = e.target.value.replace(/[^0-9]/g, '');
-                  handleInputChange(field.field_key, numericValue);
-                }}
-                placeholder={field.placeholder || field.field_label}
-                maxLength={field.max_length || undefined}
-                className="pl-10 sm:pl-12 h-11 sm:h-12 text-sm sm:text-base rounded-xl"
-              />
-            </div>
+            <PhoneInput
+              phoneValue={phoneDigits}
+              countryCodeValue={countryCodeValue}
+              onCountryCodeChange={(newCode) => {
+                handleInputChange(field.field_key, `${newCode}${phoneDigits}`);
+              }}
+              onPhoneChange={(newPhone) => {
+                const digits = newPhone.replace(/[^0-9]/g, "");
+                handleInputChange(field.field_key, countryCodeValue ? `${countryCodeValue}${digits}` : digits);
+              }}
+              required={field.is_required}
+              placeholder={field.placeholder || field.field_label}
+            />
             {field.help_text && <p className="text-xs text-muted-foreground">{field.help_text}</p>}
           </div>
         );
+      }
 
       default: {
         // Get fallback icon based on field type/key/label
