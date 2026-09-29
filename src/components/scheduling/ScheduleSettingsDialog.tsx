@@ -18,6 +18,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
 import { useToast } from '@/hooks/use-toast';
 import { scheduleSettingsSchema, scheduleHolidaySchema } from '@/lib/validations';
+import { completeLunchFields, type LunchFields } from '@/lib/lunchWindow';
 import { format } from 'date-fns';
 import { enUS, pt, es, fr, de } from 'date-fns/locale';
 
@@ -92,6 +93,17 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
       );
     }
   }, [settings]);
+
+  const updateLunchField = (change: LunchFields) => {
+    setFormData(prev => {
+      const changed = { ...prev, ...change };
+      return { ...changed, ...completeLunchFields(changed) };
+    });
+    setFieldErrors(prev => {
+      const { lunch_window_start, lunch_window_end, lunch_duration_minutes, ...rest } = prev;
+      return rest;
+    });
+  };
 
   const unavailableOption = (id: string | null | undefined, options: NoticeOption[]) => {
     if (!id || options.some(o => o.id === id)) return null;
@@ -522,7 +534,7 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
                       <Input
                         type="time"
                         value={formData.lunch_window_start || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, lunch_window_start: e.target.value }))}
+                        onChange={(e) => updateLunchField({ lunch_window_start: e.target.value })}
                         className={fieldErrors.lunch_window_start ? 'border-destructive' : ''}
                       />
                       {fieldErrors.lunch_window_start && <p className="text-sm text-destructive mt-1">{fieldErrors.lunch_window_start}</p>}
@@ -532,7 +544,7 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
                       <Input
                         type="time"
                         value={formData.lunch_window_end || ''}
-                        onChange={(e) => setFormData(prev => ({ ...prev, lunch_window_end: e.target.value }))}
+                        onChange={(e) => updateLunchField({ lunch_window_end: e.target.value })}
                         className={fieldErrors.lunch_window_end ? 'border-destructive' : ''}
                       />
                       {fieldErrors.lunch_window_end && <p className="text-sm text-destructive mt-1">{fieldErrors.lunch_window_end}</p>}
@@ -545,10 +557,9 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
                       min={1}
                       max={240}
                       value={formData.lunch_duration_minutes ?? ''}
-                      onChange={(e) => setFormData(prev => ({
-                        ...prev,
+                      onChange={(e) => updateLunchField({
                         lunch_duration_minutes: e.target.value === '' ? null : Number(e.target.value),
-                      }))}
+                      })}
                       className={fieldErrors.lunch_duration_minutes ? 'border-destructive' : ''}
                     />
                     {fieldErrors.lunch_duration_minutes && <p className="text-sm text-destructive mt-1">{fieldErrors.lunch_duration_minutes}</p>}
