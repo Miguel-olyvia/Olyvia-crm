@@ -19,6 +19,16 @@ export interface ScheduleSettings {
   working_days: number[];
   notify_client_on_reschedule: boolean;
   notify_client_on_reassign: boolean;
+  reschedule_notify_email: boolean;
+  reschedule_notify_sms: boolean;
+  reschedule_email_template_id: string | null;
+  reschedule_sms_message: string | null;
+  reassign_notify_email: boolean;
+  reassign_notify_sms: boolean;
+  reassign_email_template_id: string | null;
+  reassign_sms_message: string | null;
+  notify_client_smtp_id: string | null;
+  notify_client_sms_include_link: boolean;
   lunch_window_start: string | null;
   lunch_window_end: string | null;
   lunch_duration_minutes: number | null;
@@ -47,6 +57,16 @@ const DEFAULT_SETTINGS: Omit<ScheduleSettings, 'id' | 'organization_id'> = {
   working_days: [1, 2, 3, 4, 5],
   notify_client_on_reschedule: false,
   notify_client_on_reassign: false,
+  reschedule_notify_email: true,
+  reschedule_notify_sms: false,
+  reschedule_email_template_id: null,
+  reschedule_sms_message: null,
+  reassign_notify_email: true,
+  reassign_notify_sms: false,
+  reassign_email_template_id: null,
+  reassign_sms_message: null,
+  notify_client_smtp_id: null,
+  notify_client_sms_include_link: false,
   lunch_window_start: null,
   lunch_window_end: null,
   lunch_duration_minutes: null,

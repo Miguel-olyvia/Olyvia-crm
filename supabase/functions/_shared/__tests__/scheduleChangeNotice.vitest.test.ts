@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildNoticeCopy, resolveNoticeKind } from '../scheduleChangeNotice';
+import { buildNoticeCopy, resolveNoticeChannels, resolveNoticeKind } from '../scheduleChangeNotice';
 
 describe('resolveNoticeKind', () => {
   it('devolve null quando os dois interruptores estao desligados', () => {
@@ -73,5 +73,54 @@ describe('buildNoticeCopy', () => {
       includeSmsLink: false,
     });
     expect(copy.sms.startsWith('A empresa:')).toBe(true);
+  });
+});
+
+describe('resolveNoticeChannels', () => {
+  it('por omissao: email ligado, SMS desligado, sem modelo', () => {
+    expect(resolveNoticeChannels('datetime', {})).toEqual({
+      email: true, sms: false, templateId: null, smsMessage: null,
+    });
+  });
+
+  it('datetime usa so os campos de reagendamento', () => {
+    const r = resolveNoticeChannels('datetime', {
+      reschedule_notify_email: false,
+      reschedule_notify_sms: true,
+      reschedule_email_template_id: 't1',
+      reschedule_sms_message: 'Ola {{lead_name}}',
+      reassign_notify_email: true,
+      reassign_email_template_id: 't2',
+    });
+    expect(r).toEqual({ email: false, sms: true, templateId: 't1', smsMessage: 'Ola {{lead_name}}' });
+  });
+
+  it('assignee usa so os campos de comercial', () => {
+    const r = resolveNoticeChannels('assignee', {
+      reschedule_notify_sms: true,
+      reassign_notify_email: false,
+      reassign_notify_sms: false,
+      reassign_email_template_id: 't2',
+    });
+    expect(r).toEqual({ email: false, sms: false, templateId: 't2', smsMessage: null });
+  });
+
+  it('both une os canais e prefere o modelo de data/hora', () => {
+    const r = resolveNoticeChannels('both', {
+      reschedule_notify_email: false,
+      reschedule_notify_sms: false,
+      reschedule_email_template_id: 't1',
+      reassign_notify_email: true,
+      reassign_notify_sms: true,
+      reassign_email_template_id: 't2',
+      reassign_sms_message: 'SMS comercial',
+    });
+    expect(r).toEqual({ email: true, sms: true, templateId: 't1', smsMessage: 'SMS comercial' });
+  });
+
+  it('both cai no modelo de comercial quando data/hora nao tem; SMS so com espacos conta como vazio', () => {
+    const r = resolveNoticeChannels('both', { reassign_email_template_id: 't2', reschedule_sms_message: '   ' });
+    expect(r.templateId).toBe('t2');
+    expect(r.smsMessage).toBeNull();
   });
 });

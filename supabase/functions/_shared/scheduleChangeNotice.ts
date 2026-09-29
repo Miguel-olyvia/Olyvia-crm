@@ -100,3 +100,58 @@ export function buildNoticeCopy(kind: NoticeKind, v: NoticeCopyInput): NoticeCop
   );
   return { subject, heading, intro, sms };
 }
+
+// Configuracao propria da Agenda (schedule_settings) para os canais e modelos.
+export interface ScheduleNoticeChannelSettings {
+  reschedule_notify_email?: boolean | null;
+  reschedule_notify_sms?: boolean | null;
+  reschedule_email_template_id?: string | null;
+  reschedule_sms_message?: string | null;
+  reassign_notify_email?: boolean | null;
+  reassign_notify_sms?: boolean | null;
+  reassign_email_template_id?: string | null;
+  reassign_sms_message?: string | null;
+}
+
+export interface NoticeChannels {
+  email: boolean;
+  sms: boolean;
+  templateId: string | null;
+  smsMessage: string | null;
+}
+
+function nonEmpty(value: string | null | undefined): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+/**
+ * Canais, modelo de email e texto de SMS para um tipo de aviso.
+ * 'both' = uniao dos canais dos dois eventos; modelo e SMS sao os de data/hora
+ * se existirem, senao os de comercial, senao null (texto fixo).
+ */
+export function resolveNoticeChannels(
+  kind: NoticeKind,
+  s: ScheduleNoticeChannelSettings,
+): NoticeChannels {
+  const reschedule: NoticeChannels = {
+    email: s.reschedule_notify_email ?? true,
+    sms: s.reschedule_notify_sms ?? false,
+    templateId: nonEmpty(s.reschedule_email_template_id),
+    smsMessage: nonEmpty(s.reschedule_sms_message),
+  };
+  const reassign: NoticeChannels = {
+    email: s.reassign_notify_email ?? true,
+    sms: s.reassign_notify_sms ?? false,
+    templateId: nonEmpty(s.reassign_email_template_id),
+    smsMessage: nonEmpty(s.reassign_sms_message),
+  };
+
+  if (kind === 'datetime') return reschedule;
+  if (kind === 'assignee') return reassign;
+  return {
+    email: reschedule.email || reassign.email,
+    sms: reschedule.sms || reassign.sms,
+    templateId: reschedule.templateId ?? reassign.templateId,
+    smsMessage: reschedule.smsMessage ?? reassign.smsMessage,
+  };
+}

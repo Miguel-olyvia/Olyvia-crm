@@ -18437,6 +18437,16 @@ export type Database = {
           lunch_window_end: string | null
           lunch_window_start: string | null
           notify_client_on_reassign: boolean
+          notify_client_smtp_id: string | null
+          notify_client_sms_include_link: boolean
+          reassign_email_template_id: string | null
+          reassign_notify_email: boolean
+          reassign_notify_sms: boolean
+          reassign_sms_message: string | null
+          reschedule_email_template_id: string | null
+          reschedule_notify_email: boolean
+          reschedule_notify_sms: boolean
+          reschedule_sms_message: string | null
           notify_client_on_reschedule: boolean
           organization_id: string | null
           show_holidays: boolean
@@ -18459,6 +18469,16 @@ export type Database = {
           lunch_window_end?: string | null
           lunch_window_start?: string | null
           notify_client_on_reassign?: boolean
+          notify_client_smtp_id?: string | null
+          notify_client_sms_include_link?: boolean
+          reassign_email_template_id?: string | null
+          reassign_notify_email?: boolean
+          reassign_notify_sms?: boolean
+          reassign_sms_message?: string | null
+          reschedule_email_template_id?: string | null
+          reschedule_notify_email?: boolean
+          reschedule_notify_sms?: boolean
+          reschedule_sms_message?: string | null
           notify_client_on_reschedule?: boolean
           organization_id?: string | null
           show_holidays?: boolean
@@ -18481,6 +18501,16 @@ export type Database = {
           lunch_window_end?: string | null
           lunch_window_start?: string | null
           notify_client_on_reassign?: boolean
+          notify_client_smtp_id?: string | null
+          notify_client_sms_include_link?: boolean
+          reassign_email_template_id?: string | null
+          reassign_notify_email?: boolean
+          reassign_notify_sms?: boolean
+          reassign_sms_message?: string | null
+          reschedule_email_template_id?: string | null
+          reschedule_notify_email?: boolean
+          reschedule_notify_sms?: boolean
+          reschedule_sms_message?: string | null
           notify_client_on_reschedule?: boolean
           organization_id?: string | null
           show_holidays?: boolean
