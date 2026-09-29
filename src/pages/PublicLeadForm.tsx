@@ -606,6 +606,34 @@ interface FormData {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
 /**
+ * Valor de texto de um campo, pelo `contact_field_mapping` canonico
+ * ("po_email" -> "email"). Devolve "" quando nao ha campo ou valor.
+ */
+function valueByMapping(
+  canonical: string,
+  values: Record<string, any>,
+  fields: Array<{ field_key: string; contact_field_mapping?: string | null }>,
+): string {
+  for (const field of fields) {
+    if (field?.contact_field_mapping !== canonical) continue;
+    const value = values[field.field_key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+/** Email e telefone ja escritos pelo visitante (undefined quando vazios). */
+function extractContactFromValues(
+  values: Record<string, any>,
+  fields: Array<{ field_key: string; contact_field_mapping?: string | null }>,
+): { email: string | undefined; phone: string | undefined } {
+  return {
+    email: valueByMapping("email", values, fields) || undefined,
+    phone: valueByMapping("phone", values, fields) || undefined,
+  };
+}
+
+/**
  * Resolves {{name}}-style placeholders in the success screen copy.
  *
  * The stored copy uses generic tokens, but field keys are chosen freely per
@@ -638,14 +666,7 @@ function fillPlaceholders(
   // contact_field_mapping ("po_email" -> "email"). That mapping is the only
   // reliable link: field keys are chosen freely per form, so the same token
   // must never be tied to a particular key name.
-  const byMapping = (canonical: string): string => {
-    for (const field of fields) {
-      if (field?.contact_field_mapping !== canonical) continue;
-      const value = values[field.field_key];
-      if (typeof value === "string" && value.trim()) return value.trim();
-    }
-    return "";
-  };
+  const byMapping = (canonical: string): string => valueByMapping(canonical, values, fields);
 
   const firstName = byMapping("first_name");
   const lastName = byMapping("last_name");
@@ -1290,6 +1311,11 @@ export default function PublicLeadForm() {
       || submittedFields.find(f => f.field_type === 'ref_district')?.field_key;
     return key ? formValues[key] : undefined;
   };
+
+  // Email/telefone que o visitante ja escreveu (pelo contact_field_mapping,
+  // a mesma ligacao campo -> contacto canonico de fillPlaceholders). Servem so
+  // para o calendario mostrar os horarios do comercial de quem ja e conhecido.
+  const resolveSchedulingContact = () => extractContactFromValues(formValues, submittedFields);
 
   const resolveSchedulingPostalCode = (step: { scheduling_postal_code_field_key?: string | null } | null | undefined) => {
     const key =
@@ -2604,6 +2630,8 @@ export default function PublicLeadForm() {
                     durationMinutes={currentStepData.scheduling_duration_minutes || 60}
                     postalCode={resolveSchedulingPostalCode(currentStepData)}
                     districtId={resolveSchedulingDistrictId(currentStepData)}
+                    contactEmail={resolveSchedulingContact().email}
+                    contactPhone={resolveSchedulingContact().phone}
                     primaryColor={primaryColor}
                     textColor={branding?.text_color}
                     buttonTextColor={branding?.button_text_color}
