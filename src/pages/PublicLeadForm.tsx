@@ -31,6 +31,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { sanitizeCSSValue, sanitizeCustomCss } from "@/lib/forms/sanitizeCssValue";
 import { validateStepFieldFormats } from "@/lib/forms/publicFormValidation";
+import { resolveSchedulingGeoValues, type SchedulingGeoStep } from "@/lib/forms/schedulingGeoInputs";
 
 // Animation variants for step transitions
 const stepVariants = {
@@ -1234,7 +1235,7 @@ export default function PublicLeadForm() {
       // ("XXXX-XXX") -- é o que dá coordenadas exactas para o tempo de
       // deslocação real entre visitas.
       if (step.scheduling_requires_location) {
-        const postalRaw = resolveSchedulingPostalCode(step);
+        const postalRaw = resolveSchedulingGeo(step).forBooking.postalCode;
         const cp7Digits = String(postalRaw || '').replace(/[^0-9]/g, '');
         if (cp7Digits.length !== 7) {
           toast.error("É necessário indicar o código postal completo (ex.: 1000-001) antes de escolher a data.");
@@ -1305,27 +1306,22 @@ export default function PublicLeadForm() {
    * `ref_district` e o marcador estrutural do campo de distrito: sobrevive a
    * qualquer mudanca de nome, ao contrario de fixar "po_distrito".
    */
-  const resolveSchedulingDistrictId = (step: { scheduling_district_field_key?: string | null } | null | undefined) => {
-    const key =
-      step?.scheduling_district_field_key
-      || submittedFields.find(f => f.field_type === 'ref_district')?.field_key;
-    return key ? formValues[key] : undefined;
-  };
+  // Distrito e codigo postal TAL COMO O VISITANTE OS ESCREVEU vao ao book-slot
+  // (sao dados da lead); o calendario so os recebe com o botao ligado.
+  const resolveSchedulingGeo = (step: SchedulingGeoStep | null | undefined) =>
+    resolveSchedulingGeoValues(step, submittedFields, formValues);
 
   // Email/telefone que o visitante ja escreveu (pelo contact_field_mapping,
   // a mesma ligacao campo -> contacto canonico de fillPlaceholders). Servem so
   // para o calendario mostrar os horarios do comercial de quem ja e conhecido.
   const resolveSchedulingContact = () => extractContactFromValues(formValues, submittedFields);
 
-  const resolveSchedulingPostalCode = (step: { scheduling_postal_code_field_key?: string | null } | null | undefined) => {
-    const key =
-      step?.scheduling_postal_code_field_key
-      || submittedFields.find(f => f.contact_field_mapping === 'postal_code')?.field_key;
-    return key ? formValues[key] : undefined;
-  };
-
   const completeScheduledBooking = async (resolvedLeadId: string) => {
     if (!formConfig || !schedulingSlot) return resolvedLeadId;
+
+    const bookingGeo = resolveSchedulingGeo(
+      formConfig.steps.find(s => s.step_type === 'scheduling'),
+    ).forBooking;
 
     const response = await fetch(`${SUPABASE_URL}/functions/v1/book-slot`, {
       method: "POST",
@@ -1336,12 +1332,8 @@ export default function PublicLeadForm() {
         lead_id: resolvedLeadId,
         slot_start: schedulingSlot.start,
         slot_end: schedulingSlot.end,
-        postal_code: resolveSchedulingPostalCode(
-          formConfig.steps.find(s => s.step_type === 'scheduling'),
-        ),
-        district_id: resolveSchedulingDistrictId(
-          formConfig.steps.find(s => s.step_type === 'scheduling'),
-        ),
+        postal_code: bookingGeo.postalCode,
+        district_id: bookingGeo.districtId,
         field_values: formValues,
         campaign_id: formConfig.campaign_id || campaignId || undefined,
         source_id: resolvedSourceId || null,
@@ -2628,8 +2620,8 @@ export default function PublicLeadForm() {
                     stepNumber={currentStepData.step_number}
                     boardId={currentStepData.scheduling_board_id || null}
                     durationMinutes={currentStepData.scheduling_duration_minutes || 60}
-                    postalCode={resolveSchedulingPostalCode(currentStepData)}
-                    districtId={resolveSchedulingDistrictId(currentStepData)}
+                    postalCode={resolveSchedulingGeo(currentStepData).forCalendar.postalCode}
+                    districtId={resolveSchedulingGeo(currentStepData).forCalendar.districtId}
                     contactEmail={resolveSchedulingContact().email}
                     contactPhone={resolveSchedulingContact().phone}
                     primaryColor={primaryColor}
