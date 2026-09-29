@@ -268,6 +268,26 @@ interface DirectSaleOrigin {
   proforma_number: string | null;
 }
 
+// Eliminação de encomenda (rpc_delete_client_order): só manuais e de venda
+// direta. O servidor valida permissão, origem, POs já encomendadas e fatura.
+interface DeleteOrderTarget {
+  contract_id: string;
+  order_number: string;
+  origin: 'manual' | 'direct_sale';
+  sale_number: string | null;
+}
+
+interface DeleteClientOrderResult {
+  success?: boolean;
+  contract_id?: string;
+  order_number?: string | null;
+  reversed_movements?: number | null;
+  cancelled_pos?: number | null;
+  direct_sale_cancelled?: boolean | null;
+  message?: string | null;
+  error?: string | null;
+}
+
 // Diagnóstico da obra (Fase 1): cópia congelada do levantamento de necessidades
 // do pedido de proposta, para o armazém saber o que vai ser executado.
 //
@@ -489,6 +509,8 @@ const ClientOrders = () => {
   // Pedir em falta ao fornecedor (rpc_request_missing_from_supplier exige
   // purchase_orders.create + client_contracts.view).
   const canRequestMissing = hasPermission('purchase_orders.create') && hasPermission('client_contracts.view');
+  // Eliminar encomenda (rpc_delete_client_order exige client_orders.delete).
+  const canDeleteOrder = hasPermission('client_orders.delete');
 
   // As chaves da secção "Diagnóstico da obra" ainda não existem em
   // src/translations/index.ts (ficheiro fora do âmbito desta alteração).
@@ -579,6 +601,11 @@ const ClientOrders = () => {
   const [requestingMissing, setRequestingMissing] = useState(false);
   // Confirmação antes do pedido: o material pode já ter chegado por outra via.
   const [requestMissingConfirmOpen, setRequestMissingConfirmOpen] = useState(false);
+
+  // Eliminar encomenda (manual ou de venda direta) com motivo obrigatório.
+  const [deleteTarget, setDeleteTarget] = useState<DeleteOrderTarget | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   // Edição de encomenda manual: reutiliza o diálogo de criação. Com
   // editingContractId preenchido o diálogo grava via
@@ -1225,6 +1252,91 @@ const ClientOrders = () => {
       );
     }
     return null;
+  };
+
+  // Origem elegível para eliminação: manual ou venda direta. Contrato real
+  // (ou origem desconhecida sem venda direta associada) não se elimina aqui.
+  // Mesma lógica de renderOrigin para a RPC antiga sem origin_type.
+  const getDeletableOrigin = (
+    contractId: string,
+    originType: ClientOrderOriginType | null | undefined,
+  ): 'manual' | 'direct_sale' | null => {
+    if (originType === 'manual' || originType === 'direct_sale') return originType;
+    if (!originType && salesByContract[contractId]) return 'direct_sale';
+    return null;
+  };
+
+  const openDeleteOrder = (
+    contractId: string,
+    orderNumber: string,
+    originType: ClientOrderOriginType | null | undefined,
+    originNumber: string | null | undefined,
+  ) => {
+    const origin = getDeletableOrigin(contractId, originType);
+    if (!origin) return;
+    const sale = salesByContract[contractId];
+    setDeleteReason("");
+    setDeleteTarget({
+      contract_id: contractId,
+      order_number: orderNumber,
+      origin,
+      sale_number: origin === 'direct_sale'
+        ? (originNumber || sale?.sale_number || sale?.proforma_number || null)
+        : null,
+    });
+  };
+
+  const deleteReasonValid = deleteReason.trim().length >= 3;
+
+  // ── Eliminar encomenda ───────────────────────────────────────────────────
+  // O servidor anula a encomenda (estorna stock, liberta reservas, cancela POs
+  // pendentes), cancela a VD ligada e envia-a para o Lixo. Recusas vêm com
+  // mensagem PT em error.message; o diálogo fica aberto nesse caso.
+  const handleDeleteOrder = async () => {
+    if (!deleteTarget || deleting) return;
+    const reason = deleteReason.trim();
+    if (reason.length < 3) return;
+    const contractId = deleteTarget.contract_id;
+    setDeleting(true);
+    try {
+      const { data, error } = await (supabase as any).rpc('rpc_delete_client_order', {
+        p_contract_id: contractId,
+        p_reason: reason,
+      });
+      if (error) throw error;
+      const result = (data || {}) as DeleteClientOrderResult;
+      if (result.success === false) {
+        throw new Error(result.message || result.error || tf('clientOrders.delete.error', 'Não foi possível eliminar a encomenda.'));
+      }
+      const parts = [
+        `${asQty(result.reversed_movements)} movimento(s) de stock devolvido(s)`,
+        `${asQty(result.cancelled_pos)} pedido(s) a fornecedor cancelado(s)`,
+      ];
+      if (result.direct_sale_cancelled) {
+        parts.push(deleteTarget.sale_number
+          ? `venda direta ${deleteTarget.sale_number} cancelada`
+          : 'venda direta cancelada');
+      }
+      toast({
+        title: `Encomenda ${result.order_number || deleteTarget.order_number} eliminada`,
+        description: parts.join(' · '),
+      });
+      setDeleteTarget(null);
+      setDeleteReason("");
+      if (detailData?.contract_id === contractId) {
+        setDetailOpen(false);
+        setDetailData(null);
+      }
+      loadOrders(0, true);
+    } catch (error: any) {
+      toast({
+        title: tf('clientOrders.delete.error', 'Não foi possível eliminar a encomenda.'),
+        description: error?.message,
+        variant: "destructive",
+      });
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const getOverallStatusColor = (status: string) => {
@@ -2290,6 +2402,19 @@ const ClientOrders = () => {
                     >
                       <FileDown className="w-4 h-4" />
                     </Button>
+                    {canDeleteOrder && getDeletableOrigin(order.contract_id, order.origin_type) && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={() => openDeleteOrder(order.contract_id, order.order_number || order.contract_number, order.origin_type, order.origin_number)}
+                        title="Eliminar encomenda"
+                        aria-label={`Eliminar encomenda ${order.order_number || order.contract_number}`}
+                        disabled={deleting}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
                   </TableCell>
                 </TableRow>
               ))
@@ -2632,6 +2757,23 @@ const ClientOrders = () => {
                   <FileDown className="w-4 h-4 mr-2" />
                   {t('clientOrders.downloadPdf')}
                 </Button>
+                {canDeleteOrder && getDeletableOrigin(detailData.contract_id, detailData.origin_type) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive border-destructive/40 hover:text-destructive hover:bg-destructive/10"
+                    onClick={() => openDeleteOrder(
+                      detailData.contract_id,
+                      detailData.order_number || detailData.contract_number,
+                      detailData.origin_type,
+                      detailData.origin_number,
+                    )}
+                    disabled={deleting || confirmingAll}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Eliminar
+                  </Button>
+                )}
               </div>
 
               <Table>
@@ -2776,6 +2918,67 @@ const ClientOrders = () => {
             >
               {requestingMissing && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               {t('clientOrders.requestMissing.confirmAction')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Confirmação da eliminação de uma encomenda (manual ou venda direta) */}
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={(isOpen) => {
+          if (!isOpen && !deleting) {
+            setDeleteTarget(null);
+            setDeleteReason("");
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar encomenda {deleteTarget?.order_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A encomenda é anulada: o stock já saído volta ao armazém, as reservas são libertadas e os
+              pedidos a fornecedor pendentes são cancelados.
+              {deleteTarget?.origin === 'direct_sale' && (
+                <>
+                  {' '}
+                  {deleteTarget.sale_number
+                    ? `A venda direta ${deleteTarget.sale_number} passa a Cancelada.`
+                    : 'A venda direta ligada passa a Cancelada.'}
+                </>
+              )}
+              {' '}A encomenda vai para o Lixo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="delete-order-reason">Motivo *</Label>
+            <Textarea
+              id="delete-order-reason"
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              placeholder="Indique o motivo da eliminação"
+              rows={3}
+              disabled={deleting}
+              aria-invalid={deleteReason.length > 0 && !deleteReasonValid}
+              aria-describedby="delete-order-reason-hint"
+            />
+            <p id="delete-order-reason-hint" className="text-xs text-muted-foreground">
+              Mínimo 3 caracteres.
+            </p>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>{t('clientOrders.create.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting || !deleteReasonValid}
+              onClick={(e) => {
+                // Mantém o diálogo aberto até a RPC responder (e em caso de erro).
+                e.preventDefault();
+                handleDeleteOrder();
+              }}
+            >
+              {deleting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Eliminar
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
