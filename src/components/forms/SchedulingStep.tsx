@@ -14,6 +14,9 @@ interface SchedulingStepProps {
   durationMinutes: number;
   postalCode?: string;
   districtId?: string;
+  /** Contacto ja escrito pelo visitante: se for lead/cliente conhecido, o servidor mostra so os horarios do seu comercial. */
+  contactEmail?: string;
+  contactPhone?: string;
   primaryColor: string;
   textColor?: string;
   buttonTextColor?: string;
@@ -54,6 +57,8 @@ export function SchedulingStep({
   durationMinutes,
   postalCode,
   districtId,
+  contactEmail,
+  contactPhone,
   primaryColor,
   textColor,
   buttonTextColor,
@@ -86,7 +91,7 @@ export function SchedulingStep({
   // Prefetch which days have availability for the visible month (P3: single range call)
   useEffect(() => {
     prefetchMonth(currentMonth);
-  }, [currentMonth, formId, boardId, postalCode, districtId]);
+  }, [currentMonth, formId, boardId, postalCode, districtId, contactEmail, contactPhone]);
 
   const prefetchMonth = async (month: Date) => {
     setLoadingDays(true);
@@ -116,6 +121,8 @@ export function SchedulingStep({
           end_date: endStr,
           postal_code: postalCode || undefined,
           district_id: districtId || undefined,
+          email: contactEmail || undefined,
+          phone: contactPhone || undefined,
           board_id: boardId || undefined,
           duration_minutes: durationMinutes,
         }),
@@ -146,7 +153,7 @@ export function SchedulingStep({
       return;
     }
     loadSlots(selectedDate);
-  }, [selectedDate]);
+  }, [selectedDate, contactEmail, contactPhone]);
 
   const loadSlots = async (date: Date) => {
     setLoadingSlots(true);
@@ -160,6 +167,8 @@ export function SchedulingStep({
           date: format(date, "yyyy-MM-dd"),
           postal_code: postalCode || undefined,
           district_id: districtId || undefined,
+          email: contactEmail || undefined,
+          phone: contactPhone || undefined,
           board_id: boardId || undefined,
           duration_minutes: durationMinutes,
         }),
