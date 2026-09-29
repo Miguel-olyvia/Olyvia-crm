@@ -38,6 +38,8 @@ interface ScheduleConfig {
   holidays: string[];
 }
 
+const MAX_INITIAL_MONTH_HOPS = 3;
+
 const DEFAULT_CONFIG: ScheduleConfig = {
   working_days: [1, 2, 3, 4, 5],
   working_hours_start: '09:00',
@@ -70,6 +72,8 @@ export function SchedulingStep({
   const [loadingDays, setLoadingDays] = useState(false);
   const [noCoverage, setNoCoverage] = useState(false);
   const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>(DEFAULT_CONFIG);
+  // Auto-avanco para o mes seguinte so acontece na carga inicial.
+  const initialLoad = useRef({ active: true, hops: 0 });
 
   const today = startOfDay(new Date());
   const holidaySet = useMemo(() => new Set(scheduleConfig.holidays), [scheduleConfig.holidays]);
@@ -130,10 +134,23 @@ export function SchedulingStep({
 
       const available = new Set<string>(data.available_dates || []);
       setDaysWithSlots(available);
-      setNoCoverage(available.size === 0);
+
+      // So a carga inicial decide "sem cobertura"; um mes vazio escolhido pelo visitante nao.
+      if (initialLoad.current.active) {
+        if (available.size === 0 && initialLoad.current.hops < MAX_INITIAL_MONTH_HOPS) {
+          initialLoad.current.hops += 1;
+          setCurrentMonth(addMonths(month, 1));
+          return;
+        }
+        initialLoad.current.active = false;
+        setNoCoverage(available.size === 0);
+      }
     } catch {
       setDaysWithSlots(new Set());
-      setNoCoverage(true);
+      if (initialLoad.current.active) {
+        initialLoad.current.active = false;
+        setNoCoverage(true);
+      }
     } finally {
       setLoadingDays(false);
     }
