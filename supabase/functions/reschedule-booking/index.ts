@@ -15,6 +15,7 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 import { buildAudienceVars, pickAudienceTemplateId } from "../_shared/audienceTemplates.ts";
 import { createReminderLines } from "../_shared/reminderLines.ts";
 import { formatVisitWhen } from "../_shared/reminderContent.ts";
+import { anyReminderEnabled, reminderRuleFor } from "../_shared/reminderRule.ts";
 import { resolveRescheduleTarget, validateRescheduleSlot } from "../_shared/rescheduleSlots.ts";
 import { needsNewReminderLines } from "../_shared/reminderReconcile.ts";
 import { cancelLegacyVisitReminders, loadVisitTechnicians, reconcileItem } from "../_shared/reminderRunner.ts";
@@ -223,7 +224,7 @@ Deno.serve(async (req: Request) => {
 
       const emailCfg = formId ? await loadFormEmailConfig(supabase, formId) : null;
 
-      if (leadId && createNewReminders && emailCfg?.reminder_enabled) {
+      if (leadId && createNewReminders && emailCfg && anyReminderEnabled(emailCfg)) {
         const { data: lead } = await supabase
           .from('anew_leads')
           .select('field_values, entity_id, created_by, assigned_to')
@@ -258,11 +259,14 @@ Deno.serve(async (req: Request) => {
           const manageLink = buildManageUrl(emailCfg.booking_manage_url_template, leadLocale, token, siteUrl);
 
           // Link "Confirmo a visita" para a hora nova (o antigo expirou com a hora antiga).
-          const { data: confirmToken } = await supabase
-            .from('booking_tokens')
-            .insert({ schedule_item_id: itemId, action: 'confirm', expires_at: slot_start })
-            .select('token')
-            .single();
+          // O link e do cliente: so se o lembrete do CLIENTE estiver ligado.
+          const { data: confirmToken } = reminderRuleFor(emailCfg, 'client').enabled
+            ? await supabase
+              .from('booking_tokens')
+              .insert({ schedule_item_id: itemId, action: 'confirm', expires_at: slot_start })
+              .select('token')
+              .single()
+            : { data: null };
           const confirmLink = confirmToken?.token ? `${siteUrl}/booking/confirm?token=${confirmToken.token}` : '';
 
           const when = formatVisitWhen(slot_start);
@@ -377,10 +381,12 @@ Deno.serve(async (req: Request) => {
       };
 
       // Modelo proprio por destinatario (reschedule_client / reschedule_technician);
-      // sem nenhum configurado cai no aviso de nova reuniao de hoje e depois no
-      // texto padrao. O comercial nunca recebe os links do cliente.
-      const defaultSubject = 'Reunião reagendada — {{lead_name}}';
+      // sem nenhum configurado, o texto padrao do PROPRIO lado (nunca o do outro,
+      // nem o aviso de nova reuniao). O comercial nunca recebe os links do cliente.
       const buildMail = async (kind: 'client' | 'technician') => {
+        const defaultSubject = kind === 'client'
+          ? 'A sua visita foi reagendada'
+          : 'Reunião reagendada — {{lead_name}}';
         const vars = buildAudienceVars(baseVars, kind, {
           cancelUrl: cancelLink,
           leadPhone,
@@ -398,6 +404,11 @@ Deno.serve(async (req: Request) => {
         return {
           subject: renderSubject(defaultSubject, vars),
           html: defaultMeetingHtml({
+            audience: kind,
+            leadPhone: kind === 'technician' ? (leadPhone || undefined) : undefined,
+            leadEmail: kind === 'technician' ? (leadEmail || undefined) : undefined,
+            address: kind === 'technician' ? (item.location || undefined) : undefined,
+            appointmentUrl: kind === 'technician' ? `${siteUrlEnv.replace(/\/+$/, '')}/scheduling` : undefined,
             heading: 'Reunião reagendada',
             intro: kind === 'client'
               ? 'A sua visita foi reagendada para a data abaixo.'

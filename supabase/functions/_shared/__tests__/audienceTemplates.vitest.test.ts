@@ -16,10 +16,27 @@ function cfg(over: Partial<FormEmailConfig> = {}): FormEmailConfig {
   } as FormEmailConfig;
 }
 
-describe('pickAudienceTemplateId - por omissao nada muda', () => {
-  it('sem configuracao nenhuma devolve null (texto padrao) em todos os casos', () => {
-    for (const event of ['reminder', 'reschedule', 'cancel'] as const) {
-      for (const aud of ['client', 'technician'] as const) {
+const EVENTS = ['reminder', 'reschedule', 'cancel'] as const;
+const AUDIENCES = ['client', 'technician'] as const;
+
+// Cada destinatario, evento e idioma so olha para as suas proprias colunas.
+const OWN_COLUMN = {
+  client: { reminder: 'reminder_template_id', reschedule: 'reschedule_client_template_id', cancel: 'cancel_client_template_id' },
+  technician: {
+    reminder: 'reminder_technician_template_id',
+    reschedule: 'reschedule_technician_template_id',
+    cancel: 'cancel_technician_template_id',
+  },
+} as const;
+const OWN_PURPOSE = {
+  client: { reminder: 'reminder', reschedule: 'reschedule_client', cancel: 'cancel_client' },
+  technician: { reminder: 'reminder_technician', reschedule: 'reschedule_technician', cancel: 'cancel_technician' },
+} as const;
+
+describe('pickAudienceTemplateId - sem configuracao', () => {
+  it('sem configuracao nenhuma devolve null (texto por omissao do proprio lado) em todos os casos', () => {
+    for (const event of EVENTS) {
+      for (const aud of AUDIENCES) {
         expect(pickAudienceTemplateId(cfg(), event, aud, 'pt')).toBeNull();
       }
     }
@@ -27,52 +44,61 @@ describe('pickAudienceTemplateId - por omissao nada muda', () => {
 
   it('cfg nulo devolve null', () => {
     expect(pickAudienceTemplateId(null, 'reminder', 'client', 'pt')).toBeNull();
-  });
-
-  it('lembrete: as duas pontas usam reminder_template_id como hoje', () => {
-    const c = cfg({ reminder_template_id: 'R' });
-    expect(pickAudienceTemplateId(c, 'reminder', 'client', 'pt')).toBe('R');
-    expect(pickAudienceTemplateId(c, 'reminder', 'technician', 'pt')).toBe('R');
-  });
-
-  it('reagendamento: sem modelos novos usa meeting_notify_template_id como hoje', () => {
-    const c = cfg({ meeting_notify_template_id: 'M' });
-    expect(pickAudienceTemplateId(c, 'reschedule', 'client', 'pt')).toBe('M');
-    expect(pickAudienceTemplateId(c, 'reschedule', 'technician', 'pt')).toBe('M');
-  });
-
-  it('cancelamento nunca reutiliza meeting_notify nem reminder', () => {
-    const c = cfg({ meeting_notify_template_id: 'M', reminder_template_id: 'R' });
-    expect(pickAudienceTemplateId(c, 'cancel', 'client', 'pt')).toBeNull();
-    expect(pickAudienceTemplateId(c, 'cancel', 'technician', 'pt')).toBeNull();
+    expect(pickAudienceTemplateId(null, 'reminder', 'technician', 'pt')).toBeNull();
   });
 });
 
-describe('pickAudienceTemplateId - recurso em cadeia', () => {
-  it('comercial com modelo proprio usa-o', () => {
-    const c = cfg({ reminder_template_id: 'R', reminder_technician_template_id: 'RT' });
-    expect(pickAudienceTemplateId(c, 'reminder', 'technician', 'pt')).toBe('RT');
-    expect(pickAudienceTemplateId(c, 'reminder', 'client', 'pt')).toBe('R');
+describe('pickAudienceTemplateId - separacao total', () => {
+  it('cada destinatario usa o seu modelo em cada evento', () => {
+    for (const event of EVENTS) {
+      for (const aud of AUDIENCES) {
+        const c = cfg({ [OWN_COLUMN[aud][event]]: 'OWN' } as Partial<FormEmailConfig>);
+        expect(pickAudienceTemplateId(c, event, aud, 'pt')).toBe('OWN');
+      }
+    }
   });
 
-  it('comercial sem modelo proprio cai no do cliente antes da coluna antiga', () => {
-    const c = cfg({ reschedule_client_template_id: 'RC', meeting_notify_template_id: 'M' });
-    expect(pickAudienceTemplateId(c, 'reschedule', 'technician', 'pt')).toBe('RC');
-    expect(pickAudienceTemplateId(c, 'reschedule', 'client', 'pt')).toBe('RC');
+  it('nenhum lado cai para o outro, em nenhum evento nem idioma', () => {
+    for (const event of EVENTS) {
+      for (const aud of AUDIENCES) {
+        const other = aud === 'client' ? 'technician' : 'client';
+        // So o outro lado esta configurado (coluna e idioma).
+        const c = cfg({
+          [OWN_COLUMN[other][event]]: 'OTHER',
+          email_locale_templates: { [OWN_PURPOSE[other][event]]: { pt: 'OTHER-pt', en: 'OTHER-en' } },
+        } as Partial<FormEmailConfig>);
+        for (const locale of ['pt', 'pt-PT', 'en', 'en-GB', 'fr', null]) {
+          expect(pickAudienceTemplateId(c, event, aud, locale)).toBeNull();
+        }
+      }
+    }
   });
 
-  it('cliente nao herda o modelo do comercial', () => {
-    const c = cfg({ cancel_technician_template_id: 'CT' });
-    expect(pickAudienceTemplateId(c, 'cancel', 'client', 'pt')).toBeNull();
-    expect(pickAudienceTemplateId(c, 'cancel', 'technician', 'pt')).toBe('CT');
+  it('o comercial nunca recebe o modelo do cliente, mesmo vazio o dele', () => {
+    const c = cfg({ reminder_template_id: 'R', reschedule_client_template_id: 'RC', cancel_client_template_id: 'CC' });
+    expect(pickAudienceTemplateId(c, 'reminder', 'technician', 'pt')).toBeNull();
+    expect(pickAudienceTemplateId(c, 'reschedule', 'technician', 'pt')).toBeNull();
+    expect(pickAudienceTemplateId(c, 'cancel', 'technician', 'pt')).toBeNull();
   });
 
-  it('comercial de cancelamento sem modelo usa o do cliente', () => {
-    const c = cfg({ cancel_client_template_id: 'CC' });
-    expect(pickAudienceTemplateId(c, 'cancel', 'technician', 'pt')).toBe('CC');
+  it('o cliente nunca recebe o modelo do aviso de nova reuniao (meeting_notify) nem o do comercial', () => {
+    const c = cfg({
+      meeting_notify_template_id: 'M',
+      reminder_technician_template_id: 'RT',
+      reschedule_technician_template_id: 'ST',
+      cancel_technician_template_id: 'CT',
+    });
+    for (const event of EVENTS) {
+      expect(pickAudienceTemplateId(c, event, 'client', 'pt')).toBeNull();
+    }
   });
 
-  it('respeita o idioma por destinatario', () => {
+  it('o comercial tambem nao usa o aviso de nova reuniao como modelo de reagendamento', () => {
+    const c = cfg({ meeting_notify_template_id: 'M' });
+    expect(pickAudienceTemplateId(c, 'reschedule', 'technician', 'pt')).toBeNull();
+  });
+
+  it('respeita o idioma por destinatario e cai na coluna do proprio lado', () => {
     const c = cfg({
       reminder_technician_template_id: 'RT',
       email_locale_templates: { reminder_technician: { en: 'RT-en' } },

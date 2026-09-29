@@ -23,8 +23,14 @@ export interface FormEmailConfig {
   reminder_enabled: boolean;
   reminder_hours_before: number | null;
   reminder_template_id: string | null;
-  // Modelo proprio por destinatario (cliente / comercial). null = cai no modelo
-  // existente ou no texto padrao (ver audienceTemplates.ts). Migration 20261204700000.
+  // Lembrete PROPRIO do comercial. null = segue o valor do cliente
+  // (reminder_enabled / reminder_hours_before); valor explicito manda.
+  // Migration 20261204810000 (ver reminderRule.ts).
+  reminder_technician_enabled: boolean | null;
+  reminder_technician_hours_before: number | null;
+  // Modelo proprio por destinatario (cliente / comercial). null = texto por
+  // omissao do PROPRIO lado, nunca o modelo do outro (ver audienceTemplates.ts).
+  // Migration 20261204700000.
   reminder_technician_template_id: string | null;
   reschedule_client_template_id: string | null;
   reschedule_technician_template_id: string | null;
@@ -203,7 +209,7 @@ export async function loadFormEmailConfig(
   const { data } = await supabase
     .from("form_branding")
     .select(
-      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reschedule_notify_commercial, reschedule_notify_emails, cancel_notify_commercial, cancel_notify_emails, reminder_enabled, reminder_hours_before, reminder_template_id, reminder_technician_template_id, reschedule_client_template_id, reschedule_technician_template_id, cancel_client_template_id, cancel_technician_template_id, confirmation_sms_enabled, confirmation_sms_message, confirmation_sms_include_link, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours, primary_color, logo_url",
+      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reschedule_notify_commercial, reschedule_notify_emails, cancel_notify_commercial, cancel_notify_emails, reminder_enabled, reminder_hours_before, reminder_technician_enabled, reminder_technician_hours_before, reminder_template_id, reminder_technician_template_id, reschedule_client_template_id, reschedule_technician_template_id, cancel_client_template_id, cancel_technician_template_id, confirmation_sms_enabled, confirmation_sms_message, confirmation_sms_include_link, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours, primary_color, logo_url",
     )
     .eq("form_id", formId)
     .maybeSingle();
@@ -403,6 +409,15 @@ export function defaultMeetingHtml(opts: {
   // sozinhos aqui, sem a empresa escrever HTML nenhum.
   primaryColor?: string | null;
   logoUrl?: string | null;
+  // Destinatario do texto. "client": sem a linha "Cliente" (o cliente sabe quem
+  // e). "technician": mostra a lead (nome, telefone, email), a morada e o botao
+  // "Abrir na agenda". Sem audience: o desenho antigo (avisos internos ainda nao
+  // separados).
+  audience?: "client" | "technician";
+  leadPhone?: string;
+  leadEmail?: string;
+  address?: string;
+  appointmentUrl?: string;
 }): string {
   const brand = safeHexColor(opts.primaryColor, "#85D3BE");
   // logoUrl e um URL guardado pelo proprio sistema (upload em Personalizacao),
@@ -416,9 +431,20 @@ export function defaultMeetingHtml(opts: {
         <td style="padding:10px 0 10px 16px;border-top:1px solid #EEF2F0;color:#111827;font-size:14px;font-weight:600;text-align:right">${escapeHtml(value)}</td>
       </tr>`;
   const rows: string[] = [];
-  rows.push(row("Cliente", opts.leadName || "-"));
+  if (opts.audience === "technician") {
+    rows.push(row("Lead", opts.leadName || "-"));
+    if (opts.leadPhone) rows.push(row("Telefone", opts.leadPhone));
+    if (opts.leadEmail) rows.push(row("Email", opts.leadEmail));
+  } else if (opts.audience !== "client") {
+    rows.push(row("Cliente", opts.leadName || "-"));
+  }
   rows.push(row("Data / hora", opts.when || "-"));
-  if (opts.location) rows.push(row("Local", opts.location));
+  if (opts.audience === "technician") {
+    const where = opts.address || opts.location;
+    if (where) rows.push(row("Morada", where));
+  } else if (opts.location) {
+    rows.push(row("Local", opts.location));
+  }
   if (opts.technicianName) rows.push(row("Técnico", opts.technicianName));
 
   // cancelUrl/confirmUrl are system-built URLs (buildManageUrl / confirm-booking token), not free user text — safe as href.
@@ -430,6 +456,12 @@ export function defaultMeetingHtml(opts: {
   const cancel = opts.cancelUrl
     ? `<p style="margin:${opts.confirmUrl ? "14px" : "24px"} 0 0;text-align:center"><a href="${encodeURI(opts.cancelUrl)}" style="color:#6b7280;font-size:13px;text-decoration:underline">Gerir ou cancelar agendamento</a></p>`
     : "";
+  // appointmentUrl e um URL construido pelo sistema (site + /scheduling), so para o comercial.
+  const agendaButton = opts.audience === "technician" && opts.appointmentUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px auto 0"><tr><td style="border-radius:10px;background:#111827">
+        <a href="${encodeURI(opts.appointmentUrl)}" style="display:inline-block;padding:13px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;font-family:Inter,system-ui,sans-serif">Abrir na agenda</a>
+      </td></tr></table>`
+    : "";
 
   return `
   <div style="font-family:Inter,system-ui,sans-serif;background:#F4F6F5;padding:32px 16px">
@@ -440,6 +472,7 @@ export function defaultMeetingHtml(opts: {
         <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.5">${escapeHtml(opts.intro)}</p>
         <table role="presentation" style="width:100%;border-collapse:collapse">${rows.join("")}</table>
         ${confirmButton}
+        ${agendaButton}
         ${cancel}
       </div>
     </div>

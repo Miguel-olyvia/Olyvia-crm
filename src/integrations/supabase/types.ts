@@ -8473,6 +8473,8 @@ export type Database = {
           reminder_enabled: boolean
           reminder_hours_before: number
           reminder_sms_enabled: boolean
+          reminder_technician_enabled: boolean | null
+          reminder_technician_hours_before: number | null
           reminder_technician_template_id: string | null
           reminder_template_id: string | null
           required_field_label: string | null
@@ -8619,6 +8621,8 @@ export type Database = {
           reminder_enabled?: boolean
           reminder_hours_before?: number
           reminder_sms_enabled?: boolean
+          reminder_technician_enabled?: boolean | null
+          reminder_technician_hours_before?: number | null
           reminder_technician_template_id?: string | null
           reminder_template_id?: string | null
           required_field_label?: string | null
@@ -8765,6 +8769,8 @@ export type Database = {
           reminder_enabled?: boolean
           reminder_hours_before?: number
           reminder_sms_enabled?: boolean
+          reminder_technician_enabled?: boolean | null
+          reminder_technician_hours_before?: number | null
           reminder_technician_template_id?: string | null
           reminder_template_id?: string | null
           required_field_label?: string | null

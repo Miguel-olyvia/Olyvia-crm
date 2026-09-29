@@ -23,6 +23,7 @@ import { resolveOwnerResourceIds, restrictCandidatesToOwner } from '../_shared/k
 import { buildAudienceVars } from '../_shared/audienceTemplates.ts';
 import { createReminderLines } from '../_shared/reminderLines.ts';
 import { formatVisitWhen } from '../_shared/reminderContent.ts';
+import { reminderRuleFor } from '../_shared/reminderRule.ts';
 
 initSentry();
 
@@ -989,6 +990,7 @@ Deno.serve(async (req: Request) => {
         const confHtml = confTpl?.body_html
           ? renderHtml(confTpl.body_html, baseVars)
           : defaultMeetingHtml({
+              audience: 'client',
               heading: 'Visita confirmada',
               intro: 'A sua visita foi agendada com sucesso.',
               leadName: leadFullName, when: whenFormatted,
@@ -1087,6 +1089,11 @@ Deno.serve(async (req: Request) => {
           const html = tpl?.body_html
             ? renderHtml(tpl.body_html, notifyVars)
             : defaultMeetingHtml({
+                audience: 'technician',
+                leadPhone: String(leadPhone || '') || undefined,
+                leadEmail: leadEmail || undefined,
+                address: fullLocation || undefined,
+                appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
                 heading: 'Nova reunião agendada',
                 intro: 'Foi marcada uma nova visita através do formulário.',
                 leadName: leadFullName, when: whenFormatted,
@@ -1111,10 +1118,15 @@ Deno.serve(async (req: Request) => {
       // Ligado a visita: se ela mudar (hora, comercial, cancelamento) o
       // processador acerta o lembrete (ver _shared/reminderRunner.ts). Cada
       // destinatario recebe o modelo proprio (form_branding.reminder_*_template_id).
-      if (emailCfg?.reminder_enabled) {
-        const hoursBefore = emailCfg.reminder_hours_before && emailCfg.reminder_hours_before > 0 ? emailCfg.reminder_hours_before : 2;
-        const remindAt = new Date(new Date(slot_start).getTime() - hoursBefore * 3600000);
-        if (remindAt.getTime() > Date.now()) {
+      // Cada destinatario tem o seu interruptor e as suas horas (reminderRule.ts):
+      // avanca se algum dos dois estiver ligado e ainda a tempo.
+      const clientReminder = reminderRuleFor(emailCfg, 'client');
+      const technicianReminder = reminderRuleFor(emailCfg, 'technician');
+      const remindOk = (rule: { enabled: boolean; hoursBefore: number }) =>
+        rule.enabled && new Date(slot_start).getTime() - rule.hoursBefore * 3600000 > Date.now();
+      const clientReminderOk = remindOk(clientReminder);
+      if (emailCfg && (clientReminderOk || remindOk(technicianReminder))) {
+        {
           // Regra 12: link "Confirmo a visita" -- so nasce aqui, porque so
           // faz sentido pedir confirmacao quando existe um lembrete a sair.
           // Token proprio (action 'confirm'), distinto do de cancelar;
@@ -1124,15 +1136,19 @@ Deno.serve(async (req: Request) => {
           // gerir/cancelar, "confirmar" nao passa pelo dominio proprio da
           // organizacao (booking_manage_url_template): essa pagina, quando
           // configurada, e a deles e nao sabe lidar com esta accao nova.
-          const { data: confirmToken } = await supabase
-            .from('booking_tokens')
-            .insert({
-              schedule_item_id: scheduleItem.id,
-              action: 'confirm',
-              expires_at: slot_start,
-            })
-            .select('token')
-            .single();
+          // O link "Confirmo" e do cliente: so nasce se o lembrete do CLIENTE
+          // estiver ligado e ainda a tempo (um lembrete so do comercial nao o leva).
+          const { data: confirmToken } = clientReminderOk
+            ? await supabase
+              .from('booking_tokens')
+              .insert({
+                schedule_item_id: scheduleItem.id,
+                action: 'confirm',
+                expires_at: slot_start,
+              })
+              .select('token')
+              .single()
+            : { data: null };
           const confirmLink = confirmToken?.token
             ? `${siteUrlEnv}/booking/confirm?token=${confirmToken.token}`
             : '';

@@ -325,8 +325,10 @@ Deno.serve(async (req: Request) => {
       // (Cancel flow: pickAudienceTemplateId never falls back to meeting_notify.)
       // Modelo proprio por destinatario (cancel_client / cancel_technician); sem
       // nenhum configurado, o texto padrao abaixo, exactamente como antes.
-      const defaultSubject = 'Visita cancelada — {{lead_name}}';
       const buildMail = async (kind: 'client' | 'technician') => {
+        const defaultSubject = kind === 'client'
+          ? 'A sua visita foi cancelada'
+          : 'Visita cancelada — {{lead_name}}';
         const vars = buildAudienceVars(baseVars, kind, {
           cancelUrl: manageLink,
           leadPhone,
@@ -345,6 +347,11 @@ Deno.serve(async (req: Request) => {
         return {
           subject: renderSubject(defaultSubject, vars),
           html: defaultMeetingHtml({
+            audience: kind,
+            leadPhone: kind === 'technician' ? (leadPhone || undefined) : undefined,
+            leadEmail: kind === 'technician' ? (leadEmail || undefined) : undefined,
+            address: kind === 'technician' ? (item.location || undefined) : undefined,
+            appointmentUrl: kind === 'technician' ? `${siteUrlEnv.replace(/\/+$/, '')}/scheduling` : undefined,
             heading: 'Visita cancelada',
             intro: kind === 'client'
               ? 'A sua visita agendada foi cancelada.'

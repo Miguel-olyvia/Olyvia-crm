@@ -19,7 +19,7 @@ const VARS = {
 describe('buildReminderMail', () => {
   it('cliente: texto padrao com links de gerir e confirmar', () => {
     const m = buildReminderMail({ audience: 'client', template: null, vars: VARS, brand: null });
-    expect(m.subject).toBe('Lembrete: reunião segunda-feira, 5 de outubro de 2026, 10:00');
+    expect(m.subject).toBe('Lembrete da sua visita — segunda-feira, 5 de outubro de 2026, 10:00');
     expect(m.html).toContain('Este é um lembrete da sua visita agendada.');
     expect(m.html).toContain('booking/manage?token=abc');
     expect(m.html).toContain('booking/confirm?token=xyz');
@@ -55,7 +55,62 @@ describe('buildReminderMail', () => {
       vars: VARS,
       brand: null,
     });
-    expect(m.subject).toContain('Lembrete: reunião');
+    expect(m.subject).toContain('Lembrete da sua visita');
+  });
+});
+
+describe('buildReminderMail: separacao cliente / comercial', () => {
+  const TECH_VARS = {
+    ...VARS,
+    cancel_url: '',
+    confirm_url: '',
+    lead_phone: '910000000',
+    lead_email: 'rita@x.pt',
+    address: 'Rua A 1, Lisboa',
+    appointment_url: 'https://app.test/scheduling',
+  };
+  const tech = () => buildReminderMail({ audience: 'technician', template: null, vars: TECH_VARS, brand: null });
+  const cli = () => buildReminderMail({ audience: 'client', template: null, vars: VARS, brand: null });
+
+  it('o comercial nunca le «a sua visita» nem no assunto nem no corpo', () => {
+    const m = tech();
+    expect(m.subject).not.toMatch(/sua visita/i);
+    expect(m.html).not.toMatch(/sua visita/i);
+    expect(m.subject).toBe('Lembrete: visita a Rita Sousa — segunda-feira, 5 de outubro de 2026, 10:00');
+  });
+
+  it('o comercial ve a lead (nome, telefone, email), a morada e o botao da agenda', () => {
+    const m = tech();
+    expect(m.html).toContain('Rita Sousa');
+    expect(m.html).toContain('910000000');
+    expect(m.html).toContain('rita@x.pt');
+    expect(m.html).toContain('Rua A 1, Lisboa');
+    expect(m.html).toContain('Abrir na agenda');
+    expect(m.html).toContain('https://app.test/scheduling');
+  });
+
+  it('o comercial nao leva os links do cliente', () => {
+    const m = buildReminderMail({ audience: 'technician', template: null, vars: VARS, brand: null });
+    expect(m.html).not.toContain('booking/manage');
+    expect(m.html).not.toContain('booking/confirm');
+    expect(m.html).not.toContain('Confirmo a visita');
+  });
+
+  it('o cliente nao ve a linha «Cliente» nem o botao da agenda nem dados de contacto de lead', () => {
+    const m = cli();
+    expect(m.html).not.toContain('>Cliente<');
+    expect(m.html).not.toContain('Abrir na agenda');
+    expect(m.html).not.toContain('>Lead<');
+    expect(m.html).toContain('Data / hora');
+    expect(m.html).toContain('Rua A, Lisboa');
+  });
+
+  it('modelo sem assunto: cada lado cai no assunto por omissao do seu lado', () => {
+    const t = { subject: '', body_html: '<p>x</p>' };
+    expect(buildReminderMail({ audience: 'technician', template: t, vars: TECH_VARS, brand: null }).subject)
+      .toContain('Lembrete: visita a Rita Sousa');
+    expect(buildReminderMail({ audience: 'client', template: t, vars: VARS, brand: null }).subject)
+      .toContain('Lembrete da sua visita');
   });
 });
 
