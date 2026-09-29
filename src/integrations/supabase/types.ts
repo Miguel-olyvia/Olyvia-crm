@@ -8384,8 +8384,10 @@ export type Database = {
           button_option_border_width: string | null
           button_option_padding: string | null
           button_text_color: string | null
+          cancel_client_template_id: string | null
           cancel_notify_commercial: boolean
           cancel_notify_emails: string | null
+          cancel_technician_template_id: string | null
           card_border_color: string | null
           card_border_radius: string | null
           card_border_width: string | null
@@ -8471,10 +8473,13 @@ export type Database = {
           reminder_enabled: boolean
           reminder_hours_before: number
           reminder_sms_enabled: boolean
+          reminder_technician_template_id: string | null
           reminder_template_id: string | null
           required_field_label: string | null
+          reschedule_client_template_id: string | null
           reschedule_notify_commercial: boolean
           reschedule_notify_emails: string | null
+          reschedule_technician_template_id: string | null
           scheduling_invite_delays_hours: number[]
           scheduling_invite_enabled: boolean
           secondary_color: string | null
@@ -8525,8 +8530,10 @@ export type Database = {
           button_option_border_width?: string | null
           button_option_padding?: string | null
           button_text_color?: string | null
+          cancel_client_template_id?: string | null
           cancel_notify_commercial?: boolean
           cancel_notify_emails?: string | null
+          cancel_technician_template_id?: string | null
           card_border_color?: string | null
           card_border_radius?: string | null
           card_border_width?: string | null
@@ -8612,10 +8619,13 @@ export type Database = {
           reminder_enabled?: boolean
           reminder_hours_before?: number
           reminder_sms_enabled?: boolean
+          reminder_technician_template_id?: string | null
           reminder_template_id?: string | null
           required_field_label?: string | null
+          reschedule_client_template_id?: string | null
           reschedule_notify_commercial?: boolean
           reschedule_notify_emails?: string | null
+          reschedule_technician_template_id?: string | null
           scheduling_invite_delays_hours?: number[]
           scheduling_invite_enabled?: boolean
           secondary_color?: string | null
@@ -8666,8 +8676,10 @@ export type Database = {
           button_option_border_width?: string | null
           button_option_padding?: string | null
           button_text_color?: string | null
+          cancel_client_template_id?: string | null
           cancel_notify_commercial?: boolean
           cancel_notify_emails?: string | null
+          cancel_technician_template_id?: string | null
           card_border_color?: string | null
           card_border_radius?: string | null
           card_border_width?: string | null
@@ -8753,10 +8765,13 @@ export type Database = {
           reminder_enabled?: boolean
           reminder_hours_before?: number
           reminder_sms_enabled?: boolean
+          reminder_technician_template_id?: string | null
           reminder_template_id?: string | null
           required_field_label?: string | null
+          reschedule_client_template_id?: string | null
           reschedule_notify_commercial?: boolean
           reschedule_notify_emails?: string | null
+          reschedule_technician_template_id?: string | null
           scheduling_invite_delays_hours?: number[]
           scheduling_invite_enabled?: boolean
           secondary_color?: string | null
@@ -8824,6 +8839,41 @@ export type Database = {
           {
             foreignKeyName: "form_branding_reminder_template_id_fkey"
             columns: ["reminder_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_branding_cancel_client_template_id_fkey"
+            columns: ["cancel_client_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_branding_cancel_technician_template_id_fkey"
+            columns: ["cancel_technician_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_branding_reminder_technician_template_id_fkey"
+            columns: ["reminder_technician_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_branding_reschedule_client_template_id_fkey"
+            columns: ["reschedule_client_template_id"]
+            isOneToOne: false
+            referencedRelation: "email_templates"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "form_branding_reschedule_technician_template_id_fkey"
+            columns: ["reschedule_technician_template_id"]
             isOneToOne: false
             referencedRelation: "email_templates"
             referencedColumns: ["id"]
@@ -23200,6 +23250,10 @@ export type Database = {
         Args: { p_ids: string[]; p_organization_id: string }
         Returns: number
       }
+      rpc_bulk_set_entity_owner: {
+        Args: { p_assigned_to: string; p_ids: string[]; p_kind: string }
+        Returns: Json
+      }
       rpc_bulk_status_brand: {
         Args: {
           p_ids: string[]
@@ -25296,6 +25350,19 @@ export type Database = {
         Args: { p_id: string; p_new_owner_id: string }
         Returns: string
       }
+      rpc_reassign_visit: {
+        Args: {
+          p_end: string
+          p_item_id: string
+          p_new_user_id: string
+          p_start: string
+        }
+        Returns: Json
+      }
+      rpc_set_entity_owner: {
+        Args: { p_assigned_to: string; p_id: string; p_kind: string }
+        Returns: Json
+      }
       rpc_receive_purchase_order: {
         Args: {
           p_actual_delivery_date?: string
@@ -26664,7 +26731,7 @@ export type Database = {
       }
       rpc_update_schedule_item_assignees: {
         Args: { p_item_id: string; p_resource_ids?: string[] }
-        Returns: undefined
+        Returns: Json
       }
       rpc_update_service: {
         Args: {

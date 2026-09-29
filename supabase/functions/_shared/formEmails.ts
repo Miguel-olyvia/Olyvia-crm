@@ -23,6 +23,13 @@ export interface FormEmailConfig {
   reminder_enabled: boolean;
   reminder_hours_before: number | null;
   reminder_template_id: string | null;
+  // Modelo proprio por destinatario (cliente / comercial). null = cai no modelo
+  // existente ou no texto padrao (ver audienceTemplates.ts). Migration 20261204700000.
+  reminder_technician_template_id: string | null;
+  reschedule_client_template_id: string | null;
+  reschedule_technician_template_id: string | null;
+  cancel_client_template_id: string | null;
+  cancel_technician_template_id: string | null;
   // SMS ao lado do email correspondente -- mesma hora de reminder_hours_before,
   // desligados por omissao tal como os interruptores de email ja o sao.
   confirmation_sms_enabled: boolean;
@@ -55,7 +62,15 @@ export interface FormEmailConfig {
   logo_url: string | null;
 }
 
-export type EmailPurpose = "confirmation" | "meeting_notify" | "reminder";
+export type EmailPurpose =
+  | "confirmation"
+  | "meeting_notify"
+  | "reminder"
+  | "reminder_technician"
+  | "reschedule_client"
+  | "reschedule_technician"
+  | "cancel_client"
+  | "cancel_technician";
 
 /** Normalize a locale to its short form ("pt-PT" -> "pt"). */
 export function shortLocale(locale?: string | null): string | null {
@@ -188,7 +203,7 @@ export async function loadFormEmailConfig(
   const { data } = await supabase
     .from("form_branding")
     .select(
-      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reschedule_notify_commercial, reschedule_notify_emails, cancel_notify_commercial, cancel_notify_emails, reminder_enabled, reminder_hours_before, reminder_template_id, confirmation_sms_enabled, confirmation_sms_message, confirmation_sms_include_link, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours, primary_color, logo_url",
+      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reschedule_notify_commercial, reschedule_notify_emails, cancel_notify_commercial, cancel_notify_emails, reminder_enabled, reminder_hours_before, reminder_template_id, reminder_technician_template_id, reschedule_client_template_id, reschedule_technician_template_id, cancel_client_template_id, cancel_technician_template_id, confirmation_sms_enabled, confirmation_sms_message, confirmation_sms_include_link, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours, primary_color, logo_url",
     )
     .eq("form_id", formId)
     .maybeSingle();

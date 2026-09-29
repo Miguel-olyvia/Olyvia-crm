@@ -5,7 +5,12 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { functions: { invoke: invokeMock } },
 }));
 
-import { detectScheduleChanges, notifyClientOfScheduleChange } from "../notifyClientOfScheduleChange";
+import {
+  detectScheduleChanges,
+  filterChangesBySettings,
+  notifyClientOfScheduleChange,
+  notifyVisitsIfEnabled,
+} from "../notifyClientOfScheduleChange";
 
 describe("detectScheduleChanges", () => {
   it("a mesma data em formato ISO diferente nao conta como mudanca", () => {
@@ -56,6 +61,37 @@ describe("detectScheduleChanges", () => {
 
   it("prev null devolve []", () => {
     expect(detectScheduleChanges(null, { start_datetime: "2026-10-05T10:00:00Z" }, ["a"])).toEqual([]);
+  });
+});
+
+describe("notifyVisitsIfEnabled", () => {
+  it("interruptor de reatribuicao desligado: zero chamadas a edge function", async () => {
+    invokeMock.mockClear();
+    const n = await notifyVisitsIfEnabled(["v1", "v2"], ["assignee"], { notify_client_on_reassign: false });
+    expect(n).toBe(0);
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("interruptor ligado: avisa cada visita (sem repetidas) e conta as que enviaram", async () => {
+    invokeMock.mockClear();
+    invokeMock
+      .mockResolvedValueOnce({ data: { sent: { email: true, sms: false }, skipped: null }, error: null })
+      .mockResolvedValueOnce({ data: { sent: { email: false, sms: false }, skipped: "no_lead" }, error: null });
+    const n = await notifyVisitsIfEnabled(["v1", "v2", "v1"], ["assignee"], { notify_client_on_reassign: true });
+    expect(invokeMock).toHaveBeenCalledTimes(2);
+    expect(n).toBe(1);
+  });
+
+  it("so envia as mudancas cujo interruptor esta ligado", () => {
+    expect(
+      filterChangesBySettings(["datetime", "assignee"], { notify_client_on_reschedule: false, notify_client_on_reassign: true }),
+    ).toEqual(["assignee"]);
+  });
+
+  it("403 por ambito nao lanca excepcao: fica registado e devolve 0", async () => {
+    invokeMock.mockClear();
+    invokeMock.mockResolvedValueOnce({ data: null, error: Object.assign(new Error("Forbidden"), { context: { status: 403 } }) });
+    await expect(notifyVisitsIfEnabled(["v1"], ["assignee"], { notify_client_on_reassign: true })).resolves.toBe(0);
   });
 });
 

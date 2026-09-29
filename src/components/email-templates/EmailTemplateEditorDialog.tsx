@@ -94,6 +94,19 @@ const DEAL_VARS: VarDef[] = [
   { key: "deal_value", label: "Valor do negócio", example: "€8.500" },
 ];
 
+// Variaveis dos emails da Agenda (confirmacao, lembrete, reagendamento, cancelamento).
+// Os links dependem de quem recebe: o cliente tem cancel_url e confirm_url; o
+// comercial nunca os recebe (ficam vazios) e tem appointment_url, que abre o calendario.
+const AGENDA_VARS: VarDef[] = [
+  { key: "meeting_date", label: "Data da visita", example: "quinta-feira, 2 de outubro de 2026" },
+  { key: "meeting_datetime", label: "Data e hora da visita", example: "quinta-feira, 2 de outubro de 2026, 10:00" },
+  { key: "location", label: "Local da visita", example: "Rua das Flores 12, Lisboa" },
+  { key: "technician_name", label: "Nome do comercial da visita", example: "Ana Silva" },
+  { key: "cancel_url", label: "Link para gerir/cancelar (só no email do cliente)", example: "https://app.olyvia.pt/booking/manage?token=abc" },
+  { key: "confirm_url", label: "Link para confirmar presença (só no email do cliente)", example: "https://app.olyvia.pt/confirm?token=abc" },
+  { key: "appointment_url", label: "Link para ver a visita no calendário (só no email do comercial)", example: "https://app.olyvia.pt/scheduling" },
+];
+
 function getVarCategories(module: string): VarCategory[] {
   const cats: VarCategory[] = [
     { category: "Globais", icon: Globe, vars: GLOBAL_VARS },
@@ -125,6 +138,7 @@ function getVarCategories(module: string): VarCategory[] {
       cats.push({ category: "Negócio", icon: Handshake, vars: DEAL_VARS });
       break;
   }
+  cats.push({ category: "Agenda", icon: Clock, vars: AGENDA_VARS });
   return cats;
 }
 

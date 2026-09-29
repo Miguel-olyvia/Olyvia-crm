@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/lib/toast";
 import { Loader2, Palette, Type, Layout, CheckCircle, Image, Code, Sliders, ImageIcon, Mail } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
 import { BrandingLivePreview } from "@/components/forms/BrandingLivePreview";
 import { LANGUAGES } from "@/constants/languages";
@@ -101,6 +102,11 @@ interface BrandingData {
   reminder_enabled: boolean;
   reminder_hours_before: number;
   reminder_template_id: string | null;
+  reminder_technician_template_id: string | null;
+  reschedule_client_template_id: string | null;
+  reschedule_technician_template_id: string | null;
+  cancel_client_template_id: string | null;
+  cancel_technician_template_id: string | null;
   confirmation_sms_enabled: boolean;
   confirmation_sms_message: string;
   confirmation_sms_include_link: boolean;
@@ -161,6 +167,11 @@ const defaultBranding: BrandingData = {
   reminder_enabled: false,
   reminder_hours_before: 2,
   reminder_template_id: null,
+  reminder_technician_template_id: null,
+  reschedule_client_template_id: null,
+  reschedule_technician_template_id: null,
+  cancel_client_template_id: null,
+  cancel_technician_template_id: null,
   confirmation_sms_enabled: false,
   confirmation_sms_message: "",
   confirmation_sms_include_link: false,
@@ -263,6 +274,65 @@ interface SmtpOption {
   id: string;
   name: string;
   is_default: boolean;
+}
+
+interface EventTemplatePairProps {
+  idPrefix: string;
+  options: EmailTemplateOption[];
+  clientValue: string | null;
+  technicianValue: string | null;
+  onClientChange: (id: string | null) => void;
+  onTechnicianChange: (id: string | null) => void;
+}
+
+const TEMPLATE_DEFAULT = "__default__";
+
+/** Dois modelos de email de um evento: um para o cliente, outro para o comercial. */
+function EventTemplatePair({
+  idPrefix,
+  options,
+  clientValue,
+  technicianValue,
+  onClientChange,
+  onTechnicianChange,
+}: EventTemplatePairProps) {
+  const { t } = useTranslation();
+  const clientId = `${idPrefix}-client-template`;
+  const technicianId = `${idPrefix}-technician-template`;
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      <div className="space-y-1">
+        <Label htmlFor={clientId} className="text-xs">{t("emailAudience.forClient")}</Label>
+        <Select
+          value={clientValue || TEMPLATE_DEFAULT}
+          onValueChange={(v) => onClientChange(v === TEMPLATE_DEFAULT ? null : v)}
+        >
+          <SelectTrigger id={clientId}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={TEMPLATE_DEFAULT}>{t("emailAudience.systemDefault")}</SelectItem>
+            {options.map((tpl) => (
+              <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="space-y-1">
+        <Label htmlFor={technicianId} className="text-xs">{t("emailAudience.forCommercial")}</Label>
+        <Select
+          value={technicianValue || TEMPLATE_DEFAULT}
+          onValueChange={(v) => onTechnicianChange(v === TEMPLATE_DEFAULT ? null : v)}
+        >
+          <SelectTrigger id={technicianId}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value={TEMPLATE_DEFAULT}>{t("emailAudience.sameAsClient")}</SelectItem>
+            {options.map((tpl) => (
+              <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    </div>
+  );
 }
 
 export function FormBrandingConfig({ open, onOpenChange, formId, formName }: FormBrandingConfigProps) {
@@ -408,6 +478,11 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
           reminder_enabled: (data as any).reminder_enabled ?? false,
           reminder_hours_before: (data as any).reminder_hours_before ?? 2,
           reminder_template_id: (data as any).reminder_template_id ?? null,
+          reminder_technician_template_id: (data as any).reminder_technician_template_id ?? null,
+          reschedule_client_template_id: (data as any).reschedule_client_template_id ?? null,
+          reschedule_technician_template_id: (data as any).reschedule_technician_template_id ?? null,
+          cancel_client_template_id: (data as any).cancel_client_template_id ?? null,
+          cancel_technician_template_id: (data as any).cancel_technician_template_id ?? null,
           confirmation_sms_enabled: (data as any).confirmation_sms_enabled ?? false,
           confirmation_sms_message: (data as any).confirmation_sms_message ?? "",
           confirmation_sms_include_link: (data as any).confirmation_sms_include_link ?? false,
@@ -1127,6 +1202,14 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
                       onCheckedChange={(v) => setBranding({ ...branding, reschedule_notify_commercial: v })}
                     />
                   </div>
+                  <EventTemplatePair
+                    idPrefix="reschedule"
+                    options={emailTemplateOptions}
+                    clientValue={branding.reschedule_client_template_id}
+                    technicianValue={branding.reschedule_technician_template_id}
+                    onClientChange={(id) => setBranding({ ...branding, reschedule_client_template_id: id })}
+                    onTechnicianChange={(id) => setBranding({ ...branding, reschedule_technician_template_id: id })}
+                  />
                   {branding.reschedule_notify_commercial && (
                     <div className="space-y-1">
                       <Label className="text-xs">Emails adicionais a notificar</Label>
@@ -1154,6 +1237,14 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
                       onCheckedChange={(v) => setBranding({ ...branding, cancel_notify_commercial: v })}
                     />
                   </div>
+                  <EventTemplatePair
+                    idPrefix="cancel"
+                    options={emailTemplateOptions}
+                    clientValue={branding.cancel_client_template_id}
+                    technicianValue={branding.cancel_technician_template_id}
+                    onClientChange={(id) => setBranding({ ...branding, cancel_client_template_id: id })}
+                    onTechnicianChange={(id) => setBranding({ ...branding, cancel_technician_template_id: id })}
+                  />
                   {branding.cancel_notify_commercial && (
                     <div className="space-y-1">
                       <Label className="text-xs">Emails adicionais a notificar</Label>
@@ -1194,26 +1285,14 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
                           }
                         />
                       </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Modelo de email</Label>
-                        <Select
-                          value={branding.reminder_template_id || "__default__"}
-                          onValueChange={(v) =>
-                            setBranding({
-                              ...branding,
-                              reminder_template_id: v === "__default__" ? null : v,
-                            })
-                          }
-                        >
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__default__">Modelo padrão do sistema</SelectItem>
-                            {emailTemplateOptions.map((tpl) => (
-                              <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                      <EventTemplatePair
+                        idPrefix="reminder"
+                        options={emailTemplateOptions}
+                        clientValue={branding.reminder_template_id}
+                        technicianValue={branding.reminder_technician_template_id}
+                        onClientChange={(id) => setBranding({ ...branding, reminder_template_id: id })}
+                        onTechnicianChange={(id) => setBranding({ ...branding, reminder_technician_template_id: id })}
+                      />
                     </>
                   )}
                 </div>

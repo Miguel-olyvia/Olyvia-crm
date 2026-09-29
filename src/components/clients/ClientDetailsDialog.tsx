@@ -33,6 +33,8 @@ import { PhoneInput } from "@/components/PhoneInput";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "@/hooks/useTranslation";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { setEntityOwner, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { PermissionGate } from "@/components/PermissionGate";
 import { differenceInDays } from "date-fns";
@@ -754,6 +756,17 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         return;
       }
 
+      // O dono do cliente e o recurso das visitas futuras nunca divergem: muda-se o
+      // dono PRIMEIRO (a base troca o recurso das visitas futuras) e, se o novo dono
+      // nao tem recurso de agenda, a mudanca e recusada antes de gravar o resto.
+      let ownerAffectedVisitIds: string[] = [];
+      if ((client.assigned_to ?? null) !== (editFormData.assigned_to || null)) {
+        const ownerResult = await withAuditContext(supabase, businessUserId, () =>
+          setEntityOwner("client", client.id, editFormData.assigned_to || null),
+        );
+        ownerAffectedVisitIds = ownerResult.affectedVisitIds;
+      }
+
       if (entityId) {
         await withAuditContext(supabase, businessUserId, async () => {
           const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
@@ -789,11 +802,16 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       }
 
       toast({ title: "Cliente actualizado" });
+      if (ownerAffectedVisitIds.length > 0) {
+        void notifyOwnerChangeVisits(client.organization_id, ownerAffectedVisitIds).then((notified) => {
+          if (notified > 0) toast({ title: t("scheduling.notify.clientNotified") });
+        });
+      }
       onOpenChange(false);
       onClientUpdated?.();
     } catch (error: any) {
       captureFlowError(error, "client-lifecycle");
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: "Erro", description: await getFriendlyErrorMessage(error, error?.message), variant: "destructive" });
     }
   };
 
