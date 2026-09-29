@@ -3,6 +3,7 @@ import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
+import { resolveGeoInputs } from "../_shared/geolocationSwitch.ts";
 import { checkTravelFeasible, buildLunchBreakConfig, type LunchBreakConfig } from "../_shared/travelFeasibility.ts";
 import { ensureHolidaysPersisted } from "../_shared/ensureHolidays.ts";
 import { resolveKnownOwnerFromContact } from "../_shared/knownOwner.ts";
@@ -116,6 +117,9 @@ Deno.serve(async (req: Request) => {
     // directos (sem form_id) fica sem restricao, mesmo padrao ja existente
     // para durationMinutes acima.
     let minAdvanceHours: number | null = null;
+    // O botao do passo (scheduling_requires_location) e o interruptor da
+    // geolocalizacao. Sem form_id+step_number fica desligado (omissao na base).
+    let requiresLocation = false;
 
     // Reagendamento pelo link: recurso, duracao, antecedencia e regras vem da
     // VISITA, nao do pedido.
@@ -149,7 +153,7 @@ Deno.serve(async (req: Request) => {
     if (!rescheduleCtx && form_id && step_number) {
       const { data: step, error: stepError } = await supabase
         .from('form_steps')
-        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours, step_type')
+        .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours, scheduling_requires_location, step_type')
         .eq('form_id', form_id)
         .eq('step_number', step_number)
         .single();
@@ -171,7 +175,11 @@ Deno.serve(async (req: Request) => {
       boardId = boardId || step.scheduling_board_id;
       durationMinutes = directDuration || step.scheduling_duration_minutes || 60;
       minAdvanceHours = step.scheduling_min_advance_hours ?? null;
+      requiresLocation = step.scheduling_requires_location === true;
     }
+
+    // Desligado: codigo postal e distrito nao fazem nada (ver geolocationSwitch.ts).
+    const geo = resolveGeoInputs({ requiresLocation, postalCode: postal_code, districtId: district_id });
 
     if (!boardId) {
       return new Response(
@@ -353,7 +361,7 @@ Deno.serve(async (req: Request) => {
     const restricted = ownerResourceIds !== null;
 
     // Coordenadas exactas do cliente via CP7 (regra 13), geocodificadas uma so vez.
-    const cp7Digits = (postal_code || '').replace(/[^0-9]/g, '');
+    const cp7Digits = (geo.postalCode || '').replace(/[^0-9]/g, '');
     let coordsPromise: Promise<void> | null = null;
     let clientLat: number | null = null;
     let clientLng: number | null = null;
@@ -396,12 +404,12 @@ Deno.serve(async (req: Request) => {
     const evaluateDayWithProximity = async (day: string, restrictTo: string[] | null) => {
       const { data: resources, error: rpcError } = await supabase
         .rpc('find_nearest_resources', {
-          p_target_postal_code: postal_code || null,
+          p_target_postal_code: geo.postalCode,
           p_board_id: boardId,
           p_target_date: day,
           p_duration_minutes: durationMinutes,
           p_limit: 10,
-          p_district_id: district_id || null,
+          p_district_id: geo.districtId,
           p_min_advance_hours: minAdvanceHours,
         });
       if (rpcError) return { rpcError, resources: [] as any[], allResources: [] as any[], slots: [] as AggregatedSlot[] };
@@ -469,8 +477,8 @@ Deno.serve(async (req: Request) => {
         p_start_date: start_date,
         p_end_date: end_date,
         p_duration_minutes: durationMinutes,
-        p_postal_code: postal_code || null,
-        p_district_id: district_id || null,
+        p_postal_code: geo.postalCode,
+        p_district_id: geo.districtId,
         p_min_advance_hours: minAdvanceHours,
       });
 
@@ -499,9 +507,9 @@ Deno.serve(async (req: Request) => {
         const BATCH = 6;
         for (let i = 0; i < availableDates.length; i += BATCH) {
           const batch = availableDates.slice(i, i + BATCH);
-          if (postal_code || district_id) await resolveClientCoords();
+          if (geo.postalCode || geo.districtId) await resolveClientCoords();
           const results = await Promise.all(batch.map(async (day) => {
-            if (postal_code || district_id) {
+            if (geo.postalCode || geo.districtId) {
               const r = await evaluateDayWithProximity(day, ownerIds);
               return r.rpcError ? false : r.slots.length > 0;
             }
@@ -512,7 +520,7 @@ Deno.serve(async (req: Request) => {
         availableDates = intersectMonthDays(availableDates, ownerDays);
       }
 
-      console.log(`public-availability range: ${start_date}→${end_date}, board=${boardId}, postal=${postal_code || 'none'}, restricted=${restricted}, unrestricted_days=${unrestrictedDayCount}, available_days=${availableDates.length}`);
+      console.log(`public-availability range: ${start_date}→${end_date}, board=${boardId}, postal=${geo.postalCode || 'none'}, restricted=${restricted}, unrestricted_days=${unrestrictedDayCount}, available_days=${availableDates.length}`);
 
       return new Response(
         JSON.stringify(buildMonthResponse({ availableDates, scheduleConfig, durationMinutes })),
@@ -538,7 +546,7 @@ Deno.serve(async (req: Request) => {
 
     // With postal_code and/or district_id: use find_nearest_resources RPC,
     // which already implements the district-coverage rule.
-    if (postal_code || district_id) {
+    if (geo.postalCode || geo.districtId) {
       const { rpcError, resources, allResources, slots: aggregatedSlots } = await evaluateDayWithProximity(date, ownerResourceIds);
 
       if (rpcError) {
@@ -552,7 +560,7 @@ Deno.serve(async (req: Request) => {
       // Cobertura da lista completa (antes do filtro do dono), igual ao pedido sem email.
       const coverage = allResources.length > 0;
 
-      console.log(`public-availability: date=${date}, postal=${postal_code || 'none'}, district=${district_id || 'none'}, board=${boardId}, restricted=${restricted}, resources=${resources.length}, slots=${aggregatedSlots.length}`);
+      console.log(`public-availability: date=${date}, postal=${geo.postalCode || 'none'}, district=${geo.districtId || 'none'}, board=${boardId}, restricted=${restricted}, resources=${resources.length}, slots=${aggregatedSlots.length}`);
 
       return new Response(
         // Forma identica com e sem restricao: sem preferred_resource_id e com

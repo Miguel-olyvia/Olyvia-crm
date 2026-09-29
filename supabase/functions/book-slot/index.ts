@@ -17,6 +17,7 @@ import {
 } from '../_shared/formEmails.ts';
 import { sendSmsNow } from '../_shared/sendSms.ts';
 import { geocodePostalCode } from '../_shared/postcodeGeocode.ts';
+import { resolveGeoInputs } from '../_shared/geolocationSwitch.ts';
 import { checkTravelFeasible, buildLunchBreakConfig, type LunchBreakConfig } from '../_shared/travelFeasibility.ts';
 import { ensureHolidaysPersisted } from '../_shared/ensureHolidays.ts';
 import { resolveOwnerResourceIds, restrictCandidatesToOwner } from '../_shared/knownOwner.ts';
@@ -208,7 +209,11 @@ Deno.serve(async (req: Request) => {
     // para o tempo de deslocação real. Repetido aqui (já validado no
     // formulário) porque este endpoint é chamável directamente, sem passar
     // pelo formulário.
-    const cp7Digits = (postal_code || '').replace(/[^0-9]/g, '');
+    // O botao do passo e o interruptor da geolocalizacao: desligado, o codigo
+    // postal e o distrito nao fazem nada na marcacao (sem proximidade, sem
+    // geocodificar, sem coordenadas). Continuam a gravar-se como dados da lead.
+    const geoInputs = resolveGeoInputs({ requiresLocation, postalCode: postal_code, districtId: district_id });
+    const cp7Digits = (geoInputs.postalCode || '').replace(/[^0-9]/g, '');
     if (requiresLocation && cp7Digits.length !== 7) {
       return new Response(
         JSON.stringify({ error: 'Complete postal code (CP7) is required for this scheduling step' }),
@@ -294,12 +299,12 @@ Deno.serve(async (req: Request) => {
     }
 
     const { data: resources } = await supabase.rpc('find_nearest_resources', {
-      p_target_postal_code: postal_code || null,
+      p_target_postal_code: geoInputs.postalCode,
       p_board_id: boardId,
       p_target_date: slot_start.split('T')[0],
       p_duration_minutes: durationMinutes,
       p_limit: 50,
-      p_district_id: district_id || null,
+      p_district_id: geoInputs.districtId,
       p_min_advance_hours: minAdvanceHours,
     });
 
