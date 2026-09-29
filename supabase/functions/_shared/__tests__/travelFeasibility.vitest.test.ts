@@ -3,6 +3,8 @@ import {
   checkTravelFeasible,
   buildLunchBreakConfig,
   endsInsideLunchWindow,
+  freeLunchMinutes,
+  lunchWindowBounds,
   requiredTravelMinutes,
 } from '../travelFeasibility';
 import { haversineKm } from '../distance';
@@ -219,7 +221,7 @@ describe('checkTravelFeasible - fuso horario', () => {
 
   it('13:00Z em 2026-09-29 sao 14h locais (fora da janela)', () => {
     const neighbors = [
-      { start_datetime: iso('11:00:00'), end_datetime: iso('13:00:00'), location_lat: A.lat, location_lng: A.lng },
+      { start_datetime: iso('12:00:00'), end_datetime: iso('13:00:00'), location_lat: A.lat, location_lng: A.lng },
     ];
     const r = checkTravelFeasible({
       clientLat: A.lat,
@@ -298,5 +300,133 @@ describe('endsInsideLunchWindow', () => {
     expect(endsInsideLunchWindow(iso('12:00:00'), LUNCH)).toBe(true); // 13h00 local
     expect(endsInsideLunchWindow(iso('12:01:00'), LUNCH)).toBe(false); // 13h01 local
     expect(endsInsideLunchWindow(iso('10:59:00'), LUNCH)).toBe(false); // 11h59 local
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regra B (29/09): visitas que ocupam a janela sem deixar o almoco livre
+// atrasam a marcacao seguinte para fim + deslocacao + almoco.
+// Horas locais Lisboa (UTC+1): local HH:MM = (HH-1):MM Z.
+// ---------------------------------------------------------------------------
+describe('checkTravelFeasible - almoco nao livre na janela (Regra B)', () => {
+  const V = { lat: 38.7078, lng: -9.1366 };
+  // ~8,5 min de deslocacao (a 35 km/h) de V.
+  const NEAR = { lat: 38.7078 + 0.0446, lng: -9.1366 };
+  const visit = (from: string, to: string, at = V) => ({
+    start_datetime: iso(from),
+    end_datetime: iso(to),
+    location_lat: at.lat,
+    location_lng: at.lng,
+  });
+  const run = (
+    neighbors: ReturnType<typeof visit>[],
+    from: string,
+    to: string,
+    client: { lat: number; lng: number } | null,
+    lunchBreak: typeof LUNCH | null = LUNCH,
+  ) =>
+    checkTravelFeasible({
+      clientLat: client ? client.lat : null,
+      clientLng: client ? client.lng : null,
+      slotStart: iso(from),
+      slotEnd: iso(to),
+      neighbors,
+      lunchBreak,
+    });
+
+  it('a deslocacao de referencia ronda 8,5 min', () => {
+    const minutes = requiredTravelMinutes(haversineKm(V.lat, V.lng, NEAR.lat, NEAR.lng));
+    expect(minutes).toBeGreaterThan(8.3);
+    expect(minutes).toBeLessThan(8.7);
+  });
+
+  it('1: visita 12-14, candidato 14:30 e 15:00 (desloc. 8,5) recusam', () => {
+    const n = [visit('11:00:00', '13:00:00')];
+    expect(run(n, '13:30:00', '15:30:00', NEAR).feasible).toBe(false);
+    expect(run(n, '14:00:00', '16:00:00', NEAR).feasible).toBe(false);
+  });
+
+  it('2: visita 12-14, candidato 15:30 (desloc. 8,5) aceita', () => {
+    const n = [visit('11:00:00', '13:00:00')];
+    expect(run(n, '14:30:00', '16:30:00', NEAR).feasible).toBe(true);
+  });
+
+  it('3: visita 12-14, desloc. 0: 15:00 aceita, 14:30 recusa', () => {
+    const n = [visit('11:00:00', '13:00:00')];
+    expect(run(n, '14:00:00', '16:00:00', V).feasible).toBe(true);
+    expect(run(n, '13:30:00', '15:30:00', V).feasible).toBe(false);
+  });
+
+  it('4 (controlo): visitas 09-12 e 13-15 deixam 60 min livres, 15:30 aceita', () => {
+    const n = [visit('08:00:00', '11:00:00'), visit('12:00:00', '14:00:00')];
+    expect(run(n, '14:30:00', '16:30:00', NEAR).feasible).toBe(true);
+  });
+
+  it('5: visitas 11:30-12:30 e 12:30-14:00, candidato 14:30 (desloc. 0) recusa', () => {
+    const n = [visit('10:30:00', '11:30:00'), visit('11:30:00', '13:00:00')];
+    expect(run(n, '13:30:00', '15:30:00', V).feasible).toBe(false);
+  });
+
+  it('6: visita 14-16, candidato 11-13 (e o ultimo a tocar a janela) recusa', () => {
+    const n = [visit('13:00:00', '15:00:00')];
+    expect(run(n, '10:00:00', '12:00:00', NEAR).feasible).toBe(false);
+  });
+
+  it('7: visita 14:30-16, candidato 11-13 (desloc. 0) aceita, 90 >= 60', () => {
+    const n = [visit('13:30:00', '15:00:00')];
+    expect(run(n, '10:00:00', '12:00:00', V).feasible).toBe(true);
+  });
+
+  it('8: visita 12-14 nao atrasa o candidato das 09:00', () => {
+    const n = [visit('11:00:00', '13:00:00')];
+    expect(run(n, '08:00:00', '10:00:00', NEAR).feasible).toBe(true);
+  });
+
+  it('9: visita de outro dia a cobrir a janela nao conta', () => {
+    const other = {
+      start_datetime: '2026-09-28T11:00:00Z',
+      end_datetime: '2026-09-28T13:00:00Z',
+      location_lat: V.lat,
+      location_lng: V.lng,
+    };
+    expect(run([other], '13:30:00', '15:30:00', NEAR).feasible).toBe(true);
+  });
+
+  it('10: sem config de almoco nada muda', () => {
+    const n = [visit('11:00:00', '13:00:00')];
+    expect(run(n, '13:30:00', '15:30:00', NEAR, null).feasible).toBe(true);
+  });
+
+  it('11: visita 10:00-12:30, candidato 13:00 (desloc. 0) recusa', () => {
+    const n = [visit('09:00:00', '11:30:00')];
+    expect(run(n, '12:00:00', '14:00:00', V).feasible).toBe(false);
+  });
+
+  it('sem coordenadas no cliente a regra aplica-se com deslocacao 0', () => {
+    const n = [visit('11:00:00', '13:00:00')];
+    expect(run(n, '13:30:00', '15:30:00', null).feasible).toBe(false);
+    expect(run(n, '14:00:00', '16:00:00', null).feasible).toBe(true);
+  });
+});
+
+describe('lunchWindowBounds e freeLunchMinutes', () => {
+  it('a janela 12-13 de Lisboa em Setembro e 11:00Z-12:00Z', () => {
+    const b = lunchWindowBounds(iso('14:00:00'), LUNCH);
+    expect(new Date(b.startMs).toISOString()).toBe('2026-09-29T11:00:00.000Z');
+    expect(new Date(b.endMs).toISOString()).toBe('2026-09-29T12:00:00.000Z');
+  });
+
+  it('a janela em Inverno usa o desvio de Inverno (UTC+0)', () => {
+    const b = lunchWindowBounds('2026-12-10T15:00:00Z', LUNCH);
+    expect(new Date(b.startMs).toISOString()).toBe('2026-12-10T12:00:00.000Z');
+  });
+
+  it('une visitas sobrepostas e ignora as que nao tocam a janela', () => {
+    const w = { startMs: 0, endMs: 60 * 60000 };
+    const m = (a: number, b: number) => ({ startMs: a * 60000, endMs: b * 60000 });
+    expect(freeLunchMinutes([], w)).toBe(60);
+    expect(freeLunchMinutes([m(-30, 20), m(10, 30)], w)).toBe(30);
+    expect(freeLunchMinutes([m(60, 120), m(-60, 0)], w)).toBe(60);
+    expect(freeLunchMinutes([m(0, 20), m(40, 60)], w)).toBe(20);
   });
 });
