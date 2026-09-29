@@ -16,7 +16,7 @@ import { loadFormEmailConfig, loadTemplate, renderSubject, scheduleEmail } from 
 import type { FormEmailConfig } from "./formEmails.ts";
 import { buildAudienceVars, pickAudienceTemplateId } from "./audienceTemplates.ts";
 import { buildReminderMail, parseContentVars, reminderSmsTemplate, withFreshVisitVars } from "./reminderContent.ts";
-import { planReminderActions, REASON_CONTENT_UNRECOVERABLE, REASON_VISIT_GONE } from "./reminderReconcile.ts";
+import { isCancelledStatus, planReminderActions, REASON_CONTENT_UNRECOVERABLE, REASON_VISIT_GONE } from "./reminderReconcile.ts";
 import type { CurrentTechnician, ReminderAction, ReminderLine } from "./reminderReconcile.ts";
 import { pickReminderSender } from "./reminderSender.ts";
 
@@ -39,12 +39,12 @@ function normEmail(e: string | null | undefined): string {
   return (e || "").trim().toLowerCase();
 }
 
-function failIf(error: unknown, what: string): void {
+function failIf(error: unknown, what: string, kind: "leitura" | "escrita" = "leitura"): void {
   if (error) {
     const msg = typeof error === "object" && error !== null && "message" in error
       ? String((error as { message: unknown }).message)
       : String(error);
-    throw new Error(`[reminderRunner] leitura falhou (${what}): ${msg}`);
+    throw new Error(`[reminderRunner] ${kind} falhou (${what}): ${msg}`);
   }
 }
 
@@ -194,8 +194,10 @@ export async function reconcileItem(supabase: any, itemId: string, now: Date = n
       .update({ status: "cancelled", cancelled_at: now.toISOString(), cancel_reason: reason })
       .eq("id", lineId)
       .eq("status", "pending");
-    if (error) console.error("[reminderRunner] cancel failed:", lineId, error);
-    else summary.cancelled++;
+    // Uma falha de escrita e um acerto falhado: lanca, a visita fica por acertar
+    // e a linha (ainda pendente) nao sai neste lote.
+    failIf(error, `cancelar ${table(channel)} ${lineId}`, "escrita");
+    summary.cancelled++;
   };
   let moved = false;
 
@@ -221,11 +223,9 @@ export async function reconcileItem(supabase: any, itemId: string, now: Date = n
         .update({ scheduled_for: a.scheduled_for, visit_start_snapshot: a.snapshot, ...contentPatch })
         .eq("id", a.line_id)
         .eq("status", "pending");
-      if (error) console.error("[reminderRunner] move failed:", a.line_id, error);
-      else {
-        summary.moved++;
-        moved = true;
-      }
+      failIf(error, `mover ${table(a.channel)} ${a.line_id}`, "escrita");
+      summary.moved++;
+      moved = true;
     } else if (a.kind === "create_technician") {
       const ok = await createTechnicianLine(supabase, {
         action: a,
@@ -274,7 +274,8 @@ async function markCreateAttempt(supabase: any, itemId: string, email: string, n
 /**
  * Refaz o conteudo de uma linha religada a posteriori (sem content_vars) com a
  * hora, o local e o comercial ACTUAIS. Devolve o que gravar na linha, ou null se
- * nao for possivel (entidade que nao e lead, ficha em falta).
+ * nao for possivel (entidade que nao e lead, ficha em falta). Um ERRO de leitura
+ * nao e "nao e possivel": lanca, e a visita fica por acertar (nada e cancelado).
  */
 async function rebuildLegacyContent(
   supabase: any,
@@ -284,9 +285,11 @@ async function rebuildLegacyContent(
   technicians: VisitTechnician[],
   cfg: FormEmailConfig | null,
 ): Promise<Record<string, unknown> | null> {
+  // Leituras primeiro, fora de qualquer captura: se falharem, lanca.
+  const base = await leadVarsFromEntity(supabase, row, item.organization_id);
+  if (!base) return null;
+  const template = channel === "email" && row.template_id ? await loadTemplate(supabase, row.template_id) : null;
   try {
-    const base = await leadVarsFromEntity(supabase, row, item.organization_id);
-    if (!base) return null;
     const audience = row.audience === "technician" ? "technician" : "client";
     const own = technicians.find((t) => normEmail(t.email) === normEmail(row.to_email));
     const technicianName = audience === "technician" && channel === "email"
@@ -308,11 +311,11 @@ async function rebuildLegacyContent(
         }),
       };
     }
-    const template = row.template_id ? await loadTemplate(supabase, row.template_id) : null;
     const mail = buildReminderMail({ audience, template, vars, brand: cfg });
     return { content_vars: vars, subject: mail.subject, body_html: mail.html };
   } catch (err) {
-    console.error("[reminderRunner] nao foi possivel refazer o conteudo da linha", row.id, err);
+    // So a montagem (pura) chega aqui: falha sempre da mesma maneira, cancela-se com motivo.
+    console.error("[reminderRunner] nao foi possivel montar o conteudo da linha", row.id, err);
     return null;
   }
 }
@@ -397,7 +400,8 @@ async function leadVarsFromEntity(
   organizationId: string,
 ): Promise<Record<string, string> | null> {
   if (base.entity_type !== "leads" || !base.entity_id) return null;
-  const { data: lead } = await supabase.from("anew_leads").select("field_values").eq("id", base.entity_id).maybeSingle();
+  const { data: lead, error: leadErr } = await supabase.from("anew_leads").select("field_values").eq("id", base.entity_id).maybeSingle();
+  failIf(leadErr, "anew_leads");
   if (!lead) return null;
   const fv = lead.field_values && typeof lead.field_values === "object" && !Array.isArray(lead.field_values)
     ? lead.field_values as Record<string, any>
@@ -407,7 +411,8 @@ async function leadVarsFromEntity(
     fv.first_name || fv.po_nome || fv.nome || "",
     fv.last_name || fv.po_apelido || fv.apelido || "",
   ].filter(Boolean).join(" ").trim() || "Cliente";
-  const { data: org } = await supabase.from("anew_organizations").select("name").eq("id", base.organization_id ?? organizationId).maybeSingle();
+  const { data: org, error: orgErr } = await supabase.from("anew_organizations").select("name").eq("id", base.organization_id ?? organizationId).maybeSingle();
+  failIf(orgErr, "anew_organizations");
   return {
     lead_name: name,
     client_name: name,
@@ -450,11 +455,11 @@ export async function renderLinkedEmail(
     if (!row.schedule_item_id || !stored) return { kind: "stored" };
     const { data: item, error } = await supabase
       .from("schedule_items")
-      .select("start_datetime, location")
+      .select("status, start_datetime, location")
       .eq("id", row.schedule_item_id)
       .maybeSingle();
     if (error) return { kind: "defer", reason: "leitura da visita falhou" };
-    if (!item) return { kind: "cancel", reason: REASON_VISIT_GONE };
+    if (!item || isCancelledStatus(item.status)) return { kind: "cancel", reason: REASON_VISIT_GONE };
     const cfg = await loadFormEmailConfig(supabase, row.form_id);
     const techs = await loadVisitTechnicians(supabase, row.schedule_item_id);
     const audience = row.audience === "technician" ? "technician" : "client";
@@ -491,11 +496,11 @@ export async function renderLinkedSms(supabase: any, row: any): Promise<LinkedRe
     }
     const { data: item, error } = await supabase
       .from("schedule_items")
-      .select("start_datetime, location")
+      .select("status, start_datetime, location")
       .eq("id", row.schedule_item_id)
       .maybeSingle();
     if (error) return { kind: "defer", reason: "leitura da visita falhou" };
-    if (!item) return { kind: "cancel", reason: REASON_VISIT_GONE };
+    if (!item || isCancelledStatus(item.status)) return { kind: "cancel", reason: REASON_VISIT_GONE };
     const techs = await loadVisitTechnicians(supabase, row.schedule_item_id);
     const vars = withFreshVisitVars(stored, {
       startIso: item.start_datetime,

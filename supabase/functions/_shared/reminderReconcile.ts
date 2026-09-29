@@ -76,7 +76,7 @@ function normEmail(e: string | null | undefined): string {
   return (e || "").trim().toLowerCase();
 }
 
-function isCancelledStatus(status: string | null | undefined): boolean {
+export function isCancelledStatus(status: string | null | undefined): boolean {
   const s = (status || "").toLowerCase();
   return s === "cancelled" || s === "canceled" || s === "cancelado" || s === "cancelada";
 }
