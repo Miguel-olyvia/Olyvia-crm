@@ -11,6 +11,7 @@ import {
   renderHtml,
 } from '../_shared/formEmails.ts';
 import { buildAudienceVars, pickAudienceTemplateId } from '../_shared/audienceTemplates.ts';
+import { cancelLegacyVisitReminders } from '../_shared/reminderRunner.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
@@ -206,25 +207,36 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 6. Cancel pending reminders for this lead (email and SMS)
-    if (leadId) {
+    // 6. Cancel pending reminders of THIS visit (email and SMS), lead or client.
+    //    Filtra pela visita, nao pela lead: cancelar uma visita nao pode matar
+    //    os emails por fase da mesma lead, e uma visita de cliente (sem lead)
+    //    tem lembretes que a versao anterior nunca cancelava.
+    {
+      const cancelledAt = new Date().toISOString();
       const { error: emailError } = await supabase
         .from('scheduled_emails')
-        .update({ status: 'cancelled' })
-        .eq('entity_type', 'leads')
-        .eq('entity_id', leadId)
+        .update({ status: 'cancelled', cancelled_at: cancelledAt, cancel_reason: 'Visita cancelada' })
+        .eq('schedule_item_id', itemId)
         .eq('status', 'pending');
       if (emailError) {
         console.error('[cancel-booking] failed to cancel scheduled_emails:', emailError);
       }
       const { error: smsError } = await supabase
         .from('scheduled_sms')
-        .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancel_reason: 'Visita cancelada' })
-        .eq('entity_type', 'leads')
-        .eq('entity_id', leadId)
+        .update({ status: 'cancelled', cancelled_at: cancelledAt, cancel_reason: 'Visita cancelada' })
+        .eq('schedule_item_id', itemId)
         .eq('status', 'pending');
       if (smsError) {
         console.error('[cancel-booking] failed to cancel scheduled_sms:', smsError);
+      }
+      // Lembretes antigos, criados antes de estarem ligados a visita: so os de
+      // visita (nunca os emails por fase nem os convites de agendamento).
+      try {
+        const clientId: string | null = metadata.client_id || null;
+        if (leadId) await cancelLegacyVisitReminders(supabase, 'leads', leadId, 'Visita cancelada');
+        if (clientId) await cancelLegacyVisitReminders(supabase, 'clients', clientId, 'Visita cancelada');
+      } catch (legacyErr) {
+        console.error('[cancel-booking] failed to cancel legacy reminders (non-fatal):', legacyErr);
       }
     }
 

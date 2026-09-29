@@ -11,6 +11,7 @@ import { resolveSmtpForScheduledEmail, sanitizeSmtpError } from "../_shared/smtp
 
 import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { reconcileDrift, reconcileDueItems, renderLinkedEmail } from "../_shared/reminderRunner.ts";
 
 initSentry();
 
@@ -33,16 +34,44 @@ serve(async (req) => {
       getServiceRoleKey()
     );
 
-    const { data: pendingEmails, error: fetchError } = await supabase
-      .from("scheduled_emails")
-      .select("*")
-      .eq("status", "pending")
-      .lte("scheduled_for", new Date().toISOString())
-      .limit(50);
+    // Antes do lote: acertar os lembretes de visita com o estado ACTUAL da
+    // visita (cancelada, movida, outro comercial). Fail-soft: um erro aqui nunca
+    // pode impedir o envio dos restantes emails.
+    let reconcileSummary: Record<string, number> | null = null;
+    try {
+      reconcileSummary = { ...(await reconcileDrift(supabase)) };
+    } catch (reconcileErr) {
+      console.error("[process-scheduled-emails] reconcile failed (non-fatal):", reconcileErr);
+    }
+
+    const fetchDue = () =>
+      supabase
+        .from("scheduled_emails")
+        .select("*")
+        .eq("status", "pending")
+        .lte("scheduled_for", new Date().toISOString())
+        .limit(50);
+
+    let { data: pendingEmails, error: fetchError } = await fetchDue();
 
     if (fetchError) throw fetchError;
+
+    // Lembretes que vao sair agora: confirmar a visita de cada um mesmo que o
+    // acerto em bloco acima nao os tenha apanhado (limite do lote, mudanca de ha
+    // segundos), e voltar a ler o que sobra.
+    const dueItemIds = [
+      ...new Set((pendingEmails || []).map((e: any) => e.schedule_item_id).filter(Boolean)),
+    ] as string[];
+    // Visitas cujo acerto FALHOU: os seus lembretes nao saem neste lote (podiam
+    // ir para o comercial antigo ou para a hora antiga); ficam pendentes.
+    let unreconciled = new Set<string>();
+    if (dueItemIds.length > 0) {
+      unreconciled = await reconcileDueItems(supabase, dueItemIds);
+      ({ data: pendingEmails, error: fetchError } = await fetchDue());
+      if (fetchError) throw fetchError;
+    }
     if (!pendingEmails || pendingEmails.length === 0) {
-      return new Response(JSON.stringify({ processed: 0 }), {
+      return new Response(JSON.stringify({ processed: 0, reconcile: reconcileSummary }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -62,6 +91,7 @@ serve(async (req) => {
     let processed = 0;
     let cancelled = 0;
     let failed = 0;
+    let deferred = 0;
     const smtpResolutionSummary = {
       smtp_resolved_by_explicit_smtp_id: 0,
       smtp_resolved_by_auth_user_id_direct: 0,
@@ -72,6 +102,10 @@ serve(async (req) => {
 
     for (const email of pendingEmails) {
       try {
+        if (email.schedule_item_id && unreconciled.has(email.schedule_item_id)) {
+          deferred++;
+          continue;
+        }
         const shouldCancel = await checkIfShouldCancel(supabase, email);
         if (shouldCancel) {
           await supabase.from("scheduled_emails").update({
@@ -110,6 +144,26 @@ serve(async (req) => {
           continue;
         }
 
+        // Lembrete ligado a visita: assunto e corpo montados agora, com a hora e
+        // o comercial actuais. Sem variaveis guardadas (ou em caso de falha),
+        // vai o que ficou guardado na marcacao.
+        const rendered = email.schedule_item_id ? await renderLinkedEmail(supabase, email) : { kind: "stored" as const };
+        if (rendered.kind === "defer") {
+          console.error("[process-scheduled-emails] lembrete adiado:", email.id, rendered.reason);
+          deferred++;
+          continue;
+        }
+        if (rendered.kind === "cancel") {
+          await supabase.from("scheduled_emails").update({
+            status: "cancelled",
+            cancelled_at: new Date().toISOString(),
+            cancel_reason: rendered.reason,
+          }).eq("id", email.id).eq("status", "pending");
+          cancelled++;
+          continue;
+        }
+        const linked = rendered.kind === "ok" ? rendered.value : null;
+
         const sendResponse = await fetch(
           `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-email`,
           {
@@ -123,8 +177,8 @@ serve(async (req) => {
               organization_id: email.organization_id,
               ...(email.smtp_id ? { smtp_id: email.smtp_id } : {}),
               to: email.to_email,
-              subject: email.subject,
-              html: email.body_html,
+              subject: linked?.subject ?? email.subject,
+              html: linked?.html ?? email.body_html,
             }),
           }
         );
@@ -164,7 +218,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ processed, cancelled, failed, ...smtpResolutionSummary }),
+      JSON.stringify({ processed, cancelled, failed, deferred, reconcile: reconcileSummary, ...smtpResolutionSummary }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {

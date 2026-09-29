@@ -7,7 +7,6 @@ import {
   loadFormEmailConfig,
   loadTemplate,
   sendEmailNow,
-  scheduleEmail,
   renderHtml,
   renderSubject,
   parseEmailList,
@@ -16,11 +15,14 @@ import {
   pickTemplateId,
   buildManageUrl,
 } from '../_shared/formEmails.ts';
-import { sendSmsNow, scheduleSms } from '../_shared/sendSms.ts';
+import { sendSmsNow } from '../_shared/sendSms.ts';
 import { geocodePostalCode } from '../_shared/postcodeGeocode.ts';
 import { checkTravelFeasible, buildLunchBreakConfig, type LunchBreakConfig } from '../_shared/travelFeasibility.ts';
 import { ensureHolidaysPersisted } from '../_shared/ensureHolidays.ts';
-import { pickReminderSender } from '../_shared/reminderSender.ts';
+import { resolveOwnerResourceIds, restrictCandidatesToOwner } from '../_shared/knownOwner.ts';
+import { buildAudienceVars } from '../_shared/audienceTemplates.ts';
+import { createReminderLines } from '../_shared/reminderLines.ts';
+import { formatVisitWhen } from '../_shared/reminderContent.ts';
 
 initSentry();
 
@@ -257,16 +259,14 @@ Deno.serve(async (req: Request) => {
         ownerAnewUserId = cl?.assigned_to ?? cl?.created_by ?? null;
       }
 
-      if (ownerAnewUserId) {
-        const { data: res } = await supabase
-          .from('schedule_resources')
-          .select('id')
-          .eq('user_id', ownerAnewUserId)
-          .eq('organization_id', organizationId)
-          .eq('is_active', true);
-        ownerResourceIds = (res ?? []).map((r: { id: string }) => r.id);
-      }
+      // Mesma resolucao que o calendario publico usa (knownOwner.ts).
+      ownerResourceIds = await resolveOwnerResourceIds(supabase, organizationId, ownerAnewUserId);
     }
+
+    // O contacto TEM dono (assigned_to, ou created_by se nao houver) mesmo que
+    // esse dono nao tenha nenhum recurso activo. Nesse caso nao ha a quem marcar:
+    // o pedido vai para a fila dele, em vez de a visita ser dada a outro tecnico.
+    const hasKnownOwner = !!ownerAnewUserId;
 
     // 3. Find a resource with availability at the requested slot.
     // find_nearest_resources already applies the district-coverage-with-
@@ -320,9 +320,9 @@ Deno.serve(async (req: Request) => {
 
     // O comercial da pessoa vai a frente de todos. Se ele nao estiver entre os
     // que tem esta hora livre, NAO se marca a mais ninguem -- ver abaixo.
-    const ordered = ownerResourceIds.length > 0
-      ? proximityOrdered.filter((cand: { id: string }) => ownerResourceIds.includes(cand.id))
-      : proximityOrdered;
+    // Dono conhecido sem recurso activo: lista vazia (ownerResourceIds vazio),
+    // nao "todos".
+    const ordered = restrictCandidatesToOwner(proximityOrdered, hasKnownOwner, ownerResourceIds);
 
     for (const candidate of ordered) {
       // Re-verify at confirmation time — availability may have been computed
@@ -376,7 +376,7 @@ Deno.serve(async (req: Request) => {
     //
     // Ao visitante responde-se com sucesso, como a toda a gente: de fora nao se
     // distingue quem ja e conhecido de quem e novo.
-    if (!assignedResourceId && ownerResourceIds.length > 0 && lead_id) {
+    if (!assignedResourceId && hasKnownOwner && lead_id) {
       try {
         const { data: sub } = await supabase
           .from('form_submissions')
@@ -426,6 +426,7 @@ Deno.serve(async (req: Request) => {
 
       console.log('[book-slot] comercial sem disponibilidade; pedido guardado para marcacao a mao', {
         submissao: lead_id, comercial: ownerAnewUserId,
+        sem_recurso_activo: ownerResourceIds.length === 0,
       });
 
       return new Response(
@@ -1074,9 +1075,17 @@ Deno.serve(async (req: Request) => {
         ]);
         if (notifyList.length > 0) {
           const tpl = await loadTemplate(supabase, pickTemplateId(emailCfg, 'meeting_notify', leadLocale, emailCfg?.meeting_notify_template_id));
-          const subject = renderSubject(tpl?.subject || 'Nova reunião agendada — {{lead_name}}', baseVars);
+          // Destinatario: comercial (e extras internos). cancel_url/confirm_url,
+          // que sao os links do CLIENTE, ficam vazios mesmo num modelo proprio.
+          const notifyVars = buildAudienceVars(baseVars, 'technician', {
+            leadPhone: String(leadPhone || ''),
+            leadEmail: leadEmail || '',
+            address: fullLocation || '',
+            appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
+          });
+          const subject = renderSubject(tpl?.subject || 'Nova reunião agendada — {{lead_name}}', notifyVars);
           const html = tpl?.body_html
-            ? renderHtml(tpl.body_html, baseVars)
+            ? renderHtml(tpl.body_html, notifyVars)
             : defaultMeetingHtml({
                 heading: 'Nova reunião agendada',
                 intro: 'Foi marcada uma nova visita através do formulário.',
@@ -1098,16 +1107,19 @@ Deno.serve(async (req: Request) => {
         }
       }
 
-      // (b) Reminder X hours before — to the technician AND the client.
+      // (b) Reminder X hours before -- ao cliente E a cada comercial da visita.
+      // Ligado a visita: se ela mudar (hora, comercial, cancelamento) o
+      // processador acerta o lembrete (ver _shared/reminderRunner.ts). Cada
+      // destinatario recebe o modelo proprio (form_branding.reminder_*_template_id).
       if (emailCfg?.reminder_enabled) {
         const hoursBefore = emailCfg.reminder_hours_before && emailCfg.reminder_hours_before > 0 ? emailCfg.reminder_hours_before : 2;
         const remindAt = new Date(new Date(slot_start).getTime() - hoursBefore * 3600000);
         if (remindAt.getTime() > Date.now()) {
-          // Regra 12: link "Confirmo a visita" -- só nasce aqui, porque só
-          // faz sentido pedir confirmação quando existe um lembrete a sair.
-          // Token próprio (action 'confirm'), distinto do de cancelar;
-          // expira no início da visita -- confirmar depois disso não tem
-          // sentido.
+          // Regra 12: link "Confirmo a visita" -- so nasce aqui, porque so
+          // faz sentido pedir confirmacao quando existe um lembrete a sair.
+          // Token proprio (action 'confirm'), distinto do de cancelar;
+          // expira no inicio da visita (o processador acompanha-o se a visita
+          // mudar de hora).
           // Link fixo no dominio da propria app -- ao contrario do de
           // gerir/cancelar, "confirmar" nao passa pelo dominio proprio da
           // organizacao (booking_manage_url_template): essa pagina, quando
@@ -1125,79 +1137,30 @@ Deno.serve(async (req: Request) => {
             ? `${siteUrlEnv}/booking/confirm?token=${confirmToken.token}`
             : '';
 
-          const reminderTemplateId = pickTemplateId(emailCfg, 'reminder', leadLocale, emailCfg.reminder_template_id);
-          const tpl = await loadTemplate(supabase, reminderTemplateId);
-          const subject = renderSubject(tpl?.subject || 'Lembrete: reunião {{meeting_date}}', baseVars);
-          const htmlFor = (kind: 'client' | 'technician') => tpl?.body_html
-            ? renderHtml(tpl.body_html, baseVars)
-            : defaultMeetingHtml({
-                heading: 'Lembrete de reunião',
-                intro: kind === 'client' ? 'Este é um lembrete da sua visita agendada.' : 'Lembrete: tem uma visita agendada.',
-                leadName: leadFullName, when: whenFormatted,
-                location: fullLocation || undefined,
-                technicianName: technicianName || undefined,
-                cancelUrl: kind === 'client' ? (cancelLink || undefined) : undefined,
-                confirmUrl: kind === 'client' ? (confirmLink || undefined) : undefined,
-                primaryColor: emailCfg.primary_color, logoUrl: emailCfg.logo_url,
-              });
-          const targets: { email: string; kind: 'client' | 'technician' }[] = [];
-          if (leadEmail) targets.push({ email: leadEmail, kind: 'client' });
-          if (technicianEmail) targets.push({ email: technicianEmail, kind: 'technician' });
-
-          // Regra 3 (continuacao): o lembrete AO TECNICO usa a identidade do
-          // proprio comercial atribuido a ESTA visita (schedule_resources.user_id),
-          // nunca o membro ao acaso que createdBy resolve (anew_memberships ...
-          // LIMIT 1, sem ORDER BY) -- confirmado ao vivo que era sempre a mesma
-          // pessoa em todas as linhas de uma organizacao. O lembrete AO CLIENTE
-          // nunca depende de uma identidade pessoal: usa o SMTP do formulario,
-          // com a SMTP por omissao da organizacao como reserva, exactamente como
-          // a confirmacao e o aviso ao comercial (ver comentarios acima).
-          let orgDefaultSmtpId: string | null = null;
-          if (!emailCfg.email_smtp_id) {
-            const { data: orgSmtp } = await supabase
-              .from('organization_smtp_settings')
-              .select('id')
-              .eq('organization_id', organizationId)
-              .eq('is_active', true)
-              .order('is_default', { ascending: false })
-              .limit(1)
-              .maybeSingle();
-            orgDefaultSmtpId = orgSmtp?.id ?? null;
-          }
-
-          for (const t of targets) {
-            const sender = pickReminderSender({
-              kind: t.kind,
-              technicianUserId: assignedResource?.user_id,
-              createdBy: createdBy!,
-              formSmtpId: emailCfg.email_smtp_id,
-              orgDefaultSmtpId,
-            });
-            await scheduleEmail(supabase, {
-              organizationId, userId: sender.userId, toEmail: t.email,
-              subject, bodyHtml: htmlFor(t.kind), scheduledFor: remindAt.toISOString(),
-              entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId!, templateId: reminderTemplateId || null, smtpId: sender.smtpId,
-            });
-          }
-
-          // Regra 3 (continuação): lembrete por SMS, mesma hora do lembrete
-          // por email, só ao cliente (o técnico já vê a agenda dele — o
-          // email extra ao técnico é herdado de quando não havia app própria
-          // para ele consultar; não faz sentido duplicar isso em SMS, que
-          // tem custo por envio).
-          if (emailCfg.reminder_sms_enabled && leadPhone) {
-            const includeLinkReminder = emailCfg.confirmation_sms_include_link === true;
-            const reminderSmsVars = includeLinkReminder ? baseVars : { ...baseVars, cancel_url: '' };
-            const reminderSmsMessage = `${orgRow?.name || 'A empresa'}: lembrete da sua visita para {{meeting_date}}.${includeLinkReminder && confirmLink ? ' Confirme: {{confirm_url}}' : ''}`
-              .replace('{{confirm_url}}', confirmLink || '');
-            await scheduleSms(supabase, {
-              organizationId, createdBy,
-              toPhone: String(leadPhone),
-              message: renderSubject(reminderSmsMessage, reminderSmsVars),
-              scheduledFor: remindAt.toISOString(),
-              entityType: lead ? 'leads' : 'clients', entityId: lead?.id ?? submissionClientId ?? null,
-            });
-          }
+          const reminderWhen = formatVisitWhen(slot_start);
+          await createReminderLines({
+            supabase,
+            organizationId,
+            itemId: scheduleItem.id,
+            formId: form_id,
+            locale: leadLocale,
+            cfg: emailCfg,
+            startIso: slot_start,
+            entityType: lead ? 'leads' : 'clients',
+            entityId: lead?.id ?? submissionClientId ?? null,
+            createdBy: createdBy!,
+            companyName: orgRow?.name || '',
+            clientVars: { ...baseVars, meeting_date: reminderWhen, meeting_datetime: reminderWhen },
+            confirmUrl: confirmLink,
+            leadEmail: leadEmail || '',
+            leadPhone: String(leadPhone || ''),
+            address: fullLocation || '',
+            appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
+            technicians: technicianEmail
+              ? [{ email: technicianEmail, userId: assignedResource?.user_id ?? null, name: technicianName }]
+              : [],
+            rescheduled: false,
+          });
         }
       }
     } catch (emailErr) {
