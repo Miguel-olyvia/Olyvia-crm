@@ -3,6 +3,7 @@ import { requireServiceRole, getServiceRoleKey } from "../_shared/auth.ts";
 import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { sendSmsNow } from "../_shared/sendSms.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { reconcileDrift, reconcileDueItems, renderLinkedSms } from "../_shared/reminderRunner.ts";
 
 initSentry();
 
@@ -30,26 +31,75 @@ Deno.serve(async (req: Request) => {
   try {
     const supabase = createClient(Deno.env.get("SUPABASE_URL")!, getServiceRoleKey());
 
-    const { data: due, error: fetchError } = await supabase
-      .from("scheduled_sms")
-      .select("*")
-      .eq("status", "pending")
-      .lte("scheduled_for", new Date().toISOString())
-      .limit(50);
+    // Antes do lote: acertar os lembretes de visita com o estado ACTUAL da
+    // visita (cancelada, movida). Fail-soft: nunca impede o envio dos restantes.
+    let reconcileSummary: Record<string, number> | null = null;
+    try {
+      reconcileSummary = { ...(await reconcileDrift(supabase)) };
+    } catch (reconcileErr) {
+      console.error("[process-scheduled-sms] reconcile failed (non-fatal):", reconcileErr);
+    }
+
+    const fetchDue = () =>
+      supabase
+        .from("scheduled_sms")
+        .select("*")
+        .eq("status", "pending")
+        .lte("scheduled_for", new Date().toISOString())
+        .limit(50);
+
+    let { data: due, error: fetchError } = await fetchDue();
 
     if (fetchError) throw fetchError;
+
+    // Confirmar a visita de cada lembrete que vai sair agora, e voltar a ler.
+    const dueItemIds = [
+      ...new Set((due || []).map((r: any) => r.schedule_item_id).filter(Boolean)),
+    ] as string[];
+    // Visitas cujo acerto FALHOU: os seus lembretes ficam para o proximo lote.
+    let unreconciled = new Set<string>();
+    if (dueItemIds.length > 0) {
+      unreconciled = await reconcileDueItems(supabase, dueItemIds);
+      ({ data: due, error: fetchError } = await fetchDue());
+      if (fetchError) throw fetchError;
+    }
     if (!due || due.length === 0) {
-      return new Response(JSON.stringify({ processed: 0 }), {
+      return new Response(JSON.stringify({ processed: 0, reconcile: reconcileSummary }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     let processed = 0;
     let failed = 0;
+    let deferred = 0;
+    let cancelled = 0;
 
     for (const row of due) {
       try {
-        const result = await sendSmsNow({ toPhone: row.to_phone, message: row.message });
+        if (row.schedule_item_id && unreconciled.has(row.schedule_item_id)) {
+          deferred++;
+          continue;
+        }
+        // Lembrete ligado a visita: o texto e montado agora, com a hora actual.
+        // Nunca sai com {{chavetas}} por substituir nem com uma data que ja nao e
+        // a da visita: ou fica para o proximo lote, ou cancela-se com motivo.
+        const rendered = row.schedule_item_id ? await renderLinkedSms(supabase, row) : { kind: "stored" as const };
+        if (rendered.kind === "defer") {
+          console.error("[process-scheduled-sms] lembrete adiado:", row.id, rendered.reason);
+          deferred++;
+          continue;
+        }
+        if (rendered.kind === "cancel") {
+          await supabase.from("scheduled_sms").update({
+            status: "cancelled",
+            cancelled_at: new Date().toISOString(),
+            cancel_reason: rendered.reason,
+          }).eq("id", row.id).eq("status", "pending");
+          cancelled++;
+          continue;
+        }
+        const message: string = rendered.kind === "ok" ? rendered.value : row.message;
+        const result = await sendSmsNow({ toPhone: row.to_phone, message });
 
         await supabase.from("scheduled_sms").update({
           status: result.ok ? "sent" : "failed",
@@ -66,7 +116,7 @@ Deno.serve(async (req: Request) => {
           entity_type: row.entity_type,
           entity_id: row.entity_id,
           to_phone: row.to_phone,
-          message: row.message,
+          message,
           status: result.ok ? "sent" : "failed",
           error_message: result.ok ? null : result.error,
           sent_at: result.ok ? new Date().toISOString() : null,
@@ -83,7 +133,7 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    return new Response(JSON.stringify({ processed, failed }), {
+    return new Response(JSON.stringify({ processed, failed, cancelled, deferred, reconcile: reconcileSummary }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error: any) {

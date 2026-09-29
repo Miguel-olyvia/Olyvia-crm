@@ -56,3 +56,20 @@ export async function resolveKnownOwnerFromContact(params: {
 
   return resolveOwnerResourceIds(supabase, organizationId, summary.assigneeAnewUserId);
 }
+
+/**
+ * Candidatos a que a marcacao publica pode atribuir a visita.
+ *
+ * Contacto SEM dono conhecido: todos (o menos ocupado/mais perto, como sempre).
+ * Contacto COM dono: so os recursos do dono -- e se o dono nao tem nenhum
+ * recurso activo a lista fica VAZIA (nunca "todos"): nao ha a quem marcar e o
+ * pedido vai para a fila dele, em vez de a visita ser dada a outro tecnico.
+ */
+export function restrictCandidatesToOwner<T extends { id: string }>(
+  candidates: readonly T[],
+  hasKnownOwner: boolean,
+  ownerResourceIds: readonly string[],
+): T[] {
+  if (!hasKnownOwner) return [...candidates];
+  return candidates.filter((c) => ownerResourceIds.includes(c.id));
+}

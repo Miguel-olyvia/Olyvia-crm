@@ -282,10 +282,14 @@ export async function scheduleEmail(
     entityId?: string;
     templateId?: string | null;
     smtpId?: string | null;
+    // Lembrete de visita: liga a linha a visita para o processador a acertar
+    // quando a visita mudar (ver reminderReconcile.ts). Sem isto, a linha e um
+    // email avulso e segue o caminho de sempre.
+    link?: ReminderLink;
   },
-): Promise<void> {
+): Promise<{ ok: boolean; duplicate?: boolean }> {
   try {
-    await supabase.from("scheduled_emails").insert({
+    const { error } = await supabase.from("scheduled_emails").insert({
       template_id: row.templateId || null,
       entity_type: row.entityType || "leads",
       entity_id: row.entityId,
@@ -297,10 +301,42 @@ export async function scheduleEmail(
       scheduled_for: row.scheduledFor,
       status: "pending",
       smtp_id: row.smtpId || null,
+      ...(row.link ? linkColumns(row.link) : {}),
     });
+    if (error) {
+      // 23505 = indice unico por destinatario: ja ha um lembrete pendente igual.
+      if (error.code === "23505") return { ok: false, duplicate: true };
+      console.error("[formEmails] scheduleEmail failed:", error);
+      return { ok: false };
+    }
+    return { ok: true };
   } catch (err) {
     console.error("[formEmails] scheduleEmail failed:", err);
+    return { ok: false };
   }
+}
+
+/** Ligacao de um lembrete a uma visita (colunas de scheduled_emails / scheduled_sms). */
+export interface ReminderLink {
+  scheduleItemId: string;
+  audience: "client" | "technician";
+  formId: string | null;
+  locale: string | null;
+  /** ISO: hora da visita que o lembrete assume. */
+  visitStartSnapshot: string;
+  /** Variaveis do modelo, para montar o conteudo no envio. */
+  contentVars: Record<string, string>;
+}
+
+export function linkColumns(link: ReminderLink): Record<string, unknown> {
+  return {
+    schedule_item_id: link.scheduleItemId,
+    audience: link.audience,
+    form_id: link.formId,
+    locale: link.locale,
+    visit_start_snapshot: link.visitStartSnapshot,
+    content_vars: link.contentVars,
+  };
 }
 
 /**

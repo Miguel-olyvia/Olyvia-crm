@@ -8,6 +8,7 @@ import { ensureHolidaysPersisted } from "../_shared/ensureHolidays.ts";
 import { resolveKnownOwnerFromContact } from "../_shared/knownOwner.ts";
 import { normalizeEmailForMatch, normalizePhoneForMatch } from "../_shared/leadDedup.ts";
 import { buildDayResponse, buildMonthResponse } from "../_shared/availabilityResponse.ts";
+import { resolveRescheduleTarget, listDaysWithSlots, evaluateDay, type RescheduleContext } from "../_shared/rescheduleSlots.ts";
 import {
   aggregateFeasibleSlots,
   intersectMonthDays,
@@ -57,6 +58,10 @@ const requestSchema = z.object({
   // horarios do comercial dono quando a pessoa ja e lead/cliente.
   email: z.string().max(254).optional(),
   phone: z.string().max(40).optional(),
+  // Reagendamento pelo link publico: o calendario passa a mostrar so os
+  // horarios do recurso DA VISITA, com as regras da marcacao (ver
+  // _shared/rescheduleSlots.ts). Quando vem, ignora-se board/duracao/contacto.
+  booking_token: z.string().max(200).optional(),
 });
 
 Deno.serve(async (req: Request) => {
@@ -100,7 +105,7 @@ Deno.serve(async (req: Request) => {
     const {
       form_id, step_number, date, start_date, end_date,
       postal_code, district_id, board_id: directBoardId, duration_minutes: directDuration,
-      include_settings, email, phone,
+      include_settings, email, phone, booking_token,
     } = parsed.data;
 
     let boardId = directBoardId || null;
@@ -111,6 +116,28 @@ Deno.serve(async (req: Request) => {
     // para durationMinutes acima.
     let minAdvanceHours: number | null = null;
 
+    // Reagendamento pelo link: recurso, duracao, antecedencia e regras vem da
+    // VISITA, nao do pedido.
+    let rescheduleCtx: RescheduleContext[] | null = null;
+    if (booking_token) {
+      const refDay = start_date || date;
+      const y1 = refDay ? parseInt(refDay.substring(0, 4)) : new Date().getUTCFullYear();
+      const y2 = end_date ? parseInt(end_date.substring(0, 4)) : y1;
+      const years: number[] = [];
+      for (let y = y1; y <= y2 && years.length < 3; y++) years.push(y);
+      const target = await resolveRescheduleTarget(supabase, booking_token, { years });
+      if (!target.ok) {
+        return new Response(
+          JSON.stringify({ error: target.error, code: target.code }),
+          { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      rescheduleCtx = target.ctxs;
+      boardId = target.item.board_id;
+      durationMinutes = target.ctx.durationMinutes;
+      minAdvanceHours = target.ctx.minAdvanceHours;
+    }
+
     // Resolve minAdvanceHours (and board/duration when not passed directly)
     // from form_steps whenever form_id+step_number are given. Antes disto só
     // corria quando board_id não vinha no pedido -- mas o formulário público
@@ -118,7 +145,7 @@ Deno.serve(async (req: Request) => {
     // props diretas, então este bloco nunca chegava a correr em produção e a
     // antecedência mínima nunca era lida para o calendário de nenhum
     // formulário real (só passava quando testado sem esses parâmetros).
-    if (form_id && step_number) {
+    if (!rescheduleCtx && form_id && step_number) {
       const { data: step, error: stepError } = await supabase
         .from('form_steps')
         .select('scheduling_board_id, scheduling_duration_minutes, scheduling_min_advance_hours, step_type')
@@ -237,6 +264,53 @@ Deno.serve(async (req: Request) => {
         holidays: holidayDates,
       };
     };
+
+    // ═══════════════════════════════════════════════════════
+    // Reagendamento: so o recurso da visita, com as regras da marcacao
+    // ═══════════════════════════════════════════════════════
+    // Mesma forma de resposta que o calendario normal. So REDUZ: parte do que
+    // o recurso tem livre (sem contar a propria visita) e retira o que a
+    // deslocacao/almoco nao permite. A validacao final (reschedule-booking)
+    // usa exactamente o mesmo modulo.
+    if (rescheduleCtx) {
+      if (!start_date && !date) {
+        return new Response(
+          JSON.stringify({ error: 'date is required (YYYY-MM-DD) or start_date + end_date for range' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      if (start_date && end_date) {
+        const scheduleConfig = await fetchScheduleConfig();
+        const availableDates = await listDaysWithSlots(supabase, rescheduleCtx, start_date, end_date);
+        console.log(`public-availability reschedule range: ${start_date}→${end_date}, available_days=${availableDates.length}`);
+        return new Response(
+          JSON.stringify(buildMonthResponse({ availableDates, scheduleConfig, durationMinutes })),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      const scheduleConfig: any = include_settings ? await fetchScheduleConfig() : undefined;
+      const { evaluation, error: dayError } = await evaluateDay(supabase, rescheduleCtx, date!);
+      if (dayError) {
+        console.error('public-availability reschedule day failed:', dayError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch availability' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      console.log(`public-availability reschedule: date=${date}, offered=${evaluation.offered.length}, travel_rejected=${evaluation.travelRejected.length}`);
+      return new Response(
+        JSON.stringify(buildDayResponse({
+          slots: evaluation.offered,
+          coverage: evaluation.offered.length > 0,
+          timezone: scheduleConfig?.timezone,
+          durationMinutes,
+          scheduleConfig,
+        })),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // ═══════════════════════════════════════════════════════
     // Restricao ao comercial dono (so REDUZ, nunca acrescenta)

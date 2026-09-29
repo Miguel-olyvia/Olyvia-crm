@@ -1,25 +1,38 @@
-// Decisao pura sobre uma linha de lembrete pendente (scheduled_emails) face ao
-// estado ACTUAL da visita. Ainda nao esta ligada a nada: quem a chamar (o
-// processador de lembretes) le a linha e a visita e aplica a accao devolvida.
+// Plano de acertos dos lembretes de UMA visita (emails e SMS), puro: sem rede,
+// sem Deno. Quem o chama (reminderRunner.ts, nos processadores de lembretes)
+// le as linhas da visita, a visita, os comerciais actuais e o formulario, e
+// aplica as accoes devolvidas.
 //
-// Accoes:
-//  - cancel:   nao enviar (visita cancelada, apagada ou passada; ou o lembrete
-//              e do comercial e a visita ficou sem comercial com email).
-//  - move:     a visita mudou de hora; o lembrete acompanha, mantendo a mesma
-//              antecedencia que tinha.
-//  - retarget: mudou o comercial; o lembrete vai para o comercial actual.
-//  - send:     enviar agora tal como esta (ou, se a hora nova do lembrete ja
-//              passou mas a visita ainda nao, enviar de imediato).
+// Regras:
+//  - Visita apagada, cancelada ou ja comecada: cancelar todos os lembretes
+//    pendentes.
+//  - Lembrete do comercial cujo comercial ja nao esta na visita: cancelar.
+//  - Visita mudou de hora (a hora que o lembrete assumia difere da actual): o
+//    lembrete passa a sair X horas antes da NOVA hora, com X = intervalo ACTUAL
+//    do formulario (so se o formulario ja nao existir usa-se o intervalo
+//    gravado: hora da visita assumida menos hora do lembrete). Se essa hora
+//    nova do lembrete ja passou, NAO se envia: a linha e cancelada com motivo,
+//    como a marcacao ja faz. Nunca "enviar logo".
+//  - Comercial acrescentado (varios recursos, ou troca): cria-se-lhe um
+//    lembrete, uma linha por comercial, com a mesma regra de hora, e so se ainda
+//    ha tempo. Um comercial que ja tem lembrete pendente, enviado ou falhado
+//    para esta visita nao recebe outro.
 
-export interface ReminderRow {
-  /** ISO: quando o lembrete estava marcado para sair. */
+export type ReminderChannel = "email" | "sms";
+export type ReminderAudience = "client" | "technician";
+
+export interface ReminderLine {
+  id: string;
+  channel: ReminderChannel;
+  audience: ReminderAudience | null;
+  /** Email (emails) ou telefone (SMS) do destinatario. */
+  recipient: string | null;
+  /** pending | sent | failed | cancelled */
+  status: string;
+  /** ISO: quando o lembrete esta marcado para sair. */
   scheduled_for: string;
-  to_email: string;
-  user_id: string | null;
-  /** Para quem e o lembrete. */
-  kind: "client" | "technician";
-  /** ISO: hora da visita quando o lembrete foi agendado. */
-  visit_start_snapshot: string;
+  /** ISO: hora da visita que o lembrete assumia. */
+  visit_start_snapshot: string | null;
 }
 
 export interface ReminderVisit {
@@ -33,95 +46,133 @@ export interface CurrentTechnician {
   user_id: string | null;
 }
 
-export type ReminderActionKind = "send" | "move" | "retarget" | "cancel";
-
-export interface ReminderDecision {
-  action: ReminderActionKind;
-  /** ISO: valor a gravar em scheduled_for. */
-  scheduled_for: string;
-  to_email: string;
-  user_id: string | null;
-  /** ISO: novo visit_start_snapshot. */
-  snapshot: string;
+export interface ReminderFormState {
+  reminder_enabled: boolean;
+  reminder_hours_before: number | null;
 }
 
-const CANCELLED_STATUSES = new Set(["cancelled", "canceled", "cancelado", "cancelada"]);
+export type ReminderAction =
+  | { kind: "cancel"; line_id: string; channel: ReminderChannel; reason: string }
+  | { kind: "move"; line_id: string; channel: ReminderChannel; scheduled_for: string; snapshot: string }
+  | { kind: "create_technician"; email: string; user_id: string | null; scheduled_for: string; snapshot: string };
+
+export interface PlanInput {
+  lines: ReminderLine[];
+  visit: ReminderVisit | null;
+  technicians: CurrentTechnician[];
+  form: ReminderFormState | null;
+  now: Date;
+}
+
+export const REASON_VISIT_GONE = "Visita cancelada, apagada ou já realizada";
+export const REASON_TECHNICIAN_REMOVED = "O comercial já não está na visita";
+export const REASON_REMINDER_TIME_PASSED = "A hora do lembrete para a nova data da visita já passou";
+export const REASON_CONTENT_UNRECOVERABLE =
+  "O texto do lembrete tinha a data antiga e não foi possível refazê-lo com a data nova";
+
+const HOUR_MS = 3_600_000;
 
 function normEmail(e: string | null | undefined): string {
   return (e || "").trim().toLowerCase();
 }
 
-export function decideReminderAction(
-  row: ReminderRow,
-  visit: ReminderVisit | null,
-  currentTechnician: CurrentTechnician | null,
-  now: Date,
-): ReminderDecision {
-  const unchanged: ReminderDecision = {
-    action: "cancel",
-    scheduled_for: row.scheduled_for,
-    to_email: row.to_email,
-    user_id: row.user_id,
-    snapshot: row.visit_start_snapshot,
-  };
+function isCancelledStatus(status: string | null | undefined): boolean {
+  const s = (status || "").toLowerCase();
+  return s === "cancelled" || s === "canceled" || s === "cancelado" || s === "cancelada";
+}
+
+/** Antecedencia (ms) a usar para uma linha: a do formulario actual, senao a gravada. */
+function intervalMsFor(line: ReminderLine | null, form: ReminderFormState | null): number | null {
+  if (form && form.reminder_hours_before !== null && form.reminder_hours_before > 0) {
+    return form.reminder_hours_before * HOUR_MS;
+  }
+  if (line?.visit_start_snapshot) {
+    const saved = new Date(line.visit_start_snapshot).getTime() - new Date(line.scheduled_for).getTime();
+    if (Number.isFinite(saved) && saved > 0) return saved;
+  }
+  return null;
+}
+
+/**
+ * Ao reagendar pelo link: cria-se lembrete para a nova data quando a visita ja
+ * nao tem nenhum lembrete PENDENTE. Um lembrete ja enviado (ou falhado, ou
+ * cancelado por a hora ja ter passado) era da data anterior e nao cobre a nova.
+ */
+export function needsNewReminderLines(lines: readonly { status: string }[]): boolean {
+  return !lines.some((l) => l.status === "pending");
+}
+
+export function planReminderActions(input: PlanInput): ReminderAction[] {
+  const { lines, visit, technicians, form, now } = input;
   const nowMs = now.getTime();
+  const actions: ReminderAction[] = [];
+  const pending = lines.filter((l) => l.status === "pending");
 
-  // 1. Visita apagada, cancelada ou ja passada.
-  if (!visit) return unchanged;
-  if (visit.status && CANCELLED_STATUSES.has(visit.status.toLowerCase())) return unchanged;
-  const visitMs = new Date(visit.start_datetime).getTime();
-  if (!Number.isFinite(visitMs) || visitMs <= nowMs) return unchanged;
-
-  const isTechnician = row.kind === "technician";
-
-  // 2. Lembrete do comercial e a visita ficou sem comercial (ou sem email).
-  if (isTechnician && (!currentTechnician || !normEmail(currentTechnician.email))) {
-    return unchanged;
+  const visitMs = visit ? new Date(visit.start_datetime).getTime() : NaN;
+  const visitGone = !visit || isCancelledStatus(visit.status) || !Number.isFinite(visitMs) || visitMs <= nowMs;
+  if (visitGone) {
+    return pending.map((l) => ({ kind: "cancel", line_id: l.id, channel: l.channel, reason: REASON_VISIT_GONE }));
   }
+  const startIso = new Date(visitMs).toISOString();
 
-  // Destino: o do comercial actual, se mudou.
-  let toEmail = row.to_email;
-  let userId = row.user_id;
-  let techChanged = false;
-  if (isTechnician && currentTechnician) {
-    const cur = normEmail(currentTechnician.email);
-    if (cur !== normEmail(row.to_email)) {
-      techChanged = true;
-      toEmail = cur;
-      userId = currentTechnician.user_id;
+  const currentEmails = new Set(technicians.map((t) => normEmail(t.email)).filter(Boolean));
+
+  for (const line of pending) {
+    // Comercial retirado da visita.
+    if (line.audience === "technician" && line.channel === "email" && !currentEmails.has(normEmail(line.recipient))) {
+      actions.push({ kind: "cancel", line_id: line.id, channel: line.channel, reason: REASON_TECHNICIAN_REMOVED });
+      continue;
+    }
+
+    // Hora mudou: o lembrete acompanha, X horas antes da nova hora.
+    if (!line.visit_start_snapshot) continue;
+    const snapMs = new Date(line.visit_start_snapshot).getTime();
+    if (!Number.isFinite(snapMs) || snapMs === visitMs) continue;
+    const interval = intervalMsFor(line, form);
+    if (interval === null) continue;
+    const newFor = visitMs - interval;
+    if (newFor <= nowMs) {
+      actions.push({ kind: "cancel", line_id: line.id, channel: line.channel, reason: REASON_REMINDER_TIME_PASSED });
+    } else {
+      actions.push({
+        kind: "move",
+        line_id: line.id,
+        channel: line.channel,
+        scheduled_for: new Date(newFor).toISOString(),
+        snapshot: startIso,
+      });
     }
   }
 
-  // 3. Hora mudou: o lembrete acompanha, com a mesma antecedencia.
-  const snapshotMs = new Date(row.visit_start_snapshot).getTime();
-  const scheduledMs = new Date(row.scheduled_for).getTime();
-  if (Number.isFinite(snapshotMs) && Number.isFinite(scheduledMs) && snapshotMs !== visitMs) {
-    const newForMs = visitMs - (snapshotMs - scheduledMs);
-    const snapshot = new Date(visitMs).toISOString();
-    if (newForMs <= nowMs) {
-      // Lembrete ja vencido mas a visita ainda nao: sai agora.
-      return { action: "send", scheduled_for: now.toISOString(), to_email: toEmail, user_id: userId, snapshot };
+  // Comerciais acrescentados: so se o formulario ainda tem lembrete ligado, a
+  // visita ja tinha lembretes, e ainda ha tempo.
+  const intent = lines.some((l) => l.status === "pending" || l.status === "sent");
+  if (intent && form && form.reminder_enabled && form.reminder_hours_before !== null && form.reminder_hours_before > 0) {
+    const newFor = visitMs - form.reminder_hours_before * HOUR_MS;
+    if (newFor > nowMs) {
+      const covered = new Set(
+        lines
+          .filter((l) =>
+            l.audience === "technician" && l.channel === "email" &&
+            (l.status === "pending" || l.status === "sent" || l.status === "failed")
+          )
+          .map((l) => normEmail(l.recipient)),
+      );
+      const seen = new Set<string>();
+      for (const t of technicians) {
+        const email = normEmail(t.email);
+        if (!email || covered.has(email) || seen.has(email)) continue;
+        seen.add(email);
+        actions.push({
+          kind: "create_technician",
+          email,
+          user_id: t.user_id,
+          scheduled_for: new Date(newFor).toISOString(),
+          snapshot: startIso,
+        });
+      }
     }
-    return {
-      action: "move",
-      scheduled_for: new Date(newForMs).toISOString(),
-      to_email: toEmail,
-      user_id: userId,
-      snapshot,
-    };
   }
 
-  // 4. So o comercial mudou.
-  if (techChanged) {
-    return {
-      action: "retarget",
-      scheduled_for: row.scheduled_for,
-      to_email: toEmail,
-      user_id: userId,
-      snapshot: row.visit_start_snapshot,
-    };
-  }
-
-  // 5. Nada mudou.
-  return { ...unchanged, action: "send" };
+  return actions;
 }
