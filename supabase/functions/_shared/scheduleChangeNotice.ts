@@ -127,7 +127,8 @@ function nonEmpty(value: string | null | undefined): string | null {
 /**
  * Canais, modelo de email e texto de SMS para um tipo de aviso.
  * 'both' = uniao dos canais dos dois eventos; modelo e SMS sao os de data/hora
- * se existirem, senao os de comercial, senao null (texto fixo).
+ * se existirem e o canal desse evento estiver ligado, senao os de comercial
+ * (idem), senao null (texto fixo).
  */
 export function resolveNoticeChannels(
   kind: NoticeKind,
@@ -148,10 +149,13 @@ export function resolveNoticeChannels(
 
   if (kind === 'datetime') return reschedule;
   if (kind === 'assignee') return reassign;
+  // Modelo e SMS so vem de um evento cujo canal correspondente esta ligado.
+  const emailSources = [reschedule, reassign].filter((e) => e.email);
+  const smsSources = [reschedule, reassign].filter((e) => e.sms);
   return {
-    email: reschedule.email || reassign.email,
-    sms: reschedule.sms || reassign.sms,
-    templateId: reschedule.templateId ?? reassign.templateId,
-    smsMessage: reschedule.smsMessage ?? reassign.smsMessage,
+    email: emailSources.length > 0,
+    sms: smsSources.length > 0,
+    templateId: emailSources.map((e) => e.templateId).find((v) => v !== null) ?? null,
+    smsMessage: smsSources.map((e) => e.smsMessage).find((v) => v !== null) ?? null,
   };
 }
