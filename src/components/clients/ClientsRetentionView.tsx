@@ -11,6 +11,7 @@ import { differenceInDays, format } from "date-fns";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
+import { CLIENT_BUSINESS_SELECT, CLIENT_BUSINESS_TYPE_LABEL, deriveClientBusinessOrigin } from "@/components/clients/detail/clientBusinessOrigin";
 import type { ClientHealthScore, ClientContractInfo, ClientTag, ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 
 interface ClientsRetentionViewProps {
@@ -38,6 +39,10 @@ interface FullContract {
   created_at: string;
   payment_terms: string | null;
   notes: string | null;
+  is_manual_order?: boolean | null;
+  order_number?: string | null;
+  contract_number?: string | null;
+  direct_sales?: { sale_number: string | null; deleted_at: string | null }[] | null;
 }
 
 const HEALTH_BAR_COLORS: Record<string, string> = {
@@ -164,7 +169,7 @@ export function ClientsRetentionView({
         for (let i = 0; i < entityIds.length; i += 100) {
           const batch = entityIds.slice(i, i + 100);
           let q = supabase.from("client_contracts")
-            .select("id, entity_id, status, total_value, total_value_sem_iva, start_date, end_date, created_at, payment_terms, notes")
+            .select(`id, entity_id, status, total_value, total_value_sem_iva, start_date, end_date, created_at, payment_terms, notes, ${CLIENT_BUSINESS_SELECT}`)
             .in("entity_id", batch)
             .is("deleted_at", null)
             .in("organization_id", scopeOrgIds);
@@ -175,12 +180,12 @@ export function ClientsRetentionView({
             captureFlowError(error, "db-error-leaked-to-ui");
             continue;
           }
-          if (data) all.push(...(data as FullContract[]));
+          if (data) all.push(...(data as unknown as FullContract[]));
         }
         if (!cancelled) setAllContracts(all);
       } catch (err) {
         console.error("Error loading contracts for retention view:", err);
-        toast.error("Não foi possível carregar os contratos.");
+        toast.error("Não foi possível carregar os negócios.");
       } finally {
         if (!cancelled) setLoadingContracts(false);
       }
@@ -288,7 +293,7 @@ export function ClientsRetentionView({
         const reasons: string[] = [];
         if (daysSinceContact < 999) reasons.push(`Sem contacto há ${daysSinceContact} dias`);
         else reasons.push("Nunca contactado");
-        if (contract) reasons.push(`${contract.activeCount} contrato${contract.activeCount > 1 ? "s" : ""} ${formatCurrency(contract.totalValue)}`);
+        if (contract) reasons.push(`${contract.activeCount} negócio${contract.activeCount > 1 ? "s" : ""} ${formatCurrency(contract.totalValue)}`);
         if (!identityMap[c.entity_id]?.vat) reasons.push("Sem NIF");
         if (!c.assigned_to) reasons.push("Sem atribuição");
         if (interaction?.lastSentiment === "negative") reasons.push("Última chamada negativa 😟");
@@ -346,9 +351,11 @@ export function ClientsRetentionView({
         if (daysSinceContact !== null) details.push(`Último contacto: ${daysSinceContact} dias`);
         if (isHealthy) details.push("Provável renovação");
 
-        const contractName = c.payment_terms
-          ? `Contrato ${c.payment_terms.charAt(0).toUpperCase() + c.payment_terms.slice(1)}`
-          : `Contrato #${(c.id || "").slice(0, 6)}`;
+        // Tipo + número certo (Contrato CC-… / Venda Direta VD-… / Encomenda Cliente EC-…).
+        const origin = deriveClientBusinessOrigin(c);
+        const contractName = origin.display_number
+          ? `${CLIENT_BUSINESS_TYPE_LABEL[origin.origin_type]} ${origin.display_number}`
+          : `${CLIENT_BUSINESS_TYPE_LABEL[origin.origin_type]} #${(c.id || "").slice(0, 6)}`;
 
         return {
           id: c.id,
@@ -691,7 +698,7 @@ export function ClientsRetentionView({
                 <div className="bg-red-50 dark:bg-red-950/20 border border-red-200/50 dark:border-red-800/50 rounded-lg p-3 text-center mt-2">
                   <p className="text-sm font-semibold text-red-700 dark:text-red-400 flex items-center justify-center gap-2">
                     <AlertTriangle className="w-4 h-4" />
-                    {formatCurrency(atRiskTotalValue)} em valor de contratos em risco de perda
+                    {formatCurrency(atRiskTotalValue)} em valor de negócios em risco de perda
                   </p>
                 </div>
 

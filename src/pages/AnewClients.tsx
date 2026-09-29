@@ -2280,7 +2280,7 @@ const AnewClients = () => {
                       )}
                       {isColVisible('avatar') && <TableHead className="w-[40px]" />}
                       {isColVisible('client') && <TableHead>Cliente</TableHead>}
-                      {isColVisible('contracts') && <TableHead>Contratos</TableHead>}
+                      {isColVisible('contracts') && <TableHead>Negócios</TableHead>}
                       {isColVisible('value') && (
                       <TableHead className="cursor-pointer" onClick={() => handleSort("value")}>
                         <div className="flex items-center gap-1">Valor Total <ArrowUpDown className="w-3 h-3" /></div>
