@@ -4,13 +4,15 @@ import {
   sendEmailNow,
   defaultMeetingHtml,
   buildManageUrl,
+  renderHtml,
+  renderSubject,
 } from '../_shared/formEmails.ts';
 import { sendSmsNow } from '../_shared/sendSms.ts';
 import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from '../_shared/auth.ts';
 import { getCorsHeadersExtended } from '../_shared/cors.ts';
 import { checkRateLimit, recordRateLimitAttempt, rateLimitResponse } from '../_shared/rateLimit.ts';
 import { initSentry, captureError } from '../_shared/sentry.ts';
-import { resolveNoticeKind, buildNoticeCopy } from '../_shared/scheduleChangeNotice.ts';
+import { resolveNoticeKind, buildNoticeCopy, resolveNoticeChannels } from '../_shared/scheduleChangeNotice.ts';
 import { z } from 'npm:zod';
 
 initSentry();
@@ -92,7 +94,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: item } = await admin
       .from('schedule_items')
-      .select('id, organization_id, status, metadata, start_datetime, end_datetime, location, time_off_type, created_by, user_id')
+      .select('id, organization_id, status, metadata, start_datetime, end_datetime, location, time_off_type, created_by, user_id, lead_id')
       .eq('id', itemId)
       .maybeSingle();
 
@@ -155,7 +157,7 @@ Deno.serve(async (req: Request) => {
 
     const { data: settings } = await admin
       .from('schedule_settings')
-      .select('notify_client_on_reschedule, notify_client_on_reassign, timezone')
+      .select('notify_client_on_reschedule, notify_client_on_reassign, timezone, reschedule_notify_email, reschedule_notify_sms, reschedule_email_template_id, reschedule_sms_message, reassign_notify_email, reassign_notify_sms, reassign_email_template_id, reassign_sms_message, notify_client_smtp_id, notify_client_sms_include_link')
       .eq('organization_id', item.organization_id)
       .maybeSingle();
 
@@ -171,26 +173,32 @@ Deno.serve(async (req: Request) => {
     const metadata = (item.metadata && typeof item.metadata === 'object' && !Array.isArray(item.metadata))
       ? item.metadata as Record<string, unknown>
       : {};
-    const formId = typeof metadata.form_id === 'string' ? metadata.form_id : null;
-    if (!formId) {
-      return json({ sent: { email: false, sms: false }, skipped: 'no_form' });
+
+    // Canais e modelos vem da configuracao PROPRIA da Agenda (schedule_settings),
+    // nao do formulario de origem.
+    const channels = resolveNoticeChannels(kind, settings ?? {});
+    if (!channels.email && !channels.sms) {
+      return json({ sent: { email: false, sms: false }, skipped: 'channels_off' });
     }
 
-    // The form referenced by metadata.form_id is attacker-controllable (any
-    // user with scheduling.items.edit can write arbitrary metadata via the
-    // existing update path) -- confirm it actually belongs to this item's
-    // organization before trusting its email config for anyone.
-    const { data: formRow } = await admin
-      .from('forms')
-      .select('id')
-      .eq('id', formId)
-      .eq('organization_id', item.organization_id)
-      .maybeSingle();
-    if (!formRow) {
-      return json({ sent: { email: false, sms: false }, skipped: 'no_form' });
+    // O formulario e um extra opcional: so cor, logotipo e URL de gestao.
+    // metadata.form_id e controlavel por quem edita a visita -- confirmar que
+    // pertence a organizacao do item antes de o usar.
+    let formId: string | null = typeof metadata.form_id === 'string' ? metadata.form_id : null;
+    if (formId) {
+      const { data: formRow } = await admin
+        .from('forms')
+        .select('id')
+        .eq('id', formId)
+        .eq('organization_id', item.organization_id)
+        .maybeSingle();
+      if (!formRow) formId = null;
     }
 
-    let leadId: string | null = typeof metadata.lead_id === 'string' ? metadata.lead_id : null;
+    // Lead: coluna lead_id primeiro, depois metadata.lead_id, depois
+    // anew_leads.scheduled_visit_id. A leitura da lead abaixo filtra sempre pela org.
+    let leadId: string | null = typeof item.lead_id === 'string' ? item.lead_id : null;
+    if (!leadId && typeof metadata.lead_id === 'string') leadId = metadata.lead_id;
     if (!leadId) {
       const { data: leadByVisit } = await admin
         .from('anew_leads')
@@ -204,10 +212,7 @@ Deno.serve(async (req: Request) => {
       return json({ sent: { email: false, sms: false }, skipped: 'no_lead' });
     }
 
-    const emailCfg = await loadFormEmailConfig(admin, formId);
-    if (!emailCfg?.confirmation_email_enabled && !emailCfg?.confirmation_sms_enabled) {
-      return json({ sent: { email: false, sms: false }, skipped: 'channels_off' });
-    }
+    const emailCfg = formId ? await loadFormEmailConfig(admin, formId) : null;
 
     // metadata.lead_id is likewise attacker-controllable -- same org filter,
     // otherwise a cross-tenant lead_id would leak that lead's contact info
@@ -230,8 +235,8 @@ Deno.serve(async (req: Request) => {
     ].filter(Boolean).join(' ').trim() || 'Cliente';
     const leadPhone = String(fv.phone || fv.po_telefone || fv.telefone || '');
 
-    const canEmail = Boolean(emailCfg.confirmation_email_enabled && leadEmail);
-    const canSms = Boolean(emailCfg.confirmation_sms_enabled && leadPhone);
+    const canEmail = Boolean(channels.email && leadEmail);
+    const canSms = Boolean(channels.sms && leadPhone);
     if (!canEmail && !canSms) {
       return json({ sent: { email: false, sms: false }, skipped: 'no_contact' });
     }
@@ -275,15 +280,43 @@ Deno.serve(async (req: Request) => {
 
     const siteUrl = Deno.env.get('SITE_URL') || 'https://olyvia.lovable.app';
     const manageUrl = tokenRow?.token
-      ? buildManageUrl(emailCfg.booking_manage_url_template, null, tokenRow.token, siteUrl)
+      ? buildManageUrl(emailCfg?.booking_manage_url_template, null, tokenRow.token, siteUrl)
       : undefined;
 
     const { data: orgRow } = await admin
       .from('anew_organizations')
-      .select('name')
+      .select('name, logo_url')
       .eq('id', item.organization_id)
       .maybeSingle();
     const companyName = orgRow?.name || '';
+
+    // Modelo e SMTP escolhidos na Agenda: lidos com service role, por isso
+    // SEMPRE filtrados pela org do item -- um id de outra org e ignorado
+    // e cai no omissao (texto fixo / SMTP padrao).
+    let template: { subject: string; body_html: string } | null = null;
+    if (canEmail && channels.templateId) {
+      const { data: tplRow } = await admin
+        .from('email_templates')
+        .select('subject, body_html')
+        .eq('id', channels.templateId)
+        .eq('organization_id', item.organization_id)
+        .eq('is_active', true)
+        .maybeSingle();
+      if (tplRow?.body_html) {
+        template = { subject: tplRow.subject || '', body_html: tplRow.body_html };
+      }
+    }
+    let smtpId: string | null = null;
+    if (canEmail && settings?.notify_client_smtp_id) {
+      const { data: smtpRow } = await admin
+        .from('organization_smtp_settings')
+        .select('id')
+        .eq('id', settings.notify_client_smtp_id)
+        .eq('organization_id', item.organization_id)
+        .eq('is_active', true)
+        .maybeSingle();
+      smtpId = smtpRow?.id ?? null;
+    }
 
     const timezone = settings?.timezone || 'Europe/Lisbon';
     const meetingDate = new Date(item.start_datetime).toLocaleString('pt-PT', {
@@ -296,7 +329,7 @@ Deno.serve(async (req: Request) => {
       minute: '2-digit',
     });
 
-    const includeSmsLink = emailCfg.confirmation_sms_include_link === true;
+    const includeSmsLink = settings?.notify_client_sms_include_link === true;
     const copy = buildNoticeCopy(kind, {
       companyName,
       meetingDate,
@@ -305,26 +338,45 @@ Deno.serve(async (req: Request) => {
       includeSmsLink,
     });
 
+    // Mesmas variaveis que o book-slot.
+    const baseVars: Record<string, string> = {
+      lead_name: leadName,
+      client_name: leadName,
+      lead_email: leadEmail,
+      client_email: leadEmail,
+      lead_phone: leadPhone,
+      company_name: companyName,
+      technician_name: technicianName,
+      meeting_date: meetingDate,
+      meeting_datetime: meetingDate,
+      location: item.location || '',
+      cancel_url: manageUrl || '',
+    };
+
     const sent = { email: false, sms: false };
 
     if (canEmail) {
       try {
         sent.email = await sendEmailNow({
           organizationId: item.organization_id,
-          smtpId: emailCfg.email_smtp_id,
+          smtpId,
           to: leadEmail,
-          subject: copy.subject,
-          html: defaultMeetingHtml({
-            heading: copy.heading,
-            intro: copy.intro,
-            leadName,
-            when: meetingDate,
-            location: item.location || undefined,
-            technicianName: technicianName || undefined,
-            cancelUrl: manageUrl,
-            primaryColor: emailCfg.primary_color,
-            logoUrl: emailCfg.logo_url,
-          }),
+          subject: template
+            ? renderSubject(template.subject || copy.subject, baseVars)
+            : copy.subject,
+          html: template
+            ? renderHtml(template.body_html, baseVars)
+            : defaultMeetingHtml({
+              heading: copy.heading,
+              intro: copy.intro,
+              leadName,
+              when: meetingDate,
+              location: item.location || undefined,
+              technicianName: technicianName || undefined,
+              cancelUrl: manageUrl,
+              primaryColor: emailCfg?.primary_color,
+              logoUrl: emailCfg?.logo_url ?? orgRow?.logo_url ?? null,
+            }),
         });
       } catch (emailErr) {
         console.error('[notify-schedule-change] email send failed (non-fatal):', emailErr);
@@ -333,7 +385,10 @@ Deno.serve(async (req: Request) => {
 
     if (canSms) {
       try {
-        const r = await sendSmsNow({ toPhone: leadPhone, message: copy.sms });
+        const smsText = channels.smsMessage
+          ? renderSubject(channels.smsMessage, includeSmsLink ? baseVars : { ...baseVars, cancel_url: '' })
+          : copy.sms;
+        const r = await sendSmsNow({ toPhone: leadPhone, message: smsText });
         sent.sms = r.ok;
         if (!r.ok) console.error('[notify-schedule-change] sms send failed:', r.error);
       } catch (smsErr) {
