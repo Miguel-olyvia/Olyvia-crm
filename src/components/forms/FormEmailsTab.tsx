@@ -37,6 +37,9 @@ export interface EmailsTabFields {
   reminder_enabled: boolean;
   reminder_hours_before: number;
   reminder_template_id: string | null;
+  /** Lembrete do comercial. null = segue o do cliente (interruptor / horas). */
+  reminder_technician_enabled: boolean | null;
+  reminder_technician_hours_before: number | null;
   reminder_technician_template_id: string | null;
   scheduling_invite_enabled: boolean;
   scheduling_invite_delays_hours: string;
@@ -137,6 +140,10 @@ export function FormEmailsTab<T extends EmailsTabFields>({
 }: FormEmailsTabProps<T>) {
   const { t } = useTranslation();
   const set = (patch: Partial<EmailsTabFields>) => onChange({ ...branding, ...patch });
+  // Interruptor do comercial que se mostra: o dele, senão o do cliente (regra do servidor).
+  const technicianReminderOn = branding.reminder_technician_enabled ?? branding.reminder_enabled;
+  const followsClientOverridden =
+    branding.reminder_technician_enabled != null || branding.reminder_technician_hours_before != null;
 
   return (
     <>
@@ -201,8 +208,8 @@ export function FormEmailsTab<T extends EmailsTabFields>({
         <div className="space-y-3 rounded-lg border p-3">
           <SwitchHeader
             id="reminder-enabled"
-            label={t("emailAudience.reminderTitle")}
-            description="Enviado ao cliente e ao técnico X horas antes da visita agendada."
+            label={t("emailAudience.clientReminderTitle")}
+            description={t("emailAudience.clientReminderHelp")}
             checked={branding.reminder_enabled}
             onChange={(v) => set({ reminder_enabled: v })}
           />
@@ -217,7 +224,6 @@ export function FormEmailsTab<T extends EmailsTabFields>({
                   value={branding.reminder_hours_before}
                   onChange={(e) => set({ reminder_hours_before: parseInt(e.target.value, 10) || 1 })}
                 />
-                <p className="text-[10px] text-muted-foreground">{t("emailAudience.reminderHoursHelp")}</p>
               </div>
               <EventTemplateSelect
                 id="reminder-client-template"
@@ -310,18 +316,51 @@ export function FormEmailsTab<T extends EmailsTabFields>({
         </div>
 
         <div className="space-y-3 rounded-lg border p-3">
-          <h4 className="text-sm font-medium">{t("emailAudience.commercialReminderTitle")}</h4>
-          {branding.reminder_enabled ? (
-            <EventTemplateSelect
-              id="reminder-technician-template"
-              label={t("emailAudience.templateLabel")}
-              options={emailTemplateOptions}
-              value={branding.reminder_technician_template_id}
-              onChange={(id) => set({ reminder_technician_template_id: id })}
-              defaultLabel={t("emailAudience.sameAsClient")}
-            />
-          ) : (
-            <p className="text-[10px] text-muted-foreground">{t("emailAudience.reminderOffHint")}</p>
+          <SwitchHeader
+            id="reminder-technician-enabled"
+            label={t("emailAudience.commercialReminderTitle")}
+            description={t("emailAudience.commercialReminderHelp")}
+            checked={technicianReminderOn}
+            onChange={(v) => set({ reminder_technician_enabled: v })}
+          />
+          {technicianReminderOn && (
+            <>
+              <div className="space-y-1">
+                <Label htmlFor="reminder-technician-hours" className="text-xs">Horas de antecedência</Label>
+                <Input
+                  id="reminder-technician-hours"
+                  type="number"
+                  min={1}
+                  value={branding.reminder_technician_hours_before ?? ""}
+                  placeholder={String(branding.reminder_hours_before)}
+                  onChange={(e) => {
+                    const hours = parseInt(e.target.value, 10);
+                    set({ reminder_technician_hours_before: hours > 0 ? hours : null });
+                  }}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  {t("emailAudience.followsClientHint", { hours: branding.reminder_hours_before })}
+                </p>
+              </div>
+              <EventTemplateSelect
+                id="reminder-technician-template"
+                label={t("emailAudience.templateLabel")}
+                options={emailTemplateOptions}
+                value={branding.reminder_technician_template_id}
+                onChange={(id) => set({ reminder_technician_template_id: id })}
+                defaultLabel={t("emailAudience.commercialSystemDefault")}
+              />
+            </>
+          )}
+          {followsClientOverridden && (
+            <button
+              type="button"
+              id="reminder-technician-follow-client"
+              className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              onClick={() => set({ reminder_technician_enabled: null, reminder_technician_hours_before: null })}
+            >
+              {t("emailAudience.followClient")}
+            </button>
           )}
         </div>
 
@@ -339,7 +378,7 @@ export function FormEmailsTab<T extends EmailsTabFields>({
             options={emailTemplateOptions}
             value={branding.reschedule_technician_template_id}
             onChange={(id) => set({ reschedule_technician_template_id: id })}
-            defaultLabel={t("emailAudience.sameAsClient")}
+            defaultLabel={t("emailAudience.commercialSystemDefault")}
           />
           {branding.reschedule_notify_commercial && (
             <ExtraEmailsField
@@ -364,7 +403,7 @@ export function FormEmailsTab<T extends EmailsTabFields>({
             options={emailTemplateOptions}
             value={branding.cancel_technician_template_id}
             onChange={(id) => set({ cancel_technician_template_id: id })}
-            defaultLabel={t("emailAudience.sameAsClient")}
+            defaultLabel={t("emailAudience.commercialSystemDefault")}
           />
           {branding.cancel_notify_commercial && (
             <ExtraEmailsField

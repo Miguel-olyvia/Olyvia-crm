@@ -102,6 +102,9 @@ interface BrandingData {
   cancel_notify_emails: string;
   reminder_enabled: boolean;
   reminder_hours_before: number;
+  /** Lembrete do comercial; null = segue o do cliente. */
+  reminder_technician_enabled: boolean | null;
+  reminder_technician_hours_before: number | null;
   reminder_template_id: string | null;
   reminder_technician_template_id: string | null;
   reschedule_client_template_id: string | null;
@@ -167,6 +170,8 @@ const defaultBranding: BrandingData = {
   cancel_notify_emails: "",
   reminder_enabled: false,
   reminder_hours_before: 2,
+  reminder_technician_enabled: null,
+  reminder_technician_hours_before: null,
   reminder_template_id: null,
   reminder_technician_template_id: null,
   reschedule_client_template_id: null,
@@ -408,6 +413,8 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
           cancel_notify_emails: (data as any).cancel_notify_emails ?? "",
           reminder_enabled: (data as any).reminder_enabled ?? false,
           reminder_hours_before: (data as any).reminder_hours_before ?? 2,
+          reminder_technician_enabled: (data as any).reminder_technician_enabled ?? null,
+          reminder_technician_hours_before: (data as any).reminder_technician_hours_before ?? null,
           reminder_template_id: (data as any).reminder_template_id ?? null,
           reminder_technician_template_id: (data as any).reminder_technician_template_id ?? null,
           reschedule_client_template_id: (data as any).reschedule_client_template_id ?? null,

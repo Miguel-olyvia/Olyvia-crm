@@ -182,7 +182,14 @@ export async function reconcileItem(supabase: any, itemId: string, now: Date = n
     lines,
     visit: item ? { status: item.status, start_datetime: item.start_datetime } : null,
     technicians,
-    form: cfg ? { reminder_enabled: !!cfg.reminder_enabled, reminder_hours_before: cfg.reminder_hours_before } : null,
+    form: cfg
+      ? {
+        reminder_enabled: !!cfg.reminder_enabled,
+        reminder_hours_before: cfg.reminder_hours_before,
+        reminder_technician_enabled: cfg.reminder_technician_enabled ?? null,
+        reminder_technician_hours_before: cfg.reminder_technician_hours_before ?? null,
+      }
+      : null,
     now,
   });
   if (actions.length === 0) return { ...summary, items: 0 };

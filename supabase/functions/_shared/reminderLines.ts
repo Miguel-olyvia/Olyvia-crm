@@ -10,6 +10,7 @@ import { buildAudienceVars, pickAudienceTemplateId } from "./audienceTemplates.t
 import type { Audience } from "./audienceTemplates.ts";
 import { buildReminderMail, reminderSmsTemplate } from "./reminderContent.ts";
 import { pickReminderSender } from "./reminderSender.ts";
+import { reminderRuleFor } from "./reminderRule.ts";
 
 export interface ReminderTechnician {
   email: string;
@@ -51,15 +52,28 @@ export interface CreateReminderLinesResult {
 
 export async function createReminderLines(p: CreateReminderLinesParams): Promise<CreateReminderLinesResult> {
   const { cfg } = p;
-  if (!cfg.reminder_enabled) return { emails: 0, sms: 0, skipped: "lembrete desligado no formulario" };
+  // Regra por destinatario (reminderRule.ts): cada um tem o seu interruptor e as
+  // suas horas; o comercial sem valor proprio segue o cliente.
+  const clientRule = reminderRuleFor(cfg, "client");
+  const technicianRule = reminderRuleFor(cfg, "technician");
+  if (!clientRule.enabled && !technicianRule.enabled) {
+    return { emails: 0, sms: 0, skipped: "lembrete desligado no formulario" };
+  }
   if (!p.entityId) return { emails: 0, sms: 0, skipped: "sem entidade" };
 
-  const hoursBefore = cfg.reminder_hours_before && cfg.reminder_hours_before > 0 ? cfg.reminder_hours_before : 2;
-  const remindAtMs = new Date(p.startIso).getTime() - hoursBefore * 3_600_000;
-  if (remindAtMs <= (p.now ?? new Date()).getTime()) {
+  const nowMs = (p.now ?? new Date()).getTime();
+  const startMs = new Date(p.startIso).getTime();
+  /** Quando sai o lembrete deste destinatario, ou null se desligado ou ja nao vai a tempo. */
+  const remindAtFor = (rule: { enabled: boolean; hoursBefore: number }): string | null => {
+    if (!rule.enabled) return null;
+    const at = startMs - rule.hoursBefore * 3_600_000;
+    return at > nowMs ? new Date(at).toISOString() : null;
+  };
+  const clientRemindAt = remindAtFor(clientRule);
+  const technicianRemindAt = remindAtFor(technicianRule);
+  if (!clientRemindAt && !technicianRemindAt) {
     return { emails: 0, sms: 0, skipped: "a hora do lembrete ja passou" };
   }
-  const remindAt = new Date(remindAtMs).toISOString();
 
   // Identidade: o lembrete ao comercial usa o comercial desta visita; o do
   // cliente usa o SMTP do formulario (ou o por omissao da organizacao) e nunca
@@ -87,9 +101,9 @@ export async function createReminderLines(p: CreateReminderLinesParams): Promise
   };
 
   const targets: { audience: Audience; email: string; tech: ReminderTechnician | null }[] = [];
-  if (p.leadEmail) targets.push({ audience: "client", email: p.leadEmail, tech: null });
+  if (p.leadEmail && clientRemindAt) targets.push({ audience: "client", email: p.leadEmail, tech: null });
   const seenTech = new Set<string>();
-  for (const t of p.technicians) {
+  for (const t of technicianRemindAt ? p.technicians : []) {
     const email = (t.email || "").trim().toLowerCase();
     if (!email || seenTech.has(email)) continue;
     seenTech.add(email);
@@ -125,7 +139,7 @@ export async function createReminderLines(p: CreateReminderLinesParams): Promise
       toEmail: t.email,
       subject: mail.subject,
       bodyHtml: mail.html,
-      scheduledFor: remindAt,
+      scheduledFor: (t.audience === "client" ? clientRemindAt : technicianRemindAt) as string,
       entityType: p.entityType,
       entityId: p.entityId,
       templateId: pickAudienceTemplateId(cfg, "reminder", t.audience, p.locale),
@@ -142,9 +156,9 @@ export async function createReminderLines(p: CreateReminderLinesParams): Promise
     if (res.ok) emails++;
   }
 
-  // SMS so ao cliente: o comercial ja ve a agenda, e um SMS tem custo por envio.
+  // SMS so ao cliente (segue a regra do cliente): o comercial ja ve a agenda, e um SMS tem custo por envio.
   let sms = 0;
-  if (cfg.reminder_sms_enabled && p.leadPhone) {
+  if (cfg.reminder_sms_enabled && p.leadPhone && clientRemindAt) {
     const includeLink = cfg.confirmation_sms_include_link === true;
     const smsVars = {
       ...p.clientVars,
@@ -161,7 +175,7 @@ export async function createReminderLines(p: CreateReminderLinesParams): Promise
         withConfirmLink: includeLink && !p.rescheduled && !!p.confirmUrl,
         withManageLink: includeLink && p.rescheduled && !!p.clientVars.cancel_url,
       }),
-      scheduledFor: remindAt,
+      scheduledFor: clientRemindAt,
       entityType: p.entityType,
       entityId: p.entityId,
       link: {

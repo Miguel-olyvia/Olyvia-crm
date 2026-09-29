@@ -6,7 +6,9 @@
 import { defaultMeetingHtml, renderHtml, renderSubject } from "./formEmails.ts";
 import type { Audience } from "./audienceTemplates.ts";
 
-export const DEFAULT_REMINDER_SUBJECT = "Lembrete: reunião {{meeting_date}}";
+/** Assunto por omissao, um por destinatario: o comercial nunca recebe o texto do cliente. */
+export const DEFAULT_REMINDER_SUBJECT_CLIENT = "Lembrete da sua visita — {{meeting_date}}";
+export const DEFAULT_REMINDER_SUBJECT_TECHNICIAN = "Lembrete: visita a {{lead_name}} — {{meeting_date}}";
 
 /** Data/hora de uma visita, como aparece nos emails e SMS (fuso de Lisboa). */
 export function formatVisitWhen(iso: string): string {
@@ -38,20 +40,28 @@ export function buildReminderMail(opts: {
   brand: ReminderBrand | null;
 }): { subject: string; html: string } {
   const { audience, template, vars, brand } = opts;
-  const subject = renderSubject(template?.subject || DEFAULT_REMINDER_SUBJECT, vars);
+  const isClient = audience === "client";
+  const defaultSubject = isClient ? DEFAULT_REMINDER_SUBJECT_CLIENT : DEFAULT_REMINDER_SUBJECT_TECHNICIAN;
+  const subject = renderSubject(template?.subject || defaultSubject, vars);
   if (template?.body_html) {
     return { subject, html: renderHtml(template.body_html, vars) };
   }
-  const isClient = audience === "client";
   return {
     subject,
     html: defaultMeetingHtml({
-      heading: "Lembrete de reunião",
-      intro: isClient ? "Este é um lembrete da sua visita agendada." : "Lembrete: tem uma visita agendada.",
+      audience,
+      heading: isClient ? "Lembrete da sua visita" : "Lembrete de visita",
+      intro: isClient
+        ? "Este é um lembrete da sua visita agendada."
+        : "Lembrete: tem uma visita agendada com a lead abaixo.",
       leadName: vars.lead_name || "",
+      leadPhone: isClient ? undefined : (vars.lead_phone || undefined),
+      leadEmail: isClient ? undefined : (vars.lead_email || undefined),
+      address: isClient ? undefined : (vars.address || undefined),
+      appointmentUrl: isClient ? undefined : (vars.appointment_url || undefined),
       when: vars.meeting_date || "",
       location: vars.location || undefined,
-      technicianName: vars.technician_name || undefined,
+      technicianName: isClient ? (vars.technician_name || undefined) : undefined,
       cancelUrl: isClient ? (vars.cancel_url || undefined) : undefined,
       confirmUrl: isClient ? (vars.confirm_url || undefined) : undefined,
       primaryColor: brand?.primary_color ?? null,

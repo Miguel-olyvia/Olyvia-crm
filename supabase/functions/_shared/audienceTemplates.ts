@@ -2,10 +2,12 @@
 // para o lembrete, o reagendamento e o cancelamento. Puro: sem rede, sem Deno.
 //
 // Regras:
+//  - SEPARACAO TOTAL: cada destinatario so olha para os modelos do seu lado
+//    (por idioma, depois a coluna dele). Sem nenhum, devolve null e o chamador
+//    usa o texto por omissao do SEU lado. Nenhum lado cai para o outro, nem para
+//    o aviso de nova reuniao (meeting_notify), que e so do comercial.
 //  - O comercial NUNCA recebe cancel_url nem confirm_url (os links do cliente),
 //    mesmo com um modelo personalizado: as variaveis ficam vazias.
-//  - Quem nao configurar nenhum modelo cai no texto padrao (o chamador usa o
-//    defaultMeetingHtml quando isto devolve null), ou seja, fica como hoje.
 
 import { pickTemplateId } from "./formEmails.ts";
 import type { EmailPurpose, FormEmailConfig } from "./formEmails.ts";
@@ -42,19 +44,9 @@ function technicianSlot(
   }
 }
 
-/** Coluna que existia antes deste desdobramento (o recurso final). */
-function legacyColumn(cfg: FormEmailConfig | null, event: AudienceEvent): string | null {
-  if (event === "reminder") return cfg?.reminder_template_id ?? null;
-  if (event === "reschedule") return cfg?.meeting_notify_template_id ?? null;
-  // Cancelamento: nenhuma. Um cancelamento nunca reutiliza o modelo de
-  // "nova marcacao" (meeting_notify), que anuncia o contrario do que aconteceu.
-  return null;
-}
-
 /**
- * Modelo a usar: o do destinatario -> (comercial) o do cliente -> a coluna
- * antiga do evento -> null (texto padrao). Cada degrau respeita o idioma
- * (email_locale_templates[purpose]).
+ * Modelo a usar: o do proprio destinatario (idioma, depois a coluna dele), senao
+ * null (texto por omissao do seu lado). Nunca o do outro lado.
  */
 export function pickAudienceTemplateId(
   cfg: FormEmailConfig | null,
@@ -62,15 +54,8 @@ export function pickAudienceTemplateId(
   audience: Audience,
   locale: string | null | undefined,
 ): string | null {
-  if (audience === "technician") {
-    const own = technicianSlot(cfg, event);
-    const fromOwn = pickTemplateId(cfg, own.purpose, locale, own.column);
-    if (fromOwn) return fromOwn;
-  }
-  const client = clientSlot(cfg, event);
-  const fromClient = pickTemplateId(cfg, client.purpose, locale, client.column);
-  if (fromClient) return fromClient;
-  return legacyColumn(cfg, event);
+  const slot = audience === "technician" ? technicianSlot(cfg, event) : clientSlot(cfg, event);
+  return pickTemplateId(cfg, slot.purpose, locale, slot.column);
 }
 
 export interface AudienceVarsExtra {

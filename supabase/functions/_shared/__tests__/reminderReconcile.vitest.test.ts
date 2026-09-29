@@ -245,6 +245,66 @@ describe('planReminderActions', () => {
   });
 });
 
+describe('lembrete do comercial com regra propria', () => {
+  const later = START + 24 * H;
+  const moved = () => visit({ start_datetime: iso(later) });
+  const sms = () => client({ id: 's1', channel: 'sms', recipient: '+351900' });
+
+  it('o intervalo escolhe-se pelo destinatario da linha: comercial 6h, cliente 2h', () => {
+    const form: ReminderFormState = { ...FORM_2H, reminder_technician_hours_before: 6 };
+    const actions = plan({ lines: [line(), client()], form, visit: moved() });
+    expect(actions).toEqual([
+      { kind: 'move', line_id: 'l1', channel: 'email', scheduled_for: iso(later - 6 * H), snapshot: iso(later) },
+      { kind: 'move', line_id: 'c1', channel: 'email', scheduled_for: iso(later - 2 * H), snapshot: iso(later) },
+    ]);
+  });
+
+  it('o SMS segue sempre o cliente, mesmo com horas proprias do comercial', () => {
+    const form: ReminderFormState = { ...FORM_2H, reminder_technician_hours_before: 6 };
+    const actions = plan({ lines: [sms()], technicians: [], form, visit: moved() });
+    expect(actions).toEqual([
+      { kind: 'move', line_id: 's1', channel: 'sms', scheduled_for: iso(later - 2 * H), snapshot: iso(later) },
+    ]);
+  });
+
+  it('comercial sem horas proprias segue as do cliente', () => {
+    const form: ReminderFormState = { reminder_enabled: true, reminder_hours_before: 4, reminder_technician_hours_before: null };
+    const actions = plan({ lines: [line()], form, visit: moved() });
+    expect(actions).toEqual([
+      { kind: 'move', line_id: 'l1', channel: 'email', scheduled_for: iso(later - 4 * H), snapshot: iso(later) },
+    ]);
+  });
+
+  it('comercial acrescentado usa as horas do comercial', () => {
+    const form: ReminderFormState = { ...FORM_2H, reminder_technician_hours_before: 6 };
+    const actions = plan({ lines: [client()], technicians: [BRUNO], form, visit: moved() });
+    expect(actions).toContainEqual({
+      kind: 'create_technician',
+      email: 'bruno@x.pt',
+      user_id: 'u-bruno',
+      scheduled_for: iso(later - 6 * H),
+      snapshot: iso(later),
+    });
+  });
+
+  it('comercial desligado (explicito) nao e criado, mesmo com o cliente ligado', () => {
+    const form: ReminderFormState = { ...FORM_2H, reminder_technician_enabled: false };
+    const actions = plan({ lines: [client()], technicians: [BRUNO], form });
+    expect(actions.filter((a) => a.kind === 'create_technician')).toEqual([]);
+  });
+
+  it('comercial ligado (explicito) e criado mesmo com o cliente desligado', () => {
+    const form: ReminderFormState = { reminder_enabled: false, reminder_hours_before: 2, reminder_technician_enabled: true };
+    const actions = plan({ lines: [client()], technicians: [BRUNO], form });
+    expect(actions.filter((a) => a.kind === 'create_technician')).toHaveLength(1);
+  });
+
+  it('sem valor proprio o comercial segue o interruptor do cliente', () => {
+    const off: ReminderFormState = { reminder_enabled: false, reminder_hours_before: 2, reminder_technician_enabled: null };
+    expect(plan({ lines: [client()], technicians: [BRUNO], form: off }).filter((a) => a.kind === 'create_technician')).toEqual([]);
+  });
+});
+
 describe("needsNewReminderLines (reagendar pelo link)", () => {
   it("sem linhas: cria", () => expect(needsNewReminderLines([])).toBe(true));
   it("so uma enviada (da data anterior): cria para a nova data", () => expect(needsNewReminderLines([{ status: "sent" }])).toBe(true));

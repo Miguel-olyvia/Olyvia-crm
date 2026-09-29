@@ -14,9 +14,12 @@
 //    nova do lembrete ja passou, NAO se envia: a linha e cancelada com motivo,
 //    como a marcacao ja faz. Nunca "enviar logo".
 //  - Comercial acrescentado (varios recursos, ou troca): cria-se-lhe um
-//    lembrete, uma linha por comercial, com a mesma regra de hora, e so se ainda
+//    lembrete, uma linha por comercial, com a regra de hora do comercial (o
+//    interruptor e as horas dele; sem valor proprio segue o cliente), e so se ainda
 //    ha tempo. Um comercial que ja tem lembrete pendente, enviado ou falhado
 //    para esta visita nao recebe outro.
+
+import { positiveHours, technicianReminderEnabled, technicianReminderHours } from "./reminderRule.ts";
 
 export type ReminderChannel = "email" | "sms";
 export type ReminderAudience = "client" | "technician";
@@ -49,6 +52,9 @@ export interface CurrentTechnician {
 export interface ReminderFormState {
   reminder_enabled: boolean;
   reminder_hours_before: number | null;
+  /** Lembrete proprio do comercial; null/ausente = segue o cliente (reminderRule.ts). */
+  reminder_technician_enabled?: boolean | null;
+  reminder_technician_hours_before?: number | null;
 }
 
 export type ReminderAction =
@@ -81,10 +87,18 @@ export function isCancelledStatus(status: string | null | undefined): boolean {
   return s === "cancelled" || s === "canceled" || s === "cancelado" || s === "cancelada";
 }
 
-/** Antecedencia (ms) a usar para uma linha: a do formulario actual, senao a gravada. */
+/**
+ * Antecedencia (ms) a usar para uma linha: a do formulario actual PARA O
+ * DESTINATARIO DA LINHA (o email do comercial usa as horas do comercial; o SMS
+ * e o email do cliente as do cliente), senao a gravada.
+ */
 function intervalMsFor(line: ReminderLine | null, form: ReminderFormState | null): number | null {
-  if (form && form.reminder_hours_before !== null && form.reminder_hours_before > 0) {
-    return form.reminder_hours_before * HOUR_MS;
+  const isTechnicianEmail = line?.audience === "technician" && line.channel === "email";
+  const formHours = form
+    ? (isTechnicianEmail ? technicianReminderHours(form) : positiveHours(form.reminder_hours_before))
+    : null;
+  if (formHours !== null) {
+    return formHours * HOUR_MS;
   }
   if (line?.visit_start_snapshot) {
     const saved = new Date(line.visit_start_snapshot).getTime() - new Date(line.scheduled_for).getTime();
@@ -146,9 +160,11 @@ export function planReminderActions(input: PlanInput): ReminderAction[] {
 
   // Comerciais acrescentados: so se o formulario ainda tem lembrete ligado, a
   // visita ja tinha lembretes, e ainda ha tempo.
+  // O comercial acrescentado segue a regra do comercial (interruptor e horas dele).
+  const technicianHours = form ? technicianReminderHours(form) : null;
   const intent = lines.some((l) => l.status === "pending" || l.status === "sent");
-  if (intent && form && form.reminder_enabled && form.reminder_hours_before !== null && form.reminder_hours_before > 0) {
-    const newFor = visitMs - form.reminder_hours_before * HOUR_MS;
+  if (intent && form && technicianReminderEnabled(form) && technicianHours !== null) {
+    const newFor = visitMs - technicianHours * HOUR_MS;
     if (newFor > nowMs) {
       const covered = new Set(
         lines
