@@ -58,6 +58,9 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
     return locales[language] || enUS;
   }, [language]);
 
+  const [optionsLoaded, setOptionsLoaded] = useState(false);
+  const [optionsError, setOptionsError] = useState(false);
+
   const COUNTRIES = useMemo(() => [
     { code: 'PT', name: t('scheduling.settings.countryPortugal'), timezone: 'Europe/Lisbon' },
     { code: 'ES', name: t('scheduling.settings.countrySpain'), timezone: 'Europe/Madrid' },
@@ -90,11 +93,21 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
     }
   }, [settings]);
 
+  const unavailableOption = (id: string | null | undefined, options: NoticeOption[]) => {
+    if (!id || options.some(o => o.id === id)) return null;
+    return (
+      <SelectItem value={id}>
+        {optionsLoaded ? t('scheduling.settings.notifyOptionUnavailable') : '…'}
+      </SelectItem>
+    );
+  };
+
   useEffect(() => {
     if (!open || !companyId) return;
     let cancelled = false;
     const loadOptions = async () => {
-      const [{ data: templates }, { data: smtps }] = await Promise.all([
+      try {
+      const [{ data: templates, error: templatesError }, { data: smtps, error: smtpsError }] = await Promise.all([
         supabase
           .from('email_templates')
           .select('id, name')
@@ -109,9 +122,18 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
           .order('is_default', { ascending: false }),
       ]);
       if (cancelled) return;
+      setOptionsError(Boolean(templatesError || smtpsError));
       setTemplateOptions((templates || []) as NoticeOption[]);
       setSmtpOptions((smtps || []) as NoticeOption[]);
+      } catch {
+        if (cancelled) return;
+        setOptionsError(true);
+      } finally {
+        if (!cancelled) setOptionsLoaded(true);
+      }
     };
+    setOptionsLoaded(false);
+    setOptionsError(false);
     loadOptions();
     return () => { cancelled = true; };
   }, [open, companyId]);
@@ -264,22 +286,23 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
         </div>
 
         {!emailOn && !smsOn && (
-          <p className="text-xs text-amber-600">{t('scheduling.settings.notifyNoChannelHint')}</p>
+          <p role="status" className="text-xs text-amber-600 dark:text-amber-400">{t('scheduling.settings.notifyNoChannelHint')}</p>
         )}
 
         {emailOn && (
           <div className="space-y-1">
-            <Label>{t('scheduling.settings.notifyEmailTemplate')}</Label>
+            <Label htmlFor={`${prefix}-template`}>{t('scheduling.settings.notifyEmailTemplate')}</Label>
             <Select
               value={formData[templateKey] ?? '__default__'}
               onValueChange={(v) => setFormData(prev => ({ ...prev, [templateKey]: v === '__default__' ? null : v }))}
               disabled={!canEditSettings}
             >
-              <SelectTrigger>
+              <SelectTrigger id={`${prefix}-template`}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__default__">{t('scheduling.settings.notifyTemplateDefault')}</SelectItem>
+                {unavailableOption(formData[templateKey], templateOptions)}
                 {templateOptions.map(tpl => (
                   <SelectItem key={tpl.id} value={tpl.id}>{tpl.name || tpl.id}</SelectItem>
                 ))}
@@ -290,8 +313,9 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
 
         {smsOn && (
           <div className="space-y-1">
-            <Label>{t('scheduling.settings.notifySmsMessage')}</Label>
+            <Label htmlFor={`${prefix}-sms-message`}>{t('scheduling.settings.notifySmsMessage')}</Label>
             <Textarea
+              id={`${prefix}-sms-message`}
               rows={3}
               maxLength={480}
               value={formData[messageKey] ?? ''}
@@ -646,22 +670,30 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
               <div className="space-y-3 border-t pt-4">
                 <Label className="text-base">{t('scheduling.settings.notifyDelivery')}</Label>
                 <div className="space-y-1">
-                  <Label>{t('scheduling.settings.notifySmtp')}</Label>
+                  <Label htmlFor="notify-smtp">{t('scheduling.settings.notifySmtp')}</Label>
                   <Select
                     value={formData.notify_client_smtp_id ?? '__default__'}
                     onValueChange={(v) => setFormData(prev => ({ ...prev, notify_client_smtp_id: v === '__default__' ? null : v }))}
                     disabled={!canEditSettings}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger id="notify-smtp">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__default__">{t('scheduling.settings.notifySmtpDefault')}</SelectItem>
+                      {unavailableOption(formData.notify_client_smtp_id, smtpOptions)}
                       {smtpOptions.map(smtp => (
                         <SelectItem key={smtp.id} value={smtp.id}>{smtp.name || smtp.id}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {optionsLoaded && (optionsError || smtpOptions.length === 0) && (
+                    <p role="status" className="text-xs text-muted-foreground">
+                      {optionsError
+                        ? t('scheduling.settings.notifyOptionsLoadError')
+                        : t('scheduling.settings.notifySmtpEmptyHint')}
+                    </p>
+                  )}
                 </div>
                 <div className="flex items-center justify-between">
                   <div>

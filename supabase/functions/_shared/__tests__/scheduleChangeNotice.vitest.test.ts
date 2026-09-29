@@ -105,9 +105,9 @@ describe('resolveNoticeChannels', () => {
     expect(r).toEqual({ email: false, sms: false, templateId: 't2', smsMessage: null });
   });
 
-  it('both une os canais e prefere o modelo de data/hora', () => {
+  it('both une os canais e prefere o modelo de data/hora quando o email desse evento esta ligado', () => {
     const r = resolveNoticeChannels('both', {
-      reschedule_notify_email: false,
+      reschedule_notify_email: true,
       reschedule_notify_sms: false,
       reschedule_email_template_id: 't1',
       reassign_notify_email: true,
@@ -122,5 +122,39 @@ describe('resolveNoticeChannels', () => {
     const r = resolveNoticeChannels('both', { reassign_email_template_id: 't2', reschedule_sms_message: '   ' });
     expect(r.templateId).toBe('t2');
     expect(r.smsMessage).toBeNull();
+  });
+
+  it('both ignora o modelo de email de um evento com email desligado', () => {
+    const r = resolveNoticeChannels('both', {
+      reschedule_notify_email: false,
+      reschedule_email_template_id: 't1',
+      reassign_notify_email: true,
+      reassign_email_template_id: 't2',
+    });
+    expect(r.email).toBe(true);
+    expect(r.templateId).toBe('t2');
+  });
+
+  it('both ignora o SMS de um evento com SMS desligado', () => {
+    const r = resolveNoticeChannels('both', {
+      reschedule_notify_sms: false,
+      reschedule_sms_message: 'SMS data/hora',
+      reassign_notify_sms: true,
+      reassign_sms_message: 'SMS comercial',
+    });
+    expect(r.sms).toBe(true);
+    expect(r.smsMessage).toBe('SMS comercial');
+  });
+
+  it('both sem canal ligado devolve modelo e SMS null, mesmo com valores guardados', () => {
+    const r = resolveNoticeChannels('both', {
+      reschedule_notify_email: false,
+      reschedule_email_template_id: 't1',
+      reassign_notify_email: false,
+      reschedule_notify_sms: false,
+      reschedule_sms_message: 'x',
+      reassign_notify_sms: false,
+    });
+    expect(r).toEqual({ email: false, sms: false, templateId: null, smsMessage: null });
   });
 });
