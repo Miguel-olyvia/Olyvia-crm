@@ -223,12 +223,24 @@ const PurchaseOrders = () => {
   // Fase 5.0F: link inverso — quando a encomenda foi gerada automaticamente a
   // partir de um Contrato assinado (source_type='contract'), mostra a origem
   // no diálogo de detalhe, com link de volta para "Encomendas Clientes".
-  const [orderSourceInfo, setOrderSourceInfo] = useState<{ contractId: string; contractNumber: string; clientName: string } | null>(null);
+  const [orderSourceInfo, setOrderSourceInfo] = useState<{
+    contractId: string;
+    originType: 'contract' | 'direct_sale' | 'manual';
+    number: string;
+    clientName: string;
+  } | null>(null);
   // Ligação manual, só na criação (20261115200000) — resolve o caso
   // "sem_fornecedor" em Encomendas Clientes: ao criar a encomenda daqui,
   // escolhe-se a Encomenda Cliente que está a satisfazer.
   const [newOrderClientOrderId, setNewOrderClientOrderId] = useState("");
-  const [clientOrderOptions, setClientOrderOptions] = useState<{ contract_id: string; contract_number: string; client_name: string | null }[]>([]);
+  const [clientOrderOptions, setClientOrderOptions] = useState<{
+    contract_id: string;
+    contract_number: string;
+    order_number: string | null;
+    origin_type: 'contract' | 'direct_sale' | 'manual' | null;
+    origin_number: string | null;
+    client_name: string | null;
+  }[]>([]);
   const [clientOrderOptionsLoaded, setClientOrderOptionsLoaded] = useState(false);
   // Pré-preenchimento de itens (pedido do utilizador, 2026-08-31): ao
   // escolher a Encomenda Cliente, os produtos dela ficam "pendentes" até
@@ -557,7 +569,12 @@ const PurchaseOrders = () => {
       setClientOrderOptionsLoaded(true);
       if (error) return;
       setClientOrderOptions(((data as any[]) || []).map((r) => ({
-        contract_id: r.contract_id, contract_number: r.contract_number, client_name: r.client_name,
+        contract_id: r.contract_id,
+        contract_number: r.contract_number,
+        order_number: r.order_number ?? null,
+        origin_type: r.origin_type ?? null,
+        origin_number: r.origin_number ?? null,
+        client_name: r.client_name,
       })));
     })();
   }, [open, editingId, clientOrderOptionsLoaded, activeCompany?.id]);
@@ -908,22 +925,41 @@ const PurchaseOrders = () => {
 
     // Fase 5.0F: origem via Contrato (source_type/source_id, Fase 5.0C) —
     // best-effort, nunca bloqueia a abertura do diálogo se falhar.
+    // client_contracts inclui contratos sintéticos (is_manual_order=true):
+    // Venda Direta (direct_sales.client_contract_id) → "Venda Direta VD-…";
+    // Encomenda Cliente manual → "Encomenda Cliente EC-…"; senão "Contrato CC-…".
+    // A query a direct_sales é silenciosa: sem direct_sales.view a RLS devolve
+    // vazio e cai-se para o caso manual (mesma regra de ClientOrders.tsx).
     setOrderSourceInfo(null);
     if ((order as any).source_type === "contract" && (order as any).source_id) {
-      supabase
-        .from("client_contracts")
-        .select("contract_number, entity_id, anew_entities(display_name)")
-        .eq("id", (order as any).source_id)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (data) {
-            setOrderSourceInfo({
-              contractId: (order as any).source_id,
-              contractNumber: data.contract_number || "",
-              clientName: (data as any).anew_entities?.display_name || "",
-            });
-          }
-        });
+      const contractId: string = (order as any).source_id;
+      (async () => {
+        const { data } = await supabase
+          .from("client_contracts")
+          .select("contract_number, order_number, is_manual_order, entity_id, anew_entities(display_name)")
+          .eq("id", contractId)
+          .maybeSingle();
+        if (!data) return;
+        const row = data as any;
+        const clientName: string = row.anew_entities?.display_name || "";
+        const contractNumber: string = row.contract_number || "";
+        if (!row.is_manual_order) {
+          setOrderSourceInfo({ contractId, originType: "contract", number: contractNumber, clientName });
+          return;
+        }
+        const { data: sale } = await supabase
+          .from("direct_sales")
+          .select("id, sale_number")
+          .eq("client_contract_id", contractId)
+          .is("deleted_at", null)
+          .limit(1)
+          .maybeSingle();
+        if (sale && (sale as any).sale_number) {
+          setOrderSourceInfo({ contractId, originType: "direct_sale", number: (sale as any).sale_number, clientName });
+        } else {
+          setOrderSourceInfo({ contractId, originType: "manual", number: row.order_number || contractNumber, clientName });
+        }
+      })().catch(() => { /* best-effort */ });
     }
 
     // Load existing items
@@ -2127,10 +2163,20 @@ const PurchaseOrders = () => {
                   <DialogTitle>{editingId ? t('purchaseOrders.editOrder') : t('purchaseOrders.newOrder')}</DialogTitle>
                   {editingId && orderSourceInfo && (
                     <p className="text-sm text-muted-foreground">
-                      {t('purchaseOrders.generatedFromContract', {
-                        contractNumber: orderSourceInfo.contractNumber,
-                        clientName: orderSourceInfo.clientName,
-                      }) || `Gerada automaticamente a partir do Contrato ${orderSourceInfo.contractNumber} — Cliente ${orderSourceInfo.clientName}`}
+                      {orderSourceInfo.originType === 'direct_sale'
+                        ? (t('purchaseOrders.generatedFromDirectSale', {
+                            number: orderSourceInfo.number,
+                            clientName: orderSourceInfo.clientName,
+                          }) || `Gerada automaticamente a partir da Venda Direta ${orderSourceInfo.number} — Cliente ${orderSourceInfo.clientName}`)
+                        : orderSourceInfo.originType === 'manual'
+                        ? (t('purchaseOrders.generatedFromClientOrder', {
+                            number: orderSourceInfo.number,
+                            clientName: orderSourceInfo.clientName,
+                          }) || `Gerada automaticamente a partir da Encomenda Cliente ${orderSourceInfo.number} — Cliente ${orderSourceInfo.clientName}`)
+                        : (t('purchaseOrders.generatedFromContract', {
+                            contractNumber: orderSourceInfo.number,
+                            clientName: orderSourceInfo.clientName,
+                          }) || `Gerada automaticamente a partir do Contrato ${orderSourceInfo.number} — Cliente ${orderSourceInfo.clientName}`)}
                       {' '}
                       <Link to={`/client-orders?open=${orderSourceInfo.contractId}`} className="underline">
                         {t('purchaseOrders.viewClientOrder') || 'Ver Encomenda Cliente'}
@@ -2166,7 +2212,13 @@ const PurchaseOrders = () => {
                           <SelectItem value="none">{t('purchaseOrders.form.clientOrderSourceNone') || 'Nenhuma — encomenda sem ligação a um contrato'}</SelectItem>
                           {clientOrderOptions.map((o) => (
                             <SelectItem key={o.contract_id} value={o.contract_id}>
-                              {o.contract_number} — {o.client_name || "—"}
+                              {o.order_number || o.contract_number}
+                              {o.origin_type === 'direct_sale'
+                                ? ` · ${t('purchaseOrders.form.clientOrderOriginDirectSale', { number: o.origin_number || '' }) || `Venda Direta ${o.origin_number || ''}`}`.trimEnd()
+                                : o.origin_type === 'contract'
+                                ? ` · ${t('purchaseOrders.form.clientOrderOriginContract', { number: o.origin_number || o.contract_number }) || `Contrato ${o.origin_number || o.contract_number}`}`
+                                : ''}
+                              {' — '}{o.client_name || "—"}
                             </SelectItem>
                           ))}
                         </SelectContent>
