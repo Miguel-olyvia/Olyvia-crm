@@ -12,6 +12,7 @@ import { resolveSmtpForScheduledEmail, sanitizeSmtpError } from "../_shared/smtp
 import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { reconcileDrift, reconcileDueItems, renderLinkedEmail } from "../_shared/reminderRunner.ts";
+import { collectDueBatch, decideRendered, DUE_BATCH_SIZE, isHeldBack } from "../_shared/reminderBatch.ts";
 
 initSentry();
 
@@ -44,34 +45,34 @@ serve(async (req) => {
       console.error("[process-scheduled-emails] reconcile failed (non-fatal):", reconcileErr);
     }
 
-    const fetchDue = () =>
-      supabase
+    // Mais antigas primeiro, e sem as linhas que ja foram vistas nesta corrida.
+    const fetchDue = async (excludeIds: readonly string[]) => {
+      let q = supabase
         .from("scheduled_emails")
         .select("*")
         .eq("status", "pending")
         .lte("scheduled_for", new Date().toISOString())
-        .limit(50);
-
-    let { data: pendingEmails, error: fetchError } = await fetchDue();
-
-    if (fetchError) throw fetchError;
+        .order("scheduled_for", { ascending: true })
+        .order("id", { ascending: true })
+        .limit(DUE_BATCH_SIZE);
+      if (excludeIds.length > 0) q = q.not("id", "in", `(${excludeIds.join(",")})`);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data || []) as any[];
+    };
 
     // Lembretes que vao sair agora: confirmar a visita de cada um mesmo que o
-    // acerto em bloco acima nao os tenha apanhado (limite do lote, mudanca de ha
-    // segundos), e voltar a ler o que sobra.
-    const dueItemIds = [
-      ...new Set((pendingEmails || []).map((e: any) => e.schedule_item_id).filter(Boolean)),
-    ] as string[];
-    // Visitas cujo acerto FALHOU: os seus lembretes nao saem neste lote (podiam
-    // ir para o comercial antigo ou para a hora antiga); ficam pendentes.
-    let unreconciled = new Set<string>();
-    if (dueItemIds.length > 0) {
-      unreconciled = await reconcileDueItems(supabase, dueItemIds);
-      ({ data: pendingEmails, error: fetchError } = await fetchDue());
-      if (fetchError) throw fetchError;
-    }
-    if (!pendingEmails || pendingEmails.length === 0) {
-      return new Response(JSON.stringify({ processed: 0, reconcile: reconcileSummary }), {
+    // acerto em bloco acima nao os tenha apanhado. Visitas cujo acerto FALHOU: os
+    // seus lembretes nao saem neste lote (podiam ir para o comercial antigo ou
+    // para a hora antiga); ficam pendentes e nao ocupam o lote.
+    const batch = await collectDueBatch({
+      fetchDue,
+      reconcile: (ids) => reconcileDueItems(supabase, ids),
+    });
+    const pendingEmails = batch.rows;
+    const unreconciled = batch.unreconciled;
+    if (pendingEmails.length === 0) {
+      return new Response(JSON.stringify({ processed: 0, deferred: batch.deferred, reconcile: reconcileSummary }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -91,7 +92,7 @@ serve(async (req) => {
     let processed = 0;
     let cancelled = 0;
     let failed = 0;
-    let deferred = 0;
+    let deferred = batch.deferred;
     const smtpResolutionSummary = {
       smtp_resolved_by_explicit_smtp_id: 0,
       smtp_resolved_by_auth_user_id_direct: 0,
@@ -102,7 +103,7 @@ serve(async (req) => {
 
     for (const email of pendingEmails) {
       try {
-        if (email.schedule_item_id && unreconciled.has(email.schedule_item_id)) {
+        if (isHeldBack(email, unreconciled)) {
           deferred++;
           continue;
         }
@@ -148,21 +149,28 @@ serve(async (req) => {
         // o comercial actuais. Sem variaveis guardadas (ou em caso de falha),
         // vai o que ficou guardado na marcacao.
         const rendered = email.schedule_item_id ? await renderLinkedEmail(supabase, email) : { kind: "stored" as const };
-        if (rendered.kind === "defer") {
-          console.error("[process-scheduled-emails] lembrete adiado:", email.id, rendered.reason);
+        const decision = decideRendered(rendered);
+        if (decision.kind === "defer") {
+          console.error("[process-scheduled-emails] lembrete adiado:", email.id, decision.reason);
           deferred++;
           continue;
         }
-        if (rendered.kind === "cancel") {
-          await supabase.from("scheduled_emails").update({
+        if (decision.kind === "cancel") {
+          const { error: cancelErr } = await supabase.from("scheduled_emails").update({
             status: "cancelled",
             cancelled_at: new Date().toISOString(),
-            cancel_reason: rendered.reason,
+            cancel_reason: decision.reason,
           }).eq("id", email.id).eq("status", "pending");
-          cancelled++;
+          if (cancelErr) {
+            // Nao se conseguiu cancelar: a linha fica pendente para o proximo lote, nunca sai.
+            console.error("[process-scheduled-emails] cancelamento falhou, lembrete adiado:", email.id, cancelErr);
+            deferred++;
+          } else {
+            cancelled++;
+          }
           continue;
         }
-        const linked = rendered.kind === "ok" ? rendered.value : null;
+        const linked = decision.content;
 
         const sendResponse = await fetch(
           `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-email`,

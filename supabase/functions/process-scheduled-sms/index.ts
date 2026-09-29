@@ -4,6 +4,7 @@ import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { sendSmsNow } from "../_shared/sendSms.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { reconcileDrift, reconcileDueItems, renderLinkedSms } from "../_shared/reminderRunner.ts";
+import { collectDueBatch, decideRendered, DUE_BATCH_SIZE, isHeldBack } from "../_shared/reminderBatch.ts";
 
 initSentry();
 
@@ -40,43 +41,44 @@ Deno.serve(async (req: Request) => {
       console.error("[process-scheduled-sms] reconcile failed (non-fatal):", reconcileErr);
     }
 
-    const fetchDue = () =>
-      supabase
+    // Mais antigas primeiro, e sem as linhas que ja foram vistas nesta corrida.
+    const fetchDue = async (excludeIds: readonly string[]) => {
+      let q = supabase
         .from("scheduled_sms")
         .select("*")
         .eq("status", "pending")
         .lte("scheduled_for", new Date().toISOString())
-        .limit(50);
+        .order("scheduled_for", { ascending: true })
+        .order("id", { ascending: true })
+        .limit(DUE_BATCH_SIZE);
+      if (excludeIds.length > 0) q = q.not("id", "in", `(${excludeIds.join(",")})`);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data || []) as any[];
+    };
 
-    let { data: due, error: fetchError } = await fetchDue();
-
-    if (fetchError) throw fetchError;
-
-    // Confirmar a visita de cada lembrete que vai sair agora, e voltar a ler.
-    const dueItemIds = [
-      ...new Set((due || []).map((r: any) => r.schedule_item_id).filter(Boolean)),
-    ] as string[];
-    // Visitas cujo acerto FALHOU: os seus lembretes ficam para o proximo lote.
-    let unreconciled = new Set<string>();
-    if (dueItemIds.length > 0) {
-      unreconciled = await reconcileDueItems(supabase, dueItemIds);
-      ({ data: due, error: fetchError } = await fetchDue());
-      if (fetchError) throw fetchError;
-    }
-    if (!due || due.length === 0) {
-      return new Response(JSON.stringify({ processed: 0, reconcile: reconcileSummary }), {
+    // Confirmar a visita de cada lembrete que vai sair agora. Visitas cujo acerto
+    // FALHOU: os seus lembretes ficam para o proximo lote e nao ocupam este.
+    const batch = await collectDueBatch({
+      fetchDue,
+      reconcile: (ids) => reconcileDueItems(supabase, ids),
+    });
+    const due = batch.rows;
+    const unreconciled = batch.unreconciled;
+    if (due.length === 0) {
+      return new Response(JSON.stringify({ processed: 0, deferred: batch.deferred, reconcile: reconcileSummary }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     let processed = 0;
     let failed = 0;
-    let deferred = 0;
+    let deferred = batch.deferred;
     let cancelled = 0;
 
     for (const row of due) {
       try {
-        if (row.schedule_item_id && unreconciled.has(row.schedule_item_id)) {
+        if (isHeldBack(row, unreconciled)) {
           deferred++;
           continue;
         }
@@ -84,21 +86,28 @@ Deno.serve(async (req: Request) => {
         // Nunca sai com {{chavetas}} por substituir nem com uma data que ja nao e
         // a da visita: ou fica para o proximo lote, ou cancela-se com motivo.
         const rendered = row.schedule_item_id ? await renderLinkedSms(supabase, row) : { kind: "stored" as const };
-        if (rendered.kind === "defer") {
-          console.error("[process-scheduled-sms] lembrete adiado:", row.id, rendered.reason);
+        const decision = decideRendered(rendered);
+        if (decision.kind === "defer") {
+          console.error("[process-scheduled-sms] lembrete adiado:", row.id, decision.reason);
           deferred++;
           continue;
         }
-        if (rendered.kind === "cancel") {
-          await supabase.from("scheduled_sms").update({
+        if (decision.kind === "cancel") {
+          const { error: cancelErr } = await supabase.from("scheduled_sms").update({
             status: "cancelled",
             cancelled_at: new Date().toISOString(),
-            cancel_reason: rendered.reason,
+            cancel_reason: decision.reason,
           }).eq("id", row.id).eq("status", "pending");
-          cancelled++;
+          if (cancelErr) {
+            // Nao se conseguiu cancelar: fica pendente para o proximo lote, nunca sai.
+            console.error("[process-scheduled-sms] cancelamento falhou, lembrete adiado:", row.id, cancelErr);
+            deferred++;
+          } else {
+            cancelled++;
+          }
           continue;
         }
-        const message: string = rendered.kind === "ok" ? rendered.value : row.message;
+        const message: string = decision.content ?? row.message;
         const result = await sendSmsNow({ toPhone: row.to_phone, message });
 
         await supabase.from("scheduled_sms").update({

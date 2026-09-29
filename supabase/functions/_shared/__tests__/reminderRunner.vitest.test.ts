@@ -17,6 +17,8 @@ function makeDb(
   rpcs: Record<string, (args: any) => any> = {},
   /** Tabelas cuja LEITURA devolve erro. */
   readErrors: Record<string, { message: string }> = {},
+  /** Tabelas cujo UPDATE devolve erro. */
+  writeErrors: Record<string, { message: string }> = {},
 ) {
   let seq = 0;
   const builder = (name: string) => {
@@ -40,6 +42,7 @@ function makeDb(
         list.forEach((p) => rows().push({ id: `new-${++seq}`, ...p }));
         return { data: null, error: null };
       }
+      if (op === 'update' && writeErrors[name]) return { data: null, error: writeErrors[name] };
       const hit = rows().filter((r) => filters.every((f) => f(r)));
       if (op === 'update') {
         hit.forEach((r) => Object.assign(r, payload));
@@ -85,7 +88,10 @@ const CLIENT_VARS = {
 };
 
 function world(
-  over: { itemStatus?: string; itemStart?: number; techs?: string[]; formHours?: number; readErrors?: Record<string, { message: string }> } = {},
+  over: {
+    itemStatus?: string; itemStart?: number; techs?: string[]; formHours?: number;
+    readErrors?: Record<string, { message: string }>; writeErrors?: Record<string, { message: string }>;
+  } = {},
 ) {
   const techs = over.techs ?? ['ana'];
   const users: Row[] = [
@@ -135,7 +141,7 @@ function world(
         message: 'Acme: lembrete da sua visita para {{meeting_date}}.',
       },
     ],
-  }, {}, over.readErrors ?? {});
+  }, {}, over.readErrors ?? {}, over.writeErrors ?? {});
 }
 
 const byId = (db: ReturnType<typeof makeDb>, table: string, id: string) =>
@@ -316,7 +322,7 @@ describe('reconcileItem: um erro de leitura nunca e ausencia', () => {
 });
 
 describe('reconcileItem: linhas religadas sem variaveis guardadas', () => {
-  const legacy = (over: { techs?: string[] } = {}) => {
+  const legacy = (over: { techs?: string[]; readErrors?: Record<string, { message: string }> } = {}) => {
     const later = START + 24 * H;
     const db = world({ itemStart: later, formHours: 24, ...over });
     db.tables.scheduled_emails.forEach((r) => {
@@ -358,6 +364,67 @@ describe('reconcileItem: linhas religadas sem variaveis guardadas', () => {
     expect(byId(db, 'scheduled_emails', 'e-client')).toMatchObject({ status: 'cancelled', cancel_reason: expect.stringContaining('data antiga') });
     expect(byId(db, 'scheduled_emails', 'e-ana').status).toBe('cancelled');
     expect(s.cancelled).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe('reconcileItem: erro a ler a ficha ao refazer o texto nao cancela de vez', () => {
+  const legacyLate = (readErrors: Record<string, { message: string }> = {}) => {
+    const later = START + 24 * H;
+    const db = world({ itemStart: later, formHours: 24, readErrors });
+    db.tables.scheduled_emails.forEach((r) => { r.content_vars = null; r.subject = 'antigo'; r.body_html = '<p>antigo</p>'; });
+    db.tables.scheduled_sms.forEach((r) => { r.content_vars = null; r.message = 'Acme: visita sexta 2 de outubro.'; });
+    db.tables.anew_leads = [{ id: 'lead-1', field_values: { email: 'rita@x.pt', first_name: 'Rita' } }];
+    db.tables.anew_organizations = [{ id: 'org-1', name: 'Acme' }];
+    return db;
+  };
+
+  it('erro a ler a lead: lanca e as linhas ficam pendentes, sem mover nem cancelar', async () => {
+    const db = legacyLate({ anew_leads: { message: 'timeout' } });
+    const before = JSON.stringify(db.tables);
+    await expect(reconcileItem(db, ITEM, NOW)).rejects.toThrow(/anew_leads/);
+    expect(JSON.stringify(db.tables)).toBe(before);
+    const failed = await reconcileDueItems(db, [ITEM], NOW);
+    expect([...failed]).toEqual([ITEM]);
+    expect(db.tables.scheduled_emails.every((r) => r.status === 'pending')).toBe(true);
+  });
+
+  it('erro a ler a organizacao: lanca e nada muda', async () => {
+    const db = legacyLate({ anew_organizations: { message: 'timeout' } });
+    const before = JSON.stringify(db.tables);
+    await expect(reconcileItem(db, ITEM, NOW)).rejects.toThrow(/anew_organizations/);
+    expect(JSON.stringify(db.tables)).toBe(before);
+  });
+
+  it('a lead nao existe: ai sim cancela com motivo (nao e erro de leitura)', async () => {
+    const db = legacyLate();
+    db.tables.anew_leads.length = 0;
+    const s = await reconcileItem(db, ITEM, NOW);
+    expect(s.cancelled).toBeGreaterThanOrEqual(2);
+    expect(byId(db, 'scheduled_emails', 'e-client')).toMatchObject({ status: 'cancelled', cancel_reason: expect.stringContaining('data antiga') });
+  });
+});
+
+describe('reconcileItem: uma falha de escrita conta como acerto falhado', () => {
+  it('falha a cancelar (visita cancelada): lanca, e a visita fica por acertar', async () => {
+    const db = world({ itemStatus: 'cancelled', writeErrors: { scheduled_emails: { message: 'boom' } } });
+    await expect(reconcileItem(db, ITEM, NOW)).rejects.toThrow(/escrita.*scheduled_emails/);
+    const failed = await reconcileDueItems(db, [ITEM], NOW);
+    expect([...failed]).toEqual([ITEM]);
+    expect(db.tables.scheduled_emails.every((r) => r.status === 'pending')).toBe(true);
+  });
+
+  it('falha a mover (visita movida): lanca em vez de deixar so em log', async () => {
+    const db = world({ itemStart: START + 24 * H, formHours: 24, writeErrors: { scheduled_sms: { message: 'boom' } } });
+    await expect(reconcileItem(db, ITEM, NOW)).rejects.toThrow(/escrita.*scheduled_sms/);
+    const failed = await reconcileDueItems(db, [ITEM], NOW);
+    expect(failed.has(ITEM)).toBe(true);
+  });
+
+  it('reconcileDrift conta a visita como erro', async () => {
+    const db = world({ itemStatus: 'cancelled', writeErrors: { scheduled_emails: { message: 'boom' } } });
+    (db as any).rpc = () => Promise.resolve({ data: [{ out_item_id: ITEM }], error: null });
+    const s = await reconcileDrift(db, NOW);
+    expect(s.errors).toBe(1);
   });
 });
 
@@ -424,6 +491,12 @@ describe('renderLinkedEmail / renderLinkedSms', () => {
   it('visita apagada no envio: cancela', async () => {
     const db = world();
     db.tables.schedule_items.length = 0;
+    expect(await renderLinkedEmail(db, db.tables.scheduled_emails[0])).toMatchObject({ kind: 'cancel' });
+    expect(await renderLinkedSms(db, db.tables.scheduled_sms[0])).toMatchObject({ kind: 'cancel' });
+  });
+
+  it('visita cancelada no envio: cancela, nunca envia o lembrete', async () => {
+    const db = world({ itemStatus: 'cancelled' });
     expect(await renderLinkedEmail(db, db.tables.scheduled_emails[0])).toMatchObject({ kind: 'cancel' });
     expect(await renderLinkedSms(db, db.tables.scheduled_sms[0])).toMatchObject({ kind: 'cancel' });
   });
