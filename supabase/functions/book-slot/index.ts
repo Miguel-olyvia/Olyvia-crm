@@ -824,9 +824,13 @@ Deno.serve(async (req: Request) => {
     // escrever por cima roubava-lha, sem aviso: quem a trabalhava deixava de a
     // ver na sua lista de um momento para o outro.
     //
-    // Sem dono, mantem-se o comportamento de sempre.
-    if (assignedToAnewId && !lead.assigned_to) {
-      leadUpdate.assigned_to = assignedToAnewId;
+    // Sem dono, a lead passa a ser de quem faz a visita. So o utilizador do
+    // recurso reservado: `assignedToAnewId` pode ser um membro qualquer da
+    // organizacao (o `limit(1)` do passo 5) e esse nao tem recurso activo, por
+    // isso o guarda da sincronizacao dono<->visita recusava o UPDATE inteiro
+    // (visita, estado, campos) e a falha ficava so no console.
+    if (assignedResource?.user_id && !lead.assigned_to) {
+      leadUpdate.assigned_to = assignedResource.user_id;
     }
     if (lead_id) {
       leadUpdate.field_values = mergedFieldValues;
