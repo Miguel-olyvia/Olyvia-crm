@@ -81,6 +81,34 @@ export function aggregateFeasibleSlots(params: {
 }
 
 /**
+ * Calendario SEM codigo postal nem distrito: todos os recursos indicados, com a
+ * mesma verificacao que a marcacao (book-slot) faz -- sem coordenadas do
+ * cliente, a deslocacao conta 0 mas a pausa de almoco aplica-se. Assim o
+ * calendario nunca oferece uma hora que a marcacao depois recusa.
+ */
+export async function aggregateDayWithoutPostal(params: {
+  resourceIds: readonly string[];
+  getSlots: (resourceId: string) => Promise<{ start: string; end: string }[]>;
+  getNeighbors: (resourceId: string) => Promise<NeighborVisitLike[]>;
+  lunchBreak: LunchBreakConfig | null;
+}): Promise<AggregatedSlot[]> {
+  const { resourceIds, getSlots, getNeighbors, lunchBreak } = params;
+  const resources: CandidateResource[] = [];
+  const neighborsByResource = new Map<string, NeighborVisitLike[]>();
+  for (const resourceId of resourceIds) {
+    const slots = await getSlots(resourceId);
+    resources.push({ resource_id: resourceId, available_slots: slots });
+    if (lunchBreak && slots.length > 0) {
+      neighborsByResource.set(resourceId, await getNeighbors(resourceId));
+    }
+  }
+  return aggregateFeasibleSlots({
+    resources, ownerResourceIds: null, neighborsByResource,
+    clientLat: null, clientLng: null, lunchBreak,
+  });
+}
+
+/**
  * Modo mes: um dia so fica marcado se estava marcado (has_slots) E o dono tem
  * pelo menos um horario nesse dia. `ownerDaysWithSlots` vem da avaliacao
  * completa do dia (com deslocacao/almoco) so para os recursos do dono.

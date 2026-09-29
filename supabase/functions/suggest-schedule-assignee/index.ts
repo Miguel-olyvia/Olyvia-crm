@@ -21,7 +21,13 @@ import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
 import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
 import { haversineKm } from "../_shared/distance.ts";
-import { checkTravelFeasible, buildLunchBreakConfig } from "../_shared/travelFeasibility.ts";
+import { buildLunchBreakConfig } from "../_shared/travelFeasibility.ts";
+import { zonedDayBounds, zonedLocalToIso } from "../_shared/zonedTime.ts";
+import {
+  constrainAiSuggestion,
+  isAssigneeSlotFeasible,
+  type AssigneeFeasibilityContext,
+} from "../_shared/assigneeFeasibility.ts";
 
 initSentry();
 
@@ -208,6 +214,9 @@ serve(async (req) => {
       .eq("organization_id", organization_id)
       .maybeSingle();
     const lunchBreak = buildLunchBreakConfig(orgScheduleSettings);
+    // Fuso da organizacao: a hora pedida (HH:MM) e os limites do dia sao
+    // horas locais, nao UTC.
+    const orgTimezone = orgScheduleSettings?.timezone || "Europe/Lisbon";
 
     // 2. Get assignees via anew_memberships + anew_users + schedule_resources
     
@@ -308,8 +317,7 @@ serve(async (req) => {
     }
 
     // 3. Get existing schedule items for the requested date
-    const dateStart = `${requested_date}T00:00:00`;
-    const dateEnd = `${requested_date}T23:59:59`;
+    const { startIso: dateStart, endIso: dateEnd } = zonedDayBounds(requested_date, orgTimezone);
 
     const requestedDateObj = new Date(requested_date);
     const dayOfWeek = requestedDateObj.getDay();
@@ -356,8 +364,8 @@ serve(async (req) => {
           )
         `)
         .in("resource_id", resourceIds)
-        .gte("schedule_items.start_datetime", `${weekStartStr}T00:00:00`)
-        .lte("schedule_items.start_datetime", `${weekEndStr}T23:59:59`)
+        .gte("schedule_items.start_datetime", zonedDayBounds(weekStartStr, orgTimezone).startIso)
+        .lte("schedule_items.start_datetime", zonedDayBounds(weekEndStr, orgTimezone).endIso)
         .neq("schedule_items.status", "cancelled");
 
       if (weekAssignments) {
@@ -396,10 +404,25 @@ serve(async (req) => {
     }
 
     // 5. Build context for each assignee
-    const requestedStart = requested_time ? `${requested_date}T${requested_time}:00` : null;
+    const requestedStart = requested_time
+      ? zonedLocalToIso(requested_date, requested_time, orgTimezone)
+      : null;
     const requestedEnd = requestedStart 
       ? new Date(new Date(requestedStart).getTime() + duration_minutes * 60000).toISOString()
       : null;
+    const requestedRange = requestedStart && requestedEnd
+      ? { startIso: requestedStart, endIso: requestedEnd }
+      : null;
+    const feasibilityCtx: AssigneeFeasibilityContext = {
+      date: requested_date,
+      timezone: orgTimezone,
+      durationMinutes: duration_minutes,
+      bufferMinutes: totalBuffer,
+      rules,
+      clientLat,
+      clientLng,
+      lunchBreak,
+    };
 
     const assigneeSchedules = uniqueAssignees.map(assignee => {
       const assigneeItems = existingItems.filter((item: any) => item.resource_id === assignee.id);
@@ -445,52 +468,7 @@ serve(async (req) => {
     if (!Deno.env.get("GEMINI_API_KEY")) {
       // Fallback without AI
       const availableAssignees = assigneeSchedules
-        .filter(assignee => {
-          if (assignee.daily_visits_count >= rules.max_visits_per_day_per_employee) return false;
-          if (assignee.weekly_visits_count >= rules.max_visits_per_week_per_employee) return false;
-          
-          if (!requestedStart) return true;
-          
-          const requestedStartTime = new Date(requestedStart).getTime();
-          const requestedEndTime = new Date(requestedEnd!).getTime();
-          const bufferMs = totalBuffer * 60000;
-          
-          for (const item of assignee.scheduled_items) {
-            const itemStart = new Date(item.start).getTime();
-            const itemEnd = new Date(item.end).getTime();
-
-            if (
-              (requestedStartTime >= itemStart - bufferMs && requestedStartTime < itemEnd + bufferMs) ||
-              (requestedEndTime > itemStart - bufferMs && requestedEndTime <= itemEnd + bufferMs) ||
-              (requestedStartTime <= itemStart && requestedEndTime >= itemEnd)
-            ) {
-              return false;
-            }
-          }
-
-          // Regra 13: tempo real de deslocação desde/para a visita vizinha
-          // desse dia, quando há coordenadas do cliente -- no-op (sempre
-          // feasible) sem elas, mantendo o comportamento antigo (só o
-          // buffer fixo acima) para quem ainda não tem morada.
-          if ((clientLat !== null && clientLng !== null) || lunchBreak) {
-            const { feasible } = checkTravelFeasible({
-              clientLat,
-              clientLng,
-              slotStart: requestedStart,
-              slotEnd: requestedEnd!,
-              neighbors: assignee.scheduled_items.map(item => ({
-                start_datetime: item.start,
-                end_datetime: item.end,
-                location_lat: item.location_lat,
-                location_lng: item.location_lng,
-              })),
-              lunchBreak,
-            });
-            if (!feasible) return false;
-          }
-
-          return true;
-        })
+        .filter(assignee => isAssigneeSlotFeasible(assignee, requestedRange, feasibilityCtx).feasible)
         .sort((a, b) => {
           if (a.distance_km !== null && b.distance_km !== null) return a.distance_km - b.distance_km;
           if (a.distance_km !== null) return -1;
@@ -643,9 +621,12 @@ Responde APENAS com um JSON array contendo os colaboradores ordenados do mais ad
       suggestions = [];
     }
 
-    const enrichedSuggestions = suggestions.map((s: any) => {
-      const assignee = uniqueAssignees.find(a => a.user_id === s.user_id);
-      const scheduleData = assigneeSchedules.find(a => a.user_id === s.user_id);
+    // O mesmo filtro determinista do ramo sem IA: a IA pode sugerir quem nao
+    // tem almoco livre, deslocacao possivel ou limites por cumprir.
+    const enrichedSuggestions = suggestions.map((aiSuggestion: any) => {
+      const assignee = uniqueAssignees.find(a => a.user_id === aiSuggestion.user_id);
+      const scheduleData = assigneeSchedules.find(a => a.user_id === aiSuggestion.user_id);
+      const s = constrainAiSuggestion(aiSuggestion, scheduleData, requestedRange, feasibilityCtx);
       return {
         ...s,
         user_id: assignee?.user_id || s.user_id,       // always anew_users.id

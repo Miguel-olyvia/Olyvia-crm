@@ -10,6 +10,7 @@ import { normalizeEmailForMatch, normalizePhoneForMatch } from "../_shared/leadD
 import { buildDayResponse, buildMonthResponse } from "../_shared/availabilityResponse.ts";
 import { resolveRescheduleTarget, listDaysWithSlots, evaluateDay, type RescheduleContext } from "../_shared/rescheduleSlots.ts";
 import {
+  aggregateDayWithoutPostal,
   aggregateFeasibleSlots,
   intersectMonthDays,
   restrictResourcesToOwner,
@@ -435,29 +436,28 @@ Deno.serve(async (req: Request) => {
 
     // Sem CP nem distrito: todos os recursos activos da organizacao (ou so os do dono).
     const evaluateDayWithoutPostal = async (day: string, resourceIds: string[]) => {
-      const slotMap = new Map<string, { start: string; end: string; available_count: number }>();
-      for (const resourceId of resourceIds) {
-        const { data: slots } = await supabase
-          .rpc('get_resource_available_slots', {
-            p_resource_id: resourceId,
-            p_date: day,
-            p_duration_minutes: durationMinutes,
-            p_organization_id: orgId,
-            p_min_advance_hours: minAdvanceHours,
-          });
-        for (const slot of (slots || [])) {
-          const key = `${slot.slot_start}|${slot.slot_end}`;
-          const existing = slotMap.get(key);
-          if (existing) {
-            existing.available_count++;
-          } else {
-            slotMap.set(key, { start: slot.slot_start, end: slot.slot_end, available_count: 1 });
-          }
-        }
-      }
-      return Array.from(slotMap.values()).sort((a, b) =>
-        new Date(a.start).getTime() - new Date(b.start).getTime()
-      );
+      // Mesma verificacao da marcacao (almoco); ver aggregateDayWithoutPostal.
+      const dayStart = `${day}T00:00:00.000Z`;
+      const dayEnd = `${day}T23:59:59.999Z`;
+      return aggregateDayWithoutPostal({
+        resourceIds,
+        lunchBreak,
+        getSlots: async (resourceId) => {
+          const { data: slots } = await supabase
+            .rpc('get_resource_available_slots', {
+              p_resource_id: resourceId,
+              p_date: day,
+              p_duration_minutes: durationMinutes,
+              p_organization_id: orgId,
+              p_min_advance_hours: minAdvanceHours,
+            });
+          return (slots || []).map((s: any) => ({ start: s.slot_start as string, end: s.slot_end as string }));
+        },
+        getNeighbors: async (resourceId) => {
+          const visits = await loadVisits(resourceId);
+          return visits.filter((si) => si.start_datetime >= dayStart && si.start_datetime <= dayEnd);
+        },
+      });
     };
 
     // ═══════════════════════════════════════════════════════
