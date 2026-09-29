@@ -983,6 +983,21 @@ serve(async (req) => {
           return new Response(JSON.stringify({ error: "document_type and document_id required" }), { status: 400, headers: corsHeaders });
         }
 
+        // Venda Direta saiu do portal (ver o case "get_direct_sale_data" mais
+        // abaixo): mesma resposta 410, ANTES de qualquer leitura ou escrita —
+        // sem registo em client_portal_access_log, sem mexer no portal_status e
+        // sem notificação. As policies de portal sobre direct_sales foram
+        // retiradas (20261204800000_endurecer_permissoes_venda_direta_stock.sql).
+        if (document_type === "direct_sale") {
+          return new Response(
+            JSON.stringify({
+              error: "direct_sale_portal_disabled",
+              message: "As vendas diretas já não estão disponíveis no portal.",
+            }),
+            { status: 410, headers: corsHeaders },
+          );
+        }
+
         // Mapa explícito em vez do ternário anterior: com o ternário, o `else`
         // era "contract_id", por isso um document_type novo (direct_sale)
         // cairia silenciosamente na coluna do contrato. Os 3 mapeamentos
