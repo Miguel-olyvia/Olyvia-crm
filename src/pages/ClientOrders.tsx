@@ -198,6 +198,11 @@ interface ClientOrderDocumentLine {
   // fornecedor preferencial" (false). null/ausente = desconhecido (serviços ou
   // RPC ainda sem o campo).
   has_preferred_supplier?: boolean | null;
+  // Categoria principal e subcategoria do produto, só para agrupar as linhas
+  // no PDF (não se mostram no ecrã). null em serviços e produtos sem
+  // categoria; ausentes enquanto a RPC não tiver os campos.
+  category_name?: string | null;
+  subcategory_name?: string | null;
 }
 
 // 'sem_fornecedor' = quantidade em falta sem pedido ao fornecedor. A causa
