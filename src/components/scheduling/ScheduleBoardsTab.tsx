@@ -19,6 +19,7 @@ import {
   LayoutGrid, List, CheckCircle2, CircleDot, Layers, Lock
 } from 'lucide-react';
 import type { ScheduleBoard, ScheduleItem, ScheduleResource } from '@/types/scheduling';
+import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
 import type { ScopeLevel } from '@/hooks/usePermissionScope';
 
 interface BoardStats {
@@ -176,7 +177,7 @@ export function ScheduleBoardsTab({
       const { data: allItems, error } = await supabase
         .from('schedule_items')
         .select(`
-          id, board_id, title, status, start_datetime, end_datetime, created_at, user_id, created_by,
+          id, board_id, title, status, confirmed_at, start_datetime, end_datetime, created_at, user_id, created_by,
           assignees:schedule_item_assignees(
             resource_id,
             resource:schedule_resources(id, name, color, user_id)
@@ -672,6 +673,7 @@ function BoardCard({ board, stats, isTimeOff, onEdit, onClick, onDelete, canDele
                     <div className={`w-2 h-2 rounded-full shrink-0 ${statusColor}`} />
                     <span className="font-medium text-primary">{timeStr}</span>
                     <span className="truncate flex-1">{displayTitle}</span>
+                    {!isTimeOff && <ConfirmedByClientBadge confirmedAt={(item as any).confirmed_at} className="shrink-0" />}
                     {!itemCanConfirm && (item.status === 'draft' || item.status === 'scheduled') && (
                       <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
                     )}

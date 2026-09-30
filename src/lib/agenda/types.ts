@@ -23,6 +23,8 @@ export interface AgendaItemRow {
   title: string | null;
   description?: string | null;
   status: string;
+  /** Quando o cliente confirmou pelo link do lembrete (schedule_items.confirmed_at). */
+  confirmed_at?: string | null;
   start_datetime: string;
   end_datetime: string;
   /** Coluna GENERATED STORED na base — lê-se, nunca se calcula nem se escreve. */
