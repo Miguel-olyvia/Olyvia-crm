@@ -16,8 +16,10 @@ export interface FormEmailConfig {
   meeting_notify_template_id: string | null;
   // Independent toggles for the other two lifecycle events -- each event
   // notifies only the technician/extras it is switched on for.
+  reschedule_notify_client: boolean | null;
   reschedule_notify_commercial: boolean;
   reschedule_notify_emails: string | null;
+  cancel_notify_client: boolean | null;
   cancel_notify_commercial: boolean;
   cancel_notify_emails: string | null;
   reminder_enabled: boolean;
@@ -201,6 +203,19 @@ export function uniqueEmails(emails: (string | null | undefined)[]): string[] {
   return [...seen];
 }
 
+// O aviso ao CLIENTE ao reagendar/cancelar pelo link tem interruptor proprio.
+// Ausente (sem config, coluna null ou ainda por ler) conta como ligado, para
+// nenhum formulario existente mudar de comportamento.
+export type ClientNoticeEvent = 'reschedule' | 'cancel';
+
+export function shouldNotifyClient(
+  cfg: Pick<FormEmailConfig, 'reschedule_notify_client' | 'cancel_notify_client'> | null | undefined,
+  event: ClientNoticeEvent,
+): boolean {
+  const col = event === 'reschedule' ? 'reschedule_notify_client' : 'cancel_notify_client';
+  return cfg?.[col] !== false;
+}
+
 export async function loadFormEmailConfig(
   supabase: any,
   formId: string | null | undefined,
@@ -209,7 +224,7 @@ export async function loadFormEmailConfig(
   const { data } = await supabase
     .from("form_branding")
     .select(
-      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reschedule_notify_commercial, reschedule_notify_emails, cancel_notify_commercial, cancel_notify_emails, reminder_enabled, reminder_hours_before, reminder_technician_enabled, reminder_technician_hours_before, reminder_template_id, reminder_technician_template_id, reschedule_client_template_id, reschedule_technician_template_id, cancel_client_template_id, cancel_technician_template_id, confirmation_sms_enabled, confirmation_sms_message, confirmation_sms_include_link, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours, primary_color, logo_url",
+      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reschedule_notify_client, reschedule_notify_commercial, reschedule_notify_emails, cancel_notify_client, cancel_notify_commercial, cancel_notify_emails, reminder_enabled, reminder_hours_before, reminder_technician_enabled, reminder_technician_hours_before, reminder_template_id, reminder_technician_template_id, reschedule_client_template_id, reschedule_technician_template_id, cancel_client_template_id, cancel_technician_template_id, confirmation_sms_enabled, confirmation_sms_message, confirmation_sms_include_link, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours, primary_color, logo_url",
     )
     .eq("form_id", formId)
     .maybeSingle();

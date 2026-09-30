@@ -26,10 +26,12 @@ export interface EmailsTabFields {
   meeting_notify_commercial: boolean;
   meeting_notify_emails: string;
   meeting_notify_template_id: string | null;
+  reschedule_notify_client: boolean;
   reschedule_notify_commercial: boolean;
   reschedule_notify_emails: string;
   reschedule_client_template_id: string | null;
   reschedule_technician_template_id: string | null;
+  cancel_notify_client: boolean;
   cancel_notify_commercial: boolean;
   cancel_notify_emails: string;
   cancel_client_template_id: string | null;
@@ -238,29 +240,43 @@ export function FormEmailsTab<T extends EmailsTabFields>({
         </div>
 
         <div className="space-y-3 rounded-lg border p-3">
-          <h4 className="text-sm font-medium">{t("emailAudience.clientRescheduleTitle")}</h4>
-          <p className="text-[10px] text-muted-foreground">{t("emailAudience.clientAlwaysHelp")}</p>
-          <EventTemplateSelect
-            id="reschedule-client-template"
-            label={t("emailAudience.templateLabel")}
-            options={emailTemplateOptions}
-            value={branding.reschedule_client_template_id}
-            onChange={(id) => set({ reschedule_client_template_id: id })}
-            defaultLabel={t("emailAudience.systemDefault")}
+          <SwitchHeader
+            id="reschedule-notify-client"
+            label={t("emailAudience.clientRescheduleTitle")}
+            description={t("emailAudience.clientRescheduleHelp")}
+            checked={branding.reschedule_notify_client}
+            onChange={(v) => set({ reschedule_notify_client: v })}
           />
+          {branding.reschedule_notify_client && (
+            <EventTemplateSelect
+              id="reschedule-client-template"
+              label={t("emailAudience.templateLabel")}
+              options={emailTemplateOptions}
+              value={branding.reschedule_client_template_id}
+              onChange={(id) => set({ reschedule_client_template_id: id })}
+              defaultLabel={t("emailAudience.systemDefault")}
+            />
+          )}
         </div>
 
         <div className="space-y-3 rounded-lg border p-3">
-          <h4 className="text-sm font-medium">{t("emailAudience.clientCancelTitle")}</h4>
-          <p className="text-[10px] text-muted-foreground">{t("emailAudience.clientAlwaysHelp")}</p>
-          <EventTemplateSelect
-            id="cancel-client-template"
-            label={t("emailAudience.templateLabel")}
-            options={emailTemplateOptions}
-            value={branding.cancel_client_template_id}
-            onChange={(id) => set({ cancel_client_template_id: id })}
-            defaultLabel={t("emailAudience.systemDefault")}
+          <SwitchHeader
+            id="cancel-notify-client"
+            label={t("emailAudience.clientCancelTitle")}
+            description={t("emailAudience.clientCancelHelp")}
+            checked={branding.cancel_notify_client}
+            onChange={(v) => set({ cancel_notify_client: v })}
           />
+          {branding.cancel_notify_client && (
+            <EventTemplateSelect
+              id="cancel-client-template"
+              label={t("emailAudience.templateLabel")}
+              options={emailTemplateOptions}
+              value={branding.cancel_client_template_id}
+              onChange={(id) => set({ cancel_client_template_id: id })}
+              defaultLabel={t("emailAudience.systemDefault")}
+            />
+          )}
         </div>
 
         <div className="space-y-3 rounded-lg border p-3">

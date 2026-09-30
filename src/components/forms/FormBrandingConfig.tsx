@@ -96,8 +96,10 @@ interface BrandingData {
   meeting_notify_commercial: boolean;
   meeting_notify_emails: string;
   meeting_notify_template_id: string | null;
+  reschedule_notify_client: boolean;
   reschedule_notify_commercial: boolean;
   reschedule_notify_emails: string;
+  cancel_notify_client: boolean;
   cancel_notify_commercial: boolean;
   cancel_notify_emails: string;
   reminder_enabled: boolean;
@@ -164,8 +166,10 @@ const defaultBranding: BrandingData = {
   meeting_notify_commercial: false,
   meeting_notify_emails: "",
   meeting_notify_template_id: null,
+  reschedule_notify_client: true,
   reschedule_notify_commercial: false,
   reschedule_notify_emails: "",
+  cancel_notify_client: true,
   cancel_notify_commercial: false,
   cancel_notify_emails: "",
   reminder_enabled: false,
@@ -407,8 +411,10 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
           meeting_notify_commercial: (data as any).meeting_notify_commercial ?? false,
           meeting_notify_emails: (data as any).meeting_notify_emails ?? "",
           meeting_notify_template_id: (data as any).meeting_notify_template_id ?? null,
+          reschedule_notify_client: (data as any).reschedule_notify_client ?? true,
           reschedule_notify_commercial: (data as any).reschedule_notify_commercial ?? false,
           reschedule_notify_emails: (data as any).reschedule_notify_emails ?? "",
+          cancel_notify_client: (data as any).cancel_notify_client ?? true,
           cancel_notify_commercial: (data as any).cancel_notify_commercial ?? false,
           cancel_notify_emails: (data as any).cancel_notify_emails ?? "",
           reminder_enabled: (data as any).reminder_enabled ?? false,

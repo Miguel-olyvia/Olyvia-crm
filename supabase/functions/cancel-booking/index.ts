@@ -7,6 +7,7 @@ import {
   uniqueEmails,
   buildManageUrl,
   defaultMeetingHtml,
+  shouldNotifyClient,
   loadTemplate,
   renderHtml,
 } from '../_shared/formEmails.ts';
@@ -385,8 +386,9 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      // (b) Client: cancellation confirmation.
-      if (leadEmail) {
+      // (b) Client: cancellation confirmation. Has its own toggle
+      // (cancel_notify_client); absent config counts as on.
+      if (leadEmail && shouldNotifyClient(emailCfg, 'cancel')) {
         const mail = await buildMail('client');
         await sendEmailNow({
           organizationId,
