@@ -2764,7 +2764,8 @@ const PurchaseOrders = () => {
                               <FileDown className="w-4 h-4" />
                             </Button>
                             {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
-                              <PermissionGate permission="purchase_orders.receive">
+                              // Mesmas permissões que rpc_receive_purchase_order_lines exige (a receção dá entrada de stock).
+                              <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
                                 <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
                                   <PackageCheck className="w-4 h-4" />
                                 </Button>
