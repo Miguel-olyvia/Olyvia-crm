@@ -3347,6 +3347,8 @@ const ClientOrders = () => {
         onAddItems={handleAddCatalogItems}
         products={[]}
         services={[]}
+        title="Adicionar Itens à Encomenda"
+        description="Selecione produtos ou serviços para adicionar à encomenda"
       />
     </>
   );
