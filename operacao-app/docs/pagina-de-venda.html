@@ -1,0 +1,630 @@
+<title>Olyvia Operação</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  /* ───────────────────────────────────────────────────────────
+     Paleta. O roxo é o da Olyvia (#7c3aed, o mesmo do CRM), o
+     rosa é o acento de marca e aparece uma vez só. Os neutros
+     têm um desvio para o roxo — cinzento puro lê-se como falta
+     de decisão.
+     ─────────────────────────────────────────────────────────── */
+  :root {
+    color-scheme: light;
+    --ground:      #faf9fc;
+    --surface:     #ffffff;
+    --surface-2:   #f4f1f8;
+    --ink:         #16131d;
+    --ink-2:       #454055;
+    --ink-3:       #6f6883;
+    --line:        #e6e1ee;
+    --line-2:      #d5cee1;
+    --accent:      #7c3aed;
+    --accent-deep: #5b21b6;
+    --accent-soft: #f1ebfe;
+    --on-accent:   #ffffff;
+    --pink:        #e5197f;
+    --good:        #0f7b4f;
+    --good-soft:   #e7f5ee;
+    --warn-soft:   #fdf3e3;
+    --warn-ink:    #7a4c07;
+    --shadow: 0 1px 2px rgba(22,19,29,.05), 0 8px 24px -16px rgba(22,19,29,.28);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground:      #100e16;
+      --surface:     #1a1722;
+      --surface-2:   #221e2d;
+      --ink:         #f3f0f8;
+      --ink-2:       #c4bdd2;
+      --ink-3:       #8f879f;
+      --line:        #2e2839;
+      --line-2:      #3c3549;
+      --accent:      #a78bfa;
+      --accent-deep: #c4b5fd;
+      --accent-soft: #241d38;
+      --on-accent:   #14101f;
+      --pink:        #f472b6;
+      --good:        #5fd39b;
+      --good-soft:   #14291f;
+      --warn-soft:   #2a2113;
+      --warn-ink:    #e8c98a;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px -18px rgba(0,0,0,.9);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground:      #100e16;
+    --surface:     #1a1722;
+    --surface-2:   #221e2d;
+    --ink:         #f3f0f8;
+    --ink-2:       #c4bdd2;
+    --ink-3:       #8f879f;
+    --line:        #2e2839;
+    --line-2:      #3c3549;
+    --accent:      #a78bfa;
+    --accent-deep: #c4b5fd;
+    --accent-soft: #241d38;
+    --on-accent:   #14101f;
+    --pink:        #f472b6;
+    --good:        #5fd39b;
+    --good-soft:   #14291f;
+    --warn-soft:   #2a2113;
+    --warn-ink:    #e8c98a;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px -18px rgba(0,0,0,.9);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16.5px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3 {
+    font-family: Archivo, "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    text-wrap: balance;
+    margin: 0;
+    letter-spacing: -.018em;
+  }
+
+  p { margin: 0; }
+  strong { font-weight: 600; color: var(--ink); }
+
+  .env { max-width: 1080px; margin-inline: auto; padding-inline: clamp(20px, 5vw, 48px); }
+  .prosa { max-width: 62ch; }
+
+  /* A etiqueta em mono: é a mesma linguagem dos códigos de ordem
+     dentro do produto (OT-0148), e não um enfeite tipográfico. */
+  .rotulo {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .rotulo b { color: var(--accent); font-weight: 600; }
+
+  /* ── Cabeçalho: uma folha de obra ───────────────────────── */
+
+  .folha {
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .folha-topo {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px;
+    padding-block: 14px;
+    border-bottom: 1px solid var(--line);
+  }
+  .marca {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: Archivo, sans-serif; font-weight: 700; font-size: 15px;
+    letter-spacing: -.01em; color: var(--ink);
+  }
+  .marca-ponto {
+    width: 11px; height: 11px; border-radius: 3px;
+    background: linear-gradient(140deg, var(--accent), var(--pink));
+  }
+  .campo { display: flex; align-items: baseline; gap: 7px; }
+  .campo .v {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px;
+    font-weight: 500; color: var(--ink-2);
+  }
+  .folha-topo .empurra { margin-left: auto; }
+
+  .heroi { padding-block: clamp(56px, 9vw, 104px) clamp(44px, 7vw, 76px); }
+  .heroi h1 {
+    font-size: clamp(38px, 7.2vw, 76px);
+    font-weight: 700;
+    line-height: 1.02;
+    letter-spacing: -.035em;
+    max-width: 15ch;
+  }
+  .heroi h1 em {
+    font-style: normal;
+    color: var(--accent);
+  }
+  .heroi .abre {
+    margin-top: 26px;
+    font-size: clamp(17px, 2.1vw, 20.5px);
+    line-height: 1.55;
+    color: var(--ink-2);
+    max-width: 54ch;
+  }
+
+  .selos {
+    margin-top: 34px;
+    display: flex; flex-wrap: wrap; gap: 8px;
+  }
+  .selo {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; font-weight: 500;
+    padding: 6px 11px; border-radius: 999px;
+    border: 1px solid var(--line-2); color: var(--ink-2);
+    background: var(--surface);
+  }
+
+  /* ── Secções ─────────────────────────────────────────────── */
+
+  section { padding-block: clamp(48px, 7vw, 84px); }
+  section + section { border-top: 1px solid var(--line); }
+  .fundo { background: var(--surface); }
+
+  .cabeca { display: flex; flex-direction: column; gap: 12px; margin-bottom: 34px; }
+  .cabeca h2 {
+    font-size: clamp(26px, 3.8vw, 38px);
+    font-weight: 600;
+    line-height: 1.12;
+    max-width: 20ch;
+  }
+  .cabeca p { color: var(--ink-2); font-size: 17px; }
+
+  /* ── O funil: uma espinha vertical, porque é mesmo uma
+        sequência — o trabalho passa por aqui por esta ordem ── */
+
+  .espinha { display: grid; gap: 0; }
+  .passo {
+    display: grid;
+    grid-template-columns: 62px 1fr;
+    gap: 0 22px;
+    position: relative;
+  }
+  .passo-marca { position: relative; }
+  .passo-num {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; font-weight: 600; letter-spacing: .06em;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border: 1px solid var(--line-2);
+    width: 40px; height: 40px; border-radius: 50%;
+    display: grid; place-items: center;
+    position: relative; z-index: 1;
+  }
+  /* A linha que liga: sai do círculo e vai até ao passo seguinte. */
+  .passo:not(:last-child) .passo-marca::after {
+    content: ""; position: absolute;
+    left: 20px; top: 40px; bottom: -4px; width: 1px;
+    background: var(--line-2);
+  }
+  .passo-corpo { padding-bottom: 34px; }
+  .passo h3 { font-size: 19px; font-weight: 600; margin-bottom: 6px; }
+  .passo p { color: var(--ink-2); font-size: 16px; max-width: 58ch; }
+
+  .sozinho {
+    margin-top: 12px;
+    display: flex; align-items: flex-start; gap: 9px;
+    background: var(--good-soft);
+    border: 1px solid color-mix(in oklab, var(--good) 24%, transparent);
+    border-radius: 10px;
+    padding: 10px 13px;
+    font-size: 14.5px; line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 58ch;
+  }
+  .sozinho svg { flex: none; margin-top: 3px; color: var(--good); }
+  .sozinho b { color: var(--good); font-weight: 600; }
+
+  /* ── Grelha das perguntas ────────────────────────────────── */
+
+  .grelha { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(272px, 1fr)); }
+
+  .cartao {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px;
+    box-shadow: var(--shadow);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .fundo .cartao { background: var(--ground); }
+  .cartao h3 { font-size: 18px; font-weight: 600; line-height: 1.25; }
+  .cartao p { color: var(--ink-2); font-size: 15.5px; }
+  .cartao .antes {
+    font-size: 14px; color: var(--ink-3);
+    border-top: 1px dashed var(--line-2);
+    padding-top: 10px; margin-top: auto;
+  }
+  .cartao .antes b { color: var(--ink-2); font-weight: 500; }
+
+  /* ── Tabela do telemóvel ─────────────────────────────────── */
+
+  .lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  .lista li { background: var(--surface); padding: 16px 20px; display: grid; gap: 4px; }
+  .fundo .lista li { background: var(--ground); }
+  .lista h3 { font-size: 16.5px; font-weight: 600; }
+  .lista p { color: var(--ink-2); font-size: 15.5px; max-width: 62ch; }
+
+  /* ── Faixa de garantia ───────────────────────────────────── */
+
+  .garantia {
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    border-radius: 16px;
+    padding: clamp(22px, 3.5vw, 34px);
+  }
+  .garantia h2 { font-size: clamp(22px, 3vw, 29px); font-weight: 600; }
+  .garantia .itens { margin-top: 20px; display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+  .garantia .item { display: grid; gap: 4px; }
+  .garantia .item .t { font-weight: 600; font-size: 15.5px; }
+  .garantia .item .d { color: var(--ink-2); font-size: 15px; }
+
+  /* ── Fecho ───────────────────────────────────────────────── */
+
+  .fecho { text-align: left; }
+  .fecho h2 { font-size: clamp(28px, 4.6vw, 46px); font-weight: 700; letter-spacing: -.03em; max-width: 17ch; }
+  .fecho p { margin-top: 16px; color: var(--ink-2); font-size: 17.5px; max-width: 52ch; }
+  .botoes { margin-top: 28px; display: flex; flex-wrap: wrap; gap: 12px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px;
+    font-family: "IBM Plex Sans", sans-serif;
+    font-size: 15.5px; font-weight: 600;
+    padding: 12px 20px; border-radius: 10px;
+    text-decoration: none;
+    border: 1px solid transparent;
+    transition: transform .12s ease, background-color .12s ease, border-color .12s ease;
+  }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  .btn-1 { background: var(--accent); color: var(--on-accent); }
+  .btn-1:hover { background: var(--accent-deep); }
+  .btn-2 { border-color: var(--line-2); color: var(--ink); background: var(--surface); }
+  .btn-2:hover { border-color: var(--accent); color: var(--accent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .btn:hover { transform: translateY(-1px); }
+  }
+
+  footer {
+    border-top: 1px solid var(--line);
+    padding-block: 28px 40px;
+    color: var(--ink-3);
+    font-size: 13.5px;
+  }
+  footer .env { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: baseline; }
+
+  .nota {
+    margin-top: 26px;
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--warn-soft);
+    border: 1px solid color-mix(in oklab, var(--warn-ink) 22%, transparent);
+    border-radius: 12px; padding: 14px 16px;
+    font-size: 15px; line-height: 1.55; color: var(--warn-ink);
+    max-width: 66ch;
+  }
+  .nota svg { flex: none; margin-top: 3px; }
+
+  @media (max-width: 560px) {
+    .passo { grid-template-columns: 44px 1fr; gap: 0 14px; }
+    .passo-num { width: 34px; height: 34px; font-size: 11px; }
+    .passo:not(:last-child) .passo-marca::after { left: 17px; top: 34px; }
+  }
+</style>
+
+<header class="folha">
+  <div class="env folha-topo">
+    <span class="marca"><span class="marca-ponto" aria-hidden="true"></span> Olyvia</span>
+    <span class="campo"><span class="rotulo">Módulo</span> <span class="v">Operação</span></span>
+    <span class="campo"><span class="rotulo">Estado</span> <span class="v">No ar</span></span>
+    <span class="campo empurra"><span class="rotulo">olyvia-ai.com/operacao</span></span>
+  </div>
+
+  <div class="env heroi">
+    <p class="rotulo" style="margin-bottom:20px"><b>Manutenção</b> · Gestão de operação e ativos</p>
+    <h1>O trabalho faz-se sempre.<br>O que se perde é a <em>prova</em>.</h1>
+    <p class="abre">
+      A equipa vai lá, resolve, tira uma foto e manda-a por WhatsApp. Três meses depois o
+      cliente pergunta o que é que foi feito — e a resposta está algures numa conversa que
+      ninguém consegue encontrar. O Olyvia Operação guarda o trabalho onde ele acontece:
+      na ordem.
+    </p>
+    <div class="selos">
+      <span class="selo">Pedidos e ordens</span>
+      <span class="selo">Planos preventivos</span>
+      <span class="selo">Agenda e mapa</span>
+      <span class="selo">Custo real</span>
+      <span class="selo">Relatório ao cliente</span>
+      <span class="selo">Telemóvel</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ── 1. O funil ──────────────────────────────────────── -->
+  <section class="fundo">
+    <div class="env">
+      <div class="cabeca">
+        <p class="rotulo">01 · Do pedido ao dinheiro</p>
+        <h2>Um trabalho, do princípio ao fim</h2>
+        <p class="prosa">
+          Cinco passos. Em cada um há uma coisa que o sistema faz sozinho — e é aí que está
+          o tempo que a operação ganha de volta.
+        </p>
+      </div>
+
+      <div class="espinha">
+
+        <div class="passo">
+          <div class="passo-marca"><div class="passo-num">01</div></div>
+          <div class="passo-corpo">
+            <h3>Chega um pedido</h3>
+            <p>
+              Do cliente, de uma inspeção que correu mal, ou de um plano preventivo que
+              chegou à data. Entra tudo na mesma lista — não há dois ecrãs para a mesma coisa.
+            </p>
+            <div class="sozinho">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span><b>Sozinho:</b> os planos preventivos criam as ordens dos próximos meses sem ninguém se lembrar.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="passo">
+          <div class="passo-marca"><div class="passo-num">02</div></div>
+          <div class="passo-corpo">
+            <h3>Marca-se e atribui-se</h3>
+            <p>
+              Escolhe-se quem vai e quando. A agenda mostra a equipa lado a lado, com férias,
+              horários e feriados já lá dentro — e avisa se a pessoa já tem outra coisa àquela hora.
+            </p>
+            <div class="sozinho">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span><b>Sozinho:</b> o mapa põe as visitas do dia por ordem de estrada e diz quantos quilómetros isso poupa.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="passo">
+          <div class="passo-marca"><div class="passo-num">03</div></div>
+          <div class="passo-corpo">
+            <h3>O técnico faz o trabalho</h3>
+            <p>
+              No telemóvel, de pé, com o equipamento à frente. Responde às tarefas com um
+              toque, escreve as leituras, tira fotos. O relógio conta o tempo real de trabalho
+              — não o tempo entre abrir e fechar a ordem.
+            </p>
+            <div class="sozinho">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span><b>Sozinho:</b> uma leitura fora da gama abre logo a ordem de reparação, com o problema já escrito lá dentro.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="passo">
+          <div class="passo-marca"><div class="passo-num">04</div></div>
+          <div class="passo-corpo">
+            <h3>Fecha-se, com prova</h3>
+            <p>
+              O cliente assina no telemóvel do técnico, ali. As fotos, as leituras e o tempo
+              ficam agarrados à ordem — não a uma pasta, não a uma conversa.
+            </p>
+            <div class="sozinho">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span><b>Sozinho:</b> quando o escritório confirma, o relatório vai ao cliente por email, com as fotos e a assinatura.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="passo">
+          <div class="passo-marca"><div class="passo-num">05</div></div>
+          <div class="passo-corpo">
+            <h3>Sabe-se quanto custou</h3>
+            <p>
+              Horas de mão de obra, material e serviços, tudo na mesma ordem. Se veio de um
+              orçamento, o previsto fica congelado ao lado do gasto — e vê-se, linha a linha,
+              onde a obra escorregou.
+            </p>
+            <div class="sozinho">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+              <span><b>Sozinho:</b> o custo da mão de obra sai do tempo cronometrado, sem ninguém somar horas à mão.</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 2. As quatro perguntas ──────────────────────────── -->
+  <section>
+    <div class="env">
+      <div class="cabeca">
+        <p class="rotulo">02 · O que passa a ter resposta</p>
+        <h2>Quatro perguntas que hoje ninguém consegue responder</h2>
+        <p class="prosa">
+          Nenhuma delas é sobre software. São as quatro perguntas que se fazem numa reunião
+          de segunda-feira de manhã.
+        </p>
+      </div>
+
+      <div class="grelha">
+        <article class="cartao">
+          <h3>&ldquo;Esta obra deu lucro?&rdquo;</h3>
+          <p>
+            O custo real de cada ordem: horas cronometradas ao custo/hora de cada pessoa,
+            mais material e serviços. Ao lado, o que foi orçamentado.
+          </p>
+          <p class="antes"><b>Hoje:</b> o orçamento está num sítio e a despesa noutro. Ninguém junta os dois.</p>
+        </article>
+
+        <article class="cartao">
+          <h3>&ldquo;Isto já deu problemas antes?&rdquo;</h3>
+          <p>
+            Cada equipamento tem ficha própria com tudo o que já se lhe fez e a evolução das
+            leituras. Uma etiqueta QR colada nele abre essa ficha com a câmara do telemóvel.
+          </p>
+          <p class="antes"><b>Hoje:</b> está na cabeça de quem lá foi da última vez. Se essa pessoa sair, sai com ela.</p>
+        </article>
+
+        <article class="cartao">
+          <h3>&ldquo;Onde está a minha equipa agora?&rdquo;</h3>
+          <p>
+            A agenda por dia, semana e mês, com a carga em horas de cada pessoa — e um mapa
+            com as visitas da semana, para ver quem está a atravessar a cidade em vão.
+          </p>
+          <p class="antes"><b>Hoje:</b> um telefonema por pessoa.</p>
+        </article>
+
+        <article class="cartao">
+          <h3>&ldquo;O cliente recebeu prova?&rdquo;</h3>
+          <p>
+            Relatório com o que se fez, quando, por quem, as leituras, as fotos e a
+            assinatura. Sai por email sozinho ao confirmar a ordem — ou à mão, quando o
+            cliente liga a pedir.
+          </p>
+          <p class="antes"><b>Hoje:</b> alguém tem de se lembrar, e escrevê-lo à noite.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 3. O técnico ────────────────────────────────────── -->
+  <section class="fundo">
+    <div class="env">
+      <div class="cabeca">
+        <p class="rotulo">03 · A parte que decide tudo</p>
+        <h2>Se o técnico não usar, nada disto existe</h2>
+        <p class="prosa">
+          Um sistema de manutenção não morre no escritório: morre no telemóvel de quem está
+          de pé, com uma mão ocupada. Foi aí que se gastou o cuidado.
+        </p>
+      </div>
+
+      <ul class="lista">
+        <li>
+          <h3>Uma resposta, um toque</h3>
+          <p>Escolher &ldquo;Conforme&rdquo; grava. Não há escolher e depois gravar — é um passo que ninguém dá em pé.</p>
+        </li>
+        <li>
+          <h3>Diz o que vai acontecer antes de acontecer</h3>
+          <p>Escrever 8 numa gama de 10 a 15 mostra logo que vai ficar não conforme, e que vai abrir reparação. Ninguém descobre o erro no dia seguinte.</p>
+        </li>
+        <li>
+          <h3>Sem rede, continua a trabalhar</h3>
+          <p>As respostas e as leituras ficam guardadas no telemóvel e saem sozinhas quando a rede volta. Numa cave ou numa casa das máquinas, isto é a diferença entre usar e não usar.</p>
+        </li>
+        <li>
+          <h3>Aponta a câmara ao equipamento</h3>
+          <p>A etiqueta QR abre a ficha dele — o que é, o que já lhe fizeram, e o botão para abrir uma ordem ali mesmo. Sem instalar nada, em qualquer telemóvel.</p>
+        </li>
+        <li>
+          <h3>A conversa fica com o trabalho</h3>
+          <p>O que hoje se manda por WhatsApp — &ldquo;o quadro está diferente da checklist&rdquo;, &ldquo;a peça só chega quinta&rdquo; — escreve-se dentro da ordem, e fica lá. Não se apaga nem se reescreve.</p>
+        </li>
+        <li>
+          <h3>Quando não pode, diz o passo em falta</h3>
+          <p>Não diz &ldquo;não é possível&rdquo;. Diz &ldquo;inicia a ordem para começares a responder&rdquo;.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ── 4. A garantia ───────────────────────────────────── -->
+  <section>
+    <div class="env">
+      <div class="garantia">
+        <p class="rotulo" style="margin-bottom:12px">04 · O risco de mudar</p>
+        <h2>O que <em style="font-style:normal;color:var(--accent)">não</em> muda</h2>
+        <p class="prosa" style="margin-top:12px;color:var(--ink-2)">
+          A pergunta que trava a maior parte das mudanças de software não é &ldquo;isto é
+          melhor?&rdquo;. É &ldquo;o que é que parte no dia em que ligarmos?&rdquo;.
+        </p>
+
+        <div class="itens">
+          <div class="item">
+            <span class="t">O mesmo início de sessão</span>
+            <span class="d">Quem já entra no Olyvia entra aqui. Não há contas novas nem palavras-passe novas.</span>
+          </div>
+          <div class="item">
+            <span class="t">Os mesmos clientes</span>
+            <span class="d">A ficha do cliente é a do CRM, lida de lá. Não se duplica nem se reescreve nada.</span>
+          </div>
+          <div class="item">
+            <span class="t">Uma agenda só</span>
+            <span class="d">As férias, os horários e os compromissos que já estão na agenda da empresa aparecem aqui — não há duas agendas a contradizerem-se.</span>
+          </div>
+          <div class="item">
+            <span class="t">Quem vê o quê é imposto na base</span>
+            <span class="d">Não é o ecrã que esconde: é o servidor que recusa. Um técnico não vê custos por hora nem as ordens dos outros.</span>
+          </div>
+          <div class="item">
+            <span class="t">Nada do que já funciona é tocado</span>
+            <span class="d">O módulo vive em tabelas próprias. O que já existia continua exatamente como estava — e há verificações automáticas que falham se isso mudar.</span>
+          </div>
+          <div class="item">
+            <span class="t">Começa vazio, e desligado</span>
+            <span class="d">O envio de emails ao cliente vem desligado. Ninguém escreve a um cliente por engano no primeiro dia.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── 5. Fecho ────────────────────────────────────────── -->
+  <section class="fundo">
+    <div class="env fecho">
+      <p class="rotulo" style="margin-bottom:18px">05 · A seguir</p>
+      <h2>A melhor demonstração é uma ordem vossa.</h2>
+      <p>
+        Meia hora, uma obra real da vossa operação, do pedido ao relatório. No fim vê-se o
+        que custou — que é a parte que hoje ninguém consegue mostrar.
+      </p>
+      <div class="botoes">
+        <a class="btn btn-1" href="https://www.olyvia-ai.com/operacao">
+          Ver o Olyvia Operação
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+        <a class="btn btn-2" href="mailto:geral@olyvia-ai.com?subject=Olyvia%20Opera%C3%A7%C3%A3o%20%E2%80%94%20demonstra%C3%A7%C3%A3o">
+          Marcar uma demonstração
+        </a>
+      </div>
+
+      <div class="nota">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <span>
+          <strong>Honestidade sobre o que ainda não está feito:</strong> responder sem rede
+          funciona, mas <em>abrir</em> a aplicação sem rede e tirar fotos sem rede ainda não.
+          Não há portal onde o cliente abra pedidos sozinho — recebe relatórios, não entra na
+          plataforma. E não há stock, compras nem vendas: isso continua onde já está.
+        </span>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="env">
+    <span class="marca" style="font-size:13.5px"><span class="marca-ponto" aria-hidden="true"></span> Olyvia</span>
+    <span>Módulo Operação · olyvia-ai.com/operacao</span>
+    <span style="margin-left:auto">Documento comercial — não contém dados de clientes.</span>
+  </div>
+</footer>

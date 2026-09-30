@@ -7,9 +7,182 @@
 
 ---
 
-> ⚠ **Escrito antes do merge.** O merge está feito e o módulo está no ar em
-> `/operacao`. O deploy que falhou pelo meio era do `vercel.json`, não do
-> módulo — ver [`deploy-falhado.md`](deploy-falhado.md).
+> ⚠ **As secções 1 a 9 são de 30 de agosto**, e a §7 foi corrigida a 2 de
+> setembro. O que é verdade hoje está na **§0a**, logo a seguir — começa por aí.
+
+## 0a. O que mudou a 2 de setembro — um dia de UX
+
+A lista de ordens e a ficha da ordem foram reescritas no que toca a layout, e o
+módulo passou a saber **sugerir quem devia ir** a cada ordem. O registo
+completo está em
+[`o-que-mudou-a-2-de-setembro.md`](o-que-mudou-a-2-de-setembro.md). Em resumo:
+
+| | |
+|---|---|
+| **Sugerir quem vai** | especialidade (50 %), agenda (30 %) e distância (20 %), com o porquê de cada lugar escrito ao lado |
+| **A lista lembra-se** | vista, pesquisa, filtros e ordenação vivem no endereço |
+| **Faixas por dia** | Atrasadas, Hoje, Amanhã, Até domingo, Mais tarde, Já passou, Sem data |
+| **Números nos separadores** | e o das atrasadas a vermelho |
+| **A pesquisa espera** | mandava uma consulta por cada letra escrita |
+| **As ações não fogem** | barra colada ao topo, e barra fixa em baixo no telemóvel |
+| **Duas colunas** | o trabalho à esquerda, o contexto à direita, a partir de `lg` |
+| **A régua do percurso** | cinco degraus, e a frase que diz o que falta a seguir |
+| **O relógio anda** | numa sessão aberta, o tempo deixou de ficar parado |
+| **O «Hoje» mostra o dia** | e cada bloco traz as três primeiras ordens, com contexto |
+
+**Nenhum SQL novo.** Tudo isto lê o que já existia.
+
+---
+
+## 0b. O que mudou a 1 de setembro — o primeiro dia de uso a sério
+
+Catorze correções ao desenho, quase todas vindas da mesma frase: *"isto está
+muito difícil"*. Quem montou a operação passo a passo encontrou em duas horas o
+que meses de código não tinham encontrado.
+
+O registo completo, com a queixa que originou cada uma, está em
+[`o-que-mudou-a-1-de-setembro.md`](o-que-mudou-a-1-de-setembro.md). Em resumo:
+
+| | |
+|---|---|
+| **Categorias** | catálogo de 47 sugestões por ofício, escolhidas de uma vez |
+| **Os locais saíram das Definições** | criam-se em `/locais` e dentro da própria ordem |
+| **Uma morada, uma página** | a árvore inteira num ecrã só; um espaço não tem página própria |
+| **Mover equipamentos** | arrastando, ou por botão no telemóvel |
+| **Remover nunca apaga** | põe `ativo = false`, com gaveta para repor |
+| **"Sítio" passa a "Local"** | em todo o lado que se lê |
+| **Duplicar leva a árvore toda** | espaços e equipamentos, a qualquer profundidade |
+| **Tarefas na própria ordem** | e leituras com limites, sem passar por Definições |
+| **Tarefa respondida fecha-se** | só um "alterar" pequeno |
+| **O sino em Operações** | o do CRM, mostrado onde a pessoa está |
+| **A agenda diz o quê** | nomes das ordens na vista de mês |
+| **Espreitar sem sair** | painel ao lado em vez de mudar de página |
+| **Mapa** | na ficha do local e no painel da ordem |
+| **Filtros nas ordens** | quem, cliente, prioridade, natureza — e ordenação |
+| **Análises: &ldquo;O período&rdquo;** | entrou, saiu, atrasadas, pontualidade, tempos, e onde se concentrou |
+
+**Dois ficheiros SQL para correr:** `db/duplicar.sql` (outra vez — a função
+ganhou um argumento) e `db/tarefas-na-ordem.sql` (novo).
+
+---
+
+## 0. O que mudou a 31 de agosto
+
+O módulo está **no ar** em `/operacao`, e as **nove** coisas que estavam por
+fazer estão feitas. Restava uma, e está mais abaixo.
+
+### O que se fez
+
+| | Onde se vê |
+|---|---|
+| **Notificações** no sino do CRM — ordem atribuída, corretiva por aprovar, atraso, pausa expirada, plano falhado | o sino do Olyvia |
+| **A ordem inicia-se sozinha** à primeira resposta | ficha da ordem |
+| **Ficha do equipamento** — tudo o que se lhe fez e a evolução das leituras | `/analises` › Equipamento |
+| **PMP cumprido** por cliente e por mês | `/analises` › Manutenção preventiva |
+| **Exportar leituras** para folha de cálculo | `/analises` › Exportar medições |
+| **Agenda: férias, horários e feriados** ao marcar uma visita | ficha da ordem |
+| **Ecrã de agenda do dia** com a equipa toda lado a lado | `/agenda` |
+| **Packs de configuração** — Manutenção, Obras, Limpeza | `/definicoes` › Procedimentos |
+| **Assinatura do cliente** no telemóvel do técnico | ficha da ordem, depois de fechar |
+
+E, mais tarde no mesmo dia:
+
+| | Onde se vê |
+|---|---|
+| **Onde fica o local, no mapa**, e o botão que abre a navegação | ficha do local, ficha da ordem |
+| **O dia pela estrada** — a ordem das visitas por proximidade, e quantos km se poupam | `/agenda` › Dia |
+| **Mapa da agenda** — a semana toda em cima do mapa | `/agenda` › Mapa |
+| **Relatório automático ao cliente** ao confirmar a ordem. Desligado até alguém o ligar | `/definições` › Automático |
+| **Enviar o relatório à mão** — para quando o automático está desligado ou o cliente ligou a pedir | ficha da ordem, depois de fechar |
+| **Fila de envio** — responder sem rede e sair tudo quando a rede volta | ficha da ordem |
+| **Tipo de trabalho, centro de custo e fornecedor** na ordem, e o fecho automático por tipo | `/definições` › Tipos e custos |
+| **Motivos de pausa por função, áreas e tipos de área** | `/definições` › Listas |
+| **Duplicar** ordens, planos, locais e checklists — o molde, nunca o que aconteceu | em cada ficha |
+| **Word, Excel, CSV e PDF** nos anexos | ficha da ordem |
+| **Histórico do equipamento** — mudanças de sítio, categoria e criticidade | ficha do equipamento |
+| **Etiquetas QR** para colar nos equipamentos, e a ficha onde a câmara aterra | ficha do local › Etiquetas |
+| **Ícones nas listas**, como no Infraspeak mas no roxo da nossa marca | todas as listas |
+| **A conversa dentro da ordem** — entre colegas, guardada com o trabalho, sem se poder apagar | ficha da ordem |
+| **O funil, do princípio ao fim** | `/ajuda` › O funil |
+
+### O que falta
+
+**Trabalhar sem rede, a sério.** Metade está feita: responder a tarefas e a
+medições sem rede já funciona — fica guardado no telemóvel e sai sozinho
+quando a rede volta. O que falta é o resto: **abrir a aplicação** sem rede
+(service worker) e **tirar fotos** sem rede. A recomendação continua a ser
+esperar pelo piloto, porque a forma de resolver depende de saber ONDE a rede
+falha.
+
+**O portal do cliente.** Ficou de fora de propósito — ver
+[`portal-do-cliente.md`](portal-do-cliente.md). A base recusa hoje escrever no
+canal `cliente` das mensagens, precisamente para ninguém escrever a pensar que
+o cliente lê.
+
+**O email que não chega.** Investigado até ao fim —
+[`email-que-nao-chega.md`](email-que-nao-chega.md). É um bug do **CRM**: a
+função que processa a fila de emails não olha para o código de estado da
+resposta, e por isso marca como entregue uma carta que voltou para trás. A
+correção são três linhas e **está por aplicar, por decisão** — é código do
+CRM. O módulo faz a parte dele corretamente.
+
+Enquanto isso não estiver resolvido, **o cliente não recebe o relatório
+sozinho** — e isso tem de ser dito a quem for ao piloto.
+
+### Como testar antes do merge
+
+O PR #12 espera. Entretanto, o Vercel constrói **todos** os ramos: o
+`feature/operacoes` tem um endereço próprio, com o CRM e o `/operacao` na
+versão nova, sem tocar na produção.
+
+O caminho completo — do menu do CRM até ao relatório no cliente — está em
+[`teste-de-ponta-a-ponta.md`](teste-de-ponta-a-ponta.md), em lista para picar.
+
+⚠ **A base de dados é a de verdade.** O endereço é novo, o Supabase é o mesmo.
+O documento explica as duas regras do teste.
+
+### Os ficheiros SQL, por ordem
+
+Cada um pode voltar a correr sozinho numa base já completa — isso é testado,
+e foi a razão de um deploy falhado.
+
+```
+schema.sql → permissoes.sql → notificacoes.sql → rpcs.sql → rpcs-tarefas.sql
+  → planos.sql → correcoes-modelo.sql → medicoes.sql → agenda.sql
+  → despacho.sql → orcamentos.sql → anexos.sql → assinaturas.sql → mapa.sql
+  → relatorio-automatico.sql → relatorio-manual.sql
+  → campos-ordem.sql → duplicar.sql → tarefas-na-ordem.sql
+  → documentos-e-ativos.sql → listas-operacao.sql → mensagens.sql
+  → planos-crud.sql → config.sql → packs.sql → custos.sql → analises.sql
+  → cliente-crm.sql → pos-instalacao.sql
+```
+
+### O que está verificado
+
+Os validadores correm contra Postgres a sério (PGlite), mais os testes de
+domínio sobre funções puras. Typecheck e build limpos. Zero chaves
+estrangeiras de `ops_*` para fora — e um teste que falha se alguém criar uma.
+
+**As três únicas escritas fora de `ops_*`**, todas deliberadas e testadas:
+
+1. uma linha no sino (`notifications`);
+2. uma linha na fila de emails (`scheduled_emails`) — e **só duas funções**
+   escrevem lá: o gatilho do relatório automático e o botão de mandar à mão.
+   Há uma verificação que falha se aparecer uma terceira;
+3. os ficheiros no balde `operacoes`, que é do módulo.
+
+Fornecedores e clientes são **lidos** do CRM. Nunca escritos.
+
+### Onde está o resto
+
+O inventário completo — ecrãs, tabelas, vistas, escritas, avisos — está em
+[`mapa-do-modulo.md`](mapa-do-modulo.md). É por aí que se começa para saber
+"o que faz este ecrã" ou "onde está isto guardado".
+
+**As secções 1 a 9 abaixo são de 30 de agosto** e ficam como registo do que se
+sabia nessa altura. O que interessa hoje está aqui em cima e no mapa.
+
+---
 
 ## 1. O estado, em três linhas
 
@@ -42,7 +215,8 @@ Do zero até entregar ao cliente:
 | Orçamento aceite → obra | `/orcamentos` |
 | O que mudou face ao Infraspeak, e o tutorial | `/ajuda` |
 
-**Verificado:** 12 validadores contra Postgres a sério, 123 testes de domínio,
+**Verificado:** 12 validadores contra Postgres a sério, 123 testes de domínio
+*(a 30 de agosto — hoje são 26 validadores e 449 testes)*,
 build limpo, zero erros de lint.
 
 **Garantia que se mantém:** zero chaves estrangeiras de `ops_*` para fora, e
@@ -138,7 +312,7 @@ vieram de meia hora de uso real, e nenhuma aparecia nos 123 testes.
 cd operacao-app
 
 npm run dev                # servidor local, porta 5274
-npm test -- --run          # 123 testes de domínio
+npm test -- --run          # 449 testes de domínio
 npm run typecheck
 npm run build
 ```
@@ -180,24 +354,21 @@ Para apagar a regra no fim:
 ## 7. O push, e o que está em causa
 
 ```
-ramo:     feature/operacoes
-commits:  27 por enviar
-main:     intocado
+ramo:     feature/operacoes  — empurrado, alinhado com o origin
+main:     intocado, 44 commits atrás
 ```
 
-Duas opções, decididas em conjunto na sessão passada:
+⚠ **Esta secção estava desatualizada** até 2 de setembro: dizia que o push
+estava bloqueado e que havia 27 commits por enviar. O ramo está no origin há
+dias, e é dele que sai a pré-visualização do Vercel.
 
-**Só o ramo** *(escolhido, mas o push ficou bloqueado)*
-`git push -u origin feature/operacoes` → o Vercel cria um URL de
-pré-visualização. Ninguém no CRM vê nada. O link aparece na página do commit
-no GitHub — não é preciso conta no Vercel.
+Foi escolhido **só o ramo**: o Vercel cria um URL de pré-visualização a cada
+push, e ninguém no CRM vê nada. O link aparece na página do commit no GitHub —
+não é preciso conta no Vercel.
 
-**Direto para produção**
-Merge em `main` → `www.olyvia-ai.com/operacao` fica no ar, e o menu do CRM
-ganha "Operações" para quem tiver a permissão `operations.view`.
-
-⚠ **O push está bloqueado** para o assistente pelo modo automático. Tem de ser
-corrido à mão, ou com `!git push …` na conversa.
+A opção que continua **por tomar** é a outra: merge em `main` → 
+`www.olyvia-ai.com/operacao` fica no ar, e o menu do CRM ganha "Operações"
+para quem tiver a permissão `operations.view`.
 
 ⚠ **Por confirmar:** se as variáveis `VITE_SUPABASE_URL` e
 `VITE_SUPABASE_PUBLISHABLE_KEY` estão disponíveis no ambiente de
@@ -246,6 +417,10 @@ emails diferentes. Identificar pessoas por email, nunca por nome.
 | | |
 |---|---|
 | [`../README.md`](../README.md) | como está construído, os ficheiros SQL, a autorização em três camadas |
+| [`mapa-do-modulo.md`](mapa-do-modulo.md) | **o inventário**: ecrãs, tabelas, vistas, escritas, avisos, ordem de instalação |
+| [`o-que-mudou-a-2-de-setembro.md`](o-que-mudou-a-2-de-setembro.md) | **um dia de UX**: a lista, a ficha, o «Hoje», e a sugestão de quem vai |
 | [`a-seguir.md`](a-seguir.md) | o que vem a seguir, com o levantamento do que o CRM já tem |
+| [`deploy-falhado.md`](deploy-falhado.md) | o deploy que falhou, e porquê |
 | [`portal-do-cliente.md`](portal-do-cliente.md) | o cliente a pedir assistência sozinho |
-| `/ajuda` na app | o que mudou face ao Infraspeak, e o tutorial da equipa |
+| [`email-que-nao-chega.md`](email-que-nao-chega.md) | **o relatório que diz que foi e não foi** — investigação, causa e correção |
+| `/ajuda` na app | três portas: porquê mudar (para quem decide), como funciona (com fluxogramas), como se usa |

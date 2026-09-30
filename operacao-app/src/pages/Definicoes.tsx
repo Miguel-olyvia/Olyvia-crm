@@ -1,13 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
-import { ErroDeDados, ErroDeEscrita, listarClientes, listarLocais, type Cliente, type LocalRow } from "../lib/dados";
+import { ErroDeDados, ErroDeEscrita } from "../lib/dados";
 import {
   custosHora,
-  gravarAtivo,
-  gravarCategoria,
   gravarChecklist,
-  gravarLocal,
   gravarMedicao,
   gravarPerfil,
   listarCategorias,
@@ -16,7 +13,6 @@ import {
   listarTodasChecklists,
   medicoesDasTarefas,
   opcoesDasMedicoes,
-  proximoCodigo,
   tarefasDaChecklist,
   type CategoriaAtivo,
   type Checklist,
@@ -25,25 +21,32 @@ import {
   type Pessoa,
   type TarefaParaGravar,
 } from "../lib/config";
-import { ativosDoLocal, type AtivoRow } from "../lib/dados";
 import {
   Badge,
   Button,
   Card,
   Combobox,
-  EmptyState,
   ErrorState,
   Field,
   Input,
   Modal,
   Select,
   Skeleton,
+  Escolha,
   Toggle,
   cx,
+  useGravar,
 } from "../components/ui";
-import { Building, Check, Layers, Plus, User, X } from "../components/icons";
+import PainelPacks from "../components/PainelPacks";
+import PainelAutomatico from "../components/PainelAutomatico";
+import PainelTiposECustos from "../components/PainelTiposECustos";
+import PainelListas from "../components/PainelListas";
+import PainelVocabulario from "../components/PainelVocabulario";
+import FormCategoria from "../components/FormCategoria";
+import { Check, Euro, Layers, List, Plus, Robo, User, X } from "../components/icons";
 import { euros } from "../lib/formatar";
-import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type TipoTarefa } from "../domain/tipos";
+import { ROTULO_FUNCAO, type Funcao } from "../domain/tipos";
+import { useRotulos } from "../auth/Rotulos";
 
 /**
  * Onde se monta a operação.
@@ -51,21 +54,38 @@ import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type Tipo
  * Até aqui, tudo o que o módulo faz dependia de dados que só se metiam por SQL
  * à mão. Construiu-se o carro todo e não havia forma de o abastecer.
  *
- * Três separadores, pela ordem em que se usam pela primeira vez:
+ * ⚠ **Os sítios não estão aqui, e é de propósito.** Um local não é uma
+ * definição: é trabalho do dia. Quem chega a uma morada nova está a abrir uma
+ * ordem, ou está na árvore dos locais — não vem a Definições. Criam-se em
+ * `/locais` e dentro da própria ordem. O que ficou aqui foram as **categorias
+ * de equipamento**, que são mesmo um catálogo, e vivem ao lado das medições e
+ * das checklists que se lhes penduram.
  *
- *  1. Locais — onde é. Tudo pende daqui;
- *  2. Procedimentos — o que se faz lá, e o que se mede ao fazê-lo;
- *  3. Equipa — quem o faz, e quanto custa a hora.
+ * Cinco separadores, pela ordem em que se usam pela primeira vez:
+ *
+ *  1. Procedimentos — o que um equipamento é (categorias), o que se lhe faz
+ *     (checklists) e o que se lê ao fazê-lo (medições);
+ *  2. Equipa — quem o faz, e quanto custa a hora;
+ *  3. Tipos e custos — como se classifica o trabalho (tipos, centros de
+ *     custo, motivos de pausa, áreas), e a que conta ele vai;
+ *  4. Vocabulário — o nome que esta empresa dá às listas que vêm no código,
+ *     e as especialidades da equipa;
+ *  5. Automático — o que a aplicação faz sem ninguém carregar em nada.
  *
  * O separador fica no endereço (`?ver=equipa`), para se poder mandar um link
  * a alguém a dizer "vai aqui".
  */
 
-type Separador = "locais" | "procedimentos" | "equipa";
+type Separador =
+  | "procedimentos"
+  | "equipa"
+  | "tipos"
+  | "vocabulario"
+  | "automatico";
 
 export default function Definicoes() {
   const [params, setParams] = useSearchParams();
-  const ver = (params.get("ver") as Separador) || "locais";
+  const ver = (params.get("ver") as Separador) || "procedimentos";
 
   const trocar = (s: Separador) => {
     const p = new URLSearchParams(params);
@@ -78,25 +98,38 @@ export default function Definicoes() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-slate-900">Definições</h1>
         <p className="mt-0.5 text-sm text-slate-500">
-          Onde se monta a operação: os sítios, os procedimentos, e quem os faz.
+          Onde se monta a operação: os procedimentos, quem os faz, e como se classifica o trabalho.
         </p>
       </div>
 
       <div className="flex flex-wrap gap-1.5">
-        <Aba ligado={ver === "locais"} onClick={() => trocar("locais")} Icone={Building}>
-          Locais e equipamentos
-        </Aba>
         <Aba ligado={ver === "procedimentos"} onClick={() => trocar("procedimentos")} Icone={Layers}>
           Procedimentos
         </Aba>
         <Aba ligado={ver === "equipa"} onClick={() => trocar("equipa")} Icone={User}>
           Equipa
         </Aba>
+        <Aba ligado={ver === "tipos"} onClick={() => trocar("tipos")} Icone={Euro}>
+          Tipos e custos
+        </Aba>
+        <Aba ligado={ver === "vocabulario"} onClick={() => trocar("vocabulario")} Icone={List}>
+          Vocabulário
+        </Aba>
+        <Aba ligado={ver === "automatico"} onClick={() => trocar("automatico")} Icone={Robo}>
+          Automático
+        </Aba>
       </div>
 
-      {ver === "locais" && <PainelLocais />}
       {ver === "procedimentos" && <PainelProcedimentos />}
       {ver === "equipa" && <PainelEquipa />}
+      {ver === "tipos" && (
+        <div className="space-y-4">
+          <PainelTiposECustos />
+          <PainelListas />
+        </div>
+      )}
+      {ver === "vocabulario" && <PainelVocabulario />}
+      {ver === "automatico" && <PainelAutomatico />}
     </div>
   );
 }
@@ -130,466 +163,6 @@ function Aba({
   );
 }
 
-/* ═══════════════════════ 1. Locais e equipamentos ═══════════════════════ */
-
-function PainelLocais() {
-  const { activeOrgId } = useAuth();
-  const [locais, setLocais] = useState<LocalRow[]>([]);
-  const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [categorias, setCategorias] = useState<CategoriaAtivo[]>([]);
-  const [ativos, setAtivos] = useState<AtivoRow[]>([]);
-  const [aberto, setAberto] = useState<string | null>(null);
-  const [estado, setEstado] = useState<Estado>({ carregar: true, erro: null });
-  const [recarga, setRecarga] = useState(0);
-
-  const [formLocal, setFormLocal] = useState<LocalRow | "novo" | null>(null);
-  const [formAtivo, setFormAtivo] = useState<{ localId: string; ativo: AtivoRow | null } | null>(null);
-  const [formCategoria, setFormCategoria] = useState(false);
-
-  useEffect(() => {
-    if (!activeOrgId) return;
-    let vivo = true;
-    setEstado({ carregar: true, erro: null });
-    (async () => {
-      try {
-        const [ls, cs, cats] = await Promise.all([
-          listarLocais(activeOrgId),
-          listarClientes(activeOrgId),
-          listarCategorias(activeOrgId),
-        ]);
-        if (!vivo) return;
-        setLocais(ls);
-        setClientes(cs);
-        setCategorias(cats);
-        setEstado({ carregar: false, erro: null });
-      } catch (e) {
-        if (vivo) setEstado({ carregar: false, erro: mensagem(e, "os locais") });
-      }
-    })();
-    return () => { vivo = false; };
-  }, [activeOrgId, recarga]);
-
-  useEffect(() => {
-    if (!aberto) { setAtivos([]); return; }
-    let vivo = true;
-    void ativosDoLocal(aberto).then((as) => { if (vivo) setAtivos(as); });
-    return () => { vivo = false; };
-  }, [aberto, recarga]);
-
-  const nomeCliente = useMemo(
-    () => new Map(clientes.map((c) => [c.id, c.nome])),
-    [clientes]
-  );
-
-  if (estado.carregar) return <Carregando />;
-  if (estado.erro) return <ErrorState message={estado.erro} onRetry={() => setRecarga((r) => r + 1)} />;
-
-  return (
-    <>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-slate-500">
-          {locais.length === 0
-            ? "Nenhum local ainda."
-            : `${locais.length} ${locais.length === 1 ? "local" : "locais"} · ${categorias.length} ${categorias.length === 1 ? "categoria" : "categorias"} de equipamento`}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="secondary" onClick={() => setFormCategoria(true)}>
-            <Plus width={14} height={14} /> Categoria
-          </Button>
-          <Button size="sm" onClick={() => setFormLocal("novo")}>
-            <Plus width={14} height={14} /> Local
-          </Button>
-        </div>
-      </div>
-
-      {locais.length === 0 ? (
-        <EmptyState
-          icon={<Building width={22} height={22} />}
-          title="Comece pelos sítios"
-          description="Um local é uma morada, um edifício, um piso ou um espaço. Os equipamentos vivem dentro deles, e as ordens apontam para ambos."
-          action={<Button onClick={() => setFormLocal("novo")}>Criar o primeiro local</Button>}
-        />
-      ) : (
-        <div className="space-y-2">
-          {locais.map((l) => (
-            <Card key={l.id} className="p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <button
-                  type="button"
-                  onClick={() => setAberto(aberto === l.id ? null : l.id)}
-                  className="min-w-0 flex-1 text-left"
-                >
-                  <span className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-sm tabular text-slate-500">{l.codigo}</span>
-                    <Badge className="bg-slate-100 text-slate-600 ring-slate-200">{l.tipo}</Badge>
-                  </span>
-                  <p className="mt-1 text-sm font-medium text-slate-800">{l.nome}</p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {nomeCliente.get(l.cliente_id) ?? "Cliente"}
-                  </p>
-                </button>
-                <div className="flex shrink-0 gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setFormLocal(l)}>
-                    Editar
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => setFormAtivo({ localId: l.id, ativo: null })}
-                  >
-                    <Plus width={13} height={13} /> Equipamento
-                  </Button>
-                </div>
-              </div>
-
-              {aberto === l.id && (
-                <div className="mt-3 border-t border-slate-100 pt-3">
-                  {ativos.length === 0 ? (
-                    <p className="text-sm text-slate-400">
-                      Sem equipamentos. Sem eles, uma ordem só sabe dizer o sítio.
-                    </p>
-                  ) : (
-                    <ul className="divide-y divide-slate-100">
-                      {ativos.map((a) => (
-                        <li key={a.id} className="flex items-center justify-between gap-3 py-2">
-                          <span className="min-w-0">
-                            <span className="font-mono text-xs tabular text-slate-500">{a.codigo}</span>
-                            <span className="ml-2 text-sm text-slate-700">{a.nome}</span>
-                          </span>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => setFormAtivo({ localId: l.id, ativo: a })}
-                          >
-                            Editar
-                          </Button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {formLocal && (
-        <FormLocal
-          local={formLocal === "novo" ? null : formLocal}
-          clientes={clientes}
-          locais={locais}
-          aoFechar={() => setFormLocal(null)}
-          aoGravar={() => { setFormLocal(null); setRecarga((r) => r + 1); }}
-        />
-      )}
-
-      {formAtivo && (
-        <FormAtivo
-          localId={formAtivo.localId}
-          ativo={formAtivo.ativo}
-          categorias={categorias}
-          aoFechar={() => setFormAtivo(null)}
-          aoGravar={() => { setFormAtivo(null); setRecarga((r) => r + 1); }}
-        />
-      )}
-
-      {formCategoria && (
-        <FormCategoria
-          aoFechar={() => setFormCategoria(false)}
-          aoGravar={() => { setFormCategoria(false); setRecarga((r) => r + 1); }}
-        />
-      )}
-    </>
-  );
-}
-
-function FormLocal({
-  local,
-  clientes,
-  locais,
-  aoFechar,
-  aoGravar,
-}: {
-  local: LocalRow | null;
-  clientes: readonly Cliente[];
-  locais: readonly LocalRow[];
-  aoFechar: () => void;
-  aoGravar: () => void;
-}) {
-  const { activeOrgId } = useAuth();
-  const [codigo, setCodigo] = useState(local?.codigo ?? "");
-  const [nome, setNome] = useState(local?.nome ?? "");
-  const [tipo, setTipo] = useState(local?.tipo ?? "espaco");
-  const [clienteId, setClienteId] = useState(local?.cliente_id ?? "");
-  const [parentId, setParentId] = useState(local?.parent_id ?? "");
-  const { aGravar, erro, gravar } = useGravar();
-
-  // O código gera-se sozinho para quem cria. Obrigar alguém a inventar um
-  // código único é um convite ao engano, e o engano só aparece meses depois.
-  useEffect(() => {
-    if (local || codigo || !activeOrgId) return;
-    void proximoCodigo(activeOrgId, "LOC").then(setCodigo).catch(() => {});
-  }, [local, codigo, activeOrgId]);
-
-  return (
-    <Modal
-      title={local ? `Editar ${local.codigo}` : "Novo local"}
-      onClose={aoFechar}
-      footer={
-        <>
-          <Button variant="secondary" onClick={aoFechar}>Cancelar</Button>
-          <Button
-            disabled={!nome.trim() || !clienteId || aGravar}
-            onClick={() =>
-              gravar(
-                () =>
-                  gravarLocal({
-                    id: local?.id,
-                    orgId: activeOrgId!,
-                    clienteId,
-                    codigo: codigo.trim(),
-                    nome: nome.trim(),
-                    tipo,
-                    parentId: parentId || null,
-                  }),
-                aoGravar
-              )
-            }
-          >
-            {aGravar ? "A gravar…" : "Gravar"}
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <Field label="Nome" hint="Como as pessoas lhe chamam. Ex.: Torre A — Garagem −1">
-          <Input value={nome} onChange={(e) => setNome(e.target.value)} className="w-full" autoFocus />
-        </Field>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Cliente">
-            <Combobox
-              value={clienteId}
-              onChange={setClienteId}
-              options={clientes.map((c) => ({ value: c.id, label: c.nome }))}
-              placeholder="Escolher"
-              className="w-full"
-            />
-          </Field>
-          <Field label="Tipo">
-            <Select value={tipo} onChange={(e) => setTipo(e.target.value)} className="w-full">
-              <option value="morada">Morada</option>
-              <option value="edificio">Edifício</option>
-              <option value="piso">Piso</option>
-              <option value="espaco">Espaço</option>
-            </Select>
-          </Field>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Dentro de" hint="Opcional. Um piso vive num edifício.">
-            <Combobox
-              value={parentId}
-              onChange={setParentId}
-              options={locais
-                .filter((l) => l.id !== local?.id)
-                .map((l) => ({ value: l.id, label: `${l.nome} · ${l.codigo}` }))}
-              placeholder="Nada"
-              className="w-full"
-            />
-          </Field>
-          <Field label="Código" hint="Gerado automaticamente. Podes mudá-lo.">
-            <Input
-              value={codigo}
-              onChange={(e) => setCodigo(e.target.value)}
-              className="w-full font-mono"
-            />
-          </Field>
-        </div>
-
-        {erro && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
-      </div>
-    </Modal>
-  );
-}
-
-function FormAtivo({
-  localId,
-  ativo,
-  categorias,
-  aoFechar,
-  aoGravar,
-}: {
-  localId: string;
-  ativo: AtivoRow | null;
-  categorias: readonly CategoriaAtivo[];
-  aoFechar: () => void;
-  aoGravar: () => void;
-}) {
-  const { activeOrgId } = useAuth();
-  const [codigo, setCodigo] = useState(ativo?.codigo ?? "");
-  const [nome, setNome] = useState(ativo?.nome ?? "");
-  const [categoriaId, setCategoriaId] = useState(ativo?.categoria_id ?? "");
-  const [marca, setMarca] = useState(ativo?.marca ?? "");
-  const [modelo, setModelo] = useState(ativo?.modelo ?? "");
-  const [criticidade, setCriticidade] = useState(ativo?.criticidade ?? "normal");
-  const { aGravar, erro, gravar } = useGravar();
-
-  useEffect(() => {
-    if (ativo || codigo || !activeOrgId) return;
-    void proximoCodigo(activeOrgId, "AT").then(setCodigo).catch(() => {});
-  }, [ativo, codigo, activeOrgId]);
-
-  return (
-    <Modal
-      title={ativo ? `Editar ${ativo.codigo}` : "Novo equipamento"}
-      onClose={aoFechar}
-      footer={
-        <>
-          <Button variant="secondary" onClick={aoFechar}>Cancelar</Button>
-          <Button
-            disabled={!nome.trim() || aGravar}
-            onClick={() =>
-              gravar(
-                () =>
-                  gravarAtivo({
-                    id: ativo?.id,
-                    orgId: activeOrgId!,
-                    localId,
-                    categoriaId: categoriaId || null,
-                    codigo: codigo.trim(),
-                    nome: nome.trim(),
-                    marca: marca.trim() || null,
-                    modelo: modelo.trim() || null,
-                    criticidade,
-                  }),
-                aoGravar
-              )
-            }
-          >
-            {aGravar ? "A gravar…" : "Gravar"}
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <Field label="Nome" hint="Ex.: Extintor ABC 6 kg — entrada sul">
-          <Input value={nome} onChange={(e) => setNome(e.target.value)} className="w-full" autoFocus />
-        </Field>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Categoria"
-            hint={
-              categorias.length === 0
-                ? "Ainda não há categorias. Cria uma primeiro para poder ligar medições."
-                : "É por aqui que as medições sabem a que equipamentos se aplicam."
-            }
-          >
-            <Combobox
-              value={categoriaId}
-              onChange={setCategoriaId}
-              options={categorias.map((c) => ({ value: c.id, label: c.nome }))}
-              placeholder="Nenhuma"
-              className="w-full"
-              disabled={categorias.length === 0}
-            />
-          </Field>
-          <Field label="Criticidade" hint="Alta e crítica sobem na lista de trabalho.">
-            <Select
-              value={criticidade}
-              onChange={(e) => setCriticidade(e.target.value)}
-              className="w-full"
-            >
-              <option value="baixa">Baixa</option>
-              <option value="normal">Normal</option>
-              <option value="alta">Alta</option>
-              <option value="critica">Crítica</option>
-            </Select>
-          </Field>
-        </div>
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <Field label="Marca">
-            <Input value={marca} onChange={(e) => setMarca(e.target.value)} className="w-full" />
-          </Field>
-          <Field label="Modelo">
-            <Input value={modelo} onChange={(e) => setModelo(e.target.value)} className="w-full" />
-          </Field>
-          <Field label="Código">
-            <Input
-              value={codigo}
-              onChange={(e) => setCodigo(e.target.value)}
-              className="w-full font-mono"
-            />
-          </Field>
-        </div>
-
-        {erro && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
-      </div>
-    </Modal>
-  );
-}
-
-function FormCategoria({ aoFechar, aoGravar }: { aoFechar: () => void; aoGravar: () => void }) {
-  const { activeOrgId } = useAuth();
-  const [nome, setNome] = useState("");
-  const [codigo, setCodigo] = useState("");
-  const { aGravar, erro, gravar } = useGravar();
-
-  useEffect(() => {
-    if (codigo || !activeOrgId) return;
-    void proximoCodigo(activeOrgId, "CAT").then(setCodigo).catch(() => {});
-  }, [codigo, activeOrgId]);
-
-  return (
-    <Modal
-      title="Nova categoria de equipamento"
-      onClose={aoFechar}
-      footer={
-        <>
-          <Button variant="secondary" onClick={aoFechar}>Cancelar</Button>
-          <Button
-            disabled={!nome.trim() || aGravar}
-            onClick={() =>
-              gravar(
-                () =>
-                  gravarCategoria({
-                    orgId: activeOrgId!,
-                    codigo: codigo.trim(),
-                    nome: nome.trim(),
-                  }),
-                aoGravar
-              )
-            }
-          >
-            {aGravar ? "A gravar…" : "Gravar"}
-          </Button>
-        </>
-      }
-    >
-      <div className="space-y-4">
-        <p className="text-sm text-slate-500">
-          Extintor, AVAC, elevador, portão. Serve para dizer que medições se fazem a que tipo de
-          equipamento.
-        </p>
-        <Field label="Nome">
-          <Input value={nome} onChange={(e) => setNome(e.target.value)} className="w-full" autoFocus />
-        </Field>
-        <Field label="Código">
-          <Input
-            value={codigo}
-            onChange={(e) => setCodigo(e.target.value)}
-            className="w-full font-mono"
-          />
-        </Field>
-        {erro && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
-      </div>
-    </Modal>
-  );
-}
-
 /* ═════════════════════════ 2. Procedimentos ═════════════════════════════ */
 
 function PainelProcedimentos() {
@@ -603,6 +176,7 @@ function PainelProcedimentos() {
 
   const [formChecklist, setFormChecklist] = useState<Checklist | "novo" | null>(null);
   const [formMedicao, setFormMedicao] = useState<MedicaoDef | "nova" | null>(null);
+  const [formCategoria, setFormCategoria] = useState(false);
 
   const carregar = useCallback(async () => {
     if (!activeOrgId) return;
@@ -631,7 +205,91 @@ function PainelProcedimentos() {
 
   return (
     <>
-      {/* Medições primeiro: uma checklist não as pode usar antes de existirem. */}
+      {/* O pack antes de tudo: se a organização está vazia, é o caminho mais
+          curto entre abrir isto e ter uma checklist a sério. */}
+      <PainelPacks
+        orgId={activeOrgId}
+        vazio={checklists.length === 0 && medicoes.length === 0}
+        aoInstalar={() => setRecarga((r) => r + 1)}
+      />
+
+      {/*
+        Para que serve isto tudo, em quatro linhas.
+
+        Quem abriu este separador pela primeira vez perguntou “não estou a ver
+        o benefício, é para associar a ordens?”. Era uma pergunta justa: o ecrã
+        mostrava três listas e nunca dizia para onde é que elas iam.
+      */}
+      <Card className="border-brand-100 bg-brand-50/40 p-4 sm:p-5">
+        <h2 className="text-sm font-semibold text-brand-900">
+          O guião do trabalho
+        </h2>
+        <p className="mt-1 text-sm text-brand-900/80">
+          Isto é o que o técnico vê no telemóvel quando abre uma ordem — e o que
+          sai escrito no relatório do cliente. Sem isto, uma ordem é uma caixa de
+          texto e a prova do trabalho é a palavra de quem lá esteve.
+        </p>
+        <ul className="mt-3 space-y-1.5 text-sm text-brand-900/80">
+          <li>
+            <strong>Categoria</strong> — o que o equipamento <em>é</em>. Extintor,
+            elevador, quadro.
+          </li>
+          <li>
+            <strong>Medição</strong> — o que se lê nele. 12,4 bar. Pendura-se numa
+            categoria, e só aparece nos equipamentos dessa categoria.
+          </li>
+          <li>
+            <strong>Checklist</strong> — a lista de tarefas. Escolhe-se ao abrir a
+            ordem, e as tarefas <strong>vêm com ela</strong>, congeladas na versão
+            de hoje. Mudar a checklist amanhã não mexe nas ordens de ontem.
+          </li>
+          <li>
+            <strong>Plano</strong> (em <code>/planos</code>) — a mesma checklist, mas
+            a nascer sozinha todos os meses.
+          </li>
+        </ul>
+      </Card>
+
+      {/* As categorias vieram para aqui quando os locais saíram das Definições:
+          uma categoria não é um sítio, é a etiqueta a que as medições e as
+          checklists se penduram. Estava no separador errado. */}
+      <Card className="p-4 sm:p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">
+              Categorias de equipamento
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              O que um equipamento é. Começa por aqui: as medições penduram-se
+              nelas.
+            </p>
+          </div>
+          <Button size="sm" onClick={() => setFormCategoria(true)}>
+            <Plus width={14} height={14} /> Categorias
+          </Button>
+        </div>
+
+        {categorias.length === 0 ? (
+          <p className="mt-3 text-sm text-slate-400">
+            Nenhuma ainda. Há um catálogo por ofício no botão acima — escolhem-se
+            várias de uma vez.
+          </p>
+        ) : (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {categorias.map((c) => (
+              <span
+                key={c.id}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs ring-1 ring-slate-200"
+              >
+                <span className="font-mono text-slate-400">{c.codigo}</span>
+                <span className="text-slate-700">{c.nome}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Medições depois das categorias: uma medição pendura-se numa delas. */}
       <Card className="p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -734,6 +392,14 @@ function PainelProcedimentos() {
           medicoes={medicoes}
           aoFechar={() => setFormChecklist(null)}
           aoGravar={() => { setFormChecklist(null); setRecarga((r) => r + 1); }}
+        />
+      )}
+
+      {formCategoria && (
+        <FormCategoria
+          jaExistem={categorias}
+          aoFechar={() => setFormCategoria(false)}
+          aoGravar={() => { setFormCategoria(false); setRecarga((r) => r + 1); }}
         />
       )}
     </>
@@ -943,6 +609,7 @@ function FormChecklist({
   aoFechar: () => void;
   aoGravar: () => void;
 }) {
+  const rotulos = useRotulos();
   const { activeOrgId } = useAuth();
   const [nome, setNome] = useState(checklist?.nome ?? "");
   const [tarefas, setTarefas] = useState<TarefaParaGravar[]>([]);
@@ -1069,9 +736,9 @@ function FormChecklist({
                           onChange={(e) => mudar(i, { tipo: e.target.value })}
                           className="text-xs"
                         >
-                          {TIPOS_TAREFA.map((x) => (
-                            <option key={x} value={x}>
-                              {ROTULO_TIPO_TAREFA[x as TipoTarefa]}
+                          {rotulos.opcoes("tipo_tarefa").map((x) => (
+                            <option key={x.valor} value={x.valor}>
+                              {x.nome}
                             </option>
                           ))}
                         </Select>
@@ -1363,58 +1030,3 @@ function Carregando() {
   );
 }
 
-/**
- * Gravar, com o erro do servidor à vista.
- *
- * As RPCs escrevem mensagens para serem lidas por pessoas ("Uma gama sem
- * limites nunca dá veredicto nenhum"). Trocá-las por uma genérica seria deitar
- * fora a parte útil.
- */
-function useGravar() {
-  const [aGravar, setAGravar] = useState(false);
-  const [erro, setErro] = useState<string | null>(null);
-
-  const gravar = async (fn: () => Promise<unknown>, aoAcabar: () => void) => {
-    setAGravar(true);
-    setErro(null);
-    try {
-      await fn();
-      aoAcabar();
-    } catch (e) {
-      setErro(
-        e instanceof ErroDeEscrita
-          ? e.message
-          : "Não foi possível falar com o servidor. Tenta outra vez."
-      );
-    } finally {
-      setAGravar(false);
-    }
-  };
-
-  return { aGravar, erro, gravar };
-}
-
-function Escolha({
-  ligado,
-  onClick,
-  children,
-}: {
-  ligado: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={cx(
-        "rounded-lg px-2.5 py-1.5 text-xs font-medium ring-1 transition-all active:scale-[0.98]",
-        ligado
-          ? "bg-brand text-white ring-brand"
-          : "bg-white text-slate-600 ring-slate-200 hover:ring-slate-300"
-      )}
-    >
-      {children}
-    </button>
-  );
-}

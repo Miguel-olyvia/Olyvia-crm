@@ -32,7 +32,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useNotifications, type Notification } from "@/hooks/useNotifications";
 import { useCompany } from "@/contexts/CompanyContext";
-import { appendTimestamp, getNotificationRoute, notificationPriorityDotColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
+import { abrirNotificacao, getNotificationRoute, notificationPriorityDotColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
 
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
@@ -267,7 +267,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
     setNotificationsOpen(false);
     const route = await getNotificationRoute(notification);
     if (route) {
-      navigate(appendTimestamp(route), { replace: true });
+      abrirNotificacao(route, navigate);
     }
   };
 
@@ -279,7 +279,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
       const withAction = notification.action_type
         ? `${baseRoute}${baseRoute.includes("?") ? "&" : "?"}action=${notification.action_type}`
         : baseRoute;
-      navigate(appendTimestamp(withAction), { replace: true });
+      abrirNotificacao(withAction, navigate);
     }
   };
 
@@ -541,7 +541,7 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
                 const target = messageDialog.link || route;
                 setMessageDialog(null);
                 setNotificationsOpen(false);
-                if (target) navigate(appendTimestamp(target), { replace: true });
+                if (target) abrirNotificacao(target, navigate);
               }}
             >
               Ver documento

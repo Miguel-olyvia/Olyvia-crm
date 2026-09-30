@@ -941,22 +941,46 @@ GRANT EXECUTE ON FUNCTION public.ops_proximo_codigo(uuid, text) TO authenticated
 -- 13. Verificação
 -- ============================================================
 
+-- Este bloco contava TODAS as tabelas `ops_*` e comparava com 19, o número que
+-- este ficheiro cria. Estava certo enquanto este era o único ficheiro; a partir
+-- do momento em que `correcoes-modelo.sql` e `orcamentos.sql` acrescentaram as
+-- suas, voltar a correr o schema numa base atualizada rebentava.
+--
+-- E um ficheiro que não se pode voltar a correr não serve para nada: a operação
+-- normal é colar UM ficheiro no SQL Editor, numa base que já tem o resto.
+--
+-- Este ficheiro responde pelas SUAS 19 tabelas, e verifica-as pelo nome. A
+-- conta da RLS continua a ser sobre todas, de propósito — essa afirmação
+-- mantém-se verdadeira à medida que o módulo cresce, e é a que interessa.
+
 DO $verificar$
 DECLARE
   v_tabelas integer;
   v_rls     integer;
+  v_falta   text;
 BEGIN
+  SELECT string_agg(t, ', ' ORDER BY t) INTO v_falta
+    FROM unnest(ARRAY[
+      'ops_utilizador_perfil', 'ops_utilizador_cliente', 'ops_local', 'ops_categoria_ativo',
+      'ops_ativo', 'ops_checklist', 'ops_checklist_tarefa', 'ops_plano', 'ops_plano_alvo',
+      'ops_ordem', 'ops_ordem_alvo', 'ops_ordem_pessoa', 'ops_ordem_tarefa',
+      'ops_sessao_trabalho', 'ops_custo', 'ops_anexo', 'ops_mensagem', 'ops_evento',
+      'ops_sequencia'
+    ]) AS t
+   WHERE to_regclass('public.' || t) IS NULL;
+
+  IF v_falta IS NOT NULL THEN
+    RAISE EXCEPTION 'Operações: faltam tabelas do schema: %', v_falta;
+  END IF;
+
   SELECT count(*) INTO v_tabelas FROM pg_tables
    WHERE schemaname = 'public' AND tablename LIKE 'ops\_%';
   SELECT count(*) INTO v_rls FROM pg_tables
    WHERE schemaname = 'public' AND tablename LIKE 'ops\_%' AND rowsecurity;
 
-  IF v_tabelas <> 19 THEN
-    RAISE EXCEPTION 'Operações: esperadas 19 tabelas, encontradas %', v_tabelas;
-  END IF;
   IF v_rls <> v_tabelas THEN
     RAISE EXCEPTION 'Operações: % tabelas sem RLS', v_tabelas - v_rls;
   END IF;
-  RAISE NOTICE 'Operações v1: % tabelas, todas com RLS. Nada fora de ops_* foi tocado.', v_tabelas;
+  RAISE NOTICE 'Operações: as 19 tabelas base existem. % tabelas ops_* no total, todas com RLS.', v_tabelas;
 END
 $verificar$;

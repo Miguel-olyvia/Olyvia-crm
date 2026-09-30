@@ -145,17 +145,43 @@ idempotente. Correr duas vezes não estraga nada, e isso é verificado.
 | `db/config.sql` | Montar a operação: códigos, checklists versionadas, medições, equipa | **não** |
 | `db/custos.sql` | Lançar material e serviços, do catálogo ou de uma compra | **não** (só lê `catalog_items` e `purchase_order_items`) |
 | `db/cliente-crm.sql` | Morada, telefone e contacto do cliente, vindos do CRM | **não** (só lê as tabelas de morada) |
+| `db/notificacoes.sql` | Avisar no sino do CRM: ordem atribuída, corretiva por aprovar, atraso, pausa expirada, plano falhado | **sim** — só `INSERT` em `notifications` |
+| `db/analises.sql` | Quatro vistas: histórico do equipamento, evolução das leituras, PMP cumprido, e todas as leituras para exportar | **não** |
+| `db/agenda.sql` | Férias, horários e feriados ao marcar uma visita, e os compromissos que já estão na agenda do CRM | **não** (só lê 6 tabelas de agenda) |
+| `db/packs.sql` | Três packs de setor prontos a instalar: Manutenção, Obras, Limpeza | **não** |
+| `db/assinaturas.sql` | A assinatura do cliente, recolhida no telemóvel do técnico | **não** (a imagem vai para o bucket que o `anexos.sql` criou) |
+| `db/mapa.sql` | Onde fica o local, no mapa — para o técnico abrir a navegação e ir | **não** (duas colunas em `ops_local`, e mais nada) |
+| `db/relatorio-automatico.sql` | Ao confirmar uma ordem, o relatório vai ao cliente por email. **Desligado até alguém o ligar** | **sim** — uma linha em `scheduled_emails`, a fila de saída que o CRM já processa |
+| `db/campos-ordem.sql` | Tipo de trabalho (os 9 do Infraspeak), centro de custo, fornecedor, e o fecho automático por tipo | **não** (o fornecedor é só um id, sem chave estrangeira) |
+| `db/duplicar.sql` | Duplicar ordens, planos, locais e checklists — o molde, nunca o que aconteceu. Um local leva **a árvore toda**: espaços, espaços dos espaços, e os equipamentos de cada um | **não** |
+| `db/tarefas-na-ordem.sql` | Acrescentar e tirar tarefas na própria ordem, sem passar por Definições. Com limites, a tarefa é uma leitura com veredicto — sem precisar de definição de medição nenhuma | **não** |
+| `db/documentos-e-ativos.sql` | Word, Excel e CSV nos anexos, e o histórico do equipamento | **não** (mexe no bucket `operacoes`, que é do módulo) |
+| `db/listas-operacao.sql` | Motivos de pausa por função, áreas e tipos de área | **não** |
+| `db/listas-configuraveis.sql` | O nome que cada empresa dá a prioridade, criticidade, natureza da tarefa, nível do local e origem — e as especialidades, que nunca tiveram por onde se criar | **não** |
+| `db/mensagens.sql` | A conversa entre colegas dentro da ordem. Não se apaga nem se reescreve | **sim** — só o aviso no sino, pelo `ops_notificar` |
+| `db/relatorio-manual.sql` | O botão **Enviar ao cliente**, para quando o automático está desligado ou já passou | **sim** — a mesma linha em `scheduled_emails` |
 | `db/permissoes.sql` | as 15 permissões no catálogo | sim — `anew_permissions` |
 | `db/pos-instalacao.sql` | permissões do papel + perfil | sim — `anew_role_permissions` |
 | `db/criar-utilizador.sql` | perfil de CRM para uma conta de autenticação | sim — 3 tabelas |
 | `db/copiar-acessos.sql` | replica as organizações de outra pessoa | sim — `anew_memberships` |
 | `db/restringir-permissoes.sql` | estreita um alargamento acidental | sim — `anew_role_permissions` |
 | `db/demo.sql` · `demo-remover.sql` | dados de demonstração | não |
+| `db/demo-orcamento.sql` · `demo-orcamento-remover.sql` | **uma obra vinda de um orçamento**, com o previsto congelado e o gasto real por cima — para ver o cartão &ldquo;orçamentado contra gasto&rdquo; sem esperar por uma obra a sério | **não** — só `ops_*`, nem toca em `quotes` |
 | `db/diagnostico-*.sql` · `verificar-acesso.sql` | só leem | não |
 
 A coluna da direita é a que interessa quando alguém pergunta se isto mexe no CRM. Os
-**quatro ficheiros que constroem o módulo** não escrevem uma linha fora de `ops_*`, e há
-um teste que falha se isso mudar.
+ficheiros que constroem o módulo não escrevem uma linha fora de `ops_*`, e há um teste
+que falha se isso mudar.
+
+O que escreve para fora são **três coisas, e são sempre as mesmas**:
+
+1. `INSERT` em `notifications` — o sino que o CRM já tem.
+2. `INSERT` em `scheduled_emails` — a fila de saída que o CRM já processa. Duas
+   funções escrevem lá: o gatilho do relatório automático e o botão de mandar à mão.
+   Há um teste que falha se aparecer uma terceira.
+3. O bucket `operacoes`, que é do módulo.
+
+Os fornecedores e os clientes são **lidos** do CRM. Nunca escritos.
 
 ### A garantia que este esquema dá
 
@@ -194,19 +220,67 @@ privilégios de quem a criou e ignoraria a RLS que o CRM já tem em `anew_client
 db/schema.sql          19 tabelas ops_*, RLS, permissões, as duas vistas
 db/correcoes-modelo    +7 tabelas: especialidades, horários, medições
 db/medicoes.sql        responder a leituras, com o veredicto na base
-tools/validar-*        6 validadores contra Postgres real, sem Docker
-src/domain/            regras puras — 93 testes, sem infraestrutura
+db/notificacoes.sql    os avisos, no sino que a equipa já abre todos os dias
+db/analises.sql        4 vistas: vida do equipamento, leituras, PMP, exportar
+db/agenda.sql          férias, horários e feriados, vindos do CRM
+tools/validar-*        17 validadores contra Postgres real, sem Docker
+src/domain/            regras puras — 449 testes, sem infraestrutura
 src/lib/supabase.ts    cliente próprio, storage key própria
 src/lib/dados.ts       leituras + as 3 RPCs de escrita; nunca engole um erro
 src/auth/              sessão + resolução do utilizador Olyvia
 src/components/        layout, primitivos de UI, ícones, PainelTarefas
+src/components/diagramas.tsx  os fluxogramas da ajuda, em SVG à mão
 src/pages/             Hoje · Ordens · Ficha · Nova ordem · Locais
-                       Planos · Orçamentos · Relatório · Definições · Ajuda
+                       Agenda · Planos · Orçamentos · Relatório · Análises
+                       Definições · Ajuda
 ```
 
 O **domínio** não sabe que existe base de dados. A máquina de estados recebe um estado e
 um contexto e devolve uma decisão, por isso testa-se sem servidor nenhum — é a razão de
-haver 93 testes a correr em pouco mais de um segundo.
+haver 449 testes a correr em poucos segundos.
+
+Os ficheiros de `src/domain/` que decidem alguma coisa que se vê no ecrã:
+
+| Ficheiro | O que decide |
+|---|---|
+| `estados.ts` | as transições possíveis de uma ordem, e porque não |
+| `respostas.ts` | quem pode responder a uma tarefa, e o que lhe falta |
+| `alertas.ts` | atrasada, parada, retoma ultrapassada, por aprovar há muito |
+| `filtros-de-ordens.ts` | estreitar e ordenar a lista, sem nunca a fazer saltar |
+| `agrupar-ordens.ts` | as faixas por dia da lista — e que uma fechada nunca é "atrasada" |
+| `percurso.ts` | os cinco degraus da ficha, e a frase que diz o que falta a seguir |
+| `sugerir-tecnico.ts` | **quem devia ir a uma ordem**, e o porquê de cada lugar |
+| `agenda.ts` | a régua do dia, a carga de cada pessoa, semana e mês |
+| `rota.ts` | a distância entre dois pontos, e a ordem das paragens do dia |
+| `mapa.ts` | ler coordenadas de um link, e os links do Maps |
+| `conformidade.ts` · `tempo.ts` · `analises.ts` | veredictos, durações, e os números das Análises |
+| `rotulos.ts` | o nome que a empresa dá a cada valor das listas do código |
+
+### Sugerir quem vai — o que lê, e o que não faz
+
+O botão **Sugerir**, na ficha da ordem, ordena a equipa por três perguntas com
+pesos: **sabe fazer isto** (50 %), **está livre** (30 %), **está perto** (20 %).
+A conta está em `domain/sugerir-tecnico.ts`, é pura, e tem 27 testes.
+
+Vale a pena saber três coisas antes de olhar para o código:
+
+- **Não escreve nada.** Não há RPC nova, não há SQL novo, não há tabela nova.
+  Preenche os campos que já lá estavam, e a marcação continua a precisar dos
+  mesmos dois botões. Uma sugestão que gravasse sozinha seria uma decisão
+  tomada por um botão chamado "sugerir".
+- **Não sai da máquina.** A conta corre no browser sobre leituras que a
+  aplicação já fazia — `ops_ordem_tarefa.skill_id`, `ops_utilizador_skill`,
+  `ops_ordem`, `ops_local`, e as duas RPCs de agenda do CRM. Sem chave de API,
+  sem serviço de fora, sem fatura, e sem dados da equipa a passar por servidor
+  de terceiros. A distância usa a mesma trigonometria de `rota.ts`.
+- **Uma pergunta sem resposta não vota.** Sem especialidade nas tarefas ou sem
+  ponto no mapa, esse peso reparte-se pelos restantes em vez de contar como
+  zero — e o painel diz quais das três perguntas ficaram de fora. Contar um
+  desconhecido como zero castigava toda a gente por igual, e mudava a ordem
+  final por causa de uma coisa que ninguém sabe.
+
+Está explicada por inteiro, para quem a usa, em `/ajuda?ver=funciona#sugerir` —
+com os pesos e com os limites, incluindo que a distância é em linha reta.
 
 ### As três escritas, e só três
 
@@ -228,6 +302,10 @@ uma destas RPCs, e cada uma tem um trigger do outro lado que recusa o caminho di
 | `rpc_ops_gravar_medicao` | uma medição e as suas opções | uma gama sem limites é recusada |
 | `rpc_ops_gravar_perfil` | quem é da equipa, e o custo/hora | ninguém se despromove a si próprio |
 | `rpc_ops_lancar_custo` | material e serviços gastos | o mesmo material não entra em duas obras |
+| `rpc_ops_duplicar_*` | uma cópia de ordem, plano, local ou checklist | leva o molde, nunca o que aconteceu |
+| `rpc_ops_gravar_tipo_trabalho` · `_centro_custo` · `_motivo_pausa` · `_area` · `_area_tipo` | as listas da operação | só quem gere |
+| `rpc_ops_escrever_mensagem` | uma mensagem na conversa da ordem | não se apaga nem se reescreve; avisa quem está na ordem |
+| `rpc_ops_enviar_relatorio` | põe o relatório na fila de emails do CRM | só quem gere, só com a ordem fechada, só para o email da ficha do cliente |
 
 O browser calcula as mesmas regras — que botões mostrar, que veredicto um valor vai ter —
 mas só para responder de imediato. Quando os dois discordarem, quem manda é a base.
@@ -243,7 +321,7 @@ Trancar tudo por simetria só acrescentaria atrito onde não há nada a proteger
 
 ```bash
 npm run dev                     # servidor de desenvolvimento (porta 5274)
-npm run test                    # 62 testes de domínio
+npm run test                    # 449 testes de domínio
 npm run typecheck               # tsc --noEmit
 npm run build                   # typecheck + build de produção
 
@@ -251,6 +329,8 @@ npm run validar-schema          # o esquema contra um Postgres limpo
 npm run validar-instalacao      # a sequência de instalação toda, ponta a ponta
 npm run validar-rpcs            # a máquina de estados é MESMO imposta na base?
 npm run validar-planos          # a RRULE e a janela de 120 dias
+npm run validar-mensagens       # a conversa avisa quem tem de saber, e não se reescreve
+npm run validar-relatorio       # o email ao cliente, automático e à mão
 npm run validar-restricao       # restringir permissões não corta quem o corre
 
 npm run supabase:verificar      # o esquema contra a tua base, com ROLLBACK
@@ -260,6 +340,21 @@ npm run supabase:rpcs-tarefas   # db/rpcs-tarefas.sql
 npm run supabase:planos         # db/planos.sql
 npm run supabase:correcoes      # db/correcoes-modelo.sql (depois de planos)
 npm run supabase:medicoes       # db/medicoes.sql (depois das correcoes)
+npm run supabase:notificacoes   # db/notificacoes.sql (antes das RPCs)
+npm run supabase:analises       # db/analises.sql
+npm run supabase:agenda         # db/agenda.sql (antes do despacho)
+npm run supabase:packs          # db/packs.sql (depois do config)
+npm run supabase:assinaturas    # db/assinaturas.sql (depois dos anexos)
+npm run supabase:mapa           # db/mapa.sql (coordenadas dos locais)
+npm run supabase:relatorio      # db/relatorio-automatico.sql (depois das assinaturas)
+npm run supabase:campos         # db/campos-ordem.sql
+npm run supabase:duplicar       # db/duplicar.sql (depois do campos-ordem)
+npm run supabase:tarefas-na-ordem # db/tarefas-na-ordem.sql (depois do duplicar)
+npm run supabase:documentos     # db/documentos-e-ativos.sql
+npm run supabase:listas         # db/listas-operacao.sql (pausas, áreas)
+npm run supabase:configuraveis  # db/listas-configuraveis.sql (vocabulário)
+npm run supabase:mensagens      # db/mensagens.sql (a conversa da ordem)
+npm run supabase:relatorio-manual # db/relatorio-manual.sql (depois do relatorio)
 npm run supabase:despacho       # db/despacho.sql
 npm run supabase:orcamentos     # db/orcamentos.sql
 npm run supabase:anexos         # db/anexos.sql
@@ -367,6 +462,11 @@ salta, em vez de escorregar para o mês seguinte.
 | | |
 |---|---|
 | [`docs/deploy-falhado.md`](docs/deploy-falhado.md) | O deploy que falhou: porquê, como se descobriu, e o que ficou diferente para não voltar a acontecer. |
+| [`docs/mapa-do-modulo.md`](docs/mapa-do-modulo.md) | **O inventário.** Os ecrãs, as tabelas, as vistas, as operações de escrita, os avisos, e a ordem de instalação. |
+| [`docs/o-que-mudou-a-2-de-setembro.md`](docs/o-que-mudou-a-2-de-setembro.md) | **Um dia de UX.** A lista de ordens, a ficha da ordem e o «Hoje» refeitos — e a **sugestão de quem devia ir** a cada ordem, com os pesos e os limites escritos. |
+| [`docs/o-que-mudou-a-1-de-setembro.md`](docs/o-que-mudou-a-1-de-setembro.md) | **O primeiro dia de uso a sério.** Catorze correções ao desenho, cada uma com a queixa que a originou. É o ficheiro que explica porque é que os ecrãs estão como estão. |
+| [`docs/teste-de-ponta-a-ponta.md`](docs/teste-de-ponta-a-ponta.md) | Como validar tudo, do menu do CRM até ao relatório, **sem fazer merge** — pelo deploy de preview do Vercel. |
+| [`docs/email-que-nao-chega.md`](docs/email-que-nao-chega.md) | O relatório que a fila diz ter enviado e não enviou. Bug do CRM, investigado até ao fim, correção por aplicar. |
 | [`docs/onde-estamos.md`](docs/onde-estamos.md) | **Começa por aqui.** O estado, o que ficou por confirmar, por onde continuar, e as coisas que custaram a descobrir. |
 | [`docs/a-seguir.md`](docs/a-seguir.md) | O que vem a seguir: notificações, agenda, relatórios, WhatsApp, e o que tirar de cima de quem está no terreno. Cada ideia com o que já existe no CRM, o custo, e as que não valem a pena. |
 | [`docs/portal-do-cliente.md`](docs/portal-do-cliente.md) | O cliente a pedir assistência sozinho. O portal já existe em `/client-portal` — falta um botão lá dentro. |
@@ -375,13 +475,19 @@ salta, em vez de escorregar para o mês seguinte.
 
 ## Fora do v1, por decisão
 
-Identificados no levantamento, nenhum necessário para fechar o ciclo:
+O que à partida ficou de fora e **continua de fora**, com a razão:
 
-- os ecrãs de Planos, Agenda, Análises e Definições — o modelo suporta-os, falta a
-  interface
-- agendamentos múltiplos por ordem (`RETIFICAÇÃO MEDIDAS`, `INÍCIO OBRA`)
-- SLA por cliente × área × prioridade
-- áreas, tipos e prioridades como tabelas de configuração — hoje são colunas
-- histórico e gráfico das medições na ficha de ativo (as leituras já ficam gravadas)
-- regras de notificação, portal do cliente, relatório em PDF
-- ponte com a agenda do CRM (`schedule_items`) e com o Inventário
+| | Porquê |
+|---|---|
+| **Portal do cliente** | É um produto, não uma funcionalidade: contas, permissões e um ecrã público. Ver [`docs/portal-do-cliente.md`](docs/portal-do-cliente.md). Hoje a base **recusa** escrever no canal `cliente` das mensagens, para ninguém escrever a pensar que o cliente lê |
+| **Abrir a app sem rede** (service worker) | Responder a tarefas e medições sem rede já funciona. Abrir a app sem rede é outra coisa, e a forma de a resolver depende de saber onde a rede falha — espera pelo piloto |
+| **Fotos sem rede** | O mesmo. Uma foto não cabe na mesma fila que uma resposta de texto |
+| **WhatsApp** | A conversa da ordem é entre colegas. Ligar ao WhatsApp é integrar com uma empresa terceira e mudar quem vê o quê |
+| **Stock, Vendas e Compras** | O Infraspeak tem; a Olyvia não os usa. Construir o que ninguém abre é custo puro |
+| **SLA por cliente × área × prioridade** | O modelo suporta-o (áreas e tipos já são tabelas). Falta alguém querer os prazos escritos |
+| **Etiquetas NFC** | Custam dinheiro por unidade e precisam de telemóvel com NFC ligado. O QR imprime-se numa folha de autocolantes e lê-se com a câmara de qualquer telemóvel |
+
+O que estava nesta lista e **já está feito**: os ecrãs de Planos, Agenda, Análises e
+Definições; áreas e tipos como tabelas de configuração; histórico e evolução das
+medições na ficha do equipamento; o relatório ao cliente (pela impressão do browser,
+automático e à mão); e a ponte com a agenda do CRM.

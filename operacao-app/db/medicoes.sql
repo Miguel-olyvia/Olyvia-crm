@@ -175,6 +175,18 @@ BEGIN
     END IF;
   END IF;
 
+  -- Chegar ao local e responder à primeira tarefa É iniciar a ordem. Quem está
+  -- em cima de um telhado não tem de se lembrar de carregar num botão antes, e
+  -- esquecer-se disso só se descobre quando a resposta é recusada.
+  --
+  -- Não se salta regra nenhuma: a transição passa pela RPC de sempre, que volta
+  -- a verificar quem pode iniciar, escreve o evento e abre a sessão de trabalho.
+  -- O cronómetro começa aqui — que é quando o trabalho começou mesmo.
+  IF v_o.estado = 'agendada' THEN
+    PERFORM public.rpc_ops_transitar_ordem(v_o.id, 'iniciar');
+    SELECT * INTO v_o FROM public.ops_ordem WHERE id = v_o.id;
+  END IF;
+
   IF v_o.estado <> 'em_curso' THEN
     RAISE EXCEPTION 'Só se lê numa ordem em curso (esta está %).',
       replace(v_o.estado, '_', ' ');

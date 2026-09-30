@@ -21,20 +21,38 @@ export interface Permissao {
   pode: boolean;
   /** Porquê não. Escrito para ser lido em voz alta a quem está no local. */
   motivo?: string;
+  /** O que vai acontecer sem se pedir. Aparece antes, não depois. */
+  aviso?: string;
 }
 
 /**
  * Responder é executar, e só se executa uma ordem em curso.
  *
+ * Com uma exceção de propósito: uma ordem **agendada** deixa-se responder, e a
+ * primeira resposta inicia-a. Chegar ao local e começar a trabalhar é iniciar a
+ * ordem; obrigar a carregar num botão antes só servia para a pessoa se esquecer
+ * e descobrir isso com uma recusa. A base faz o mesmo, em
+ * `ops_responder_tarefa_impl` — o cronómetro começa na mesma.
+ *
  * A mensagem diz o passo em falta, não só o impedimento. "Não podes responder"
- * deixa a pessoa parada; "Inicia a ordem para começar a responder" diz-lhe o
- * que carregar a seguir.
+ * deixa a pessoa parada; "Retoma-a para continuar" diz-lhe o que carregar.
  */
 export function podeResponder(ctx: ContextoResposta): Permissao {
+  const podeExecutar = ctx.funcao !== "tecnico" || ctx.atribuido;
+
+  if (ctx.estadoOrdem === "agendada") {
+    if (!podeExecutar) {
+      return {
+        pode: false,
+        motivo: "Esta ordem está atribuída a outra pessoa. Fala com quem a distribuiu.",
+      };
+    }
+    return { pode: true, aviso: "A primeira resposta inicia a ordem." };
+  }
+
   if (ctx.estadoOrdem !== "em_curso") {
     const passo: Record<string, string> = {
       por_aprovar: "Esta ordem ainda está por aprovar.",
-      agendada: "Inicia a ordem para começares a responder.",
       pausada: "A ordem está em pausa. Retoma-a para continuar.",
       fechada: "A ordem já foi fechada. As respostas ficaram como estavam.",
       confirmada: "A ordem já foi confirmada pelo cliente.",

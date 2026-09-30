@@ -192,6 +192,101 @@ CREATE TABLE public.anew_entity_emails (
   is_primary boolean DEFAULT false,
   created_at timestamptz DEFAULT now());
 
+-- O sino do CRM. Copiada do baseline com as colunas que nos interessam, e com
+-- os mesmos defaults — sobretudo kind, que por omissão é 'alert' e NÃO é o
+-- que o sino mostra. Um teste com o default errado passaria à mesma; é por
+-- isso que ele está aqui.
+CREATE TABLE public.notifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  type text NOT NULL,
+  title text NOT NULL,
+  message text NOT NULL,
+  link text,
+  data jsonb,
+  is_read boolean DEFAULT false,
+  read_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  organization_id uuid,
+  entity_type varchar,
+  entity_id uuid,
+  priority varchar DEFAULT 'low',
+  action_type varchar,
+  action_config jsonb,
+  is_dismissed boolean NOT NULL DEFAULT false,
+  is_resolved boolean NOT NULL DEFAULT false,
+  resolved_at timestamptz,
+  resolved_reason varchar,
+  kind text NOT NULL DEFAULT 'alert');
+
+-- A agenda do CRM. O que interessa aqui é que schedule_resources.user_id
+-- aponta para anew_users.id: é essa ligação, que já existia, que dispensa uma
+-- tabela de mapa entre pessoas de Operações e recursos de agenda.
+CREATE TABLE public.schedule_resources (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  name text NOT NULL DEFAULT 'Recurso',
+  resource_type text NOT NULL DEFAULT 'user',
+  user_id uuid REFERENCES public.anew_users(id) ON DELETE SET NULL,
+  is_active boolean DEFAULT true,
+  organization_id uuid);
+
+CREATE TABLE public.resource_time_off (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  resource_id uuid NOT NULL,
+  title text NOT NULL,
+  reason text,
+  start_date date NOT NULL,
+  end_date date NOT NULL,
+  all_day boolean DEFAULT true,
+  approved boolean DEFAULT false,
+  notes text);
+
+CREATE TABLE public.resource_availability_rules (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  resource_id uuid NOT NULL,
+  day_of_week integer NOT NULL CHECK (day_of_week BETWEEN 0 AND 6),
+  start_time time NOT NULL,
+  end_time time NOT NULL,
+  is_available boolean DEFAULT true,
+  valid_from date,
+  valid_until date);
+
+CREATE TABLE public.schedule_holidays (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  country_code varchar(2) NOT NULL DEFAULT 'PT',
+  organization_id uuid,
+  name varchar(255) NOT NULL,
+  holiday_date date NOT NULL,
+  is_recurring boolean NOT NULL DEFAULT false,
+  is_custom boolean NOT NULL DEFAULT false);
+
+-- Os compromissos do CRM. Duas colunas importam para o cruzamento com a
+-- agenda de Operações: user_id, que aponta direto para anew_users, e o
+-- time_off_type, que marca um compromisso que na verdade e uma ausencia —
+-- essas vem por resource_time_off, e traze-las tambem por aqui duplicava-as.
+CREATE TABLE public.schedule_items (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  board_id uuid,
+  title text NOT NULL,
+  status text NOT NULL DEFAULT 'scheduled',
+  origin text NOT NULL DEFAULT 'manual',
+  start_datetime timestamptz NOT NULL,
+  end_datetime timestamptz NOT NULL,
+  all_day boolean DEFAULT false,
+  location text,
+  location_lat numeric(10,8),
+  location_lng numeric(11,8),
+  time_off_type text,
+  vacation_id uuid,
+  user_id uuid,
+  organization_id uuid);
+
+CREATE TABLE public.schedule_item_assignees (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  item_id uuid NOT NULL,
+  resource_id uuid NOT NULL,
+  role text DEFAULT 'assignee');
+
 CREATE TABLE public.suppliers (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.client_portal_users (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
 CREATE TABLE public.products (id uuid PRIMARY KEY DEFAULT gen_random_uuid());
