@@ -347,7 +347,7 @@ const PurchaseOrders = () => {
   // Fase 5.0F: Encomendas Clientes assinadas, para a ligação manual opcional
   // ao criar uma encomenda nova (não relevante ao editar — ver
   // rpc_create_purchase_order, 20261115200000). Best-effort: falha de
-  // permissão (client_contracts.view) não bloqueia a criação da encomenda,
+  // permissão (client_orders.view) não bloqueia a criação da encomenda,
   // só esconde o campo.
   useEffect(() => {
     if (!open || editingId || clientOrderOptionsLoaded || !activeCompany?.id) return;

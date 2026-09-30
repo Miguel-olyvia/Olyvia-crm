@@ -12,7 +12,7 @@ import { Document, Font, Image, Page, StyleSheet, Text, View } from '@react-pdf/
 // │ que VAI para o cliente, por isso o aviso "DOCUMENTO INTERNO" está no     │
 // │ título, numa tarja, e repetido FIXO no rodapé de todas as páginas — para │
 // │ que uma folha solta impressa não possa ser confundida.                   │
-// │ Acesso no frontend: permissão `quotes.view_costs`.                       │
+// │ Acesso no frontend: permissão `direct_sales.view_costs`.                 │
 // └──────────────────────────────────────────────────────────────────────────┘
 //
 // Ao contrário da proforma, aqui as LINHAS INTERNAS (visible_to_client = false)
