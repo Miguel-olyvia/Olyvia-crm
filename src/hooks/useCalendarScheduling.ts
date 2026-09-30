@@ -256,6 +256,7 @@ export function useCalendarScheduling(companyId?: string) {
           start_time: item.start_datetime,
           end_time: item.end_datetime,
           status: item.status === 'scheduled' ? 'scheduled' : 
+                  item.status === 'confirmed' ? 'confirmed' :
                   item.status === 'completed' ? 'completed' :
                   item.status === 'cancelled' ? 'cancelled' : 
                   item.status === 'rescheduled' ? 'rescheduled' : 'scheduled',
@@ -331,6 +332,7 @@ export function useCalendarScheduling(companyId?: string) {
           start_datetime: visitData.start_time,
           end_datetime: visitData.end_time,
           status: visitData.status === 'scheduled' ? 'scheduled' :
+                  visitData.status === 'confirmed' ? 'confirmed' :
                   visitData.status === 'completed' ? 'completed' :
                   visitData.status === 'cancelled' ? 'cancelled' : 'scheduled',
           origin: 'manual',
@@ -462,6 +464,7 @@ export function useCalendarScheduling(companyId?: string) {
   ): Promise<boolean> => {
     try {
       const mappedStatus = visitData.status === 'scheduled' ? 'scheduled' :
+                          visitData.status === 'confirmed' ? 'confirmed' :
                           visitData.status === 'completed' ? 'completed' :
                           visitData.status === 'cancelled' ? 'cancelled' : 'scheduled';
 

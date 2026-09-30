@@ -9,6 +9,7 @@ import {
   uniqueEmails,
   buildManageUrl,
   defaultMeetingHtml,
+  shouldNotifyClient,
 } from '../_shared/formEmails.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
@@ -165,6 +166,8 @@ Deno.serve(async (req: Request) => {
         start_datetime: slot_start,
         end_datetime: effectiveEnd,
         status: 'scheduled',
+        // A hora mudou: a confirmacao do cliente deixa de valer (o gatilho da base tambem o garante).
+        confirmed_at: null,
       })
       .eq('id', itemId);
 
@@ -423,8 +426,9 @@ Deno.serve(async (req: Request) => {
         };
       };
 
-      // (a) Client: friendly confirmation of the new slot.
-      if (leadEmail) {
+      // (a) Client: friendly confirmation of the new slot. Has its own toggle
+      // (reschedule_notify_client); absent config counts as on.
+      if (leadEmail && shouldNotifyClient(emailCfg, 'reschedule')) {
         const mail = await buildMail('client');
         await sendEmailNow({
           organizationId,

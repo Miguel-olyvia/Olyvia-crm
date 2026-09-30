@@ -10,6 +10,7 @@ import { toast } from '@/lib/toast';
 import { useTranslation } from '@/hooks/useTranslation';
 import { usePermissions } from '@/hooks/usePermissions';
 import type { ScheduleItem, ScheduleBoard } from '@/types/scheduling';
+import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
 import type { ScheduleSettings, ScheduleHoliday } from '@/hooks/useScheduleSettings';
 
 interface ScheduleCalendarViewProps {
@@ -343,6 +344,7 @@ export function ScheduleCalendarView({
                         <span className="text-[10px] opacity-70">
                           {format(new Date(item.start_datetime), 'HH:mm')}
                         </span>
+                        <ConfirmedByClientBadge confirmedAt={item.confirmed_at} className="block" />
                       </div>
                     ))}
                     {dayItems.length > 3 && !expandedDays.has(dayKey) && (
@@ -461,6 +463,7 @@ export function ScheduleCalendarView({
                         <div className="text-xs opacity-70">
                           {format(new Date(item.start_datetime), 'HH:mm')} - {format(new Date(item.end_datetime), 'HH:mm')}
                         </div>
+                        <ConfirmedByClientBadge confirmedAt={item.confirmed_at} />
                         {item.assignees && item.assignees.length > 0 && (
                           <div className="flex gap-1 mt-1 flex-wrap">
                             {item.assignees.map(a => (
@@ -549,6 +552,7 @@ export function ScheduleCalendarView({
                                 {format(new Date(item.start_datetime), 'HH:mm')} - {format(new Date(item.end_datetime), 'HH:mm')}
                                 {item.duration_minutes && ` (${item.duration_minutes}min)`}
                               </div>
+                              <ConfirmedByClientBadge confirmedAt={item.confirmed_at} />
                             </div>
                             {item.assignees && item.assignees.length > 0 && (
                               <div className="flex gap-1">

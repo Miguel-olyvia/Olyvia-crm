@@ -15,10 +15,12 @@ const allOn: EmailsTabFields = {
   meeting_notify_commercial: true,
   meeting_notify_emails: "",
   meeting_notify_template_id: null,
+  reschedule_notify_client: true,
   reschedule_notify_commercial: true,
   reschedule_notify_emails: "",
   reschedule_client_template_id: null,
   reschedule_technician_template_id: null,
+  cancel_notify_client: true,
   cancel_notify_commercial: true,
   cancel_notify_emails: "",
   cancel_client_template_id: null,
@@ -187,5 +189,43 @@ describe("FormEmailsTab: cliente e comercial separados", () => {
     const { commercial, onChange } = renderTab();
     fireEvent.click(within(commercial).getByLabelText("Aviso ao comercial ao cancelar"));
     expect(onChange).toHaveBeenCalledWith({ ...allOn, cancel_notify_commercial: false });
+  });
+});
+
+describe("FormEmailsTab: aviso ao cliente ao reagendar e ao cancelar tem interruptor proprio", () => {
+  it("os dois interruptores estao no grupo do cliente e nao no do comercial", () => {
+    const { client, commercial } = renderTab();
+    for (const name of ["Quando a visita é reagendada", "Quando a visita é cancelada"]) {
+      expect(within(client).getByRole("switch", { name })).toBeChecked();
+      expect(within(commercial).queryByRole("switch", { name })).not.toBeInTheDocument();
+    }
+    expect(client.querySelector("#reschedule-notify-client")).not.toBeNull();
+    expect(client.querySelector("#cancel-notify-client")).not.toBeNull();
+  });
+
+  it("desligados escondem os modelos do cliente e ficam so a confirmacao e o lembrete", () => {
+    const { client } = renderTab({ ...allOn, reschedule_notify_client: false, cancel_notify_client: false });
+    expect(client.querySelector("#reschedule-client-template")).toBeNull();
+    expect(client.querySelector("#cancel-client-template")).toBeNull();
+    expect(client.querySelectorAll("#confirmation-email-template, #reminder-client-template, #reschedule-client-template, #cancel-client-template")).toHaveLength(2);
+  });
+
+  it("cada interruptor e independente do outro", () => {
+    const { client } = renderTab({ ...allOn, reschedule_notify_client: false });
+    expect(client.querySelector("#reschedule-client-template")).toBeNull();
+    expect(client.querySelector("#cancel-client-template")).not.toBeNull();
+  });
+
+  it("clicar grava so o campo alterado", () => {
+    const { client, onChange } = renderTab();
+    fireEvent.click(within(client).getByRole("switch", { name: "Quando a visita é cancelada" }));
+    expect(onChange).toHaveBeenCalledWith({ ...allOn, cancel_notify_client: false });
+    fireEvent.click(within(client).getByRole("switch", { name: "Quando a visita é reagendada" }));
+    expect(onChange).toHaveBeenLastCalledWith({ ...allOn, reschedule_notify_client: false });
+  });
+
+  it("ja nao diz que o cliente recebe sempre", () => {
+    const { client } = renderTab();
+    expect(within(client).queryByText(/recebe sempre/)).not.toBeInTheDocument();
   });
 });

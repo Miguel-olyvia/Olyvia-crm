@@ -8385,6 +8385,7 @@ export type Database = {
           button_option_padding: string | null
           button_text_color: string | null
           cancel_client_template_id: string | null
+          cancel_notify_client: boolean
           cancel_notify_commercial: boolean
           cancel_notify_emails: string | null
           cancel_technician_template_id: string | null
@@ -8479,6 +8480,7 @@ export type Database = {
           reminder_template_id: string | null
           required_field_label: string | null
           reschedule_client_template_id: string | null
+          reschedule_notify_client: boolean
           reschedule_notify_commercial: boolean
           reschedule_notify_emails: string | null
           reschedule_technician_template_id: string | null
@@ -8533,6 +8535,7 @@ export type Database = {
           button_option_padding?: string | null
           button_text_color?: string | null
           cancel_client_template_id?: string | null
+          cancel_notify_client?: boolean
           cancel_notify_commercial?: boolean
           cancel_notify_emails?: string | null
           cancel_technician_template_id?: string | null
@@ -8627,6 +8630,7 @@ export type Database = {
           reminder_template_id?: string | null
           required_field_label?: string | null
           reschedule_client_template_id?: string | null
+          reschedule_notify_client?: boolean
           reschedule_notify_commercial?: boolean
           reschedule_notify_emails?: string | null
           reschedule_technician_template_id?: string | null
@@ -8681,6 +8685,7 @@ export type Database = {
           button_option_padding?: string | null
           button_text_color?: string | null
           cancel_client_template_id?: string | null
+          cancel_notify_client?: boolean
           cancel_notify_commercial?: boolean
           cancel_notify_emails?: string | null
           cancel_technician_template_id?: string | null
@@ -8775,6 +8780,7 @@ export type Database = {
           reminder_template_id?: string | null
           required_field_label?: string | null
           reschedule_client_template_id?: string | null
+          reschedule_notify_client?: boolean
           reschedule_notify_commercial?: boolean
           reschedule_notify_emails?: string | null
           reschedule_technician_template_id?: string | null
