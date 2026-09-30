@@ -13,11 +13,10 @@ import { resolveRescheduleTarget, listDaysWithSlots, evaluateDay, type Reschedul
 import {
   aggregateDayWithoutPostal,
   aggregateFeasibleSlots,
-  intersectMonthDays,
-  restrictResourcesToOwner,
   type AggregatedSlot,
   type NeighborVisitLike,
 } from "../_shared/slotAggregation.ts";
+import { candidateDays, coverageForOwnerDay, evaluateOwnerDay, makeOwnerDeps } from "../_shared/ownerEligibility.ts";
 
 initSentry();
 
@@ -322,15 +321,17 @@ Deno.serve(async (req: Request) => {
     }
 
     // ═══════════════════════════════════════════════════════
-    // Restricao ao comercial dono (so REDUZ, nunca acrescenta)
+    // Comercial dono: o prioritario, avaliado directamente
     // ═══════════════════════════════════════════════════════
     // Quando o visitante e uma lead/cliente ja conhecida, so contam os recursos
-    // do comercial a quem a ficha esta ligada. E uma INTERSECAO aplicada depois
-    // de/junto com todas as regras (cobertura do distrito, antecedencia,
-    // capacidade, ausencias, conflitos, feriados, deslocacao e almoco): o
-    // recurso do dono passa pelas mesmas verificacoes que passaria sem
-    // restricao. Sem entidade, sem dono, ou dono sem recurso activo => null =>
-    // comportamento igual ao de sempre (o book-slot protege no fim).
+    // do comercial a quem a ficha esta ligada, e ele e SEMPRE o prioritario:
+    // os seus recursos sao avaliados DIRECTAMENTE (_shared/ownerEligibility.ts),
+    // sem o corte de proximidade e sem o veto de cobertura de distrito ou
+    // distancia maxima -- o dono vale fora da zona dele. Continuam a aplicar-se
+    // as regras reais da agenda (horario, capacidade, ausencias, feriados,
+    // antecedencia, conflitos, deslocacao e almoco). Sem entidade, sem dono, ou
+    // dono sem recurso activo => null => comportamento igual ao de sempre (o
+    // book-slot protege no fim).
     let ownerResourceIds: string[] | null = null;
     const contactEmail = normalizeEmailForMatch(email);
     const contactPhone = normalizePhoneForMatch(phone) ? phone : null;
@@ -358,7 +359,6 @@ Deno.serve(async (req: Request) => {
         console.log('public-availability: contact rate limit hit, ignoring contact');
       }
     }
-    const restricted = ownerResourceIds !== null;
 
     // Coordenadas exactas do cliente via CP7 (regra 13), geocodificadas uma so vez.
     const cp7Digits = (geo.postalCode || '').replace(/[^0-9]/g, '');
@@ -399,9 +399,9 @@ Deno.serve(async (req: Request) => {
     // deve aparecer como escolhível se pelo menos UM comercial candidato
     // conseguir mesmo lá chegar a tempo -- não basta ter a agenda livre.
     // Cada comercial é verificado contra os SEUS próprios compromissos
-    // vizinhos nesse dia; se um não der, outro pode dar. Com `restrictTo`, so
-    // os recursos do dono entram -- e passam por exactamente esta verificacao.
-    const evaluateDayWithProximity = async (day: string, restrictTo: string[] | null) => {
+    // vizinhos nesse dia; se um não der, outro pode dar. (O dono conhecido nao
+    // passa por aqui: ver evaluateOwnerDay.)
+    const evaluateDayWithProximity = async (day: string) => {
       const { data: resources, error: rpcError } = await supabase
         .rpc('find_nearest_resources', {
           p_target_postal_code: geo.postalCode,
@@ -412,9 +412,9 @@ Deno.serve(async (req: Request) => {
           p_district_id: geo.districtId,
           p_min_advance_hours: minAdvanceHours,
         });
-      if (rpcError) return { rpcError, resources: [] as any[], allResources: [] as any[], slots: [] as AggregatedSlot[] };
+      if (rpcError) return { rpcError, resources: [] as any[], slots: [] as AggregatedSlot[] };
 
-      const candidates = restrictResourcesToOwner<any>(resources || [], restrictTo);
+      const candidates = (resources || []) as any[];
       await resolveClientCoords();
 
       const dayStart = `${day}T00:00:00.000Z`;
@@ -437,9 +437,7 @@ Deno.serve(async (req: Request) => {
         neighborsByResource,
         clientLat, clientLng, lunchBreak,
       });
-      // allResources = lista ANTES do filtro do dono: e daqui que sai o `coverage`,
-      // para ser igual com e sem restricao.
-      return { rpcError: null, resources: candidates, allResources: (resources || []) as any[], slots };
+      return { rpcError: null, resources: candidates, slots };
     };
 
     // Sem CP nem distrito: todos os recursos activos da organizacao (ou so os do dono).
@@ -468,9 +466,53 @@ Deno.serve(async (req: Request) => {
       });
     };
 
+    // Dono conhecido: os dias e horarios vem SO dos recursos dele, com as regras
+    // reais da agenda mas sem proximidade/distrito (ver ownerEligibility.ts).
+    const ownerDeps = ownerResourceIds
+      ? makeOwnerDeps(supabase, orgId, durationMinutes, minAdvanceHours)
+      : null;
+    const evaluateOwner = async (day: string) => {
+      await resolveClientCoords();
+      return evaluateOwnerDay({
+        ownerResourceIds: ownerResourceIds!, day, clientLat, clientLng, lunchBreak, deps: ownerDeps!,
+      });
+    };
+
     // ═══════════════════════════════════════════════════════
     // MODE 1: Range query (P3) — returns daily availability map
     // ═══════════════════════════════════════════════════════
+    if (start_date && end_date && ownerResourceIds && ownerDeps) {
+      // Nao passa por get_month_availability (que corta pela zona): os dias
+      // candidatos saem da agenda da organizacao e cada um e avaliado so com os
+      // recursos do dono, em lotes.
+      const scheduleConfig = await fetchScheduleConfig();
+      // Um dia de margem: o dia "de hoje" e o do fuso da organizacao, e a RPC
+      // decide (antecedencia minima incluida); isto so poupa chamadas.
+      const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const days = candidateDays(start_date, end_date, scheduleConfig.working_days, scheduleConfig.holidays, yesterday);
+      const availableDates: string[] = [];
+      const BATCH = 6;
+      for (let i = 0; i < days.length; i += BATCH) {
+        const batch = days.slice(i, i + BATCH);
+        const results = await Promise.all(batch.map(async (day) => {
+          const r = await evaluateOwner(day);
+          if (r.error) {
+            console.error('public-availability: owner month day failed:', day, r.error);
+            return false;
+          }
+          return r.slots.length > 0;
+        }));
+        batch.forEach((day, idx) => { if (results[idx]) availableDates.push(day); });
+      }
+
+      console.log(`public-availability range (owner): ${start_date}→${end_date}, board=${boardId}, candidate_days=${days.length}, available_days=${availableDates.length}`);
+
+      return new Response(
+        JSON.stringify(buildMonthResponse({ availableDates, scheduleConfig, durationMinutes })),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     if (start_date && end_date) {
       const { data: monthData, error: monthError } = await supabase.rpc('get_month_availability', {
         p_board_id: boardId,
@@ -493,34 +535,11 @@ Deno.serve(async (req: Request) => {
       // Always include schedule_config for range requests
       const scheduleConfig = await fetchScheduleConfig();
 
-      let availableDates: string[] = (monthData || [])
+      const availableDates: string[] = (monthData || [])
         .filter((d: any) => d.has_slots)
         .map((d: any) => d.available_date);
-      const unrestrictedDayCount = availableDates.length;
 
-      if (ownerResourceIds) {
-        // Um dia so fica marcado se estava marcado hoje (get_month_availability)
-        // E o recurso do dono tem mesmo um horario nesse dia depois de todas as
-        // regras (incluindo deslocacao e almoco). Subconjunto por construcao.
-        const ownerIds = ownerResourceIds;
-        const ownerDays = new Set<string>();
-        const BATCH = 6;
-        for (let i = 0; i < availableDates.length; i += BATCH) {
-          const batch = availableDates.slice(i, i + BATCH);
-          if (geo.postalCode || geo.districtId) await resolveClientCoords();
-          const results = await Promise.all(batch.map(async (day) => {
-            if (geo.postalCode || geo.districtId) {
-              const r = await evaluateDayWithProximity(day, ownerIds);
-              return r.rpcError ? false : r.slots.length > 0;
-            }
-            return (await evaluateDayWithoutPostal(day, ownerIds)).length > 0;
-          }));
-          batch.forEach((day, idx) => { if (results[idx]) ownerDays.add(day); });
-        }
-        availableDates = intersectMonthDays(availableDates, ownerDays);
-      }
-
-      console.log(`public-availability range: ${start_date}→${end_date}, board=${boardId}, postal=${geo.postalCode || 'none'}, restricted=${restricted}, unrestricted_days=${unrestrictedDayCount}, available_days=${availableDates.length}`);
+      console.log(`public-availability range: ${start_date}→${end_date}, board=${boardId}, postal=${geo.postalCode || 'none'}, available_days=${availableDates.length}`);
 
       return new Response(
         JSON.stringify(buildMonthResponse({ availableDates, scheduleConfig, durationMinutes })),
@@ -544,10 +563,69 @@ Deno.serve(async (req: Request) => {
       scheduleConfig = await fetchScheduleConfig();
     }
 
+    // Dono conhecido: horarios so dos recursos dele, avaliados directamente
+    // (com e sem codigo postal). A resposta tem a mesma forma que a de um
+    // desconhecido; o `coverage` calcula-se como para um desconhecido.
+    if (ownerResourceIds && ownerDeps) {
+      const { slots: ownerSlots, error: ownerError } = await evaluateOwner(date);
+      if (ownerError) {
+        console.error('public-availability owner day failed:', ownerError);
+        return new Response(
+          JSON.stringify({ error: 'Failed to fetch availability' }),
+          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+
+      let ownerCoverage = ownerSlots.length > 0;
+      if (geo.postalCode || geo.districtId) {
+        // `coverage` da lista de proximidade sem filtro, igual ao pedido sem email.
+        const { data: nearest, error: nearestError } = await supabase.rpc('find_nearest_resources', {
+          p_target_postal_code: geo.postalCode,
+          p_board_id: boardId,
+          p_target_date: date,
+          p_duration_minutes: durationMinutes,
+          p_limit: 10,
+          p_district_id: geo.districtId,
+          p_min_advance_hours: minAdvanceHours,
+        });
+        if (nearestError) {
+          console.error('Error calling find_nearest_resources:', nearestError);
+          return new Response(
+            JSON.stringify({ error: 'Failed to find available resources', details: nearestError.message }),
+            { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        ownerCoverage = (nearest || []).length > 0;
+      } else if (!ownerCoverage) {
+        const { data: orgResources } = await supabase
+          .from('schedule_resources')
+          .select('id')
+          .eq('organization_id', orgId)
+          .eq('is_active', true);
+        const allIds = (orgResources || []).map((r: any) => r.id as string);
+        ownerCoverage = (await evaluateDayWithoutPostal(date, allIds)).length > 0;
+      }
+      // Nunca coverage=false com horarios: um desconhecido nao recebe essa combinacao.
+      ownerCoverage = coverageForOwnerDay(ownerCoverage, ownerSlots);
+
+      console.log(`public-availability (owner): date=${date}, postal=${geo.postalCode || 'none'}, district=${geo.districtId || 'none'}, board=${boardId}, resources=${ownerResourceIds.length}, slots=${ownerSlots.length}`);
+
+      return new Response(
+        JSON.stringify(buildDayResponse({
+          slots: ownerSlots,
+          coverage: ownerCoverage,
+          timezone: scheduleConfig?.timezone,
+          durationMinutes,
+          scheduleConfig,
+        })),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // With postal_code and/or district_id: use find_nearest_resources RPC,
     // which already implements the district-coverage rule.
     if (geo.postalCode || geo.districtId) {
-      const { rpcError, resources, allResources, slots: aggregatedSlots } = await evaluateDayWithProximity(date, ownerResourceIds);
+      const { rpcError, resources, slots: aggregatedSlots } = await evaluateDayWithProximity(date);
 
       if (rpcError) {
         console.error('Error calling find_nearest_resources:', rpcError);
@@ -557,14 +635,13 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      // Cobertura da lista completa (antes do filtro do dono), igual ao pedido sem email.
-      const coverage = allResources.length > 0;
+      const coverage = resources.length > 0;
 
-      console.log(`public-availability: date=${date}, postal=${geo.postalCode || 'none'}, district=${geo.districtId || 'none'}, board=${boardId}, restricted=${restricted}, resources=${resources.length}, slots=${aggregatedSlots.length}`);
+      console.log(`public-availability: date=${date}, postal=${geo.postalCode || 'none'}, district=${geo.districtId || 'none'}, board=${boardId}, resources=${resources.length}, slots=${aggregatedSlots.length}`);
 
       return new Response(
-        // Forma identica com e sem restricao: sem preferred_resource_id e com
-        // available_count constante (ver _shared/availabilityResponse.ts).
+        // Forma identica para conhecido e desconhecido: sem preferred_resource_id
+        // e com available_count constante (ver _shared/availabilityResponse.ts).
         JSON.stringify(buildDayResponse({
           slots: aggregatedSlots,
           coverage,
@@ -591,22 +668,12 @@ Deno.serve(async (req: Request) => {
       );
     }
 
-    const allowedOwnerIds = ownerResourceIds ? new Set<string>(ownerResourceIds) : null;
-    const resourceIdsForDay = (boardResources || [])
-      .map((r: any) => r.id as string)
-      .filter((id: string) => !allowedOwnerIds || allowedOwnerIds.has(id));
+    const resourceIdsForDay = (boardResources || []).map((r: any) => r.id as string);
 
     const aggregatedSlots = await evaluateDayWithoutPostal(date, resourceIdsForDay);
+    const coverage = aggregatedSlots.length > 0;
 
-    // Cobertura calculada SEM o filtro do dono, igual ao pedido sem email. So
-    // se recalcula quando o dono nao tem horarios (com horarios, ha cobertura).
-    let coverage = aggregatedSlots.length > 0;
-    if (allowedOwnerIds && !coverage) {
-      const allIds = (boardResources || []).map((r: any) => r.id as string);
-      coverage = (await evaluateDayWithoutPostal(date, allIds)).length > 0;
-    }
-
-    console.log(`public-availability (no postal): date=${date}, board=${boardId}, restricted=${restricted}, resources=${resourceIdsForDay.length}, slots=${aggregatedSlots.length}`);
+    console.log(`public-availability (no postal): date=${date}, board=${boardId}, resources=${resourceIdsForDay.length}, slots=${aggregatedSlots.length}`);
 
     return new Response(
       JSON.stringify(buildDayResponse({
