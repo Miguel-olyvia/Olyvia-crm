@@ -124,6 +124,10 @@ interface Props {
   replaceMode?: boolean; // When true, selecting an item immediately replaces and closes
   replaceItemType?: "product" | "service" | "bundle"; // Which tab to show when in replace mode
   priceContext?: PriceContextCode; // 'retail' | 'bundle' - defaults to 'retail'
+  // Título/descrição do diálogo fora dos orçamentos (encomendas, venda direta).
+  // Sem eles fica o texto dos orçamentos.
+  title?: string;
+  description?: string;
 }
 
 const PAGE_SIZE = 10;
@@ -131,7 +135,7 @@ const PAGE_SIZE = 10;
 // secção 2) — matches the pattern already used for entity search (clientSearch.ts).
 const SUPPLIER_SKU_MATCH_LIMIT = 300;
 
-export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initialProducts, services: initialServices, replaceMode = false, replaceItemType, priceContext = PRICE_CONTEXT_CODES.RETAIL }: Props) {
+export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initialProducts, services: initialServices, replaceMode = false, replaceItemType, priceContext = PRICE_CONTEXT_CODES.RETAIL, title, description }: Props) {
   const [activeTab, setActiveTab] = useState<"products" | "services" | "bundles">("products");
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedBundles, setSelectedBundles] = useState<Map<string, SelectedBundle>>(new Map());
@@ -1750,10 +1754,10 @@ export function AddItemsDialog({ open, onOpenChange, onAddItems, products: initi
               </div>
               <div>
                 <DialogTitle className="text-xl font-bold">
-                  {replaceMode ? "Substituir Item" : "Adicionar Itens ao Orçamento"}
+                  {replaceMode ? "Substituir Item" : (title ?? "Adicionar Itens ao Orçamento")}
                 </DialogTitle>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  {replaceMode ? "Selecione o produto ou serviço que substituirá o item atual" : "Selecione produtos ou serviços para adicionar"}
+                  {replaceMode ? "Selecione o produto ou serviço que substituirá o item atual" : (description ?? "Selecione produtos ou serviços para adicionar")}
                 </p>
               </div>
             </div>

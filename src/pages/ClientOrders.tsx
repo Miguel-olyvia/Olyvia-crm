@@ -53,9 +53,9 @@ import {
 // tabela nova, sem trigger nova). Consome os 2 RPCs de leitura já aplicados
 // em produção (migration 20261115160000_client_order_documents_read_rpcs.sql):
 // rpc_list_client_order_documents (listagem) e rpc_get_client_order_document
-// (detalhe/PDF). Ambos exigem inventory.view E client_contracts.view em
-// simultâneo — mesma dupla verificação replicada no frontend via
-// ProtectedRoute (App.tsx) e no item de menu (menuConfig.ts).
+// (detalhe/PDF). Ambos exigem client_orders.view (permissão própria, para o
+// armazém não precisar de ver contratos) — mesma verificação replicada no
+// frontend via ProtectedRoute (App.tsx) e no item de menu (menuConfig.ts).
 //
 // Padrão de paginação: infinite-scroll com .range() e SEM total_count (a RPC
 // não devolve contagem total, de propósito — mesmo padrão já usado em
@@ -183,6 +183,11 @@ interface ClientOrderDocumentLine {
   // fornecedor preferencial" (false). null/ausente = desconhecido (serviços ou
   // RPC ainda sem o campo).
   has_preferred_supplier?: boolean | null;
+  // Categoria principal e subcategoria do produto, só para agrupar as linhas
+  // no PDF (não se mostram no ecrã). null em serviços e produtos sem
+  // categoria; ausentes enquanto a RPC não tiver os campos.
+  category_name?: string | null;
+  subcategory_name?: string | null;
 }
 
 // 'sem_fornecedor' = quantidade em falta sem pedido ao fornecedor. A causa
@@ -420,12 +425,15 @@ interface DeliveryAddressPickerProps {
   newFormIdPrefix: string;
   label: string;
   disabled: boolean;
+  // Acrescentar morada de entrega ao cliente a partir da encomenda
+  // (client_orders.edit). Sem ela só se escolhe uma existente ou se escreve.
+  canAddNew: boolean;
   t: (key: string, params?: Record<string, string | number>) => string;
 }
 
 const DeliveryAddressPicker = ({
   entityId, options, optionsLoading, choice, onChoiceChange, showNewForm, onShowNewFormChange,
-  onAdded, value, onValueChange, textareaId, newFormIdPrefix, label, disabled, t,
+  onAdded, value, onValueChange, textareaId, newFormIdPrefix, label, disabled, canAddNew, t,
 }: DeliveryAddressPickerProps) => (
   <div className="space-y-2">
     <Label htmlFor={textareaId}>{label}</Label>
@@ -440,11 +448,13 @@ const DeliveryAddressPicker = ({
               {formatDeliveryAddress(option) || option.formatted || '—'}
             </SelectItem>
           ))}
-          <SelectItem value={NEW_DELIVERY_ADDRESS_VALUE}>{t('clientOrders.create.deliveryAddressNew')}</SelectItem>
+          {canAddNew && (
+            <SelectItem value={NEW_DELIVERY_ADDRESS_VALUE}>{t('clientOrders.create.deliveryAddressNew')}</SelectItem>
+          )}
         </SelectContent>
       </Select>
     )}
-    {entityId && !optionsLoading && options.length === 0 && !showNewForm && (
+    {canAddNew && entityId && !optionsLoading && options.length === 0 && !showNewForm && (
       <div>
         <Button
           type="button"
@@ -458,7 +468,7 @@ const DeliveryAddressPicker = ({
         </Button>
       </div>
     )}
-    {entityId && showNewForm && (
+    {canAddNew && entityId && showNewForm && (
       <div className="rounded-md border p-3 space-y-2">
         <p className="text-sm font-medium">{t('deliveryAddresses.newTitle')}</p>
         <DeliveryAddressForm
@@ -489,11 +499,17 @@ const ClientOrders = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const canConfirmStockExit = hasPermission('inventory.edit') && hasPermission('client_orders.confirm_stock_exit');
-  // Editar encomenda manual (rpc_update_manual_client_order exige o mesmo).
-  const canEditOrder = hasPermission('client_contracts.edit');
+  // Editar encomendas de cliente: linhas das manuais
+  // (rpc_update_manual_client_order), morada de entrega e notas
+  // (rpc_update_client_order_header) e acrescentar morada de entrega ao
+  // cliente a partir da encomenda. Permissão própria, já não depende de
+  // client_contracts.edit. Criar encomenda manual é client_orders.create
+  // (PermissionGate do botão "Nova encomenda").
+  const canEditOrder = hasPermission('client_orders.edit');
+  const canCreateOrder = hasPermission('client_orders.create');
   // Pedir em falta ao fornecedor (rpc_request_missing_from_supplier exige
-  // purchase_orders.create + client_contracts.view).
-  const canRequestMissing = hasPermission('purchase_orders.create') && hasPermission('client_contracts.view');
+  // purchase_orders.create + client_orders.view).
+  const canRequestMissing = hasPermission('purchase_orders.create') && hasPermission('client_orders.view');
   // Eliminar encomenda (rpc_delete_client_order exige client_orders.delete).
   const canDeleteOrder = hasPermission('client_orders.delete');
 
@@ -612,6 +628,9 @@ const ClientOrders = () => {
   // Texto mostrado na Textarea ao abrir (morada calculada). Se não mudar, não
   // se grava a calculada — envia-se o override em bruto.
   const [headerInitialAddress, setHeaderInitialAddress] = useState("");
+  // "+ Nova morada…" no diálogo manual: quem edita precisa de
+  // client_orders.edit; ao criar basta client_orders.create.
+  const canAddDeliveryInManualDialog = canEditOrder || (!editingContractId && canCreateOrder);
 
   // Filtros num ref (não recria loadOrders a cada keystroke) — mesmo truque
   // já usado em Stocks.tsx para manter a identidade do IntersectionObserver
@@ -1753,7 +1772,7 @@ const ClientOrders = () => {
 
   const handleDeliveryChoiceChange = (value: string) => {
     if (value === NEW_DELIVERY_ADDRESS_VALUE) {
-      setShowNewDeliveryForm(true);
+      if (headerEditOpen ? canEditOrder : canAddDeliveryInManualDialog) setShowNewDeliveryForm(true);
       return;
     }
     const option = deliveryOptions.find((o) => o.entity_address_id === value);
@@ -2200,11 +2219,12 @@ const ClientOrders = () => {
               <p className="text-muted-foreground">{t('clientOrders.description')}</p>
             </div>
           </div>
-          {/* A página já está protegida por inventory.view + client_contracts.view
+          {/* A página já está protegida por client_orders.view
               (ProtectedRoute em App.tsx e menuConfig.ts). Criar uma encomenda
-              cria um contrato assinado, pelo que exige client_contracts.create —
-              mesmo PermissionGate usado em ClientContracts.tsx. */}
-          <PermissionGate permission="client_contracts.create">
+              manual exige client_orders.create (permissão própria; já não
+              depende de client_contracts.create, mesmo criando por baixo um
+              contrato sintético assinado). */}
+          <PermissionGate permission="client_orders.create">
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="w-4 h-4 mr-2" />
               {t('clientOrders.create.newOrder')}
@@ -2937,6 +2957,7 @@ const ClientOrders = () => {
               newFormIdPrefix="client_order_header_new_delivery"
               label={t('clientOrders.dialog.deliveryAddress')}
               disabled={headerEditSaving}
+              canAddNew={canEditOrder}
               t={t}
             />
             {detailData && 'delivery_address_override' in detailData && (
@@ -3025,6 +3046,7 @@ const ClientOrders = () => {
               newFormIdPrefix="client_order_new_delivery"
               label={t('clientOrders.create.deliveryAddress')}
               disabled={creating}
+              canAddNew={canAddDeliveryInManualDialog}
               t={t}
             />
 
@@ -3231,6 +3253,8 @@ const ClientOrders = () => {
         onAddItems={handleAddCatalogItems}
         products={[]}
         services={[]}
+        title="Adicionar Itens à Encomenda"
+        description="Selecione produtos ou serviços para adicionar à encomenda"
       />
     </>
   );

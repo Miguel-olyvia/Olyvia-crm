@@ -121,10 +121,9 @@ const DirectSales = () => {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
 
-  // Mesma permissão que governa "ver margens e custos" nos orçamentos. A venda
-  // direta não tem permissão própria de custos, e criar uma obrigaria a
-  // atribuí-la aos papéis antes de alguém poder ver o documento.
-  const canViewCosts = hasPermission("quotes.view_costs");
+  // Permissão própria da venda direta para ver custos e margens (documento
+  // interno). Independente das permissões dos orçamentos.
+  const canViewCosts = hasPermission("direct_sales.view_costs");
   const { activeCompany, isLoading: companyLoading } = useCompany();
 
   // Mesma fonte de Propostas/Orçamentos: `anewUserId` do scope é o id de
@@ -499,7 +498,7 @@ const DirectSales = () => {
    *
    * Sem exigir proforma: ao contrário da proforma, este documento faz sentido
    * antes da aceitação — serve para decidir o preço, não para o comunicar. O
-   * acesso é travado pela permissão `quotes.view_costs` no menu; aqui o guarda
+   * acesso é travado pela permissão `direct_sales.view_costs` no menu; aqui o guarda
    * é só contra cliques repetidos.
    */
   const handleDownloadInternalDoc = async (sale: DirectSaleRow) => {
@@ -813,9 +812,10 @@ const DirectSales = () => {
                           {/* Confirmação manual (substitui o portal). Só a partir
                               de rascunho ou de uma 'enviada' antiga: confirmar
                               uma venda já aceite/rejeitada/cancelada não faz
-                              sentido — a RPC volta a validar do lado dela. */}
+                              sentido — a RPC volta a validar do lado dela.
+                              Atrás de direct_sales.confirm (permissão própria). */}
                           {CONFIRMABLE_STATUSES.includes(sale.status) && (
-                            <PermissionGate permission="direct_sales.edit">
+                            <PermissionGate permission="direct_sales.confirm">
                               <DropdownMenuSeparator />
                               <DropdownMenuLabel className="text-[10px] uppercase text-muted-foreground">
                                 Estado
@@ -837,7 +837,7 @@ const DirectSales = () => {
                               proforma_number). Sem número não há documento, por
                               isso o item nem aparece.
 
-                              Fora do PermissionGate de direct_sales.edit de
+                              Fora de qualquer PermissionGate de escrita, de
                               propósito: descarregar um documento é leitura, e a
                               rota já exige direct_sales.view.
 
@@ -879,9 +879,9 @@ const DirectSales = () => {
                           )}
 
                           {/* Documento interno de custo e margem (Fase 6A).
-                              Atrás de `quotes.view_costs`, a permissão que já
-                              governa "ver margens e custos" — quem não a tem
-                              nem vê o item.
+                              Atrás de `direct_sales.view_costs`, a permissão
+                              própria de "ver margens e custos" da venda
+                              direta — quem não a tem nem vê o item.
 
                               Ao contrário da proforma, não depende de
                               proforma_number: serve para decidir o preço antes
@@ -905,9 +905,10 @@ const DirectSales = () => {
                           {/* Registo da fatura (Fase 6B). Só depois de aceite,
                               porque é essa a regra que a RPC também aplica —
                               faturar uma venda que ainda pode ser rejeitada não
-                              faz sentido. Atrás de direct_sales.edit: é escrita. */}
+                              faz sentido. Atrás de direct_sales.register_invoice
+                              (permissão própria): é escrita. */}
                           {sale.status === "aceite" && (
-                            <PermissionGate permission="direct_sales.edit">
+                            <PermissionGate permission="direct_sales.register_invoice">
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 onClick={(e) => {

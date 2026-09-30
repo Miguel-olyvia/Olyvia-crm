@@ -78,20 +78,50 @@ const styles = StyleSheet.create({
     marginTop: 5,
     marginBottom: 5,
   },
+  // Cabeçalho e linhas com o mesmo padding horizontal, para as colunas ficarem
+  // alinhadas; o espaço entre células vem do padding de cada coluna.
   tableHeader: {
     flexDirection: 'row',
     backgroundColor: '#374151',
-    padding: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 5,
     fontWeight: 'bold',
     color: '#ffffff',
     fontSize: 8,
   },
   tableRow: {
     flexDirection: 'row',
+    alignItems: 'flex-start',
     borderBottom: '1 solid #e5e7eb',
-    padding: 5,
+    paddingVertical: 5,
+    paddingHorizontal: 5,
     backgroundColor: '#ffffff',
     fontSize: 8,
+  },
+  // Título de cada grupo de categoria na tabela de linhas.
+  groupTitleRow: {
+    flexDirection: 'row',
+    backgroundColor: '#f3f4f6',
+    borderBottom: '1 solid #e5e7eb',
+    paddingVertical: 4,
+    paddingHorizontal: 9,
+    marginTop: 4,
+  },
+  groupTitleText: {
+    fontSize: 8,
+    fontWeight: 'bold',
+    color: '#111827',
+  },
+  // Quadrado vazio para marcar à mão na separação do material.
+  checkbox: {
+    width: 9,
+    height: 9,
+    border: '1 solid #374151',
+  },
+  subcategoryText: {
+    fontSize: 7,
+    color: '#6b7280',
+    marginTop: 1,
   },
   fixedFooter: {
     position: 'absolute',
@@ -192,11 +222,14 @@ const styles = StyleSheet.create({
   },
 });
 
+// Larguras somam 100%. paddingHorizontal separa as células; o Estado leva
+// paddingLeft maior para não colar à Qtd. (alinhada à direita).
 const columnStyles = {
-  sku: { width: '15%', fontSize: 8 },
-  description: { width: '40%', fontSize: 8 },
-  quantity: { width: '15%', fontSize: 8, textAlign: 'right' as const },
-  status: { width: '30%', fontSize: 8 },
+  check: { width: '5%', paddingHorizontal: 4, paddingTop: 1 },
+  sku: { width: '15%', fontSize: 8, paddingHorizontal: 4 },
+  description: { width: '38%', fontSize: 8, paddingHorizontal: 4 },
+  quantity: { width: '12%', fontSize: 8, paddingHorizontal: 4, textAlign: 'right' as const },
+  status: { width: '30%', fontSize: 8, paddingLeft: 10, paddingRight: 4 },
 };
 
 // Espelha ClientOrderDocumentLine em src/pages/ClientOrders.tsx: uma linha é de
@@ -225,7 +258,61 @@ interface ClientOrderDocumentPDFLine {
   has_preferred_supplier?: boolean | null;
   stock_movement_id?: string | null;
   stock_exit_movement_id?: string | null;
+  // Categoria principal/subcategoria do produto (null em serviços e produtos
+  // sem categoria). Servem só para agrupar a tabela — ver groupLinesByCategory.
+  category_name?: string | null;
+  subcategory_name?: string | null;
 }
+
+interface ClientOrderLineGroup {
+  key: string;
+  title: string;
+  lines: ClientOrderDocumentPDFLine[];
+}
+
+const NO_CATEGORY_TITLE = 'Sem categoria';
+const SERVICES_TITLE = 'Serviços';
+
+// Agrupa por categoria principal: categorias por ordem alfabética (pt), depois
+// "Sem categoria" e, por fim, "Serviços". Dentro de cada grupo mantém-se a
+// ordem original das linhas. Os componentes de um bundle são produtos e caem
+// cada um na sua categoria.
+const groupLinesByCategory = (lines: ClientOrderDocumentPDFLine[]): ClientOrderLineGroup[] => {
+  const byCategory = new Map<string, ClientOrderDocumentPDFLine[]>();
+  const uncategorised: ClientOrderDocumentPDFLine[] = [];
+  const services: ClientOrderDocumentPDFLine[] = [];
+
+  for (const line of lines) {
+    // item_type é opcional neste tipo; sem ele, o estado 'servico' identifica-a.
+    if (line.item_type === 'service' || (!line.item_type && line.line_status === 'servico')) {
+      services.push(line);
+      continue;
+    }
+    const category = line.category_name?.trim();
+    if (!category) {
+      uncategorised.push(line);
+      continue;
+    }
+    const bucket = byCategory.get(category);
+    if (bucket) bucket.push(line);
+    else byCategory.set(category, [line]);
+  }
+
+  const groups: ClientOrderLineGroup[] = Array.from(byCategory.keys())
+    .sort((a, b) => a.localeCompare(b, 'pt', { sensitivity: 'base' }))
+    .map((category) => ({ key: `cat:${category}`, title: category, lines: byCategory.get(category) ?? [] }));
+  if (uncategorised.length > 0) groups.push({ key: 'no-category', title: NO_CATEGORY_TITLE, lines: uncategorised });
+  if (services.length > 0) groups.push({ key: 'services', title: SERVICES_TITLE, lines: services });
+  return groups;
+};
+
+const formatGroupTitle = (group: ClientOrderLineGroup): string => {
+  const count = group.lines.length;
+  const noun = group.key === 'services'
+    ? (count === 1 ? 'serviço' : 'serviços')
+    : (count === 1 ? 'produto' : 'produtos');
+  return `${group.title.toLocaleUpperCase('pt-PT')} — ${count} ${noun}`;
+};
 
 const pdfQty = (value: unknown): number => {
   const n = Number(value);
@@ -363,6 +450,27 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
   const lines = document.lines || [];
   const diagnostic = document.diagnostic || [];
   const originText = getOriginText(document);
+  const groups = groupLinesByCategory(lines);
+
+  // Uma linha da tabela. Os componentes de bundle partilham quote_line_id e
+  // distinguem-se pelo component_index (mesma chave de antes).
+  const renderLine = (line: ClientOrderDocumentPDFLine) => {
+    const subcategory = line.subcategory_name?.trim();
+    return (
+      <View key={`${line.quote_line_id}:${line.component_index ?? 0}`} style={styles.tableRow} wrap={false}>
+        <View style={columnStyles.check}>
+          <View style={styles.checkbox} />
+        </View>
+        <Text style={columnStyles.sku}>{line.product_sku || line.service_sku || '-'}</Text>
+        <View style={columnStyles.description}>
+          <Text style={{ fontSize: 8 }}>{line.product_name || line.service_name || ''}</Text>
+          {subcategory && <Text style={styles.subcategoryText}>{subcategory}</Text>}
+        </View>
+        <Text style={columnStyles.quantity}>{line.quantity}</Text>
+        <Text style={columnStyles.status}>{getLineStatusText(line)}</Text>
+      </View>
+    );
+  };
 
   return (
     <Document>
@@ -422,6 +530,8 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
           <Text style={styles.sectionTitle}>LINHAS DE PRODUTO</Text>
           <View style={styles.table}>
             <View style={styles.tableHeader}>
+              {/* Coluna da caixa de verificação: cabeçalho em branco. */}
+              <View style={columnStyles.check} />
               <Text style={columnStyles.sku}>SKU</Text>
               <Text style={columnStyles.description}>Produto</Text>
               <Text style={columnStyles.quantity}>Qtd.</Text>
@@ -431,14 +541,22 @@ export const ClientOrderDocumentPDF = ({ document, company }: ClientOrderDocumen
         </View>
 
         <View>
-          {lines.map((line) => (
-            <View key={`${line.quote_line_id}:${line.component_index ?? 0}`} style={styles.tableRow}>
-              <Text style={columnStyles.sku}>{line.product_sku || line.service_sku || '-'}</Text>
-              <Text style={columnStyles.description}>{line.product_name || line.service_name || ''}</Text>
-              <Text style={columnStyles.quantity}>{line.quantity}</Text>
-              <Text style={columnStyles.status}>{getLineStatusText(line)}</Text>
-            </View>
-          ))}
+          {groups.map((group) => {
+            const [firstLine, ...otherLines] = group.lines;
+            return (
+              <View key={group.key}>
+                {/* Título + primeira linha juntos, para o título nunca ficar
+                    sozinho no fundo da página. */}
+                <View wrap={false}>
+                  <View style={styles.groupTitleRow}>
+                    <Text style={styles.groupTitleText}>{formatGroupTitle(group)}</Text>
+                  </View>
+                  {firstLine && renderLine(firstLine)}
+                </View>
+                {otherLines.map(renderLine)}
+              </View>
+            );
+          })}
           {lines.length === 0 && (
             <View style={styles.tableRow}>
               <Text style={{ fontSize: 8 }}>Sem linhas de produto para este contrato.</Text>

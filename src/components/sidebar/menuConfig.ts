@@ -234,10 +234,10 @@ export const menuSections: MenuSection[] = [
       { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses" },
       { to: "/purchase-orders", icon: ShoppingCart, labelKey: "sidebar.purchaseOrders" },
       { to: "/stocks", icon: BarChart3, labelKey: "sidebar.stocks" },
-      // Fase 5.0F: só visível para quem tem inventory.view E client_contracts.view
-      // em simultâneo (decisão do plano — evita expor nomes/valores de contratos
-      // de clientes a quem só tem acesso a Inventário).
-      { to: "/client-orders", icon: ClipboardCheck, labelKey: "sidebar.clientOrders", permissions: ["inventory.view", "client_contracts.view"], requireAll: true },
+      // Permissão própria (client_orders.view): quem trabalha no armazém vê as
+      // encomendas de cliente sem precisar de acesso aos contratos. Os RPCs das
+      // encomendas verificam a mesma permissão.
+      { to: "/client-orders", icon: ClipboardCheck, labelKey: "sidebar.clientOrders", permission: "client_orders.view" },
       // Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/
       // inventory.edit controlam ações dentro da página, não a visibilidade do menu.
       { to: "/stock-counts", icon: ListChecks, labelKey: "sidebar.stockCounts", permission: "inventory.view" },
