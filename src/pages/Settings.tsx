@@ -18,7 +18,7 @@ import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useCompany } from "@/contexts/CompanyContext";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
-import PlanoFaturacaoCard from "@/components/settings/PlanoFaturacaoCard";
+import { BillingSummaryCard } from "@/components/billing/BillingSummaryCard";
 
 interface CustomField {
   id: string;
@@ -87,6 +87,8 @@ const Settings = () => {
   const [isCompanyAdmin, setIsCompanyAdmin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [userCompanyId, setUserCompanyId] = useState<string | null>(null);
+  // Organizations where the user holds an admin membership (for the billing card gate).
+  const [adminOrgIds, setAdminOrgIds] = useState<string[]>([]);
   
   const [fieldName, setFieldName] = useState("");
   const [fieldLabel, setFieldLabel] = useState("");
@@ -186,6 +188,9 @@ const Settings = () => {
             );
             const adminMembership = (memberships || []).find((m) => adminRoleIds.has(m.role_id));
 
+            setAdminOrgIds(
+              (memberships || []).filter((m) => adminRoleIds.has(m.role_id)).map((m) => m.organization_id),
+            );
             if (adminMembership) {
               setIsCompanyAdmin(true);
               setUserCompanyId(adminMembership.organization_id);
@@ -1163,8 +1168,12 @@ const Settings = () => {
           </Card>
         )}
 
-        {/* Plan & Billing Card - Only visible to company admins */}
-        {isCompanyAdmin && <PlanoFaturacaoCard organizationId={userCompanyId} />}
+        {/* Plan & Billing Card - display gate only: the server enforces who may manage billing
+            (fn_get_billing_overview.can_manage_billing / checkout 403). Billing is read for the
+            ACTIVE org; the RPC resolves the root payer's plan. */}
+        {activeCompany?.id && adminOrgIds.includes(activeCompany.id) && (
+          <BillingSummaryCard organizationId={activeCompany.id} />
+        )}
 
         {/* Channel Types Card - Only visible to admins */}
         {isAdmin && (

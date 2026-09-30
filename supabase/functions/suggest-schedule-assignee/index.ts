@@ -19,6 +19,7 @@ import { callAiGateway } from "../_shared/aiGateway.ts";
 import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
 import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
+import { requireActiveMembership } from "../_shared/orgMembership.ts";
 import { geocodePostalCode } from "../_shared/postcodeGeocode.ts";
 import { haversineKm } from "../_shared/distance.ts";
 import { buildLunchBreakConfig } from "../_shared/travelFeasibility.ts";
@@ -122,6 +123,15 @@ serve(async (req) => {
     if (!hasAccess) {
       return new Response(
         JSON.stringify({ error: "Access denied to this organization" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Visibility is not enough to spend an organization's credits: require an
+    // ACTIVE membership in exactly this organization, before any charge.
+    if (!(await requireActiveMembership(supabaseAdmin, caller.anewUserId, organization_id))) {
+      return new Response(
+        JSON.stringify({ error: "Forbidden" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

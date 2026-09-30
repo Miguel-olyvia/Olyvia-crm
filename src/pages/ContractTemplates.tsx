@@ -534,7 +534,7 @@ const ContractTemplates = () => {
           </div>
           {canManage && (
             <div className="flex items-center gap-2">
-              <TemplateFileImport onImport={handleFileImport} />
+              <TemplateFileImport onImport={handleFileImport} organizationId={activeCompany?.id} />
               <Button onClick={() => setIsEditorOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" /> Nova Minuta
               </Button>

@@ -14,6 +14,8 @@ import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_s
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
 import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
+import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
+import { requireActiveMembership } from "../_shared/orgMembership.ts";
 
 initSentry();
 
@@ -111,6 +113,33 @@ function streamWithToolCalls(
   });
 }
 
+/**
+ * SSE response carrying a fixed assistant message (OpenAI-style delta frames,
+ * same wire format as the gateway stream) — used when the AI credits run out
+ * or cannot be verified in the middle of the tool loop, so the user still
+ * gets what was already done plus a clear explanation instead of an error.
+ */
+function partialAnswerResponse(
+  message: string,
+  toolCalls: ToolCallView[],
+  corsHeaders: Record<string, string>,
+): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      if (toolCalls.length > 0) {
+        controller.enqueue(encoder.encode(`event: tool_calls\ndata: ${JSON.stringify({ toolCalls })}\n\n`));
+      }
+      controller.enqueue(
+        encoder.encode(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: message } }] })}\n\n`),
+      );
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+  return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "text/event-stream" } });
+}
+
 async function executeTool(
   ctx: ExecCtx,
   toolName: string,
@@ -203,6 +232,15 @@ Deno.serve(async (req) => {
       });
     }
     const ctx = built.ctx;
+
+    // buildExecCtx only proves the org is VISIBLE (hierarchy/association).
+    // Spending its AI credits requires an ACTIVE membership in exactly this org.
+    if (!(await requireActiveMembership(supabase, ctx.businessUserId, ctx.organizationId))) {
+      return new Response(
+        JSON.stringify({ error: "Forbidden" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // Rate limiting — persistent, DB-backed; scoped per authenticated user.
     const rateLimitIdentifier = ctx.businessUserId || ctx.organizationId;
@@ -371,6 +409,7 @@ Deno.serve(async (req) => {
       });
 
       if (!followUpResponse.ok || !followUpResponse.body) throw new Error("Follow-up AI request failed (pendingTool)");
+      await logAiGatewayUsage(supabase, ctx.organizationId as string, "ai-assistant", AI_CREDIT_COSTS["ai-assistant"]);
       return new Response(streamWithToolCalls(followUpResponse.body, [callView]), {
         headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
       });
@@ -435,7 +474,34 @@ Deno.serve(async (req) => {
       return skipped.length > 0 ? { ok: false, skipped } : { ok: true };
     }
 
+    // Credits: the first gateway call is covered by the up-front charge above.
+    // Every additional gateway call (tool-loop iterations after the first, and
+    // the final streaming call once tools ran) costs 1 more credit, so a long
+    // tool chain cannot cost the same as a single chat message. If the extra
+    // charge is blocked (out of credits, or the credits check is unavailable —
+    // fail closed) the loop stops and the user gets a partial answer.
+    const EXTRA_CALL_COST = 1;
+    const chargeExtraGatewayCall = async (): Promise<Response | null> => {
+      const extra = await checkAndConsumeAiCredits(supabase, ctx.organizationId as string, EXTRA_CALL_COST);
+      if (extra.blocked) {
+        const unavailable = extra.reason === "credits_check_unavailable";
+        return partialAnswerResponse(
+          unavailable
+            ? "Não consegui verificar os teus créditos de IA neste momento, por isso parei aqui. O que já foi feito ficou registado (ver acima); tenta continuar dentro de instantes."
+            : "Os teus créditos de IA acabaram a meio deste pedido, por isso parei aqui. O que já foi feito ficou registado (ver acima). Compra mais créditos ou aguarda a renovação do plano para continuar.",
+          allExecutedToolCalls,
+          corsHeaders,
+        );
+      }
+      if (pendingCreditsRefund) pendingCreditsRefund.amount = EXTRA_CALL_COST;
+      return null;
+    };
+
     for (let iter = 0; iter < MAX_TOOL_ITERATIONS; iter++) {
+      if (iter > 0) {
+        const stop = await chargeExtraGatewayCall();
+        if (stop) return stop;
+      }
       const response = await callAiGateway({
         model: MODEL,
         messages: [{ role: "system", content: fullSystemPrompt }, ...conversation],
@@ -470,6 +536,13 @@ Deno.serve(async (req) => {
       }
 
       const aiResponse = await response.json();
+      await logAiGatewayUsage(
+        supabase,
+        ctx.organizationId as string,
+        "ai-assistant",
+        iter === 0 ? AI_CREDIT_COSTS["ai-assistant"] : EXTRA_CALL_COST,
+        aiResponse.usage,
+      );
       const choice = aiResponse.choices?.[0];
       const toolCalls = choice?.message?.tool_calls;
 
@@ -811,13 +884,22 @@ Deno.serve(async (req) => {
     }
 
     // ---- Final streaming call (sem tools) — entrega texto ao cliente ----
+    // When tools ran, this is an additional gateway call and is charged.
+    const finalCallCharge = allExecutedToolCalls.length > 0 ? EXTRA_CALL_COST : 0;
+    if (finalCallCharge > 0) {
+      const stop = await chargeExtraGatewayCall();
+      if (stop) return stop;
+    }
     const streamResponse = await callAiGateway({
       model: MODEL,
       messages: [{ role: "system", content: fullSystemPrompt }, ...conversation],
       stream: true,
     });
-
     if (!streamResponse.ok || !streamResponse.body) throw new Error("Final stream AI request failed");
+    // Logged only for a successful response, with exactly what this call was
+    // charged (0 when no tools ran: the up-front credit already covered it and
+    // was logged with the first call). Streaming carries no usage metadata.
+    await logAiGatewayUsage(supabase, ctx.organizationId as string, "ai-assistant", finalCallCharge);
 
     if (allExecutedToolCalls.length > 0 || toolLoopAborted) {
       return new Response(streamWithToolCalls(streamResponse.body, allExecutedToolCalls), {
