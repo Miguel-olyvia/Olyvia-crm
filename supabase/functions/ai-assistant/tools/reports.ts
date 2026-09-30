@@ -3,10 +3,24 @@
 // Hard cap of 10 000 base rows per source; returns `truncated: true` if hit.
 
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
-import { can } from "../shared/authz.ts";
+import { can, requirePermission } from "../shared/authz.ts";
 
 const ROW_CAP = 10000;
 const BATCH = 200;
+
+// A edge corre com service role (bypassa RLS) — as permissões de leitura são
+// aplicadas aqui, espelhando os ProtectedRoute do App.tsx (/leads → leads.view,
+// /deals → deals.view, /proposals → proposals.view, /quotes → quotes.view,
+// /clients → clients.view, agenda → scheduling.items.view, /users → users.view).
+const VIEW_PERMISSION = {
+  leads: "leads.view",
+  deals: "deals.view",
+  proposals: "proposals.view",
+  quotes: "quotes.view",
+  clients: "clients.view",
+  schedule_items: "scheduling.items.view",
+  users: "users.view",
+} as const;
 
 // ---------- helpers ----------
 
@@ -93,34 +107,62 @@ const getStats: Handler = async (ctx, args): Promise<ToolResult> => {
     return q;
   };
 
-  const [leads, deals, proposals, quotes] = await Promise.all([
-    filterRange(supabase.from("anew_leads").select("id", { count: "exact", head: true }).eq("organization_id", organizationId)),
-    filterRange(supabase.from("deals").select("id", { count: "exact", head: true }).eq("organization_id", organizationId)),
-    filterRange(supabase.from("proposals").select("id", { count: "exact", head: true }).eq("organization_id", organizationId)),
-    filterRange(supabase.from("quotes").select("id", { count: "exact", head: true }).eq("organization_id", organizationId)),
-  ]);
-
-  let dashboard: any = null;
-  try {
-    const { data, error } = await supabase.rpc("get_lead_dashboard_stats", {
-      p_org_id: organizationId,
-      p_date_from: args?.date_from ?? null,
-      p_date_to: args?.date_to ?? null,
-    });
-    if (!error) dashboard = data;
-  } catch (_e) {
-    dashboard = null;
+  // Só as secções que o utilizador pode ver; as restantes vêm a null e são
+  // listadas em omitted_sections (em vez de falhar a tool inteira).
+  const allowed = {
+    leads: can(ctx, VIEW_PERMISSION.leads),
+    deals: can(ctx, VIEW_PERMISSION.deals),
+    proposals: can(ctx, VIEW_PERMISSION.proposals),
+    quotes: can(ctx, VIEW_PERMISSION.quotes),
+  };
+  const omitted = (Object.keys(allowed) as Array<keyof typeof allowed>).filter((k) => !allowed[k]);
+  if (omitted.length === Object.keys(allowed).length) {
+    return {
+      success: false,
+      code: "forbidden",
+      missing_permission: VIEW_PERMISSION.leads,
+      message: "Não tens permissão para ver estatísticas (falta: leads.view, deals.view, proposals.view ou quotes.view).",
+    };
   }
 
+  const countFor = (table: string, enabled: boolean): Promise<{ count: number | null } | null> =>
+    enabled
+      ? filterRange(supabase.from(table).select("id", { count: "exact", head: true }).eq("organization_id", organizationId))
+      : Promise.resolve(null);
+
+  const [leads, deals, proposals, quotes] = await Promise.all([
+    countFor("anew_leads", allowed.leads),
+    countFor("deals", allowed.deals),
+    countFor("proposals", allowed.proposals),
+    countFor("quotes", allowed.quotes),
+  ]);
+
+  // get_lead_dashboard_stats é um agregado de leads — só com leads.view.
+  let dashboard: any = null;
+  if (allowed.leads) {
+    try {
+      const { data, error } = await supabase.rpc("get_lead_dashboard_stats", {
+        p_org_id: organizationId,
+        p_date_from: args?.date_from ?? null,
+        p_date_to: args?.date_to ?? null,
+      });
+      if (!error) dashboard = data;
+    } catch (_e) {
+      dashboard = null;
+    }
+  }
+
+  const baseMsg = hasRange ? "Stats do período." : "Stats do mês.";
   return {
     success: true,
-    message: hasRange ? "Stats do período." : "Stats do mês.",
+    message: omitted.length > 0 ? `${baseMsg} Sem permissão para: ${omitted.join(", ")}.` : baseMsg,
     data: {
-      leads: leads.count || 0,
-      deals: deals.count || 0,
-      proposals: proposals.count || 0,
-      quotes: quotes.count || 0,
+      leads: allowed.leads ? (leads?.count || 0) : null,
+      deals: allowed.deals ? (deals?.count || 0) : null,
+      proposals: allowed.proposals ? (proposals?.count || 0) : null,
+      quotes: allowed.quotes ? (quotes?.count || 0) : null,
       dashboard,
+      ...(omitted.length > 0 ? { omitted_sections: omitted } : {}),
     },
   };
 };
@@ -156,6 +198,12 @@ const getPipelineReport: Handler = async (ctx, args): Promise<ToolResult> => {
   if (pipeline !== "deals" && pipeline !== "proposals") {
     return { success: false, message: `pipeline desconhecido: ${pipeline}` };
   }
+  const denied = requirePermission(
+    ctx,
+    pipeline === "deals" ? VIEW_PERMISSION.deals : VIEW_PERMISSION.proposals,
+    pipeline === "deals" ? "ver o pipeline de PPs" : "ver o pipeline de propostas",
+  );
+  if (denied) return denied;
 
   const { from, to } = defaultRange(args);
 
@@ -260,6 +308,22 @@ const getOverdueItems: Handler = async (ctx, args): Promise<ToolResult> => {
   const nowIso = new Date().toISOString();
   const todayIso = new Date().toISOString().slice(0, 10);
 
+  // Uma entidade por chamada — recusa só a entidade sem permissão de leitura.
+  const OVERDUE_LABEL: Record<string, string> = {
+    schedule_items: "ver itens de agenda",
+    deals: "ver PPs",
+    proposals: "ver propostas",
+    quotes: "ver orçamentos",
+  };
+  if (entity in OVERDUE_LABEL) {
+    const denied = requirePermission(
+      ctx,
+      VIEW_PERMISSION[entity as "schedule_items" | "deals" | "proposals" | "quotes"],
+      OVERDUE_LABEL[entity],
+    );
+    if (denied) return denied;
+  }
+
   if (entity === "schedule_items") {
     const { data, error } = await supabase
       .from("schedule_items")
@@ -348,6 +412,18 @@ const getTopClients: Handler = async (ctx, args): Promise<ToolResult> => {
   const metric = args?.metric ?? "deals";
   const limit = Math.min(Math.max(Number(args?.limit) || 10, 1), 20);
   const { from, to } = defaultRange(args);
+
+  // Ranking de clientes: exige clients.view e a leitura do módulo usado como métrica.
+  const deniedClients = requirePermission(ctx, VIEW_PERMISSION.clients, "ver clientes");
+  if (deniedClients) return deniedClients;
+  if (metric === "deals" || metric === "proposals" || metric === "quotes") {
+    const deniedMetric = requirePermission(
+      ctx,
+      VIEW_PERMISSION[metric as "deals" | "proposals" | "quotes"],
+      metric === "deals" ? "ver PPs" : metric === "proposals" ? "ver propostas" : "ver orçamentos",
+    );
+    if (deniedMetric) return deniedMetric;
+  }
 
   let rows: any[] = [];
   let clientCol: "client_id" | "cliente_id" = "client_id";
@@ -440,20 +516,50 @@ const getTeamPerformance: Handler = async (ctx, args): Promise<ToolResult> => {
   const limit = Math.min(Math.max(Number(args?.limit) || 20, 1), 50);
   const { from, to } = defaultRange(args);
 
+  // Performance por membro expõe a actividade de toda a equipa → exige users.view
+  // (mesmo gate do ecrã /users). Cada contagem só entra se o utilizador puder ver
+  // o módulo correspondente; as outras ficam a 0 e vêm em omitted_sections.
+  const deniedUsers = requirePermission(ctx, VIEW_PERMISSION.users, "ver a performance da equipa");
+  if (deniedUsers) return deniedUsers;
+  const allowed = {
+    leads: can(ctx, VIEW_PERMISSION.leads),
+    deals: can(ctx, VIEW_PERMISSION.deals),
+    quotes: can(ctx, VIEW_PERMISSION.quotes),
+    proposals: can(ctx, VIEW_PERMISSION.proposals),
+  };
+  const omitted = (Object.keys(allowed) as Array<keyof typeof allowed>).filter((k) => !allowed[k]);
+  if (omitted.length === Object.keys(allowed).length) {
+    return {
+      success: false,
+      code: "forbidden",
+      missing_permission: VIEW_PERMISSION.leads,
+      message: "Não tens permissão para ver a performance da equipa (falta: leads.view, deals.view, quotes.view ou proposals.view).",
+    };
+  }
+  const skipped = Promise.resolve({ data: [] as any[] });
+
   const [{ data: leads }, { data: deals }, { data: quotes }, { data: proposals }, { data: members }] = await Promise.all([
-    supabase.from("anew_leads").select("assigned_to")
-      .eq("organization_id", organizationId).gte("created_at", from).lte("created_at", to)
-      .is("deleted_at", null).not("assigned_to", "is", null).limit(ROW_CAP),
-    supabase.from("deals").select("assigned_to")
-      .eq("organization_id", organizationId).gte("created_at", from).lte("created_at", to)
-      .is("deleted_at", null).not("assigned_to", "is", null).limit(ROW_CAP),
-    supabase.from("quotes").select("assigned_to")
-      .eq("organization_id", organizationId).gte("created_at", from).lte("created_at", to)
-      .is("deleted_at", null).not("assigned_to", "is", null).limit(ROW_CAP),
-    supabase.from("proposals").select("assigned_to, is_deleted, deleted_at")
-      .eq("organization_id", organizationId).gte("created_at", from).lte("created_at", to)
-      .is("deleted_at", null).or("is_deleted.is.null,is_deleted.eq.false")
-      .not("assigned_to", "is", null).limit(ROW_CAP),
+    allowed.leads
+      ? supabase.from("anew_leads").select("assigned_to")
+        .eq("organization_id", organizationId).gte("created_at", from).lte("created_at", to)
+        .is("deleted_at", null).not("assigned_to", "is", null).limit(ROW_CAP)
+      : skipped,
+    allowed.deals
+      ? supabase.from("deals").select("assigned_to")
+        .eq("organization_id", organizationId).gte("created_at", from).lte("created_at", to)
+        .is("deleted_at", null).not("assigned_to", "is", null).limit(ROW_CAP)
+      : skipped,
+    allowed.quotes
+      ? supabase.from("quotes").select("assigned_to")
+        .eq("organization_id", organizationId).gte("created_at", from).lte("created_at", to)
+        .is("deleted_at", null).not("assigned_to", "is", null).limit(ROW_CAP)
+      : skipped,
+    allowed.proposals
+      ? supabase.from("proposals").select("assigned_to, is_deleted, deleted_at")
+        .eq("organization_id", organizationId).gte("created_at", from).lte("created_at", to)
+        .is("deleted_at", null).or("is_deleted.is.null,is_deleted.eq.false")
+        .not("assigned_to", "is", null).limit(ROW_CAP)
+      : skipped,
     supabase.from("anew_memberships").select("user_id")
       .eq("organization_id", organizationId).eq("status", "active"),
   ]);
@@ -478,9 +584,12 @@ const getTeamPerformance: Handler = async (ctx, args): Promise<ToolResult> => {
   const truncated = [leads, deals, quotes, proposals].some((arr) => (arr?.length || 0) >= ROW_CAP);
   return {
     success: true,
-    message: `Performance de ${out.length} membro(s).`,
+    message: omitted.length > 0
+      ? `Performance de ${out.length} membro(s). Sem permissão para: ${omitted.join(", ")} (contagens a 0).`
+      : `Performance de ${out.length} membro(s).`,
     data: out,
     truncated,
+    ...(omitted.length > 0 ? { omitted_sections: omitted } : {}),
     ...(truncated ? { note: "limite de 10000 linhas atingido em pelo menos uma fonte; agregado pode estar incompleto" } : {}),
   };
 };

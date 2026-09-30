@@ -2,10 +2,12 @@
 // Owns: list_workflow_rules, list_workflow_logs, execute_workflow.
 //
 // Gates:
-//  - list_workflow_rules: nenhum app-gate; RLS de workflow_automation_rules já
-//    filtra por organization_id ∈ visibleOrgIds OR organization_id IS NULL.
+//  - list_workflow_rules: a edge corre com service role (a RLS não se aplica);
+//    scope org + globais aplicado na query e, por regra, leitura do módulo da
+//    source_entity (<modulo>.view) ou workflows.edit — canViewWorkflowModule.
 //  - list_workflow_logs: workflow_execution_log NÃO tem organization_id (policy
-//    é USING(true)) — segurança é via rule_id IN visibleRuleIds calculado aqui.
+//    é USING(true)) — segurança é via rule_id IN visibleRuleIds calculado aqui,
+//    já filtrado pelas mesmas permissões por módulo.
 //  - execute_workflow: <modulo>.edit do source_entity (lead/deal/quote/proposal)
 //    + Fase 2 entity-role check defensivo quando o registo tem entity_id.
 //
@@ -13,7 +15,7 @@
 // chamado entity_id por motivos históricos; aqui o input público é record_id e
 // a tradução é feita no momento do invoke.
 
-import { can } from "../shared/authz.ts";
+import { can, canViewWorkflowModule, workflowModuleViewPermission } from "../shared/authz.ts";
 import { resolveEntityRolesInOrg } from "./activities.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
@@ -86,6 +88,28 @@ async function fetchVisibleRules(
   return merged;
 }
 
+// Gate de leitura comum a list_workflow_rules / list_workflow_logs.
+// Devolve o erro a devolver ao modelo, ou null se pode continuar.
+function workflowReadDenied(ctx: ExecCtx, sourceEntity: string | undefined): ToolResult | null {
+  if (sourceEntity) {
+    if (canViewWorkflowModule(ctx, sourceEntity)) return null;
+    const perm = workflowModuleViewPermission(sourceEntity);
+    return {
+      success: false,
+      code: "forbidden",
+      missing_permission: perm,
+      message: `Não tens permissão para ver workflows de ${sourceEntity} (falta: ${perm} ou workflows.edit).`,
+    };
+  }
+  if (SOURCE_ENTITIES.some((m) => canViewWorkflowModule(ctx, m))) return null;
+  return {
+    success: false,
+    code: "forbidden",
+    missing_permission: "workflows.edit",
+    message: "Não tens permissão para ver workflows (falta: workflows.edit ou leitura de leads/PPs/orçamentos/propostas).",
+  };
+}
+
 // ===== list_workflow_rules =====
 
 export const listWorkflowRulesDef: ToolDef = {
@@ -118,14 +142,18 @@ const listWorkflowRules: Handler = async (ctx, args): Promise<ToolResult> => {
   if (args?.source_entity !== undefined && !SOURCE_ENTITIES.includes(args.source_entity)) {
     return { success: false, message: `source_entity inválido. Aceites: ${SOURCE_ENTITIES.join(", ")}.` };
   }
+  const denied = workflowReadDenied(ctx, args?.source_entity);
+  if (denied) return denied;
 
   try {
-    const rows = await fetchVisibleRules(
+    const fetched = await fetchVisibleRules(
       supabase,
       organizationId,
       { is_active: args?.is_active, source_entity: args?.source_entity, trigger_type: args?.trigger_type },
       "id, name, description, is_active, source_entity, trigger_type, target_entity, action_type, execution_order, organization_id",
     );
+    // Só regras de módulos que o utilizador pode ver.
+    const rows = fetched.filter((r: any) => canViewWorkflowModule(ctx, r.source_entity));
     rows.sort((a, b) => (a.execution_order ?? 0) - (b.execution_order ?? 0));
     const items = rows.slice(0, limit);
     return { success: true, message: `${items.length} regra(s).`, data: items };
@@ -177,9 +205,12 @@ const listWorkflowLogs: Handler = async (ctx, args): Promise<ToolResult> => {
   if (args?.status !== undefined && !LOG_STATUSES.includes(args.status)) {
     return { success: false, message: `status inválido. Aceites: ${LOG_STATUSES.join(", ")}.` };
   }
+  const denied = workflowReadDenied(ctx, args?.source_entity);
+  if (denied) return denied;
 
   try {
-    const visibleRules = await fetchVisibleRules(supabase, organizationId, {}, "id");
+    const visibleRules = (await fetchVisibleRules(supabase, organizationId, {}, "id, source_entity"))
+      .filter((r: any) => canViewWorkflowModule(ctx, r.source_entity));
     const visibleRuleIds = visibleRules.map((r: any) => r.id);
     if (visibleRuleIds.length === 0) {
       return { success: true, message: "0 execuções.", data: [] };

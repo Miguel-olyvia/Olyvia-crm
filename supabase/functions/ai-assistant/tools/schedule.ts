@@ -1,6 +1,6 @@
 // Schedule tools — extracted verbatim from index.ts.
 
-import { can, permissionExists, requireWrite } from "../shared/authz.ts";
+import { can, permissionExists, requirePermission, requireWrite } from "../shared/authz.ts";
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -250,9 +250,17 @@ const createScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
 };
 
 
+// Leitura de schedule_items: a RLS exige scheduling.items.view (policy
+// "Users can view schedule items (scoped)"); a edge corre com service role, por
+// isso o mesmo gate é aplicado aqui. NOTA: o âmbito OWNED/TEAM/ORG da RLS
+// (get_schedule_item_scope_context) ainda não é replicado nestas tools.
+const SCHEDULE_ITEMS_VIEW = "scheduling.items.view";
+
 const listSchedule: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
+  const denied = requirePermission(ctx, SCHEDULE_ITEMS_VIEW, "ver a agenda");
+  if (denied) return denied;
   const today = new Date().toISOString().split("T")[0];
   const from = args?.from_date || today;
   const to = args?.to_date || from;
@@ -390,6 +398,8 @@ export const getScheduleItemDef: ToolDef = {
 const getScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
+  const denied = requirePermission(ctx, SCHEDULE_ITEMS_VIEW, "ver itens de agenda");
+  if (denied) return denied;
   if (!args?.item_id || !UUID_RE.test(String(args.item_id))) return { success: false, message: "item_id inválido." };
 
   const { data: item, error } = await supabase
@@ -709,6 +719,8 @@ const listMyAgenda: Handler = async (ctx, args): Promise<ToolResult> => {
   const { supabase, organizationId, businessUserId } = ctx;
   if (!organizationId) return { success: false, message: "Organização não definida." };
   if (!businessUserId) return { success: false, message: "Utilizador não identificado." };
+  const denied = requirePermission(ctx, SCHEDULE_ITEMS_VIEW, "ver a agenda");
+  if (denied) return denied;
 
   const today = new Date().toISOString().split("T")[0];
   const from = args?.from || today;

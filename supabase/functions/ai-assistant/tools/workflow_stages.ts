@@ -7,13 +7,14 @@
 //  - quote    → quote_workflow_stages      (escrita ok; SEM trigger updated_at; sem created_by)
 //  - deal     → deal_stages                (READ-ONLY via agente; tabela global sem organization_id)
 //
-// Edge corre com service role → bypassa RLS. Gate aplicado: workflows.edit.
+// Edge corre com service role → bypassa RLS. Gate de escrita: workflows.edit.
+// Gate de leitura (list_workflow_stages): <modulo>.view ou workflows.edit.
 //
 // normalizeStageOrder é best-effort, sem transacção. updateWorkflowStage força
 // updated_at=now() no patch para garantir reposicionamento determinístico em
 // proposal/quote, onde não há trigger BEFORE UPDATE.
 
-import { can } from "../shared/authz.ts";
+import { can, canViewWorkflowModule, workflowModuleViewPermission } from "../shared/authz.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -155,6 +156,16 @@ const listWorkflowStages: Handler = async (ctx, args): Promise<ToolResult> => {
     return { success: false, message: `module inválido. Aceites: ${MODULES.join(", ")}.` };
   }
   const mod: Module = args.module;
+  // Leitura: ver o módulo (<modulo>.view) ou gerir workflows (workflows.edit).
+  if (!canViewWorkflowModule(ctx, mod)) {
+    const perm = workflowModuleViewPermission(mod);
+    return {
+      success: false,
+      code: "forbidden",
+      missing_permission: perm,
+      message: `Não tens permissão para ver os stages de ${mod} (falta: ${perm} ou workflows.edit).`,
+    };
+  }
   let limit = 25;
   if (args?.limit !== undefined) {
     const n = Number(args.limit);

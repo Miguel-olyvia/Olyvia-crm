@@ -29,6 +29,9 @@ export type ToolResult = {
   candidate_name?: string | null;
   match_field?: string;
   proposed_payload?: any;
+  // Tipo de confirmação pedida à UI. Ausente/null = anti-duplicação (create_lead/create_contact).
+  confirmation_type?: "send_email" | null;
+  summary?: any;
   [k: string]: any;
 };
 

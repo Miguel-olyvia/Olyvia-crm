@@ -14,6 +14,32 @@ export function can(ctx: ExecCtx, permissionCode: string): boolean {
   return permissionSetHas(permSet(ctx), permissionCode);
 }
 
+// Passa se o utilizador tiver pelo menos uma das permissões indicadas.
+export function canAny(ctx: ExecCtx, permissionCodes: readonly string[]): boolean {
+  return permissionCodes.some((code) => can(ctx, code));
+}
+
+// Leitura de configuração de workflows (regras, logs, stages, stage actions) por
+// módulo. Não existe permissão "workflows.view": a config é aberta a partir do
+// ecrã de cada módulo, por isso basta ver o módulo (<modulo>.view) ou gerir
+// workflows (workflows.edit, mesmo gate das mutations).
+const WORKFLOW_MODULE_VIEW: Record<string, string> = {
+  lead: "leads.view",
+  deal: "deals.view",
+  quote: "quotes.view",
+  proposal: "proposals.view",
+};
+
+export function canViewWorkflowModule(ctx: ExecCtx, module: string | null | undefined): boolean {
+  if (can(ctx, "workflows.edit")) return true;
+  const perm = module ? WORKFLOW_MODULE_VIEW[module] : undefined;
+  return !!perm && can(ctx, perm);
+}
+
+export function workflowModuleViewPermission(module: string): string {
+  return WORKFLOW_MODULE_VIEW[module] ?? "workflows.edit";
+}
+
 export type ForbiddenResult = {
   success: false;
   code: "forbidden";

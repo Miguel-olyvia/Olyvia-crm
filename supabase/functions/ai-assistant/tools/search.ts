@@ -1,13 +1,26 @@
 // Fase 4.E — search_entities (pesquisa global cross-kind)
 // Devolve uma mistura de leads/clients/deals/quotes/proposals/contracts
 // num único payload, evitando ter de chamar 7 tools distintas.
-// Read-only; RLS controla visibilidade. Org-scoping via <table>.organization_id directo.
+// Read-only. A edge corre com service role, por isso a RLS NÃO se aplica aqui:
+// org-scoping via <table>.organization_id directo e permissões de leitura por kind
+// aplicadas no handler (KIND_VIEW_PERMISSION). Kinds sem permissão são ignorados.
 
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
+import { can } from "../shared/authz.ts";
 
 type Kind = "lead" | "client" | "deal" | "quote" | "proposal" | "contract";
 
 const ALL_KINDS: Kind[] = ["lead", "client", "deal", "quote", "proposal", "contract"];
+
+// Mesmos gates dos ProtectedRoute do App.tsx para cada ecrã.
+const KIND_VIEW_PERMISSION: Record<Kind, string> = {
+  lead: "leads.view",
+  client: "clients.view",
+  deal: "deals.view",
+  quote: "quotes.view",
+  proposal: "proposals.view",
+  contract: "client_contracts.view",
+};
 
 type Item = {
   kind: Kind;
@@ -66,6 +79,17 @@ const search_entities: Handler = async (ctx, args): Promise<ToolResult> => {
   if (Array.isArray(args?.kinds) && args.kinds.length > 0) {
     const requested = (args.kinds as string[]).filter((k) => (ALL_KINDS as string[]).includes(k));
     if (requested.length > 0) kinds = requested as Kind[];
+  }
+
+  const forbiddenKinds = kinds.filter((k) => !can(ctx, KIND_VIEW_PERMISSION[k]));
+  kinds = kinds.filter((k) => !forbiddenKinds.includes(k));
+  if (kinds.length === 0) {
+    return {
+      success: false,
+      code: "forbidden",
+      missing_permission: KIND_VIEW_PERMISSION[forbiddenKinds[0]],
+      message: `Não tens permissão para pesquisar estes registos (falta: ${forbiddenKinds.map((k) => KIND_VIEW_PERMISSION[k]).join(", ")}).`,
+    };
   }
 
   const pattern = `%${escapeIlike(rawQuery)}%`;
@@ -227,7 +251,13 @@ const search_entities: Handler = async (ctx, args): Promise<ToolResult> => {
   return {
     success: true,
     message: `${items.length} resultado(s) para "${rawQuery}".`,
-    data: { items, counts, query: rawQuery, kinds_searched: kinds },
+    data: {
+      items,
+      counts,
+      query: rawQuery,
+      kinds_searched: kinds,
+      ...(forbiddenKinds.length > 0 ? { kinds_skipped_forbidden: forbiddenKinds } : {}),
+    },
   };
 };
 

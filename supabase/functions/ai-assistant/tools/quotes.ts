@@ -1,6 +1,7 @@
 // Quote tools — extracted verbatim from index.ts.
 
 import { requireWrite, requireActionPermission, requirePermission } from "../shared/authz.ts";
+import { buildSendEmailConfirmation, isUserConfirmed } from "../shared/emailConfirmation.ts";
 
 // Estados em que um orçamento aceita escrita populadora (linhas, descontos, fees básicos).
 // Fonte: schema `quotes.estado` — apenas 'rascunho' é mutável sem efeito externo.
@@ -412,7 +413,7 @@ export const sendQuoteDef: ToolDef = {
   type: "function",
   function: {
     name: "send_quote",
-    description: "Envia um orçamento por email via send-quote-email.",
+    description: "Envia um orçamento por email via send-quote-email. A chamada NÃO envia logo: devolve um cartão de confirmação ao utilizador (número, destinatários, assunto, mensagem) e o email só é enviado quando o utilizador carrega em \"Enviar\". Nunca digas que o email foi enviado sem um resultado com success=true.",
     parameters: {
       type: "object",
       properties: {
@@ -457,13 +458,26 @@ const sendQuote: Handler = async (ctx, args): Promise<ToolResult> => {
 
   const { data: q } = await supabase
     .from("quotes")
-    .select("id")
+    .select("id, quote_number, title")
     .eq("id", args.quote_id)
     .eq("organization_id", organizationId)
     .maybeSingle();
   if (!q) return { success: false, message: "Orçamento não encontrado ou fora de scope." };
 
   if (!authHeader) return { success: false, message: "Sessão sem token — não é possível invocar send-quote-email." };
+
+  // Envio de email é acção externa irreversível: sem confirmação explícita do
+  // utilizador na UI (flag só aceite pelo caminho pendingTool) devolve o cartão.
+  if (!isUserConfirmed(args)) {
+    return buildSendEmailConfirmation({
+      documentType: "quote",
+      documentNumber: q.quote_number,
+      documentTitle: q.title,
+      recipientEmail: recipient,
+      args,
+    });
+  }
+
   const body: Record<string, any> = { quote_id: args.quote_id, recipient_email: recipient };
   if (args.recipient_name) body.recipient_name = String(args.recipient_name);
   if (Array.isArray(args.recipients)) body.recipients = args.recipients;

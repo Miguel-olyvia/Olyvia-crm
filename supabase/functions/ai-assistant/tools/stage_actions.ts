@@ -8,9 +8,10 @@
 //  - proposal → proposal_stage_actions   (READ-ONLY via agente — executor NÃO lê esta tabela)
 //
 // Gate de escrita: workflows.edit (paridade com workflow_automation_rules).
+// Gate de leitura (list_stage_actions): <modulo>.view ou workflows.edit.
 // Bloqueio de duplicado aplica-se SÓ enquanto a action existente está is_active=true.
 
-import { can } from "../shared/authz.ts";
+import { can, canViewWorkflowModule, workflowModuleViewPermission } from "../shared/authz.ts";
 import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -80,6 +81,16 @@ const listStageActions: Handler = async (ctx, args): Promise<ToolResult> => {
   }
   const mod: Module = args.module;
   if (mod !== "deal" && !organizationId) return { success: false, message: "Organização não definida." };
+  // Leitura: ver o módulo (<modulo>.view) ou gerir workflows (workflows.edit).
+  if (!canViewWorkflowModule(ctx, mod)) {
+    const perm = workflowModuleViewPermission(mod);
+    return {
+      success: false,
+      code: "forbidden",
+      missing_permission: perm,
+      message: `Não tens permissão para ver as actions de ${mod} (falta: ${perm} ou workflows.edit).`,
+    };
+  }
   if (args?.stage_id !== undefined && !UUID_RE.test(String(args.stage_id))) {
     return { success: false, message: "stage_id inválido." };
   }

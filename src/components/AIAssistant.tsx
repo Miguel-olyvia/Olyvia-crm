@@ -23,16 +23,32 @@ import {
 import { 
   MessageCircle, Send, Loader2, Star, X, 
   ExternalLink, Sparkles, Trash2, ChevronDown,
-  History, Plus, MessageSquare, AlertTriangle
+  History, Plus, MessageSquare, AlertTriangle, Mail
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { pt } from "date-fns/locale";
 import olyviaIcon from "@/assets/olyvia-icon.png";
 import { ToolCallList, type ToolCallView } from "@/components/ai-assistant/ToolCallList";
 
+// Resumo devolvido pelo servidor para confirmar envios de email (send_quote / send_proposal).
+interface SendEmailSummary {
+  document_type: "quote" | "proposal";
+  document_number: string | null;
+  document_title: string | null;
+  recipient_email: string;
+  recipient_name: string | null;
+  recipients: string[];
+  cc: string[];
+  subject: string | null;
+  message_preview: string | null;
+}
+
 interface PendingConfirmation {
   tool: string;
   args: any;
+  // null/ausente = anti-duplicação (create_lead / create_contact).
+  confirmation_type?: "send_email" | null;
+  summary?: SendEmailSummary | null;
   candidate_entity_id?: string | null;
   candidate_name?: string | null;
   match_field?: string | null;
@@ -49,6 +65,7 @@ interface Message {
   created_at?: string;
   confirmation?: PendingConfirmation;
   confirmationResolved?: boolean;
+  confirmationCancelled?: boolean;
   toolCalls?: ToolCallView[];
 }
 
@@ -85,6 +102,7 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const orgIdRef = useRef<string | null>(activeCompany?.id ?? null);
+  const sendingConfirmationsRef = useRef<Set<number>>(new Set());
 
   // Isolate conversations by organization: when the active org changes, drop the
   // in-memory conversation so messages from different orgs never mix.
@@ -559,6 +577,8 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
   const resolveConfirmation = (msgIdx: number, choice: "reuse" | "create") => {
     const target = messages[msgIdx];
     if (!target?.confirmation || target.confirmationResolved) return;
+    // Cartão de envio de email tem fluxo próprio (confirmSendEmail / cancelSendEmail).
+    if (target.confirmation.confirmation_type === "send_email") return;
     const conf = target.confirmation;
     const args = { ...(conf.args || {}) };
     if (choice === "reuse") {
@@ -573,6 +593,35 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
       delete args.confirmed_entity_id;
     }
     streamChat("", { pendingTool: { name: conf.tool, args }, resolvingMessageIdx: msgIdx });
+  };
+
+  // Confirmação de envio de email: "Enviar" reenvia a tool com user_confirmed=true
+  // (o servidor só aceita esta flag pelo caminho pendingTool); "Cancelar" não chama o servidor.
+  const confirmSendEmail = (msgIdx: number) => {
+    const target = messages[msgIdx];
+    if (!target?.confirmation || target.confirmationResolved) return;
+    if (target.confirmation.confirmation_type !== "send_email") return;
+    // Evita envio duplicado por duplo clique antes de isLoading ficar activo.
+    if (sendingConfirmationsRef.current.has(msgIdx)) return;
+    sendingConfirmationsRef.current.add(msgIdx);
+    const conf = target.confirmation;
+    const args = { ...(conf.args || {}), user_confirmed: true };
+    streamChat("", { pendingTool: { name: conf.tool, args }, resolvingMessageIdx: msgIdx })
+      .finally(() => sendingConfirmationsRef.current.delete(msgIdx));
+  };
+
+  const cancelSendEmail = async (msgIdx: number) => {
+    const target = messages[msgIdx];
+    if (!target?.confirmation || target.confirmationResolved) return;
+    if (sendingConfirmationsRef.current.has(msgIdx)) return;
+    const note: Message = { role: "assistant", content: "Envio cancelado." };
+    setMessages(prev => [
+      ...prev.map((m, i) =>
+        i === msgIdx ? { ...m, confirmationResolved: true, confirmationCancelled: true } : m,
+      ),
+      note,
+    ]);
+    if (conversationId) await saveMessage(conversationId, note);
   };
 
   const handleSend = () => {
@@ -777,8 +826,82 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
                           </div>
                         )}
 
+                        {/* Confirmation card (envio de email) */}
+                        {msg.role === "assistant" && msg.confirmation?.confirmation_type === "send_email" && (
+                          <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-3 space-y-2">
+                            <div className="flex items-start gap-2">
+                              <Mail className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                              <div className="text-xs space-y-0.5 min-w-0">
+                                <p className="text-sm font-semibold">Enviar email?</p>
+                                {msg.confirmation.summary ? (
+                                  <>
+                                    <p>
+                                      <span className="font-semibold">
+                                        {msg.confirmation.summary.document_type === "quote" ? "Orçamento:" : "Proposta:"}
+                                      </span>{" "}
+                                      {msg.confirmation.summary.document_number || msg.confirmation.summary.document_title || "—"}
+                                      {msg.confirmation.summary.document_number && msg.confirmation.summary.document_title
+                                        ? ` — ${msg.confirmation.summary.document_title}`
+                                        : ""}
+                                    </p>
+                                    <p className="break-all">
+                                      <span className="font-semibold">Para:</span>{" "}
+                                      {msg.confirmation.summary.recipient_name
+                                        ? `${msg.confirmation.summary.recipient_name} <${msg.confirmation.summary.recipient_email}>`
+                                        : msg.confirmation.summary.recipient_email}
+                                      {msg.confirmation.summary.recipients.length > 0
+                                        ? `, ${msg.confirmation.summary.recipients.join(", ")}`
+                                        : ""}
+                                    </p>
+                                    {msg.confirmation.summary.cc.length > 0 && (
+                                      <p className="break-all">
+                                        <span className="font-semibold">CC:</span> {msg.confirmation.summary.cc.join(", ")}
+                                      </p>
+                                    )}
+                                    <p>
+                                      <span className="font-semibold">Assunto:</span>{" "}
+                                      {msg.confirmation.summary.subject || <span className="italic text-muted-foreground">assunto por defeito</span>}
+                                    </p>
+                                    {msg.confirmation.summary.message_preview && (
+                                      <p className="whitespace-pre-wrap">
+                                        <span className="font-semibold">Mensagem:</span> {msg.confirmation.summary.message_preview}
+                                      </p>
+                                    )}
+                                  </>
+                                ) : (
+                                  <p className="text-muted-foreground">Ferramenta: {msg.confirmation.tool}</p>
+                                )}
+                              </div>
+                            </div>
+                            {msg.confirmationResolved ? (
+                              <p className="text-xs text-muted-foreground italic">
+                                {msg.confirmationCancelled ? "Envio cancelado." : "Confirmação enviada."}
+                              </p>
+                            ) : (
+                              <div className="flex gap-2 pt-1">
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  disabled={isLoading}
+                                  onClick={() => confirmSendEmail(idx)}
+                                >
+                                  Enviar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={isLoading}
+                                  onClick={() => cancelSendEmail(idx)}
+                                >
+                                  Cancelar
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* Confirmation card (anti-duplication) */}
-                        {msg.role === "assistant" && msg.confirmation && (
+                        {msg.role === "assistant" && msg.confirmation && msg.confirmation.confirmation_type !== "send_email" && (
                           <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 p-3 space-y-2">
                             <div className="flex items-start gap-2">
                               <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />

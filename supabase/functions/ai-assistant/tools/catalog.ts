@@ -3,9 +3,48 @@
 // Para cada kind: 2 queries (.ilike em name, .ilike em sku), união + dedupe por id em TS,
 // ranking simples (starts-with > contains), corte para `limit`.
 
-import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
+import type { ExecCtx, Handler, ToolDef, ToolResult } from "../shared/types.ts";
+import { canAny } from "../shared/authz.ts";
 
 type Kind = "product" | "service" | "bundle";
+
+// Permissões de leitura do catálogo. A edge corre com service role (bypassa RLS),
+// por isso o gate é aplicado aqui. Além da permissão de ver o catálogo (products.view
+// — também usada pelo ecrã /bundles — e services.view), quem monta orçamentos,
+// propostas, vendas directas ou encomendas de cliente precisa de pesquisar artigos
+// no seletor desses ecrãs, por isso essas permissões de criação/edição também dão acesso.
+const CATALOG_BUILDER_PERMISSIONS = [
+  "quotes.create",
+  "quotes.edit",
+  "proposals.create",
+  "proposals.edit",
+  "direct_sales.create",
+  "direct_sales.edit",
+  "client_orders.create",
+  "client_orders.edit",
+] as const;
+
+const KIND_VIEW_PERMISSIONS: Record<Kind, readonly string[]> = {
+  product: ["products.view", ...CATALOG_BUILDER_PERMISSIONS],
+  service: ["services.view", ...CATALOG_BUILDER_PERMISSIONS],
+  bundle: ["products.view", ...CATALOG_BUILDER_PERMISSIONS],
+};
+
+function canReadKind(ctx: ExecCtx, kind: Kind): boolean {
+  return canAny(ctx, KIND_VIEW_PERMISSIONS[kind]);
+}
+
+function catalogForbidden(kind: Kind | "all"): ToolResult {
+  const primary = kind === "service" ? "services.view" : "products.view";
+  return {
+    success: false,
+    code: "forbidden",
+    missing_permission: primary,
+    message: `Não tens permissão para ver o catálogo (falta: ${
+      kind === "all" ? "products.view ou services.view" : primary
+    }, ou permissão de criar orçamentos/propostas/vendas/encomendas).`,
+  };
+}
 type Item = {
   kind: Kind;
   id: string;
@@ -60,8 +99,12 @@ const search_products: Handler = async (ctx, args): Promise<ToolResult> => {
   const kindArg: "product" | "service" | "bundle" | "all" =
     args?.kind && ["product", "service", "bundle", "all"].includes(args.kind) ? args.kind : "all";
 
-  const kinds: Kind[] =
+  const requestedKinds: Kind[] =
     kindArg === "all" ? ["product", "service", "bundle"] : [kindArg as Kind];
+  // Só pesquisa os kinds que o utilizador pode ver; sem nenhum → forbidden.
+  const kinds = requestedKinds.filter((k) => canReadKind(ctx, k));
+  if (kinds.length === 0) return catalogForbidden(kindArg);
+  const skippedKinds = requestedKinds.filter((k) => !kinds.includes(k));
 
   const pattern = `%${escapeIlike(rawQuery)}%`;
   const PER_QUERY_LIMIT = 50;
@@ -143,7 +186,13 @@ const search_products: Handler = async (ctx, args): Promise<ToolResult> => {
 
   return {
     success: true,
-    data: { items, counts, query: rawQuery },
+    ...(skippedKinds.length > 0 ? { message: `Sem permissão para pesquisar: ${skippedKinds.join(", ")}.` } : {}),
+    data: {
+      items,
+      counts,
+      query: rawQuery,
+      ...(skippedKinds.length > 0 ? { kinds_skipped_forbidden: skippedKinds } : {}),
+    },
   };
 };
 
@@ -180,6 +229,7 @@ function clampListLimit(n: any): number {
 const list_products: Handler = async (ctx, args): Promise<ToolResult> => {
   const orgId = ctx.organizationId;
   if (!orgId) return { success: false, message: "Organização não definida." };
+  if (!canReadKind(ctx, "product")) return catalogForbidden("product");
   const onlyActive = args?.is_active !== false;
   const limit = clampListLimit(args?.limit);
   let q = ctx.supabase
@@ -200,6 +250,7 @@ const list_products: Handler = async (ctx, args): Promise<ToolResult> => {
 const list_services: Handler = async (ctx, args): Promise<ToolResult> => {
   const orgId = ctx.organizationId;
   if (!orgId) return { success: false, message: "Organização não definida." };
+  if (!canReadKind(ctx, "service")) return catalogForbidden("service");
   const onlyActive = args?.is_active !== false;
   const limit = clampListLimit(args?.limit);
   let q = ctx.supabase
@@ -220,6 +271,7 @@ const list_services: Handler = async (ctx, args): Promise<ToolResult> => {
 const list_bundles: Handler = async (ctx, args): Promise<ToolResult> => {
   const orgId = ctx.organizationId;
   if (!orgId) return { success: false, message: "Organização não definida." };
+  if (!canReadKind(ctx, "bundle")) return catalogForbidden("bundle");
   const onlyActive = args?.is_active !== false;
   const limit = clampListLimit(args?.limit);
   let q = ctx.supabase

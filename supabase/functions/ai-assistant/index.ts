@@ -4,6 +4,7 @@ import { buildExecCtx } from "./shared/context.ts";
 import { fetchSystemPrompt, fetchHelpKnowledge } from "./shared/prompt.ts";
 import { summarizeToolArgs } from "./shared/summarizeArgs.ts";
 import { resolveEntityId, type EntityKind } from "./shared/resolveEntityId.ts";
+import { USER_CONFIRMED_ARG } from "./shared/emailConfirmation.ts";
 import { TOOLS, HANDLERS, selectToolsForContext } from "./tools/registry.ts";
 import type { ExecCtx, ToolResult } from "./shared/types.ts";
 
@@ -50,6 +51,30 @@ const requestSchema = z.object({
 const RATE_LIMIT_BUCKET = "ai-assistant";
 const RATE_LIMIT_MAX_ATTEMPTS = 30;
 const RATE_LIMIT_WINDOW_MINUTES = 1;
+
+// Tools que podem ser re-executadas pelo caminho pendingTool (confirmação
+// resolvida pelo utilizador na UI). Só entram aqui tools que devolvem
+// requires_confirmation e cujo cartão é tratado em AIAssistant.tsx:
+//  - create_lead / create_contact → anti-duplicação (tools/crm.ts)
+//  - send_quote / send_proposal   → confirmação de envio de email
+// Qualquer outro nome vindo do cliente é rejeitado (400) antes de consumir
+// créditos — o pendingTool salta o filtro de tools por página e o guard de
+// catalogSearchIds, por isso não pode ser uma porta genérica para HANDLERS.
+const PENDING_TOOL_ALLOWLIST = new Set(["create_lead", "create_contact", "send_quote", "send_proposal"]);
+
+function confirmationView(toolName: string, args: unknown, result: ToolResult) {
+  return {
+    tool: toolName,
+    args,
+    confirmation_type: result.confirmation_type ?? null,
+    summary: result.summary ?? null,
+    candidate_entity_id: result.candidate_entity_id ?? null,
+    candidate_name: result.candidate_name ?? null,
+    match_field: result.match_field ?? null,
+    proposed_payload: result.proposed_payload ?? null,
+    message: result.message ?? "É necessário confirmar.",
+  };
+}
 
 type ToolCallView = {
   id: string;
@@ -179,6 +204,16 @@ Deno.serve(async (req) => {
       pendingTool = null,
     } = parsed.data;
     const organizationId: string | null = bodyOrgId || companyId || null;
+
+    // pendingTool só para tools com confirmação na UI. Rejeitado aqui, antes do
+    // rate limit e do débito de créditos, para não cobrar pedidos inválidos.
+    if (pendingTool && !PENDING_TOOL_ALLOWLIST.has(pendingTool.name)) {
+      console.warn(`[ai-assistant] pendingTool rejeitado: "${pendingTool.name}" fora da allowlist.`);
+      return new Response(
+        JSON.stringify({ error: `A ferramenta "${pendingTool.name}" não pode ser confirmada por este caminho.` }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
 
     // Tool filtering: send only the subset of the 123 registered tools that's
     // plausibly relevant to the page the user is on (see selectToolsForContext
@@ -317,9 +352,11 @@ Deno.serve(async (req) => {
     const trimmedMessages = messages.slice(-20);
 
     // ---- pendingTool path: user resolved a confirmation in the UI; bypass first model call ----
-    // NOTA: pendingTool é usado para confirmações de UI (ex.: anti-dup de entidades) e
-    // não passa pelo guard de catalogSearchIds. Se algum dia for usado para
-    // add_quote_items / create_quote(items[]), aplicar o mesmo guard aqui ou rejeitar.
+    // NOTA: pendingTool é usado para confirmações de UI (anti-dup de entidades e
+    // envio de email) e não passa pelo guard de catalogSearchIds nem pelo filtro de
+    // tools por página. Por isso só aceita nomes de PENDING_TOOL_ALLOWLIST (validado
+    // acima, antes do débito de créditos). É também o ÚNICO caminho em que
+    // USER_CONFIRMED_ARG chega à tool — no loop do modelo é sempre retirado.
     if (pendingTool && typeof pendingTool === "object" && typeof pendingTool.name === "string") {
       const args = (pendingTool.args && typeof pendingTool.args === "object") ? pendingTool.args : {};
       const toolCallId = `pending_${Date.now()}`;
@@ -333,15 +370,7 @@ Deno.serve(async (req) => {
         return new Response(
           JSON.stringify({
             type: "confirmation",
-            confirmations: [{
-              tool: pendingTool.name,
-              args,
-              candidate_entity_id: result.candidate_entity_id ?? null,
-              candidate_name: result.candidate_name ?? null,
-              match_field: result.match_field ?? null,
-              proposed_payload: result.proposed_payload ?? null,
-              message: result.message ?? "É necessário confirmar.",
-            }],
+            confirmations: [confirmationView(pendingTool.name, args, result)],
             toolCalls: [callView],
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -488,6 +517,16 @@ Deno.serve(async (req) => {
             toolArgs = JSON.parse(tc.function.arguments || "{}");
           } catch (e) {
             console.error(`Bad args for ${toolName}:`, e);
+          }
+          // SEGURANÇA: USER_CONFIRMED_ARG representa a confirmação do utilizador na UI
+          // (ex.: envio de email) e só pode chegar pelo caminho pendingTool. O modelo
+          // nunca o pode definir — retirado aqui para todas as tools, antes de
+          // qualquer resolução de IDs ou execução.
+          if (toolArgs && typeof toolArgs === "object" && !Array.isArray(toolArgs) &&
+              Object.prototype.hasOwnProperty.call(toolArgs, USER_CONFIRMED_ARG)) {
+            console.warn(`[ai-assistant] ${USER_CONFIRMED_ARG} retirado dos args pedidos pelo modelo para ${toolName}.`);
+            const { [USER_CONFIRMED_ARG]: _ignored, ...rest } = toolArgs;
+            toolArgs = rest;
           }
           const startedAt = performance.now();
 
@@ -779,15 +818,7 @@ Deno.serve(async (req) => {
         return new Response(
           JSON.stringify({
             type: "confirmation",
-            confirmations: pendingConfirmations.map((r) => ({
-              tool: r.tool_name,
-              args: r.tool_args,
-              candidate_entity_id: r.result.candidate_entity_id ?? null,
-              candidate_name: r.result.candidate_name ?? null,
-              match_field: r.result.match_field ?? null,
-              proposed_payload: r.result.proposed_payload ?? null,
-              message: r.result.message ?? "É necessário confirmar.",
-            })),
+            confirmations: pendingConfirmations.map((r) => confirmationView(r.tool_name, r.tool_args, r.result)),
             toolCalls: allExecutedToolCalls,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } },

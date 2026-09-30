@@ -1,7 +1,8 @@
 // Unit tests for requireActionPermission + permission alias expansion.
 // Run: deno test supabase/functions/ai-assistant/shared/authz.test.ts
 import { assertEquals } from "https://deno.land/std@0.224.0/assert/mod.ts";
-import { requireActionPermission, can } from "./authz.ts";
+import { requireActionPermission, can, canAny, canViewWorkflowModule } from "./authz.ts";
+import { isUserConfirmed, buildSendEmailConfirmation } from "./emailConfirmation.ts";
 import type { ExecCtx } from "./types.ts";
 
 function mkCtx(perms: string[], opts: Partial<ExecCtx> = {}): ExecCtx {
@@ -194,3 +195,43 @@ Deno.test("set_quote_model: dono + rascunho + quotes.create => permite", () => {
   assertEquals(r, null);
 });
 
+
+// ── canAny / canViewWorkflowModule ──
+Deno.test("canAny: passa com uma das permissões (inclui alias .update)", () => {
+  assertEquals(canAny(mkCtx(["quotes.update"]), ["products.view", "quotes.edit"]), true);
+  assertEquals(canAny(mkCtx(["leads.view"]), ["products.view", "quotes.edit"]), false);
+});
+
+Deno.test("canViewWorkflowModule: <modulo>.view ou workflows.edit", () => {
+  assertEquals(canViewWorkflowModule(mkCtx(["leads.view"]), "lead"), true);
+  assertEquals(canViewWorkflowModule(mkCtx(["leads.view"]), "deal"), false);
+  assertEquals(canViewWorkflowModule(mkCtx(["workflows.edit"]), "proposal"), true);
+  assertEquals(canViewWorkflowModule(mkCtx(["leads.view"]), null), false);
+  assertEquals(canViewWorkflowModule(mkCtx([], { isSystemAdmin: true }), "quote"), true);
+});
+
+// ── Confirmação de envio de email ──
+Deno.test("isUserConfirmed: só aceita o booleano true", () => {
+  assertEquals(isUserConfirmed({ user_confirmed: true }), true);
+  assertEquals(isUserConfirmed({ user_confirmed: "true" }), false);
+  assertEquals(isUserConfirmed({ user_confirmed: 1 }), false);
+  assertEquals(isUserConfirmed({}), false);
+  assertEquals(isUserConfirmed(null), false);
+});
+
+Deno.test("buildSendEmailConfirmation: devolve requires_confirmation send_email com resumo", () => {
+  const r = buildSendEmailConfirmation({
+    documentType: "quote",
+    documentNumber: "Q-2026-0001",
+    documentTitle: "Cozinha",
+    recipientEmail: "a@b.pt",
+    args: { cc: ["c@d.pt", ""], subject: "Orçamento", message: "x".repeat(400) },
+  });
+  assertEquals(r.success, false);
+  assertEquals(r.requires_confirmation, true);
+  assertEquals(r.confirmation_type, "send_email");
+  assertEquals(r.summary.document_number, "Q-2026-0001");
+  assertEquals(r.summary.cc, ["c@d.pt"]);
+  assertEquals(r.summary.recipients, []);
+  assertEquals(r.summary.message_preview.length, 301);
+});

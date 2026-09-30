@@ -1,6 +1,7 @@
 // Proposal tools — extracted verbatim from index.ts.
 
 import { requireWrite } from "../shared/authz.ts";
+import { buildSendEmailConfirmation, isUserConfirmed } from "../shared/emailConfirmation.ts";
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -116,7 +117,7 @@ export const sendProposalDef: ToolDef = {
   type: "function",
   function: {
     name: "send_proposal",
-    description: "Envia uma proposta por email via send-proposal-email.",
+    description: "Envia uma proposta por email via send-proposal-email. A chamada NÃO envia logo: devolve um cartão de confirmação ao utilizador (número, destinatários, assunto, mensagem) e o email só é enviado quando o utilizador carrega em \"Enviar\". Nunca digas que o email foi enviado sem um resultado com success=true.",
     parameters: {
       type: "object",
       properties: {
@@ -144,13 +145,26 @@ const sendProposal: Handler = async (ctx, args): Promise<ToolResult> => {
 
   const { data: p } = await supabase
     .from("proposals")
-    .select("id")
+    .select("id, proposal_number, title")
     .eq("id", args.proposal_id)
     .eq("organization_id", organizationId)
     .maybeSingle();
   if (!p) return { success: false, message: "Proposta não encontrada ou fora de scope." };
 
   if (!authHeader) return { success: false, message: "Sessão sem token — não é possível invocar send-proposal-email." };
+
+  // Envio de email é acção externa irreversível: sem confirmação explícita do
+  // utilizador na UI (flag só aceite pelo caminho pendingTool) devolve o cartão.
+  if (!isUserConfirmed(args)) {
+    return buildSendEmailConfirmation({
+      documentType: "proposal",
+      documentNumber: p.proposal_number,
+      documentTitle: p.title,
+      recipientEmail: recipient,
+      args,
+    });
+  }
+
   const body: Record<string, any> = { proposal_id: args.proposal_id, recipient_email: recipient };
   if (args.recipient_name) body.recipient_name = String(args.recipient_name);
   if (Array.isArray(args.recipients)) body.recipients = args.recipients;
