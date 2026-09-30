@@ -63,6 +63,9 @@
 -- Forward-only e re-executável. Não toca em nenhuma base local.
 -- ============================================================
 
+-- Um bloqueio de lock reverte a migration inteira de forma limpa, em vez de pôr pedidos em produção à fila.
+SET LOCAL lock_timeout = '5s';
+
 -- ------------------------------------------------------------
 -- 1. Funções auxiliares e de contagem de lugares
 -- ------------------------------------------------------------
