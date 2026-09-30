@@ -166,6 +166,8 @@ Deno.serve(async (req: Request) => {
         start_datetime: slot_start,
         end_datetime: effectiveEnd,
         status: 'scheduled',
+        // A hora mudou: a confirmacao do cliente deixa de valer (o gatilho da base tambem o garante).
+        confirmed_at: null,
       })
       .eq('id', itemId);
 

@@ -31,6 +31,7 @@ import { AutoScheduleRulesTab } from '@/components/scheduling/AutoScheduleRulesT
 import { ScheduleSettingsDialog } from '@/components/scheduling/ScheduleSettingsDialog';
 import { ScheduleBoardsTab } from '@/components/scheduling/ScheduleBoardsTab';
 import type { ScheduleItem, ScheduleBoard, ScheduleResource, ScheduleFilters } from '@/types/scheduling';
+import { applyRescheduleToItem } from '@/lib/scheduling/clientConfirmation';
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 
@@ -315,7 +316,7 @@ export default function Scheduling() {
   const handleItemDrop = async (itemId: string, newStart: Date, newEnd: Date) => {
     const prevItem = items.find(i => i.id === itemId);
     if (await rescheduleItem(itemId, newStart, newEnd)) {
-      setItems(prev => prev.map(item => item.id === itemId ? { ...item, start_datetime: newStart.toISOString(), end_datetime: newEnd.toISOString() } : item));
+      setItems(prev => prev.map(item => item.id === itemId ? applyRescheduleToItem(item, newStart, newEnd) : item));
       notifyIfEnabled(itemId, detectScheduleChanges(prevItem ?? null, { start_datetime: newStart.toISOString(), end_datetime: newEnd.toISOString() }, null));
     }
   };

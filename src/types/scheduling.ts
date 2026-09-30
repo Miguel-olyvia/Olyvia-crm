@@ -79,6 +79,8 @@ export interface ScheduleItem {
   end_datetime: string;
   all_day: boolean;
   duration_minutes?: number;
+  /** Quando o cliente confirmou pelo link do lembrete; null se nao confirmou ou se a visita mudou de hora. */
+  confirmed_at?: string | null;
   client_id?: string;
   lead_id?: string;
   deal_id?: string;

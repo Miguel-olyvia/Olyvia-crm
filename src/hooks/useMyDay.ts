@@ -27,6 +27,7 @@ const AGENDA_SELECT = `
   title,
   description,
   status,
+  confirmed_at,
   start_datetime,
   end_datetime,
   duration_minutes,

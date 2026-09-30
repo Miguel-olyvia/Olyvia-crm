@@ -22,6 +22,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/lib/toast';
 import { scheduleItemSchema } from '@/lib/validations';
 import type { ScheduleItem, ScheduleBoard, ScheduleResource, ScheduleItemStatus, BoardModule } from '@/types/scheduling';
+import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
 
 interface ScheduleItemDialogProps {
   open: boolean;
@@ -438,6 +439,7 @@ export function ScheduleItemDialog({
                     <SelectItem value="rescheduled">{t('common.rescheduled')}</SelectItem>
                   </SelectContent>
                 </Select>
+                <ConfirmedByClientBadge confirmedAt={item?.confirmed_at} />
               </div>
             )}
 
