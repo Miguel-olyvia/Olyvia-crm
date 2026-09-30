@@ -148,17 +148,17 @@ export const translations = {
     'hero.cta': 'Start Free Trial',
     'hero.signin': 'Sign In',
     'hero.trusted': 'Trusted by 1000+ teams',
-    'hero.automation': '24/7 AI automation',
+    'hero.automation': '24/7 AI assistant',
     'hero.noFees': 'No setup fees',
     
     // Feature Cards
     'features.firstAI.title': 'First AI-powered CRM',
-    'features.firstAI.desc': 'Built to help small teams and enterprise sales leaders run fully automated pipelines — from cold outreach to follow-ups.',
+    'features.firstAI.desc': 'Built to help small teams and sales leaders manage their entire pipeline — from first contact to follow-up — with an always-available AI assistant.',
     'features.smart.title': 'Smart, transparent, scalable',
     'features.smart.desc': 'Manage unlimited contacts, always free. Every plan already comes with its own AI credit package — and you\'re never stuck: top up in seconds whenever you need, without changing plans.',
     
     // How It Works
-    'howItWorks.badge': 'Automated AI Workflows',
+    'howItWorks.badge': 'Automations + AI Assistant',
     'howItWorks.title': 'How It Works',
     'howItWorks.subtitle': 'Olyvia replaces traditional CRMs and marketing tools with one AI-native platform that works 24/7',
     
@@ -190,7 +190,7 @@ export const translations = {
     'howItWorks.agents.tag3': 'Autonomous agents (coming soon)',
     'howItWorks.agents.text': 'An assistant that knows your CRM. Tell it what you need and it handles the routine tasks so you can focus on strategy.',
     
-    'howItWorks.cta.main': 'You focus on relationships — Olyvia\'s AI handles everything else.',
+    'howItWorks.cta.main': 'You focus on relationships — Olyvia handles the routine tasks.',
     'howItWorks.cta.sub': 'Join 1000+ teams already automating their sales pipeline',
     'howItWorks.cta.button': 'Start Free Trial',
     
@@ -279,7 +279,7 @@ export const translations = {
     'landing.products.contacts.feature2': 'Custom fields & tags',
     'landing.products.contacts.feature3': 'Import/export tools',
     'landing.products.proposals.title': 'Proposal Management',
-    'landing.products.proposals.description': 'Create, send and track proposals with templates, e-signatures, and automatic follow-ups',
+    'landing.products.proposals.description': 'Create, send and track proposals with templates, e-signatures, and status tracking',
     'landing.products.proposals.feature1': 'Professional templates',
     'landing.products.proposals.feature2': 'Digital signatures',
     'landing.products.proposals.feature3': 'Tracking & analytics',
@@ -8198,17 +8198,17 @@ export const translations = {
     'hero.cta': 'Começar Teste Grátis',
     'hero.signin': 'Entrar',
     'hero.trusted': 'Confiado por 1000+ equipas',
-    'hero.automation': 'Automação IA 24/7',
+    'hero.automation': 'Assistente de IA 24/7',
     'hero.noFees': 'Sem taxas de configuração',
     
     // Feature Cards
     'features.firstAI.title': 'Primeiro CRM com IA',
-    'features.firstAI.desc': 'Construído para ajudar pequenas equipas e líderes de vendas empresariais a executar pipelines totalmente automatizados — desde o primeiro contacto até ao follow-up.',
+    'features.firstAI.desc': 'Construído para ajudar pequenas equipas e líderes de vendas a gerir todo o pipeline — do primeiro contacto ao follow-up — com uma assistente de IA sempre disponível.',
     'features.smart.title': 'Inteligente, transparente, escalável',
     'features.smart.desc': 'Gira contactos ilimitados, sempre grátis. Cada plano já traz o seu pacote de créditos de IA incluído — e nunca fica bloqueado: se precisar de mais, reforce em segundos, sem trocar de plano.',
     
     // How It Works
-    'howItWorks.badge': 'Fluxos de Trabalho IA Automatizados',
+    'howItWorks.badge': 'Automações + Assistente de IA',
     'howItWorks.title': 'Como Funciona',
     'howItWorks.subtitle': 'A Olyvia substitui CRMs tradicionais e ferramentas de marketing por uma plataforma nativa de IA que funciona 24/7',
     
@@ -8240,7 +8240,7 @@ export const translations = {
     'howItWorks.agents.tag3': 'Agentes autónomos (brevemente)',
     'howItWorks.agents.text': 'Uma assistente que conhece o seu CRM. Diga-lhe o que precisa e ela trata das tarefas rotineiras para que se possa focar na estratégia.',
     
-    'howItWorks.cta.main': 'Você foca-se nas relações — A IA da Olyvia trata do resto.',
+    'howItWorks.cta.main': 'Você foca-se nas relações — a Olyvia trata das tarefas rotineiras.',
     'howItWorks.cta.sub': 'Junte-se a 1000+ equipas que já automatizam o seu pipeline de vendas',
     'howItWorks.cta.button': 'Começar Teste Grátis',
     
@@ -8329,7 +8329,7 @@ export const translations = {
     'landing.products.contacts.feature2': 'Campos e etiquetas personalizadas',
     'landing.products.contacts.feature3': 'Ferramentas de importação/exportação',
     'landing.products.proposals.title': 'Gestão de Propostas',
-    'landing.products.proposals.description': 'Crie, envie e acompanhe propostas com modelos, assinaturas digitais e acompanhamento automático',
+    'landing.products.proposals.description': 'Crie, envie e acompanhe propostas com modelos, assinaturas digitais e acompanhamento do estado',
     'landing.products.proposals.feature1': 'Modelos profissionais',
     'landing.products.proposals.feature2': 'Assinaturas digitais',
     'landing.products.proposals.feature3': 'Acompanhamento e análises',
@@ -16191,17 +16191,17 @@ export const translations = {
     'hero.cta': 'Comenzar Prueba Gratis',
     'hero.signin': 'Iniciar Sesión',
     'hero.trusted': 'Confiado por 1000+ equipos',
-    'hero.automation': 'Automatización IA 24/7',
+    'hero.automation': 'Asistente de IA 24/7',
     'hero.noFees': 'Sin tarifas de configuración',
     
     // Feature Cards
     'features.firstAI.title': 'Primer CRM con IA',
-    'features.firstAI.desc': 'Construido para ayudar a pequeños equipos y líderes de ventas empresariales a ejecutar pipelines totalmente automatizados — desde el contacto inicial hasta el seguimiento.',
+    'features.firstAI.desc': 'Construido para ayudar a pequeños equipos y líderes de ventas a gestionar todo el pipeline — desde el primer contacto hasta el seguimiento — con una asistente de IA siempre disponible.',
     'features.smart.title': 'Inteligente, transparente, escalable',
     'features.smart.desc': 'Gestiona contactos ilimitados, siempre gratis. Cada plan ya incluye su propio paquete de créditos de IA — y nunca te quedas atascado: recarga en segundos cuando lo necesites, sin cambiar de plan.',
     
     // How It Works
-    'howItWorks.badge': 'Flujos de Trabajo IA Automatizados',
+    'howItWorks.badge': 'Automatizaciones + Asistente de IA',
     'howItWorks.title': 'Cómo Funciona',
     'howItWorks.subtitle': 'Olyvia reemplaza los CRMs tradicionales y herramientas de marketing con una plataforma nativa de IA que funciona 24/7',
     
@@ -16233,7 +16233,7 @@ export const translations = {
     'howItWorks.agents.tag3': 'Agentes autónomos (próximamente)',
     'howItWorks.agents.text': 'Una asistente que conoce tu CRM. Dile lo que necesitas y ella se encarga de las tareas rutinarias para que puedas enfocarte en la estrategia.',
     
-    'howItWorks.cta.main': 'Tú te enfocas en las relaciones — La IA de Olyvia maneja todo lo demás.',
+    'howItWorks.cta.main': 'Tú te enfocas en las relaciones — Olyvia se encarga de las tareas rutinarias.',
     'howItWorks.cta.sub': 'Únete a 1000+ equipos que ya automatizan su pipeline de ventas',
     'howItWorks.cta.button': 'Comenzar Prueba Gratis',
     
@@ -16322,7 +16322,7 @@ export const translations = {
     'landing.products.contacts.feature2': 'Campos y etiquetas personalizados',
     'landing.products.contacts.feature3': 'Herramientas de importación/exportación',
     'landing.products.proposals.title': 'Gestión de Propuestas',
-    'landing.products.proposals.description': 'Crea, envía y haz seguimiento de propuestas con plantillas, firmas electrónicas y seguimientos automáticos',
+    'landing.products.proposals.description': 'Crea, envía y haz seguimiento de propuestas con plantillas, firmas electrónicas y seguimiento del estado',
     'landing.products.proposals.feature1': 'Plantillas profesionales',
     'landing.products.proposals.feature2': 'Firmas digitales',
     'landing.products.proposals.feature3': 'Seguimiento y análisis',
@@ -23519,17 +23519,17 @@ export const translations = {
     'hero.cta': 'Commencer l\'Essai Gratuit',
     'hero.signin': 'Se Connecter',
     'hero.trusted': 'Approuvé par 1000+ équipes',
-    'hero.automation': 'Automatisation IA 24/7',
+    'hero.automation': 'Assistante IA 24/7',
     'hero.noFees': 'Pas de frais de configuration',
     
     // Feature Cards
     'features.firstAI.title': 'Premier CRM avec IA',
-    'features.firstAI.desc': 'Conçu pour aider les petites équipes et les responsables des ventes d\'entreprise à exécuter des pipelines entièrement automatisés — du premier contact au suivi.',
+    'features.firstAI.desc': 'Conçu pour aider les petites équipes et les responsables des ventes à gérer tout leur pipeline — du premier contact au suivi — avec une assistante IA toujours disponible.',
     'features.smart.title': 'Intelligent, transparent, évolutif',
     'features.smart.desc': 'Gérez des contacts illimités, toujours gratuit. Chaque forfait inclut déjà son propre pack de crédits IA — et vous n\'êtes jamais bloqué : rechargez en quelques secondes dès que nécessaire, sans changer de forfait.',
     
     // How It Works
-    'howItWorks.badge': 'Flux de Travail IA Automatisés',
+    'howItWorks.badge': 'Automatisations + Assistante IA',
     'howItWorks.title': 'Comment Ça Marche',
     'howItWorks.subtitle': 'Olyvia remplace les CRM traditionnels et les outils marketing par une plateforme native IA qui fonctionne 24/7',
     
@@ -23561,7 +23561,7 @@ export const translations = {
     'howItWorks.agents.tag3': 'Agents autonomes (bientôt disponible)',
     'howItWorks.agents.text': 'Une assistante qui connaît votre CRM. Dites-lui ce dont vous avez besoin et elle s\'occupe des tâches routinières pour que vous puissiez vous concentrer sur la stratégie.',
     
-    'howItWorks.cta.main': 'Vous vous concentrez sur les relations — L\'IA d\'Olyvia gère tout le reste.',
+    'howItWorks.cta.main': 'Vous vous concentrez sur les relations — Olyvia s\'occupe des tâches routinières.',
     'howItWorks.cta.sub': 'Rejoignez 1000+ équipes qui automatisent déjà leur pipeline de ventes',
     'howItWorks.cta.button': 'Commencer l\'Essai Gratuit',
     
@@ -23650,7 +23650,7 @@ export const translations = {
     'landing.products.contacts.feature2': 'Champs et étiquettes personnalisés',
     'landing.products.contacts.feature3': 'Outils d\'import/export',
     'landing.products.proposals.title': 'Gestion des Propositions',
-    'landing.products.proposals.description': 'Créez, envoyez et suivez des propositions avec des modèles, des signatures électroniques et des suivis automatiques',
+    'landing.products.proposals.description': 'Créez, envoyez et suivez des propositions avec des modèles, des signatures électroniques et le suivi du statut',
     'landing.products.proposals.feature1': 'Modèles professionnels',
     'landing.products.proposals.feature2': 'Signatures numériques',
     'landing.products.proposals.feature3': 'Suivi et analyses',
@@ -30746,17 +30746,17 @@ export const translations = {
     'hero.cta': 'Kostenlose Testversion Starten',
     'hero.signin': 'Anmelden',
     'hero.trusted': 'Vertraut von 1000+ Teams',
-    'hero.automation': '24/7 KI-Automatisierung',
+    'hero.automation': '24/7 KI-Assistentin',
     'hero.noFees': 'Keine Einrichtungsgebühren',
     
     // Feature Cards
     'features.firstAI.title': 'Erstes KI-gestütztes CRM',
-    'features.firstAI.desc': 'Entwickelt, um kleinen Teams und Vertriebsleitern zu helfen, vollautomatisierte Pipelines zu betreiben — von der Kaltakquise bis zur Nachverfolgung.',
+    'features.firstAI.desc': 'Entwickelt, um kleinen Teams und Vertriebsleitern zu helfen, ihre gesamte Pipeline zu verwalten — vom ersten Kontakt bis zur Nachverfolgung — mit einer jederzeit verfügbaren KI-Assistentin.',
     'features.smart.title': 'Intelligent, transparent, skalierbar',
     'features.smart.desc': 'Verwalten Sie unbegrenzt Kontakte, immer kostenlos. Jeder Plan enthält bereits sein eigenes KI-Credit-Paket — und Sie stehen nie still: laden Sie bei Bedarf in Sekunden auf, ohne den Plan zu wechseln.',
     
     // How It Works
-    'howItWorks.badge': 'Automatisierte KI-Workflows',
+    'howItWorks.badge': 'Automatisierungen + KI-Assistentin',
     'howItWorks.title': 'Wie Es Funktioniert',
     'howItWorks.subtitle': 'Olyvia ersetzt traditionelle CRMs und Marketing-Tools durch eine KI-native Plattform, die 24/7 arbeitet',
     
@@ -30788,7 +30788,7 @@ export const translations = {
     'howItWorks.agents.tag3': 'Autonome Agenten (demnächst)',
     'howItWorks.agents.text': 'Eine Assistentin, die Ihr CRM kennt. Sagen Sie ihr, was Sie brauchen, und sie erledigt die Routineaufgaben, damit Sie sich auf die Strategie konzentrieren können.',
     
-    'howItWorks.cta.main': 'Sie konzentrieren sich auf Beziehungen — Olyvias KI kümmert sich um alles andere.',
+    'howItWorks.cta.main': 'Sie konzentrieren sich auf Beziehungen — Olyvia kümmert sich um die Routineaufgaben.',
     'howItWorks.cta.sub': 'Schließen Sie sich 1000+ Teams an, die bereits ihre Verkaufspipeline automatisieren',
     'howItWorks.cta.button': 'Kostenlose Testversion Starten',
     
@@ -30877,7 +30877,7 @@ export const translations = {
     'landing.products.contacts.feature2': 'Benutzerdefinierte Felder & Tags',
     'landing.products.contacts.feature3': 'Import-/Export-Tools',
     'landing.products.proposals.title': 'Angebotsverwaltung',
-    'landing.products.proposals.description': 'Erstellen, senden und verfolgen Sie Angebote mit Vorlagen, elektronischen Signaturen und automatischen Follow-ups',
+    'landing.products.proposals.description': 'Erstellen, senden und verfolgen Sie Angebote mit Vorlagen, elektronischen Signaturen und Statusverfolgung',
     'landing.products.proposals.feature1': 'Professionelle Vorlagen',
     'landing.products.proposals.feature2': 'Digitale Signaturen',
     'landing.products.proposals.feature3': 'Tracking & Analysen',
