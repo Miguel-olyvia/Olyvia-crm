@@ -58,9 +58,9 @@ const MANUAL_ORDER_PRICE_FIELDS = ["unit_price"] as const;
 // tabela nova, sem trigger nova). Consome os 2 RPCs de leitura já aplicados
 // em produção (migration 20261115160000_client_order_documents_read_rpcs.sql):
 // rpc_list_client_order_documents (listagem) e rpc_get_client_order_document
-// (detalhe/PDF). Ambos exigem inventory.view E client_contracts.view em
-// simultâneo — mesma dupla verificação replicada no frontend via
-// ProtectedRoute (App.tsx) e no item de menu (menuConfig.ts).
+// (detalhe/PDF). Ambos exigem client_orders.view (permissão própria, para o
+// armazém não precisar de ver contratos) — mesma verificação replicada no
+// frontend via ProtectedRoute (App.tsx) e no item de menu (menuConfig.ts).
 //
 // Padrão de paginação: infinite-scroll com .range() e SEM total_count (a RPC
 // não devolve contagem total, de propósito — mesmo padrão já usado em
@@ -507,8 +507,8 @@ const ClientOrders = () => {
   // Editar encomenda manual (rpc_update_manual_client_order exige o mesmo).
   const canEditOrder = hasPermission('client_contracts.edit');
   // Pedir em falta ao fornecedor (rpc_request_missing_from_supplier exige
-  // purchase_orders.create + client_contracts.view).
-  const canRequestMissing = hasPermission('purchase_orders.create') && hasPermission('client_contracts.view');
+  // purchase_orders.create + client_orders.view).
+  const canRequestMissing = hasPermission('purchase_orders.create') && hasPermission('client_orders.view');
   // Eliminar encomenda (rpc_delete_client_order exige client_orders.delete).
   const canDeleteOrder = hasPermission('client_orders.delete');
 
@@ -2273,7 +2273,7 @@ const ClientOrders = () => {
               <p className="text-muted-foreground">{t('clientOrders.description')}</p>
             </div>
           </div>
-          {/* A página já está protegida por inventory.view + client_contracts.view
+          {/* A página já está protegida por client_orders.view
               (ProtectedRoute em App.tsx e menuConfig.ts). Criar uma encomenda
               cria um contrato assinado, pelo que exige client_contracts.create —
               mesmo PermissionGate usado em ClientContracts.tsx. */}

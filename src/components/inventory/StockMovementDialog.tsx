@@ -245,7 +245,7 @@ export default function StockMovementDialog({
         p_offset: 0,
       } as any);
       if (error) {
-        // Best-effort — permissão em falta (client_contracts.view) não deve
+        // Best-effort — permissão em falta (client_orders.view) não deve
         // bloquear o registo de movimento, só esconde o campo de ligação.
         setClientOrdersLoaded(true);
         return;
