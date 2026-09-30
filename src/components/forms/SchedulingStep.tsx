@@ -17,6 +17,8 @@ interface SchedulingStepProps {
   /** Contacto ja escrito pelo visitante: se for lead/cliente conhecido, o servidor mostra so os horarios do seu comercial. */
   contactEmail?: string;
   contactPhone?: string;
+  /** Reagendamento pelo link: so os horarios do recurso da visita, com as regras da marcacao. */
+  bookingToken?: string;
   primaryColor: string;
   textColor?: string;
   buttonTextColor?: string;
@@ -61,6 +63,7 @@ export function SchedulingStep({
   districtId,
   contactEmail,
   contactPhone,
+  bookingToken,
   primaryColor,
   textColor,
   buttonTextColor,
@@ -95,7 +98,7 @@ export function SchedulingStep({
   // Prefetch which days have availability for the visible month (P3: single range call)
   useEffect(() => {
     prefetchMonth(currentMonth);
-  }, [currentMonth, formId, boardId, postalCode, districtId, contactEmail, contactPhone]);
+  }, [currentMonth, formId, boardId, postalCode, districtId, contactEmail, contactPhone, bookingToken]);
 
   const prefetchMonth = async (month: Date) => {
     setLoadingDays(true);
@@ -127,6 +130,7 @@ export function SchedulingStep({
           district_id: districtId || undefined,
           email: contactEmail || undefined,
           phone: contactPhone || undefined,
+          booking_token: bookingToken || undefined,
           board_id: boardId || undefined,
           duration_minutes: durationMinutes,
         }),
@@ -170,7 +174,7 @@ export function SchedulingStep({
       return;
     }
     loadSlots(selectedDate);
-  }, [selectedDate, contactEmail, contactPhone]);
+  }, [selectedDate, contactEmail, contactPhone, bookingToken]);
 
   const loadSlots = async (date: Date) => {
     setLoadingSlots(true);
@@ -186,6 +190,7 @@ export function SchedulingStep({
           district_id: districtId || undefined,
           email: contactEmail || undefined,
           phone: contactPhone || undefined,
+          booking_token: bookingToken || undefined,
           board_id: boardId || undefined,
           duration_minutes: durationMinutes,
         }),
