@@ -25386,6 +25386,14 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_revert_purchase_order_receipt: {
+        Args: {
+          p_item_ids: string[]
+          p_purchase_order_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
       rpc_record_diagnostic_suggestion_accepted: {
         Args: {
           p_ai_confidence?: number
