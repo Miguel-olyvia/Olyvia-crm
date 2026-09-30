@@ -20,7 +20,8 @@ import { geocodePostalCode } from '../_shared/postcodeGeocode.ts';
 import { resolveGeoInputs } from '../_shared/geolocationSwitch.ts';
 import { checkTravelFeasible, buildLunchBreakConfig, type LunchBreakConfig } from '../_shared/travelFeasibility.ts';
 import { ensureHolidaysPersisted } from '../_shared/ensureHolidays.ts';
-import { resolveOwnerResourceIds, restrictCandidatesToOwner } from '../_shared/knownOwner.ts';
+import { resolveOwnerResourceIds } from '../_shared/knownOwner.ts';
+import { evaluateOwnerDay, makeOwnerDeps, ownerResourcesForSlot } from '../_shared/ownerEligibility.ts';
 import { buildAudienceVars } from '../_shared/audienceTemplates.ts';
 import { createReminderLines } from '../_shared/reminderLines.ts';
 import { formatVisitWhen } from '../_shared/reminderContent.ts';
@@ -298,37 +299,52 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const { data: resources } = await supabase.rpc('find_nearest_resources', {
-      p_target_postal_code: geoInputs.postalCode,
-      p_board_id: boardId,
-      p_target_date: slot_start.split('T')[0],
-      p_duration_minutes: durationMinutes,
-      p_limit: 50,
-      p_district_id: geoInputs.districtId,
-      p_min_advance_hours: minAdvanceHours,
-    });
+    let ordered: { id: string }[];
+    if (hasKnownOwner) {
+      // O dono e SEMPRE o prioritario: os recursos dele sao avaliados
+      // directamente, sem corte de proximidade nem veto de distrito ou distancia
+      // maxima -- a mesma funcao que o calendario publico usa, por isso o que
+      // foi oferecido e o que aqui se aceita. Se ele nao tiver esta hora livre,
+      // NAO se marca a mais ninguem -- ver abaixo. Dono sem recurso activo:
+      // lista vazia, nao "todos".
+      const ownerDay = await evaluateOwnerDay({
+        ownerResourceIds,
+        day: slot_start.split('T')[0],
+        clientLat, clientLng, lunchBreak,
+        deps: makeOwnerDeps(supabase, organizationId, durationMinutes, minAdvanceHours),
+      });
+      if (ownerDay.error) {
+        // Como antes (a RPC de proximidade falhada dava lista vazia): vai para a fila dele.
+        console.error('[book-slot] avaliacao do dono falhou:', ownerDay.error);
+      }
+      ordered = ownerResourcesForSlot(ownerDay.slots, slot_start, slot_end).map((id) => ({ id }));
+    } else {
+      const { data: resources } = await supabase.rpc('find_nearest_resources', {
+        p_target_postal_code: geoInputs.postalCode,
+        p_board_id: boardId,
+        p_target_date: slot_start.split('T')[0],
+        p_duration_minutes: durationMinutes,
+        p_limit: 50,
+        p_district_id: geoInputs.districtId,
+        p_min_advance_hours: minAdvanceHours,
+      });
 
-    const candidatesWithSlot = (resources || []).filter((res: any) => {
-      const slots = res.available_slots || [];
-      return slots.some((s: any) =>
-        new Date(s.start).getTime() === new Date(slot_start).getTime() &&
-        new Date(s.end).getTime() === new Date(slot_end).getTime()
-      );
-    });
+      const candidatesWithSlot = (resources || []).filter((res: any) => {
+        const slots = res.available_slots || [];
+        return slots.some((s: any) =>
+          new Date(s.start).getTime() === new Date(slot_start).getTime() &&
+          new Date(s.end).getTime() === new Date(slot_end).getTime()
+        );
+      });
 
-    // Regra 13, Logica "quem": candidatesWithSlot ja vem ordenado por
-    // proximidade (herdado de find_nearest_resources) -- NAO reordenar por
-    // orderByLeastBusy aqui. Essa ordenacao e por numero total de marcacoes
-    // de sempre, sem nada a ver com distancia, e substituia por completo a
-    // prioridade "mais perto primeiro" que o calendario publico ja promete
-    // ao cliente (public-availability, preferred_resource_id).
-    const proximityOrdered = candidatesWithSlot.map((res: any) => ({ id: res.resource_id }));
-
-    // O comercial da pessoa vai a frente de todos. Se ele nao estiver entre os
-    // que tem esta hora livre, NAO se marca a mais ninguem -- ver abaixo.
-    // Dono conhecido sem recurso activo: lista vazia (ownerResourceIds vazio),
-    // nao "todos".
-    const ordered = restrictCandidatesToOwner(proximityOrdered, hasKnownOwner, ownerResourceIds);
+      // Regra 13, Logica "quem": candidatesWithSlot ja vem ordenado por
+      // proximidade (herdado de find_nearest_resources) -- NAO reordenar por
+      // orderByLeastBusy aqui. Essa ordenacao e por numero total de marcacoes
+      // de sempre, sem nada a ver com distancia, e substituia por completo a
+      // prioridade "mais perto primeiro" que o calendario publico ja promete
+      // ao cliente (public-availability, preferred_resource_id).
+      ordered = candidatesWithSlot.map((res: any) => ({ id: res.resource_id }));
+    }
 
     for (const candidate of ordered) {
       // Re-verify at confirmation time — availability may have been computed
