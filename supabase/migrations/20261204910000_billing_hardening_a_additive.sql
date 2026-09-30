@@ -4,7 +4,7 @@
 -- ============================================================
 -- ATENÇÃO -- ESTA PARTE NÃO SAI SOZINHA. É SÓ ADITIVA (colunas, tabelas e
 -- funções novas, funções substituídas com o mesmo contrato, triggers), mas o
--- código novo depende dela e a parte B (20261204500000) depende do código novo.
+-- código novo depende dela e a parte B (20261204920000) depende do código novo.
 --
 -- ORDEM SEGURA DE PUBLICAÇÃO (não saltar passos):
 --   1. Esta migration A (db push).
