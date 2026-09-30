@@ -143,7 +143,7 @@ export function ClientsValueView({
         }
       } catch (err) {
         console.error("Error loading contracts for value view:", err);
-        toast.error("Não foi possível carregar os contratos.");
+        toast.error("Não foi possível carregar os negócios.");
       } finally {
         if (!cancelled) setLoadingContracts(false);
       }
@@ -340,7 +340,7 @@ export function ClientsValueView({
       if (contract && contract.activeCount === 1 && clientValueSemIva < avgValue) {
         opportunities.push({
           entityId: eid, name, initials, value: clientValue,
-          reason: `Só 1 contrato · Valor abaixo da média (${formatCurrency(avgValue)}) · Potencial de +${formatCurrency(avgValue - clientValueSemIva)}`,
+          reason: `Só 1 negócio · Valor abaixo da média (${formatCurrency(avgValue)}) · Potencial de +${formatCurrency(avgValue - clientValueSemIva)}`,
           action: "deal",
           potentialValue: avgValue - clientValueSemIva,
         });
@@ -353,7 +353,7 @@ export function ClientsValueView({
         if (daysSince > 42 && contract && contract.activeCount >= 1) {
           opportunities.push({
             entityId: eid, name, initials, value: clientValue,
-            reason: `Só ${contract.activeCount} contrato · Sem contacto ${daysSince} dias · Reactivar primeiro`,
+            reason: `Só ${contract.activeCount} negócio · Sem contacto ${daysSince} dias · Reactivar primeiro`,
             action: "contact",
             potentialValue: avgValue * 0.3,
           });
@@ -415,7 +415,7 @@ export function ClientsValueView({
                   <Info className="w-3 h-3 text-muted-foreground/70 cursor-help" />
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs text-xs">
-                  Inclui contratos assinados, activos e expirados. Drafts e cancelados não contam.
+                  Inclui negócios (contratos, encomendas de cliente e vendas diretas) assinados, ativos e expirados. Rascunhos e cancelados não contam.
                 </TooltipContent>
               </UITooltip>
             </p>
@@ -447,13 +447,13 @@ export function ClientsValueView({
                   <Info className="w-3 h-3 text-muted-foreground/70 cursor-help" />
                 </TooltipTrigger>
                 <TooltipContent className="max-w-xs text-xs">
-                  Receita comprometida/histórica com cadência mensal (payment_terms). Pode incluir contratos expirados.
+                  Receita comprometida/histórica com cadência mensal (payment_terms). Pode incluir negócios expirados.
                 </TooltipContent>
               </UITooltip>
             </p>
             <p className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{formatCurrency(kpis.recurringRevenue)}<span className="text-sm font-normal text-muted-foreground">/mês</span></p>
             <p className="text-xs text-muted-foreground mt-0.5">{formatCurrency(kpis.recurringRevenueWithVat)} com IVA</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{kpis.recurringCount} contratos recorrentes</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{kpis.recurringCount} negócios recorrentes</p>
           </CardContent>
         </Card>
         <Card>
@@ -478,7 +478,7 @@ export function ClientsValueView({
           </CardHeader>
           <CardContent className="space-y-1">
             {topClients.length === 0 && (
-              <p className="text-sm text-muted-foreground py-4 text-center">Sem dados de contratos</p>
+              <p className="text-sm text-muted-foreground py-4 text-center">Sem dados de negócios</p>
             )}
             {topClients.map((client, i) => {
               const rank = i + 1;
@@ -503,7 +503,7 @@ export function ClientsValueView({
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold truncate">{client.name}</p>
                     <p className="text-xs text-muted-foreground flex items-center gap-1 flex-wrap">
-                      {client.contractCount} contrato{client.contractCount > 1 ? "s" : ""}
+                      {client.contractCount} negócio{client.contractCount > 1 ? "s" : ""}
                       <span>·</span>
                       Cliente desde {client.clientSinceLabel}
                       {client.tags.length > 0 && (

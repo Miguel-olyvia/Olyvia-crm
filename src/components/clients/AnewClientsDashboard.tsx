@@ -429,7 +429,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         }
       }
 
-      // Contract totals for the top KPI cards ("Valor Contratos", "Contratos Activos",
+      // Contract totals for the top KPI cards ("Valor Negócios", "Negócios Ativos",
       // "A Expirar"): sourced from rpc_client_contract_stats, scoped to the organization
       // CURRENTLY SELECTED by the user (companyFilter when set, else activeCompany — see
       // contractStatsOrgId above) and to the same entity population as scopedClients — so
@@ -444,7 +444,7 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
         });
         if (rpcError) {
           console.error("Error loading rpc_client_contract_stats for clients dashboard:", rpcError);
-          toast.error("Não foi possível carregar as estatísticas de contratos.");
+          toast.error("Não foi possível carregar as estatísticas de negócios.");
         } else {
           const row: any = Array.isArray(rpcStats) ? rpcStats[0] : rpcStats;
           if (row) {
@@ -583,9 +583,9 @@ export function AnewClientsDashboard({ scopedClients, activeFilter, onFilterChan
       {/* Row 2: Contract & health KPIs */}
       {showExtendedKPIs && (
         <div className="grid grid-cols-7 gap-2">
-          <StatCard title="Valor Contratos" value={formatCurrency(stats.totalContractValue)} subtitle={`${formatCurrency(stats.totalContractValueWithVat)} com IVA`} icon={DollarSign} iconColor="text-purple-600" loading={loading} />
+          <StatCard title="Valor Negócios" value={formatCurrency(stats.totalContractValue)} subtitle={`${formatCurrency(stats.totalContractValueWithVat)} com IVA`} icon={DollarSign} iconColor="text-purple-600" loading={loading} />
           <StatCard title="Valor Médio" value={formatCurrency(stats.avgValuePerClient)} subtitle={`${formatCurrency(stats.avgValuePerClientWithVat)} com IVA`} icon={DollarSign} iconColor="text-purple-500" loading={loading} />
-          <StatCard title="Contratos Activos" value={stats.activeContracts} icon={FileText} iconColor="text-green-600" loading={loading}
+          <StatCard title="Negócios Ativos" value={stats.activeContracts} icon={FileText} iconColor="text-green-600" loading={loading}
             subtitle={`em ${stats.activeClients} clientes`} />
           <StatCard title="Sem Contacto >30D" value={stats.noContact30d} icon={AlertTriangle} iconColor="text-red-600" loading={loading}
             onClick={() => onFilterChange?.("no_contact_30d")} highlighted={activeFilter === "no_contact_30d"} />

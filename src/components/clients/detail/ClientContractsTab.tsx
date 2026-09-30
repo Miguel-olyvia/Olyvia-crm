@@ -9,6 +9,12 @@ import { Loader2, FileText, Plus } from "lucide-react";
 import { differenceInDays, format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { Progress } from "@/components/ui/progress";
+import {
+  CLIENT_BUSINESS_SELECT,
+  ClientBusinessTypeBadge,
+  deriveClientBusinessOrigin,
+  type ClientBusinessOriginType,
+} from "./clientBusinessOrigin";
 
 interface ClientContractsTabProps {
   entityId: string;
@@ -25,6 +31,8 @@ interface ContractRecord {
   end_date: string | null;
   payment_terms: string | null;
   created_at: string;
+  origin_type: ClientBusinessOriginType;
+  display_number: string;
 }
 
 const STATUS_DISPLAY: Record<string, { label: string; className: string }> = {
@@ -50,14 +58,14 @@ export function ClientContractsTab({ entityId, clientId, organizationId }: Clien
     try {
       const { data } = await (supabase as any)
         .from("client_contracts")
-        .select("id, title:contract_number, status, total_value, start_date, end_date, payment_terms, created_at")
+        .select(`id, title:contract_number, status, total_value, start_date, end_date, payment_terms, created_at, ${CLIENT_BUSINESS_SELECT}`)
         .or(`entity_id.eq.${entityId},client_id.eq.${clientId}`)
         .eq("organization_id", organizationId)
         .order("created_at", { ascending: false });
-      setContracts(data || []);
+      setContracts((data || []).map((c: any) => ({ ...c, ...deriveClientBusinessOrigin(c) })));
     } catch (e) {
       console.error("Error loading contracts:", e);
-      toast({ title: "Erro", description: "Não foi possível carregar os contratos.", variant: "destructive" });
+      toast({ title: "Erro", description: "Não foi possível carregar os negócios.", variant: "destructive" });
     } finally {
       setLoading(false);
     }
@@ -74,7 +82,7 @@ export function ClientContractsTab({ entityId, clientId, organizationId }: Clien
       {contracts.length === 0 ? (
         <div className="text-center py-8">
           <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
-          <p className="text-muted-foreground">Sem contratos registados</p>
+          <p className="text-muted-foreground">Sem negócios registados</p>
         </div>
       ) : (
         contracts.map(c => {
@@ -84,14 +92,37 @@ export function ClientContractsTab({ entityId, clientId, organizationId }: Clien
           const elapsed = c.start_date ? differenceInDays(now, new Date(c.start_date)) : null;
           const progressPct = totalDays && elapsed !== null ? Math.min(100, Math.max(0, Math.round((elapsed / totalDays) * 100))) : null;
 
+          // Deep-links já existentes (?open=<id>): contratos reais abrem em
+          // Contratos; encomendas manuais e vendas diretas em Encomendas Clientes.
+          const target = c.origin_type === "contract"
+            ? `/client-contracts?open=${c.id}`
+            : `/client-orders?open=${c.id}`;
+          const openTarget = () => navigate(target);
+
           return (
-            <Card key={c.id} className="border-l-4 border-l-green-500">
+            <Card
+              key={c.id}
+              className="border-l-4 border-l-green-500 cursor-pointer hover:bg-muted/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              role="link"
+              tabIndex={0}
+              aria-label={`Abrir ${c.display_number || c.title}`}
+              onClick={openTarget}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openTarget();
+                }
+              }}
+            >
               <CardContent className="py-3 px-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
                     <div>
-                      <p className="text-sm font-medium">{c.title}</p>
+                      <div className="flex items-center gap-1.5">
+                        <ClientBusinessTypeBadge type={c.origin_type} />
+                        <p className="text-sm font-medium">{c.display_number || c.title}</p>
+                      </div>
                       <p className="text-[10px] text-muted-foreground">
                         {c.start_date && `Início: ${format(new Date(c.start_date), "dd/MM/yyyy", { locale: pt })}`}
                         {c.end_date && ` · Fim: ${format(new Date(c.end_date), "dd/MM/yyyy", { locale: pt })}`}

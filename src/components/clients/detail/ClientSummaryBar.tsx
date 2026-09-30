@@ -45,7 +45,7 @@ export function ClientSummaryBar({
         <p className="font-semibold mt-0.5">{formatCurrency(totalValue)}</p>
       </div>
       <div>
-        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Contratos Activos</p>
+        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Negócios Ativos</p>
         <p className="font-semibold mt-0.5">{activeContracts}</p>
       </div>
       <div>
