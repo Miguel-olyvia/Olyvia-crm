@@ -19,6 +19,15 @@
 const STRIPE_API_BASE = "https://api.stripe.com/v1";
 
 /**
+ * Pinned API version. 2024-06-20 is the last release before the "basil"
+ * changes: `charge.invoice`, `invoice.subscription` and top-level
+ * `subscription.current_period_end` all still exist, which the webhook logic
+ * relies on. Without a pin, the account default (which Stripe can bump)
+ * decides the shape of every response.
+ */
+export const STRIPE_API_VERSION = "2024-06-20";
+
+/**
  * Params accepted by stripeRequest. Broader than a flat
  * Record<string, string | number> on purpose: Stripe endpoints like
  * Checkout Session creation require nested objects/arrays (line_items,
@@ -83,12 +92,15 @@ function toStripeFormBody(params: StripeParams): string {
  *               query string is NOT built here (Stripe GETs used by this
  *               project so far don't need query params); pass an empty
  *               params object for GET calls.
+ * @param opts.idempotencyKey  Sent as the `Idempotency-Key` header so a retried
+ *               create (network blip, double click) returns the original
+ *               object instead of creating a duplicate.
  * @throws Error with Stripe's own error message when the response is not 2xx.
  */
 export async function stripeRequest(
   path: string,
   params: StripeParams = {},
-  opts: { method?: string } = {},
+  opts: { method?: string; idempotencyKey?: string } = {},
 ): Promise<any> {
   const secretKey = Deno.env.get("STRIPE_SECRET_KEY");
   if (!secretKey) {
@@ -108,8 +120,12 @@ export async function stripeRequest(
     method,
     headers: {
       "Authorization": `Bearer ${secretKey}`,
+      "Stripe-Version": STRIPE_API_VERSION,
       ...(isBodyMethod
         ? { "Content-Type": "application/x-www-form-urlencoded" }
+        : {}),
+      ...(opts.idempotencyKey
+        ? { "Idempotency-Key": opts.idempotencyKey }
         : {}),
     },
     body: isBodyMethod ? toStripeFormBody(params) : undefined,
@@ -120,7 +136,12 @@ export async function stripeRequest(
   if (!response.ok) {
     const message = json?.error?.message ||
       `Stripe API error (HTTP ${response.status}) on ${path}`;
-    throw new Error(message);
+    // status/code let callers react to specific failures (e.g. 409
+    // idempotency_key_in_use, 404 resource_missing) without parsing messages.
+    throw Object.assign(new Error(message), {
+      status: response.status,
+      code: json?.error?.code as string | undefined,
+    });
   }
 
   return json;

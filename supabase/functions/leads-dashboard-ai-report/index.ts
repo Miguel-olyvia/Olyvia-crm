@@ -32,6 +32,7 @@ import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_s
 import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
 import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
+import { requireActiveMembership } from "../_shared/orgMembership.ts";
 
 initSentry();
 
@@ -202,6 +203,15 @@ Deno.serve(async (req) => {
     if (!hasAccess) {
       return new Response(
         JSON.stringify({ error: "Sem permissão para aceder a esta organização" }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
+    // Visibility is not enough to spend an organization's credits: require an
+    // ACTIVE membership in exactly this organization, before any charge.
+    if (!(await requireActiveMembership(supabase, caller.anewUserId, organization_id))) {
+      return new Response(
+        JSON.stringify({ error: "Forbidden" }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }

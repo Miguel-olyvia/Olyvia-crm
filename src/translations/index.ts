@@ -1028,6 +1028,8 @@ export const translations = {
     'sidebar.dataErasureRequests': 'Data Erasure Requests',
     'sidebar.apiKeys': 'API Keys',
     'sidebar.settings': 'Settings',
+
+    'sidebar.billing': 'Billing',
     'sidebar.smtpManagement': 'Email SMTP',
     'sidebar.emailTemplates': 'Email Templates',
     'sidebar.tech': 'Technical',
@@ -7057,6 +7059,110 @@ export const translations = {
     'settingsPage.billing.changePlanError': 'Could not register the plan change request',
     'settingsPage.billing.checkoutSuccess': 'Payment confirmed! Your balance and plan will update shortly.',
     'settingsPage.billing.checkoutCancelled': 'Checkout cancelled.',
+    'settingsPage.billing.managedByOwner': 'Billing is managed by the account owner. Only the owner can change the plan or buy credits.',
+    'settingsPage.billing.statusExpired': 'Plan expired',
+    'settingsPage.billing.notPayer': 'Only the account owner can change the plan or buy credits.',
+    'settingsPage.billing.subscriptionExists': 'This account already has an active subscription. Manage it instead of starting a new one.',
+    'settingsPage.billing.billingUnavailable': 'Billing is temporarily unavailable. Please try again in a few minutes.',
+    'settingsPage.billing.creditsCheckUnavailable': 'Could not verify your AI credits right now. Please try again shortly.',
+    'settingsPage.billing.notAMember': 'You are not a member of this organization, so its billing cannot be shown.',
+    'settingsPage.billing.loadError': 'Could not load the billing information.',
+    'settingsPage.billing.retry': 'Try again',
+    'settingsPage.billing.noOrganization': 'No organization selected. Choose an organization to see its billing.',
+    'settingsPage.billing.planAlreadyActive': 'This plan is already active.',
+    'settingsPage.billing.checkoutInProgress': 'A payment for this account is already in progress. Finish it or wait a few minutes before starting another.',
+    'settingsPage.billing.subscriptionInactive': 'The subscription is not active, so it cannot be changed. Renew the plan first.',
+    'settingsPage.billing.renewPlan': 'Renew plan',
+    'settingsPage.billing.pastDueHint': 'The last payment failed. Update the payment method in the payment portal to keep the plan active.',
+    'settingsPage.billing.loading': 'Loading',
+
+    'billing.page.title': 'Billing',
+
+    'billing.page.subtitle': 'Plan, usage, AI credits and payments for your account.',
+
+    'billing.page.status.trialing': 'Trial',
+
+    'billing.page.status.active': 'Active',
+
+    'billing.page.status.past_due': 'Payment overdue',
+
+    'billing.page.status.expired': 'Expired',
+
+    'billing.page.status.canceled': 'Canceled',
+
+    'billing.page.status.unknown': 'Unknown',
+
+    'billing.page.renewsOn': 'Renews on {date}',
+
+    'billing.page.accessUntil': 'Access until {date}',
+
+    'billing.page.chooseAPlan': 'Choose a plan below to activate your account.',
+
+    'billing.page.usage.title': 'Usage and limits',
+
+    'billing.page.usage.description': 'What you have used against the limits of your plan.',
+
+    'billing.page.usage.unlimited': 'Unlimited',
+
+    'billing.page.usage.monthly': 'resets monthly',
+
+    'billing.page.usage.total': 'total',
+
+    'billing.page.usage.loadError': 'Could not load your usage.',
+
+    'billing.page.portal.title': 'Payment and subscription',
+
+    'billing.page.portal.help': 'Cancel your subscription, change your card or downgrade in the secure payment portal.',
+
+    'billing.page.portal.button': 'Manage payment and subscription',
+
+    'billing.page.portal.opening': 'Opening portal...',
+
+    'billing.page.portal.errorTitle': 'Could not open the payment portal',
+
+    'billing.page.portal.errorNotPayer': 'Only the account owner can manage payment and subscription.',
+
+    'billing.page.portal.errorNoCustomer': 'There is no payment profile yet. Subscribe to a plan first.',
+
+    'billing.page.portal.errorInternal': 'Something went wrong. Please try again in a few minutes.',
+
+    'billing.page.summary.title': 'Plan & Billing',
+
+    'billing.page.summary.description': 'Your plan and payment status.',
+
+    'billing.page.summary.open': 'Open billing',
+
+    'billing.page.summary.loadError': 'Could not load the billing summary.',
+
+    'billing.page.banner.pastDue': 'Your last payment failed. Update your payment method to keep your plan.',
+
+    'billing.page.banner.expired': 'Your plan has expired. Renew it to keep using all features.',
+
+    'billing.page.banner.trialEnding': 'Your trial ends in {days} days.',
+
+    'billing.page.banner.trialLastDay': 'Your trial ends today.',
+
+    'billing.page.banner.payerAction': 'Go to billing',
+
+    'billing.page.banner.nonPayerAction': 'Ask the account owner to fix this.',
+
+    'billing.page.banner.dismiss': 'Dismiss',
+    'landing.plans.internal.name': 'Internal (no limits)',
+    'settingsPage.billing.packageNotFound': 'This credit package no longer exists. Reload the page and try again.',
+    'settingsPage.billing.packageInactive': 'This credit package is no longer available.',
+    'settingsPage.billing.planPricingNotConfigured': 'This plan has no price configured yet. Please contact support.',
+    'settingsPage.billing.planNotPurchasable': 'This plan cannot be purchased online.',
+    'settingsPage.billing.invalidRequest': 'The request was not valid. Reload the page and try again.',
+    'settingsPage.billing.internalError': 'Something went wrong on our side. Please try again in a few minutes.',
+    'billing.page.changeInPortal': 'To change your plan, use the payment portal.',
+    'billing.page.changeInPortalLink': 'Go to payment and subscription',
+    'billing.page.trialLastDay': 'Last day of your trial',
+    'billing.page.trialDaysLeftOne': '1 day left in trial',
+    'billing.page.banner.trialEndingOne': 'Your trial ends in 1 day.',
+    'friendlyError.planNotActive': 'Your plan is not active, so this action is not available. Renew or subscribe to a plan in Billing.',
+    'contractTemplates.import.creditsInsufficient': 'Not enough AI credits: the PDF was imported with basic text extraction (formatting may need review).',
+    'contractTemplates.import.aiUnavailable': 'Advanced PDF extraction is not available right now: the PDF was imported with basic text extraction.',
+    'contractTemplates.import.noOrganization': 'No organization selected: the PDF was imported with basic text extraction.',
     'settingsPage.billing.priceMonth': '/month',
     'settingsPage.customFields.title': 'Contact Custom Fields',
     'settingsPage.customFields.description': 'Configure additional fields for contacts',
@@ -8916,6 +9022,8 @@ export const translations = {
     'sidebar.dataErasureRequests': 'Pedidos de Eliminação de Dados',
     'sidebar.apiKeys': 'Chaves API',
     'sidebar.settings': 'Definições',
+
+    'sidebar.billing': 'Faturação',
     'sidebar.smtpManagement': 'Email SMTP',
     'sidebar.emailTemplates': 'Templates de Email',
     'sidebar.tech': 'Técnico',
@@ -15208,6 +15316,110 @@ export const translations = {
     'settingsPage.billing.changePlanError': 'Não foi possível registar o pedido de mudança de plano',
     'settingsPage.billing.checkoutSuccess': 'Pagamento confirmado! O saldo e o plano vão atualizar em breve.',
     'settingsPage.billing.checkoutCancelled': 'Pagamento cancelado.',
+    'settingsPage.billing.managedByOwner': 'A faturação é gerida pelo titular da conta. Só o titular pode alterar o plano ou comprar créditos.',
+    'settingsPage.billing.statusExpired': 'Plano expirado',
+    'settingsPage.billing.notPayer': 'Só o titular da conta pode alterar o plano ou comprar créditos.',
+    'settingsPage.billing.subscriptionExists': 'Esta conta já tem uma subscrição ativa. Gere a subscrição existente em vez de iniciar uma nova.',
+    'settingsPage.billing.billingUnavailable': 'A faturação está temporariamente indisponível. Tenta novamente dentro de alguns minutos.',
+    'settingsPage.billing.creditsCheckUnavailable': 'Não foi possível verificar os teus créditos de IA neste momento. Tenta novamente daqui a pouco.',
+    'settingsPage.billing.notAMember': 'Não és membro desta organização, por isso a faturação dela não pode ser mostrada.',
+    'settingsPage.billing.loadError': 'Não foi possível carregar a informação de faturação.',
+    'settingsPage.billing.retry': 'Tentar novamente',
+    'settingsPage.billing.noOrganization': 'Nenhuma organização selecionada. Escolhe uma organização para ver a faturação.',
+    'settingsPage.billing.planAlreadyActive': 'Este plano já está ativo.',
+    'settingsPage.billing.checkoutInProgress': 'Já existe um pagamento em curso para esta conta. Conclui-o ou aguarda uns minutos antes de iniciar outro.',
+    'settingsPage.billing.subscriptionInactive': 'A subscrição não está ativa, por isso não pode ser alterada. Renova primeiro o plano.',
+    'settingsPage.billing.renewPlan': 'Renovar plano',
+    'settingsPage.billing.pastDueHint': 'O último pagamento falhou. Atualiza o método de pagamento no portal de pagamentos para manter o plano ativo.',
+    'settingsPage.billing.loading': 'A carregar',
+
+    'billing.page.title': 'Faturação',
+
+    'billing.page.subtitle': 'Plano, consumo, créditos de IA e pagamentos da tua conta.',
+
+    'billing.page.status.trialing': 'Período de teste',
+
+    'billing.page.status.active': 'Ativo',
+
+    'billing.page.status.past_due': 'Pagamento em atraso',
+
+    'billing.page.status.expired': 'Expirado',
+
+    'billing.page.status.canceled': 'Cancelado',
+
+    'billing.page.status.unknown': 'Desconhecido',
+
+    'billing.page.renewsOn': 'Renova a {date}',
+
+    'billing.page.accessUntil': 'Acesso até {date}',
+
+    'billing.page.chooseAPlan': 'Escolhe um plano abaixo para ativar a conta.',
+
+    'billing.page.usage.title': 'Consumo e limites',
+
+    'billing.page.usage.description': 'O que já usaste face aos limites do teu plano.',
+
+    'billing.page.usage.unlimited': 'Ilimitado',
+
+    'billing.page.usage.monthly': 'renova todos os meses',
+
+    'billing.page.usage.total': 'total',
+
+    'billing.page.usage.loadError': 'Não foi possível carregar o consumo.',
+
+    'billing.page.portal.title': 'Pagamento e subscrição',
+
+    'billing.page.portal.help': 'Cancela a subscrição, muda de cartão ou passa para um plano inferior no portal de pagamento seguro.',
+
+    'billing.page.portal.button': 'Gerir pagamento e subscrição',
+
+    'billing.page.portal.opening': 'A abrir o portal...',
+
+    'billing.page.portal.errorTitle': 'Não foi possível abrir o portal de pagamento',
+
+    'billing.page.portal.errorNotPayer': 'Só o dono da conta pode gerir o pagamento e a subscrição.',
+
+    'billing.page.portal.errorNoCustomer': 'Ainda não existe um perfil de pagamento. Subscreve primeiro um plano.',
+
+    'billing.page.portal.errorInternal': 'Algo correu mal. Tenta novamente dentro de alguns minutos.',
+
+    'billing.page.summary.title': 'Plano & Faturação',
+
+    'billing.page.summary.description': 'O teu plano e o estado do pagamento.',
+
+    'billing.page.summary.open': 'Abrir faturação',
+
+    'billing.page.summary.loadError': 'Não foi possível carregar o resumo de faturação.',
+
+    'billing.page.banner.pastDue': 'O último pagamento falhou. Atualiza o método de pagamento para manteres o plano.',
+
+    'billing.page.banner.expired': 'O teu plano expirou. Renova-o para continuares a usar todas as funcionalidades.',
+
+    'billing.page.banner.trialEnding': 'O período de teste termina dentro de {days} dias.',
+
+    'billing.page.banner.trialLastDay': 'O período de teste termina hoje.',
+
+    'billing.page.banner.payerAction': 'Ir para a faturação',
+
+    'billing.page.banner.nonPayerAction': 'Pede ao dono da conta para resolver isto.',
+
+    'billing.page.banner.dismiss': 'Fechar',
+    'landing.plans.internal.name': 'Interno (sem limites)',
+    'settingsPage.billing.packageNotFound': 'Este pacote de créditos já não existe. Recarrega a página e tenta novamente.',
+    'settingsPage.billing.packageInactive': 'Este pacote de créditos já não está disponível.',
+    'settingsPage.billing.planPricingNotConfigured': 'Este plano ainda não tem preço configurado. Contacta o suporte.',
+    'settingsPage.billing.planNotPurchasable': 'Este plano não pode ser adquirido online.',
+    'settingsPage.billing.invalidRequest': 'O pedido não era válido. Recarrega a página e tenta novamente.',
+    'settingsPage.billing.internalError': 'Algo correu mal do nosso lado. Tenta novamente dentro de alguns minutos.',
+    'billing.page.changeInPortal': 'Para mudar de plano, usa o portal de pagamento.',
+    'billing.page.changeInPortalLink': 'Ir para pagamento e subscrição',
+    'billing.page.trialLastDay': 'Último dia do período de teste',
+    'billing.page.trialDaysLeftOne': 'Falta 1 dia para o fim do período de teste',
+    'billing.page.banner.trialEndingOne': 'O período de teste termina dentro de 1 dia.',
+    'friendlyError.planNotActive': 'O teu plano não está ativo, por isso esta ação não está disponível. Renova ou subscreve um plano na Faturação.',
+    'contractTemplates.import.creditsInsufficient': 'Créditos de IA insuficientes: o PDF foi importado com extração básica de texto (a formatação pode precisar de revisão).',
+    'contractTemplates.import.aiUnavailable': 'A extração avançada de PDF não está disponível neste momento: o PDF foi importado com extração básica de texto.',
+    'contractTemplates.import.noOrganization': 'Nenhuma organização selecionada: o PDF foi importado com extração básica de texto.',
     'settingsPage.billing.priceMonth': '/mês',
     'settingsPage.billing.title': 'Plano & Faturação',
     'settingsPage.billing.description': 'Gerir o plano, créditos de IA e faturas da organização',
@@ -16810,6 +17022,8 @@ export const translations = {
     'sidebar.dataErasureRequests': 'Solicitudes de Eliminación de Datos',
     'sidebar.apiKeys': 'Claves API',
     'sidebar.settings': 'Configuración',
+
+    'sidebar.billing': 'Facturación',
     'sidebar.smtpManagement': 'Email SMTP',
     'sidebar.emailTemplates': 'Plantillas de Email',
     'sidebar.tech': 'Técnico',
@@ -22554,6 +22768,110 @@ export const translations = {
     'settingsPage.billing.changePlanError': 'No se pudo registrar la solicitud de cambio de plan',
     'settingsPage.billing.checkoutSuccess': '¡Pago confirmado! Su saldo y plan se actualizarán en breve.',
     'settingsPage.billing.checkoutCancelled': 'Pago cancelado.',
+    'settingsPage.billing.managedByOwner': 'La facturación la gestiona el titular de la cuenta. Solo el titular puede cambiar el plan o comprar créditos.',
+    'settingsPage.billing.statusExpired': 'Plan caducado',
+    'settingsPage.billing.notPayer': 'Solo el titular de la cuenta puede cambiar el plan o comprar créditos.',
+    'settingsPage.billing.subscriptionExists': 'Esta cuenta ya tiene una suscripción activa. Gestiona la existente en lugar de iniciar una nueva.',
+    'settingsPage.billing.billingUnavailable': 'La facturación no está disponible temporalmente. Inténtalo de nuevo en unos minutos.',
+    'settingsPage.billing.creditsCheckUnavailable': 'No se pudieron verificar tus créditos de IA ahora mismo. Inténtalo de nuevo en breve.',
+    'settingsPage.billing.notAMember': 'No eres miembro de esta organización, por lo que no se puede mostrar su facturación.',
+    'settingsPage.billing.loadError': 'No se pudo cargar la información de facturación.',
+    'settingsPage.billing.retry': 'Reintentar',
+    'settingsPage.billing.noOrganization': 'Ninguna organización seleccionada. Elige una organización para ver su facturación.',
+    'settingsPage.billing.planAlreadyActive': 'Este plan ya está activo.',
+    'settingsPage.billing.checkoutInProgress': 'Ya hay un pago en curso para esta cuenta. Termínalo o espera unos minutos antes de iniciar otro.',
+    'settingsPage.billing.subscriptionInactive': 'La suscripción no está activa, por lo que no se puede modificar. Renueva primero el plan.',
+    'settingsPage.billing.renewPlan': 'Renovar plan',
+    'settingsPage.billing.pastDueHint': 'El último pago falló. Actualiza el método de pago en el portal de pagos para mantener el plan activo.',
+    'settingsPage.billing.loading': 'Cargando',
+
+    'billing.page.title': 'Facturación',
+
+    'billing.page.subtitle': 'Plan, consumo, créditos de IA y pagos de tu cuenta.',
+
+    'billing.page.status.trialing': 'Periodo de prueba',
+
+    'billing.page.status.active': 'Activo',
+
+    'billing.page.status.past_due': 'Pago vencido',
+
+    'billing.page.status.expired': 'Caducado',
+
+    'billing.page.status.canceled': 'Cancelado',
+
+    'billing.page.status.unknown': 'Desconocido',
+
+    'billing.page.renewsOn': 'Se renueva el {date}',
+
+    'billing.page.accessUntil': 'Acceso hasta el {date}',
+
+    'billing.page.chooseAPlan': 'Elige un plan abajo para activar la cuenta.',
+
+    'billing.page.usage.title': 'Consumo y límites',
+
+    'billing.page.usage.description': 'Lo que has usado frente a los límites de tu plan.',
+
+    'billing.page.usage.unlimited': 'Ilimitado',
+
+    'billing.page.usage.monthly': 'se renueva cada mes',
+
+    'billing.page.usage.total': 'total',
+
+    'billing.page.usage.loadError': 'No se pudo cargar el consumo.',
+
+    'billing.page.portal.title': 'Pago y suscripción',
+
+    'billing.page.portal.help': 'Cancela la suscripción, cambia de tarjeta o baja de plan en el portal de pago seguro.',
+
+    'billing.page.portal.button': 'Gestionar pago y suscripción',
+
+    'billing.page.portal.opening': 'Abriendo el portal...',
+
+    'billing.page.portal.errorTitle': 'No se pudo abrir el portal de pago',
+
+    'billing.page.portal.errorNotPayer': 'Solo el propietario de la cuenta puede gestionar el pago y la suscripción.',
+
+    'billing.page.portal.errorNoCustomer': 'Aún no existe un perfil de pago. Suscríbete primero a un plan.',
+
+    'billing.page.portal.errorInternal': 'Algo salió mal. Inténtalo de nuevo en unos minutos.',
+
+    'billing.page.summary.title': 'Plan y Facturación',
+
+    'billing.page.summary.description': 'Tu plan y el estado del pago.',
+
+    'billing.page.summary.open': 'Abrir facturación',
+
+    'billing.page.summary.loadError': 'No se pudo cargar el resumen de facturación.',
+
+    'billing.page.banner.pastDue': 'El último pago falló. Actualiza el método de pago para mantener tu plan.',
+
+    'billing.page.banner.expired': 'Tu plan ha caducado. Renuévalo para seguir usando todas las funciones.',
+
+    'billing.page.banner.trialEnding': 'Tu periodo de prueba termina en {days} días.',
+
+    'billing.page.banner.trialLastDay': 'Tu periodo de prueba termina hoy.',
+
+    'billing.page.banner.payerAction': 'Ir a facturación',
+
+    'billing.page.banner.nonPayerAction': 'Pide al propietario de la cuenta que lo resuelva.',
+
+    'billing.page.banner.dismiss': 'Cerrar',
+    'landing.plans.internal.name': 'Interno (sin límites)',
+    'settingsPage.billing.packageNotFound': 'Este paquete de créditos ya no existe. Recarga la página e inténtalo de nuevo.',
+    'settingsPage.billing.packageInactive': 'Este paquete de créditos ya no está disponible.',
+    'settingsPage.billing.planPricingNotConfigured': 'Este plan aún no tiene precio configurado. Contacta con soporte.',
+    'settingsPage.billing.planNotPurchasable': 'Este plan no se puede comprar en línea.',
+    'settingsPage.billing.invalidRequest': 'La solicitud no era válida. Recarga la página e inténtalo de nuevo.',
+    'settingsPage.billing.internalError': 'Algo salió mal por nuestra parte. Inténtalo de nuevo en unos minutos.',
+    'billing.page.changeInPortal': 'Para cambiar de plan, usa el portal de pago.',
+    'billing.page.changeInPortalLink': 'Ir a pago y suscripción',
+    'billing.page.trialLastDay': 'Último día del periodo de prueba',
+    'billing.page.trialDaysLeftOne': 'Queda 1 día de prueba',
+    'billing.page.banner.trialEndingOne': 'Tu periodo de prueba termina en 1 día.',
+    'friendlyError.planNotActive': 'Tu plan no está activo, por lo que esta acción no está disponible. Renueva o suscríbete a un plan en Facturación.',
+    'contractTemplates.import.creditsInsufficient': 'Créditos de IA insuficientes: el PDF se importó con extracción básica de texto (el formato puede requerir revisión).',
+    'contractTemplates.import.aiUnavailable': 'La extracción avanzada de PDF no está disponible ahora: el PDF se importó con extracción básica de texto.',
+    'contractTemplates.import.noOrganization': 'Ninguna organización seleccionada: el PDF se importó con extracción básica de texto.',
     'settingsPage.billing.priceMonth': '/mes',
     'settingsPage.billing.title': 'Plan y Facturación',
     'settingsPage.billing.description': 'Gestionar el plan, créditos de IA y facturas de la organización',
@@ -24051,6 +24369,8 @@ export const translations = {
     'sidebar.dataErasureRequests': 'Demandes de suppression de données',
     'sidebar.apiKeys': 'Clés API',
     'sidebar.settings': 'Paramètres',
+
+    'sidebar.billing': 'Facturation',
     'sidebar.smtpManagement': 'Email SMTP',
     'sidebar.emailTemplates': 'Modèles d\'Email',
     'sidebar.tech': 'Technique',
@@ -29753,6 +30073,110 @@ export const translations = {
     'settingsPage.billing.changePlanError': "Impossible d'enregistrer la demande de changement de plan",
     'settingsPage.billing.checkoutSuccess': 'Paiement confirmé ! Votre solde et votre plan seront mis à jour sous peu.',
     'settingsPage.billing.checkoutCancelled': 'Paiement annulé.',
+    'settingsPage.billing.managedByOwner': "La facturation est gérée par le titulaire du compte. Seul le titulaire peut changer de forfait ou acheter des crédits.",
+    'settingsPage.billing.statusExpired': 'Forfait expiré',
+    'settingsPage.billing.notPayer': "Seul le titulaire du compte peut changer de forfait ou acheter des crédits.",
+    'settingsPage.billing.subscriptionExists': "Ce compte a déjà un abonnement actif. Gérez l'abonnement existant au lieu d'en créer un nouveau.",
+    'settingsPage.billing.billingUnavailable': "La facturation est temporairement indisponible. Réessayez dans quelques minutes.",
+    'settingsPage.billing.creditsCheckUnavailable': "Impossible de vérifier vos crédits IA pour le moment. Réessayez sous peu.",
+    'settingsPage.billing.notAMember': "Vous n'êtes pas membre de cette organisation : sa facturation ne peut pas être affichée.",
+    'settingsPage.billing.loadError': "Impossible de charger les informations de facturation.",
+    'settingsPage.billing.retry': 'Réessayer',
+    'settingsPage.billing.noOrganization': "Aucune organisation sélectionnée. Choisissez une organisation pour voir sa facturation.",
+    'settingsPage.billing.planAlreadyActive': 'Ce forfait est déjà actif.',
+    'settingsPage.billing.checkoutInProgress': "Un paiement est déjà en cours pour ce compte. Terminez-le ou attendez quelques minutes avant d'en lancer un autre.",
+    'settingsPage.billing.subscriptionInactive': "L'abonnement n'est pas actif et ne peut pas être modifié. Renouvelez d'abord le forfait.",
+    'settingsPage.billing.renewPlan': 'Renouveler le forfait',
+    'settingsPage.billing.pastDueHint': "Le dernier paiement a échoué. Mettez à jour le moyen de paiement dans le portail de paiement pour garder le forfait actif.",
+    'settingsPage.billing.loading': 'Chargement',
+
+    'billing.page.title': 'Facturation',
+
+    'billing.page.subtitle': 'Plan, consommation, crédits IA et paiements de votre compte.',
+
+    'billing.page.status.trialing': 'Période d\'essai',
+
+    'billing.page.status.active': 'Actif',
+
+    'billing.page.status.past_due': 'Paiement en retard',
+
+    'billing.page.status.expired': 'Expiré',
+
+    'billing.page.status.canceled': 'Annulé',
+
+    'billing.page.status.unknown': 'Inconnu',
+
+    'billing.page.renewsOn': 'Renouvellement le {date}',
+
+    'billing.page.accessUntil': 'Accès jusqu\'au {date}',
+
+    'billing.page.chooseAPlan': 'Choisissez un plan ci-dessous pour activer le compte.',
+
+    'billing.page.usage.title': 'Consommation et limites',
+
+    'billing.page.usage.description': 'Ce que vous avez utilisé par rapport aux limites de votre plan.',
+
+    'billing.page.usage.unlimited': 'Illimité',
+
+    'billing.page.usage.monthly': 'réinitialisé chaque mois',
+
+    'billing.page.usage.total': 'total',
+
+    'billing.page.usage.loadError': 'Impossible de charger la consommation.',
+
+    'billing.page.portal.title': 'Paiement et abonnement',
+
+    'billing.page.portal.help': 'Annulez l\'abonnement, changez de carte ou passez à un plan inférieur dans le portail de paiement sécurisé.',
+
+    'billing.page.portal.button': 'Gérer le paiement et l\'abonnement',
+
+    'billing.page.portal.opening': 'Ouverture du portail...',
+
+    'billing.page.portal.errorTitle': 'Impossible d\'ouvrir le portail de paiement',
+
+    'billing.page.portal.errorNotPayer': 'Seul le propriétaire du compte peut gérer le paiement et l\'abonnement.',
+
+    'billing.page.portal.errorNoCustomer': 'Il n\'existe pas encore de profil de paiement. Souscrivez d\'abord à un plan.',
+
+    'billing.page.portal.errorInternal': 'Une erreur s\'est produite. Réessayez dans quelques minutes.',
+
+    'billing.page.summary.title': 'Plan & Facturation',
+
+    'billing.page.summary.description': 'Votre plan et l\'état du paiement.',
+
+    'billing.page.summary.open': 'Ouvrir la facturation',
+
+    'billing.page.summary.loadError': 'Impossible de charger le résumé de facturation.',
+
+    'billing.page.banner.pastDue': 'Le dernier paiement a échoué. Mettez à jour le moyen de paiement pour conserver votre plan.',
+
+    'billing.page.banner.expired': 'Votre plan a expiré. Renouvelez-le pour continuer à utiliser toutes les fonctionnalités.',
+
+    'billing.page.banner.trialEnding': 'Votre période d\'essai se termine dans {days} jours.',
+
+    'billing.page.banner.trialLastDay': 'Votre période d\'essai se termine aujourd\'hui.',
+
+    'billing.page.banner.payerAction': 'Aller à la facturation',
+
+    'billing.page.banner.nonPayerAction': 'Demandez au propriétaire du compte de résoudre cela.',
+
+    'billing.page.banner.dismiss': 'Fermer',
+    'landing.plans.internal.name': 'Interne (sans limites)',
+    'settingsPage.billing.packageNotFound': 'Ce pack de crédits n\'existe plus. Rechargez la page et réessayez.',
+    'settingsPage.billing.packageInactive': 'Ce pack de crédits n\'est plus disponible.',
+    'settingsPage.billing.planPricingNotConfigured': 'Ce plan n\'a pas encore de prix configuré. Contactez le support.',
+    'settingsPage.billing.planNotPurchasable': 'Ce plan ne peut pas être acheté en ligne.',
+    'settingsPage.billing.invalidRequest': 'La demande n\'était pas valide. Rechargez la page et réessayez.',
+    'settingsPage.billing.internalError': 'Une erreur s\'est produite de notre côté. Réessayez dans quelques minutes.',
+    'billing.page.changeInPortal': 'Pour changer de plan, utilisez le portail de paiement.',
+    'billing.page.changeInPortalLink': 'Aller au paiement et à l\'abonnement',
+    'billing.page.trialLastDay': 'Dernier jour de la période d\'essai',
+    'billing.page.trialDaysLeftOne': '1 jour restant d\'essai',
+    'billing.page.banner.trialEndingOne': 'Votre période d\'essai se termine dans 1 jour.',
+    'friendlyError.planNotActive': 'Votre plan n\'est pas actif, cette action n\'est donc pas disponible. Renouvelez ou souscrivez à un plan dans Facturation.',
+    'contractTemplates.import.creditsInsufficient': "Crédits IA insuffisants : le PDF a été importé avec une extraction de texte basique (la mise en forme peut nécessiter une relecture).",
+    'contractTemplates.import.aiUnavailable': "L'extraction avancée de PDF n'est pas disponible pour le moment : le PDF a été importé avec une extraction de texte basique.",
+    'contractTemplates.import.noOrganization': "Aucune organisation sélectionnée : le PDF a été importé avec une extraction de texte basique.",
     'settingsPage.billing.priceMonth': '/mois',
     'settingsPage.customFields.title': 'Champs Personnalisés de Contact',
     'settingsPage.customFields.description': 'Configurer des champs supplémentaires pour les contacts',
@@ -31309,6 +31733,8 @@ export const translations = {
     'sidebar.dataErasureRequests': 'Datenlöschanträge',
     'sidebar.apiKeys': 'API-Schlüssel',
     'sidebar.settings': 'Einstellungen',
+
+    'sidebar.billing': 'Abrechnung',
     'sidebar.smtpManagement': 'Email SMTP',
     'sidebar.emailTemplates': 'E-Mail-Vorlagen',
     'sidebar.tech': 'Technisch',
@@ -36986,6 +37412,110 @@ export const translations = {
     'settingsPage.billing.changePlanError': 'Die Anfrage zur Planänderung konnte nicht registriert werden',
     'settingsPage.billing.checkoutSuccess': 'Zahlung bestätigt! Ihr Guthaben und Plan werden in Kürze aktualisiert.',
     'settingsPage.billing.checkoutCancelled': 'Zahlung abgebrochen.',
+    'settingsPage.billing.managedByOwner': 'Die Abrechnung wird vom Kontoinhaber verwaltet. Nur der Inhaber kann den Tarif ändern oder Credits kaufen.',
+    'settingsPage.billing.statusExpired': 'Tarif abgelaufen',
+    'settingsPage.billing.notPayer': 'Nur der Kontoinhaber kann den Tarif ändern oder Credits kaufen.',
+    'settingsPage.billing.subscriptionExists': 'Dieses Konto hat bereits ein aktives Abonnement. Verwalten Sie das bestehende, statt ein neues zu starten.',
+    'settingsPage.billing.billingUnavailable': 'Die Abrechnung ist vorübergehend nicht verfügbar. Bitte versuchen Sie es in einigen Minuten erneut.',
+    'settingsPage.billing.creditsCheckUnavailable': 'Ihre KI-Credits konnten gerade nicht geprüft werden. Bitte versuchen Sie es gleich erneut.',
+    'settingsPage.billing.notAMember': 'Sie sind kein Mitglied dieser Organisation, daher kann deren Abrechnung nicht angezeigt werden.',
+    'settingsPage.billing.loadError': 'Die Abrechnungsinformationen konnten nicht geladen werden.',
+    'settingsPage.billing.retry': 'Erneut versuchen',
+    'settingsPage.billing.noOrganization': 'Keine Organisation ausgewählt. Wählen Sie eine Organisation, um deren Abrechnung zu sehen.',
+    'settingsPage.billing.planAlreadyActive': 'Dieser Tarif ist bereits aktiv.',
+    'settingsPage.billing.checkoutInProgress': 'Für dieses Konto läuft bereits eine Zahlung. Schließen Sie sie ab oder warten Sie einige Minuten, bevor Sie eine neue starten.',
+    'settingsPage.billing.subscriptionInactive': 'Das Abonnement ist nicht aktiv und kann nicht geändert werden. Verlängern Sie zuerst den Tarif.',
+    'settingsPage.billing.renewPlan': 'Tarif verlängern',
+    'settingsPage.billing.pastDueHint': 'Die letzte Zahlung ist fehlgeschlagen. Aktualisieren Sie die Zahlungsmethode im Zahlungsportal, damit der Tarif aktiv bleibt.',
+    'settingsPage.billing.loading': 'Wird geladen',
+
+    'billing.page.title': 'Abrechnung',
+
+    'billing.page.subtitle': 'Plan, Nutzung, KI-Guthaben und Zahlungen Ihres Kontos.',
+
+    'billing.page.status.trialing': 'Testphase',
+
+    'billing.page.status.active': 'Aktiv',
+
+    'billing.page.status.past_due': 'Zahlung überfällig',
+
+    'billing.page.status.expired': 'Abgelaufen',
+
+    'billing.page.status.canceled': 'Gekündigt',
+
+    'billing.page.status.unknown': 'Unbekannt',
+
+    'billing.page.renewsOn': 'Verlängert sich am {date}',
+
+    'billing.page.accessUntil': 'Zugang bis {date}',
+
+    'billing.page.chooseAPlan': 'Wählen Sie unten einen Plan, um das Konto zu aktivieren.',
+
+    'billing.page.usage.title': 'Nutzung und Limits',
+
+    'billing.page.usage.description': 'Was Sie im Verhältnis zu den Limits Ihres Plans verbraucht haben.',
+
+    'billing.page.usage.unlimited': 'Unbegrenzt',
+
+    'billing.page.usage.monthly': 'wird monatlich zurückgesetzt',
+
+    'billing.page.usage.total': 'gesamt',
+
+    'billing.page.usage.loadError': 'Die Nutzung konnte nicht geladen werden.',
+
+    'billing.page.portal.title': 'Zahlung und Abonnement',
+
+    'billing.page.portal.help': 'Kündigen Sie das Abonnement, ändern Sie die Karte oder wechseln Sie im sicheren Zahlungsportal zu einem niedrigeren Plan.',
+
+    'billing.page.portal.button': 'Zahlung und Abonnement verwalten',
+
+    'billing.page.portal.opening': 'Portal wird geöffnet...',
+
+    'billing.page.portal.errorTitle': 'Das Zahlungsportal konnte nicht geöffnet werden',
+
+    'billing.page.portal.errorNotPayer': 'Nur der Kontoinhaber kann Zahlung und Abonnement verwalten.',
+
+    'billing.page.portal.errorNoCustomer': 'Es gibt noch kein Zahlungsprofil. Buchen Sie zuerst einen Plan.',
+
+    'billing.page.portal.errorInternal': 'Etwas ist schiefgelaufen. Bitte versuchen Sie es in einigen Minuten erneut.',
+
+    'billing.page.summary.title': 'Plan & Abrechnung',
+
+    'billing.page.summary.description': 'Ihr Plan und der Zahlungsstatus.',
+
+    'billing.page.summary.open': 'Abrechnung öffnen',
+
+    'billing.page.summary.loadError': 'Die Abrechnungsübersicht konnte nicht geladen werden.',
+
+    'billing.page.banner.pastDue': 'Die letzte Zahlung ist fehlgeschlagen. Aktualisieren Sie die Zahlungsmethode, um Ihren Plan zu behalten.',
+
+    'billing.page.banner.expired': 'Ihr Plan ist abgelaufen. Verlängern Sie ihn, um alle Funktionen weiter zu nutzen.',
+
+    'billing.page.banner.trialEnding': 'Ihre Testphase endet in {days} Tagen.',
+
+    'billing.page.banner.trialLastDay': 'Ihre Testphase endet heute.',
+
+    'billing.page.banner.payerAction': 'Zur Abrechnung',
+
+    'billing.page.banner.nonPayerAction': 'Bitten Sie den Kontoinhaber, dies zu beheben.',
+
+    'billing.page.banner.dismiss': 'Schließen',
+    'landing.plans.internal.name': 'Intern (ohne Limits)',
+    'settingsPage.billing.packageNotFound': 'Dieses Guthabenpaket existiert nicht mehr. Laden Sie die Seite neu und versuchen Sie es erneut.',
+    'settingsPage.billing.packageInactive': 'Dieses Guthabenpaket ist nicht mehr verfügbar.',
+    'settingsPage.billing.planPricingNotConfigured': 'Für diesen Plan ist noch kein Preis hinterlegt. Bitte kontaktieren Sie den Support.',
+    'settingsPage.billing.planNotPurchasable': 'Dieser Plan kann nicht online gekauft werden.',
+    'settingsPage.billing.invalidRequest': 'Die Anfrage war ungültig. Laden Sie die Seite neu und versuchen Sie es erneut.',
+    'settingsPage.billing.internalError': 'Auf unserer Seite ist ein Fehler aufgetreten. Bitte versuchen Sie es in einigen Minuten erneut.',
+    'billing.page.changeInPortal': 'Um den Plan zu wechseln, nutzen Sie das Zahlungsportal.',
+    'billing.page.changeInPortalLink': 'Zu Zahlung und Abonnement',
+    'billing.page.trialLastDay': 'Letzter Tag der Testphase',
+    'billing.page.trialDaysLeftOne': 'Noch 1 Tag Testphase',
+    'billing.page.banner.trialEndingOne': 'Ihre Testphase endet in 1 Tag.',
+    'friendlyError.planNotActive': 'Ihr Plan ist nicht aktiv, daher ist diese Aktion nicht verfügbar. Verlängern Sie oder buchen Sie einen Plan unter Abrechnung.',
+    'contractTemplates.import.creditsInsufficient': 'Nicht genug KI-Credits: Die PDF wurde mit einfacher Textextraktion importiert (Formatierung ggf. prüfen).',
+    'contractTemplates.import.aiUnavailable': 'Die erweiterte PDF-Extraktion ist derzeit nicht verfügbar: Die PDF wurde mit einfacher Textextraktion importiert.',
+    'contractTemplates.import.noOrganization': 'Keine Organisation ausgewählt: Die PDF wurde mit einfacher Textextraktion importiert.',
     'settingsPage.billing.priceMonth': '/Monat',
     'settingsPage.customFields.title': 'Benutzerdefinierte Kontaktfelder',
     'settingsPage.customFields.description': 'Zusätzliche Felder konfigurieren',

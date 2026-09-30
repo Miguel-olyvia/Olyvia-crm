@@ -60,8 +60,17 @@
  * it's documented here instead.
  */
 
+import { captureError } from "./sentry.ts";
+
 // deno-lint-ignore no-explicit-any
 type SupabaseClientLike = any;
+
+/** Reason returned when the credits system itself could not be consulted. */
+export const CREDITS_CHECK_UNAVAILABLE = "credits_check_unavailable";
+
+function creditsUnavailable(): AiCreditsCheckResult {
+  return { blocked: true, reason: CREDITS_CHECK_UNAVAILABLE };
+}
 
 export interface AiCreditsCheckResult {
   blocked: boolean;
@@ -78,12 +87,10 @@ export interface AiCreditsCheckResult {
  * Supabase client — the RPC is not meant to be exposed to anon/authenticated
  * roles.
  *
- * Fails OPEN (returns `{ blocked: false }`) on unexpected RPC errors
- * (network/DB issue, or the RPC not existing yet during rollout) — mirrors
- * `checkRateLimit`'s fail-open behavior in rateLimit.ts, so an outage or a
- * not-yet-migrated database does not take down every AI feature in this
- * repo. This is a deliberate choice: a credits-system failure should never
- * be the reason a paying customer can't use an AI feature.
+ * FAILS CLOSED: an RPC error, an empty result or a thrown exception returns
+ * `{ blocked: true, reason: "credits_check_unavailable" }`. Billing must never
+ * be bypassed because the credits system is down. `aiCreditsBlockedResponse`
+ * maps that reason to a 503 instead of the 402 upsell.
  */
 export async function checkAndConsumeAiCredits(
   supabaseAdminClient: SupabaseClientLike,
@@ -97,15 +104,26 @@ export async function checkAndConsumeAiCredits(
     });
 
     if (error) {
-      console.error("[aiCredits] fn_check_and_consume_ai_credits failed — failing open:", error.message);
-      return { blocked: false };
+      console.error("[aiCredits] fn_check_and_consume_ai_credits failed — failing closed:", error.message);
+      await captureError(new Error(`fn_check_and_consume_ai_credits: ${error.message}`), {
+        function: "aiCredits",
+        organization_id: organizationId,
+      });
+      return creditsUnavailable();
     }
 
     // PostgREST can wrap a single-row RPC result either as a plain object or
     // as a one-element array/rowset depending on the function's return type
     // — normalize both shapes.
     const row = Array.isArray(data) ? data[0] : data;
-    if (!row) return { blocked: false };
+    if (!row) {
+      console.error("[aiCredits] fn_check_and_consume_ai_credits returned no data — failing closed");
+      await captureError(new Error("fn_check_and_consume_ai_credits returned no data"), {
+        function: "aiCredits",
+        organization_id: organizationId,
+      });
+      return creditsUnavailable();
+    }
 
     return {
       blocked: row.blocked === true,
@@ -116,8 +134,9 @@ export async function checkAndConsumeAiCredits(
       balance_credits: row.balance_credits ?? null,
     };
   } catch (e) {
-    console.error("[aiCredits] fn_check_and_consume_ai_credits threw — failing open:", e);
-    return { blocked: false };
+    console.error("[aiCredits] fn_check_and_consume_ai_credits threw — failing closed:", e);
+    await captureError(e, { function: "aiCredits", organization_id: organizationId });
+    return creditsUnavailable();
   }
 }
 
@@ -153,14 +172,23 @@ export async function refundAiCredits(
 }
 
 /**
- * Builds the standard 402 Payment Required response for a blocked AI-credit
- * check. Same style as `rateLimitResponse()` in rateLimit.ts — callers still
- * own their own CORS headers.
+ * Builds the response for a blocked AI-credit check. A genuine
+ * out-of-credits/limit block is the standard 402 Payment Required with the
+ * upsell payload; `credits_check_unavailable` (fail-closed) is a 503, since
+ * offering a purchase would be wrong when the credits system is down. Callers
+ * that use this helper get the 503 mapping for free. Same style as
+ * `rateLimitResponse()` — callers still own their own CORS headers.
  */
 export function aiCreditsBlockedResponse(
   result: AiCreditsCheckResult,
   corsHeaders: Record<string, string>,
 ): Response {
+  if (result.reason === CREDITS_CHECK_UNAVAILABLE) {
+    return new Response(
+      JSON.stringify({ error: CREDITS_CHECK_UNAVAILABLE, reason: CREDITS_CHECK_UNAVAILABLE }),
+      { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  }
   return new Response(
     JSON.stringify({
       error: "limit_exceeded",
