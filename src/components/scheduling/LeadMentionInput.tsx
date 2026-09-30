@@ -9,55 +9,55 @@ import { supabase } from '@/integrations/supabase/client';
 import { searchEntityIds } from '@/lib/clientSearch';
 import { useTranslation } from '@/hooks/useTranslation';
 
-interface Contact {
+interface LeadOption {
   id: string;
   entity_id: string;
   display_name: string;
   entity_type?: string;
 }
 
-interface ContactMentionInputProps {
-  selectedContactId: string;
-  onContactSelect: (contactId: string) => void;
+interface LeadMentionInputProps {
+  selectedLeadId: string;
+  onLeadSelect: (leadId: string) => void;
   placeholder?: string;
   organizationId?: string;
   disabled?: boolean;
 }
 
-export function ContactMentionInput({
-  selectedContactId,
-  onContactSelect,
+export function LeadMentionInput({
+  selectedLeadId,
+  onLeadSelect,
   placeholder,
   organizationId,
   disabled = false,
-}: ContactMentionInputProps) {
+}: LeadMentionInputProps) {
   const { t } = useTranslation();
   const [inputValue, setInputValue] = useState('');
   const [showPopover, setShowPopover] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [leads, setLeads] = useState<LeadOption[]>([]);
+  const [selectedLead, setSelectedLead] = useState<LeadOption | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const getContactDisplayName = (contact: Contact) => {
-    return contact.display_name || 'N/A';
+  const getLeadDisplayName = (lead: LeadOption) => {
+    return lead.display_name || 'N/A';
   };
 
-  // Load selected contact on mount
+  // Load selected lead on mount
   useEffect(() => {
-    const loadSelectedContact = async () => {
-      if (selectedContactId) {
+    const loadSelectedLead = async () => {
+      if (selectedLeadId) {
         const { data } = await supabase
           .from('anew_leads')
           .select('id, entity_id, entity:anew_entities!anew_leads_entity_id_fkey(display_name, type)')
-          .eq('id', selectedContactId)
+          .eq('id', selectedLeadId)
           .single();
 
         if (data) {
           const entity = data.entity as any;
-          setSelectedContact({
+          setSelectedLead({
             id: data.id,
             entity_id: data.entity_id,
             display_name: entity?.display_name || 'N/A',
@@ -65,24 +65,24 @@ export function ContactMentionInput({
           });
         }
       } else {
-        setSelectedContact(null);
+        setSelectedLead(null);
       }
     };
 
-    loadSelectedContact();
-  }, [selectedContactId]);
+    loadSelectedLead();
+  }, [selectedLeadId]);
 
-  // Search contacts on-demand
-  const searchContacts = useCallback(async (query: string) => {
+  // Search leads on-demand
+  const searchLeads = useCallback(async (query: string) => {
     if (query.length < 1) {
-      setContacts([]);
+      setLeads([]);
       return;
     }
 
     setIsLoading(true);
     try {
       const { ids: matchedIds } = await searchEntityIds(query);
-      if (matchedIds.length === 0) { setContacts([]); return; }
+      if (matchedIds.length === 0) { setLeads([]); return; }
       const { data: matchingEntities, error: entityError } = await supabase
         .from('anew_entities')
         .select('id, display_name, type')
@@ -90,7 +90,7 @@ export function ContactMentionInput({
         .limit(20);
 
       if (entityError || !matchingEntities || matchingEntities.length === 0) {
-        setContacts([]);
+        setLeads([]);
         return;
       }
 
@@ -98,7 +98,7 @@ export function ContactMentionInput({
 
       // Only leads that have progressed enough to be scheduling-relevant
       // (qualified or in negotiation) can be mentioned in appointments.
-      let contactQuery = supabase
+      let leadQuery = supabase
         .from('anew_leads')
         .select('id, entity_id')
         .in('entity_id', entityIds)
@@ -107,10 +107,10 @@ export function ContactMentionInput({
         .limit(10);
 
       if (organizationId) {
-        contactQuery = contactQuery.eq('organization_id', organizationId);
+        leadQuery = leadQuery.eq('organization_id', organizationId);
       }
 
-      const { data, error } = await contactQuery;
+      const { data, error } = await leadQuery;
 
       if (!error && data) {
         const entityMap = new Map(matchingEntities.map(e => [e.id, e]));
@@ -123,10 +123,10 @@ export function ContactMentionInput({
             entity_type: entity?.type,
           };
         });
-        setContacts(mapped);
+        setLeads(mapped);
       }
     } catch (error) {
-      console.error('Error searching contacts:', error);
+      console.error('Error searching leads:', error);
     } finally {
       setIsLoading(false);
     }
@@ -140,10 +140,10 @@ export function ContactMentionInput({
 
     if (searchQuery.length >= 1) {
       debounceRef.current = setTimeout(() => {
-        searchContacts(searchQuery);
+        searchLeads(searchQuery);
       }, 300);
     } else {
-      setContacts([]);
+      setLeads([]);
     }
 
     return () => {
@@ -151,7 +151,7 @@ export function ContactMentionInput({
         clearTimeout(debounceRef.current);
       }
     };
-  }, [searchQuery, searchContacts]);
+  }, [searchQuery, searchLeads]);
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -168,18 +168,18 @@ export function ContactMentionInput({
     }
   };
 
-  const handleContactSelect = useCallback((contactId: string) => {
-    const contact = contacts.find((item) => item.id === contactId) || null;
-    onContactSelect(contactId);
-    setSelectedContact(contact);
+  const handleLeadSelect = useCallback((leadId: string) => {
+    const lead = leads.find((item) => item.id === leadId) || null;
+    onLeadSelect(leadId);
+    setSelectedLead(lead);
     setInputValue('');
     setSearchQuery('');
     setShowPopover(false);
-  }, [contacts, onContactSelect]);
+  }, [leads, onLeadSelect]);
 
-  const handleRemoveContact = () => {
-    onContactSelect('');
-    setSelectedContact(null);
+  const handleRemoveLead = () => {
+    onLeadSelect('');
+    setSelectedLead(null);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -189,20 +189,20 @@ export function ContactMentionInput({
     }
   };
 
-  if (selectedContact) {
+  if (selectedLead) {
     return (
       <div className="flex items-center gap-2 p-2 border rounded-md bg-background">
         <Badge variant="secondary" className="flex items-center gap-2 py-1.5 px-3">
-          {selectedContact.entity_type === 'company' ? (
+          {selectedLead.entity_type === 'company' ? (
             <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
           ) : (
             <User className="h-3.5 w-3.5 text-muted-foreground" />
           )}
-          <span>{getContactDisplayName(selectedContact)}</span>
+          <span>{getLeadDisplayName(selectedLead)}</span>
           {!disabled && (
             <X
               className="h-3.5 w-3.5 cursor-pointer hover:text-destructive transition-colors"
-              onClick={handleRemoveContact}
+              onClick={handleRemoveLead}
             />
           )}
         </Badge>
@@ -259,23 +259,23 @@ export function ContactMentionInput({
               <div className="py-6 text-center text-sm text-muted-foreground">
                 {t('scheduling.contact.typeToSearch') || 'Escreva @ para pesquisar...'}
               </div>
-            ) : contacts.length === 0 ? (
+            ) : leads.length === 0 ? (
               <CommandEmpty>{t('scheduling.contact.noResults') || 'Nenhuma lead encontrada'}</CommandEmpty>
             ) : (
               <CommandGroup heading={t('scheduling.contact.heading') || 'Leads'}>
-                {contacts.map(contact => (
+                {leads.map(lead => (
                   <CommandItem
-                    key={contact.id}
-                    value={getContactDisplayName(contact)}
-                    onSelect={() => handleContactSelect(contact.id)}
+                    key={lead.id}
+                    value={getLeadDisplayName(lead)}
+                    onSelect={() => handleLeadSelect(lead.id)}
                     className="flex items-center gap-2 cursor-pointer"
                   >
-                    {contact.entity_type === 'company' ? (
+                    {lead.entity_type === 'company' ? (
                       <Building2 className="h-4 w-4 text-muted-foreground" />
                     ) : (
                       <User className="h-4 w-4 text-muted-foreground" />
                     )}
-                    <span>{getContactDisplayName(contact)}</span>
+                    <span>{getLeadDisplayName(lead)}</span>
                   </CommandItem>
                 ))}
               </CommandGroup>

@@ -12,7 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { X, ChevronDown, Send, Check, XCircle, HelpCircle, User, Mail, Phone } from 'lucide-react';
 import { extractLeadContactInfo } from '@/utils/leadContactInfo';
 import { ClientMentionInput } from './ClientMentionInput';
-import { ContactMentionInput } from './LeadMentionInput';
+import { LeadMentionInput } from './LeadMentionInput';
 import { InviteeSelector } from './InviteeSelector';
 import { useScheduleInvitations } from '@/hooks/useScheduleInvitations';
 import { useTranslation } from '@/hooks/useTranslation';
@@ -149,7 +149,7 @@ export function ScheduleItemDialog({
       : format(defaultEnd, "yyyy-MM-dd'T'HH:mm"),
     all_day: item?.all_day || false,
     client_id: item?.client_id || defaultClientId || '',
-    contact_id: item?.contact_id || '',
+    lead_id: item?.lead_id || '',
     location: item?.location || '',
     priority: item?.priority || 0,
     notes: item?.notes || '',
@@ -182,7 +182,7 @@ export function ScheduleItemDialog({
           : format(end, "yyyy-MM-dd'T'HH:mm"),
         all_day: item?.all_day || false,
         client_id: item?.client_id || defaultClientId || '',
-        contact_id: item?.contact_id || '',
+        lead_id: item?.lead_id || '',
         location: item?.location || '',
         priority: item?.priority || 0,
         notes: item?.notes || '',
@@ -209,7 +209,7 @@ export function ScheduleItemDialog({
   const boardModules = (selectedBoard?.settings as any)?.allowed_modules as BoardModule[] | undefined;
   const autoFillAddress = (selectedBoard?.settings as any)?.auto_fill_address === true;
   const showClient    = !isTimeOffBoard && (!boardModules || boardModules.includes('client'));
-  const showContact   = !isTimeOffBoard && (!boardModules || boardModules.includes('contact'));
+  const showLead      = !isTimeOffBoard && (!boardModules || boardModules.includes('contact'));
   const showLocation  = !isTimeOffBoard && (!boardModules || boardModules.includes('location'));
   const showPriority  = !isTimeOffBoard && (!boardModules || boardModules.includes('priority'));
   const showResources = !isTimeOffBoard && (!boardModules || boardModules.includes('resources'));
@@ -313,7 +313,7 @@ export function ScheduleItemDialog({
         start_datetime: new Date(formData.start_datetime).toISOString(),
         end_datetime: new Date(formData.end_datetime).toISOString(),
         client_id: formData.client_id || null,
-        contact_id: formData.contact_id || null,
+        lead_id: formData.lead_id || null,
         employee_id: formData.employee_id || null,
         user_id: isTimeOffBoard ? (formData.user_id || null) : null,
         time_off_type: isTimeOffBoard ? formData.time_off_type : null,
@@ -663,7 +663,7 @@ export function ScheduleItemDialog({
 
             {/* Client - hide for time-off */}
             {showClient && (
-              <div className={showClient && !showContact ? "col-span-2 space-y-2" : "space-y-2"}>
+              <div className={showClient && !showLead ? "col-span-2 space-y-2" : "space-y-2"}>
                 <Label>{t('scheduling.item.client')}</Label>
                 <ClientMentionInput
                   selectedClientId={formData.client_id}
@@ -720,13 +720,13 @@ export function ScheduleItemDialog({
               </div>
             )}
 
-            {/* Contact - hide for time-off and construction boards */}
-            {showContact && (
+            {/* Lead - hide for time-off and construction boards */}
+            {showLead && (
               <div className="space-y-2">
                 <Label>{t('scheduling.item.contact')}</Label>
-                <ContactMentionInput
-                  selectedContactId={formData.contact_id}
-                  onContactSelect={(contactId) => setFormData(f => ({ ...f, contact_id: contactId }))}
+                <LeadMentionInput
+                  selectedLeadId={formData.lead_id}
+                  onLeadSelect={(leadId) => setFormData(f => ({ ...f, lead_id: leadId }))}
                   placeholder={t('scheduling.item.selectContact')}
                   disabled={isViewOnly}
                 />
