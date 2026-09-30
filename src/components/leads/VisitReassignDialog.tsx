@@ -28,10 +28,17 @@ import { UserSchedulePreview } from "./UserSchedulePreview";
 import { cn } from "@/lib/utils";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 import { findScheduleItemForLead } from "./leadVisitMatching";
-import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { extractLeadLocation as extractSharedLeadLocation } from "@/lib/leads/location";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { useTranslation } from "@/hooks/useTranslation";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { setEntityOwner, asStringArray } from "@/lib/leads/entityOwnerSync";
+import {
+  loadNotifySettings,
+  notifyVisitsIfEnabled,
+  type ScheduleChange,
+} from "@/lib/scheduling/notifyClientOfScheduleChange";
 
 interface ScheduledVisit {
   id: string;
@@ -106,6 +113,7 @@ export function VisitReassignDialog({
   onUpdated,
 }: VisitReassignDialogProps) {
   const { toast } = useToast();
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [visit, setVisit] = useState<ScheduledVisit | null>(null);
@@ -663,8 +671,8 @@ export function VisitReassignDialog({
   const handleReassign = async () => {
     if (!visit || !selectedUserId || !selectedDate || !selectedTime) {
       toast({
-        title: "Dados incompletos",
-        description: "Selecione um colaborador e horário",
+        title: t("leads.reassignVisit.incompleteTitle"),
+        description: t("leads.reassignVisit.incompleteDesc"),
         variant: "destructive",
       });
       return;
@@ -679,24 +687,13 @@ export function VisitReassignDialog({
       const [hours, mins] = selectedTime.split(":").map(Number);
       const newStart = new Date(selectedDate);
       newStart.setHours(hours, mins, 0, 0);
-      
-      const originalDuration = new Date(visit.end_datetime).getTime() - 
+
+      const originalDuration = new Date(visit.end_datetime).getTime() -
                                new Date(visit.start_datetime).getTime();
       const newEnd = new Date(newStart.getTime() + originalDuration);
 
-      // Update schedule item datetime
-      const { error: updateError } = await supabase
-        .from("schedule_items")
-        .update({
-          start_datetime: newStart.toISOString(),
-          end_datetime: newEnd.toISOString(),
-        })
-        .eq("id", visit.id);
-
-      if (updateError) throw updateError;
-
-      // Resolve anew_users.id -> auth_user_id for schedule_resources (FK points to profiles/auth)
-      let anewUserData: { id: string; auth_user_id: string; name: string | null } | null = null;
+      // Resolve o utilizador de destino (anew_users.id).
+      let anewUserData: { id: string; auth_user_id: string | null; name: string | null } | null = null;
 
       // Primary lookup: selectedUserId is anew_users.id
       const { data: primaryLookup } = await supabase
@@ -721,74 +718,54 @@ export function VisitReassignDialog({
       }
 
       const anewUserId = anewUserData.id;
-      const userName = anewUserData.name || "Utilizador";
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) throw new Error("Business user not resolved");
 
-      // Get or create resource for new user (using anew internal id)
-      let newResourceId: string | null = null;
-      const { data: existingResource } = await supabase
-        .from("schedule_resources")
-        .select("id")
-        .eq("user_id", anewUserId)
-        .eq("organization_id", companyId)
-        .maybeSingle();
+      // Data + recurso da visita numa só transacção. A base alinha o dono da
+      // lead/cliente e as outras visitas futuras dessa ficha, e devolve o que mudou.
+      const { data: reassignData, error: reassignError } = await supabase.rpc("rpc_reassign_visit", {
+        p_item_id: visit.id,
+        p_new_user_id: anewUserId,
+        p_start: newStart.toISOString(),
+        p_end: newEnd.toISOString(),
+      });
+      if (reassignError) throw reassignError;
 
-      if (existingResource) {
-        newResourceId = existingResource.id;
-      } else {
-        const { data: newResource, error: resourceError } = await supabase
-          .from("schedule_resources")
-          .insert({
-            organization_id: companyId,
-            name: userName,
-            resource_type: "user",
-            user_id: anewUserId,
-            is_active: true,
-            color: "#10b981",
-            metadata: {},
-            created_by: businessUserId,
-          })
-          .select("id")
-          .single();
+      const reassign = (reassignData ?? {}) as {
+        changes?: unknown;
+        lead_id?: string | null;
+        other_visit_ids?: unknown;
+        resource_id?: string | null;
+      };
+      const ownChanges = (Array.isArray(reassign.changes) ? reassign.changes : []).filter(
+        (c): c is ScheduleChange => c === "datetime" || c === "assignee",
+      );
+      const otherVisitIds = asStringArray(reassign.other_visit_ids);
+      const newResourceId = typeof reassign.resource_id === "string" ? reassign.resource_id : null;
 
-        if (resourceError) throw resourceError;
-        newResourceId = newResource?.id;
-      }
-
-      // Update assignee — RPC atómica (delete+insert numa única transação),
-      // evita a janela em que o utilizador perde a visibilidade RLS do item
-      // a meio da troca de recurso.
-      if (newResourceId) {
-        const { error: assigneeError } = await supabase.rpc(
-          "rpc_update_schedule_item_assignees",
-          {
-            p_item_id: visit.id,
-            p_resource_ids: [newResourceId],
-          }
-        );
-
-        if (assigneeError) throw assigneeError;
-      }
-
-      // Update lead assigned_to using Anew internal user id (already resolved above)
-      if (lead) {
-        const { error: leadUpdateError } = await (supabase as any)
-          .from("anew_leads")
-          .update({ assigned_to: anewUserId })
-          .eq("id", lead.id);
-
-        if (leadUpdateError) {
-          console.error("Error updating lead assigned_to:", leadUpdateError);
-          throw new Error("Falha ao atualizar atribuição da lead: " + leadUpdateError.message);
+      // Visita fora do vinculo lead_id/metadata/scheduled_visit_id: a base não
+      // chegou à lead, por isso o dono acompanha aqui (idempotente se já coincide).
+      if (lead && !reassign.lead_id) {
+        try {
+          const ownerResult = await setEntityOwner("lead", lead.id, anewUserId);
+          otherVisitIds.push(...ownerResult.affectedVisitIds);
+        } catch (ownerError) {
+          captureFlowError(ownerError, "lead-lifecycle");
         }
-
-        console.log("Lead assigned_to updated successfully to anew_user_id:", anewUserId);
       }
 
-      toast({ title: "Visita reatribuída com sucesso!" });
+      toast({ title: t("leads.reassignVisit.success") });
+
+      // Avisa o cliente (respeitando os interruptores da organização). Em
+      // segundo plano: a gravação já terminou.
+      void (async () => {
+        const settings = await loadNotifySettings(companyId);
+        const notified =
+          (await notifyVisitsIfEnabled([visit.id], ownChanges, settings)) +
+          (await notifyVisitsIfEnabled(otherVisitIds.filter((id) => id !== visit.id), ["assignee"], settings));
+        if (notified > 0) toast({ title: t("scheduling.notify.clientNotified") });
+      })();
+
       await onUpdated?.(undefined, {
-        leadId: lead.id,
+        leadId: lead?.id ?? "",
         visitId: visit.id,
         assignedTo: anewUserId,
         resourceId: newResourceId,
@@ -796,11 +773,12 @@ export function VisitReassignDialog({
         scheduledEnd: newEnd.toISOString(),
       });
       onOpenChange(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       captureFlowError(error, "lead-lifecycle");
+      const description = await getFriendlyErrorMessage(error);
       toast({
-        title: "Erro ao reatribuir visita",
-        description: error.message,
+        title: t("leads.reassignVisit.error"),
+        description,
         variant: "destructive",
       });
     } finally {

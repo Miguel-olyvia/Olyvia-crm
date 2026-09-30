@@ -74,8 +74,28 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   { match: /Edge Function returned a non-2xx/i, key: "friendlyError.serverError" },
 ];
 
+/**
+ * Erros da regra "dono da lead/cliente = recurso da visita futura", lançados
+ * pela base com prefixo estável (o nif-write-proxy só passa `message`). Tratados
+ * ANTES de FRIENDLY_MAP: o nome do utilizador pode conter "permission" ou "SMTP".
+ */
+const OWNER_WITHOUT_RESOURCE = /owner_without_schedule_resource:\s*(.*)$/im;
+const OWNER_REQUIRED = /owner_required_for_future_visit/i;
+
+function mapOwnerSyncError(raw: string): string | null {
+  const withoutResource = OWNER_WITHOUT_RESOURCE.exec(raw);
+  if (withoutResource) {
+    const name = withoutResource[1].trim().replace(/["}\\]+$/, "") || "?";
+    return translate("friendlyError.ownerWithoutScheduleResource").replace("{name}", name);
+  }
+  if (OWNER_REQUIRED.test(raw)) return translate("friendlyError.ownerRequiredForFutureVisit");
+  return null;
+}
+
 function mapFriendly(raw: string): string {
   if (!raw) return translate("friendlyError.unexpectedRetry");
+  const ownerSync = mapOwnerSyncError(raw);
+  if (ownerSync) return ownerSync;
   for (const { match, key } of FRIENDLY_MAP) {
     if (match.test(raw)) return translate(key);
   }

@@ -7,7 +7,11 @@ import {
   uniqueEmails,
   buildManageUrl,
   defaultMeetingHtml,
+  loadTemplate,
+  renderHtml,
 } from '../_shared/formEmails.ts';
+import { buildAudienceVars, pickAudienceTemplateId } from '../_shared/audienceTemplates.ts';
+import { cancelLegacyVisitReminders } from '../_shared/reminderRunner.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
@@ -203,25 +207,36 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    // 6. Cancel pending reminders for this lead (email and SMS)
-    if (leadId) {
+    // 6. Cancel pending reminders of THIS visit (email and SMS), lead or client.
+    //    Filtra pela visita, nao pela lead: cancelar uma visita nao pode matar
+    //    os emails por fase da mesma lead, e uma visita de cliente (sem lead)
+    //    tem lembretes que a versao anterior nunca cancelava.
+    {
+      const cancelledAt = new Date().toISOString();
       const { error: emailError } = await supabase
         .from('scheduled_emails')
-        .update({ status: 'cancelled' })
-        .eq('entity_type', 'leads')
-        .eq('entity_id', leadId)
+        .update({ status: 'cancelled', cancelled_at: cancelledAt, cancel_reason: 'Visita cancelada' })
+        .eq('schedule_item_id', itemId)
         .eq('status', 'pending');
       if (emailError) {
         console.error('[cancel-booking] failed to cancel scheduled_emails:', emailError);
       }
       const { error: smsError } = await supabase
         .from('scheduled_sms')
-        .update({ status: 'cancelled', cancelled_at: new Date().toISOString(), cancel_reason: 'Visita cancelada' })
-        .eq('entity_type', 'leads')
-        .eq('entity_id', leadId)
+        .update({ status: 'cancelled', cancelled_at: cancelledAt, cancel_reason: 'Visita cancelada' })
+        .eq('schedule_item_id', itemId)
         .eq('status', 'pending');
       if (smsError) {
         console.error('[cancel-booking] failed to cancel scheduled_sms:', smsError);
+      }
+      // Lembretes antigos, criados antes de estarem ligados a visita: so os de
+      // visita (nunca os emails por fase nem os convites de agendamento).
+      try {
+        const clientId: string | null = metadata.client_id || null;
+        if (leadId) await cancelLegacyVisitReminders(supabase, 'leads', leadId, 'Visita cancelada');
+        if (clientId) await cancelLegacyVisitReminders(supabase, 'clients', clientId, 'Visita cancelada');
+      } catch (legacyErr) {
+        console.error('[cancel-booking] failed to cancel legacy reminders (non-fatal):', legacyErr);
       }
     }
 
@@ -246,6 +261,7 @@ Deno.serve(async (req: Request) => {
 
       // Resolve client email + name from the lead's field_values.
       let leadEmail = '';
+      let leadPhone = '';
       let leadName = 'Cliente';
       if (leadId) {
         const { data: lead } = await supabase
@@ -258,6 +274,8 @@ Deno.serve(async (req: Request) => {
           : {};
         const leadEmailRaw = fv.email || fv.po_email || fv.Email || null;
         leadEmail = leadEmailRaw ? String(leadEmailRaw).toLowerCase().trim() : '';
+        const leadPhoneRaw = fv.phone || fv.po_telefone || fv.telefone || fv.telemovel || null;
+        leadPhone = leadPhoneRaw ? String(leadPhoneRaw).trim() : '';
         leadName = [
           fv.first_name || fv.po_nome || fv.nome || '',
           fv.last_name || fv.po_apelido || fv.apelido || '',
@@ -304,18 +322,48 @@ Deno.serve(async (req: Request) => {
       // that template's copy announces a visit was *scheduled* — the exact opposite of
       // what happened — and its placeholders (e.g. {{lead_phone}}) render raw because the
       // cancel flow doesn't populate them. Always send a purpose-built cancellation notice.
-      const subject = renderSubject('Visita cancelada — {{lead_name}}', baseVars);
-      const htmlFor = (kind: 'client' | 'technician') => defaultMeetingHtml({
-        heading: 'Visita cancelada',
-        intro: kind === 'client'
-          ? 'A sua visita agendada foi cancelada.'
-          : 'Uma visita agendada foi cancelada.',
-        leadName: leadName,
-        when: formattedWhen,
-        location: item.location || undefined,
-        technicianName: technicianName || undefined,
-        primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
-      });
+      // (Cancel flow: pickAudienceTemplateId never falls back to meeting_notify.)
+      // Modelo proprio por destinatario (cancel_client / cancel_technician); sem
+      // nenhum configurado, o texto padrao abaixo, exactamente como antes.
+      const buildMail = async (kind: 'client' | 'technician') => {
+        const defaultSubject = kind === 'client'
+          ? 'A sua visita foi cancelada'
+          : 'Visita cancelada — {{lead_name}}';
+        const vars = buildAudienceVars(baseVars, kind, {
+          cancelUrl: manageLink,
+          leadPhone,
+          leadEmail,
+          address: item.location || '',
+          appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
+        });
+        const templateId = pickAudienceTemplateId(emailCfg, 'cancel', kind, leadLocale);
+        const tpl = await loadTemplate(supabase, templateId);
+        if (tpl?.body_html) {
+          return {
+            subject: renderSubject(tpl.subject || defaultSubject, vars),
+            html: renderHtml(tpl.body_html, vars),
+          };
+        }
+        return {
+          subject: renderSubject(defaultSubject, vars),
+          html: defaultMeetingHtml({
+            audience: kind,
+            leadPhone: kind === 'technician' ? (leadPhone || undefined) : undefined,
+            leadEmail: kind === 'technician' ? (leadEmail || undefined) : undefined,
+            address: kind === 'technician' ? (item.location || undefined) : undefined,
+            appointmentUrl: kind === 'technician' ? `${siteUrlEnv.replace(/\/+$/, '')}/scheduling` : undefined,
+            heading: 'Visita cancelada',
+            intro: kind === 'client'
+              ? 'A sua visita agendada foi cancelada.'
+              : 'Uma visita agendada foi cancelada.',
+            leadName: leadName,
+            when: formattedWhen,
+            location: item.location || undefined,
+            technicianName: technicianName || undefined,
+            primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
+          }),
+        };
+      };
 
       // (a) Technician + extra notify emails: internal cancellation notice.
       // Its own toggle ("Aviso ao comercial ao cancelar"), independent from
@@ -326,24 +374,26 @@ Deno.serve(async (req: Request) => {
         ...extra,
       ]);
       if (notifyList.length > 0) {
+        const mail = await buildMail('technician');
         await sendEmailNow({
           organizationId,
           smtpId: emailCfg?.email_smtp_id,
           to: notifyList[0],
           recipients: notifyList,
-          subject,
-          html: htmlFor('technician'),
+          subject: mail.subject,
+          html: mail.html,
         });
       }
 
       // (b) Client: cancellation confirmation.
       if (leadEmail) {
+        const mail = await buildMail('client');
         await sendEmailNow({
           organizationId,
           smtpId: emailCfg?.email_smtp_id,
           to: leadEmail,
-          subject,
-          html: htmlFor('client'),
+          subject: mail.subject,
+          html: mail.html,
         });
       }
     } catch (emailErr) {

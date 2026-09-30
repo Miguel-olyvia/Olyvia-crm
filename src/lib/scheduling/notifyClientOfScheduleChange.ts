@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { captureFlowError } from '@/lib/observability/captureFlowError';
 
 export type ScheduleChange = 'datetime' | 'assignee';
 
@@ -23,14 +24,85 @@ export async function notifyClientOfScheduleChange(
       body: { schedule_item_id: itemId, changes },
     });
     if (error) {
+      // Um 403 por ambito (comercial "so meus" que passou a visita a outra
+      // pessoa) cai aqui: fica registado como achado, nao se contorna.
       console.error('[notifyClientOfScheduleChange]', error);
+      captureFlowError(error, 'lead-lifecycle');
       return null;
     }
     return data as NotifyResult;
   } catch (error) {
     console.error('[notifyClientOfScheduleChange]', error);
+    captureFlowError(error, 'lead-lifecycle');
     return null;
   }
+}
+
+export interface NotifySettings {
+  notify_client_on_reschedule?: boolean | null;
+  notify_client_on_reassign?: boolean | null;
+}
+
+/** Filtra as mudancas pelos interruptores da organizacao (schedule_settings). */
+export function filterChangesBySettings(
+  changes: ScheduleChange[],
+  settings: NotifySettings | null | undefined,
+): ScheduleChange[] {
+  return changes.filter(
+    (c) =>
+      (c === 'datetime' && settings?.notify_client_on_reschedule === true) ||
+      (c === 'assignee' && settings?.notify_client_on_reassign === true),
+  );
+}
+
+/**
+ * Avisa o cliente de varias visitas de uma vez (as devolvidas pelas RPCs de
+ * mudanca de dono). Respeita os interruptores; devolve quantas visitas
+ * enviaram mesmo email/SMS. Nunca lanca excepcao.
+ */
+export async function notifyVisitsIfEnabled(
+  itemIds: readonly string[],
+  changes: ScheduleChange[],
+  settings: NotifySettings | null | undefined,
+): Promise<number> {
+  const wanted = filterChangesBySettings(changes, settings);
+  if (wanted.length === 0 || itemIds.length === 0) return 0;
+
+  const results = await Promise.all(
+    [...new Set(itemIds)].map((id) => notifyClientOfScheduleChange(id, wanted)),
+  );
+  return results.filter((r) => r && (r.sent.email || r.sent.sms)).length;
+}
+
+/** Le so os dois interruptores de aviso da organizacao. Nunca lanca excepcao. */
+export async function loadNotifySettings(orgId: string | null | undefined): Promise<NotifySettings | null> {
+  if (!orgId) return null;
+  try {
+    const { data, error } = await supabase
+      .from('schedule_settings')
+      .select('notify_client_on_reschedule, notify_client_on_reassign')
+      .eq('organization_id', orgId)
+      .maybeSingle();
+    if (error) {
+      console.error('[loadNotifySettings]', error);
+      return null;
+    }
+    return data as NotifySettings | null;
+  } catch (error) {
+    console.error('[loadNotifySettings]', error);
+    return null;
+  }
+}
+
+/** Atalho para quem nao tem os interruptores a mao: carrega-os e avisa. */
+export async function notifyVisitsForOrg(
+  orgId: string | null | undefined,
+  itemIds: readonly string[],
+  changes: ScheduleChange[],
+): Promise<number> {
+  if (itemIds.length === 0) return 0;
+  const settings = await loadNotifySettings(orgId);
+  return notifyVisitsIfEnabled(itemIds, changes, settings);
 }
 
 interface PrevScheduleItem {

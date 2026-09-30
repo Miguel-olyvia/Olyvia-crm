@@ -351,9 +351,18 @@ export default function Scheduling() {
       const prevItem = selectedItem && selectedItem.id === data.id ? selectedItem : items.find(i => i.id === data.id) ?? null;
       if (await updateItem(data.id, data)) {
         toast.success(t('scheduling.item.updateSuccess'));
-        const assigneesOk = await updateAssignees(data.id, assigneeIds);
+        const assigneesResult = await updateAssignees(data.id, assigneeIds);
         setItems(await fetchItemsRef.current(filters));
-        notifyIfEnabled(data.id, detectScheduleChanges(prevItem, data, assigneesOk ? assigneeIds : null));
+        notifyIfEnabled(data.id, detectScheduleChanges(prevItem, data, assigneesResult ? assigneeIds : null));
+        if (assigneesResult?.leadOwnerChanged) {
+          // O recurso mudou e o dono da lead/cliente ligado acompanhou-o; as outras
+          // visitas futuras dessa ficha foram alinhadas pela base.
+          const ownerName = users.find(u => u.id === assigneesResult.newOwnerId)?.name ?? '';
+          toast.info(t('scheduling.item.leadOwnerSynced', { name: ownerName }));
+          assigneesResult.otherVisitIds
+            .filter(otherId => otherId !== data.id)
+            .forEach(otherId => notifyIfEnabled(otherId, ['assignee']));
+        }
       }
     } else {
       const newItem = await createItem(data, assigneeIds);

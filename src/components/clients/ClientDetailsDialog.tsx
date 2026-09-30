@@ -33,6 +33,8 @@ import { PhoneInput } from "@/components/PhoneInput";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useTranslation } from "@/hooks/useTranslation";
+import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { setEntityOwner, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { PermissionGate } from "@/components/PermissionGate";
 import { differenceInDays } from "date-fns";
@@ -40,6 +42,7 @@ import { calculateClientHealth, type ClientContractInfo, type ClientInteractionI
 import { RequestErasureButton } from "@/components/RequestErasureButton";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { ClientDeliveryAddressesSection } from "@/components/clients/ClientDeliveryAddressesSection";
+import { CLIENT_BUSINESS_SELECT, deriveClientBusinessOrigin, type ClientBusinessOriginType } from "@/components/clients/detail/clientBusinessOrigin";
 
 /**
  * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
@@ -140,6 +143,7 @@ interface Proposal {
 interface Contract {
   id: string; title: string; status: string; total_value: number;
   start_date: string | null; end_date: string | null; payment_terms: string | null;
+  origin_type: ClientBusinessOriginType; display_number: string;
 }
 
 export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdated }: ClientDetailsDialogProps) => {
@@ -309,7 +313,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const [interactionsRes, tagsRes, contractsRes] = await Promise.all([
         supabase.from("entity_interactions").select("id, interaction_type, sentiment, subject, notes, next_action_type, next_action_date, interaction_at, created_by, created_at").eq("entity_id", entityId).eq("organization_id", organizationId).order("interaction_at", { ascending: false }).limit(50),
         supabase.from("contact_tags").select("id, tag, color").eq("entity_id", entityId).eq("organization_id", organizationId),
-        (supabase as any).from("client_contracts").select("id, title:contract_number, status, total_value, start_date, end_date, payment_terms").eq("entity_id", entityId).eq("organization_id", organizationId).order("created_at", { ascending: false }),
+        (supabase as any).from("client_contracts").select(`id, title:contract_number, status, total_value, start_date, end_date, payment_terms, ${CLIENT_BUSINESS_SELECT}`).eq("entity_id", entityId).eq("organization_id", organizationId).order("created_at", { ascending: false }),
       ]);
 
       if (interactionsRes.error || tagsRes.error || contractsRes.error) {
@@ -317,7 +321,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       }
       setInteractions(interactionsRes.data || []);
       setTags(tagsRes.data || []);
-      setContracts(contractsRes.data || []);
+      setContracts((contractsRes.data || []).map((c: any) => ({ ...c, ...deriveClientBusinessOrigin(c) })));
 
       // Origin of this client (from anew_clients.origin_* columns, not a live lead join)
       if (client.origin_source || client.origin_source_id || client.origin_campaign_id) {
@@ -545,7 +549,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       return days > 0 && days <= 60;
     });
     if (!expiring) return null;
-    return { name: expiring.title, daysUntil: differenceInDays(new Date(expiring.end_date!), now) };
+    return { name: expiring.display_number || expiring.title, daysUntil: differenceInDays(new Date(expiring.end_date!), now) };
   }, [contracts]);
 
   const { events: sendEvents } = useEntitySendEvents(client?.entity_id || null);
@@ -754,6 +758,17 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         return;
       }
 
+      // O dono do cliente e o recurso das visitas futuras nunca divergem: muda-se o
+      // dono PRIMEIRO (a base troca o recurso das visitas futuras) e, se o novo dono
+      // nao tem recurso de agenda, a mudanca e recusada antes de gravar o resto.
+      let ownerAffectedVisitIds: string[] = [];
+      if ((client.assigned_to ?? null) !== (editFormData.assigned_to || null)) {
+        const ownerResult = await withAuditContext(supabase, businessUserId, () =>
+          setEntityOwner("client", client.id, editFormData.assigned_to || null),
+        );
+        ownerAffectedVisitIds = ownerResult.affectedVisitIds;
+      }
+
       if (entityId) {
         await withAuditContext(supabase, businessUserId, async () => {
           const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
@@ -789,11 +804,16 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       }
 
       toast({ title: "Cliente actualizado" });
+      if (ownerAffectedVisitIds.length > 0) {
+        void notifyOwnerChangeVisits(client.organization_id, ownerAffectedVisitIds).then((notified) => {
+          if (notified > 0) toast({ title: t("scheduling.notify.clientNotified") });
+        });
+      }
       onOpenChange(false);
       onClientUpdated?.();
     } catch (error: any) {
       captureFlowError(error, "client-lifecycle");
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: "Erro", description: await getFriendlyErrorMessage(error, error?.message), variant: "destructive" });
     }
   };
 
@@ -1115,7 +1135,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                     📜 Timeline {timelineEvents.length > 0 && <Badge className="ml-1" variant="secondary">{timelineEvents.length}</Badge>}
                   </TabsTrigger>
                   <TabsTrigger value="contracts">
-                    📑 Contratos {activeContractCount > 0 && <Badge className="ml-1" variant="secondary">{activeContractCount}</Badge>}
+                    📑 Negócios {activeContractCount > 0 && <Badge className="ml-1" variant="secondary">{activeContractCount}</Badge>}
                   </TabsTrigger>
                   <TabsTrigger value="deals">
                     📋 Pedidos {deals.length > 0 && <Badge className="ml-1" variant="secondary">{deals.length}</Badge>}

@@ -14,6 +14,11 @@ interface SchedulingStepProps {
   durationMinutes: number;
   postalCode?: string;
   districtId?: string;
+  /** Contacto ja escrito pelo visitante: se for lead/cliente conhecido, o servidor mostra so os horarios do seu comercial. */
+  contactEmail?: string;
+  contactPhone?: string;
+  /** Reagendamento pelo link: so os horarios do recurso da visita, com as regras da marcacao. */
+  bookingToken?: string;
   primaryColor: string;
   textColor?: string;
   buttonTextColor?: string;
@@ -38,6 +43,8 @@ interface ScheduleConfig {
   holidays: string[];
 }
 
+const MAX_INITIAL_MONTH_HOPS = 3;
+
 const DEFAULT_CONFIG: ScheduleConfig = {
   working_days: [1, 2, 3, 4, 5],
   working_hours_start: '09:00',
@@ -54,6 +61,9 @@ export function SchedulingStep({
   durationMinutes,
   postalCode,
   districtId,
+  contactEmail,
+  contactPhone,
+  bookingToken,
   primaryColor,
   textColor,
   buttonTextColor,
@@ -70,6 +80,8 @@ export function SchedulingStep({
   const [loadingDays, setLoadingDays] = useState(false);
   const [noCoverage, setNoCoverage] = useState(false);
   const [scheduleConfig, setScheduleConfig] = useState<ScheduleConfig>(DEFAULT_CONFIG);
+  // Auto-avanco para o mes seguinte so acontece na carga inicial.
+  const initialLoad = useRef({ active: true, hops: 0 });
 
   const today = startOfDay(new Date());
   const holidaySet = useMemo(() => new Set(scheduleConfig.holidays), [scheduleConfig.holidays]);
@@ -86,7 +98,7 @@ export function SchedulingStep({
   // Prefetch which days have availability for the visible month (P3: single range call)
   useEffect(() => {
     prefetchMonth(currentMonth);
-  }, [currentMonth, formId, boardId, postalCode, districtId]);
+  }, [currentMonth, formId, boardId, postalCode, districtId, contactEmail, contactPhone, bookingToken]);
 
   const prefetchMonth = async (month: Date) => {
     setLoadingDays(true);
@@ -116,6 +128,9 @@ export function SchedulingStep({
           end_date: endStr,
           postal_code: postalCode || undefined,
           district_id: districtId || undefined,
+          email: contactEmail || undefined,
+          phone: contactPhone || undefined,
+          booking_token: bookingToken || undefined,
           board_id: boardId || undefined,
           duration_minutes: durationMinutes,
         }),
@@ -130,10 +145,23 @@ export function SchedulingStep({
 
       const available = new Set<string>(data.available_dates || []);
       setDaysWithSlots(available);
-      setNoCoverage(available.size === 0);
+
+      // So a carga inicial decide "sem cobertura"; um mes vazio escolhido pelo visitante nao.
+      if (initialLoad.current.active) {
+        if (available.size === 0 && initialLoad.current.hops < MAX_INITIAL_MONTH_HOPS) {
+          initialLoad.current.hops += 1;
+          setCurrentMonth(addMonths(month, 1));
+          return;
+        }
+        initialLoad.current.active = false;
+        setNoCoverage(available.size === 0);
+      }
     } catch {
       setDaysWithSlots(new Set());
-      setNoCoverage(true);
+      if (initialLoad.current.active) {
+        initialLoad.current.active = false;
+        setNoCoverage(true);
+      }
     } finally {
       setLoadingDays(false);
     }
@@ -146,7 +174,7 @@ export function SchedulingStep({
       return;
     }
     loadSlots(selectedDate);
-  }, [selectedDate]);
+  }, [selectedDate, contactEmail, contactPhone, bookingToken]);
 
   const loadSlots = async (date: Date) => {
     setLoadingSlots(true);
@@ -160,6 +188,9 @@ export function SchedulingStep({
           date: format(date, "yyyy-MM-dd"),
           postal_code: postalCode || undefined,
           district_id: districtId || undefined,
+          email: contactEmail || undefined,
+          phone: contactPhone || undefined,
+          booking_token: bookingToken || undefined,
           board_id: boardId || undefined,
           duration_minutes: durationMinutes,
         }),

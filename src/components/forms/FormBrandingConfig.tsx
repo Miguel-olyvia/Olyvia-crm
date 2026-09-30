@@ -12,7 +12,9 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "@/lib/toast";
 import { Loader2, Palette, Type, Layout, CheckCircle, Image, Code, Sliders, ImageIcon, Mail } from "lucide-react";
+import { useTranslation } from "@/hooks/useTranslation";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
+import { FormEmailsTab, type EmailTemplateOption, type SmtpOption } from "@/components/forms/FormEmailsTab";
 import { BrandingLivePreview } from "@/components/forms/BrandingLivePreview";
 import { LANGUAGES } from "@/constants/languages";
 import {
@@ -100,7 +102,15 @@ interface BrandingData {
   cancel_notify_emails: string;
   reminder_enabled: boolean;
   reminder_hours_before: number;
+  /** Lembrete do comercial; null = segue o do cliente. */
+  reminder_technician_enabled: boolean | null;
+  reminder_technician_hours_before: number | null;
   reminder_template_id: string | null;
+  reminder_technician_template_id: string | null;
+  reschedule_client_template_id: string | null;
+  reschedule_technician_template_id: string | null;
+  cancel_client_template_id: string | null;
+  cancel_technician_template_id: string | null;
   confirmation_sms_enabled: boolean;
   confirmation_sms_message: string;
   confirmation_sms_include_link: boolean;
@@ -160,7 +170,14 @@ const defaultBranding: BrandingData = {
   cancel_notify_emails: "",
   reminder_enabled: false,
   reminder_hours_before: 2,
+  reminder_technician_enabled: null,
+  reminder_technician_hours_before: null,
   reminder_template_id: null,
+  reminder_technician_template_id: null,
+  reschedule_client_template_id: null,
+  reschedule_technician_template_id: null,
+  cancel_client_template_id: null,
+  cancel_technician_template_id: null,
   confirmation_sms_enabled: false,
   confirmation_sms_message: "",
   confirmation_sms_include_link: false,
@@ -252,17 +269,6 @@ function ColorInput({ label, description, value, onChange }: { label: string; de
       {description && <p className="text-[10px] text-muted-foreground leading-tight">{description}</p>}
     </div>
   );
-}
-
-interface EmailTemplateOption {
-  id: string;
-  name: string;
-}
-
-interface SmtpOption {
-  id: string;
-  name: string;
-  is_default: boolean;
 }
 
 export function FormBrandingConfig({ open, onOpenChange, formId, formName }: FormBrandingConfigProps) {
@@ -407,7 +413,14 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
           cancel_notify_emails: (data as any).cancel_notify_emails ?? "",
           reminder_enabled: (data as any).reminder_enabled ?? false,
           reminder_hours_before: (data as any).reminder_hours_before ?? 2,
+          reminder_technician_enabled: (data as any).reminder_technician_enabled ?? null,
+          reminder_technician_hours_before: (data as any).reminder_technician_hours_before ?? null,
           reminder_template_id: (data as any).reminder_template_id ?? null,
+          reminder_technician_template_id: (data as any).reminder_technician_template_id ?? null,
+          reschedule_client_template_id: (data as any).reschedule_client_template_id ?? null,
+          reschedule_technician_template_id: (data as any).reschedule_technician_template_id ?? null,
+          cancel_client_template_id: (data as any).cancel_client_template_id ?? null,
+          cancel_technician_template_id: (data as any).cancel_technician_template_id ?? null,
           confirmation_sms_enabled: (data as any).confirmation_sms_enabled ?? false,
           confirmation_sms_message: (data as any).confirmation_sms_message ?? "",
           confirmation_sms_include_link: (data as any).confirmation_sms_include_link ?? false,
@@ -988,295 +1001,12 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
               </TabsContent>
 
               <TabsContent value="emails" className="space-y-6 mt-0">
-                <div className="space-y-3 rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>Email de confirmação</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Enviado ao cliente assim que submete o formulário (agendamento incluído).
-                      </p>
-                    </div>
-                    <Switch
-                      checked={branding.confirmation_email_enabled}
-                      onCheckedChange={(v) => setBranding({ ...branding, confirmation_email_enabled: v })}
-                    />
-                  </div>
-                  {branding.confirmation_email_enabled && (
-                    <div className="space-y-1">
-                      <Label className="text-xs">Modelo de email</Label>
-                      <Select
-                        value={branding.confirmation_email_template_id || "__default__"}
-                        onValueChange={(v) =>
-                          setBranding({
-                            ...branding,
-                            confirmation_email_template_id: v === "__default__" ? null : v,
-                          })
-                        }
-                      >
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__default__">Modelo padrão do sistema</SelectItem>
-                          {emailTemplateOptions.map((tpl) => (
-                            <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  <div className="flex items-center justify-between border-t pt-3">
-                    <div>
-                      <Label className="text-xs">Também por SMS</Label>
-                      <p className="text-[10px] text-muted-foreground">
-                        Além do email, envia um SMS de confirmação ao número indicado pelo cliente.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={branding.confirmation_sms_enabled}
-                      onCheckedChange={(v) => setBranding({ ...branding, confirmation_sms_enabled: v })}
-                    />
-                  </div>
-                  {branding.confirmation_sms_enabled && (
-                    <div className="space-y-3">
-                      <div className="space-y-1">
-                        <Label className="text-xs">Mensagem do SMS</Label>
-                        <Textarea
-                          value={branding.confirmation_sms_message}
-                          onChange={(e) => setBranding({ ...branding, confirmation_sms_message: e.target.value })}
-                          placeholder='Deixe vazio para usar a mensagem base: "{{company_name}}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita."'
-                          rows={3}
-                        />
-                        <p className="text-[10px] text-muted-foreground">
-                          Aceita as mesmas variáveis do email: {"{{lead_name}}"}, {"{{meeting_date}}"}, {"{{company_name}}"}, {"{{cancel_url}}"}.
-                        </p>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <Label className="text-xs">Incluir link de gerir/cancelar no SMS</Label>
-                          <p className="text-[10px] text-muted-foreground">
-                            Desligado por omissão. Só ligue depois de confirmar o envio de um SMS de teste com o link.
-                          </p>
-                        </div>
-                        <Switch
-                          checked={branding.confirmation_sms_include_link}
-                          onCheckedChange={(v) => setBranding({ ...branding, confirmation_sms_include_link: v })}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3 rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>Aviso de reunião ao comercial</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Notifica quando uma visita/reunião é agendada.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={branding.meeting_notify_commercial}
-                      onCheckedChange={(v) => setBranding({ ...branding, meeting_notify_commercial: v })}
-                    />
-                  </div>
-                  {branding.meeting_notify_commercial && (
-                    <>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Emails adicionais a notificar</Label>
-                        <Textarea
-                          value={branding.meeting_notify_emails}
-                          onChange={(e) => setBranding({ ...branding, meeting_notify_emails: e.target.value })}
-                          placeholder="ex: comercial@empresa.pt, outro@empresa.pt"
-                          rows={2}
-                        />
-                        <p className="text-[10px] text-muted-foreground">Separe vários emails por vírgula, ponto e vírgula ou linha.</p>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Modelo de email</Label>
-                        <Select
-                          value={branding.meeting_notify_template_id || "__default__"}
-                          onValueChange={(v) =>
-                            setBranding({
-                              ...branding,
-                              meeting_notify_template_id: v === "__default__" ? null : v,
-                            })
-                          }
-                        >
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__default__">Modelo padrão do sistema</SelectItem>
-                            {emailTemplateOptions.map((tpl) => (
-                              <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                <div className="space-y-3 rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>Aviso ao comercial ao reagendar</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Notifica quando uma visita/reunião é reagendada.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={branding.reschedule_notify_commercial}
-                      onCheckedChange={(v) => setBranding({ ...branding, reschedule_notify_commercial: v })}
-                    />
-                  </div>
-                  {branding.reschedule_notify_commercial && (
-                    <div className="space-y-1">
-                      <Label className="text-xs">Emails adicionais a notificar</Label>
-                      <Textarea
-                        value={branding.reschedule_notify_emails}
-                        onChange={(e) => setBranding({ ...branding, reschedule_notify_emails: e.target.value })}
-                        placeholder="ex: comercial@empresa.pt, outro@empresa.pt"
-                        rows={2}
-                      />
-                      <p className="text-[10px] text-muted-foreground">Separe vários emails por vírgula, ponto e vírgula ou linha.</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3 rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>Aviso ao comercial ao cancelar</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Notifica quando uma visita/reunião é cancelada.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={branding.cancel_notify_commercial}
-                      onCheckedChange={(v) => setBranding({ ...branding, cancel_notify_commercial: v })}
-                    />
-                  </div>
-                  {branding.cancel_notify_commercial && (
-                    <div className="space-y-1">
-                      <Label className="text-xs">Emails adicionais a notificar</Label>
-                      <Textarea
-                        value={branding.cancel_notify_emails}
-                        onChange={(e) => setBranding({ ...branding, cancel_notify_emails: e.target.value })}
-                        placeholder="ex: comercial@empresa.pt, outro@empresa.pt"
-                        rows={2}
-                      />
-                      <p className="text-[10px] text-muted-foreground">Separe vários emails por vírgula, ponto e vírgula ou linha.</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3 rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>Lembrete antes da visita</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Enviado ao cliente e ao técnico X horas antes da visita agendada.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={branding.reminder_enabled}
-                      onCheckedChange={(v) => setBranding({ ...branding, reminder_enabled: v })}
-                    />
-                  </div>
-                  {branding.reminder_enabled && (
-                    <>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Horas de antecedência</Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={branding.reminder_hours_before}
-                          onChange={(e) =>
-                            setBranding({ ...branding, reminder_hours_before: parseInt(e.target.value, 10) || 1 })
-                          }
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs">Modelo de email</Label>
-                        <Select
-                          value={branding.reminder_template_id || "__default__"}
-                          onValueChange={(v) =>
-                            setBranding({
-                              ...branding,
-                              reminder_template_id: v === "__default__" ? null : v,
-                            })
-                          }
-                        >
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__default__">Modelo padrão do sistema</SelectItem>
-                            {emailTemplateOptions.map((tpl) => (
-                              <SelectItem key={tpl.id} value={tpl.id}>{tpl.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                <div className="space-y-3 rounded-lg border p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>Lembrete de agendamento por concluir</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Envia um email ao lead que preencheu o formulário mas não escolheu um horário.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={branding.scheduling_invite_enabled}
-                      onCheckedChange={(v) => setBranding({ ...branding, scheduling_invite_enabled: v })}
-                    />
-                  </div>
-                  {branding.scheduling_invite_enabled && (
-                    <div className="space-y-1">
-                      <Label className="text-xs">Horas após o preenchimento (várias, separadas por vírgula)</Label>
-                      <Input
-                        value={branding.scheduling_invite_delays_hours}
-                        onChange={(e) => setBranding({ ...branding, scheduling_invite_delays_hours: e.target.value })}
-                        placeholder="ex: 24, 72, 168"
-                      />
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-3 rounded-lg border p-3">
-                  <Label>Envio</Label>
-                  <div className="space-y-1">
-                    <Label className="text-xs">SMTP a usar</Label>
-                    <Select
-                      value={branding.email_smtp_id || "__default__"}
-                      onValueChange={(v) => setBranding({ ...branding, email_smtp_id: v === "__default__" ? null : v })}
-                    >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__default__">SMTP padrão da organização</SelectItem>
-                        {smtpOptions.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>{s.name}{s.is_default ? " (padrão)" : ""}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">URL de gestão do agendamento</Label>
-                    <Input
-                      value={branding.booking_manage_url_template}
-                      onChange={(e) => setBranding({ ...branding, booking_manage_url_template: e.target.value })}
-                      placeholder="Deixe vazio para usar /booking/manage. Aceita {lang}, ex: https://site.pt/{lang}/agendamento"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">URL pública deste formulário</Label>
-                    <Input
-                      value={branding.public_form_url_template}
-                      onChange={(e) => setBranding({ ...branding, public_form_url_template: e.target.value })}
-                      placeholder="Deixe vazio para usar o padrão. Aceita {lang} e {form_id}"
-                    />
-                  </div>
-                </div>
+                <FormEmailsTab<BrandingData>
+                  branding={branding}
+                  onChange={setBranding}
+                  emailTemplateOptions={emailTemplateOptions}
+                  smtpOptions={smtpOptions}
+                />
               </TabsContent>
             </ScrollArea>
               </Tabs>

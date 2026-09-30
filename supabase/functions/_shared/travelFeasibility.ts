@@ -19,9 +19,11 @@ interface NeighborVisit {
 }
 
 // Pausa de almoço somada ao tempo de deslocação (regra 13, complemento
-// 28/09). Quando uma visita TERMINA dentro de [windowStartMin, windowEndMin]
-// (hora local em timezone, extremos incluídos), a folga até à próxima
-// marcação desse comercial tem de ser deslocação + durationMinutes.
+// 28/09). Quando uma visita TERMINA dentro de (windowStartMin, windowEndMin]
+// (hora local em timezone, início excluído, fim incluído), a folga até à
+// marcação SEGUINTE desse comercial tem de ser deslocação + durationMinutes.
+// Só conta o lado anterior ao candidato: uma visita que ocupa o almoço nunca
+// é recusada por isso, e as visitas já marcadas depois dela não a impedem.
 // windowEndMin serve só para decidir se a visita toca o almoço -- nunca é
 // usado para calcular folgas: soma-se sempre a duração a partir do FIM da
 // visita, nunca a partir do fim da janela (alternativa testada e rejeitada:
@@ -82,7 +84,7 @@ export function buildLunchBreakConfig(
 }
 
 // Minutos desde a meia-noite local (hora de cfg.timezone) em que `iso` cai,
-// verificado contra [windowStartMin, windowEndMin], extremos incluídos.
+// verificado contra [windowStartMin, windowEndMin], início excluído, fim incluído.
 export function endsInsideLunchWindow(iso: string, cfg: LunchBreakConfig): boolean {
   const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: cfg.timezone,
@@ -93,7 +95,132 @@ export function endsInsideLunchWindow(iso: string, cfg: LunchBreakConfig): boole
   const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
   const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
   const totalMin = hour * 60 + minute;
-  return totalMin >= cfg.windowStartMin && totalMin <= cfg.windowEndMin;
+  return totalMin > cfg.windowStartMin && totalMin <= cfg.windowEndMin;
+}
+
+// Minutos desde a meia-noite local (hora de `timezone`) em que cai `ms`.
+function localMinutesOfDay(ms: number, timezone: string): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(ms));
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? '0');
+  return hour * 60 + minute;
+}
+
+// Janela de almoço em instantes absolutos, no dia LOCAL (fuso da organização)
+// em que cai `slotStart`. Sem tabelas nem pesquisas: o desvio do fuso vem da
+// hora local de slotStart. (Numa mudança de hora dentro do próprio dia o
+// desvio pode errar uma hora; essas mudanças ocorrem de madrugada, e a
+// janela típica, ao meio-dia, fica depois delas.)
+export function lunchWindowBounds(
+  slotStart: string,
+  cfg: LunchBreakConfig,
+): { startMs: number; endMs: number } {
+  const ms = new Date(slotStart).getTime();
+  const localMin = localMinutesOfDay(ms, cfg.timezone);
+  const minuteFloorMs = ms - (ms % 60000);
+  const dayStartMs = minuteFloorMs - localMin * 60000;
+  return {
+    startMs: dayStartMs + cfg.windowStartMin * 60000,
+    endMs: dayStartMs + cfg.windowEndMin * 60000,
+  };
+}
+
+interface LunchItem {
+  startMs: number;
+  endMs: number;
+  lat: number | null;
+  lng: number | null;
+}
+
+// Minutos livres dentro da janela: duração da janela menos a união das
+// partes das visitas que caem nela.
+export function freeLunchMinutes(
+  items: ReadonlyArray<{ startMs: number; endMs: number }>,
+  window: { startMs: number; endMs: number },
+): number {
+  const clipped = items
+    .map((i) => ({ s: Math.max(i.startMs, window.startMs), e: Math.min(i.endMs, window.endMs) }))
+    .filter((i) => i.e > i.s)
+    .sort((a, b) => a.s - b.s);
+  let busy = 0;
+  let curS = 0;
+  let curE = 0;
+  let open = false;
+  for (const c of clipped) {
+    if (!open) {
+      curS = c.s;
+      curE = c.e;
+      open = true;
+    } else if (c.s <= curE) {
+      curE = Math.max(curE, c.e);
+    } else {
+      busy += curE - curS;
+      curS = c.s;
+      curE = c.e;
+    }
+  }
+  if (open) busy += curE - curS;
+  return (window.endMs - window.startMs - busy) / 60000;
+}
+
+// Regra B (almoço, 29/09; 30/09 só o lado anterior): se as visitas JÁ
+// MARCADAS do comercial nesse dia (sem contar o candidato) não deixam livre
+// dentro da janela a duração do almoço, a marcação seguinte à última que toca
+// a janela só pode começar depois de fim + deslocação + almoço. O candidato
+// nunca é recusado por ocupar ou cobrir o almoço: só conta se vier DEPOIS da
+// visita que o consumiu. Visitas marcadas depois do candidato não o impedem.
+function checkLunchCoverage(params: {
+  clientLat: number | null;
+  clientLng: number | null;
+  slotStartMs: number;
+  slotStart: string;
+  neighbors: NeighborVisit[];
+  lunch: LunchBreakConfig;
+}): { feasible: boolean; reason?: string } {
+  const { clientLat, clientLng, slotStartMs, neighbors, lunch } = params;
+  const window = lunchWindowBounds(params.slotStart, lunch);
+
+  const items: LunchItem[] = neighbors.map((n) => ({
+    startMs: new Date(n.start_datetime).getTime(),
+    endMs: new Date(n.end_datetime).getTime(),
+    lat: n.location_lat,
+    lng: n.location_lng,
+  }));
+
+  if (freeLunchMinutes(items, window) >= lunch.durationMinutes) return { feasible: true };
+
+  let last: LunchItem | null = null;
+  for (const i of items) {
+    const touches = Math.min(i.endMs, window.endMs) > Math.max(i.startMs, window.startMs);
+    if (touches && (!last || i.endMs > last.endMs)) last = i;
+  }
+  if (!last || slotStartMs < last.endMs) return { feasible: true };
+
+  // Se já há uma visita marcada entre `last` e o candidato, a marcação
+  // seguinte a `last` é essa, não o candidato.
+  const lastEndMs = last.endMs;
+  if (items.some((i) => i.startMs >= lastEndMs && i.startMs < slotStartMs)) {
+    return { feasible: true };
+  }
+
+  const travel =
+    last.lat !== null && last.lng !== null && clientLat !== null && clientLng !== null
+      ? requiredTravelMinutes(haversineKm(last.lat, last.lng, clientLat, clientLng))
+      : 0;
+  const needed = travel + lunch.durationMinutes;
+  const gap = (slotStartMs - lastEndMs) / 60000;
+  if (gap < needed) {
+    return {
+      feasible: false,
+      reason: `lunch break not free in window (needs ~${Math.ceil(needed)}min after last visit in window incl. ${lunch.durationMinutes}min lunch, has ${Math.floor(gap)}min)`,
+    };
+  }
+  return { feasible: true };
 }
 
 // Vizinha mais próxima antes/depois do candidato, com ou sem exigir
@@ -135,8 +262,10 @@ function findNearestNeighbors(
  * silêncio para leads por geocodificar (complemento 28/09).
  *
  * lunchBreak (opcional): quando presente, soma a duração do almoço ao tempo
- * de deslocação sempre que uma visita (a anterior, no lado "before", ou o
- * próprio candidato, no lado "after") TERMINA dentro da janela configurada.
+ * de deslocação sempre que a visita ANTERIOR ao candidato TERMINA dentro da
+ * janela configurada (início excluído, fim incluído) ou deixou o almoço sem
+ * tempo livre. O candidato nunca é recusado por ocupar o almoço, e as visitas
+ * já marcadas depois dele não contam para o almoço.
  * Omitir o parâmetro reproduz o comportamento de hoje byte a byte.
  */
 export function checkTravelFeasible(params: {
@@ -158,7 +287,7 @@ export function checkTravelFeasible(params: {
   // Vizinhas com coordenadas (para a deslocação) e vizinhas quaisquer (para
   // o almoço, que se aplica mesmo sem coordenadas).
   const { before, after } = findNearestNeighbors(neighbors, slotStartMs, slotEndMs, true);
-  const { before: beforeAny, after: afterAny } = findNearestNeighbors(neighbors, slotStartMs, slotEndMs, false);
+  const { before: beforeAny } = findNearestNeighbors(neighbors, slotStartMs, slotEndMs, false);
 
   if (hasClient) {
     if (before) {
@@ -199,22 +328,15 @@ export function checkTravelFeasible(params: {
       }
     }
 
-    // Lado seguinte: o próprio candidato termina dentro da janela -- a
-    // folga até à próxima vizinha tem de incluir deslocação + almoço.
-    if (afterAny && endsInsideLunchWindow(slotEnd, lunch)) {
-      const travel =
-        hasClient && afterAny.location_lat !== null && afterAny.location_lng !== null
-          ? requiredTravelMinutes(haversineKm(clientLat!, clientLng!, afterAny.location_lat, afterAny.location_lng))
-          : 0;
-      const needed = travel + lunch.durationMinutes;
-      const gap = (new Date(afterAny.start_datetime).getTime() - slotEndMs) / 60000;
-      if (gap < needed) {
-        return {
-          feasible: false,
-          reason: `lunch break before next visit (needs ~${Math.ceil(needed)}min incl. ${lunch.durationMinutes}min lunch, has ${Math.floor(gap)}min)`,
-        };
-      }
-    }
+    const coverage = checkLunchCoverage({
+      clientLat,
+      clientLng,
+      slotStartMs,
+      slotStart,
+      neighbors,
+      lunch,
+    });
+    if (!coverage.feasible) return coverage;
   }
 
   return { feasible: true };
