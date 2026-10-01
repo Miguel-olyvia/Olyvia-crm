@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -13,7 +13,12 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Plus, Trash2, AlertCircle, AlertTriangle } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command, CommandGroup, CommandInput, CommandItem, CommandList,
+} from "@/components/ui/command";
+import { Plus, Trash2, AlertCircle, AlertTriangle, Check, ChevronsUpDown } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { formatExactMoney, formatPackMoney, normalizePackQty, supplierUnitCost } from "@/utils/products/productPacks";
 
 type MovementType = "entrada" | "saida" | "transferencia" | "ajuste" | "devolucao" | "quebra";
@@ -70,11 +75,28 @@ const supplierCostPlaceholder = (s: ItemSupplierOption | undefined): string => {
 // já usada pela dedução automática (Fase 5.0B), mas aqui é uma escolha manual
 // via rpc_decrement_stock(p_sale_source_type, p_sale_source_id), não uma
 // trigger. Não substitui nem interage com a dedução automática.
+// 20261204290000: a Encomenda Cliente tem número próprio (EC-AAAA-NNNN) e
+// origem (contrato / venda direta / manual) — mesmos campos e mesma regra de
+// fallback que ClientOrders.tsx (order_number null → contract_number).
+type ClientOrderOriginType = "contract" | "direct_sale" | "manual";
+
 interface ClientOrderOption {
   contract_id: string;
   contract_number: string;
   client_name: string | null;
+  order_number: string | null;
+  origin_type: ClientOrderOriginType | null;
+  origin_number: string | null;
 }
+
+const toClientOrderOption = (r: any): ClientOrderOption => ({
+  contract_id: r.contract_id,
+  contract_number: r.contract_number,
+  client_name: r.client_name ?? null,
+  order_number: r.order_number ?? null,
+  origin_type: (r.origin_type ?? null) as ClientOrderOriginType | null,
+  origin_number: r.origin_number ?? null,
+});
 
 // Multi-produto (pedido do utilizador, 2026-08-31): cada movimento pode
 // afetar vários produtos de uma vez — ex. um profissional a processar uma
@@ -175,8 +197,18 @@ export default function StockMovementDialog({
 
   // Ligação opcional a uma Encomenda Cliente — só relevante para "saida".
   const [clientOrderId, setClientOrderId] = useState("");
+  // Opção escolhida guardada à parte: a lista muda com a pesquisa e a
+  // encomenda escolhida pode deixar de estar nos resultados.
+  const [selectedClientOrder, setSelectedClientOrder] = useState<ClientOrderOption | null>(null);
   const [clientOrders, setClientOrders] = useState<ClientOrderOption[]>([]);
-  const [clientOrdersLoaded, setClientOrdersLoaded] = useState(false);
+  // Últimas 100 sem pesquisa — base para filtrar no cliente pelo nº de
+  // origem (VD-…), que o p_search da RPC não cobre.
+  const [recentClientOrders, setRecentClientOrders] = useState<ClientOrderOption[]>([]);
+  const [clientOrdersFetching, setClientOrdersFetching] = useState(false);
+  const [clientOrderPickerOpen, setClientOrderPickerOpen] = useState(false);
+  const [clientOrderSearch, setClientOrderSearch] = useState("");
+  const [debouncedClientOrderSearch, setDebouncedClientOrderSearch] = useState("");
+  const clientOrdersRequestRef = useRef(0);
   const [clientOrderLoading, setClientOrderLoading] = useState(false);
   // Reserva da própria Encomenda Cliente ligada (qty_reserved somado por
   // produto): uma saída para essa encomenda pode consumir a sua reserva.
@@ -202,6 +234,10 @@ export default function StockMovementDialog({
     setCounterparty("");
     setNotes("");
     setClientOrderId("");
+    setSelectedClientOrder(null);
+    setClientOrderPickerOpen(false);
+    setClientOrderSearch("");
+    setDebouncedClientOrderSearch("");
     setClientOrderReservedByProduct({});
     setReservations({});
     setOrgStockByProduct({});
@@ -232,30 +268,72 @@ export default function StockMovementDialog({
     })();
   }, [open, organizationId, productsLoaded, toast]);
 
-  // Encomendas Clientes assinadas — só carregado quando o tipo "Saída" é
-  // escolhido pela primeira vez (não bloqueia a abertura do diálogo).
+  // Debounce da pesquisa de Encomenda Cliente (pesquisa no servidor).
   useEffect(() => {
-    if (!open || movementType !== "saida" || clientOrdersLoaded || !organizationId) return;
+    const handle = setTimeout(() => setDebouncedClientOrderSearch(clientOrderSearch.trim()), 300);
+    return () => clearTimeout(handle);
+  }, [clientOrderSearch]);
+
+  // Encomendas Clientes assinadas — só carregado com o tipo "Saída" (não
+  // bloqueia a abertura do diálogo). Pesquisa no servidor via p_search (cobre
+  // nº do contrato, nº EC e nome do cliente), para não depender das primeiras
+  // 100. Respostas fora de ordem são ignoradas (clientOrdersRequestRef).
+  useEffect(() => {
+    if (!open || movementType !== "saida" || !organizationId) return;
+    const requestId = ++clientOrdersRequestRef.current;
+    const search = debouncedClientOrderSearch;
+    setClientOrdersFetching(true);
     (async () => {
       const { data, error } = await supabase.rpc('rpc_list_client_order_documents', {
         p_organization_id: organizationId,
-        p_search: null,
+        p_search: search || null,
         p_status_filter: null,
         p_limit: 100,
         p_offset: 0,
       } as any);
+      if (requestId !== clientOrdersRequestRef.current) return;
+      setClientOrdersFetching(false);
       if (error) {
         // Best-effort — permissão em falta (client_orders.view) não deve
-        // bloquear o registo de movimento, só esconde o campo de ligação.
-        setClientOrdersLoaded(true);
+        // bloquear o registo de movimento: a lista fica só com "Nenhuma".
+        setClientOrders([]);
         return;
       }
-      setClientOrders(((data as any[]) || []).map((r) => ({
-        contract_id: r.contract_id, contract_number: r.contract_number, client_name: r.client_name,
-      })));
-      setClientOrdersLoaded(true);
+      const rows = ((data as unknown as any[] | null) || []).map(toClientOrderOption);
+      setClientOrders(rows);
+      if (!search) setRecentClientOrders(rows);
     })();
-  }, [open, movementType, organizationId, clientOrdersLoaded]);
+  }, [open, movementType, organizationId, debouncedClientOrderSearch]);
+
+  // Resultados do servidor + as recentes cujo nº de origem (VD-…) contém a
+  // pesquisa — o p_search da RPC não procura no nº da venda direta.
+  const clientOrderResults = useMemo(() => {
+    const search = debouncedClientOrderSearch.toLowerCase();
+    if (!search) return clientOrders;
+    const ids = new Set(clientOrders.map((o) => o.contract_id));
+    const byOrigin = recentClientOrders.filter(
+      (o) => !ids.has(o.contract_id) && (o.origin_number || "").toLowerCase().includes(search),
+    );
+    return [...clientOrders, ...byOrigin];
+  }, [clientOrders, recentClientOrders, debouncedClientOrderSearch]);
+
+  // "Contrato CC-…" / "Venda Direta VD-…" / "Sem documento anterior" — mesmos
+  // textos de ClientOrders.tsx. Sem origin_type (RPC antiga) não mostra nada.
+  const describeClientOrderOrigin = (o: ClientOrderOption): string | null => {
+    if (o.origin_type === "direct_sale") {
+      return `${t('clientOrders.origin.directSale')}${o.origin_number ? ` ${o.origin_number}` : ""}`;
+    }
+    if (o.origin_type === "contract") {
+      return t('clientOrders.origin.contract', { number: o.origin_number || o.contract_number });
+    }
+    if (o.origin_type === "manual") return t('clientOrders.origin.manual');
+    return null;
+  };
+
+  const formatClientOrderLabel = (o: ClientOrderOption): string => {
+    const origin = describeClientOrderOrigin(o);
+    return `${o.order_number || o.contract_number} — ${o.client_name || "—"}${origin ? ` · ${origin}` : ""}`;
+  };
 
   // Pré-preenchimento (pedido do utilizador, 2026-08-31): ao escolher a
   // Encomenda Cliente, as linhas de produto passam a preencher-se sozinhas a
@@ -310,6 +388,12 @@ export default function StockMovementDialog({
     } finally {
       setClientOrderLoading(false);
     }
+  };
+
+  const selectClientOrder = (order: ClientOrderOption | null) => {
+    setSelectedClientOrder(order);
+    setClientOrderPickerOpen(false);
+    handleClientOrderChange(order ? order.contract_id : "none");
   };
 
   // Fornecedores de uma linha concreta — carregado sob-demanda, quando o
@@ -676,17 +760,56 @@ export default function StockMovementDialog({
           {movementType === "saida" && (
             <div>
               <Label>Encomenda Cliente de origem (opcional)</Label>
-              <Select value={clientOrderId || "none"} onValueChange={handleClientOrderChange} disabled={clientOrderLoading}>
-                <SelectTrigger><SelectValue placeholder="Nenhuma — saída sem ligação a um contrato" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Nenhuma — saída sem ligação a um contrato</SelectItem>
-                  {clientOrders.map((o) => (
-                    <SelectItem key={o.contract_id} value={o.contract_id}>
-                      {o.contract_number} — {o.client_name || "—"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* `modal` no Popover: o conteúdo vai para um portal fora do
+                  DialogContent e, sem isto, o focus trap do diálogo rouba o
+                  foco ao CommandInput e o dropdown fecha-se sozinho. */}
+              <Popover modal open={clientOrderPickerOpen} onOpenChange={setClientOrderPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={clientOrderPickerOpen}
+                    className="w-full justify-between font-normal"
+                    disabled={clientOrderLoading}
+                  >
+                    <span className="truncate">
+                      {clientOrderId && selectedClientOrder
+                        ? formatClientOrderLabel(selectedClientOrder)
+                        : "Nenhuma — saída sem ligação a um contrato"}
+                    </span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[24rem] p-0" align="start">
+                  <Command shouldFilter={false}>
+                    <CommandInput
+                      placeholder="Pesquisar por EC, contrato, VD ou cliente…"
+                      value={clientOrderSearch}
+                      onValueChange={setClientOrderSearch}
+                    />
+                    <CommandList className="max-h-72 overflow-y-auto" onWheel={(e) => e.stopPropagation()}>
+                      <CommandGroup>
+                        <CommandItem value="__none__" onSelect={() => selectClientOrder(null)}>
+                          <Check className={cn("mr-2 h-4 w-4 shrink-0", !clientOrderId ? "opacity-100" : "opacity-0")} />
+                          Nenhuma — saída sem ligação a um contrato
+                        </CommandItem>
+                        {clientOrderResults.map((o) => (
+                          <CommandItem key={o.contract_id} value={o.contract_id} onSelect={() => selectClientOrder(o)}>
+                            <Check className={cn("mr-2 h-4 w-4 shrink-0", clientOrderId === o.contract_id ? "opacity-100" : "opacity-0")} />
+                            <span className="truncate">{formatClientOrderLabel(o)}</span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                      {(clientOrdersFetching || clientOrderResults.length === 0) && (
+                        <p className="py-3 text-center text-sm text-muted-foreground">
+                          {clientOrdersFetching ? "A pesquisar…" : "Nenhuma encomenda encontrada."}
+                        </p>
+                      )}
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
               <p className="text-xs text-muted-foreground mt-1">
                 {clientOrderLoading
                   ? "A carregar produtos da encomenda…"
@@ -803,12 +926,33 @@ export default function StockMovementDialog({
 
                 {(() => {
                   const consumption = getReservedConsumption(line);
-                  if (!consumption) return null;
+                  // Saída sem Encomenda Cliente escolhida sobre um produto com
+                  // reservas: avisa sempre (mesmo com stock livre suficiente),
+                  // para quem está a servir uma dessas encomendas a escolher
+                  // acima. rpc_get_product_stock_reservations só devolve o total
+                  // por produto e o nº de encomendas, não quais são.
+                  const reservation = line.productId ? reservations[line.productId] : undefined;
+                  const unlinkedReserved = movementType === "saida" && !clientOrderId && reservation && reservation.qty_reserved > 0
+                    ? reservation
+                    : null;
+                  if (!consumption && !unlinkedReserved) return null;
                   return (
                     <Alert className="border-amber-500/50 bg-amber-50 py-2 dark:bg-amber-950/20">
                       <AlertTriangle className="h-4 w-4 text-amber-600" />
                       <AlertDescription className="text-xs text-amber-900 dark:text-amber-200">
-                        {t('inventory.movement.reservedWarning', { qty: consumption.qty, count: consumption.orders })}
+                        {unlinkedReserved && (
+                          <span className="block">
+                            {t('inventory.movement.unlinkedReservedWarning', {
+                              qty: Math.round(unlinkedReserved.qty_reserved * 1e6) / 1e6,
+                              count: Math.max(1, unlinkedReserved.orders_count),
+                            })}
+                          </span>
+                        )}
+                        {consumption && (
+                          <span className={unlinkedReserved ? "block mt-1" : undefined}>
+                            {t('inventory.movement.reservedWarning', { qty: consumption.qty, count: consumption.orders })}
+                          </span>
+                        )}
                       </AlertDescription>
                     </Alert>
                   );
