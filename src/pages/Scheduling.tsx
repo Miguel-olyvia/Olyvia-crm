@@ -110,7 +110,6 @@ export default function Scheduling() {
   const [boards, setBoards] = useState<ScheduleBoard[]>([]);
   const [resources, setResources] = useState<ScheduleResource[]>([]);
   const [items, setItems] = useState<ScheduleItem[]>([]);
-  const [contacts, setContacts] = useState<any[]>([]);
   const [employees, setEmployees] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [currentUserId, setCurrentUserId] = useState<string>();
@@ -183,10 +182,7 @@ export default function Scheduling() {
       const [boardsData, resourcesData] = await Promise.all([fetchBoardsRef.current(), fetchResourcesRef.current()]);
       if (cancelled) return;
       setBoards(boardsData); setResources(resourcesData);
-      const [contactsRes, userRes] = await Promise.all([
-        supabase.from('anew_contacts').select('id, entity:anew_entities(id, first_name, last_name)').eq('organization_id', activeCompany.id).order('created_at', { ascending: false }),
-        supabase.auth.getUser(),
-      ]);
+      const userRes = await supabase.auth.getUser();
       // Load users via separate queries (no FK between anew_memberships and anew_users)
       const { data: rawMemberships } = await supabase.from('anew_memberships').select('user_id, role_id').eq('organization_id', activeCompany.id).eq('status', 'active');
       // anew_memberships também tem linhas "active" para clientes/contactos do
@@ -212,11 +208,6 @@ export default function Scheduling() {
         }
       }
       if (cancelled) return;
-      setContacts((contactsRes.data || []).map((c: any) => ({
-        id: c.id,
-        first_name: c.entity?.first_name || '',
-        last_name: c.entity?.last_name || '',
-      })));
       setEmployees([]);
       setUsers(usersData);
       if (userRes.data.user) {
@@ -680,7 +671,7 @@ export default function Scheduling() {
       </div>
 
       <ScheduleItemDialog open={itemDialogOpen} onOpenChange={setItemDialogOpen} item={selectedItem} boards={boards} resources={resources}
-        contacts={contacts} employees={employees} companyUsers={assignableUsers} currentUserId={currentUserId} currentEmployeeId={undefined}
+        employees={employees} companyUsers={assignableUsers} currentUserId={currentUserId} currentEmployeeId={undefined}
         defaultDate={defaultDate} defaultTitle={prefill.title} defaultClientId={prefill.clientId}
         companyId={activeCompany?.id} onSave={handleSaveItem} onDelete={handleDeleteItem} />
       <ScheduleBoardDialog open={boardDialogOpen} onOpenChange={setBoardDialogOpen} board={selectedBoard} onSave={handleSaveBoard} />

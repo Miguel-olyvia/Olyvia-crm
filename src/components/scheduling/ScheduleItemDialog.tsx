@@ -30,7 +30,6 @@ interface ScheduleItemDialogProps {
   item?: ScheduleItem | null;
   boards: ScheduleBoard[];
   resources: ScheduleResource[];
-  contacts: { id: string; first_name: string; last_name: string }[];
   employees?: { id: string; first_name: string; last_name: string; reports_to?: string | null; user_id?: string | null }[];
   companyUsers?: { id: string; name: string }[];
   currentUserId?: string;
@@ -51,7 +50,6 @@ export function ScheduleItemDialog({
   item,
   boards,
   resources,
-  contacts,
   employees = [],
   companyUsers = [],
   currentUserId,

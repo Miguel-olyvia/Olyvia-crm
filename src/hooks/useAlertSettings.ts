@@ -14,10 +14,6 @@ const DEFAULTS: AlertSettingsMap = {
   // Leads
   lead_no_contact: { is_active: true, days_threshold: 7 },
   lead_no_contact_urgent: { is_active: true, days_threshold: 14 },
-  // Contacts
-  contact_no_contact: { is_active: true, days_threshold: 7 },
-  contact_no_contact_urgent: { is_active: true, days_threshold: 14 },
-  contact_no_deal: { is_active: true, days_threshold: 14 },
   // Clients
   client_no_contact: { is_active: true, days_threshold: 30 },
   client_no_contact_urgent: { is_active: true, days_threshold: 60 },

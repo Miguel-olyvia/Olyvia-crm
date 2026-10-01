@@ -18,9 +18,6 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 const ALERT_DEFAULTS: Record<string, { days: number | null; active: boolean }> = {
   lead_no_contact: { days: 7, active: true },
   lead_no_contact_urgent: { days: 14, active: true },
-  contact_no_contact: { days: 7, active: true },
-  contact_no_contact_urgent: { days: 14, active: true },
-  contact_no_deal: { days: 14, active: true },
   client_no_contact: { days: 30, active: true },
   client_no_contact_urgent: { days: 60, active: true },
   client_missing_nif: { days: null, active: true },
@@ -55,9 +52,6 @@ interface LegacySettings {
   client_no_contact_enabled: boolean;
   client_no_contact_days_1: number;
   client_no_contact_days_2: number;
-  contact_no_contact_enabled: boolean;
-  contact_no_contact_days_1: number;
-  contact_no_contact_days_2: number;
   scheduled_actions_enabled: boolean;
   email_tracking_enabled: boolean;
   email_hot_interest_opens: number;
@@ -76,9 +70,6 @@ const LEGACY_DEFAULTS: LegacySettings = {
   client_no_contact_enabled: true,
   client_no_contact_days_1: 30,
   client_no_contact_days_2: 60,
-  contact_no_contact_enabled: true,
-  contact_no_contact_days_1: 7,
-  contact_no_contact_days_2: 14,
   scheduled_actions_enabled: true,
   email_tracking_enabled: true,
   email_hot_interest_opens: 3,
@@ -267,8 +258,6 @@ Deno.serve(async (req) => {
       // ── Global is_active guard: types covered by /alert-settings ──
       const SETTING_GATED_TYPES = new Set<string>([
         "lead_no_contact", "lead_no_contact_urgent",
-        "contact_no_contact", "contact_no_contact_urgent", "contact_no_contact_7d", "contact_no_contact_14d",
-        "contact_no_deal",
         "client_no_contact", "client_no_contact_urgent",
         "client_missing_nif",
         "proposal_no_response", "proposal_no_response_urgent",
@@ -282,12 +271,7 @@ Deno.serve(async (req) => {
       const stillPending: typeof pendingNotifications = [];
       for (const n of pendingNotifications) {
         if (SETTING_GATED_TYPES.has(n.type)) {
-          const lookupType = n.type === "contact_no_contact_7d"
-            ? "contact_no_contact"
-            : n.type === "contact_no_contact_14d"
-              ? "contact_no_contact_urgent"
-              : n.type;
-          const cfg = getAlertConfig(n.organization_id, lookupType);
+          const cfg = getAlertConfig(n.organization_id, n.type);
           if (cfg.is_active === false) {
             markResolved(n.id, "alert_setting_disabled");
             continue;
@@ -298,8 +282,6 @@ Deno.serve(async (req) => {
 
       // ── Batch preload entities for resolution ──
       const leadNotifs = stillPending.filter(n => n.entity_type === "lead" && (n.type === "lead_no_contact" || n.type === "lead_no_contact_urgent"));
-      const contactNoContactNotifs = stillPending.filter(n => n.entity_type === "contact" && (n.type === "contact_no_contact" || n.type === "contact_no_contact_urgent" || n.type === "contact_no_contact_7d" || n.type === "contact_no_contact_14d"));
-      const contactNoDealNotifs = stillPending.filter(n => n.entity_type === "contact" && n.type === "contact_no_deal");
       const clientNoContactNotifs = stillPending.filter(n => n.entity_type === "client" && (n.type === "client_no_contact" || n.type === "client_no_contact_urgent"));
       const clientNifNotifs = stillPending.filter(n => n.entity_type === "client" && n.type === "client_missing_nif");
       const proposalNotifs = stillPending.filter(n => n.entity_type === "proposal");
@@ -310,15 +292,13 @@ Deno.serve(async (req) => {
 
       // Batch fetch all needed entities in parallel
       const leadIds = [...new Set(leadNotifs.map(n => n.entity_id))];
-      const contactIds = [...new Set([...contactNoContactNotifs, ...contactNoDealNotifs].map(n => n.entity_id))];
       const clientIds = [...new Set([...clientNoContactNotifs, ...clientNifNotifs].map(n => n.entity_id))];
       const proposalIds = [...new Set(proposalNotifs.map(n => n.entity_id))];
       const contractIds = [...new Set(contractNotifs.map(n => n.entity_id))];
       const quoteIds = [...new Set(quoteNotifs.map(n => n.entity_id))];
 
-      const [leads, contacts, clients, proposals, contracts, quotesPre] = await Promise.all([
+      const [leads, clients, proposals, contracts, quotesPre] = await Promise.all([
         fetchByIds<any>(supabase, "anew_leads", leadIds, "id, last_contact_at, status"),
-        fetchByIds<any>(supabase, "anew_contacts", contactIds, "id, last_interaction_at, converted_to_client_id, status"),
         fetchByIds<any>(supabase, "anew_clients", clientIds, "id, last_interaction_at, status, entity_id"),
         fetchByIds<any>(supabase, "proposals", proposalIds, "id, status, sent_at, created_at, organization_id"),
         fetchByIds<any>(supabase, "client_contracts", contractIds, "id, status, end_date, client_id, created_at"),
@@ -326,7 +306,6 @@ Deno.serve(async (req) => {
       ]);
 
       const leadMap = new Map((leads || []).map((l: any) => [l.id, l]));
-      const contactMap = new Map((contacts || []).map((c: any) => [c.id, c]));
       const clientMap = new Map((clients || []).map((c: any) => [c.id, c]));
       const proposalMap = new Map((proposals || []).map((p: any) => [p.id, p]));
       const contractMap = new Map((contracts || []).map((c: any) => [c.id, c]));
@@ -341,31 +320,6 @@ Deno.serve(async (req) => {
         if (lead.last_contact_at && cfg.days_threshold) {
           const daysSince = Math.floor((now.getTime() - new Date(lead.last_contact_at).getTime()) / 86400000);
           if (daysSince < cfg.days_threshold) markResolved(n.id, "condition_changed");
-        }
-      }
-
-      // ── Contacts: no contact ──
-      for (const n of contactNoContactNotifs) {
-        const contact = contactMap.get(n.entity_id);
-        if (!contact) { markResolved(n.id, "entity_missing"); continue; }
-        if (contact.converted_to_client_id || contact.status === "inactive") { markResolved(n.id, "condition_changed"); continue; }
-        const cfg = getAlertConfig(n.organization_id, n.type.replace("_7d", "").replace("_14d", "_urgent"));
-        if (contact.last_interaction_at && cfg.days_threshold) {
-          const daysSince = Math.floor((now.getTime() - new Date(contact.last_interaction_at).getTime()) / 86400000);
-          if (daysSince < cfg.days_threshold) markResolved(n.id, "condition_changed");
-        }
-      }
-
-      // ── Contacts: no deal (batch deals count) ──
-      if (contactNoDealNotifs.length > 0) {
-        const noDealContactIds = [...new Set(contactNoDealNotifs.map(n => n.entity_id))];
-        const dealsForContacts = await fetchByIds<any>(supabase, "deals", noDealContactIds, "contact_id", "contact_id");
-        const contactsWithDeals = new Set((dealsForContacts || []).map((d: any) => d.contact_id));
-
-        for (const n of contactNoDealNotifs) {
-          const contact = contactMap.get(n.entity_id);
-          if (!contact || contact.converted_to_client_id || contact.status === "inactive") { markResolved(n.id, "condition_changed"); continue; }
-          if (contactsWithDeals.has(n.entity_id)) markResolved(n.id, "condition_changed");
         }
       }
 
@@ -1219,6 +1173,7 @@ Deno.serve(async (req) => {
     // DAILY MODE
     // ─────────────────────────────────────────
     if (mode === "daily") {
+      // contact_* kept only so the daily run retires leftover notifications of the retired Contacts alerts (nothing generates them any more).
       const timeBasedTypes = [
         "lead_no_contact", "lead_no_contact_urgent",
         "contact_no_contact", "contact_no_contact_urgent", "contact_no_contact_7d", "contact_no_contact_14d",
@@ -1363,110 +1318,6 @@ Deno.serve(async (req) => {
             message: `Considere contactar ${group.normal.length === 1 ? "este lead" : `estes ${group.normal.length} leads`}.`,
             priority: "medium", link: `/leads?open=${group.normal[0]}`,
             action_config: { entity_ids: group.normal, count: group.normal.length },
-          });
-        }
-      }
-
-      // ── CONTACTS: grouped by user ──
-      const rawContacts = await fetchAll<any>(
-        supabase,
-        "anew_contacts",
-        (q) => q.is("converted_to_client_id", null).neq("status", "inactive"),
-        "id, entity_id, assigned_to, created_by, organization_id, last_interaction_at, created_at, converted_at, converted_to_client_id, status",
-      );
-
-      let filteredContacts = rawContacts || [];
-      const contactEntityIds = filteredContacts.map(c => c.entity_id).filter(Boolean) as string[];
-
-      {
-        const activeClientsForContacts = await chunkedFetch<any>(
-          supabase,
-          "anew_clients",
-          contactEntityIds,
-          "entity_id",
-          (q, chunk) => q.in("entity_id", chunk).not("status", "in", '("inactive","lost","churned","lost_definitive")'),
-        );
-
-        if (activeClientsForContacts?.length) {
-          const ghostContactEntityIds = new Set(activeClientsForContacts.map((c: any) => c.entity_id));
-          console.log(`[notifications] Contacts: excluded ${ghostContactEntityIds.size} ghost contacts`);
-          filteredContacts = filteredContacts.filter(c => !c.entity_id || !ghostContactEntityIds.has(c.entity_id));
-        }
-      }
-
-      // ★ OPTIMIZATION: Batch preload deals for contact_no_deal check
-      const contactIdsForDeal = filteredContacts.filter(c => c.converted_at).map(c => c.id);
-      const dealsForDailyContacts = await fetchByIds<any>(supabase, "deals", contactIdsForDeal, "contact_id", "contact_id");
-      const contactsWithDealsDaily = new Set((dealsForDailyContacts || []).map((d: any) => d.contact_id));
-
-      const contactsByUser = new Map<string, { orgId: string; normal: string[]; urgent: string[]; noDeal: string[] }>();
-
-      for (const co of filteredContacts) {
-        const orgId = co.organization_id;
-        const ownerId = co.assigned_to || co.created_by;
-        if (!ownerId) continue;
-        const authUserId = smartResolveUserId(ownerId);
-        if (!authUserId) continue;
-        const key = `${authUserId}::${orgId}`;
-
-        if (!contactsByUser.has(key)) contactsByUser.set(key, { orgId, normal: [], urgent: [], noDeal: [] });
-        const group = contactsByUser.get(key)!;
-
-        const referenceDate = co.last_interaction_at || co.created_at;
-        if (referenceDate) {
-          const daysSince = Math.floor((now.getTime() - new Date(referenceDate).getTime()) / 86400000);
-          const cfgUrgent = getAlertConfig(orgId, "contact_no_contact_urgent");
-          const cfgNormal = getAlertConfig(orgId, "contact_no_contact");
-
-          if (cfgUrgent.is_active && cfgUrgent.days_threshold && daysSince >= cfgUrgent.days_threshold) {
-            group.urgent.push(co.id);
-          } else if (cfgNormal.is_active && cfgNormal.days_threshold && daysSince >= cfgNormal.days_threshold) {
-            group.normal.push(co.id);
-          }
-        }
-
-        const cfgNoDeal = getAlertConfig(orgId, "contact_no_deal");
-        if (cfgNoDeal.is_active && cfgNoDeal.days_threshold && co.converted_at) {
-          const daysSinceConversion = Math.floor((now.getTime() - new Date(co.converted_at).getTime()) / 86400000);
-          if (daysSinceConversion >= cfgNoDeal.days_threshold && !contactsWithDealsDaily.has(co.id)) {
-            group.noDeal.push(co.id);
-          }
-        }
-      }
-
-      for (const [compositeKey, group] of contactsByUser) {
-        const userId = compositeKey.split("::")[0];
-        if (group.urgent.length > 0) {
-          const cfg = getAlertConfig(group.orgId, "contact_no_contact_urgent");
-          notifications.push({
-            user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "contact_no_contact_urgent", entity_type: "contact", entity_id: group.urgent[0],
-            title: `${pl(group.urgent.length, "contacto", "contactos")} sem interação há +${cfg.days_threshold} dias`,
-            message: `Tem ${pl(group.urgent.length, "contacto", "contactos")} que ${group.urgent.length === 1 ? "precisa" : "precisam"} de atenção urgente.`,
-            priority: "high", action_type: "call_now", link: `/contacts?open=${group.urgent[0]}`,
-            action_config: { entity_ids: group.urgent, count: group.urgent.length },
-          });
-        }
-        if (group.normal.length > 0) {
-          const cfg = getAlertConfig(group.orgId, "contact_no_contact");
-          notifications.push({
-            user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "contact_no_contact", entity_type: "contact", entity_id: group.normal[0],
-            title: `${pl(group.normal.length, "contacto", "contactos")} sem interação há +${cfg.days_threshold} dias`,
-            message: `Considere fazer follow-up com ${group.normal.length === 1 ? "este contacto" : `estes ${group.normal.length} contactos`}.`,
-            priority: "medium", link: `/contacts?open=${group.normal[0]}`,
-            action_config: { entity_ids: group.normal, count: group.normal.length },
-          });
-        }
-        if (group.noDeal.length > 0) {
-          const cfg = getAlertConfig(group.orgId, "contact_no_deal");
-          notifications.push({
-            user_id: userId, organization_id: group.orgId, kind: "alert",
-            type: "contact_no_deal", entity_type: "contact", entity_id: group.noDeal[0],
-            title: `${pl(group.noDeal.length, "contacto", "contactos")} sem pedido de proposta há +${cfg.days_threshold} dias`,
-            message: `${group.noDeal.length === 1 ? "Este contacto foi convertido" : "Estes contactos foram convertidos"} mas não ${group.noDeal.length === 1 ? "tem" : "têm"} pedido de proposta criado.`,
-            priority: "medium", link: `/contacts?open=${group.noDeal[0]}`,
-            action_config: { entity_ids: group.noDeal, count: group.noDeal.length },
           });
         }
       }

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Loader2, Save, RotateCcw, ChevronDown, Megaphone, UserCheck, Users, FileText, ScrollText, ClipboardList, Bell, Mail, Calendar, Warehouse } from "lucide-react";
+import { Loader2, Save, RotateCcw, ChevronDown, Megaphone, Users, FileText, ScrollText, ClipboardList, Bell, Mail, Calendar, Warehouse } from "lucide-react";
 
 // ─── Alert type definitions with defaults ───
 interface AlertDef {
@@ -38,17 +38,6 @@ const ALERT_MODULES: ModuleDef[] = [
     alerts: [
       { type: "lead_no_contact", label: "Sem contacto", description: "Gerar alerta após X dias sem interação registada", hasDays: true, defaultDays: 7, defaultActive: true },
       { type: "lead_no_contact_urgent", label: "Sem contacto urgente", description: "Alerta vermelho após X dias sem interação", hasDays: true, defaultDays: 14, defaultActive: true },
-    ],
-  },
-  {
-    id: "contacts",
-    label: "Contactos",
-    icon: UserCheck,
-    iconColor: "text-purple-500",
-    alerts: [
-      { type: "contact_no_contact", label: "Sem contacto", description: "Gerar alerta após X dias sem interação", hasDays: true, defaultDays: 7, defaultActive: true },
-      { type: "contact_no_contact_urgent", label: "Sem contacto urgente", description: "Alerta vermelho após X dias sem interação", hasDays: true, defaultDays: 14, defaultActive: true },
-      { type: "contact_no_deal", label: "Sem deal criado", description: "Se o contacto foi convertido de lead há X dias e não tem deal", hasDays: true, defaultDays: 14, defaultActive: true },
     ],
   },
   {
