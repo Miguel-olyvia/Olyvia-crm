@@ -1181,10 +1181,20 @@ const ClientOrders = () => {
     }
   };
 
-  const openPurchaseOrder = (purchaseOrderId: string) => {
+  const openPurchaseOrder = (line: ClientOrderDocumentLine) => {
+    if (!line.purchase_order_id) return;
     // Mesmo padrão de cross-link já usado em ClientContracts.tsx
     // (?open=<id>) — replicado em PurchaseOrders.tsx para este caso.
-    navigate(`/purchase-orders?open=${purchaseOrderId}`);
+    // rpc_get_client_order_document não devolve o id da linha da PO, por isso
+    // vai o produto + a linha da EC (quote_line_id/component_index): em
+    // PurchaseOrders.tsx servem para pré-selecionar a linha em "Reverter receção".
+    const params = new URLSearchParams({ open: line.purchase_order_id });
+    if (line.product_id) params.set('product', line.product_id);
+    if (line.quote_line_id) params.set('quote_line', line.quote_line_id);
+    if (line.component_index !== null && line.component_index !== undefined) {
+      params.set('component', String(line.component_index));
+    }
+    navigate(`/purchase-orders?${params.toString()}`);
   };
 
   // Origem da encomenda (20261204290000): contrato → "Contrato CC-…"; venda
@@ -1402,7 +1412,9 @@ const ClientOrders = () => {
       case 'servido_por_stock':
         return t('clientOrders.lineStatus.servedByStock');
       case 'recebido':
-        return t('clientOrders.lineStatus.received');
+        return line.purchase_order_number
+          ? t('clientOrders.lineStatus.receivedWithPo', { number: line.purchase_order_number })
+          : t('clientOrders.lineStatus.received');
       case 'a_aguardar_encomenda':
         return t('clientOrders.lineStatus.awaitingOrder', { number: line.purchase_order_number || '' });
       case 'stock_disponivel_confirmar':
@@ -2778,7 +2790,7 @@ const ClientOrders = () => {
                               <Button
                                 variant="ghost"
                                 size="icon"
-                                onClick={() => openPurchaseOrder(line.purchase_order_id as string)}
+                                onClick={() => openPurchaseOrder(line)}
                                 title={t('clientOrders.openPurchaseOrder')}
                               >
                                 <ExternalLink className="w-4 h-4" />
