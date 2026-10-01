@@ -11,6 +11,83 @@
 > `/operacao`. O deploy que falhou pelo meio era do `vercel.json`, não do
 > módulo — ver [`deploy-falhado.md`](deploy-falhado.md).
 
+## 0. 01/10/2026 — auditoria: isolamento, tempos, supervisor
+
+Uma auditoria encontrou um defeito de base: `has_anew_permission()` é
+**global**, e várias policies e RPCs usavam-na sozinha. Quem fosse gestor na
+organização A e técnico na B tinha, na B, os poderes de gestor. Corrigido sem
+tocar no que já está instalado — dois ficheiros novos que correm por cima.
+
+**`db/seguranca.sql`** (isolamento entre organizações)
+
+- `ops_pode(org, permissão)`: vê a organização + tem a permissão **pelo papel
+  da membership dessa organização** + perfil ativo lá. Gerir a equipa e ver
+  custos exigem ainda função admin/gestor **nessa** organização.
+- Todas as policies de `ops_*` reescritas com `ops_pode` (filhos de ordem,
+  custos, previsto, skills, horários, medições, checklists, planos, âmbito…).
+- Escritas diretas fechadas (só RPCs): ordens, filhos de ordem, custos,
+  previsto, perfis, leituras, eventos, anexos. Fecha também o UPDATE de
+  `responsavel_id`/`cliente_id`/`organization_id` e de `obrigatoria`.
+- RPCs com a permissão na organização certa (criar, atribuir, agendar,
+  checklists, medições, perfis, custos, anexos, planos, locais, orçamento→obra).
+  `rpc_ops_gravar_perfil`: só admin/gestor **daqui**, ninguém dá função acima
+  da sua nem mexe em quem está acima. `rpc_ops_obra_de_orcamento` já não
+  revela o código da obra a quem não é da organização.
+- `ops_recalcular_custo_mao_obra` e `ops_conflitos_de_agenda` fora do alcance
+  de `authenticated`; `ops_pode_ver_ordem`/`ops_clientes_no_ambito` deixam de
+  responder sobre terceiros; `ops_evento` só em nome próprio.
+- Função **supervisor** (entre gestor e operador): vê o âmbito todo, confirma e
+  reabre ordens fechadas, cancela; não gere equipa nem vê custos.
+  `ops_nivel_funcao(text)` e `ops_funcao_atual(org)` para quem precisar.
+
+**`db/tempos.sql`** (tempo real)
+
+- Cada pessoa liga e desliga o seu relógio (`rpc_ops_sessao`). Iniciar/retomar
+  só abrem o de quem carrega (se está na ordem, ou a ordem não tem equipa);
+  pausar/fechar/cancelar fecham os de todos, com `motivo_fim`. Um relógio
+  aberto por pessoa e ordem.
+- Tempo por tarefa: `ops_sessao_trabalho.ordem_tarefa_id`,
+  `rpc_ops_tarefa_iniciar`/`rpc_ops_tarefa_terminar`; responder fecha o relógio
+  da tarefa e continua na ordem. `ops_v_tarefa_tempo`: real contra estimado.
+- `ops_v_ordem_custo` conta a mão de obra **ao vivo** em ordens abertas;
+  fechada/confirmada vale a linha do fecho — nunca as duas.
+- A transição em vigor (`rpc_ops_transitar_ordem`) passa a viver aqui.
+
+**Também:** `planos.sql`, `rpcs.sql` e `orcamentos.sql` já não fazem regredir
+as versões novas se forem corridos outra vez; `restringir-permissoes.sql` só
+mexe numa organização indicada à mão (recusa sem ela); a atribuição deixou de
+falhar em silêncio em ordens sem responsável (`rpcs-tarefas.sql`,
+`medicoes.sql`); `validar-config` deixou de falhar no dia 1 do mês. Na app:
+tempo estimado editável nas checklists, real/estimado por tarefa, botões para
+contar tempo por tarefa e "o meu relógio", mão de obra "a contar" no custo.
+
+Validadores novos: `validar-seguranca` (duas organizações, cinco pessoas),
+`validar-tempos`, `validar-estados` (paridade TS↔SQL, 1260 combinações).
+
+### Ordem de aplicação em produção
+
+```
+1. npm run supabase:seguranca
+2. npm run supabase:tempos
+3. npm run supabase:rpcs-tarefas   (outra vez — corrige a atribuição em ordens sem responsável)
+4. npm run supabase:medicoes       (outra vez — idem)
+5. npm run supabase:obras          (módulo de obras)
+6. opcional, só numa org de teste: db/demo-obras.sql (e demo-obras-remover.sql para limpar)
+7. só depois: publicar a app (lê colunas que o tempos.sql cria)
+```
+
+Antes de aplicar: `npm run validar-atualizacao`. Monta a produção de hoje
+(a sequência antiga, lida do git no commit-base `a8e096da`), aplica os passos
+1–5, e exige que o resultado seja igual, policy a policy e função a função, a
+uma instalação limpa. Se alguém mudar esta ordem ou esquecer um passo, falha.
+
+⚠ **Regra nova:** se voltares a correr um ficheiro anterior a `seguranca.sql`
+(schema, config, despacho, custos…), corre `seguranca.sql` e `tempos.sql`
+outra vez a seguir — os antigos recriam policies e RPCs com a verificação
+global. `validar-instalacao` prova que esta repetição é segura.
+
+---
+
 ## 1. O estado, em três linhas
 
 O módulo está **completo de ponta a ponta** e **instalado em produção**. Está a
@@ -143,7 +220,7 @@ npm run typecheck
 npm run build
 ```
 
-**Os 12 validadores** correm o SQL contra um Postgres a sério (PGlite, sem
+**Os validadores** (`tools/validar-*.mjs`) correm o SQL contra um Postgres a sério (PGlite, sem
 Docker):
 
 ```bash

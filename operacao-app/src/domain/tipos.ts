@@ -25,7 +25,14 @@ export const ESTADOS = [
 ] as const;
 export type Estado = (typeof ESTADOS)[number];
 
-export const FUNCOES = ["admin", "gestor", "operador", "tecnico"] as const;
+/**
+ * Da mais à menos poderosa. A ordem importa: é a hierarquia.
+ *
+ * O supervisor fica entre o gestor e o operador. Vê tudo o que está no seu
+ * âmbito e valida o trabalho feito (confirma ou reabre uma ordem fechada),
+ * mas não mexe em definições nem em custos — isso continua a ser do gestor.
+ */
+export const FUNCOES = ["admin", "gestor", "supervisor", "operador", "tecnico"] as const;
 export type Funcao = (typeof FUNCOES)[number];
 
 export const PRIORIDADES = ["baixa", "normal", "alta", "urgente"] as const;
@@ -105,11 +112,22 @@ export const ROTULO_TIPO_TAREFA: Record<TipoTarefa, string> = {
 export const ROTULO_FUNCAO: Record<Funcao, string> = {
   admin: "Administrador",
   gestor: "Gestor",
+  supervisor: "Supervisor",
   operador: "Operador",
   tecnico: "Técnico",
 };
 
 /* ─────────────────────────── Grupos úteis ─────────────────────────── */
+
+/** Posição na hierarquia: 0 é o topo. Espelha `ops_nivel_funcao()` na base. */
+export function nivelFuncao(f: Funcao): number {
+  return FUNCOES.indexOf(f);
+}
+
+/** `a` está pelo menos ao nível de `b`? */
+export function funcaoPeloMenos(a: Funcao, b: Funcao): boolean {
+  return nivelFuncao(a) <= nivelFuncao(b);
+}
 
 /** Estados em que a ordem ainda consome atenção de alguém. */
 export const ESTADOS_ABERTOS: readonly Estado[] = [

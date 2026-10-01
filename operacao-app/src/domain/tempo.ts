@@ -85,6 +85,61 @@ export function formatarDuracao(segundos: number): string {
   return `${horas}h${String(minutos).padStart(2, "0")}m`;
 }
 
+/* ───────────────────── Real contra estimado, por tarefa ───────────────────── */
+
+/**
+ * O que se escreve no formulário (minutos, à portuguesa) para o que a base
+ * guarda (segundos). Vazio, negativo ou ilegível dá 0 — "sem estimativa" —
+ * em vez de um número inventado.
+ */
+export function minutosParaSegundos(texto: string): number {
+  const n = Number(texto.trim().replace(",", "."));
+  if (!texto.trim() || !Number.isFinite(n) || n <= 0) return 0;
+  return Math.round(n * 60);
+}
+
+/** O inverso, para encher o formulário. 0 fica vazio. */
+export function segundosParaMinutos(segundos: number): string {
+  if (!segundos || segundos <= 0) return "";
+  const m = segundos / 60;
+  return Number.isInteger(m) ? String(m) : m.toFixed(1).replace(".", ",");
+}
+
+export interface ComparacaoTempo {
+  estimado: number;
+  real: number;
+  /** real − estimado, em segundos. Nulo sem estimativa. */
+  desvio: number | null;
+  /**
+   * `sem_estimativa` — não há contra o que comparar;
+   * `dentro`         — até ao estimado, mais a tolerância;
+   * `acima`          — passou a tolerância.
+   */
+  situacao: "sem_estimativa" | "dentro" | "acima";
+}
+
+/**
+ * Compara o tempo real de uma tarefa com o estimado. A tolerância (10% por
+ * omissão) existe porque ninguém faz uma tarefa de 10 minutos em 600
+ * segundos certos — e um alarme que toca sempre deixa de ser ouvido.
+ */
+export function compararTempo(
+  estimado: number,
+  real: number,
+  tolerancia = 0.1
+): ComparacaoTempo {
+  const r = Math.max(0, Math.floor(real));
+  if (!estimado || estimado <= 0) {
+    return { estimado: 0, real: r, desvio: null, situacao: "sem_estimativa" };
+  }
+  return {
+    estimado,
+    real: r,
+    desvio: r - estimado,
+    situacao: r <= estimado * (1 + tolerancia) ? "dentro" : "acima",
+  };
+}
+
 /** Euros em pt-PT: `64,29 €`. */
 export function formatarEuros(valor: number): string {
   return new Intl.NumberFormat("pt-PT", {

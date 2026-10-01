@@ -283,7 +283,7 @@ const DIFERENCAS = [
     infraspeak:
       "Há “tempo de execução”, que é fecho menos início — e por isso dá coisas como 5303 horas numa ordem que ficou aberta cinco meses. O tempo REAL de trabalho não existe em lado nenhum.",
     olyvia:
-      "Sessões de trabalho: quem começou, quando, quando parou. O custo de mão de obra é a soma das sessões vezes o custo/hora de cada pessoa.",
+      "Sessões de trabalho: cada pessoa liga e desliga o seu relógio, na ordem ou numa tarefa. Pausar ou fechar a ordem pára o de toda a gente. O custo de mão de obra é a soma das sessões vezes o custo/hora de cada pessoa — e vê-se ao vivo enquanto a ordem está aberta.",
     evidencia:
       "o campo “custo por hora” já existe na ficha de utilizador do Infraspeak, e nunca é preenchido. Resultado: o custo de mão de obra é 0,00 € em TODAS as ordens da instância.",
     feito: true,
@@ -428,23 +428,29 @@ function Tutorial() {
               <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
                 <th className="pb-2 font-medium">&nbsp;</th>
                 <th className="pb-2 text-center font-medium">Técnico</th>
+                <th className="pb-2 text-center font-medium">Supervisor</th>
                 <th className="pb-2 text-center font-medium">Gestor</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {[
-                ["Ver as ordens em que está", true, true],
-                ["Responder a tarefas e medições", true, true],
-                ["Tirar fotos", true, true],
-                ["Abrir uma ordem", "fica por aprovar", true],
-                ["Atribuir e marcar datas", false, true],
-                ["Ver custos", false, "com permissão"],
-                ["Criar locais, checklists, equipa", false, true],
-              ].map(([o, t, g]) => (
+                ["Ver as ordens em que está", true, true, true],
+                ["Ver todas as ordens da empresa", false, true, true],
+                ["Responder a tarefas e medições", true, true, true],
+                ["Tirar fotos", true, true, true],
+                ["Abrir uma ordem", "fica por aprovar", "com permissão", true],
+                ["Confirmar ou reabrir trabalho fechado", false, true, true],
+                ["Atribuir e marcar datas", false, "com permissão", true],
+                ["Ver custos", false, false, "com permissão"],
+                ["Criar locais, checklists, equipa", false, false, true],
+              ].map(([o, t, s, g]) => (
                 <tr key={String(o)}>
                   <td className="py-2 pr-3 text-slate-700">{o}</td>
                   <td className="py-2 text-center">
                     <Marca v={t} />
+                  </td>
+                  <td className="py-2 text-center">
+                    <Marca v={s} />
                   </td>
                   <td className="py-2 text-center">
                     <Marca v={g} />

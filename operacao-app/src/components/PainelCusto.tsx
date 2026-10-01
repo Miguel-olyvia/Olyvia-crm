@@ -64,7 +64,10 @@ export default function PainelCusto({
         <Numero rotulo="Previsto" valor={euros(p)} />
         <Numero rotulo="Gasto" valor={euros(r)} destaque={passou ? "mau" : "bom"} />
         <Numero rotulo="Material" valor={euros(custo.real_material)} />
-        <Numero rotulo="Mão de obra" valor={euros(custo.real_mao_obra)} />
+        <Numero
+          rotulo={custo.mao_obra_em_curso ? "Mão de obra · a contar" : "Mão de obra"}
+          valor={euros(custo.real_mao_obra)}
+        />
       </div>
 
       <Barra
@@ -77,6 +80,14 @@ export default function PainelCusto({
           : p === r
             ? "Está exatamente no previsto."
             : `Ainda há ${euros(p - r)} de folga.`}
+        {/* Enquanto há gente a trabalhar, a mão de obra é a de agora — sobe
+            sozinha. Dizê-lo evita que alguém leia o número como final. */}
+        {custo.mao_obra_em_curso &&
+          ` A mão de obra está a contar ao vivo (${custo.sessoes_abertas ?? 0} ${
+            custo.sessoes_abertas === 1 ? "pessoa" : "pessoas"
+          } a trabalhar).`}
+        {(custo.sem_custo_hora ?? 0) > 0 &&
+          ` ${custo.sem_custo_hora} ${custo.sem_custo_hora === 1 ? "pessoa sem" : "pessoas sem"} custo/hora — não entra na conta.`}
       </p>
 
       {/* Onde derrapou. Um total só diz que derrapou; isto diz onde. */}

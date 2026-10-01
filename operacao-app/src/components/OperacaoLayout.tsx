@@ -18,6 +18,8 @@ import {
   LogOut,
   OperacaoMark,
 } from "./icons";
+import { ObraCapacete, ObraCronometro, ObraValidar } from "./ObraIcones";
+import { podeValidar } from "../domain/obras";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 
@@ -28,9 +30,18 @@ function iniciais(nome: string | null, email: string | null): string {
   return fonte.slice(0, 2).toUpperCase();
 }
 
-const NAVEGACAO = [
+// `so`: só aparece para quem passa no teste (a base verifica na mesma).
+const NAVEGACAO: {
+  to: string;
+  rotulo: string;
+  Icone: (p: React.SVGProps<SVGSVGElement>) => JSX.Element;
+  so?: (funcao: string | null) => boolean;
+}[] = [
   { to: "/", rotulo: "Hoje", Icone: Home },
+  { to: "/minhas-tarefas", rotulo: "Tarefas", Icone: ObraCronometro },
   { to: "/ordens", rotulo: "Ordens", Icone: List },
+  { to: "/obras", rotulo: "Obras", Icone: ObraCapacete },
+  { to: "/validar", rotulo: "Validar", Icone: ObraValidar, so: podeValidar },
   { to: "/locais", rotulo: "Locais", Icone: Layers },
   { to: "/planos", rotulo: "Planos", Icone: Clock },
   { to: "/orcamentos", rotulo: "Orçamentos", Icone: Euro },
@@ -54,6 +65,8 @@ export function OperacaoLayout() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, [menuAberto]);
 
+  const navegacao = NAVEGACAO.filter((n) => !n.so || n.so(funcao));
+
   const ativo = (to: string) =>
     to === "/" ? location.pathname === "/" : location.pathname.startsWith(to);
 
@@ -74,14 +87,14 @@ export function OperacaoLayout() {
           </Link>
 
           {/* Navegação principal — desktop */}
-          <nav className="hidden flex-1 items-center gap-1 md:flex">
-            {NAVEGACAO.map(({ to, rotulo, Icone }) => (
+          <nav className="hidden flex-1 items-center gap-1 overflow-x-auto md:flex">
+            {navegacao.map(({ to, rotulo, Icone }) => (
               <Link
                 key={to}
                 to={to}
                 aria-current={ativo(to) ? "page" : undefined}
                 className={cx(
-                  "inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
+                  "inline-flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-2 text-sm transition-colors lg:px-3",
                   ativo(to)
                     ? "bg-brand-50 font-medium text-brand-800"
                     : "text-slate-600 hover:bg-slate-100"
@@ -134,7 +147,7 @@ export function OperacaoLayout() {
                 <span className="hidden min-w-0 max-w-[170px] text-left leading-tight lg:block">
                   <span className="block truncate text-sm font-medium text-slate-700">{userName}</span>
                   <span className="block truncate text-[11px] text-slate-400">
-                    {funcao ? ROTULO_FUNCAO[funcao] : "—"}
+                    {funcao ? ROTULO_FUNCAO[funcao] ?? (funcao === ("supervisor" as string) ? "Supervisor" : funcao) : "—"}
                   </span>
                 </span>
                 <ChevronRight
@@ -192,14 +205,16 @@ export function OperacaoLayout() {
 
       {/* Navegação — mobile */}
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 pb-[max(0.35rem,env(safe-area-inset-bottom))] backdrop-blur md:hidden print:hidden">
-        <div className="mx-auto flex max-w-6xl items-stretch justify-around">
-          {NAVEGACAO.map(({ to, rotulo, Icone }) => (
+        {/* Com as obras são mais de sete destinos: a barra desliza na horizontal
+            em vez de espremer os rótulos até ficarem ilegíveis. */}
+        <div className="mx-auto flex max-w-6xl items-stretch justify-around overflow-x-auto">
+          {navegacao.map(({ to, rotulo, Icone }) => (
             <Link
               key={to}
               to={to}
               aria-current={ativo(to) ? "page" : undefined}
               className={cx(
-                "flex min-h-[46px] flex-1 basis-0 flex-col items-center justify-center gap-0.5 px-1 pt-1.5 text-[10px] transition-colors",
+                "flex min-h-[46px] min-w-[60px] flex-1 basis-0 flex-col items-center justify-center gap-0.5 px-1 pt-1.5 text-[10px] transition-colors",
                 ativo(to) ? "font-semibold text-brand" : "text-slate-400 hover:text-slate-600"
               )}
             >

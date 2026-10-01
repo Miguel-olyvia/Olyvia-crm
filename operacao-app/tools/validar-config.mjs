@@ -396,12 +396,14 @@ console.log("\n─── e agora funciona tudo junto ─────────
       JOIN public.ops_ordem o ON o.id = t.ordem_id WHERE o.origem='preventiva'`);
   t.n >= 3 ? ok(`com ${t.n} tarefas copiadas da checklist`) : mau(`${t.n} tarefas`);
 
-  // Duas medições × três ordens: seis leituras à espera de quem lá chegar.
+  // Duas medições por ordem. Quantas ordens nascem depende do dia em que o
+  // teste corre: a dia 1 do mês o próprio dia entra na janela e são quatro,
+  // nos outros dias são três. Fixar "6" fazia o teste falhar uma vez por mês.
   const l = await um(`
     SELECT count(*)::int AS n FROM public.ops_ordem_tarefa_medicao WHERE lida_em IS NULL`);
-  l.n === 6
-    ? ok(`e ${l.n} leituras por fazer, semeadas com a ordem`)
-    : mau(`esperava 6 leituras por fazer, encontrei ${l.n}`);
+  l.n === 2 * m.ordens_criadas
+    ? ok(`e ${l.n} leituras por fazer (2 × ${m.ordens_criadas} ordens), semeadas com a ordem`)
+    : mau(`esperava ${2 * m.ordens_criadas} leituras por fazer, encontrei ${l.n}`);
 
   const v = await um(`
     SELECT DISTINCT checklist_versao FROM public.ops_ordem_alvo WHERE checklist_versao IS NOT NULL`);

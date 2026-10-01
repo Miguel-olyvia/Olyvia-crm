@@ -17,6 +17,13 @@ const Relatorio = lazy(() => import("./pages/Relatorio"));
 const Planos = lazy(() => import("./pages/Planos"));
 const Definicoes = lazy(() => import("./pages/Definicoes"));
 const AjudaPagina = lazy(() => import("./pages/Ajuda"));
+// Obras: fases, tarefas, Gantt, tempos e validação.
+const Obras = lazy(() => import("./pages/Obras"));
+const ObraDetalhe = lazy(() => import("./pages/ObraDetalhe"));
+const ObraModelos = lazy(() => import("./pages/ObraModelos"));
+const ObraMetricas = lazy(() => import("./pages/ObraMetricas"));
+const MinhasTarefas = lazy(() => import("./pages/MinhasTarefas"));
+const Validar = lazy(() => import("./pages/Validar"));
 
 export default function App() {
   return (
@@ -85,6 +92,55 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar os orçamentos…" />}>
               <Orcamentos />
+            </Suspense>
+          }
+        />
+        {/* Obras. "modelos" e "metricas" antes de ":codigo", pela mesma razão de "/ordens/nova". */}
+        <Route
+          path="/obras"
+          element={
+            <Suspense fallback={<Spinner label="A carregar as obras…" />}>
+              <Obras />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/obras/modelos"
+          element={
+            <Suspense fallback={<Spinner label="A carregar os modelos…" />}>
+              <ObraModelos />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/obras/metricas"
+          element={
+            <Suspense fallback={<Spinner label="A calcular as métricas…" />}>
+              <ObraMetricas />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/obras/:codigo"
+          element={
+            <Suspense fallback={<Spinner label="A carregar a obra…" />}>
+              <ObraDetalhe />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/minhas-tarefas"
+          element={
+            <Suspense fallback={<Spinner label="A carregar as tuas tarefas…" />}>
+              <MinhasTarefas />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/validar"
+          element={
+            <Suspense fallback={<Spinner label="A carregar a fila…" />}>
+              <Validar />
             </Suspense>
           }
         />

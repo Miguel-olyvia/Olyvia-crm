@@ -9,9 +9,10 @@
  * Funções puras. Não sabem que existe base de dados, e por isso testam-se sem
  * infraestrutura nenhuma.
  *
- * ⚠ Isto é a regra, não a fechadura. A imposição real tem de estar na base de
- * dados: enquanto as transições forem escritas pelo cliente, quem tiver o
- * token consegue contorná-las. Ver `db/schema.sql`, secção 11.2.
+ * ⚠ Isto é a regra, não a fechadura. A fechadura é `rpc_ops_transitar_ordem`
+ * (versão em vigor: `db/tempos.sql`). As duas têm de dizer o mesmo, e
+ * `tools/validar-estados.mjs` prova-o combinação a combinação: se mudares
+ * uma, muda a outra.
  */
 
 import type { Estado, EstadoTarefa, Funcao } from "./tipos";
@@ -56,8 +57,10 @@ interface Regra {
 }
 
 const GESTAO: readonly Funcao[] = ["admin", "gestor"];
-const GESTAO_E_OPERADOR: readonly Funcao[] = ["admin", "gestor", "operador"];
-const TODOS: readonly Funcao[] = ["admin", "gestor", "operador", "tecnico"];
+/** Quem valida trabalho feito: a gestão e o supervisor. */
+const VALIDACAO: readonly Funcao[] = ["admin", "gestor", "supervisor"];
+const GESTAO_E_OPERADOR: readonly Funcao[] = ["admin", "gestor", "supervisor", "operador"];
+const TODOS: readonly Funcao[] = ["admin", "gestor", "supervisor", "operador", "tecnico"];
 
 /** Só o técnico é limitado pela atribuição; quem gere vê e age em tudo. */
 function exigeAtribuicao(ctx: Contexto, acao: string): string | null {
@@ -129,16 +132,18 @@ export const REGRAS: Record<Transicao, Regra> = {
     },
   },
 
+  // Validar o trabalho: confirmar que ficou bem feito, ou devolvê-lo para
+  // ser corrigido. É o que o supervisor faz no terreno — pode as duas coisas.
   confirmar: {
     de: ["fechada"],
     para: "confirmada",
-    funcoes: GESTAO,
+    funcoes: VALIDACAO,
   },
 
   reabrir: {
     de: ["fechada"],
     para: "em_curso",
-    funcoes: GESTAO,
+    funcoes: VALIDACAO,
   },
 
   cancelar: {

@@ -43,6 +43,7 @@ import {
 } from "../components/ui";
 import { Building, Check, Layers, Plus, User, X } from "../components/icons";
 import { euros } from "../lib/formatar";
+import { minutosParaSegundos, segundosParaMinutos } from "../domain/tempo";
 import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type TipoTarefa } from "../domain/tipos";
 
 /**
@@ -946,6 +947,9 @@ function FormChecklist({
   const { activeOrgId } = useAuth();
   const [nome, setNome] = useState(checklist?.nome ?? "");
   const [tarefas, setTarefas] = useState<TarefaParaGravar[]>([]);
+  // O que se está a escrever no campo dos minutos, por tarefa — para "2," não
+  // virar "2" a meio da escrita.
+  const [rascunhoMinutos, setRascunhoMinutos] = useState<Record<number, string>>({});
   const [aCarregar, setACarregar] = useState(!!checklist);
   const { aGravar, erro, gravar } = useGravar();
 
@@ -963,6 +967,7 @@ function FormChecklist({
           tipo: t.tipo,
           obrigatoria: t.obrigatoria,
           privada: t.privada,
+          tempo_estimado: t.tempo_estimado ?? 0,
           medicoes: ms.filter((m) => m.checklist_tarefa_id === t.id).map((m) => m.medicao_def_id),
         }))
       );
@@ -1084,9 +1089,31 @@ function FormChecklist({
                         <Escolha ligado={t.privada} onClick={() => mudar(i, { privada: !t.privada })}>
                           não sai no relatório
                         </Escolha>
+                        {/* O tempo estimado é o termo de comparação do tempo
+                            real de cada tarefa. Em minutos, que é como se
+                            pensa; a base guarda segundos. */}
+                        <label className="inline-flex items-center gap-1.5 text-xs text-slate-500">
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            value={rascunhoMinutos[i] ?? segundosParaMinutos(t.tempo_estimado ?? 0)}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              setRascunhoMinutos((r) => ({ ...r, [i]: v }));
+                              mudar(i, { tempo_estimado: minutosParaSegundos(v) });
+                            }}
+                            placeholder="—"
+                            className="w-16 py-1 text-right font-mono text-xs tabular"
+                            aria-label={`Tempo estimado da tarefa ${i + 1}, em minutos`}
+                          />
+                          min estimados
+                        </label>
                         <button
                           type="button"
-                          onClick={() => setTarefas((xs) => xs.filter((_, j) => j !== i))}
+                          onClick={() => {
+                            setTarefas((xs) => xs.filter((_, j) => j !== i));
+                            setRascunhoMinutos({});
+                          }}
                           className="ml-auto rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-white hover:text-red-600"
                           aria-label="Remover tarefa"
                         >
@@ -1133,7 +1160,7 @@ function FormChecklist({
               onClick={() =>
                 setTarefas((xs) => [
                   ...xs,
-                  { nome: "", tipo: "inspecao", obrigatoria: true, privada: false, medicoes: [] },
+                  { nome: "", tipo: "inspecao", obrigatoria: true, privada: false, tempo_estimado: 0, medicoes: [] },
                 ])
               }
             >
@@ -1306,11 +1333,12 @@ function FormPerfil({
       <div className="space-y-4">
         <Field
           label="Função"
-          hint="Um técnico executa. Um gestor distribui, marca datas e vê custos."
+          hint="Um técnico executa. Um supervisor acompanha e valida o trabalho feito, sem mexer em definições nem custos. Um gestor distribui, marca datas e vê custos."
         >
           <Select value={funcao} onChange={(e) => setFuncao(e.target.value)} className="w-full">
             <option value="tecnico">Técnico</option>
             <option value="operador">Operador</option>
+            <option value="supervisor">Supervisor</option>
             <option value="gestor">Gestor</option>
             <option value="admin">Administrador</option>
           </Select>
