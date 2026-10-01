@@ -41,6 +41,15 @@ type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
 };
 
+// Pré-seleção de linhas no diálogo "Reverter receção" — vem do link por linha
+// em ClientOrders.tsx (?open=<po>&item=… ou &product=…&quote_line=…&component=…).
+type RevertPreselect = {
+  itemIds?: string[];
+  productId?: string | null;
+  quoteLineId?: string | null;
+  componentIndex?: number | null;
+};
+
 type PurchaseOrderItem = {
   id?: string;
   item_type: 'product' | 'service';
@@ -235,6 +244,21 @@ const PurchaseOrders = () => {
   const [revertSelectedIds, setRevertSelectedIds] = useState<Set<string>>(new Set());
   const [revertReason, setRevertReason] = useState("");
   const [reverting, setReverting] = useState(false);
+  // Encomenda aberta no diálogo de detalhe: nº, fornecedor e estado ORIGINAL
+  // (não o do formulário) — decide o modo só de leitura. hasReceivedLines é
+  // preenchido quando as linhas carregam (handleEdit).
+  const [editingOrderMeta, setEditingOrderMeta] = useState<{
+    id: string;
+    orderNumber: string;
+    supplierName: string;
+    status: string;
+    hasReceivedLines: boolean;
+  } | null>(null);
+  // Linha a pré-selecionar em "Reverter receção", lida do URL (?item=/?product=).
+  const [pendingRevertPreselect, setPendingRevertPreselect] = useState<(RevertPreselect & { orderId: string }) | null>(null);
+  // Ao passar do diálogo da encomenda para o de reversão, o primeiro não deve
+  // devolver o foco ao gatilho (roubava-o ao diálogo que acabou de abrir).
+  const skipOrderDialogFocusRestoreRef = useRef(false);
   // Fase 5.0F: link inverso — quando a encomenda foi gerada automaticamente a
   // partir de um Contrato assinado (source_type='contract'), mostra a origem
   // no diálogo de detalhe, com link de volta para "Encomendas Clientes".
@@ -289,6 +313,12 @@ const PurchaseOrders = () => {
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission } = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
+  // Encomendas recebidas (total ou parcialmente) abrem só de leitura, venha o
+  // diálogo de onde vier (lista, ?open= de Encomendas Clientes, …).
+  const isOrderReadOnly =
+    !!editingId &&
+    editingOrderMeta?.id === editingId &&
+    (editingOrderMeta.status === 'received' || editingOrderMeta.status === 'partially_received');
 
   const [formData, setFormData] = useState({
     supplier_id: "",
@@ -626,6 +656,24 @@ const PurchaseOrders = () => {
 
     const target = orders.find((o) => o.id === openId);
     if (target) {
+      const itemId = searchParams.get("item");
+      const productId = searchParams.get("product");
+      const quoteLineId = searchParams.get("quote_line");
+      const componentRaw = searchParams.get("component");
+      const componentIndex = componentRaw !== null && componentRaw !== "" && Number.isFinite(Number(componentRaw))
+        ? Number(componentRaw)
+        : null;
+      setPendingRevertPreselect(
+        itemId || productId
+          ? {
+              orderId: target.id,
+              itemIds: itemId ? [itemId] : undefined,
+              productId: productId || null,
+              quoteLineId: quoteLineId || null,
+              componentIndex,
+            }
+          : null,
+      );
       handleEdit(target);
     } else {
       toast({
@@ -636,6 +684,10 @@ const PurchaseOrders = () => {
     }
 
     searchParams.delete("open");
+    searchParams.delete("item");
+    searchParams.delete("product");
+    searchParams.delete("quote_line");
+    searchParams.delete("component");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams, orders, loading]);
@@ -951,6 +1003,13 @@ const PurchaseOrders = () => {
 
   const handleEdit = async (order: PurchaseOrder) => {
     setEditingId(order.id);
+    setEditingOrderMeta({
+      id: order.id,
+      orderNumber: order.order_number,
+      supplierName: order.suppliers?.name || "",
+      status: order.status,
+      hasReceivedLines: false,
+    });
     setFormData({
       supplier_id: order.supplier_id,
       order_date: order.order_date,
@@ -1005,6 +1064,10 @@ const PurchaseOrders = () => {
       .eq("purchase_order_id", order.id);
 
     if (items) {
+      const hasReceivedLines = (items as unknown as Array<PurchaseOrderItemWithReceipt>).some(
+        (item) => item.item_type === 'product' && Number(item.received_quantity) > 0,
+      );
+      setEditingOrderMeta((prev) => (prev && prev.id === order.id ? { ...prev, hasReceivedLines } : prev));
       setOrderItems((items as unknown as Array<PurchaseOrderItemWithReceipt>).map(item => ({
         id: item.id,
         item_type: item.item_type as 'product' | 'service',
@@ -1200,7 +1263,29 @@ const PurchaseOrders = () => {
     }
   };
 
-  const openRevertDialog = async (order: PurchaseOrder) => {
+  // Linhas a marcar à partida: ids explícitos; senão as do produto, e dessas
+  // só as ligadas à linha da Encomenda Cliente (quote_line_id/component_index)
+  // quando alguma o estiver. Só ids que existam na lista carregada.
+  const resolveRevertPreselection = (lines: PurchaseOrderItemWithReceipt[], preselect: RevertPreselect): string[] => {
+    if (preselect.itemIds && preselect.itemIds.length > 0) {
+      const wanted = new Set(preselect.itemIds);
+      const byId = lines.filter((l) => wanted.has(l.id)).map((l) => l.id);
+      if (byId.length > 0 || !preselect.productId) return byId;
+    }
+    if (!preselect.productId) return [];
+    const byProduct = lines.filter((l) => l.product_id === preselect.productId);
+    if (preselect.quoteLineId) {
+      const wantedComponent = preselect.componentIndex ?? null;
+      const byQuoteLine = byProduct.filter((l) => {
+        const row = l as unknown as { quote_line_id?: string | null; component_index?: number | null };
+        return row.quote_line_id === preselect.quoteLineId && (row.component_index ?? null) === wantedComponent;
+      });
+      if (byQuoteLine.length > 0) return byQuoteLine.map((l) => l.id);
+    }
+    return byProduct.map((l) => l.id);
+  };
+
+  const openRevertDialog = async (order: Pick<PurchaseOrder, 'id' | 'order_number'>, preselect?: RevertPreselect) => {
     setRevertingOrder({ id: order.id, order_number: order.order_number });
     setRevertLines([]);
     setRevertSelectedIds(new Set());
@@ -1219,7 +1304,50 @@ const PurchaseOrders = () => {
       toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
       return;
     }
-    setRevertLines((data as unknown as PurchaseOrderItemWithReceipt[] | null) || []);
+    const lines = (data as unknown as PurchaseOrderItemWithReceipt[] | null) || [];
+    setRevertLines(lines);
+    if (preselect) {
+      const ids = resolveRevertPreselection(lines, preselect);
+      if (ids.length > 0) setRevertSelectedIds(new Set(ids));
+    }
+  };
+
+  const handleOrderDialogOpenChange = (isOpen: boolean) => {
+    setOpen(isOpen);
+    if (!isOpen) {
+      setEditingId(null);
+      setEditingOrderMeta(null);
+      setPendingRevertPreselect(null);
+      setFormData({
+        supplier_id: "",
+        order_date: new Date().toISOString().split('T')[0],
+        expected_delivery: "",
+        status: "pending",
+        notes: "",
+      });
+      setFieldErrors({});
+      setOrderItems([]);
+      setOrganizationSelection({
+        tenantId: "",
+        companyId: activeCompany?.id || "",
+        businessUnitId: "",
+        departmentId: "",
+        secondaryCompanyIds: [],
+      });
+      setNewOrderClientOrderId("");
+      setPendingClientOrderLines([]);
+    }
+  };
+
+  // "Reverter receção" dentro do diálogo da encomenda (só de leitura): fecha-o
+  // e abre o diálogo de reversão já existente, com a linha vinda do link.
+  const handleRevertFromOrderDialog = () => {
+    const meta = editingOrderMeta;
+    if (!meta) return;
+    const preselect = pendingRevertPreselect?.orderId === meta.id ? pendingRevertPreselect : undefined;
+    skipOrderDialogFocusRestoreRef.current = true;
+    handleOrderDialogOpenChange(false);
+    void openRevertDialog({ id: meta.id, order_number: meta.orderNumber }, preselect);
   };
 
   const toggleRevertLine = (id: string, checked: boolean) => {
@@ -1746,6 +1874,8 @@ const PurchaseOrders = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Encomenda recebida: só de leitura — nunca grava, mesmo que algo submeta o form.
+    if (isOrderReadOnly) return;
 
     const validation = purchaseOrderSchema.safeParse(formData);
     if (!validation.success) {
@@ -2510,39 +2640,35 @@ const PurchaseOrders = () => {
             </Dialog>
             </PermissionGate>
             <PermissionGate permission="purchase_orders.create">
-           <Dialog open={open} onOpenChange={(isOpen) => {
-              setOpen(isOpen);
-              if (!isOpen) {
-                setEditingId(null);
-                setFormData({
-                  supplier_id: "",
-                  order_date: new Date().toISOString().split('T')[0],
-                  expected_delivery: "",
-                  status: "pending",
-                  notes: "",
-                });
-                setFieldErrors({});
-                setOrderItems([]);
-                setOrganizationSelection({
-                  tenantId: "",
-                  companyId: activeCompany?.id || "",
-                  businessUnitId: "",
-                  departmentId: "",
-                  secondaryCompanyIds: [],
-                });
-                setNewOrderClientOrderId("");
-                setPendingClientOrderLines([]);
-               }
-             }}>
+           <Dialog open={open} onOpenChange={handleOrderDialogOpenChange}>
               <DialogTrigger asChild>
                 <Button>
                   <Plus className="w-4 h-4 mr-2" />
                   {t('purchaseOrders.newOrder')}
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+              <DialogContent
+                className="max-w-6xl max-h-[90vh] overflow-y-auto"
+                onCloseAutoFocus={(e) => {
+                  if (skipOrderDialogFocusRestoreRef.current) {
+                    skipOrderDialogFocusRestoreRef.current = false;
+                    e.preventDefault();
+                  }
+                }}
+              >
                 <DialogHeader>
-                  <DialogTitle>{editingId ? t('purchaseOrders.editOrder') : t('purchaseOrders.newOrder')}</DialogTitle>
+                  <DialogTitle>
+                    {!editingId
+                      ? t('purchaseOrders.newOrder')
+                      : editingOrderMeta?.id === editingId
+                        ? (isOrderReadOnly
+                            ? t('purchaseOrders.orderTitle', {
+                                number: editingOrderMeta.orderNumber,
+                                supplier: editingOrderMeta.supplierName || '—',
+                              })
+                            : `${t('purchaseOrders.editOrder')} ${editingOrderMeta.orderNumber} — ${editingOrderMeta.supplierName || '—'}`)
+                        : t('purchaseOrders.editOrder')}
+                  </DialogTitle>
                   {editingId && orderSourceInfo && (
                     <p className="text-sm text-muted-foreground">
                       {orderSourceInfo.originType === 'direct_sale'
@@ -2567,13 +2693,37 @@ const PurchaseOrders = () => {
                   )}
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-6">
-                  {/* Organization Selection */}
-                  <OrganizationFormSection
-                    value={organizationSelection}
-                    onChange={setOrganizationSelection}
-                    showSecondaryCompanies={false}
-                    multiSelectCompanies={false}
-                  />
+                  {/* Encomenda recebida: só de leitura. A reversão é por linha, no
+                      diálogo próprio — mesmas permissões que o botão ↩ da lista. */}
+                  {isOrderReadOnly && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2">
+                      <p className="text-sm text-muted-foreground">
+                        {t('purchaseOrders.readOnlyReceived')}
+                      </p>
+                      {editingOrderMeta?.hasReceivedLines && (
+                        <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
+                          <Button type="button" variant="outline" size="sm" onClick={handleRevertFromOrderDialog}>
+                            <Undo2 className="w-4 h-4 mr-2" />
+                            {t('purchaseOrders.revert.action')}
+                          </Button>
+                        </PermissionGate>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Organization Selection — sem prop disabled; em só de leitura o
+                      fieldset desativa os controlos e bloqueia o rato. */}
+                  <fieldset
+                    disabled={isOrderReadOnly}
+                    className={cn("min-w-0", isOrderReadOnly && "pointer-events-none opacity-70")}
+                  >
+                    <OrganizationFormSection
+                      value={organizationSelection}
+                      onChange={setOrganizationSelection}
+                      showSecondaryCompanies={false}
+                      multiSelectCompanies={false}
+                    />
+                  </fieldset>
 
                   {/* Fase 5.0F: ligação manual opcional a uma Encomenda Cliente — só
                       na criação, resolve o caso "sem_fornecedor" em Encomendas
@@ -2630,6 +2780,7 @@ const PurchaseOrders = () => {
                             variant="outline"
                             role="combobox"
                             aria-expanded={supplierPickerOpen}
+                            disabled={isOrderReadOnly}
                             className={cn("w-full justify-between font-normal", !formData.supplier_id && "text-muted-foreground", fieldErrors.supplier_id && "border-destructive")}
                           >
                             <span className="truncate">
@@ -2680,6 +2831,7 @@ const PurchaseOrders = () => {
                         value={formData.order_date}
                         onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
                         required
+                        disabled={isOrderReadOnly}
                         className={fieldErrors.order_date ? "border-destructive" : ""}
                       />
                       {fieldErrors.order_date && <p className="text-xs text-destructive">{fieldErrors.order_date}</p>}
@@ -2691,11 +2843,12 @@ const PurchaseOrders = () => {
                         type="date"
                         value={formData.expected_delivery}
                         onChange={(e) => setFormData({ ...formData, expected_delivery: e.target.value })}
+                        disabled={isOrderReadOnly}
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="status">{t('purchaseOrders.form.status')} *</Label>
-                      <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+                      <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })} disabled={isOrderReadOnly}>
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
@@ -2731,19 +2884,9 @@ const PurchaseOrders = () => {
                           <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
-                      {!hasPermission('purchase_orders.approve') && formData.status !== 'ordered' && (
+                      {!isOrderReadOnly && !hasPermission('purchase_orders.approve') && formData.status !== 'ordered' && (
                         <p className="text-xs text-muted-foreground">
                           Sem permissão para aprovar encomendas (mudar para "{t('purchaseOrders.status.ordered')}").
-                        </p>
-                      )}
-                      {formData.status === 'received' && (
-                        <p className="text-xs text-muted-foreground">
-                          Esta encomenda já foi recebida (stock atualizado). Para reverter, usa um ajuste em Stocks.
-                        </p>
-                      )}
-                      {formData.status === 'partially_received' && (
-                        <p className="text-xs text-muted-foreground">
-                          Esta encomenda já tem linhas parcialmente recebidas — não é possível editá-la nem cancelá-la. Para devolver mercadoria já recebida, usa a devolução ao fornecedor.
                         </p>
                       )}
                     </div>
@@ -2756,12 +2899,14 @@ const PurchaseOrders = () => {
                       value={formData.notes}
                       onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                       rows={3}
+                      disabled={isOrderReadOnly}
                     />
                   </div>
 
                   <div className="border-t pt-4">
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-semibold">{t('purchaseOrders.form.orderItems')}</h3>
+                      {!isOrderReadOnly && (
                       <div className="flex gap-2">
                         {/* Pesquisa no catálogo do fornecedor (rpc_supplier_catalog_search):
                             SKU, ref. do fornecedor, código de barras ou nome. Cada
@@ -2849,6 +2994,7 @@ const PurchaseOrders = () => {
                           {t('purchaseOrders.form.addItems')}
                         </Button>
                       </div>
+                      )}
                     </div>
 
                     {orderItems.length > 0 ? (
@@ -2889,6 +3035,7 @@ const PurchaseOrders = () => {
                                        type="number"
                                        value={item.quantity}
                                        onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
+                                       disabled={isOrderReadOnly}
                                        className="w-20"
                                        min="0"
                                        step={itemRequiresIntegerQty(item) ? "1" : "0.01"}
@@ -2905,6 +3052,7 @@ const PurchaseOrders = () => {
                                        <Select
                                          value={currentLink?.item_supplier_id ?? ""}
                                          onValueChange={(value) => handleChangeLineUom(index, value)}
+                                         disabled={isOrderReadOnly}
                                        >
                                          <SelectTrigger className="h-9 w-32" aria-label="Unidade da linha">
                                            <SelectValue placeholder={uomLabel || "—"} />
@@ -2928,6 +3076,7 @@ const PurchaseOrders = () => {
                                        type="number"
                                        value={item.unit_price}
                                        onChange={(e) => handleItemChange(index, 'unit_price', e.target.value)}
+                                       disabled={isOrderReadOnly}
                                        className="w-24"
                                        min="0"
                                        step="0.01"
@@ -2937,7 +3086,7 @@ const PurchaseOrders = () => {
                                    <TableCell className="font-semibold">€{item.total_price.toFixed(2)}</TableCell>
                                    <TableCell>
                                      <div className="flex gap-1">
-                                        {item.item_type === 'product' && item.product_id && (
+                                        {!isOrderReadOnly && item.item_type === 'product' && item.product_id && (
                                          <Button
                                            type="button"
                                            variant="ghost"
@@ -2953,6 +3102,7 @@ const PurchaseOrders = () => {
                                            <Tag className="w-4 h-4" />
                                          </Button>
                                        )}
+                                       {!isOrderReadOnly && (
                                        <Button
                                          type="button"
                                          variant="ghost"
@@ -2961,6 +3111,7 @@ const PurchaseOrders = () => {
                                        >
                                          <Trash2 className="w-4 h-4" />
                                        </Button>
+                                       )}
                                      </div>
                                    </TableCell>
                                  </TableRow>
@@ -3003,12 +3154,23 @@ const PurchaseOrders = () => {
                   </div>
 
                   <div className="flex gap-2 justify-end pt-4 border-t">
-                    <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                      {t('purchaseOrders.form.cancel')}
-                    </Button>
-                    <Button type="submit">
-                      {editingId ? t('purchaseOrders.form.update') : t('purchaseOrders.form.create')}
-                    </Button>
+                    {isOrderReadOnly ? (
+                      // Fecho completo (repõe o formulário) — o Cancelar abaixo só
+                      // fecha, e deixaria o editingId/modo só de leitura agarrados
+                      // à próxima "Nova Encomenda".
+                      <Button type="button" variant="outline" onClick={() => handleOrderDialogOpenChange(false)}>
+                        {t('purchaseOrders.form.close')}
+                      </Button>
+                    ) : (
+                      <>
+                        <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                          {t('purchaseOrders.form.cancel')}
+                        </Button>
+                        <Button type="submit">
+                          {editingId ? t('purchaseOrders.form.update') : t('purchaseOrders.form.create')}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </form>
               </DialogContent>
