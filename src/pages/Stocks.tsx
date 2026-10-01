@@ -80,6 +80,22 @@ const stockSchema = z.object({
   path: ["maximum_quantity"],
 });
 
+// Mesmo texto que o StockMovementDialog: o stock só regista unidades inteiras.
+const STOCK_INTEGER_ONLY_MSG = "O stock só regista unidades inteiras.";
+// Motivo dos ajustes gerados pela importação (como "Stock inicial" na criação).
+const CSV_IMPORT_REASON = "Importação CSV";
+
+interface ImportResult {
+  created: number;
+  adjustedUp: number;
+  adjustedDown: number;
+  unitsUp: number;
+  unitsDown: number;
+  settingsOnly: number;
+  unchanged: number;
+  errors: string[];
+}
+
 // PostgREST caps an unranged response at 1000 rows — a plain .select() silently
 // truncates for catalogs bigger than that. Paginates past that cap instead of
 // ever relying on a single unranged request. Same helper as PurchaseOrders.tsx.
@@ -141,6 +157,8 @@ const Stocks = () => {
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportResult | null>(null);
   const [editingStock, setEditingStock] = useState<Stock | null>(null);
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
   const [movementContext, setMovementContext] = useState<{ productId?: string; warehouseId?: string; movementType?: "ajuste" }>({});
@@ -765,11 +783,21 @@ const Stocks = () => {
     }
   };
 
+  // Importação CSV. A quantidade nunca é escrita diretamente em `stocks`
+  // (sem stock_movement não fica rasto): linhas novas nascem a 0 e a
+  // quantidade do ficheiro entra como ajuste "Importação CSV"; linhas que já
+  // existem recebem um ajuste pela diferença e só as definições
+  // (mín./máx./ponto de encomenda/localização) são atualizadas diretamente.
+  // Cada linha é tratada à parte — uma falha não aborta as outras.
   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
 
+    setImportResult(null);
+    setImporting(true);
     try {
+      if (!activeCompany?.id) throw new Error("No active company selected");
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('User not authenticated');
       const businessUserId = await resolveCurrentBusinessUserId();
@@ -781,36 +809,61 @@ const Stocks = () => {
         throw new Error(t('stocks.toast.emptyFile'));
       }
 
-      // Pre-check existing (product_id, warehouse_id) pairs already tracked for this
-      // org, so a collision can be skipped/reported per-row instead of failing the
-      // whole batch atomically. Paginated — a plain unranged .select() would
-      // silently truncate above 1000 existing stock rows.
-      const { data: existingStockPairs, error: existingStockPairsError } = await fetchAllRows(() =>
+      // Linhas de stock já existentes na organização (por produto+armazém),
+      // com a quantidade e definições atuais para calcular a diferença.
+      // Paginado — um .select() sem range truncava acima de 1000 linhas.
+      const { data: existingStockRows, error: existingStockRowsError } = await fetchAllRows(() =>
         supabase
           .from("stocks")
-          .select("product_id, warehouse_id")
+          .select("id, product_id, warehouse_id, quantity, minimum_quantity, maximum_quantity, reorder_point, location")
           .eq("organization_id", activeCompany.id)
           .is("deleted_at", null)
       );
 
-      if (existingStockPairsError) throw existingStockPairsError;
+      if (existingStockRowsError) throw existingStockRowsError;
 
+      type ExistingStockRow = {
+        id: string;
+        product_id: string;
+        warehouse_id: string;
+        quantity: number;
+        minimum_quantity: number;
+        maximum_quantity: number;
+        reorder_point: number;
+        location: string | null;
+      };
       const pairKey = (productId: string, warehouseId: string) => `${productId}::${warehouseId}`;
-      const existingPairSet = new Set(
-        (existingStockPairs || []).map((s: any) => pairKey(s.product_id, s.warehouse_id))
+      const existingByPair = new Map<string, ExistingStockRow>(
+        ((existingStockRows || []) as ExistingStockRow[]).map((s) => [pairKey(s.product_id, s.warehouse_id), s])
       );
       const seenInFile = new Set<string>();
 
       const dataLines = lines.slice(1);
-      const stocksToInsert = [];
       const rowErrors: string[] = [];
 
-      // Convert a raw CSV cell to a number, WITHOUT silently coercing malformed
-      // values to 0. Empty cells default to 0 (matches "not provided"); anything
-      // else that fails to parse is surfaced as NaN so stockSchema rejects it.
-      const toNumberOrNaN = (v: string | undefined): number => {
+      type PlannedRow = {
+        lineNumber: number;
+        label: string;
+        product_id: string;
+        warehouse_id: string;
+        quantity: number;
+        settings: {
+          minimum_quantity: number;
+          maximum_quantity: number;
+          reorder_point: number;
+          location: string | null;
+        };
+        existing: ExistingStockRow | null;
+        delta: number;
+        settingsChanged: boolean;
+      };
+      const planned: PlannedRow[] = [];
+
+      // Célula vazia = "não indicado" (null); valores malformados ficam NaN
+      // para o stockSchema os rejeitar — nunca são convertidos em 0 em silêncio.
+      const toNumberOrNull = (v: string | undefined): number | null => {
         const trimmed = (v ?? '').trim();
-        if (trimmed === '') return 0;
+        if (trimmed === '') return null;
         return Number(trimmed);
       };
 
@@ -829,14 +882,30 @@ const Stocks = () => {
           return;
         }
 
+        const key = pairKey(product.id, warehouse.id);
+        if (seenInFile.has(key)) {
+          rowErrors.push(`Linha ${lineNumber}: "${values[0]}" no armazém "${values[1]}" aparece repetido no ficheiro`);
+          return;
+        }
+
+        const existing = existingByPair.get(key) ?? null;
+
+        // Linha existente: célula vazia mantém o valor atual (não zera stock
+        // nem definições). Linha nova: célula vazia = 0, como antes.
+        const rawQty = toNumberOrNull(values[2]);
+        const rawMin = toNumberOrNull(values[3]);
+        const rawMax = toNumberOrNull(values[4]);
+        const rawReorder = toNumberOrNull(values[5]);
+        const rawLocation = (values[6] ?? '').trim();
+
         const candidate = {
           product_id: product.id,
           warehouse_id: warehouse.id,
-          quantity: toNumberOrNaN(values[2]),
-          minimum_quantity: toNumberOrNaN(values[3]),
-          maximum_quantity: toNumberOrNaN(values[4]),
-          reorder_point: toNumberOrNaN(values[5]),
-          location: values[6] || "",
+          quantity: rawQty ?? (existing ? toNum(existing.quantity) : 0),
+          minimum_quantity: rawMin ?? (existing ? toNum(existing.minimum_quantity) : 0),
+          maximum_quantity: rawMax ?? (existing ? toNum(existing.maximum_quantity) : 0),
+          reorder_point: rawReorder ?? (existing ? toNum(existing.reorder_point) : 0),
+          location: rawLocation !== '' ? rawLocation : (existing?.location ?? ""),
         };
 
         const validation = stockSchema.safeParse(candidate);
@@ -845,29 +914,41 @@ const Stocks = () => {
           rowErrors.push(`Linha ${lineNumber} (${values[0]}): ${firstError.message}`);
           return;
         }
-
-        const key = pairKey(product.id, warehouse.id);
-        if (existingPairSet.has(key) || seenInFile.has(key)) {
-          rowErrors.push(`Linha ${lineNumber}: já existe stock para "${values[0]}" no armazém "${values[1]}"`);
+        if (!Number.isInteger(candidate.quantity)) {
+          rowErrors.push(`Linha ${lineNumber} (${values[0]}): ${STOCK_INTEGER_ONLY_MSG}`);
           return;
         }
         seenInFile.add(key);
 
         const validated = validation.data;
-        stocksToInsert.push({
-          product_id: validated.product_id,
-          warehouse_id: validated.warehouse_id,
-          quantity: validated.quantity,
+        const settings = {
           minimum_quantity: validated.minimum_quantity,
           maximum_quantity: validated.maximum_quantity,
           reorder_point: validated.reorder_point,
           location: validated.location || null,
-          organization_id: activeCompany.id,
-          created_by: businessUserId,
+        };
+        const delta = existing ? validated.quantity - toNum(existing.quantity) : validated.quantity;
+        const settingsChanged = existing
+          ? settings.minimum_quantity !== toNum(existing.minimum_quantity)
+            || settings.maximum_quantity !== toNum(existing.maximum_quantity)
+            || settings.reorder_point !== toNum(existing.reorder_point)
+            || (settings.location ?? null) !== (existing.location || null)
+          : false;
+
+        planned.push({
+          lineNumber,
+          label: `${values[0]} / ${values[1]}`,
+          product_id: validated.product_id,
+          warehouse_id: validated.warehouse_id,
+          quantity: validated.quantity,
+          settings,
+          existing,
+          delta,
+          settingsChanged,
         });
       });
 
-      if (stocksToInsert.length === 0) {
+      if (planned.length === 0) {
         throw new Error(
           rowErrors.length > 0
             ? `${t('stocks.toast.noValidStocks')} ${rowErrors.slice(0, 5).join(" | ")}`
@@ -875,26 +956,137 @@ const Stocks = () => {
         );
       }
 
+      // Pré-visualização antes de escrever: quantas linhas novas, quantos
+      // ajustes (+/-) e quantas sem alterações.
+      const toCreate = planned.filter((r) => !r.existing);
+      const toAdjustUp = planned.filter((r) => r.existing && r.delta > 0);
+      const toAdjustDown = planned.filter((r) => r.existing && r.delta < 0);
+      const toSettingsOnly = planned.filter((r) => r.existing && r.delta === 0 && r.settingsChanged);
+      const toUnchanged = planned.filter((r) => r.existing && r.delta === 0 && !r.settingsChanged);
+      const sumUnits = (rows: PlannedRow[]) => rows.reduce((acc, r) => acc + Math.abs(r.delta), 0);
+
+      const previewLines = [
+        `Importar ${planned.length} linha(s) do ficheiro:`,
+        `• ${toCreate.length} stock(s) novo(s)${sumUnits(toCreate) > 0 ? ` (+${formatQty(sumUnits(toCreate))} un em ajustes "${CSV_IMPORT_REASON}")` : ""}`,
+        `• ${toAdjustUp.length} ajuste(s) positivo(s) (+${formatQty(sumUnits(toAdjustUp))} un)`,
+        `• ${toAdjustDown.length} ajuste(s) negativo(s) (−${formatQty(sumUnits(toAdjustDown))} un)`,
+        `• ${toSettingsOnly.length} só com definições (mín./máx./ponto/localização)`,
+        `• ${toUnchanged.length} sem alterações`,
+      ];
+      if (rowErrors.length > 0) {
+        previewLines.push(`• ${rowErrors.length} linha(s) inválida(s) serão ignoradas`);
+      }
+      previewLines.push("", "As diferenças de quantidade ficam registadas como movimentos de ajuste. Continuar?");
+      if (!confirm(previewLines.join("\n"))) return;
+
+      const result: ImportResult = {
+        created: 0,
+        adjustedUp: 0,
+        adjustedDown: 0,
+        unitsUp: 0,
+        unitsDown: 0,
+        settingsOnly: 0,
+        unchanged: toUnchanged.length,
+        errors: [...rowErrors],
+      };
+
+      // 1) Escritas diretas em `stocks` (linhas novas a 0 + definições das
+      //    existentes), cada uma com o seu erro — não em lote atómico.
+      const rowsReadyForAdjust: PlannedRow[] = [];
       await withAuditContext(
         supabase,
         businessUserId,
         async () => {
-          const { error } = await supabase.from("stocks").insert(stocksToInsert);
-          if (error) throw error;
+          for (const row of planned) {
+            if (!row.existing) {
+              const { error } = await supabase.from("stocks").insert([
+                {
+                  ...row.settings,
+                  product_id: row.product_id,
+                  warehouse_id: row.warehouse_id,
+                  quantity: 0,
+                  organization_id: activeCompany.id,
+                  created_by: businessUserId,
+                },
+              ]);
+              if (error) {
+                result.errors.push(`Linha ${row.lineNumber} (${row.label}): não foi possível criar o stock (${error.message})`);
+                continue;
+              }
+              result.created += 1;
+              if (row.delta > 0) rowsReadyForAdjust.push(row);
+              continue;
+            }
+
+            if (row.settingsChanged) {
+              const { error } = await supabase
+                .from("stocks")
+                .update({
+                  ...row.settings,
+                  updated_at: new Date().toISOString(),
+                })
+                .eq("id", row.existing.id);
+              if (error) {
+                result.errors.push(`Linha ${row.lineNumber} (${row.label}): não foi possível atualizar as definições (${error.message})`);
+              } else if (row.delta === 0) {
+                result.settingsOnly += 1;
+              }
+            }
+            if (row.delta !== 0) rowsReadyForAdjust.push(row);
+          }
         },
         "csv_import"
       );
 
-      const skippedSuffix = rowErrors.length > 0
-        ? ` ${rowErrors.length} linha(s) inválida(s) foram ignoradas: ${rowErrors.slice(0, 5).join(" | ")}${rowErrors.length > 5 ? ` (+${rowErrors.length - 5} mais)` : ""}`
-        : "";
+      // 2) Quantidades: sempre por rpc_adjust_stock (p_qty = diferença
+      //    positiva, direção à parte), que regista o stock_movement.
+      for (const row of rowsReadyForAdjust) {
+        const qty = Math.abs(row.delta);
+        const direction = row.delta > 0 ? "positivo" : "negativo";
+        const { error: adjustError } = await supabase.rpc("rpc_adjust_stock", {
+          p_product_id: row.product_id,
+          p_warehouse_id: row.warehouse_id,
+          p_qty: qty,
+          p_direction: direction,
+          p_reason: CSV_IMPORT_REASON,
+          p_notes: null,
+        } as any);
+        if (adjustError) {
+          result.errors.push(
+            row.existing
+              ? `Linha ${row.lineNumber} (${row.label}): ajuste de ${row.delta > 0 ? "+" : "−"}${formatQty(qty)} un não registado (${adjustError.message})`
+              : `Linha ${row.lineNumber} (${row.label}): stock criado com 0 un — as ${formatQty(qty)} un não foram registadas (${adjustError.message})`
+          );
+          continue;
+        }
+        if (!row.existing) continue; // conta como "criada"
+        if (row.delta > 0) {
+          result.adjustedUp += 1;
+          result.unitsUp += qty;
+        } else {
+          result.adjustedDown += 1;
+          result.unitsDown += qty;
+        }
+      }
 
-      toast({
-        title: t('stocks.toast.importSuccess'),
-        description: `${t('stocks.toast.importSuccessDesc', { count: stocksToInsert.length })}${skippedSuffix}`,
-      });
+      setImportResult(result);
 
-      setImportDialogOpen(false);
+      const summary = `${result.created} criada(s), ${result.adjustedUp + result.adjustedDown} ajustada(s) (+${formatQty(result.unitsUp)} / −${formatQty(result.unitsDown)} un), ${result.settingsOnly} só definições, ${result.unchanged} sem alterações`;
+      if (result.errors.length > 0) {
+        captureFlowError(new Error(`CSV import: ${result.errors.length} row error(s)`), "record-export-import");
+        toast({
+          title: t('stocks.toast.importSuccess'),
+          description: `${summary}. ${result.errors.length} linha(s) com erro — ver detalhe na janela de importação.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: t('stocks.toast.importSuccess'),
+          description: summary,
+        });
+        setImportDialogOpen(false);
+      }
+
       refresh();
     } catch (error: any) {
       captureFlowError(error, "record-export-import");
@@ -903,9 +1095,10 @@ const Stocks = () => {
         description: error.message,
         variant: "destructive",
       });
+    } finally {
+      setImporting(false);
+      input.value = '';
     }
-
-    e.target.value = '';
   };
 
   if (companyLoading) {
@@ -953,7 +1146,14 @@ const Stocks = () => {
               </Button>
             </PermissionGate>
             <PermissionGate permission="stocks.import">
-              <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+              <Dialog
+                open={importDialogOpen}
+                onOpenChange={(open) => {
+                  if (importing) return;
+                  setImportDialogOpen(open);
+                  if (open) setImportResult(null);
+                }}
+              >
                 <DialogTrigger asChild>
                   <Button variant="outline">
                     <Upload className="mr-2 h-4 w-4" /> {t('stocks.import')}
@@ -971,7 +1171,35 @@ const Stocks = () => {
                       type="file"
                       accept=".csv"
                       onChange={handleImport}
+                      disabled={importing}
                     />
+                    <p className="text-xs text-muted-foreground">
+                      As quantidades não são escritas diretamente: stocks novos são criados a 0 e as diferenças ficam registadas como ajuste ("{CSV_IMPORT_REASON}"). Em stocks já existentes, células vazias mantêm o valor atual.
+                    </p>
+                    {importing && (
+                      <p className="text-sm text-muted-foreground" role="status">A importar…</p>
+                    )}
+                    {importResult && (
+                      <div className="rounded-md border p-3 text-sm space-y-2" role="status">
+                        <ul className="space-y-0.5">
+                          <li>{importResult.created} stock(s) criado(s)</li>
+                          <li>{importResult.adjustedUp} ajuste(s) positivo(s) (+{formatQty(importResult.unitsUp)} un)</li>
+                          <li>{importResult.adjustedDown} ajuste(s) negativo(s) (−{formatQty(importResult.unitsDown)} un)</li>
+                          <li>{importResult.settingsOnly} só com definições atualizadas</li>
+                          <li>{importResult.unchanged} sem alterações</li>
+                        </ul>
+                        {importResult.errors.length > 0 && (
+                          <div>
+                            <p className="font-medium text-destructive">{importResult.errors.length} linha(s) com erro:</p>
+                            <ul className="mt-1 max-h-48 overflow-y-auto list-disc pl-5 text-destructive">
+                              {importResult.errors.map((err, i) => (
+                                <li key={i}>{err}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </DialogContent>
               </Dialog>
