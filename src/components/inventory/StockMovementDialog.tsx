@@ -156,6 +156,9 @@ interface StockMovementDialogProps {
   // específico.
   defaultProductId?: string;
   defaultWarehouseId?: string;
+  // Tipo inicial (por omissão "entrada") — ex. "ajuste" quando aberto a partir
+  // da edição de stock, onde a quantidade deixou de ser editável.
+  defaultMovementType?: MovementType;
   onSuccess: () => void;
 }
 
@@ -176,7 +179,7 @@ const fetchAllRows = async (buildQuery: () => any): Promise<{ data: any[] | null
 };
 
 export default function StockMovementDialog({
-  open, onOpenChange, organizationId, warehouses, defaultProductId, defaultWarehouseId, onSuccess,
+  open, onOpenChange, organizationId, warehouses, defaultProductId, defaultWarehouseId, defaultMovementType, onSuccess,
 }: StockMovementDialogProps) {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -226,7 +229,7 @@ export default function StockMovementDialog({
   // was opened with (produto/armazém pré-preenchidos a partir de uma linha).
   useEffect(() => {
     if (!open) return;
-    setMovementType("entrada");
+    setMovementType(defaultMovementType || "entrada");
     setWarehouseId(defaultWarehouseId || "");
     setToWarehouseId("");
     setDirection("positivo");
@@ -242,7 +245,7 @@ export default function StockMovementDialog({
     setReservations({});
     setOrgStockByProduct({});
     setLines([makeEmptyLine(defaultProductId)]);
-  }, [open, defaultProductId, defaultWarehouseId]);
+  }, [open, defaultProductId, defaultWarehouseId, defaultMovementType]);
 
   // Produtos — só carregado quando o diálogo abre (não em todo o carregamento
   // da página de Stocks), paginado.
