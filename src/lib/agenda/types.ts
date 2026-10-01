@@ -23,6 +23,8 @@ export interface AgendaItemRow {
   title: string | null;
   description?: string | null;
   status: string;
+  /** Quando o cliente confirmou pelo link do lembrete (schedule_items.confirmed_at). */
+  confirmed_at?: string | null;
   start_datetime: string;
   end_datetime: string;
   /** Coluna GENERATED STORED na base — lê-se, nunca se calcula nem se escreve. */
@@ -30,7 +32,7 @@ export interface AgendaItemRow {
   all_day?: boolean | null;
   location?: string | null;
   client_id?: string | null;
-  contact_id?: string | null;
+  lead_id?: string | null;
   deal_id?: string | null;
   /**
    * Caminho de dono directo (escrito só pelo assistente de IA). Em produção

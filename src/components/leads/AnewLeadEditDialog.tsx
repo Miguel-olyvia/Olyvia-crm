@@ -4,6 +4,7 @@ import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { setEntityOwner, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
 import {
   Dialog,
   DialogContent,
@@ -471,6 +472,27 @@ export function AnewLeadEditDialog({
         }
       }
 
+      // O dono e as visitas futuras da lead nunca divergem: muda-se o dono PRIMEIRO
+      // (a base troca o recurso das visitas futuras). Se o novo dono não tem
+      // recurso de agenda, a mudança é recusada e nada mais é gravado.
+      let ownerAffectedVisitIds: string[] = [];
+      if ((lead.assigned_to ?? null) !== (assignedTo ?? null)) {
+        try {
+          const ownerResult = await withAuditContext(supabase, userId, () =>
+            setEntityOwner("lead", lead.id, assignedTo),
+          );
+          ownerAffectedVisitIds = ownerResult.affectedVisitIds;
+        } catch (ownerError) {
+          const description = await getFriendlyErrorMessage(ownerError);
+          toast({
+            title: t("leads.toast.assigneeUpdateError"),
+            description,
+            variant: "destructive",
+          });
+          return; // o finally envolvente limpa o `saving`
+        }
+      }
+
       await withAuditContext(supabase, userId, async () => {
         // p_lost_reason is cast via `as any`: it's added by migration
         // 20261112200000_rpc_update_lead_add_lost_reason.sql, not yet
@@ -600,6 +622,14 @@ export function AnewLeadEditDialog({
         toast({
           title: "Lead atualizada",
           description: "Os dados da lead foram guardados com sucesso.",
+        });
+      }
+
+      // Avisa o cliente de que mudou o comercial da visita (só se o interruptor da
+      // organização estiver ligado). Em segundo plano: a gravação já terminou.
+      if (ownerAffectedVisitIds.length > 0) {
+        void notifyOwnerChangeVisits(companyId, ownerAffectedVisitIds).then((notified) => {
+          if (notified > 0) toast({ title: t("scheduling.notify.clientNotified") });
         });
       }
 

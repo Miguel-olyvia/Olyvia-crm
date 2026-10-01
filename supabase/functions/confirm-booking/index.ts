@@ -1,6 +1,7 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { applyClientConfirmation } from "../_shared/bookingConfirmDecision.ts";
 
 initSentry();
 
@@ -29,7 +30,8 @@ const RATE_LIMIT_WINDOW_MINUTES = 1;
  *   code ∈ 'INVALID' | 'EXPIRED' | 'USED' | 'CANCELLED'
  *
  * Steps:
- *  - schedule_items.confirmed_at = now() (only if not already set)
+ *  - schedule_items.confirmed_at = now() (only if not already set) and, from
+ *    scheduled/rescheduled, status = 'confirmed'
  *  - notifications: alert the assigned commercial (fail-soft, muteable via alert_settings)
  *  - booking_tokens.used_at = now()
  *
@@ -111,16 +113,13 @@ Deno.serve(async (req: Request) => {
       return json({ error: 'Esta visita já foi cancelada.', code: 'CANCELLED' });
     }
 
-    // 3. Mark confirmed (CRITICAL — must succeed before we burn the token)
-    if (!item.confirmed_at) {
-      const { error: confirmError } = await supabase
-        .from('schedule_items')
-        .update({ confirmed_at: new Date().toISOString() })
-        .eq('id', itemId);
-      if (confirmError) {
-        console.error('[confirm-booking] failed to mark confirmed:', confirmError);
-        return json({ error: 'Não foi possível confirmar agora. Tente novamente.', code: 'RETRY' }, 503);
-      }
+    // 3. Mark confirmed (CRITICAL — must succeed before we burn the token).
+    // scheduled/rescheduled passam a 'confirmed' + confirmed_at; outros estados
+    // activos so levam o carimbo (ver _shared/bookingConfirmDecision.ts).
+    const { error: confirmError } = await applyClientConfirmation(supabase, item, new Date().toISOString());
+    if (confirmError) {
+      console.error('[confirm-booking] failed to mark confirmed:', confirmError);
+      return json({ error: 'Não foi possível confirmar agora. Tente novamente.', code: 'RETRY' }, 503);
     }
 
     // 4. Burn the token (compare-and-swap: only if still unused)

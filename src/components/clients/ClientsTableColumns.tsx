@@ -25,7 +25,7 @@ export const DEFAULT_CLIENT_COLUMNS: ClientColumnConfig[] = [
   { id: "health", key: "health", label: "Saúde", visible: true },
   { id: "avatar", key: "avatar", label: "Avatar", visible: true },
   { id: "client", key: "client", label: "Cliente", visible: true },
-  { id: "contracts", key: "contracts", label: "Contratos", visible: true },
+  { id: "contracts", key: "contracts", label: "Negócios", visible: true },
   { id: "value", key: "value", label: "Valor Total", visible: true },
   { id: "tags", key: "tags", label: "Tags", visible: true },
   { id: "nif", key: "nif", label: "NIF", visible: true },

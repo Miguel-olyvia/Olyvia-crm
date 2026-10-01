@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Trash2, RotateCcw, User, Briefcase, AlertTriangle, ArrowLeft, Handshake, FileText, FileSignature, FileCheck } from "lucide-react";
+import { Trash2, RotateCcw, User, Briefcase, AlertTriangle, ArrowLeft, Handshake, FileText, FileSignature, FileCheck, PackageCheck } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -20,7 +20,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const ZERO_UUID = "00000000-0000-0000-0000-000000000000";
 
-type Kind = "clients" | "leads" | "deals" | "quotes" | "proposals" | "contracts";
+type Kind = "clients" | "leads" | "deals" | "quotes" | "proposals" | "contracts" | "client_orders";
 
 type Row = {
   id: string;
@@ -35,8 +35,10 @@ type Row = {
 const ENTITY_KINDS: Record<"clients" | "leads", "client" | "lead"> = {
   clients: "client", leads: "lead",
 };
-const BUSINESS_KINDS: Record<"deals" | "quotes" | "proposals" | "contracts", "deal" | "quote" | "proposal" | "contract"> = {
-  deals: "deal", quotes: "quote", proposals: "proposal", contracts: "contract",
+// Encomendas de cliente (client_contracts.is_manual_order = true) são linhas
+// de client_contracts: restauro/purga pelas mesmas RPCs com kind "contract".
+const BUSINESS_KINDS: Record<"deals" | "quotes" | "proposals" | "contracts" | "client_orders", "deal" | "quote" | "proposal" | "contract"> = {
+  deals: "deal", quotes: "quote", proposals: "proposal", contracts: "contract", client_orders: "contract",
 };
 const isBusiness = (k: Kind): k is keyof typeof BUSINESS_KINDS => k in BUSINESS_KINDS;
 
@@ -56,10 +58,11 @@ const PURGE_PERMISSION: Record<Kind, string> = {
   quotes: "deals.delete",
   proposals: "deals.delete",
   contracts: "deals.delete",
+  client_orders: "deals.delete",
 };
 
 type DataState = Record<Kind, Row[]>;
-const EMPTY_DATA: DataState = { clients: [], leads: [], deals: [], quotes: [], proposals: [], contracts: [] };
+const EMPTY_DATA: DataState = { clients: [], leads: [], deals: [], quotes: [], proposals: [], contracts: [], client_orders: [] };
 
 export default function Trash() {
   const navigate = useNavigate();
@@ -69,6 +72,8 @@ export default function Trash() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<DataState>(EMPTY_DATA);
   const [purgeTarget, setPurgeTarget] = useState<{ kind: Kind; id: string; name: string } | null>(null);
+  // Restauro de encomenda de cliente pede confirmação (volta como Anulada).
+  const [restoreOrderTarget, setRestoreOrderTarget] = useState<{ id: string; name: string } | null>(null);
 
   const {
     getPermissionScope,
@@ -165,12 +170,26 @@ export default function Trash() {
       const contractScopedUserIds = new Set<string>();
       if (scopeAnewUserId) contractScopedUserIds.add(scopeAnewUserId);
       if (contractsScope === "TEAM") teamMemberIds.forEach((id) => contractScopedUserIds.add(id));
+      // Contratos reais apenas: as encomendas de cliente (is_manual_order)
+      // têm separador próprio abaixo.
       let contractsQuery: any = contractsScope === "NONE" ? null : (supabase as any)
         .from("client_contracts").select("id, contract_number, deleted_at, deleted_by, created_at, created_by").eq("organization_id", orgId)
+        .eq("is_manual_order", false)
         .not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(500);
       if (contractsQuery && contractsScope !== "ORG") {
         const ids = Array.from(contractScopedUserIds);
         contractsQuery = ids.length > 0 ? contractsQuery.in("created_by", ids) : contractsQuery.eq("id", ZERO_UUID);
+      }
+
+      // ── Encomendas de cliente (client_contracts.is_manual_order) — mesmo
+      // scope client_contracts.view dos contratos ──
+      let clientOrdersQuery: any = contractsScope === "NONE" ? null : (supabase as any)
+        .from("client_contracts").select("id, contract_number, order_number, entity_id, deleted_at, deleted_by, created_at, created_by").eq("organization_id", orgId)
+        .eq("is_manual_order", true)
+        .not("deleted_at", "is", null).order("deleted_at", { ascending: false }).limit(500);
+      if (clientOrdersQuery && contractsScope !== "ORG") {
+        const ids = Array.from(contractScopedUserIds);
+        clientOrdersQuery = ids.length > 0 ? clientOrdersQuery.in("created_by", ids) : clientOrdersQuery.eq("id", ZERO_UUID);
       }
 
       // ── Proposals — mirrors the lead→deal→proposal traversal reused in
@@ -203,19 +222,20 @@ export default function Trash() {
         return q;
       };
 
-      const [c, l, d, q, p, k] = await Promise.all([
+      const [c, l, d, q, p, k, o] = await Promise.all([
         clientsQuery ?? Promise.resolve({ data: [] as any[] }),
         leadsQuery ?? Promise.resolve({ data: [] as any[] }),
         dealsQuery ?? Promise.resolve({ data: [] as any[] }),
         quotesQuery ?? Promise.resolve({ data: [] as any[] }),
         buildProposalsQuery(),
         contractsQuery ?? Promise.resolve({ data: [] as any[] }),
+        clientOrdersQuery ?? Promise.resolve({ data: [] as any[] }),
       ]);
 
       const facetRows = [...(c.data || []), ...(l.data || [])];
-      const businessRows = [...(d.data || []), ...(q.data || []), ...(p.data || []), ...(k.data || [])];
+      const businessRows = [...(d.data || []), ...(q.data || []), ...(p.data || []), ...(k.data || []), ...(o.data || [])];
 
-      const allEntityIds = Array.from(new Set(facetRows.map((r: any) => r.entity_id).filter(Boolean)));
+      const allEntityIds = Array.from(new Set([...facetRows, ...(o.data || [])].map((r: any) => r.entity_id).filter(Boolean)));
       const allUserIds = Array.from(new Set([...facetRows, ...businessRows].map((r: any) => r.deleted_by).filter(Boolean)));
 
       const nameMap = new Map<string, string>();
@@ -265,6 +285,17 @@ export default function Trash() {
         };
       });
 
+      // Encomendas: nome = cliente; Nº = order_number (EC-…) ou contract_number.
+      const mapClientOrders = (rows: any[]): Row[] => (rows || []).map((r) => ({
+        id: r.id,
+        entity_id: r.entity_id ?? null,
+        display_name: r.entity_id ? (nameMap.get(r.entity_id) || "—") : "—",
+        subtitle: r.order_number || r.contract_number || null,
+        deleted_at: r.deleted_at,
+        deleted_by_name: r.deleted_by ? (userMap.get(r.deleted_by) || "—") : null,
+        created_at: r.created_at,
+      }));
+
       setData({
         clients: mapFacet(c.data || []),
         leads: mapFacet(l.data || []),
@@ -272,6 +303,7 @@ export default function Trash() {
         quotes: mapBusiness(q.data || []),
         proposals: mapBusiness(p.data || []),
         contracts: mapBusiness(k.data || []),
+        client_orders: mapClientOrders(o.data || []),
       });
     } catch (e: any) {
       captureFlowError(e, "soft-delete-restore");
@@ -314,11 +346,11 @@ export default function Trash() {
     }
   };
 
-  const renderTable = (kind: Kind, rows: Row[], showSubtitle = false) => (
+  const renderTable = (kind: Kind, rows: Row[], showSubtitle = false, nameLabel = "Nome") => (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Nome</TableHead>
+          <TableHead>{nameLabel}</TableHead>
           {showSubtitle && <TableHead>Nº</TableHead>}
           <TableHead>Eliminado em</TableHead>
           <TableHead>Eliminado por</TableHead>
@@ -335,7 +367,13 @@ export default function Trash() {
             <TableCell>{r.deleted_at ? format(new Date(r.deleted_at), "dd/MM/yyyy HH:mm", { locale: pt }) : "—"}</TableCell>
             <TableCell className="text-muted-foreground">{r.deleted_by_name || "—"}</TableCell>
             <TableCell className="text-right space-x-2">
-              <Button size="sm" variant="outline" onClick={() => restore(kind, r.id)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => (kind === "client_orders"
+                  ? setRestoreOrderTarget({ id: r.id, name: r.subtitle || r.display_name })
+                  : restore(kind, r.id))}
+              >
                 <RotateCcw className="h-3.5 w-3.5 mr-1" /> Restaurar
               </Button>
               {hasPermission(PURGE_PERMISSION[kind]) && (
@@ -384,6 +422,7 @@ export default function Trash() {
                   <TabsTrigger value="quotes"><FileText className="h-3.5 w-3.5 mr-1" />Orçamentos <Badge variant="secondary" className="ml-2">{data.quotes.length}</Badge></TabsTrigger>
                   <TabsTrigger value="proposals"><FileSignature className="h-3.5 w-3.5 mr-1" />Propostas <Badge variant="secondary" className="ml-2">{data.proposals.length}</Badge></TabsTrigger>
                   <TabsTrigger value="contracts"><FileCheck className="h-3.5 w-3.5 mr-1" />Contratos <Badge variant="secondary" className="ml-2">{data.contracts.length}</Badge></TabsTrigger>
+                  <TabsTrigger value="client_orders"><PackageCheck className="h-3.5 w-3.5 mr-1" />Encomendas de cliente <Badge variant="secondary" className="ml-2">{data.client_orders.length}</Badge></TabsTrigger>
                 </TabsList>
               </div>
             </div>
@@ -399,9 +438,35 @@ export default function Trash() {
                 {loading ? <div className="text-center py-8 text-muted-foreground">A carregar…</div> : renderTable(k, data[k], true)}
               </TabsContent>
             ))}
+            <TabsContent value="client_orders" className="mt-4">
+              {loading ? <div className="text-center py-8 text-muted-foreground">A carregar…</div> : renderTable("client_orders", data.client_orders, true, "Cliente")}
+            </TabsContent>
           </Tabs>
         </CardContent>
       </Card>
+
+      <AlertDialog open={!!restoreOrderTarget} onOpenChange={(o) => !o && setRestoreOrderTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Restaurar encomenda {restoreOrderTarget?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A encomenda volta como Anulada; o stock não é descontado de novo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const target = restoreOrderTarget;
+                setRestoreOrderTarget(null);
+                if (target) restore("client_orders", target.id);
+              }}
+            >
+              Restaurar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!purgeTarget} onOpenChange={(o) => !o && setPurgeTarget(null)}>
         <AlertDialogContent>

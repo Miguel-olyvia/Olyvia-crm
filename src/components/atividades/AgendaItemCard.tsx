@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { Building2, MapPin, Sun, UserRound } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { AgendaItem } from "@/lib/agenda/types";
+import { ConfirmedByClientBadge } from "@/components/scheduling/ConfirmedByClientBadge";
 import { getEntityHref, getStatusClass, getStatusLabel, getTypeLabel } from "./agendaLabels";
 
 interface AgendaItemCardProps {
@@ -89,6 +90,8 @@ export function AgendaItemCard({ item, formatTime, formatDate, variant = "defaul
             {getStatusLabel(t, item.status)}
           </span>
         </div>
+
+        <ConfirmedByClientBadge confirmedAt={item.confirmed_at} className="mt-1" />
 
         <p className="mt-0.5 text-[11px] uppercase tracking-[0.1em] text-muted-foreground">
           {isAllDay ? t("activities.myDay.allDay") : getTypeLabel(t, item.itemType)}

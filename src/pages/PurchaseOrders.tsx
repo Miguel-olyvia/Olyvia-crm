@@ -8,7 +8,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck } from "lucide-react";
+import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck, Undo2 } from "lucide-react";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { PermissionGate } from "@/components/PermissionGate";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
@@ -153,15 +153,36 @@ const PurchaseOrders = () => {
   // (também é usada pelo relatório de SLA mesmo em receções parciais sucessivas).
   const [actualDeliveryDate, setActualDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
   const [receiving, setReceiving] = useState(false);
+  // Reverter receção (por linha) — para encomendas marcadas como recebidas por
+  // engano. Liga a rpc_revert_purchase_order_receipt: as linhas escolhidas
+  // voltam a "por receber" e o stock que entrou é retirado (recusa se já saiu).
+  const [revertDialogOpen, setRevertDialogOpen] = useState(false);
+  const [revertingOrder, setRevertingOrder] = useState<{ id: string; order_number: string } | null>(null);
+  const [revertLines, setRevertLines] = useState<PurchaseOrderItemWithReceipt[]>([]);
+  const [revertSelectedIds, setRevertSelectedIds] = useState<Set<string>>(new Set());
+  const [revertReason, setRevertReason] = useState("");
+  const [reverting, setReverting] = useState(false);
   // Fase 5.0F: link inverso — quando a encomenda foi gerada automaticamente a
   // partir de um Contrato assinado (source_type='contract'), mostra a origem
   // no diálogo de detalhe, com link de volta para "Encomendas Clientes".
-  const [orderSourceInfo, setOrderSourceInfo] = useState<{ contractId: string; contractNumber: string; clientName: string } | null>(null);
+  const [orderSourceInfo, setOrderSourceInfo] = useState<{
+    contractId: string;
+    originType: 'contract' | 'direct_sale' | 'manual';
+    number: string;
+    clientName: string;
+  } | null>(null);
   // Ligação manual, só na criação (20261115200000) — resolve o caso
   // "sem_fornecedor" em Encomendas Clientes: ao criar a encomenda daqui,
   // escolhe-se a Encomenda Cliente que está a satisfazer.
   const [newOrderClientOrderId, setNewOrderClientOrderId] = useState("");
-  const [clientOrderOptions, setClientOrderOptions] = useState<{ contract_id: string; contract_number: string; client_name: string | null }[]>([]);
+  const [clientOrderOptions, setClientOrderOptions] = useState<{
+    contract_id: string;
+    contract_number: string;
+    order_number: string | null;
+    origin_type: 'contract' | 'direct_sale' | 'manual' | null;
+    origin_number: string | null;
+    client_name: string | null;
+  }[]>([]);
   const [clientOrderOptionsLoaded, setClientOrderOptionsLoaded] = useState(false);
   // Pré-preenchimento de itens (pedido do utilizador, 2026-08-31): ao
   // escolher a Encomenda Cliente, os produtos dela ficam "pendentes" até
@@ -335,7 +356,7 @@ const PurchaseOrders = () => {
   // Fase 5.0F: Encomendas Clientes assinadas, para a ligação manual opcional
   // ao criar uma encomenda nova (não relevante ao editar — ver
   // rpc_create_purchase_order, 20261115200000). Best-effort: falha de
-  // permissão (client_contracts.view) não bloqueia a criação da encomenda,
+  // permissão (client_orders.view) não bloqueia a criação da encomenda,
   // só esconde o campo.
   useEffect(() => {
     if (!open || editingId || clientOrderOptionsLoaded || !activeCompany?.id) return;
@@ -350,7 +371,12 @@ const PurchaseOrders = () => {
       setClientOrderOptionsLoaded(true);
       if (error) return;
       setClientOrderOptions(((data as any[]) || []).map((r) => ({
-        contract_id: r.contract_id, contract_number: r.contract_number, client_name: r.client_name,
+        contract_id: r.contract_id,
+        contract_number: r.contract_number,
+        order_number: r.order_number ?? null,
+        origin_type: r.origin_type ?? null,
+        origin_number: r.origin_number ?? null,
+        client_name: r.client_name,
       })));
     })();
   }, [open, editingId, clientOrderOptionsLoaded, activeCompany?.id]);
@@ -701,22 +727,41 @@ const PurchaseOrders = () => {
 
     // Fase 5.0F: origem via Contrato (source_type/source_id, Fase 5.0C) —
     // best-effort, nunca bloqueia a abertura do diálogo se falhar.
+    // client_contracts inclui contratos sintéticos (is_manual_order=true):
+    // Venda Direta (direct_sales.client_contract_id) → "Venda Direta VD-…";
+    // Encomenda Cliente manual → "Encomenda Cliente EC-…"; senão "Contrato CC-…".
+    // A query a direct_sales é silenciosa: sem direct_sales.view a RLS devolve
+    // vazio e cai-se para o caso manual (mesma regra de ClientOrders.tsx).
     setOrderSourceInfo(null);
     if ((order as any).source_type === "contract" && (order as any).source_id) {
-      supabase
-        .from("client_contracts")
-        .select("contract_number, entity_id, anew_entities(display_name)")
-        .eq("id", (order as any).source_id)
-        .maybeSingle()
-        .then(({ data }) => {
-          if (data) {
-            setOrderSourceInfo({
-              contractId: (order as any).source_id,
-              contractNumber: data.contract_number || "",
-              clientName: (data as any).anew_entities?.display_name || "",
-            });
-          }
-        });
+      const contractId: string = (order as any).source_id;
+      (async () => {
+        const { data } = await supabase
+          .from("client_contracts")
+          .select("contract_number, order_number, is_manual_order, entity_id, anew_entities(display_name)")
+          .eq("id", contractId)
+          .maybeSingle();
+        if (!data) return;
+        const row = data as any;
+        const clientName: string = row.anew_entities?.display_name || "";
+        const contractNumber: string = row.contract_number || "";
+        if (!row.is_manual_order) {
+          setOrderSourceInfo({ contractId, originType: "contract", number: contractNumber, clientName });
+          return;
+        }
+        const { data: sale } = await supabase
+          .from("direct_sales")
+          .select("id, sale_number")
+          .eq("client_contract_id", contractId)
+          .is("deleted_at", null)
+          .limit(1)
+          .maybeSingle();
+        if (sale && (sale as any).sale_number) {
+          setOrderSourceInfo({ contractId, originType: "direct_sale", number: (sale as any).sale_number, clientName });
+        } else {
+          setOrderSourceInfo({ contractId, originType: "manual", number: row.order_number || contractNumber, clientName });
+        }
+      })().catch(() => { /* best-effort */ });
     }
 
     // Load existing items
@@ -902,6 +947,76 @@ const PurchaseOrders = () => {
       toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
     } finally {
       setReceiving(false);
+    }
+  };
+
+  const openRevertDialog = async (order: PurchaseOrder) => {
+    setRevertingOrder({ id: order.id, order_number: order.order_number });
+    setRevertLines([]);
+    setRevertSelectedIds(new Set());
+    setRevertReason("");
+    setRevertDialogOpen(true);
+
+    // Só linhas de produto com alguma quantidade recebida podem ser revertidas.
+    const { data, error } = await supabase
+      .from("purchase_order_items")
+      .select("*, uom:uom_id(code), products(name, uom:uom_id(code))")
+      .eq("purchase_order_id", order.id)
+      .eq("item_type", "product")
+      .gt("received_quantity", 0);
+
+    if (error) {
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+      return;
+    }
+    setRevertLines((data as unknown as PurchaseOrderItemWithReceipt[] | null) || []);
+  };
+
+  const toggleRevertLine = (id: string, checked: boolean) => {
+    setRevertSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const handleSelectAllRevertLines = () => {
+    setRevertSelectedIds(new Set(revertLines.map((item) => item.id)));
+  };
+
+  const handleRevertReceipt = async () => {
+    const reason = revertReason.trim();
+    if (!revertingOrder || revertSelectedIds.size === 0 || reason.length < 3) return;
+
+    setReverting(true);
+    try {
+      const { data, error } = await supabase.rpc("rpc_revert_purchase_order_receipt", {
+        p_purchase_order_id: revertingOrder.id,
+        p_item_ids: Array.from(revertSelectedIds),
+        p_reason: reason,
+      });
+      if (error) throw error;
+
+      const result = data as { order_number?: string; status?: string; lines?: unknown[] } | null;
+      toast({
+        title: t('purchaseOrders.revert.successTitle') || "Receção revertida",
+        description: t('purchaseOrders.revert.successDescription', {
+          order: result?.order_number || revertingOrder.order_number,
+          count: result?.lines?.length ?? revertSelectedIds.size,
+        }),
+      });
+      setRevertDialogOpen(false);
+      setRevertingOrder(null);
+      setRevertLines([]);
+      setRevertSelectedIds(new Set());
+      setRevertReason("");
+      loadData();
+    } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setReverting(false);
     }
   };
 
@@ -1703,10 +1818,20 @@ const PurchaseOrders = () => {
                   <DialogTitle>{editingId ? t('purchaseOrders.editOrder') : t('purchaseOrders.newOrder')}</DialogTitle>
                   {editingId && orderSourceInfo && (
                     <p className="text-sm text-muted-foreground">
-                      {t('purchaseOrders.generatedFromContract', {
-                        contractNumber: orderSourceInfo.contractNumber,
-                        clientName: orderSourceInfo.clientName,
-                      }) || `Gerada automaticamente a partir do Contrato ${orderSourceInfo.contractNumber} — Cliente ${orderSourceInfo.clientName}`}
+                      {orderSourceInfo.originType === 'direct_sale'
+                        ? (t('purchaseOrders.generatedFromDirectSale', {
+                            number: orderSourceInfo.number,
+                            clientName: orderSourceInfo.clientName,
+                          }) || `Gerada automaticamente a partir da Venda Direta ${orderSourceInfo.number} — Cliente ${orderSourceInfo.clientName}`)
+                        : orderSourceInfo.originType === 'manual'
+                        ? (t('purchaseOrders.generatedFromClientOrder', {
+                            number: orderSourceInfo.number,
+                            clientName: orderSourceInfo.clientName,
+                          }) || `Gerada automaticamente a partir da Encomenda Cliente ${orderSourceInfo.number} — Cliente ${orderSourceInfo.clientName}`)
+                        : (t('purchaseOrders.generatedFromContract', {
+                            contractNumber: orderSourceInfo.number,
+                            clientName: orderSourceInfo.clientName,
+                          }) || `Gerada automaticamente a partir do Contrato ${orderSourceInfo.number} — Cliente ${orderSourceInfo.clientName}`)}
                       {' '}
                       <Link to={`/client-orders?open=${orderSourceInfo.contractId}`} className="underline">
                         {t('purchaseOrders.viewClientOrder') || 'Ver Encomenda Cliente'}
@@ -1742,7 +1867,13 @@ const PurchaseOrders = () => {
                           <SelectItem value="none">{t('purchaseOrders.form.clientOrderSourceNone') || 'Nenhuma — encomenda sem ligação a um contrato'}</SelectItem>
                           {clientOrderOptions.map((o) => (
                             <SelectItem key={o.contract_id} value={o.contract_id}>
-                              {o.contract_number} — {o.client_name || "—"}
+                              {o.order_number || o.contract_number}
+                              {o.origin_type === 'direct_sale'
+                                ? ` · ${t('purchaseOrders.form.clientOrderOriginDirectSale', { number: o.origin_number || '' }) || `Venda Direta ${o.origin_number || ''}`}`.trimEnd()
+                                : o.origin_type === 'contract'
+                                ? ` · ${t('purchaseOrders.form.clientOrderOriginContract', { number: o.origin_number || o.contract_number }) || `Contrato ${o.origin_number || o.contract_number}`}`
+                                : ''}
+                              {' — '}{o.client_name || "—"}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -2130,9 +2261,23 @@ const PurchaseOrders = () => {
                               <FileDown className="w-4 h-4" />
                             </Button>
                             {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
-                              <PermissionGate permission="purchase_orders.receive">
+                              // Mesmas permissões que rpc_receive_purchase_order_lines exige (a receção dá entrada de stock).
+                              <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
                                 <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
                                   <PackageCheck className="w-4 h-4" />
+                                </Button>
+                              </PermissionGate>
+                            )}
+                            {(order.status === 'received' || order.status === 'partially_received') && (
+                              // Mesmas permissões que rpc_revert_purchase_order_receipt exige (a reversão retira stock).
+                              <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => openRevertDialog(order)}
+                                  title={t('purchaseOrders.revert.action') || "Reverter receção"}
+                                >
+                                  <Undo2 className="w-4 h-4" />
                                 </Button>
                               </PermissionGate>
                             )}
@@ -2437,6 +2582,110 @@ const PurchaseOrders = () => {
               </Button>
               <Button onClick={handleReceiveOrder} disabled={receiving || !receiveWarehouseId}>
                 {receiving ? "A confirmar..." : "Confirmar receção"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reverter receção, por linha — para receções registadas por engano.
+          Liga a rpc_revert_purchase_order_receipt; os erros (sem permissão,
+          stock já saído, estado inválido) vêm da RPC já em PT. */}
+      <Dialog open={revertDialogOpen} onOpenChange={(o) => { if (!reverting) setRevertDialogOpen(o); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {t('purchaseOrders.revert.title') || "Reverter receção"}{revertingOrder ? ` — ${revertingOrder.order_number}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {t('purchaseOrders.revert.warning') || "As linhas escolhidas voltam a \"por receber\" e o stock que entrou é retirado do armazém. Se já saiu stock, a reversão é recusada."}
+            </p>
+
+            {revertLines.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                {t('purchaseOrders.revert.noLines') || "Esta encomenda não tem linhas recebidas para reverter."}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <Label>{t('purchaseOrders.revert.linesLabel') || "Linhas a reverter"}</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={handleSelectAllRevertLines} disabled={reverting}>
+                    {t('purchaseOrders.revert.selectAll') || "Selecionar tudo"}
+                  </Button>
+                </div>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10" />
+                      <TableHead>{t('purchaseOrders.revert.item') || "Item"}</TableHead>
+                      <TableHead className="text-right">{t('purchaseOrders.revert.ordered') || "Encomendada"}</TableHead>
+                      <TableHead className="text-right">{t('purchaseOrders.revert.receivedToRevert') || "Recebida (a reverter)"}</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {revertLines.map((item) => {
+                      const checked = revertSelectedIds.has(item.id);
+                      return (
+                        <TableRow key={item.id}>
+                          <TableCell>
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={(v) => toggleRevertLine(item.id, v === true)}
+                              disabled={reverting}
+                              aria-label={item.products?.name || item.description}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">{item.products?.name || item.description}</div>
+                            {(item.sku || item.supplier_sku) && (
+                              <div className="text-xs text-muted-foreground font-mono">
+                                {item.sku}
+                                {item.sku && item.supplier_sku ? " · " : ""}
+                                {item.supplier_sku ? `Ref.: ${item.supplier_sku}` : ""}
+                              </div>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-right whitespace-nowrap">{item.quantity}</TableCell>
+                          <TableCell className="text-right whitespace-nowrap">{item.received_quantity || 0}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="revert-reason">{t('purchaseOrders.revert.reason') || "Motivo"}</Label>
+              <Textarea
+                id="revert-reason"
+                value={revertReason}
+                onChange={(e) => setRevertReason(e.target.value)}
+                placeholder={t('purchaseOrders.revert.reasonPlaceholder') || "Ex.: marcada como recebida por engano"}
+                disabled={reverting}
+                rows={3}
+              />
+              {revertReason.length > 0 && revertReason.trim().length < 3 && (
+                <p className="text-xs text-destructive">
+                  {t('purchaseOrders.revert.reasonTooShort') || "O motivo tem de ter pelo menos 3 caracteres."}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setRevertDialogOpen(false)} disabled={reverting}>
+                {t('purchaseOrders.revert.cancel') || "Cancelar"}
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={handleRevertReceipt}
+                disabled={reverting || revertSelectedIds.size === 0 || revertReason.trim().length < 3}
+              >
+                {reverting
+                  ? (t('purchaseOrders.revert.processing') || "A reverter...")
+                  : (t('purchaseOrders.revert.confirm') || "Reverter receção")}
               </Button>
             </div>
           </div>

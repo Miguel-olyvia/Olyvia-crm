@@ -1921,13 +1921,13 @@ export function FormBuilder({
                           }
                         </SelectContent>
                       </Select>
-                      <p className="text-[10px] text-muted-foreground">Só mostra campos de passos ANTERIORES a este — um código postal recolhido depois do agendamento chega tarde de mais para calcular distância.</p>
+                      <p className="text-[10px] text-muted-foreground">Só mostra campos de passos ANTERIORES a este — um código postal recolhido depois do agendamento chega tarde de mais para calcular distância. Só conta para o agendamento com o botão &quot;Exigir código postal completo antes de agendar&quot; ligado; desligado, o valor continua a ser guardado como dado da lead mas não filtra o calendário nem a marcação.</p>
                     </div>
                     <div className="flex items-center justify-between gap-2 rounded-md border p-3">
                       <div>
                         <Label className="text-xs">Exigir código postal completo antes de agendar</Label>
                         <p className="text-[10px] text-muted-foreground">
-                          Necessário para calcular tempo de deslocação real entre visitas (regra 13). Ligado: o código postal (campo acima) tem de estar preenchido, no formato completo XXXX-XXX, num passo anterior. Desligado (omissão): nada obrigatório, formulário continua dinâmico.
+                          Desligado: o código postal e o distrito não são usados no agendamento — o calendário mostra todos os comerciais e não se calcula a deslocação. Ligado: exige o código postal completo (XXXX-XXX) num passo anterior e usa-o, com o distrito, para escolher o comercial mais perto e calcular a deslocação.
                         </p>
                       </div>
                       <Switch
@@ -2006,7 +2006,7 @@ export function FormBuilder({
                         </SelectContent>
                       </Select>
                       <p className="text-[10px] text-muted-foreground">
-                        Selecione o campo que contém o distrito escolhido. Sem campo configurado, mantém-se o comportamento atual (todos os recursos ativos da organização).
+                        Selecione o campo que contém o distrito escolhido. Só conta para o agendamento com o botão &quot;Exigir código postal completo antes de agendar&quot; ligado; desligado, o distrito continua a ser guardado como dado da lead mas não filtra o calendário nem a marcação. Sem campo configurado, mantém-se o comportamento atual (todos os recursos ativos da organização).
                       </p>
                     </div>
                   </div>

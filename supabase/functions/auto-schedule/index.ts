@@ -511,6 +511,33 @@ async function processScheduleRequest(
     return { success: false, error: 'Business user could not be resolved for scheduling' };
   }
 
+  // schedule_items.lead_id is the current column; contact_id is kept as a
+  // deprecated alias for callers that have not migrated yet. lead_id wins
+  // when both are supplied.
+  let leadId: string | null = request.lead_id ?? request.contact_id ?? null;
+  if (leadId) {
+    const { data: leadRow } = await supabase
+      .from('anew_leads')
+      .select('id')
+      .eq('id', leadId)
+      .eq('organization_id', effectiveCompanyId)
+      .maybeSingle();
+    if (!leadRow) {
+      // Legacy callers may still send a pre-merge anew_contacts id — resolve
+      // it via the Contacts→Leads migration map before giving up.
+      const { data: mapRow } = await supabase
+        .from('_migration_contacts_to_leads_map')
+        .select('lead_id')
+        .eq('contact_id', leadId)
+        .eq('organization_id', effectiveCompanyId)
+        .maybeSingle();
+      leadId = mapRow?.lead_id ?? null;
+    }
+    if (!leadId) {
+      return { success: false, error: 'lead_id não encontrado nesta organização' };
+    }
+  }
+
   // If auto_assign is true, find the best slot using rules
   if (request.auto_assign) {
     console.log('Auto-assign enabled, finding best slot...');
@@ -600,7 +627,7 @@ async function processScheduleRequest(
           start_datetime: result.slot.start,
           end_datetime: result.slot.end,
           client_id: request.client_id,
-          contact_id: request.contact_id,
+          lead_id: leadId,
           deal_id: request.deal_id,
           location: request.location,
           priority: request.priority || 0,
@@ -708,7 +735,7 @@ async function processScheduleRequest(
         start_datetime: slot.start,
         end_datetime: slot.end,
         client_id: request.client_id,
-        contact_id: request.contact_id,
+        lead_id: leadId,
         deal_id: request.deal_id,
         location: request.location,
         priority: request.priority || 0,
@@ -783,7 +810,7 @@ async function processScheduleRequest(
         start_datetime: startDatetime,
         end_datetime: endDatetime,
         client_id: request.client_id,
-        contact_id: request.contact_id,
+        lead_id: leadId,
         deal_id: request.deal_id,
         location: request.location,
         priority: request.priority || 0,

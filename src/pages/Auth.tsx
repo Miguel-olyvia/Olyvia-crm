@@ -506,17 +506,17 @@ const Auth = () => {
               >
                 Voltar ao Login
               </button>
-            ) : (
+            ) : mode === "register" ? (
+              // O registo aberto foi retirado do ecra: no login nao ha ja
+              // ligacao para criar conta, por isso este modo nao e alcancavel.
               <button
                 type="button"
-                onClick={() => setMode(mode === "login" ? "register" : "login")}
+                onClick={() => setMode("login")}
                 className="text-primary hover:underline block w-full"
               >
-                {mode === "login"
-                  ? "Não tem conta? Registe-se agora"
-                  : "Já tem conta? Faça login"}
+                Já tem conta? Faça login
               </button>
-            )}
+            ) : null}
           </div>
         </CardContent>
       </Card>

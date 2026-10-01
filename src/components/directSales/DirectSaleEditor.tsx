@@ -996,6 +996,8 @@ export function DirectSaleEditor({ open, onOpenChange, saleId, onSaved }: Direct
         onAddItems={handleAddCatalogItems}
         products={[]}
         services={[]}
+        title="Adicionar Itens à Venda Direta"
+        description="Selecione produtos ou serviços para adicionar à venda direta"
       />
     </>
   );

@@ -21,7 +21,7 @@ import {
 //
 // Não exige `proforma_number`: ao contrário da proforma, este documento faz
 // sentido antes da aceitação — é uma ferramenta de custeio, não um documento
-// emitido. O acesso é controlado no frontend pela permissão `quotes.view_costs`.
+// emitido. O acesso é controlado no frontend pela permissão `direct_sales.view_costs`.
 
 export async function generateInternalSalePdfBlob(
   directSaleId: string,

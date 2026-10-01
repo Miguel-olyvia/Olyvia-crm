@@ -138,8 +138,6 @@ const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalPropos
 const ClientPortalContracts = lazy(() => import("./pages/ClientPortalContracts"));
 const ClientPortalContractDetail = lazy(() => import("./pages/ClientPortalContractDetail"));
 const ClientPortalDocuments = lazy(() => import("./pages/ClientPortalDocuments"));
-const ClientPortalDirectSales = lazy(() => import("./pages/ClientPortalDirectSales"));
-const ClientPortalDirectSaleDetail = lazy(() => import("./pages/ClientPortalDirectSaleDetail"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -200,8 +198,6 @@ const App = () => (
                       <Route path="/client-portal" element={<ClientPortal />} />
                       <Route path="/client-portal/proposals" element={<ClientPortalProposals />} />
                       <Route path="/client-portal/proposals/:id" element={<ClientPortalProposalDetail />} />
-                      <Route path="/client-portal/direct-sales" element={<ClientPortalDirectSales />} />
-                      <Route path="/client-portal/direct-sales/:id" element={<ClientPortalDirectSaleDetail />} />
                       <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
                       <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
                       <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
@@ -256,8 +252,8 @@ const App = () => (
                       <Route path="/stocks" element={<ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
                       <Route path="/warehouses" element={<ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />
                       <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
-                      {/* Fase 5.0F: exige inventory.view E client_contracts.view em simultâneo — mesma dupla verificação dos RPCs (rpc_list_client_order_documents/rpc_get_client_order_document). */}
-                      <Route path="/client-orders" element={<ProtectedRoute permissions={["inventory.view", "client_contracts.view"]} requireAll><ClientOrders /></ProtectedRoute>} />
+                      {/* Permissão própria client_orders.view — o armazém vê as encomendas sem precisar de ver contratos. Mesma verificação dos RPCs (rpc_list_client_order_documents/rpc_get_client_order_document). */}
+                      <Route path="/client-orders" element={<ProtectedRoute permission="client_orders.view"><ClientOrders /></ProtectedRoute>} />
                       {/* Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/inventory.edit controlam ações DENTRO da página (contar/resolver/finalizar), não o acesso à rota. */}
                       <Route path="/stock-counts" element={<ProtectedRoute permission="inventory.view"><StockCounts /></ProtectedRoute>} />
                       <Route path="/suppliers" element={<ProtectedRoute permission="suppliers.view"><Suppliers /></ProtectedRoute>} />

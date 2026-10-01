@@ -76,6 +76,7 @@ import { ContactTagsDialog } from "@/components/contacts/ContactTagsDialog";
 import { ClientsTableColumns, ClientColumnConfig, DEFAULT_CLIENT_COLUMNS } from "@/components/clients/ClientsTableColumns";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { bulkSetEntityOwner, describeSkipped } from "@/lib/leads/entityOwnerSync";
 import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 
 interface ClientRecord {
@@ -1242,11 +1243,21 @@ const AnewClients = () => {
       const { data: anewUser } = await (supabase as any).from("anew_users").select("id").eq("auth_user_id", user.id).maybeSingle();
       if (!anewUser?.id) throw new Error("Business user not found");
       const ids = Array.from(selectedIds);
-      const { error } = await withAuditContext(supabase, anewUser.id, () =>
-        (supabase as any).from("anew_clients").update({ assigned_to: bulkAssignUserId }).in("id", ids).eq("organization_id", activeCompany?.id)
+      // Uma só RPC: os clientes com visita futura cujo novo dono não tem recurso de
+      // agenda NÃO falham o lote — ficam de fora e voltam em `skipped`. Em massa não
+      // se enviam emails aos clientes.
+      const result = await withAuditContext(supabase, anewUser.id, () =>
+        bulkSetEntityOwner("client", ids, bulkAssignUserId)
       );
-      if (error) throw error;
-      toast({ title: t('clients.toast.bulkAssignSuccess'), description: t('clients.toast.bulkAssignSuccessDesc', { count: selectedIds.size, name: assignedUserMap.get(bulkAssignUserId) || "comercial selecionado" }) });
+      if (result.updatedIds.length > 0) {
+        toast({ title: t('clients.toast.bulkAssignSuccess'), description: t('clients.toast.bulkAssignSuccessDesc', { count: result.updatedIds.length, name: assignedUserMap.get(bulkAssignUserId) || "comercial selecionado" }) });
+      }
+      if (result.skipped.length > 0) {
+        toast({ title: t('clients.toast.bulkAssignError'), description: t('clients.toast.bulkAssignSkipped', { count: result.skipped.length, names: describeSkipped(result.skipped) }), variant: "destructive" });
+      }
+      if (result.updatedIds.length === 0 && result.skipped.length === 0) {
+        toast({ title: t('clients.toast.bulkAssignError'), variant: "destructive" });
+      }
       setSelectedIds(new Set()); setBulkAssignDialogOpen(false); setBulkAssignUserId(""); setClients([]); setHasMore(true); loadClients(0, true);
     } catch (error: any) {
       captureFlowError(error, "client-lifecycle");
@@ -2280,7 +2291,7 @@ const AnewClients = () => {
                       )}
                       {isColVisible('avatar') && <TableHead className="w-[40px]" />}
                       {isColVisible('client') && <TableHead>Cliente</TableHead>}
-                      {isColVisible('contracts') && <TableHead>Contratos</TableHead>}
+                      {isColVisible('contracts') && <TableHead>Negócios</TableHead>}
                       {isColVisible('value') && (
                       <TableHead className="cursor-pointer" onClick={() => handleSort("value")}>
                         <div className="flex items-center gap-1">Valor Total <ArrowUpDown className="w-3 h-3" /></div>

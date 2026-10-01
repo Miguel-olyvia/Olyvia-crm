@@ -67,10 +67,21 @@ export async function scheduleSms(
     scheduledFor: string; // ISO
     entityType?: string;
     entityId?: string | null;
+    // Lembrete de visita: liga a linha a visita (ver reminderReconcile.ts). Nas
+    // linhas ligadas, message guarda o texto com {{variaveis}} e o processador
+    // renderiza-o no envio com a hora actual da visita.
+    link?: {
+      scheduleItemId: string;
+      audience: "client" | "technician";
+      formId: string | null;
+      locale: string | null;
+      visitStartSnapshot: string;
+      contentVars: Record<string, string>;
+    };
   },
-): Promise<void> {
+): Promise<{ ok: boolean; duplicate?: boolean }> {
   try {
-    await supabase.from("scheduled_sms").insert({
+    const { error } = await supabase.from("scheduled_sms").insert({
       organization_id: row.organizationId,
       created_by: row.createdBy,
       entity_type: row.entityType || "leads",
@@ -78,8 +89,25 @@ export async function scheduleSms(
       to_phone: row.toPhone,
       message: row.message,
       scheduled_for: row.scheduledFor,
+      ...(row.link
+        ? {
+          schedule_item_id: row.link.scheduleItemId,
+          audience: row.link.audience,
+          form_id: row.link.formId,
+          locale: row.link.locale,
+          visit_start_snapshot: row.link.visitStartSnapshot,
+          content_vars: row.link.contentVars,
+        }
+        : {}),
     });
+    if (error) {
+      if (error.code === "23505") return { ok: false, duplicate: true };
+      console.error("[sendSms] scheduleSms failed:", error);
+      return { ok: false };
+    }
+    return { ok: true };
   } catch (err) {
     console.error("[sendSms] scheduleSms failed:", err);
+    return { ok: false };
   }
 }

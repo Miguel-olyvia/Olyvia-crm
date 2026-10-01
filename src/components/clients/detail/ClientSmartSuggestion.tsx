@@ -39,7 +39,7 @@ export function ClientSmartSuggestion({
   let onSecondary: (() => void) | null = null;
 
   if (expiringContract) {
-    suggestion = `O ${firstName} é cliente VIP com ${contractCount} contrato${contractCount !== 1 ? "s" : ""} activo${contractCount !== 1 ? "s" : ""} e valor total de ${formatCurrency(totalValue)}. O contrato "${expiringContract.name}" renova em ${expiringContract.daysUntil} dias — sugerimos preparar proposta de renovação.`;
+    suggestion = `O ${firstName} é cliente VIP com ${contractCount} negócio${contractCount !== 1 ? "s" : ""} ativo${contractCount !== 1 ? "s" : ""} e valor total de ${formatCurrency(totalValue)}. O negócio "${expiringContract.name}" renova em ${expiringContract.daysUntil} dias — sugerimos preparar proposta de renovação.`;
     actionLabel = "Preparar proposta";
     ActionIcon = FileText;
     onAction = onCreateDeal;
@@ -48,7 +48,7 @@ export function ClientSmartSuggestion({
     onSecondary = onCall;
   } else if (!hasContactHistory || (daysSince !== null && daysSince > 7)) {
     const contactPhrase = hasContactHistory ? `sem contacto há ${daysSince} dias` : "sem qualquer contacto registado";
-    suggestion = `${firstName} tem ${contractCount > 0 ? `${contractCount} contrato${contractCount !== 1 ? "s" : ""}` : "registos"} mas ${contactPhrase}. Sugerimos ligar para dar seguimento.`;
+    suggestion = `${firstName} tem ${contractCount > 0 ? `${contractCount} negócio${contractCount !== 1 ? "s" : ""}` : "registos"} mas ${contactPhrase}. Sugerimos ligar para dar seguimento.`;
     actionLabel = "Ligar";
     ActionIcon = Phone;
     onAction = onCall;

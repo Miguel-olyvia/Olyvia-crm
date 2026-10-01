@@ -226,6 +226,7 @@ export function SendEntityEmailDialog({
           user_id: userId,
           organization_id: organizationId,
           entity_id: entityId || undefined,
+          contract_id: module === "contracts" && contractId ? contractId : undefined,
           to,
           recipients: finalRecipients,
           cc,

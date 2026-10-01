@@ -5,6 +5,7 @@ import { AlertTriangle, Calendar, Check, HelpCircle, Star } from "lucide-react";
 import { differenceInDays, format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { type ClientHealthScore } from "@/hooks/useClientEnrichedData";
+import { ClientBusinessTypeBadge, type ClientBusinessOriginType } from "./clientBusinessOrigin";
 
 interface Deal {
   id: string; title: string; value: number; stage_id: string;
@@ -15,6 +16,7 @@ interface Deal {
 interface Contract {
   id: string; title: string; status: string; total_value: number;
   start_date: string | null; end_date: string | null; payment_terms?: string | null;
+  origin_type?: ClientBusinessOriginType; display_number?: string;
 }
 
 interface ClientSummaryTabProps {
@@ -38,7 +40,7 @@ interface ClientSummaryTabProps {
 // contracts); `max` below is only the best-case value used to size the bar.
 const HEALTH_FACTOR_CONFIG = [
   { key: "lastContact", icon: "👁", label: "Último contacto", max: 20 },
-  { key: "contracts", icon: "📑", label: "Contratos activos", max: 15 },
+  { key: "contracts", icon: "📑", label: "Negócios ativos", max: 15 },
   { key: "emailEngagement", icon: "📧", label: "Engagement", max: 10 },
   { key: "dataCompleteness", icon: "📄", label: "Dados completos", max: 10 },
   { key: "interactionFrequency", icon: "📊", label: "Frequência de interacção", max: 10 },
@@ -70,11 +72,11 @@ export function ClientSummaryTab({
   return (
     <div className="space-y-4 mt-4">
       <div className="grid grid-cols-2 gap-4">
-        {/* Contracts card */}
+        {/* Negócios card (contratos reais + encomendas manuais + vendas diretas) */}
         <Card>
           <CardContent className="pt-4 space-y-3">
             <Label className="text-muted-foreground flex items-center gap-2 text-xs uppercase tracking-wider">
-              📑 Contratos Activos
+              📑 Negócios Ativos
             </Label>
             {activeContracts.length > 0 ? activeContracts.map(c => {
               const daysToEnd = c.end_date ? differenceInDays(new Date(c.end_date), now) : null;
@@ -83,7 +85,10 @@ export function ClientSummaryTab({
                   <div className="flex items-center gap-2">
                     <span className="h-2 w-2 rounded-full bg-green-500 shrink-0" />
                     <div>
-                      <p className="text-sm font-medium">{c.title}</p>
+                      <div className="flex items-center gap-1.5">
+                        {c.origin_type && <ClientBusinessTypeBadge type={c.origin_type} />}
+                        <p className="text-sm font-medium">{c.display_number || c.title}</p>
+                      </div>
                       <p className="text-[10px] text-muted-foreground">
                         {c.start_date && `Início: ${format(new Date(c.start_date), "dd/MM/yyyy", { locale: pt })}`}
                         {c.end_date && ` · Fim: ${format(new Date(c.end_date), "dd/MM/yyyy", { locale: pt })}`}
@@ -106,7 +111,7 @@ export function ClientSummaryTab({
                 </div>
               );
             }) : (
-              <p className="text-sm text-muted-foreground text-center py-4">Sem contratos activos</p>
+              <p className="text-sm text-muted-foreground text-center py-4">Sem negócios ativos</p>
             )}
           </CardContent>
         </Card>
