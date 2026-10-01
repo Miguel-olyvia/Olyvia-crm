@@ -2289,33 +2289,54 @@ const PurchaseOrders = () => {
     const numberLabel = info.originType === "contract"
       ? (t('purchaseOrders.origin.contract', { number: info.number }) || `Contrato ${info.number}`)
       : info.number;
+    const label = info.clientName ? `${numberLabel} — ${info.clientName}` : numberLabel;
     return (
-      <Link to={`/client-orders?open=${contractId}`} className="hover:underline">
-        {info.clientName ? `${numberLabel} — ${info.clientName}` : numberLabel}
+      <Link
+        to={`/client-orders?open=${contractId}`}
+        className="block max-w-[280px] truncate hover:underline"
+        title={label}
+      >
+        {label}
       </Link>
     );
   };
 
+  // Coluna de ações fixa à direita: fundo opaco (a cor do cartão + a mesma tinta
+  // da linha/hover em camadas), para não ficar transparente por cima das colunas
+  // que passam por baixo durante o scroll horizontal. Sem border-l porque em
+  // border-collapse a borda não acompanha o sticky — usa-se box-shadow.
+  // A vista agrupada (sem coluna de fornecedor) está dentro de uma célula com
+  // bg-muted/30, por isso a camada base inclui essa tinta.
+  const stickyActionsBase =
+    "sticky right-0 z-10 whitespace-nowrap bg-card shadow-[inset_1px_0_0_hsl(var(--border)),-6px_0_6px_-6px_rgb(0_0_0/0.15)]";
+  const stickyActionsFlat =
+    "group-hover:[background-image:linear-gradient(hsl(var(--muted)/0.5),hsl(var(--muted)/0.5))]";
+  const stickyActionsNested =
+    "[background-image:linear-gradient(hsl(var(--muted)/0.3),hsl(var(--muted)/0.3))] group-hover:[background-image:linear-gradient(hsl(var(--muted)/0.5),hsl(var(--muted)/0.5)),linear-gradient(hsl(var(--muted)/0.3),hsl(var(--muted)/0.3))]";
+  const stickyActionsClass = (nested: boolean) =>
+    `${stickyActionsBase} ${nested ? stickyActionsNested : stickyActionsFlat}`;
+
   // Linha de encomenda — usada tal e qual nas duas vistas ("Ver todas" e dentro
   // de cada grupo). Ações, condições e PermissionGate inalterados.
+  // showSupplier=false só é usado dentro do grupo expandido (tabela aninhada).
   const renderOrderRow = (order: PurchaseOrder, showSupplier: boolean) => (
-    <TableRow key={order.id}>
-      <TableCell className="font-mono font-semibold">{order.order_number}</TableCell>
+    <TableRow key={order.id} className="group">
+      <TableCell className="font-mono font-semibold whitespace-nowrap">{order.order_number}</TableCell>
       {showSupplier && <TableCell>{order.suppliers?.name || "N/A"}</TableCell>}
       <TableCell className="whitespace-nowrap">{renderOrderOrigin(order)}</TableCell>
-      <TableCell>{new Date(order.order_date).toLocaleDateString()}</TableCell>
-      <TableCell>
+      <TableCell className="whitespace-nowrap">{new Date(order.order_date).toLocaleDateString()}</TableCell>
+      <TableCell className="whitespace-nowrap">
         {order.expected_delivery
           ? new Date(order.expected_delivery).toLocaleDateString()
           : "N/A"}
       </TableCell>
-      <TableCell>
-        <Badge className={getStatusColor(order.status)}>
+      <TableCell className="whitespace-nowrap">
+        <Badge className={`whitespace-nowrap ${getStatusColor(order.status)}`}>
           {getStatusLabel(order.status)}
         </Badge>
       </TableCell>
-      <TableCell className="font-semibold">€{order.total_value.toFixed(2)}</TableCell>
-      <TableCell className="text-right">
+      <TableCell className="font-semibold whitespace-nowrap">€{order.total_value.toFixed(2)}</TableCell>
+      <TableCell className={`text-right ${stickyActionsClass(!showSupplier)}`}>
         <div className="flex justify-end gap-2">
           {showDeleted ? (
             <PermissionGate permission="purchase_orders.delete">
@@ -2386,15 +2407,15 @@ const PurchaseOrders = () => {
 
   const renderOrderTableHeader = (showSupplier: boolean) => (
     <TableHeader>
-      <TableRow>
-        <TableHead>{t('purchaseOrders.table.number')}</TableHead>
+      <TableRow className="group">
+        <TableHead className="whitespace-nowrap">{t('purchaseOrders.table.number')}</TableHead>
         {showSupplier && <TableHead>{t('purchaseOrders.table.supplier')}</TableHead>}
         <TableHead>{t('purchaseOrders.table.origin') || 'Origem / Cliente'}</TableHead>
         <TableHead>{t('purchaseOrders.table.date')}</TableHead>
         <TableHead>{t('purchaseOrders.table.delivery')}</TableHead>
         <TableHead>{t('purchaseOrders.table.status')}</TableHead>
         <TableHead>{t('purchaseOrders.table.totalValue')}</TableHead>
-        <TableHead className="text-right">{t('purchaseOrders.table.actions')}</TableHead>
+        <TableHead className={`text-right ${stickyActionsClass(!showSupplier)}`}>{t('purchaseOrders.table.actions')}</TableHead>
       </TableRow>
     </TableHeader>
   );
@@ -3146,7 +3167,11 @@ const PurchaseOrders = () => {
                       {isExpanded && (
                         <TableRow className="hover:bg-transparent">
                           <TableCell colSpan={7} className="bg-muted/30 p-2 md:pl-10">
-                            <Table>
+                            {/* w-0 + min-w-full: o contentor com overflow-auto não contribui
+                                com a largura da tabela interna para a célula, por isso fica
+                                com a largura disponível e o scroll horizontal (e o sticky das
+                                ações) passam a ser deste contentor, não da tabela exterior. */}
+                            <Table containerClassName="w-0 min-w-full">
                               {renderOrderTableHeader(false)}
                               <TableBody>
                                 {group.orders.map((order) => renderOrderRow(order, false))}
