@@ -116,7 +116,7 @@ function getVarCategories(module: string): VarCategory[] {
       cats.push({ category: "Lead", icon: Target, vars: LEAD_VARS });
       break;
     case "contacts":
-      cats.push({ category: "Contacto / Cliente", icon: Users, vars: CLIENT_VARS });
+      cats.push({ category: "Cliente", icon: Users, vars: CLIENT_VARS });
       break;
     case "clients":
       cats.push({ category: "Cliente", icon: Building, vars: CLIENT_VARS });

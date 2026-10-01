@@ -51,7 +51,7 @@ const ACTION_LABELS: Record<string, { label: string; icon: React.ReactNode; desc
   convert_to_client: {
     label: "Converter para Cliente",
     icon: <UserCheck className="w-4 h-4 text-blue-600" />,
-    description: "Converte o contacto em cliente automaticamente",
+    description: "Converte a lead em cliente automaticamente",
   },
   create_task: {
     label: "Criar Tarefa",

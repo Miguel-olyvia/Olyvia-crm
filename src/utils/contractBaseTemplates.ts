@@ -179,7 +179,7 @@ export const VARIABLE_CATEGORIES: VariableCategory[] = [
     label: "Cliente",
     icon: "👤",
     variables: [
-      { key: "{{cliente_nome}}", label: "Nome do Cliente", description: "Nome do cliente/contacto" },
+      { key: "{{cliente_nome}}", label: "Nome do Cliente", description: "Nome do cliente" },
       { key: "{{cliente_nif}}", label: "NIF do Cliente", description: "NIF do cliente" },
       { key: "{{cliente_morada}}", label: "Morada do Cliente", description: "Morada do cliente" },
       { key: "{{cliente_email}}", label: "Email do Cliente", description: "Email do cliente" },

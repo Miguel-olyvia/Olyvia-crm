@@ -38,7 +38,7 @@ export const CONTRACT_VARIABLES = [
   { key: "{{empresa_nome}}", label: "Nome da Empresa", description: "Nome da organização" },
   { key: "{{empresa_nif}}", label: "NIF da Empresa", description: "NIF da organização" },
   { key: "{{empresa_morada}}", label: "Morada da Empresa", description: "Morada da organização" },
-  { key: "{{cliente_nome}}", label: "Nome do Cliente", description: "Nome do cliente/contacto" },
+  { key: "{{cliente_nome}}", label: "Nome do Cliente", description: "Nome do cliente" },
   { key: "{{cliente_nif}}", label: "NIF do Cliente", description: "NIF do cliente" },
   { key: "{{cliente_morada}}", label: "Morada do Cliente", description: "Morada do cliente" },
   { key: "{{cliente_email}}", label: "Email do Cliente", description: "Email do cliente" },

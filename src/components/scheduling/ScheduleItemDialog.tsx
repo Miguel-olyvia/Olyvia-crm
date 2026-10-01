@@ -723,7 +723,7 @@ export function ScheduleItemDialog({
             {/* Lead - hide for time-off and construction boards */}
             {showLead && (
               <div className="space-y-2">
-                <Label>{t('scheduling.item.contact')}</Label>
+                <Label>{t('scheduling.item.lead')}</Label>
                 <LeadMentionInput
                   selectedLeadId={formData.lead_id}
                   onLeadSelect={(leadId) => setFormData(f => ({ ...f, lead_id: leadId }))}

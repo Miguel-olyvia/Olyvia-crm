@@ -741,7 +741,7 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
                           { label: "📊 Stats do mês", action: "Mostra-me as estatísticas do mês" },
                           { label: "📄 Propostas pendentes", action: "Quais as propostas em rascunho?" },
                           { label: "💰 Criar orçamento", action: "Quero criar um orçamento" },
-                          { label: "🔎 Pesquisar contacto", action: "Pesquisa contactos com o nome " },
+                          { label: "🔎 Pesquisar lead ou cliente", action: "Pesquisa leads ou clientes com o nome " },
                         ].map((item) => (
                           <Button
                             key={item.label}

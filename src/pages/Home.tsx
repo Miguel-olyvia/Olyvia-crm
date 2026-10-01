@@ -149,7 +149,7 @@ const createDefaultMenuGroups = (): MenuGroup[] => [
   {
     id: "customers",
     title: "Customers",
-    description: "Customer and contact management",
+    description: "Customer and lead management",
     icon: Users,
     color: "from-purple-500/20 to-purple-600/20",
     permissions: ["clients.view", "contacts.view", "leads.view", "calendar.view_company", "call_center.view"],

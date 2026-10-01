@@ -26,9 +26,9 @@ const TOOL_LABELS: Record<string, { label: string; icon: LucideIcon }> = {
   update_lead: { label: "Atualizar lead", icon: UserPlus },
   search_leads: { label: "Procurar leads", icon: Search },
   // Entities / contacts
-  search_entities: { label: "Procurar contactos", icon: Users },
-  create_entity: { label: "Criar contacto", icon: Users },
-  update_entity: { label: "Atualizar contacto", icon: Users },
+  search_entities: { label: "Procurar leads e clientes", icon: Users },
+  create_entity: { label: "Criar lead", icon: Users },
+  update_entity: { label: "Atualizar lead ou cliente", icon: Users },
   // Deals / pipeline
   create_deal: { label: "Criar negócio", icon: Briefcase },
   update_deal: { label: "Atualizar negócio", icon: Briefcase },

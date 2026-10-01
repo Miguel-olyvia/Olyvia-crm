@@ -19,11 +19,11 @@ export const TEMPLATE_VARIABLES: Record<string, Array<{ key: string; label: stri
     { key: "lead_value", label: "Valor estimado", category: "Lead" },
   ],
   contacts: [
-    { key: "client_name", label: "Nome", category: "Contacto" },
-    { key: "client_email", label: "Email", category: "Contacto" },
-    { key: "client_phone", label: "Telefone", category: "Contacto" },
-    { key: "client_company", label: "Empresa do cliente", category: "Contacto" },
-    { key: "client_nif", label: "NIF", category: "Contacto" },
+    { key: "client_name", label: "Nome", category: "Cliente" },
+    { key: "client_email", label: "Email", category: "Cliente" },
+    { key: "client_phone", label: "Telefone", category: "Cliente" },
+    { key: "client_company", label: "Empresa do cliente", category: "Cliente" },
+    { key: "client_nif", label: "NIF", category: "Cliente" },
   ],
   clients: [
     { key: "client_name", label: "Nome", category: "Cliente" },

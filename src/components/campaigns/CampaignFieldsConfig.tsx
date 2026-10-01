@@ -1410,7 +1410,7 @@ export function CampaignFieldsConfig({
                                   </div>
                                   {field.contact_field_mapping && (
                                     <div className="text-xs text-muted-foreground">
-                                      → Contacto:{" "}
+                                      → Lead:{" "}
                                       <span className="font-medium">{field.contact_field_mapping}</span>
                                     </div>
                                   )}

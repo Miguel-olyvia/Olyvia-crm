@@ -302,7 +302,7 @@ export default function DocsArchitecture() {
                 <h4 className="font-medium mb-2">Tokens de API:</h4>
                 <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
                   <li>Tokens scoped ao nível onde são criados (empresa, BU ou área)</li>
-                  <li>Permissões granulares (ex: leads.write, contacts.read)</li>
+                  <li>Permissões granulares (ex: leads.write, clients.read)</li>
                   <li>Cada token só acede a dados do seu nível organizacional</li>
                   <li>Usados para integrações externas (ex: inserção de leads via API)</li>
                 </ul>

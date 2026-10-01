@@ -2152,7 +2152,7 @@ const ClientContracts = () => {
                                   )}
                                   <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
                                     ✅ Marcar como Assinado
-                                    <span className="text-[10px] text-muted-foreground ml-1">⚡ Converte contacto em cliente</span>
+                                    <span className="text-[10px] text-muted-foreground ml-1">⚡ Converte lead em cliente</span>
                                   </DropdownMenuItem>
                                   {canSendSignature && (
                                     <>
@@ -2324,7 +2324,7 @@ const ClientContracts = () => {
             <AlertDialogHeader>
               <AlertDialogTitle>⚡ Marcar contrato como assinado</AlertDialogTitle>
               <AlertDialogDescription>
-                Ao marcar este contrato como assinado, o sistema irá automaticamente converter o contacto associado em cliente.
+                Ao marcar este contrato como assinado, o sistema irá automaticamente converter a lead associada em cliente.
                 Esta ação não pode ser desfeita. Continuar?
               </AlertDialogDescription>
             </AlertDialogHeader>

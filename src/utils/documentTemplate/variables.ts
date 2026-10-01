@@ -36,7 +36,7 @@ export const DOCUMENT_TEMPLATE_VARIABLES: DocumentVariable[] = [
   { key: "{{empresa_morada}}", label: "Morada da Empresa", description: "Morada da organização", group: "empresa", contexts: ["proposal", "quote", "contract"] },
 
   // Cliente
-  { key: "{{cliente_nome}}",     label: "Nome do Cliente",     description: "Nome do cliente/contacto", group: "cliente", contexts: ["proposal", "quote", "contract"] },
+  { key: "{{cliente_nome}}",     label: "Nome do Cliente",     description: "Nome do cliente", group: "cliente", contexts: ["proposal", "quote", "contract"] },
   { key: "{{cliente_nif}}",      label: "NIF do Cliente",      description: "NIF do cliente",           group: "cliente", contexts: ["proposal", "quote", "contract"] },
   { key: "{{cliente_morada}}",   label: "Morada do Cliente",   description: "Morada do cliente",        group: "cliente", contexts: ["proposal", "quote", "contract"] },
   { key: "{{cliente_email}}",    label: "Email do Cliente",    description: "Email do cliente",         group: "cliente", contexts: ["proposal", "quote", "contract"] },

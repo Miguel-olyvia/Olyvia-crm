@@ -88,7 +88,7 @@ const permissionGroups: PermissionGroup[] = [
   {
     icon: <Users className="h-5 w-5" />,
     title: "Customers (Clientes)",
-    description: "Clientes e contactos",
+    description: "Clientes e leads",
     submodules: [
       {
         name: "Clientes",

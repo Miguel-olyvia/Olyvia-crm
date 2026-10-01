@@ -3476,7 +3476,7 @@ const Proposals = () => {
                           return (
                             <div className="rounded-md border border-dashed bg-muted/20 p-2 space-y-1.5">
                               <p className="text-xs text-muted-foreground">
-                                Orçamentos em rascunho disponíveis {selectedDeal ? "para este Pedido" : "deste contacto/cliente"}:
+                                Orçamentos em rascunho disponíveis {selectedDeal ? "para este Pedido" : "desta lead/cliente"}:
                               </p>
                               <div className="flex flex-wrap gap-1.5">
                                 {available.map((q) => (

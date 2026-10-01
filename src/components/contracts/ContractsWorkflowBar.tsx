@@ -37,7 +37,7 @@ export function ContractsWorkflowBar() {
           ))}
         </div>
         <span className="text-[11px] text-muted-foreground ml-auto hidden lg:block">
-          Assinar contrato converte contacto em cliente automaticamente
+          Assinar contrato converte a lead em cliente automaticamente
         </span>
       </div>
     </div>

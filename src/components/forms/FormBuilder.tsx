@@ -2192,7 +2192,7 @@ export function FormBuilder({
                   <div className="space-y-2">
                     <Label className="text-xs flex items-center gap-1">
                       <Zap className="h-3 w-3 text-primary" />
-                      Propriedade do Contacto
+                      Propriedade da Lead
                     </Label>
                     <Select
                       value={selectedField.contact_field_mapping || "_none"}

@@ -2746,7 +2746,7 @@ export default function AnewLeads() {
     if (newStage.is_conversion) {
       toast({
         title: "Não é possível mover diretamente para esta fase",
-        description: "Esta fase converte o lead num contacto — usa a ação \"Converter em Contacto\" no lead.",
+        description: "Esta fase converte a lead em cliente — usa a ação \"Converter para Cliente\" na lead.",
         variant: "destructive",
       });
       return;
@@ -4680,7 +4680,7 @@ export default function AnewLeads() {
     if (matchingStage?.is_conversion) {
       toast({
         title: "Não é possível mover diretamente para esta fase",
-        description: "Esta fase converte o lead num contacto — usa a ação \"Converter em Contacto\" em cada lead.",
+        description: "Esta fase converte a lead em cliente — usa a ação \"Converter para Cliente\" em cada lead.",
         variant: "destructive",
       });
       return;
@@ -7117,7 +7117,7 @@ export default function AnewLeads() {
                     </Select>
                   </div>
                   <div>
-                    <Label>Mapear para Contacto</Label>
+                    <Label>Mapear para Lead</Label>
                     <Select value={newField.contact_field_mapping} onValueChange={v => setNewField({ ...newField, contact_field_mapping: v })}>
                       <SelectTrigger>
                         <SelectValue placeholder="Sem mapeamento" />
@@ -7222,7 +7222,7 @@ export default function AnewLeads() {
                             onValueChange={v => setEditingField({ ...editingField, contact_field_mapping: v === "_none" ? null : v })}
                           >
                             <SelectTrigger>
-                              <SelectValue placeholder="Mapear para Contacto" />
+                              <SelectValue placeholder="Mapear para Lead" />
                             </SelectTrigger>
                             <SelectContent>
                               {CONTACT_FIELDS.map(f => (
