@@ -128,6 +128,12 @@ export const User = (p: IconProps) => (
   </svg>
 );
 
+export const Menu = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 6h16M4 12h16M4 18h16" />
+  </svg>
+);
+
 export const List = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
