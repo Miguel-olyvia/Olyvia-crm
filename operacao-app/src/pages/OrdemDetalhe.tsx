@@ -16,6 +16,9 @@ import {
   previstoDaOrdem,
   sessoesDaOrdem,
   tarefasDaOrdem,
+  temposDasTarefas,
+  mudarRelogio,
+  ErroDeEscrita,
   type AlvoDaOrdem,
   type MedicaoDaTarefa,
   type MembroEquipa,
@@ -26,6 +29,7 @@ import {
   type OrdemCompleta,
   type SessaoDaOrdem,
   type TarefaDaOrdem,
+  type TempoDaTarefa,
 } from "../lib/dados";
 import {
   Badge,
@@ -83,6 +87,9 @@ export default function OrdemDetalhe() {
   const [alvos, setAlvos] = useState<AlvoDaOrdem[]>([]);
   const [tarefas, setTarefas] = useState<TarefaDaOrdem[]>([]);
   const [sessoes, setSessoes] = useState<SessaoDaOrdem[]>([]);
+  const [tempos, setTempos] = useState<Map<string, TempoDaTarefa>>(new Map());
+  const [aMudarRelogio, setAMudarRelogio] = useState(false);
+  const [erroRelogio, setErroRelogio] = useState<string | null>(null);
   const [medicoes, setMedicoes] = useState<MedicaoDaTarefa[]>([]);
   const [opcoes, setOpcoes] = useState<OpcaoDeMedicao[]>([]);
   const [naOrdem, setNaOrdem] = useState<string[]>([]);
@@ -114,13 +121,14 @@ export default function OrdemDetalhe() {
         setOrdem(null);
         return;
       }
-      const [als, tfs, sss, eq, cls, pes] = await Promise.all([
+      const [als, tfs, sss, eq, cls, pes, tps] = await Promise.all([
         alvosDaOrdem(o.id),
         tarefasDaOrdem(o.id),
         sessoesDaOrdem(o.id),
         listarEquipa(activeOrgId),
         listarClientes(activeOrgId),
         pessoasDaOrdem(o.id),
+        temposDasTarefas(o.id),
       ]);
       // As leituras e as suas opções vêm num segundo passo porque dependem
       // das tarefas. Duas consultas, não uma por tarefa.
@@ -143,6 +151,7 @@ export default function OrdemDetalhe() {
       setAlvos(als);
       setTarefas(tfs);
       setSessoes(sss);
+      setTempos(new Map(tps.map((t) => [t.ordem_tarefa_id, t])));
       setMedicoes(meds);
       setOpcoes(ops);
       setEquipa(new Map(eq.map((m) => [m.utilizador_id, m])));
@@ -167,16 +176,17 @@ export default function OrdemDetalhe() {
   const contexto = useMemo(
     () => ({
       funcao: funcao ?? "tecnico",
+      // Está na ordem quem é responsável ou está na equipa — é a mesma
+      // pergunta que a base faz. Ter tido uma sessão não conta.
       atribuido:
         !!businessUserId &&
-        (ordem?.responsavel_id === businessUserId ||
-          sessoes.some((s) => s.utilizador_id === businessUserId)),
+        (ordem?.responsavel_id === businessUserId || naOrdem.includes(businessUserId)),
       tarefas: tarefas.map((t) => ({
         estado: t.estado as EstadoTarefa,
         obrigatoria: t.obrigatoria,
       })),
     }),
-    [funcao, businessUserId, ordem, sessoes, tarefas]
+    [funcao, businessUserId, ordem, naOrdem, tarefas]
   );
 
   const possiveis = ordem ? transicoesPossiveis(ordem.estado, contexto) : [];
@@ -196,6 +206,27 @@ export default function OrdemDetalhe() {
     fim: s.fim ? new Date(s.fim) : null,
   }));
   const tempoTotal = tempoTotalSegundos(sessoesDominio);
+
+  // O MEU relógio: cada pessoa liga e desliga o seu.
+  const minhaSessao = sessoes.find((s) => !s.fim && s.utilizador_id === businessUserId) ?? null;
+  const podeContar =
+    ordem?.estado === "em_curso" && (contexto.funcao !== "tecnico" || contexto.atribuido);
+
+  const relogio = async (acao: "entrar" | "sair") => {
+    if (!ordem) return;
+    setAMudarRelogio(true);
+    setErroRelogio(null);
+    try {
+      await mudarRelogio(ordem.id, acao);
+      setRecarga((r) => r + 1);
+    } catch (e) {
+      setErroRelogio(
+        e instanceof ErroDeEscrita ? e.message : "Não foi possível falar com o servidor. Tenta outra vez."
+      );
+    } finally {
+      setAMudarRelogio(false);
+    }
+  };
 
   const executar = async (t: Transicao) => {
     if (!ordem || !businessUserId) return;
@@ -434,6 +465,8 @@ export default function OrdemDetalhe() {
         medicoes={medicoes}
         opcoes={opcoes}
         permissao={permissaoResponder}
+        tempos={tempos}
+        minhaTarefa={minhaSessao?.ordem_tarefa_id ?? null}
         aoGravar={() => setRecarga((r) => r + 1)}
       />
 
@@ -457,9 +490,41 @@ export default function OrdemDetalhe() {
           </span>
         </div>
 
+        {/* O meu relógio. Pausar ou fechar a ordem pára o de toda a gente;
+            voltar a contar é de cada um. */}
+        {(minhaSessao || podeContar) && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-slate-50/70 px-3 py-2">
+            <span className="text-sm text-slate-600">
+              {minhaSessao
+                ? minhaSessao.ordem_tarefa_id
+                  ? `O teu tempo está a contar em "${
+                      tarefas.find((t) => t.id === minhaSessao.ordem_tarefa_id)?.nome ?? "uma tarefa"
+                    }".`
+                  : "O teu tempo está a contar nesta ordem."
+                : "O teu tempo não está a contar."}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              className="ml-auto"
+              disabled={aMudarRelogio}
+              onClick={() => void relogio(minhaSessao ? "sair" : "entrar")}
+            >
+              {minhaSessao ? (
+                <><Pause width={13} height={13} /> Parar o meu tempo</>
+              ) : (
+                <><Play width={13} height={13} /> Começar a contar</>
+              )}
+            </Button>
+            {erroRelogio && (
+              <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erroRelogio}</p>
+            )}
+          </div>
+        )}
+
         {sessoes.length === 0 ? (
           <p className="mt-2 text-sm text-slate-400">
-            Ainda ninguém trabalhou nesta ordem. O tempo conta-se a partir de quem a inicia.
+            Ainda ninguém trabalhou nesta ordem. Cada pessoa da equipa liga o seu relógio.
           </p>
         ) : (
           <ul className="mt-2 divide-y divide-slate-100">
@@ -478,6 +543,11 @@ export default function OrdemDetalhe() {
                 <li key={s.id} className="flex items-center justify-between gap-3 py-2 text-sm">
                   <span className="min-w-0 truncate text-slate-700">
                     {membro?.nome ?? "—"}
+                    {s.ordem_tarefa_id && (
+                      <span className="ml-1.5 text-xs text-slate-400">
+                        · {tarefas.find((t) => t.id === s.ordem_tarefa_id)?.nome ?? "tarefa"}
+                      </span>
+                    )}
                     {!s.fim && (
                       <Badge className="ml-2 bg-brand-50 text-brand-800 ring-brand-200">a decorrer</Badge>
                     )}

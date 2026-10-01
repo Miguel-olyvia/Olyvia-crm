@@ -5,6 +5,7 @@
  *                 → planos.sql → correcoes-modelo.sql → medicoes.sql
  *                 → despacho.sql → orcamentos.sql → anexos.sql
  *                 → planos-crud.sql → config.sql → custos.sql → cliente-crm.sql
+ *                 → seguranca.sql → tempos.sql → obras.sql
  *                 → criar-utilizador.sql
  *                 → pos-instalacao.sql → demo.sql → demo-remover.sql
  *
@@ -120,6 +121,54 @@ await passo("db/custos.sql", ler("custos.sql"));
 await passo("db/custos.sql outra vez (idempotência)", ler("custos.sql"));
 await passo("db/cliente-crm.sql", ler("cliente-crm.sql"));
 await passo("db/cliente-crm.sql outra vez (idempotência)", ler("cliente-crm.sql"));
+await passo("db/seguranca.sql", ler("seguranca.sql"));
+await passo("db/seguranca.sql outra vez (idempotência)", ler("seguranca.sql"));
+await passo("db/tempos.sql", ler("tempos.sql"));
+await passo("db/tempos.sql outra vez (idempotência)", ler("tempos.sql"));
+
+// ── 2b. Voltar a correr um ficheiro antigo não pode fazer regredir nada ──
+// planos.sql, rpcs.sql e orcamentos.sql têm a PRIMEIRA versão de funções e
+// vistas que ficheiros mais recentes substituíram. Correr um deles outra vez
+// (por engano, ou para reparar outra coisa) tem de deixar a versão nova.
+console.log("\n─── ficheiros antigos outra vez, depois dos novos ──");
+await passo("db/planos.sql depois de correcoes-modelo.sql", ler("planos.sql"));
+await passo("db/rpcs.sql depois de tempos.sql", ler("rpcs.sql"));
+await passo("db/orcamentos.sql depois de tempos.sql", ler("orcamentos.sql"));
+// Estes dois voltam a correr em produção (correção da atribuição em ordens
+// sem responsável, 01/10/2026). Têm de conviver com os triggers de tempos.sql.
+await passo("db/rpcs-tarefas.sql depois de tempos.sql", ler("rpcs-tarefas.sql"));
+await passo("db/medicoes.sql depois de tempos.sql", ler("medicoes.sql"));
+{
+  const def = async (assinatura) =>
+    (await um(`SELECT pg_get_functiondef('${assinatura}'::regprocedure) AS d`)).d;
+
+  (await def("public.rpc_ops_materializar_planos(uuid,integer)")).includes("tipo_recorrencia")
+    ? ok("rpc_ops_materializar_planos continua a ser a de correcoes-modelo.sql")
+    : mau("planos.sql fez regredir rpc_ops_materializar_planos");
+  (await def("public.ops_expandir_rrule(text,date,date)")).includes("v_ord")
+    ? ok("ops_expandir_rrule continua a saber 'última segunda-feira'")
+    : mau("planos.sql fez regredir ops_expandir_rrule");
+  (await def("public.rpc_ops_transitar_ordem(uuid,text,text,timestamptz)")).includes("supervisor")
+    ? ok("rpc_ops_transitar_ordem continua a ser a de tempos.sql")
+    : mau("rpcs.sql fez regredir rpc_ops_transitar_ordem");
+  const col = await um(`SELECT count(*)::int AS n FROM information_schema.columns
+                         WHERE table_name = 'ops_v_ordem_custo' AND column_name = 'segundos_trabalho'`);
+  col.n === 1
+    ? ok("ops_v_ordem_custo continua a contar a mão de obra ao vivo")
+    : mau("orcamentos.sql fez regredir ops_v_ordem_custo");
+  const trg = await um(`SELECT count(*)::int AS n FROM pg_trigger
+                         WHERE tgname IN ('ops_tarefa_tempo_antes','ops_tarefa_tempo_depois','ops_tarefa_guarda_estado')`);
+  trg.n === 3
+    ? ok("os triggers de tempo e a fechadura das tarefas convivem")
+    : mau(`esperava 3 triggers em ops_ordem_tarefa, encontrei ${trg.n}`);
+}
+// O que não se protege sozinho (policies e RPCs que seguranca.sql reescreve)
+// volta ao sítio correndo seguranca.sql e tempos.sql outra vez — é a regra
+// escrita no cabeçalho de seguranca.sql.
+await passo("db/seguranca.sql outra vez, depois dos antigos", ler("seguranca.sql"));
+await passo("db/tempos.sql outra vez, depois dos antigos", ler("tempos.sql"));
+await passo("db/obras.sql", ler("obras.sql"));
+await passo("db/obras.sql outra vez (idempotência)", ler("obras.sql"));
 
 // ── 3. Criar o perfil de CRM de uma conta que so existe na autenticacao ──
 await passo("db/criar-utilizador.sql", ler("criar-utilizador.sql"));

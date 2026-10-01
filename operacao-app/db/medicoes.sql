@@ -180,7 +180,9 @@ BEGIN
       replace(v_o.estado, '_', ' ');
   END IF;
 
-  v_atribuido := (v_o.responsavel_id = v_user)
+  -- COALESCE: numa ordem sem responsável, `NULL = x` dá NULL, e `NOT NULL`
+  -- não recusa nada — um técnico de fora passava (auditoria 01/10/2026).
+  v_atribuido := COALESCE(v_o.responsavel_id = v_user, false)
     OR EXISTS (SELECT 1 FROM public.ops_ordem_pessoa
                 WHERE ordem_id = v_o.id AND utilizador_id = v_user);
   IF v_funcao = 'tecnico' AND NOT v_atribuido THEN

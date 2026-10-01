@@ -1,19 +1,29 @@
 -- =============================================================================
 -- Operações — restringir as permissões aos papéis que interessam
 --
--- O `db/pos-instalacao.sql` atribuiu `operations.*` a TODOS os papéis com o
--- nome indicado. Numa base com 56 organizações, "Admin" existe uma vez por
--- organização: as 15 permissões foram parar a dezenas de papéis em vez de um.
+-- ███████████████████████████████████████████████████████████████████████████
+-- ██  ATENÇÃO — ESTE FICHEIRO APAGA PERMISSÕES DE PAPÉIS DO CRM.            ██
+-- ██                                                                        ██
+-- ██  · Só mexe na ORGANIZAÇÃO indicada no bloco CONFIGURAÇÃO. Sem          ██
+-- ██    organização preenchida, recusa-se a correr.                         ██
+-- ██  · Nessa organização, tira `operations.*` a todos os papéis que a      ██
+-- ██    pessoa indicada NÃO tem. Quem tinha acesso por outro papel perde-o. ██
+-- ██  · Corre primeiro com ROLLBACK no fim (em vez do COMMIT) e lê a lista  ██
+-- ██    "ligações a remover" antes de o correr a sério.                     ██
+-- ███████████████████████████████████████████████████████████████████████████
 --
--- A culpa é do desenho desse ficheiro — quando encontrava vários papéis com o
--- mesmo nome emitia um aviso e seguia, em vez de parar. Um aviso que não trava
--- não serve num SQL Editor onde as mensagens passam despercebidas.
+-- Porque existe: o `db/pos-instalacao.sql` atribuiu `operations.*` a TODOS os
+-- papéis com o nome indicado. Numa base com 56 organizações, "Admin" existe
+-- uma vez por organização: as 15 permissões foram parar a dezenas de papéis
+-- em vez de um.
 --
--- Este ficheiro corrige, e é conservador: mantém as permissões apenas nos
--- papéis que a pessoa indicada realmente tem, e tira-as de todos os outros.
+-- A primeira versão deste ficheiro corrigia isso apagando `operations.*` de
+-- TODOS os papéis de TODAS as organizações, exceto os de um email fixo. Numa
+-- base partilhada por várias empresas, isso cortava o módulo a todas as
+-- outras de uma vez. Agora o âmbito é UMA organização, escolhida à mão.
 --
--- Só toca em `anew_role_permissions`, e só em linhas `operations.*`. Nenhuma
--- outra permissão do CRM é afetada.
+-- Só toca em `anew_role_permissions`, e só em linhas `operations.*` de papéis
+-- da organização indicada. Papéis globais (sem organização) não são tocados.
 --
 -- Antes de apagar, imprime o que vai apagar e o que vai manter.
 -- =============================================================================
@@ -24,8 +34,13 @@ BEGIN;
 -- │  CONFIGURAÇÃO                                                        │
 -- └──────────────────────────────────────────────────────────────────────┘
 CREATE TEMP TABLE _cfg AS SELECT
-  -- Os papéis DESTA pessoa ficam com as permissões. Todos os outros perdem-nas.
-  '1999rubencmail@gmail.com'::text AS email;
+  -- Os papéis DESTA pessoa ficam com as permissões. Os outros papéis da
+  -- organização abaixo perdem-nas.
+  '1999rubencmail@gmail.com'::text AS email,
+
+  -- A organização onde se restringe. OBRIGATÓRIA. Vê o id com:
+  --   SELECT id, name FROM public.anew_organizations ORDER BY name;
+  NULL::uuid                       AS organization_id;
 
 
 -- ============================================================
@@ -37,6 +52,15 @@ DECLARE c record; v_user uuid; v_papeis integer;
 BEGIN
   SELECT * INTO c FROM _cfg;
 
+  IF c.organization_id IS NULL THEN
+    RAISE EXCEPTION
+      'Preenche organization_id no bloco CONFIGURAÇÃO. Este ficheiro só restringe UMA organização de cada vez.';
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM public.anew_organizations WHERE id = c.organization_id) THEN
+    RAISE EXCEPTION 'Não existe nenhuma organização com o id %.', c.organization_id;
+  END IF;
+
   SELECT id INTO v_user FROM public.anew_users
    WHERE lower(email) = lower(c.email) AND deleted_at IS NULL;
   IF v_user IS NULL THEN
@@ -45,11 +69,12 @@ BEGIN
 
   SELECT count(DISTINCT m.role_id) INTO v_papeis
     FROM public.anew_memberships m
-   WHERE m.user_id = v_user AND m.status = 'active';
+   WHERE m.user_id = v_user AND m.status = 'active'
+     AND m.organization_id = c.organization_id;
 
   IF v_papeis = 0 THEN
     RAISE EXCEPTION
-      'Esta pessoa não tem memberships ativas. Correr isto tirava as permissões a TODOS os papéis e deixava o módulo inacessível.';
+      'Esta pessoa não tem membership ativa nesta organização. Correr isto tirava as permissões a TODOS os papéis de lá e deixava o módulo inacessível.';
   END IF;
 END
 $verificar$;
@@ -74,31 +99,45 @@ BEGIN
       LEFT JOIN public.anew_organizations o ON o.id = ro.organization_id
      WHERE lower(u.email) = lower((SELECT email FROM _cfg))
        AND m.status = 'active'
+       AND m.organization_id = (SELECT organization_id FROM _cfg)
      ORDER BY 2, 1
   LOOP
     v_manter := v_manter + 1;
     RAISE NOTICE '  % — %', COALESCE(r.org, '(global)'), r.papel;
   END LOOP;
 
-  SELECT count(*) INTO v_tirar
-    FROM public.anew_role_permissions rp
-   WHERE rp.permission_code LIKE 'operations.%'
-     AND rp.role_id NOT IN (
-       SELECT m.role_id FROM public.anew_memberships m
-         JOIN public.anew_users u ON u.id = m.user_id
-        WHERE lower(u.email) = lower((SELECT email FROM _cfg)) AND m.status = 'active');
+  RAISE NOTICE '─── ligações a REMOVER ───────────────────';
+  FOR r IN
+    SELECT ro.name AS papel, count(*)::integer AS n
+      FROM public.anew_role_permissions rp
+      JOIN public.anew_roles ro ON ro.id = rp.role_id
+     WHERE rp.permission_code LIKE 'operations.%'
+       AND ro.organization_id = (SELECT organization_id FROM _cfg)
+       AND rp.role_id NOT IN (
+         SELECT m.role_id FROM public.anew_memberships m
+           JOIN public.anew_users u ON u.id = m.user_id
+          WHERE lower(u.email) = lower((SELECT email FROM _cfg)) AND m.status = 'active')
+     GROUP BY ro.name ORDER BY ro.name
+  LOOP
+    v_tirar := v_tirar + r.n;
+    RAISE NOTICE '  % — % permissões', r.papel, r.n;
+  END LOOP;
 
-  RAISE NOTICE '─── % papéis mantidos, % ligações a remover ──', v_manter, v_tirar;
+  RAISE NOTICE '─── % papéis mantidos, % ligações a remover, só nesta organização ──',
+    v_manter, v_tirar;
 END
 $mostrar$;
 
 
 -- ============================================================
--- Parte 2 — Restringir
+-- Parte 2 — Restringir, só nesta organização
 -- ============================================================
 
 DELETE FROM public.anew_role_permissions rp
- WHERE rp.permission_code LIKE 'operations.%'
+ USING public.anew_roles ro
+ WHERE ro.id = rp.role_id
+   AND ro.organization_id = (SELECT organization_id FROM _cfg)
+   AND rp.permission_code LIKE 'operations.%'
    AND rp.role_id NOT IN (
      SELECT m.role_id
        FROM public.anew_memberships m
@@ -117,12 +156,13 @@ DECLARE
   v_papeis    integer;
   v_uid       uuid;
 BEGIN
-  SELECT count(*) INTO v_restantes
-    FROM public.anew_role_permissions WHERE permission_code LIKE 'operations.%';
-  SELECT count(DISTINCT role_id) INTO v_papeis
-    FROM public.anew_role_permissions WHERE permission_code LIKE 'operations.%';
+  SELECT count(*), count(DISTINCT rp.role_id) INTO v_restantes, v_papeis
+    FROM public.anew_role_permissions rp
+    JOIN public.anew_roles ro ON ro.id = rp.role_id
+   WHERE rp.permission_code LIKE 'operations.%'
+     AND ro.organization_id = (SELECT organization_id FROM _cfg);
 
-  RAISE NOTICE 'Ficaram % ligações, em % papéis.', v_restantes, v_papeis;
+  RAISE NOTICE 'Nesta organização ficaram % ligações, em % papéis.', v_restantes, v_papeis;
 
   -- A verificação que interessa: quem pediu isto continua a poder entrar.
   SELECT au.id INTO v_uid
@@ -143,13 +183,14 @@ COMMIT;
 
 
 -- =============================================================================
--- PARA VOLTAR A ALARGAR (se for mesmo o que se quer)
+-- PARA VOLTAR A ALARGAR NUMA ORGANIZAÇÃO (se for mesmo o que se quer)
 --
 --   INSERT INTO public.anew_role_permissions (role_id, permission_code)
 --   SELECT r.id, p.code
 --     FROM public.anew_roles r
 --     CROSS JOIN public.anew_permissions p
---    WHERE r.name = 'Admin' AND r.deleted_at IS NULL AND r.is_system IS NOT TRUE
+--    WHERE r.organization_id = '<id da organização>'
+--      AND r.name = 'Admin' AND r.deleted_at IS NULL AND r.is_system IS NOT TRUE
 --      AND p.category = 'operations'
 --   ON CONFLICT DO NOTHING;
 -- =============================================================================

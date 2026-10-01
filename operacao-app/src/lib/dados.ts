@@ -139,6 +139,8 @@ export interface TarefaDaOrdem {
   observacoes: string | null;
   /** Uma tarefa privada não sai no relatório do cliente. */
   privada: boolean;
+  /** Segundos, copiados da checklist. 0 = sem estimativa. */
+  tempo_estimado: number;
 }
 
 export async function alvosDaOrdem(ordemId: string): Promise<AlvoDaOrdem[]> {
@@ -156,7 +158,7 @@ export async function tarefasDaOrdem(ordemId: string): Promise<TarefaDaOrdem[]> 
     .from("ops_ordem_tarefa")
     .select(
       "id, ordem_alvo_id, posicao, nome, tipo, estado, valor_num, valor_texto, " +
-        "unidade, limite_min, limite_max, obrigatoria, observacoes, privada"
+        "unidade, limite_min, limite_max, obrigatoria, observacoes, privada, tempo_estimado"
     )
     .eq("ordem_id", ordemId)
     .order("posicao");
@@ -171,16 +173,64 @@ export interface SessaoDaOrdem {
   utilizador_id: string;
   inicio: string;
   fim: string | null;
+  /** A tarefa em que este tempo foi gasto. Nulo = na ordem, sem tarefa. */
+  ordem_tarefa_id: string | null;
+  /** Porque parou: pessoa, troca, tarefa, pausa, fecho, cancelamento. */
+  motivo_fim: string | null;
 }
 
 export async function sessoesDaOrdem(ordemId: string): Promise<SessaoDaOrdem[]> {
   const { data, error } = await supabase
     .from("ops_sessao_trabalho")
-    .select("id, utilizador_id, inicio, fim")
+    .select("id, utilizador_id, inicio, fim, ordem_tarefa_id, motivo_fim")
     .eq("ordem_id", ordemId)
     .order("inicio");
   rebentar("carregar as sessões de trabalho", error);
   return (data ?? []) as unknown as SessaoDaOrdem[];
+}
+
+/** Real contra estimado, por tarefa. Vem de `ops_v_tarefa_tempo`. */
+export interface TempoDaTarefa {
+  ordem_tarefa_id: string;
+  tempo_estimado: number;
+  /** Segundos, com as sessões abertas a contar até agora. */
+  tempo_real: number;
+  a_contar: boolean;
+  a_contar_por: string[];
+}
+
+export async function temposDasTarefas(ordemId: string): Promise<TempoDaTarefa[]> {
+  const { data, error } = await supabase
+    .from("ops_v_tarefa_tempo")
+    .select("ordem_tarefa_id, tempo_estimado, tempo_real, a_contar, a_contar_por")
+    .eq("ordem_id", ordemId);
+  rebentar("carregar o tempo das tarefas", error);
+  return ((data ?? []) as unknown as TempoDaTarefa[]).map((t) => ({
+    ...t,
+    tempo_estimado: Number(t.tempo_estimado),
+    tempo_real: Number(t.tempo_real),
+  }));
+}
+
+/**
+ * O meu relógio nesta ordem. Cada pessoa liga e desliga o seu — a base não
+ * liga o de ninguém por arrasto.
+ */
+export async function mudarRelogio(ordemId: string, acao: "entrar" | "sair"): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_sessao", { p_ordem_id: ordemId, p_acao: acao });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível mudar o relógio.");
+}
+
+/** Começar a contar numa tarefa (fecha o relógio que estava noutra coisa). */
+export async function iniciarTarefa(tarefaId: string): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_tarefa_iniciar", { p_tarefa_id: tarefaId });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível começar a tarefa.");
+}
+
+/** Parar de contar numa tarefa sem a responder. O relógio continua na ordem. */
+export async function pararTarefa(tarefaId: string): Promise<void> {
+  const { error } = await supabase.rpc("rpc_ops_tarefa_terminar", { p_tarefa_id: tarefaId });
+  if (error) throw new ErroDeEscrita(error.message || "Não foi possível parar a tarefa.");
 }
 
 /* ────────────────────────── Clientes e equipa ────────────────────────── */
@@ -612,6 +662,11 @@ export interface CustoDaOrdem {
   real_total: number;
   desvio: number | null;
   desvio_percent: number | null;
+  /** A mão de obra está a ser contada ao vivo (há relógios abertos). */
+  mao_obra_em_curso?: boolean;
+  sessoes_abertas?: number;
+  /** Pessoas com tempo nesta ordem e sem custo/hora definido. */
+  sem_custo_hora?: number;
 }
 
 export async function custoDaOrdem(ordemId: string): Promise<CustoDaOrdem | null> {
@@ -619,7 +674,7 @@ export async function custoDaOrdem(ordemId: string): Promise<CustoDaOrdem | null
     .from("ops_v_ordem_custo")
     .select(
       "ordem_id, previsto, real_material, real_mao_obra, real_outros, " +
-        "real_total, desvio, desvio_percent"
+        "real_total, desvio, desvio_percent, mao_obra_em_curso, sessoes_abertas, sem_custo_hora"
     )
     .eq("ordem_id", ordemId)
     .limit(1);
