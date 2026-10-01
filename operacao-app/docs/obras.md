@@ -211,3 +211,21 @@ node tools/validar-instalacao.mjs
 - **UI sem Supabase real.** Não foi experimentada contra o Supabase real, porque
   `obras.sql` não está aplicado lá. As páginas estão cobertas por testes de fumo com
   dados simulados, e o SQL pelos validadores PGlite.
+
+## Dados de teste
+
+`npm run gerar-dados-de-teste` escreve em `dist-sql/` dois ficheiros para colar
+no SQL Editor do Supabase:
+
+- `dados-de-teste.sql` — escolhe a organização (sozinho, se só uma tem
+  Operações; senão recusa e pede o nome em `v_nome`) e corre `demo.sql`,
+  `demo-obras.sql` e `demo-testes.sql`: ordens OT-DEMO-*, obras OB-DEMO-001 a
+  006 em todos os estados, modelos "(demo)", tempos com ritmos diferentes por
+  pessoa e extras em todos os estados. Só tabelas `ops_*`; não duplica.
+- `dados-de-teste-remover.sql` — apaga tudo o que tem prefixo DEMO e os
+  modelos "(demo)".
+
+As pessoas são as que já têm perfil em Operações: atribuir funções em
+Definições ANTES de gerar dá Métricas por pessoa e uma fila Validar que se
+pode testar (quem fez uma tarefa não a valida). Provado em
+`npm run validar-demo`.

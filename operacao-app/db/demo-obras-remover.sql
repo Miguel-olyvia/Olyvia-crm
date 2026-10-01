@@ -1,4 +1,5 @@
--- Remove o que `db/demo-obras.sql` criou: a obra OB-DEMO-001 e tudo o que lhe
+-- Remove o que `db/demo-obras.sql` e `db/demo-testes.sql` criaram: as obras
+-- OB-DEMO-* e tudo o que lhes
 -- pertence (fases, tarefas, pessoas, registos e extras saem por CASCADE).
 --
 -- O modelo "Remodelação casa de banho" FICA: é um modelo útil, e pode já ter
@@ -13,6 +14,9 @@ DELETE FROM public.ops_evento
    AND entidade_id IN (SELECT id FROM public.ops_obra WHERE codigo LIKE 'OB-DEMO-%');
 
 DELETE FROM public.ops_obra WHERE codigo LIKE 'OB-DEMO-%';
+
+-- Os modelos que demo-testes.sql criou (o da casa de banho fica — ver acima).
+DELETE FROM public.ops_obra_modelo WHERE nome LIKE '% (demo)';
 
 DO $r$
 DECLARE v integer;

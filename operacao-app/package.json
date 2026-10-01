@@ -35,6 +35,8 @@
     "supabase:demo-remover": "node tools/correr-sql.mjs db/demo-remover.sql",
     "validar-instalacao": "node tools/validar-instalacao.mjs",
     "validar-atualizacao": "node tools/validar-atualizacao.mjs",
+    "validar-demo": "node tools/validar-demo.mjs",
+    "gerar-dados-de-teste": "node tools/gerar-dados-de-teste.mjs",
     "validar-rpcs": "node tools/validar-rpcs.mjs",
     "validar-planos": "node tools/validar-planos.mjs",
     "validar-medicoes": "node tools/validar-medicoes.mjs",

@@ -49,7 +49,7 @@ export const GRUPOS: { titulo: string | null; itens: Item[] }[] = [
   {
     titulo: "Execução",
     itens: [
-      { to: "/minhas-tarefas", rotulo: "Minhas tarefas", Icone: ObraCronometro },
+      { to: "/minhas-tarefas", rotulo: "As minhas tarefas", Icone: ObraCronometro },
       { to: "/validar", rotulo: "Validar", Icone: ObraValidar, so: podeValidar },
     ],
   },
