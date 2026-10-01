@@ -37,6 +37,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { Database } from "@/integrations/supabase/types";
 import { PermissionGate } from "@/components/PermissionGate";
+import { cn } from "@/lib/utils";
 import { useTranslation } from "@/hooks/useTranslation";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
@@ -142,7 +143,7 @@ const Stocks = () => {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingStock, setEditingStock] = useState<Stock | null>(null);
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
-  const [movementContext, setMovementContext] = useState<{ productId?: string; warehouseId?: string }>({});
+  const [movementContext, setMovementContext] = useState<{ productId?: string; warehouseId?: string; movementType?: "ajuste" }>({});
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
   const [historyContext, setHistoryContext] = useState<{ productId: string; warehouseId: string; productName?: string; warehouseName?: string } | null>(null);
   const [formData, setFormData] = useState({
@@ -538,12 +539,20 @@ const Stocks = () => {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
 
+      // A quantidade nunca é escrita diretamente em `stocks` a partir deste
+      // formulário: sem stock_movement não fica rasto (09-09: 0→1 sem
+      // movimento). Mudar quantidade = Registar movimento → Ajuste.
+      const { quantity: _quantity, product_id, warehouse_id, ...settings } = formData;
+
       if (editingStock) {
+        // Só definições da linha (mín./máx./ponto de encomenda/localização).
+        // Produto e armazém também ficam de fora: trocá-los numa linha com
+        // quantidade moveria stock sem movimento.
         await withAuditContext(supabase, businessUserId, async () => {
           const { error } = await supabase
             .from("stocks")
             .update({
-              ...formData,
+              ...settings,
               updated_at: new Date().toISOString(),
             })
             .eq("id", editingStock.id);
@@ -558,10 +567,16 @@ const Stocks = () => {
       } else {
         if (!activeCompany?.id) throw new Error("No active company selected");
 
+        // Cria a linha a 0 e, se houver quantidade inicial, regista-a como
+        // ajuste positivo (rpc_adjust_stock: p_qty é o delta, positivo, com a
+        // direção à parte; exige a linha de stocks já existente).
         await withAuditContext(supabase, businessUserId, async () => {
           const { error } = await supabase.from("stocks").insert([
             {
-              ...formData,
+              ...settings,
+              product_id,
+              warehouse_id,
+              quantity: 0,
               organization_id: activeCompany.id,
               created_by: businessUserId,
             },
@@ -570,10 +585,35 @@ const Stocks = () => {
           if (error) throw error;
         });
 
-        toast({
-          title: t('stocks.toast.createSuccess'),
-          description: t('stocks.toast.createSuccessDesc'),
-        });
+        const initialQty = Math.trunc(Number(formData.quantity) || 0);
+        let initialQtyError: string | null = null;
+        if (initialQty > 0) {
+          const { error: adjustError } = await supabase.rpc("rpc_adjust_stock", {
+            p_product_id: product_id,
+            p_warehouse_id: warehouse_id,
+            p_qty: initialQty,
+            p_direction: "positivo",
+            p_reason: "Stock inicial",
+            p_notes: null,
+          } as any);
+          if (adjustError) initialQtyError = adjustError.message;
+        }
+
+        if (initialQtyError) {
+          // A linha ficou criada a 0 — não se desfaz; avisa para registar a
+          // quantidade com um ajuste.
+          captureFlowError(new Error(initialQtyError), "stock-lifecycle");
+          toast({
+            title: "Stock criado sem a quantidade inicial",
+            description: `A linha foi criada com 0 un. Não foi possível registar as ${initialQty} un iniciais (${initialQtyError}). Usa Registar movimento → Ajuste.`,
+            variant: "destructive",
+          });
+        } else {
+          toast({
+            title: t('stocks.toast.createSuccess'),
+            description: t('stocks.toast.createSuccessDesc'),
+          });
+        }
       }
 
       setDialogOpen(false);
@@ -972,6 +1012,7 @@ const Stocks = () => {
                     onValueChange={(value) =>
                       setFormData({ ...formData, product_id: value })
                     }
+                    disabled={Boolean(editingStock)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder={t('stocks.form.selectProduct')} />
@@ -993,6 +1034,7 @@ const Stocks = () => {
                     onValueChange={(value) =>
                       setFormData({ ...formData, warehouse_id: value })
                     }
+                    disabled={Boolean(editingStock)}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder={t('stocks.form.selectWarehouse')} />
@@ -1008,21 +1050,61 @@ const Stocks = () => {
                   {fieldErrors.warehouse_id && <p className="text-sm text-destructive mt-1">{fieldErrors.warehouse_id}</p>}
                 </div>
                 <div>
-                  <Label htmlFor="quantity">{t('stocks.form.quantity')}</Label>
+                  <Label htmlFor="quantity">
+                    {editingStock ? t('stocks.form.quantity') : "Quantidade inicial"}
+                  </Label>
                   <Input
                     id="quantity"
                     type="number"
+                    min={0}
+                    step={1}
                     value={formData.quantity}
-                    onChange={(e) =>
+                    readOnly={Boolean(editingStock)}
+                    aria-describedby="quantity-help"
+                    onChange={(e) => {
+                      if (editingStock) return;
                       setFormData({
                         ...formData,
                         quantity: parseInt(e.target.value) || 0,
-                      })
-                    }
+                      });
+                    }}
                     required
-                    className={fieldErrors.quantity ? "border-destructive" : ""}
+                    className={cn(
+                      fieldErrors.quantity ? "border-destructive" : "",
+                      editingStock ? "bg-muted cursor-not-allowed" : "",
+                    )}
                   />
                   {fieldErrors.quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.quantity}</p>}
+                  {editingStock ? (
+                    <div id="quantity-help" className="mt-1 flex flex-wrap items-center gap-2">
+                      <p className="text-xs text-muted-foreground">
+                        Para alterar a quantidade usa Registar movimento → Ajuste.
+                      </p>
+                      <PermissionGate permission="stocks.edit">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const stock = editingStock;
+                            setDialogOpen(false);
+                            setMovementContext({
+                              productId: stock.product_id,
+                              warehouseId: stock.warehouse_id,
+                              movementType: "ajuste",
+                            });
+                            setMovementDialogOpen(true);
+                          }}
+                        >
+                          <ArrowLeftRight className="mr-1 h-3.5 w-3.5" /> Registar ajuste
+                        </Button>
+                      </PermissionGate>
+                    </div>
+                  ) : (
+                    <p id="quantity-help" className="text-xs text-muted-foreground mt-1">
+                      Fica registada como movimento de ajuste ("Stock inicial"). Depois de criada, a quantidade só muda por Registar movimento.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="minimum_quantity">{t('stocks.form.minimumQuantity')}</Label>
@@ -1386,6 +1468,7 @@ const Stocks = () => {
         warehouses={warehouses}
         defaultProductId={movementContext.productId}
         defaultWarehouseId={movementContext.warehouseId}
+        defaultMovementType={movementContext.movementType}
         onSuccess={refresh}
       />
 
