@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,7 +8,7 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck, ChevronsUpDown, Check, ScanBarcode, Undo2 } from "lucide-react";
+import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck, ChevronsUpDown, Check, ScanBarcode, Undo2, ChevronDown, ChevronRight, Layers, List } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
@@ -179,6 +179,12 @@ const fetchAllRows = async (
   return { data: rows, error: null };
 };
 
+const PURCHASE_ORDERS_VIEW_STORAGE_KEY = "purchaseOrders.listViewMode";
+// Chave do grupo "Sem fornecedor" na vista agrupada.
+const NO_SUPPLIER_GROUP_KEY = "__no_supplier__";
+// Lote de ids por pedido .in(...) — mantém o URL do PostgREST num tamanho seguro.
+const ORIGIN_LOOKUP_CHUNK = 150;
+
 const PurchaseOrders = () => {
   const { t } = useTranslation();
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
@@ -238,6 +244,27 @@ const PurchaseOrders = () => {
     number: string;
     clientName: string;
   } | null>(null);
+  // Coluna "Origem / Cliente" da lista: a mesma resolução de orderSourceInfo
+  // (ver handleEdit), mas em lote para todas as encomendas com
+  // source_type='contract' — chave = client_contracts.id (source_id).
+  // Best-effort: se a leitura falhar ou a RLS não devolver a linha, a célula
+  // mostra "—" e a lista continua a funcionar.
+  const [listOriginByContract, setListOriginByContract] = useState<Record<string, {
+    originType: 'contract' | 'direct_sale' | 'manual';
+    number: string;
+    clientName: string;
+  }>>({});
+  const listOriginRequestRef = useRef(0);
+  // Vista da lista: agrupada por fornecedor (omissão) ou todas as encomendas.
+  // A última escolha fica em localStorage.
+  const [listViewMode, setListViewMode] = useState<'grouped' | 'all'>(() => {
+    try {
+      return localStorage.getItem(PURCHASE_ORDERS_VIEW_STORAGE_KEY) === 'all' ? 'all' : 'grouped';
+    } catch {
+      return 'grouped';
+    }
+  });
+  const [expandedSupplierGroups, setExpandedSupplierGroups] = useState<Set<string>>(new Set());
   // Ligação manual, só na criação (20261115200000) — resolve o caso
   // "sem_fornecedor" em Encomendas Clientes: ao criar a encomenda daqui,
   // escolhe-se a Encomenda Cliente que está a satisfazer.
@@ -2117,6 +2144,261 @@ const PurchaseOrders = () => {
     setDateFilterField("order_date");
   };
 
+  // Origem / Cliente em lote para a lista — mesma regra de handleEdit
+  // (client_contracts → se is_manual_order, procura a Venda Direta ligada;
+  // senão é Encomenda Cliente manual EC-…; não manual = Contrato CC-…), mas com
+  // .in(...) por lotes em vez de uma consulta por encomenda.
+  useEffect(() => {
+    const requestId = ++listOriginRequestRef.current;
+    const contractIds = Array.from(new Set(
+      orders
+        .filter((o) => (o as any).source_type === "contract" && (o as any).source_id)
+        .map((o) => (o as any).source_id as string)
+    ));
+    if (contractIds.length === 0) {
+      setListOriginByContract({});
+      return;
+    }
+    const chunks: string[][] = [];
+    for (let i = 0; i < contractIds.length; i += ORIGIN_LOOKUP_CHUNK) {
+      chunks.push(contractIds.slice(i, i + ORIGIN_LOOKUP_CHUNK));
+    }
+    (async () => {
+      const contractResults = await Promise.all(chunks.map((ids) =>
+        supabase
+          .from("client_contracts")
+          .select("id, contract_number, order_number, is_manual_order, anew_entities(display_name)")
+          .in("id", ids)
+      ));
+      const contractRows: any[] = [];
+      for (const res of contractResults) {
+        if (res.error) throw res.error;
+        contractRows.push(...((res.data as any[]) || []));
+      }
+
+      // Só os contratos sintéticos podem ter Venda Direta. Sem direct_sales.view
+      // a RLS devolve vazio e cai-se para o caso manual (EC-…).
+      const manualIds = contractRows.filter((r) => r.is_manual_order).map((r) => r.id as string);
+      const saleByContract = new Map<string, string>();
+      if (manualIds.length > 0) {
+        const saleChunks: string[][] = [];
+        for (let i = 0; i < manualIds.length; i += ORIGIN_LOOKUP_CHUNK) {
+          saleChunks.push(manualIds.slice(i, i + ORIGIN_LOOKUP_CHUNK));
+        }
+        const saleResults = await Promise.all(saleChunks.map((ids) =>
+          supabase
+            .from("direct_sales")
+            .select("client_contract_id, sale_number")
+            .in("client_contract_id", ids)
+            .is("deleted_at", null)
+        ));
+        for (const res of saleResults) {
+          if (res.error) continue; // silencioso, como em handleEdit
+          for (const sale of ((res.data as any[]) || [])) {
+            if (sale.client_contract_id && sale.sale_number && !saleByContract.has(sale.client_contract_id)) {
+              saleByContract.set(sale.client_contract_id, sale.sale_number);
+            }
+          }
+        }
+      }
+
+      const next: Record<string, { originType: 'contract' | 'direct_sale' | 'manual'; number: string; clientName: string }> = {};
+      for (const row of contractRows) {
+        const clientName: string = row.anew_entities?.display_name || "";
+        const contractNumber: string = row.contract_number || "";
+        if (!row.is_manual_order) {
+          next[row.id] = { originType: "contract", number: contractNumber, clientName };
+        } else if (saleByContract.has(row.id)) {
+          next[row.id] = { originType: "direct_sale", number: saleByContract.get(row.id) as string, clientName };
+        } else {
+          next[row.id] = { originType: "manual", number: row.order_number || contractNumber, clientName };
+        }
+      }
+      if (listOriginRequestRef.current !== requestId) return;
+      setListOriginByContract(next);
+    })().catch((error) => {
+      console.error("Error loading purchase order origins:", error);
+      if (listOriginRequestRef.current !== requestId) return;
+      setListOriginByContract({});
+    });
+  }, [orders]);
+
+  // Vista agrupada: os filtros já foram aplicados em filteredOrders, por isso
+  // um fornecedor sem encomendas filtradas não chega a ter grupo.
+  const supplierGroups = useMemo(() => {
+    const groups = new Map<string, {
+      key: string;
+      supplierName: string;
+      orders: PurchaseOrder[];
+      toReceive: number;
+      received: number;
+      lastOrderDate: string;
+      totalValue: number;
+    }>();
+    for (const order of filteredOrders) {
+      const key = order.supplier_id || NO_SUPPLIER_GROUP_KEY;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          supplierName: order.supplier_id
+            ? (order.suppliers?.name || suppliers.find((s) => s.id === order.supplier_id)?.name || "N/A")
+            : (t('purchaseOrders.groups.noSupplier') || 'Sem fornecedor'),
+          orders: [],
+          toReceive: 0,
+          received: 0,
+          lastOrderDate: "",
+          totalValue: 0,
+        };
+        groups.set(key, group);
+      }
+      group.orders.push(order);
+      if (order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') group.toReceive += 1;
+      if (order.status === 'received') group.received += 1;
+      if (order.order_date && order.order_date > group.lastOrderDate) group.lastOrderDate = order.order_date;
+      group.totalValue += Number(order.total_value) || 0;
+    }
+    return Array.from(groups.values()).sort((a, b) => b.lastOrderDate.localeCompare(a.lastOrderDate));
+  }, [filteredOrders, suppliers, t]);
+
+  const changeListViewMode = (mode: 'grouped' | 'all') => {
+    setListViewMode(mode);
+    try {
+      localStorage.setItem(PURCHASE_ORDERS_VIEW_STORAGE_KEY, mode);
+    } catch {
+      /* localStorage indisponível — fica só nesta sessão */
+    }
+  };
+
+  const toggleSupplierGroup = (key: string) => {
+    setExpandedSupplierGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const renderOrderOrigin = (order: PurchaseOrder) => {
+    if ((order as any).source_type !== "contract" || !(order as any).source_id) {
+      return <span className="text-muted-foreground">{t('purchaseOrders.origin.stock') || 'Stock'}</span>;
+    }
+    const contractId: string = (order as any).source_id;
+    const info = listOriginByContract[contractId];
+    if (!info) return <span className="text-muted-foreground">—</span>;
+    const numberLabel = info.originType === "contract"
+      ? (t('purchaseOrders.origin.contract', { number: info.number }) || `Contrato ${info.number}`)
+      : info.number;
+    return (
+      <Link to={`/client-orders?open=${contractId}`} className="hover:underline">
+        {info.clientName ? `${numberLabel} — ${info.clientName}` : numberLabel}
+      </Link>
+    );
+  };
+
+  // Linha de encomenda — usada tal e qual nas duas vistas ("Ver todas" e dentro
+  // de cada grupo). Ações, condições e PermissionGate inalterados.
+  const renderOrderRow = (order: PurchaseOrder, showSupplier: boolean) => (
+    <TableRow key={order.id}>
+      <TableCell className="font-mono font-semibold">{order.order_number}</TableCell>
+      {showSupplier && <TableCell>{order.suppliers?.name || "N/A"}</TableCell>}
+      <TableCell className="whitespace-nowrap">{renderOrderOrigin(order)}</TableCell>
+      <TableCell>{new Date(order.order_date).toLocaleDateString()}</TableCell>
+      <TableCell>
+        {order.expected_delivery
+          ? new Date(order.expected_delivery).toLocaleDateString()
+          : "N/A"}
+      </TableCell>
+      <TableCell>
+        <Badge className={getStatusColor(order.status)}>
+          {getStatusLabel(order.status)}
+        </Badge>
+      </TableCell>
+      <TableCell className="font-semibold">€{order.total_value.toFixed(2)}</TableCell>
+      <TableCell className="text-right">
+        <div className="flex justify-end gap-2">
+          {showDeleted ? (
+            <PermissionGate permission="purchase_orders.delete">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleRestore(order.id)}
+              >
+                {t('purchaseOrders.restore') || 'Restaurar'}
+              </Button>
+            </PermissionGate>
+          ) : (
+            <>
+              <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
+                <FileDown className="w-4 h-4" />
+              </Button>
+              {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
+                // Mesmas permissões que rpc_receive_purchase_order_lines exige (a receção dá entrada de stock).
+                <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                  <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
+                    <PackageCheck className="w-4 h-4" />
+                  </Button>
+                </PermissionGate>
+              )}
+              {(order.status === 'received' || order.status === 'partially_received') && (
+                // Mesmas permissões que rpc_revert_purchase_order_receipt exige (a reversão retira stock).
+                <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openRevertDialog(order)}
+                    title={t('purchaseOrders.revert.action') || "Reverter receção"}
+                  >
+                    <Undo2 className="w-4 h-4" />
+                  </Button>
+                </PermissionGate>
+              )}
+              <PermissionGate permission="purchase_orders.edit">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleEdit(order)}
+                  disabled={order.status === 'partially_received' || order.status === 'received'}
+                  title={
+                    order.status === 'partially_received' || order.status === 'received'
+                      ? "Não é possível editar uma encomenda já recebida"
+                      : undefined
+                  }
+                >
+                  <Pencil className="w-4 h-4" />
+                </Button>
+              </PermissionGate>
+              <PermissionGate permission="purchase_orders.delete">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleDelete(order.id)}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </PermissionGate>
+            </>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+
+  const renderOrderTableHeader = (showSupplier: boolean) => (
+    <TableHeader>
+      <TableRow>
+        <TableHead>{t('purchaseOrders.table.number')}</TableHead>
+        {showSupplier && <TableHead>{t('purchaseOrders.table.supplier')}</TableHead>}
+        <TableHead>{t('purchaseOrders.table.origin') || 'Origem / Cliente'}</TableHead>
+        <TableHead>{t('purchaseOrders.table.date')}</TableHead>
+        <TableHead>{t('purchaseOrders.table.delivery')}</TableHead>
+        <TableHead>{t('purchaseOrders.table.status')}</TableHead>
+        <TableHead>{t('purchaseOrders.table.totalValue')}</TableHead>
+        <TableHead className="text-right">{t('purchaseOrders.table.actions')}</TableHead>
+      </TableRow>
+    </TableHeader>
+  );
+
   if (companyLoading) {
     return (
       <>
@@ -2783,6 +3065,24 @@ const PurchaseOrders = () => {
                   {t('purchaseOrders.filters.clear')}
                 </Button>
               )}
+
+              <Button
+                variant="outline"
+                className="md:ml-auto"
+                onClick={() => changeListViewMode(listViewMode === 'grouped' ? 'all' : 'grouped')}
+              >
+                {listViewMode === 'grouped' ? (
+                  <>
+                    <List className="w-4 h-4 mr-2" />
+                    {t('purchaseOrders.view.all') || 'Ver todas'}
+                  </>
+                ) : (
+                  <>
+                    <Layers className="w-4 h-4 mr-2" />
+                    {t('purchaseOrders.view.grouped') || 'Agrupar por fornecedor'}
+                  </>
+                )}
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -2795,104 +3095,76 @@ const PurchaseOrders = () => {
                 {hasActiveOrderFilters ? t('purchaseOrders.filters.noResults') : t('purchaseOrders.noOrders')}
               </p>
             </div>
-          ) : (
+          ) : listViewMode === 'grouped' ? (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t('purchaseOrders.table.number')}</TableHead>
+                  <TableHead className="w-10" />
                   <TableHead>{t('purchaseOrders.table.supplier')}</TableHead>
-                  <TableHead>{t('purchaseOrders.table.date')}</TableHead>
-                  <TableHead>{t('purchaseOrders.table.delivery')}</TableHead>
-                  <TableHead>{t('purchaseOrders.table.status')}</TableHead>
-                  <TableHead>{t('purchaseOrders.table.totalValue')}</TableHead>
-                  <TableHead className="text-right">{t('purchaseOrders.table.actions')}</TableHead>
+                  <TableHead className="text-right">{t('purchaseOrders.groups.orderCount') || 'Nº encomendas'}</TableHead>
+                  <TableHead className="text-right">{t('purchaseOrders.groups.toReceive') || 'Por receber'}</TableHead>
+                  <TableHead className="text-right">{t('purchaseOrders.groups.received') || 'Recebidas'}</TableHead>
+                  <TableHead>{t('purchaseOrders.groups.lastOrder') || 'Última encomenda'}</TableHead>
+                  <TableHead className="text-right">{t('purchaseOrders.groups.totalValue') || 'Valor total'}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredOrders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell className="font-mono font-semibold">{order.order_number}</TableCell>
-                    <TableCell>{order.suppliers?.name || "N/A"}</TableCell>
-                    <TableCell>{new Date(order.order_date).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      {order.expected_delivery
-                        ? new Date(order.expected_delivery).toLocaleDateString()
-                        : "N/A"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColor(order.status)}>
-                        {getStatusLabel(order.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-semibold">€{order.total_value.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {showDeleted ? (
-                          <PermissionGate permission="purchase_orders.delete">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleRestore(order.id)}
-                            >
-                              {t('purchaseOrders.restore') || 'Restaurar'}
-                            </Button>
-                          </PermissionGate>
-                        ) : (
-                          <>
-                            <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
-                              <FileDown className="w-4 h-4" />
-                            </Button>
-                            {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
-                              // Mesmas permissões que rpc_receive_purchase_order_lines exige (a receção dá entrada de stock).
-                              <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
-                                <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
-                                  <PackageCheck className="w-4 h-4" />
-                                </Button>
-                              </PermissionGate>
-                            )}
-                            {(order.status === 'received' || order.status === 'partially_received') && (
-                              // Mesmas permissões que rpc_revert_purchase_order_receipt exige (a reversão retira stock).
-                              <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => openRevertDialog(order)}
-                                  title={t('purchaseOrders.revert.action') || "Reverter receção"}
-                                >
-                                  <Undo2 className="w-4 h-4" />
-                                </Button>
-                              </PermissionGate>
-                            )}
-                            <PermissionGate permission="purchase_orders.edit">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleEdit(order)}
-                                disabled={order.status === 'partially_received' || order.status === 'received'}
-                                title={
-                                  order.status === 'partially_received' || order.status === 'received'
-                                    ? "Não é possível editar uma encomenda já recebida"
-                                    : undefined
-                                }
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                            <PermissionGate permission="purchase_orders.delete">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDelete(order.id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {supplierGroups.map((group) => {
+                  const isExpanded = expandedSupplierGroups.has(group.key);
+                  return (
+                    <Fragment key={group.key}>
+                      <TableRow
+                        className="cursor-pointer"
+                        onClick={() => toggleSupplierGroup(group.key)}
+                      >
+                        <TableCell className="w-10">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-expanded={isExpanded}
+                            aria-label={isExpanded
+                              ? (t('purchaseOrders.groups.collapse') || 'Recolher')
+                              : (t('purchaseOrders.groups.expand') || 'Expandir')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSupplierGroup(group.key);
+                            }}
+                          >
+                            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                          </Button>
+                        </TableCell>
+                        <TableCell className="font-semibold">{group.supplierName}</TableCell>
+                        <TableCell className="text-right">{group.orders.length}</TableCell>
+                        <TableCell className="text-right">{group.toReceive}</TableCell>
+                        <TableCell className="text-right">{group.received}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {group.lastOrderDate ? new Date(group.lastOrderDate).toLocaleDateString() : "N/A"}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">€{group.totalValue.toFixed(2)}</TableCell>
+                      </TableRow>
+                      {isExpanded && (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell colSpan={7} className="bg-muted/30 p-2 md:pl-10">
+                            <Table>
+                              {renderOrderTableHeader(false)}
+                              <TableBody>
+                                {group.orders.map((order) => renderOrderRow(order, false))}
+                              </TableBody>
+                            </Table>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <Table>
+              {renderOrderTableHeader(true)}
+              <TableBody>
+                {filteredOrders.map((order) => renderOrderRow(order, true))}
               </TableBody>
             </Table>
           )}
