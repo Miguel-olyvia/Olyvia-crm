@@ -83,7 +83,19 @@ export async function obterObra(codigo: string, orgId: string): Promise<ObraResu
     .eq("codigo", codigo)
     .maybeSingle();
   rebentar("carregar a obra", error);
-  if (!data) return null;
+  if (!data) {
+    // Não está na empresa ativa (ex.: link aberto noutro endereço, ou outra
+    // empresa escolhida): procura nas que a pessoa vê — a RLS filtra.
+    const { data: outras, error: e2 } = await supabase
+      .from("ops_v_obra_resumo")
+      .select("*")
+      .eq("codigo", codigo)
+      .limit(1);
+    rebentar("carregar a obra", e2);
+    if (!outras?.length) return null;
+    const o = outras[0] as unknown as ObraResumo;
+    return { ...o, minutos_reais: Number(o.minutos_reais) };
+  }
   const o = data as unknown as ObraResumo;
   return { ...o, minutos_reais: Number(o.minutos_reais) };
 }

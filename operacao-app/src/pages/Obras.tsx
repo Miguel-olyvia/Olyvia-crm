@@ -332,12 +332,16 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
     };
   }, [orgId]);
 
-  // O tipo de obra vem escolhido: o "por defeito" (arranque, proteção,
-  // limpeza, entrega), a que se juntam os serviços vendidos. Em branco, sem
-  // por defeito, o primeiro — senão nascia vazia.
+  // A partir de um contrato ou orçamento, o plano sai SÓ dos serviços vendidos
+  // (tarefas, tempos e dependências de cada serviço): o tipo de obra é opcional
+  // e vem vazio. Em branco, sem serviços, vem o "por defeito" (senão nascia vazia).
   useEffect(() => {
+    if (fonte !== "branco") {
+      setModeloId("");
+      return;
+    }
     const def = modelos.find((m) => m.por_defeito);
-    setModeloId(def ? def.id : fonte === "branco" && modelos.length ? modelos[0].id : "");
+    setModeloId(def ? def.id : modelos.length ? modelos[0].id : "");
   }, [fonte, modelos]);
 
   const fonteId = fonte === "orcamento" ? orcamentoId : fonte === "contrato" ? contratoId : "";
@@ -649,7 +653,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field
-              label="Tipo de obra"
+              label={fonte === "branco" ? "Tipo de obra" : "Tipo de obra (opcional)"}
               hint={
                 modelo
                   ? `+ ${modelo.fases.reduce((s, f) => s + f.tarefas.length, 0)} tarefas do tipo (${formatarMinutos(totalModelo)})` +

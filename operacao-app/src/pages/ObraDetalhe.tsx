@@ -86,7 +86,7 @@ const TRANSICOES: Record<EstadoObra, { para: EstadoObra; rotulo: string; motivo:
 
 export default function ObraDetalhe() {
   const { codigo = "" } = useParams();
-  const { activeOrgId, funcao } = useAuth();
+  const { activeOrgId, funcao, orgs, setActiveOrgId } = useAuth();
   const [obra, setObra] = useState<ObraResumo | null>(null);
   const [fases, setFases] = useState<FaseObra[]>([]);
   const [tarefas, setTarefas] = useState<TarefaObra[]>([]);
@@ -135,6 +135,12 @@ export default function ObraDetalhe() {
         setErro("Obra não encontrada, ou sem permissão para a ver.");
         return;
       }
+      // A obra é de outra empresa que a pessoa também vê: passa para essa
+      // (a equipa, os clientes e as permissões são os dela). Recarrega sozinho.
+      if (o.organization_id !== activeOrgId && orgs.some((g) => g.id === o.organization_id)) {
+        setActiveOrgId(o.organization_id);
+        return;
+      }
       const [fs, ts, cs, ex, eq, cls] = await Promise.all([
         fasesDaObra(o.id),
         tarefasDaObra(o.id),
@@ -155,7 +161,7 @@ export default function ObraDetalhe() {
     } finally {
       setACarregar(false);
     }
-  }, [activeOrgId, codigo, recarga]);
+  }, [activeOrgId, codigo, recarga, orgs, setActiveOrgId]);
 
   useEffect(() => {
     void carregar();
