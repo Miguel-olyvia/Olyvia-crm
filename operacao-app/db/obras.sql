@@ -1703,8 +1703,14 @@ BEGIN
      AND d.obra_id = v_id AND d.orcamento_linha_id = t.orcamento_linha_id
      AND sd.id = d.servico_tarefa_id AND sd.servico_id = st.servico_id AND sd.ordem = st.depende_ordem;
 
-  -- 3. Datas (em paralelo dentro da fase) e equipa.
-  v_n := public.ops_obra_replanear_impl(v_id, v_inicio);
+  -- 3. Datas (em paralelo dentro da fase) e equipa. Sem data indicada, a
+  --    primeira em que a equipa está livre (a partir de amanhã).
+  IF _inicio IS NULL THEN
+    v_inicio := public.ops_obra_planear_auto_impl(v_id, current_date + 1);
+  ELSE
+    PERFORM public.ops_obra_replanear_impl(v_id, v_inicio);
+  END IF;
+  SELECT count(*) INTO v_n FROM public.ops_obra_tarefa WHERE obra_id = v_id;
 
   SELECT min(inicio_planeado), max(fim_planeado) INTO v_ini, v_fim
     FROM public.ops_obra_tarefa WHERE obra_id = v_id;
@@ -1737,7 +1743,8 @@ BEGIN
     jsonb_build_object('codigo', v_codigo, 'orcamento_id', _orcamento_id,
                        'contrato_id', _contrato_id, 'modelo_id', _modelo_id, 'tarefas', v_n));
 
-  RETURN jsonb_build_object('ok', true, 'id', v_id, 'codigo', v_codigo, 'tarefas', v_n);
+  RETURN jsonb_build_object('ok', true, 'id', v_id, 'codigo', v_codigo, 'tarefas', v_n,
+                            'inicio', v_inicio);
 END
 $$;
 
@@ -2060,9 +2067,10 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
 DECLARE
-  v_o    record;
-  v_quem record;
-  v_n    integer;
+  v_o      record;
+  v_quem   record;
+  v_n      integer;
+  v_inicio date;
 BEGIN
   SELECT * INTO v_o FROM public.ops_obra WHERE id = p_obra_id;
   IF NOT FOUND THEN
@@ -2072,10 +2080,14 @@ BEGIN
     v_o.organization_id, 'operations.orders.edit', ARRAY['gestor'],
     'Só quem planeia mexe nas datas.');
   IF p_data_inicio IS NULL THEN
-    RAISE EXCEPTION 'Falta a data de início.';
+    -- "Primeira data livre": replaneia e redistribui o que ainda não começou.
+    v_inicio := public.ops_obra_planear_auto_impl(p_obra_id, current_date + 1);
+    SELECT count(*) INTO v_n FROM public.ops_obra_tarefa WHERE obra_id = p_obra_id;
+  ELSE
+    v_inicio := public.ops_obra_somar_dias_uteis(p_data_inicio, 0);
+    v_n := public.ops_obra_replanear_impl(p_obra_id, v_inicio);
   END IF;
-  v_n := public.ops_obra_replanear_impl(p_obra_id, public.ops_obra_somar_dias_uteis(p_data_inicio, 0));
-  RETURN jsonb_build_object('ok', true, 'tarefas', v_n);
+  RETURN jsonb_build_object('ok', true, 'tarefas', v_n, 'inicio', v_inicio);
 END
 $$;
 
@@ -2330,6 +2342,7 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_atribuir_tarefa(uuid, uuid[]) TO a
 -- ordem de preferência:
 --   1. sem choque — não estão noutra obra nesses dias;
 --   1b. com a especialidade que a tarefa pede (skill);
+--   1c. livres nesta obra nesses dias (tarefas em paralelo → pessoas diferentes);
 --   2. da zona — a `zona_base` aparece na morada da obra;
 --   3. continuidade — já estão nesta obra (a mesma equipa do princípio ao fim);
 --   4. menos carga — menos minutos abertos atribuídos, em todas as obras.
@@ -2382,6 +2395,16 @@ BEGIN
                      AND o2.inicio_planeado IS NOT NULL
                      AND daterange(o2.inicio_planeado, COALESCE(o2.fim_planeado, o2.inicio_planeado), '[]')
                       && daterange(t.ini, t.fim, '[]'))) AS choque,
+               -- Já tem outra tarefa DESTA obra nesses dias (tarefas em paralelo
+               -- vão para pessoas diferentes).
+               (t.ini IS NOT NULL AND EXISTS (
+                  SELECT 1 FROM public.ops_obra_tarefa_pessoa tp
+                    JOIN public.ops_obra_tarefa o2 ON o2.id = tp.tarefa_id
+                   WHERE tp.utilizador_id = p.utilizador_id
+                     AND o2.obra_id = _obra_id AND o2.id <> t.id
+                     AND o2.inicio_planeado IS NOT NULL
+                     AND daterange(o2.inicio_planeado, COALESCE(o2.fim_planeado, o2.inicio_planeado), '[]')
+                      && daterange(t.ini, t.fim, '[]'))) AS ocupado,
                (t.skill IS NULL OR EXISTS (
                   SELECT 1 FROM public.ops_utilizador_skill us
                    WHERE us.utilizador_id = p.utilizador_id AND us.skill_id = t.skill)) AS tem_skill,
@@ -2397,7 +2420,7 @@ BEGIN
           FROM public.ops_utilizador_perfil p
          WHERE p.organization_id = v_o.organization_id AND p.ativo
            AND p.funcao = ANY (v_funcoes)
-         ORDER BY choque, tem_skill DESC, na_zona DESC, na_obra DESC, carga, p.utilizador_id
+         ORDER BY choque, tem_skill DESC, ocupado, na_zona DESC, na_obra DESC, carga, p.utilizador_id
          LIMIT t.n
       ) c
     ON CONFLICT (tarefa_id, utilizador_id) DO NOTHING;
@@ -2410,6 +2433,61 @@ END
 $$;
 
 REVOKE ALL ON FUNCTION public.ops_obra_distribuir_impl(uuid) FROM PUBLIC, anon, authenticated;
+
+-- A data de início automática: o primeiro dia útil, a partir de `_desde`,
+-- em que a obra fica planeada e distribuída SEM choques com outras obras.
+-- Experimenta dia a dia (até 40 dias úteis): planeia, distribui, conta as
+-- tarefas com choque. Se nenhum dia servir, fica o menos mau. As tarefas já
+-- começadas (com tempo registado) não perdem as pessoas.
+CREATE OR REPLACE FUNCTION public.ops_obra_planear_auto_impl(_obra_id uuid, _desde date)
+RETURNS date
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  d       date := public.ops_obra_somar_dias_uteis(_desde, 0);
+  v_best  date;
+  v_min   integer;
+  n       integer;
+  i       integer := 0;
+BEGIN
+  LOOP
+    DELETE FROM public.ops_obra_tarefa_pessoa tp
+     USING public.ops_obra_tarefa t
+     WHERE t.id = tp.tarefa_id AND t.obra_id = _obra_id
+       AND t.estado IN ('por_fazer','rejeitada')
+       AND NOT EXISTS (SELECT 1 FROM public.ops_obra_registo r WHERE r.tarefa_id = t.id);
+    PERFORM public.ops_obra_replanear_impl(_obra_id, d);
+    PERFORM public.ops_obra_distribuir_impl(_obra_id);
+
+    SELECT count(*) INTO n FROM public.ops_obra_tarefa t
+     WHERE t.obra_id = _obra_id AND public.ops_obra_conflitos_impl(t.id) <> '[]'::jsonb;
+    IF n = 0 THEN
+      RETURN d;
+    END IF;
+    IF v_min IS NULL OR n < v_min THEN
+      v_min := n;
+      v_best := d;
+    END IF;
+
+    i := i + 1;
+    EXIT WHEN i >= 40;
+    d := public.ops_obra_somar_dias_uteis(d, 1);
+  END LOOP;
+
+  -- Nenhum dia sem choques: o que tem menos.
+  DELETE FROM public.ops_obra_tarefa_pessoa tp
+   USING public.ops_obra_tarefa t
+   WHERE t.id = tp.tarefa_id AND t.obra_id = _obra_id
+     AND t.estado IN ('por_fazer','rejeitada')
+     AND NOT EXISTS (SELECT 1 FROM public.ops_obra_registo r WHERE r.tarefa_id = t.id);
+  PERFORM public.ops_obra_replanear_impl(_obra_id, v_best);
+  PERFORM public.ops_obra_distribuir_impl(_obra_id);
+  RETURN v_best;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_planear_auto_impl(uuid, date) FROM PUBLIC, anon, authenticated;
 
 -- O botão "Distribuir equipa". `p_refazer` tira primeiro as pessoas das
 -- tarefas que ainda ninguém começou (por fazer / rejeitadas sem registo).

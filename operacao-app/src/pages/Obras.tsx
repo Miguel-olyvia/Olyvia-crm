@@ -280,6 +280,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
   const [clienteId, setClienteId] = useState("");
   const [morada, setMorada] = useState("");
   const [inicio, setInicio] = useState(somarDiasUteis(hojeIso(), 1));
+  const [inicioAuto, setInicioAuto] = useState(true);
   const [supervisorId, setSupervisorId] = useState("");
   const [aGravar, setAGravar] = useState(false);
 
@@ -385,7 +386,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
         clienteId: fonte === "branco" ? clienteId : null,
         morada: morada.trim() || null,
         modeloId: modeloId || null,
-        dataInicio: inicio || null,
+        dataInicio: inicioAuto ? null : inicio || null,
         supervisorId: supervisorId || null,
       });
       aoCriar();
@@ -521,8 +522,19 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
                 ))}
               </Select>
             </Field>
-            <Field label="Começa a" hint="As tarefas espalham-se por dias úteis a partir daqui.">
-              <Input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} className="w-full" />
+            <Field
+              label="Começa a"
+              hint={inicioAuto ? "Automático: o primeiro dia útil em que a equipa está livre." : "As tarefas planeiam-se a partir daqui."}
+            >
+              <div className="flex items-center gap-2">
+                <label className="flex shrink-0 items-center gap-1 text-xs text-slate-600">
+                  <input type="checkbox" checked={inicioAuto} onChange={(e) => setInicioAuto(e.target.checked)} />
+                  automático
+                </label>
+                {!inicioAuto && (
+                  <Input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} className="w-full" />
+                )}
+              </div>
             </Field>
             <Field label="Supervisor" hint="Quem valida o que a equipa dá por feito.">
               <Select value={supervisorId} onChange={(e) => setSupervisorId(e.target.value)} className="w-full">

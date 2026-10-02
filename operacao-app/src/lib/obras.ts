@@ -595,8 +595,9 @@ export function mudarEstadoObra(obraId: string, estado: EstadoObra, motivo?: str
   );
 }
 
-export function replanearObra(obraId: string, dataInicio: string) {
-  return rpc<{ ok: boolean; tarefas: number }>(
+/** `dataInicio` null = a primeira data em que a equipa está livre (replaneia e redistribui). */
+export function replanearObra(obraId: string, dataInicio: string | null) {
+  return rpc<{ ok: boolean; tarefas: number; inicio: string }>(
     "rpc_ops_obra_replanear",
     { p_obra_id: obraId, p_data_inicio: dataInicio },
     "Não foi possível replanear."

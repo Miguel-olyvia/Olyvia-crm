@@ -831,6 +831,29 @@ console.log("\n─── modelos por serviço ───────────�
     DELETE FROM public.ops_utilizador_skill;`);
 }
 
+/* ── Data de início automática ──────────────────────────────────────────── */
+console.log("\n─── data de início automática ───────────");
+{
+  const MOD_WC = (await um(`SELECT id FROM public.ops_obra_modelo WHERE organization_id='${ORG_A}' AND nome='Remodelação casa de banho'`)).id;
+  const X1 = await devePassar("obra sem data: a primeira com a equipa livre", AUTH.gestorA,
+    criar(`p_org => '${ORG_A}', p_titulo => 'Auto 1', p_cliente_id => '${CLI_A}', p_modelo_id => '${MOD_WC}'`));
+  const X2 = await devePassar("outra igual, com a mesma equipa", AUTH.gestorA,
+    criar(`p_org => '${ORG_A}', p_titulo => 'Auto 2', p_cliente_id => '${CLI_A}', p_modelo_id => '${MOD_WC}'`));
+  const amanha = (await um(`SELECT public.ops_obra_somar_dias_uteis(current_date + 1, 0)::text AS d`)).d;
+  const choques = async (id) =>
+    (await um(`SELECT count(*)::int AS n FROM public.ops_obra_tarefa t
+                WHERE t.obra_id='${id}' AND public.ops_obra_conflitos_impl(t.id) <> '[]'::jsonb`)).n;
+  const fim1 = (await um(`SELECT max(fim_planeado)::text AS f FROM public.ops_obra_tarefa WHERE obra_id='${X1?.id}'`)).f;
+  X1?.inicio === amanha ? ok(`a 1.ª começa no próximo dia útil (${amanha})`) : mau(`início 1: ${X1?.inicio} (esperado ${amanha})`);
+  X2?.inicio > X1?.inicio && (await choques(X2?.id)) === 0
+    ? ok(`a 2.ª passa para ${X2.inicio} (a 1.ª acaba a ${fim1}) e não choca com ninguém`)
+    : mau(`início 2: ${X2?.inicio}, choques ${await choques(X2?.id)}`);
+  const r = await devePassar("'Replanear' sem data volta a procurar a primeira data livre", AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_replanear('${X2?.id}', NULL);`);
+  r?.inicio === X2?.inicio ? ok("e dá a mesma data (nada mudou entretanto)") : mau(`replanear auto: ${JSON.stringify(r)}`);
+  await db.exec(`DELETE FROM public.ops_obra WHERE id IN ('${X1?.id}','${X2?.id}');`);
+}
+
 /* ── Isolamento ─────────────────────────────────────────────────────────── */
 console.log("\n─── isolamento entre organizações ───────");
 {

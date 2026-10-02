@@ -33,6 +33,7 @@ import {
   Select,
   Skeleton,
   Textarea,
+  Toggle,
   cx,
 } from "../components/ui";
 import { AlertTriangle, ChevronLeft, MapPin, Plus } from "../components/icons";
@@ -586,10 +587,11 @@ function EditarObra({
 function Replanear({ obra, aoFechar, aoGravar }: { obra: ObraResumo; aoFechar: () => void; aoGravar: () => void }) {
   const [inicio, setInicio] = useState(obra.data_inicio_prevista ?? hojeIso());
   const [erro, setErro] = useState<string | null>(null);
+  const [auto, setAuto] = useState(true);
   const gravar = async () => {
     setErro(null);
     try {
-      await replanearObra(obra.id, inicio);
+      await replanearObra(obra.id, auto ? null : inicio);
       aoGravar();
       aoFechar();
     } catch (e) {
@@ -612,12 +614,20 @@ function Replanear({ obra, aoFechar, aoGravar }: { obra: ObraResumo; aoFechar: (
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
-          Volta a espalhar todas as tarefas, uma a seguir à outra, 8 h por dia útil, a partir desta data. As datas que
-          arrastaste à mão perdem-se.
+          Volta a planear todas as tarefas (em paralelo dentro de cada fase, 8 h por dia útil). As datas que arrastaste à
+          mão perdem-se.
         </p>
-        <Field label="Começa a">
-          <Input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} className="w-full" />
-        </Field>
+        <Toggle
+          checked={auto}
+          onChange={setAuto}
+          label="Primeira data com a equipa livre"
+          hint="Procura o primeiro dia sem choques com outras obras e volta a distribuir a equipa nas tarefas por começar."
+        />
+        {!auto && (
+          <Field label="Começa a">
+            <Input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} className="w-full" />
+          </Field>
+        )}
         {erro && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
       </div>
     </Modal>
