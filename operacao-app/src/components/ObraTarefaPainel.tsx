@@ -18,6 +18,7 @@ import {
   nivelDeAlerta,
 } from "../domain/obras";
 import { data as formatarData } from "../lib/formatar";
+import FotosTarefa from "./FotosTarefa";
 
 /**
  * A ficha de uma tarefa da obra, ao lado do Gantt.
@@ -292,6 +293,18 @@ export default function ObraTarefaPainel({
           </>
         ) : (
           tarefa && <FichaLeitura tarefa={tarefa} nomes={nomes} />
+        )}
+
+        {tarefa && (
+          <div className="border-t border-slate-100 pt-3">
+            <FotosTarefa
+              tarefa={tarefa}
+              podeEnviar={podeEditar}
+              podeApagarTodas={podeEditar}
+              euId={null}
+              nomes={nomes}
+            />
+          </div>
         )}
 
         {erro && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}

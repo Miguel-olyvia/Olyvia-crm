@@ -16,6 +16,7 @@ import { ObraCronometro, ObraExtra } from "../components/ObraIcones";
 import { ObraTarefaEstadoBadge } from "../components/ObraEstadoBadge";
 import ObraJustificacao from "../components/ObraJustificacao";
 import { RegistarExtra } from "../components/ObraExtras";
+import FotosTarefa from "../components/FotosTarefa";
 import {
   acoesDoExecutor,
   formatarCronometro,
@@ -279,6 +280,29 @@ export default function MinhasTarefas() {
 
         {aberta && (
           <div className="space-y-3 border-t border-slate-100 bg-slate-50/50 px-4 py-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Onde</p>
+              {t.obra_morada ? (
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.obra_morada)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-0.5 inline-flex items-start gap-1.5 text-sm font-medium text-brand"
+                >
+                  <MapPin width={14} height={14} className="mt-0.5 shrink-0" />
+                  <span>
+                    {t.obra_morada} <span className="font-normal text-slate-400">· abrir no mapa</span>
+                  </span>
+                </a>
+              ) : (
+                <p className="mt-0.5 text-sm text-slate-400">Sem morada na obra — pergunta ao gestor.</p>
+              )}
+              <p className="mt-0.5 text-xs text-slate-500">
+                {t.obra_codigo} · {t.obra_titulo}
+                {t.inicio_planeado &&
+                  ` · ${formatarData(t.inicio_planeado)}${t.fim_planeado && t.fim_planeado !== t.inicio_planeado ? ` a ${formatarData(t.fim_planeado)}` : ""}`}
+              </p>
+            </div>
             {[
               ["Procedimento", t.procedimento],
               ["Materiais", t.materiais],
@@ -296,6 +320,8 @@ export default function MinhasTarefas() {
                 Só depois de: <b>{dep.nome}</b>
               </p>
             )}
+            <FotosTarefa tarefa={t} podeEnviar euId={businessUserId} />
+
             <button
               type="button"
               onClick={() => setExtra(t)}

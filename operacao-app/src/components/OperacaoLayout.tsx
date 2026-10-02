@@ -12,6 +12,7 @@ import {
   Settings,
   Euro,
   ExternalLink,
+  Eye,
   Home,
   Layers,
   List,
@@ -22,6 +23,7 @@ import {
 } from "./icons";
 import { ObraCapacete, ObraCronometro, ObraModelo, ObraValidar } from "./ObraIcones";
 import { podePlanear, podeValidar } from "../domain/obras";
+import { EscolherPessoa, FaixaEntrarComo, sairDoEntrarComo, useEntrarComo } from "./EntrarComo";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 const CHAVE_PAINEL = "operacao.menu-aberto";
@@ -132,8 +134,10 @@ function NavegacaoModulo({
 }
 
 export function OperacaoLayout() {
-  const { userName, userEmail, funcao, orgs, activeOrgId, setActiveOrgId, signOut } = useAuth();
+  const { userName, userEmail, funcao, orgs, activeOrgId, setActiveOrgId, signOut, businessUserId } = useAuth();
   const location = useLocation();
+  const verComo = useEntrarComo();
+  const [aEscolherPessoa, setAEscolherPessoa] = useState(false);
   const [aConfirmarSaida, setAConfirmarSaida] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
   const [painelAberto, setPainelAberto] = useState(lerPainelAberto);
@@ -256,24 +260,52 @@ export function OperacaoLayout() {
                     <ExternalLink width={16} height={16} /> Voltar à Olyvia
                   </a>
 
+                  {funcao === "admin" && !verComo && activeOrgId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuAberto(false);
+                        setAEscolherPessoa(true);
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 sm:py-2"
+                    >
+                      <Eye width={16} height={16} /> Ver como outra pessoa…
+                    </button>
+                  )}
+
                   <div className="my-1 h-px bg-slate-100" />
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuAberto(false);
-                      setAConfirmarSaida(true);
-                    }}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50 sm:py-2"
-                  >
-                    <LogOut width={16} height={16} /> Sair
-                  </button>
+                  {verComo ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuAberto(false);
+                        void sairDoEntrarComo();
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-amber-700 transition-colors hover:bg-amber-50 sm:py-2"
+                    >
+                      <LogOut width={16} height={16} /> Voltar à minha conta
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuAberto(false);
+                        setAConfirmarSaida(true);
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50 sm:py-2"
+                    >
+                      <LogOut width={16} height={16} /> Sair
+                    </button>
+                  )}
                 </div>
               )}
             </div>
           </div>
         </div>
       </header>
+
+      {verComo && <FaixaEntrarComo estado={verComo} />}
 
       {/* Desktop: barra de ícones + painel do módulo */}
       <aside
@@ -367,7 +399,8 @@ export function OperacaoLayout() {
       {/* O conteúdo afasta-se da barra (64px) e do painel (256px) quando aberto */}
       <main
         className={cx(
-          "px-4 pb-20 pt-20 transition-[padding] duration-300 md:pb-6 print:p-0",
+          "px-4 pb-20 transition-[padding] duration-300 md:pb-6 print:p-0",
+          verComo ? "pt-32 sm:pt-28" : "pt-20",
           painelAberto ? "md:pl-[21rem]" : "md:pl-20"
         )}
       >
@@ -375,6 +408,10 @@ export function OperacaoLayout() {
           <Outlet />
         </div>
       </main>
+
+      {aEscolherPessoa && activeOrgId && (
+        <EscolherPessoa orgId={activeOrgId} euId={businessUserId} aoFechar={() => setAEscolherPessoa(false)} />
+      )}
 
       {aConfirmarSaida && (
         <ConfirmDialog

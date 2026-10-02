@@ -7,6 +7,7 @@ import { Button, Card, EmptyState, ErrorState, Field, Modal, Skeleton, Textarea,
 import { AlertTriangle, Check, X } from "../components/icons";
 import { ObraValidar } from "../components/ObraIcones";
 import { FichaLeitura } from "../components/ObraTarefaPainel";
+import FotosTarefa from "../components/FotosTarefa";
 import {
   ROTULO_MOTIVO,
   formatarMinutos,
@@ -135,6 +136,7 @@ export default function Validar() {
                         {t.fase_ordem}. {t.fase_nome}
                       </p>
                       <p className="text-sm font-semibold text-slate-800">{t.nome}</p>
+                      {t.obra_morada && <p className="mt-0.5 truncate text-xs text-slate-400">{t.obra_morada}</p>}
                       <p className="mt-0.5 text-xs text-slate-500">
                         {quem.map((u) => nomes.get(u) ?? "—").join(", ") || "—"} · feita {dataHora(t.terminada_em)}
                       </p>
@@ -181,6 +183,9 @@ export default function Validar() {
                       Trabalhaste nesta tarefa — a validação tem de ser de outra pessoa.
                     </p>
                   )}
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <FotosTarefa tarefa={t} podeEnviar={false} euId={businessUserId} nomes={nomes} />
+                  </div>
                   {aberta === t.id && (
                     <div className="mt-3 border-t border-slate-100 pt-3">
                       <FichaLeitura tarefa={t} nomes={nomes} />

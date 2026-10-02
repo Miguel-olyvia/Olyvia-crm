@@ -19,6 +19,7 @@ const auth = {
 };
 
 vi.mock("../../auth/AuthProvider", () => ({ useAuth: () => auth }));
+vi.mock("../../lib/supabase", () => ({ supabase: { from: () => ({ select: () => ({ in: () => ({ order: async () => ({ data: [], error: null }) }) }) }), storage: { from: () => ({ createSignedUrls: async () => ({ data: [], error: null }) }) }, auth: {}, functions: {}, rpc: async () => ({ data: null, error: null }) } }));
 
 function montar(rota = "/") {
   return render(
