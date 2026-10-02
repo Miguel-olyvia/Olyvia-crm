@@ -244,8 +244,16 @@ interface ClientOrderDocumentPDFLine {
   service_name?: string | null;
   service_sku?: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'parcial' | 'sem_fornecedor' | 'servico';
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'parcial' | 'sem_fornecedor' | 'servico' | 'nao_recebido_anulado';
   purchase_order_number: string | null;
+  // 20261206150000: quantidade anulada nas POs (unidades base) e anulações.
+  qty_cancelled?: number | null;
+  cancellations?: Array<{
+    purchase_order_number?: string | null;
+    quantity_cancelled?: number | null;
+    reason?: string | null;
+    notes?: string | null;
+  } | null> | null;
   // 20261204310000: reserva por ordem de assinatura (unidades base).
   component_index?: number | null;
   qty_reserved?: number | null;
@@ -376,8 +384,40 @@ interface ClientOrderDocumentPDFProps {
   } | null;
 }
 
-const getLineStatusText = (line: ClientOrderDocumentPDFLine): string => {
+const PO_CANCELLATION_REASON_TEXT: Record<string, string> = {
+  found_stock: 'Encontrei stock / outra solução',
+  supplier_unavailable: 'Fornecedor sem produto',
+  other: 'Outro',
+};
+
+// " na PO-1 (motivo)" — mesma regra do ecrã (ClientOrders.getLineCancellationRefs).
+const getCancellationRefsText = (line: ClientOrderDocumentPDFLine): string => {
+  const list = Array.isArray(line.cancellations) ? line.cancellations : [];
+  const pos = Array.from(new Set(list.map((c) => c?.purchase_order_number).filter((n): n is string => !!n)));
+  if (pos.length === 0 && line.purchase_order_number) pos.push(line.purchase_order_number);
+  const reasons = Array.from(new Set(list.map((c) => {
+    if (!c) return '';
+    if (c.reason === 'other') return c.notes?.trim() || PO_CANCELLATION_REASON_TEXT.other;
+    return (c.reason && PO_CANCELLATION_REASON_TEXT[c.reason]) || c.reason || '';
+  }).filter(Boolean)));
+  return `${pos.length > 0 ? ` na ${pos.join(', ')}` : ''}${reasons.length > 0 ? ` (${reasons.join('; ')})` : ''}`;
+};
+
+// Parte anulada numa linha recebida/servida/parcial; vazio sem anulação.
+const getCancelledSuffixText = (line: ClientOrderDocumentPDFLine): string => {
+  if (!['recebido', 'servido_por_stock', 'parcial'].includes(line.line_status)) return '';
+  const cancelled = pdfQty(line.qty_cancelled);
+  if (cancelled <= 0) return '';
+  return ` · ${formatBaseQty(cancelled)} não será recebido — anulado${getCancellationRefsText(line)}`;
+};
+
+const getLineStatusText = (line: ClientOrderDocumentPDFLine): string =>
+  `${getBaseLineStatusText(line)}${getCancelledSuffixText(line)}`;
+
+const getBaseLineStatusText = (line: ClientOrderDocumentPDFLine): string => {
   switch (line.line_status) {
+    case 'nao_recebido_anulado':
+      return `Não será recebido — anulado${getCancellationRefsText(line)}`;
     case 'servido_por_stock':
       return 'Servido por Stock';
     case 'recebido': {

@@ -156,7 +156,9 @@ interface ClientOrderDocumentLine {
   service_name: string | null;
   service_sku: string | null;
   quantity: number;
-  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'parcial' | 'sem_fornecedor' | 'servico';
+  // 20261206150000: 'nao_recebido_anulado' = linha concluída sem nada
+  // recebido/servido, porque o que faltava foi anulado na PO.
+  line_status: 'servido_por_stock' | 'recebido' | 'a_aguardar_encomenda' | 'stock_disponivel_confirmar' | 'parcial' | 'sem_fornecedor' | 'servico' | 'nao_recebido_anulado';
   stock_movement_id: string | null;
   purchase_order_id: string | null;
   purchase_order_number: string | null;
@@ -178,6 +180,11 @@ interface ClientOrderDocumentLine {
   // 20261204340000: quantidade já servida por stock (unidades base); null em
   // serviços. Fonte de verdade para "X servido" — não inferir pelos movimentos.
   qty_served?: number | null;
+  // 20261206150000: quantidade anulada nas POs ("não vou receber o resto"),
+  // em unidades base, e as anulações ativas que a explicam (null sem
+  // anulações). Opcionais enquanto a RPC não tiver os campos.
+  qty_cancelled?: number | null;
+  cancellations?: ClientOrderLineCancellation[] | null;
   // Só em linhas de produto: o produto tem fornecedor preferencial. Distingue,
   // em 'sem_fornecedor', "falta pedir ao fornecedor" (true) de "não há
   // fornecedor preferencial" (false). null/ausente = desconhecido (serviços ou
@@ -211,6 +218,38 @@ const PO_CANCELLATION_REASON_LABELS: Record<string, string> = {
   supplier_unavailable: 'Fornecedor sem produto',
   other: 'Outro',
 };
+
+// 20261206150000: anulação ativa numa PO que reduz a necessidade da linha
+// (rpc_get_client_order_document → lines[].cancellations). quantity_cancelled
+// já vem em unidades base.
+interface ClientOrderLineCancellation {
+  cancellation_id: string;
+  purchase_order_id: string | null;
+  purchase_order_number: string | null;
+  quantity_cancelled: number | null;
+  reason: string | null;
+  notes: string | null;
+  created_at: string | null;
+}
+
+// " na PO-1, PO-2 (motivo; motivo)" a partir das anulações da linha; sem
+// anulações cai para a PO da linha. Motivo 'other' mostra a nota, se houver.
+const getLineCancellationRefs = (
+  line: Pick<ClientOrderDocumentLine, 'cancellations' | 'purchase_order_number'>,
+): string => {
+  const list = Array.isArray(line.cancellations) ? line.cancellations : [];
+  const pos = Array.from(new Set(list.map((c) => c?.purchase_order_number).filter((n): n is string => !!n)));
+  if (pos.length === 0 && line.purchase_order_number) pos.push(line.purchase_order_number);
+  const reasons = Array.from(new Set(list.map((c) => {
+    if (!c) return '';
+    if (c.reason === 'other') return c.notes?.trim() || PO_CANCELLATION_REASON_LABELS.other;
+    return (c.reason && PO_CANCELLATION_REASON_LABELS[c.reason]) || c.reason || '';
+  }).filter(Boolean)));
+  return `${pos.length > 0 ? ` na ${pos.join(', ')}` : ''}${reasons.length > 0 ? ` (${reasons.join('; ')})` : ''}`;
+};
+
+const hasDocumentCancellations = (line: Pick<ClientOrderDocumentLine, 'cancellations'>): boolean =>
+  Array.isArray(line.cancellations) && line.cancellations.length > 0;
 
 const asQty = (value: unknown): number => {
   const n = Number(value);
@@ -1424,6 +1463,8 @@ const ClientOrders = () => {
       // por isso não é uma pendência. Sem esta entrada caía no fallback
       // vermelho e parecia um problema por resolver.
       servico: "bg-muted text-muted-foreground",
+      // Neutro: concluída por decisão (anulado na PO), não é pendência.
+      nao_recebido_anulado: "bg-muted text-muted-foreground",
     };
     return colors[status] || colors.sem_fornecedor;
   };
@@ -1471,8 +1512,24 @@ const ClientOrders = () => {
     return parts.join(' · ');
   };
 
+  // 20261206150000: parte anulada na PO numa linha recebida/servida/parcial —
+  // " · X não será recebido — anulado na PO-X (motivo)". Vazio sem anulação.
+  const getCancelledSuffix = (line: ClientOrderDocumentLine): string => {
+    if (!['recebido', 'servido_por_stock', 'parcial'].includes(line.line_status)) return '';
+    const cancelled = asQty(line.qty_cancelled);
+    if (cancelled <= 0) return '';
+    return ` · ${formatBaseQty(cancelled)} não será recebido — anulado${getLineCancellationRefs(line)}`;
+  };
+
   const getLineStatusLabel = (line: ClientOrderDocumentLine) => {
+    const label = getBaseLineStatusLabel(line);
+    return `${label}${getCancelledSuffix(line)}`;
+  };
+
+  const getBaseLineStatusLabel = (line: ClientOrderDocumentLine) => {
     switch (line.line_status) {
+      case 'nao_recebido_anulado':
+        return `Não será recebido — anulado${getLineCancellationRefs(line)}`;
       case 'servido_por_stock':
         return t('clientOrders.lineStatus.servedByStock');
       case 'recebido':
@@ -1513,8 +1570,9 @@ const ClientOrders = () => {
     const productLines = detailData.lines.filter((line) => line.line_status !== 'servico');
     const total = productLines.length;
     // 'parcial' não conta como disponível: parte ainda depende do fornecedor.
+    // 'nao_recebido_anulado' conta: a linha está concluída (anulada na PO).
     const done = productLines.filter((line) =>
-      ['servido_por_stock', 'recebido', 'stock_disponivel_confirmar'].includes(line.line_status)
+      ['servido_por_stock', 'recebido', 'stock_disponivel_confirmar', 'nao_recebido_anulado'].includes(line.line_status)
     ).length;
     const percent = total > 0 ? Math.round((done / total) * 100) : 0;
     return { done, total, percent };
@@ -2861,8 +2919,11 @@ const ClientOrders = () => {
                               </Button>
                             )}
                           </div>
-                          {/* Só leitura: resto anulado na PO ligada ("não vou receber o resto"). */}
-                          {poCancellationsByLine?.contractId === detailData.contract_id &&
+                          {/* Só leitura: resto anulado na PO ligada ("não vou receber o resto").
+                              Quando o documento já traz as anulações da linha
+                              (20261206150000), o rótulo do estado já as mostra. */}
+                          {!hasDocumentCancellations(line) &&
+                            poCancellationsByLine?.contractId === detailData.contract_id &&
                             (poCancellationsByLine.byLine[lineKey(line)] || []).map((c) => (
                               <div key={c.id} className="mt-1 text-xs text-muted-foreground" title={c.notes || undefined}>
                                 {formatBaseQty(c.units)} anulado(s){c.poNumber ? ` na ${c.poNumber}` : ''} — {PO_CANCELLATION_REASON_LABELS[c.reason] || c.reason}
