@@ -43,6 +43,7 @@ const U = {
   tecAB: "a0000000-0000-0000-0000-00000000000f", // técnico na A, e também na B
   comA: "a0000000-0000-0000-0000-000000000010", // técnico com papel do CRM mais largo
   sysA: "a0000000-0000-0000-0000-000000000011", // técnico que é admin de sistema
+  gscA: "a0000000-0000-0000-0000-000000000012", // gestor sem acesso a custos
 };
 const AUTH = Object.fromEntries(Object.entries(U).map(([k, v]) => [k, v.replace(/^a/, "e")]));
 
@@ -256,6 +257,31 @@ await recusa("o admin da A não usa isto na B", AUTH.adminA,
   JSON.parse(t).ok === false ? ok("o técnico não fecha a entrada do admin") : mau("o técnico fechou a entrada do admin");
   const t2 = await chamar(AUTH.adminA, `SELECT public.rpc_ops_entrar_como_terminar('10600000-0000-0000-0000-000000000001')::text`);
   JSON.parse(t2).ok === true ? ok("o admin fecha a sua entrada ao voltar") : mau("o admin não fechou a entrada");
+}
+
+console.log("\n─── custo/hora ao editar a equipa ───────");
+{
+  const R_GSC = "d0000000-0000-0000-0000-00000000000e";
+  await db.exec(`
+    INSERT INTO public.anew_roles (id, organization_id, name) VALUES ('${R_GSC}','${ORG_A}','Gestor sem custos A');
+    INSERT INTO public.anew_role_permissions (role_id, permission_code)
+      SELECT '${R_GSC}', code FROM public.anew_permissions
+       WHERE category = 'operations' AND code <> 'operations.costs.view';
+    INSERT INTO public.anew_memberships (user_id, organization_id, role_id, status)
+      VALUES ('${U.gscA}','${ORG_A}','${R_GSC}','active');
+    INSERT INTO public.ops_utilizador_perfil (organization_id, utilizador_id, funcao)
+      VALUES ('${ORG_A}','${U.gscA}','gestor');
+    UPDATE public.ops_utilizador_perfil SET custo_hora = 25
+     WHERE organization_id = '${ORG_A}' AND utilizador_id = '${U.tecA}';`);
+  const custo = async () =>
+    Number((await um(`SELECT custo_hora FROM public.ops_utilizador_perfil
+                       WHERE organization_id='${ORG_A}' AND utilizador_id='${U.tecA}'`)).custo_hora);
+  await passa("o gestor sem custos edita a pessoa", AUTH.gscA,
+    `SELECT public.rpc_ops_gravar_perfil('${ORG_A}', '${U.tecA}', 'tecnico', NULL, true)`);
+  (await custo()) === 25 ? ok("e o custo/hora fica como estava (25)") : mau(`custo/hora passou a ${await custo()}`);
+  await passa("o admin muda o custo/hora", AUTH.adminA,
+    `SELECT public.rpc_ops_gravar_perfil('${ORG_A}', '${U.tecA}', 'tecnico', 30, true)`);
+  (await custo()) === 30 ? ok("e fica 30") : mau(`custo/hora ficou ${await custo()}`);
 }
 
 console.log(falhas.length ? `\n✗ ${falhas.length} falha(s)` : "\n✓ fotos e entrar como: regras provadas");
