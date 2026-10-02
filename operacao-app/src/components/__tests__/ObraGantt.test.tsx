@@ -369,3 +369,57 @@ describe("ObraGantt — coluna dos nomes", () => {
     expect(largura()).toBe(280);
   });
 });
+
+describe("ObraGantt — plano original e atrasos", () => {
+  const atraso = { motivo: "secagem", contexto: "parede ainda húmida", minutosExtra: null, clienteAvisado: false, n: 2 };
+  const comAtrasos = [
+    t({ id: "a", nome: "Demolição", inicio: "2026-10-05", fim: "2026-10-09", inicioOriginal: "2026-10-05", fimOriginal: "2026-10-07", atraso }),
+    t({ id: "b", nome: "Canalização", faseId: "f2", inicio: "2026-10-06", fim: "2026-10-07", atrasadaInicio: true }),
+  ];
+
+  it("sem os campos novos, não desenha nada de atrasos", () => {
+    montar();
+    expect(document.querySelector("[data-gantt-resumo]")).toBeNull();
+    expect(document.querySelector("[data-plano-original]")).toBeNull();
+    expect(document.querySelector("[data-marca-atraso]")).toBeNull();
+    expect(screen.queryByText("não iniciada")).not.toBeInTheDocument();
+    expect(screen.queryByText("Plano original")).not.toBeInTheDocument();
+  });
+
+  it("mostra o resumo, a sombra do plano original, o troço além do plano e a legenda", () => {
+    montar({ tarefas: comAtrasos });
+    const resumo = document.querySelector("[data-gantt-resumo]");
+    expect(resumo?.textContent).toBe(
+      "Fim previsto: 9 out (original 7 out, +2 dias úteis) · 2 tarefas atrasadas · 1 não iniciada a tempo · 1 por avisar o cliente"
+    );
+    expect(document.querySelectorAll("[data-plano-original]")).toHaveLength(1);
+    expect(document.querySelector("[data-alem-original]")?.getAttribute("data-alem-original")).toBe("por-avisar");
+    expect(screen.getByText("Plano original")).toBeInTheDocument();
+    expect(screen.getByText("Não iniciada a tempo")).toBeInTheDocument();
+  });
+
+  it("o troço além do plano fica âmbar quando o cliente já foi avisado", () => {
+    montar({ tarefas: [{ ...comAtrasos[0], atraso: { ...atraso, clienteAvisado: true } }] });
+    expect(document.querySelector("[data-alem-original]")?.getAttribute("data-alem-original")).toBe("avisado");
+  });
+
+  it("a marca de atraso tem o texto, o contador e chama aoClicarAtraso", () => {
+    const aoClicarAtraso = vi.fn();
+    const { aoSelecionar } = montar({ tarefas: comAtrasos, aoClicarAtraso });
+    const marca = document.querySelector("[data-marca-atraso='a']") as HTMLElement;
+    expect(marca.getAttribute("title")).toBe(
+      "Atrasada +2 dias — Secagem: parede ainda húmida (cliente por avisar) · 2 atrasos registados"
+    );
+    expect(within(marca).getByText("2")).toBeInTheDocument();
+    fireEvent.click(marca);
+    expect(aoClicarAtraso).toHaveBeenCalledWith("a");
+    expect(aoSelecionar).not.toHaveBeenCalled();
+  });
+
+  it("assinala a tarefa não iniciada a tempo na coluna e na barra", () => {
+    montar({ tarefas: comAtrasos });
+    expect(screen.getByText("não iniciada")).toBeInTheDocument();
+    expect(document.querySelector("[data-tarefa-id='b']")?.getAttribute("data-nao-iniciada")).toBe("true");
+    expect(document.querySelector("[data-tarefa-id='a']")?.hasAttribute("data-nao-iniciada")).toBe(false);
+  });
+});

@@ -52,8 +52,8 @@
     "validar-obras": "node tools/validar-obras.mjs",
     "validar-fotos-entrar-como": "node tools/validar-fotos-entrar-como.mjs",
     "validar-pessoas-crm": "node tools/validar-pessoas-crm.mjs",
-    "validar-stock": "node tools/validar-stock.mjs",
-    "validar-restricao": "node tools/validar-restricao.mjs"
+    "validar-restricao": "node tools/validar-restricao.mjs",
+    "validar-stock": "node tools/validar-stock.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.80.0",

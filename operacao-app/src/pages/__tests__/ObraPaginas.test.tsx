@@ -101,6 +101,32 @@ const OBRA = {
   n_extras: 1,
 };
 
+const ALERTAS = [
+  {
+    tipo: "fim_ultrapassado", gravidade: 1, tarefa_id: "t4", obra_id: "o1", obra_codigo: "OB-2026-00001",
+    obra_titulo: "Remodelação WC", tarefa_nome: "Pintura", pessoas: ["u-tec"], pessoas_nomes: ["Tiago Técnico"],
+    desde: agora.toISOString(), minutos_atraso: 1500, detalhe: "Devia ter acabado a 01/10 e voltou para refazer", atraso_id: null,
+  },
+  {
+    tipo: "nao_iniciada", gravidade: 2, tarefa_id: "t2", obra_id: "o1", obra_codigo: "OB-2026-00001",
+    obra_titulo: "Remodelação WC", tarefa_nome: "Remoção de entulho", pessoas: ["u-tec"], pessoas_nomes: ["Tiago Técnico"],
+    desde: agora.toISOString(), minutos_atraso: 90, detalhe: "Devia ter começado a 02/10 às 08:00", atraso_id: null,
+  },
+  {
+    tipo: "cliente_por_avisar", gravidade: 3, tarefa_id: "t1", obra_id: "o1", obra_codigo: "OB-2026-00001",
+    obra_titulo: "Remodelação WC", tarefa_nome: "Demolição de revestimentos", pessoas: ["u-tec"], pessoas_nomes: ["Tiago Técnico"],
+    desde: agora.toISOString(), minutos_atraso: 480, detalhe: "Acesso / cliente: sem chave da porta · novo fim 05/10", atraso_id: "a1",
+  },
+];
+
+const ATRASOS = [
+  {
+    id: "a1", obra_id: "o1", tarefa_id: "t1", motivo: "secagem", contexto: "Parede ainda húmida",
+    minutos_extra: 480, novo_fim: hoje, fim_anterior: hoje, registado_por: "u-tec", registado_em: agora.toISOString(),
+    cliente_avisado: false, cliente_avisado_em: null, cliente_avisado_por: null, nota_cliente: null,
+  },
+];
+
 const tarefaPrevista = (id: string, nome: string, p: Record<string, unknown> = {}) => ({
   id,
   ordem: 1000 + Number(id.replace(/\D/g, "") || 1),
@@ -354,6 +380,21 @@ vi.mock("../../lib/obras", () => ({
   atribuirTarefa: vi.fn(),
   registarExtra: vi.fn(),
   decidirExtra: vi.fn(),
+  // Atrasos e alertas do supervisor.
+  EVENTO_ALERTAS: "ops:alertas-mudaram",
+  avisarAlertasMudaram: vi.fn(),
+  alertasDeSupervisao: vi.fn(async () => ALERTAS),
+  atrasosDaObra: vi.fn(async () => ATRASOS),
+  obterTarefa: vi.fn(async (id: string) => TAREFAS.find((t) => t.id === id) ?? null),
+  registarAtraso: vi.fn(async () => ({
+    ok: true, simulado: false, atraso_id: "a9", fim_anterior: hoje, novo_fim: hoje, minutos_estimativa: 420,
+    empurradas: [], fim_obra_anterior: hoje, fim_obra_novo: hoje,
+  })),
+  simularAtraso: vi.fn(async () => ({
+    ok: true, simulado: true, atraso_id: null, fim_anterior: hoje, novo_fim: hoje, minutos_estimativa: 420,
+    empurradas: [], fim_obra_anterior: hoje, fim_obra_novo: hoje,
+  })),
+  marcarClienteAvisado: vi.fn(async () => ({ ok: true, ja_avisado: false })),
 }));
 
 import Obras from "../Obras";
@@ -486,6 +527,55 @@ describe("páginas de Obras (fumo)", () => {
     auth.funcao = "gestor";
     em("/validar", <Validar />);
     expect(await screen.findByText(/a validação tem de ser de outra pessoa/)).toBeInTheDocument();
+  });
+
+  it("Validar: alertas no topo, o pior primeiro, com 'Cliente avisado'", async () => {
+    auth.funcao = "supervisor";
+    auth.businessUserId = "u-s";
+    const { container } = em("/validar", <Validar />);
+    expect(await screen.findByText("1 tarefa passou do fim previsto")).toBeInTheDocument();
+    expect(screen.getByText("1 tarefa não iniciada a tempo")).toBeInTheDocument();
+    expect(screen.getByText("1 atraso por avisar ao cliente")).toBeInTheDocument();
+    const tipos = [...container.querySelectorAll("[data-alerta]")].map((e) => e.getAttribute("data-alerta"));
+    expect(tipos).toEqual(["fim_ultrapassado", "nao_iniciada", "cliente_por_avisar"]);
+    fireEvent.click(screen.getByRole("button", { name: "Cliente avisado" }));
+    fireEvent.change(screen.getByPlaceholderText(/liguei à D. Maria/), { target: { value: "Liguei ao cliente" } });
+    fireEvent.click(screen.getByRole("button", { name: "Marcar como avisado" }));
+    await waitFor(() => expect(obras.marcarClienteAvisado).toHaveBeenCalledWith("a1", "Liguei ao cliente"));
+  });
+
+  it("Obra: fim original vs revisto, 'Avisar o cliente' e o Gantt recebe o plano original", async () => {
+    vi.mocked(obras.obterObra).mockResolvedValueOnce({ ...OBRA, fim_planeado: "2026-10-09", fim_original: "2026-10-06", n_alertas: 2 } as never);
+    vi.mocked(obras.tarefasDaObra).mockResolvedValueOnce([
+      { ...TAREFAS[0], inicio_original: "2026-10-01", fim_original: "2026-10-01", n_atrasos: 1,
+        ultimo_atraso: { ...ATRASOS[0], motivo: "secagem" } as never, atrasada_inicio: false },
+      ...TAREFAS.slice(1),
+    ]);
+    em("/obras/OB-2026-00001", <ObraDetalhe />, "/obras/:codigo");
+    expect(await screen.findByText(/original 06\/10\/2026, \+3 dias úteis/)).toBeInTheDocument();
+    expect(screen.getByTestId("avisar-cliente")).toHaveTextContent("Parede ainda húmida");
+    expect(screen.getByText("2 alertas")).toBeInTheDocument();
+  });
+
+  it("Minhas tarefas: 'Vai atrasar' abre a folha e regista com contexto", async () => {
+    auth.funcao = "tecnico";
+    em("/minhas-tarefas", <MinhasTarefas />);
+    fireEvent.click(await screen.findByText("Remoção de entulho"));
+    // A que está a correr está sempre aberta: a 2.ª "Vai atrasar" é a da tarefa aberta agora.
+    const vai = screen.getAllByText(/Vai atrasar/);
+    fireEvent.click(vai[vai.length - 1]);
+    expect(await screen.findByText("Mais quanto tempo?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Material em falta" }));
+    fireEvent.change(screen.getByPlaceholderText(/betonilha/), { target: { value: "Falta o cimento cola" } });
+    fireEvent.change(screen.getByLabelText("Quanto tempo a mais"), { target: { value: "2" } });
+    fireEvent.click(screen.getByRole("button", { name: "Registar atraso" }));
+    await waitFor(() =>
+      expect(obras.registarAtraso).toHaveBeenCalledWith({
+        tarefaId: "t2", motivo: "material_em_falta", contexto: "Falta o cimento cola",
+        minutosExtra: 120, novoFim: null, empurrar: true,
+      })
+    );
+    expect(await screen.findByText(/Atraso registado: "Remoção de entulho"/)).toBeInTheDocument();
   });
 
   it("Validar: o técnico é mandado embora", () => {

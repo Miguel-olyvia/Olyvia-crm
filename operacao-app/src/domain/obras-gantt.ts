@@ -14,6 +14,7 @@ import {
   diasUteisEntre,
   distanciaUteis,
   ehDiaUtil,
+  formatarMinutos,
   nivelDeAlerta,
   somarDias,
   somarDiasUteis,
@@ -46,6 +47,22 @@ export interface TarefaGantt {
   dependeDe: string | null;
   /** Tarefas (micro, não fases) de que esta depende: só deve começar depois de todas acabarem. */
   dependencias?: readonly string[];
+  /** Plano original (baseline), yyyy-mm-dd. Sem isto, não há sombra do plano. */
+  inicioOriginal?: string | null;
+  fimOriginal?: string | null;
+  /** Devia ter começado e ainda não começou. */
+  atrasadaInicio?: boolean;
+  /** O último atraso registado (e quantos houve, em `n`). */
+  atraso?: AtrasoGantt | null;
+}
+
+export interface AtrasoGantt {
+  motivo: string;
+  contexto: string;
+  minutosExtra: number | null;
+  clienteAvisado: boolean;
+  /** Quantos atrasos já se registaram nesta tarefa. */
+  n: number;
 }
 
 export interface Barra {
@@ -65,6 +82,8 @@ export type LinhaGantt =
       gasto: number;
       nivel: NivelAlerta;
       emAtraso: boolean;
+      /** A barra do plano original, quando difere do atual (senão null/ausente). */
+      barraOriginal?: Barra | null;
     };
 
 export interface Semana {
@@ -134,7 +153,10 @@ export function montarGantt(args: {
   const { fases, tarefas, hoje, recolhidas = new Set(), margem = 1, escala = "dia" } = args;
   const minimoDias = args.minimoDias ?? MINIMO_DIAS[escala];
 
-  const datas = tarefas.flatMap((t) => [t.inicio, t.fim].filter((x): x is string => !!x));
+  // O plano original também conta, para a sombra caber na janela.
+  const datas = tarefas.flatMap((t) =>
+    [t.inicio, t.fim, t.inicioOriginal, t.fimOriginal].filter((x): x is string => !!x)
+  );
   let ini = datas.length ? datas.reduce((a, b) => (a < b ? a : b)) : hoje;
   let fim = datas.length ? datas.reduce((a, b) => (a > b ? a : b)) : hoje;
   if (hoje < ini) ini = hoje;
@@ -192,6 +214,7 @@ export function montarGantt(args: {
         gasto: t.minutosPrevistos > 0 ? t.minutosReais / t.minutosPrevistos : 0,
         nivel: nivelDeAlerta(t.minutosReais, t.minutosPrevistos),
         emAtraso: aberta && !!t.fim && t.fim < hoje,
+        barraOriginal: planoMudou(t) ? barraDe(dias, t.inicioOriginal ?? t.inicio, t.fimOriginal ?? t.fim) : null,
       });
     }
   }
@@ -616,4 +639,142 @@ export function larguraAjustadaAosNomes(
   if (!validas.length) return limitarLarguraNomes(atual);
   const precisa = Math.max(...validas.map((m) => atual - m.ocupado + m.natural));
   return limitarLarguraNomes(Math.ceil(precisa) + 4);
+}
+
+/* ─────────────────────────── Plano original e atrasos ─────────────────────────── */
+
+/** As datas atuais diferem do plano original? (Sem plano original, não.) */
+export function planoMudou(t: Pick<TarefaGantt, "inicio" | "fim" | "inicioOriginal" | "fimOriginal">): boolean {
+  if (!t.inicioOriginal && !t.fimOriginal) return false;
+  const iniOrig = t.inicioOriginal ?? t.inicio;
+  const fimOrig = t.fimOriginal ?? t.fim ?? iniOrig;
+  return iniOrig !== t.inicio || fimOrig !== (t.fim ?? t.inicio);
+}
+
+/**
+ * Quantos dias úteis o fim atual passa do fim original (negativo se adiantou;
+ * 0 se faltar alguma das datas). Fins de semana encostam ao dia útil seguinte.
+ */
+export function diasUteisDeAtraso(fimOriginal: string | null | undefined, fimAtual: string | null | undefined): number {
+  if (!fimOriginal || !fimAtual) return 0;
+  return distanciaUteis(somarDiasUteis(fimOriginal, 0), somarDiasUteis(fimAtual, 0));
+}
+
+/**
+ * A parte da barra atual (em píxeis, relativa à grelha) que vai além do fim
+ * original, para a pintar às riscas. Null se não passa do original. Serve a
+ * qualquer escala: só depende de `ppd` (ver `pxPorDia`).
+ */
+export function segmentoAlemDoOriginal(args: {
+  dias: readonly string[];
+  barra: Barra;
+  fimOriginal: string | null | undefined;
+  ppd: number;
+  folga: number;
+  minimo?: number;
+}): { left: number; width: number } | null {
+  const { dias, barra, fimOriginal, ppd, folga, minimo } = args;
+  if (!fimOriginal || !dias.length) return null;
+  const g = geometriaBarra(barra, ppd, folga, minimo);
+  const fimBarra = g.left + g.width;
+  const xFimOriginal = xDeColuna(colunaDe(dias, fimOriginal) + 1, ppd) - folga;
+  const left = Math.max(g.left, xFimOriginal);
+  const width = fimBarra - left;
+  return width > 0 ? { left, width } : null;
+}
+
+/** "23 out". */
+export function dataCurta(iso: string): string {
+  const [, m, d] = iso.split("-").map(Number);
+  return `${d} ${MESES[m - 1]}`;
+}
+
+/** "secagem" ou "falta_material" → "Secagem", "Falta material"; texto livre fica como vem (1.ª maiúscula). */
+function rotuloMotivo(motivo: string): string {
+  const m = motivo.trim();
+  if (!m) return "";
+  const legivel = /^[a-z0-9_]+$/.test(m) ? m.replace(/_/g, " ") : m;
+  return legivel[0].toUpperCase() + legivel.slice(1);
+}
+
+const plural = (n: number, um: string, varios: string) => `${n} ${Math.abs(n) === 1 ? um : varios}`;
+
+/**
+ * "Atrasada +2 dias — Secagem: parede ainda húmida (cliente avisado)". Os dias
+ * vêm do fim atual contra o original; sem isso, dos minutos extra.
+ */
+export function textoAtraso(t: Pick<TarefaGantt, "fim" | "inicio" | "fimOriginal" | "atraso">): string | null {
+  const a = t.atraso;
+  if (!a) return null;
+  const dias = diasUteisDeAtraso(t.fimOriginal, t.fim ?? t.inicio);
+  const quanto =
+    dias > 0
+      ? ` +${plural(dias, "dia", "dias")}`
+      : a.minutosExtra != null && a.minutosExtra > 0
+        ? ` +${formatarMinutos(a.minutosExtra)}`
+        : "";
+  const motivo = rotuloMotivo(a.motivo ?? "");
+  const contexto = (a.contexto ?? "").trim();
+  const porque = motivo && contexto ? `${motivo}: ${contexto}` : motivo || contexto;
+  const vezes = a.n > 1 ? ` · ${a.n} atrasos registados` : "";
+  return `Atrasada${quanto}${porque ? ` — ${porque}` : ""} (${a.clienteAvisado ? "cliente avisado" : "cliente por avisar"})${vezes}`;
+}
+
+/** Atrasada: atraso registado, não começou a tempo, ou o fim passou do original. */
+export function tarefaAtrasada(t: TarefaGantt): boolean {
+  return !!t.atraso || !!t.atrasadaInicio || diasUteisDeAtraso(t.fimOriginal, t.fim ?? t.inicio) > 0;
+}
+
+export interface ResumoAtrasos {
+  /** Último fim do plano atual. */
+  fimPrevisto: string | null;
+  /** Último fim do plano original (onde falta o original, conta o atual). */
+  fimOriginal: string | null;
+  /** fimPrevisto − fimOriginal, em dias úteis. */
+  diasUteis: number;
+  atrasadas: number;
+  porAvisar: number;
+  naoIniciadas: number;
+}
+
+/**
+ * O resumo do topo do Gantt. Null quando nenhuma tarefa traz plano original
+ * nem dados de atraso (o Gantt fica como era).
+ */
+export function resumoAtrasos(tarefas: readonly TarefaGantt[]): ResumoAtrasos | null {
+  const comDados = tarefas.some(
+    (t) => !!t.inicioOriginal || !!t.fimOriginal || !!t.atraso || t.atrasadaInicio !== undefined
+  );
+  if (!comDados) return null;
+  const ultimo = (xs: (string | null | undefined)[]) =>
+    xs.filter((x): x is string => !!x).reduce<string | null>((a, b) => (a == null || b > a ? b : a), null);
+  const fimPrevisto = ultimo(tarefas.map((t) => t.fim ?? t.inicio));
+  const fimOriginal = ultimo(tarefas.map((t) => t.fimOriginal ?? t.fim ?? t.inicio));
+  return {
+    fimPrevisto,
+    fimOriginal,
+    diasUteis: diasUteisDeAtraso(fimOriginal, fimPrevisto),
+    atrasadas: tarefas.filter(tarefaAtrasada).length,
+    porAvisar: tarefas.filter((t) => !!t.atraso && !t.atraso.clienteAvisado).length,
+    naoIniciadas: tarefas.filter((t) => !!t.atrasadaInicio).length,
+  };
+}
+
+/** "Fim previsto: 23 out (original 17 out, +4 dias úteis) · 3 tarefas atrasadas · 1 por avisar o cliente". */
+export function textoResumoAtrasos(r: ResumoAtrasos): string {
+  const partes: string[] = [];
+  if (r.fimPrevisto) {
+    let fim = `Fim previsto: ${dataCurta(r.fimPrevisto)}`;
+    if (r.fimOriginal && r.diasUteis !== 0) {
+      const sinal = r.diasUteis > 0 ? "+" : "−";
+      fim += ` (original ${dataCurta(r.fimOriginal)}, ${sinal}${plural(Math.abs(r.diasUteis), "dia útil", "dias úteis")})`;
+    } else {
+      fim += " (no plano original)";
+    }
+    partes.push(fim);
+  }
+  partes.push(r.atrasadas ? plural(r.atrasadas, "tarefa atrasada", "tarefas atrasadas") : "sem tarefas atrasadas");
+  if (r.naoIniciadas) partes.push(plural(r.naoIniciadas, "não iniciada a tempo", "não iniciadas a tempo"));
+  if (r.porAvisar) partes.push(`${r.porAvisar} por avisar o cliente`);
+  return partes.join(" · ");
 }

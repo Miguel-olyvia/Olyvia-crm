@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  dataCurta,
+  diasUteisDeAtraso,
+  planoMudou,
+  resumoAtrasos,
+  segmentoAlemDoOriginal,
+  tarefaAtrasada,
+  textoAtraso,
+  textoResumoAtrasos,
+} from "../obras-gantt";
+import {
   avisosDeDependencia,
   barraDe,
   cabecalhoGantt,
@@ -458,5 +468,103 @@ describe("coluna dos nomes", () => {
   it("sem medidas (sem layout), fica como está", () => {
     expect(larguraAjustadaAosNomes(300, [])).toBe(300);
     expect(larguraAjustadaAosNomes(300, [{ ocupado: 0, natural: 0 }])).toBe(300);
+  });
+});
+
+describe("plano original e atrasos", () => {
+  it("planoMudou só quando há original e difere do atual", () => {
+    expect(planoMudou(t({}))).toBe(false);
+    expect(planoMudou(t({ inicioOriginal: "2026-10-05", fimOriginal: "2026-10-05" }))).toBe(false);
+    expect(planoMudou(t({ inicioOriginal: "2026-10-05", fimOriginal: "2026-10-02", fim: "2026-10-05" }))).toBe(true);
+    expect(planoMudou(t({ fimOriginal: "2026-10-06" }))).toBe(true);
+  });
+
+  it("diasUteisDeAtraso conta dias úteis entre fins (fins de semana não contam)", () => {
+    // sex 9 out → ter 13 out: 2 dias úteis
+    expect(diasUteisDeAtraso("2026-10-09", "2026-10-13")).toBe(2);
+    expect(diasUteisDeAtraso("2026-10-13", "2026-10-09")).toBe(-2);
+    expect(diasUteisDeAtraso("2026-10-09", "2026-10-09")).toBe(0);
+    // sábado encosta à segunda
+    expect(diasUteisDeAtraso("2026-10-10", "2026-10-12")).toBe(0);
+    expect(diasUteisDeAtraso(null, "2026-10-12")).toBe(0);
+    expect(diasUteisDeAtraso("2026-10-12", undefined)).toBe(0);
+  });
+
+  it("segmentoAlemDoOriginal: a parte da barra depois do fim original, em px, em cada escala", () => {
+    const dias = diasUteisEntre("2026-10-05", "2026-10-16");
+    // barra 5–9 out (col 0, 5 colunas); original acabava a 7 (col 2)
+    const barra = { col: 0, span: 5 };
+    for (const ppd of [44, 22, 6]) {
+      const seg = segmentoAlemDoOriginal({ dias, barra, fimOriginal: "2026-10-07", ppd, folga: 1 });
+      expect(seg).toEqual({ left: 3 * ppd - 1, width: 5 * ppd - 1 - (3 * ppd - 1) });
+    }
+    expect(segmentoAlemDoOriginal({ dias, barra, fimOriginal: "2026-10-09", ppd: 44, folga: 2 })).toBeNull();
+    expect(segmentoAlemDoOriginal({ dias, barra, fimOriginal: "2026-10-14", ppd: 44, folga: 2 })).toBeNull();
+    expect(segmentoAlemDoOriginal({ dias, barra, fimOriginal: null, ppd: 44, folga: 2 })).toBeNull();
+    // original acaba antes do início atual: a barra toda está além
+    expect(
+      segmentoAlemDoOriginal({ dias, barra: { col: 5, span: 2 }, fimOriginal: "2026-10-06", ppd: 44, folga: 2 })
+    ).toEqual({ left: 5 * 44 + 2, width: 2 * 44 - 4 });
+  });
+
+  it("montarGantt dá a barra original quando o plano mudou e alarga a janela para a incluir", () => {
+    const l = montarGantt({
+      fases: [{ id: "f1", ordem: 1, nome: "F" }],
+      tarefas: [t({ id: "x", inicio: "2026-10-12", fim: "2026-10-13", inicioOriginal: "2026-10-01", fimOriginal: "2026-10-02" })],
+      hoje: "2026-10-12",
+    });
+    expect(l.dias[0] <= "2026-10-01").toBe(true);
+    const linha = l.linhas.find((x) => x.tipo === "tarefa");
+    expect(linha?.tipo === "tarefa" && linha.barraOriginal).toEqual({ col: l.dias.indexOf("2026-10-01"), span: 2 });
+    const igual = montarGantt({ fases: [{ id: "f1", ordem: 1, nome: "F" }], tarefas: [t({ id: "y" })], hoje: "2026-10-05" });
+    const ly = igual.linhas.find((x) => x.tipo === "tarefa");
+    expect(ly?.tipo === "tarefa" && ly.barraOriginal).toBeNull();
+  });
+
+  it("textoAtraso descreve o último atraso", () => {
+    const atraso = { motivo: "secagem", contexto: "parede ainda húmida", minutosExtra: null, clienteAvisado: true, n: 1 };
+    expect(textoAtraso(t({ fimOriginal: "2026-10-05", fim: "2026-10-07", atraso }))).toBe(
+      "Atrasada +2 dias — Secagem: parede ainda húmida (cliente avisado)"
+    );
+    expect(
+      textoAtraso(t({ fim: "2026-10-05", atraso: { ...atraso, minutosExtra: 90, clienteAvisado: false, n: 3 } }))
+    ).toBe("Atrasada +1 h 30 min — Secagem: parede ainda húmida (cliente por avisar) · 3 atrasos registados");
+    expect(
+      textoAtraso(t({ fimOriginal: "2026-10-05", fim: "2026-10-06", atraso: { ...atraso, motivo: "falta_material", contexto: "" } }))
+    ).toBe("Atrasada +1 dia — Falta material (cliente avisado)");
+    expect(textoAtraso(t({}))).toBeNull();
+  });
+
+  it("resumoAtrasos: null sem dados; senão fim previsto vs original e contagens", () => {
+    expect(resumoAtrasos([t({}), t({ id: "b" })])).toBeNull();
+    const atraso = { motivo: "x", contexto: "", minutosExtra: null, clienteAvisado: false, n: 1 };
+    const lista = [
+      t({ id: "a", fim: "2026-10-23", fimOriginal: "2026-10-19", atraso }),
+      t({ id: "b", fim: "2026-10-16", fimOriginal: "2026-10-16", atrasadaInicio: true }),
+      t({ id: "c", fim: "2026-10-14", fimOriginal: "2026-10-13" }),
+      t({ id: "d", fim: "2026-10-12", atrasadaInicio: false }),
+    ];
+    const r = resumoAtrasos(lista);
+    expect(r).toEqual({
+      fimPrevisto: "2026-10-23",
+      fimOriginal: "2026-10-19",
+      diasUteis: 4,
+      atrasadas: 3,
+      porAvisar: 1,
+      naoIniciadas: 1,
+    });
+    expect(tarefaAtrasada(lista[3])).toBe(false);
+    expect(textoResumoAtrasos(r!)).toBe(
+      "Fim previsto: 23 out (original 19 out, +4 dias úteis) · 3 tarefas atrasadas · 1 não iniciada a tempo · 1 por avisar o cliente"
+    );
+  });
+
+  it("textoResumoAtrasos sem desvio e com adiantamento", () => {
+    const base = { fimPrevisto: "2026-10-17", fimOriginal: "2026-10-17", diasUteis: 0, atrasadas: 0, porAvisar: 0, naoIniciadas: 0 };
+    expect(textoResumoAtrasos(base)).toBe("Fim previsto: 17 out (no plano original) · sem tarefas atrasadas");
+    expect(textoResumoAtrasos({ ...base, fimPrevisto: "2026-10-16", diasUteis: -1, atrasadas: 1 })).toBe(
+      "Fim previsto: 16 out (original 17 out, −1 dia útil) · 1 tarefa atrasada"
+    );
+    expect(dataCurta("2026-10-23")).toBe("23 out");
   });
 });

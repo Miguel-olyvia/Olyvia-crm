@@ -425,6 +425,81 @@ CREATE TABLE IF NOT EXISTS public.ops_obra_extra (
 
 CREATE INDEX IF NOT EXISTS ops_obra_extra_obra_idx ON public.ops_obra_extra (obra_id, estado);
 
+-- Atrasos — "vai demorar mais" ANTES de demorar (pedido do supervisor):
+--   · o plano ORIGINAL (baseline) fica guardado na 1.ª vez que a tarefa é
+--     atrasada ou replaneada com a obra em curso — nunca mais se sobrescreve
+--     (trigger ops_obra_tarefa_baseline, mais abaixo). É contra ele que o
+--     Gantt desenha a sombra e a ficha diz "+N dias";
+--   · `minutos_estimativa` = a estimativa final de mão de obra (pessoa × min)
+--     depois dos atrasos. NULL = igual ao previsto. `minutos_previstos` NÃO
+--     muda: as métricas comparam o real com o que se previu;
+--   · cada atraso fica registado com motivo + contexto, e com o "cliente
+--     avisado" (quem, quando, o que se disse) — o supervisor vê o que falta.
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS inicio_original date;
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS fim_original date;
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS minutos_estimativa integer
+  CHECK (minutos_estimativa IS NULL OR minutos_estimativa > 0);
+-- A hora a que o dia de obra começa (Europe/Lisbon). Uma tarefa por fazer
+-- conta como "não iniciada a tempo" 60 min depois desta hora no dia de início.
+ALTER TABLE public.ops_obra ADD COLUMN IF NOT EXISTS hora_inicio_dia time NOT NULL DEFAULT '08:00';
+
+CREATE TABLE IF NOT EXISTS public.ops_obra_tarefa_atraso (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id     uuid NOT NULL,
+  obra_id             uuid NOT NULL REFERENCES public.ops_obra(id) ON DELETE CASCADE,
+  tarefa_id           uuid NOT NULL REFERENCES public.ops_obra_tarefa(id) ON DELETE CASCADE,
+  motivo              text NOT NULL CHECK (motivo IN
+                        ('secagem','condicoes_edificio','material_em_falta','trabalho_imprevisto',
+                         'acesso_cliente','meteorologia','equipa','outro')),
+  contexto            text NOT NULL CHECK (length(btrim(contexto)) >= 5),
+  minutos_extra       integer CHECK (minutos_extra IS NULL OR minutos_extra > 0),
+  novo_fim            date,
+  fim_anterior        date,
+  registado_por       uuid,            -- → anew_users.id
+  registado_em        timestamptz NOT NULL DEFAULT now(),
+  cliente_avisado     boolean NOT NULL DEFAULT false,
+  cliente_avisado_em  timestamptz,
+  cliente_avisado_por uuid,            -- → anew_users.id
+  nota_cliente        text
+);
+
+CREATE INDEX IF NOT EXISTS ops_obra_tarefa_atraso_tarefa_idx
+  ON public.ops_obra_tarefa_atraso (tarefa_id, registado_em DESC);
+CREATE INDEX IF NOT EXISTS ops_obra_tarefa_atraso_avisar_idx
+  ON public.ops_obra_tarefa_atraso (organization_id, obra_id) WHERE NOT cliente_avisado;
+
+-- O plano original, guardado UMA vez: na 1.ª mudança de datas com a obra em
+-- curso (arrastar no Gantt, replanear, gravar a tarefa) — o registo de um
+-- atraso guarda-o ele próprio, em qualquer estado da obra. Depois de
+-- guardado, nunca mais muda (nem por engano de uma RPC).
+CREATE OR REPLACE FUNCTION public.ops_obra_tarefa_baseline()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO 'public'
+AS $$
+BEGIN
+  IF OLD.inicio_original IS NOT NULL OR OLD.fim_original IS NOT NULL THEN
+    NEW.inicio_original := OLD.inicio_original;
+    NEW.fim_original := OLD.fim_original;
+  ELSIF NEW.inicio_original IS NULL AND NEW.fim_original IS NULL
+    AND (NEW.inicio_planeado IS DISTINCT FROM OLD.inicio_planeado
+         OR NEW.fim_planeado IS DISTINCT FROM OLD.fim_planeado)
+    AND (OLD.inicio_planeado IS NOT NULL OR OLD.fim_planeado IS NOT NULL)
+    AND EXISTS (SELECT 1 FROM public.ops_obra o WHERE o.id = NEW.obra_id AND o.estado = 'em_curso') THEN
+    NEW.inicio_original := OLD.inicio_planeado;
+    NEW.fim_original := OLD.fim_planeado;
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_tarefa_baseline() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS ops_obra_tarefa_baseline ON public.ops_obra_tarefa;
+CREATE TRIGGER ops_obra_tarefa_baseline
+  BEFORE UPDATE ON public.ops_obra_tarefa
+  FOR EACH ROW EXECUTE FUNCTION public.ops_obra_tarefa_baseline();
+
 
 -- ============================================================
 -- 2b. O orçamento de um contrato — pelos MESMOS caminhos que o CRM
@@ -4267,6 +4342,503 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_decidir_extra(uuid, text, text) TO
 
 
 -- ============================================================
+-- 11b. Atrasos: registar, avisar o cliente, alertas do supervisor
+-- ============================================================
+-- O supervisor quer saber ANTES: quem ainda não começou o que devia ter
+-- começado, o que já passou do fim, e que atrasos ainda não foram ditos ao
+-- cliente. Quem está na tarefa (ou o supervisor, ou o gestor) regista o
+-- atraso com contexto e "mais quanto tempo"; o plano original fica guardado,
+-- as tarefas que dependem desta (e ainda não começaram) são empurradas em
+-- cadeia, e o novo fim da obra sai logo — para avisar o cliente.
+-- As notificações ficam DENTRO de Operações (o sino do CRM seria a 1.ª
+-- escrita no CRM: decisão pendente).
+
+-- Dias úteis entre duas datas: quantos se somam a `_de` para chegar a `_ate`
+-- (o inverso de ops_obra_somar_dias_uteis). 0 se `_ate` <= `_de`.
+CREATE OR REPLACE FUNCTION public.ops_obra_dias_uteis_entre(_de date, _ate date)
+RETURNS integer
+LANGUAGE sql IMMUTABLE
+SET search_path TO 'public'
+AS $$
+  SELECT CASE WHEN _de IS NULL OR _ate IS NULL OR _ate <= _de THEN 0
+    ELSE (SELECT count(*)::integer
+            FROM generate_series((_de + 1)::timestamp, _ate::timestamp, interval '1 day') d
+           WHERE extract(isodow FROM d) <= 5) END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_dias_uteis_entre(date, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_dias_uteis_entre(date, date) TO authenticated, service_role;
+
+-- A regra "não iniciada a tempo": por fazer, e já passaram 60 min da hora de
+-- início do dia (ops_obra.hora_inicio_dia, 08:00 por defeito → 09:00) no dia
+-- de início planeado — ou o dia já passou. Hora de Lisboa. A MESMA regra na
+-- vista (coluna atrasada_inicio, o Gantt) e nos alertas.
+CREATE OR REPLACE FUNCTION public.ops_obra_atrasada_inicio(
+  _estado text, _inicio date, _hora time, _agora timestamptz DEFAULT now())
+RETURNS boolean
+LANGUAGE sql STABLE
+SET search_path TO 'public'
+AS $$
+  SELECT COALESCE(
+    _estado = 'por_fazer' AND _inicio IS NOT NULL
+    AND (_agora AT TIME ZONE 'Europe/Lisbon')
+        >= (_inicio + COALESCE(_hora, time '08:00')) + interval '60 minutes',
+    false)
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_atrasada_inicio(text, date, time, timestamptz) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_atrasada_inicio(text, date, time, timestamptz) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.ops_obra_rotulo_atraso(_motivo text)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path TO 'public'
+AS $$
+  SELECT CASE _motivo
+    WHEN 'secagem' THEN 'Secagem / cura'
+    WHEN 'condicoes_edificio' THEN 'Condições do edifício'
+    WHEN 'material_em_falta' THEN 'Material em falta'
+    WHEN 'trabalho_imprevisto' THEN 'Trabalho imprevisto'
+    WHEN 'acesso_cliente' THEN 'Acesso / cliente'
+    WHEN 'meteorologia' THEN 'Meteorologia'
+    WHEN 'equipa' THEN 'Equipa'
+    ELSE 'Outro' END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_rotulo_atraso(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_rotulo_atraso(text) TO authenticated, service_role;
+
+-- Todos os alertas de uma organização (ou de uma obra), SEM filtro de quem
+-- vê. SECURITY INVOKER de propósito: na vista ops_v_obra_resumo (contagem)
+-- corre com a RLS de quem lê; dentro de rpc_ops_obra_alertas corre com os
+-- direitos da RPC, que filtra ela própria por função.
+--   gravidade 1  fim_ultrapassado    por fazer / em curso / rejeitada, com fim_planeado < hoje
+--   gravidade 2  nao_iniciada        por fazer, ops_obra_atrasada_inicio() — e o fim ainda não passou
+--                                    (senão já é fim_ultrapassado, que é pior)
+--   gravidade 3  cliente_por_avisar  atraso registado com cliente_avisado = false
+-- Só obras planeadas ou em curso (os por avisar: qualquer obra não cancelada).
+CREATE OR REPLACE FUNCTION public.ops_obra_alertas_lista(_org uuid, _obra uuid DEFAULT NULL)
+RETURNS TABLE (
+  tipo           text,
+  gravidade      smallint,
+  tarefa_id      uuid,
+  obra_id        uuid,
+  obra_codigo    text,
+  obra_titulo    text,
+  tarefa_nome    text,
+  pessoas        uuid[],
+  desde          timestamptz,
+  minutos_atraso integer,
+  detalhe        text,
+  atraso_id      uuid,
+  supervisor_id  uuid
+)
+LANGUAGE sql STABLE
+SET search_path TO 'public'
+AS $$
+  WITH agora AS (
+    SELECT (now() AT TIME ZONE 'Europe/Lisbon') AS ts,
+           (now() AT TIME ZONE 'Europe/Lisbon')::date AS hoje
+  ),
+  ta AS (
+    SELECT t.id, t.obra_id, t.nome, t.estado, t.inicio_planeado, t.fim_planeado,
+           o.codigo, o.titulo, o.supervisor_id AS sup, COALESCE(o.hora_inicio_dia, time '08:00') AS hora,
+           COALESCE((SELECT array_agg(tp.utilizador_id ORDER BY tp.atribuida_em, tp.utilizador_id)
+                       FROM public.ops_obra_tarefa_pessoa tp WHERE tp.tarefa_id = t.id), '{}'::uuid[]) AS pessoas
+      FROM public.ops_obra_tarefa t
+      JOIN public.ops_obra o ON o.id = t.obra_id
+     WHERE t.organization_id = _org
+       AND (_obra IS NULL OR t.obra_id = _obra)
+       AND o.estado IN ('planeada','em_curso')
+       AND t.estado IN ('por_fazer','em_curso','rejeitada')
+  )
+  SELECT 'fim_ultrapassado'::text, 1::smallint, ta.id, ta.obra_id, ta.codigo, ta.titulo, ta.nome, ta.pessoas,
+         ((ta.fim_planeado + 1)::timestamp AT TIME ZONE 'Europe/Lisbon'),
+         GREATEST(0, floor(extract(epoch FROM (ag.ts - (ta.fim_planeado + 1)::timestamp)) / 60))::integer,
+         'Devia ter acabado a ' || to_char(ta.fim_planeado, 'DD/MM') ||
+           CASE ta.estado WHEN 'por_fazer' THEN ' e ainda nem começou'
+                          WHEN 'rejeitada' THEN ' e voltou para refazer'
+                          ELSE ' e ainda está em curso' END,
+         NULL::uuid, ta.sup
+    FROM ta CROSS JOIN agora ag
+   WHERE ta.fim_planeado IS NOT NULL AND ta.fim_planeado < ag.hoje
+  UNION ALL
+  SELECT 'nao_iniciada'::text, 2::smallint, ta.id, ta.obra_id, ta.codigo, ta.titulo, ta.nome, ta.pessoas,
+         ((ta.inicio_planeado + ta.hora) AT TIME ZONE 'Europe/Lisbon'),
+         GREATEST(0, floor(extract(epoch FROM (ag.ts - (ta.inicio_planeado + ta.hora))) / 60))::integer,
+         'Devia ter começado a ' || to_char(ta.inicio_planeado, 'DD/MM') || ' às ' || to_char(ta.hora, 'HH24:MI')
+           || CASE WHEN cardinality(ta.pessoas) = 0 THEN ' · ninguém atribuído' ELSE '' END
+           || COALESCE(' · à espera de "' || dep.nome || '"', ''),
+         NULL::uuid, ta.sup
+    FROM ta CROSS JOIN agora ag
+    LEFT JOIN LATERAL (
+      SELECT d.nome FROM public.ops_obra_tarefa_dependencia x
+        JOIN public.ops_obra_tarefa d ON d.id = x.depende_de_id
+       WHERE x.tarefa_id = ta.id AND d.estado NOT IN ('feita','validada')
+       ORDER BY d.inicio_planeado NULLS LAST, d.nome LIMIT 1
+    ) dep ON true
+   WHERE public.ops_obra_atrasada_inicio(ta.estado, ta.inicio_planeado, ta.hora)
+     AND NOT (ta.fim_planeado IS NOT NULL AND ta.fim_planeado < ag.hoje)
+  UNION ALL
+  SELECT 'cliente_por_avisar'::text, 3::smallint, a.tarefa_id, a.obra_id, o.codigo, o.titulo, t.nome,
+         COALESCE((SELECT array_agg(tp.utilizador_id ORDER BY tp.atribuida_em, tp.utilizador_id)
+                     FROM public.ops_obra_tarefa_pessoa tp WHERE tp.tarefa_id = a.tarefa_id), '{}'::uuid[]),
+         a.registado_em,
+         COALESCE(a.minutos_extra,
+                  public.ops_obra_dias_uteis_entre(a.fim_anterior, a.novo_fim) * o.minutos_por_dia)::integer,
+         public.ops_obra_rotulo_atraso(a.motivo) || ': ' || a.contexto
+           || COALESCE(' · novo fim ' || to_char(a.novo_fim, 'DD/MM'), ''),
+         a.id, o.supervisor_id
+    FROM public.ops_obra_tarefa_atraso a
+    JOIN public.ops_obra o ON o.id = a.obra_id
+    JOIN public.ops_obra_tarefa t ON t.id = a.tarefa_id
+   WHERE a.organization_id = _org
+     AND (_obra IS NULL OR a.obra_id = _obra)
+     AND NOT a.cliente_avisado
+     AND o.estado <> 'cancelada'
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_alertas_lista(uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_alertas_lista(uuid, uuid) TO authenticated, service_role;
+
+-- Os alertas que EU devo ver: gestor/admin — todas as obras da organização;
+-- o supervisor de uma obra — as dessa obra; os outros — nenhum (lista vazia,
+-- não erro: o contador do menu pergunta sem saber a função). Pior primeiro.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_alertas(p_org uuid)
+RETURNS TABLE (
+  tipo           text,
+  gravidade      smallint,
+  tarefa_id      uuid,
+  obra_id        uuid,
+  obra_codigo    text,
+  obra_titulo    text,
+  tarefa_nome    text,
+  pessoas        uuid[],
+  pessoas_nomes  text[],
+  desde          timestamptz,
+  minutos_atraso integer,
+  detalhe        text,
+  atraso_id      uuid
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+#variable_conflict use_column
+DECLARE
+  v_eu     uuid;
+  v_funcao text;
+BEGIN
+  -- Primeiro quem chama (recusa quem não é desta organização), depois o resto.
+  SELECT q.utilizador_id, q.funcao INTO v_eu, v_funcao FROM public.ops_quem_sou(p_org) q;
+  IF NOT public.ops_pode(p_org, 'operations.orders.view') THEN
+    RETURN;
+  END IF;
+
+  RETURN QUERY
+  SELECT a.tipo, a.gravidade, a.tarefa_id, a.obra_id, a.obra_codigo, a.obra_titulo, a.tarefa_nome,
+         a.pessoas,
+         COALESCE((SELECT array_agg(COALESCE(u.name, 'Sem nome') ORDER BY p.k)
+                     FROM unnest(a.pessoas) WITH ORDINALITY AS p(id, k)
+                     LEFT JOIN public.anew_users u ON u.id = p.id), '{}'::text[]),
+         a.desde, a.minutos_atraso, a.detalhe, a.atraso_id
+    FROM public.ops_obra_alertas_lista(p_org, NULL) a
+   WHERE v_funcao IN ('admin','gestor') OR a.supervisor_id = v_eu
+   ORDER BY a.gravidade, a.minutos_atraso DESC NULLS LAST, a.obra_codigo, a.tarefa_nome;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_alertas(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_alertas(uuid) TO authenticated, service_role;
+
+-- Registar um atraso ("vai demorar mais"). Pode: quem está na tarefa
+-- (orders.execute), o supervisor DA OBRA (orders.confirm), o gestor/admin
+-- (orders.edit). Exige motivo e contexto (≥ 5 letras) e pelo menos um de:
+--   · p_minutos_extra — mão de obra a mais (pessoa × min). O calendário
+--     anda ceil(min ÷ pessoas ÷ minutos_por_dia) dias úteis: a partir do fim
+--     previsto, ou de hoje se o fim já passou (aí conta o dia de hoje);
+--   · p_novo_fim — a nova data de fim, dita por quem sabe.
+-- Guarda o plano original (se ainda não houver), muda fim_planeado e
+-- minutos_estimativa (minutos_previstos fica: é a base das métricas) e, com
+-- p_empurrar, empurra EM CADEIA as tarefas que dependem desta e ainda não
+-- começaram (por fazer, sem tempo registado) — só o necessário: quem tinha
+-- folga não mexe; quem começava no dia seguinte ao fim continua a começar no
+-- dia seguinte ao novo fim; a duração (dias úteis) mantém-se.
+-- p_simular = true faz tudo e desfaz no fim: é a pré-visualização do ecrã
+-- (novo fim da tarefa e da obra), sem gravar nada.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_registar_atraso(
+  p_tarefa_id     uuid,
+  p_motivo        text,
+  p_contexto      text,
+  p_minutos_extra integer DEFAULT NULL,
+  p_novo_fim      date    DEFAULT NULL,
+  p_empurrar      boolean DEFAULT true,
+  p_simular       boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_t         record;
+  v_quem      record;
+  v_motivo    text := nullif(btrim(coalesce(p_motivo, '')), '');
+  v_ctx       text := nullif(btrim(coalesce(p_contexto, '')), '');
+  v_simular   boolean := COALESCE(p_simular, false);
+  v_hoje      date := (now() AT TIME ZONE 'Europe/Lisbon')::date;
+  v_fim_ant   date;
+  v_novo      date;
+  v_dias      integer;
+  v_obra_ant  date;
+  v_obra_novo date;
+  v_estim     integer;
+  v_id        uuid;
+  v_fila      uuid[];
+  v_atual     uuid;
+  v_cfim      date;
+  v_cant      date;
+  v_antes     jsonb := '{}'::jsonb;   -- tarefa → fim antes de ser empurrada
+  v_mexidas   jsonb := '{}'::jsonb;   -- tarefa → {nome, datas antes e depois}
+  v_d         record;
+  v_req       date;
+  v_nf        date;
+  v_passos    integer := 0;
+  v_res       jsonb;
+BEGIN
+  SELECT t.*, o.estado AS obra_estado, o.supervisor_id AS obra_supervisor, o.minutos_por_dia AS mpd
+    INTO v_t
+    FROM public.ops_obra_tarefa t JOIN public.ops_obra o ON o.id = t.obra_id
+   WHERE t.id = p_tarefa_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Tarefa não encontrada.' USING ERRCODE = 'no_data_found';
+  END IF;
+
+  SELECT q.utilizador_id, q.funcao INTO v_quem FROM public.ops_quem_sou(v_t.organization_id) q;
+  IF NOT (
+       (v_quem.funcao IN ('admin','gestor') AND public.ops_pode(v_t.organization_id, 'operations.orders.edit'))
+    OR (v_t.obra_supervisor = v_quem.utilizador_id
+        AND public.ops_pode(v_t.organization_id, 'operations.orders.confirm'))
+    OR (EXISTS (SELECT 1 FROM public.ops_obra_tarefa_pessoa
+                 WHERE tarefa_id = p_tarefa_id AND utilizador_id = v_quem.utilizador_id)
+        AND public.ops_pode(v_t.organization_id, 'operations.orders.execute'))
+  ) THEN
+    RAISE EXCEPTION 'Só quem está na tarefa, o supervisor da obra ou o gestor registam um atraso.'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF v_t.obra_estado IN ('concluida','cancelada') THEN
+    RAISE EXCEPTION 'A obra está %; já não se registam atrasos.', v_t.obra_estado;
+  END IF;
+  IF v_t.estado NOT IN ('por_fazer','em_curso','rejeitada') THEN
+    RAISE EXCEPTION 'Esta tarefa já está %. Um atraso regista-se antes de acabar.', replace(v_t.estado, '_', ' ');
+  END IF;
+
+  -- Na pré-visualização ainda se está a escrever: só as contas importam.
+  IF NOT v_simular THEN
+    IF v_motivo IS NULL OR v_motivo NOT IN ('secagem','condicoes_edificio','material_em_falta',
+         'trabalho_imprevisto','acesso_cliente','meteorologia','equipa','outro') THEN
+      RAISE EXCEPTION 'Escolhe o motivo do atraso.' USING ERRCODE = 'check_violation';
+    END IF;
+    IF v_ctx IS NULL OR length(v_ctx) < 5 THEN
+      RAISE EXCEPTION 'Escreve o contexto do atraso (pelo menos 5 letras): é o que o supervisor e o cliente vão ler.'
+        USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  IF p_minutos_extra IS NOT NULL AND p_minutos_extra <= 0 THEN
+    RAISE EXCEPTION 'O tempo a mais tem de ser maior que zero.' USING ERRCODE = 'check_violation';
+  END IF;
+  IF p_minutos_extra IS NULL AND p_novo_fim IS NULL THEN
+    RAISE EXCEPTION 'Diz quanto tempo a mais (horas ou dias) ou a nova data de fim.' USING ERRCODE = 'check_violation';
+  END IF;
+
+  v_fim_ant := COALESCE(v_t.fim_planeado, v_t.inicio_planeado);
+  IF p_novo_fim IS NOT NULL THEN
+    IF v_fim_ant IS NOT NULL AND p_novo_fim < v_fim_ant THEN
+      RAISE EXCEPTION 'A nova data de fim (%) é antes do fim previsto (%). Um atraso só empurra para a frente.',
+        to_char(p_novo_fim, 'DD/MM/YYYY'), to_char(v_fim_ant, 'DD/MM/YYYY') USING ERRCODE = 'check_violation';
+    END IF;
+    IF p_novo_fim < v_hoje THEN
+      RAISE EXCEPTION 'A nova data de fim já passou.' USING ERRCODE = 'check_violation';
+    END IF;
+    v_novo := p_novo_fim;
+  ELSE
+    v_dias := ceil(p_minutos_extra::numeric / GREATEST(v_t.pessoas_previstas, 1) / GREATEST(v_t.mpd, 1))::integer;
+    IF v_fim_ant IS NULL OR v_fim_ant < v_hoje THEN
+      v_novo := public.ops_obra_somar_dias_uteis(v_hoje, GREATEST(v_dias - 1, 0));
+    ELSE
+      v_novo := public.ops_obra_somar_dias_uteis(v_fim_ant, v_dias);
+    END IF;
+  END IF;
+
+  SELECT max(COALESCE(fim_planeado, inicio_planeado)) INTO v_obra_ant
+    FROM public.ops_obra_tarefa WHERE obra_id = v_t.obra_id;
+
+  BEGIN
+    -- A tarefa: plano original (uma vez), novo fim, nova estimativa.
+    UPDATE public.ops_obra_tarefa
+       SET inicio_original = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
+                                  THEN inicio_planeado ELSE inicio_original END,
+           fim_original    = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
+                                  THEN fim_planeado ELSE fim_original END,
+           fim_planeado    = v_novo,
+           minutos_estimativa = CASE WHEN p_minutos_extra IS NULL THEN minutos_estimativa
+                                     ELSE COALESCE(minutos_estimativa, minutos_previstos) + p_minutos_extra END,
+           atualizada_em   = now()
+     WHERE id = p_tarefa_id
+     RETURNING minutos_estimativa INTO v_estim;
+
+    -- As dependentes, em cadeia (sem ciclos: o trigger das dependências não deixa).
+    IF COALESCE(p_empurrar, true) THEN
+      v_antes := jsonb_build_object(p_tarefa_id::text, v_fim_ant);
+      v_fila := ARRAY[p_tarefa_id];
+      WHILE COALESCE(array_length(v_fila, 1), 0) > 0 AND v_passos < 5000 LOOP
+        v_passos := v_passos + 1;
+        v_atual := v_fila[1];
+        v_fila := v_fila[2:array_length(v_fila, 1)];
+        SELECT COALESCE(fim_planeado, inicio_planeado) INTO v_cfim FROM public.ops_obra_tarefa WHERE id = v_atual;
+        CONTINUE WHEN v_cfim IS NULL;
+        v_cant := (v_antes ->> v_atual::text)::date;
+
+        FOR v_d IN
+          SELECT d.id, d.nome, d.inicio_planeado AS ini, COALESCE(d.fim_planeado, d.inicio_planeado) AS fim
+            FROM public.ops_obra_tarefa_dependencia x
+            JOIN public.ops_obra_tarefa d ON d.id = x.tarefa_id
+           WHERE x.depende_de_id = v_atual
+             AND d.estado = 'por_fazer' AND d.inicio_planeado IS NOT NULL
+             AND NOT EXISTS (SELECT 1 FROM public.ops_obra_registo r WHERE r.tarefa_id = d.id)
+           ORDER BY d.inicio_planeado, d.id
+        LOOP
+          -- Começava no dia seguinte ao fim da anterior → continua no dia
+          -- seguinte ao novo fim; começava no próprio dia → no próprio dia.
+          v_req := CASE WHEN v_cant IS NOT NULL AND v_d.ini > v_cant
+                        THEN public.ops_obra_somar_dias_uteis(v_cfim, 1)
+                        ELSE public.ops_obra_somar_dias_uteis(v_cfim, 0) END;
+          CONTINUE WHEN v_d.ini >= v_req;
+          v_nf := public.ops_obra_somar_dias_uteis(v_req, public.ops_obra_dias_uteis_entre(v_d.ini, v_d.fim));
+
+          UPDATE public.ops_obra_tarefa
+             SET inicio_original = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
+                                        THEN inicio_planeado ELSE inicio_original END,
+                 fim_original    = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
+                                        THEN fim_planeado ELSE fim_original END,
+                 inicio_planeado = v_req,
+                 fim_planeado    = v_nf,
+                 atualizada_em   = now()
+           WHERE id = v_d.id;
+
+          IF NOT (v_mexidas ? v_d.id::text) THEN
+            v_mexidas := v_mexidas || jsonb_build_object(v_d.id::text, jsonb_build_object(
+              'tarefa_id', v_d.id, 'nome', v_d.nome, 'inicio_anterior', v_d.ini, 'fim_anterior', v_d.fim));
+            v_antes := v_antes || jsonb_build_object(v_d.id::text, v_d.fim);
+          END IF;
+          v_mexidas := jsonb_set(v_mexidas, ARRAY[v_d.id::text, 'novo_inicio'], to_jsonb(v_req));
+          v_mexidas := jsonb_set(v_mexidas, ARRAY[v_d.id::text, 'novo_fim'], to_jsonb(v_nf));
+          v_fila := v_fila || v_d.id;
+        END LOOP;
+      END LOOP;
+    END IF;
+
+    SELECT max(COALESCE(fim_planeado, inicio_planeado)) INTO v_obra_novo
+      FROM public.ops_obra_tarefa WHERE obra_id = v_t.obra_id;
+
+    IF NOT v_simular THEN
+      INSERT INTO public.ops_obra_tarefa_atraso
+        (organization_id, obra_id, tarefa_id, motivo, contexto, minutos_extra, novo_fim, fim_anterior, registado_por)
+      VALUES
+        (v_t.organization_id, v_t.obra_id, p_tarefa_id, v_motivo, v_ctx, p_minutos_extra, v_novo,
+         v_t.fim_planeado, v_quem.utilizador_id)
+      RETURNING id INTO v_id;
+
+      PERFORM public.ops_obra_evento(v_t.organization_id, v_t.obra_id, 'atraso',
+        v_t.nome || ': ' || v_ctx, v_quem.utilizador_id,
+        jsonb_build_object('tarefa_id', p_tarefa_id, 'atraso_id', v_id, 'motivo', v_motivo,
+                           'minutos_extra', p_minutos_extra, 'fim_anterior', v_t.fim_planeado,
+                           'novo_fim', v_novo, 'empurradas', (SELECT count(*) FROM jsonb_object_keys(v_mexidas)),
+                           'fim_obra_anterior', v_obra_ant, 'fim_obra_novo', v_obra_novo));
+    END IF;
+
+    v_res := jsonb_build_object(
+      'ok', true,
+      'simulado', v_simular,
+      'atraso_id', v_id,
+      'fim_anterior', v_t.fim_planeado,
+      'novo_fim', v_novo,
+      'minutos_estimativa', v_estim,
+      'empurradas', COALESCE((SELECT jsonb_agg(e.value ORDER BY e.value->>'novo_inicio', e.value->>'nome')
+                                FROM jsonb_each(v_mexidas) e), '[]'::jsonb),
+      'fim_obra_anterior', v_obra_ant,
+      'fim_obra_novo', v_obra_novo);
+
+    IF v_simular THEN
+      -- Desfaz tudo o que este bloco mudou; as contas ficam em v_res.
+      RAISE EXCEPTION 'simulação' USING ERRCODE = 'OB001';
+    END IF;
+  EXCEPTION WHEN SQLSTATE 'OB001' THEN
+    NULL;
+  END;
+
+  RETURN v_res;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_registar_atraso(uuid, text, text, integer, date, boolean, boolean)
+  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_registar_atraso(uuid, text, text, integer, date, boolean, boolean)
+  TO authenticated, service_role;
+
+-- "Cliente avisado" (com o que se lhe disse). Supervisor da obra ou
+-- gestor/admin. Marcar outra vez não muda nada (fica quem avisou primeiro).
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_cliente_avisado(p_atraso_id uuid, p_nota text DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_a    record;
+  v_quem record;
+  v_nota text := nullif(btrim(coalesce(p_nota, '')), '');
+BEGIN
+  SELECT a.*, o.supervisor_id AS obra_supervisor, o.estado AS obra_estado, t.nome AS tarefa_nome
+    INTO v_a
+    FROM public.ops_obra_tarefa_atraso a
+    JOIN public.ops_obra o ON o.id = a.obra_id
+    JOIN public.ops_obra_tarefa t ON t.id = a.tarefa_id
+   WHERE a.id = p_atraso_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Atraso não encontrado.' USING ERRCODE = 'no_data_found';
+  END IF;
+
+  SELECT q.utilizador_id, q.funcao INTO v_quem FROM public.ops_quem_sou(v_a.organization_id) q;
+  IF NOT (
+       (v_quem.funcao IN ('admin','gestor') AND public.ops_pode(v_a.organization_id, 'operations.orders.edit'))
+    OR (v_a.obra_supervisor = v_quem.utilizador_id
+        AND public.ops_pode(v_a.organization_id, 'operations.orders.confirm'))
+  ) THEN
+    RAISE EXCEPTION 'Só o supervisor da obra ou o gestor marcam o cliente como avisado.'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+
+  IF v_a.cliente_avisado THEN
+    RETURN jsonb_build_object('ok', true, 'ja_avisado', true, 'cliente_avisado_em', v_a.cliente_avisado_em);
+  END IF;
+
+  UPDATE public.ops_obra_tarefa_atraso
+     SET cliente_avisado = true, cliente_avisado_em = now(),
+         cliente_avisado_por = v_quem.utilizador_id, nota_cliente = v_nota
+   WHERE id = p_atraso_id;
+
+  PERFORM public.ops_obra_evento(v_a.organization_id, v_a.obra_id, 'cliente_avisado',
+    v_a.tarefa_nome || COALESCE(': ' || v_nota, ''), v_quem.utilizador_id,
+    jsonb_build_object('atraso_id', p_atraso_id, 'tarefa_id', v_a.tarefa_id, 'nota', v_nota));
+
+  RETURN jsonb_build_object('ok', true, 'ja_avisado', false);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_cliente_avisado(uuid, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_cliente_avisado(uuid, text) TO authenticated, service_role;
+
+
+-- ============================================================
 -- 12. Previsto contra real — tempo e custo de mão de obra
 -- ============================================================
 -- Tempo: toda a gente que vê a obra. Custo: só quem tem `costs.view` nesta
@@ -4386,7 +4958,15 @@ SELECT
   -- todas as tarefas de que esta depende (setas do Gantt) e os materiais
   -- do CRM ligados no passo "Serviços do contrato".
   COALESCE(dp.dependencias, ARRAY[]::uuid[]) AS dependencias,
-  t.materiais_crm
+  t.materiais_crm,
+  -- Atrasos (secção 11b): o plano original, a estimativa final, quantos
+  -- atrasos, o último, e "devia ter começado e não começou".
+  t.inicio_original, t.fim_original, t.minutos_estimativa,
+  COALESCE(atr.n, 0)::integer AS n_atrasos,
+  atr.ultimo AS ultimo_atraso,
+  public.ops_obra_atrasada_inicio(t.estado, t.inicio_planeado, o.hora_inicio_dia) AS atrasada_inicio,
+  -- Para o ecrã do atraso converter "mais 2 h" em mão de obra (pessoa × min).
+  t.pessoas_previstas, o.minutos_por_dia
 FROM public.ops_obra_tarefa t
 JOIN public.ops_obra_fase f ON f.id = t.fase_id
 JOIN public.ops_obra o ON o.id = t.obra_id
@@ -4402,7 +4982,18 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
   SELECT array_agg(d.depende_de_id ORDER BY d.criada_em, d.depende_de_id) AS dependencias
     FROM public.ops_obra_tarefa_dependencia d WHERE d.tarefa_id = t.id
-) dp ON true;
+) dp ON true
+LEFT JOIN LATERAL (
+  SELECT count(*) AS n,
+         (SELECT jsonb_build_object(
+                   'id', a2.id, 'motivo', a2.motivo, 'contexto', a2.contexto,
+                   'minutos_extra', a2.minutos_extra, 'novo_fim', a2.novo_fim,
+                   'fim_anterior', a2.fim_anterior, 'registado_em', a2.registado_em,
+                   'registado_por', a2.registado_por, 'cliente_avisado', a2.cliente_avisado)
+            FROM public.ops_obra_tarefa_atraso a2 WHERE a2.tarefa_id = t.id
+           ORDER BY a2.registado_em DESC, a2.id DESC LIMIT 1) AS ultimo
+    FROM public.ops_obra_tarefa_atraso a WHERE a.tarefa_id = t.id
+) atr ON true;
 
 -- Uma linha por obra: o resumo da lista.
 CREATE OR REPLACE VIEW public.ops_v_obra_resumo
@@ -4419,10 +5010,15 @@ SELECT
   COALESCE(x.minutos_previstos, 0)::integer AS minutos_previstos,
   COALESCE(x.minutos_reais, 0)::numeric(12,1) AS minutos_reais,
   x.inicio_planeado, x.fim_planeado,
-  COALESCE(e.n_extras, 0)::integer        AS n_extras
+  COALESCE(e.n_extras, 0)::integer        AS n_extras,
+  -- Atrasos (secção 11b): o fim do plano ORIGINAL (o maior dos fins
+  -- originais, ou o planeado de quem nunca mexeu) e quantos alertas há.
+  x.fim_original,
+  COALESCE(al.n_alertas, 0)::integer      AS n_alertas
 FROM public.ops_obra o
 LEFT JOIN LATERAL (
   SELECT count(*) AS n_tarefas,
+         max(COALESCE(v.fim_original, v.fim_planeado)) AS fim_original,
          count(*) FILTER (WHERE v.estado IN ('feita','validada')) AS n_feitas,
          count(*) FILTER (WHERE v.estado = 'validada') AS n_validadas,
          count(*) FILTER (WHERE v.estado = 'feita') AS n_por_validar,
@@ -4435,7 +5031,10 @@ LEFT JOIN LATERAL (
 LEFT JOIN LATERAL (
   SELECT count(*) AS n_extras FROM public.ops_obra_extra e
    WHERE e.obra_id = o.id AND e.estado IN ('registado','aprovado')
-) e ON true;
+) e ON true
+LEFT JOIN LATERAL (
+  SELECT count(*) AS n_alertas FROM public.ops_obra_alertas_lista(o.organization_id, o.id)
+) al ON true;
 
 -- Alertas: tarefas abertas a ≥ 80 % do previsto. Os limiares são os de
 -- `nivelDeAlerta()` em src/domain/obras.ts.
@@ -4583,6 +5182,7 @@ ALTER TABLE public.ops_obra_modelo_fase   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ops_obra_modelo_tarefa ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ops_obra_servico_tarefa ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ops_obra_tarefa_dependencia ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ops_obra_tarefa_atraso ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS ops_obra_servico_tarefa_select ON public.ops_obra_servico_tarefa;
 CREATE POLICY ops_obra_servico_tarefa_select ON public.ops_obra_servico_tarefa
@@ -4597,7 +5197,8 @@ DECLARE
   t text;
 BEGIN
   FOREACH t IN ARRAY ARRAY['ops_obra_fase','ops_obra_tarefa','ops_obra_tarefa_pessoa',
-                           'ops_obra_registo','ops_obra_extra','ops_obra_tarefa_dependencia']
+                           'ops_obra_registo','ops_obra_extra','ops_obra_tarefa_dependencia',
+                           'ops_obra_tarefa_atraso']
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t || '_select', t);
     EXECUTE format(
@@ -4619,7 +5220,7 @@ BEGIN
   FOREACH t IN ARRAY ARRAY['ops_obra','ops_obra_fase','ops_obra_tarefa','ops_obra_tarefa_pessoa',
                            'ops_obra_registo','ops_obra_extra','ops_obra_modelo',
                            'ops_obra_modelo_fase','ops_obra_modelo_tarefa','ops_obra_servico_tarefa',
-                           'ops_obra_tarefa_dependencia']
+                           'ops_obra_tarefa_dependencia','ops_obra_tarefa_atraso']
   LOOP
     EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon', t);
     EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.%I FROM authenticated', t);
@@ -4639,16 +5240,17 @@ DO $v$
 DECLARE
   n integer;
 BEGIN
-  -- As 11 deste ficheiro, pelo nome (outros ficheiros acrescentam as suas
+  -- As 12 deste ficheiro, pelo nome (outros ficheiros acrescentam as suas
   -- ops_obra_* — ex.: obras-fotos.sql — e este ficheiro tem de poder voltar
   -- a correr depois deles).
   SELECT count(*) INTO n FROM pg_tables
    WHERE schemaname = 'public'
      AND tablename IN ('ops_obra','ops_obra_fase','ops_obra_tarefa','ops_obra_tarefa_pessoa',
                        'ops_obra_registo','ops_obra_extra','ops_obra_modelo','ops_obra_modelo_fase',
-                       'ops_obra_modelo_tarefa','ops_obra_servico_tarefa','ops_obra_tarefa_dependencia');
-  IF n <> 11 THEN
-    RAISE EXCEPTION 'Obras: esperadas 11 tabelas ops_obra*, encontradas %.', n;
+                       'ops_obra_modelo_tarefa','ops_obra_servico_tarefa','ops_obra_tarefa_dependencia',
+                       'ops_obra_tarefa_atraso');
+  IF n <> 12 THEN
+    RAISE EXCEPTION 'Obras: esperadas 12 tabelas ops_obra*, encontradas %.', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_tables
@@ -4695,6 +5297,6 @@ BEGIN
     RAISE EXCEPTION 'Obras: % função(ões) SECURITY DEFINER sem search_path.', n;
   END IF;
 
-  RAISE NOTICE 'Obras prontas: 11 tabelas com RLS, escrita só por RPC, nada escrito no CRM.';
+  RAISE NOTICE 'Obras prontas: 12 tabelas com RLS, escrita só por RPC, nada escrito no CRM.';
 END
 $v$;

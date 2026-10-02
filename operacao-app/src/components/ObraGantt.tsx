@@ -8,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { cx } from "./ui";
-import { AlertTriangle, ChevronRight, User } from "./icons";
+import { AlertTriangle, ChevronRight, Clock, User } from "./icons";
 import { ObraPega } from "./ObraIcones";
 import {
   formatarMinutos,
@@ -37,12 +37,18 @@ import {
   limitarLarguraNomes,
   montarGantt,
   pxPorDia,
+  resumoAtrasos,
+  segmentoAlemDoOriginal,
+  textoAtraso,
+  textoResumoAtrasos,
   xDeColuna,
   xHoje,
   type EscalaGantt,
   type FaseGantt,
   type TarefaGantt,
 } from "../domain/obras-gantt";
+
+export type { AtrasoGantt, TarefaGantt } from "../domain/obras-gantt";
 
 /**
  * O mapa de atividades da obra.
@@ -152,6 +158,7 @@ export default function ObraGantt({
   aoSelecionar,
   aoMudarDatas,
   aoLigar,
+  aoClicarAtraso,
 }: {
   fases: readonly FaseGantt[];
   /** Cada tarefa pode trazer `dependencias` (ids); sem isso, vale o `dependeDe` antigo. */
@@ -170,6 +177,8 @@ export default function ObraGantt({
    * prop não aparece a pega de ligar.
    */
   aoLigar?: (tarefaId: string, dependeDeId: string) => void;
+  /** Clicar na marca de atraso de uma tarefa (p.ex. abrir o histórico de atrasos). */
+  aoClicarAtraso?: (tarefaId: string) => void;
 }) {
   const [recolhidas, setRecolhidas] = useState<Set<string>>(new Set());
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
@@ -194,6 +203,7 @@ export default function ObraGantt({
   const cabecalho = useMemo(() => cabecalhoGantt(layout.dias, escala, hoje), [layout.dias, escala, hoje]);
   const juntas = useMemo(() => (escala === "mes" ? [] : juntasDeFimDeSemana(layout.dias)), [layout.dias, escala]);
   const posHoje = xHoje(layout.dias, hoje, ppd);
+  const resumo = useMemo(() => resumoAtrasos(tarefas), [tarefas]);
 
   const largura = layout.dias.length * ppd;
   // Folga entre barras: cabe na junta do fim de semana sem a tapar.
@@ -380,6 +390,26 @@ export default function ObraGantt({
         aRedimensionar && "cursor-col-resize select-none"
       )}
     >
+      {/* ── Resumo de atrasos (só com plano original ou atrasos registados) ── */}
+      {resumo && (
+        <div
+          data-gantt-resumo
+          className={cx(
+            "flex items-center gap-1.5 border-b px-3 py-1.5 text-[12px]",
+            resumo.porAvisar > 0
+              ? "border-red-100 bg-red-50/70 text-red-800"
+              : resumo.atrasadas > 0 || resumo.diasUteis > 0
+                ? "border-amber-100 bg-amber-50/70 text-amber-800"
+                : "border-slate-100 bg-slate-50/60 text-slate-600"
+          )}
+        >
+          <Clock width={13} height={13} className="shrink-0" aria-hidden />
+          <span className="min-w-0 truncate" title={textoResumoAtrasos(resumo)}>
+            {textoResumoAtrasos(resumo)}
+          </span>
+        </div>
+      )}
+
       {/* ── Escala ── */}
       <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
         {/* Avisos de dependência (não impedem nada) */}
@@ -500,6 +530,15 @@ export default function ObraGantt({
                 >
                   {l.tarefa.nome}
                 </span>
+                {l.tarefa.atrasadaInicio && (
+                  <span
+                    data-nao-iniciada
+                    className="shrink-0 rounded bg-red-100 px-1 text-[10px] font-medium leading-4 text-red-700 ring-1 ring-inset ring-red-200"
+                    title="Devia ter começado e ainda não começou"
+                  >
+                    não iniciada
+                  </span>
+                )}
                 <span
                   className={cx(
                     "shrink-0 font-mono text-[11px] tabular",
@@ -618,8 +657,29 @@ export default function ObraGantt({
                     const arrastavel = podeEditar && t.estado !== "feita" && t.estado !== "validada";
                     const aArrastar = arrasto?.id === t.id;
                     const g = geometriaBarra(v, ppd, folga);
+                    const bo = l.barraOriginal;
+                    const gOriginal = bo ? geometriaBarra(bo, ppd, folga, 4) : null;
+                    // Durante o arrasto o plano ainda não mudou: não pinta o "além do original".
+                    const alem =
+                      t.fimOriginal && !aArrastar
+                        ? segmentoAlemDoOriginal({ dias: layout.dias, barra: v, fimOriginal: t.fimOriginal, ppd, folga })
+                        : null;
+                    const porAvisar = !!t.atraso && !t.atraso.clienteAvisado;
+                    const txtAtraso = textoAtraso(t);
+                    const xMarca = g.left + g.width + 2;
+                    const larguraMarca = t.atraso ? (t.atraso.n > 1 ? 30 : 18) : 0;
                     return (
                       <>
+                      {gOriginal && bo && (
+                        // O plano original: contorno tracejado, fino, por baixo da barra atual.
+                        <div
+                          data-plano-original
+                          aria-hidden
+                          className="pointer-events-none absolute h-1 rounded-sm border border-dashed border-slate-400 bg-slate-100/70"
+                          style={{ left: gOriginal.left, width: gOriginal.width, top: ALTURA_LINHA - 6 }}
+                          title={`Plano original: ${t.inicioOriginal ?? t.inicio} a ${t.fimOriginal ?? t.fim}`}
+                        />
+                      )}
                       <div
                         role="button"
                         tabIndex={0}
@@ -637,17 +697,48 @@ export default function ObraGantt({
                           aArrastar && "z-10 cursor-grabbing shadow-elevated",
                           aArrastar && avisos.length > 0 && "ring-2 ring-amber-500",
                           selecionada === t.id && "outline outline-2 outline-brand",
-                          l.emAtraso && "ring-red-400"
+                          l.emAtraso && "ring-red-400",
+                          t.atrasadaInicio && "ring-2 ring-red-500"
                         )}
                         style={g}
                         data-tarefa-id={t.id}
-                        title={`${t.nome} — ${formatarMinutos(t.minutosReais)} de ${formatarMinutos(t.minutosPrevistos)}`}
+                        data-nao-iniciada={t.atrasadaInicio || undefined}
+                        title={[
+                          `${t.nome} — ${formatarMinutos(t.minutosReais)} de ${formatarMinutos(t.minutosPrevistos)}`,
+                          t.atrasadaInicio ? "Não iniciada a tempo" : null,
+                          txtAtraso,
+                        ]
+                          .filter(Boolean)
+                          .join("\n")}
                       >
                         {/* O real, por dentro do planeado */}
                         <div
                           className={cx("absolute inset-y-0 left-0", COR_GASTO[l.nivel])}
                           style={{ width: `${Math.min(1, l.gasto) * 100}%` }}
                         />
+                        {/* O que vai além do fim original: às riscas (vermelho se o cliente não foi avisado) */}
+                        {alem && (
+                          <div
+                            data-alem-original={porAvisar ? "por-avisar" : "avisado"}
+                            aria-hidden
+                            className="pointer-events-none absolute inset-y-0"
+                            style={{
+                              left: alem.left - g.left,
+                              width: alem.width,
+                              backgroundImage: `repeating-linear-gradient(135deg, ${
+                                porAvisar ? "rgba(220,38,38,.55)" : "rgba(217,119,6,.5)"
+                              } 0 4px, transparent 4px 8px)`,
+                              boxShadow: `inset 2px 0 0 ${porAvisar ? "#dc2626" : "#d97706"}`,
+                            }}
+                          />
+                        )}
+                        {/* Não iniciada a tempo: o início da barra pulsa a vermelho */}
+                        {t.atrasadaInicio && (
+                          <span
+                            aria-hidden
+                            className="pointer-events-none absolute inset-y-0 left-0 w-1.5 animate-pulse bg-red-500"
+                          />
+                        )}
                         {t.aCorrer > 0 && (
                           <span className="relative ml-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-white ring-2 ring-brand" />
                         )}
@@ -678,6 +769,33 @@ export default function ObraGantt({
                           </span>
                         )}
                       </div>
+                      {t.atraso && txtAtraso && (
+                        // Marca de atraso, logo a seguir ao fim da barra.
+                        <button
+                          type="button"
+                          data-marca-atraso={t.id}
+                          title={txtAtraso}
+                          aria-label={txtAtraso}
+                          aria-disabled={!aoClicarAtraso || undefined}
+                          tabIndex={aoClicarAtraso ? 0 : -1}
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            aoClicarAtraso?.(t.id);
+                          }}
+                          className={cx(
+                            "absolute top-1/2 z-10 flex h-4 -translate-y-1/2 items-center gap-0.5 rounded-full px-0.5 text-[9px] font-semibold leading-none ring-1",
+                            porAvisar
+                              ? "bg-red-50 text-red-700 ring-red-300"
+                              : "bg-amber-50 text-amber-700 ring-amber-300",
+                            aoClicarAtraso ? "cursor-pointer hover:brightness-95" : "cursor-default"
+                          )}
+                          style={{ left: xMarca }}
+                        >
+                          <Clock width={11} height={11} aria-hidden />
+                          {t.atraso.n > 1 && <span className="tabular pr-0.5">{t.atraso.n}</span>}
+                        </button>
+                      )}
                       {podeLigar && !aArrastar && (
                         // Pega de ligar: arrastar do fim desta barra para a tarefa que depende dela.
                         <span
@@ -696,7 +814,7 @@ export default function ObraGantt({
                               ? "opacity-100"
                               : "opacity-0 group-hover/linha:opacity-100 [@media(hover:none)]:opacity-60"
                           )}
-                          style={{ left: g.left + g.width + 2 }}
+                          style={{ left: xMarca + larguraMarca }}
                         />
                       )}
                       </>
@@ -784,6 +902,37 @@ export default function ObraGantt({
           <span className="h-0.5 w-4 bg-red-600" />
           Começa antes de a anterior acabar
         </span>
+        {resumo && (
+          <>
+            <span className="text-slate-300">|</span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-1.5 w-4 rounded-sm border border-dashed border-slate-400 bg-slate-100" />
+              Plano original
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="h-2.5 w-4 rounded-sm"
+                style={{ backgroundImage: "repeating-linear-gradient(135deg, rgba(217,119,6,.6) 0 3px, transparent 3px 6px)" }}
+              />
+              Além do plano (cliente avisado)
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className="h-2.5 w-4 rounded-sm"
+                style={{ backgroundImage: "repeating-linear-gradient(135deg, rgba(220,38,38,.6) 0 3px, transparent 3px 6px)" }}
+              />
+              Cliente por avisar
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Clock width={11} height={11} className="text-amber-600" aria-hidden />
+              Atraso registado
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-2.5 w-4 rounded-sm bg-slate-200 ring-2 ring-inset ring-red-500" />
+              Não iniciada a tempo
+            </span>
+          </>
+        )}
         {podeEditar && (
           <span className="ml-auto">
             Arrasta para mudar as datas · pega à direita para esticar

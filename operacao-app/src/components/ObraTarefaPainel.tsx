@@ -3,6 +3,8 @@ import { Badge, Button, Field, Input, Modal, Select, Textarea, cx } from "./ui";
 import { AlertTriangle } from "./icons";
 import { ErroDeEscrita, type MembroEquipa } from "../lib/dados";
 import {
+  atrasosDaObra,
+  type AtrasoTarefa,
   apagarTarefa,
   atribuirTarefa,
   gravarTarefa,
@@ -21,6 +23,9 @@ import {
 } from "../domain/obras";
 import { data as formatarData } from "../lib/formatar";
 import FotosTarefa from "./FotosTarefa";
+import ObraAtraso, { ClienteAvisado } from "./ObraAtraso";
+import { diasDeDesvio, formatarDesvio, rotuloMotivoAtraso } from "../domain/atrasos";
+import { dataHora } from "../lib/formatar";
 
 /**
  * A ficha de uma tarefa da obra, ao lado do Gantt.
@@ -40,6 +45,8 @@ export default function ObraTarefaPainel({
   conflitos,
   podeEditar,
   faseNova,
+  podeRegistarAtraso = false,
+  podeAvisarCliente = false,
   aoFechar,
   aoGravar,
 }: {
@@ -54,6 +61,10 @@ export default function ObraTarefaPainel({
   conflitos: readonly ConflitoObra[];
   podeEditar: boolean;
   faseNova?: string | null;
+  /** Gestor ou supervisor da obra: "Registar atraso". */
+  podeRegistarAtraso?: boolean;
+  /** Gestor ou supervisor da obra: "Cliente avisado". */
+  podeAvisarCliente?: boolean;
   aoFechar: () => void;
   aoGravar: () => void;
 }) {
@@ -234,6 +245,17 @@ export default function ObraTarefaPainel({
           </div>
         ) : null}
 
+        {tarefa && (
+          <AtrasosDaTarefa
+            obraId={obraId}
+            tarefa={tarefa}
+            nomes={nomes}
+            podeRegistar={podeRegistarAtraso}
+            podeAvisar={podeAvisarCliente}
+            aoMudar={aoGravar}
+          />
+        )}
+
         {podeEditar ? (
           <>
             <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
@@ -382,6 +404,147 @@ export function FichaLeitura({ tarefa, nomes }: { tarefa: TarefaObra; nomes: Rea
       {bloco("Procedimento", tarefa.procedimento)}
       {bloco("Materiais", tarefa.materiais)}
       {bloco("Ferramentas", tarefa.ferramentas)}
+    </div>
+  );
+}
+
+/**
+ * Atrasos da tarefa: plano original vs revisto, o histórico (motivo,
+ * contexto, quanto) e, para o supervisor/gestor, "Registar atraso" e
+ * "Cliente avisado".
+ */
+function AtrasosDaTarefa({
+  obraId,
+  tarefa,
+  nomes,
+  podeRegistar,
+  podeAvisar,
+  aoMudar,
+}: {
+  obraId: string;
+  tarefa: TarefaObra;
+  nomes: ReadonlyMap<string, string>;
+  podeRegistar: boolean;
+  podeAvisar: boolean;
+  aoMudar: () => void;
+}) {
+  const [atrasos, setAtrasos] = useState<AtrasoTarefa[]>([]);
+  const [recarga, setRecarga] = useState(0);
+  const [registar, setRegistar] = useState(false);
+  const [avisar, setAvisar] = useState<AtrasoTarefa | null>(null);
+  const [erro, setErro] = useState<string | null>(null);
+  const nAtrasos = tarefa.n_atrasos ?? 0;
+
+  useEffect(() => {
+    // Sem atrasos (ou sem o SQL dos atrasos aplicado): não há nada a ler.
+    if (!nAtrasos && recarga === 0) {
+      setAtrasos([]);
+      return;
+    }
+    let vivo = true;
+    atrasosDaObra(obraId, tarefa.id)
+      .then((a) => vivo && setAtrasos(a))
+      .catch(() => vivo && setErro("Não foi possível carregar o histórico de atrasos."));
+    return () => {
+      vivo = false;
+    };
+  }, [obraId, tarefa.id, nAtrasos, recarga]);
+
+  const aberta = tarefa.estado === "por_fazer" || tarefa.estado === "em_curso" || tarefa.estado === "rejeitada";
+  const temOriginal = !!(tarefa.inicio_original || tarefa.fim_original);
+  const desvio = diasDeDesvio(tarefa.fim_original, tarefa.fim_planeado);
+  if (!temOriginal && !atrasos.length && !(podeRegistar && aberta) && !tarefa.atrasada_inicio) return null;
+
+  const mudou = () => {
+    setRecarga((r) => r + 1);
+    aoMudar();
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-slate-200 p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Prazos e atrasos</p>
+        {podeRegistar && aberta && (
+          <Button size="sm" variant="secondary" onClick={() => setRegistar(true)}>
+            <AlertTriangle width={13} height={13} /> Registar atraso
+          </Button>
+        )}
+      </div>
+      {tarefa.atrasada_inicio && (
+        <p className="rounded-md bg-red-50 px-2 py-1 text-xs text-red-700">
+          Devia ter começado a {formatarData(tarefa.inicio_planeado)} e ainda ninguém iniciou.
+        </p>
+      )}
+      {temOriginal && (
+        <p className="text-xs text-slate-600">
+          Plano original: {formatarData(tarefa.inicio_original)} → {formatarData(tarefa.fim_original)} · revisto:{" "}
+          <b>
+            {formatarData(tarefa.inicio_planeado)} → {formatarData(tarefa.fim_planeado)}
+          </b>
+          {desvio !== 0 && <span className="ml-1 font-medium text-amber-700">({formatarDesvio(desvio)})</span>}
+        </p>
+      )}
+      {tarefa.minutos_estimativa != null && tarefa.minutos_estimativa !== tarefa.minutos_previstos && (
+        <p className="text-xs text-slate-600">
+          Estimativa final: <b className="font-mono tabular">{formatarMinutos(tarefa.minutos_estimativa)}</b> (previsto{" "}
+          {formatarMinutos(tarefa.minutos_previstos)})
+        </p>
+      )}
+      {atrasos.length > 0 && (
+        <ul className="space-y-1.5">
+          {atrasos.map((a) => (
+            <li key={a.id} className="rounded-md bg-amber-50/70 px-2.5 py-1.5 text-xs text-slate-700">
+              <p>
+                <b>{rotuloMotivoAtraso(a.motivo)}</b>
+                {a.minutos_extra ? <> · +{formatarMinutos(a.minutos_extra)}</> : null}
+                {a.novo_fim && <> · fim {formatarData(a.fim_anterior)} → {formatarData(a.novo_fim)}</>}
+              </p>
+              <p className="mt-0.5 whitespace-pre-line">{a.contexto}</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                {a.registado_por ? nomes.get(a.registado_por) ?? "—" : "—"} · {dataHora(a.registado_em)}
+              </p>
+              {a.cliente_avisado ? (
+                <p className="mt-0.5 text-[11px] text-emerald-700">
+                  Cliente avisado {dataHora(a.cliente_avisado_em)}
+                  {a.cliente_avisado_por && <> por {nomes.get(a.cliente_avisado_por) ?? "—"}</>}
+                  {a.nota_cliente && <> — {a.nota_cliente}</>}
+                </p>
+              ) : podeAvisar ? (
+                <button
+                  type="button"
+                  className="mt-1 text-[11px] font-medium text-brand underline"
+                  onClick={() => setAvisar(a)}
+                >
+                  Cliente avisado…
+                </button>
+              ) : (
+                <p className="mt-0.5 text-[11px] text-red-700">Cliente ainda por avisar</p>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {erro && <p className="text-xs text-red-700">{erro}</p>}
+
+      {registar && (
+        <ObraAtraso
+          tarefa={tarefa}
+          aoFechar={() => setRegistar(false)}
+          aoGravar={() => {
+            setRegistar(false);
+            mudou();
+          }}
+        />
+      )}
+      {avisar && (
+        <ClienteAvisado
+          atrasoId={avisar.id}
+          titulo={tarefa.nome}
+          detalhe={`${rotuloMotivoAtraso(avisar.motivo)}: ${avisar.contexto}`}
+          aoFechar={() => setAvisar(null)}
+          aoGravar={mudou}
+        />
+      )}
     </div>
   );
 }

@@ -1724,6 +1724,358 @@ await deveSerRecusado(
   "Sem acesso a esta organização"
 );
 
+/* ── Atrasos e alertas do supervisor ────────────────────────────────────── */
+console.log("\n─── atrasos e alertas do supervisor ─────");
+{
+  // Ninguém com relógio a correr (das secções de cima): cada um só tem um.
+  await db.exec(`UPDATE public.ops_obra_registo SET fim = now() WHERE fim IS NULL`);
+  // Datas relativas a HOJE (Lisboa): F é uma segunda-feira daqui a ≥ 3 semanas.
+  const DT = await um(`
+    WITH b AS (SELECT (now() AT TIME ZONE 'Europe/Lisbon')::date AS hoje)
+    SELECT hoje::text AS hoje, (hoje - 1)::text AS ontem, (hoje - 3)::text AS antes3, (hoje + 5)::text AS mais5,
+           f::text AS f, (f + 1)::text AS f1, (f + 2)::text AS f2, (f + 3)::text AS f3, (f + 4)::text AS f4
+      FROM b, LATERAL (SELECT (hoje + 21) + ((8 - extract(isodow FROM hoje + 21)::int) % 7) AS f) x`);
+
+  const OBX = await devePassar(
+    "uma obra para os atrasos, com o Supervisor A",
+    AUTH.gestorA,
+    criar(`p_org => '${ORG_A}', p_titulo => 'Atrasos', p_cliente_id => '${CLI_A}',
+           p_data_inicio => '${DT.f}', p_supervisor_id => '${U.supA}'`)
+  );
+  await db.exec(`DELETE FROM public.ops_obra_tarefa WHERE obra_id='${OBX.id}';
+                 UPDATE public.ops_obra SET supervisor_id='${U.supA}' WHERE id='${OBX.id}';`);
+  const faseX = (await um(`SELECT id FROM public.ops_obra_fase WHERE obra_id='${OBX.id}' ORDER BY ordem LIMIT 1`)).id;
+  const nova = async (nome, ini, fim, quem) => {
+    const r = await chamar(AUTH.gestorA,
+      `SELECT public.rpc_ops_obra_gravar_tarefa('${OBX.id}', NULL, '${faseX}', '${nome}', 60,
+         p_inicio => '${ini}', p_fim => '${fim}');`);
+    if (quem) await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_atribuir_tarefa('${r.id}', ARRAY['${quem}']::uuid[]);`);
+    return r.id;
+  };
+  // TA → TB → TC em cadeia; TD depende de TA mas já começou; TN devia ter
+  // começado ontem; TF devia ter acabado ontem; TG é para arrastar no Gantt.
+  const TA = await nova("Assentar base", DT.f, DT.f, U.tecA);
+  const TB = await nova("Impermeabilizar", DT.f1, DT.f1, U.tec2A);
+  const TC = await nova("Revestir", DT.f2, DT.f3, U.tec2A);
+  const TD = await nova("Ja comecada", DT.f, DT.f, U.tecA);
+  const TN = await nova("Devia ter comecado", DT.ontem, DT.mais5, U.tec2A);
+  const TF = await nova("Passou do fim", DT.antes3, DT.ontem, U.tecA);
+  const TG = await nova("Arrastada", DT.f, DT.f, U.tec2A);
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_gravar_dependencias('${TB}', ARRAY['${TA}']::uuid[]);`);
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_gravar_dependencias('${TC}', ARRAY['${TB}']::uuid[]);`);
+
+  // Plano original pelo Gantt: com a obra só planeada, arrastar não guarda nada.
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_planear_tarefa('${TG}', '${DT.f1}', '${DT.f1}');`);
+  const g0 = await um(`SELECT inicio_original FROM public.ops_obra_tarefa WHERE id='${TG}'`);
+  g0.inicio_original === null
+    ? ok("obra ainda planeada: arrastar no Gantt não fixa o plano original")
+    : mau(`baseline cedo demais: ${JSON.stringify(g0)}`);
+
+  // TD e TF arrancam (a obra passa a em curso) e ficam em pausa.
+  for (const t of [TD, TF]) {
+    await chamar(AUTH.tecA, `SELECT public.rpc_ops_obra_iniciar_tarefa('${t}');`);
+    await chamar(AUTH.tecA, `SELECT public.rpc_ops_obra_terminar_tarefa('${t}', false);`);
+  }
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_gravar_dependencias('${TD}', ARRAY['${TA}']::uuid[]);`);
+
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_planear_tarefa('${TG}', '${DT.f2}', '${DT.f2}');`);
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_planear_tarefa('${TG}', '${DT.f3}', '${DT.f3}');`);
+  const g1 = await um(`SELECT inicio_original::text AS io, fim_original::text AS fo, inicio_planeado::text AS ip
+                         FROM public.ops_obra_tarefa WHERE id='${TG}'`);
+  g1.io === DT.f1 && g1.fo === DT.f1 && g1.ip === DT.f3
+    ? ok("obra em curso: o 1.º arrasto guarda o plano original, o 2.º já não o sobrescreve")
+    : mau(`baseline pelo Gantt: ${JSON.stringify(g1)} (esperado ${DT.f1})`);
+
+  const atraso = (args) => `SELECT public.rpc_ops_obra_registar_atraso(${args});`;
+  await deveSerRecusado(
+    "um técnico de fora da tarefa não regista atraso nela",
+    AUTH.tec2A,
+    atraso(`'${TA}', 'secagem', 'Ainda está húmido', 120`),
+    "Só quem está na tarefa"
+  );
+  await deveSerRecusado(
+    "nem o gestor de outra organização",
+    AUTH.gestorB,
+    atraso(`'${TA}', 'secagem', 'Ainda está húmido', 120`),
+    "Sem acesso a esta organização"
+  );
+  await deveSerRecusado(
+    "o contexto é obrigatório (≥ 5 letras)",
+    AUTH.tecA,
+    atraso(`'${TA}', 'secagem', ' abc ', 120`),
+    "contexto"
+  );
+  await deveSerRecusado(
+    "sem 'mais quanto tempo' nem nova data, é recusado",
+    AUTH.tecA,
+    atraso(`'${TA}', 'secagem', 'Ainda está húmido'`),
+    "quanto tempo a mais"
+  );
+  await deveSerRecusado(
+    "motivo fora da lista é recusado",
+    AUTH.tecA,
+    atraso(`'${TA}', 'preguica', 'Ainda está húmido', 120`),
+    "motivo"
+  );
+  await deveSerRecusado(
+    "uma nova data de fim para trás é recusada",
+    AUTH.tecA,
+    atraso(`'${TA}', 'secagem', 'Ainda está húmido', NULL, '${DT.hoje}'`),
+    "Um atraso só empurra para a frente"
+  );
+
+  // Pré-visualização: as contas todas, nada gravado.
+  const sim = await devePassar(
+    "a pré-visualização (p_simular) dá o novo fim da tarefa e da obra",
+    AUTH.tecA,
+    atraso(`'${TA}', NULL, NULL, 480, p_simular => true`)
+  );
+  const s0 = await um(`SELECT t.fim_planeado::text AS fim, t.inicio_original,
+                              (SELECT count(*)::int FROM public.ops_obra_tarefa_atraso WHERE tarefa_id='${TA}') AS n,
+                              (SELECT fim_planeado::text FROM public.ops_obra_tarefa WHERE id='${TB}') AS fim_b
+                         FROM public.ops_obra_tarefa t WHERE t.id='${TA}'`);
+  sim?.simulado === true && sim?.novo_fim === DT.f1 && sim?.fim_obra_novo === DT.f4 && sim?.empurradas?.length === 2 &&
+  s0.fim === DT.f && s0.inicio_original === null && s0.n === 0 && s0.fim_b === DT.f1
+    ? ok(`simulação: fim ${DT.f} → ${DT.f1}, obra até ${DT.f4}, e a base ficou igual`)
+    : mau(`simulação: ${JSON.stringify(sim)} / base ${JSON.stringify(s0)}`);
+
+  const r1 = await devePassar(
+    "o técnico da tarefa regista o atraso: secagem, +8 h, com contexto",
+    AUTH.tecA,
+    atraso(`'${TA}', 'secagem', 'Betonilha ainda húmida, não dá para assentar', 480`)
+  );
+  {
+    const t = await um(`SELECT inicio_original::text AS io, fim_original::text AS fo, fim_planeado::text AS fim,
+                               minutos_previstos AS prev, minutos_estimativa AS est
+                          FROM public.ops_obra_tarefa WHERE id='${TA}'`);
+    r1?.novo_fim === DT.f1 && t.fim === DT.f1 && t.io === DT.f && t.fo === DT.f
+      ? ok(`novo fim ${DT.f1} (+1 dia útil a 480 min/dia), plano original ${DT.f} guardado`)
+      : mau(`atraso 1: ${JSON.stringify(r1)} / ${JSON.stringify(t)}`);
+    t.prev === 60 && t.est === 540
+      ? ok("minutos_previstos fica 60 (métricas); minutos_estimativa passa a 540")
+      : mau(`estimativa: ${JSON.stringify(t)}`);
+    const emp = Object.fromEntries((r1?.empurradas ?? []).map((e) => [e.tarefa_id, e]));
+    const b = await um(`SELECT inicio_planeado::text AS i, fim_planeado::text AS f, inicio_original::text AS io FROM public.ops_obra_tarefa WHERE id='${TB}'`);
+    const c = await um(`SELECT inicio_planeado::text AS i, fim_planeado::text AS f, fim_original::text AS fo FROM public.ops_obra_tarefa WHERE id='${TC}'`);
+    const d = await um(`SELECT inicio_planeado::text AS i, fim_planeado::text AS f, inicio_original FROM public.ops_obra_tarefa WHERE id='${TD}'`);
+    b.i === DT.f2 && b.f === DT.f2 && b.io === DT.f1 && c.i === DT.f3 && c.f === DT.f4 && c.fo === DT.f3 &&
+    emp[TB]?.novo_inicio === DT.f2 && emp[TC]?.novo_fim === DT.f4
+      ? ok("as dependentes por começar foram empurradas em cadeia (TA → TB → TC), com o plano original guardado")
+      : mau(`cadeia: TB ${JSON.stringify(b)} TC ${JSON.stringify(c)} resposta ${JSON.stringify(r1?.empurradas)}`);
+    d.i === DT.f && d.f === DT.f && d.inicio_original === null && !emp[TD]
+      ? ok("a dependente que já começou (com tempo registado) não foi mexida")
+      : mau(`a começada mexeu: ${JSON.stringify(d)}`);
+    r1?.fim_obra_anterior === DT.f3 && r1?.fim_obra_novo === DT.f4
+      ? ok(`fim da obra recalculado: ${DT.f3} → ${DT.f4}`)
+      : mau(`fim da obra: ${r1?.fim_obra_anterior} → ${r1?.fim_obra_novo}`);
+  }
+
+  const r2 = await devePassar(
+    "o supervisor da obra regista outro atraso com nova data, sem empurrar",
+    AUTH.supA,
+    atraso(`'${TA}', 'material_em_falta', 'Falta a membrana, chega quarta', NULL, '${DT.f2}', false`)
+  );
+  {
+    const t = await um(`SELECT inicio_original::text AS io, fim_original::text AS fo, fim_planeado::text AS fim,
+                               minutos_estimativa AS est FROM public.ops_obra_tarefa WHERE id='${TA}'`);
+    const b = await um(`SELECT inicio_planeado::text AS i FROM public.ops_obra_tarefa WHERE id='${TB}'`);
+    t.fim === DT.f2 && t.io === DT.f && t.fo === DT.f && t.est === 540 && b.i === DT.f2 && r2?.empurradas?.length === 0
+      ? ok("o plano original guarda-se uma vez só; sem 'empurrar', as outras não mexem")
+      : mau(`atraso 2: ${JSON.stringify(t)} TB ${JSON.stringify(b)}`);
+    const ev = await um(`SELECT count(*)::int AS n FROM public.ops_evento WHERE entidade_id='${OBX.id}' AND tipo='atraso'`);
+    ev.n === 2 ? ok("cada atraso fica no histórico (ops_evento)") : mau(`eventos de atraso: ${ev.n}`);
+  }
+
+  // As vistas que a app (e o Gantt) leem.
+  {
+    const v = await linhas(AUTH.supA, `
+      SELECT id, n_atrasos, ultimo_atraso, inicio_original::text AS io, minutos_estimativa AS est, atrasada_inicio
+        FROM public.ops_v_obra_tarefa WHERE obra_id='${OBX.id}';`);
+    const por = Object.fromEntries(v.map((x) => [x.id, x]));
+    const u = por[TA]?.ultimo_atraso;
+    por[TA]?.n_atrasos === 2 && u?.motivo === "material_em_falta" && u?.novo_fim === DT.f2 &&
+    u?.cliente_avisado === false && por[TA]?.io === DT.f && por[TA]?.est === 540
+      ? ok("ops_v_obra_tarefa: n_atrasos, ultimo_atraso, plano original e estimativa")
+      : mau(`vista da tarefa: ${JSON.stringify(por[TA])}`);
+    por[TN]?.atrasada_inicio === true && por[TA]?.atrasada_inicio === false && por[TD]?.atrasada_inicio === false
+      ? ok("atrasada_inicio: só a que devia ter começado e está por fazer")
+      : mau(`atrasada_inicio: TN=${por[TN]?.atrasada_inicio} TA=${por[TA]?.atrasada_inicio} TD=${por[TD]?.atrasada_inicio}`);
+    const r = (await linhas(AUTH.supA, `
+      SELECT fim_planeado::text AS fim, fim_original::text AS fo, n_alertas
+        FROM public.ops_v_obra_resumo WHERE id='${OBX.id}';`)).at(-1);
+    r?.fim === DT.f4 && r?.fo === DT.f3 && r?.n_alertas === 4
+      ? ok(`ops_v_obra_resumo: fim ${DT.f4} (original ${DT.f3}) e 4 alertas`)
+      : mau(`resumo: ${JSON.stringify(r)}`);
+  }
+
+  // Os alertas.
+  const alertasDe = async (auth, org = ORG_A) =>
+    (await linhas(auth, `SELECT * FROM public.rpc_ops_obra_alertas('${org}');`)).filter((a) => a.obra_id === OBX.id);
+  {
+    const a = await alertasDe(AUTH.supA);
+    const tipos = a.map((x) => `${x.tipo}:${x.tarefa_id === TN ? "TN" : x.tarefa_id === TF ? "TF" : x.tarefa_id === TA ? "TA" : "?"}`);
+    const n = a.find((x) => x.tipo === "nao_iniciada");
+    a.length === 4 && a[0].tipo === "fim_ultrapassado" && a[0].tarefa_id === TF &&
+    n?.tarefa_id === TN && n?.pessoas_nomes?.[0] === "Subempreiteiro A" &&
+    a.filter((x) => x.tipo === "cliente_por_avisar").length === 2
+      ? ok(`o supervisor da obra vê os alertas, o pior primeiro: ${tipos.join(", ")}`)
+      : mau(`alertas do supervisor: ${JSON.stringify(tipos)} ${JSON.stringify(n)}`);
+    const g = await alertasDe(AUTH.gestorA);
+    g.length === 4 ? ok("a gestora vê os mesmos (todas as obras da organização)") : mau(`alertas da gestora: ${g.length}`);
+    const t = await linhas(AUTH.tecA, `SELECT count(*)::int AS n FROM public.rpc_ops_obra_alertas('${ORG_A}');`);
+    t.at(-1).n === 0 ? ok("o técnico não recebe alertas (lista vazia, sem erro)") : mau(`o técnico viu ${t.at(-1).n} alertas`);
+    const b = await alertasDe(AUTH.gestorB, ORG_B);
+    b.length === 0 ? ok("o gestor da B, na B, não vê os alertas da A") : mau(`fuga de alertas: ${b.length}`);
+    await deveSerRecusado(
+      "e pedir os alertas da A é recusado",
+      AUTH.gestorB,
+      `SELECT count(*) FROM public.rpc_ops_obra_alertas('${ORG_A}');`,
+      "Sem acesso a esta organização"
+    );
+    // Um supervisor só vê as obras de que é supervisor.
+    await db.exec(`UPDATE public.ops_obra SET supervisor_id = NULL WHERE id='${OBX.id}'`);
+    const s2 = await alertasDe(AUTH.supA);
+    s2.length === 0 ? ok("sem ser supervisor da obra, o supervisor não vê os alertas dela") : mau(`viu ${s2.length}`);
+    await db.exec(`UPDATE public.ops_obra SET supervisor_id = '${U.supA}' WHERE id='${OBX.id}'`);
+
+    // A regra da hora: 08:00 + 60 min de tolerância (hora de Lisboa).
+    const h = await um(`SELECT
+        public.ops_obra_atrasada_inicio('por_fazer', '2026-10-05', '08:00', '2026-10-05 08:59 Europe/Lisbon') AS antes,
+        public.ops_obra_atrasada_inicio('por_fazer', '2026-10-05', '08:00', '2026-10-05 09:00 Europe/Lisbon') AS as9,
+        public.ops_obra_atrasada_inicio('por_fazer', '2026-10-05', '07:00', '2026-10-05 08:00 Europe/Lisbon') AS as7,
+        public.ops_obra_atrasada_inicio('em_curso',  '2026-10-05', '08:00', '2026-10-06 12:00 Europe/Lisbon') AS curso`);
+    !h.antes && h.as9 && h.as7 && !h.curso
+      ? ok("não iniciada: a partir das 09:00 do dia (hora de início 08:00 + 60 min), configurável por obra")
+      : mau(`regra da hora: ${JSON.stringify(h)}`);
+  }
+
+  // Cliente avisado.
+  {
+    await deveSerRecusado(
+      "o técnico não marca o cliente como avisado",
+      AUTH.tecA,
+      `SELECT public.rpc_ops_obra_cliente_avisado('${r1?.atraso_id}', 'Avisei');`,
+      "Só o supervisor da obra"
+    );
+    await deveSerRecusado(
+      "nem o gestor da B",
+      AUTH.gestorB,
+      `SELECT public.rpc_ops_obra_cliente_avisado('${r1?.atraso_id}', 'Avisei');`,
+      "Sem acesso a esta organização"
+    );
+    await devePassar(
+      "o supervisor marca o 1.º atraso como avisado, com nota",
+      AUTH.supA,
+      `SELECT public.rpc_ops_obra_cliente_avisado('${r1?.atraso_id}', 'Liguei à D. Maria às 10h');`
+    );
+    const a = await alertasDe(AUTH.supA);
+    const porAvisar = a.filter((x) => x.tipo === "cliente_por_avisar");
+    porAvisar.length === 1 && porAvisar[0].atraso_id === r2?.atraso_id
+      ? ok("o 'cliente por avisar' desse atraso desapareceu (fica o outro)")
+      : mau(`por avisar: ${JSON.stringify(porAvisar.map((x) => x.atraso_id))}`);
+    const again = await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_cliente_avisado('${r1?.atraso_id}', 'Outra nota');`);
+    const row = await um(`SELECT cliente_avisado, cliente_avisado_por, nota_cliente FROM public.ops_obra_tarefa_atraso WHERE id='${r1?.atraso_id}'`);
+    again?.ja_avisado === true && row.cliente_avisado && row.cliente_avisado_por === U.supA &&
+    row.nota_cliente === "Liguei à D. Maria às 10h"
+      ? ok("marcar outra vez não muda nada (fica quem avisou e o que disse)")
+      : mau(`2.ª marcação: ${JSON.stringify(again)} ${JSON.stringify(row)}`);
+  }
+
+  // Leitura e escrita direta da tabela de atrasos.
+  {
+    const t = await linhas(AUTH.tecA, `SELECT count(*)::int AS n FROM public.ops_obra_tarefa_atraso WHERE obra_id='${OBX.id}';`);
+    const b = await linhas(AUTH.gestorB, `SELECT count(*)::int AS n FROM public.ops_obra_tarefa_atraso;`);
+    t.at(-1).n === 2 && b.at(-1).n === 0
+      ? ok("os atrasos leem-se por quem vê a obra (RLS), e a B não vê nenhum")
+      : mau(`leitura de atrasos: técnico ${t.at(-1).n}, B ${b.at(-1).n}`);
+    await deveSerRecusado(
+      "ninguém escreve na tabela de atrasos sem RPC",
+      AUTH.gestorA,
+      `UPDATE public.ops_obra_tarefa_atraso SET cliente_avisado = true;`,
+      "permission denied"
+    );
+  }
+
+  // Idempotência com dados: correr obras.sql outra vez não mexe em nada disto.
+  {
+    const antes = await um(`SELECT (SELECT count(*)::int FROM public.ops_obra_tarefa_atraso) AS n,
+                                   (SELECT fim_original::text FROM public.ops_obra_tarefa WHERE id='${TA}') AS fo,
+                                   (SELECT hora_inicio_dia::text FROM public.ops_obra WHERE id='${OBX.id}') AS h`);
+    try {
+      await db.exec(ler("obras.sql"));
+      const depois = await um(`SELECT (SELECT count(*)::int FROM public.ops_obra_tarefa_atraso) AS n,
+                                      (SELECT fim_original::text FROM public.ops_obra_tarefa WHERE id='${TA}') AS fo,
+                                      (SELECT hora_inicio_dia::text FROM public.ops_obra WHERE id='${OBX.id}') AS h`);
+      JSON.stringify(antes) === JSON.stringify(depois) && antes.n === 2 && antes.h === "08:00:00"
+        ? ok("obras.sql outra vez, com atrasos registados: nada muda")
+        : mau(`idempotência com dados: ${JSON.stringify(antes)} → ${JSON.stringify(depois)}`);
+    } catch (e) {
+      mau(`obras.sql não voltou a correr com atrasos: ${e.message}`);
+    }
+  }
+
+  // Tirar a obra de teste (as contagens de baixo contam com 4 obras).
+  await db.exec(`DELETE FROM public.ops_evento WHERE entidade_id='${OBX.id}';
+                 DELETE FROM public.ops_obra WHERE id='${OBX.id}';`);
+
+  // Uma obra que nasce SÓ dos serviços (sem tipo de obra): plano e
+  // dependências completos, e os atrasos/alertas funcionam na mesma.
+  {
+    const ORC_SO = "99990000-0000-0000-0000-0000000000cc";
+    await db.exec(`
+      INSERT INTO public.quotes (id, organization_id, cliente_id, quote_number, title, obra_endereco, estado, accepted_at, total)
+        VALUES ('${ORC_SO}','${ORG_A}','${CLI_A}','ORC-A-SO','Só serviços','Rua S 1, Lisboa','aceite',now(),3000);
+      INSERT INTO public.quote_lines (quote_id, ordem, descricao_snapshot, qt, service_id) VALUES
+        ('${ORC_SO}',0,'Remoção',10,'5e000000-0000-0000-0000-000000000001'),
+        ('${ORC_SO}',1,'Duche',1,'5e000000-0000-0000-0000-000000000002'),
+        ('${ORC_SO}',2,'Pintura',20,'5e000000-0000-0000-0000-000000000003');`);
+    const OSO = await devePassar(
+      "obra só dos serviços do orçamento (sem tipo de obra)",
+      AUTH.gestorA,
+      criar(`p_org => '${ORG_A}', p_orcamento_id => '${ORC_SO}', p_data_inicio => '${DT.f}', p_supervisor_id => '${U.supA}'`)
+    );
+    const ts = await q(`
+      SELECT t.id, t.nome, t.modelo_tarefa_id, t.servico_id, t.inicio_planeado::text AS ini, t.fim_planeado::text AS fim,
+             (SELECT count(*)::int FROM public.ops_obra_tarefa_pessoa tp WHERE tp.tarefa_id = t.id) AS pessoas
+        FROM public.ops_obra_tarefa t WHERE t.obra_id = '${OSO?.id}'`);
+    const deps = await q(`
+      SELECT x.tarefa_id, x.depende_de_id, t.inicio_planeado::text AS ini, d.fim_planeado::text AS dfim
+        FROM public.ops_obra_tarefa_dependencia x
+        JOIN public.ops_obra_tarefa t ON t.id = x.tarefa_id
+        JOIN public.ops_obra_tarefa d ON d.id = x.depende_de_id
+       WHERE x.obra_id = '${OSO?.id}'`);
+    ts.length > 3 && ts.every((t) => !t.modelo_tarefa_id && t.servico_id && t.ini && t.fim && t.pessoas > 0)
+      ? ok(`${ts.length} tarefas, todas dos serviços, todas com datas e equipa — sem tipo de obra`)
+      : mau(`obra só de serviços: ${JSON.stringify(ts)}`);
+    deps.length > 0 && deps.every((d) => d.ini >= d.dfim)
+      ? ok(`${deps.length} dependência(s) dos modelos de serviço, e o plano respeita-as`)
+      : mau(`dependências sem tipo de obra: ${JSON.stringify(deps)}`);
+    if (deps.length) {
+      const dep = deps[0];
+      const antesDep = await um(`SELECT inicio_planeado::text AS i FROM public.ops_obra_tarefa WHERE id='${dep.tarefa_id}'`);
+      const r = await devePassar(
+        "atraso de 2 dias numa tarefa dela, pelo gestor",
+        AUTH.gestorA,
+        atraso(`'${dep.depende_de_id}', 'trabalho_imprevisto', 'Parede oca atrás do azulejo', NULL,
+                (SELECT public.ops_obra_somar_dias_uteis(fim_planeado, 2) FROM public.ops_obra_tarefa WHERE id='${dep.depende_de_id}')`)
+      );
+      const depois = await um(`SELECT inicio_planeado::text AS i FROM public.ops_obra_tarefa WHERE id='${dep.tarefa_id}'`);
+      r?.empurradas?.some((e) => e.tarefa_id === dep.tarefa_id) && depois.i > antesDep.i
+        ? ok("a dependente (do mesmo serviço) foi empurrada")
+        : mau(`empurrar sem tipo de obra: ${JSON.stringify(r)} ${antesDep.i} → ${depois.i}`);
+      const a = (await linhas(AUTH.supA, `SELECT * FROM public.rpc_ops_obra_alertas('${ORG_A}');`))
+        .filter((x) => x.obra_id === OSO?.id);
+      a.length === 1 && a[0].tipo === "cliente_por_avisar"
+        ? ok("e o supervisor tem o 'cliente por avisar' dessa obra")
+        : mau(`alertas sem tipo de obra: ${JSON.stringify(a.map((x) => x.tipo))}`);
+    }
+    await db.exec(`DELETE FROM public.ops_evento WHERE entidade_id='${OSO?.id}';
+                   DELETE FROM public.ops_obra WHERE id='${OSO?.id}';
+                   DELETE FROM public.quote_lines WHERE quote_id = '${ORC_SO}';
+                   DELETE FROM public.quotes WHERE id = '${ORC_SO}';`);
+  }
+}
+
 /* ── O CRM ficou intacto ────────────────────────────────────────────────── */
 console.log("\n─── o CRM ficou intacto ─────────────────");
 {
