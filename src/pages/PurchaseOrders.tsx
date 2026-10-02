@@ -8,7 +8,18 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck, ChevronsUpDown, Check, ScanBarcode, Undo2, ChevronDown, ChevronRight, Layers, List } from "lucide-react";
+import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck, ChevronsUpDown, Check, ScanBarcode, Undo2, ChevronDown, ChevronRight, Layers, List, Ban } from "lucide-react";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
@@ -161,6 +172,75 @@ type PurchaseOrderReceiptRow = Database["public"]["Tables"]["purchase_order_rece
 const formatQty = (value: number | null | undefined) =>
   (Number(value) || 0).toLocaleString("pt-PT", { maximumFractionDigits: 4 });
 
+// Anular o resto de uma linha / da PO inteira ("não vou receber o resto").
+// Tabela purchase_order_item_cancellations e RPCs rpc_cancel_po_line_remainder,
+// rpc_cancel_po_remainder, rpc_undo_po_line_cancellation e
+// rpc_undo_po_cancellation_batch ainda não estão nos tipos gerados — cast local.
+type PoCancellationReason = "found_stock" | "supplier_unavailable" | "other";
+
+const PO_CANCELLATION_REASON_LABELS: Record<PoCancellationReason, string> = {
+  found_stock: "Encontrei stock / outra solução",
+  supplier_unavailable: "Fornecedor sem produto",
+  other: "Outro",
+};
+
+const poCancellationReasonLabel = (reason: string | null | undefined) =>
+  PO_CANCELLATION_REASON_LABELS[reason as PoCancellationReason] || reason || "—";
+
+type PoItemCancellationRow = {
+  id: string;
+  organization_id: string;
+  purchase_order_id: string;
+  // null quando a linha da PO foi recriada na edição (ON DELETE SET NULL).
+  purchase_order_item_id: string | null;
+  quantity_cancelled: number;
+  quantity_before: number | null;
+  quantity_after: number | null;
+  reason: string;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  undone_at: string | null;
+  undone_by: string | null;
+  undo_reason: string | null;
+  // Preenchido nas anulações da PO inteira (desfazem-se em lote — a BD recusa
+  // desfazer só uma linha de um lote).
+  batch_id?: string | null;
+  po_status_after?: string | null;
+};
+
+type PoCancelTarget =
+  | {
+      kind: "line";
+      source: "receive";
+      orderId: string;
+      orderNumber: string;
+      itemId: string;
+      quantity: number;
+      uomLabel: string;
+      productName: string;
+      isClientOrder: boolean;
+    }
+  | {
+      kind: "order";
+      source: "receive" | "list";
+      orderId: string;
+      orderNumber: string;
+      // null quando não se conhecem as linhas (ação na lista).
+      lineCount: number | null;
+      isClientOrder: boolean;
+    };
+
+type PoUndoTarget = {
+  cancellationId: string;
+  batchId: string | null;
+  orderId: string;
+  source: "receive" | "orderDialog";
+  description: string;
+};
+
+const poCancellationsDb = () => supabase as any;
+
 // Números de EC distintos referidos nas linhas (normalmente só um por PO).
 const distinctContractNumbers = (lines: ReceiptAllocationLine[] | undefined) =>
   Array.from(new Set((lines || []).map((l) => l.contract_order_number).filter((n): n is string => !!n)));
@@ -281,6 +361,18 @@ const PurchaseOrders = () => {
   const [receivePreviewError, setReceivePreviewError] = useState<string | null>(null);
   const [receivePreviewLoading, setReceivePreviewLoading] = useState(false);
   const receivePreviewRequestRef = useRef(0);
+
+  // "Não vou receber o resto" (linha ou PO inteira) — anulações ativas por PO
+  // (no diálogo de receção e no diálogo da encomenda) e diálogos de motivo /
+  // desfazer.
+  const [receiveCancellations, setReceiveCancellations] = useState<{ orderId: string; rows: PoItemCancellationRow[] } | null>(null);
+  const [orderCancellations, setOrderCancellations] = useState<{ orderId: string; rows: PoItemCancellationRow[] } | null>(null);
+  const [poCancelTarget, setPoCancelTarget] = useState<PoCancelTarget | null>(null);
+  const [poCancelReason, setPoCancelReason] = useState<PoCancellationReason>("found_stock");
+  const [poCancelNotes, setPoCancelNotes] = useState("");
+  const [poCancelSubmitting, setPoCancelSubmitting] = useState(false);
+  const [poUndoTarget, setPoUndoTarget] = useState<PoUndoTarget | null>(null);
+  const [poUndoSubmitting, setPoUndoSubmitting] = useState(false);
   // Passar para stock (rpc_po_receipt_release_to_stock): recebido de linhas de
   // PO de contrato cuja Encomenda Cliente ficou inativa.
   const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
@@ -1443,6 +1535,213 @@ const PurchaseOrders = () => {
       toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
     } finally {
       setReceiving(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
+  // "Não vou receber o resto" — anular o que falta de uma linha ou da PO inteira.
+  // Best-effort na leitura: se a tabela não responder, as notas não aparecem e
+  // o resto do ecrã funciona como antes.
+  const fetchActivePoCancellations = async (orderId: string): Promise<PoItemCancellationRow[] | null> => {
+    const { data, error } = await poCancellationsDb()
+      .from("purchase_order_item_cancellations")
+      .select("*")
+      .eq("purchase_order_id", orderId)
+      .is("undone_at", null)
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.warn("[PurchaseOrders] não foi possível carregar as anulações da encomenda", error);
+      return null;
+    }
+    return ((data as PoItemCancellationRow[] | null) || []);
+  };
+
+  const loadReceiveCancellations = async (orderId: string) => {
+    const rows = await fetchActivePoCancellations(orderId);
+    if (rows) setReceiveCancellations({ orderId, rows });
+  };
+
+  // Anulações da PO aberta no diálogo de receção.
+  useEffect(() => {
+    if (!receiveDialogOpen || !receivingOrder?.id) return;
+    setReceiveCancellations(null);
+    void loadReceiveCancellations(receivingOrder.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiveDialogOpen, receivingOrder?.id]);
+
+  // Anulações da PO aberta no diálogo da encomenda (ver/editar).
+  useEffect(() => {
+    if (!open || !editingId) return;
+    const orderId = editingId;
+    setOrderCancellations(null);
+    void fetchActivePoCancellations(orderId).then((rows) => {
+      if (rows && openOrderIdRef.current === orderId) setOrderCancellations({ orderId, rows });
+    });
+  }, [open, editingId]);
+
+  // Depois de anular/desfazer com o diálogo de receção aberto: relê as linhas
+  // (a quantidade encomendada muda) sem tocar no armazém/data escolhidos; o
+  // "Receber agora" de cada linha nunca passa do novo pendente.
+  const refreshReceiveLinesAfterCancellation = async (orderId: string) => {
+    const { data, error } = await supabase
+      .from("purchase_order_items")
+      .select("*, uom:uom_id(code), products(name, uom:uom_id(code))")
+      .eq("purchase_order_id", orderId)
+      .eq("item_type", "product");
+    if (error || !data) return;
+    const items = data as unknown as PurchaseOrderItemWithReceipt[];
+    setReceiveLines((prev) => (prev.length === 0 || prev[0].purchase_order_id === orderId ? items : prev));
+    setReceiveLineQuantities((prev) => {
+      const next = { ...prev };
+      items.forEach((item) => {
+        const remaining = Math.max(item.quantity - (item.received_quantity || 0), 0);
+        if (item.id in next) next[item.id] = Math.min(next[item.id] ?? 0, remaining);
+      });
+      return next;
+    });
+  };
+
+  // Mesmo fecho que a receção faz quando a PO fica totalmente recebida.
+  const closeReceiveDialogAfterCancellation = () => {
+    setReceiveDialogOpen(false);
+    setReceivingOrder(null);
+    setReceiveLines([]);
+    setReceiveLineQuantities({});
+    setReceivePreview({});
+    setReceivePreviewError(null);
+    setActualDeliveryDate(new Date().toISOString().slice(0, 10));
+  };
+
+  const resetPoCancelForm = () => {
+    setPoCancelReason("found_stock");
+    setPoCancelNotes("");
+  };
+
+  const openPoLineCancel = (item: PurchaseOrderItemWithReceipt, remaining: number, uomLabel: string) => {
+    if (!receivingOrder || remaining <= 0) return;
+    resetPoCancelForm();
+    setPoCancelTarget({
+      kind: "line",
+      source: "receive",
+      orderId: receivingOrder.id,
+      orderNumber: receivingOrder.order_number,
+      itemId: item.id,
+      quantity: remaining,
+      uomLabel,
+      productName: item.products?.name || item.description || "produto",
+      isClientOrder: receivingOrder.isClientOrder,
+    });
+  };
+
+  const openPoOrderCancelFromReceive = () => {
+    if (!receivingOrder) return;
+    const pendingCount = receiveLines.filter((item) => getReceiveRemaining(item) > 0).length;
+    if (pendingCount === 0) return;
+    resetPoCancelForm();
+    setPoCancelTarget({
+      kind: "order",
+      source: "receive",
+      orderId: receivingOrder.id,
+      orderNumber: receivingOrder.order_number,
+      lineCount: pendingCount,
+      isClientOrder: receivingOrder.isClientOrder,
+    });
+  };
+
+  const openPoOrderCancelFromList = (order: PurchaseOrder) => {
+    resetPoCancelForm();
+    setPoCancelTarget({
+      kind: "order",
+      source: "list",
+      orderId: order.id,
+      orderNumber: order.order_number,
+      lineCount: null,
+      isClientOrder: (order as any).source_type === "contract",
+    });
+  };
+
+  const handleConfirmPoCancel = async () => {
+    const target = poCancelTarget;
+    if (!target) return;
+    const notes = poCancelNotes.trim();
+    if (poCancelReason === "other" && !notes) {
+      toast({ title: t('purchaseOrders.toast.error'), description: "Indica uma nota para o motivo «Outro».", variant: "destructive" });
+      return;
+    }
+    setPoCancelSubmitting(true);
+    try {
+      const { data, error } = target.kind === "line"
+        ? await poCancellationsDb().rpc("rpc_cancel_po_line_remainder", {
+            p_purchase_order_item_id: target.itemId,
+            p_reason: poCancelReason,
+            p_notes: notes || null,
+          })
+        : await poCancellationsDb().rpc("rpc_cancel_po_remainder", {
+            p_purchase_order_id: target.orderId,
+            p_reason: poCancelReason,
+            p_notes: notes || null,
+          });
+      if (error) throw error;
+      const result = (data || {}) as { status?: string; quantity_cancelled?: number | null; lines_cancelled?: number | null };
+      const status = result.status;
+      const linesCancelled = target.kind === "order" ? Number(result.lines_cancelled ?? target.lineCount ?? 0) || 0 : 0;
+      toast({
+        title: "Resto anulado",
+        description: target.kind === "line"
+          ? `${formatQty(result.quantity_cancelled ?? target.quantity)}${target.uomLabel ? ` ${target.uomLabel}` : ""} de ${target.productName} já não vão ser recebidos (${target.orderNumber}).`
+          : status === "cancelled"
+            ? `${target.orderNumber} ficou cancelada — nada tinha sido recebido.`
+            : `${target.orderNumber}: anulado o que faltava${linesCancelled > 0 ? ` de ${linesCancelled} linha(s)` : ""}.`,
+      });
+      setPoCancelTarget(null);
+      resetPoCancelForm();
+      if (target.source === "receive") {
+        if (status === "received" || status === "cancelled") {
+          closeReceiveDialogAfterCancellation();
+        } else {
+          void refreshReceiveLinesAfterCancellation(target.orderId);
+          void loadReceiveCancellations(target.orderId);
+        }
+      }
+      loadData();
+    } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setPoCancelSubmitting(false);
+    }
+  };
+
+  const handleConfirmPoUndo = async () => {
+    const target = poUndoTarget;
+    if (!target) return;
+    setPoUndoSubmitting(true);
+    try {
+      const { error } = target.batchId
+        ? await poCancellationsDb().rpc("rpc_undo_po_cancellation_batch", { p_batch_id: target.batchId, p_reason: null })
+        : await poCancellationsDb().rpc("rpc_undo_po_line_cancellation", { p_cancellation_id: target.cancellationId, p_reason: null });
+      if (error) throw error;
+      toast({
+        title: "Anulação desfeita",
+        description: target.batchId
+          ? "As linhas desta encomenda voltam a ficar por receber."
+          : "A quantidade volta a ficar por receber.",
+      });
+      setPoUndoTarget(null);
+      if (target.source === "receive") {
+        void refreshReceiveLinesAfterCancellation(target.orderId);
+        void loadReceiveCancellations(target.orderId);
+      } else {
+        // O estado da PO mudou: fecha o diálogo da encomenda para não ficar um
+        // formulário com o estado antigo (que podia ser regravado).
+        handleOrderDialogOpenChange(false);
+      }
+      loadData();
+    } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setPoUndoSubmitting(false);
     }
   };
 
@@ -2781,6 +3080,20 @@ const PurchaseOrders = () => {
                   </Button>
                 </PermissionGate>
               )}
+              {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
+                // "Não vou receber o resto" da PO inteira — mesmas permissões que a receção.
+                <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openPoOrderCancelFromList(order)}
+                    title="Não vou receber"
+                    aria-label="Não vou receber o resto da encomenda"
+                  >
+                    <Ban className="w-4 h-4" />
+                  </Button>
+                </PermissionGate>
+              )}
               {(order.status === 'received' || order.status === 'partially_received') && (
                 // Mesmas permissões que rpc_revert_purchase_order_receipt exige (a reversão retira stock).
                 <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
@@ -3460,6 +3773,62 @@ const PurchaseOrders = () => {
                     )}
                   </div>
 
+                  {/* "Não vou receber o resto": anulações ativas desta PO (linha ou
+                      PO inteira). Só informação + Desfazer; a anulação da PO
+                      inteira (batch_id) desfaz-se em lote. */}
+                  {editingId && orderCancellations?.orderId === editingId && orderCancellations.rows.length > 0 && (() => {
+                    const rows = orderCancellations.rows;
+                    const itemsById = new Map(
+                      (orderReceiptItems?.orderId === editingId ? orderReceiptItems.items : []).map((i) => [i.id, i]),
+                    );
+                    return (
+                      <div className="border-t pt-4 space-y-2">
+                        <p className="text-sm font-medium">Resto anulado (não vai ser recebido)</p>
+                        <ul className="space-y-1">
+                          {rows.map((c, idx) => {
+                            // purchase_order_item_id null = linha recriada na edição
+                            // da PO: mostra-se sem nome de linha e sem Desfazer.
+                            const lineGone = !c.purchase_order_item_id;
+                            const item = c.purchase_order_item_id ? itemsById.get(c.purchase_order_item_id) : undefined;
+                            const units = item?.units_per_uom ?? 1;
+                            const lineUomCode = item?.uom?.code || (units === 1 ? item?.products?.uom?.code : null) || "";
+                            const name = item?.products?.name || item?.description || (lineGone ? "Linha já não existe" : "Linha");
+                            // Lote: um só "Desfazer" (na primeira linha do lote que ainda existe).
+                            const isBatchFollower = lineGone || (!!c.batch_id &&
+                              rows.findIndex((r) => r.batch_id === c.batch_id && !!r.purchase_order_item_id) !== idx);
+                            return (
+                              <li key={c.id} className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+                                <span>
+                                  {name}: {formatQty(c.quantity_cancelled)}{lineUomCode ? ` ${lineUomCode}` : ""} anulado(s) — {poCancellationReasonLabel(c.reason)}
+                                  {c.notes ? ` (${c.notes})` : ""} · {new Date(c.created_at).toLocaleString("pt-PT")}
+                                </span>
+                                {!isBatchFollower && (
+                                  <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                                    <Button
+                                      type="button"
+                                      variant="link"
+                                      size="sm"
+                                      className="h-6 px-1 text-xs"
+                                      onClick={() => setPoUndoTarget({
+                                        cancellationId: c.id,
+                                        batchId: c.batch_id ?? null,
+                                        orderId: c.purchase_order_id,
+                                        source: "orderDialog",
+                                        description: `Volta a ficar por receber: ${formatQty(c.quantity_cancelled)}${lineUomCode ? ` ${lineUomCode}` : ""} de ${name}.`,
+                                      })}
+                                    >
+                                      {c.batch_id ? "Desfazer (toda a encomenda)" : "Desfazer"}
+                                    </Button>
+                                  </PermissionGate>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    );
+                  })()}
+
                   {/* Histórico de receções (purchase_order_receipts, 20261206130000) —
                       só de leitura, colapsável. Receções anteriores à tabela não
                       têm registo aqui. */}
@@ -4031,7 +4400,10 @@ const PurchaseOrders = () => {
                           <TableCell className="text-right">{item.received_quantity || 0}</TableCell>
                           <TableCell className="text-right">
                             {fullyReceived ? (
-                              <span className="text-xs text-muted-foreground">já recebida</span>
+                              <span className="text-xs text-muted-foreground">
+                                {/* quantity=0 só acontece numa linha anulada sem nada recebido. */}
+                                {Number(item.quantity) <= 0 && !(Number(item.received_quantity) > 0) ? "anulada" : "já recebida"}
+                              </span>
                             ) : (
                               <>
                                 <Input
@@ -4080,6 +4452,66 @@ const PurchaseOrders = () => {
                                 </div>
                               </>
                             )}
+                            {(() => {
+                              // "Não vou receber o resto": anulações ativas desta
+                              // linha + ação para anular o que ainda falta.
+                              const lineCancellations = receiveCancellations && receiveCancellations.orderId === receivingOrder?.id
+                                ? receiveCancellations.rows.filter((c) => c.purchase_order_item_id === item.id)
+                                : [];
+                              if (lineCancellations.length === 0 && fullyReceived) return null;
+                              const uomLabel = lineUomCode || baseCode;
+                              const productName = item.products?.name || item.description || "produto";
+                              return (
+                                <div className="mt-1 flex flex-col items-end text-xs">
+                                  {lineCancellations.map((c) => {
+                                    // Lote: um só "Desfazer (toda a encomenda)", na
+                                    // primeira linha do lote que está na tabela.
+                                    const isBatchFollower = !!c.batch_id && receiveCancellations?.rows.find(
+                                      (r) => r.batch_id === c.batch_id && !!r.purchase_order_item_id &&
+                                        receiveLines.some((l) => l.id === r.purchase_order_item_id),
+                                    )?.id !== c.id;
+                                    return (
+                                    <div key={c.id} className="flex items-center gap-1 text-muted-foreground whitespace-nowrap">
+                                      <span title={c.notes || undefined}>
+                                        {formatQty(c.quantity_cancelled)}{uomLabel ? ` ${uomLabel}` : ""} anulado(s) — {poCancellationReasonLabel(c.reason)}
+                                      </span>
+                                      {!isBatchFollower && (
+                                      <Button
+                                        type="button"
+                                        variant="link"
+                                        size="sm"
+                                        className="h-6 px-1 text-xs"
+                                        disabled={receiving || poUndoSubmitting}
+                                        onClick={() => setPoUndoTarget({
+                                          cancellationId: c.id,
+                                          batchId: c.batch_id ?? null,
+                                          orderId: c.purchase_order_id,
+                                          source: "receive",
+                                          description: `Volta a ficar por receber: ${formatQty(c.quantity_cancelled)}${uomLabel ? ` ${uomLabel}` : ""} de ${productName}.`,
+                                        })}
+                                      >
+                                        {/* Anulação da PO inteira: a BD só aceita desfazer o lote. */}
+                                        {c.batch_id ? "Desfazer (toda a encomenda)" : "Desfazer"}
+                                      </Button>
+                                      )}
+                                    </div>
+                                    );
+                                  })}
+                                  {!fullyReceived && (
+                                    <Button
+                                      type="button"
+                                      variant="link"
+                                      size="sm"
+                                      className="h-6 px-1 text-xs text-muted-foreground"
+                                      disabled={receiving}
+                                      onClick={() => openPoLineCancel(item, remaining, uomLabel)}
+                                    >
+                                      Não vou receber o resto
+                                    </Button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </TableCell>
                         </TableRow>
                       );
@@ -4088,6 +4520,21 @@ const PurchaseOrders = () => {
                 </Table>
                 {receivePreviewError && (
                   <p className="text-xs text-destructive" role="alert">{receivePreviewError}</p>
+                )}
+                {receiveLines.some((item) => getReceiveRemaining(item) > 0) && (
+                  <div className="flex justify-start">
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-6 px-1 text-xs text-muted-foreground"
+                      disabled={receiving}
+                      onClick={openPoOrderCancelFromReceive}
+                    >
+                      <Ban className="w-3.5 h-3.5 mr-1" />
+                      Não vou receber o resto da encomenda
+                    </Button>
+                  </div>
                 )}
               </div>
             )}
@@ -4103,6 +4550,113 @@ const PurchaseOrders = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* "Não vou receber o resto" — motivo da anulação (linha ou PO inteira).
+          Liga a rpc_cancel_po_line_remainder / rpc_cancel_po_remainder; os
+          erros vêm da RPC. Pode abrir por cima do diálogo de receção. */}
+      <Dialog
+        open={!!poCancelTarget}
+        onOpenChange={(o) => {
+          if (!o && !poCancelSubmitting) setPoCancelTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {poCancelTarget?.kind === "order" ? "Não vou receber o resto da encomenda" : "Não vou receber o resto"}
+            </DialogTitle>
+          </DialogHeader>
+          {poCancelTarget && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {poCancelTarget.kind === "line"
+                  ? `Vais anular ${formatQty(poCancelTarget.quantity)}${poCancelTarget.uomLabel ? ` ${poCancelTarget.uomLabel}` : ""} de ${poCancelTarget.productName}.`
+                  : poCancelTarget.lineCount !== null
+                    ? `Vais anular o que falta de ${poCancelTarget.lineCount} linha(s) da encomenda ${poCancelTarget.orderNumber}. Se nada tiver sido recebido, a encomenda fica cancelada.`
+                    : `Vais anular tudo o que falta receber da encomenda ${poCancelTarget.orderNumber}. Se nada tiver sido recebido, a encomenda fica cancelada.`}
+                {poCancelTarget.isClientOrder
+                  ? " A encomenda de cliente ligada deixa de esperar por este fornecedor e passa a usar stock disponível ou a ficar em falta."
+                  : " Esta quantidade deixa de estar por receber."}
+              </p>
+              <div className="space-y-2">
+                <Label>Motivo</Label>
+                <RadioGroup
+                  value={poCancelReason}
+                  onValueChange={(v) => setPoCancelReason(v as PoCancellationReason)}
+                  disabled={poCancelSubmitting}
+                >
+                  {(Object.keys(PO_CANCELLATION_REASON_LABELS) as PoCancellationReason[]).map((value) => (
+                    <div key={value} className="flex items-center gap-2">
+                      <RadioGroupItem value={value} id={`po-cancel-reason-${value}`} />
+                      <Label htmlFor={`po-cancel-reason-${value}`} className="font-normal">
+                        {PO_CANCELLATION_REASON_LABELS[value]}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-cancel-notes">
+                  Nota{poCancelReason === "other" ? " (obrigatória)" : " (opcional)"}
+                </Label>
+                <Textarea
+                  id="po-cancel-notes"
+                  rows={3}
+                  value={poCancelNotes}
+                  onChange={(e) => setPoCancelNotes(e.target.value)}
+                  disabled={poCancelSubmitting}
+                  aria-required={poCancelReason === "other"}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setPoCancelTarget(null)} disabled={poCancelSubmitting}>
+                  Cancelar
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => void handleConfirmPoCancel()}
+                  disabled={poCancelSubmitting || (poCancelReason === "other" && !poCancelNotes.trim())}
+                >
+                  {poCancelSubmitting ? "A anular..." : "Confirmar anulação"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Desfazer uma anulação (linha) ou o lote da PO inteira. */}
+      <AlertDialog
+        open={!!poUndoTarget}
+        onOpenChange={(o) => {
+          if (!o && !poUndoSubmitting) setPoUndoTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desfazer anulação?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {poUndoTarget?.batchId
+                ? "Desfaz a anulação de todas as linhas desta encomenda."
+                : poUndoTarget?.description}
+              {poUndoTarget?.source === "orderDialog" &&
+                " O diálogo da encomenda vai fechar — alterações não gravadas perdem-se."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={poUndoSubmitting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={poUndoSubmitting}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleConfirmPoUndo();
+              }}
+            >
+              {poUndoSubmitting ? "A desfazer..." : "Desfazer"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Reverter receção, por linha — para receções registadas por engano.
           Liga a rpc_revert_purchase_order_receipt; os erros (sem permissão,
