@@ -17,11 +17,14 @@ import {
   listarContratos,
   listarModelos,
   listarObras,
+  moradaSugerida,
   orcamentosComObra,
+  previsaoDoOrcamento,
   type AlertaObra,
   type ContratoAssinado,
   type ModeloObra,
   type ObraResumo,
+  type PrevisaoOrcamento,
 } from "../lib/obras";
 import {
   Badge,
@@ -299,7 +302,6 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
         setModelos(ms.filter((m) => m.ativo));
         setClientes(cs);
         setEquipa(eq);
-        if (ms.length) setModeloId(ms[0].id);
       } catch (e) {
         if (vivo) setErro(e instanceof ErroDeDados ? e.message : "Não foi possível carregar as fontes.");
       } finally {
@@ -311,8 +313,58 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
     };
   }, [orgId]);
 
+  // O tipo de obra vem escolhido: o "por defeito" (arranque, proteção,
+  // limpeza, entrega), a que se juntam os serviços vendidos. Em branco, sem
+  // por defeito, o primeiro — senão nascia vazia.
+  useEffect(() => {
+    const def = modelos.find((m) => m.por_defeito);
+    setModeloId(def ? def.id : fonte === "branco" && modelos.length ? modelos[0].id : "");
+  }, [fonte, modelos]);
+
+  const fonteId = fonte === "orcamento" ? orcamentoId : fonte === "contrato" ? contratoId : "";
+  const [previsao, setPrevisao] = useState<PrevisaoOrcamento | null>(null);
+  const [erroPrevisao, setErroPrevisao] = useState<string | null>(null);
+  useEffect(() => {
+    setPrevisao(null);
+    setErroPrevisao(null);
+    if (!fonteId) return;
+    let vivo = true;
+    previsaoDoOrcamento({
+      orgId,
+      orcamentoId: fonte === "orcamento" ? fonteId : null,
+      contratoId: fonte === "contrato" ? fonteId : null,
+    })
+      .then((p) => vivo && setPrevisao(p))
+      .catch((e) => vivo && setErroPrevisao(e instanceof ErroDeEscrita ? e.message : "Não foi possível ler os serviços."));
+    return () => {
+      vivo = false;
+    };
+  }, [orgId, fonte, fonteId, modeloId]);
+
+  // A morada vem preenchida (orçamento/contrato, ou a do cliente); quem abre
+  // pode corrigir. Mudar a fonte volta a sugerir.
+  useEffect(() => {
+    const cliente = fonte === "branco" ? clienteId : "";
+    if (!fonteId && !cliente) {
+      setMorada("");
+      return;
+    }
+    let vivo = true;
+    moradaSugerida({
+      orgId,
+      clienteId: cliente || null,
+      orcamentoId: fonte === "orcamento" ? fonteId : null,
+      contratoId: fonte === "contrato" ? fonteId : null,
+    })
+      .then((m) => vivo && setMorada(m ?? ""))
+      .catch(() => vivo && setMorada(""));
+    return () => {
+      vivo = false;
+    };
+  }, [orgId, fonte, fonteId, clienteId]);
+
   const nomeCliente = useMemo(() => new Map(clientes.map((c) => [c.id, c.nome])), [clientes]);
-  const supervisores = equipa.filter((m) => m.funcao === "supervisor" || m.funcao === "gestor");
+  const supervisores = equipa.filter((m) => ["supervisor", "gestor", "admin"].includes(m.funcao));
   const modelo = modelos.find((m) => m.id === modeloId);
   const totalModelo = modelo?.fases.reduce((s, f) => s + f.tarefas.reduce((x, t) => x + t.minutos_previstos, 0), 0) ?? 0;
 
@@ -450,11 +502,18 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field
-              label="Modelo"
-              hint={modelo ? `${modelo.fases.length} fases · ${formatarMinutos(totalModelo)} previstos` : "Sem modelo: 4 fases vazias."}
+              label="Tipo de obra"
+              hint={
+                modelo
+                  ? `+ ${modelo.fases.reduce((s, f) => s + f.tarefas.length, 0)} tarefas do tipo (${formatarMinutos(totalModelo)})` +
+                    (fonte === "branco" ? "" : ", além dos serviços vendidos")
+                  : fonte === "branco"
+                    ? "Sem tipo: 4 fases vazias."
+                    : "Só os serviços vendidos."
+              }
             >
               <Select value={modeloId} onChange={(e) => setModeloId(e.target.value)} className="w-full">
-                <option value="">— sem modelo —</option>
+                <option value="">{fonte === "branco" ? "— nenhum —" : "— nenhum (só os serviços) —"}</option>
                 {modelos.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.nome}
@@ -475,12 +534,14 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
                 ))}
               </Select>
             </Field>
-            <Field label="Morada da obra" hint={fonte === "branco" ? undefined : "Vazio = a do orçamento."}>
+            <Field label="Morada da obra" hint="Vem do orçamento ou do cliente. Podes corrigir.">
               <Input value={morada} onChange={(e) => setMorada(e.target.value)} className="w-full" />
             </Field>
           </div>
 
-          {modelos.length === 0 && (
+          {fonteId && <PrevisaoTarefas previsao={previsao} erro={erroPrevisao} />}
+
+          {modelos.length === 0 && fonte === "branco" && (
             <p className="text-xs text-slate-500">
               Ainda não há modelos.{" "}
               <Link to="/obras/modelos" className="font-medium text-brand underline">
@@ -493,6 +554,56 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
         </div>
       )}
     </Modal>
+  );
+}
+
+const NOMES_FASE = ["", "Preparação e demolições", "Instalações técnicas", "Acabamentos", "Limpeza e entrega"];
+
+function PrevisaoTarefas({ previsao, erro }: { previsao: PrevisaoOrcamento | null; erro: string | null }) {
+  if (erro) return <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>;
+  if (!previsao) return <Skeleton className="h-20 w-full" />;
+  if (previsao.tarefas.length === 0) {
+    return (
+      <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        Este orçamento não tem serviços (só produtos ou linhas soltas). A obra nasce só com as tarefas do tipo de obra —
+        acrescenta as outras depois.
+      </p>
+    );
+  }
+  const fases = [1, 2, 3, 4].map((f) => ({ f, tarefas: previsao.tarefas.filter((t) => t.fase === f) })).filter((x) => x.tarefas.length);
+  return (
+    <div className="space-y-2 rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
+      <p className="text-sm font-medium text-slate-700">
+        Dos serviços vendidos: {previsao.tarefas.length} tarefa{previsao.tarefas.length === 1 ? "" : "s"} ·{" "}
+        {formatarMinutos(previsao.minutos)} previstos. Datas, equipa e supervisor são planeados ao abrir.
+      </p>
+      {previsao.sem_ficha > 0 && (
+        <p className="text-xs text-amber-700">
+          {previsao.sem_ficha} serviço{previsao.sem_ficha === 1 ? "" : "s"} sem modelo nem horas na ficha técnica: fica
+          {previsao.sem_ficha === 1 ? "" : "m"} com 1 h. Cria o modelo em Obras → Modelos, ou ajusta na obra.
+        </p>
+      )}
+      <div className="max-h-56 space-y-2 overflow-y-auto">
+        {fases.map(({ f, tarefas }) => (
+          <div key={f}>
+            <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              {f}. {NOMES_FASE[f]}
+            </p>
+            <ul className="mt-0.5 space-y-0.5">
+              {tarefas.map((t, i) => (
+                <li key={i} className="flex justify-between gap-3 text-sm text-slate-700">
+                  <span className="min-w-0 truncate">
+                    {t.nome}
+                    {t.sem_ficha && <span className="ml-1 text-xs text-amber-700">(sem ficha)</span>}
+                  </span>
+                  <span className="shrink-0 font-mono text-xs tabular text-slate-500">{formatarMinutos(t.minutos)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

@@ -12,6 +12,7 @@ import {
   planearTarefa,
   renomearFase,
   replanearObra,
+  distribuirEquipa,
   tarefasDaObra,
   type ConflitoObra,
   type ConflitoRpc,
@@ -108,6 +109,20 @@ export default function ObraDetalhe() {
 
   const planeia = podePlanear(funcao);
   const recarregar = () => setRecarga((r) => r + 1);
+  const [aDistribuir, setADistribuir] = useState(false);
+  const distribuir = async () => {
+    if (!obra) return;
+    setADistribuir(true);
+    try {
+      const r = await distribuirEquipa(obra.id, true);
+      setAviso({ texto: `Equipa distribuída por ${r.tarefas} tarefa${r.tarefas === 1 ? "" : "s"} (as já começadas ficaram como estavam).` });
+      recarregar();
+    } catch (e) {
+      setAviso({ texto: e instanceof ErroDeEscrita ? e.message : "Não foi possível distribuir a equipa." });
+    } finally {
+      setADistribuir(false);
+    }
+  };
 
   const carregar = useCallback(async () => {
     if (!activeOrgId) return;
@@ -294,6 +309,9 @@ export default function ObraDetalhe() {
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => setReplanear(true)}>
                   Replanear datas
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => void distribuir()} disabled={aDistribuir}>
+                  {aDistribuir ? "A distribuir…" : "Distribuir equipa"}
                 </Button>
               </>
             )}
@@ -547,7 +565,7 @@ function EditarObra({
             <Select value={supervisor} onChange={(e) => setSupervisor(e.target.value)} className="w-full">
               <option value="">—</option>
               {equipa
-                .filter((m) => m.funcao === "supervisor" || m.funcao === "gestor")
+                .filter((m) => ["supervisor", "gestor", "admin"].includes(m.funcao))
                 .map((m) => (
                   <option key={m.utilizador_id} value={m.utilizador_id}>
                     {m.nome} ({m.funcao})

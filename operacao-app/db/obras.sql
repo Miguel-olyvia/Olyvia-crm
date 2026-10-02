@@ -105,6 +105,44 @@ CREATE TABLE IF NOT EXISTS public.ops_obra_modelo_tarefa (
 CREATE INDEX IF NOT EXISTS ops_obra_modelo_tarefa_idx
   ON public.ops_obra_modelo_tarefa (modelo_id, modelo_fase_id, ordem);
 
+-- Um tipo de obra pode ser o "por defeito": é o que vem escolhido quando a
+-- obra nasce de um contrato (traz as tarefas que existem em qualquer obra:
+-- arranque, proteção, limpeza final, entrega).
+ALTER TABLE public.ops_obra_modelo ADD COLUMN IF NOT EXISTS por_defeito boolean NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS ops_obra_modelo_defeito_uidx
+  ON public.ops_obra_modelo (organization_id) WHERE por_defeito;
+
+-- Modelo de tarefas por SERVIÇO do CRM: como se executa cada serviço vendido.
+-- Ao criar a obra a partir de um contrato, cada linha do orçamento expande-se
+-- nas tarefas do modelo do seu serviço, com o tempo × quantidade.
+--   minutos da tarefa = minutos_fixos + minutos_por_unidade × qt   (pessoa × tempo)
+--   depende_ordem     = outra tarefa do MESMO serviço (ex.: fechar roços
+--                       depois do ensaio)
+-- `servico_id` → services.id, SEM FK (o CRM apaga a sério). Escrita só por RPC.
+CREATE TABLE IF NOT EXISTS public.ops_obra_servico_tarefa (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id     uuid NOT NULL,
+  servico_id          uuid NOT NULL,
+  ordem               integer NOT NULL,
+  nome                text NOT NULL,
+  fase                smallint NOT NULL DEFAULT 3 CHECK (fase BETWEEN 1 AND 9),
+  minutos_por_unidade numeric(10,2) NOT NULL DEFAULT 0 CHECK (minutos_por_unidade >= 0),
+  minutos_fixos       integer NOT NULL DEFAULT 0 CHECK (minutos_fixos >= 0),
+  pessoas             smallint NOT NULL DEFAULT 1 CHECK (pessoas BETWEEN 1 AND 20),
+  skill_id            uuid REFERENCES public.ops_skill(id) ON DELETE SET NULL,
+  depende_ordem       integer,
+  procedimento        text,
+  materiais           text,
+  ferramentas         text,
+  -- 'sugerida' = gerada pela biblioteca; 'manual' = alguém a gravou.
+  origem              text NOT NULL DEFAULT 'manual' CHECK (origem IN ('manual','sugerida')),
+  atualizado_em       timestamptz NOT NULL DEFAULT now(),
+  atualizado_por      uuid,
+  UNIQUE (organization_id, servico_id, ordem),
+  CHECK (minutos_por_unidade > 0 OR minutos_fixos > 0),
+  CHECK (depende_ordem IS NULL OR depende_ordem <> ordem)
+);
+
 
 -- ============================================================
 -- 2. A obra, as fases, as tarefas
@@ -196,6 +234,20 @@ CREATE TABLE IF NOT EXISTS public.ops_obra_tarefa (
 CREATE INDEX IF NOT EXISTS ops_obra_tarefa_obra_idx  ON public.ops_obra_tarefa (obra_id, fase_id, ordem);
 CREATE INDEX IF NOT EXISTS ops_obra_tarefa_datas_idx ON public.ops_obra_tarefa (organization_id, inicio_planeado, fim_planeado);
 CREATE INDEX IF NOT EXISTS ops_obra_tarefa_modelo_idx ON public.ops_obra_tarefa (modelo_tarefa_id) WHERE modelo_tarefa_id IS NOT NULL;
+
+-- Tarefas que nasceram de uma linha do orçamento (serviço com ficha técnica).
+-- SEM FK, como as outras ligações ao CRM.
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS orcamento_linha_id uuid;  -- → quote_lines.id
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS servico_id uuid;          -- → services.id
+-- Quantas pessoas a tarefa leva (da ficha técnica). `minutos_previstos` é
+-- pessoa × tempo; no calendário, a tarefa dura minutos ÷ pessoas.
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS pessoas_previstas smallint NOT NULL DEFAULT 1
+  CHECK (pessoas_previstas BETWEEN 1 AND 20);
+-- A especialidade que a tarefa pede, e o passo do modelo de serviço de onde veio.
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS skill_id uuid
+  REFERENCES public.ops_skill(id) ON DELETE SET NULL;
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS servico_tarefa_id uuid
+  REFERENCES public.ops_obra_servico_tarefa(id) ON DELETE SET NULL;
 
 -- Quem está numa tarefa. `obra_id` vai repetido para a policy não precisar
 -- de um join por linha.
@@ -341,36 +393,94 @@ $$;
 REVOKE ALL ON FUNCTION public.ops_obra_somar_dias_uteis(date, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ops_obra_somar_dias_uteis(date, integer) TO authenticated, service_role;
 
--- Espalha as tarefas pelo calendário, uma a seguir à outra, pela ordem
--- (fase, tarefa), com `minutos_por_dia` de capacidade. É o plano de partida;
--- o gestor arrasta depois no Gantt. Espelho de `planearSequencial()`.
+-- O plano de partida, em PARALELO dentro de cada fase:
+--   · as fases vêm uma depois da outra (a 2 começa quando a 1 acaba);
+--   · dentro da fase, cada tarefa começa assim que (a) a tarefa de que
+--     depende acabou e (b) há pessoas livres — a equipa da obra tem tantas
+--     "vagas" quantos os técnicos/operadores ativos (de 1 a 4);
+--   · uma tarefa de k pessoas ocupa k vagas durante minutos ÷ k;
+--   · `minutos_por_dia` de trabalho por dia útil.
+-- O gestor arrasta depois no Gantt. (O plano em série do domínio,
+-- `planearSequencial()`, é o caso de 1 vaga.)
 CREATE OR REPLACE FUNCTION public.ops_obra_replanear_impl(_obra_id uuid, _inicio date)
 RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
 DECLARE
-  v_mpd    integer;
-  v_cursor bigint := 0;
-  v_n      integer := 0;
-  r        record;
+  v_org     uuid;
+  v_mpd     integer;
+  v_cap     integer;
+  v_livre   bigint[];       -- minuto em que cada vaga fica livre
+  v_fimt    jsonb := '{}';  -- fim (minuto) de cada tarefa já planeada
+  v_fase    integer := NULL;
+  v_fase_ini bigint := 0;
+  v_fase_fim bigint := 0;
+  v_k       integer;
+  v_dur     bigint;
+  v_cedo    bigint;
+  v_ini     bigint;
+  v_fim     bigint;
+  v_escolha integer[];
+  v_best    integer;
+  v_n       integer := 0;
+  r         record;
+  i         integer;
+  j         integer;
 BEGIN
-  SELECT minutos_por_dia INTO v_mpd FROM public.ops_obra WHERE id = _obra_id;
+  SELECT organization_id, minutos_por_dia INTO v_org, v_mpd FROM public.ops_obra WHERE id = _obra_id;
+
+  SELECT LEAST(4, GREATEST(1, count(*)))::integer INTO v_cap
+    FROM public.ops_utilizador_perfil
+   WHERE organization_id = v_org AND ativo AND funcao IN ('tecnico','operador');
+  v_livre := array_fill(0::bigint, ARRAY[v_cap]);
 
   FOR r IN
-    SELECT t.id, t.minutos_previstos
+    SELECT t.id, f.ordem AS fase, t.depende_de, t.minutos_previstos AS min,
+           LEAST(GREATEST(t.pessoas_previstas, 1), v_cap) AS k
       FROM public.ops_obra_tarefa t
       JOIN public.ops_obra_fase f ON f.id = t.fase_id
      WHERE t.obra_id = _obra_id
      ORDER BY f.ordem, t.ordem, t.criada_em
   LOOP
+    IF v_fase IS DISTINCT FROM r.fase THEN
+      v_fase := r.fase;
+      v_fase_ini := v_fase_fim;
+    END IF;
+
+    v_k := r.k;
+    v_dur := GREATEST(1, ceil(r.min::numeric / v_k))::bigint;
+    v_cedo := GREATEST(v_fase_ini, COALESCE((v_fimt->>(r.depende_de::text))::bigint, 0));
+
+    -- As k vagas que ficam livres mais cedo.
+    v_escolha := '{}';
+    FOR j IN 1..v_k LOOP
+      v_best := NULL;
+      FOR i IN 1..v_cap LOOP
+        IF NOT (i = ANY (v_escolha)) AND (v_best IS NULL OR v_livre[i] < v_livre[v_best]) THEN
+          v_best := i;
+        END IF;
+      END LOOP;
+      v_escolha := v_escolha || v_best;
+    END LOOP;
+
+    v_ini := v_cedo;
+    FOREACH i IN ARRAY v_escolha LOOP
+      v_ini := GREATEST(v_ini, v_livre[i]);
+    END LOOP;
+    v_fim := v_ini + v_dur;
+    FOREACH i IN ARRAY v_escolha LOOP
+      v_livre[i] := v_fim;
+    END LOOP;
+
+    v_fimt := v_fimt || jsonb_build_object(r.id::text, v_fim);
+    v_fase_fim := GREATEST(v_fase_fim, v_fim);
+
     UPDATE public.ops_obra_tarefa
-       SET inicio_planeado = public.ops_obra_somar_dias_uteis(_inicio, (v_cursor / v_mpd)::integer),
-           fim_planeado    = public.ops_obra_somar_dias_uteis(
-                               _inicio, ((v_cursor + GREATEST(r.minutos_previstos, 1) - 1) / v_mpd)::integer),
+       SET inicio_planeado = public.ops_obra_somar_dias_uteis(_inicio, (v_ini / v_mpd)::integer),
+           fim_planeado    = public.ops_obra_somar_dias_uteis(_inicio, ((v_fim - 1) / v_mpd)::integer),
            atualizada_em   = now()
      WHERE id = r.id;
-    v_cursor := v_cursor + GREATEST(r.minutos_previstos, 1);
     v_n := v_n + 1;
   END LOOP;
 
@@ -710,6 +820,797 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_gravar_modelo(uuid, uuid, text, te
 
 
 -- ============================================================
+-- 6b. Tarefas a partir do orçamento (os serviços vendidos)
+-- ============================================================
+-- Uma tarefa por linha do orçamento que seja um SERVIÇO. Produtos (louças,
+-- material) não são trabalho e ficam de fora.
+--
+--   · minutos previstos = qt × horas × pessoas da ficha técnica × 60
+--     (é a mesma conta que o CRM usa para o custo de mão de obra: preço/hora
+--     × pessoas × horas, por unidade). Sem horas na ficha → 60 min e
+--     `sem_ficha`, para se ver o que falta preencher no CRM;
+--   · procedimento = "descrição da mão de obra" da ficha;
+--   · materiais = os materiais da ficha × qt;
+--   · fase por palavras-chave na categoria/nome do serviço/secção:
+--     demolição/preparação → 1, instalações → 2, limpeza/entrega → 4,
+--     o resto → 3. É um ponto de partida; o gestor muda no Gantt.
+--
+-- Só lê o CRM. Se a base não tiver as tabelas de serviços, devolve vazio
+-- (a obra nasce com as 4 fases vazias, como antes).
+
+-- (DROP: a lista de colunas devolvidas mudou ao longo das versões.)
+DROP FUNCTION IF EXISTS public.ops_obra_tarefas_do_orcamento(uuid);
+CREATE FUNCTION public.ops_obra_tarefas_do_orcamento(_orc uuid)
+RETURNS TABLE (
+  fase               smallint,
+  ordem              integer,
+  nome               text,
+  procedimento       text,
+  materiais          text,
+  ferramentas        text,
+  minutos            integer,
+  pessoas            smallint,
+  skill_id           uuid,
+  sem_ficha          boolean,
+  com_modelo         boolean,
+  orcamento_linha_id uuid,
+  servico_id         uuid,
+  servico_tarefa_id  uuid)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+#variable_conflict use_column
+DECLARE
+  v_org   uuid;
+  v_ordem integer := 0;
+  l       record;
+  st      record;
+BEGIN
+  IF _orc IS NULL
+     OR to_regclass('public.services') IS NULL
+     OR to_regclass('public.service_categories') IS NULL
+     OR to_regclass('public.service_materials') IS NULL
+     OR to_regclass('public.products') IS NULL
+     OR NOT EXISTS (SELECT 1 FROM information_schema.columns
+                     WHERE table_schema = 'public' AND table_name = 'quote_lines'
+                       AND column_name = 'service_id') THEN
+    RETURN;
+  END IF;
+
+  SELECT q.organization_id INTO v_org FROM public.quotes q WHERE q.id = _orc;
+
+  -- Dinâmico para o ficheiro instalar numa base sem as tabelas de serviços.
+  FOR l IN EXECUTE $q$
+    SELECT l.id, COALESCE(l.qt, 1) AS qt, l.service_id,
+           COALESCE(nullif(btrim(s.name), ''), nullif(btrim(l.descricao_snapshot), ''), 'Serviço') AS nome,
+           nullif(btrim(s.technical_sheet_labor_description), '') AS proc,
+           s.technical_sheet_labor_hours AS horas,
+           s.technical_sheet_labor_people_count AS pessoas,
+           (CASE
+              WHEN lower(concat_ws(' ', c.name, s.name, l.section_name)) ~ '(demol|prepara|remoç|remoc|retirad|desmont|proteç|protec|estaleiro)' THEN 1
+              WHEN lower(concat_ws(' ', c.name, s.name, l.section_name)) ~ '(eletric|elétric|electric|canaliz|água|agua|esgot|gás|gas |avac|climatiz|ar condicionado|instalaç|instalac|tubag|quadro|rede )' THEN 2
+              WHEN lower(concat_ws(' ', c.name, s.name, l.section_name)) ~ '(limpez|entrega)' THEN 4
+              ELSE 3
+            END)::smallint AS fase,
+           (SELECT string_agg(p.name || ' × ' || trim_scale(round((sm.quantity * COALESCE(l.qt, 1))::numeric, 2))::text,
+                              '; ' ORDER BY sm.sort_order NULLS LAST, p.name)
+              FROM public.service_materials sm
+              JOIN public.products p ON p.id = sm.product_id
+             WHERE sm.service_id = l.service_id AND sm.deleted_at IS NULL) AS materiais
+      FROM public.quote_lines l
+      JOIN public.services s ON s.id = l.service_id
+      LEFT JOIN public.service_categories c ON c.id = s.service_category_id
+     WHERE l.quote_id = $1
+     ORDER BY l.ordem NULLS LAST, l.id
+  $q$ USING _orc
+  LOOP
+    IF EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa x
+                WHERE x.organization_id = v_org AND x.servico_id = l.service_id) THEN
+      -- O serviço tem modelo: uma tarefa por passo, tempo × quantidade.
+      FOR st IN
+        SELECT x.* FROM public.ops_obra_servico_tarefa x
+         WHERE x.organization_id = v_org AND x.servico_id = l.service_id
+         ORDER BY x.ordem
+      LOOP
+        v_ordem := v_ordem + 1;
+        fase := st.fase;
+        ordem := v_ordem;
+        nome := l.nome || ': ' || st.nome;
+        procedimento := st.procedimento;
+        materiais := st.materiais;
+        ferramentas := st.ferramentas;
+        minutos := GREATEST(1, round(st.minutos_fixos + st.minutos_por_unidade * l.qt))::integer;
+        pessoas := st.pessoas;
+        skill_id := st.skill_id;
+        sem_ficha := false;
+        com_modelo := true;
+        orcamento_linha_id := l.id;
+        servico_id := l.service_id;
+        servico_tarefa_id := st.id;
+        RETURN NEXT;
+      END LOOP;
+    ELSE
+      -- Sem modelo: uma tarefa só, com o tempo da ficha técnica
+      -- (qt × horas × pessoas; sem horas → 60 min e `sem_ficha`).
+      v_ordem := v_ordem + 1;
+      fase := l.fase;
+      ordem := v_ordem;
+      nome := l.nome;
+      procedimento := l.proc;
+      materiais := l.materiais;
+      ferramentas := NULL;
+      minutos := (CASE WHEN COALESCE(l.horas, 0) > 0
+                       THEN GREATEST(1, round(60 * l.qt * l.horas * COALESCE(nullif(l.pessoas, 0), 1)))
+                       ELSE 60 END)::integer;
+      pessoas := LEAST(20, GREATEST(1, COALESCE(round(l.pessoas), 1)))::smallint;
+      skill_id := NULL;
+      sem_ficha := COALESCE(l.horas, 0) <= 0;
+      com_modelo := false;
+      orcamento_linha_id := l.id;
+      servico_id := l.service_id;
+      servico_tarefa_id := NULL;
+      RETURN NEXT;
+    END IF;
+  END LOOP;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_tarefas_do_orcamento(uuid) FROM PUBLIC, anon, authenticated;
+
+
+-- ============================================================
+-- 6c. Modelos por serviço — gestão e sugestão automática
+-- ============================================================
+-- Quem gere: o gestor/admin de Operações (checklists.manage) OU o comercial
+-- (quem pode editar serviços no CRM, `services.edit`, nesta organização).
+
+CREATE OR REPLACE FUNCTION public.ops_obra_pode_gerir_modelos(_org uuid)
+RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_user uuid := public.current_business_user_id();
+BEGIN
+  RETURN public.is_system_admin_user((SELECT auth.uid()))
+    OR (public.ops_pode(_org, 'operations.checklists.manage')
+        AND EXISTS (SELECT 1 FROM public.ops_utilizador_perfil p
+                     WHERE p.organization_id = _org AND p.utilizador_id = v_user
+                       AND p.ativo AND p.funcao IN ('admin','gestor')))
+    OR EXISTS (SELECT 1 FROM public.anew_memberships m
+                 JOIN public.anew_role_permissions rp
+                   ON rp.role_id = m.role_id AND rp.permission_code = 'services.edit'
+                WHERE m.user_id = v_user AND m.organization_id = _org AND m.status = 'active');
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_pode_gerir_modelos(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_pode_gerir_modelos(uuid) TO authenticated, service_role;
+
+-- Ver os modelos: quem vê Operações, ou quem os pode gerir.
+CREATE OR REPLACE FUNCTION public.ops_obra_pode_ver_modelos(_org uuid)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT public.ops_pode(_org, 'operations.view') OR public.ops_obra_pode_gerir_modelos(_org)
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_pode_ver_modelos(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_pode_ver_modelos(uuid) TO authenticated, service_role;
+
+-- O serviço é desta organização (dono, ou partilhado com ela)?
+CREATE OR REPLACE FUNCTION public.ops_obra_servico_da_org(_org uuid, _servico uuid)
+RETURNS boolean
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v boolean;
+BEGIN
+  IF to_regclass('public.services') IS NULL THEN
+    RETURN false;
+  END IF;
+  EXECUTE 'SELECT EXISTS (SELECT 1 FROM public.services s WHERE s.id = $2
+             AND NOT COALESCE(s.is_deleted, false) AND s.deleted_at IS NULL
+             AND (s.organization_id = $1'
+       || CASE WHEN to_regclass('public.service_organizations') IS NOT NULL
+               THEN ' OR EXISTS (SELECT 1 FROM public.service_organizations so
+                                  WHERE so.service_id = s.id AND so.organization_id = $1)'
+               ELSE '' END
+       || '))'
+    INTO v USING _org, _servico;
+  RETURN v;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_servico_da_org(uuid, uuid) FROM PUBLIC, anon, authenticated;
+
+-- A biblioteca de partida: como se executa, em geral, cada família de
+-- serviço. São valores RAZOÁVEIS, não medidos — servem para a obra nascer
+-- planeada; as métricas (real vs previsto) dizem depois o que corrigir.
+--   re = palavras na categoria/nome do serviço (a primeira família que bate)
+--   mu = minutos (pessoa × tempo) por unidade, se a ficha não tiver horas
+--   t  = passos: n nome, fase, p fração do tempo por unidade, x minutos fixos,
+--        k pessoas (null = as da ficha), d depende do passo n.º
+CREATE OR REPLACE FUNCTION public.ops_obra_biblioteca()
+RETURNS jsonb
+LANGUAGE sql IMMUTABLE
+SET search_path TO 'public'
+AS $$ SELECT $j$[
+  {"familia":"Demolições","re":"demol|remoç|remoc|picar|retirad|desmont|arranc","skill":"Demolições","mu":30,"t":[
+    {"n":"Proteger zona e acessos","fase":1,"x":45,"p":0,"k":1},
+    {"n":"Demolir e remover","fase":1,"p":0.8,"k":2,"d":1},
+    {"n":"Retirar entulho","fase":1,"p":0.2,"k":1,"d":2}]},
+  {"familia":"AVAC","re":"climatiz|ar condicionado|avac|ventila|bomba de calor|split","skill":"AVAC","mu":240,"t":[
+    {"n":"Furação e suportes","fase":2,"p":0.3,"k":1},
+    {"n":"Instalar unidades e tubagem","fase":2,"p":0.5,"k":2,"d":1},
+    {"n":"Vácuo, carga e teste","fase":2,"x":30,"p":0.2,"k":1,"d":2}]},
+  {"familia":"Canalização","re":"canaliz|água|agua|esgot|sanit|duche|banheira|autoclism|torneira|lavatór|lavator|termoacumul|esquentador","skill":"Canalização","mu":120,"t":[
+    {"n":"Marcar traçado","fase":2,"x":30,"p":0,"k":1},
+    {"n":"Abrir roços","fase":2,"p":0.25,"k":1,"d":1},
+    {"n":"Instalar tubagem e equipamento","fase":2,"p":0.5,"k":null,"d":2},
+    {"n":"Ensaio de estanquidade","fase":2,"x":30,"p":0,"k":1,"d":3},
+    {"n":"Fechar roços","fase":2,"p":0.25,"k":1,"d":4}]},
+  {"familia":"Eletricidade","re":"eletric|elétric|electric|quadro|tomada|interruptor|iluminaç|ilumina|luminár|cabo|ited","skill":"Eletricidade","mu":90,"t":[
+    {"n":"Marcar traçado","fase":2,"x":30,"p":0,"k":1},
+    {"n":"Abrir roços e caixas","fase":2,"p":0.3,"k":1,"d":1},
+    {"n":"Passar cabos e ligar","fase":2,"p":0.5,"k":null,"d":2},
+    {"n":"Fechar roços","fase":2,"p":0.2,"k":1,"d":3},
+    {"n":"Ensaio e verificação","fase":2,"x":30,"p":0,"k":1,"d":4}]},
+  {"familia":"Pladur e tetos","re":"pladur|gesso cartonado|teto falso|tecto falso|divisór|divisor","skill":"Pladur","mu":40,"t":[
+    {"n":"Montar estrutura","fase":3,"p":0.4,"k":null},
+    {"n":"Aplicar placas","fase":3,"p":0.35,"k":null,"d":1},
+    {"n":"Tratar juntas","fase":3,"p":0.25,"k":1,"d":2}]},
+  {"familia":"Revestimentos","re":"azulej|cerâm|ceram|revestim|mosaic|pavimento|ladrilh|porcelan|soalho|flutuante|vinil","skill":"Revestimentos","mu":45,"t":[
+    {"n":"Regularizar base","fase":3,"p":0.25,"k":1},
+    {"n":"Assentar","fase":3,"p":0.55,"k":null,"d":1},
+    {"n":"Betumar juntas e rematar","fase":3,"p":0.15,"k":1,"d":2},
+    {"n":"Limpar","fase":3,"p":0.05,"k":1,"d":3}]},
+  {"familia":"Pintura","re":"pintur|tinta|esmalt|verniz|estuque|reboco","skill":"Pintura","mu":15,"t":[
+    {"n":"Proteger e mascarar","fase":3,"x":30,"p":0,"k":1},
+    {"n":"Preparar superfície","fase":3,"p":0.35,"k":1,"d":1},
+    {"n":"Aplicar primário","fase":3,"p":0.2,"k":1,"d":2},
+    {"n":"1.ª demão","fase":3,"p":0.225,"k":1,"d":3},
+    {"n":"2.ª demão","fase":3,"p":0.225,"k":1,"d":4}]},
+  {"familia":"Carpintaria","re":"carpint|porta|roupeiro|armário|armario|móvel|movel|cozinha|bancada|rodapé|rodape","skill":"Carpintaria","mu":120,"t":[
+    {"n":"Medir e preparar","fase":3,"x":30,"p":0.1,"k":1},
+    {"n":"Montar","fase":3,"p":0.75,"k":null,"d":1},
+    {"n":"Afinar e rematar","fase":3,"p":0.15,"k":1,"d":2}]},
+  {"familia":"Limpeza","re":"limpez","skill":null,"mu":60,"t":[
+    {"n":"Limpeza","fase":4,"p":1,"k":null}]}
+]$j$::jsonb $$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_biblioteca() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_biblioteca() TO authenticated, service_role;
+
+-- Gera (substitui) o modelo de um serviço a partir da biblioteca e da ficha
+-- técnica. Devolve o n.º de tarefas.
+CREATE OR REPLACE FUNCTION public.ops_obra_servico_sugerir_impl(_org uuid, _servico uuid, _autor uuid)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_s      record;
+  v_chave  text;
+  v_fam    jsonb;
+  v_fase   smallint;
+  v_total  numeric;
+  v_ficha_pessoas integer;
+  v_skill  uuid;
+  v_mats   text;
+  v_maxp   numeric;
+  v_n      integer := 0;
+  t        jsonb;
+  i        integer;
+BEGIN
+  EXECUTE 'SELECT s.name, c.name AS categoria, s.technical_sheet_labor_hours AS horas,
+                  s.technical_sheet_labor_people_count AS pessoas,
+                  nullif(btrim(s.technical_sheet_labor_description), '''') AS descricao
+             FROM public.services s LEFT JOIN public.service_categories c ON c.id = s.service_category_id
+            WHERE s.id = $1'
+     INTO v_s USING _servico;
+  IF v_s.name IS NULL THEN
+    RETURN 0;
+  END IF;
+
+  v_chave := lower(concat_ws(' ', v_s.categoria, v_s.name));
+  SELECT f INTO v_fam
+    FROM jsonb_array_elements(public.ops_obra_biblioteca()) WITH ORDINALITY AS x(f, pos)
+   WHERE v_chave ~ (f->>'re')
+   ORDER BY pos LIMIT 1;
+
+  IF v_fam IS NULL THEN
+    -- Genérico: preparar / executar / arrumar, na fase que o nome sugere.
+    v_fase := CASE
+      WHEN v_chave ~ '(demol|prepara|remoç|remoc|retirad|desmont|proteç|protec|estaleiro)' THEN 1
+      WHEN v_chave ~ '(instalaç|instalac|tubag|rede |gás|gas )' THEN 2
+      WHEN v_chave ~ '(limpez|entrega)' THEN 4
+      ELSE 3 END;
+    v_fam := jsonb_build_object('familia', 'Genérico', 'skill', NULL, 'mu', 60, 't', jsonb_build_array(
+      jsonb_build_object('n', 'Preparar', 'fase', v_fase, 'x', 15, 'p', 0.1, 'k', 1),
+      jsonb_build_object('n', 'Executar', 'fase', v_fase, 'p', 0.8, 'k', NULL, 'd', 1),
+      jsonb_build_object('n', 'Arrumar e limpar', 'fase', v_fase, 'p', 0.1, 'k', 1, 'd', 2)));
+  END IF;
+
+  v_ficha_pessoas := GREATEST(1, COALESCE(round(v_s.pessoas), 1))::integer;
+  v_total := CASE WHEN COALESCE(v_s.horas, 0) > 0
+                  THEN v_s.horas * v_ficha_pessoas * 60
+                  ELSE (v_fam->>'mu')::numeric END;
+
+  IF v_fam->>'skill' IS NOT NULL THEN
+    INSERT INTO public.ops_skill (organization_id, nome) VALUES (_org, v_fam->>'skill')
+    ON CONFLICT (organization_id, nome) DO NOTHING;
+    SELECT id INTO v_skill FROM public.ops_skill WHERE organization_id = _org AND nome = v_fam->>'skill';
+  END IF;
+
+  -- Materiais da ficha, por unidade, no passo principal (o de maior fração).
+  EXECUTE 'SELECT string_agg(p.name || '' × '' || trim_scale(round(sm.quantity::numeric, 2))::text || '' /un'',
+                             ''; '' ORDER BY sm.sort_order NULLS LAST, p.name)
+             FROM public.service_materials sm JOIN public.products p ON p.id = sm.product_id
+            WHERE sm.service_id = $1 AND sm.deleted_at IS NULL'
+     INTO v_mats USING _servico;
+  SELECT max(COALESCE((x->>'p')::numeric, 0)) INTO v_maxp FROM jsonb_array_elements(v_fam->'t') x;
+
+  DELETE FROM public.ops_obra_servico_tarefa WHERE organization_id = _org AND servico_id = _servico;
+
+  i := 0;
+  FOR t IN SELECT x FROM jsonb_array_elements(v_fam->'t') x LOOP
+    i := i + 1;
+    INSERT INTO public.ops_obra_servico_tarefa (
+      organization_id, servico_id, ordem, nome, fase, minutos_por_unidade, minutos_fixos,
+      pessoas, skill_id, depende_ordem, procedimento, materiais, origem, atualizado_por)
+    VALUES (
+      _org, _servico, i, t->>'n', (t->>'fase')::smallint,
+      round(v_total * COALESCE((t->>'p')::numeric, 0), 2),
+      COALESCE((t->>'x')::integer, 0),
+      -- k da biblioteca; sem k, as pessoas da ficha.
+      LEAST(20, COALESCE((t->>'k')::integer, v_ficha_pessoas)),
+      v_skill,
+      (t->>'d')::integer,
+      CASE WHEN COALESCE((t->>'p')::numeric, 0) = v_maxp THEN v_s.descricao END,
+      CASE WHEN COALESCE((t->>'p')::numeric, 0) = v_maxp THEN v_mats END,
+      'sugerida', _autor);
+    v_n := v_n + 1;
+  END LOOP;
+
+  RETURN v_n;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_servico_sugerir_impl(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
+
+-- O tipo de obra "Obra geral", por defeito, com as tarefas que existem sempre.
+CREATE OR REPLACE FUNCTION public.ops_obra_semear_tipo_geral_impl(_org uuid)
+RETURNS uuid
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_id uuid;
+  v_f  uuid;
+BEGIN
+  SELECT id INTO v_id FROM public.ops_obra_modelo WHERE organization_id = _org AND por_defeito;
+  IF v_id IS NOT NULL THEN
+    RETURN v_id;
+  END IF;
+  SELECT id INTO v_id FROM public.ops_obra_modelo WHERE organization_id = _org AND nome = 'Obra geral';
+  IF v_id IS NOT NULL THEN
+    UPDATE public.ops_obra_modelo SET por_defeito = true, atualizado_em = now() WHERE id = v_id;
+    RETURN v_id;
+  END IF;
+
+  INSERT INTO public.ops_obra_modelo (organization_id, nome, descricao, tipo_servico, por_defeito)
+  VALUES (_org, 'Obra geral',
+          'O que existe em qualquer obra. Os serviços do contrato juntam-se a estas tarefas.',
+          'geral', true)
+  RETURNING id INTO v_id;
+
+  INSERT INTO public.ops_obra_modelo_fase (organization_id, modelo_id, ordem, nome)
+  VALUES (_org, v_id, 1, 'Preparação e demolições'), (_org, v_id, 2, 'Instalações técnicas'),
+         (_org, v_id, 3, 'Acabamentos'), (_org, v_id, 4, 'Limpeza e entrega');
+
+  SELECT id INTO v_f FROM public.ops_obra_modelo_fase WHERE modelo_id = v_id AND ordem = 1;
+  INSERT INTO public.ops_obra_modelo_tarefa (organization_id, modelo_id, modelo_fase_id, ordem, nome, procedimento, minutos_previstos)
+  VALUES (_org, v_id, v_f, 1, 'Reunião de arranque com o cliente', 'Confirmar acessos, horários, zonas a proteger e contactos.', 30),
+         (_org, v_id, v_f, 2, 'Proteger acessos e zonas comuns', 'Cartão/plástico no chão, fita nas portas, proteção de elevador.', 60);
+  SELECT id INTO v_f FROM public.ops_obra_modelo_fase WHERE modelo_id = v_id AND ordem = 4;
+  INSERT INTO public.ops_obra_modelo_tarefa (organization_id, modelo_id, modelo_fase_id, ordem, nome, procedimento, minutos_previstos)
+  VALUES (_org, v_id, v_f, 1, 'Limpeza final', 'Retirar proteções, aspirar, lavar superfícies.', 120),
+         (_org, v_id, v_f, 2, 'Vistoria e entrega ao cliente', 'Percorrer a obra com o cliente, anotar remates, recolher assinatura.', 60);
+  RETURN v_id;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_semear_tipo_geral_impl(uuid) FROM PUBLIC, anon, authenticated;
+
+-- "Gerar sugestões": um serviço (p_servico_id) ou todos os da organização.
+-- Sem p_substituir, só gera onde não há modelo; com p_substituir, refaz os
+-- sugeridos (nunca apaga um modelo que alguém gravou à mão, exceto se for o
+-- serviço indicado). Garante também o tipo "Obra geral".
+CREATE OR REPLACE FUNCTION public.rpc_ops_servico_modelo_sugerir(
+  p_org         uuid,
+  p_servico_id  uuid    DEFAULT NULL,
+  p_substituir  boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_user     uuid := public.current_business_user_id();
+  v_servicos integer := 0;
+  v_tarefas  integer := 0;
+  v_k        integer;
+  v_id       uuid;
+BEGIN
+  IF NOT public.ops_obra_pode_gerir_modelos(p_org) THEN
+    RAISE EXCEPTION 'Sem permissão para gerir modelos nesta organização.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF to_regclass('public.services') IS NULL THEN
+    RAISE EXCEPTION 'Esta base não tem o catálogo de serviços do CRM.';
+  END IF;
+
+  IF p_servico_id IS NOT NULL THEN
+    IF NOT public.ops_obra_servico_da_org(p_org, p_servico_id) THEN
+      RAISE EXCEPTION 'Serviço não encontrado nesta organização.' USING ERRCODE = 'no_data_found';
+    END IF;
+    IF NOT p_substituir AND EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa
+                                     WHERE organization_id = p_org AND servico_id = p_servico_id) THEN
+      RAISE EXCEPTION 'Esse serviço já tem modelo. Para o refazer, confirma a substituição.';
+    END IF;
+    v_tarefas := public.ops_obra_servico_sugerir_impl(p_org, p_servico_id, v_user);
+    v_servicos := 1;
+  ELSE
+    FOR v_id IN EXECUTE
+      'SELECT s.id FROM public.services s
+        WHERE NOT COALESCE(s.is_deleted, false) AND s.deleted_at IS NULL
+          AND (s.organization_id = $1'
+      || CASE WHEN to_regclass('public.service_organizations') IS NOT NULL
+              THEN ' OR EXISTS (SELECT 1 FROM public.service_organizations so
+                                 WHERE so.service_id = s.id AND so.organization_id = $1)'
+              ELSE '' END
+      || ')' USING p_org
+    LOOP
+      IF NOT EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa
+                      WHERE organization_id = p_org AND servico_id = v_id)
+         OR (p_substituir AND NOT EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa
+                                           WHERE organization_id = p_org AND servico_id = v_id
+                                             AND origem = 'manual')) THEN
+        v_k := public.ops_obra_servico_sugerir_impl(p_org, v_id, v_user);
+        v_tarefas := v_tarefas + v_k;
+        v_servicos := v_servicos + 1;
+      END IF;
+    END LOOP;
+  END IF;
+
+  PERFORM public.ops_obra_semear_tipo_geral_impl(p_org);
+  RETURN jsonb_build_object('ok', true, 'servicos', v_servicos, 'tarefas', v_tarefas);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_servico_modelo_sugerir(uuid, uuid, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_servico_modelo_sugerir(uuid, uuid, boolean) TO authenticated, service_role;
+
+-- Gravar o modelo de um serviço (substitui todas as tarefas). p_tarefas é um
+-- array [{nome, fase, minutos_por_unidade, minutos_fixos, pessoas, skill_id,
+-- depende_ordem, procedimento, materiais, ferramentas}] pela ordem.
+CREATE OR REPLACE FUNCTION public.rpc_ops_servico_modelo_gravar(
+  p_org        uuid,
+  p_servico_id uuid,
+  p_tarefas    jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_user uuid := public.current_business_user_id();
+  v_n    integer := COALESCE(jsonb_array_length(p_tarefas), 0);
+  t      jsonb;
+  i      integer := 0;
+  v_dep  integer;
+  v_mpu  numeric;
+  v_fix  integer;
+BEGIN
+  IF NOT public.ops_obra_pode_gerir_modelos(p_org) THEN
+    RAISE EXCEPTION 'Sem permissão para gerir modelos nesta organização.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF NOT public.ops_obra_servico_da_org(p_org, p_servico_id) THEN
+    RAISE EXCEPTION 'Serviço não encontrado nesta organização.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF jsonb_typeof(COALESCE(p_tarefas, '[]'::jsonb)) <> 'array' THEN
+    RAISE EXCEPTION 'As tarefas têm de vir numa lista.';
+  END IF;
+
+  -- Validar tudo antes de apagar o que lá está.
+  FOR t IN SELECT x FROM jsonb_array_elements(COALESCE(p_tarefas, '[]'::jsonb)) x LOOP
+    i := i + 1;
+    IF nullif(btrim(t->>'nome'), '') IS NULL THEN
+      RAISE EXCEPTION 'A tarefa n.º % não tem nome.', i;
+    END IF;
+    IF COALESCE((t->>'fase')::integer, 0) NOT BETWEEN 1 AND 9 THEN
+      RAISE EXCEPTION '"%": a fase tem de ser de 1 a 9.', t->>'nome';
+    END IF;
+    v_mpu := COALESCE((t->>'minutos_por_unidade')::numeric, 0);
+    v_fix := COALESCE((t->>'minutos_fixos')::integer, 0);
+    IF v_mpu < 0 OR v_fix < 0 OR (v_mpu = 0 AND v_fix = 0) THEN
+      RAISE EXCEPTION '"%": precisa de tempo (por unidade ou fixo).', t->>'nome';
+    END IF;
+    IF COALESCE((t->>'pessoas')::integer, 1) NOT BETWEEN 1 AND 20 THEN
+      RAISE EXCEPTION '"%": de 1 a 20 pessoas.', t->>'nome';
+    END IF;
+    v_dep := (t->>'depende_ordem')::integer;
+    IF v_dep IS NOT NULL AND (v_dep = i OR v_dep < 1 OR v_dep > v_n) THEN
+      RAISE EXCEPTION '"%": só pode depender de outra tarefa deste serviço.', t->>'nome';
+    END IF;
+    IF nullif(t->>'skill_id', '') IS NOT NULL AND NOT EXISTS (
+         SELECT 1 FROM public.ops_skill WHERE id = (t->>'skill_id')::uuid AND organization_id = p_org) THEN
+      RAISE EXCEPTION '"%": essa especialidade não é desta organização.', t->>'nome';
+    END IF;
+  END LOOP;
+
+  DELETE FROM public.ops_obra_servico_tarefa WHERE organization_id = p_org AND servico_id = p_servico_id;
+
+  INSERT INTO public.ops_obra_servico_tarefa (
+    organization_id, servico_id, ordem, nome, fase, minutos_por_unidade, minutos_fixos, pessoas,
+    skill_id, depende_ordem, procedimento, materiais, ferramentas, origem, atualizado_por)
+  SELECT p_org, p_servico_id, x.pos::integer, btrim(x.t->>'nome'), (x.t->>'fase')::smallint,
+         COALESCE((x.t->>'minutos_por_unidade')::numeric, 0), COALESCE((x.t->>'minutos_fixos')::integer, 0),
+         COALESCE((x.t->>'pessoas')::smallint, 1), nullif(x.t->>'skill_id', '')::uuid,
+         (x.t->>'depende_ordem')::integer,
+         nullif(btrim(x.t->>'procedimento'), ''), nullif(btrim(x.t->>'materiais'), ''),
+         nullif(btrim(x.t->>'ferramentas'), ''), 'manual', v_user
+    FROM jsonb_array_elements(COALESCE(p_tarefas, '[]'::jsonb)) WITH ORDINALITY AS x(t, pos);
+
+  RETURN jsonb_build_object('ok', true, 'tarefas', v_n);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_servico_modelo_gravar(uuid, uuid, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_servico_modelo_gravar(uuid, uuid, jsonb) TO authenticated, service_role;
+
+-- Lista de serviços da organização, com a ficha e o estado do modelo. Por
+-- RPC (e não vista) para não depender das permissões do CRM sobre `services`.
+CREATE OR REPLACE FUNCTION public.rpc_ops_servicos_com_modelo(p_org uuid)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v jsonb;
+BEGIN
+  IF NOT public.ops_obra_pode_ver_modelos(p_org) THEN
+    RAISE EXCEPTION 'Sem permissão nesta organização.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF to_regclass('public.services') IS NULL THEN
+    RETURN '[]'::jsonb;
+  END IF;
+  EXECUTE
+    'SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        ''servico_id'', s.id, ''nome'', s.name, ''sku'', s.sku, ''categoria'', c.name,
+        ''horas'', s.technical_sheet_labor_hours, ''pessoas'', s.technical_sheet_labor_people_count,
+        ''descricao_mao_obra'', s.technical_sheet_labor_description,
+        ''tarefas'', COALESCE(m.tarefas, ''[]''::jsonb),
+        ''editado'', COALESCE(m.editado, false)) ORDER BY c.name NULLS LAST, s.name), ''[]''::jsonb)
+       FROM public.services s
+       LEFT JOIN public.service_categories c ON c.id = s.service_category_id
+       LEFT JOIN LATERAL (
+         SELECT jsonb_agg(jsonb_build_object(
+                  ''id'', x.id, ''ordem'', x.ordem, ''nome'', x.nome, ''fase'', x.fase,
+                  ''minutos_por_unidade'', x.minutos_por_unidade, ''minutos_fixos'', x.minutos_fixos,
+                  ''pessoas'', x.pessoas, ''skill_id'', x.skill_id, ''depende_ordem'', x.depende_ordem,
+                  ''procedimento'', x.procedimento, ''materiais'', x.materiais, ''ferramentas'', x.ferramentas,
+                  ''origem'', x.origem) ORDER BY x.ordem) AS tarefas,
+                bool_or(x.origem = ''manual'') AS editado
+           FROM public.ops_obra_servico_tarefa x
+          WHERE x.organization_id = $1 AND x.servico_id = s.id) m ON true
+      WHERE NOT COALESCE(s.is_deleted, false) AND s.deleted_at IS NULL
+        AND (s.organization_id = $1'
+    || CASE WHEN to_regclass('public.service_organizations') IS NOT NULL
+            THEN ' OR EXISTS (SELECT 1 FROM public.service_organizations so
+                               WHERE so.service_id = s.id AND so.organization_id = $1)'
+            ELSE '' END
+    || ')'
+    INTO v USING p_org;
+  RETURN v;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_servicos_com_modelo(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_servicos_com_modelo(uuid) TO authenticated, service_role;
+
+-- O tipo de obra por defeito (um por organização).
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_modelo_por_defeito(p_modelo_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_org uuid;
+BEGIN
+  SELECT organization_id INTO v_org FROM public.ops_obra_modelo WHERE id = p_modelo_id;
+  IF v_org IS NULL THEN
+    RAISE EXCEPTION 'Tipo de obra não encontrado.' USING ERRCODE = 'no_data_found';
+  END IF;
+  IF NOT public.ops_obra_pode_gerir_modelos(v_org) THEN
+    RAISE EXCEPTION 'Sem permissão para gerir modelos nesta organização.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  UPDATE public.ops_obra_modelo SET por_defeito = false WHERE organization_id = v_org AND por_defeito AND id <> p_modelo_id;
+  UPDATE public.ops_obra_modelo SET por_defeito = true, ativo = true, atualizado_em = now() WHERE id = p_modelo_id;
+  RETURN jsonb_build_object('ok', true);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_modelo_por_defeito(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_modelo_por_defeito(uuid) TO authenticated, service_role;
+
+-- Especialidades: criar uma, e dizer quem as tem (com a zona base), para a
+-- distribuição automática escolher bem.
+CREATE OR REPLACE FUNCTION public.rpc_ops_skill_criar(p_org uuid, p_nome text)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_id   uuid;
+  v_nome text := nullif(btrim(coalesce(p_nome, '')), '');
+BEGIN
+  IF NOT public.ops_obra_pode_gerir_modelos(p_org) THEN
+    RAISE EXCEPTION 'Sem permissão para gerir especialidades nesta organização.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF v_nome IS NULL THEN
+    RAISE EXCEPTION 'Uma especialidade precisa de nome.';
+  END IF;
+  INSERT INTO public.ops_skill (organization_id, nome) VALUES (p_org, v_nome)
+  ON CONFLICT (organization_id, nome) DO UPDATE SET ativo = true
+  RETURNING id INTO v_id;
+  RETURN jsonb_build_object('ok', true, 'id', v_id);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_skill_criar(uuid, text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_skill_criar(uuid, text) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.rpc_ops_pessoa_planeamento(
+  p_org        uuid,
+  p_utilizador uuid,
+  p_zona       text,
+  p_skills     uuid[]
+)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_quem record;
+BEGIN
+  SELECT * INTO v_quem FROM public.ops_obra_exigir(
+    p_org, 'operations.settings.manage', ARRAY['gestor'],
+    'Só o gestor muda a zona e as especialidades da equipa.');
+  IF NOT EXISTS (SELECT 1 FROM public.ops_utilizador_perfil
+                  WHERE organization_id = p_org AND utilizador_id = p_utilizador) THEN
+    RAISE EXCEPTION 'Essa pessoa não está em Operações nesta organização.';
+  END IF;
+  IF EXISTS (SELECT 1 FROM unnest(COALESCE(p_skills, '{}')) s
+              WHERE NOT EXISTS (SELECT 1 FROM public.ops_skill k WHERE k.id = s AND k.organization_id = p_org)) THEN
+    RAISE EXCEPTION 'Há uma especialidade que não é desta organização.';
+  END IF;
+
+  UPDATE public.ops_utilizador_perfil
+     SET zona_base = nullif(btrim(coalesce(p_zona, '')), ''), atualizado_em = now()
+   WHERE organization_id = p_org AND utilizador_id = p_utilizador;
+
+  DELETE FROM public.ops_utilizador_skill us
+   USING public.ops_skill k
+   WHERE k.id = us.skill_id AND k.organization_id = p_org AND us.utilizador_id = p_utilizador
+     AND NOT (us.skill_id = ANY (COALESCE(p_skills, '{}')));
+  INSERT INTO public.ops_utilizador_skill (utilizador_id, skill_id)
+  SELECT p_utilizador, s FROM unnest(COALESCE(p_skills, '{}')) s
+  ON CONFLICT DO NOTHING;
+
+  RETURN jsonb_build_object('ok', true);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_pessoa_planeamento(uuid, uuid, text, uuid[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_pessoa_planeamento(uuid, uuid, text, uuid[]) TO authenticated, service_role;
+
+
+-- Morada da obra quando o orçamento não a tem escrita: a morada de obra do
+-- orçamento (site_address_id) e, senão, a do cliente (a principal primeiro).
+-- Só lê o CRM; dinâmico para instalar numa base sem estas tabelas.
+CREATE OR REPLACE FUNCTION public.ops_obra_morada_do_crm(_cliente uuid, _orc uuid)
+RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v text;
+  fmt CONSTANT text := $f$btrim(concat_ws(', ',
+      nullif(btrim(concat_ws(' ', a.street, a.number)), ''),
+      nullif(btrim(concat_ws(' ', nullif(a.floor, ''), nullif(a.unit, ''))), ''),
+      nullif(btrim(concat_ws(' ', a.postal_code, a.city)), '')))$f$;
+BEGIN
+  IF to_regclass('public.anew_addresses') IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  IF _orc IS NOT NULL AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = 'quotes' AND column_name = 'site_address_id') THEN
+    EXECUTE 'SELECT ' || fmt || ' FROM public.quotes q JOIN public.anew_addresses a ON a.id = q.site_address_id
+              WHERE q.id = $1' INTO v USING _orc;
+  END IF;
+
+  IF nullif(v, '') IS NULL AND _cliente IS NOT NULL
+     AND to_regclass('public.anew_entity_addresses') IS NOT NULL THEN
+    EXECUTE 'SELECT ' || fmt || '
+               FROM public.anew_clients cl
+               JOIN public.anew_entity_addresses ea ON ea.entity_id = cl.entity_id
+               JOIN public.anew_addresses a ON a.id = ea.address_id
+              WHERE cl.id = $1 AND (ea.valid_to IS NULL OR ea.valid_to > now())
+              ORDER BY COALESCE(ea.is_primary, false) DESC, (ea.address_type = ''obra'') DESC NULLS LAST
+              LIMIT 1' INTO v USING _cliente;
+  END IF;
+
+  RETURN nullif(v, '');
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_morada_do_crm(uuid, uuid) FROM PUBLIC, anon, authenticated;
+
+-- A morada que a obra vai ter, para o ecrã preencher o campo antes de criar:
+-- a do orçamento (escrita ou site) ou a do cliente.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_morada_sugerida(
+  p_org          uuid,
+  p_cliente_id   uuid DEFAULT NULL,
+  p_orcamento_id uuid DEFAULT NULL,
+  p_contrato_id  uuid DEFAULT NULL
+)
+RETURNS text
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_quem    record;
+  v_cliente uuid := p_cliente_id;
+  v_orc     uuid := p_orcamento_id;
+  v_org     uuid;
+  v_texto   text;
+BEGIN
+  SELECT * INTO v_quem FROM public.ops_obra_exigir(
+    p_org, 'operations.orders.create', ARRAY['gestor'], 'Só quem planeia abre obras.');
+
+  IF p_contrato_id IS NOT NULL AND to_regclass('public.client_contracts') IS NOT NULL THEN
+    EXECUTE 'SELECT organization_id, quote_id, client_id FROM public.client_contracts
+              WHERE id = $1 AND deleted_at IS NULL'
+       INTO v_org, v_orc, v_cliente USING p_contrato_id;
+    IF v_org IS DISTINCT FROM p_org THEN RETURN NULL; END IF;
+  END IF;
+
+  IF v_orc IS NOT NULL THEN
+    SELECT q.organization_id, COALESCE(v_cliente, q.cliente_id), nullif(btrim(q.obra_endereco), '')
+      INTO v_org, v_cliente, v_texto
+      FROM public.quotes q WHERE q.id = v_orc AND q.deleted_at IS NULL;
+    IF v_org IS DISTINCT FROM p_org THEN RETURN NULL; END IF;
+  END IF;
+
+  IF v_cliente IS NOT NULL AND NOT EXISTS (
+       SELECT 1 FROM public.anew_clients WHERE id = v_cliente AND organization_id = p_org) THEN
+    RETURN NULL;
+  END IF;
+
+  RETURN COALESCE(v_texto, public.ops_obra_morada_do_crm(v_cliente, v_orc));
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_morada_sugerida(uuid, uuid, uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_morada_sugerida(uuid, uuid, uuid, uuid) TO authenticated, service_role;
+
+
+-- ============================================================
 -- 7. Criar uma obra
 -- ============================================================
 -- Três portas: de um orçamento aceite, de um contrato assinado, ou em branco.
@@ -738,6 +1639,9 @@ DECLARE
   v_codigo text;
   v_inicio date := public.ops_obra_somar_dias_uteis(COALESCE(_inicio, current_date), 0);
   v_n      integer := 0;
+  v_sup    uuid := _supervisor_id;
+  v_ini    date;
+  v_fim    date;
   f        record;
 BEGIN
   v_codigo := public.ops_proximo_codigo_interno(_org, 'OB');
@@ -748,9 +1652,10 @@ BEGIN
   VALUES (
     _org, v_codigo, _cliente_id, _orcamento_id, _contrato_id, _modelo_id,
     _titulo, nullif(btrim(coalesce(_morada,'')), ''), v_inicio,
-    COALESCE(_gestor_id, _autor), _supervisor_id, _autor)
+    COALESCE(_gestor_id, _autor), NULL, _autor)
   RETURNING id INTO v_id;
 
+  -- 1. O tipo de obra (modelo): as fases e as tarefas que existem sempre.
   IF _modelo_id IS NOT NULL THEN
     FOR f IN
       SELECT mf.id, mf.ordem, mf.nome FROM public.ops_obra_modelo_fase mf
@@ -768,16 +1673,65 @@ BEGIN
         FROM nova, public.ops_obra_modelo_tarefa mt
        WHERE mt.modelo_fase_id = f.id;
     END LOOP;
-  ELSE
-    -- Em branco: as quatro fases por defeito. 3 e 4 a confirmar.
-    INSERT INTO public.ops_obra_fase (organization_id, obra_id, ordem, nome)
-    VALUES (_org, v_id, 1, 'Preparação e demolições'),
-           (_org, v_id, 2, 'Instalações técnicas'),
-           (_org, v_id, 3, 'Acabamentos'),
-           (_org, v_id, 4, 'Limpeza e entrega');
   END IF;
 
+  -- As quatro fases por defeito, se o tipo não as trouxe. 3 e 4 a confirmar.
+  INSERT INTO public.ops_obra_fase (organization_id, obra_id, ordem, nome)
+  SELECT _org, v_id, x.o, x.n
+    FROM (VALUES (1, 'Preparação e demolições'), (2, 'Instalações técnicas'),
+                 (3, 'Acabamentos'), (4, 'Limpeza e entrega')) x(o, n)
+   WHERE NOT EXISTS (SELECT 1 FROM public.ops_obra_fase WHERE obra_id = v_id AND ordem = x.o);
+
+  -- 2. O que foi vendido: cada serviço do orçamento/contrato, pelo seu modelo
+  --    (ou pela ficha técnica). Ficam depois das tarefas do tipo, na fase.
+  INSERT INTO public.ops_obra_tarefa (
+    organization_id, obra_id, fase_id, ordem, nome, procedimento, materiais, ferramentas,
+    minutos_previstos, pessoas_previstas, skill_id, orcamento_linha_id, servico_id, servico_tarefa_id)
+  SELECT _org, v_id, fa.id, 1000 + t.ordem, t.nome, t.procedimento, t.materiais, t.ferramentas,
+         t.minutos, t.pessoas, t.skill_id, t.orcamento_linha_id, t.servico_id, t.servico_tarefa_id
+    FROM public.ops_obra_tarefas_do_orcamento(_orcamento_id) t
+    JOIN public.ops_obra_fase fa ON fa.obra_id = v_id AND fa.ordem = t.fase;
+
+  -- Dependências dentro de cada serviço (ex.: fechar roços depois do ensaio).
+  UPDATE public.ops_obra_tarefa t
+     SET depende_de = d.id
+    FROM public.ops_obra_servico_tarefa st,
+         public.ops_obra_tarefa d,
+         public.ops_obra_servico_tarefa sd
+   WHERE t.obra_id = v_id
+     AND st.id = t.servico_tarefa_id AND st.depende_ordem IS NOT NULL
+     AND d.obra_id = v_id AND d.orcamento_linha_id = t.orcamento_linha_id
+     AND sd.id = d.servico_tarefa_id AND sd.servico_id = st.servico_id AND sd.ordem = st.depende_ordem;
+
+  -- 3. Datas (em paralelo dentro da fase) e equipa.
   v_n := public.ops_obra_replanear_impl(v_id, v_inicio);
+
+  SELECT min(inicio_planeado), max(fim_planeado) INTO v_ini, v_fim
+    FROM public.ops_obra_tarefa WHERE obra_id = v_id;
+
+  -- Supervisor: o escolhido; senão o supervisor (depois o gestor) com menos
+  -- obras nesses dias, e depois com menos obras abertas.
+  IF v_sup IS NULL THEN
+    SELECT p.utilizador_id INTO v_sup
+      FROM public.ops_utilizador_perfil p
+     WHERE p.organization_id = _org AND p.ativo AND p.funcao IN ('supervisor','gestor')
+     ORDER BY (p.funcao = 'supervisor') DESC,
+              (SELECT count(*) FROM public.ops_obra o
+                WHERE o.supervisor_id = p.utilizador_id AND o.id <> v_id
+                  AND o.estado IN ('planeada','em_curso')
+                  AND v_ini IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM public.ops_obra_tarefa t2
+                               WHERE t2.obra_id = o.id AND t2.inicio_planeado IS NOT NULL
+                                 AND daterange(t2.inicio_planeado, COALESCE(t2.fim_planeado, t2.inicio_planeado), '[]')
+                                  && daterange(v_ini, COALESCE(v_fim, v_ini), '[]'))),
+              (SELECT count(*) FROM public.ops_obra o
+                WHERE o.supervisor_id = p.utilizador_id AND o.estado IN ('planeada','em_curso','suspensa')),
+              p.utilizador_id
+     LIMIT 1;
+  END IF;
+  UPDATE public.ops_obra SET supervisor_id = v_sup WHERE id = v_id;
+
+  PERFORM public.ops_obra_distribuir_impl(v_id);
 
   PERFORM public.ops_obra_evento(_org, v_id, 'criada', _titulo, _autor,
     jsonb_build_object('codigo', v_codigo, 'orcamento_id', _orcamento_id,
@@ -815,6 +1769,7 @@ DECLARE
   v_q        record;
   v_c        record;
   v_existe   text;
+  v_ctr_num  text;
 BEGIN
   SELECT * INTO v_quem FROM public.ops_obra_exigir(
     p_org, 'operations.orders.create', ARRAY['gestor'],
@@ -843,7 +1798,11 @@ BEGIN
     END IF;
     v_orc := COALESCE(v_orc, v_c.quote_id);
     v_cliente := COALESCE(v_cliente, v_c.client_id);
-    v_titulo := COALESCE(v_titulo, 'Obra — contrato ' || COALESCE(v_c.contract_number, 's/ número'));
+    v_ctr_num := COALESCE(v_c.contract_number, 's/ número');
+    -- Com orçamento, o título vem dele (mais legível); senão, o número do contrato.
+    IF v_orc IS NULL THEN
+      v_titulo := COALESCE(v_titulo, 'Obra — contrato ' || v_ctr_num);
+    END IF;
   END IF;
 
   -- Do orçamento aceite (ou do orçamento do contrato).
@@ -867,12 +1826,19 @@ BEGIN
     END IF;
     v_cliente := COALESCE(v_cliente, v_q.cliente_id);
     v_titulo  := COALESCE(v_titulo, nullif(btrim(v_q.title), ''),
-                          'Obra — orçamento ' || COALESCE(v_q.quote_number, ''));
+                          CASE WHEN p_contrato_id IS NOT NULL
+                               THEN 'Obra — contrato ' || v_ctr_num
+                               ELSE 'Obra — orçamento ' || COALESCE(v_q.quote_number, '') END);
     v_morada  := COALESCE(nullif(btrim(coalesce(v_morada,'')), ''), v_q.obra_endereco);
   END IF;
 
   IF v_titulo IS NULL THEN
     RAISE EXCEPTION 'Uma obra precisa de um título.';
+  END IF;
+
+  -- Sem morada escrita: a do orçamento (site) ou a do cliente.
+  IF nullif(btrim(coalesce(v_morada, '')), '') IS NULL THEN
+    v_morada := public.ops_obra_morada_do_crm(v_cliente, v_orc);
   END IF;
 
   IF v_cliente IS NOT NULL AND NOT EXISTS (
@@ -896,6 +1862,7 @@ BEGIN
     RAISE EXCEPTION 'O supervisor indicado não está ativo em Operações nesta organização.';
   END IF;
 
+  -- Sem supervisor escolhido, ops_obra_criar_impl escolhe um livre nessas datas.
   RETURN public.ops_obra_criar_impl(
     p_org, v_quem.o_utilizador, v_titulo, v_cliente, p_modelo_id, p_data_inicio,
     v_orc, p_contrato_id, v_morada, p_gestor_id, p_supervisor_id);
@@ -906,6 +1873,60 @@ REVOKE ALL ON FUNCTION public.rpc_ops_obra_criar(uuid, text, uuid, uuid, date, u
   FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_criar(uuid, text, uuid, uuid, date, uuid, uuid, text, uuid, uuid)
   TO authenticated, service_role;
+
+-- O que `rpc_ops_obra_criar` SEM modelo vai gerar a partir do orçamento (ou
+-- do orçamento do contrato) — para o ecrã mostrar antes de criar.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_previsao_orcamento(
+  p_org          uuid,
+  p_orcamento_id uuid DEFAULT NULL,
+  p_contrato_id  uuid DEFAULT NULL
+)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_quem record;
+  v_orc  uuid := p_orcamento_id;
+  v_org  uuid;
+BEGIN
+  SELECT * INTO v_quem FROM public.ops_obra_exigir(
+    p_org, 'operations.orders.create', ARRAY['gestor'],
+    'Só quem planeia abre obras.');
+
+  IF p_contrato_id IS NOT NULL THEN
+    SELECT c.quote_id, c.organization_id INTO v_orc, v_org
+      FROM public.client_contracts c
+     WHERE c.id = p_contrato_id AND c.deleted_at IS NULL;
+    IF v_org IS DISTINCT FROM p_org THEN
+      RAISE EXCEPTION 'Contrato não encontrado nesta organização.' USING ERRCODE = 'no_data_found';
+    END IF;
+  END IF;
+
+  IF v_orc IS NULL THEN
+    RETURN jsonb_build_object('tarefas', '[]'::jsonb, 'minutos', 0, 'sem_ficha', 0, 'orcamento_id', NULL);
+  END IF;
+
+  SELECT q.organization_id INTO v_org FROM public.quotes q WHERE q.id = v_orc AND q.deleted_at IS NULL;
+  IF v_org IS DISTINCT FROM p_org THEN
+    RAISE EXCEPTION 'Orçamento não encontrado nesta organização.' USING ERRCODE = 'no_data_found';
+  END IF;
+
+  RETURN (
+    SELECT jsonb_build_object(
+      'orcamento_id', v_orc,
+      'tarefas', COALESCE(jsonb_agg(jsonb_build_object(
+                   'fase', t.fase, 'nome', t.nome, 'minutos', t.minutos, 'pessoas', t.pessoas,
+                   'sem_ficha', t.sem_ficha, 'materiais', t.materiais)
+                   ORDER BY t.fase, t.ordem), '[]'::jsonb),
+      'minutos', COALESCE(sum(t.minutos), 0),
+      'sem_ficha', count(*) FILTER (WHERE t.sem_ficha))
+      FROM public.ops_obra_tarefas_do_orcamento(v_orc) t);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_previsao_orcamento(uuid, uuid, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_previsao_orcamento(uuid, uuid, uuid) TO authenticated, service_role;
 
 
 -- ============================================================
@@ -1298,6 +2319,138 @@ $$;
 
 REVOKE ALL ON FUNCTION public.rpc_ops_obra_atribuir_tarefa(uuid, uuid[]) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_atribuir_tarefa(uuid, uuid[]) TO authenticated, service_role;
+
+
+-- ============================================================
+-- 8b. Distribuir a equipa sozinho — o planeamento sem cliques
+-- ============================================================
+-- Para cada tarefa por atribuir, pela ordem do plano, escolhe
+-- `pessoas_previstas` pessoas entre os técnicos/operadores ativos da
+-- organização (se não houver nenhum, entre toda a gente ativa), por esta
+-- ordem de preferência:
+--   1. sem choque — não estão noutra obra nesses dias;
+--   1b. com a especialidade que a tarefa pede (skill);
+--   2. da zona — a `zona_base` aparece na morada da obra;
+--   3. continuidade — já estão nesta obra (a mesma equipa do princípio ao fim);
+--   4. menos carga — menos minutos abertos atribuídos, em todas as obras.
+-- O gestor corrige depois no Gantt; isto é o ponto de partida.
+
+CREATE OR REPLACE FUNCTION public.ops_obra_distribuir_impl(_obra_id uuid)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_o       record;
+  v_funcoes text[];
+  v_n       integer := 0;
+  v_k       integer;
+  t         record;
+BEGIN
+  SELECT id, organization_id, COALESCE(morada, '') AS morada INTO v_o
+    FROM public.ops_obra WHERE id = _obra_id;
+
+  v_funcoes := CASE WHEN EXISTS (
+                      SELECT 1 FROM public.ops_utilizador_perfil
+                       WHERE organization_id = v_o.organization_id AND ativo
+                         AND funcao IN ('tecnico','operador'))
+                    THEN ARRAY['tecnico','operador']
+                    ELSE ARRAY['admin','gestor','supervisor','tecnico','operador'] END;
+
+  FOR t IN
+    SELECT ta.id, ta.inicio_planeado AS ini, COALESCE(ta.fim_planeado, ta.inicio_planeado) AS fim,
+           ta.pessoas_previstas AS n, ta.skill_id AS skill
+      FROM public.ops_obra_tarefa ta
+      JOIN public.ops_obra_fase fa ON fa.id = ta.fase_id
+     WHERE ta.obra_id = _obra_id
+       AND ta.estado IN ('por_fazer','rejeitada')
+       AND NOT EXISTS (SELECT 1 FROM public.ops_obra_tarefa_pessoa tp WHERE tp.tarefa_id = ta.id)
+     ORDER BY ta.inicio_planeado NULLS LAST, fa.ordem, ta.ordem
+  LOOP
+    INSERT INTO public.ops_obra_tarefa_pessoa (tarefa_id, utilizador_id, organization_id, obra_id)
+    SELECT t.id, c.utilizador_id, v_o.organization_id, _obra_id
+      FROM (
+        SELECT p.utilizador_id,
+               (t.ini IS NOT NULL AND EXISTS (
+                  SELECT 1 FROM public.ops_obra_tarefa_pessoa tp
+                    JOIN public.ops_obra_tarefa o2 ON o2.id = tp.tarefa_id
+                    JOIN public.ops_obra ob ON ob.id = o2.obra_id
+                   WHERE tp.utilizador_id = p.utilizador_id
+                     AND o2.obra_id <> _obra_id
+                     AND o2.estado IN ('por_fazer','em_curso','rejeitada')
+                     AND ob.estado IN ('planeada','em_curso')
+                     AND o2.inicio_planeado IS NOT NULL
+                     AND daterange(o2.inicio_planeado, COALESCE(o2.fim_planeado, o2.inicio_planeado), '[]')
+                      && daterange(t.ini, t.fim, '[]'))) AS choque,
+               (t.skill IS NULL OR EXISTS (
+                  SELECT 1 FROM public.ops_utilizador_skill us
+                   WHERE us.utilizador_id = p.utilizador_id AND us.skill_id = t.skill)) AS tem_skill,
+               (nullif(btrim(p.zona_base), '') IS NOT NULL
+                  AND v_o.morada ILIKE '%' || btrim(p.zona_base) || '%') AS na_zona,
+               EXISTS (SELECT 1 FROM public.ops_obra_tarefa_pessoa tp
+                        WHERE tp.obra_id = _obra_id AND tp.utilizador_id = p.utilizador_id) AS na_obra,
+               (SELECT COALESCE(sum(o2.minutos_previstos), 0)
+                  FROM public.ops_obra_tarefa_pessoa tp
+                  JOIN public.ops_obra_tarefa o2 ON o2.id = tp.tarefa_id
+                 WHERE tp.utilizador_id = p.utilizador_id
+                   AND o2.estado IN ('por_fazer','em_curso','rejeitada')) AS carga
+          FROM public.ops_utilizador_perfil p
+         WHERE p.organization_id = v_o.organization_id AND p.ativo
+           AND p.funcao = ANY (v_funcoes)
+         ORDER BY choque, tem_skill DESC, na_zona DESC, na_obra DESC, carga, p.utilizador_id
+         LIMIT t.n
+      ) c
+    ON CONFLICT (tarefa_id, utilizador_id) DO NOTHING;
+    GET DIAGNOSTICS v_k = ROW_COUNT;
+    IF v_k > 0 THEN v_n := v_n + 1; END IF;
+  END LOOP;
+
+  RETURN v_n;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_distribuir_impl(uuid) FROM PUBLIC, anon, authenticated;
+
+-- O botão "Distribuir equipa". `p_refazer` tira primeiro as pessoas das
+-- tarefas que ainda ninguém começou (por fazer / rejeitadas sem registo).
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_distribuir(p_obra_id uuid, p_refazer boolean DEFAULT false)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_o    record;
+  v_quem record;
+  v_n    integer;
+BEGIN
+  SELECT * INTO v_o FROM public.ops_obra WHERE id = p_obra_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Obra não encontrada.' USING ERRCODE = 'no_data_found';
+  END IF;
+  SELECT * INTO v_quem FROM public.ops_obra_exigir(
+    v_o.organization_id, 'operations.orders.edit', ARRAY['gestor'],
+    'Só quem planeia distribui o trabalho.');
+  IF v_o.estado IN ('concluida','cancelada') THEN
+    RAISE EXCEPTION 'A obra está %; já não se planeia.', v_o.estado;
+  END IF;
+
+  IF p_refazer THEN
+    DELETE FROM public.ops_obra_tarefa_pessoa tp
+     USING public.ops_obra_tarefa t
+     WHERE t.id = tp.tarefa_id AND t.obra_id = p_obra_id
+       AND t.estado IN ('por_fazer','rejeitada')
+       AND NOT EXISTS (SELECT 1 FROM public.ops_obra_registo r WHERE r.tarefa_id = t.id);
+  END IF;
+
+  v_n := public.ops_obra_distribuir_impl(p_obra_id);
+  PERFORM public.ops_obra_evento(v_o.organization_id, p_obra_id, 'distribuida', NULL,
+    v_quem.o_utilizador, jsonb_build_object('tarefas', v_n, 'refazer', p_refazer));
+  RETURN jsonb_build_object('ok', true, 'tarefas', v_n);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_distribuir(uuid, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_distribuir(uuid, boolean) TO authenticated, service_role;
 
 
 -- ============================================================
@@ -1826,25 +2979,49 @@ FROM public.ops_v_obra_tarefa v
 WHERE v.estado IN ('por_fazer','em_curso','rejeitada')
   AND v.minutos_reais >= 0.8 * v.minutos_previstos;
 
--- Choques de agenda visíveis a quem consulta (para o Gantt).
-CREATE OR REPLACE VIEW public.ops_v_obra_conflito
-WITH (security_invoker = true) AS
+-- Choques de agenda (para o Gantt). NÃO é security_invoker, de propósito:
+-- como invoker, a RLS das 5 tabelas era avaliada linha a linha ANTES do
+-- filtro `obra_id = …` (as policies chamam funções e funcionam como
+-- barreira), num cruzamento de todas as atribuições de cada pessoa com
+-- todas as outras — milhares de verificações por pedido, até o Postgres o
+-- cancelar por tempo e pesar na base inteira. Assim o filtro da obra desce
+-- primeiro, e a visibilidade verifica-se nas poucas linhas que sobram:
+--   · a linha só existe para quem vê a obra da tarefa (ops_pode_ver_obra);
+--   · da OUTRA obra, só se mostra o nome e o código a quem também a vê.
+--   · UM choque por tarefa, pessoa e OUTRA obra (a 1.ª tarefa em conflito
+--     nessa obra): com a mesma equipa em várias obras, todas as combinações
+--     eram milhares de linhas — e o Gantt congelava a desenhá-las.
+DROP VIEW IF EXISTS public.ops_v_obra_conflito;
+CREATE VIEW public.ops_v_obra_conflito AS
 SELECT
-  tp.tarefa_id, tp.utilizador_id, t.obra_id, t.organization_id,
-  t2.id AS outra_tarefa_id, t2.nome AS outra_tarefa, o2.codigo AS outra_obra,
-  t2.inicio_planeado AS outro_inicio, t2.fim_planeado AS outro_fim
-FROM public.ops_obra_tarefa_pessoa tp
-JOIN public.ops_obra_tarefa t ON t.id = tp.tarefa_id
-JOIN public.ops_obra_tarefa_pessoa tp2 ON tp2.utilizador_id = tp.utilizador_id AND tp2.tarefa_id <> tp.tarefa_id
-JOIN public.ops_obra_tarefa t2 ON t2.id = tp2.tarefa_id
-JOIN public.ops_obra o2 ON o2.id = t2.obra_id
-WHERE t2.obra_id <> t.obra_id
-  AND t.estado IN ('por_fazer','em_curso','rejeitada')
-  AND t2.estado IN ('por_fazer','em_curso','rejeitada')
-  AND o2.estado IN ('planeada','em_curso')
-  AND t.inicio_planeado IS NOT NULL AND t2.inicio_planeado IS NOT NULL
-  AND daterange(t.inicio_planeado, COALESCE(t.fim_planeado, t.inicio_planeado), '[]')
-   && daterange(t2.inicio_planeado, COALESCE(t2.fim_planeado, t2.inicio_planeado), '[]');
+  c.tarefa_id, c.utilizador_id, c.obra_id, c.organization_id,
+  c.outra_tarefa_id,
+  CASE WHEN public.ops_pode_ver_obra(c.outra_obra_id) THEN c.outra_tarefa_nome ELSE 'Tarefa noutra obra' END AS outra_tarefa,
+  CASE WHEN public.ops_pode_ver_obra(c.outra_obra_id) THEN c.outra_obra_codigo ELSE 'outra obra' END AS outra_obra,
+  c.outro_inicio, c.outro_fim
+FROM (
+  SELECT DISTINCT ON (tp.tarefa_id, tp.utilizador_id, t2.obra_id)
+    tp.tarefa_id, tp.utilizador_id, t.obra_id, t.organization_id,
+    t2.id AS outra_tarefa_id, t2.nome AS outra_tarefa_nome, t2.obra_id AS outra_obra_id,
+    o2.codigo AS outra_obra_codigo, t2.inicio_planeado AS outro_inicio, t2.fim_planeado AS outro_fim
+  FROM public.ops_obra_tarefa t
+  JOIN public.ops_obra_tarefa_pessoa tp ON tp.tarefa_id = t.id
+  JOIN public.ops_obra_tarefa_pessoa tp2 ON tp2.utilizador_id = tp.utilizador_id AND tp2.obra_id <> t.obra_id
+  JOIN public.ops_obra_tarefa t2 ON t2.id = tp2.tarefa_id
+  JOIN public.ops_obra o2 ON o2.id = t2.obra_id
+  WHERE t.estado IN ('por_fazer','em_curso','rejeitada')
+    AND t2.estado IN ('por_fazer','em_curso','rejeitada')
+    AND o2.estado IN ('planeada','em_curso')
+    AND t.inicio_planeado IS NOT NULL AND t2.inicio_planeado IS NOT NULL
+    AND daterange(t.inicio_planeado, COALESCE(t.fim_planeado, t.inicio_planeado), '[]')
+     && daterange(t2.inicio_planeado, COALESCE(t2.fim_planeado, t2.inicio_planeado), '[]')
+    AND public.ops_pode_ver_obra(t.obra_id)
+  ORDER BY tp.tarefa_id, tp.utilizador_id, t2.obra_id, t2.inicio_planeado, t2.id
+) c;
+
+-- Os índices que este cruzamento usa.
+CREATE INDEX IF NOT EXISTS ops_obra_tarefa_pessoa_tarefa_idx ON public.ops_obra_tarefa_pessoa (tarefa_id);
+CREATE INDEX IF NOT EXISTS ops_obra_tarefa_pessoa_obra_idx   ON public.ops_obra_tarefa_pessoa (obra_id);
 
 REVOKE ALL ON public.ops_v_obra_tarefa, public.ops_v_obra_resumo,
               public.ops_v_obra_alerta, public.ops_v_obra_conflito FROM PUBLIC, anon;
@@ -1908,6 +3085,11 @@ ALTER TABLE public.ops_obra_extra         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ops_obra_modelo        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ops_obra_modelo_fase   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ops_obra_modelo_tarefa ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ops_obra_servico_tarefa ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS ops_obra_servico_tarefa_select ON public.ops_obra_servico_tarefa;
+CREATE POLICY ops_obra_servico_tarefa_select ON public.ops_obra_servico_tarefa
+  FOR SELECT TO authenticated USING (public.ops_obra_pode_ver_modelos(organization_id));
 
 DROP POLICY IF EXISTS ops_obra_select ON public.ops_obra;
 CREATE POLICY ops_obra_select ON public.ops_obra
@@ -1939,7 +3121,7 @@ BEGIN
   -- recusar.
   FOREACH t IN ARRAY ARRAY['ops_obra','ops_obra_fase','ops_obra_tarefa','ops_obra_tarefa_pessoa',
                            'ops_obra_registo','ops_obra_extra','ops_obra_modelo',
-                           'ops_obra_modelo_fase','ops_obra_modelo_tarefa']
+                           'ops_obra_modelo_fase','ops_obra_modelo_tarefa','ops_obra_servico_tarefa']
   LOOP
     EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon', t);
     EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.%I FROM authenticated', t);
@@ -1961,8 +3143,8 @@ DECLARE
 BEGIN
   SELECT count(*) INTO n FROM pg_tables
    WHERE schemaname = 'public' AND tablename LIKE 'ops\_obra%';
-  IF n <> 9 THEN
-    RAISE EXCEPTION 'Obras: esperadas 9 tabelas ops_obra*, encontradas %.', n;
+  IF n <> 10 THEN
+    RAISE EXCEPTION 'Obras: esperadas 10 tabelas ops_obra*, encontradas %.', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_tables
@@ -1988,11 +3170,12 @@ BEGIN
     RAISE EXCEPTION 'Obras: % policy(ies) de escrita. A escrita é só por RPC.', n;
   END IF;
 
-  -- Vistas sem security_invoker contornariam a RLS.
+  -- Vistas sem security_invoker contornariam a RLS. (ops_v_obra_conflito é a
+  -- exceção deliberada: filtra a visibilidade ela própria — ver acima.)
   SELECT count(*) INTO n FROM pg_class c
    WHERE c.relnamespace = 'public'::regnamespace AND c.relkind = 'v'
      AND c.relname IN ('ops_v_obra_tarefa','ops_v_obra_resumo','ops_v_obra_alerta',
-                       'ops_v_obra_conflito','ops_v_contrato')
+                       'ops_v_contrato')
      AND NOT ('security_invoker=true' = ANY (COALESCE(c.reloptions, '{}')));
   IF n > 0 THEN
     RAISE EXCEPTION 'Obras: % vista(s) sem security_invoker.', n;
@@ -2008,6 +3191,6 @@ BEGIN
     RAISE EXCEPTION 'Obras: % função(ões) SECURITY DEFINER sem search_path.', n;
   END IF;
 
-  RAISE NOTICE 'Obras prontas: 9 tabelas com RLS, escrita só por RPC, nada escrito no CRM.';
+  RAISE NOTICE 'Obras prontas: 10 tabelas com RLS, escrita só por RPC, nada escrito no CRM.';
 END
 $v$;

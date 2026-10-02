@@ -26,6 +26,7 @@ import {
   type TarefaParaGravar,
 } from "../lib/config";
 import { ativosDoLocal, type AtivoRow } from "../lib/dados";
+import { gravarPlaneamentoPessoa, listarSkills, planeamentoDaEquipa, type Skill } from "../lib/obras";
 import {
   Badge,
   Button,
@@ -1300,7 +1301,29 @@ function FormPerfil({
   const [funcao, setFuncao] = useState(pessoa.funcao ?? "tecnico");
   const [custo, setCusto] = useState(custoAtual?.toString() ?? "");
   const [ativo, setAtivo] = useState(pessoa.ativo ?? true);
+  const [zona, setZona] = useState("");
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [minhas, setMinhas] = useState<string[]>([]);
   const { aGravar, erro, gravar } = useGravar();
+
+  // Zona e especialidades: é o que a distribuição automática usa para escolher
+  // quem vai a cada tarefa.
+  useEffect(() => {
+    if (!activeOrgId) return;
+    let vivo = true;
+    Promise.all([listarSkills(activeOrgId), planeamentoDaEquipa(activeOrgId)])
+      .then(([k, p]) => {
+        if (!vivo) return;
+        setSkills(k);
+        const eu = p.get(pessoa.utilizador_id);
+        setZona(eu?.zona ?? "");
+        setMinhas(eu?.skills ?? []);
+      })
+      .catch(() => undefined);
+    return () => {
+      vivo = false;
+    };
+  }, [activeOrgId, pessoa.utilizador_id]);
 
   return (
     <Modal
@@ -1320,7 +1343,14 @@ function FormPerfil({
                     funcao,
                     custoHora: podeVerCusto && custo.trim() ? Number(custo.replace(",", ".")) : null,
                     ativo,
-                  }),
+                  }).then(() =>
+                    gravarPlaneamentoPessoa({
+                      orgId: activeOrgId!,
+                      utilizadorId: pessoa.utilizador_id,
+                      zona: zona.trim() || null,
+                      skills: minhas,
+                    })
+                  ),
                 aoGravar
               )
             }
@@ -1355,6 +1385,35 @@ function FormPerfil({
               placeholder="18.50"
               className="w-40 font-mono"
             />
+          </Field>
+        )}
+
+        <Field label="Zona base" hint="Ex.: Lisboa, Margem Sul, Porto. Quem é da zona da obra é escolhido primeiro.">
+          <Input value={zona} onChange={(e) => setZona(e.target.value)} placeholder="Lisboa" className="w-56" />
+        </Field>
+
+        {skills.length > 0 && (
+          <Field label="Especialidades" hint="As tarefas que pedem uma especialidade vão primeiro para quem a tem.">
+            <div className="flex flex-wrap gap-2">
+              {skills.map((k) => {
+                const tem = minhas.includes(k.id);
+                return (
+                  <button
+                    key={k.id}
+                    type="button"
+                    aria-pressed={tem}
+                    onClick={() => setMinhas((m) => (tem ? m.filter((x) => x !== k.id) : [...m, k.id]))}
+                    className={
+                      tem
+                        ? "rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-800 ring-1 ring-inset ring-brand-200"
+                        : "rounded-full bg-white px-3 py-1 text-xs text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50"
+                    }
+                  >
+                    {k.nome}
+                  </button>
+                );
+              })}
+            </div>
           </Field>
         )}
 
