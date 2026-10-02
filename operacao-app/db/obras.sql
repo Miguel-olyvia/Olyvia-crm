@@ -4470,7 +4470,10 @@ SELECT
   CASE WHEN public.ops_pode_ver_obra(c.outra_obra_id) THEN c.outra_obra_codigo ELSE 'outra obra' END AS outra_obra,
   c.outro_inicio, c.outro_fim
 FROM (
-  SELECT DISTINCT ON (tp.tarefa_id, tp.utilizador_id, t2.obra_id)
+  -- t.obra_id À CABEÇA do DISTINCT ON: só assim o filtro `obra_id = …` de quem
+  -- lê a vista desce para dentro do cálculo. Sem isto, calculavam-se os
+  -- choques de TODAS as obras a cada pedido (timeout com dezenas de obras).
+  SELECT DISTINCT ON (t.obra_id, tp.tarefa_id, tp.utilizador_id, t2.obra_id)
     tp.tarefa_id, tp.utilizador_id, t.obra_id, t.organization_id,
     t2.id AS outra_tarefa_id, t2.nome AS outra_tarefa_nome, t2.obra_id AS outra_obra_id,
     o2.codigo AS outra_obra_codigo, t2.inicio_planeado AS outro_inicio, t2.fim_planeado AS outro_fim
@@ -4486,7 +4489,7 @@ FROM (
     AND daterange(t.inicio_planeado, COALESCE(t.fim_planeado, t.inicio_planeado), '[]')
      && daterange(t2.inicio_planeado, COALESCE(t2.fim_planeado, t2.inicio_planeado), '[]')
     AND public.ops_pode_ver_obra(t.obra_id)
-  ORDER BY tp.tarefa_id, tp.utilizador_id, t2.obra_id, t2.inicio_planeado, t2.id
+  ORDER BY t.obra_id, tp.tarefa_id, tp.utilizador_id, t2.obra_id, t2.inicio_planeado, t2.id
 ) c;
 
 -- Os índices que este cruzamento usa.

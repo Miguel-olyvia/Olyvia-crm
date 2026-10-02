@@ -281,7 +281,13 @@ export async function conflitosDaObra(obraId: string): Promise<ConflitoObra[]> {
     .from("ops_v_obra_conflito")
     .select("tarefa_id, utilizador_id, outra_tarefa_id, outra_tarefa, outra_obra, outro_inicio, outro_fim")
     .eq("obra_id", obraId);
-  rebentar("carregar os choques de agenda", error);
+  if (error) {
+    // Os choques são um aviso, não o essencial: se falharem (ex.: tempo
+    // esgotado), a obra abre na mesma, sem os avisos — em vez de um erro.
+    // eslint-disable-next-line no-console
+    console.warn("[Obras] choques de agenda indisponíveis:", error);
+    return [];
+  }
   return (data ?? []) as unknown as ConflitoObra[];
 }
 
