@@ -311,7 +311,12 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
         ]);
         if (!vivo) return;
         setOrcamentos(os.filter((o) => !comObra.has(o.id)));
-        setContratos(ct.contratos.filter((c) => !c.tem_obra));
+        // Os que trazem serviços (viram tarefas) primeiro; a ordem por data mantém-se dentro de cada grupo.
+        setContratos(
+          ct.contratos
+            .filter((c) => !c.tem_obra)
+            .sort((a, b) => Number((b.n_servicos ?? 0) > 0) - Number((a.n_servicos ?? 0) > 0))
+        );
         setSemContratos(ct.indisponivel);
         setModelos(ms.filter((m) => m.ativo));
         setClientes(cs);
@@ -620,6 +625,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
                     titulo={`${c.numero} · ${c.titulo}`}
                     sub={`${c.cliente_id ? nomeCliente.get(c.cliente_id) ?? "Cliente" : "Sem cliente"} · assinado ${formatarData(c.assinado_em)}`}
                     dir={euros(c.valor)}
+                    etiqueta={<EtiquetaServicos c={c} />}
                   />
                 ))}
               </div>
@@ -760,18 +766,44 @@ function PrevisaoTarefas({ previsao, erro }: { previsao: PrevisaoOrcamento | nul
   );
 }
 
+/** Destaca se o contrato traz serviços (viram tarefas) ou não. Sem a contagem (SQL antigo), não mostra nada. */
+function EtiquetaServicos({ c }: { c: ContratoAssinado }) {
+  if (c.n_servicos == null) return null;
+  if (!c.orcamento_id) {
+    return (
+      <span className="inline-flex rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 ring-1 ring-inset ring-red-200">
+        sem orçamento ligado
+      </span>
+    );
+  }
+  if (c.n_servicos === 0) {
+    return (
+      <span className="inline-flex rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
+        sem serviços{c.n_produtos ? ` · ${c.n_produtos} produto(s)` : ""} — só as tarefas do tipo de obra
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800 ring-1 ring-inset ring-emerald-200">
+      {c.n_servicos} serviço(s){c.n_produtos ? ` · ${c.n_produtos} produto(s)` : ""}
+    </span>
+  );
+}
+
 function Escolha({
   on,
   aoEscolher,
   titulo,
   sub,
   dir,
+  etiqueta,
 }: {
   on: boolean;
   aoEscolher: () => void;
   titulo: string;
   sub: string;
   dir: string;
+  etiqueta?: React.ReactNode;
 }) {
   return (
     <button
@@ -786,6 +818,7 @@ function Escolha({
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium text-slate-800">{titulo}</span>
         <span className="block truncate text-xs text-slate-500">{sub}</span>
+        {etiqueta && <span className="mt-1 block">{etiqueta}</span>}
       </span>
       <span className="shrink-0 font-mono text-xs tabular text-slate-600">{dir}</span>
     </button>

@@ -427,6 +427,73 @@ CREATE INDEX IF NOT EXISTS ops_obra_extra_obra_idx ON public.ops_obra_extra (obr
 
 
 -- ============================================================
+-- 2b. O orçamento de um contrato — pelos MESMOS caminhos que o CRM
+-- ============================================================
+-- Um contrato que nasceu de uma proposta muitas vezes não tem `quote_id`.
+-- O CRM (src/components/contracts/contractDocument.ts) chega ao orçamento por:
+--   1. client_contracts.quote_id;
+--   2. a seleção da proposta (proposal_quote_selections, selected);
+--   3. o orçamento com quotes.proposal_id (o aceite mais recente);
+--   4. pipeline_links (proposal_id → quote_id).
+-- Ler só o 1.º deixava esses contratos "sem serviços". Só leitura; cada
+-- caminho só é tentado se a tabela/coluna existir nesta base.
+CREATE OR REPLACE FUNCTION public.ops_contrato_orcamento(_contrato_id uuid)
+RETURNS uuid
+-- INVOKER de propósito: lê com os direitos de quem chama (a RLS do CRM manda),
+-- tal como a vista ops_v_contrato; dentro das RPCs corre com os delas.
+LANGUAGE plpgsql STABLE SECURITY INVOKER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_quote    uuid;
+  v_proposta uuid;
+BEGIN
+  IF _contrato_id IS NULL OR to_regclass('public.client_contracts') IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  EXECUTE 'SELECT quote_id, ' ||
+          CASE WHEN EXISTS (SELECT 1 FROM information_schema.columns
+                             WHERE table_schema = 'public' AND table_name = 'client_contracts'
+                               AND column_name = 'proposal_id')
+               THEN 'proposal_id' ELSE 'NULL::uuid' END ||
+          ' FROM public.client_contracts WHERE id = $1'
+     INTO v_quote, v_proposta USING _contrato_id;
+
+  IF v_quote IS NOT NULL OR v_proposta IS NULL THEN
+    RETURN v_quote;
+  END IF;
+
+  IF to_regclass('public.proposal_quote_selections') IS NOT NULL THEN
+    EXECUTE 'SELECT quote_id FROM public.proposal_quote_selections
+              WHERE proposal_id = $1 AND selected AND quote_id IS NOT NULL LIMIT 1'
+       INTO v_quote USING v_proposta;
+    IF v_quote IS NOT NULL THEN RETURN v_quote; END IF;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'quotes' AND column_name = 'proposal_id') THEN
+    EXECUTE 'SELECT id FROM public.quotes WHERE proposal_id = $1
+              ORDER BY accepted_at DESC NULLS LAST, created_at DESC LIMIT 1'
+       INTO v_quote USING v_proposta;
+    IF v_quote IS NOT NULL THEN RETURN v_quote; END IF;
+  END IF;
+
+  IF to_regclass('public.pipeline_links') IS NOT NULL THEN
+    EXECUTE 'SELECT q.id FROM public.pipeline_links pl JOIN public.quotes q ON q.id = pl.quote_id
+              WHERE pl.proposal_id = $1 ORDER BY q.created_at DESC LIMIT 1'
+       INTO v_quote USING v_proposta;
+  END IF;
+
+  RETURN v_quote;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_contrato_orcamento(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_contrato_orcamento(uuid) TO authenticated, service_role;
+
+
+-- ============================================================
 -- 3. Quem vê uma obra
 -- ============================================================
 -- Vê tudo quem tem `view_all` NESTA organização. Os outros veem as obras em
@@ -1908,7 +1975,7 @@ BEGIN
     p_org, 'operations.orders.create', ARRAY['gestor'], 'Só quem planeia abre obras.');
 
   IF p_contrato_id IS NOT NULL AND to_regclass('public.client_contracts') IS NOT NULL THEN
-    EXECUTE 'SELECT organization_id, quote_id, client_id FROM public.client_contracts
+    EXECUTE 'SELECT organization_id, public.ops_contrato_orcamento(id), client_id FROM public.client_contracts
               WHERE id = $1 AND deleted_at IS NULL'
        INTO v_org, v_orc, v_cliente USING p_contrato_id;
     IF v_org IS DISTINCT FROM p_org THEN RETURN NULL; END IF;
@@ -2381,7 +2448,7 @@ BEGIN
   -- Do contrato assinado.
   IF p_contrato_id IS NOT NULL THEN
     SELECT c.id, c.organization_id, c.client_id, c.contract_number, c.status,
-           c.quote_id, c.notes
+           public.ops_contrato_orcamento(c.id) AS quote_id, c.notes
       INTO v_c
       FROM public.client_contracts c
      WHERE c.id = p_contrato_id AND c.deleted_at IS NULL;
@@ -2502,7 +2569,7 @@ BEGIN
     'Só quem planeia abre obras.');
 
   IF p_contrato_id IS NOT NULL THEN
-    SELECT c.quote_id, c.organization_id INTO v_orc, v_org
+    SELECT public.ops_contrato_orcamento(c.id), c.organization_id INTO v_orc, v_org
       FROM public.client_contracts c
      WHERE c.id = p_contrato_id AND c.deleted_at IS NULL;
     IF v_org IS DISTINCT FROM p_org THEN
@@ -2592,7 +2659,7 @@ BEGIN
     IF to_regclass('public.client_contracts') IS NULL THEN
       RAISE EXCEPTION 'Contrato não encontrado nesta organização.' USING ERRCODE = 'no_data_found';
     END IF;
-    EXECUTE 'SELECT quote_id, organization_id FROM public.client_contracts
+    EXECUTE 'SELECT public.ops_contrato_orcamento(id), organization_id FROM public.client_contracts
               WHERE id = $1 AND deleted_at IS NULL'
        INTO v_orc, v_org USING p_contrato_id;
     IF v_org IS DISTINCT FROM p_org THEN
@@ -4440,11 +4507,30 @@ GRANT SELECT ON public.ops_v_obra_tarefa, public.ops_v_obra_resumo,
 -- base sem o módulo de contratos instala o resto na mesma.
 
 DO $contratos$
+DECLARE
+  v_tem_servico boolean;
+  v_tem_produto boolean;
+  v_servicos    text;
+  v_produtos    text;
 BEGIN
   IF to_regclass('public.client_contracts') IS NULL THEN
     RAISE NOTICE 'client_contracts não existe: ops_v_contrato fica por criar.';
     RETURN;
   END IF;
+
+  -- As contagens só se as colunas existirem (uma base sem catálogo instala na mesma).
+  SELECT bool_or(column_name = 'service_id'), bool_or(column_name = 'product_id')
+    INTO v_tem_servico, v_tem_produto
+    FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'quote_lines';
+  v_servicos := CASE WHEN v_tem_servico
+    THEN '(SELECT count(*)::int FROM public.quote_lines l WHERE l.quote_id = r.orcamento_id AND l.service_id IS NOT NULL)'
+    ELSE 'NULL::int' END;
+  v_produtos := CASE WHEN v_tem_produto
+    THEN '(SELECT count(*)::int FROM public.quote_lines l WHERE l.quote_id = r.orcamento_id'
+         || CASE WHEN v_tem_servico THEN ' AND l.service_id IS NULL' ELSE '' END
+         || ' AND l.product_id IS NOT NULL)'
+    ELSE 'NULL::int' END;
 
   EXECUTE $v$
     CREATE OR REPLACE VIEW public.ops_v_contrato
@@ -4455,16 +4541,20 @@ BEGIN
       c.client_id                                           AS cliente_id,
       COALESCE(c.contract_number, '—')                      AS numero,
       c.status                                              AS estado,
-      c.quote_id                                            AS orcamento_id,
+      r.orcamento_id                                        AS orcamento_id,
       COALESCE(nullif(btrim(q.title), ''), 'Contrato ' || COALESCE(c.contract_number, '')) AS titulo,
       q.obra_endereco,
       COALESCE(c.signature_date, c.company_signature_date, c.accepted_at) AS assinado_em,
       c.total_value                                         AS valor,
       c.currency                                            AS moeda,
       EXISTS (SELECT 1 FROM public.ops_obra o
-               WHERE o.contrato_id = c.id AND o.estado <> 'cancelada') AS tem_obra
+               WHERE o.contrato_id = c.id AND o.estado <> 'cancelada') AS tem_obra,
+      -- Para destacar na Nova obra quais trazem serviços (viram tarefas) e quais não.
+      $v$ || v_servicos || $v$ AS n_servicos,
+      $v$ || v_produtos || $v$ AS n_produtos
     FROM public.client_contracts c
-    LEFT JOIN public.quotes q ON q.id = c.quote_id AND q.deleted_at IS NULL
+    CROSS JOIN LATERAL (SELECT public.ops_contrato_orcamento(c.id) AS orcamento_id) r
+    LEFT JOIN public.quotes q ON q.id = r.orcamento_id AND q.deleted_at IS NULL
     WHERE c.deleted_at IS NULL
       AND c.status IN ('signed','assinado','active')
   $v$;

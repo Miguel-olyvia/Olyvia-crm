@@ -1270,6 +1270,50 @@ console.log("\n─── data de início automática ─────────
   await db.exec(`DELETE FROM public.ops_obra WHERE id IN ('${X1?.id}','${X2?.id}');`);
 }
 
+/* ── Contrato ligado ao orçamento só pela proposta (como no CRM) ───────── */
+console.log("\n─── contrato → orçamento pelos caminhos do CRM ───");
+{
+  const PROP = "77770000-0000-0000-0000-000000000001";
+  const CTR_PROP = "88880000-0000-0000-0000-000000000009";
+  const ORC_PROP = "99990000-0000-0000-0000-000000000009";
+  await db.exec(`
+    ALTER TABLE public.client_contracts ADD COLUMN IF NOT EXISTS proposal_id uuid;
+    CREATE TABLE IF NOT EXISTS public.proposal_quote_selections (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(), proposal_id uuid, quote_id uuid, selected boolean);
+    GRANT SELECT ON public.proposal_quote_selections TO authenticated;
+    -- Um orçamento próprio (o do outro contrato já tem obra), com as mesmas linhas.
+    INSERT INTO public.quotes (id, organization_id, cliente_id, quote_number, title, obra_endereco, estado, accepted_at, total)
+      VALUES ('${ORC_PROP}','${ORG_A}','${CLI_A}','ORC-A-PROP','WC pela proposta','Rua da Proposta 1, Lisboa','aceite',now(),2500);
+    INSERT INTO public.quote_lines (quote_id, ordem, descricao_snapshot, qt, service_id)
+      SELECT '${ORC_PROP}', ordem, descricao_snapshot, qt, service_id
+        FROM public.quote_lines WHERE quote_id = '${ORC_CONTRATO}';
+    INSERT INTO public.proposal_quote_selections (proposal_id, quote_id, selected)
+      VALUES ('${PROP}','${ORC_PROP}', true);
+    INSERT INTO public.client_contracts (id, contract_number, client_id, status, organization_id,
+                                         quote_id, proposal_id, signature_date, created_by)
+      VALUES ('${CTR_PROP}','CT-A-PROP','${CLI_A}','signed','${ORG_A}',NULL,'${PROP}',now(),'${U.gestorA}');
+    -- Recria a vista agora que há proposal_id (como em produção).
+    ${ler("obras.sql").match(/DO \$contratos\$[\s\S]*?\$contratos\$;/)[0]}
+  `);
+  const v = (await linhas(AUTH.gestorA,
+    `SELECT orcamento_id::text AS o, n_servicos AS s, n_produtos AS p FROM public.ops_v_contrato WHERE id = '${CTR_PROP}';`))[0];
+  v?.o === ORC_PROP
+    ? ok("o contrato sem quote_id chega ao orçamento pela seleção da proposta")
+    : mau(`orçamento do contrato pela proposta: ${JSON.stringify(v)}`);
+  v?.s === 3 ? ok("e mostra os 3 serviços para destacar na Nova obra") : mau(`n_servicos: ${v?.s}`);
+  const ass = (await linhas(AUTH.gestorA,
+    `SELECT n_servicos AS s FROM public.ops_v_contrato WHERE id = '${CTR_ASSINADO}';`))[0];
+  ass?.s === 3 ? ok("o contrato com quote_id continua igual (3 serviços)") : mau(`contrato normal: ${JSON.stringify(ass)}`);
+  const prev = await devePassar("a previsão da Nova obra lê os serviços do contrato da proposta", AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_previsao_contrato(p_org => '${ORG_A}', p_contrato_id => '${CTR_PROP}')::text;`);
+  (prev?.servicos?.length ?? 0) === 3
+    ? ok("e devolve os 3 serviços com tarefas")
+    : mau(`serviços na previsão: ${prev?.servicos?.length}`);
+  await db.exec(`DELETE FROM public.client_contracts WHERE id = '${CTR_PROP}';
+                 DELETE FROM public.quote_lines WHERE quote_id = '${ORC_PROP}';
+                 DELETE FROM public.quotes WHERE id = '${ORC_PROP}';`);
+}
+
 /* ── Isolamento ─────────────────────────────────────────────────────────── */
 console.log("\n─── isolamento entre organizações ───────");
 {

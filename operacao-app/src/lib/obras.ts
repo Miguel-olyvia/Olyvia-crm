@@ -444,6 +444,10 @@ export interface ContratoAssinado {
   assinado_em: string | null;
   valor: number | null;
   tem_obra: boolean;
+  /** Linhas de serviço do orçamento do contrato (viram tarefas). Ausente em bases antigas. */
+  n_servicos?: number | null;
+  /** Linhas só de produto. */
+  n_produtos?: number | null;
 }
 
 /**
@@ -456,7 +460,8 @@ export async function listarContratos(
 ): Promise<{ contratos: ContratoAssinado[]; indisponivel: boolean }> {
   const { data, error } = await supabase
     .from("ops_v_contrato")
-    .select("id, cliente_id, numero, estado, orcamento_id, titulo, obra_endereco, assinado_em, valor, tem_obra")
+    // "*": as colunas n_servicos/n_produtos só existem depois do SQL novo.
+    .select("*")
     .eq("organization_id", orgId)
     .order("assinado_em", { ascending: false, nullsFirst: false })
     .limit(200);
