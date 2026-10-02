@@ -12215,6 +12215,36 @@ export type Database = {
         }
         Relationships: []
       }
+      ops_entrar_como_log: {
+        Row: {
+          admin_id: string
+          alvo_id: string
+          fim: string | null
+          id: string
+          inicio: string
+          organization_id: string
+          user_agent: string | null
+        }
+        Insert: {
+          admin_id: string
+          alvo_id: string
+          fim?: string | null
+          id?: string
+          inicio?: string
+          organization_id: string
+          user_agent?: string | null
+        }
+        Update: {
+          admin_id?: string
+          alvo_id?: string
+          fim?: string | null
+          id?: string
+          inicio?: string
+          organization_id?: string
+          user_agent?: string | null
+        }
+        Relationships: []
+      }
       ops_evento: {
         Row: {
           antes: Json | null
@@ -12760,6 +12790,7 @@ export type Database = {
           id: string
           nome: string
           organization_id: string
+          por_defeito: boolean
           tipo_servico: string | null
         }
         Insert: {
@@ -12771,6 +12802,7 @@ export type Database = {
           id?: string
           nome: string
           organization_id: string
+          por_defeito?: boolean
           tipo_servico?: string | null
         }
         Update: {
@@ -12782,6 +12814,7 @@ export type Database = {
           id?: string
           nome?: string
           organization_id?: string
+          por_defeito?: boolean
           tipo_servico?: string | null
         }
         Relationships: []
@@ -12945,6 +12978,74 @@ export type Database = {
           },
         ]
       }
+      ops_obra_servico_tarefa: {
+        Row: {
+          atualizado_em: string
+          atualizado_por: string | null
+          depende_ordem: number | null
+          fase: number
+          ferramentas: string | null
+          id: string
+          materiais: string | null
+          minutos_fixos: number
+          minutos_por_unidade: number
+          nome: string
+          ordem: number
+          organization_id: string
+          origem: string
+          pessoas: number
+          procedimento: string | null
+          servico_id: string
+          skill_id: string | null
+        }
+        Insert: {
+          atualizado_em?: string
+          atualizado_por?: string | null
+          depende_ordem?: number | null
+          fase?: number
+          ferramentas?: string | null
+          id?: string
+          materiais?: string | null
+          minutos_fixos?: number
+          minutos_por_unidade?: number
+          nome: string
+          ordem: number
+          organization_id: string
+          origem?: string
+          pessoas?: number
+          procedimento?: string | null
+          servico_id: string
+          skill_id?: string | null
+        }
+        Update: {
+          atualizado_em?: string
+          atualizado_por?: string | null
+          depende_ordem?: number | null
+          fase?: number
+          ferramentas?: string | null
+          id?: string
+          materiais?: string | null
+          minutos_fixos?: number
+          minutos_por_unidade?: number
+          nome?: string
+          ordem?: number
+          organization_id?: string
+          origem?: string
+          pessoas?: number
+          procedimento?: string | null
+          servico_id?: string
+          skill_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ops_obra_servico_tarefa_skill_id_fkey"
+            columns: ["skill_id"]
+            isOneToOne: false
+            referencedRelation: "ops_skill"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       ops_obra_tarefa: {
         Row: {
           atualizada_em: string
@@ -12958,6 +13059,7 @@ export type Database = {
           iniciada_em: string | null
           inicio_planeado: string | null
           materiais: string | null
+          materiais_crm: Json
           minutos_previstos: number
           modelo_tarefa_id: string | null
           motivo_desvio: string | null
@@ -12965,10 +13067,15 @@ export type Database = {
           nome: string
           nota_desvio: string | null
           obra_id: string
+          orcamento_linha_id: string | null
           ordem: number
           organization_id: string
+          pessoas_previstas: number
           procedimento: string | null
           rejeitada_em: string | null
+          servico_id: string | null
+          servico_tarefa_id: string | null
+          skill_id: string | null
           terminada_em: string | null
           validada_em: string | null
           validada_por: string | null
@@ -12985,6 +13092,7 @@ export type Database = {
           iniciada_em?: string | null
           inicio_planeado?: string | null
           materiais?: string | null
+          materiais_crm?: Json
           minutos_previstos?: number
           modelo_tarefa_id?: string | null
           motivo_desvio?: string | null
@@ -12992,10 +13100,15 @@ export type Database = {
           nome: string
           nota_desvio?: string | null
           obra_id: string
+          orcamento_linha_id?: string | null
           ordem?: number
           organization_id: string
+          pessoas_previstas?: number
           procedimento?: string | null
           rejeitada_em?: string | null
+          servico_id?: string | null
+          servico_tarefa_id?: string | null
+          skill_id?: string | null
           terminada_em?: string | null
           validada_em?: string | null
           validada_por?: string | null
@@ -13012,6 +13125,7 @@ export type Database = {
           iniciada_em?: string | null
           inicio_planeado?: string | null
           materiais?: string | null
+          materiais_crm?: Json
           minutos_previstos?: number
           modelo_tarefa_id?: string | null
           motivo_desvio?: string | null
@@ -13019,10 +13133,15 @@ export type Database = {
           nome?: string
           nota_desvio?: string | null
           obra_id?: string
+          orcamento_linha_id?: string | null
           ordem?: number
           organization_id?: string
+          pessoas_previstas?: number
           procedimento?: string | null
           rejeitada_em?: string | null
+          servico_id?: string | null
+          servico_tarefa_id?: string | null
+          skill_id?: string | null
           terminada_em?: string | null
           validada_em?: string | null
           validada_por?: string | null
@@ -13082,6 +13201,200 @@ export type Database = {
             columns: ["obra_id"]
             isOneToOne: false
             referencedRelation: "ops_v_obra_resumo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_servico_tarefa_id_fkey"
+            columns: ["servico_tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "ops_obra_servico_tarefa"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_skill_id_fkey"
+            columns: ["skill_id"]
+            isOneToOne: false
+            referencedRelation: "ops_skill"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ops_obra_tarefa_dependencia: {
+        Row: {
+          criada_em: string
+          depende_de_id: string
+          obra_id: string
+          organization_id: string
+          tarefa_id: string
+        }
+        Insert: {
+          criada_em?: string
+          depende_de_id: string
+          obra_id: string
+          organization_id: string
+          tarefa_id: string
+        }
+        Update: {
+          criada_em?: string
+          depende_de_id?: string
+          obra_id?: string
+          organization_id?: string
+          tarefa_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_depende_de_id_fkey"
+            columns: ["depende_de_id"]
+            isOneToOne: false
+            referencedRelation: "ops_obra_tarefa"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_depende_de_id_fkey"
+            columns: ["depende_de_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_alerta"
+            referencedColumns: ["tarefa_id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_depende_de_id_fkey"
+            columns: ["depende_de_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_conflito"
+            referencedColumns: ["outra_tarefa_id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_depende_de_id_fkey"
+            columns: ["depende_de_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_tarefa"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "ops_obra"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_resumo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_tarefa_id_fkey"
+            columns: ["tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "ops_obra_tarefa"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_tarefa_id_fkey"
+            columns: ["tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_alerta"
+            referencedColumns: ["tarefa_id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_tarefa_id_fkey"
+            columns: ["tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_conflito"
+            referencedColumns: ["outra_tarefa_id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_dependencia_tarefa_id_fkey"
+            columns: ["tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_tarefa"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ops_obra_tarefa_foto: {
+        Row: {
+          caminho: string
+          carregado_em: string
+          carregado_por: string | null
+          id: string
+          legenda: string | null
+          mime: string | null
+          nome: string
+          obra_id: string
+          organization_id: string
+          tamanho: number | null
+          tarefa_id: string
+        }
+        Insert: {
+          caminho: string
+          carregado_em?: string
+          carregado_por?: string | null
+          id?: string
+          legenda?: string | null
+          mime?: string | null
+          nome: string
+          obra_id: string
+          organization_id: string
+          tamanho?: number | null
+          tarefa_id: string
+        }
+        Update: {
+          caminho?: string
+          carregado_em?: string
+          carregado_por?: string | null
+          id?: string
+          legenda?: string | null
+          mime?: string | null
+          nome?: string
+          obra_id?: string
+          organization_id?: string
+          tamanho?: number | null
+          tarefa_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ops_obra_tarefa_foto_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "ops_obra"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_foto_obra_id_fkey"
+            columns: ["obra_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_resumo"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_foto_tarefa_id_fkey"
+            columns: ["tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "ops_obra_tarefa"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_foto_tarefa_id_fkey"
+            columns: ["tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_alerta"
+            referencedColumns: ["tarefa_id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_foto_tarefa_id_fkey"
+            columns: ["tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_conflito"
+            referencedColumns: ["outra_tarefa_id"]
+          },
+          {
+            foreignKeyName: "ops_obra_tarefa_foto_tarefa_id_fkey"
+            columns: ["tarefa_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_obra_tarefa"
             referencedColumns: ["id"]
           },
         ]
@@ -17087,6 +17400,116 @@ export type Database = {
           },
         ]
       }
+      purchase_order_item_cancellations: {
+        Row: {
+          batch_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          po_actual_delivery_date_before: string | null
+          po_status_after: string | null
+          po_status_before: string | null
+          po_total_value_after: number | null
+          po_total_value_before: number | null
+          purchase_order_id: string
+          purchase_order_item_id: string | null
+          quantity_after: number
+          quantity_before: number
+          quantity_cancelled: number
+          reason: string
+          total_price_after: number | null
+          total_price_before: number | null
+          undo_reason: string | null
+          undone_at: string | null
+          undone_by: string | null
+          vat_amount_after: number | null
+          vat_amount_before: number | null
+        }
+        Insert: {
+          batch_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          organization_id: string
+          po_actual_delivery_date_before?: string | null
+          po_status_after?: string | null
+          po_status_before?: string | null
+          po_total_value_after?: number | null
+          po_total_value_before?: number | null
+          purchase_order_id: string
+          purchase_order_item_id?: string | null
+          quantity_after: number
+          quantity_before: number
+          quantity_cancelled: number
+          reason: string
+          total_price_after?: number | null
+          total_price_before?: number | null
+          undo_reason?: string | null
+          undone_at?: string | null
+          undone_by?: string | null
+          vat_amount_after?: number | null
+          vat_amount_before?: number | null
+        }
+        Update: {
+          batch_id?: string | null
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          po_actual_delivery_date_before?: string | null
+          po_status_after?: string | null
+          po_status_before?: string | null
+          po_total_value_after?: number | null
+          po_total_value_before?: number | null
+          purchase_order_id?: string
+          purchase_order_item_id?: string | null
+          quantity_after?: number
+          quantity_before?: number
+          quantity_cancelled?: number
+          reason?: string
+          total_price_after?: number | null
+          total_price_before?: number | null
+          undo_reason?: string | null
+          undone_at?: string | null
+          undone_by?: string | null
+          vat_amount_after?: number | null
+          vat_amount_before?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchase_order_item_cancellations_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_compra_linha"
+            referencedColumns: ["compra_id"]
+          },
+          {
+            foreignKeyName: "purchase_order_item_cancellations_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_item_cancellations_purchase_order_item_id_fkey"
+            columns: ["purchase_order_item_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_compra_linha"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_item_cancellations_purchase_order_item_id_fkey"
+            columns: ["purchase_order_item_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       purchase_order_items: {
         Row: {
           component_index: number | null
@@ -17223,6 +17646,7 @@ export type Database = {
           quantity: number
           received_at: string
           received_by: string | null
+          receiving_scan_id: string | null
           revert_movement_id: string | null
           revert_reason: string | null
           reverted_at: string | null
@@ -17247,6 +17671,7 @@ export type Database = {
           quantity: number
           received_at?: string
           received_by?: string | null
+          receiving_scan_id?: string | null
           revert_movement_id?: string | null
           revert_reason?: string | null
           reverted_at?: string | null
@@ -17271,6 +17696,7 @@ export type Database = {
           quantity?: number
           received_at?: string
           received_by?: string | null
+          receiving_scan_id?: string | null
           revert_movement_id?: string | null
           revert_reason?: string | null
           reverted_at?: string | null
@@ -17329,6 +17755,13 @@ export type Database = {
             columns: ["purchase_order_item_id"]
             isOneToOne: false
             referencedRelation: "purchase_order_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "purchase_order_receipts_receiving_scan_id_fkey"
+            columns: ["receiving_scan_id"]
+            isOneToOne: false
+            referencedRelation: "receiving_scans"
             referencedColumns: ["id"]
           },
           {
@@ -18599,6 +19032,79 @@ export type Database = {
           success?: boolean
         }
         Relationships: []
+      }
+      receiving_scans: {
+        Row: {
+          code: string | null
+          created_at: string
+          created_by: string | null
+          delivery_note_id: string | null
+          id: string
+          matched_by: string | null
+          organization_id: string
+          product_id: string | null
+          quantity: number | null
+          result: Json
+          supplier_id: string | null
+          units: number | null
+          uom_id: string | null
+          warehouse_id: string | null
+        }
+        Insert: {
+          code?: string | null
+          created_at?: string
+          created_by?: string | null
+          delivery_note_id?: string | null
+          id: string
+          matched_by?: string | null
+          organization_id: string
+          product_id?: string | null
+          quantity?: number | null
+          result: Json
+          supplier_id?: string | null
+          units?: number | null
+          uom_id?: string | null
+          warehouse_id?: string | null
+        }
+        Update: {
+          code?: string | null
+          created_at?: string
+          created_by?: string | null
+          delivery_note_id?: string | null
+          id?: string
+          matched_by?: string | null
+          organization_id?: string
+          product_id?: string | null
+          quantity?: number | null
+          result?: Json
+          supplier_id?: string | null
+          units?: number | null
+          uom_id?: string | null
+          warehouse_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "receiving_scans_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receiving_scans_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "receiving_scans_warehouse_id_fkey"
+            columns: ["warehouse_id"]
+            isOneToOne: false
+            referencedRelation: "warehouses"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       reminder_create_attempts: {
         Row: {
@@ -22353,6 +22859,7 @@ export type Database = {
         Row: {
           a_correr: number | null
           depende_de: string | null
+          dependencias: string[] | null
           estado: string | null
           fase_id: string | null
           fase_nome: string | null
@@ -22363,6 +22870,7 @@ export type Database = {
           iniciada_em: string | null
           inicio_planeado: string | null
           materiais: string | null
+          materiais_crm: Json | null
           minutos_previstos: number | null
           minutos_reais: number | null
           modelo_tarefa_id: string | null
@@ -23306,6 +23814,81 @@ export type Database = {
         Args: { p_org: string; p_user: string }
         Returns: string
       }
+      fn_po_cancel_line_remainder_internal: {
+        Args: {
+          p_actor: string
+          p_batch_id: string
+          p_item_id: string
+          p_notes: string
+          p_po: Database["public"]["Tables"]["purchase_orders"]["Row"]
+          p_reason: string
+        }
+        Returns: {
+          batch_id: string | null
+          created_at: string
+          created_by: string | null
+          id: string
+          notes: string | null
+          organization_id: string
+          po_actual_delivery_date_before: string | null
+          po_status_after: string | null
+          po_status_before: string | null
+          po_total_value_after: number | null
+          po_total_value_before: number | null
+          purchase_order_id: string
+          purchase_order_item_id: string | null
+          quantity_after: number
+          quantity_before: number
+          quantity_cancelled: number
+          reason: string
+          total_price_after: number | null
+          total_price_before: number | null
+          undo_reason: string | null
+          undone_at: string | null
+          undone_by: string | null
+          vat_amount_after: number | null
+          vat_amount_before: number | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "purchase_order_item_cancellations"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_po_cancel_remainder_guard: {
+        Args: { p_purchase_order_id: string }
+        Returns: {
+          actual_delivery_date: string | null
+          business_unit_id: string | null
+          created_at: string
+          created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
+          expected_delivery: string | null
+          id: string
+          notes: string | null
+          order_date: string
+          order_number: string
+          organization_id: string
+          source_id: string | null
+          source_type: string | null
+          status: string
+          supplier_id: string | null
+          total_value: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "purchase_orders"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_po_cancel_remainder_status: {
+        Args: { p_fallback_status: string; p_purchase_order_id: string }
+        Returns: string
+      }
       fn_po_receipt_allocation: {
         Args: { p_purchase_order_item_id: string; p_units: number }
         Returns: {
@@ -23318,6 +23901,15 @@ export type Database = {
           units_to_order: number
           units_to_stock: number
         }[]
+      }
+      fn_po_undo_cancellations_internal: {
+        Args: {
+          p_actor: string
+          p_ids: string[]
+          p_po: Database["public"]["Tables"]["purchase_orders"]["Row"]
+          p_reason: string
+        }
+        Returns: Json
       }
       fn_proposals_persist_relations: {
         Args: {
@@ -23333,6 +23925,50 @@ export type Database = {
           p_selected_quote_ids: string[]
         }
         Returns: string[]
+      }
+      fn_receiving_open_lines: {
+        Args: {
+          p_organization_id: string
+          p_product_ids: string[]
+          p_supplier_id?: string
+        }
+        Returns: {
+          allocation_rank: number
+          confirmed: boolean
+          contract_active: boolean
+          contract_id: string
+          contract_order_number: string
+          contract_sort_ts: string
+          description: string
+          expected_delivery: string
+          open_quantity: number
+          order_date: string
+          order_number: string
+          po_status: string
+          product_id: string
+          purchase_order_id: string
+          purchase_order_item_id: string
+          quantity: number
+          received_quantity: number
+          sku: string
+          supplier_id: string
+          supplier_name: string
+          supplier_sku: string
+          units_per_uom: number
+          uom_id: string
+        }[]
+      }
+      fn_receiving_scan_replay: {
+        Args: {
+          p_actor: string
+          p_organization_id: string
+          p_product_id: string
+          p_quantity: number
+          p_request_id: string
+          p_uom_id: string
+          p_warehouse_id: string
+        }
+        Returns: Json
       }
       fn_reconcile_dirty_lead_pipelines: {
         Args: { p_limit?: number }
@@ -24084,6 +24720,10 @@ export type Database = {
           tipo: string
         }[]
       }
+      ops_entrar_como_verificar: {
+        Args: { p_alvo: string; p_org: string }
+        Returns: Json
+      }
       ops_escapar_html: { Args: { _t: string }; Returns: string }
       ops_exige_criacao: { Args: { _org_id: string }; Returns: string }
       ops_exige_gestao: { Args: { _org_id: string }; Returns: string }
@@ -24155,6 +24795,7 @@ export type Database = {
         Returns: number
       }
       ops_numero_legivel: { Args: { _n: number }; Returns: string }
+      ops_obra_biblioteca: { Args: never; Returns: Json }
       ops_obra_conflitos_impl: { Args: { _tarefa_id: string }; Returns: Json }
       ops_obra_criar_impl: {
         Args: {
@@ -24168,6 +24809,7 @@ export type Database = {
           _orcamento_id: string
           _org: string
           _supervisor_id: string
+          _tarefas?: Json
           _titulo: string
         }
         Returns: Json
@@ -24182,6 +24824,11 @@ export type Database = {
         }
         Returns: Json
       }
+      ops_obra_dependencias_defeito_impl: {
+        Args: { _inferir_servicos: boolean; _obra_id: string }
+        Returns: number
+      }
+      ops_obra_distribuir_impl: { Args: { _obra_id: string }; Returns: number }
       ops_obra_evento: {
         Args: {
           _autor: string
@@ -24202,15 +24849,82 @@ export type Database = {
         }
         Returns: Record<string, unknown>
       }
+      ops_obra_indisponiveis_impl: {
+        Args: { _fim: string; _ini: string; _org: string }
+        Returns: {
+          motivo: string
+          utilizador_id: string
+        }[]
+      }
       ops_obra_minutos_reais: { Args: { _tarefa_id: string }; Returns: number }
+      ops_obra_morada_do_crm: {
+        Args: { _cliente: string; _orc: string }
+        Returns: string
+      }
+      ops_obra_pessoas_livres_impl: {
+        Args: { _excluir?: string; _fim: string; _ini: string; _org: string }
+        Returns: {
+          dias_cheios: number
+          funcao: string
+          livre: boolean
+          minutos_ocupados: number
+          motivo: string
+          nome: string
+          ordens: number
+          skills: string[]
+          utilizador_id: string
+          zona: string
+        }[]
+      }
+      ops_obra_planear_auto_impl: {
+        Args: { _desde: string; _fixas?: string[]; _obra_id: string }
+        Returns: string
+      }
+      ops_obra_pode_gerir_modelos: { Args: { _org: string }; Returns: boolean }
+      ops_obra_pode_ver_modelos: { Args: { _org: string }; Returns: boolean }
       ops_obra_replanear_impl: {
         Args: { _inicio: string; _obra_id: string }
         Returns: number
       }
       ops_obra_semear_exemplo_impl: { Args: { _org: string }; Returns: string }
+      ops_obra_semear_tipo_geral_impl: {
+        Args: { _org: string }
+        Returns: string
+      }
+      ops_obra_servico_da_org: {
+        Args: { _org: string; _servico: string }
+        Returns: boolean
+      }
+      ops_obra_servico_sugerir_impl: {
+        Args: { _autor: string; _org: string; _servico: string }
+        Returns: number
+      }
       ops_obra_somar_dias_uteis: {
         Args: { _d: string; _n: number }
         Returns: string
+      }
+      ops_obra_tarefas_do_orcamento: {
+        Args: { _orc: string }
+        Returns: {
+          com_modelo: boolean
+          fase: number
+          ferramentas: string
+          materiais: string
+          minutos: number
+          nome: string
+          orcamento_linha_id: string
+          ordem: number
+          pessoas: number
+          procedimento: string
+          sem_ficha: boolean
+          servico_id: string
+          servico_tarefa_id: string
+          skill_id: string
+        }[]
+      }
+      ops_obra_validar_tarefas: {
+        Args: { _orc: string; _org: string; _tarefas: Json }
+        Returns: undefined
       }
       ops_pack_conteudo: { Args: { _pack: string }; Returns: Json }
       ops_pode: { Args: { _org_id: string; _perm: string }; Returns: boolean }
@@ -24279,6 +24993,27 @@ export type Database = {
         }
         Returns: number
       }
+      ops_stock_calcular: {
+        Args: { p_org: string; p_produtos: string[] }
+        Returns: {
+          a_chegar: number
+          disponivel: number
+          fisico: number
+          gere_stock: boolean
+          nome: string
+          produto_id: string
+          reservado: number
+          sku: string
+          unidade: string
+        }[]
+      }
+      ops_stock_filtro_org: { Args: never; Returns: string }
+      ops_stock_ha_inventario: { Args: never; Returns: boolean }
+      ops_stock_tem: {
+        Args: { p_colunas: string[]; p_tabela: string }
+        Returns: boolean
+      }
+      ops_stock_verificar: { Args: { p_org: string }; Returns: undefined }
       ops_valores_da_lista: { Args: { _lista: string }; Returns: string[] }
       org_has_active_access: { Args: { _org_id: string }; Returns: boolean }
       org_is_own_unparented: { Args: { _org_id: string }; Returns: boolean }
@@ -24908,6 +25643,22 @@ export type Database = {
       }
       rpc_bulk_update_inventory_count_lines: {
         Args: { p_inventory_count_id: string; p_lines: Json }
+        Returns: Json
+      }
+      rpc_cancel_po_line_remainder: {
+        Args: {
+          p_notes?: string
+          p_purchase_order_item_id: string
+          p_reason: string
+        }
+        Returns: Json
+      }
+      rpc_cancel_po_remainder: {
+        Args: {
+          p_notes?: string
+          p_purchase_order_id: string
+          p_reason: string
+        }
         Returns: Json
       }
       rpc_client_contract_stats: {
@@ -26703,7 +27454,50 @@ export type Database = {
         Args: { p_cliente_id?: string; p_nome?: string; p_plano_id: string }
         Returns: Json
       }
+      rpc_ops_entrar_como_terminar: {
+        Args: { p_log_id: string }
+        Returns: Json
+      }
       rpc_ops_enviar_relatorio: { Args: { p_ordem_id: string }; Returns: Json }
+      rpc_ops_equipa_crm: {
+        Args: { p_org: string }
+        Returns: {
+          ativo: boolean
+          ausencia_fim: string
+          ausencia_inicio: string
+          ausencia_origem: string
+          ausencia_tipo: string
+          avatar_url: string
+          cargo: string
+          cargo_crm: string
+          categoria_funcao: string
+          codigos_postais: string[]
+          custo_hora: number
+          data_admissao: string
+          distritos: string[]
+          em_operacoes: boolean
+          email: string
+          equipa_crm: string
+          estado_contrato: string
+          funcao: string
+          local_crm: string
+          local_trabalho: string
+          nome: string
+          numero_interno: string
+          papel_crm: string
+          papel_crm_codigo: string
+          pode_ver_custos: boolean
+          regime: string
+          rh_disponivel: boolean
+          rh_ligado: boolean
+          skills: string[]
+          skills_nomes: string[]
+          telefone: string
+          tipo_contrato: string
+          utilizador_id: string
+          zona_base: string
+        }[]
+      }
       rpc_ops_escrever_mensagem: {
         Args: { p_ordem_id: string; p_texto: string }
         Returns: Json
@@ -26898,6 +27692,7 @@ export type Database = {
           p_orcamento_id?: string
           p_org: string
           p_supervisor_id?: string
+          p_tarefas?: Json
           p_titulo?: string
         }
         Returns: Json
@@ -26915,6 +27710,14 @@ export type Database = {
       }
       rpc_ops_obra_decidir_extra: {
         Args: { p_acao: string; p_extra_id: string; p_motivo?: string }
+        Returns: Json
+      }
+      rpc_ops_obra_distribuir: {
+        Args: { p_obra_id: string; p_refazer?: boolean }
+        Returns: Json
+      }
+      rpc_ops_obra_gravar_dependencias: {
+        Args: { p_depende_de: string[]; p_tarefa_id: string }
         Returns: Json
       }
       rpc_ops_obra_gravar_fase: {
@@ -26953,12 +27756,41 @@ export type Database = {
         Args: { p_tarefa_id: string }
         Returns: Json
       }
+      rpc_ops_obra_modelo_por_defeito: {
+        Args: { p_modelo_id: string }
+        Returns: Json
+      }
+      rpc_ops_obra_morada_sugerida: {
+        Args: {
+          p_cliente_id?: string
+          p_contrato_id?: string
+          p_orcamento_id?: string
+          p_org: string
+        }
+        Returns: string
+      }
       rpc_ops_obra_mudar_estado: {
         Args: { p_estado: string; p_motivo?: string; p_obra_id: string }
         Returns: Json
       }
       rpc_ops_obra_planear_tarefa: {
         Args: { p_fim: string; p_inicio: string; p_tarefa_id: string }
+        Returns: Json
+      }
+      rpc_ops_obra_previsao_contrato: {
+        Args: {
+          p_contrato_id?: string
+          p_data_inicio?: string
+          p_modelo_id?: string
+          p_morada?: string
+          p_orcamento_id?: string
+          p_org: string
+          p_tarefas?: Json
+        }
+        Returns: Json
+      }
+      rpc_ops_obra_previsao_orcamento: {
+        Args: { p_contrato_id?: string; p_orcamento_id?: string; p_org: string }
         Returns: Json
       }
       rpc_ops_obra_registar_extra: {
@@ -26971,12 +27803,33 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_ops_obra_registar_foto: {
+        Args: {
+          p_caminho: string
+          p_legenda?: string
+          p_mime?: string
+          p_nome: string
+          p_tamanho?: number
+          p_tarefa_id: string
+        }
+        Returns: Json
+      }
+      rpc_ops_obra_remover_foto: { Args: { p_foto_id: string }; Returns: Json }
       rpc_ops_obra_replanear: {
         Args: { p_data_inicio: string; p_obra_id: string }
         Returns: Json
       }
       rpc_ops_obra_semear_modelo_exemplo: {
         Args: { p_org: string }
+        Returns: Json
+      }
+      rpc_ops_obra_stock: {
+        Args: {
+          p_limite?: number
+          p_org: string
+          p_pesquisa?: string
+          p_produto_ids?: string[]
+        }
         Returns: Json
       }
       rpc_ops_obra_terminar_tarefa: {
@@ -27001,6 +27854,35 @@ export type Database = {
           medicoes: number
           nome: string
           pack: string
+        }[]
+      }
+      rpc_ops_pessoa_planeamento: {
+        Args: {
+          p_org: string
+          p_skills: string[]
+          p_utilizador: string
+          p_zona: string
+        }
+        Returns: Json
+      }
+      rpc_ops_pessoas_livres: {
+        Args: {
+          p_excluir_tarefa?: string
+          p_fim?: string
+          p_inicio: string
+          p_org: string
+        }
+        Returns: {
+          dias_cheios: number
+          funcao: string
+          livre: boolean
+          minutos_ocupados: number
+          motivo: string
+          nome: string
+          ordens: number
+          skills: string[]
+          utilizador_id: string
+          zona: string
         }[]
       }
       rpc_ops_proximo_codigo: {
@@ -27047,13 +27929,69 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_ops_servico_modelo_gravar: {
+        Args: { p_org: string; p_servico_id: string; p_tarefas: Json }
+        Returns: Json
+      }
+      rpc_ops_servico_modelo_sugerir: {
+        Args: { p_org: string; p_servico_id?: string; p_substituir?: boolean }
+        Returns: Json
+      }
+      rpc_ops_servicos_com_modelo: { Args: { p_org: string }; Returns: Json }
       rpc_ops_sessao: {
         Args: { p_acao: string; p_ordem_id: string }
+        Returns: Json
+      }
+      rpc_ops_skill_criar: {
+        Args: { p_nome: string; p_org: string }
         Returns: Json
       }
       rpc_ops_skills_do_utilizador: {
         Args: { p_org_id: string; p_skills: string[]; p_utilizador_id: string }
         Returns: Json
+      }
+      rpc_ops_stock_disponivel: {
+        Args: { p_org: string; p_produtos: string[] }
+        Returns: {
+          a_chegar: number
+          disponivel: number
+          fisico: number
+          gere_stock: boolean
+          nome: string
+          produto_id: string
+          reservado: number
+          sku: string
+          unidade: string
+        }[]
+      }
+      rpc_ops_stock_pesquisar: {
+        Args: { p_limite?: number; p_org: string; p_texto: string }
+        Returns: {
+          a_chegar: number
+          disponivel: number
+          fisico: number
+          gere_stock: boolean
+          nome: string
+          produto_id: string
+          reservado: number
+          sku: string
+          unidade: string
+        }[]
+      }
+      rpc_ops_stock_sugerir: {
+        Args: { p_org: string; p_quantidade: number; p_servico_id: string }
+        Returns: {
+          a_chegar: number
+          disponivel: number
+          fisico: number
+          gere_stock: boolean
+          nome: string
+          produto_id: string
+          quantidade: number
+          reservado: number
+          sku: string
+          unidade: string
+        }[]
       }
       rpc_ops_tarefa_iniciar: { Args: { p_tarefa_id: string }; Returns: Json }
       rpc_ops_tarefa_terminar: { Args: { p_tarefa_id: string }; Returns: Json }
@@ -27099,6 +28037,20 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_receive_by_code: {
+        Args: {
+          p_code?: string
+          p_dry_run?: boolean
+          p_product_id: string
+          p_purchase_order_item_id?: string
+          p_quantity: number
+          p_request_id: string
+          p_supplier_id?: string
+          p_uom_id?: string
+          p_warehouse_id: string
+        }
+        Returns: Json
+      }
       rpc_receive_purchase_order: {
         Args: {
           p_actual_delivery_date?: string
@@ -27114,6 +28066,10 @@ export type Database = {
           p_purchase_order_id: string
           p_warehouse_id: string
         }
+        Returns: Json
+      }
+      rpc_receiving_lookup: {
+        Args: { p_code: string; p_supplier_id?: string; p_warehouse_id: string }
         Returns: Json
       }
       rpc_record_diagnostic_suggestion_accepted: {
@@ -27633,6 +28589,14 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      rpc_undo_po_cancellation_batch: {
+        Args: { p_batch_id: string; p_reason?: string }
+        Returns: Json
+      }
+      rpc_undo_po_line_cancellation: {
+        Args: { p_cancellation_id: string; p_reason?: string }
+        Returns: Json
       }
       rpc_update_brand: {
         Args: {
