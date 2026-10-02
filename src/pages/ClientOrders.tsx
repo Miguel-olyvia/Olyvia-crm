@@ -205,6 +205,13 @@ const getMissingSupplierKind = (line: Pick<ClientOrderDocumentLine, 'has_preferr
 const lineKey = (line: Pick<ClientOrderDocumentLine, 'quote_line_id' | 'component_index'>) =>
   `${line.quote_line_id}:${line.component_index ?? 0}`;
 
+// Motivos de "não vou receber o resto" numa PO (purchase_order_item_cancellations.reason).
+const PO_CANCELLATION_REASON_LABELS: Record<string, string> = {
+  found_stock: 'Encontrei stock / outra solução',
+  supplier_unavailable: 'Fornecedor sem produto',
+  other: 'Outro',
+};
+
 const asQty = (value: unknown): number => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
@@ -547,6 +554,12 @@ const ClientOrders = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailData, setDetailData] = useState<ClientOrderDocumentDetail | null>(null);
+  // "Não vou receber o resto" nas POs ligadas (purchase_order_item_cancellations,
+  // só leitura): anulações ativas por linha da EC (lineKey). Best-effort.
+  const [poCancellationsByLine, setPoCancellationsByLine] = useState<{
+    contractId: string;
+    byLine: Record<string, Array<{ id: string; units: number; poNumber: string; reason: string; notes: string | null }>>;
+  } | null>(null);
   const [pdfGeneratingId, setPdfGeneratingId] = useState<string | null>(null);
 
   // Criação manual (rpc_create_manual_client_order). Até aqui a página era
@@ -810,6 +823,57 @@ const ClientOrders = () => {
       setDetailLoading(false);
     }
   };
+
+  // Anulações ativas ("não vou receber o resto") das linhas de PO ligadas a
+  // esta EC — PO com source_type='contract' e source_id = contrato; a linha
+  // da PO liga à linha da EC por quote_line_id + component_index. Recarrega
+  // sempre que o documento é relido. Tabela fora dos tipos gerados: cast local.
+  const detailContractId = detailData?.contract_id ?? null;
+  useEffect(() => {
+    if (!detailContractId) return;
+    const contractId = detailContractId;
+    let stale = false;
+    (async () => {
+      const { data, error } = await (supabase as any)
+        .from('purchase_order_item_cancellations')
+        // !inner nas duas: anulações sem linha (purchase_order_item_id null,
+        // linha recriada na edição) e de POs apagadas ficam de fora.
+        .select('id, quantity_cancelled, reason, notes, purchase_order_items!inner(quote_line_id, component_index, units_per_uom), purchase_orders!inner(order_number, source_type, source_id, deleted_at)')
+        .is('undone_at', null)
+        .eq('purchase_orders.source_type', 'contract')
+        .eq('purchase_orders.source_id', contractId)
+        .is('purchase_orders.deleted_at', null);
+      if (stale) return;
+      if (error) {
+        console.warn('[ClientOrders] não foi possível carregar as anulações das encomendas a fornecedor', error);
+        return;
+      }
+      const byLine: Record<string, Array<{ id: string; units: number; poNumber: string; reason: string; notes: string | null }>> = {};
+      ((data || []) as Array<{
+        id: string;
+        quantity_cancelled: number;
+        reason: string;
+        notes: string | null;
+        purchase_order_items: { quote_line_id: string | null; component_index: number | null; units_per_uom: number | null } | null;
+        purchase_orders: { order_number: string | null } | null;
+      }>).forEach((row) => {
+        const poItem = row.purchase_order_items;
+        if (!poItem?.quote_line_id) return;
+        const key = lineKey({ quote_line_id: poItem.quote_line_id, component_index: poItem.component_index });
+        // Quantidade da PO na unidade da linha; na EC mostra-se em unidades de stock.
+        const units = asQty(row.quantity_cancelled) * (Number(poItem.units_per_uom) > 0 ? Number(poItem.units_per_uom) : 1);
+        (byLine[key] ||= []).push({
+          id: row.id,
+          units,
+          poNumber: row.purchase_orders?.order_number || '',
+          reason: row.reason,
+          notes: row.notes,
+        });
+      });
+      setPoCancellationsByLine({ contractId, byLine });
+    })().catch((e) => console.warn('[ClientOrders] anulações das encomendas a fornecedor', e));
+    return () => { stale = true; };
+  }, [detailContractId, detailData]);
 
   // Fase 5.0F: link inverso a partir de PurchaseOrders.tsx
   // (?open=<contract_id>) — mesmo padrão já usado no sentido oposto
@@ -2797,6 +2861,13 @@ const ClientOrders = () => {
                               </Button>
                             )}
                           </div>
+                          {/* Só leitura: resto anulado na PO ligada ("não vou receber o resto"). */}
+                          {poCancellationsByLine?.contractId === detailData.contract_id &&
+                            (poCancellationsByLine.byLine[lineKey(line)] || []).map((c) => (
+                              <div key={c.id} className="mt-1 text-xs text-muted-foreground" title={c.notes || undefined}>
+                                {formatBaseQty(c.units)} anulado(s){c.poNumber ? ` na ${c.poNumber}` : ''} — {PO_CANCELLATION_REASON_LABELS[c.reason] || c.reason}
+                              </div>
+                            ))}
                         </TableCell>
                       </TableRow>
                     ))
