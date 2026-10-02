@@ -76,7 +76,7 @@ async function buildEntityClientForPdf(entityId: string, quoteId?: string | null
     (supabase as any).from("anew_entity_emails").select("email").eq("entity_id", entityId).eq("is_primary", true).limit(1),
     (supabase as any).from("anew_entity_phones").select("phone_number, country_code").eq("entity_id", entityId).eq("is_primary", true).limit(1),
     (supabase as any).from("anew_entity_fiscal_entities").select("fiscal_entity_id").eq("entity_id", entityId).eq("is_primary", true).limit(1),
-    (supabase as any).from("anew_entity_addresses").select("address_id, is_primary, anew_addresses(*)").eq("entity_id", entityId),
+    (supabase as any).from("anew_entity_addresses").select("address_id, is_primary, address_type, valid_to, anew_addresses(*)").eq("entity_id", entityId),
   ]);
 
   const entity = entityRes.data;
@@ -110,7 +110,13 @@ async function buildEntityClientForPdf(entityId: string, quoteId?: string | null
   }
 
   const displayName = entity.display_name || [entity.first_name, entity.last_name].filter(Boolean).join(" ");
-  const clientAddresses = (addressesRes.data || []).map((ea: any) => ({
+  // "Morada" do cliente no PDF = morada fiscal (principal): ficam de fora as
+  // moradas de entrega e as ligações já fechadas — senão, sem principal, o
+  // fallback "primeira da lista" podia apanhar uma morada de entrega.
+  const agora = Date.now();
+  const clientAddresses = (addressesRes.data || [])
+    .filter((ea: any) => ea.address_type !== "delivery" && (!ea.valid_to || new Date(ea.valid_to).getTime() > agora))
+    .map((ea: any) => ({
     street: ea.anew_addresses?.street || "",
     number: ea.anew_addresses?.number || "",
     postal_code: ea.anew_addresses?.postal_code || "",

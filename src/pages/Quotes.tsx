@@ -35,6 +35,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { QuoteBuilder } from "@/components/QuoteBuilder";
+import { QuoteMoradasResumo } from "@/components/quote/QuoteMoradasResumo";
 import { generateQuotePdfBlob } from "@/utils/generateQuotePdfBlob";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -1024,15 +1025,6 @@ export default function Quotes() {
     organizationId: activeCompany?.id,
     bulkDeleteRpc: "rpc_bulk_delete_quote",
   });
-
-  const getClientAddress = (quote: Quote) => {
-    if (quote.clients?.client_addresses?.length) {
-      const primaryAddress = quote.clients.client_addresses.find(addr => addr.is_primary) || quote.clients.client_addresses[0];
-      const parts = [primaryAddress.street, primaryAddress.number, primaryAddress.postal_code, primaryAddress.city].filter(Boolean);
-      if (parts.length > 0) return parts.join(", ");
-    }
-    return "—";
-  };
 
   const getEntityId = (quote: Quote): string | undefined => {
     return (quote as any).entity_id || quote.clients?.entity_id || (quote.deals as any)?.entity_id;
@@ -2325,13 +2317,14 @@ export default function Quotes() {
                         <p className="font-medium">{getClientName(detailQuote).name}</p>
                       </div>
                       <div>
-                        <label className="text-xs font-medium text-muted-foreground">{t('quotes.columns.location')}</label>
-                        <p className="text-sm">{getClientAddress(detailQuote)}</p>
-                      </div>
-                      <div>
                         <label className="text-xs font-medium text-muted-foreground">Comercial</label>
                         <p className="text-sm">{detailQuote.assigned_to ? (comercialNamesMap[detailQuote.assigned_to] || "...") : "—"}</p>
                       </div>
+                    </div>
+                    {/* Morada fiscal (da entidade, lida pelo orçamento) e morada
+                        de entrega gravada no orçamento (obra_endereco). */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <QuoteMoradasResumo quoteId={detailQuote.id} obraEndereco={detailQuote.obra_endereco} />
                     </div>
                     <Separator />
                     <div className="grid grid-cols-3 gap-4">

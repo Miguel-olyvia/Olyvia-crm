@@ -24713,13 +24713,21 @@ export type Database = {
       }
       rpc_add_entity_delivery_address: {
         Args: {
+          p_acesso?: string
           p_city?: string
           p_entity_id: string
+          p_estacionamento?: string
           p_floor?: string
+          p_impacto_percent?: number
+          p_n_andares?: number
+          p_n_elevadores?: number
+          p_n_fracoes_por_andar?: number
           p_number?: string
           p_postal_code?: string
           p_street: string
+          p_tem_elevador?: boolean
           p_unit?: string
+          p_zona_estacionamento?: string
         }
         Returns: Json
       }
@@ -25187,6 +25195,7 @@ export type Database = {
           p_address_number: string
           p_address_postal_code: string
           p_address_street: string
+          p_address_unit?: string
           p_client_type: string
           p_display_name?: string
           p_email?: string
@@ -26513,16 +26522,25 @@ export type Database = {
       rpc_list_entity_delivery_addresses: {
         Args: { p_entity_id: string }
         Returns: {
+          acesso: string
           address_id: string
           city: string
           created_at: string
           entity_address_id: string
+          estacionamento: string
           floor: string
           formatted: string
+          has_building: boolean
+          impacto_percent: number
+          n_andares: number
+          n_elevadores: number
+          n_fracoes_por_andar: number
           number: string
           postal_code: string
           street: string
+          tem_elevador: boolean
           unit: string
+          zona_estacionamento: string
         }[]
       }
       rpc_manage_attribute_option_group: {
@@ -27719,9 +27737,11 @@ export type Database = {
       rpc_update_client: {
         Args: {
           p_address_city?: string
+          p_address_floor?: string
           p_address_number?: string
           p_address_postal_code?: string
           p_address_street?: string
+          p_address_unit?: string
           p_assigned_to: string
           p_clear_nif?: boolean
           p_client_id: string
@@ -27975,6 +27995,26 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      rpc_update_entity_delivery_address: {
+        Args: {
+          p_acesso?: string
+          p_city?: string
+          p_entity_address_id: string
+          p_estacionamento?: string
+          p_floor?: string
+          p_impacto_percent?: number
+          p_n_andares?: number
+          p_n_elevadores?: number
+          p_n_fracoes_por_andar?: number
+          p_number?: string
+          p_postal_code?: string
+          p_street: string
+          p_tem_elevador?: boolean
+          p_unit?: string
+          p_zona_estacionamento?: string
+        }
+        Returns: Json
       }
       rpc_update_inventory_count_line_quantity: {
         Args: { p_counted_quantity: number; p_line_id: string }

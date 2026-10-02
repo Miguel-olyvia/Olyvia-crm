@@ -32,6 +32,10 @@ import { formatCurrency, cn } from "@/lib/utils";
 import { QuotePipelineBar } from "@/components/quote/QuotePipelineBar";
 import { QuoteDealCard } from "@/components/quote/QuoteDealCard";
 import { QuoteEntityPreview } from "@/components/quote/QuoteEntityPreview";
+import { QuoteMoradaFiscal } from "@/components/quote/QuoteMoradaFiscal";
+import { QuoteMoradaEntrega } from "@/components/quote/QuoteMoradaEntrega";
+import { setQuoteMoradaEntrega } from "@/lib/quotes/quoteMoradas";
+import { formatDeliveryAddress } from "@/lib/addresses/entityDeliveryAddresses";
 import { EntitySearchInput } from "@/components/EntitySearchInput";
 import { QuoteBuilderSidebar } from "@/components/quote/QuoteBuilderSidebar";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
@@ -343,6 +347,53 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [selectedDeal, setSelectedDeal] = useState<Deal | null>(null);
   const [selectedSource, setSelectedSource] = useState<{ kind: "contact" | "client" | "lead"; id: string; name: string; entity_id: string | null; organization_id: string | null } | null>(null);
   const [resolvedQuoteEntityId, setResolvedQuoteEntityId] = useState<string | null>(null);
+  // Morada de entrega escolhida (anew_addresses.id) e a entidade a que
+  // pertence: ao trocar de lead/cliente a escolha anterior deixa de valer.
+  const [moradaEntrega, setMoradaEntrega] = useState<{ entityId: string | null; addressId: string | null; texto: string | null }>({ entityId: null, addressId: null, texto: null });
+  // O que o orçamento tinha gravado ao abrir (site_address_id / obra_endereco).
+  const [moradaGravada, setMoradaGravada] = useState<{ entityId: string | null; siteAddressId: string | null; obraEndereco: string | null }>({ entityId: null, siteAddressId: null, obraEndereco: null });
+  // Entidade cujas moradas se mostram (a mesma que o orçamento grava em entity_id).
+  const moradaEntityId = selectedDeal?.entity_id || selectedSource?.entity_id || resolvedQuoteEntityId || null;
+  const moradaEntregaEscolhida = moradaEntrega.entityId === moradaEntityId ? moradaEntrega.addressId : null;
+  // Texto da morada de entrega para a pré-visualização do PDF (antes de gravar).
+  const moradaEntregaTexto = moradaEntrega.entityId === moradaEntityId
+    ? moradaEntrega.texto || (moradaGravada.entityId === moradaEntityId ? moradaGravada.obraEndereco : null)
+    : null;
+  // Ficha onde se acrescenta a morada fiscal em falta.
+  const moradaFiscalFicha: { kind: "client" | "lead"; id: string } | null =
+    selectedSource && (selectedSource.kind === "client" || selectedSource.kind === "lead") && selectedSource.id
+      ? { kind: selectedSource.kind, id: selectedSource.id }
+      : selectedDeal?.client_id
+        ? { kind: "client", id: selectedDeal.client_id }
+        : selectedDeal?.lead_id
+          ? { kind: "lead", id: selectedDeal.lead_id }
+          : null;
+
+  /**
+   * Depois do rpc_save_quote: grava a morada de entrega escolhida
+   * (rpc_set_quote_morada_entrega → site_address_id + obra_endereco). Não
+   * mexe num orçamento antigo que só tem texto em obra_endereco enquanto não
+   * se escolher uma morada. Uma falha aqui não desfaz a gravação do orçamento.
+   */
+  const gravarMoradaEntrega = async (quoteIdToUpdate: string) => {
+    const desejada = moradaEntregaEscolhida;
+    const mudouEntidade = moradaGravada.entityId !== moradaEntityId;
+    const precisa = desejada !== null
+      || moradaGravada.siteAddressId !== null
+      || (mudouEntidade && !!moradaGravada.obraEndereco);
+    if (!precisa) return;
+    try {
+      const result = await setQuoteMoradaEntrega(quoteIdToUpdate, desejada);
+      setMoradaGravada({ entityId: moradaEntityId, siteAddressId: result.site_address_id, obraEndereco: result.obra_endereco });
+    } catch (error: unknown) {
+      console.error("[QuoteBuilder] morada de entrega não gravada:", error, { quoteIdToUpdate, desejada });
+      toast({
+        title: "Orçamento gravado, mas a morada de entrega não",
+        description: (error as { message?: string })?.message,
+        variant: "destructive",
+      });
+    }
+  };
   const { toast } = useToast();
   const { t } = useTranslation();
   const { activeCompany, companies: userCompanies, userType: companyUserType } = useCompany();
@@ -1784,6 +1835,18 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       
       setQuoteNumber(quote.quote_number || null);
 
+      // Moradas gravadas: a de entrega é quotes.site_address_id (+ o texto em
+      // obra_endereco); a fiscal lê-se sempre da entidade.
+      {
+        const gravadaEntityId = quote.entity_id || (quote.deals as { entity_id?: string | null } | null)?.entity_id || null;
+        setMoradaGravada({
+          entityId: gravadaEntityId,
+          siteAddressId: quote.site_address_id || null,
+          obraEndereco: quote.obra_endereco || null,
+        });
+        setMoradaEntrega({ entityId: gravadaEntityId, addressId: quote.site_address_id || null, texto: quote.obra_endereco || null });
+      }
+
       // Set selected deal for display with lead info
       if (quote.deals) {
         const dealData = quote.deals as any;
@@ -2371,6 +2434,9 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
 
       const savedQuoteRow = savedQuote as Database["public"]["Tables"]["quotes"]["Row"] | null;
       savedQuoteId = savedQuoteRow?.id || savedQuoteId;
+
+      // Morada de entrega (fora do rpc_save_quote, ver gravarMoradaEntrega).
+      if (savedQuoteId) await gravarMoradaEntrega(savedQuoteId);
 
       // Snapshot do diagnóstico do pedido de proposta. Aqui — e só aqui —
       // savedQuoteId é o id real do orçamento (num orçamento novo a prop
@@ -3827,6 +3893,25 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                 </div>
               )}
 
+              {/* Moradas: a fiscal vem da ficha da lead/cliente (só leitura);
+                  a de entrega escolhe-se das moradas de entrega do cliente
+                  (a 1.ª por defeito) e grava-se no orçamento. */}
+              {moradaEntityId && (
+                <div className="space-y-4 rounded-lg border p-4">
+                  <QuoteMoradaFiscal
+                    entityId={moradaEntityId}
+                    quoteId={effectiveQuoteId || null}
+                    ficha={moradaFiscalFicha}
+                  />
+                  <QuoteMoradaEntrega
+                    entityId={moradaEntityId}
+                    value={moradaEntregaEscolhida}
+                    savedText={moradaGravada.entityId === moradaEntityId ? moradaGravada.obraEndereco : null}
+                    onChange={(addressId, address) => setMoradaEntrega({ entityId: moradaEntityId, addressId, texto: address ? (formatDeliveryAddress(address) || address.formatted || null) : null })}
+                  />
+                </div>
+              )}
+
               {/* Title + Reference */}
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
@@ -4786,6 +4871,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           quote_number: quoteNumber || autoReference,
           created_at: new Date().toISOString(),
           entity_id: resolvedQuoteEntityId,
+          obra_endereco: moradaEntregaTexto,
         }}
         lines={lines}
         organizationId={formData.organization_id || selectedSource?.organization_id || activeCompany?.id || null}

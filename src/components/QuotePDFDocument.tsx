@@ -508,8 +508,10 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
         {vat     && <View style={styles.row}><Text style={styles.label}>NIF:</Text><Text style={styles.value}>{vat}</Text></View>}
         {email   && <View style={styles.row}><Text style={styles.label}>Email:</Text><Text style={styles.value}>{email}</Text></View>}
         {phone   && <View style={styles.row}><Text style={styles.label}>Telefone:</Text><Text style={styles.value}>{phone}</Text></View>}
-        {address && <View style={styles.row}><Text style={styles.label}>Morada:</Text><Text style={styles.value}>{address}</Text></View>}
-        {quote.obra_endereco && <View style={styles.row}><Text style={styles.label}>Morada Obra:</Text><Text style={styles.value}>{quote.obra_endereco}</Text></View>}
+        {/* Morada fiscal = principal da entidade; morada de entrega = a
+            escolhida no orçamento (obra_endereco, gravado com site_address_id). */}
+        {address && <View style={styles.row}><Text style={styles.label}>Morada fiscal:</Text><Text style={styles.value}>{address}</Text></View>}
+        {quote.obra_endereco && <View style={styles.row}><Text style={styles.label}>Morada de entrega:</Text><Text style={styles.value}>{quote.obra_endereco}</Text></View>}
       </View>
     );
   })() : null;
