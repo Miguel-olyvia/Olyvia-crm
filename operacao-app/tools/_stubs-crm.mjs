@@ -257,3 +257,67 @@ INSERT INTO auth.users (id, email, email_confirmed_at)
   VALUES ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
           'olyvia-live-ui-check+11544965@example.invalid', now());
 `;
+
+/**
+ * Os privilégios por omissão do Supabase.
+ *
+ * No Supabase, cada tabela e função nova nasce com privilégios para `anon`,
+ * `authenticated` e `service_role` (default privileges do esquema public). Um
+ * Postgres limpo não faz isso — e então um `REVOKE ... FROM PUBLIC, anon`
+ * parece suficiente aqui e deixa `authenticated` com EXECUTE em produção.
+ *
+ * Aplicar ANTES de correr os ficheiros `db/*.sql`, para os objetos nascerem
+ * como nasceriam lá.
+ */
+export const PRIVILEGIOS_SUPABASE = `
+GRANT USAGE ON SCHEMA public, auth TO anon, authenticated, service_role;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA auth TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES    TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO anon, authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO anon, authenticated, service_role;
+`;
+
+/**
+ * Autenticação e autorização como as do CRM, para cenários com várias
+ * organizações e várias pessoas.
+ *
+ * Os stubs de base fazem `has_anew_permission` devolver sempre false e
+ * `get_user_visible_org_ids` devolver TODAS as organizações. Isso chega para
+ * instalar, e não chega para provar isolamento: um teste entre organizações
+ * passaria pela razão errada.
+ *
+ *   · current_business_user_id — o anew_users cujo auth_user_id é auth.uid();
+ *   · get_user_visible_org_ids — as organizações com membership ativa;
+ *   · has_anew_permission     — GLOBAL, como a do CRM: basta o papel de UMA
+ *                               membership ativa ter a permissão;
+ *   · is_system_admin_user    — quem estiver em public._stub_admin_sistema.
+ *
+ * Aplicar DEPOIS de STUBS_CRM (substitui as funções de lá).
+ */
+export const AUTENTICACAO_REAL = `
+CREATE TABLE IF NOT EXISTS public._stub_admin_sistema (auth_user_id uuid PRIMARY KEY);
+
+CREATE OR REPLACE FUNCTION public.current_business_user_id()
+  RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER AS
+  $$ SELECT id FROM public.anew_users WHERE auth_user_id = auth.uid() LIMIT 1 $$;
+
+CREATE OR REPLACE FUNCTION public.get_user_visible_org_ids(_auth_uid uuid)
+  RETURNS SETOF uuid LANGUAGE sql STABLE SECURITY DEFINER AS
+  $$ SELECT am.organization_id FROM public.anew_users au
+       JOIN public.anew_memberships am ON am.user_id = au.id AND am.status = 'active'
+      WHERE au.auth_user_id = _auth_uid $$;
+
+CREATE OR REPLACE FUNCTION public.has_anew_permission(_auth_uid uuid, _permission_code text)
+  RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER AS
+  $$ SELECT EXISTS (
+       SELECT 1 FROM public.anew_users au
+         JOIN public.anew_memberships am ON am.user_id = au.id AND am.status = 'active'
+         JOIN public.anew_role_permissions arp
+           ON arp.role_id = am.role_id AND arp.permission_code = _permission_code
+        WHERE au.auth_user_id = _auth_uid) $$;
+
+CREATE OR REPLACE FUNCTION public.is_system_admin_user(_user_id uuid)
+  RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER AS
+  $$ SELECT EXISTS (SELECT 1 FROM public._stub_admin_sistema WHERE auth_user_id = _user_id) $$;
+`;

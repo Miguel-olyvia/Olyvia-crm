@@ -126,6 +126,20 @@ GRANT SELECT ON public.ops_v_orcamento TO authenticated, service_role;
 -- fica nulo em vez de zero — "não havia orçamento" não é o mesmo que
 -- "orçamento de zero euros".
 
+-- ⚠ Esta é a PRIMEIRA versão. db/tempos.sql substitui-a por uma que conta a
+-- mão de obra ao vivo (e acrescenta colunas). Voltar a correr este ficheiro
+-- depois desse não a pode desfazer — nem rebentar com "cannot drop columns
+-- from view" —, por isso só se cria aqui se a versão nova ainda não existe.
+DO $vista$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'ops_v_ordem_custo'
+                AND column_name = 'segundos_trabalho') THEN
+    RAISE NOTICE 'ops_v_ordem_custo: já existe a versão de tempos.sql — não se mexe.';
+    RETURN;
+  END IF;
+
+  EXECUTE $def$
 CREATE OR REPLACE VIEW public.ops_v_ordem_custo
 WITH (security_invoker = true) AS
 SELECT
@@ -159,6 +173,9 @@ LEFT JOIN LATERAL (
     sum(c.total)::numeric(12,2) AS real_total
     FROM public.ops_custo c WHERE c.ordem_id = o.id
 ) r ON true;
+  $def$;
+END
+$vista$;
 
 REVOKE ALL ON public.ops_v_ordem_custo FROM PUBLIC, anon;
 GRANT SELECT ON public.ops_v_ordem_custo TO authenticated, service_role;

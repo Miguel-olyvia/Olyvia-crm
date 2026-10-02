@@ -25,7 +25,7 @@ export const createScheduleItemDef: ToolDef = {
         location: { type: "string" },
         postal_code: { type: "string", description: "Usado por auto_assign_resource." },
         client_id: { type: "string", description: "UUID de clients." },
-        contact_id: { type: "string", description: "UUID de contacts." },
+        lead_id: { type: "string", description: "UUID de anew_leads." },
         deal_id: { type: "string", description: "UUID de deals." },
         assigned_to: { type: "string", description: "UUID anew_users.id (campo user_id do item)." },
         resource_ids: { type: "array", items: { type: "string" }, maxItems: 20, description: "UUIDs de schedule_resources." },
@@ -72,7 +72,7 @@ const createScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
   if (args.end_time !== undefined && !HHMM_RE.test(String(args.end_time))) {
     return { success: false, message: "end_time inválido (HH:MM)." };
   }
-  for (const k of ["client_id", "contact_id", "deal_id", "assigned_to"]) {
+  for (const k of ["client_id", "lead_id", "deal_id", "assigned_to"]) {
     if (args[k] !== undefined && args[k] !== null && !UUID_RE.test(String(args[k]))) {
       return { success: false, message: `${k} inválido (UUID).` };
     }
@@ -165,7 +165,7 @@ const createScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
     }
   }
 
-  // Validate client_id/contact_id/deal_id belong to the active org before linking
+  // Validate client_id/lead_id/deal_id belong to the active org before linking
   // them to the schedule item — these are user/model-supplied UUIDs and must not
   // be trusted across tenants just because they pass the UUID format check.
   if (args.client_id) {
@@ -177,14 +177,14 @@ const createScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
       .maybeSingle();
     if (!c) return { success: false, message: "client_id não encontrado nesta organização." };
   }
-  if (args.contact_id) {
+  if (args.lead_id) {
     const { data: c } = await supabase
-      .from("anew_contacts")
+      .from("anew_leads")
       .select("id")
-      .eq("id", args.contact_id)
+      .eq("id", args.lead_id)
       .eq("organization_id", organizationId)
       .maybeSingle();
-    if (!c) return { success: false, message: "contact_id não encontrado nesta organização." };
+    if (!c) return { success: false, message: "lead_id não encontrado nesta organização." };
   }
   if (args.deal_id) {
     const { data: d } = await supabase
@@ -212,7 +212,7 @@ const createScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
     metadata,
   };
   if (args.client_id) insertPayload.client_id = args.client_id;
-  if (args.contact_id) insertPayload.contact_id = args.contact_id;
+  if (args.lead_id) insertPayload.lead_id = args.lead_id;
   if (args.deal_id) insertPayload.deal_id = args.deal_id;
   if (args.assigned_to) insertPayload.user_id = args.assigned_to;
 
@@ -404,7 +404,7 @@ const getScheduleItem: Handler = async (ctx, args): Promise<ToolResult> => {
 
   const { data: item, error } = await supabase
     .from("schedule_items")
-    .select("id, board_id, title, description, status, start_datetime, end_datetime, location, priority, created_by, client_id, contact_id, deal_id")
+    .select("id, board_id, title, description, status, start_datetime, end_datetime, location, priority, created_by, client_id, lead_id, deal_id")
     .eq("id", args.item_id)
     .eq("organization_id", organizationId)
     .maybeSingle();

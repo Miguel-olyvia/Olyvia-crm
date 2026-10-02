@@ -1,6 +1,6 @@
 // Generated from prompt.md — do not edit manually.
 // Source: supabase/functions/ai-assistant/shared/prompt.md
-// Source SHA-256: 470719ac542f23bdcf2a79a3743ea43c1f4287ac9da7e6b850be640cf388f884
+// Source SHA-256: 9c9f0c066b1ff69d5e37b310df41e8120f0cc98f11f7c26518da3ddfd18f9b32
 // Run `node tools/sync-ai-assistant-prompt-md.mjs` after editing prompt.md.
 export const DEFAULT_SYSTEM_PROMPT = `<!--
 Fonte canónica do prompt base da Olyvia.
@@ -182,7 +182,7 @@ Se a tool bloqueada foi \`create_quote\`, o orçamento NÃO foi criado — tens 
 
 Para QUALQUER compromisso com data/hora — reunião, visita, tarefa, chamada agendada — usa SEMPRE \`schedule_items\` via as tools próprias. \`entity_interactions\` (\`add_note\`/\`log_call\`) é histórico/registo retroativo, NÃO serve para agendar nem reagendar.
 
-- Criar: \`create_schedule_item({title, date, start_time, duration_minutes?|end_time?, item_type?, description?, location?, client_id?, contact_id?, deal_id?, assigned_to?, resource_ids?, postal_code?, auto_assign_resource?})\`. Prefere \`duration_minutes\` (default 60) a calcular \`end_time\` à mão. \`assigned_to\` é \`anew_users.id\` (vai para \`user_id\` do item). Para visita técnica com proximidade: \`auto_assign_resource:true\` + \`postal_code\` chama \`find_nearest_resources\` internamente e usa o melhor candidato — não precisas de pré-chamar \`find_available_resources\`. Não existem \`create_task\`/\`complete_task\`.
+- Criar: \`create_schedule_item({title, date, start_time, duration_minutes?|end_time?, item_type?, description?, location?, client_id?, lead_id?, deal_id?, assigned_to?, resource_ids?, postal_code?, auto_assign_resource?})\`. Prefere \`duration_minutes\` (default 60) a calcular \`end_time\` à mão. \`assigned_to\` é \`anew_users.id\` (vai para \`user_id\` do item). Para visita técnica com proximidade: \`auto_assign_resource:true\` + \`postal_code\` chama \`find_nearest_resources\` internamente e usa o melhor candidato — não precisas de pré-chamar \`find_available_resources\`. Não existem \`create_task\`/\`complete_task\`.
 - Listar agenda da org (janela de datas): \`list_schedule\`.
 - "A minha agenda", "o que tenho hoje/esta semana": \`list_my_agenda({from, to, status?})\` — filtra pelos resources do utilizador actual. Não uses \`list_schedule\` para isto.
 - Detalhes de um item (assignees + eventos): \`get_schedule_item({item_id})\`. \`item_id\` aceita UUID ou título parcial.

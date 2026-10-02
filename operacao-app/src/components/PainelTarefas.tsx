@@ -2,12 +2,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   ErroDeEscrita,
+  iniciarTarefa,
+  pararTarefa,
   responderMedicao,
   responderTarefa,
   type MedicaoDaTarefa,
   type OpcaoDeMedicao,
   type TarefaDaOrdem,
+  type TempoDaTarefa,
 } from "../lib/dados";
+import { compararTempo, formatarDuracao } from "../domain/tempo";
 import {
   Badge,
   Barra,
@@ -19,7 +23,7 @@ import {
   Textarea,
   cx,
 } from "./ui";
-import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronRight, X } from "./icons";
+import { AlertTriangle, Check, CheckCircle, ChevronDown, ChevronRight, Clock, Pause, Play, X } from "./icons";
 import {
   comoSeResponde,
   faltaParaGravar,
@@ -56,12 +60,18 @@ export default function PainelTarefas({
   medicoes,
   opcoes,
   permissao,
+  tempos = new Map(),
+  minhaTarefa = null,
   aoGravar,
 }: {
   tarefas: readonly TarefaDaOrdem[];
   medicoes: readonly MedicaoDaTarefa[];
   opcoes: readonly OpcaoDeMedicao[];
   permissao: Permissao;
+  /** Real contra estimado, por tarefa (`ops_v_tarefa_tempo`). */
+  tempos?: ReadonlyMap<string, TempoDaTarefa>;
+  /** A tarefa em que o MEU relógio está a contar, se alguma. */
+  minhaTarefa?: string | null;
   /** Recarrega a ordem. A app não adivinha o novo estado — vai buscá-lo. */
   aoGravar: () => void;
 }) {
@@ -145,6 +155,26 @@ export default function PainelTarefas({
     }
   };
 
+  // Começar ou parar de contar numa tarefa. Não muda o estado da tarefa:
+  // responder é que a dá por feita (e isso também pára o relógio dela).
+  const relogio = async (tarefaId: string, acao: "iniciar" | "parar") => {
+    const chave = `relogio:${tarefaId}`;
+    setAGravar(chave);
+    setErros((e) => ({ ...e, [tarefaId]: "" }));
+    try {
+      await (acao === "iniciar" ? iniciarTarefa(tarefaId) : pararTarefa(tarefaId));
+      aoGravar();
+    } catch (e) {
+      setErros((er) => ({
+        ...er,
+        [tarefaId]:
+          e instanceof ErroDeEscrita ? e.message : "Não foi possível falar com o servidor. Tenta outra vez.",
+      }));
+    } finally {
+      setAGravar(null);
+    }
+  };
+
   if (tarefas.length === 0) return null;
 
   return (
@@ -220,6 +250,7 @@ export default function PainelTarefas({
                         · {resumo.total - resumo.porLer}/{resumo.total} leituras
                       </span>
                     )}
+                    <TempoDaLinha tarefa={t} tempo={tempos.get(t.id)} />
                     {t.observacoes && !estaAberta && (
                       <span className="min-w-0 truncate italic">· {t.observacoes}</span>
                     )}
@@ -233,6 +264,37 @@ export default function PainelTarefas({
 
               {estaAberta && (
                 <div className="ml-[26px] space-y-3 border-l-2 border-slate-100 pl-3.5 pb-3 pt-1">
+                  {permissao.pode && (minhaTarefa === t.id || t.estado === "pendente") && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {minhaTarefa === t.id ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={aGravar !== null}
+                          onClick={() => void relogio(t.id, "parar")}
+                        >
+                          <Pause width={13} height={13} /> Parar o meu tempo nesta tarefa
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={aGravar !== null}
+                          onClick={() => void relogio(t.id, "iniciar")}
+                        >
+                          <Play width={13} height={13} /> Começar a contar nesta tarefa
+                        </Button>
+                      )}
+                      <span className="text-xs text-slate-400">
+                        {minhaTarefa === t.id
+                          ? "Responder também pára — e o teu tempo continua na ordem."
+                          : "O tempo real de cada tarefa compara-se com o estimado."}
+                      </span>
+                    </div>
+                  )}
+                  {erros[t.id] && caminho === "medicoes" && (
+                    <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erros[t.id]}</p>
+                  )}
                   {caminho === "medicoes" ? (
                     leituras.map((l) => (
                       <BlocoMedicao
@@ -552,6 +614,36 @@ function BlocoVeredicto({
 }
 
 /* ───────────────────────────── Peças pequenas ────────────────────────── */
+
+/**
+ * "12m de 15m", na linha da tarefa. Vermelho quando passa o estimado (com a
+ * folga de `compararTempo`), e um relógio quando alguém está a contar nela.
+ * Sem estimativa e sem tempo, não diz nada — não há nada a dizer.
+ */
+function TempoDaLinha({ tarefa, tempo }: { tarefa: TarefaDaOrdem; tempo?: TempoDaTarefa }) {
+  const estimado = tempo?.tempo_estimado ?? Number(tarefa.tempo_estimado ?? 0);
+  const real = tempo?.tempo_real ?? 0;
+  if (!estimado && !real && !tempo?.a_contar) return null;
+  const c = compararTempo(estimado, real);
+  return (
+    <span
+      className={cx(
+        "inline-flex items-center gap-1 tabular",
+        c.situacao === "acima" ? "text-red-600" : undefined
+      )}
+      title={
+        c.situacao === "sem_estimativa"
+          ? "Tempo real nesta tarefa (sem estimativa na checklist)"
+          : "Tempo real contra o estimado na checklist"
+      }
+    >
+      · <Clock width={11} height={11} />
+      {real > 0 || tempo?.a_contar ? formatarDuracao(real) : "—"}
+      {estimado > 0 && <> de {formatarDuracao(estimado)}</>}
+      {tempo?.a_contar && <span className="text-brand-700">· a contar</span>}
+    </span>
+  );
+}
 
 function BotaoGravar({
   ativo,

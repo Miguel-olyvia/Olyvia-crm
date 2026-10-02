@@ -117,6 +117,7 @@ import {
 import { ensureEntityOrgLink, linkEntityToOrg, findEntityMatches } from "@/utils/orgEntity";
 import { assertNoSupabaseError } from "@/lib/assertNoSupabaseError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
+import { setEntityOwner, bulkSetEntityOwner, describeSkipped, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
 import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -4537,16 +4538,25 @@ export default function AnewLeads() {
 
   // Assign lead to user
   const handleAssignLead = async (leadId: string, userId: string | null) => {
-    const { error } = await supabase
-      .from("anew_leads")
-      .update({ assigned_to: userId })
-      .eq("id", leadId);
+    // O dono e as visitas futuras da lead nunca divergem: a RPC muda o dono e a
+    // base troca o recurso das visitas futuras; recusa se o novo dono não tem
+    // recurso de agenda (ou se a lead ficaria sem dono com visita marcada).
+    let ownerResult: Awaited<ReturnType<typeof setEntityOwner>>;
+    try {
+      ownerResult = await setEntityOwner("lead", leadId, userId);
+    } catch (error) {
+      const description = await getFriendlyErrorMessage(error);
+      toast({ title: t('common.error'), description, variant: "destructive" });
+      return;
+    }
 
-    if (error) {
-      toast({ title: t('common.error'), description: error.message, variant: "destructive" });
-    } else {
-      toast({ title: userId ? t('leads.toast.assigned') : t('leads.toast.unassigned') });
-      refreshSingleLead(leadId);
+    toast({ title: userId ? t('leads.toast.assigned') : t('leads.toast.unassigned') });
+    refreshSingleLead(leadId);
+
+    if (ownerResult.affectedVisitIds.length > 0) {
+      void notifyOwnerChangeVisits(activeCompanyId, ownerResult.affectedVisitIds).then((notified) => {
+        if (notified > 0) toast({ title: t('scheduling.notify.clientNotified') });
+      });
     }
   };
 
@@ -4755,24 +4765,35 @@ export default function AnewLeads() {
 
     setIsBulkUpdating(true);
     const auditUserId = scopeAnewUserId || scopeAuthUserId || "";
-    const updateData = userId === "clear"
-      ? { assigned_to: null }
-      : { assigned_to: userId };
+    const newOwnerId = userId === "clear" ? null : userId;
 
     try {
-      const { error } = await withAuditContext(supabase, auditUserId, async () =>
-        await supabase.from("anew_leads").update(updateData).in("id", selectedLeadIds)
+      // Uma só RPC: as leads com visita futura cujo novo dono não tem recurso de
+      // agenda NÃO falham o lote — ficam de fora e voltam em `skipped`. Em massa
+      // não se enviam emails aos clientes.
+      const result = await withAuditContext(supabase, auditUserId, () =>
+        bulkSetEntityOwner("lead", selectedLeadIds, newOwnerId),
       );
 
-      if (error) {
-        const description = await getFriendlyErrorMessage(error);
-        toast({ title: t('leads.toast.assigneeUpdateError'), description, variant: "destructive" });
-      } else {
-        toast({ title: t('leads.toast.bulkAssigneeUpdatedCount', { count: selectedLeadIds.length }) });
-        setSelectedLeadIds([]);
-        loadLeads();
-        loadStatusCounts();
+      if (result.updatedIds.length > 0) {
+        toast({ title: t('leads.toast.bulkAssigneeUpdatedCount', { count: result.updatedIds.length }) });
       }
+      if (result.updatedIds.length === 0 && result.skipped.length === 0) {
+        toast({ title: t('leads.toast.assigneeUpdateError'), variant: "destructive" });
+      }
+      if (result.skipped.length > 0) {
+        toast({
+          title: t('leads.toast.assigneeUpdateError'),
+          description: t('leads.toast.bulkAssigneeSkipped', {
+            count: result.skipped.length,
+            names: describeSkipped(result.skipped),
+          }),
+          variant: "destructive",
+        });
+      }
+      setSelectedLeadIds([]);
+      loadLeads();
+      loadStatusCounts();
     } catch (error: unknown) {
       const description = await getFriendlyErrorMessage(error);
       toast({ title: t('leads.toast.assigneeUpdateError'), description, variant: "destructive" });

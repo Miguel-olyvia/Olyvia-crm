@@ -16,13 +16,28 @@ export interface FormEmailConfig {
   meeting_notify_template_id: string | null;
   // Independent toggles for the other two lifecycle events -- each event
   // notifies only the technician/extras it is switched on for.
+  reschedule_notify_client: boolean | null;
   reschedule_notify_commercial: boolean;
   reschedule_notify_emails: string | null;
+  cancel_notify_client: boolean | null;
   cancel_notify_commercial: boolean;
   cancel_notify_emails: string | null;
   reminder_enabled: boolean;
   reminder_hours_before: number | null;
   reminder_template_id: string | null;
+  // Lembrete PROPRIO do comercial. null = segue o valor do cliente
+  // (reminder_enabled / reminder_hours_before); valor explicito manda.
+  // Migration 20261204810000 (ver reminderRule.ts).
+  reminder_technician_enabled: boolean | null;
+  reminder_technician_hours_before: number | null;
+  // Modelo proprio por destinatario (cliente / comercial). null = texto por
+  // omissao do PROPRIO lado, nunca o modelo do outro (ver audienceTemplates.ts).
+  // Migration 20261204700000.
+  reminder_technician_template_id: string | null;
+  reschedule_client_template_id: string | null;
+  reschedule_technician_template_id: string | null;
+  cancel_client_template_id: string | null;
+  cancel_technician_template_id: string | null;
   // SMS ao lado do email correspondente -- mesma hora de reminder_hours_before,
   // desligados por omissao tal como os interruptores de email ja o sao.
   confirmation_sms_enabled: boolean;
@@ -55,7 +70,15 @@ export interface FormEmailConfig {
   logo_url: string | null;
 }
 
-export type EmailPurpose = "confirmation" | "meeting_notify" | "reminder";
+export type EmailPurpose =
+  | "confirmation"
+  | "meeting_notify"
+  | "reminder"
+  | "reminder_technician"
+  | "reschedule_client"
+  | "reschedule_technician"
+  | "cancel_client"
+  | "cancel_technician";
 
 /** Normalize a locale to its short form ("pt-PT" -> "pt"). */
 export function shortLocale(locale?: string | null): string | null {
@@ -180,6 +203,19 @@ export function uniqueEmails(emails: (string | null | undefined)[]): string[] {
   return [...seen];
 }
 
+// O aviso ao CLIENTE ao reagendar/cancelar pelo link tem interruptor proprio.
+// Ausente (sem config, coluna null ou ainda por ler) conta como ligado, para
+// nenhum formulario existente mudar de comportamento.
+export type ClientNoticeEvent = 'reschedule' | 'cancel';
+
+export function shouldNotifyClient(
+  cfg: Pick<FormEmailConfig, 'reschedule_notify_client' | 'cancel_notify_client'> | null | undefined,
+  event: ClientNoticeEvent,
+): boolean {
+  const col = event === 'reschedule' ? 'reschedule_notify_client' : 'cancel_notify_client';
+  return cfg?.[col] !== false;
+}
+
 export async function loadFormEmailConfig(
   supabase: any,
   formId: string | null | undefined,
@@ -188,7 +224,7 @@ export async function loadFormEmailConfig(
   const { data } = await supabase
     .from("form_branding")
     .select(
-      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reschedule_notify_commercial, reschedule_notify_emails, cancel_notify_commercial, cancel_notify_emails, reminder_enabled, reminder_hours_before, reminder_template_id, confirmation_sms_enabled, confirmation_sms_message, confirmation_sms_include_link, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours, primary_color, logo_url",
+      "confirmation_email_enabled, confirmation_email_template_id, meeting_notify_commercial, meeting_notify_emails, meeting_notify_template_id, reschedule_notify_client, reschedule_notify_commercial, reschedule_notify_emails, cancel_notify_client, cancel_notify_commercial, cancel_notify_emails, reminder_enabled, reminder_hours_before, reminder_technician_enabled, reminder_technician_hours_before, reminder_template_id, reminder_technician_template_id, reschedule_client_template_id, reschedule_technician_template_id, cancel_client_template_id, cancel_technician_template_id, confirmation_sms_enabled, confirmation_sms_message, confirmation_sms_include_link, reminder_sms_enabled, email_locale_templates, booking_manage_url_template, email_smtp_id, public_form_url_template, scheduling_invite_enabled, scheduling_invite_delays_hours, primary_color, logo_url",
     )
     .eq("form_id", formId)
     .maybeSingle();
@@ -267,10 +303,14 @@ export async function scheduleEmail(
     entityId?: string;
     templateId?: string | null;
     smtpId?: string | null;
+    // Lembrete de visita: liga a linha a visita para o processador a acertar
+    // quando a visita mudar (ver reminderReconcile.ts). Sem isto, a linha e um
+    // email avulso e segue o caminho de sempre.
+    link?: ReminderLink;
   },
-): Promise<void> {
+): Promise<{ ok: boolean; duplicate?: boolean }> {
   try {
-    await supabase.from("scheduled_emails").insert({
+    const { error } = await supabase.from("scheduled_emails").insert({
       template_id: row.templateId || null,
       entity_type: row.entityType || "leads",
       entity_id: row.entityId,
@@ -282,10 +322,42 @@ export async function scheduleEmail(
       scheduled_for: row.scheduledFor,
       status: "pending",
       smtp_id: row.smtpId || null,
+      ...(row.link ? linkColumns(row.link) : {}),
     });
+    if (error) {
+      // 23505 = indice unico por destinatario: ja ha um lembrete pendente igual.
+      if (error.code === "23505") return { ok: false, duplicate: true };
+      console.error("[formEmails] scheduleEmail failed:", error);
+      return { ok: false };
+    }
+    return { ok: true };
   } catch (err) {
     console.error("[formEmails] scheduleEmail failed:", err);
+    return { ok: false };
   }
+}
+
+/** Ligacao de um lembrete a uma visita (colunas de scheduled_emails / scheduled_sms). */
+export interface ReminderLink {
+  scheduleItemId: string;
+  audience: "client" | "technician";
+  formId: string | null;
+  locale: string | null;
+  /** ISO: hora da visita que o lembrete assume. */
+  visitStartSnapshot: string;
+  /** Variaveis do modelo, para montar o conteudo no envio. */
+  contentVars: Record<string, string>;
+}
+
+export function linkColumns(link: ReminderLink): Record<string, unknown> {
+  return {
+    schedule_item_id: link.scheduleItemId,
+    audience: link.audience,
+    form_id: link.formId,
+    locale: link.locale,
+    visit_start_snapshot: link.visitStartSnapshot,
+    content_vars: link.contentVars,
+  };
 }
 
 /**
@@ -352,6 +424,15 @@ export function defaultMeetingHtml(opts: {
   // sozinhos aqui, sem a empresa escrever HTML nenhum.
   primaryColor?: string | null;
   logoUrl?: string | null;
+  // Destinatario do texto. "client": sem a linha "Cliente" (o cliente sabe quem
+  // e). "technician": mostra a lead (nome, telefone, email), a morada e o botao
+  // "Abrir na agenda". Sem audience: o desenho antigo (avisos internos ainda nao
+  // separados).
+  audience?: "client" | "technician";
+  leadPhone?: string;
+  leadEmail?: string;
+  address?: string;
+  appointmentUrl?: string;
 }): string {
   const brand = safeHexColor(opts.primaryColor, "#85D3BE");
   // logoUrl e um URL guardado pelo proprio sistema (upload em Personalizacao),
@@ -365,9 +446,20 @@ export function defaultMeetingHtml(opts: {
         <td style="padding:10px 0 10px 16px;border-top:1px solid #EEF2F0;color:#111827;font-size:14px;font-weight:600;text-align:right">${escapeHtml(value)}</td>
       </tr>`;
   const rows: string[] = [];
-  rows.push(row("Cliente", opts.leadName || "-"));
+  if (opts.audience === "technician") {
+    rows.push(row("Lead", opts.leadName || "-"));
+    if (opts.leadPhone) rows.push(row("Telefone", opts.leadPhone));
+    if (opts.leadEmail) rows.push(row("Email", opts.leadEmail));
+  } else if (opts.audience !== "client") {
+    rows.push(row("Cliente", opts.leadName || "-"));
+  }
   rows.push(row("Data / hora", opts.when || "-"));
-  if (opts.location) rows.push(row("Local", opts.location));
+  if (opts.audience === "technician") {
+    const where = opts.address || opts.location;
+    if (where) rows.push(row("Morada", where));
+  } else if (opts.location) {
+    rows.push(row("Local", opts.location));
+  }
   if (opts.technicianName) rows.push(row("Técnico", opts.technicianName));
 
   // cancelUrl/confirmUrl are system-built URLs (buildManageUrl / confirm-booking token), not free user text — safe as href.
@@ -379,6 +471,12 @@ export function defaultMeetingHtml(opts: {
   const cancel = opts.cancelUrl
     ? `<p style="margin:${opts.confirmUrl ? "14px" : "24px"} 0 0;text-align:center"><a href="${encodeURI(opts.cancelUrl)}" style="color:#6b7280;font-size:13px;text-decoration:underline">Gerir ou cancelar agendamento</a></p>`
     : "";
+  // appointmentUrl e um URL construido pelo sistema (site + /scheduling), so para o comercial.
+  const agendaButton = opts.audience === "technician" && opts.appointmentUrl
+    ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px auto 0"><tr><td style="border-radius:10px;background:#111827">
+        <a href="${encodeURI(opts.appointmentUrl)}" style="display:inline-block;padding:13px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;font-family:Inter,system-ui,sans-serif">Abrir na agenda</a>
+      </td></tr></table>`
+    : "";
 
   return `
   <div style="font-family:Inter,system-ui,sans-serif;background:#F4F6F5;padding:32px 16px">
@@ -389,6 +487,7 @@ export function defaultMeetingHtml(opts: {
         <p style="margin:0 0 20px;color:#4b5563;font-size:14px;line-height:1.5">${escapeHtml(opts.intro)}</p>
         <table role="presentation" style="width:100%;border-collapse:collapse">${rows.join("")}</table>
         ${confirmButton}
+        ${agendaButton}
         ${cancel}
       </div>
     </div>

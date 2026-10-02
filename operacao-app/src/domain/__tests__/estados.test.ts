@@ -225,3 +225,28 @@ describe("estaAtrasada — é badge, não estado", () => {
     expect(estaAtrasada("agendada", null, agora)).toBe(false);
   });
 });
+
+describe("supervisor — valida o trabalho, não gere a fila", () => {
+  const supervisor: Contexto = { funcao: "supervisor", atribuido: false };
+
+  it("confirma uma ordem fechada, mesmo sem estar nela", () => {
+    expect(avaliar("fechada", "confirmar", supervisor)).toEqual({ ok: true, para: "confirmada" });
+  });
+
+  it("reabre uma ordem fechada (devolve o trabalho)", () => {
+    expect(avaliar("fechada", "reabrir", supervisor)).toEqual({ ok: true, para: "em_curso" });
+  });
+
+  it("não aprova nem rejeita — isso é de quem gere a fila", () => {
+    expect(avaliar("por_aprovar", "aprovar", supervisor).ok).toBe(false);
+    expect(avaliar("por_aprovar", "rejeitar", { ...supervisor, motivo: "x" }).ok).toBe(false);
+  });
+
+  it("cancela com motivo, como o operador", () => {
+    expect(avaliar("agendada", "cancelar", { ...supervisor, motivo: "duplicada" }).ok).toBe(true);
+  });
+
+  it("o técnico continua sem confirmar", () => {
+    expect(avaliar("fechada", "confirmar", tecnico(true)).ok).toBe(false);
+  });
+});

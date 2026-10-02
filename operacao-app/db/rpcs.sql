@@ -97,8 +97,24 @@ $$;
 -- ============================================================
 -- Espelha `src/domain/estados.ts`. As duas cópias existem de propósito: a do
 -- browser desenha os botões certos e responde de imediato; esta é a que manda.
--- Se divergirem, é esta que vale — e os testes em `supabase/tests` comparam-nas.
+-- Se divergirem, é esta que vale — e `tools/validar-estados.mjs` compara-as,
+-- combinação a combinação.
+--
+-- ⚠ Esta é a PRIMEIRA versão. A que vale hoje vive em db/tempos.sql (com o
+-- supervisor e os relógios por pessoa). Para que voltar a correr este
+-- ficheiro não a faça regredir, só é criada aqui se tempos.sql ainda não
+-- correu (coluna ops_sessao_trabalho.motivo_fim).
 
+DO $transitar$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'ops_sessao_trabalho'
+                AND column_name = 'motivo_fim') THEN
+    RAISE NOTICE 'rpc_ops_transitar_ordem: já existe a versão de tempos.sql — não se mexe.';
+    RETURN;
+  END IF;
+
+  EXECUTE $def$
 CREATE OR REPLACE FUNCTION public.rpc_ops_transitar_ordem(
   p_ordem_id        uuid,
   p_transicao       text,
@@ -159,7 +175,9 @@ BEGIN
   END IF;
 
   v_de := v_o.estado;
-  v_atribuido := (v_o.responsavel_id = v_user)
+  -- COALESCE: numa ordem sem responsável, `NULL = x` dá NULL, e `NOT NULL`
+  -- não recusa nada — um técnico de fora passava (auditoria 01/10/2026).
+  v_atribuido := COALESCE(v_o.responsavel_id = v_user, false)
     OR EXISTS (SELECT 1 FROM public.ops_ordem_pessoa
                 WHERE ordem_id = p_ordem_id AND utilizador_id = v_user);
 
@@ -292,6 +310,9 @@ BEGIN
   );
 END
 $$;
+  $def$;
+END
+$transitar$;
 
 
 -- ============================================================
@@ -332,7 +353,9 @@ CREATE TRIGGER ops_ordem_guarda_estado
 -- ============================================================
 
 REVOKE ALL ON FUNCTION public.rpc_ops_transitar_ordem(uuid, text, text, timestamptz) FROM PUBLIC, anon;
-REVOKE ALL ON FUNCTION public.ops_recalcular_custo_mao_obra(uuid)                     FROM PUBLIC, anon;
+-- Interna: só a transição a chama. `authenticated` fica de fora de forma
+-- explícita — no Supabase as funções novas nascem com EXECUTE para ele.
+REVOKE ALL ON FUNCTION public.ops_recalcular_custo_mao_obra(uuid)                     FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.rpc_ops_transitar_ordem(uuid, text, text, timestamptz) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.ops_recalcular_custo_mao_obra(uuid)                    TO service_role;
 
