@@ -235,6 +235,17 @@ vi.mock("../../lib/obras", () => ({
   ]),
   listarContratos: vi.fn(async () => ({ contratos: [], indisponivel: false })),
   orcamentosComObra: vi.fn(async () => new Set<string>()),
+  moradaSugerida: vi.fn(async () => "Rua do Cliente 7, Lisboa"),
+  previsaoDoOrcamento: vi.fn(async () => ({
+    orcamento_id: "q2",
+    minutos: 840,
+    sem_ficha: 1,
+    tarefas: [
+      { fase: 1, nome: "Remoção de azulejo", minutos: 600, sem_ficha: false, materiais: null },
+      { fase: 2, nome: "Base de duche", minutos: 180, sem_ficha: false, materiais: "Cimento cola × 2" },
+      { fase: 3, nome: "Pintura de tetos", minutos: 60, sem_ficha: true, materiais: null },
+    ],
+  })),
   iniciarTarefa: vi.fn(),
   terminarTarefa: vi.fn(async () => ({ ok: true })),
   validarTarefa: vi.fn(async () => ({ ok: true })),
@@ -245,6 +256,29 @@ vi.mock("../../lib/obras", () => ({
   atualizarObra: vi.fn(),
   mudarEstadoObra: vi.fn(),
   replanearObra: vi.fn(),
+  distribuirEquipa: vi.fn(async () => ({ ok: true, tarefas: 3 })),
+  listarServicosComModelo: vi.fn(async () => [
+    {
+      servico_id: "s1",
+      nome: "Base de duche",
+      sku: "SRV-1",
+      categoria: "Canalização",
+      horas: 3,
+      pessoas: 1,
+      descricao_mao_obra: null,
+      editado: false,
+      tarefas: [
+        { nome: "Abrir roços", fase: 2, minutos_por_unidade: 45, minutos_fixos: 0, pessoas: 1, skill_id: "k1", depende_ordem: null, procedimento: null, materiais: null, ferramentas: null },
+        { nome: "Instalar", fase: 2, minutos_por_unidade: 90, minutos_fixos: 30, pessoas: 1, skill_id: "k1", depende_ordem: 1, procedimento: null, materiais: null, ferramentas: null },
+      ],
+    },
+    { servico_id: "s2", nome: "Pintura de tetos", sku: null, categoria: "Pinturas", horas: null, pessoas: null, descricao_mao_obra: null, editado: false, tarefas: [] },
+  ]),
+  listarSkills: vi.fn(async () => [{ id: "k1", nome: "Canalização" }]),
+  sugerirModelos: vi.fn(async () => ({ ok: true, servicos: 1, tarefas: 5 })),
+  gravarModeloServico: vi.fn(async () => ({ ok: true, tarefas: 2 })),
+  criarSkill: vi.fn(),
+  tornarTipoPorDefeito: vi.fn(async () => ({ ok: true })),
   renomearFase: vi.fn(),
   gravarTarefa: vi.fn(),
   apagarTarefa: vi.fn(),
@@ -282,6 +316,17 @@ describe("páginas de Obras (fumo)", () => {
     expect(await screen.findByText("Remodelação WC")).toBeInTheDocument();
     fireEvent.click(screen.getByText("Nova obra"));
     expect(await screen.findByText(/ORC-9 · WC suite/)).toBeInTheDocument();
+  });
+
+  it("Nova obra: escolher o orçamento mostra as tarefas que os serviços vão gerar", async () => {
+    em("/obras", <Obras />);
+    fireEvent.click(await screen.findByText("Nova obra"));
+    fireEvent.click(await screen.findByText(/ORC-9 · WC suite/));
+    expect(await screen.findByText("Remoção de azulejo")).toBeInTheDocument();
+    expect(screen.getByText(/3 tarefas/)).toBeInTheDocument();
+    expect(screen.getByText(/1 serviço sem modelo nem horas na ficha técnica/)).toBeInTheDocument();
+    expect(screen.getByText("(sem ficha)")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("Rua do Cliente 7, Lisboa")).toBeInTheDocument();
   });
 
   it("Obras: o técnico não vê Nova obra nem Validar", async () => {
@@ -356,6 +401,23 @@ describe("páginas de Obras (fumo)", () => {
     em("/obras/metricas", <ObraMetricas />);
     expect(await screen.findByText("Por tarefa — o default está certo?")).toBeInTheDocument();
     em("/obras/modelos", <ObraModelos />);
+    fireEvent.click(await screen.findByText("Tipos de obra"));
     expect(await screen.findByText("Remodelação casa de banho")).toBeInTheDocument();
+  });
+
+  it("Modelos → Serviços: lista com o estado do modelo, e o editor com os passos", async () => {
+    em("/obras/modelos", <ObraModelos />);
+    expect(await screen.findByText("Base de duche")).toBeInTheDocument();
+    expect(screen.getByText("sem modelo")).toBeInTheDocument();
+    expect(screen.getByText(/2 passos/)).toBeInTheDocument();
+    expect(screen.getByText(/Gerar sugestões para 1 sem modelo/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Base de duche"));
+    expect(await screen.findByDisplayValue("Abrir roços")).toBeInTheDocument();
+    expect(screen.getByText(/de trabalho \(pessoa × tempo\)/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Gravar modelo"));
+    await waitFor(() => expect(obras.gravarModeloServico).toHaveBeenCalled());
+    const [, servico, tarefas] = vi.mocked(obras.gravarModeloServico).mock.calls[0];
+    expect(servico).toBe("s1");
+    expect(tarefas[1]).toMatchObject({ nome: "Instalar", depende_ordem: 1, minutos_fixos: 30, skill_id: "k1" });
   });
 });

@@ -258,6 +258,47 @@ await db.exec(`
                                   custo_material_unit, custo_mao_obra_unit) VALUES
     ('${ORC_A}',0,'Mão de obra remodelação',40,0,20),
     ('${ORC_A}',1,'Louças',1,600,0);
+  -- Serviços com ficha técnica (só as colunas que obras.sql lê). Ficam aqui,
+  -- como os contratos: validar-instalacao prova que obras.sql instala sem elas.
+  ALTER TABLE public.quote_lines ADD COLUMN service_id uuid, ADD COLUMN section_name text;
+  CREATE TABLE public.service_categories (id uuid PRIMARY KEY, name text NOT NULL);
+  CREATE TABLE public.services (
+    id uuid PRIMARY KEY, name text NOT NULL, service_category_id uuid,
+    technical_sheet_labor_description text, technical_sheet_labor_hours numeric,
+    technical_sheet_labor_people_count numeric,
+    organization_id uuid, sku text, is_deleted boolean NOT NULL DEFAULT false, deleted_at timestamptz);
+  CREATE TABLE public.service_organizations (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), service_id uuid NOT NULL, organization_id uuid NOT NULL);
+  ALTER TABLE public.products ADD COLUMN name text;
+  CREATE TABLE public.service_materials (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(), service_id uuid NOT NULL, product_id uuid NOT NULL,
+    quantity numeric NOT NULL, sort_order integer, deleted_at timestamptz);
+  INSERT INTO public.service_categories VALUES
+    ('5c000000-0000-0000-0000-000000000001','Demolições'),
+    ('5c000000-0000-0000-0000-000000000002','Canalização'),
+    ('5c000000-0000-0000-0000-000000000003','Pinturas');
+  INSERT INTO public.services VALUES
+    ('5e000000-0000-0000-0000-000000000001','Remoção de azulejo','5c000000-0000-0000-0000-000000000001','Picar e retirar entulho',0.5,2),
+    ('5e000000-0000-0000-0000-000000000002','Base de duche','5c000000-0000-0000-0000-000000000002','Assentar e ligar ao esgoto',3,1),
+    ('5e000000-0000-0000-0000-000000000003','Pintura de tetos','5c000000-0000-0000-0000-000000000003',NULL,NULL,NULL);
+  INSERT INTO public.products (id, name) VALUES ('5f000000-0000-0000-0000-000000000001','Cimento cola'),
+                                     ('5f000000-0000-0000-0000-000000000002','Silicone');
+  INSERT INTO public.service_materials (service_id, product_id, quantity, sort_order, deleted_at) VALUES
+    ('5e000000-0000-0000-0000-000000000002','5f000000-0000-0000-0000-000000000001',2,1,NULL),
+    ('5e000000-0000-0000-0000-000000000002','5f000000-0000-0000-0000-000000000002',1,2,now());
+  -- Moradas do cliente A: uma antiga (já não vale) e a principal.
+  INSERT INTO public.anew_addresses (id, street, number, floor, postal_code, city) VALUES
+    ('ad000000-0000-0000-0000-000000000001','Rua Velha','1',NULL,'1000-001','Lisboa'),
+    ('ad000000-0000-0000-0000-000000000002','Rua do Cliente','7','2.º Esq','1100-200','Lisboa');
+  INSERT INTO public.anew_entity_addresses (entity_id, address_id, address_type, is_primary, valid_to) VALUES
+    ('77777777-7777-7777-7777-777777777777','ad000000-0000-0000-0000-000000000001','fiscal',true, now() - interval '1 day'),
+    ('77777777-7777-7777-7777-777777777777','ad000000-0000-0000-0000-000000000002','fiscal',true, NULL);
+  -- O orçamento do contrato: 3 serviços (um sem ficha) e um produto.
+  INSERT INTO public.quote_lines (quote_id, ordem, descricao_snapshot, qt, service_id) VALUES
+    ('${ORC_CONTRATO}',0,'Remoção de azulejo',10,'5e000000-0000-0000-0000-000000000001'),
+    ('${ORC_CONTRATO}',1,'Base de duche 80x80',1,'5e000000-0000-0000-0000-000000000002'),
+    ('${ORC_CONTRATO}',2,'Pintura tetos',20,'5e000000-0000-0000-0000-000000000003'),
+    ('${ORC_CONTRATO}',3,'Louças',1,NULL);
   INSERT INTO public.client_contracts (id, contract_number, client_id, status, organization_id,
                                        quote_id, signature_date, created_by) VALUES
     ('${CTR_ASSINADO}','CT-A-001','${CLI_A}','signed','${ORG_A}','${ORC_CONTRATO}',now(),'${U.gestorA}'),
@@ -450,8 +491,10 @@ const OB1 = await devePassar(
                               OR extract(isodow FROM fim_planeado) > 5)::int AS fds,
            sum(minutos_previstos)::int AS minutos
       FROM public.ops_obra_tarefa WHERE obra_id='${OB1.id}'`);
-  d.ini === "2026-10-05" && d.fim === "2026-10-13"
-    ? ok(`${d.minutos} min a 480/dia = 7 dias úteis: 05/10 → 13/10, saltando o fim de semana`)
+  // Em paralelo, com 2 técnicos/operadores na organização (2 vagas): em série
+  // seriam 7 dias úteis (05/10 → 13/10); assim acaba a 08/10.
+  d.ini === "2026-10-05" && d.fim === "2026-10-08"
+    ? ok(`${d.minutos} min com 2 pessoas em paralelo: 05/10 → 08/10 (em série seriam 7 dias úteis)`)
     : mau(`planeamento ${d.ini} → ${d.fim} (${d.minutos} min)`);
   d.fds === 0 ? ok("nenhuma tarefa cai a um sábado ou domingo") : mau(`${d.fds} tarefa(s) ao fim de semana`);
 
@@ -485,6 +528,28 @@ await deveSerRecusado(
   criar(`p_org => '${ORG_A}', p_contrato_id => '${CTR_B}'`),
   "não encontrado"
 );
+{
+  const p = await devePassar(
+    "pré-visualizar as tarefas que o contrato vai gerar",
+    AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_previsao_orcamento('${ORG_A}', NULL, '${CTR_ASSINADO}');`
+  );
+  p?.tarefas?.length === 3 && p.minutos === 600 + 180 + 60 && p.sem_ficha === 1
+    ? ok("3 serviços → 3 tarefas, 840 min, 1 sem ficha técnica (o produto fica de fora)")
+    : mau(`pré-visualização: ${JSON.stringify(p)}`);
+}
+await deveSerRecusado(
+  "o técnico não pré-visualiza",
+  AUTH.tecA,
+  `SELECT public.rpc_ops_obra_previsao_orcamento('${ORG_A}', NULL, '${CTR_ASSINADO}');`,
+  "Só quem planeia"
+);
+await deveSerRecusado(
+  "o gestor da B não pré-visualiza um contrato da A pela B",
+  AUTH.gestorB,
+  `SELECT public.rpc_ops_obra_previsao_orcamento('${ORG_B}', NULL, '${CTR_ASSINADO}');`,
+  "não encontrado"
+);
 const OB2 = await devePassar(
   "do contrato assinado, sem modelo",
   AUTH.gestorA,
@@ -503,8 +568,26 @@ const OB2 = await devePassar(
     ? ok("começar a um sábado (10/10) passa para segunda (12/10)")
     : mau(`início ${o.ini}`);
   o.fases === "Preparação e demolições | Instalações técnicas | Acabamentos | Limpeza e entrega"
-    ? ok("em branco, nascem as 4 fases por defeito")
+    ? ok("sem modelo, nascem as 4 fases por defeito")
     : mau(`fases: ${o.fases}`);
+  const t = await q(`
+    SELECT f.ordem AS fase, t.nome, t.minutos_previstos AS min, t.procedimento, t.materiais,
+           t.servico_id IS NOT NULL AS tem_servico, t.orcamento_linha_id IS NOT NULL AS tem_linha,
+           t.inicio_planeado::text AS ini, t.fim_planeado::text AS fim
+      FROM public.ops_obra_tarefa t JOIN public.ops_obra_fase f ON f.id = t.fase_id
+     WHERE t.obra_id='${OB2.id}' ORDER BY f.ordem, t.ordem`);
+  JSON.stringify(t.map((x) => [x.fase, x.nome, x.min])) ===
+  JSON.stringify([[1, "Remoção de azulejo", 600], [2, "Base de duche", 180], [3, "Pintura de tetos", 60]])
+    ? ok("tarefas dos serviços do contrato: fase pela categoria, minutos = qt × horas × pessoas")
+    : mau(`tarefas do contrato: ${JSON.stringify(t)}`);
+  t[0]?.procedimento === "Picar e retirar entulho" && t[1]?.materiais === "Cimento cola × 2"
+    ? ok("procedimento e materiais (sem os apagados) vêm da ficha técnica")
+    : mau(`ficha: ${JSON.stringify(t.slice(0, 2))}`);
+  t.every((x) => x.tem_servico && x.tem_linha) ? ok("cada tarefa guarda a linha e o serviço de onde veio") : mau("sem rasto da linha");
+  // 600 min com 2 pessoas = 300 no calendário; +180 = 480 (1 dia); a 3.ª passa para o dia seguinte.
+  t[0]?.ini === "2026-10-12" && t[0]?.fim === "2026-10-12" && t[1]?.fim === "2026-10-12" && t[2]?.ini === "2026-10-13"
+    ? ok("planeadas em sequência; a duração no calendário divide pelas pessoas da ficha")
+    : mau(`datas: ${JSON.stringify(t.map((x) => [x.ini, x.fim]))}`);
   const c = await linhas(AUTH.gestorA,
     `SELECT tem_obra FROM public.ops_v_contrato WHERE id='${CTR_ASSINADO}';`);
   c.at(-1)?.tem_obra === true ? ok("ops_v_contrato já diz que tem obra") : mau("ops_v_contrato não marcou tem_obra");
@@ -521,11 +604,255 @@ const OB3 = await devePassar(
   criar(`p_org => '${ORG_A}', p_titulo => 'Pintura escritório', p_cliente_id => '${CLI_A}',
          p_data_inicio => '2026-10-05'`)
 );
+{
+  const m = await um(`SELECT morada FROM public.ops_obra WHERE id='${OB3?.id}'`);
+  m?.morada === "Rua do Cliente 7, 2.º Esq, 1100-200 Lisboa"
+    ? ok("sem morada no orçamento, a obra fica com a morada atual do cliente")
+    : mau(`morada do cliente: ${m?.morada}`);
+  const sc = await chamar(AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_morada_sugerida('${ORG_A}', NULL, NULL, '${CTR_ASSINADO}');`);
+  const sl = await chamar(AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_morada_sugerida('${ORG_A}', '${CLI_A}');`);
+  sc === "Av. Roma 3, Lisboa" && sl === "Rua do Cliente 7, 2.º Esq, 1100-200 Lisboa"
+    ? ok("o formulário recebe a morada sugerida (do contrato, ou do cliente)")
+    : mau(`morada sugerida: ${sc} | ${sl}`);
+  const sb = await chamar(AUTH.gestorB,
+    `SELECT public.rpc_ops_obra_morada_sugerida('${ORG_B}', '${CLI_A}');`);
+  sb === null ? ok("o gestor da B não lê a morada de um cliente da A") : mau(`fuga de morada: ${sb}`);
+}
 const OBB = await devePassar(
   "o gestor da B abre uma obra na B",
   AUTH.gestorB,
   criar(`p_org => '${ORG_B}', p_titulo => 'Obra B', p_cliente_id => '${CLI_B}'`)
 );
+
+/* ── Planeamento automático: supervisor e equipa ────────────────────────── */
+console.log("\n─── planeamento automático ──────────────");
+{
+  const sup = await um(`SELECT supervisor_id FROM public.ops_obra WHERE id='${OB2?.id}'`);
+  sup?.supervisor_id === U.supA
+    ? ok("sem supervisor escolhido, fica o supervisor da organização")
+    : mau(`supervisor automático: ${sup?.supervisor_id}`);
+
+  const eq = await q(`
+    SELECT t.nome, t.pessoas_previstas AS n,
+           array_agg(tp.utilizador_id::text ORDER BY tp.utilizador_id) AS quem
+      FROM public.ops_obra_tarefa t
+      LEFT JOIN public.ops_obra_tarefa_pessoa tp ON tp.tarefa_id = t.id
+     WHERE t.obra_id='${OB2?.id}' GROUP BY t.id, t.nome, t.pessoas_previstas, t.ordem ORDER BY t.ordem`);
+  const tecnicos = new Set([U.tecA, U.tec2A]);
+  eq.length === 3 && eq.every((x) => x.quem.filter(Boolean).length === x.n)
+    ? ok("ao criar, cada tarefa já tem as pessoas que a ficha pede (2 na remoção, 1 nas outras)")
+    : mau(`equipa automática: ${JSON.stringify(eq)}`);
+  eq.every((x) => x.quem.every((u) => tecnicos.has(u)))
+    ? ok("só técnicos e operadores — o gestor e o supervisor não entram na equipa")
+    : mau(`entrou quem não devia: ${JSON.stringify(eq)}`);
+
+  // Do zero, para ver as preferências sem o ruído das outras obras.
+  await db.exec(`DELETE FROM public.ops_obra_tarefa_pessoa;
+                 UPDATE public.ops_utilizador_perfil SET zona_base = 'Roma' WHERE utilizador_id = '${U.tec2A}';`);
+  await deveSerRecusado(
+    "o técnico não distribui a equipa",
+    AUTH.tecA,
+    `SELECT public.rpc_ops_obra_distribuir('${OB2?.id}', true);`,
+    "Só quem planeia"
+  );
+  const d = await devePassar(
+    "a gestora carrega em 'Distribuir equipa'",
+    AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_distribuir('${OB2?.id}', true);`
+  );
+  const z = await q(`
+    SELECT t.ordem, array_agg(tp.utilizador_id::text) AS quem
+      FROM public.ops_obra_tarefa t JOIN public.ops_obra_tarefa_pessoa tp ON tp.tarefa_id = t.id
+     WHERE t.obra_id='${OB2?.id}' GROUP BY t.ordem ORDER BY t.ordem`);
+  d?.tarefas === 3 && z[1]?.quem.join() === U.tec2A && z[2]?.quem.join() === U.tec2A
+    ? ok("quem tem a zona na morada da obra (Av. Roma) fica com as tarefas de 1 pessoa")
+    : mau(`zona: ${JSON.stringify({ d, z })}`);
+
+  // Choque: o tec2A passa a estar noutra obra nesses dias → vai o tecA.
+  await db.exec(`
+    INSERT INTO public.ops_obra_tarefa_pessoa (tarefa_id, utilizador_id, organization_id, obra_id)
+    SELECT t.id, '${U.tec2A}', t.organization_id, t.obra_id FROM public.ops_obra_tarefa t
+     WHERE t.obra_id = '${OB1?.id}' ORDER BY t.ordem LIMIT 1;
+    UPDATE public.ops_obra_tarefa SET inicio_planeado = '2026-10-12', fim_planeado = '2026-10-13'
+     WHERE obra_id = '${OB1?.id}' AND id IN (SELECT tarefa_id FROM public.ops_obra_tarefa_pessoa WHERE utilizador_id='${U.tec2A}');`);
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_distribuir('${OB2?.id}', true);`);
+  const ch = await q(`
+    SELECT t.ordem, array_agg(tp.utilizador_id::text) AS quem
+      FROM public.ops_obra_tarefa t JOIN public.ops_obra_tarefa_pessoa tp ON tp.tarefa_id = t.id
+     WHERE t.obra_id='${OB2?.id}' AND t.pessoas_previstas = 1 GROUP BY t.ordem ORDER BY t.ordem`);
+  ch.length === 2 && ch.every((x) => x.quem.join() === U.tecA)
+    ? ok("quem já está noutra obra nesses dias fica de fora, mesmo sendo da zona")
+    : mau(`choque: ${JSON.stringify(ch)}`);
+
+  // Os testes seguintes atribuem à mão: começam sem ninguém, como antes.
+  await db.exec(`DELETE FROM public.ops_obra_tarefa_pessoa;
+                 UPDATE public.ops_utilizador_perfil SET zona_base = NULL;
+                 SELECT public.ops_obra_replanear_impl('${OB1?.id}', '2026-10-05');`);
+}
+
+/* ── Modelos por serviço ────────────────────────────────────────────────── */
+console.log("\n─── modelos por serviço ─────────────────");
+{
+  const COM = "a0000000-0000-0000-0000-00000000000e";
+  const AUTH_COM = "e0000000-0000-0000-0000-00000000000e";
+  const S_REM = "5e000000-0000-0000-0000-000000000001";
+  const S_DUCHE = "5e000000-0000-0000-0000-000000000002";
+  const S_PINT = "5e000000-0000-0000-0000-000000000003";
+  const S_B = "5e000000-0000-0000-0000-000000000009";
+  const S_PARTILHADO = "5e000000-0000-0000-0000-00000000000a";
+  await db.exec(`
+    UPDATE public.services SET organization_id = '${ORG_A}';
+    INSERT INTO public.services (id, name, technical_sheet_labor_hours, technical_sheet_labor_people_count, organization_id) VALUES
+      ('${S_B}','Serviço da B',1,1,'${ORG_B}'),
+      ('${S_PARTILHADO}','Limpeza pós-obra',2,2,'${ORG_B}');
+    INSERT INTO public.service_organizations (service_id, organization_id) VALUES ('${S_PARTILHADO}','${ORG_A}');
+    INSERT INTO public.anew_users (id, auth_user_id, name, email) VALUES ('${COM}','${AUTH_COM}','Comercial A','ca@x.pt');
+    INSERT INTO public.auth_to_business_user_map (auth_user_id, business_user_id) VALUES ('${AUTH_COM}','${COM}');
+    INSERT INTO public.anew_roles (id, organization_id, name) VALUES ('d0000000-0000-0000-0000-00000000000d','${ORG_A}','Comercial A');
+    INSERT INTO public.anew_role_permissions (role_id, permission_code) VALUES ('d0000000-0000-0000-0000-00000000000d','services.edit');
+    INSERT INTO public.anew_memberships (user_id, organization_id, role_id, status)
+      VALUES ('${COM}','${ORG_A}','d0000000-0000-0000-0000-00000000000d','active');
+  `);
+
+  await deveSerRecusado("o técnico não gera modelos", AUTH.tecA,
+    `SELECT public.rpc_ops_servico_modelo_sugerir('${ORG_A}');`, "Sem permissão");
+  const g = await devePassar("o comercial (services.edit, sem perfil em Operações) gera os modelos que faltam",
+    AUTH_COM, `SELECT public.rpc_ops_servico_modelo_sugerir('${ORG_A}');`);
+  g?.servicos === 4 && g?.tarefas === 3 + 5 + 5 + 1
+    ? ok("4 serviços (3 da A + 1 partilhado com a A) → 14 tarefas pela biblioteca")
+    : mau(`sugestão: ${JSON.stringify(g)}`);
+
+  const m = async (servico) => q(`
+    SELECT x.ordem, x.nome, x.fase, x.minutos_por_unidade::float AS mpu, x.minutos_fixos AS fix, x.pessoas,
+           x.depende_ordem AS dep, k.nome AS skill, x.procedimento, x.materiais, x.origem
+      FROM public.ops_obra_servico_tarefa x LEFT JOIN public.ops_skill k ON k.id = x.skill_id
+     WHERE x.organization_id='${ORG_A}' AND x.servico_id='${servico}' ORDER BY x.ordem`);
+  const rem = await m(S_REM);
+  rem.map((x) => x.nome).join(" | ") === "Proteger zona e acessos | Demolir e remover | Retirar entulho" &&
+  rem[1].mpu === 48 && rem[1].pessoas === 2 && rem[1].dep === 1 && rem[0].fix === 45 && rem[1].skill === "Demolições"
+    ? ok("demolição: 0,5 h × 2 pessoas da ficha = 60 min/un, 80 % em 'Demolir e remover' (48), 2 pessoas, skill Demolições")
+    : mau(`modelo da remoção: ${JSON.stringify(rem)}`);
+  const duche = await m(S_DUCHE);
+  duche.length === 5 && duche[2].mpu === 90 && duche[2].pessoas === 1 &&
+  duche[2].materiais === "Cimento cola × 2 /un" && duche[2].procedimento === "Assentar e ligar ao esgoto" &&
+  duche.every((x) => x.fase === 2 && x.origem === "sugerida")
+    ? ok("canalização: 5 passos na fase 2; o principal leva o procedimento e os materiais da ficha")
+    : mau(`modelo do duche: ${JSON.stringify(duche)}`);
+  const pint = await m(S_PINT);
+  pint.length === 5 && Math.abs(pint.reduce((a, x) => a + x.mpu, 0) - 15) < 0.01
+    ? ok("pintura sem horas na ficha: 15 min/un da biblioteca, repartidos por 5 passos")
+    : mau(`modelo da pintura: ${JSON.stringify(pint)}`);
+  const tipo = await um(`SELECT nome, por_defeito FROM public.ops_obra_modelo WHERE organization_id='${ORG_A}' AND por_defeito`);
+  tipo?.nome === "Obra geral" ? ok("e fica criado o tipo 'Obra geral', por defeito") : mau(`tipo por defeito: ${JSON.stringify(tipo)}`);
+
+  await deveSerRecusado("o gestor da B não mexe num serviço da A pela B", AUTH.gestorB,
+    `SELECT public.rpc_ops_servico_modelo_sugerir('${ORG_B}', '${S_REM}', true);`, "não encontrado");
+  await deveSerRecusado("sem confirmar, não se substitui um modelo que já existe", AUTH.gestorA,
+    `SELECT public.rpc_ops_servico_modelo_sugerir('${ORG_A}', '${S_REM}');`, "já tem modelo");
+
+  const grava = (tarefas, who = AUTH_COM) =>
+    `SELECT public.rpc_ops_servico_modelo_gravar('${ORG_A}', '${S_DUCHE}', '${JSON.stringify(tarefas)}'::jsonb);`;
+  await deveSerRecusado("depender de uma tarefa que não existe é recusado", AUTH_COM,
+    grava([{ nome: "Assentar base", fase: 2, minutos_por_unidade: 120, pessoas: 1, depende_ordem: 5 }]), "só pode depender");
+  await deveSerRecusado("uma tarefa sem tempo é recusada", AUTH_COM,
+    grava([{ nome: "Assentar base", fase: 2 }]), "precisa de tempo");
+  const SK_B = (await um(`INSERT INTO public.ops_skill (organization_id, nome) VALUES ('${ORG_B}','Só da B') RETURNING id`)).id;
+  await deveSerRecusado("uma especialidade de outra organização é recusada", AUTH_COM,
+    grava([{ nome: "Assentar base", fase: 2, minutos_por_unidade: 120, skill_id: SK_B }]), "não é desta organização");
+  const canal = (await um(`SELECT id FROM public.ops_skill WHERE organization_id='${ORG_A}' AND nome='Canalização'`)).id;
+  await devePassar("o comercial grava o modelo do duche à mão (2 passos, o 2.º depende do 1.º)", AUTH_COM,
+    grava([
+      { nome: "Assentar base", fase: 2, minutos_fixos: 30, minutos_por_unidade: 120, pessoas: 1, skill_id: canal },
+      { nome: "Ligar ao esgoto e vedar", fase: 2, minutos_por_unidade: 60, pessoas: 1, skill_id: canal, depende_ordem: 1 },
+    ]));
+  const re = await devePassar("refazer as sugestões não apaga o que foi gravado à mão", AUTH.gestorA,
+    `SELECT public.rpc_ops_servico_modelo_sugerir('${ORG_A}', NULL, true);`);
+  (await m(S_DUCHE)).length === 2 && re?.servicos === 3
+    ? ok("o duche (manual) ficou; os 3 sugeridos foram refeitos")
+    : mau(`refazer: ${JSON.stringify(re)} / duche ${(await m(S_DUCHE)).length}`);
+
+  const lista = await chamar(AUTH.gestorA, `SELECT public.rpc_ops_servicos_com_modelo('${ORG_A}');`);
+  lista?.length === 4 && lista.find((x) => x.servico_id === S_DUCHE)?.editado === true &&
+  !lista.some((x) => x.servico_id === S_B)
+    ? ok("a lista do ecrã: os 4 serviços da A (com o partilhado), o duche marcado como editado")
+    : mau(`lista: ${JSON.stringify(lista?.map((x) => [x.nome, x.tarefas.length, x.editado]))}`);
+
+  // Especialidades e zona: o tec2A é canalizador.
+  await deveSerRecusado("o técnico não mexe nas especialidades da equipa", AUTH.tecA,
+    `SELECT public.rpc_ops_pessoa_planeamento('${ORG_A}', '${U.tec2A}', 'Lisboa', ARRAY['${canal}']::uuid[]);`, "Só o gestor");
+  await devePassar("a gestora diz que o subempreiteiro é canalizador", AUTH.gestorA,
+    `SELECT public.rpc_ops_pessoa_planeamento('${ORG_A}', '${U.tec2A}', NULL, ARRAY['${canal}']::uuid[]);`);
+
+  // Uma obra a partir de um orçamento com estes serviços, com o tipo por defeito.
+  const ORC_M = "99990000-0000-0000-0000-0000000000aa";
+  await db.exec(`
+    INSERT INTO public.quotes (id, organization_id, cliente_id, quote_number, title, obra_endereco, estado, accepted_at, total)
+      VALUES ('${ORC_M}','${ORG_A}','${CLI_A}','ORC-A-M','WC completo','Rua M 1, Lisboa','aceite',now(),3000);
+    INSERT INTO public.quote_lines (quote_id, ordem, descricao_snapshot, qt, service_id) VALUES
+      ('${ORC_M}',0,'Remoção',10,'${S_REM}'), ('${ORC_M}',1,'Duche',1,'${S_DUCHE}'), ('${ORC_M}',2,'Pintura',20,'${S_PINT}');`);
+  const TIPO = (await um(`SELECT id FROM public.ops_obra_modelo WHERE organization_id='${ORG_A}' AND por_defeito`)).id;
+  const OBM = await devePassar("obra do orçamento com o tipo 'Obra geral'", AUTH.gestorA,
+    criar(`p_org => '${ORG_A}', p_orcamento_id => '${ORC_M}', p_modelo_id => '${TIPO}', p_data_inicio => '2026-11-02'`));
+  const tm = await q(`
+    SELECT t.nome, f.ordem AS fase, t.minutos_previstos AS min, t.pessoas_previstas AS k,
+           d.nome AS depende, t.inicio_planeado::text AS ini, t.fim_planeado::text AS fim,
+           (SELECT array_agg(tp.utilizador_id::text) FROM public.ops_obra_tarefa_pessoa tp WHERE tp.tarefa_id = t.id) AS quem
+      FROM public.ops_obra_tarefa t JOIN public.ops_obra_fase f ON f.id = t.fase_id
+      LEFT JOIN public.ops_obra_tarefa d ON d.id = t.depende_de
+     WHERE t.obra_id='${OBM?.id}' ORDER BY f.ordem, t.ordem`);
+  const por = (n) => tm.find((x) => x.nome === n);
+  tm.length === 4 + 3 + 2 + 5 && por("Reunião de arranque com o cliente") && por("Vistoria e entrega ao cliente")
+    ? ok("14 tarefas: as 4 do tipo (arranque, proteção, limpeza, entrega) + as dos 3 serviços")
+    : mau(`tarefas da obra: ${JSON.stringify(tm.map((x) => x.nome))}`);
+  const dem = por("Remoção de azulejo: Demolir e remover");
+  const ent = por("Remoção de azulejo: Retirar entulho");
+  dem?.min === 480 && dem?.k === 2 && ent?.depende === "Remoção de azulejo: Demolir e remover"
+    ? ok("tempo × quantidade (48 × 10 = 480 min, 2 pessoas) e a dependência dentro do serviço")
+    : mau(`demolição: ${JSON.stringify({ dem, ent })}`);
+  ent && dem && ent.ini >= dem.fim
+    ? ok("o entulho só começa quando a demolição acaba")
+    : mau(`ordem: ${JSON.stringify({ dem, ent })}`);
+  const f1 = tm.filter((x) => x.fase === 1);
+  const f2 = tm.filter((x) => x.fase === 2);
+  f1.filter((x) => x.ini === "2026-11-02").length >= 2 && f2.every((x) => x.ini >= f1.reduce((a, x) => (x.fim > a ? x.fim : a), ""))
+    ? ok("em paralelo dentro da fase (várias tarefas no 1.º dia), e a fase 2 só depois da 1")
+    : mau(`paralelo: ${JSON.stringify(tm.map((x) => [x.fase, x.nome, x.ini, x.fim]))}`);
+  f2.length === 2 && f2.every((x) => x.quem?.join() === U.tec2A)
+    ? ok("as tarefas de canalização vão para quem tem a especialidade")
+    : mau(`skill: ${JSON.stringify(f2.map((x) => [x.nome, x.quem]))}`);
+
+  // Limpar: os testes seguintes contam obras e pessoas como antes.
+  await db.exec(`
+    DELETE FROM public.ops_obra WHERE id = '${OBM?.id}';
+    DELETE FROM public.quote_lines WHERE quote_id = '${ORC_M}';
+    DELETE FROM public.quotes WHERE id = '${ORC_M}';
+    DELETE FROM public.ops_utilizador_skill;`);
+}
+
+/* ── Data de início automática ──────────────────────────────────────────── */
+console.log("\n─── data de início automática ───────────");
+{
+  const MOD_WC = (await um(`SELECT id FROM public.ops_obra_modelo WHERE organization_id='${ORG_A}' AND nome='Remodelação casa de banho'`)).id;
+  const X1 = await devePassar("obra sem data: a primeira com a equipa livre", AUTH.gestorA,
+    criar(`p_org => '${ORG_A}', p_titulo => 'Auto 1', p_cliente_id => '${CLI_A}', p_modelo_id => '${MOD_WC}'`));
+  const X2 = await devePassar("outra igual, com a mesma equipa", AUTH.gestorA,
+    criar(`p_org => '${ORG_A}', p_titulo => 'Auto 2', p_cliente_id => '${CLI_A}', p_modelo_id => '${MOD_WC}'`));
+  const amanha = (await um(`SELECT public.ops_obra_somar_dias_uteis(current_date + 1, 0)::text AS d`)).d;
+  const choques = async (id) =>
+    (await um(`SELECT count(*)::int AS n FROM public.ops_obra_tarefa t
+                WHERE t.obra_id='${id}' AND public.ops_obra_conflitos_impl(t.id) <> '[]'::jsonb`)).n;
+  const fim1 = (await um(`SELECT max(fim_planeado)::text AS f FROM public.ops_obra_tarefa WHERE obra_id='${X1?.id}'`)).f;
+  X1?.inicio === amanha ? ok(`a 1.ª começa no próximo dia útil (${amanha})`) : mau(`início 1: ${X1?.inicio} (esperado ${amanha})`);
+  X2?.inicio > X1?.inicio && (await choques(X2?.id)) === 0
+    ? ok(`a 2.ª passa para ${X2.inicio} (a 1.ª acaba a ${fim1}) e não choca com ninguém`)
+    : mau(`início 2: ${X2?.inicio}, choques ${await choques(X2?.id)}`);
+  const r = await devePassar("'Replanear' sem data volta a procurar a primeira data livre", AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_replanear('${X2?.id}', NULL);`);
+  r?.inicio === X2?.inicio ? ok("e dá a mesma data (nada mudou entretanto)") : mau(`replanear auto: ${JSON.stringify(r)}`);
+  await db.exec(`DELETE FROM public.ops_obra WHERE id IN ('${X1?.id}','${X2?.id}');`);
+}
 
 /* ── Isolamento ─────────────────────────────────────────────────────────── */
 console.log("\n─── isolamento entre organizações ───────");
@@ -653,6 +980,11 @@ await deveSerRecusado(
   const v = await linhas(AUTH.gestorA,
     `SELECT count(*)::int AS n FROM public.ops_v_obra_conflito WHERE tarefa_id='${nova.id}';`);
   v.at(-1).n === 1 ? ok("e a vista do Gantt mostra-o") : mau(`ops_v_obra_conflito: ${v.at(-1).n}`);
+  // A vista não é security_invoker (por desempenho): filtra ela própria.
+  const vb = await linhas(AUTH.gestorB, `SELECT count(*)::int AS n FROM public.ops_v_obra_conflito;`);
+  vb.at(-1).n === 0 ? ok("o gestor da B não vê os choques da A") : mau(`fuga na vista de choques: ${vb.at(-1).n}`);
+  const vt = await linhas(AUTH.tec2A, `SELECT count(*)::int AS n FROM public.ops_v_obra_conflito WHERE obra_id='${OB3.id}';`);
+  vt.at(-1).n === 0 ? ok("nem um técnico que não está nessa obra") : mau(`técnico vê choques alheios: ${vt.at(-1).n}`);
   const mv = await chamar(AUTH.gestorA,
     `SELECT public.rpc_ops_obra_planear_tarefa('${nova.id}', '2026-10-20', '2026-10-20');`);
   mv.conflitos.length === 0

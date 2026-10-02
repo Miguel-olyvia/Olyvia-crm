@@ -54,7 +54,7 @@ describe("OperacaoLayout — menu", () => {
     montar();
     const nav = screen.getByRole("navigation", { name: "Operações" });
     expect(within(nav).queryByText("Validar")).toBeNull();
-    expect(within(nav).getByText("Minhas tarefas")).toBeInTheDocument();
+    expect(within(nav).getByText("As minhas tarefas")).toBeInTheDocument();
   });
 
   it("nada no menu desliza na horizontal", () => {

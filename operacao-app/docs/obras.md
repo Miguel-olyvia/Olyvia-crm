@@ -25,6 +25,53 @@ Em branco ────────┘                               │
   técnicas", 3 "Acabamentos" e 4 "Limpeza e entrega". **As fases 3 e 4 não foram
   nomeadas na reunião.** Estes nomes são um default e podem ser editados por obra e
   por modelo. Ficam **a confirmar**.
+- **Tarefas a partir do contrato/orçamento.** Sem modelo escolhido, cada linha
+  do orçamento que seja um **serviço** vira uma tarefa (produtos ficam de fora):
+  - minutos previstos = qt × horas × pessoas da ficha técnica do serviço (a
+    mesma conta do custo de mão de obra no CRM). Sem horas na ficha → 60 min,
+    marcada "sem ficha" na pré-visualização;
+  - procedimento = "descrição da mão de obra"; materiais = materiais da ficha × qt;
+  - fase por palavras-chave na categoria/nome/secção (demolição → 1,
+    instalações → 2, limpeza/entrega → 4, resto → 3). É um ponto de partida.
+  - A tarefa guarda `orcamento_linha_id` e `servico_id`. O ecrã "Nova obra"
+    mostra a lista antes de criar (`rpc_ops_obra_previsao_orcamento`).
+  - Com modelo escolhido, as tarefas vêm do modelo, como antes.
+- **Modelos (Obras → Modelos).**
+  - *Serviços*: cada serviço do catálogo do CRM tem os seus passos
+    (`ops_obra_servico_tarefa`): fase, min/unidade + min fixos (pessoa ×
+    tempo), pessoas, especialidade, "depois de" (dentro do serviço),
+    procedimento/materiais/ferramentas. Na obra, cada linha vendida expande-se
+    nos passos do seu serviço (tempo × quantidade), com as dependências.
+    Serviço sem modelo → 1 tarefa pela ficha técnica.
+  - "Gerar sugestões" (`rpc_ops_servico_modelo_sugerir`) preenche os serviços
+    sem modelo a partir de uma biblioteca de famílias (demolições,
+    canalização, eletricidade, AVAC, pladur, revestimentos, pintura,
+    carpintaria, limpeza, genérico) e da ficha técnica (horas × pessoas por
+    unidade; sem ficha, minutos por unidade da biblioteca). **Valores
+    razoáveis, não medidos** — as métricas dizem depois o que corrigir.
+    Refazer nunca apaga um modelo gravado à mão.
+  - *Tipos de obra*: as tarefas que existem sempre. "Obra geral" (por defeito):
+    reunião de arranque, proteção, limpeza final, vistoria e entrega.
+  - Gerem: gestor/admin de Operações **ou** quem tem `services.edit` no CRM
+    (comercial), nessa organização.
+- **Planeamento automático (ao criar a obra).**
+  - **Em paralelo dentro da fase**: as fases vêm em sequência; dentro da fase,
+    cada tarefa começa assim que a de que depende acabou e há vagas (tantas
+    quantos os técnicos/operadores ativos, de 1 a 4).
+  - **Especialidade**: as tarefas que pedem uma vão primeiro a quem a tem
+    (Definições → Equipa: especialidades e zona base).
+  - Pessoas por tarefa = "número de pessoas" da ficha (`pessoas_previstas`). No
+    calendário, a tarefa dura minutos ÷ pessoas.
+  - **Supervisor**: se não for escolhido, o supervisor (senão o gestor) ativo
+    com menos obras abertas.
+  - **Equipa**: cada tarefa recebe logo as suas pessoas, entre técnicos e
+    operadores (se não houver, entre toda a gente ativa). Preferência: sem
+    choque com outras obras nesses dias → `zona_base` na morada da obra → já
+    está nesta obra → menos carga aberta. Botão "Distribuir equipa" na obra
+    refaz isto nas tarefas que ninguém começou (`rpc_ops_obra_distribuir`).
+  - **Morada**: a do orçamento; senão a morada de obra do orçamento
+    (`site_address_id`); senão a morada atual do cliente (a principal). O
+    formulário vem preenchido (`rpc_ops_obra_morada_sugerida`).
 - **A duração da fase é a soma das tarefas.** A barra da fase vai do primeiro
   início ao último fim das suas tarefas.
 - **Planeamento inicial.** As tarefas são espalhadas uma a seguir à outra, a 480
@@ -190,9 +237,12 @@ node tools/validar-instalacao.mjs
    completo? Hoje o gestor cria-a quando quer, e o agendamento do início é a data
    que escolhe.
 6. **Tempo por pessoa ou por equipa?** Hoje é por pessoa, em minutos.
-7. **Tempos default por tarefa.** O Excel das fichas técnicas por serviço tem os
-   tempos? O modelo "Remodelação casa de banho" tem tempos estimados por nós e deve
-   ser revisto.
+7. **Tempos default por tarefa.** Vêm da ficha técnica dos serviços no CRM
+   (horas × pessoas). Serviços sem horas entram com 1 h: é preciso preencher as
+   fichas. O modelo "Remodelação casa de banho" tem tempos estimados por nós e
+   deve ser revisto.
+8. **Fase de cada serviço.** Hoje é adivinhada por palavras-chave. Se for para
+   ficar, o certo é uma coluna "fase da obra" na categoria de serviço, no CRM.
 
 ## Limitações conhecidas
 
@@ -211,3 +261,21 @@ node tools/validar-instalacao.mjs
 - **UI sem Supabase real.** Não foi experimentada contra o Supabase real, porque
   `obras.sql` não está aplicado lá. As páginas estão cobertas por testes de fumo com
   dados simulados, e o SQL pelos validadores PGlite.
+
+## Dados de teste
+
+`npm run gerar-dados-de-teste` escreve em `dist-sql/` dois ficheiros para colar
+no SQL Editor do Supabase:
+
+- `dados-de-teste.sql` — escolhe a organização (sozinho, se só uma tem
+  Operações; senão recusa e pede o nome em `v_nome`) e corre `demo.sql`,
+  `demo-obras.sql` e `demo-testes.sql`: ordens OT-DEMO-*, obras OB-DEMO-001 a
+  006 em todos os estados, modelos "(demo)", tempos com ritmos diferentes por
+  pessoa e extras em todos os estados. Só tabelas `ops_*`; não duplica.
+- `dados-de-teste-remover.sql` — apaga tudo o que tem prefixo DEMO e os
+  modelos "(demo)".
+
+As pessoas são as que já têm perfil em Operações: atribuir funções em
+Definições ANTES de gerar dá Métricas por pessoa e uma fila Validar que se
+pode testar (quem fez uma tarefa não a valida). Provado em
+`npm run validar-demo`.

@@ -338,6 +338,8 @@ export interface ModeloObra {
   descricao: string | null;
   tipo_servico: string | null;
   ativo: boolean;
+  /** O tipo que vem escolhido numa obra nova a partir de orçamento/contrato. */
+  por_defeito?: boolean;
   fases: ModeloFase[];
 }
 
@@ -345,7 +347,7 @@ export async function listarModelos(orgId: string): Promise<ModeloObra[]> {
   const [m, f, t] = await Promise.all([
     supabase
       .from("ops_obra_modelo")
-      .select("id, nome, descricao, tipo_servico, ativo")
+      .select("id, nome, descricao, tipo_servico, ativo, por_defeito")
       .eq("organization_id", orgId)
       .order("nome"),
     supabase
@@ -465,6 +467,62 @@ export async function orcamentosComObra(orgId: string): Promise<Set<string>> {
   return new Set(((data ?? []) as { orcamento_id: string }[]).map((r) => r.orcamento_id));
 }
 
+export interface TarefaPrevista {
+  fase: number;
+  nome: string;
+  minutos: number;
+  sem_ficha: boolean;
+  materiais: string | null;
+}
+
+export interface PrevisaoOrcamento {
+  orcamento_id: string | null;
+  tarefas: TarefaPrevista[];
+  minutos: number;
+  sem_ficha: number;
+}
+
+/**
+ * As tarefas que uma obra SEM modelo vai ter, vindas dos serviços do
+ * orçamento (ou do orçamento do contrato): uma por serviço, com o tempo da
+ * ficha técnica. Só lê.
+ */
+export function previsaoDoOrcamento(args: {
+  orgId: string;
+  orcamentoId?: string | null;
+  contratoId?: string | null;
+}): Promise<PrevisaoOrcamento> {
+  return rpc(
+    "rpc_ops_obra_previsao_orcamento",
+    {
+      p_org: args.orgId,
+      p_orcamento_id: args.orcamentoId ?? null,
+      p_contrato_id: args.contratoId ?? null,
+    },
+    "Não foi possível ler os serviços do orçamento."
+  );
+}
+
+/** A morada que a obra vai ter: a do orçamento/contrato, ou a do cliente. Só lê. */
+export async function moradaSugerida(args: {
+  orgId: string;
+  clienteId?: string | null;
+  orcamentoId?: string | null;
+  contratoId?: string | null;
+}): Promise<string | null> {
+  const r = await rpc<string | null>(
+    "rpc_ops_obra_morada_sugerida",
+    {
+      p_org: args.orgId,
+      p_cliente_id: args.clienteId ?? null,
+      p_orcamento_id: args.orcamentoId ?? null,
+      p_contrato_id: args.contratoId ?? null,
+    },
+    "Não foi possível ler a morada."
+  );
+  return r ?? null;
+}
+
 /* ─────────────────────────────── Escritas ─────────────────────────────── */
 
 export interface ConflitoRpc {
@@ -537,11 +595,21 @@ export function mudarEstadoObra(obraId: string, estado: EstadoObra, motivo?: str
   );
 }
 
-export function replanearObra(obraId: string, dataInicio: string) {
-  return rpc<{ ok: boolean; tarefas: number }>(
+/** `dataInicio` null = a primeira data em que a equipa está livre (replaneia e redistribui). */
+export function replanearObra(obraId: string, dataInicio: string | null) {
+  return rpc<{ ok: boolean; tarefas: number; inicio: string }>(
     "rpc_ops_obra_replanear",
     { p_obra_id: obraId, p_data_inicio: dataInicio },
     "Não foi possível replanear."
+  );
+}
+
+/** Distribui a equipa pelas tarefas sem ninguém; `refazer` redistribui as que ninguém começou. */
+export function distribuirEquipa(obraId: string, refazer = false) {
+  return rpc<{ ok: boolean; tarefas: number }>(
+    "rpc_ops_obra_distribuir",
+    { p_obra_id: obraId, p_refazer: refazer },
+    "Não foi possível distribuir a equipa."
   );
 }
 
@@ -684,4 +752,127 @@ export async function custosDaObra(obraId: string): Promise<CustosObra> {
   const { data, error } = await supabase.rpc("rpc_ops_obra_custos", { p_obra_id: obraId });
   rebentar("calcular o previsto contra o real", error);
   return data as unknown as CustosObra;
+}
+
+/* ─────────────────────────── Modelos por serviço ─────────────────────────── */
+
+export interface TarefaServico {
+  id?: string;
+  ordem?: number;
+  nome: string;
+  fase: number;
+  minutos_por_unidade: number;
+  minutos_fixos: number;
+  pessoas: number;
+  skill_id: string | null;
+  depende_ordem: number | null;
+  procedimento: string | null;
+  materiais: string | null;
+  ferramentas: string | null;
+  origem?: "manual" | "sugerida";
+}
+
+export interface ServicoComModelo {
+  servico_id: string;
+  nome: string;
+  sku: string | null;
+  categoria: string | null;
+  horas: number | null;
+  pessoas: number | null;
+  descricao_mao_obra: string | null;
+  tarefas: TarefaServico[];
+  editado: boolean;
+}
+
+export interface Skill {
+  id: string;
+  nome: string;
+}
+
+/** Os serviços do catálogo do CRM desta organização, com o modelo de cada um. */
+export async function listarServicosComModelo(orgId: string): Promise<ServicoComModelo[]> {
+  const r = await rpc<ServicoComModelo[] | null>(
+    "rpc_ops_servicos_com_modelo",
+    { p_org: orgId },
+    "Não foi possível carregar os serviços."
+  );
+  return r ?? [];
+}
+
+/** Gera modelos pela biblioteca: um serviço, ou todos os que faltam (`substituir` refaz os sugeridos). */
+export function sugerirModelos(args: { orgId: string; servicoId?: string | null; substituir?: boolean }) {
+  return rpc<{ ok: boolean; servicos: number; tarefas: number }>(
+    "rpc_ops_servico_modelo_sugerir",
+    { p_org: args.orgId, p_servico_id: args.servicoId ?? null, p_substituir: args.substituir ?? false },
+    "Não foi possível gerar os modelos."
+  );
+}
+
+export function gravarModeloServico(orgId: string, servicoId: string, tarefas: TarefaServico[]) {
+  return rpc<{ ok: boolean; tarefas: number }>(
+    "rpc_ops_servico_modelo_gravar",
+    {
+      p_org: orgId,
+      p_servico_id: servicoId,
+      p_tarefas: tarefas.map((t) => ({
+        nome: t.nome,
+        fase: t.fase,
+        minutos_por_unidade: t.minutos_por_unidade,
+        minutos_fixos: t.minutos_fixos,
+        pessoas: t.pessoas,
+        skill_id: t.skill_id,
+        depende_ordem: t.depende_ordem,
+        procedimento: t.procedimento,
+        materiais: t.materiais,
+        ferramentas: t.ferramentas,
+      })),
+    },
+    "Não foi possível gravar o modelo."
+  );
+}
+
+export async function listarSkills(orgId: string): Promise<Skill[]> {
+  const { data, error } = await supabase
+    .from("ops_skill")
+    .select("id, nome")
+    .eq("organization_id", orgId)
+    .eq("ativo", true)
+    .order("nome");
+  rebentar("carregar as especialidades", error);
+  return (data ?? []) as unknown as Skill[];
+}
+
+export function criarSkill(orgId: string, nome: string) {
+  return rpc<{ ok: boolean; id: string }>("rpc_ops_skill_criar", { p_org: orgId, p_nome: nome }, "Não foi possível criar a especialidade.");
+}
+
+export function tornarTipoPorDefeito(modeloId: string) {
+  return rpc<{ ok: boolean }>("rpc_ops_obra_modelo_por_defeito", { p_modelo_id: modeloId }, "Não foi possível mudar o tipo por defeito.");
+}
+
+/** Zona base e especialidades de cada pessoa da equipa (para a distribuição automática). */
+export async function planeamentoDaEquipa(
+  orgId: string
+): Promise<Map<string, { zona: string | null; skills: string[] }>> {
+  const [p, s] = await Promise.all([
+    supabase.from("ops_utilizador_perfil").select("utilizador_id, zona_base").eq("organization_id", orgId),
+    supabase.from("ops_utilizador_skill").select("utilizador_id, skill_id, ops_skill!inner(organization_id)").eq("ops_skill.organization_id", orgId),
+  ]);
+  rebentar("carregar a zona e as especialidades", p.error ?? s.error);
+  const out = new Map<string, { zona: string | null; skills: string[] }>();
+  for (const r of (p.data ?? []) as { utilizador_id: string; zona_base: string | null }[]) {
+    out.set(r.utilizador_id, { zona: r.zona_base, skills: [] });
+  }
+  for (const r of (s.data ?? []) as unknown as { utilizador_id: string; skill_id: string }[]) {
+    out.get(r.utilizador_id)?.skills.push(r.skill_id);
+  }
+  return out;
+}
+
+export function gravarPlaneamentoPessoa(args: { orgId: string; utilizadorId: string; zona: string | null; skills: string[] }) {
+  return rpc<{ ok: boolean }>(
+    "rpc_ops_pessoa_planeamento",
+    { p_org: args.orgId, p_utilizador: args.utilizadorId, p_zona: args.zona, p_skills: args.skills },
+    "Não foi possível gravar a zona e as especialidades."
+  );
 }

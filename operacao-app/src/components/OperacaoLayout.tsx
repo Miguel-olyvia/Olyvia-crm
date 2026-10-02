@@ -20,8 +20,8 @@ import {
   OperacaoMark,
   X,
 } from "./icons";
-import { ObraCapacete, ObraCronometro, ObraValidar } from "./ObraIcones";
-import { podeValidar } from "../domain/obras";
+import { ObraCapacete, ObraCronometro, ObraModelo, ObraValidar } from "./ObraIcones";
+import { podePlanear, podeValidar } from "../domain/obras";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 const CHAVE_PAINEL = "operacao.menu-aberto";
@@ -49,7 +49,7 @@ export const GRUPOS: { titulo: string | null; itens: Item[] }[] = [
   {
     titulo: "Execução",
     itens: [
-      { to: "/minhas-tarefas", rotulo: "Minhas tarefas", Icone: ObraCronometro },
+      { to: "/minhas-tarefas", rotulo: "As minhas tarefas", Icone: ObraCronometro },
       { to: "/validar", rotulo: "Validar", Icone: ObraValidar, so: podeValidar },
     ],
   },
@@ -58,6 +58,7 @@ export const GRUPOS: { titulo: string | null; itens: Item[] }[] = [
     itens: [
       { to: "/ordens", rotulo: "Ordens", Icone: List },
       { to: "/obras", rotulo: "Obras", Icone: ObraCapacete },
+      { to: "/obras/modelos", rotulo: "Modelos", Icone: ObraModelo, so: podePlanear },
       { to: "/planos", rotulo: "Planos", Icone: Clock },
     ],
   },

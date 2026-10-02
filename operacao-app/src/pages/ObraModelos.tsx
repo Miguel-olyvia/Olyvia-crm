@@ -6,6 +6,7 @@ import {
   gravarModelo,
   listarModelos,
   semearModeloExemplo,
+  tornarTipoPorDefeito,
   type FaseParaGravar,
   type ModeloObra,
 } from "../lib/obras";
@@ -13,13 +14,20 @@ import { Badge, Button, Card, EmptyState, ErrorState, Field, Input, Skeleton, Te
 import { ChevronLeft, Plus, X } from "../components/icons";
 import { ObraModelo } from "../components/ObraIcones";
 import { FASES_POR_DEFEITO, formatarMinutos, podePlanear } from "../domain/obras";
+import ModelosServicos from "../components/ModelosServicos";
 
 /**
- * Modelos de obra: as fases e tarefas-tipo, com o tempo default de cada uma.
+ * Modelos — de onde nasce o plano de uma obra:
  *
- * É daqui que nasce o plano de uma obra nova. Mudar um modelo não mexe nas
- * obras já criadas (copiaram-no). Ao gravar, as tarefas mantêm o id — é o
- * que deixa as métricas comparar o mesmo default ao longo do tempo.
+ *  · Serviços: como se executa cada serviço vendido (passos, tempo por
+ *    unidade, pessoas, especialidade, dependências). A obra criada a partir
+ *    de um contrato junta os passos de cada linha vendida.
+ *  · Tipos de obra: as fases e as tarefas que existem em qualquer obra
+ *    (arranque, proteção, limpeza, entrega). O "por defeito" vem escolhido.
+ *
+ * Mudar um modelo não mexe nas obras já criadas (copiaram-no). Ao gravar, as
+ * tarefas mantêm o id — é o que deixa as métricas comparar o mesmo default
+ * ao longo do tempo.
  */
 
 interface Rascunho {
@@ -89,8 +97,19 @@ export default function ObraModelos() {
   const [aGravar, setAGravar] = useState(false);
   const [erroAcao, setErroAcao] = useState<string | null>(null);
   const [aberta, setAberta] = useState<string | null>(null);
+  const [aba, setAba] = useState<"servicos" | "tipos">("servicos");
 
   const gere = podePlanear(funcao);
+
+  const porDefeito = async (id: string) => {
+    setErroAcao(null);
+    try {
+      await tornarTipoPorDefeito(id);
+      setRecarga((r) => r + 1);
+    } catch (e) {
+      setErroAcao(e instanceof ErroDeEscrita ? e.message : "Não foi possível mudar o tipo por defeito.");
+    }
+  };
 
   const carregar = useCallback(async () => {
     if (!activeOrgId) return;
@@ -169,12 +188,12 @@ export default function ObraModelos() {
       </Link>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Modelos de obra</h1>
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Modelos</h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            Fases e tarefas-tipo por serviço, com o tempo previsto de cada uma.
+            De onde nasce o plano de uma obra: os passos de cada serviço vendido e as tarefas de cada tipo de obra.
           </p>
         </div>
-        {gere && !rascunho && (
+        {aba === "tipos" && gere && !rascunho && (
           <div className="flex gap-2">
             {!temExemplo && (
               <Button variant="secondary" size="sm" onClick={() => void semear()}>
@@ -188,9 +207,29 @@ export default function ObraModelos() {
         )}
       </div>
 
+      <div className="grid w-full max-w-sm grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-sm">
+        {(
+          [
+            ["servicos", "Serviços"],
+            ["tipos", "Tipos de obra"],
+          ] as const
+        ).map(([a, r]) => (
+          <button
+            key={a}
+            type="button"
+            onClick={() => setAba(a)}
+            className={cx("rounded-md px-3 py-1.5", aba === a ? "bg-white font-medium text-slate-800 shadow-sm" : "text-slate-500")}
+          >
+            {r}
+          </button>
+        ))}
+      </div>
+
       {erroAcao && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erroAcao}</p>}
 
-      {rascunho ? (
+      {aba === "servicos" && activeOrgId ? (
+        <ModelosServicos orgId={activeOrgId} gere={gere} />
+      ) : rascunho ? (
         <Card className="space-y-4 p-4">
           <div className="grid gap-3 sm:grid-cols-[2fr_1fr]">
             <Field label="Nome">
@@ -333,6 +372,7 @@ export default function ObraModelos() {
                   <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setAberta(aberta === m.id ? null : m.id)}>
                     <p className="flex items-center gap-2 text-sm font-semibold text-slate-800">
                       {m.nome}
+                      {m.por_defeito && <Badge className="bg-brand-50 text-brand-800 ring-brand-200">por defeito</Badge>}
                       {!m.ativo && <Badge>inativo</Badge>}
                     </p>
                     <p className="text-xs text-slate-500">
@@ -341,9 +381,16 @@ export default function ObraModelos() {
                     {m.descricao && <p className="mt-1 text-xs text-slate-400">{m.descricao}</p>}
                   </button>
                   {gere && (
-                    <Button size="sm" variant="secondary" onClick={() => setRascunho(paraRascunho(m))}>
-                      Editar
-                    </Button>
+                    <div className="flex gap-2">
+                      {!m.por_defeito && (
+                        <Button size="sm" variant="secondary" onClick={() => void porDefeito(m.id)}>
+                          Tornar por defeito
+                        </Button>
+                      )}
+                      <Button size="sm" variant="secondary" onClick={() => setRascunho(paraRascunho(m))}>
+                        Editar
+                      </Button>
+                    </div>
                   )}
                 </div>
                 {aberta === m.id && (

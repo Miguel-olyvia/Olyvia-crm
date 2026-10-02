@@ -22,6 +22,9 @@ CREATE TEMP TABLE _ctx AS
 SELECT c.organization_id AS org_id, c.id AS cliente_id
   FROM public.anew_clients c
  WHERE c.deleted_at IS NULL
+   -- Se dados-de-teste.sql escolheu a organização (ops.demo_org), é essa.
+   AND (nullif(current_setting('ops.demo_org', true), '') IS NULL
+        OR c.organization_id = nullif(current_setting('ops.demo_org', true), '')::uuid)
  ORDER BY c.created_at NULLS LAST
  LIMIT 1;
 

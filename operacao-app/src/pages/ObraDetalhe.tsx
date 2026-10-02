@@ -12,6 +12,7 @@ import {
   planearTarefa,
   renomearFase,
   replanearObra,
+  distribuirEquipa,
   tarefasDaObra,
   type ConflitoObra,
   type ConflitoRpc,
@@ -32,6 +33,7 @@ import {
   Select,
   Skeleton,
   Textarea,
+  Toggle,
   cx,
 } from "../components/ui";
 import { AlertTriangle, ChevronLeft, MapPin, Plus } from "../components/icons";
@@ -108,6 +110,20 @@ export default function ObraDetalhe() {
 
   const planeia = podePlanear(funcao);
   const recarregar = () => setRecarga((r) => r + 1);
+  const [aDistribuir, setADistribuir] = useState(false);
+  const distribuir = async () => {
+    if (!obra) return;
+    setADistribuir(true);
+    try {
+      const r = await distribuirEquipa(obra.id, true);
+      setAviso({ texto: `Equipa distribuída por ${r.tarefas} tarefa${r.tarefas === 1 ? "" : "s"} (as já começadas ficaram como estavam).` });
+      recarregar();
+    } catch (e) {
+      setAviso({ texto: e instanceof ErroDeEscrita ? e.message : "Não foi possível distribuir a equipa." });
+    } finally {
+      setADistribuir(false);
+    }
+  };
 
   const carregar = useCallback(async () => {
     if (!activeOrgId) return;
@@ -294,6 +310,9 @@ export default function ObraDetalhe() {
                 </Button>
                 <Button size="sm" variant="secondary" onClick={() => setReplanear(true)}>
                   Replanear datas
+                </Button>
+                <Button size="sm" variant="secondary" onClick={() => void distribuir()} disabled={aDistribuir}>
+                  {aDistribuir ? "A distribuir…" : "Distribuir equipa"}
                 </Button>
               </>
             )}
@@ -547,7 +566,7 @@ function EditarObra({
             <Select value={supervisor} onChange={(e) => setSupervisor(e.target.value)} className="w-full">
               <option value="">—</option>
               {equipa
-                .filter((m) => m.funcao === "supervisor" || m.funcao === "gestor")
+                .filter((m) => ["supervisor", "gestor", "admin"].includes(m.funcao))
                 .map((m) => (
                   <option key={m.utilizador_id} value={m.utilizador_id}>
                     {m.nome} ({m.funcao})
@@ -568,10 +587,11 @@ function EditarObra({
 function Replanear({ obra, aoFechar, aoGravar }: { obra: ObraResumo; aoFechar: () => void; aoGravar: () => void }) {
   const [inicio, setInicio] = useState(obra.data_inicio_prevista ?? hojeIso());
   const [erro, setErro] = useState<string | null>(null);
+  const [auto, setAuto] = useState(true);
   const gravar = async () => {
     setErro(null);
     try {
-      await replanearObra(obra.id, inicio);
+      await replanearObra(obra.id, auto ? null : inicio);
       aoGravar();
       aoFechar();
     } catch (e) {
@@ -594,12 +614,20 @@ function Replanear({ obra, aoFechar, aoGravar }: { obra: ObraResumo; aoFechar: (
     >
       <div className="space-y-3">
         <p className="text-sm text-slate-600">
-          Volta a espalhar todas as tarefas, uma a seguir à outra, 8 h por dia útil, a partir desta data. As datas que
-          arrastaste à mão perdem-se.
+          Volta a planear todas as tarefas (em paralelo dentro de cada fase, 8 h por dia útil). As datas que arrastaste à
+          mão perdem-se.
         </p>
-        <Field label="Começa a">
-          <Input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} className="w-full" />
-        </Field>
+        <Toggle
+          checked={auto}
+          onChange={setAuto}
+          label="Primeira data com a equipa livre"
+          hint="Procura o primeiro dia sem choques com outras obras e volta a distribuir a equipa nas tarefas por começar."
+        />
+        {!auto && (
+          <Field label="Começa a">
+            <Input type="date" value={inicio} onChange={(e) => setInicio(e.target.value)} className="w-full" />
+          </Field>
+        )}
         {erro && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
       </div>
     </Modal>
