@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useAuth } from "../auth/AuthProvider";
+import { MateriaisStock } from "./MateriaisStock";
 import type { MembroEquipa } from "../lib/dados";
 import {
   estadoDoStock,
@@ -195,6 +197,7 @@ function LinhaTarefa({
   aoRemover: () => void;
 }) {
   const [aberta, setAberta] = useState(false);
+  const { activeOrgId } = useAuth();
   const livres = t.livres ? new Set(t.livres) : null;
   const motivos = new Map(t.ocupados.map((o) => [o.utilizador_id, o.motivo]));
   // Só se escolhem as pessoas LIVRES nesses dias. As outras aparecem
@@ -323,22 +326,48 @@ function LinhaTarefa({
       {aberta && (
         <div className="space-y-3 rounded-lg bg-slate-50 p-2.5">
           <DepoisDe t={t} outras={outras} aoMudar={aoMudar} />
-          {/*
-            TODO(MateriaisStock): quando existir src/components/MateriaisStock.tsx (outro agente),
-            trocar este <Materiais> por:
-              <MateriaisStock orgId={orgId} servicoId={servico.servico_id} quantidadeServico={servico.quantidade}
-                valor={t.materiais_crm as never} onChange={(m) => aoMudar((x) => ({ ...x, materiais_crm: m.map((y) => ({ ...y, origem: "stock" })) }))} />
-            O formato gravado (ops_obra_tarefa.materiais_crm) já aceita {produto_id, nome, quantidade, unidade, disponivel}.
-          */}
-          <Materiais
-            t={t}
-            servico={servico}
-            stock={stock}
-            totalPorProduto={totalPorProduto}
-            produtosContrato={produtosContrato}
-            pesquisarStock={pesquisarStock}
-            aoMudar={aoMudar}
-          />
+          {activeOrgId ? (
+            <div className="space-y-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Materiais do stock</p>
+              <MateriaisStock
+                orgId={activeOrgId}
+                servicoId={servico.servico_id}
+                quantidadeServico={servico.quantidade ?? 1}
+                // Só os ligados a um produto vão para o componente; os outros ficam como estão.
+                valor={t.materiais_crm
+                  .filter((m) => m.produto_id)
+                  .map((m) => ({
+                    produto_id: m.produto_id as string,
+                    nome: m.nome,
+                    quantidade: m.quantidade ?? 0,
+                    unidade: m.unidade ?? null,
+                    disponivel: m.disponivel ?? null,
+                  }))}
+                onChange={(lista) =>
+                  aoMudar((x) => ({
+                    ...x,
+                    materiais_crm: [
+                      ...x.materiais_crm.filter((y) => !y.produto_id),
+                      ...lista.map((y) => ({
+                        ...y,
+                        origem: x.materiais_crm.find((z) => z.produto_id === y.produto_id)?.origem ?? ("stock" as const),
+                      })),
+                    ],
+                  }))
+                }
+              />
+            </div>
+          ) : (
+            <Materiais
+              t={t}
+              servico={servico}
+              stock={stock}
+              totalPorProduto={totalPorProduto}
+              produtosContrato={produtosContrato}
+              pesquisarStock={pesquisarStock}
+              aoMudar={aoMudar}
+            />
+          )}
           <div className="grid gap-2 sm:grid-cols-2">
             <label className="block space-y-1 text-xs text-slate-600">
               Materiais (texto)
