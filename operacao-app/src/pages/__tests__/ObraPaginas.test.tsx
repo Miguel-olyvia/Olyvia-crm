@@ -101,6 +101,65 @@ const OBRA = {
   n_extras: 1,
 };
 
+const tarefaPrevista = (id: string, nome: string, p: Record<string, unknown> = {}) => ({
+  id,
+  ordem: 1000 + Number(id.replace(/\D/g, "") || 1),
+  linha_id: "l1",
+  servico_id: "s1",
+  servico_tarefa_id: null,
+  do_tipo: false,
+  nome,
+  fase: 2,
+  minutos: 30,
+  pessoas_previstas: 1,
+  skill_id: null,
+  skill_nome: "Eletricidade",
+  depende: [] as string[],
+  procedimento: null,
+  materiais: null,
+  ferramentas: null,
+  materiais_crm: [],
+  inicio: hoje,
+  fim: hoje,
+  pessoas: ["u-tec"],
+  livres: ["u-tec"],
+  ocupados: [] as { utilizador_id: string; motivo: string | null }[],
+  ...p,
+});
+
+const PREVISAO_CONTRATO = {
+  orcamento_id: "q2",
+  inicio: hoje,
+  minutos: 150,
+  outras: [],
+  produtos: [],
+  servicos: [
+    {
+      linha_id: "l1",
+      servico_id: "s1",
+      nome: "Tomadas",
+      descricao: null,
+      categoria: null,
+      quantidade: 6,
+      unidade: "un",
+      sugerido: true,
+      com_modelo: false,
+      sem_ficha: false,
+      materiais_ficha: [{ produto_id: "pTom", nome: "Tomada schuko", quantidade: 6, origem: "ficha" }],
+      tarefas: [
+        // Nesse dia, o técnico está de férias: aparece indisponível, com o motivo.
+        tarefaPrevista("t1", "Tomadas: Marcar traçado", {
+          pessoas: [],
+          livres: [],
+          ocupados: [{ utilizador_id: "u-tec", motivo: "ausência: Férias" }],
+        }),
+        tarefaPrevista("t2", "Tomadas: Passar cabos", { minutos: 90, materiais: "Tomada × 1 /un", depende: ["t1"] }),
+        tarefaPrevista("t3", "Tomadas: Ensaio", { depende: ["t2"] }),
+      ],
+    },
+  ],
+};
+
 vi.mock("../../lib/dados", () => ({
   ErroDeDados: class extends Error {},
   ErroDeEscrita: class extends Error {},
@@ -247,6 +306,15 @@ vi.mock("../../lib/obras", () => ({
       { fase: 3, nome: "Pintura de tetos", minutos: 60, sem_ficha: true, materiais: null },
     ],
   })),
+  previsaoDoContrato: vi.fn(async () => PREVISAO_CONTRATO),
+  stockDosProdutos: vi.fn(async () => ({
+    com_inventario: true,
+    produtos: [
+      { produto_id: "pTom", nome: "Tomada schuko", sku: "T1", unidade: "un", gere_stock: true, stock: 4, reservado: 1, disponivel: 3 },
+    ],
+  })),
+  pessoasLivres: vi.fn(async () => []),
+  gravarDependencias: vi.fn(async () => ({ ok: true, dependencias: [], antes_de_acabar: [] })),
   iniciarTarefa: vi.fn(),
   terminarTarefa: vi.fn(async () => ({ ok: true })),
   validarTarefa: vi.fn(async () => ({ ok: true })),
@@ -328,6 +396,34 @@ describe("páginas de Obras (fumo)", () => {
     expect(screen.getByText(/1 serviço sem modelo nem horas na ficha técnica/)).toBeInTheDocument();
     expect(screen.getByText("(sem ficha)")).toBeInTheDocument();
     expect(await screen.findByDisplayValue("Rua do Cliente 7, Lisboa")).toBeInTheDocument();
+  });
+
+  it("Nova obra, passo 2: os serviços do contrato, editáveis, e 'Abrir obra' grava as tarefas", async () => {
+    vi.mocked(obras.criarObra).mockResolvedValueOnce({ ok: true, id: "o9", codigo: "OB-2026-00009", tarefas: 2 });
+    em("/obras", <Obras />);
+    fireEvent.click(await screen.findByText("Nova obra"));
+    fireEvent.click(await screen.findByText(/ORC-9 · WC suite/));
+    fireEvent.click(await screen.findByText("Seguinte"));
+
+    expect(await screen.findByText("Tomadas")).toBeInTheDocument();
+    expect(screen.getByText("sugestão automática")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Tomadas: Passar cabos")).toBeInTheDocument();
+    // Quem está de férias nesse dia não se escolhe — e vê-se porquê.
+    const indisponivel = screen.getByRole("option", { name: /Tiago Técnico — indisponível: ausência: Férias/ });
+    expect(indisponivel).toBeDisabled();
+    // Os materiais da ficha (6 tomadas) contra o stock (3 disponíveis).
+    expect((await screen.findAllByText(/faltam 3 un — encomendar/)).length).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getAllByLabelText("Tirar a tarefa")[0]);
+    fireEvent.click(screen.getByText("Abrir obra"));
+    await waitFor(() => expect(obras.criarObra).toHaveBeenCalled());
+    const chamadas = vi.mocked(obras.criarObra).mock.calls;
+    const args = chamadas[chamadas.length - 1][0];
+    expect(args.orcamentoId).toBe("q2");
+    expect(args.tarefas?.map((t) => t.nome)).toEqual(["Tomadas: Passar cabos", "Tomadas: Ensaio"]);
+    expect(args.tarefas?.[0]).toMatchObject({ pessoas: ["u-tec"], depende: [], minutos: 90 });
+    expect(args.tarefas?.[1].depende).toEqual([1]);
+    expect(args.tarefas?.[0].materiais_crm[0]).toMatchObject({ produto_id: "pTom", quantidade: 6, disponivel: 3 });
   });
 
   it("Obras: o técnico não vê Nova obra nem Validar", async () => {

@@ -15,6 +15,9 @@ import type {
   EstadoTarefaObra,
   MotivoDesvio,
 } from "../domain/obras";
+import type { MaterialLigado, PrevisaoContrato, ProdutoStock, TarefaParaCriar } from "../domain/novaObra";
+
+export type { MaterialLigado, PrevisaoContrato, ProdutoStock, TarefaParaCriar } from "../domain/novaObra";
 
 function rebentar(contexto: string, error: { message: string } | null): void {
   if (!error) return;
@@ -135,10 +138,20 @@ export interface TarefaObra {
   minutos_reais: number;
   a_correr: number;
   pessoas: string[];
+  /** Todas as tarefas de que esta depende (ops_obra_tarefa_dependencia) — as setas do Gantt. */
+  dependencias?: string[];
+  /** Materiais do CRM ligados no passo "Serviços do contrato". */
+  materiais_crm?: MaterialLigado[];
 }
 
 function normalizarTarefa(t: TarefaObra): TarefaObra {
-  return { ...t, minutos_reais: Number(t.minutos_reais), pessoas: t.pessoas ?? [] };
+  return {
+    ...t,
+    minutos_reais: Number(t.minutos_reais),
+    pessoas: t.pessoas ?? [],
+    dependencias: t.dependencias ?? (t.depende_de ? [t.depende_de] : []),
+    materiais_crm: t.materiais_crm ?? [],
+  };
 }
 
 export async function tarefasDaObra(obraId: string): Promise<TarefaObra[]> {
@@ -503,6 +516,111 @@ export function previsaoDoOrcamento(args: {
   );
 }
 
+/**
+ * O passo 2 da Nova obra, "Serviços do contrato": cada serviço vendido com as
+ * tarefas que vai ter (do modelo do serviço, ou sugeridas pela biblioteca),
+ * datas, pessoas sugeridas e quem está livre. A base cria a obra numa
+ * subtransação e desfaz — nada fica gravado. Com `tarefas`, recalcula com as
+ * tarefas já editadas.
+ */
+export function previsaoDoContrato(args: {
+  orgId: string;
+  contratoId?: string | null;
+  orcamentoId?: string | null;
+  modeloId?: string | null;
+  dataInicio?: string | null;
+  morada?: string | null;
+  tarefas?: TarefaParaCriar[] | null;
+}): Promise<PrevisaoContrato> {
+  return rpc(
+    "rpc_ops_obra_previsao_contrato",
+    {
+      p_org: args.orgId,
+      p_contrato_id: args.contratoId ?? null,
+      p_orcamento_id: args.orcamentoId ?? null,
+      p_modelo_id: args.modeloId ?? null,
+      p_data_inicio: args.dataInicio ?? null,
+      p_morada: args.morada ?? null,
+      p_tarefas: args.tarefas ?? null,
+    },
+    "Não foi possível preparar os serviços do contrato."
+  );
+}
+
+/** Stock dos produtos (por ids, ou pesquisa por nome/SKU). Só lê o inventário do CRM; não reserva. */
+export async function stockDosProdutos(args: {
+  orgId: string;
+  produtoIds?: readonly string[] | null;
+  pesquisa?: string | null;
+  limite?: number;
+}): Promise<{ com_inventario: boolean; com_reservas?: boolean; produtos: ProdutoStock[] }> {
+  const r = await rpc<{ com_inventario: boolean; com_reservas?: boolean; produtos: ProdutoStock[] | null }>(
+    "rpc_ops_obra_stock",
+    {
+      p_org: args.orgId,
+      p_produto_ids: args.produtoIds ?? null,
+      p_pesquisa: args.pesquisa ?? null,
+      p_limite: args.limite ?? 30,
+    },
+    "Não foi possível ler o stock."
+  );
+  return {
+    ...r,
+    produtos: (r.produtos ?? []).map((p) => ({
+      ...p,
+      stock: p.stock == null ? null : Number(p.stock),
+      reservado: Number(p.reservado ?? 0),
+      disponivel: p.disponivel == null ? null : Number(p.disponivel),
+    })),
+  };
+}
+
+export interface PessoaLivre {
+  utilizador_id: string;
+  nome: string;
+  funcao: string;
+  skills: string[];
+  zona: string | null;
+  minutos_ocupados: number;
+  dias_cheios: number;
+  ordens: number;
+  livre: boolean;
+  /** Porque não está livre ('ausência: Férias', 'feriado: …', 'agenda cheia: OB-…', 'ordem OT-…'); null se livre. */
+  motivo: string | null;
+}
+
+/**
+ * Quem está livre entre duas datas (≥ 8 h planeadas num dia ou uma ordem
+ * agendada = ocupado). Devolve toda a gente ativa, com `livre`.
+ */
+export async function pessoasLivres(args: {
+  orgId: string;
+  inicio: string;
+  fim?: string | null;
+  excluirTarefa?: string | null;
+}): Promise<PessoaLivre[]> {
+  const r = await rpc<PessoaLivre[] | null>(
+    "rpc_ops_pessoas_livres",
+    {
+      p_org: args.orgId,
+      p_inicio: args.inicio,
+      p_fim: args.fim ?? null,
+      p_excluir_tarefa: args.excluirTarefa ?? null,
+    },
+    "Não foi possível ler a agenda da equipa."
+  );
+  return r ?? [];
+}
+
+/** "Depois de": substitui as dependências da tarefa (recusa ciclos). */
+export function gravarDependencias(tarefaId: string, dependeDe: readonly string[]) {
+  return rpc<{ ok: boolean; dependencias: string[]; antes_de_acabar: string[] }>(
+    "rpc_ops_obra_gravar_dependencias",
+    { p_tarefa_id: tarefaId, p_depende_de: dependeDe },
+    "Não foi possível gravar as dependências."
+  );
+}
+
 /** A morada que a obra vai ter: a do orçamento/contrato, ou a do cliente. Só lê. */
 export async function moradaSugerida(args: {
   orgId: string;
@@ -546,23 +664,24 @@ export function criarObra(args: {
   morada?: string | null;
   gestorId?: string | null;
   supervisorId?: string | null;
+  /** As tarefas dos serviços revistas no passo 2. Omitido = expansão automática de sempre. */
+  tarefas?: TarefaParaCriar[] | null;
 }): Promise<{ ok: boolean; id: string; codigo: string; tarefas: number }> {
-  return rpc(
-    "rpc_ops_obra_criar",
-    {
-      p_org: args.orgId,
-      p_titulo: args.titulo ?? null,
-      p_cliente_id: args.clienteId ?? null,
-      p_modelo_id: args.modeloId ?? null,
-      p_data_inicio: args.dataInicio ?? null,
-      p_orcamento_id: args.orcamentoId ?? null,
-      p_contrato_id: args.contratoId ?? null,
-      p_morada: args.morada ?? null,
-      p_gestor_id: args.gestorId ?? null,
-      p_supervisor_id: args.supervisorId ?? null,
-    },
-    "Não foi possível abrir a obra."
-  );
+  const params: Record<string, unknown> = {
+    p_org: args.orgId,
+    p_titulo: args.titulo ?? null,
+    p_cliente_id: args.clienteId ?? null,
+    p_modelo_id: args.modeloId ?? null,
+    p_data_inicio: args.dataInicio ?? null,
+    p_orcamento_id: args.orcamentoId ?? null,
+    p_contrato_id: args.contratoId ?? null,
+    p_morada: args.morada ?? null,
+    p_gestor_id: args.gestorId ?? null,
+    p_supervisor_id: args.supervisorId ?? null,
+  };
+  // Só se manda quando há: assim a chamada de sempre continua igual.
+  if (args.tarefas) params.p_tarefas = args.tarefas;
+  return rpc("rpc_ops_obra_criar", params, "Não foi possível abrir a obra.");
 }
 
 export function atualizarObra(args: {

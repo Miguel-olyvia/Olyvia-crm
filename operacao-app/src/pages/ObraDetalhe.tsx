@@ -13,6 +13,7 @@ import {
   renomearFase,
   replanearObra,
   distribuirEquipa,
+  gravarDependencias,
   tarefasDaObra,
   type ConflitoObra,
   type ConflitoRpc,
@@ -178,9 +179,25 @@ export default function ObraDetalhe() {
         pessoas: t.pessoas,
         aCorrer: t.a_correr,
         dependeDe: t.depende_de,
+        dependencias: t.dependencias,
       })),
     [tarefas]
   );
+
+  // Ligar duas tarefas no Gantt: junta a nova dependência às que a tarefa já tem.
+  const ligar = async (tarefaId: string, dependeDeId: string) => {
+    const atual = tarefas.find((t) => t.id === tarefaId)?.dependencias ?? [];
+    if (atual.includes(dependeDeId)) return;
+    try {
+      const r = await gravarDependencias(tarefaId, [...atual, dependeDeId]);
+      if (r.antes_de_acabar?.length) {
+        setAviso({ texto: "Ligadas. Atenção: a tarefa começa antes de a outra acabar — arrasta-a ou replaneia." });
+      }
+      recarregar();
+    } catch (e) {
+      setAviso({ texto: e instanceof ErroDeEscrita ? e.message : "Não foi possível ligar as tarefas." });
+    }
+  };
 
   const sobrecarga = useMemo(
     () =>
@@ -389,6 +406,7 @@ export default function ObraDetalhe() {
             selecionada={selecionada}
             aoSelecionar={setSelecionada}
             aoMudarDatas={(id, i) => void mudarDatas(id, i)}
+            aoLigar={editavel ? (id, dep) => void ligar(id, dep) : undefined}
           />
 
           {editavel && (
@@ -434,6 +452,7 @@ export default function ObraDetalhe() {
         <ObraTarefaPainel
           key={tarefaSel?.id ?? `nova-${novaNaFase}`}
           obraId={obra.id}
+          orgId={obra.organization_id}
           tarefa={tarefaSel}
           fases={fases}
           tarefas={tarefas}

@@ -6,6 +6,8 @@ import {
   apagarTarefa,
   atribuirTarefa,
   gravarTarefa,
+  pessoasLivres,
+  type PessoaLivre,
   type ConflitoObra,
   type ConflitoRpc,
   type FaseObra,
@@ -30,6 +32,7 @@ import FotosTarefa from "./FotosTarefa";
  */
 export default function ObraTarefaPainel({
   obraId,
+  orgId,
   tarefa,
   fases,
   tarefas,
@@ -41,6 +44,8 @@ export default function ObraTarefaPainel({
   aoGravar,
 }: {
   obraId: string;
+  /** Para saber quem está livre nas datas da tarefa. Sem ele, mostra toda a equipa. */
+  orgId?: string;
   /** null = tarefa nova */
   tarefa: TarefaObra | null;
   fases: readonly FaseObra[];
@@ -71,8 +76,32 @@ export default function ObraTarefaPainel({
   }, [tarefa?.id]);
 
   const nomes = useMemo(() => new Map(equipa.map((m) => [m.utilizador_id, m.nome])), [equipa]);
+
+  // Quem está livre nas datas da tarefa (férias, feriados, agenda cheia, ordens).
+  // Quem está ocupado não aparece para escolher — a não ser que já esteja na tarefa.
+  const [livres, setLivres] = useState<Map<string, PessoaLivre> | null>(null);
+  useEffect(() => {
+    if (!podeEditar || !orgId || !inicio) {
+      setLivres(null);
+      return;
+    }
+    let vivo = true;
+    pessoasLivres({ orgId, inicio, fim: fim || inicio, excluirTarefa: tarefa?.id ?? null })
+      .then((ps) => vivo && setLivres(new Map(ps.map((p) => [p.utilizador_id, p]))))
+      .catch(() => vivo && setLivres(null));
+    return () => {
+      vivo = false;
+    };
+  }, [podeEditar, orgId, inicio, fim, tarefa?.id]);
+
   // Executam: técnicos e operadores (empreiteiros incluídos); o gestor também pode.
-  const executores = equipa.filter((m) => m.funcao !== "admin");
+  const todosExecutores = equipa.filter((m) => m.funcao !== "admin");
+  const executores = livres
+    ? todosExecutores.filter((m) => pessoas.includes(m.utilizador_id) || livres.get(m.utilizador_id)?.livre !== false)
+    : todosExecutores;
+  const ocupados = livres
+    ? todosExecutores.filter((m) => !pessoas.includes(m.utilizador_id) && livres.get(m.utilizador_id)?.livre === false)
+    : [];
   const meusConflitos = tarefa ? conflitos.filter((c) => c.tarefa_id === tarefa.id) : [];
   const outras = tarefas.filter((t) => t.id !== tarefa?.id);
 
@@ -275,8 +304,28 @@ export default function ObraTarefaPainel({
                     </button>
                   );
                 })}
-                {executores.length === 0 && <p className="text-xs text-slate-400">Ninguém com perfil em Operações.</p>}
+                {executores.length === 0 && (
+                  <p className="text-xs text-slate-400">
+                    {ocupados.length ? "Ninguém livre nestas datas." : "Ninguém com perfil em Operações."}
+                  </p>
+                )}
               </div>
+              {pessoas.some((p) => livres?.get(p)?.livre === false) && (
+                <p className="mt-1.5 text-xs text-amber-700">
+                  Atenção:{" "}
+                  {pessoas
+                    .filter((p) => livres?.get(p)?.livre === false)
+                    .map((p) => `${nomes.get(p) ?? "—"} (${livres?.get(p)?.motivo ?? "ocupado"})`)
+                    .join(", ")}
+                  .
+                </p>
+              )}
+              {ocupados.length > 0 && (
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  Indisponíveis nestas datas:{" "}
+                  {ocupados.map((m) => `${m.nome} — ${livres?.get(m.utilizador_id)?.motivo ?? "ocupado"}`).join(" · ")}
+                </p>
+              )}
             </div>
 
             <Field label="Procedimento" hint="Como se faz, e como se usa a ferramenta.">
