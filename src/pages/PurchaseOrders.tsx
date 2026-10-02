@@ -127,6 +127,44 @@ const itemRequiresIntegerQty = (item: PurchaseOrderItem) =>
 const formatSupplierLabel = (supplier: { name?: string | null; code?: string | null } | null | undefined) =>
   supplier ? (supplier.code ? `${supplier.code} · ${supplier.name || ""}` : supplier.name || "") : "";
 
+// Destino por linha da receção (20261206130000): mesmo formato em
+// rpc_receive_purchase_order_lines e rpc_preview_po_receipt. units_* em
+// unidades de stock (já × units_per_uom); qty_* na unidade da linha.
+type ReceiptAllocationLine = {
+  purchase_order_item_id: string;
+  units_per_uom?: number | null;
+  destination?: "client_order" | "stock" | "split" | null;
+  allocation_reason?: string | null;
+  contract_order_number?: string | null;
+  contract_active?: boolean | null;
+  units_to_order?: number | null;
+  units_to_stock?: number | null;
+  qty_to_order?: number | null;
+  qty_to_stock?: number | null;
+  stock_quantity_now?: number | null;
+  // Só no cliente: quantidade enviada na pré-visualização (descarta
+  // repartições de uma quantidade já alterada).
+  requested_quantity?: number;
+};
+
+type ReceiptAllocationResult = {
+  order_number?: string;
+  status?: string;
+  stock_skipped?: boolean;
+  units_to_order_total?: number | null;
+  units_to_stock_total?: number | null;
+  lines?: ReceiptAllocationLine[];
+};
+
+type PurchaseOrderReceiptRow = Database["public"]["Tables"]["purchase_order_receipts"]["Row"];
+
+const formatQty = (value: number | null | undefined) =>
+  (Number(value) || 0).toLocaleString("pt-PT", { maximumFractionDigits: 4 });
+
+// Números de EC distintos referidos nas linhas (normalmente só um por PO).
+const distinctContractNumbers = (lines: ReceiptAllocationLine[] | undefined) =>
+  Array.from(new Set((lines || []).map((l) => l.contract_order_number).filter((n): n is string => !!n)));
+
 // Receção parcial (migration 20261114040000): tipo de conveniência para as
 // linhas de purchase_order_items usadas no fluxo de receção.
 // `products` (join) é usado para mostrar o nome REAL/atual do produto no
@@ -221,7 +259,9 @@ const PurchaseOrders = () => {
   // armazém de destino e liga-se a rpc_receive_purchase_order (gera a entrada
   // em stock_movements na mesma transação que muda o estado para 'received').
   const [receiveDialogOpen, setReceiveDialogOpen] = useState(false);
-  const [receivingOrder, setReceivingOrder] = useState<{ id: string; order_number: string; stockSkipped: boolean } | null>(null);
+  // isClientOrder: PO ligada a uma Encomenda Cliente (source_type='contract') —
+  // o destino de cada linha (EC / stock / misto) vem de rpc_preview_po_receipt.
+  const [receivingOrder, setReceivingOrder] = useState<{ id: string; order_number: string; isClientOrder: boolean } | null>(null);
   const [receiveWarehouses, setReceiveWarehouses] = useState<{ id: string; name: string }[]>([]);
   const [receiveWarehouseId, setReceiveWarehouseId] = useState("");
   // Receção parcial (20261114040000): linhas de produto desta encomenda e a
@@ -235,6 +275,33 @@ const PurchaseOrders = () => {
   // (também é usada pelo relatório de SLA mesmo em receções parciais sucessivas).
   const [actualDeliveryDate, setActualDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
   const [receiving, setReceiving] = useState(false);
+  // Pré-visualização do destino por linha (rpc_preview_po_receipt, debounce):
+  // chave = purchase_order_item_id. O erro (ex. acima do saldo) fica inline.
+  const [receivePreview, setReceivePreview] = useState<Record<string, ReceiptAllocationLine>>({});
+  const [receivePreviewError, setReceivePreviewError] = useState<string | null>(null);
+  const [receivePreviewLoading, setReceivePreviewLoading] = useState(false);
+  const receivePreviewRequestRef = useRef(0);
+  // Passar para stock (rpc_po_receipt_release_to_stock): recebido de linhas de
+  // PO de contrato cuja Encomenda Cliente ficou inativa.
+  const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
+  // contractInactiveKnown=false: estado da EC desconhecido (texto neutro).
+  const [releaseOrder, setReleaseOrder] = useState<{ id: string; order_number: string; contractNumber: string; contractInactiveKnown: boolean } | null>(null);
+  const [releaseLines, setReleaseLines] = useState<PurchaseOrderItemWithReceipt[]>([]);
+  const [releaseSelectedIds, setReleaseSelectedIds] = useState<Set<string>>(new Set());
+  const [releaseWarehouses, setReleaseWarehouses] = useState<{ id: string; name: string }[]>([]);
+  const [releaseWarehouseId, setReleaseWarehouseId] = useState("");
+  const [releaseReason, setReleaseReason] = useState("");
+  const [releasing, setReleasing] = useState(false);
+  // Diálogo de detalhe: estado da EC ligada, linhas tal como gravadas
+  // (received_to_stock_units) e histórico de receções — sempre com o id da PO,
+  // para não mostrar dados de outra encomenda aberta entretanto.
+  // active: null = estado da EC desconhecido (a RLS não devolveu o contrato).
+  const [orderContractState, setOrderContractState] = useState<{ orderId: string; contractId: string; number: string; active: boolean | null } | null>(null);
+  // PO aberta no diálogo de detalhe — respostas de outra PO são descartadas.
+  const openOrderIdRef = useRef<string | null>(null);
+  const [orderReceiptItems, setOrderReceiptItems] = useState<{ orderId: string; items: PurchaseOrderItemWithReceipt[] } | null>(null);
+  const [orderReceipts, setOrderReceipts] = useState<{ orderId: string; rows: PurchaseOrderReceiptRow[]; warehouseNames: Record<string, string> } | null>(null);
+  const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
   // Reverter receção (por linha) — para encomendas marcadas como recebidas por
   // engano. Liga a rpc_revert_purchase_order_receipt: as linhas escolhidas
   // voltam a "por receber" e o stock que entrou é retirado (recusa se já saiu).
@@ -1001,7 +1068,29 @@ const PurchaseOrders = () => {
     }
   };
 
+  // Histórico de receções (purchase_order_receipts, só leitura) — best-effort:
+  // se falhar, a secção simplesmente não aparece. Nomes dos armazéns por id
+  // (inclui armazéns já apagados, para o histórico continuar legível).
+  const loadOrderReceipts = async (orderId: string) => {
+    const { data, error } = await supabase
+      .from("purchase_order_receipts")
+      .select("*")
+      .eq("purchase_order_id", orderId)
+      .order("received_at", { ascending: false });
+    if (error || !data || openOrderIdRef.current !== orderId) return;
+    const warehouseIds = Array.from(new Set(data.map((r) => r.warehouse_id).filter((id): id is string => !!id)));
+    const warehouseNames: Record<string, string> = {};
+    if (warehouseIds.length > 0) {
+      const { data: whs } = await supabase.from("warehouses").select("id, name").in("id", warehouseIds);
+      (whs || []).forEach((w) => { warehouseNames[w.id] = w.name; });
+    }
+    // Entretanto pode ter sido aberta outra PO — descarta a resposta.
+    if (openOrderIdRef.current !== orderId) return;
+    setOrderReceipts({ orderId, rows: data, warehouseNames });
+  };
+
   const handleEdit = async (order: PurchaseOrder) => {
+    openOrderIdRef.current = order.id;
     setEditingId(order.id);
     setEditingOrderMeta({
       id: order.id,
@@ -1026,16 +1115,34 @@ const PurchaseOrders = () => {
     // A query a direct_sales é silenciosa: sem direct_sales.view a RLS devolve
     // vazio e cai-se para o caso manual (mesma regra de ClientOrders.tsx).
     setOrderSourceInfo(null);
+    setOrderContractState(null);
+    setOrderReceiptItems(null);
+    setOrderReceipts(null);
+    setReceiptHistoryOpen(false);
+    void loadOrderReceipts(order.id);
     if ((order as any).source_type === "contract" && (order as any).source_id) {
       const contractId: string = (order as any).source_id;
       (async () => {
         const { data } = await supabase
           .from("client_contracts")
-          .select("contract_number, order_number, is_manual_order, entity_id, anew_entities(display_name)")
+          .select("contract_number, order_number, is_manual_order, entity_id, status, deleted_at, anew_entities(display_name)")
           .eq("id", contractId)
           .maybeSingle();
-        if (!data) return;
+        if (openOrderIdRef.current !== order.id) return;
+        if (!data) {
+          // Sem client_contracts.view (ou EC não devolvida pela RLS): estado
+          // desconhecido — a RPC de passagem para stock decide e explica.
+          setOrderContractState({ orderId: order.id, contractId, number: "", active: null });
+          return;
+        }
         const row = data as any;
+        // Mesma regra das RPCs de receção: ativa = assinada e não apagada.
+        setOrderContractState({
+          orderId: order.id,
+          contractId,
+          number: row.order_number || row.contract_number || "",
+          active: !row.deleted_at && (row.status === "signed" || row.status === "assinado"),
+        });
         const clientName: string = row.anew_entities?.display_name || "";
         const contractNumber: string = row.contract_number || "";
         if (!row.is_manual_order) {
@@ -1054,16 +1161,24 @@ const PurchaseOrders = () => {
         } else {
           setOrderSourceInfo({ contractId, originType: "manual", number: row.order_number || contractNumber, clientName });
         }
-      })().catch(() => { /* best-effort */ });
+      })().catch(() => {
+        // best-effort; estado da EC fica desconhecido (não bloqueia o botão).
+        if (openOrderIdRef.current === order.id) {
+          setOrderContractState((prev) => prev ?? { orderId: order.id, contractId, number: "", active: null });
+        }
+      });
     }
 
     // Load existing items
     const { data: items } = await supabase
       .from("purchase_order_items")
-      .select("*, uom:uom_id(code), products(uom:uom_id(code))")
+      .select("*, uom:uom_id(code), products(name, uom:uom_id(code))")
       .eq("purchase_order_id", order.id);
 
     if (items) {
+      if (openOrderIdRef.current === order.id) {
+        setOrderReceiptItems({ orderId: order.id, items: items as unknown as PurchaseOrderItemWithReceipt[] });
+      }
       const hasReceivedLines = (items as unknown as Array<PurchaseOrderItemWithReceipt>).some(
         (item) => item.item_type === 'product' && Number(item.received_quantity) > 0,
       );
@@ -1135,11 +1250,15 @@ const PurchaseOrders = () => {
   };
 
   const openReceiveDialog = async (order: PurchaseOrder) => {
-    // Ligada a uma Encomenda Cliente = não entra no stock geral (20261115210000).
-    setReceivingOrder({ id: order.id, order_number: order.order_number, stockSkipped: (order as any).source_type === "contract" });
+    // Ligada a uma Encomenda Cliente: o que a EC ainda precisa vai para a EC e
+    // o excedente entra em stock (20261206130000) — ver a pré-visualização.
+    setReceivingOrder({ id: order.id, order_number: order.order_number, isClientOrder: (order as any).source_type === "contract" });
     setReceiveWarehouseId("");
     setReceiveLines([]);
     setReceiveLineQuantities({});
+    setReceivePreview({});
+    setReceivePreviewError(null);
+    setReceivePreviewLoading(false);
     setActualDeliveryDate(new Date().toISOString().slice(0, 10));
     setReceiveDialogOpen(true);
 
@@ -1195,6 +1314,55 @@ const PurchaseOrders = () => {
     setReceiveLineQuantities(quantities);
   };
 
+  // Pré-visualização do destino (rpc_preview_po_receipt simula a receção e
+  // desfaz): debounce de 400 ms; pedidos antigos descartados pelo requestId.
+  // Erros ficam inline (sem toast a cada tecla). Só em POs ligadas a uma EC —
+  // numa PO de stock tudo entra em stock. O armazém vai no pedido mas não é
+  // dependência: o destino não depende dele.
+  useEffect(() => {
+    if (!receiveDialogOpen || !receivingOrder) return;
+    const orderId = receivingOrder.id;
+    const lines = receiveLines
+      .map((item) => ({ purchase_order_item_id: item.id, quantity: receiveLineQuantities[item.id] || 0 }))
+      .filter((line) => line.quantity > 0);
+    const requestId = ++receivePreviewRequestRef.current;
+    if (!receivingOrder.isClientOrder || lines.length === 0) {
+      setReceivePreview({});
+      setReceivePreviewError(null);
+      setReceivePreviewLoading(false);
+      return;
+    }
+    setReceivePreviewLoading(true);
+    const handle = setTimeout(async () => {
+      const { data, error } = await supabase.rpc("rpc_preview_po_receipt", {
+        p_purchase_order_id: orderId,
+        p_lines: lines,
+        p_warehouse_id: receiveWarehouseId || undefined,
+      });
+      if (receivePreviewRequestRef.current !== requestId) return;
+      setReceivePreviewLoading(false);
+      if (error) {
+        setReceivePreview({});
+        setReceivePreviewError(error.message);
+        return;
+      }
+      const result = data as unknown as ReceiptAllocationResult | null;
+      const requested = new Map(lines.map((l) => [l.purchase_order_item_id, l.quantity]));
+      const byItem: Record<string, ReceiptAllocationLine> = {};
+      (result?.lines || []).forEach((l) => {
+        byItem[l.purchase_order_item_id] = { ...l, requested_quantity: requested.get(l.purchase_order_item_id) };
+      });
+      setReceivePreview(byItem);
+      setReceivePreviewError(null);
+    }, 400);
+    return () => {
+      clearTimeout(handle);
+      // Descarta a resposta em voo (diálogo fechado ou quantidades mudadas).
+      receivePreviewRequestRef.current++;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiveDialogOpen, receivingOrder, receiveLines, receiveLineQuantities]);
+
   const handleReceiveOrder = async () => {
     if (!receivingOrder || !receiveWarehouseId) return;
 
@@ -1226,23 +1394,36 @@ const PurchaseOrders = () => {
 
       // O status devolvido pelo RPC é a fonte da verdade — não assumir
       // 'received' (pode ter ficado 'partially_received').
-      const result = data as {
-        status?: string;
-        stock_skipped?: boolean;
-        lines?: Array<{ units_per_uom?: number | null; stock_quantity_now?: number | null }>;
-      } | null;
+      const result = data as unknown as ReceiptAllocationResult | null;
       const isFullyReceived = result?.status === 'received';
+      const resultLines = result?.lines || [];
       // Embalagens (20261204203500): stock_quantity_now = unidades de stock
       // que entraram agora (quantidade × fator da linha).
-      const stockUnitsNow = (result?.lines || []).reduce((sum, l) => sum + (Number(l.stock_quantity_now) || 0), 0);
-      const hasPacks = (result?.lines || []).some((l) => (l.units_per_uom ?? 1) > 1);
-      // Ligada a uma Encomenda Cliente (já tem destino certo) — a receção
-      // não infla o stock geral, ver 20261115210000.
-      const stockNote = result?.stock_skipped
-        ? " Ligada a uma Encomenda Cliente — o stock geral não foi alterado."
-        : hasPacks
-          ? ` Stock atualizado: entraram ${stockUnitsNow} unidades de stock.`
-          : " Stock atualizado.";
+      const stockUnitsNow = resultLines.reduce((sum, l) => sum + (Number(l.stock_quantity_now) || 0), 0);
+      const hasPacks = resultLines.some((l) => (l.units_per_uom ?? 1) > 1);
+      // Destino por linha (20261206130000): units_*_total em unidades de stock.
+      // stock_skipped=true só quando nada entrou em stock numa PO de contrato.
+      const unitsToOrder = Number(result?.units_to_order_total) || 0;
+      const unitsToStock = Number(result?.units_to_stock_total) || 0;
+      const ecNumbers = distinctContractNumbers(resultLines);
+      const ecLabel = ecNumbers.length > 0 ? ecNumbers.join(", ") : "Encomenda Cliente";
+      // EC inativa decide-se pelo motivo da alocação (o número pode faltar).
+      const inactiveLines = resultLines.filter((l) => l.allocation_reason === "client_order_inactive");
+      const inactiveEcNumbers = distinctContractNumbers(inactiveLines);
+      const inactiveEcLabel = inactiveEcNumbers.length > 0
+        ? `A encomenda cliente ${inactiveEcNumbers.join(", ")}`
+        : "A encomenda cliente ligada";
+      const stockNote = unitsToOrder > 0 && unitsToStock > 0
+        ? ` ${formatQty(unitsToOrder)} unidades para a ${ecLabel}, ${formatQty(unitsToStock)} para stock.`
+        : result?.stock_skipped || (unitsToOrder > 0 && unitsToStock === 0)
+          ? ` Tudo para a ${ecLabel} — o stock geral não foi alterado.`
+          : inactiveLines.length > 0
+            ? ` ${inactiveEcLabel} está inativa — entraram ${formatQty(unitsToStock)} unidades em stock.`
+            : resultLines.some((l) => l.allocation_reason === "client_order_already_covered")
+              ? ` A ${ecLabel} já estava coberta — entraram ${formatQty(unitsToStock)} unidades em stock.`
+            : hasPacks
+              ? ` Stock atualizado: entraram ${stockUnitsNow} unidades de stock.`
+              : " Stock atualizado.";
 
       toast({
         title: isFullyReceived ? "Encomenda totalmente recebida" : "Receção parcial registada",
@@ -1254,6 +1435,8 @@ const PurchaseOrders = () => {
       setReceivingOrder(null);
       setReceiveLines([]);
       setReceiveLineQuantities({});
+      setReceivePreview({});
+      setReceivePreviewError(null);
       setActualDeliveryDate(new Date().toISOString().slice(0, 10));
       loadData();
     } catch (error: any) {
@@ -1315,6 +1498,7 @@ const PurchaseOrders = () => {
   const handleOrderDialogOpenChange = (isOpen: boolean) => {
     setOpen(isOpen);
     if (!isOpen) {
+      openOrderIdRef.current = null;
       setEditingId(null);
       setEditingOrderMeta(null);
       setPendingRevertPreselect(null);
@@ -1376,13 +1560,28 @@ const PurchaseOrders = () => {
       });
       if (error) throw error;
 
-      const result = data as { order_number?: string; status?: string; lines?: unknown[] } | null;
+      const result = data as {
+        order_number?: string;
+        status?: string;
+        lines?: Array<{ units_reverted_from_stock?: number | null; units_reverted_from_client_order?: number | null }>;
+      } | null;
+      // Destino por linha (20261206130000): quanto saiu do stock e quanto
+      // deixou de estar entregue à Encomenda Cliente (unidades de stock).
+      const fromStock = (result?.lines || []).reduce((sum, l) => sum + (Number(l.units_reverted_from_stock) || 0), 0);
+      const fromClientOrder = (result?.lines || []).reduce((sum, l) => sum + (Number(l.units_reverted_from_client_order) || 0), 0);
+      const revertNote = fromStock > 0 && fromClientOrder > 0
+        ? ` Retiradas ${formatQty(fromStock)} unidades do stock e ${formatQty(fromClientOrder)} da Encomenda Cliente.`
+        : fromClientOrder > 0
+          ? ` Retiradas ${formatQty(fromClientOrder)} unidades da Encomenda Cliente — o stock geral não foi alterado.`
+          : fromStock > 0
+            ? ` Retiradas ${formatQty(fromStock)} unidades do stock.`
+            : "";
       toast({
         title: t('purchaseOrders.revert.successTitle') || "Receção revertida",
         description: t('purchaseOrders.revert.successDescription', {
           order: result?.order_number || revertingOrder.order_number,
           count: result?.lines?.length ?? revertSelectedIds.size,
-        }),
+        }) + revertNote,
       });
       setRevertDialogOpen(false);
       setRevertingOrder(null);
@@ -1395,6 +1594,97 @@ const PurchaseOrders = () => {
       toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
     } finally {
       setReverting(false);
+    }
+  };
+
+  // Unidades de stock recebidas numa linha que ainda não estão em stock (as
+  // que foram entregues à Encomenda Cliente).
+  const getUnitsNotInStock = (item: PurchaseOrderItemWithReceipt) =>
+    (Number(item.received_quantity) || 0) * (item.units_per_uom ?? 1) - (Number(item.received_to_stock_units) || 0);
+
+  // Linhas da encomenda aberta que podem passar para stock: só PO de contrato
+  // (orderContractState só existe para source_type='contract') com a EC
+  // inativa OU de estado desconhecido (sem client_contracts.view). Se a EC for
+  // conhecida e ativa, não. rpc_po_receipt_release_to_stock volta a validar
+  // tudo e explica a recusa.
+  const releasableLines =
+    editingId &&
+    orderContractState?.orderId === editingId &&
+    orderContractState.active !== true &&
+    orderReceiptItems?.orderId === editingId
+      ? orderReceiptItems.items.filter((item) => item.item_type === "product" && getUnitsNotInStock(item) > 0)
+      : [];
+
+  // Fecha o diálogo da encomenda e abre o de "Passar para stock" (mesmo
+  // padrão de handleRevertFromOrderDialog).
+  const handleReleaseFromOrderDialog = async () => {
+    const meta = editingOrderMeta;
+    if (!meta || releasableLines.length === 0) return;
+    const lines = releasableLines;
+    setReleaseOrder({
+      id: meta.id,
+      order_number: meta.orderNumber,
+      contractNumber: orderContractState?.number || "",
+      contractInactiveKnown: orderContractState?.active === false,
+    });
+    setReleaseLines(lines);
+    setReleaseSelectedIds(new Set(lines.map((l) => l.id)));
+    setReleaseWarehouseId("");
+    setReleaseReason("");
+    skipOrderDialogFocusRestoreRef.current = true;
+    handleOrderDialogOpenChange(false);
+    setReleaseDialogOpen(true);
+
+    if (!activeCompany?.id) return;
+    const { data, error } = await supabase
+      .from("warehouses")
+      .select("id, name")
+      .eq("organization_id", activeCompany.id)
+      .is("deleted_at", null)
+      .order("name");
+    if (error) {
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+      return;
+    }
+    setReleaseWarehouses(data || []);
+  };
+
+  const toggleReleaseLine = (id: string, checked: boolean) => {
+    setReleaseSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const handleReleaseToStock = async () => {
+    if (!releaseOrder || releaseSelectedIds.size === 0 || !releaseWarehouseId) return;
+    setReleasing(true);
+    try {
+      const { data, error } = await supabase.rpc("rpc_po_receipt_release_to_stock", {
+        p_item_ids: Array.from(releaseSelectedIds),
+        p_warehouse_id: releaseWarehouseId,
+        p_reason: releaseReason.trim() || undefined,
+      });
+      if (error) throw error;
+      const result = data as { lines?: Array<{ units_to_stock?: number | null }> } | null;
+      const units = (result?.lines || []).reduce((sum, l) => sum + (Number(l.units_to_stock) || 0), 0);
+      toast({
+        title: "Passado para stock",
+        description: `${releaseOrder.order_number}: entraram ${formatQty(units)} unidades em stock.`,
+      });
+      setReleaseDialogOpen(false);
+      setReleaseOrder(null);
+      setReleaseLines([]);
+      setReleaseSelectedIds(new Set());
+      setReleaseReason("");
+      loadData();
+    } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setReleasing(false);
     }
   };
 
@@ -2700,13 +2990,30 @@ const PurchaseOrders = () => {
                       <p className="text-sm text-muted-foreground">
                         {t('purchaseOrders.readOnlyReceived')}
                       </p>
-                      {editingOrderMeta?.hasReceivedLines && (
-                        <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
-                          <Button type="button" variant="outline" size="sm" onClick={handleRevertFromOrderDialog}>
-                            <Undo2 className="w-4 h-4 mr-2" />
-                            {t('purchaseOrders.revert.action')}
-                          </Button>
-                        </PermissionGate>
+                      <div className="flex flex-wrap gap-2">
+                        {/* EC inativa: o que foi entregue à EC pode passar para stock.
+                            Mesmas permissões que rpc_po_receipt_release_to_stock. */}
+                        {releasableLines.length > 0 && (
+                          <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                            <Button type="button" variant="outline" size="sm" onClick={() => void handleReleaseFromOrderDialog()}>
+                              <PackageCheck className="w-4 h-4 mr-2" />
+                              Passar para stock
+                            </Button>
+                          </PermissionGate>
+                        )}
+                        {editingOrderMeta?.hasReceivedLines && (
+                          <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
+                            <Button type="button" variant="outline" size="sm" onClick={handleRevertFromOrderDialog}>
+                              <Undo2 className="w-4 h-4 mr-2" />
+                              {t('purchaseOrders.revert.action')}
+                            </Button>
+                          </PermissionGate>
+                        )}
+                      </div>
+                      {releasableLines.length > 0 && orderContractState?.active === false && (
+                        <p className="w-full text-xs text-amber-700 dark:text-amber-400">
+                          A encomenda cliente {orderContractState.number || "ligada"} está inativa — o que foi recebido para ela pode passar para stock.
+                        </p>
                       )}
                     </div>
                   )}
@@ -3153,6 +3460,101 @@ const PurchaseOrders = () => {
                     )}
                   </div>
 
+                  {/* Histórico de receções (purchase_order_receipts, 20261206130000) —
+                      só de leitura, colapsável. Receções anteriores à tabela não
+                      têm registo aqui. */}
+                  {editingId && (
+                    (orderReceipts?.orderId === editingId && orderReceipts.rows.length > 0) ||
+                    (editingOrderMeta?.id === editingId && editingOrderMeta.hasReceivedLines)
+                  ) && (() => {
+                    const rows = orderReceipts?.orderId === editingId ? orderReceipts.rows : [];
+                    const warehouseNames = orderReceipts?.orderId === editingId ? orderReceipts.warehouseNames : {};
+                    const itemsById = new Map(
+                      (orderReceiptItems?.orderId === editingId ? orderReceiptItems.items : []).map((i) => [i.id, i]),
+                    );
+                    return (
+                      <div className="border-t pt-4">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="px-2 -ml-2"
+                          onClick={() => setReceiptHistoryOpen((v) => !v)}
+                          aria-expanded={receiptHistoryOpen}
+                        >
+                          {receiptHistoryOpen ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+                          Histórico de receções{rows.length > 0 ? ` (${rows.length})` : ""}
+                        </Button>
+                        {receiptHistoryOpen && (
+                          rows.length === 0 ? (
+                            <p className="text-sm text-muted-foreground mt-2">
+                              Sem registo detalhado — as receções feitas antes desta funcionalidade não aparecem aqui.
+                            </p>
+                          ) : (
+                            <div className="mt-2 overflow-x-auto">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Data</TableHead>
+                                    <TableHead>Linha / produto</TableHead>
+                                    <TableHead>Tipo</TableHead>
+                                    <TableHead className="text-right">Quantidade</TableHead>
+                                    <TableHead className="text-right">Para EC</TableHead>
+                                    <TableHead className="text-right">Para stock</TableHead>
+                                    <TableHead>Armazém</TableHead>
+                                    <TableHead>Estado</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {rows.map((r) => {
+                                    const item = r.purchase_order_item_id ? itemsById.get(r.purchase_order_item_id) : undefined;
+                                    const units = r.units_per_uom ?? 1;
+                                    const baseCode = item?.products?.uom?.code || "un";
+                                    const lineUomCode = item?.uom?.code || (units === 1 ? item?.products?.uom?.code : null) || "";
+                                    const isRelease = r.kind === "release_to_stock";
+                                    return (
+                                      <TableRow key={r.id} className={r.reverted_at ? "opacity-60" : ""}>
+                                        <TableCell className="whitespace-nowrap">{new Date(r.received_at).toLocaleString("pt-PT")}</TableCell>
+                                        <TableCell>
+                                          <div className="max-w-[240px] truncate" title={item?.products?.name || item?.description || ""}>
+                                            {item?.products?.name || item?.description || "Linha removida"}
+                                          </div>
+                                        </TableCell>
+                                        <TableCell className="whitespace-nowrap">{isRelease ? "Passagem para stock" : "Receção"}</TableCell>
+                                        <TableCell className="text-right whitespace-nowrap">
+                                          {isRelease ? "—" : `${formatQty(r.quantity)}${lineUomCode ? ` ${lineUomCode}` : ""}`}
+                                        </TableCell>
+                                        <TableCell className="text-right whitespace-nowrap">
+                                          {Number(r.units_to_order) > 0 ? `${formatQty(r.units_to_order)} ${baseCode}` : "—"}
+                                        </TableCell>
+                                        <TableCell className="text-right whitespace-nowrap">
+                                          {Number(r.units_to_stock) > 0 ? `${formatQty(r.units_to_stock)} ${baseCode}` : "—"}
+                                        </TableCell>
+                                        <TableCell className="whitespace-nowrap">{r.warehouse_id ? warehouseNames[r.warehouse_id] || "—" : "—"}</TableCell>
+                                        <TableCell>
+                                          {r.reverted_at ? (
+                                            <span className="text-xs">
+                                              Revertida em {new Date(r.reverted_at).toLocaleString("pt-PT")}
+                                              {r.revert_reason ? ` — ${r.revert_reason}` : ""}
+                                            </span>
+                                          ) : (
+                                            <span className="text-xs text-muted-foreground">
+                                              Ativa{isRelease && r.notes ? ` — ${r.notes}` : ""}
+                                            </span>
+                                          )}
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="flex gap-2 justify-end pt-4 border-t">
                     {isOrderReadOnly ? (
                       // Fecho completo (repõe o formulário) — o Cancelar abaixo só
@@ -3541,10 +3943,23 @@ const PurchaseOrders = () => {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Indica, por linha, a quantidade a dar entrada em stock agora. Só as quantidades
+              Indica, por linha, a quantidade a receber agora. Só as quantidades
               indicadas são recebidas — o que ficar por preencher continua por receber para uma
               entrega posterior.
+              {receivingOrder?.isClientOrder &&
+                " Esta encomenda está ligada a uma Encomenda Cliente: o que ela ainda precisa fica para ela e o excedente entra em stock."}
             </p>
+            {(() => {
+              // Decide-se pelo motivo da alocação; o número da EC pode faltar.
+              const inactiveLines = Object.values(receivePreview).filter((l) => l.allocation_reason === "client_order_inactive");
+              if (inactiveLines.length === 0) return null;
+              const numbers = distinctContractNumbers(inactiveLines);
+              return (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                  {numbers.length > 0 ? `A encomenda cliente ${numbers.join(", ")}` : "A encomenda cliente ligada"} está inativa — o recebido entra em stock.
+                </div>
+              );
+            })()}
             <div className="space-y-2">
               <Label>Armazém de destino</Label>
               <Select value={receiveWarehouseId} onValueChange={setReceiveWarehouseId}>
@@ -3633,9 +4048,35 @@ const PurchaseOrders = () => {
                                   }}
                                 />
                                 <div className="text-xs text-muted-foreground mt-1 whitespace-nowrap">
-                                  {receivingOrder?.stockSkipped
-                                    ? "sem entrada no stock geral"
-                                    : `entram ${(toReceive * units).toLocaleString("pt-PT")} ${baseCode} em stock`}
+                                  {(() => {
+                                    if (toReceive <= 0) return null;
+                                    const preview = receivePreview[item.id];
+                                    // PO de stock: o destino é sempre o stock — não depende da pré-visualização.
+                                    if (!receivingOrder?.isClientOrder && (!preview || preview.destination === "stock")) {
+                                      return `entram ${(toReceive * units).toLocaleString("pt-PT")} ${baseCode} em stock`;
+                                    }
+                                    // Repartição de uma quantidade já alterada (ou ainda sem resposta).
+                                    if (!preview || preview.requested_quantity !== toReceive) {
+                                      return receivePreviewError ? null : "a calcular destino…";
+                                    }
+                                    const qtyToOrder = Number(preview.qty_to_order) || 0;
+                                    const qtyToStock = Number(preview.qty_to_stock) || 0;
+                                    const uomSuffix = lineUomCode ? ` ${lineUomCode}` : "";
+                                    const parts: string[] = [];
+                                    if (qtyToOrder > 0) {
+                                      parts.push(
+                                        `${formatQty(qtyToOrder)}${uomSuffix} para ${preview.contract_order_number || "a EC"}` +
+                                          (units > 1 ? ` (${formatQty(preview.units_to_order)} ${baseCode})` : ""),
+                                      );
+                                    }
+                                    if (qtyToStock > 0) {
+                                      parts.push(
+                                        `${formatQty(qtyToStock)}${uomSuffix} para stock` +
+                                          (units > 1 ? ` (${formatQty(preview.units_to_stock)} ${baseCode})` : ""),
+                                      );
+                                    }
+                                    return parts.join(" / ") || null;
+                                  })()}
                                 </div>
                               </>
                             )}
@@ -3645,6 +4086,9 @@ const PurchaseOrders = () => {
                     })}
                   </TableBody>
                 </Table>
+                {receivePreviewError && (
+                  <p className="text-xs text-destructive" role="alert">{receivePreviewError}</p>
+                )}
               </div>
             )}
 
@@ -3728,7 +4172,15 @@ const PurchaseOrders = () => {
                             )}
                           </TableCell>
                           <TableCell className="text-right whitespace-nowrap">{item.quantity}{lineUomCode ? ` ${lineUomCode}` : ""}</TableCell>
-                          <TableCell className="text-right whitespace-nowrap">{item.received_quantity || 0}{lineUomCode ? ` ${lineUomCode}` : ""}</TableCell>
+                          <TableCell className="text-right whitespace-nowrap">
+                            {item.received_quantity || 0}{lineUomCode ? ` ${lineUomCode}` : ""}
+                            {/* Destino por linha: parte que saiu do stock vs. parte entregue à EC. */}
+                            {getUnitsNotInStock(item) > 0 && (
+                              <div className="text-xs text-muted-foreground">
+                                {formatQty(item.received_to_stock_units)} {baseCode} do stock · {formatQty(getUnitsNotInStock(item))} {baseCode} da EC
+                              </div>
+                            )}
+                          </TableCell>
                         </TableRow>
                       );
                     })}
@@ -3766,6 +4218,102 @@ const PurchaseOrders = () => {
                 {reverting
                   ? (t('purchaseOrders.revert.processing') || "A reverter...")
                   : (t('purchaseOrders.revert.confirm') || "Reverter receção")}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Passar para stock — o recebido de uma PO de contrato cuja Encomenda
+          Cliente ficou inativa. Liga a rpc_po_receipt_release_to_stock, que
+          volta a validar tudo (EC ativa, linha de stock, nada pendente). */}
+      <Dialog open={releaseDialogOpen} onOpenChange={(o) => { if (!releasing) setReleaseDialogOpen(o); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Passar para stock{releaseOrder ? ` — ${releaseOrder.order_number}` : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {releaseOrder?.contractInactiveKnown
+                ? `A encomenda cliente ${releaseOrder.contractNumber || "ligada"} está inativa. O que foi recebido para ela nas linhas escolhidas dá entrada no armazém indicado.`
+                : "Só é possível se a encomenda cliente estiver inativa. O que foi recebido para ela nas linhas escolhidas dá entrada no armazém indicado."}
+            </p>
+
+            <div className="space-y-2">
+              <Label>Armazém de destino</Label>
+              <Select value={releaseWarehouseId} onValueChange={setReleaseWarehouseId} disabled={releasing}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Escolhe um armazém" />
+                </SelectTrigger>
+                <SelectContent>
+                  {releaseWarehouses.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableHead>Item</TableHead>
+                  <TableHead className="text-right">Recebida</TableHead>
+                  <TableHead className="text-right">Passa para stock</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {releaseLines.map((item) => {
+                  const units = item.units_per_uom ?? 1;
+                  const baseCode = item.products?.uom?.code || "un";
+                  const lineUomCode = item.uom?.code || (units === 1 ? item.products?.uom?.code : null) || "";
+                  return (
+                    <TableRow key={item.id}>
+                      <TableCell>
+                        <Checkbox
+                          checked={releaseSelectedIds.has(item.id)}
+                          onCheckedChange={(v) => toggleReleaseLine(item.id, v === true)}
+                          disabled={releasing}
+                          aria-label={item.products?.name || item.description}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium">{item.products?.name || item.description}</div>
+                        {item.sku && <div className="text-xs text-muted-foreground font-mono">{item.sku}</div>}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {item.received_quantity || 0}{lineUomCode ? ` ${lineUomCode}` : ""}
+                      </TableCell>
+                      <TableCell className="text-right whitespace-nowrap">
+                        {formatQty(getUnitsNotInStock(item))} {baseCode}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+
+            <div className="space-y-2">
+              <Label htmlFor="release-reason">Motivo (opcional)</Label>
+              <Textarea
+                id="release-reason"
+                value={releaseReason}
+                onChange={(e) => setReleaseReason(e.target.value)}
+                placeholder="Ex.: encomenda cliente cancelada"
+                disabled={releasing}
+                rows={2}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setReleaseDialogOpen(false)} disabled={releasing}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleReleaseToStock}
+                disabled={releasing || releaseSelectedIds.size === 0 || !releaseWarehouseId}
+              >
+                {releasing ? "A passar..." : "Passar para stock"}
               </Button>
             </div>
           </div>
