@@ -8,11 +8,11 @@ import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { Loader2, Pencil, Trash2, Truck } from "lucide-react";
 import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
+import { FichaLocalResumo } from "@/components/addresses/FichaLocalResumo";
 import {
   listEntityDeliveryAddresses,
   formatDeliveryAddress,
   removeEntityDeliveryAddress,
-  resumoFichaTecnica,
   type EntityDeliveryAddress,
 } from "@/lib/addresses/entityDeliveryAddresses";
 
@@ -23,7 +23,7 @@ interface ClientDeliveryAddressesSectionProps {
 /**
  * Secção "Moradas de entrega" da ficha do cliente. Independente do botão
  * Guardar da ficha: acrescentar, editar e remover gravam logo, por RPC. Cada
- * morada mostra o resumo da ficha técnica do edifício. Não toca na
+ * morada mostra o resumo da ficha do local (Exterior / Interior). Não toca na
  * morada principal (essa continua a ser gravada pelo rpc_update_client).
  */
 export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddressesSectionProps) => {
@@ -87,7 +87,6 @@ export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddre
         <ul className="space-y-2 mb-4">
           {addresses.map((address) => {
             const text = formatDeliveryAddress(address) || address.formatted || '—';
-            const resumo = resumoFichaTecnica(address.ficha_tecnica, address.floor);
             if (editingId === address.entity_address_id) {
               return (
                 <li key={address.entity_address_id} className="rounded-md border px-3 py-3 space-y-2">
@@ -107,7 +106,7 @@ export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddre
               <li key={address.entity_address_id} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
                 <div className="min-w-0">
                   <p className="text-sm break-words">{text}</p>
-                  {resumo && <p className="text-xs text-muted-foreground break-words">{resumo}</p>}
+                  <FichaLocalResumo ficha={address.ficha_tecnica} piso={address.floor} className="mt-0.5" />
                 </div>
                 <div className="flex shrink-0 items-center">
                 <Button

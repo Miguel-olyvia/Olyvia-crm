@@ -4,7 +4,7 @@
  *
  *  1. Escolhe a PRIMEIRA morada de entrega por defeito.
  *  2. Não escolhe por defeito quando já há valor ou texto gravado.
- *  3. Mostra o resumo da ficha técnica da morada escolhida.
+ *  3. Mostra o resumo da ficha do local (Exterior / Interior) da morada escolhida.
  *  4. Trocar de morada chama onChange.
  *  5. "Nova morada de entrega" → ao gravar, a nova fica escolhida.
  *  6. "Editar" → ao gravar, a escolha segue o address_id devolvido.
@@ -22,7 +22,6 @@ vi.mock("@/lib/addresses/entityDeliveryAddresses", () => ({
   listEntityDeliveryAddresses: (...a: unknown[]) => h.list(...a),
   formatDeliveryAddress: (a: { street?: string | null; number?: string | null; city?: string | null }) =>
     [a.street, a.number, a.city].filter(Boolean).join(", "),
-  resumoFichaTecnica: (f: { acesso?: string } | null) => (f ? `Ficha: ${f.acesso}` : ""),
 }));
 
 // O formulário real é do módulo de moradas; aqui só interessa o contrato.
@@ -96,7 +95,30 @@ describe("QuoteMoradaEntrega", () => {
     const opcao = await screen.findByRole("radio", { name: "Rua A, 1, Lisboa" });
     expect(opcao).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("radio", { name: "Rua B, 1, Lisboa" })).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByTestId("quote-morada-ficha-tecnica")).toHaveTextContent("Ficha: dificil");
+    expect(screen.getByTestId("quote-morada-ficha-tecnica")).toHaveTextContent("Exterior: Difícil acesso");
+  });
+
+  it("resumo em duas linhas (Exterior / Interior) e aviso quando a ficha está vazia", async () => {
+    const comInterior = morada("addr-4", "Rua D", {
+      ficha_tecnica: {
+        acesso: "facil", tipologia: "T3", area_util_m2: 95, n_casas_banho: 2, habitada_durante_obra: true,
+      } as EntityDeliveryAddress["ficha_tecnica"],
+    });
+    h.list.mockResolvedValue([comInterior, A2]);
+    const { unmount } = render(<QuoteMoradaEntrega entityId="ent-1" value="addr-4" onChange={vi.fn()} />);
+    const resumo = await screen.findByTestId("quote-morada-ficha-tecnica");
+    const linhas = Array.from(resumo.querySelectorAll("p[data-seccao]")).map((p) => p.textContent);
+    expect(linhas).toEqual(["Exterior: Fácil acesso", "Interior: T3 · 95 m² · 2 WC · habitada"]);
+    unmount();
+
+    render(<QuoteMoradaEntrega entityId="ent-1" value="addr-2" onChange={vi.fn()} />);
+    expect(await screen.findByText(/Ficha do local por preencher/)).toBeInTheDocument();
+  });
+
+  it("rótulo diz \"Morada de entrega / do serviço\"", () => {
+    render(<QuoteMoradaEntrega entityId={null} value={null} onChange={vi.fn()} />);
+    expect(screen.getByText("Morada de entrega / do serviço")).toBeInTheDocument();
+    expect(screen.queryByText(/da obra/)).not.toBeInTheDocument();
   });
 
   it("trocar de morada chama onChange", async () => {

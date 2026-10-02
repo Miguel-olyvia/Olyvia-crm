@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } }));
 
 import { formatDeliveryAddress } from "../entityDeliveryAddresses";
+import { FICHA_TECNICA_VAZIA } from "../fichaTecnicaEdificio";
 
 describe("formatDeliveryAddress", () => {
   it("inclui andar e fração quando existem", () => {
@@ -43,6 +44,7 @@ describe("ficha técnica nas moradas de entrega", () => {
     })).toEqual({
       ...base,
       ficha_tecnica: {
+        ...FICHA_TECNICA_VAZIA,
         acesso: "dificil", impacto_percent: 15, estacionamento: "pago", zona_estacionamento: null,
         tem_elevador: true, n_elevadores: 1, n_andares: 5, n_fracoes_por_andar: 4,
       },
@@ -58,6 +60,7 @@ describe("ficha técnica nas moradas de entrega", () => {
     const input = {
       street: " Rua X ", number: "", floor: "3", unit: "", postal_code: "1000-001", city: "Lisboa",
       ficha_tecnica: {
+        ...FICHA_TECNICA_VAZIA,
         acesso: "facil" as const, impacto_percent: null, estacionamento: null, zona_estacionamento: null,
         tem_elevador: false, n_elevadores: null, n_andares: 4, n_fracoes_por_andar: null,
       },
@@ -70,6 +73,58 @@ describe("ficha técnica nas moradas de entrega", () => {
     await updateEntityDeliveryAddress("ea1", { ...input, ficha_tecnica: null });
     expect(rpc).toHaveBeenLastCalledWith("rpc_update_entity_delivery_address", expect.objectContaining({
       p_entity_address_id: "ea1", p_acesso: undefined, p_n_andares: undefined,
+      p_tipologia: undefined, p_com_interior: true,
+    }));
+  });
+
+  it("deliveryAddressFromRow traz o interior (área em texto vira número)", async () => {
+    const { deliveryAddressFromRow } = await import("../entityDeliveryAddresses");
+    const r = deliveryAddressFromRow({
+      ...base, has_building: true, tipologia: "T3", area_util_m2: "95.50", n_casas_banho: 2,
+      ano_construcao: 1985, canalizacao: "ferro", habitada_durante_obra: true, animais: false,
+      notas_interior: "Cão",
+    });
+    expect(r).toEqual({
+      ...base,
+      ficha_tecnica: {
+        ...FICHA_TECNICA_VAZIA,
+        tipologia: "T3", area_util_m2: 95.5, n_casas_banho: 2, ano_construcao: 1985, canalizacao: "ferro",
+        habitada_durante_obra: true, animais: false, notas_interior: "Cão",
+      },
+    });
+    // As colunas da ficha não ficam soltas na morada.
+    expect(r).not.toHaveProperty("tipologia");
+    expect(r).not.toHaveProperty("has_building");
+  });
+
+  it("add e update enviam os campos do interior", async () => {
+    const { supabase } = await import("@/integrations/supabase/client");
+    const rpc = supabase.rpc as unknown as ReturnType<typeof vi.fn>;
+    rpc.mockResolvedValue({ data: {}, error: null });
+    const { addEntityDeliveryAddress, updateEntityDeliveryAddress } = await import("../entityDeliveryAddresses");
+    const input = {
+      street: "Rua X", number: "1", floor: "", unit: "", postal_code: "1000-001", city: "Lisboa",
+      ficha_tecnica: {
+        ...FICHA_TECNICA_VAZIA,
+        tipologia: "T2" as const, area_util_m2: 70.5, n_divisoes: 4, n_casas_banho: 1, ano_construcao: 1970,
+        pavimento: "madeira" as const, eletrica: "antiga" as const, quadro_diferencial: false,
+        canalizacao: "nao_sei" as const, gas: "sem" as const, amianto: "nao" as const,
+        habitada_durante_obra: true, animais: false, notas_interior: "Gato",
+      },
+    };
+    const esperado = {
+      p_tipologia: "T2", p_area_util_m2: 70.5, p_n_divisoes: 4, p_n_casas_banho: 1, p_ano_construcao: 1970,
+      p_pavimento: "madeira", p_eletrica: "antiga", p_quadro_diferencial: false, p_canalizacao: "nao_sei",
+      p_gas: "sem", p_amianto: "nao", p_habitada_durante_obra: true, p_animais: false, p_notas_interior: "Gato",
+      p_acesso: undefined, p_tem_elevador: undefined,
+    };
+    await addEntityDeliveryAddress("e1", input);
+    expect(rpc).toHaveBeenLastCalledWith("rpc_add_entity_delivery_address", expect.objectContaining(esperado));
+    // O add não leva p_com_interior (só existe no update).
+    expect(rpc.mock.calls[rpc.mock.calls.length - 1]?.[1]).not.toHaveProperty("p_com_interior");
+    await updateEntityDeliveryAddress("ea1", input);
+    expect(rpc).toHaveBeenLastCalledWith("rpc_update_entity_delivery_address", expect.objectContaining({
+      ...esperado, p_com_interior: true,
     }));
   });
 });

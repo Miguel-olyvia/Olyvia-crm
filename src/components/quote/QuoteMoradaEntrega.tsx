@@ -4,10 +4,10 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { Building2, Loader2, Pencil, Plus, RefreshCw, Truck } from "lucide-react";
 import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
+import { FichaLocalResumo } from "@/components/addresses/FichaLocalResumo";
 import {
   formatDeliveryAddress,
   listEntityDeliveryAddresses,
-  resumoFichaTecnica,
   type EntityDeliveryAddress,
 } from "@/lib/addresses/entityDeliveryAddresses";
 
@@ -35,7 +35,7 @@ const textoMorada = (address: EntityDeliveryAddress) =>
   formatDeliveryAddress(address) || address.formatted || "—";
 
 /**
- * Morada de entrega / da obra do orçamento: lista as moradas de entrega da
+ * Morada de entrega / do serviço do orçamento: lista as moradas de entrega da
  * entidade (a PRIMEIRA fica escolhida por defeito), permite acrescentar uma
  * nova (fica escolhida) e editar a escolhida. Os formulários são o
  * DeliveryAddressForm da ficha do cliente — mesmas regras, mesma RPC.
@@ -91,7 +91,7 @@ export const QuoteMoradaEntrega = ({ entityId, value, onChange, savedText, disab
   if (!entityId) {
     return (
       <div className="space-y-1">
-        <Label className="flex items-center gap-2"><Truck className="h-4 w-4" />Morada de entrega / da obra</Label>
+        <Label className="flex items-center gap-2"><Truck className="h-4 w-4" />Morada de entrega / do serviço</Label>
         <p className="text-sm text-muted-foreground">Escolha primeiro a lead ou o cliente.</p>
       </div>
     );
@@ -100,14 +100,13 @@ export const QuoteMoradaEntrega = ({ entityId, value, onChange, savedText, disab
   const selected = value ? addresses.find((a) => a.address_id === value) ?? null : null;
   // Morada gravada no orçamento que já não está na lista (ou orçamento antigo, só com texto).
   const savedOnly = !selected && !!savedText?.trim() && !loading;
-  const resumo = selected ? resumoFichaTecnica(selected.ficha_tecnica, selected.floor) : "";
   const busy = !!disabled || loading;
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <Label className="flex items-center gap-2">
-          <Truck className="h-4 w-4" />Morada de entrega / da obra
+          <Truck className="h-4 w-4" />Morada de entrega / do serviço
           {loading && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" aria-label="A carregar moradas" />}
         </Label>
         <div className="flex items-center gap-1">
@@ -178,10 +177,14 @@ export const QuoteMoradaEntrega = ({ entityId, value, onChange, savedText, disab
       )}
 
       {selected && mode === "idle" && (
-        <p className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="quote-morada-ficha-tecnica">
+        <div className="flex items-start gap-1.5 text-xs text-muted-foreground" data-testid="quote-morada-ficha-tecnica">
           <Building2 className="h-3.5 w-3.5 shrink-0 mt-px" />
-          {resumo || "Ficha técnica do edifício por preencher (use “Editar”)."}
-        </p>
+          <FichaLocalResumo
+            ficha={selected.ficha_tecnica}
+            piso={selected.floor}
+            vazio="Ficha do local por preencher (use “Editar”)."
+          />
+        </div>
       )}
 
       {mode === "add" && (

@@ -24714,18 +24714,32 @@ export type Database = {
       rpc_add_entity_delivery_address: {
         Args: {
           p_acesso?: string
+          p_amianto?: string
+          p_animais?: boolean
+          p_ano_construcao?: number
+          p_area_util_m2?: number
+          p_canalizacao?: string
           p_city?: string
+          p_eletrica?: string
           p_entity_id: string
           p_estacionamento?: string
           p_floor?: string
+          p_gas?: string
+          p_habitada_durante_obra?: boolean
           p_impacto_percent?: number
           p_n_andares?: number
+          p_n_casas_banho?: number
+          p_n_divisoes?: number
           p_n_elevadores?: number
           p_n_fracoes_por_andar?: number
+          p_notas_interior?: string
           p_number?: string
+          p_pavimento?: string
           p_postal_code?: string
+          p_quadro_diferencial?: boolean
           p_street: string
           p_tem_elevador?: boolean
+          p_tipologia?: string
           p_unit?: string
           p_zona_estacionamento?: string
         }
@@ -26524,21 +26538,35 @@ export type Database = {
         Returns: {
           acesso: string
           address_id: string
+          amianto: string
+          animais: boolean
+          ano_construcao: number
+          area_util_m2: number
+          canalizacao: string
           city: string
           created_at: string
+          eletrica: string
           entity_address_id: string
           estacionamento: string
           floor: string
           formatted: string
+          gas: string
+          habitada_durante_obra: boolean
           has_building: boolean
           impacto_percent: number
           n_andares: number
+          n_casas_banho: number
+          n_divisoes: number
           n_elevadores: number
           n_fracoes_por_andar: number
+          notas_interior: string
           number: string
+          pavimento: string
           postal_code: string
+          quadro_diferencial: boolean
           street: string
           tem_elevador: boolean
+          tipologia: string
           unit: string
           zona_estacionamento: string
         }[]
@@ -27999,18 +28027,33 @@ export type Database = {
       rpc_update_entity_delivery_address: {
         Args: {
           p_acesso?: string
+          p_amianto?: string
+          p_animais?: boolean
+          p_ano_construcao?: number
+          p_area_util_m2?: number
+          p_canalizacao?: string
           p_city?: string
+          p_com_interior?: boolean
+          p_eletrica?: string
           p_entity_address_id: string
           p_estacionamento?: string
           p_floor?: string
+          p_gas?: string
+          p_habitada_durante_obra?: boolean
           p_impacto_percent?: number
           p_n_andares?: number
+          p_n_casas_banho?: number
+          p_n_divisoes?: number
           p_n_elevadores?: number
           p_n_fracoes_por_andar?: number
+          p_notas_interior?: string
           p_number?: string
+          p_pavimento?: string
           p_postal_code?: string
+          p_quadro_diferencial?: boolean
           p_street: string
           p_tem_elevador?: boolean
+          p_tipologia?: string
           p_unit?: string
           p_zona_estacionamento?: string
         }

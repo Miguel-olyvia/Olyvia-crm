@@ -1,30 +1,38 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { MoradaCampos } from "@/lib/addresses/validarMorada";
-import type {
-  Acesso,
-  Estacionamento,
-  FichaTecnicaEdificio,
-  ZonaEstacionamento,
-} from "@/lib/addresses/fichaTecnicaEdificio";
+import { FICHA_TECNICA_VAZIA, type FichaTecnicaEdificio } from "@/lib/addresses/fichaTecnicaEdificio";
 
 // Moradas de entrega de um cliente (anew_entity_addresses com
 // address_type = 'delivery', ativas). Migrações 20261204400000 e
 // 20261206160000: a leitura, a criação, a edição e a remoção passam todas por
-// RPC (a permissão é validada lá). Cada morada pode ter uma ficha técnica do
-// edifício (anew_address_building, 1:1 com a morada).
+// RPC (a permissão é validada lá). Cada morada pode ter uma "ficha do local"
+// (anew_address_building, 1:1 com a morada): Exterior — edifício e acessos —
+// e Interior — a casa (20261207110000).
 //
 // API estável (usada também pelos orçamentos):
 //   listEntityDeliveryAddresses, addEntityDeliveryAddress,
 //   updateEntityDeliveryAddress, removeEntityDeliveryAddress,
-//   formatDeliveryAddress, resumoFichaTecnica e os tipos abaixo.
+//   formatDeliveryAddress, resumoFichaTecnica, linhasResumoFichaLocal e os
+//   tipos abaixo.
 
 export type {
   Acesso,
+  Amianto,
+  Canalizacao,
+  Eletrica,
   Estacionamento,
+  FichaLocal,
   FichaTecnicaEdificio,
+  Gas,
+  Pavimento,
+  Tipologia,
   ZonaEstacionamento,
 } from "@/lib/addresses/fichaTecnicaEdificio";
-export { resumoFichaTecnica, fichaTecnicaVazia } from "@/lib/addresses/fichaTecnicaEdificio";
+export {
+  resumoFichaTecnica,
+  linhasResumoFichaLocal,
+  fichaTecnicaVazia,
+} from "@/lib/addresses/fichaTecnicaEdificio";
 
 export interface EntityDeliveryAddress {
   entity_address_id: string;
@@ -37,14 +45,15 @@ export interface EntityDeliveryAddress {
   city: string | null;
   formatted: string | null;
   created_at: string | null;
-  /** Ficha técnica do edifício; null quando não foi preenchida. */
+  /** Ficha do local (exterior + interior); null quando não foi preenchida. */
   ficha_tecnica: FichaTecnicaEdificio | null;
 }
 
 export interface DeliveryAddressInput extends MoradaCampos {
   /**
-   * Ficha técnica do edifício. No add: omitida/null = não mexe na ficha que a
-   * morada já tenha. No update: null apaga a ficha.
+   * Ficha do local. No add: secção (exterior/interior) sem dados = não mexe
+   * nessa secção da ficha que a morada já tenha. No update: a ficha é
+   * substituída (null apaga as duas secções).
    */
   ficha_tecnica?: FichaTecnicaEdificio | null;
 }
@@ -92,38 +101,26 @@ export const formatDeliveryAddress = (address: Partial<DeliveryAddressParts> | n
     .join(", ");
 };
 
-// Linha devolvida por rpc_list_entity_delivery_addresses (ficha técnica em colunas).
-interface DeliveryAddressRow extends Omit<EntityDeliveryAddress, "ficha_tecnica"> {
+// Linha devolvida por rpc_list_entity_delivery_addresses (ficha em colunas).
+type DeliveryAddressRow = Omit<EntityDeliveryAddress, "ficha_tecnica"> & {
   has_building?: boolean | null;
-  acesso?: string | null;
-  impacto_percent?: number | null;
-  estacionamento?: string | null;
-  zona_estacionamento?: string | null;
-  tem_elevador?: boolean | null;
-  n_elevadores?: number | null;
-  n_andares?: number | null;
-  n_fracoes_por_andar?: number | null;
-}
+} & { [K in keyof FichaTecnicaEdificio]?: FichaTecnicaEdificio[K] | string | null };
+
+const CAMPOS_FICHA = Object.keys(FICHA_TECNICA_VAZIA) as (keyof FichaTecnicaEdificio)[];
 
 export const deliveryAddressFromRow = (row: DeliveryAddressRow): EntityDeliveryAddress => {
-  const {
-    has_building, acesso, impacto_percent, estacionamento, zona_estacionamento,
-    tem_elevador, n_elevadores, n_andares, n_fracoes_por_andar, ...address
-  } = row;
+  const { has_building: hasBuilding, ...rest } = row;
+  const address: Record<string, unknown> = { ...rest };
+  const ficha: Record<string, unknown> = { ...FICHA_TECNICA_VAZIA };
+  for (const campo of CAMPOS_FICHA) {
+    ficha[campo] = row[campo] ?? null;
+    delete address[campo];
+  }
+  // numeric pode chegar como texto, conforme o cliente — normaliza.
+  if (ficha.area_util_m2 !== null) ficha.area_util_m2 = Number(ficha.area_util_m2);
   return {
-    ...address,
-    ficha_tecnica: has_building
-      ? {
-          acesso: (acesso as Acesso | null) ?? null,
-          impacto_percent: impacto_percent ?? null,
-          estacionamento: (estacionamento as Estacionamento | null) ?? null,
-          zona_estacionamento: (zona_estacionamento as ZonaEstacionamento | null) ?? null,
-          tem_elevador: tem_elevador ?? null,
-          n_elevadores: n_elevadores ?? null,
-          n_andares: n_andares ?? null,
-          n_fracoes_por_andar: n_fracoes_por_andar ?? null,
-        }
-      : null,
+    ...(address as Omit<EntityDeliveryAddress, "ficha_tecnica">),
+    ficha_tecnica: hasBuilding ? (ficha as unknown as FichaTecnicaEdificio) : null,
   };
 };
 
@@ -138,7 +135,8 @@ export const fetchEntityDeliveryAddresses = listEntityDeliveryAddresses;
 
 const optional = (value: string | null | undefined) => (value && value.trim() ? value.trim() : undefined);
 
-// Parâmetros da ficha técnica (iguais no add e no update).
+// Parâmetros da ficha do local (iguais no add e no update; null → omitido,
+// a RPC recebe o DEFAULT NULL).
 const fichaParams = (ficha: FichaTecnicaEdificio | null | undefined) => ({
   p_acesso: ficha?.acesso ?? undefined,
   p_impacto_percent: ficha?.impacto_percent ?? undefined,
@@ -148,6 +146,20 @@ const fichaParams = (ficha: FichaTecnicaEdificio | null | undefined) => ({
   p_n_elevadores: ficha?.n_elevadores ?? undefined,
   p_n_andares: ficha?.n_andares ?? undefined,
   p_n_fracoes_por_andar: ficha?.n_fracoes_por_andar ?? undefined,
+  p_tipologia: ficha?.tipologia ?? undefined,
+  p_area_util_m2: ficha?.area_util_m2 ?? undefined,
+  p_n_divisoes: ficha?.n_divisoes ?? undefined,
+  p_n_casas_banho: ficha?.n_casas_banho ?? undefined,
+  p_ano_construcao: ficha?.ano_construcao ?? undefined,
+  p_pavimento: ficha?.pavimento ?? undefined,
+  p_eletrica: ficha?.eletrica ?? undefined,
+  p_quadro_diferencial: ficha?.quadro_diferencial ?? undefined,
+  p_canalizacao: ficha?.canalizacao ?? undefined,
+  p_gas: ficha?.gas ?? undefined,
+  p_amianto: ficha?.amianto ?? undefined,
+  p_habitada_durante_obra: ficha?.habitada_durante_obra ?? undefined,
+  p_animais: ficha?.animais ?? undefined,
+  p_notas_interior: ficha?.notas_interior ?? undefined,
 });
 
 export const addEntityDeliveryAddress = async (
@@ -170,7 +182,9 @@ export const addEntityDeliveryAddress = async (
 
 /**
  * Edita uma morada de entrega (a ligação mantém o mesmo entity_address_id).
- * A ficha técnica é substituída pela enviada (null/omitida = apagar).
+ * A ficha do local é substituída pela enviada (null/omitida = apagar), as duas
+ * secções: vai sempre p_com_interior = true para o interior também ser
+ * substituído (sem ele — chamadas antigas — o interior gravado mantém-se).
  */
 export const updateEntityDeliveryAddress = async (
   entityAddressId: string,
@@ -185,6 +199,7 @@ export const updateEntityDeliveryAddress = async (
     p_floor: optional(input.floor),
     p_unit: optional(input.unit),
     ...fichaParams(input.ficha_tecnica),
+    p_com_interior: true,
   });
   if (error) throw error;
   return data as unknown as UpdateDeliveryAddressResult;

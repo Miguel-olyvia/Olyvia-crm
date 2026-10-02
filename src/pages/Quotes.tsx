@@ -96,6 +96,8 @@ interface Quote {
   root_organization_id: string | null;
   deal_id: string | null;
   obra_endereco: string | null;
+  /** anew_addresses.id da morada de entrega escolhida (select *). */
+  site_address_id?: string | null;
   modelo_base: string;
   estado: string;
   created_at: string;
@@ -2324,7 +2326,12 @@ export default function Quotes() {
                     {/* Morada fiscal (da entidade, lida pelo orçamento) e morada
                         de entrega gravada no orçamento (obra_endereco). */}
                     <div className="grid grid-cols-2 gap-4">
-                      <QuoteMoradasResumo quoteId={detailQuote.id} obraEndereco={detailQuote.obra_endereco} />
+                      <QuoteMoradasResumo
+                        quoteId={detailQuote.id}
+                        obraEndereco={detailQuote.obra_endereco}
+                        entityId={getEntityId(detailQuote) ?? null}
+                        siteAddressId={detailQuote.site_address_id ?? null}
+                      />
                     </div>
                     <Separator />
                     <div className="grid grid-cols-3 gap-4">
@@ -2589,7 +2596,7 @@ export default function Quotes() {
       <SensitiveExportDialog
         open={sensitiveExportOpen}
         onOpenChange={setSensitiveExportOpen}
-        sensitiveFields={["morada da obra"]}
+        sensitiveFields={["morada do serviço"]}
         loading={exporting}
         onConfirm={(includeSensitive) => void performExport(includeSensitive)}
       />

@@ -7,12 +7,13 @@
 //   • código postal no formato 0000-000 e diferente de 0000-000;
 //   • número, andar e fração opcionais.
 // Os limites de tamanho são os do addressSchema (src/lib/validations.ts).
-// A ficha técnica do edifício (só moradas de entrega) valida-se com
-// validarFichaTecnica, reexportado daqui.
+// A ficha do local (só moradas de entrega: exterior — edifício e acessos — e
+// interior — a casa) valida-se com validarFichaTecnica, reexportado daqui.
 
 export {
   validarFichaTecnica,
   pisoNumerico,
+  MENSAGENS_FICHA_TECNICA,
   type ErrosFichaTecnica,
   type FichaTecnicaValores,
   type ResultadoValidacaoFichaTecnica,

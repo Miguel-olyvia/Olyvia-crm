@@ -16,7 +16,6 @@ import {
 } from "@/lib/addresses/entityDeliveryAddresses";
 import {
   FICHA_TECNICA_VALORES_VAZIOS,
-  fichaTecnicaVazia,
   valoresDaFichaTecnica,
   type FichaTecnicaValores,
 } from "@/lib/addresses/fichaTecnicaEdificio";
@@ -61,8 +60,8 @@ const moradaDe = (e: EntityDeliveryAddress | undefined): MoradaCampos =>
 /**
  * Formulário de uma morada de entrega: acrescentar (rpc_add_entity_delivery_address)
  * ou, com `existente`, editar (rpc_update_entity_delivery_address). Grava logo,
- * sem depender de outro botão. Inclui a secção colapsável "Ficha técnica do
- * edifício". Os campos e a validação são os partilhados (CamposMorada +
+ * sem depender de outro botão. Inclui a "Ficha do local" (secções colapsáveis
+ * Exterior e Interior; abre-se a que já tiver dados). Os campos e a validação são os partilhados (CamposMorada +
  * validarMorada / validarFichaTecnica), os mesmos da morada principal.
  * Não usa <form>: na ficha do cliente fica dentro do formulário de edição, e um
  * Enter aqui não pode submeter a ficha — por isso o Enter é tratado à parte.
@@ -184,7 +183,6 @@ export const DeliveryAddressForm = ({
         erros={fichaErrors}
         idPrefix={`${idPrefix}_ficha`}
         disabled={busy}
-        defaultOpen={editing && !fichaTecnicaVazia(existente?.ficha_tecnica)}
       />
       <div className="flex justify-end gap-2">
         {onCancel && (
