@@ -324,5 +324,7 @@ emails diferentes. Identificar pessoas por email, nunca por nome.
 |---|---|
 | [`../README.md`](../README.md) | como está construído, os ficheiros SQL, a autorização em três camadas |
 | [`a-seguir.md`](a-seguir.md) | o que vem a seguir, com o levantamento do que o CRM já tem |
+| [`obras.md`](obras.md) | obras: fases, tarefas, Gantt, tempos, atrasos e alertas |
+| [`../../src/lib/addresses/README.md`](../../src/lib/addresses/README.md) | CRM: moradas, ficha do local (exterior/interior) e moradas no orçamento |
 | [`portal-do-cliente.md`](portal-do-cliente.md) | o cliente a pedir assistência sozinho |
 | `/ajuda` na app | o que mudou face ao Infraspeak, e o tutorial da equipa |

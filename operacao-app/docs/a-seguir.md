@@ -11,7 +11,7 @@
 
 ---
 
-## Ficha técnica do local / do edifício (pedido de 02/10/2026 — para depois da base)
+## Ficha do local (pedido de 02/10/2026 — CRM feito, falta Operações)
 
 **O pedido.** No orçamento, o comercial preenche uma ficha técnica do local
 da obra: facilidade de acesso, estacionamento (e para carrinha?), elevador
@@ -27,18 +27,26 @@ do edifício", "secagem"). Com a ficha, o planeamento pode aplicar
 **fatores** aos tempos previstos (ex.: +15 % em tarefas de "Demolições" sem
 elevador) e mostrar a ficha ao executor na tarefa, ao lado da morada.
 
-**Onde vive.** É do CRM/comercial, não de Operações: pertence ao orçamento
-(ou à morada da obra, `site_address_id`), preenchido no diagnóstico. Operações
-só LÊ — como já faz com `quotes`, `quote_lines` e `client_contracts`.
+**Onde vive.** No CRM, na morada de entrega: tabela `anew_address_building`,
+1:1 com `anew_addresses`, com as secções **Exterior** (acesso e impacto %,
+estacionamento e zona, elevador, andares, frações por andar; o piso é o andar
+da morada) e **Interior** (tipologia, área, divisões, WC, ano, pavimento,
+elétrica, canalização, gás, amianto, habitada, animais, notas). O orçamento
+aponta para a morada em `quotes.site_address_id`. Operações só LÊ, como já
+faz com `quotes`, `quote_lines` e `client_contracts`. Detalhe em
+[`src/lib/addresses/README.md`](../../src/lib/addresses/README.md).
 
-**A fazer, quando a base estiver fechada:**
-1. CRM: campos da ficha (estruturados, não texto livre) no orçamento/morada da obra.
-2. Operações: ler a ficha na previsão da obra (`rpc_ops_obra_previsao_contrato`) e
-   aplicar fatores por família de tarefa (tabela de fatores configurável por organização).
+**A fazer:**
+1. ~~CRM: campos da ficha no orçamento/morada da obra.~~ Feito a 02/10/2026
+   (`cfbb5173`, `7f7d25a8`).
+2. Operações: ler a ficha (via `quotes.site_address_id` → `anew_address_building`,
+   por uma RPC, porque a tabela não tem policies) na previsão da obra
+   (`rpc_ops_obra_previsao_contrato`) e aplicar fatores por família de tarefa
+   (tabela de fatores configurável por organização).
 3. Mostrar a ficha em "As minhas tarefas" (junto à morada) e na ficha da obra.
 4. Usar o desvio justificado ("condições do edifício") para afinar os fatores com dados reais.
 
-**Estado:** só documentado. Nada construído.
+**Estado:** a ficha existe e é preenchida no CRM. Operações ainda não a lê.
 
 ---
 
