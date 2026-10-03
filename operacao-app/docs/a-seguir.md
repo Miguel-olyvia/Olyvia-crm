@@ -11,6 +11,29 @@
 
 ---
 
+## Planeamento automático — o que ficou por fazer (03/10/2026)
+
+O motor está feito ([`planeamento.md`](planeamento.md)). Falta, por ordem de
+valor:
+
+1. **Pessoas nos ofícios.** As 11 especialidades da Mudelar (com Gás ITG,
+   Marmorista, Logística) não têm ninguém associado: a distribuição não tem
+   por onde escolher. É preencher dados (Equipa → especialidades).
+2. **Capacidade por ofício no plano.** O plano usa "vagas" genéricas (até 4
+   por obra). Com as pessoas nos ofícios, passa a ser "há 2 azulejistas livres
+   nessa semana". Custo médio: mexe em `ops_obra_replanear_impl`.
+3. **Prazos de materiais.** Móveis por encomenda e bancada: a data de
+   entrega do produto/fornecedor devia condicionar o início da montagem. Hoje
+   a bancada usa a espera fixa de 5 dias do modelo.
+4. **Medidas obrigatórias.** Quando a equipa decidir, tornar obrigatórios os
+   campos de planeamento do diagnóstico nos pacotes (hoje são opcionais).
+5. **Atrasos com feriados.** O empurrar de um atraso ainda conta só fins de
+   semana (`rpc_ops_obra_registar_atraso`).
+6. **Fatores da ficha do local por divisão** já entram (casa habitada, acesso,
+   elevador, andar); o "impacto no preço" é uma decisão em aberto do CRM.
+
+---
+
 ## Ficha do local (pedido de 02/10/2026 — CRM feito, falta Operações)
 
 **O pedido.** No orçamento, o comercial preenche uma ficha técnica do local

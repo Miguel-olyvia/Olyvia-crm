@@ -70,6 +70,29 @@ Sem o passo 1, o CRM continua a funcionar (a secção nova não aparece) e as
 Operações usam as medidas de referência. Sem o passo 3, as obras nascem como
 antes (modelos sugeridos ou ficha técnica).
 
+### Estado na produção (03/10/2026)
+
+- Passos 1 e 2 aplicados; passo 3 feito na **Mudelar**: 52 serviços, 168
+  passos (8 pacotes com 119, 39 extras com 49), 3 condicionais, ofícios Gás
+  (ITG), Marmorista e Logística criados. "Carregar tempos padrão" carrega na
+  organização em que se está — noutra organização dá "0 serviços".
+- ⚠ As duas proteções de compatibilidade (abaixo) entraram em `obras.sql`
+  DEPOIS dessa aplicação: **correr `db/obras.sql` outra vez**.
+
+### Compatibilidade com os ecrãs publicados antes
+
+A base nova serve os ecrãs antigos sem os partir:
+
+| Ecrã antigo | O que manda | O que a base faz |
+|---|---|---|
+| Terminar tarefa | 4 argumentos | `p_medida_real` tem default; a medida real fica = prevista |
+| Gravar modelo de serviço | sem `chave` nem campos novos | os campos do planeamento seguem a **posição** do passo (não se apagam) |
+| Nova obra, passo 2 (`p_tarefas`) | sem espera/chave/medida | vêm do passo de modelo de onde a tarefa veio |
+| Pré-visualização | — | os campos novos a mais são ignorados |
+| CRM, gravar necessidade | sem as chaves `diag_*` novas | ficam como estavam (`CASE WHEN ? THEN`) |
+
+`validar-planeamento` prova as duas do meio.
+
 ## Testar o fluxo inteiro, desde a lead
 
 1. **Lead → negócio.** Qualificar uma lead de teste e criar o negócio.

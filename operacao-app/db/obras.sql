@@ -2575,6 +2575,7 @@ DECLARE
   v_mpu  numeric;
   v_fix  integer;
   v_antes jsonb;
+  v_por_pos boolean;
 BEGIN
   IF NOT public.ops_obra_pode_gerir_modelos(p_org) THEN
     RAISE EXCEPTION 'Sem permissão para gerir modelos nesta organização.' USING ERRCODE = 'insufficient_privilege';
@@ -2650,7 +2651,12 @@ BEGIN
     RAISE EXCEPTION 'Há duas tarefas com a mesma chave.';
   END IF;
 
+  -- Um ecrã de antes desta versão não manda chaves: aí os campos do
+  -- planeamento (chave, encaixe, condição, espera, medida…) seguem a POSIÇÃO
+  -- do passo — gravar lá um modelo dos tempos padrão não os apaga.
+  v_por_pos := NOT EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(p_tarefas, '[]'::jsonb)) x WHERE x ? 'chave');
   v_antes := (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                 'ordem', x.ordem,
                  'chave', x.chave, 'depende_chaves', to_jsonb(x.depende_chaves),
                  'espera_antes_horas', x.espera_antes_horas, 'medida', x.medida,
                  'condicao', x.condicao, 'encaixe', x.encaixe, 'fatores', to_jsonb(x.fatores))), '[]'::jsonb)
@@ -2669,7 +2675,7 @@ BEGIN
          (x.t->>'depende_ordem')::integer,
          nullif(btrim(x.t->>'procedimento'), ''), nullif(btrim(x.t->>'materiais'), ''),
          nullif(btrim(x.t->>'ferramentas'), ''), 'manual', v_user,
-         nullif(btrim(x.t->>'chave'), ''),
+         COALESCE(nullif(btrim(x.t->>'chave'), ''), CASE WHEN v_por_pos THEN a.v->>'chave' END),
          CASE WHEN jsonb_typeof(x.t->'depende_chaves') = 'array'
               THEN ARRAY(SELECT jsonb_array_elements_text(x.t->'depende_chaves'))
               ELSE COALESCE(ARRAY(SELECT jsonb_array_elements_text(COALESCE(a.v->'depende_chaves', '[]'::jsonb))), '{}') END,
@@ -2682,7 +2688,9 @@ BEGIN
               ELSE COALESCE(ARRAY(SELECT jsonb_array_elements_text(COALESCE(a.v->'fatores', '[]'::jsonb))), '{}') END
     FROM jsonb_array_elements(COALESCE(p_tarefas, '[]'::jsonb)) WITH ORDINALITY AS x(t, pos)
     LEFT JOIN LATERAL (SELECT y AS v FROM jsonb_array_elements(v_antes) y
-                        WHERE y->>'chave' = nullif(btrim(x.t->>'chave'), '') LIMIT 1) a ON true;
+                        WHERE (NOT v_por_pos AND y->>'chave' = nullif(btrim(x.t->>'chave'), ''))
+                           OR (v_por_pos AND (y->>'ordem')::integer = x.pos::integer)
+                        LIMIT 1) a ON true;
 
   RETURN jsonb_build_object('ok', true, 'tarefas', v_n);
 END
@@ -3166,9 +3174,17 @@ BEGIN
                        'disponivel', (m->>'disponivel')::numeric,
                        'origem', CASE WHEN m->>'origem' IN ('contrato','stock') THEN m->>'origem' ELSE 'ficha' END))
                        FROM jsonb_array_elements(COALESCE(x.e->'materiais_crm', '[]'::jsonb)) m), '[]'::jsonb),
-           nullif(btrim(x.e->>'chave_passo'), ''),
-           COALESCE(public.ops_num(x.e->>'espera_antes_horas'), 0),
-           nullif(x.e->>'medida', ''),
+           -- Um ecrã de antes desta versão não manda estes campos: vêm do
+           -- passo de modelo de onde a tarefa veio (a cura não se perde).
+           COALESCE(nullif(btrim(x.e->>'chave_passo'), ''),
+                    (SELECT st.chave FROM public.ops_obra_servico_tarefa st
+                      WHERE st.id::text = x.e->>'servico_tarefa_id' AND st.organization_id = _org)),
+           COALESCE(public.ops_num(x.e->>'espera_antes_horas'),
+                    (SELECT st.espera_antes_horas FROM public.ops_obra_servico_tarefa st
+                      WHERE st.id::text = x.e->>'servico_tarefa_id' AND st.organization_id = _org), 0),
+           COALESCE(nullif(x.e->>'medida', ''),
+                    (SELECT st.medida FROM public.ops_obra_servico_tarefa st
+                      WHERE st.id::text = x.e->>'servico_tarefa_id' AND st.organization_id = _org)),
            public.ops_num(x.e->>'medida_qt'),
            nullif(x.e->>'minutos_origem', ''),
            COALESCE(public.ops_num(x.e->>'ritmo_n'), 0)::integer,

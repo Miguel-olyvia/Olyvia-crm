@@ -7,6 +7,22 @@
 
 ---
 
+## 03/10/2026 — planeamento automático das obras
+
+Tempos padrão dos manuais de remodelação (casa de banho, cozinha), extras
+encaixados no pacote, medidas da visita, esperas (curas) e feriados no plano,
+e aprendizagem do ritmo real. Tudo em [`planeamento.md`](planeamento.md):
+o que faz, como aplicar, compatibilidade com o ecrã publicado antes, e o teste
+passo a passo desde a lead.
+
+Na produção, a 03/10: migração do CRM `20261208100000` e `db/obras.sql`
+aplicados; tempos padrão carregados na Mudelar (52 serviços, 168 passos).
+⚠ Depois disso entraram duas proteções de compatibilidade em `obras.sql` —
+**correr `db/obras.sql` outra vez** antes de usar os ecrãs antigos para gravar
+modelos (ver planeamento.md, "Compatibilidade").
+
+---
+
 > ⚠ **Escrito antes do merge.** O merge está feito e o módulo está no ar em
 > `/operacao`. O deploy que falhou pelo meio era do `vercel.json`, não do
 > módulo — ver [`deploy-falhado.md`](deploy-falhado.md).

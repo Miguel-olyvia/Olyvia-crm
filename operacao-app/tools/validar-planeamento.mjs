@@ -457,6 +457,19 @@ console.log("\n─── passo 2 (p_tarefas) ───────────�
            t.find((x) => x.chave === "3.3")?.fatores_chave === "altura_revestimento=teto|janela=nao|local_cortes=fora",
     "nada se perde na ida e volta (espera, extras juntos, fatores)",
     `ida e volta: ${t.length}/${lista.length} tarefas; espera ${imp?.espera_antes_horas}`);
+
+  // O passo 2 publicado ANTES desta versão não manda os campos novos: a
+  // espera e a chave vêm do passo de modelo (a cura não se perde).
+  await db.exec(`UPDATE public.ops_obra SET estado = 'cancelada' WHERE estado <> 'cancelada' AND contrato_id = '${C.wc2}'`);
+  const semNovos = enviar.map(({ chave_passo, espera_antes_horas, medida, medida_qt, minutos_origem, ritmo_n, fatores, fatores_chave, minutos_juntos, ...resto }) => resto);
+  const oAntigo = await tenta("abrir a obra como o passo 2 antigo", () =>
+    chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_criar(p_org => '${ORG}', p_contrato_id => '${C.wc2}',
+       p_data_inicio => '2026-11-02', p_tarefas => '${JSON.stringify(semNovos).replace(/'/g, "''")}'::jsonb);`));
+  const ta = oAntigo ? await tarefas(oAntigo.id) : [];
+  const impA = ta.find((x) => x.chave === "3.2");
+  verifica(impA && Number(impA.espera_antes_horas) === 48 && impA.medida === "m2_total",
+    "o passo 2 antigo (sem os campos novos) mantém a espera e a medida do modelo",
+    `passo 2 antigo: ${JSON.stringify(impA ? { chave: impA.chave, espera: impA.espera_antes_horas, medida: impA.medida } : null)}`);
 }
 
 /* ── 6. Aprender ────────────────────────────────────────────────────────── */
@@ -514,6 +527,20 @@ console.log("\n─── modelos ───────────────�
   const d = await um(`SELECT encaixe, origem, minutos_por_unidade FROM public.ops_obra_servico_tarefa WHERE servico_id = '${S.sup[0]}' ORDER BY ordem LIMIT 1`);
   verifica(d.encaixe?.casa_banho?.alvo === "2.1" && d.origem === "manual" && Number(d.minutos_por_unidade) === 100,
     "gravar no ecrã muda o tempo e guarda o encaixe (pela chave)", `depois de gravar: ${JSON.stringify(d)}`);
+  // O ecrã publicado ANTES desta versão não manda chaves nem campos novos:
+  // gravar lá o pacote não pode apagar chaves, esperas, medidas nem condições.
+  const wc = (typeof lista === "string" ? JSON.parse(lista) : lista).find((s) => s.servico_id === S.wc[0]);
+  const antigo = wc.tarefas.map(({ nome, fase, minutos_por_unidade, minutos_fixos, pessoas, skill_id, depende_ordem, procedimento, materiais, ferramentas }) =>
+    ({ nome, fase, minutos_por_unidade, minutos_fixos, pessoas, skill_id, depende_ordem, procedimento, materiais, ferramentas }));
+  await tenta("gravar o pacote como o ecrã antigo", () =>
+    chamar(AUTH.gestor, `SELECT public.rpc_ops_servico_modelo_gravar('${ORG}', '${S.wc[0]}', '${JSON.stringify(antigo).replace(/'/g, "''")}'::jsonb);`));
+  const p32 = await um(`SELECT chave, espera_antes_horas, medida, depende_chaves FROM public.ops_obra_servico_tarefa
+                         WHERE servico_id = '${S.wc[0]}' AND ordem = 11`);
+  const p23 = await um(`SELECT condicao FROM public.ops_obra_servico_tarefa WHERE servico_id = '${S.wc[0]}' AND chave = '2.3'`);
+  verifica(p32?.chave === "3.2" && Number(p32?.espera_antes_horas) === 48 && p32?.medida === "m2_total" &&
+           String(p32?.depende_chaves) === "3.1" && p23?.condicao,
+    "gravar no ecrã antigo (sem chaves) mantém chave, espera, medida, dependências e condição",
+    `depois do ecrã antigo: ${JSON.stringify(p32)} condição ${JSON.stringify(p23)}`);
   const de3 = await chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_semear_tempos_padrao('${ORG}');`);
   verifica((de3.saltados ?? []).includes(S.sup[1]), "carregar outra vez não pisa um modelo gravado à mão",
     `saltados: ${JSON.stringify(de3.saltados)}`);
