@@ -11,6 +11,37 @@
 
 ---
 
+## Ficha técnica do local / do edifício (pedido de 02/10/2026 — para depois da base)
+
+**O pedido.** No orçamento, o comercial preenche uma ficha técnica do local
+da obra: facilidade de acesso, estacionamento (e para carrinha?), elevador
+(dimensões, se leva material), andar, horários permitidos pelo condomínio,
+licença de ocupação de via, quadro elétrico/água acessíveis, exposição solar e
+humidade (secagens), presença do cliente, animais, etc.
+
+**Porquê importa às Operações.** Estas condições mudam as tarefas e a duração:
+um 4.º andar sem elevador aumenta demolições e descargas; sem estacionamento
+há tempo perdido; condomínio com horário reduz os minutos por dia; um edifício
+sem sol alonga secagens (é um dos motivos de desvio já previstos: "condições
+do edifício", "secagem"). Com a ficha, o planeamento pode aplicar
+**fatores** aos tempos previstos (ex.: +15 % em tarefas de "Demolições" sem
+elevador) e mostrar a ficha ao executor na tarefa, ao lado da morada.
+
+**Onde vive.** É do CRM/comercial, não de Operações: pertence ao orçamento
+(ou à morada da obra, `site_address_id`), preenchido no diagnóstico. Operações
+só LÊ — como já faz com `quotes`, `quote_lines` e `client_contracts`.
+
+**A fazer, quando a base estiver fechada:**
+1. CRM: campos da ficha (estruturados, não texto livre) no orçamento/morada da obra.
+2. Operações: ler a ficha na previsão da obra (`rpc_ops_obra_previsao_contrato`) e
+   aplicar fatores por família de tarefa (tabela de fatores configurável por organização).
+3. Mostrar a ficha em "As minhas tarefas" (junto à morada) e na ficha da obra.
+4. Usar o desvio justificado ("condições do edifício") para afinar os fatores com dados reais.
+
+**Estado:** só documentado. Nada construído.
+
+---
+
 ## Em duas linhas
 
 O ganho maior não está em construir coisas novas. Está em **usar o que o CRM

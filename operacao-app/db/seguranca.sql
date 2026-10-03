@@ -1309,6 +1309,7 @@ DECLARE
   v_funcao  text;
   v_sistema boolean := public.is_system_admin_user(auth.uid());
   v_antes   record;
+  v_custo   numeric;
 BEGIN
   SELECT q.utilizador_id, q.funcao INTO v_user, v_funcao FROM public.ops_quem_sou(p_org_id) q;
 
@@ -1357,9 +1358,16 @@ BEGIN
       USING ERRCODE = 'insufficient_privilege';
   END IF;
 
+  -- Quem não vê custos não os muda: o ecrã não lhe mostra o custo/hora e
+  -- mandava NULL, o que apagava o valor de quem editava sem dar por isso.
+  v_custo := CASE
+    WHEN v_sistema OR public.ops_pode(p_org_id, 'operations.costs.view') THEN p_custo_hora
+    ELSE v_antes.custo_hora
+  END;
+
   INSERT INTO public.ops_utilizador_perfil
     (organization_id, utilizador_id, funcao, custo_hora, ativo)
-  VALUES (p_org_id, p_utilizador, p_funcao, p_custo_hora, COALESCE(p_ativo, true))
+  VALUES (p_org_id, p_utilizador, p_funcao, v_custo, COALESCE(p_ativo, true))
   ON CONFLICT (organization_id, utilizador_id) DO UPDATE SET
     funcao     = EXCLUDED.funcao,
     custo_hora = EXCLUDED.custo_hora,
@@ -1374,7 +1382,7 @@ BEGIN
           ELSE jsonb_build_object('funcao', v_antes.funcao,
                                   'custo_hora', v_antes.custo_hora,
                                   'ativo', v_antes.ativo) END,
-     jsonb_build_object('funcao', p_funcao, 'custo_hora', p_custo_hora, 'ativo', p_ativo));
+     jsonb_build_object('funcao', p_funcao, 'custo_hora', v_custo, 'ativo', p_ativo));
 
   RETURN jsonb_build_object('ok', true, 'utilizador_id', p_utilizador);
 END

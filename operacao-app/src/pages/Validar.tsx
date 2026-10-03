@@ -2,11 +2,22 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { ErroDeDados, ErroDeEscrita, listarEquipa } from "../lib/dados";
-import { registosDasTarefas, tarefasPorValidar, validarTarefa, type RegistoObra, type TarefaObra } from "../lib/obras";
+import {
+  EVENTO_ALERTAS,
+  alertasDeSupervisao,
+  registosDasTarefas,
+  tarefasPorValidar,
+  validarTarefa,
+  type AlertaSupervisao,
+  type RegistoObra,
+  type TarefaObra,
+} from "../lib/obras";
+import AlertasSupervisao from "../components/AlertasSupervisao";
 import { Button, Card, EmptyState, ErrorState, Field, Modal, Skeleton, Textarea, cx } from "../components/ui";
 import { AlertTriangle, Check, X } from "../components/icons";
 import { ObraValidar } from "../components/ObraIcones";
 import { FichaLeitura } from "../components/ObraTarefaPainel";
+import FotosTarefa from "../components/FotosTarefa";
 import {
   ROTULO_MOTIVO,
   formatarMinutos,
@@ -36,6 +47,8 @@ export default function Validar() {
   const [motivo, setMotivo] = useState("");
   const [aGravar, setAGravar] = useState<string | null>(null);
   const [aberta, setAberta] = useState<string | null>(null);
+  const [alertas, setAlertas] = useState<AlertaSupervisao[]>([]);
+  const [erroAlertas, setErroAlertas] = useState<string | null>(null);
 
   const carregar = useCallback(async () => {
     if (!activeOrgId) return;
@@ -45,6 +58,14 @@ export default function Validar() {
       setTarefas(ts);
       setRegistos(await registosDasTarefas(ts.map((t) => t.id)));
       setNomes(new Map(eq.map((m) => [m.utilizador_id, m.nome])));
+      // Os alertas não travam a fila: se falharem, diz-se e a fila aparece.
+      try {
+        setAlertas(await alertasDeSupervisao(activeOrgId));
+        setErroAlertas(null);
+      } catch (e) {
+        setAlertas([]);
+        setErroAlertas(e instanceof ErroDeDados ? e.message : "Não foi possível carregar os alertas.");
+      }
     } catch (e) {
       setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar a fila.");
     } finally {
@@ -55,6 +76,13 @@ export default function Validar() {
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  // Um atraso registado noutro sítio (ex.: na ficha da tarefa) atualiza os alertas.
+  useEffect(() => {
+    const f = () => setRecarga((r) => r + 1);
+    window.addEventListener(EVENTO_ALERTAS, f);
+    return () => window.removeEventListener(EVENTO_ALERTAS, f);
+  }, []);
 
   const porObra = useMemo(() => {
     const m = new Map<string, TarefaObra[]>();
@@ -102,6 +130,12 @@ export default function Validar() {
 
       {erroAcao && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erroAcao}</p>}
 
+      {erroAlertas && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{erroAlertas}</p>}
+      <AlertasSupervisao alertas={alertas} aoMudar={() => setRecarga((r) => r + 1)} />
+      {alertas.length > 0 && (
+        <h2 className="pt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">Por validar</h2>
+      )}
+
       {tarefas.length === 0 ? (
         <Card>
           <EmptyState
@@ -135,6 +169,7 @@ export default function Validar() {
                         {t.fase_ordem}. {t.fase_nome}
                       </p>
                       <p className="text-sm font-semibold text-slate-800">{t.nome}</p>
+                      {t.obra_morada && <p className="mt-0.5 truncate text-xs text-slate-400">{t.obra_morada}</p>}
                       <p className="mt-0.5 text-xs text-slate-500">
                         {quem.map((u) => nomes.get(u) ?? "—").join(", ") || "—"} · feita {dataHora(t.terminada_em)}
                       </p>
@@ -181,6 +216,9 @@ export default function Validar() {
                       Trabalhaste nesta tarefa — a validação tem de ser de outra pessoa.
                     </p>
                   )}
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <FotosTarefa tarefa={t} podeEnviar={false} euId={businessUserId} nomes={nomes} />
+                  </div>
                   {aberta === t.id && (
                     <div className="mt-3 border-t border-slate-100 pt-3">
                       <FichaLeitura tarefa={t} nomes={nomes} />

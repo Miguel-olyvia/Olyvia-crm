@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { ErroDeDados, ErroDeEscrita, listarClientes, listarEquipa, type MembroEquipa } from "../lib/dados";
 import {
+  atrasosDaObra,
+  type AtrasoTarefa,
   atualizarObra,
   conflitosDaObra,
   extrasDaObra,
@@ -13,6 +15,7 @@ import {
   renomearFase,
   replanearObra,
   distribuirEquipa,
+  gravarDependencias,
   tarefasDaObra,
   type ConflitoObra,
   type ConflitoRpc,
@@ -39,6 +42,8 @@ import {
 import { AlertTriangle, ChevronLeft, MapPin, Plus } from "../components/icons";
 import ObraGantt from "../components/ObraGantt";
 import ObraTarefaPainel from "../components/ObraTarefaPainel";
+import { ClienteAvisado } from "../components/ObraAtraso";
+import { diasDeDesvio, formatarDesvio, rotuloMotivoAtraso } from "../domain/atrasos";
 import ObraPrevistoReal from "../components/ObraPrevistoReal";
 import ObraExtras from "../components/ObraExtras";
 import { ObraEstadoBadge } from "../components/ObraEstadoBadge";
@@ -85,12 +90,14 @@ const TRANSICOES: Record<EstadoObra, { para: EstadoObra; rotulo: string; motivo:
 
 export default function ObraDetalhe() {
   const { codigo = "" } = useParams();
-  const { activeOrgId, funcao } = useAuth();
+  const { activeOrgId, funcao, orgs, setActiveOrgId, businessUserId } = useAuth();
   const [obra, setObra] = useState<ObraResumo | null>(null);
   const [fases, setFases] = useState<FaseObra[]>([]);
   const [tarefas, setTarefas] = useState<TarefaObra[]>([]);
   const [conflitos, setConflitos] = useState<ConflitoObra[]>([]);
   const [extras, setExtras] = useState<ExtraObra[]>([]);
+  const [atrasos, setAtrasos] = useState<AtrasoTarefa[]>([]);
+  const [avisarCliente, setAvisarCliente] = useState<AtrasoTarefa | null>(null);
   const [equipa, setEquipa] = useState<MembroEquipa[]>([]);
   const [cliente, setCliente] = useState<string | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -98,7 +105,9 @@ export default function ObraDetalhe() {
   const [recarga, setRecarga] = useState(0);
   const [separador, setSeparador] = useState<Separador>("mapa");
 
-  const [selecionada, setSelecionada] = useState<string | null>(null);
+  // ?tarefa=… (vindo de um alerta) abre logo a ficha dessa tarefa.
+  const [params] = useSearchParams();
+  const [selecionada, setSelecionada] = useState<string | null>(() => params.get("tarefa"));
   const [novaNaFase, setNovaNaFase] = useState<string | null>(null);
   const [aviso, setAviso] = useState<{ texto: string; conflitos?: ConflitoRpc[] } | null>(null);
   const [transicao, setTransicao] = useState<{ para: EstadoObra; rotulo: string; motivo: boolean } | null>(null);
@@ -134,14 +143,23 @@ export default function ObraDetalhe() {
         setErro("Obra não encontrada, ou sem permissão para a ver.");
         return;
       }
-      const [fs, ts, cs, ex, eq, cls] = await Promise.all([
+      // A obra é de outra empresa que a pessoa também vê: passa para essa
+      // (a equipa, os clientes e as permissões são os dela). Recarrega sozinho.
+      if (o.organization_id !== activeOrgId && orgs.some((g) => g.id === o.organization_id)) {
+        setActiveOrgId(o.organization_id);
+        return;
+      }
+      const [fs, ts, cs, ex, eq, cls, at] = await Promise.all([
         fasesDaObra(o.id),
         tarefasDaObra(o.id),
         conflitosDaObra(o.id),
         extrasDaObra(o.id),
         listarEquipa(activeOrgId),
         listarClientes(activeOrgId),
+        // Sem o SQL dos atrasos aplicado, a obra abre na mesma (sem atrasos).
+        atrasosDaObra(o.id).catch(() => [] as AtrasoTarefa[]),
       ]);
+      setAtrasos(at);
       setObra(o);
       setFases(fs);
       setTarefas(ts);
@@ -154,7 +172,7 @@ export default function ObraDetalhe() {
     } finally {
       setACarregar(false);
     }
-  }, [activeOrgId, codigo, recarga]);
+  }, [activeOrgId, codigo, recarga, orgs, setActiveOrgId]);
 
   useEffect(() => {
     void carregar();
@@ -178,9 +196,37 @@ export default function ObraDetalhe() {
         pessoas: t.pessoas,
         aCorrer: t.a_correr,
         dependeDe: t.depende_de,
+        dependencias: t.dependencias,
+        inicioOriginal: t.inicio_original ?? null,
+        fimOriginal: t.fim_original ?? null,
+        atrasadaInicio: t.atrasada_inicio ?? false,
+        atraso: t.ultimo_atraso
+          ? {
+              motivo: t.ultimo_atraso.motivo,
+              contexto: t.ultimo_atraso.contexto,
+              minutosExtra: t.ultimo_atraso.minutos_extra,
+              clienteAvisado: t.ultimo_atraso.cliente_avisado,
+              n: t.n_atrasos ?? 1,
+            }
+          : null,
       })),
     [tarefas]
   );
+
+  // Ligar duas tarefas no Gantt: junta a nova dependência às que a tarefa já tem.
+  const ligar = async (tarefaId: string, dependeDeId: string) => {
+    const atual = tarefas.find((t) => t.id === tarefaId)?.dependencias ?? [];
+    if (atual.includes(dependeDeId)) return;
+    try {
+      const r = await gravarDependencias(tarefaId, [...atual, dependeDeId]);
+      if (r.antes_de_acabar?.length) {
+        setAviso({ texto: "Ligadas. Atenção: a tarefa começa antes de a outra acabar — arrasta-a ou replaneia." });
+      }
+      recarregar();
+    } catch (e) {
+      setAviso({ texto: e instanceof ErroDeEscrita ? e.message : "Não foi possível ligar as tarefas." });
+    }
+  };
 
   const sobrecarga = useMemo(
     () =>
@@ -238,6 +284,11 @@ export default function ObraDetalhe() {
   const tarefaSel = tarefas.find((t) => t.id === selecionada) ?? null;
   const progresso = obra.n_tarefas ? Math.round((obra.n_feitas / obra.n_tarefas) * 100) : 0;
   const editavel = planeia && obra.estado !== "concluida" && obra.estado !== "cancelada";
+  // Atrasos: o gestor/admin, ou o supervisor DESTA obra (a base verifica na mesma).
+  const geraAtrasos = planeia || (!!businessUserId && obra.supervisor_id === businessUserId);
+  const porAvisar = atrasos.filter((a) => !a.cliente_avisado);
+  const nomeTarefa = new Map(tarefas.map((t) => [t.id, t.nome]));
+  const desvioObra = diasDeDesvio(obra.fim_original, obra.fim_planeado);
 
   return (
     <div className="space-y-4">
@@ -284,6 +335,20 @@ export default function ObraDetalhe() {
             <p className="text-xs text-slate-400">
               {formatarData(obra.inicio_planeado)} → {formatarData(obra.fim_planeado)}
             </p>
+            <p className={cx("text-xs", desvioObra > 0 ? "font-medium text-amber-700" : "text-slate-500")}>
+              Fim previsto: {formatarData(obra.fim_planeado)}
+              {desvioObra !== 0 && obra.fim_original && (
+                <>
+                  {" "}
+                  (original {formatarData(obra.fim_original)}, {formatarDesvio(desvioObra)})
+                </>
+              )}
+            </p>
+            {!!obra.n_alertas && (
+              <p className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-red-700">
+                <AlertTriangle width={11} height={11} /> {obra.n_alertas} alerta{obra.n_alertas === 1 ? "" : "s"}
+              </p>
+            )}
           </div>
         </div>
 
@@ -338,6 +403,31 @@ export default function ObraDetalhe() {
         </div>
       )}
 
+      {porAvisar.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-900" data-testid="avisar-cliente">
+          <p className="flex items-center gap-1.5 font-medium">
+            <AlertTriangle width={14} height={14} /> Avisar o cliente: {porAvisar.length} atraso
+            {porAvisar.length === 1 ? "" : "s"} ainda não comunicado{porAvisar.length === 1 ? "" : "s"}
+            {desvioObra > 0 && <> · a obra acaba {formatarDesvio(desvioObra)} depois do previsto</>}
+          </p>
+          <ul className="mt-1 space-y-1 text-xs">
+            {porAvisar.map((a) => (
+              <li key={a.id} className="flex flex-wrap items-center gap-x-2">
+                <span>
+                  <b>{nomeTarefa.get(a.tarefa_id) ?? "Tarefa"}</b> — {rotuloMotivoAtraso(a.motivo)}: {a.contexto}
+                  {a.novo_fim && <> · novo fim {formatarData(a.novo_fim)}</>}
+                </span>
+                {geraAtrasos && (
+                  <button type="button" className="font-medium text-brand underline" onClick={() => setAvisarCliente(a)}>
+                    Cliente avisado…
+                  </button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       <div className="flex gap-1 overflow-x-auto rounded-lg bg-slate-100 p-1 text-sm sm:w-fit">
         {(
           [
@@ -389,6 +479,7 @@ export default function ObraDetalhe() {
             selecionada={selecionada}
             aoSelecionar={setSelecionada}
             aoMudarDatas={(id, i) => void mudarDatas(id, i)}
+            aoLigar={editavel ? (id, dep) => void ligar(id, dep) : undefined}
           />
 
           {editavel && (
@@ -434,6 +525,7 @@ export default function ObraDetalhe() {
         <ObraTarefaPainel
           key={tarefaSel?.id ?? `nova-${novaNaFase}`}
           obraId={obra.id}
+          orgId={obra.organization_id}
           tarefa={tarefaSel}
           fases={fases}
           tarefas={tarefas}
@@ -441,6 +533,8 @@ export default function ObraDetalhe() {
           conflitos={conflitos}
           podeEditar={editavel}
           faseNova={novaNaFase}
+          podeRegistarAtraso={geraAtrasos && obra.estado !== "concluida" && obra.estado !== "cancelada"}
+          podeAvisarCliente={geraAtrasos}
           aoFechar={() => {
             setSelecionada(null);
             setNovaNaFase(null);
@@ -484,6 +578,16 @@ export default function ObraDetalhe() {
             {erroAcao && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erroAcao}</p>}
           </div>
         </Modal>
+      )}
+
+      {avisarCliente && (
+        <ClienteAvisado
+          atrasoId={avisarCliente.id}
+          titulo={nomeTarefa.get(avisarCliente.tarefa_id) ?? "Atraso"}
+          detalhe={`${rotuloMotivoAtraso(avisarCliente.motivo)}: ${avisarCliente.contexto}`}
+          aoFechar={() => setAvisarCliente(null)}
+          aoGravar={recarregar}
+        />
       )}
 
       {editar && <EditarObra obra={obra} equipa={equipa} aoFechar={() => setEditar(false)} aoGravar={recarregar} />}

@@ -19,13 +19,26 @@ import {
   listarObras,
   moradaSugerida,
   orcamentosComObra,
+  previsaoDoContrato,
   previsaoDoOrcamento,
+  stockDosProdutos,
   type AlertaObra,
   type ContratoAssinado,
   type ModeloObra,
   type ObraResumo,
+  type PrevisaoContrato,
   type PrevisaoOrcamento,
+  type ProdutoStock,
 } from "../lib/obras";
+import {
+  aplicarRecalculo,
+  paraCriar,
+  problemaNoPasso2,
+  produtosParaStock,
+  servicosEditaveis,
+  type ServicoEditavel,
+} from "../domain/novaObra";
+import { NovaObraServicos, type StockCarregado } from "../components/NovaObraServicos";
 import {
   Badge,
   Barra,
@@ -298,7 +311,12 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
         ]);
         if (!vivo) return;
         setOrcamentos(os.filter((o) => !comObra.has(o.id)));
-        setContratos(ct.contratos.filter((c) => !c.tem_obra));
+        // Os que trazem serviços (viram tarefas) primeiro; a ordem por data mantém-se dentro de cada grupo.
+        setContratos(
+          ct.contratos
+            .filter((c) => !c.tem_obra)
+            .sort((a, b) => Number((b.n_servicos ?? 0) > 0) - Number((a.n_servicos ?? 0) > 0))
+        );
         setSemContratos(ct.indisponivel);
         setModelos(ms.filter((m) => m.ativo));
         setClientes(cs);
@@ -314,12 +332,16 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
     };
   }, [orgId]);
 
-  // O tipo de obra vem escolhido: o "por defeito" (arranque, proteção,
-  // limpeza, entrega), a que se juntam os serviços vendidos. Em branco, sem
-  // por defeito, o primeiro — senão nascia vazia.
+  // A partir de um contrato ou orçamento, o plano sai SÓ dos serviços vendidos
+  // (tarefas, tempos e dependências de cada serviço): o tipo de obra é opcional
+  // e vem vazio. Em branco, sem serviços, vem o "por defeito" (senão nascia vazia).
   useEffect(() => {
+    if (fonte !== "branco") {
+      setModeloId("");
+      return;
+    }
     const def = modelos.find((m) => m.por_defeito);
-    setModeloId(def ? def.id : fonte === "branco" && modelos.length ? modelos[0].id : "");
+    setModeloId(def ? def.id : modelos.length ? modelos[0].id : "");
   }, [fonte, modelos]);
 
   const fonteId = fonte === "orcamento" ? orcamentoId : fonte === "contrato" ? contratoId : "";
@@ -374,6 +396,89 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
     (fonte === "contrato" && contratoId) ||
     (fonte === "branco" && titulo.trim() && clienteId);
 
+  // ── Passo 2: "Serviços do contrato" (contrato ou orçamento aceite) ──────
+  const temPasso2 = fonte !== "branco";
+  const [passo, setPasso] = useState<1 | 2>(1);
+  const [previsaoC, setPrevisaoC] = useState<PrevisaoContrato | null>(null);
+  const [erroC, setErroC] = useState<string | null>(null);
+  const [servicos, setServicos] = useState<ServicoEditavel[]>([]);
+  const [stock, setStock] = useState<StockCarregado | null>(null);
+  const [aRecalcular, setARecalcular] = useState(false);
+
+  // Mudar a fonte volta ao passo 1 (o passo 2 é desse contrato).
+  useEffect(() => {
+    setPasso(1);
+    setPrevisaoC(null);
+    setServicos([]);
+  }, [fonte, fonteId]);
+
+  const argsPrevisao = () => ({
+    orgId,
+    contratoId: fonte === "contrato" ? contratoId : null,
+    orcamentoId: fonte === "orcamento" ? orcamentoId : null,
+    modeloId: modeloId || null,
+    dataInicio: inicioAuto ? null : inicio || null,
+    morada: morada.trim() || null,
+  });
+
+  const juntarStock = (lista: ProdutoStock[], comInventario: boolean) =>
+    setStock((s) => {
+      const produtos = new Map(s?.produtos ?? []);
+      for (const p of lista) produtos.set(p.produto_id, p);
+      return { com_inventario: comInventario || !!s?.com_inventario, produtos };
+    });
+
+  const seguinte = async () => {
+    setPasso(2);
+    setErro(null);
+    setErroC(null);
+    setPrevisaoC(null);
+    setStock(null);
+    try {
+      const p = await previsaoDoContrato(argsPrevisao());
+      const s = servicosEditaveis(p);
+      setPrevisaoC(p);
+      setServicos(s);
+      const ids = produtosParaStock(s, p);
+      if (ids.length) {
+        // O stock é uma ajuda: se falhar (sem inventário, sem acesso), o passo continua.
+        stockDosProdutos({ orgId, produtoIds: ids })
+          .then((r) => juntarStock(r.produtos, r.com_inventario))
+          .catch(() => setStock({ com_inventario: false, produtos: new Map() }));
+      } else {
+        setStock({ com_inventario: false, produtos: new Map() });
+      }
+    } catch (e) {
+      setErroC(e instanceof ErroDeEscrita ? e.message : "Não foi possível preparar os serviços do contrato.");
+    }
+  };
+
+  const recalcular = async () => {
+    const problema = problemaNoPasso2(servicos);
+    if (problema) {
+      setErro(problema);
+      return;
+    }
+    setARecalcular(true);
+    setErro(null);
+    try {
+      const p = await previsaoDoContrato({ ...argsPrevisao(), tarefas: paraCriar(servicos) });
+      setServicos((atual) => aplicarRecalculo(atual, p));
+    } catch (e) {
+      setErro(e instanceof ErroDeEscrita ? e.message : "Não foi possível recalcular.");
+    } finally {
+      setARecalcular(false);
+    }
+  };
+
+  const pesquisarStock = async (texto: string) => {
+    const r = await stockDosProdutos({ orgId, pesquisa: texto });
+    juntarStock(r.produtos, r.com_inventario);
+    return r.produtos;
+  };
+
+  const problema2 = passo === 2 && previsaoC ? problemaNoPasso2(servicos) : null;
+
   const abrir = async () => {
     setAGravar(true);
     setErro(null);
@@ -388,6 +493,8 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
         modeloId: modeloId || null,
         dataInicio: inicioAuto ? null : inicio || null,
         supervisorId: supervisorId || null,
+        // No passo 2, a obra nasce com EXATAMENTE estas tarefas e pessoas.
+        tarefas: passo === 2 && previsaoC ? paraCriar(servicos, stock?.produtos) : null,
       });
       aoCriar();
       navegar(`/obras/${r.codigo}`);
@@ -400,21 +507,63 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
 
   return (
     <Modal
-      title="Nova obra"
+      title={passo === 2 ? "Nova obra — serviços do contrato" : "Nova obra"}
       size="lg"
       onClose={aoFechar}
       footer={
-        <>
-          <Button variant="secondary" onClick={aoFechar}>
-            Cancelar
-          </Button>
-          <Button onClick={() => void abrir()} disabled={!pronto || aGravar}>
-            {aGravar ? "A abrir…" : "Abrir obra"}
-          </Button>
-        </>
+        passo === 2 ? (
+          <>
+            <Button variant="secondary" onClick={() => setPasso(1)} disabled={aGravar}>
+              Voltar
+            </Button>
+            <Button
+              onClick={() => void abrir()}
+              disabled={aGravar || !previsaoC || !!problema2}
+              title={problema2 ?? undefined}
+            >
+              {aGravar ? "A abrir…" : "Abrir obra"}
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="secondary" onClick={aoFechar}>
+              Cancelar
+            </Button>
+            {temPasso2 ? (
+              <Button onClick={() => void seguinte()} disabled={!pronto}>
+                Seguinte
+              </Button>
+            ) : (
+              <Button onClick={() => void abrir()} disabled={!pronto || aGravar}>
+                {aGravar ? "A abrir…" : "Abrir obra"}
+              </Button>
+            )}
+          </>
+        )
       }
     >
-      {aCarregar ? (
+      {passo === 2 ? (
+        <div className="space-y-3">
+          <p className="text-xs text-slate-500">
+            Passo 2 de 2 · Tudo vem sugerido: tarefas do modelo de cada serviço (ou da biblioteca), tempo × quantidade, quem
+            está livre e os materiais da ficha. Muda o que quiseres; ao abrir, a obra nasce exatamente assim e as datas
+            continuam automáticas.
+          </p>
+          <NovaObraServicos
+            previsao={previsaoC}
+            erro={erroC}
+            servicos={servicos}
+            aoMudar={setServicos}
+            equipa={equipa}
+            stock={stock}
+            pesquisarStock={pesquisarStock}
+            aRecalcular={aRecalcular}
+            aoRecalcular={() => void recalcular()}
+          />
+          {problema2 && <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">{problema2}</p>}
+          {erro && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
+        </div>
+      ) : aCarregar ? (
         <div className="space-y-2">
           <Skeleton className="h-10 w-full" />
           <Skeleton className="h-24 w-full" />
@@ -480,6 +629,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
                     titulo={`${c.numero} · ${c.titulo}`}
                     sub={`${c.cliente_id ? nomeCliente.get(c.cliente_id) ?? "Cliente" : "Sem cliente"} · assinado ${formatarData(c.assinado_em)}`}
                     dir={euros(c.valor)}
+                    etiqueta={<EtiquetaServicos c={c} />}
                   />
                 ))}
               </div>
@@ -503,7 +653,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field
-              label="Tipo de obra"
+              label={fonte === "branco" ? "Tipo de obra" : "Tipo de obra (opcional)"}
               hint={
                 modelo
                   ? `+ ${modelo.fases.reduce((s, f) => s + f.tarefas.length, 0)} tarefas do tipo (${formatarMinutos(totalModelo)})` +
@@ -587,12 +737,13 @@ function PrevisaoTarefas({ previsao, erro }: { previsao: PrevisaoOrcamento | nul
     <div className="space-y-2 rounded-lg bg-slate-50 p-3 ring-1 ring-inset ring-slate-200">
       <p className="text-sm font-medium text-slate-700">
         Dos serviços vendidos: {previsao.tarefas.length} tarefa{previsao.tarefas.length === 1 ? "" : "s"} ·{" "}
-        {formatarMinutos(previsao.minutos)} previstos. Datas, equipa e supervisor são planeados ao abrir.
+        {formatarMinutos(previsao.minutos)} previstos. No passo seguinte vês cada serviço com as tarefas, técnicos e
+        materiais sugeridos, e podes mudar tudo.
       </p>
       {previsao.sem_ficha > 0 && (
         <p className="text-xs text-amber-700">
           {previsao.sem_ficha} serviço{previsao.sem_ficha === 1 ? "" : "s"} sem modelo nem horas na ficha técnica: fica
-          {previsao.sem_ficha === 1 ? "" : "m"} com 1 h. Cria o modelo em Obras → Modelos, ou ajusta na obra.
+          {previsao.sem_ficha === 1 ? "" : "m"} com 1 h. No passo seguinte as tarefas vêm sugeridas pela biblioteca — ajusta lá.
         </p>
       )}
       <div className="max-h-56 space-y-2 overflow-y-auto">
@@ -619,18 +770,44 @@ function PrevisaoTarefas({ previsao, erro }: { previsao: PrevisaoOrcamento | nul
   );
 }
 
+/** Destaca se o contrato traz serviços (viram tarefas) ou não. Sem a contagem (SQL antigo), não mostra nada. */
+function EtiquetaServicos({ c }: { c: ContratoAssinado }) {
+  if (c.n_servicos == null) return null;
+  if (!c.orcamento_id) {
+    return (
+      <span className="inline-flex rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700 ring-1 ring-inset ring-red-200">
+        sem orçamento ligado
+      </span>
+    );
+  }
+  if (c.n_servicos === 0) {
+    return (
+      <span className="inline-flex rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-800 ring-1 ring-inset ring-amber-200">
+        sem serviços{c.n_produtos ? ` · ${c.n_produtos} produto(s)` : ""} — só as tarefas do tipo de obra
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800 ring-1 ring-inset ring-emerald-200">
+      {c.n_servicos} serviço(s){c.n_produtos ? ` · ${c.n_produtos} produto(s)` : ""}
+    </span>
+  );
+}
+
 function Escolha({
   on,
   aoEscolher,
   titulo,
   sub,
   dir,
+  etiqueta,
 }: {
   on: boolean;
   aoEscolher: () => void;
   titulo: string;
   sub: string;
   dir: string;
+  etiqueta?: React.ReactNode;
 }) {
   return (
     <button
@@ -645,6 +822,7 @@ function Escolha({
       <span className="min-w-0">
         <span className="block truncate text-sm font-medium text-slate-800">{titulo}</span>
         <span className="block truncate text-xs text-slate-500">{sub}</span>
+        {etiqueta && <span className="mt-1 block">{etiqueta}</span>}
       </span>
       <span className="shrink-0 font-mono text-xs tabular text-slate-600">{dir}</span>
     </button>

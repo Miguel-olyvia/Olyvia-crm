@@ -783,7 +783,7 @@ export async function urlsDosAnexos(caminhos: readonly string[]): Promise<Map<st
  * depender de uma API de contexto seguro para gerar um nome de ficheiro é
  * fragilidade a troco de nada.
  */
-function nomeSorteado(): string {
+export function nomeSorteado(): string {
   if (typeof crypto !== "undefined" && typeof crypto.getRandomValues === "function") {
     const b = new Uint8Array(16);
     crypto.getRandomValues(b);

@@ -12,6 +12,7 @@ import {
   Settings,
   Euro,
   ExternalLink,
+  Eye,
   Home,
   Layers,
   List,
@@ -22,6 +23,8 @@ import {
 } from "./icons";
 import { ObraCapacete, ObraCronometro, ObraModelo, ObraValidar } from "./ObraIcones";
 import { podePlanear, podeValidar } from "../domain/obras";
+import { EscolherPessoa, FaixaEntrarComo, sairDoEntrarComo, useEntrarComo } from "./EntrarComo";
+import { EVENTO_ALERTAS, alertasDeSupervisao } from "../lib/obras";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 const CHAVE_PAINEL = "operacao.menu-aberto";
@@ -78,6 +81,47 @@ export const GRUPOS: { titulo: string | null; itens: Item[] }[] = [
   },
 ];
 
+/** De quanto em quanto tempo o contador de alertas do menu volta a perguntar. */
+export const INTERVALO_ALERTAS_MS = 2 * 60_000;
+
+/**
+ * Quantos alertas de obra (não iniciadas, fim ultrapassado, cliente por
+ * avisar) tem quem supervisiona. Pergunta ao montar, a cada 2 min, ao voltar
+ * à janela e quando um ecrã avisa que mudaram. Falhar não estraga o menu:
+ * fica sem contador.
+ */
+export function useContadorAlertas(orgId: string | null, funcao: string | null): number {
+  const [n, setN] = useState(0);
+  const ativo = !!orgId && podeValidar(funcao);
+  useEffect(() => {
+    if (!ativo || !orgId) {
+      setN(0);
+      return;
+    }
+    let vivo = true;
+    const perguntar = () => {
+      alertasDeSupervisao(orgId)
+        .then((a) => vivo && setN(a.length))
+        .catch(() => vivo && setN(0));
+    };
+    perguntar();
+    const id = window.setInterval(perguntar, INTERVALO_ALERTAS_MS);
+    const aoFocar = () => perguntar();
+    const aoVer = () => document.visibilityState === "visible" && perguntar();
+    window.addEventListener("focus", aoFocar);
+    window.addEventListener(EVENTO_ALERTAS, aoFocar);
+    document.addEventListener("visibilitychange", aoVer);
+    return () => {
+      vivo = false;
+      window.clearInterval(id);
+      window.removeEventListener("focus", aoFocar);
+      window.removeEventListener(EVENTO_ALERTAS, aoFocar);
+      document.removeEventListener("visibilitychange", aoVer);
+    };
+  }, [ativo, orgId]);
+  return n;
+}
+
 function lerPainelAberto(): boolean {
   try {
     return localStorage.getItem(CHAVE_PAINEL) !== "0";
@@ -91,10 +135,13 @@ function NavegacaoModulo({
   funcao,
   ativo,
   onNavegar,
+  contagens = {},
 }: {
   funcao: string | null;
   ativo: (to: string) => boolean;
   onNavegar?: () => void;
+  /** Um número ao lado do destino (ex.: alertas em Validar). 0 = nada. */
+  contagens?: Record<string, number>;
 }) {
   const grupos = GRUPOS.map((g) => ({ ...g, itens: g.itens.filter((i) => !i.so || i.so(funcao)) })).filter(
     (g) => g.itens.length > 0
@@ -122,6 +169,15 @@ function NavegacaoModulo({
               >
                 <Icone width={16} height={16} className="shrink-0" />
                 <span className="truncate">{rotulo}</span>
+                {!!contagens[to] && (
+                  <span
+                    className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-white"
+                    aria-label={`${contagens[to]} alerta${contagens[to] === 1 ? "" : "s"}`}
+                    title={`${contagens[to]} alerta${contagens[to] === 1 ? "" : "s"} de obra`}
+                  >
+                    {contagens[to] > 99 ? "99+" : contagens[to]}
+                  </span>
+                )}
               </Link>
             ))}
           </div>
@@ -132,13 +188,17 @@ function NavegacaoModulo({
 }
 
 export function OperacaoLayout() {
-  const { userName, userEmail, funcao, orgs, activeOrgId, setActiveOrgId, signOut } = useAuth();
+  const { userName, userEmail, funcao, orgs, activeOrgId, setActiveOrgId, signOut, businessUserId } = useAuth();
   const location = useLocation();
+  const verComo = useEntrarComo();
+  const [aEscolherPessoa, setAEscolherPessoa] = useState(false);
   const [aConfirmarSaida, setAConfirmarSaida] = useState(false);
   const [menuAberto, setMenuAberto] = useState(false);
   const [painelAberto, setPainelAberto] = useState(lerPainelAberto);
   const [gavetaAberta, setGavetaAberta] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const nAlertas = useContadorAlertas(activeOrgId, funcao);
+  const contagens = { "/validar": nAlertas };
 
   useEffect(() => {
     if (!menuAberto) return;
@@ -256,24 +316,52 @@ export function OperacaoLayout() {
                     <ExternalLink width={16} height={16} /> Voltar à Olyvia
                   </a>
 
+                  {funcao === "admin" && !verComo && activeOrgId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuAberto(false);
+                        setAEscolherPessoa(true);
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 sm:py-2"
+                    >
+                      <Eye width={16} height={16} /> Ver como outra pessoa…
+                    </button>
+                  )}
+
                   <div className="my-1 h-px bg-slate-100" />
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMenuAberto(false);
-                      setAConfirmarSaida(true);
-                    }}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50 sm:py-2"
-                  >
-                    <LogOut width={16} height={16} /> Sair
-                  </button>
+                  {verComo ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuAberto(false);
+                        void sairDoEntrarComo();
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-amber-700 transition-colors hover:bg-amber-50 sm:py-2"
+                    >
+                      <LogOut width={16} height={16} /> Voltar à minha conta
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMenuAberto(false);
+                        setAConfirmarSaida(true);
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2.5 text-sm text-red-600 transition-colors hover:bg-red-50 sm:py-2"
+                    >
+                      <LogOut width={16} height={16} /> Sair
+                    </button>
+                  )}
                 </div>
               )}
             </div>
           </div>
         </div>
       </header>
+
+      {verComo && <FaixaEntrarComo estado={verComo} />}
 
       {/* Desktop: barra de ícones + painel do módulo */}
       <aside
@@ -317,7 +405,7 @@ export function OperacaoLayout() {
               <X width={16} height={16} />
             </button>
           </div>
-          <NavegacaoModulo funcao={funcao} ativo={ativo} />
+          <NavegacaoModulo funcao={funcao} ativo={ativo} contagens={contagens} />
         </div>
       )}
 
@@ -329,6 +417,14 @@ export function OperacaoLayout() {
         className="fixed bottom-4 left-4 z-30 flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-elevated md:hidden print:hidden"
       >
         <Menu width={20} height={20} />
+        {nAlertas > 0 && (
+          <span
+            className="absolute -right-1 -top-1 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold text-white"
+            aria-label={`${nAlertas} alertas`}
+          >
+            {nAlertas > 99 ? "99+" : nAlertas}
+          </span>
+        )}
       </button>
 
       {gavetaAberta && (
@@ -351,7 +447,12 @@ export function OperacaoLayout() {
                 <X width={16} height={16} />
               </button>
             </div>
-            <NavegacaoModulo funcao={funcao} ativo={ativo} onNavegar={() => setGavetaAberta(false)} />
+            <NavegacaoModulo
+              funcao={funcao}
+              ativo={ativo}
+              contagens={contagens}
+              onNavegar={() => setGavetaAberta(false)}
+            />
             <div className="shrink-0 border-t border-slate-200 p-3">
               <a
                 href={OLYVIA_URL}
@@ -367,7 +468,8 @@ export function OperacaoLayout() {
       {/* O conteúdo afasta-se da barra (64px) e do painel (256px) quando aberto */}
       <main
         className={cx(
-          "px-4 pb-20 pt-20 transition-[padding] duration-300 md:pb-6 print:p-0",
+          "px-4 pb-20 transition-[padding] duration-300 md:pb-6 print:p-0",
+          verComo ? "pt-32 sm:pt-28" : "pt-20",
           painelAberto ? "md:pl-[21rem]" : "md:pl-20"
         )}
       >
@@ -375,6 +477,10 @@ export function OperacaoLayout() {
           <Outlet />
         </div>
       </main>
+
+      {aEscolherPessoa && activeOrgId && (
+        <EscolherPessoa orgId={activeOrgId} euId={businessUserId} aoFechar={() => setAEscolherPessoa(false)} />
+      )}
 
       {aConfirmarSaida && (
         <ConfirmDialog

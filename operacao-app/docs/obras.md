@@ -113,6 +113,23 @@ Em branco ────────┘                               │
 - **Trabalhos extra.** Seguem o fluxo registado → aprovado (gestor) → enviado ao
   comercial, ou recusado (com motivo). "Enviado" é um estado em Operações:
   **nada é escrito no CRM**. O comercial faz o orçamento adicional no CRM.
+- **Atrasos e alertas do supervisor** (`obras.sql`, secção 11b).
+  - *Vai atrasar*: quem está na tarefa, o supervisor da obra ou o gestor
+    registam o atraso (`rpc_ops_obra_registar_atraso`): motivo, contexto
+    (≥ 5 letras) e mais quanto tempo (minutos de mão de obra) ou nova data de
+    fim. Guarda o plano original (`inicio_original`/`fim_original`, uma vez),
+    muda `fim_planeado` e `minutos_estimativa` (`minutos_previstos` não muda),
+    e empurra em cadeia as dependentes que ainda não começaram. `p_simular`
+    dá o impacto sem gravar (a pré-visualização do ecrã).
+  - O plano original também se guarda na 1.ª mudança de datas com a obra em
+    curso (trigger `ops_obra_tarefa_baseline`: arrastar no Gantt, replanear).
+  - *Cliente avisado*: `rpc_ops_obra_cliente_avisado` (supervisor da obra ou
+    gestor), com nota.
+  - *Alertas* (`rpc_ops_obra_alertas`): fim ultrapassado → não iniciada a
+    tempo (por fazer, 60 min depois de `ops_obra.hora_inicio_dia`, 08:00 por
+    defeito, hora de Lisboa) → cliente por avisar. Gestor/admin veem todas as
+    obras; o supervisor, as suas; os outros, nada. Ficam em Operações: o sino
+    do CRM seria a 1.ª escrita no CRM (decisão pendente).
 - **Métricas.** Contam só tarefas terminadas e precisam de pelo menos 3 tarefas
   para tirar uma conclusão.
   - Por tarefa-modelo: real/previsto mostra se o default está curto ou longo, com
@@ -182,7 +199,7 @@ As permissões são sempre verificadas **na organização da obra**, com `ops_po
 | Modelos | `_gravar_modelo`, `_semear_modelo_exemplo` |
 
 **Segurança.**
-- RLS está ligada nas 9 tabelas.
+- RLS está ligada nas 12 tabelas deste ficheiro (inclui `ops_obra_tarefa_atraso`).
 - Há policies **só de SELECT**, com `ops_pode_ver_obra()`. Esta função dá acesso
   com `view_all` na organização, ou a quem é gestor, supervisor ou está em pelo
   menos uma tarefa da obra.
