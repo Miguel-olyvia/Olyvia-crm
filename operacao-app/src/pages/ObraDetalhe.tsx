@@ -57,6 +57,7 @@ import {
   type Intervalo,
 } from "../domain/obras";
 import type { TarefaGantt } from "../domain/obras-gantt";
+import { rotuloOrigem } from "../domain/planeamento";
 import { data as formatarData } from "../lib/formatar";
 
 /**
@@ -197,6 +198,8 @@ export default function ObraDetalhe() {
         aCorrer: t.a_correr,
         dependeDe: t.depende_de,
         dependencias: t.dependencias,
+        esperaAntesHoras: t.espera_antes_horas == null ? null : Number(t.espera_antes_horas),
+        origemTempo: rotuloOrigem(t.minutos_origem, t.ritmo_n) || null,
         inicioOriginal: t.inicio_original ?? null,
         fimOriginal: t.fim_original ?? null,
         atrasadaInicio: t.atrasada_inicio ?? false,

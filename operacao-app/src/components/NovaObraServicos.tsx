@@ -7,6 +7,7 @@ import {
   ligarMaterial,
   minutosDoServico,
   minutosTotais,
+  mudarMinutos,
   mudarTarefa,
   necessidadesDeMateriais,
   novaTarefa,
@@ -19,6 +20,7 @@ import {
   type TarefaEditavel,
 } from "../domain/novaObra";
 import { formatarMinutos } from "../domain/obras";
+import { descreverFatores, formatarEspera, rotuloOrigem, unidadeDaMedida } from "../domain/planeamento";
 import { data as formatarData } from "../lib/formatar";
 import { Badge, Button, IconButton, Input, Select, Skeleton, Textarea, cx } from "./ui";
 import { AlertTriangle, ChevronDown, ChevronRight, Plus, Search, X } from "./icons";
@@ -237,7 +239,7 @@ function LinhaTarefa({
             type="number"
             min={1}
             value={Number.isFinite(t.minutos) ? t.minutos : ""}
-            onChange={(e) => aoMudar((x) => ({ ...x, minutos: Number(e.target.value) }))}
+            onChange={(e) => aoMudar((x) => mudarMinutos(x, Number(e.target.value)))}
             className="py-1.5 text-right font-mono"
           />
           min
@@ -263,6 +265,40 @@ function LinhaTarefa({
           {formatarMinutos(t.minutos)}
           {t.skill_nome && ` · ${t.skill_nome}`}
         </span>
+        {/* Planeamento automático: de onde veio o tempo, a medida, a espera. */}
+        {t.minutos_origem && (
+          <span title={t.fatores_chave ? `Para: ${descreverFatores(t.fatores_chave)}` : undefined}>
+            <Badge
+              className={
+                t.minutos_origem === "aprendido"
+                  ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                  : t.minutos_origem === "manual"
+                    ? "bg-amber-50 text-amber-800 ring-amber-200"
+                    : undefined
+              }
+            >
+              {rotuloOrigem(t.minutos_origem, t.ritmo_n)}
+            </Badge>
+          </span>
+        )}
+        {t.medida && t.medida !== "fixo" && t.medida !== "qt" && t.medida_qt != null && (
+          <span className="text-slate-500" title="A medida que o tempo usou (da visita, ou a de referência do pacote)">
+            {String(t.medida_qt).replace(".", ",")} {unidadeDaMedida(t.medida)}
+          </span>
+        )}
+        {!!t.espera_antes_horas && (
+          <span
+            className="rounded-full bg-amber-50 px-2 py-0.5 text-amber-800 ring-1 ring-amber-200"
+            title="Tempo corrido antes de começar (cura, secagem, fabrico): ninguém trabalha, mas o relógio conta"
+          >
+            espera {formatarEspera(t.espera_antes_horas)}
+          </span>
+        )}
+        {!!t.minutos_juntos && (
+          <span className="text-slate-500" title="Minutos de extras do orçamento juntos a este passo">
+            inclui {formatarMinutos(t.minutos_juntos)} de extras
+          </span>
+        )}
         {t.pessoas.map((u) => {
           const ocupado = !!livres && !livres.has(u);
           return (

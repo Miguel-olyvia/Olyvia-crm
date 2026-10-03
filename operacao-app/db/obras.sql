@@ -502,6 +502,160 @@ CREATE TRIGGER ops_obra_tarefa_baseline
 
 
 -- ============================================================
+-- 2c. Planeamento automático: tempos padrão, esperas, medidas, condições,
+--     encaixe dos extras e aprendizagem (03/10/2026)
+-- ============================================================
+-- Origem: os manuais operacionais de remodelação (casa de banho, cozinha),
+-- compactados em tarefas com tempos padrão, e a reunião de 02/10 (os tempos
+-- reais das equipas corrigem os padrões; a ficha do local diz o contexto).
+--
+--   · O MODELO de um serviço (ops_obra_servico_tarefa) ganha:
+--       chave               código estável do passo ('3.3'), para os extras
+--                           se encaixarem e para a aprendizagem;
+--       depende_chaves      vários "depois de" dentro do mesmo serviço;
+--       espera_antes_horas  tempo CORRIDO depois de acabarem as tarefas de que
+--                           depende (cura da betonilha, fabrico da bancada) —
+--                           ninguém trabalha, mas o relógio conta, fins de
+--                           semana incluídos;
+--       medida              o que multiplica minutos_por_unidade: 'qt' (a
+--                           quantidade da linha, como antes), 'fixo', ou uma
+--                           medida da divisão (m² de pavimento, pontos de
+--                           água…) — os pacotes vendem-se com qt 1;
+--       condicao            o passo só entra se o orçamento tiver um destes
+--                           serviços ou se a ficha do local / a área disser
+--                           (ex.: gás);
+--       encaixe             para um EXTRA: junta-se a um passo do pacote
+--                           ('junta': soma-lhe o tempo) ou entra ENTRE dois
+--                           passos ('entre'), por tipo de pacote;
+--       fatores             as características que mudam o ritmo (casa
+--                           habitada, local dos cortes…), para aprender.
+--   · ops_obra_servico_perfil: o papel do serviço no planeamento — pacote de
+--     casa de banho / de cozinha (e as medidas de referência quando o
+--     orçamento não as traz), ou extra.
+--   · A tarefa da obra guarda o que usou (medida e quantidade, fatores,
+--     origem do tempo) e, ao terminar, a medida REAL.
+--   · ops_obra_ritmo: o ritmo aprendido por passo de modelo e por combinação
+--     de fatores, a partir das tarefas validadas.
+
+-- 'padrao' = veio dos tempos padrão validados (manuais operacionais): como
+-- 'manual', a sugestão automática nunca o substitui.
+ALTER TABLE public.ops_obra_servico_tarefa DROP CONSTRAINT IF EXISTS ops_obra_servico_tarefa_origem_check;
+ALTER TABLE public.ops_obra_servico_tarefa ADD CONSTRAINT ops_obra_servico_tarefa_origem_check
+  CHECK (origem IN ('manual','sugerida','padrao'));
+ALTER TABLE public.ops_obra_servico_tarefa ADD COLUMN IF NOT EXISTS chave text
+  CHECK (chave IS NULL OR chave ~ '^[0-9A-Za-z._-]{1,12}$');
+ALTER TABLE public.ops_obra_servico_tarefa ADD COLUMN IF NOT EXISTS depende_chaves text[] NOT NULL DEFAULT '{}';
+ALTER TABLE public.ops_obra_servico_tarefa ADD COLUMN IF NOT EXISTS espera_antes_horas numeric(6,1) NOT NULL DEFAULT 0
+  CHECK (espera_antes_horas >= 0 AND espera_antes_horas <= 2000);
+ALTER TABLE public.ops_obra_servico_tarefa ADD COLUMN IF NOT EXISTS medida text NOT NULL DEFAULT 'qt';
+ALTER TABLE public.ops_obra_servico_tarefa ADD COLUMN IF NOT EXISTS condicao jsonb;
+ALTER TABLE public.ops_obra_servico_tarefa ADD COLUMN IF NOT EXISTS encaixe jsonb;
+ALTER TABLE public.ops_obra_servico_tarefa ADD COLUMN IF NOT EXISTS fatores text[] NOT NULL DEFAULT '{}';
+ALTER TABLE public.ops_obra_servico_tarefa DROP CONSTRAINT IF EXISTS ops_obra_servico_tarefa_medida_chk;
+ALTER TABLE public.ops_obra_servico_tarefa ADD CONSTRAINT ops_obra_servico_tarefa_medida_chk
+  CHECK (medida IN ('qt','fixo','m2_pavimento','m2_parede','m2_total','pontos_agua','pontos_eletricos',
+                    'pecas_sanitarias','acessorios','modulos','eletrodomesticos','ml_bancada'));
+CREATE UNIQUE INDEX IF NOT EXISTS ops_obra_servico_tarefa_chave_uidx
+  ON public.ops_obra_servico_tarefa (organization_id, servico_id, chave) WHERE chave IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS public.ops_obra_servico_perfil (
+  organization_id  uuid NOT NULL,
+  servico_id       uuid NOT NULL,            -- → services.id, sem FK (como o resto)
+  -- 'casa_banho' / 'cozinha' = é um PACOTE desse tipo (traz a obra inteira
+  -- dessa divisão); NULL = extra ou serviço avulso.
+  tipo             text CHECK (tipo IS NULL OR tipo IN ('casa_banho','cozinha')),
+  -- Medidas de referência do pacote: {"m2_pavimento": 4, "m2_parede": 18, …}.
+  -- Usadas quando o orçamento não traz a área de intervenção medida.
+  medidas          jsonb NOT NULL DEFAULT '{}'::jsonb,
+  atualizado_em    timestamptz NOT NULL DEFAULT now(),
+  atualizado_por   uuid,
+  PRIMARY KEY (organization_id, servico_id)
+);
+-- false = não é trabalho no local (deslocação, projeto 3D): não dá tarefa.
+ALTER TABLE public.ops_obra_servico_perfil ADD COLUMN IF NOT EXISTS planear boolean NOT NULL DEFAULT true;
+-- A linha deste serviço não é uma tarefa: dá uma MEDIDA ao pacote do seu
+-- contexto (ex.: "Instalação de eletrodomésticos" × 4 = 4 eletrodomésticos).
+ALTER TABLE public.ops_obra_servico_perfil ADD COLUMN IF NOT EXISTS medida_para text;
+ALTER TABLE public.ops_obra_servico_perfil DROP CONSTRAINT IF EXISTS ops_obra_servico_perfil_medida_para_chk;
+ALTER TABLE public.ops_obra_servico_perfil ADD CONSTRAINT ops_obra_servico_perfil_medida_para_chk
+  CHECK (medida_para IS NULL OR medida_para IN ('m2_pavimento','m2_parede','pontos_agua','pontos_eletricos',
+                                                 'pecas_sanitarias','acessorios','modulos','eletrodomesticos','ml_bancada'));
+
+-- Um número a partir de texto, sem rebentar ("3,5" → 3.5; "abc" → NULL).
+CREATE OR REPLACE FUNCTION public.ops_num(_t text)
+RETURNS numeric
+LANGUAGE sql IMMUTABLE
+SET search_path TO 'public'
+AS $$
+  SELECT CASE WHEN replace(btrim(_t), ',', '.') ~ '^-?\d{1,12}(\.\d{1,6})?$'
+              THEN replace(btrim(_t), ',', '.')::numeric END
+$$;
+REVOKE ALL ON FUNCTION public.ops_num(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_num(text) TO authenticated, service_role;
+
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS chave text;
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS espera_antes_horas numeric(6,1) NOT NULL DEFAULT 0
+  CHECK (espera_antes_horas >= 0 AND espera_antes_horas <= 2000);
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS medida text;
+-- A quantidade da medida que o tempo usou (ex.: 22 m²), e a REAL, dita por
+-- quem termina a tarefa (por defeito, a prevista).
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS medida_qt numeric(10,2)
+  CHECK (medida_qt IS NULL OR medida_qt >= 0);
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS medida_real numeric(10,2)
+  CHECK (medida_real IS NULL OR medida_real >= 0);
+-- Os valores dos fatores com que a tarefa nasceu ({"habitada":"sim", …}) e a
+-- chave ordenada que os agrupa para aprender ("habitada=sim|local_cortes=fora").
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS fatores jsonb NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS fatores_chave text NOT NULL DEFAULT '';
+-- De onde veio o tempo: 'padrao' (modelo), 'aprendido' (ritmo real),
+-- 'ficha' (ficha técnica do serviço), 'manual' (alguém o mudou), NULL = antigo.
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS minutos_origem text
+  CHECK (minutos_origem IS NULL OR minutos_origem IN ('padrao','aprendido','ficha','manual'));
+-- Em quantas tarefas reais se baseou o tempo aprendido (0 = padrão).
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS ritmo_n integer NOT NULL DEFAULT 0;
+-- Minutos de EXTRAS que se juntaram a este passo do pacote (ex.: "Supressão
+-- de ponto de água" na canalização). A aprendizagem tira-os ao real, para o
+-- ritmo do passo não ficar a contar com trabalho que não é dele.
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS minutos_juntos integer NOT NULL DEFAULT 0
+  CHECK (minutos_juntos >= 0);
+
+-- O ritmo aprendido. Por passo de modelo (servico_tarefa_id) e combinação de
+-- fatores ('' = todas). Em minutos (pessoa × tempo):
+--   minutos = fixos + por_unidade × medida
+-- `n` = tarefas reais que entraram; `padrao_*` = o modelo no momento.
+CREATE TABLE IF NOT EXISTS public.ops_obra_ritmo (
+  organization_id     uuid NOT NULL,
+  servico_tarefa_id   uuid NOT NULL REFERENCES public.ops_obra_servico_tarefa(id) ON DELETE CASCADE,
+  fatores_chave       text NOT NULL DEFAULT '',
+  n                   integer NOT NULL CHECK (n > 0),
+  minutos_fixos       numeric(10,2) NOT NULL CHECK (minutos_fixos >= 0),
+  minutos_por_unidade numeric(10,3) NOT NULL CHECK (minutos_por_unidade >= 0),
+  padrao_fixos        numeric(10,2) NOT NULL,
+  padrao_por_unidade  numeric(10,3) NOT NULL,
+  atualizado_em       timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (servico_tarefa_id, fatores_chave)
+);
+CREATE INDEX IF NOT EXISTS ops_obra_ritmo_org_idx ON public.ops_obra_ritmo (organization_id);
+
+-- Cada mudança do ritmo, para se ver porque é que um tempo mudou.
+CREATE TABLE IF NOT EXISTS public.ops_obra_ritmo_historico (
+  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id     uuid NOT NULL,
+  servico_tarefa_id   uuid NOT NULL REFERENCES public.ops_obra_servico_tarefa(id) ON DELETE CASCADE,
+  fatores_chave       text NOT NULL DEFAULT '',
+  tarefa_id           uuid,             -- a tarefa validada que provocou a mudança
+  n                   integer NOT NULL,
+  antes_fixos         numeric(10,2),
+  antes_por_unidade   numeric(10,3),
+  depois_fixos        numeric(10,2) NOT NULL,
+  depois_por_unidade  numeric(10,3) NOT NULL,
+  em                  timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ops_obra_ritmo_historico_idx
+  ON public.ops_obra_ritmo_historico (servico_tarefa_id, em DESC);
+
+
+-- ============================================================
 -- 2b. O orçamento de um contrato — pelos MESMOS caminhos que o CRM
 -- ============================================================
 -- Um contrato que nasceu de uma proposta muitas vezes não tem `quote_id`.
@@ -656,6 +810,118 @@ $$;
 REVOKE ALL ON FUNCTION public.ops_obra_somar_dias_uteis(date, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ops_obra_somar_dias_uteis(date, integer) TO authenticated, service_role;
 
+-- Os próximos `_n` dias úteis DA ORGANIZAÇÃO a partir de `_d` (incluído, se
+-- for útil): seg–sex, sem os feriados de schedule_holidays (os da
+-- organização e os nacionais PT; os recorrentes contam pelo dia e mês). Uma
+-- só leitura dos feriados — o plano usa a lista por índice.
+CREATE OR REPLACE FUNCTION public.ops_obra_dias_uteis_lista(_org uuid, _d date, _n integer)
+RETURNS date[]
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v    date := _d;
+  a    date[] := '{}';
+  fer  date[] := '{}';
+  rec  text[] := '{}';
+  k    integer := 0;
+BEGIN
+  IF _org IS NOT NULL AND to_regclass('public.schedule_holidays') IS NOT NULL THEN
+    EXECUTE 'SELECT COALESCE(array_agg(h.holiday_date) FILTER (WHERE NOT h.is_recurring), ''{}''),
+                    COALESCE(array_agg(to_char(h.holiday_date, ''MM-DD'')) FILTER (WHERE h.is_recurring), ''{}'')
+               FROM public.schedule_holidays h
+              WHERE (h.organization_id = $1 OR (h.organization_id IS NULL AND upper(h.country_code) = ''PT''))
+                AND (h.is_recurring OR h.holiday_date >= $2)'
+       INTO fer, rec USING _org, _d;
+  END IF;
+  WHILE k < GREATEST(_n, 1) LOOP
+    IF extract(isodow FROM v) <= 5 AND NOT (v = ANY (fer)) AND NOT (to_char(v, 'MM-DD') = ANY (rec)) THEN
+      a := a || v;
+      k := k + 1;
+    END IF;
+    v := v + 1;
+  END LOOP;
+  RETURN a;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_dias_uteis_lista(uuid, date, integer) FROM PUBLIC, anon, authenticated;
+
+-- Como ops_obra_somar_dias_uteis, mas com os feriados da organização.
+CREATE OR REPLACE FUNCTION public.ops_obra_somar_dias_uteis_org(_org uuid, _d date, _n integer)
+RETURNS date
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT (public.ops_obra_dias_uteis_lista(_org, _d, GREATEST(_n, 0) + 1))[GREATEST(_n, 0) + 1]
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_somar_dias_uteis_org(uuid, date, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_somar_dias_uteis_org(uuid, date, integer) TO authenticated, service_role;
+
+-- Uma espera em tempo CORRIDO (cura, fabrico) no plano em minutos de
+-- trabalho. `_m` = minuto de trabalho em que as tarefas anteriores acabam
+-- (0 = arranque); devolve o 1.º minuto de trabalho depois de passarem
+-- `_horas` de relógio. `_dias` = a lista de dias úteis do plano (índice 1 =
+-- dia 0); o dia de trabalho começa a `_hora` e dura `_mpd` minutos. A cura
+-- corre de noite e ao fim de semana; o trabalho não. Espelho de
+-- `minutoDepoisDaEspera()` em src/domain/planeamento.ts.
+CREATE OR REPLACE FUNCTION public.ops_obra_minuto_apos_espera(
+  _dias date[], _hora time, _mpd integer, _m bigint, _horas numeric)
+RETURNS bigint
+LANGUAGE plpgsql IMMUTABLE
+SET search_path TO 'public'
+AS $$
+DECLARE
+  di   integer;
+  off  integer;
+  ts   timestamp;
+  t    timestamp;
+  dt   date;
+  tod  interval;
+  i    integer;
+  n    integer := COALESCE(array_length(_dias, 1), 0);
+BEGIN
+  IF COALESCE(_horas, 0) <= 0 OR n = 0 THEN
+    RETURN _m;
+  END IF;
+  IF _m <= 0 THEN
+    ts := _dias[1] + _hora;
+  ELSE
+    di := ((_m - 1) / _mpd)::integer;
+    off := (_m - di::bigint * _mpd)::integer;
+    IF di + 1 > n THEN
+      RETURN _m + ceil(_horas / 24.0)::bigint * _mpd;
+    END IF;
+    ts := _dias[di + 1] + _hora + make_interval(mins => off);
+  END IF;
+  t := ts + make_interval(secs => (_horas * 3600)::double precision);
+  dt := t::date;
+
+  i := NULL;
+  FOR k IN 1 .. n LOOP
+    IF _dias[k] >= dt THEN i := k; EXIT; END IF;
+  END LOOP;
+  IF i IS NULL THEN
+    RETURN _m + ceil(_horas / 24.0)::bigint * _mpd;   -- para lá do horizonte: aproximação
+  END IF;
+  IF _dias[i] > dt THEN
+    RETURN (i - 1)::bigint * _mpd;                     -- não é dia útil: o próximo, de manhã
+  END IF;
+  tod := t - dt::timestamp;
+  IF tod <= _hora::interval THEN
+    RETURN (i - 1)::bigint * _mpd;                     -- antes de o dia começar
+  END IF;
+  IF tod >= _hora::interval + make_interval(mins => _mpd) THEN
+    RETURN i::bigint * _mpd;                           -- depois de o dia acabar: o dia útil seguinte
+  END IF;
+  RETURN (i - 1)::bigint * _mpd + ceil(extract(epoch FROM (tod - _hora::interval)) / 60.0)::bigint;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_minuto_apos_espera(date[], time, integer, bigint, numeric) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_minuto_apos_espera(date[], time, integer, bigint, numeric) TO authenticated, service_role;
+
 -- O plano de partida, por DEPENDÊNCIAS (tarefa a tarefa, não fase a fase):
 --   · cada tarefa começa assim que (a) TODAS as tarefas de que depende
 --     (ops_obra_tarefa_dependencia) acabaram e (b) há pessoas livres — a
@@ -665,7 +931,11 @@ GRANT EXECUTE ON FUNCTION public.ops_obra_somar_dias_uteis(date, integer) TO aut
 --   · agendamento topológico com capacidade: de entre as tarefas prontas,
 --     vai primeiro a que pode começar mais cedo; empate → fase, ordem;
 --   · uma tarefa de k pessoas ocupa k vagas durante minutos ÷ k;
---   · `minutos_por_dia` de trabalho por dia útil.
+--   · `minutos_por_dia` de trabalho por dia útil — dias úteis DA
+--     ORGANIZAÇÃO (sem feriados de schedule_holidays);
+--   · `espera_antes_horas` (cura, fabrico): a tarefa só começa quando
+--     passarem essas horas de RELÓGIO depois de acabarem as de que depende —
+--     noites e fins de semana contam (ops_obra_minuto_apos_espera).
 -- A ordem "fase a fase" de antes continua a sair quando as dependências a
 -- pedem (ver ops_obra_dependencias_defeito_impl: as tarefas do tipo de obra
 -- dependem de tudo o que vem antes). Um ciclo (só em dados antigos) não
@@ -689,7 +959,11 @@ DECLARE
   v_et      integer[];      -- arestas: tarefa (índice) …
   v_ed      integer[];      -- … depende de (índice), ordenadas por esta
   v_falta   integer[];      -- dependências ainda por planear
-  v_cedo    bigint[];       -- o mais cedo que cada tarefa pode começar
+  v_cedo    bigint[];       -- quando acabam as tarefas de que depende
+  v_pronto  bigint[];       -- o mais cedo que pode começar (depois da espera)
+  v_esp     numeric[];      -- espera antes, em horas de relógio
+  v_dias    date[];         -- os dias úteis da organização desde o arranque
+  v_hora    time;
   v_feito   boolean[];
   v_rini    integer[];      -- onde começam, em v_et, as dependentes de cada tarefa
   v_rcnt    integer[];
@@ -706,7 +980,9 @@ DECLARE
   i         integer;
   j         integer;
 BEGIN
-  SELECT organization_id, minutos_por_dia INTO v_org, v_mpd FROM public.ops_obra WHERE id = _obra_id;
+  SELECT organization_id, minutos_por_dia, hora_inicio_dia INTO v_org, v_mpd, v_hora
+    FROM public.ops_obra WHERE id = _obra_id;
+  v_dias := public.ops_obra_dias_uteis_lista(v_org, _inicio, 800);
 
   SELECT LEAST(4, GREATEST(1, count(*)))::integer INTO v_cap
     FROM public.ops_utilizador_perfil
@@ -715,9 +991,11 @@ BEGIN
 
   SELECT array_agg(x.id ORDER BY x.fo, x.ordem, x.criada_em, x.id),
          array_agg(x.minutos_previstos ORDER BY x.fo, x.ordem, x.criada_em, x.id),
-         array_agg(LEAST(GREATEST(x.pessoas_previstas, 1), v_cap) ORDER BY x.fo, x.ordem, x.criada_em, x.id)
-    INTO v_ids, v_min, v_kk
-    FROM (SELECT t.id, f.ordem AS fo, t.ordem, t.criada_em, t.minutos_previstos, t.pessoas_previstas
+         array_agg(LEAST(GREATEST(x.pessoas_previstas, 1), v_cap) ORDER BY x.fo, x.ordem, x.criada_em, x.id),
+         array_agg(COALESCE(x.espera_antes_horas, 0) ORDER BY x.fo, x.ordem, x.criada_em, x.id)
+    INTO v_ids, v_min, v_kk, v_esp
+    FROM (SELECT t.id, f.ordem AS fo, t.ordem, t.criada_em, t.minutos_previstos, t.pessoas_previstas,
+                 t.espera_antes_horas
             FROM public.ops_obra_tarefa t JOIN public.ops_obra_fase f ON f.id = t.fase_id
            WHERE t.obra_id = _obra_id) x;
   v_n := COALESCE(array_length(v_ids, 1), 0);
@@ -739,10 +1017,17 @@ BEGIN
     v_rini  := array_fill(0, ARRAY[v_n]);
     v_cedo  := array_fill(0::bigint, ARRAY[v_n]);
     v_feito := array_fill(false, ARRAY[v_n]);
+    v_pronto := array_fill(0::bigint, ARRAY[v_n]);
     FOR j IN 1..v_m LOOP
       v_falta[v_et[j]] := v_falta[v_et[j]] + 1;
       v_rcnt[v_ed[j]] := v_rcnt[v_ed[j]] + 1;
       IF v_rini[v_ed[j]] = 0 THEN v_rini[v_ed[j]] := j; END IF;
+    END LOOP;
+    -- As que não dependem de nada: a espera conta desde o arranque.
+    FOR i IN 1..v_n LOOP
+      IF v_falta[i] = 0 THEN
+        v_pronto[i] := public.ops_obra_minuto_apos_espera(v_dias, v_hora, v_mpd, 0, v_esp[i]);
+      END IF;
     END LOOP;
 
     FOR s IN 1..v_n LOOP
@@ -750,7 +1035,7 @@ BEGIN
       v_best := NULL;
       FOR i IN 1..v_n LOOP
         IF NOT v_feito[i] AND v_falta[i] = 0
-           AND (v_best IS NULL OR v_cedo[i] < v_cedo[v_best]) THEN
+           AND (v_best IS NULL OR v_pronto[i] < v_pronto[v_best]) THEN
           v_best := i;
         END IF;
       END LOOP;
@@ -759,6 +1044,7 @@ BEGIN
         FOR i IN 1..v_n LOOP
           IF NOT v_feito[i] THEN v_best := i; EXIT; END IF;
         END LOOP;
+        v_pronto[v_best] := public.ops_obra_minuto_apos_espera(v_dias, v_hora, v_mpd, v_cedo[v_best], v_esp[v_best]);
       END IF;
 
       v_k := v_kk[v_best];
@@ -776,7 +1062,7 @@ BEGIN
         v_escolha := v_escolha || v_slot;
       END LOOP;
 
-      v_ini := v_cedo[v_best];
+      v_ini := v_pronto[v_best];
       FOREACH i IN ARRAY v_escolha LOOP
         v_ini := GREATEST(v_ini, v_livre[i]);
       END LOOP;
@@ -790,12 +1076,19 @@ BEGIN
         FOR j IN v_rini[v_best] .. v_rini[v_best] + v_rcnt[v_best] - 1 LOOP
           v_falta[v_et[j]] := v_falta[v_et[j]] - 1;
           v_cedo[v_et[j]] := GREATEST(v_cedo[v_et[j]], v_fim);
+          -- Ficou pronta: a espera (cura, fabrico) conta a partir daqui.
+          IF v_falta[v_et[j]] = 0 THEN
+            v_pronto[v_et[j]] := public.ops_obra_minuto_apos_espera(
+              v_dias, v_hora, v_mpd, v_cedo[v_et[j]], v_esp[v_et[j]]);
+          END IF;
         END LOOP;
       END IF;
 
       UPDATE public.ops_obra_tarefa
-         SET inicio_planeado = public.ops_obra_somar_dias_uteis(_inicio, (v_ini / v_mpd)::integer),
-             fim_planeado    = public.ops_obra_somar_dias_uteis(_inicio, ((v_fim - 1) / v_mpd)::integer),
+         SET inicio_planeado = COALESCE(v_dias[(v_ini / v_mpd)::integer + 1],
+                                        public.ops_obra_somar_dias_uteis_org(v_org, _inicio, (v_ini / v_mpd)::integer)),
+             fim_planeado    = COALESCE(v_dias[((v_fim - 1) / v_mpd)::integer + 1],
+                                        public.ops_obra_somar_dias_uteis_org(v_org, _inicio, ((v_fim - 1) / v_mpd)::integer)),
              atualizada_em   = now()
        WHERE id = v_ids[v_best];
     END LOOP;
@@ -1289,6 +1582,116 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_gravar_modelo(uuid, uuid, text, te
 -- Só lê o CRM. Se a base não tiver as tabelas de serviços, devolve vazio
 -- (a obra nasce com as 4 fases vazias, como antes).
 
+-- As medidas de uma área de intervenção (a necessidade do negócio no CRM,
+-- `deal_needs.diag_*`, ou a sua cópia congelada no orçamento), com as de
+-- referência do pacote onde faltarem. `_mult` multiplica as de referência
+-- (um pacote vendido com qt 2 = duas divisões iguais).
+--   m2_pavimento = diag_m2_pavimento, senão diag_area_m2
+--   m2_parede    = perímetro × altura do revestimento (20/60/120 cm, ou até
+--                  ao teto = pé-direito, 2,5 m se não houver)
+--   m2_total     = pavimento + parede
+-- Espelho de `medidasDaArea()` em src/domain/planeamento.ts.
+CREATE OR REPLACE FUNCTION public.ops_obra_medidas(_area jsonb, _ref jsonb, _mult numeric DEFAULT 1)
+RETURNS jsonb
+LANGUAGE plpgsql IMMUTABLE
+SET search_path TO 'public'
+AS $$
+DECLARE
+  a      jsonb := COALESCE(_area, '{}'::jsonb);
+  r      jsonb := COALESCE(_ref, '{}'::jsonb);
+  m      numeric := GREATEST(COALESCE(_mult, 1), 0);
+  v      jsonb := '{}'::jsonb;
+  pav    numeric;
+  par    numeric;
+  alt    numeric;
+  per    numeric;
+  k      text;
+  num    numeric;
+BEGIN
+  pav := COALESCE(public.ops_num(a->>'diag_m2_pavimento'), public.ops_num(a->>'diag_area_m2'));
+  per := public.ops_num(a->>'diag_perimetro_m');
+  alt := CASE a->>'diag_altura_revestimento'
+           WHEN '20cm' THEN 0.2 WHEN '60cm' THEN 0.6 WHEN '120cm' THEN 1.2
+           WHEN 'teto' THEN COALESCE(public.ops_num(a->>'diag_pe_direito_m'), 2.5) END;
+  IF per IS NOT NULL AND alt IS NOT NULL THEN
+    par := round(per * alt, 2);
+  END IF;
+
+  IF pav IS NOT NULL THEN v := v || jsonb_build_object('m2_pavimento', pav); END IF;
+  IF par IS NOT NULL THEN v := v || jsonb_build_object('m2_parede', par); END IF;
+  IF public.ops_num(a->>'diag_pontos_agua') IS NOT NULL THEN
+    v := v || jsonb_build_object('pontos_agua', public.ops_num(a->>'diag_pontos_agua'));
+  END IF;
+  IF public.ops_num(a->>'diag_pontos_eletricos') IS NOT NULL THEN
+    v := v || jsonb_build_object('pontos_eletricos', public.ops_num(a->>'diag_pontos_eletricos'));
+  END IF;
+
+  -- O que faltar, da referência do pacote (× qt).
+  FOR k IN SELECT unnest(ARRAY['m2_pavimento','m2_parede','pontos_agua','pontos_eletricos','pecas_sanitarias',
+                               'acessorios','modulos','eletrodomesticos','ml_bancada']) LOOP
+    num := public.ops_num(r->>k);
+    IF NOT v ? k AND num IS NOT NULL THEN
+      v := v || jsonb_build_object(k, round(num * m, 2));
+    END IF;
+  END LOOP;
+
+  IF v ? 'm2_pavimento' OR v ? 'm2_parede' THEN
+    v := v || jsonb_build_object('m2_total',
+      COALESCE((v->>'m2_pavimento')::numeric, 0) + COALESCE((v->>'m2_parede')::numeric, 0));
+  ELSIF public.ops_num(r->>'m2_total') IS NOT NULL THEN
+    v := v || jsonb_build_object('m2_total', round(public.ops_num(r->>'m2_total') * m, 2));
+  END IF;
+  RETURN v;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_medidas(jsonb, jsonb, numeric) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_medidas(jsonb, jsonb, numeric) TO authenticated, service_role;
+
+-- Os fatores que mudam o ritmo de uma tarefa, a partir da área de
+-- intervenção e da ficha do local (anew_address_building + andar). Valores
+-- fechados, para se poderem agrupar. Espelho de `fatoresDoLocal()` em
+-- src/domain/planeamento.ts.
+CREATE OR REPLACE FUNCTION public.ops_obra_fatores(_area jsonb, _local jsonb)
+RETURNS jsonb
+LANGUAGE sql IMMUTABLE
+SET search_path TO 'public'
+AS $$
+  SELECT jsonb_strip_nulls(jsonb_build_object(
+    'habitada',            CASE (_local->>'habitada_durante_obra') WHEN 'true' THEN 'sim' WHEN 'false' THEN 'nao' END,
+    'acesso',              CASE WHEN _local->>'acesso' IN ('facil','dificil') THEN _local->>'acesso' END,
+    'elevador',            CASE (_local->>'tem_elevador') WHEN 'true' THEN 'sim' WHEN 'false' THEN 'nao' END,
+    'andar',               CASE WHEN public.ops_num(_local->>'piso') IS NULL THEN NULL
+                                WHEN public.ops_num(_local->>'piso') <= 0 THEN 'rc'
+                                WHEN public.ops_num(_local->>'piso') <= 2 THEN '1-2'
+                                ELSE '3+' END,
+    'mobilada',            CASE WHEN _local->>'mobilada' IN ('pouco','medio','muito') THEN _local->>'mobilada' END,
+    'distancia',           CASE WHEN _local->>'distancia_entrada' IN ('curta','media','longa') THEN _local->>'distancia_entrada' END,
+    'animais',             CASE (_local->>'animais') WHEN 'true' THEN 'sim' WHEN 'false' THEN 'nao' END,
+    'janela',              CASE (_area->>'diag_janela') WHEN 'true' THEN 'sim' WHEN 'false' THEN 'nao' END,
+    'local_cortes',        CASE WHEN _area->>'diag_local_cortes' IN ('na_area','varanda','fora') THEN _area->>'diag_local_cortes' END,
+    'altura_revestimento', CASE WHEN _area->>'diag_altura_revestimento' IN ('20cm','60cm','120cm','teto')
+                                THEN _area->>'diag_altura_revestimento' END))
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_fatores(jsonb, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_fatores(jsonb, jsonb) TO authenticated, service_role;
+
+-- A chave que agrupa uma tarefa para aprender: só os fatores que o passo de
+-- modelo declara, por ordem alfabética ("habitada=sim|local_cortes=fora").
+CREATE OR REPLACE FUNCTION public.ops_obra_fatores_chave(_fatores jsonb, _quais text[])
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path TO 'public'
+AS $$
+  SELECT COALESCE(string_agg(k || '=' || (_fatores->>k), '|' ORDER BY k), '')
+    FROM unnest(COALESCE(_quais, '{}')) k
+   WHERE _fatores ? k
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_fatores_chave(jsonb, text[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_fatores_chave(jsonb, text[]) TO authenticated, service_role;
+
 -- (DROP: a lista de colunas devolvidas mudou ao longo das versões.)
 DROP FUNCTION IF EXISTS public.ops_obra_tarefas_do_orcamento(uuid);
 CREATE FUNCTION public.ops_obra_tarefas_do_orcamento(_orc uuid)
@@ -1306,16 +1709,47 @@ RETURNS TABLE (
   com_modelo         boolean,
   orcamento_linha_id uuid,
   servico_id         uuid,
-  servico_tarefa_id  uuid)
+  servico_tarefa_id  uuid,
+  -- Planeamento automático (2c):
+  chave              text,       -- chave do passo de modelo
+  depende_chaves     text[],     -- "depois de" dentro do mesmo serviço
+  espera_antes_horas numeric,
+  medida             text,
+  medida_qt          numeric,
+  minutos_origem     text,
+  ritmo_n            integer,
+  fatores            jsonb,
+  fatores_chave      text,
+  contexto           text,       -- 'casa_banho' / 'cozinha' / NULL: o pacote a que a linha pertence
+  pacote             boolean,    -- a linha é um pacote (traz a obra inteira da divisão)
+  encaixe            jsonb)      -- {modo:'junta'|'entre', alvo} já resolvido para o contexto
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
 #variable_conflict use_column
 DECLARE
-  v_org   uuid;
-  v_ordem integer := 0;
-  l       record;
-  st      record;
+  v_org     uuid;
+  v_ordem   integer := 0;
+  v_linhas  jsonb := '[]'::jsonb;
+  v_local   jsonb := '{}'::jsonb;
+  v_snap    boolean := to_regclass('public.quote_diagnostic_snapshot') IS NOT NULL;
+  v_needs   boolean := to_regclass('public.deal_needs') IS NOT NULL;
+  v_ctx     text;
+  v_ctx_pac jsonb;              -- a linha-pacote do contexto atual
+  v_pacs    jsonb := '{}'::jsonb;  -- tipo → 1.ª linha-pacote desse tipo
+  v_para    jsonb := '{}'::jsonb;  -- tipo → {medida: Σ qt} das linhas que dão medidas
+  v_area    jsonb;
+  v_meds    jsonb;
+  v_fat     jsonb;
+  v_qt      numeric;
+  v_inclui  boolean;
+  v_e       jsonb;
+  v_rit     record;
+  v_servs   uuid[];
+  l         jsonb;
+  r         record;
+  st        record;
+  i         integer;
 BEGIN
   IF _orc IS NULL
      OR to_regclass('public.services') IS NULL
@@ -1330,9 +1764,31 @@ BEGIN
 
   SELECT q.organization_id INTO v_org FROM public.quotes q WHERE q.id = _orc;
 
-  -- Dinâmico para o ficheiro instalar numa base sem as tabelas de serviços.
-  FOR l IN EXECUTE $q$
+  -- A ficha do local da morada de entrega do orçamento (exterior + interior
+  -- + andar). Só se tudo existir nesta base.
+  IF to_regclass('public.anew_address_building') IS NOT NULL AND to_regclass('public.anew_addresses') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = 'public' AND table_name = 'quotes' AND column_name = 'site_address_id') THEN
+    EXECUTE 'SELECT to_jsonb(b) || jsonb_build_object(''andar_texto'', a.floor)
+               FROM public.quotes q
+               JOIN public.anew_address_building b ON b.address_id = q.site_address_id
+               LEFT JOIN public.anew_addresses a ON a.id = q.site_address_id
+              WHERE q.id = $1'
+       INTO v_local USING _orc;
+    v_local := COALESCE(v_local, '{}'::jsonb);
+    -- O andar em número: "3.º Esq" → 3, "R/C" → 0.
+    IF v_local->>'andar_texto' IS NOT NULL THEN
+      v_local := v_local || jsonb_build_object('piso',
+        CASE WHEN lower(v_local->>'andar_texto') ~ '^\s*(r/?c|rés|res)' THEN 0
+             ELSE public.ops_num(substring(v_local->>'andar_texto' FROM '-?\d+')) END);
+    END IF;
+  END IF;
+
+  -- 1.ª passagem: as linhas de serviço, com o papel de cada serviço e a área
+  -- de intervenção de onde vieram (a necessidade do negócio).
+  FOR r IN EXECUTE $q$
     SELECT l.id, COALESCE(l.qt, 1) AS qt, l.service_id,
+           nullif(to_jsonb(l)->>'source_deal_need_id', '') AS need_id,
            COALESCE(nullif(btrim(s.name), ''), nullif(btrim(l.descricao_snapshot), ''), 'Serviço') AS nome,
            nullif(btrim(s.technical_sheet_labor_description), '') AS proc,
            s.technical_sheet_labor_hours AS horas,
@@ -1355,51 +1811,211 @@ BEGIN
      ORDER BY l.ordem NULLS LAST, l.id
   $q$ USING _orc
   LOOP
+    v_area := NULL;
+    IF r.need_id IS NOT NULL THEN
+      IF v_snap THEN
+        EXECUTE 'SELECT to_jsonb(s) FROM public.quote_diagnostic_snapshot s
+                  WHERE s.quote_id = $1 AND s.deal_need_id::text = $2 LIMIT 1'
+           INTO v_area USING _orc, r.need_id;
+      END IF;
+      IF v_needs THEN
+        -- O que a cópia congelada ainda não tem (colunas novas) vem da necessidade.
+        EXECUTE 'SELECT to_jsonb(d) FROM public.deal_needs d WHERE d.id::text = $1'
+           INTO v_e USING r.need_id;
+        v_area := COALESCE(v_e, '{}'::jsonb) || jsonb_strip_nulls(COALESCE(v_area, '{}'::jsonb));
+      END IF;
+    END IF;
+
+    l := jsonb_build_object(
+      'id', r.id, 'qt', r.qt, 'service_id', r.service_id, 'nome', r.nome, 'proc', r.proc,
+      'horas', r.horas, 'pessoas', r.pessoas, 'fase', r.fase, 'materiais', r.materiais,
+      'area', v_area,
+      'tipo', (SELECT p.tipo FROM public.ops_obra_servico_perfil p
+                WHERE p.organization_id = v_org AND p.servico_id = r.service_id),
+      'planear', COALESCE((SELECT p.planear FROM public.ops_obra_servico_perfil p
+                            WHERE p.organization_id = v_org AND p.servico_id = r.service_id), true),
+      'medida_para', (SELECT p.medida_para FROM public.ops_obra_servico_perfil p
+                       WHERE p.organization_id = v_org AND p.servico_id = r.service_id),
+      'ref', COALESCE((SELECT p.medidas FROM public.ops_obra_servico_perfil p
+                        WHERE p.organization_id = v_org AND p.servico_id = r.service_id), '{}'::jsonb));
+    v_linhas := v_linhas || jsonb_build_array(l);
+    IF l->>'tipo' IS NOT NULL AND NOT v_pacs ? (l->>'tipo') THEN
+      v_pacs := v_pacs || jsonb_build_object(l->>'tipo', l);
+    END IF;
+  END LOOP;
+
+  v_servs := ARRAY(SELECT DISTINCT (x->>'service_id')::uuid FROM jsonb_array_elements(v_linhas) x);
+
+  -- O contexto de cada linha: o seu pacote; senão o tipo da área de onde
+  -- veio; senão o pacote mais próximo ACIMA dela no orçamento; senão o 1.º
+  -- pacote do orçamento. E as linhas que só dão medidas (ex.: "Instalação de
+  -- eletrodomésticos" = quantos eletrodomésticos tem a cozinha).
+  v_ctx := NULL;
+  FOR i IN 0 .. jsonb_array_length(v_linhas) - 1 LOOP
+    l := v_linhas->i;
+    IF l->>'tipo' IS NOT NULL THEN
+      v_ctx := l->>'tipo';
+      l := l || jsonb_build_object('ctx', v_ctx);
+    ELSIF (l->'area'->>'diag_tipo_area') IN ('casa_banho','cozinha') THEN
+      l := l || jsonb_build_object('ctx', l->'area'->>'diag_tipo_area');
+    ELSIF v_ctx IS NOT NULL THEN
+      l := l || jsonb_build_object('ctx', v_ctx);
+    ELSE
+      l := l || jsonb_build_object('ctx', (SELECT k FROM jsonb_object_keys(v_pacs) k ORDER BY k LIMIT 1));
+    END IF;
+    v_linhas := jsonb_set(v_linhas, ARRAY[i::text], l);
+    IF l->>'medida_para' IS NOT NULL AND l->>'ctx' IS NOT NULL THEN
+      v_para := jsonb_set(v_para, ARRAY[l->>'ctx'],
+                  COALESCE(v_para->(l->>'ctx'), '{}'::jsonb)
+                  || jsonb_build_object(l->>'medida_para',
+                       COALESCE((v_para->(l->>'ctx')->>(l->>'medida_para'))::numeric, 0) + (l->>'qt')::numeric));
+    END IF;
+  END LOOP;
+
+  -- 2.ª passagem: as tarefas.
+  FOR i IN 0 .. jsonb_array_length(v_linhas) - 1 LOOP
+    l := v_linhas->i;
+    CONTINUE WHEN NOT (l->>'planear')::boolean OR l->>'medida_para' IS NOT NULL;
+
+    -- A área de intervenção: a da linha; senão a do pacote do contexto.
+    v_ctx := l->>'ctx';
+    v_ctx_pac := CASE WHEN v_ctx IS NOT NULL THEN v_pacs->v_ctx END;
+    v_area := COALESCE(l->'area', v_ctx_pac->'area');
+    IF jsonb_typeof(v_area) <> 'object' THEN v_area := NULL; END IF;
+    -- Medidas: da área; o que faltar, da referência do pacote (× qt do pacote).
+    v_meds := public.ops_obra_medidas(
+                v_area,
+                COALESCE(CASE WHEN l->>'tipo' IS NOT NULL THEN l->'ref' END, v_ctx_pac->'ref', '{}'::jsonb),
+                CASE WHEN v_area IS NULL THEN COALESCE((COALESCE(v_ctx_pac, l)->>'qt')::numeric, 1) ELSE 1 END)
+              || COALESCE(v_para->v_ctx, '{}'::jsonb);
+    v_fat := public.ops_obra_fatores(v_area, v_local);
+
     IF EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa x
-                WHERE x.organization_id = v_org AND x.servico_id = l.service_id) THEN
-      -- O serviço tem modelo: uma tarefa por passo, tempo × quantidade.
+                WHERE x.organization_id = v_org AND x.servico_id = (l->>'service_id')::uuid) THEN
       FOR st IN
         SELECT x.* FROM public.ops_obra_servico_tarefa x
-         WHERE x.organization_id = v_org AND x.servico_id = l.service_id
+         WHERE x.organization_id = v_org AND x.servico_id = (l->>'service_id')::uuid
          ORDER BY x.ordem
       LOOP
+        -- Condição: um dos serviços no orçamento, OU a área / a ficha diz.
+        v_inclui := COALESCE(st.condicao IS NULL
+          OR (jsonb_typeof(st.condicao->'servicos') = 'array'
+              AND EXISTS (SELECT 1 FROM jsonb_array_elements_text(st.condicao->'servicos') s
+                           WHERE s.value::uuid = ANY (v_servs)))
+          OR (jsonb_typeof(st.condicao->'ficha') = 'object'
+              AND COALESCE(v_area->>('diag_' || (st.condicao->'ficha'->>'campo')),
+                           v_local->>(st.condicao->'ficha'->>'campo'))
+                  IN (SELECT jsonb_array_elements_text(st.condicao->'ficha'->'valores'))), false);
+        CONTINUE WHEN NOT v_inclui;
+
+        -- Encaixe de um extra: a regra do tipo de pacote do contexto. Sem
+        -- regra para esse tipo (mas com regras para outros), o passo não se
+        -- aplica; sem pacote nenhum, fica uma tarefa normal.
+        -- '*' = o tipo onde o extra mais se vende: vale sem pacote, ou num
+        -- pacote de outro tipo para o qual o serviço não tem passos próprios;
+        -- {"modo":"livre"} = tarefa normal, sem âncora.
+        v_e := NULL;
+        IF st.encaixe IS NOT NULL THEN
+          IF v_ctx IS NOT NULL AND v_ctx_pac IS NOT NULL THEN
+            v_e := st.encaixe->v_ctx;
+            IF v_e IS NULL AND NOT EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa y
+                                            WHERE y.organization_id = v_org AND y.servico_id = st.servico_id
+                                              AND y.encaixe ? v_ctx) THEN
+              v_e := st.encaixe->'*';
+            END IF;
+          ELSE
+            v_e := st.encaixe->'*';
+          END IF;
+          CONTINUE WHEN v_e IS NULL;
+          IF v_e->>'modo' = 'livre' THEN
+            v_e := NULL;
+          END IF;
+        END IF;
+
+        v_qt := CASE st.medida
+                  WHEN 'qt'   THEN (l->>'qt')::numeric
+                  WHEN 'fixo' THEN 0
+                  ELSE COALESCE((v_meds->>st.medida)::numeric, 0) END;
+
+        -- O ritmo aprendido (o da combinação de fatores; senão o geral).
+        SELECT ri.* INTO v_rit FROM public.ops_obra_ritmo ri
+         WHERE ri.servico_tarefa_id = st.id
+           AND ri.fatores_chave IN (public.ops_obra_fatores_chave(v_fat, st.fatores), '')
+         ORDER BY (ri.fatores_chave = '') LIMIT 1;
+
         v_ordem := v_ordem + 1;
         fase := st.fase;
         ordem := v_ordem;
-        nome := l.nome || ': ' || st.nome;
+        nome := (l->>'nome') || ': ' || st.nome;
         procedimento := st.procedimento;
         materiais := st.materiais;
         ferramentas := st.ferramentas;
-        minutos := GREATEST(1, round(st.minutos_fixos + st.minutos_por_unidade * l.qt))::integer;
+        IF v_rit.servico_tarefa_id IS NOT NULL THEN
+          minutos := GREATEST(1, round(v_rit.minutos_fixos + v_rit.minutos_por_unidade * v_qt))::integer;
+          minutos_origem := 'aprendido';
+          ritmo_n := v_rit.n;
+        ELSE
+          minutos := GREATEST(1, round(st.minutos_fixos + st.minutos_por_unidade * v_qt))::integer;
+          minutos_origem := 'padrao';
+          ritmo_n := 0;
+        END IF;
         pessoas := st.pessoas;
         skill_id := st.skill_id;
         sem_ficha := false;
         com_modelo := true;
-        orcamento_linha_id := l.id;
-        servico_id := l.service_id;
+        orcamento_linha_id := (l->>'id')::uuid;
+        servico_id := (l->>'service_id')::uuid;
         servico_tarefa_id := st.id;
+        chave := st.chave;
+        depende_chaves := CASE WHEN cardinality(st.depende_chaves) > 0 THEN st.depende_chaves
+                               WHEN st.depende_ordem IS NOT NULL THEN
+                                 ARRAY(SELECT COALESCE(d.chave, '#' || d.ordem) FROM public.ops_obra_servico_tarefa d
+                                        WHERE d.organization_id = v_org AND d.servico_id = st.servico_id
+                                          AND d.ordem = st.depende_ordem)
+                               ELSE '{}' END;
+        espera_antes_horas := st.espera_antes_horas;
+        medida := st.medida;
+        medida_qt := v_qt;
+        fatores := v_fat;
+        fatores_chave := public.ops_obra_fatores_chave(v_fat, st.fatores);
+        contexto := v_ctx;
+        pacote := l->>'tipo' IS NOT NULL;
+        encaixe := v_e;
         RETURN NEXT;
       END LOOP;
     ELSE
       -- Sem modelo: uma tarefa só, com o tempo da ficha técnica
       -- (qt × horas × pessoas; sem horas → 60 min e `sem_ficha`).
       v_ordem := v_ordem + 1;
-      fase := l.fase;
+      fase := (l->>'fase')::smallint;
       ordem := v_ordem;
-      nome := l.nome;
-      procedimento := l.proc;
-      materiais := l.materiais;
+      nome := l->>'nome';
+      procedimento := l->>'proc';
+      materiais := l->>'materiais';
       ferramentas := NULL;
-      minutos := (CASE WHEN COALESCE(l.horas, 0) > 0
-                       THEN GREATEST(1, round(60 * l.qt * l.horas * COALESCE(nullif(l.pessoas, 0), 1)))
+      minutos := (CASE WHEN COALESCE((l->>'horas')::numeric, 0) > 0
+                       THEN GREATEST(1, round(60 * (l->>'qt')::numeric * (l->>'horas')::numeric
+                                              * COALESCE(nullif((l->>'pessoas')::numeric, 0), 1)))
                        ELSE 60 END)::integer;
-      pessoas := LEAST(20, GREATEST(1, COALESCE(round(l.pessoas), 1)))::smallint;
+      pessoas := LEAST(20, GREATEST(1, COALESCE(round((l->>'pessoas')::numeric), 1)))::smallint;
       skill_id := NULL;
-      sem_ficha := COALESCE(l.horas, 0) <= 0;
+      sem_ficha := COALESCE((l->>'horas')::numeric, 0) <= 0;
       com_modelo := false;
-      orcamento_linha_id := l.id;
-      servico_id := l.service_id;
+      orcamento_linha_id := (l->>'id')::uuid;
+      servico_id := (l->>'service_id')::uuid;
       servico_tarefa_id := NULL;
+      chave := NULL;
+      depende_chaves := '{}';
+      espera_antes_horas := 0;
+      medida := 'qt';
+      medida_qt := (l->>'qt')::numeric;
+      minutos_origem := CASE WHEN COALESCE((l->>'horas')::numeric, 0) > 0 THEN 'ficha' ELSE 'padrao' END;
+      ritmo_n := 0;
+      fatores := v_fat;
+      fatores_chave := '';
+      contexto := v_ctx;
+      pacote := l->>'tipo' IS NOT NULL;
+      encaixe := NULL;
       RETURN NEXT;
     END IF;
   END LOOP;
@@ -1632,6 +2248,196 @@ $$;
 
 REVOKE ALL ON FUNCTION public.ops_obra_servico_sugerir_impl(uuid, uuid, uuid) FROM PUBLIC, anon, authenticated;
 
+-- ============================================================
+-- 6d. Tempos padrão — os manuais operacionais, compactados (03/10/2026)
+-- ============================================================
+-- Remodelação completa de casa de banho (18 passos) e de cozinha (21), os
+-- modelos parciais de casa de banho (0–3), a mudança de mobiliário de
+-- cozinha e 39 extras com o seu encaixe no pacote. Gerado a partir da folha
+-- validada "Planeamento - tempos padrão casa de banho e cozinha.xlsx".
+-- Os serviços encontram-se pelo NOME no catálogo da organização (os do CRM
+-- da Mudelar em 03/10/2026). Só entra por RPC, nunca ao correr o ficheiro.
+-- Sem `_substituir`, não toca num serviço com modelo gravado à mão.
+CREATE OR REPLACE FUNCTION public.ops_obra_tempos_padrao()
+RETURNS jsonb
+LANGUAGE sql IMMUTABLE
+SET search_path TO 'public'
+AS $semente$ SELECT '{"versao":"2026-10-03","skills":["Logística","Gás (ITG)","Marmorista","Demolições","Canalização","Eletricidade","Revestimentos","Pintura","Carpintaria"],"pacotes":[{"servicos":["MO Modelo Remodelação Completa - Casa de Banho Comum","MO Modelo Remodelação Completa - Casa de Banho Social"],"tipo":"casa_banho","medidas":{"m2_pavimento":4,"m2_parede":18,"m2_total":22,"pontos_agua":5,"pontos_eletricos":6,"pecas_sanitarias":4,"acessorios":6},"passos":[{"chave":"1.1","nome":"Isolamento e proteção da área","fase":1,"skill":null,"depende":[],"espera":0,"medida":"fixo","fixos":120,"por_unidade":0,"pessoas":1,"fatores":["habitada","mobilada","distancia"],"condicao":null},{"chave":"1.2","nome":"Desligar redes e desmontar louças, móveis e acessórios","fase":1,"skill":"Demolições","depende":["1.1"],"espera":0,"medida":"pecas_sanitarias","fixos":60,"por_unidade":30,"pessoas":1,"fatores":["habitada"],"condicao":null},{"chave":"1.3","nome":"Demolição de revestimentos, pavimentos, paredes e tetos","fase":1,"skill":"Demolições","depende":["1.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":36,"pessoas":2,"fatores":["acesso"],"condicao":null},{"chave":"1.4","nome":"Retirada de entulho e limpeza","fase":1,"skill":null,"depende":["1.3"],"espera":0,"medida":"m2_total","fixos":60,"por_unidade":9,"pessoas":1,"fatores":["acesso","andar","distancia","elevador"],"condicao":null},{"chave":"1.5","nome":"Levantamento de materiais em armazém","fase":1,"skill":"Logística","depende":[],"espera":0,"medida":"fixo","fixos":180,"por_unidade":0,"pessoas":1,"fatores":["acesso","andar","elevador"],"condicao":null},{"chave":"2.1","nome":"Canalização (água e esgotos)","fase":2,"skill":"Canalização","depende":["1.4","1.5"],"espera":0,"medida":"pontos_agua","fixos":360,"por_unidade":240,"pessoas":1,"fatores":[],"condicao":null},{"chave":"2.2","nome":"Instalação elétrica (iluminação, tomadas, ventilação)","fase":2,"skill":"Eletricidade","depende":["1.4","1.5"],"espera":0,"medida":"pontos_eletricos","fixos":180,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null},{"chave":"2.3","nome":"Preparação para aquecimento (toalheiro elétrico)","fase":2,"skill":"Eletricidade","depende":["2.2"],"espera":0,"medida":"fixo","fixos":120,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":{"servicos":["Instalação de Toalheiros Eletricos"],"ficha":{"campo":"toalheiro","valores":["true"]}}},{"chave":"2.4","nome":"Ensaios (água, esgotos, elétrico) e fecho de roços","fase":2,"skill":"Canalização","depende":["2.1","2.2","2.3"],"espera":0,"medida":"fixo","fixos":360,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.1","nome":"Regularização do pavimento (betonilha)","fase":3,"skill":"Revestimentos","depende":["2.4"],"espera":0,"medida":"m2_pavimento","fixos":120,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.2","nome":"Impermeabilização de paredes e pavimento","fase":3,"skill":"Revestimentos","depende":["3.1"],"espera":48,"medida":"m2_total","fixos":60,"por_unidade":18,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.3","nome":"Assentamento de azulejo e mosaico","fase":3,"skill":"Revestimentos","depende":["3.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":60,"pessoas":2,"fatores":["altura_revestimento","janela","local_cortes"],"condicao":null},{"chave":"3.4","nome":"Betumação de juntas e limpeza","fase":3,"skill":"Revestimentos","depende":["3.3"],"espera":24,"medida":"m2_total","fixos":60,"por_unidade":12,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.5","nome":"Teto falso, pintura do teto, sancas e rodapés","fase":3,"skill":"Pintura","depende":["2.4"],"espera":0,"medida":"m2_pavimento","fixos":240,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.1","nome":"Montagem de louças sanitárias","fase":4,"skill":"Canalização","depende":["3.4","3.5"],"espera":24,"medida":"pecas_sanitarias","fixos":120,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.2","nome":"Torneiras, acessórios, espelhos e mobiliário","fase":4,"skill":"Carpintaria","depende":["4.1"],"espera":0,"medida":"acessorios","fixos":120,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.3","nome":"Ligação de equipamentos elétricos (iluminação, ventilação)","fase":4,"skill":"Eletricidade","depende":["3.4","3.5"],"espera":24,"medida":"pontos_eletricos","fixos":60,"por_unidade":30,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.4","nome":"Selagens, retoques, limpeza final e entrega","fase":4,"skill":null,"depende":["4.2","4.3"],"espera":0,"medida":"m2_total","fixos":240,"por_unidade":6,"pessoas":1,"fatores":["habitada","mobilada"],"condicao":null}]},{"servicos":["MO Modelo 0 - Casa de Banho: Remoção de Poliban até 100x100 + Revestimento até 20cm"],"tipo":"casa_banho","medidas":{"m2_pavimento":1,"m2_parede":0.6,"m2_total":1.6,"pontos_agua":1,"pontos_eletricos":0,"pecas_sanitarias":1,"acessorios":2},"passos":[{"chave":"1.1","nome":"Isolamento e proteção da área","fase":1,"skill":null,"depende":[],"espera":0,"medida":"fixo","fixos":120,"por_unidade":0,"pessoas":1,"fatores":["habitada","mobilada","distancia"],"condicao":null},{"chave":"1.2","nome":"Desligar redes e desmontar louças, móveis e acessórios","fase":1,"skill":"Demolições","depende":["1.1"],"espera":0,"medida":"pecas_sanitarias","fixos":60,"por_unidade":30,"pessoas":1,"fatores":["habitada"],"condicao":null},{"chave":"1.3","nome":"Demolição de revestimentos, pavimentos, paredes e tetos","fase":1,"skill":"Demolições","depende":["1.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":36,"pessoas":2,"fatores":["acesso"],"condicao":null},{"chave":"1.4","nome":"Retirada de entulho e limpeza","fase":1,"skill":null,"depende":["1.3"],"espera":0,"medida":"m2_total","fixos":60,"por_unidade":9,"pessoas":1,"fatores":["acesso","andar","distancia","elevador"],"condicao":null},{"chave":"1.5","nome":"Levantamento de materiais em armazém","fase":1,"skill":"Logística","depende":[],"espera":0,"medida":"fixo","fixos":180,"por_unidade":0,"pessoas":1,"fatores":["acesso","andar","elevador"],"condicao":null},{"chave":"3.1","nome":"Regularização do pavimento (betonilha)","fase":3,"skill":"Revestimentos","depende":["1.4","1.5"],"espera":0,"medida":"m2_pavimento","fixos":120,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.2","nome":"Impermeabilização de paredes e pavimento","fase":3,"skill":"Revestimentos","depende":["3.1"],"espera":48,"medida":"m2_total","fixos":60,"por_unidade":18,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.3","nome":"Assentamento de azulejo e mosaico","fase":3,"skill":"Revestimentos","depende":["3.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":60,"pessoas":2,"fatores":["altura_revestimento","janela","local_cortes"],"condicao":null},{"chave":"3.4","nome":"Betumação de juntas e limpeza","fase":3,"skill":"Revestimentos","depende":["3.3"],"espera":24,"medida":"m2_total","fixos":60,"por_unidade":12,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.1","nome":"Montagem de louças sanitárias","fase":4,"skill":"Canalização","depende":["3.4","1.4","1.5"],"espera":0,"medida":"pecas_sanitarias","fixos":120,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.2","nome":"Torneiras, acessórios, espelhos e mobiliário","fase":4,"skill":"Carpintaria","depende":["4.1"],"espera":0,"medida":"acessorios","fixos":120,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.4","nome":"Selagens, retoques, limpeza final e entrega","fase":4,"skill":null,"depende":["4.2","3.4","1.4","1.5"],"espera":0,"medida":"m2_total","fixos":240,"por_unidade":6,"pessoas":1,"fatores":["habitada","mobilada"],"condicao":null}]},{"servicos":["MO Modelo 1 - Casa de Banho: Remoção de Banheira ou Poliban  + Revestimento até 60cm"],"tipo":"casa_banho","medidas":{"m2_pavimento":1,"m2_parede":1.8,"m2_total":2.8,"pontos_agua":1,"pontos_eletricos":0,"pecas_sanitarias":1,"acessorios":2},"passos":[{"chave":"1.1","nome":"Isolamento e proteção da área","fase":1,"skill":null,"depende":[],"espera":0,"medida":"fixo","fixos":120,"por_unidade":0,"pessoas":1,"fatores":["habitada","mobilada","distancia"],"condicao":null},{"chave":"1.2","nome":"Desligar redes e desmontar louças, móveis e acessórios","fase":1,"skill":"Demolições","depende":["1.1"],"espera":0,"medida":"pecas_sanitarias","fixos":60,"por_unidade":30,"pessoas":1,"fatores":["habitada"],"condicao":null},{"chave":"1.3","nome":"Demolição de revestimentos, pavimentos, paredes e tetos","fase":1,"skill":"Demolições","depende":["1.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":36,"pessoas":2,"fatores":["acesso"],"condicao":null},{"chave":"1.4","nome":"Retirada de entulho e limpeza","fase":1,"skill":null,"depende":["1.3"],"espera":0,"medida":"m2_total","fixos":60,"por_unidade":9,"pessoas":1,"fatores":["acesso","andar","distancia","elevador"],"condicao":null},{"chave":"1.5","nome":"Levantamento de materiais em armazém","fase":1,"skill":"Logística","depende":[],"espera":0,"medida":"fixo","fixos":180,"por_unidade":0,"pessoas":1,"fatores":["acesso","andar","elevador"],"condicao":null},{"chave":"3.1","nome":"Regularização do pavimento (betonilha)","fase":3,"skill":"Revestimentos","depende":["1.4","1.5"],"espera":0,"medida":"m2_pavimento","fixos":120,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.2","nome":"Impermeabilização de paredes e pavimento","fase":3,"skill":"Revestimentos","depende":["3.1"],"espera":48,"medida":"m2_total","fixos":60,"por_unidade":18,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.3","nome":"Assentamento de azulejo e mosaico","fase":3,"skill":"Revestimentos","depende":["3.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":60,"pessoas":2,"fatores":["altura_revestimento","janela","local_cortes"],"condicao":null},{"chave":"3.4","nome":"Betumação de juntas e limpeza","fase":3,"skill":"Revestimentos","depende":["3.3"],"espera":24,"medida":"m2_total","fixos":60,"por_unidade":12,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.1","nome":"Montagem de louças sanitárias","fase":4,"skill":"Canalização","depende":["3.4","1.4","1.5"],"espera":0,"medida":"pecas_sanitarias","fixos":120,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.2","nome":"Torneiras, acessórios, espelhos e mobiliário","fase":4,"skill":"Carpintaria","depende":["4.1"],"espera":0,"medida":"acessorios","fixos":120,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.4","nome":"Selagens, retoques, limpeza final e entrega","fase":4,"skill":null,"depende":["4.2","3.4","1.4","1.5"],"espera":0,"medida":"m2_total","fixos":240,"por_unidade":6,"pessoas":1,"fatores":["habitada","mobilada"],"condicao":null}]},{"servicos":["MO Modelo 2 - Casa de Banho: Remoção de Banheira ou Poliban  + Elevação da Torneira + Revestimento até 120cm"],"tipo":"casa_banho","medidas":{"m2_pavimento":1,"m2_parede":3.6,"m2_total":4.6,"pontos_agua":1,"pontos_eletricos":0,"pecas_sanitarias":1,"acessorios":2},"passos":[{"chave":"1.1","nome":"Isolamento e proteção da área","fase":1,"skill":null,"depende":[],"espera":0,"medida":"fixo","fixos":120,"por_unidade":0,"pessoas":1,"fatores":["habitada","mobilada","distancia"],"condicao":null},{"chave":"1.2","nome":"Desligar redes e desmontar louças, móveis e acessórios","fase":1,"skill":"Demolições","depende":["1.1"],"espera":0,"medida":"pecas_sanitarias","fixos":60,"por_unidade":30,"pessoas":1,"fatores":["habitada"],"condicao":null},{"chave":"1.3","nome":"Demolição de revestimentos, pavimentos, paredes e tetos","fase":1,"skill":"Demolições","depende":["1.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":36,"pessoas":2,"fatores":["acesso"],"condicao":null},{"chave":"1.4","nome":"Retirada de entulho e limpeza","fase":1,"skill":null,"depende":["1.3"],"espera":0,"medida":"m2_total","fixos":60,"por_unidade":9,"pessoas":1,"fatores":["acesso","andar","distancia","elevador"],"condicao":null},{"chave":"1.5","nome":"Levantamento de materiais em armazém","fase":1,"skill":"Logística","depende":[],"espera":0,"medida":"fixo","fixos":180,"por_unidade":0,"pessoas":1,"fatores":["acesso","andar","elevador"],"condicao":null},{"chave":"2.1","nome":"Canalização (água e esgotos)","fase":2,"skill":"Canalização","depende":["1.4","1.5"],"espera":0,"medida":"pontos_agua","fixos":360,"por_unidade":240,"pessoas":1,"fatores":[],"condicao":null},{"chave":"2.4","nome":"Ensaios (água, esgotos, elétrico) e fecho de roços","fase":2,"skill":"Canalização","depende":["2.1","1.4","1.5"],"espera":0,"medida":"fixo","fixos":360,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.1","nome":"Regularização do pavimento (betonilha)","fase":3,"skill":"Revestimentos","depende":["2.4"],"espera":0,"medida":"m2_pavimento","fixos":120,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.2","nome":"Impermeabilização de paredes e pavimento","fase":3,"skill":"Revestimentos","depende":["3.1"],"espera":48,"medida":"m2_total","fixos":60,"por_unidade":18,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.3","nome":"Assentamento de azulejo e mosaico","fase":3,"skill":"Revestimentos","depende":["3.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":60,"pessoas":2,"fatores":["altura_revestimento","janela","local_cortes"],"condicao":null},{"chave":"3.4","nome":"Betumação de juntas e limpeza","fase":3,"skill":"Revestimentos","depende":["3.3"],"espera":24,"medida":"m2_total","fixos":60,"por_unidade":12,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.1","nome":"Montagem de louças sanitárias","fase":4,"skill":"Canalização","depende":["3.4","2.4"],"espera":0,"medida":"pecas_sanitarias","fixos":120,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.2","nome":"Torneiras, acessórios, espelhos e mobiliário","fase":4,"skill":"Carpintaria","depende":["4.1"],"espera":0,"medida":"acessorios","fixos":120,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.4","nome":"Selagens, retoques, limpeza final e entrega","fase":4,"skill":null,"depende":["4.2","3.4","2.4"],"espera":0,"medida":"m2_total","fixos":240,"por_unidade":6,"pessoas":1,"fatores":["habitada","mobilada"],"condicao":null}]},{"servicos":["MO Modelo 3 - Casa de Banho: Remoção de Banheira ou Poliban  + Elevação da Torneira + Revestimento até teto"],"tipo":"casa_banho","medidas":{"m2_pavimento":1,"m2_parede":7.2,"m2_total":8.2,"pontos_agua":1,"pontos_eletricos":0,"pecas_sanitarias":1,"acessorios":2},"passos":[{"chave":"1.1","nome":"Isolamento e proteção da área","fase":1,"skill":null,"depende":[],"espera":0,"medida":"fixo","fixos":120,"por_unidade":0,"pessoas":1,"fatores":["habitada","mobilada","distancia"],"condicao":null},{"chave":"1.2","nome":"Desligar redes e desmontar louças, móveis e acessórios","fase":1,"skill":"Demolições","depende":["1.1"],"espera":0,"medida":"pecas_sanitarias","fixos":60,"por_unidade":30,"pessoas":1,"fatores":["habitada"],"condicao":null},{"chave":"1.3","nome":"Demolição de revestimentos, pavimentos, paredes e tetos","fase":1,"skill":"Demolições","depende":["1.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":36,"pessoas":2,"fatores":["acesso"],"condicao":null},{"chave":"1.4","nome":"Retirada de entulho e limpeza","fase":1,"skill":null,"depende":["1.3"],"espera":0,"medida":"m2_total","fixos":60,"por_unidade":9,"pessoas":1,"fatores":["acesso","andar","distancia","elevador"],"condicao":null},{"chave":"1.5","nome":"Levantamento de materiais em armazém","fase":1,"skill":"Logística","depende":[],"espera":0,"medida":"fixo","fixos":180,"por_unidade":0,"pessoas":1,"fatores":["acesso","andar","elevador"],"condicao":null},{"chave":"2.1","nome":"Canalização (água e esgotos)","fase":2,"skill":"Canalização","depende":["1.4","1.5"],"espera":0,"medida":"pontos_agua","fixos":360,"por_unidade":240,"pessoas":1,"fatores":[],"condicao":null},{"chave":"2.4","nome":"Ensaios (água, esgotos, elétrico) e fecho de roços","fase":2,"skill":"Canalização","depende":["2.1","1.4","1.5"],"espera":0,"medida":"fixo","fixos":360,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.1","nome":"Regularização do pavimento (betonilha)","fase":3,"skill":"Revestimentos","depende":["2.4"],"espera":0,"medida":"m2_pavimento","fixos":120,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.2","nome":"Impermeabilização de paredes e pavimento","fase":3,"skill":"Revestimentos","depende":["3.1"],"espera":48,"medida":"m2_total","fixos":60,"por_unidade":18,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.3","nome":"Assentamento de azulejo e mosaico","fase":3,"skill":"Revestimentos","depende":["3.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":60,"pessoas":2,"fatores":["altura_revestimento","janela","local_cortes"],"condicao":null},{"chave":"3.4","nome":"Betumação de juntas e limpeza","fase":3,"skill":"Revestimentos","depende":["3.3"],"espera":24,"medida":"m2_total","fixos":60,"por_unidade":12,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.1","nome":"Montagem de louças sanitárias","fase":4,"skill":"Canalização","depende":["3.4","2.4"],"espera":0,"medida":"pecas_sanitarias","fixos":120,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.2","nome":"Torneiras, acessórios, espelhos e mobiliário","fase":4,"skill":"Carpintaria","depende":["4.1"],"espera":0,"medida":"acessorios","fixos":120,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.4","nome":"Selagens, retoques, limpeza final e entrega","fase":4,"skill":null,"depende":["4.2","3.4","2.4"],"espera":0,"medida":"m2_total","fixos":240,"por_unidade":6,"pessoas":1,"fatores":["habitada","mobilada"],"condicao":null}]},{"servicos":["MO Modelo Remodelação Completa - Cozinha"],"tipo":"cozinha","medidas":{"m2_pavimento":10,"m2_parede":10,"m2_total":20,"pontos_agua":3,"pontos_eletricos":12,"modulos":10,"eletrodomesticos":4,"ml_bancada":3},"passos":[{"chave":"1.1","nome":"Isolamento e proteção da área","fase":1,"skill":null,"depende":[],"espera":0,"medida":"fixo","fixos":120,"por_unidade":0,"pessoas":1,"fatores":["habitada","mobilada","distancia"],"condicao":null},{"chave":"1.2","nome":"Desligar e proteger pontos de água, gás e eletricidade","fase":1,"skill":"Canalização","depende":["1.1"],"espera":0,"medida":"fixo","fixos":120,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null},{"chave":"1.3","nome":"Desmontagem de móveis e eletrodomésticos","fase":1,"skill":"Carpintaria","depende":["1.2"],"espera":0,"medida":"modulos","fixos":120,"por_unidade":30,"pessoas":2,"fatores":["habitada"],"condicao":null},{"chave":"1.4","nome":"Remoção de revestimentos, pavimentos e demolições","fase":1,"skill":"Demolições","depende":["1.3"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":48,"pessoas":2,"fatores":["acesso"],"condicao":null},{"chave":"1.5","nome":"Retirada de entulho e limpeza","fase":1,"skill":null,"depende":["1.4"],"espera":0,"medida":"m2_total","fixos":60,"por_unidade":12,"pessoas":1,"fatores":["acesso","andar","distancia","elevador"],"condicao":null},{"chave":"1.6","nome":"Levantamento de materiais em armazém","fase":1,"skill":"Logística","depende":[],"espera":0,"medida":"fixo","fixos":180,"por_unidade":0,"pessoas":1,"fatores":["acesso","andar","elevador"],"condicao":null},{"chave":"2.1","nome":"Canalização (água e esgotos)","fase":2,"skill":"Canalização","depende":["1.5","1.6"],"espera":0,"medida":"pontos_agua","fixos":240,"por_unidade":240,"pessoas":1,"fatores":[],"condicao":null},{"chave":"2.2","nome":"Instalação elétrica (iluminação, tomadas, circuitos de forno e placa)","fase":2,"skill":"Eletricidade","depende":["1.5","1.6"],"espera":0,"medida":"pontos_eletricos","fixos":360,"por_unidade":120,"pessoas":1,"fatores":[],"condicao":null},{"chave":"2.3","nome":"Instalação de gás","fase":2,"skill":"Gás (ITG)","depende":["1.5","1.6"],"espera":0,"medida":"fixo","fixos":360,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":{"servicos":["Instalação de Gás nas Paredes","Instalação de Eletrodoméstico a Gás","Anulação de Ponto de Gás","Certificação de Gás"],"ficha":{"campo":"gas","valores":["anular","manter","instalar","canalizado","garrafa"]}}},{"chave":"2.4","nome":"Testes de estanquidade e funcionamento e fecho de roços","fase":2,"skill":"Canalização","depende":["2.1","2.2","2.3"],"espera":0,"medida":"fixo","fixos":480,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.1","nome":"Regularização do pavimento (betonilha)","fase":3,"skill":"Revestimentos","depende":["2.4"],"espera":0,"medida":"m2_pavimento","fixos":120,"por_unidade":30,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.2","nome":"Impermeabilização (zonas húmidas)","fase":3,"skill":"Revestimentos","depende":["3.1"],"espera":48,"medida":"m2_pavimento","fixos":60,"por_unidade":12,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.3","nome":"Assentamento de azulejo e pavimento","fase":3,"skill":"Revestimentos","depende":["3.2"],"espera":0,"medida":"m2_total","fixos":120,"por_unidade":60,"pessoas":2,"fatores":["janela","local_cortes"],"condicao":null},{"chave":"3.4","nome":"Betumação de juntas e limpeza","fase":3,"skill":"Revestimentos","depende":["3.3"],"espera":24,"medida":"m2_total","fixos":60,"por_unidade":12,"pessoas":1,"fatores":[],"condicao":null},{"chave":"3.5","nome":"Teto falso, pintura, sancas e rodapés","fase":3,"skill":"Pintura","depende":["2.4"],"espera":0,"medida":"m2_pavimento","fixos":240,"por_unidade":48,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.1","nome":"Montagem dos móveis","fase":4,"skill":"Carpintaria","depende":["3.4","3.5"],"espera":24,"medida":"modulos","fixos":240,"por_unidade":90,"pessoas":2,"fatores":[],"condicao":null},{"chave":"4.2","nome":"Medição da bancada","fase":4,"skill":"Marmorista","depende":["4.1"],"espera":0,"medida":"fixo","fixos":60,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.3","nome":"Colocação da bancada","fase":4,"skill":"Marmorista","depende":["4.2"],"espera":120,"medida":"ml_bancada","fixos":120,"por_unidade":60,"pessoas":2,"fatores":["andar","elevador"],"condicao":null},{"chave":"4.4","nome":"Instalação de eletrodomésticos","fase":4,"skill":"Carpintaria","depende":["4.3"],"espera":0,"medida":"eletrodomesticos","fixos":60,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.5","nome":"Ligações de água, gás e eletricidade","fase":4,"skill":"Canalização","depende":["4.4"],"espera":0,"medida":"pontos_agua","fixos":120,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.6","nome":"Selagens, retoques, limpeza final e entrega","fase":4,"skill":null,"depende":["4.5"],"espera":0,"medida":"m2_total","fixos":240,"por_unidade":6,"pessoas":1,"fatores":["habitada","mobilada"],"condicao":null}]},{"servicos":["MO Modelo Simples de Mudança de Mobiliário - Cozinha"],"tipo":"cozinha","medidas":{"modulos":10,"eletrodomesticos":4,"ml_bancada":3,"pontos_agua":3},"passos":[{"chave":"1.1","nome":"Isolamento e proteção da área","fase":1,"skill":null,"depende":[],"espera":0,"medida":"fixo","fixos":120,"por_unidade":0,"pessoas":1,"fatores":["habitada","mobilada","distancia"],"condicao":null},{"chave":"1.3","nome":"Desmontagem de móveis e eletrodomésticos","fase":1,"skill":"Carpintaria","depende":["1.1"],"espera":0,"medida":"modulos","fixos":120,"por_unidade":30,"pessoas":2,"fatores":["habitada"],"condicao":null},{"chave":"1.5","nome":"Retirada de entulho e limpeza","fase":1,"skill":null,"depende":["1.3"],"espera":0,"medida":"m2_total","fixos":60,"por_unidade":12,"pessoas":1,"fatores":["acesso","andar","distancia","elevador"],"condicao":null},{"chave":"1.6","nome":"Levantamento de materiais em armazém","fase":1,"skill":"Logística","depende":[],"espera":0,"medida":"fixo","fixos":180,"por_unidade":0,"pessoas":1,"fatores":["acesso","andar","elevador"],"condicao":null},{"chave":"4.1","nome":"Montagem dos móveis","fase":4,"skill":"Carpintaria","depende":["1.5","1.6"],"espera":0,"medida":"modulos","fixos":240,"por_unidade":90,"pessoas":2,"fatores":[],"condicao":null},{"chave":"4.2","nome":"Medição da bancada","fase":4,"skill":"Marmorista","depende":["4.1"],"espera":0,"medida":"fixo","fixos":60,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.3","nome":"Colocação da bancada","fase":4,"skill":"Marmorista","depende":["4.2"],"espera":120,"medida":"ml_bancada","fixos":120,"por_unidade":60,"pessoas":2,"fatores":["andar","elevador"],"condicao":null},{"chave":"4.4","nome":"Instalação de eletrodomésticos","fase":4,"skill":"Carpintaria","depende":["4.3"],"espera":0,"medida":"eletrodomesticos","fixos":60,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.5","nome":"Ligações de água, gás e eletricidade","fase":4,"skill":"Canalização","depende":["4.4"],"espera":0,"medida":"pontos_agua","fixos":120,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null},{"chave":"4.6","nome":"Selagens, retoques, limpeza final e entrega","fase":4,"skill":null,"depende":["4.5"],"espera":0,"medida":"m2_total","fixos":240,"por_unidade":6,"pessoas":1,"fatores":["habitada","mobilada"],"condicao":null}]}],"extras":[{"servico":"Levantamento de Sanitários e Mobiliário","passos":[{"chave":"CB1","nome":"Levantamento de Sanitários e Mobiliário","fase":1,"skill":"Demolições","depende":[],"espera":0,"medida":"qt","fixos":120,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"1.2"},"*":{"modo":"livre"}}}]},{"servico":"Supressão de ponto de água","passos":[{"chave":"CB1","nome":"Supressão de ponto de água","fase":2,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"2.1"},"*":{"modo":"livre"}}}]},{"servico":"Mão de Obra Construção de Nicho (valor por unidade)","passos":[{"chave":"CB1","nome":"Mão de Obra Construção de Nicho (valor por unidade)","fase":2,"skill":"Revestimentos","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":180,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"entre","alvo":["2.4","3.2"]},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Revestimento m2","passos":[{"chave":"CB1","nome":"Instalação de Revestimento m2","fase":3,"skill":"Revestimentos","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"3.3"},"*":{"modo":"livre"}}}]},{"servico":"Mão de Obra Demolição de parede m2","passos":[{"chave":"CB1","nome":"Mão de Obra Demolição de parede m2","fase":1,"skill":"Demolições","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":48,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"1.3"}}},{"chave":"CZ1","nome":"Mão de Obra Demolição de parede m2","fase":1,"skill":"Demolições","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":48,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"1.4"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Pavimento m2","passos":[{"chave":"CB1","nome":"Instalação de Pavimento m2","fase":3,"skill":"Revestimentos","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"3.3"},"*":{"modo":"livre"}}}]},{"servico":"Anulação de Ponto de Gás","passos":[{"chave":"CB1","nome":"Anulação de Ponto de Gás","fase":2,"skill":"Gás (ITG)","depende":[],"espera":0,"medida":"qt","fixos":120,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"2.1"}}},{"chave":"CZ1","nome":"Anulação de Ponto de Gás","fase":2,"skill":"Gás (ITG)","depende":[],"espera":0,"medida":"qt","fixos":120,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"2.3"},"*":{"modo":"livre"}}}]},{"servico":"Mão de Obra Levantamento de parede em Alvenaria m2","passos":[{"chave":"CB1","nome":"Mão de Obra Levantamento de parede em Alvenaria m2","fase":1,"skill":"Revestimentos","depende":[],"espera":0,"medida":"qt","fixos":60,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"entre","alvo":["1.4","2.1"]},"*":{"modo":"livre"}}},{"chave":"CZ1","nome":"Mão de Obra Levantamento de parede em Alvenaria m2","fase":1,"skill":"Revestimentos","depende":[],"espera":0,"medida":"qt","fixos":60,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"entre","alvo":["1.5","2.1"]}}}]},{"servico":"Instalação de Mobiliário WC","passos":[{"chave":"CB1","nome":"Instalação de Mobiliário WC","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":120,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Coluna de Duche","passos":[{"chave":"CB1","nome":"Instalação de Coluna de Duche","fase":4,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}}]},{"servico":"Colocação de Serigrafia para Resguardo","passos":[{"chave":"CB1","nome":"Colocação de Serigrafia para Resguardo","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}}]},{"servico":"Construção de Murete em Alvenaria até 80cm","passos":[{"chave":"CB1","nome":"Construção de Murete em Alvenaria até 80cm","fase":2,"skill":"Revestimentos","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":240,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"entre","alvo":["2.4","3.2"]},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Sanita Compacta","passos":[{"chave":"CB1","nome":"Instalação de Sanita Compacta","fase":4,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":120,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.1"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Resguardo","passos":[{"chave":"CB1","nome":"Instalação de Resguardo","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":120,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Eletrodoméstico a Gás","passos":[{"chave":"CB1","nome":"Instalação de Eletrodoméstico a Gás","fase":4,"skill":"Gás (ITG)","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":120,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"}}},{"chave":"CZ1","nome":"Instalação de Eletrodoméstico a Gás (1/2)","fase":4,"skill":"Gás (ITG)","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"4.4"},"*":{"modo":"livre"}}},{"chave":"CZ2","nome":"Instalação de Eletrodoméstico a Gás (2/2)","fase":4,"skill":"Gás (ITG)","depende":["CZ1"],"espera":0,"medida":"qt","fixos":0,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"4.5"},"*":{"modo":"livre"}}}]},{"servico":"Mão de Obra - Deslocação de Ponto de Água ML","passos":[{"chave":"CB1","nome":"Mão de Obra - Deslocação de Ponto de Água ML","fase":2,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"2.1"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Banheira de Pousar","passos":[{"chave":"CB1","nome":"Instalação de Banheira de Pousar","fase":4,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":180,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.1"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de torneira de lavatório","passos":[{"chave":"CB1","nome":"Instalação de torneira de lavatório","fase":4,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Espelho com LED","passos":[{"chave":"CB1","nome":"Instalação de Espelho com LED (1/2)","fase":4,"skill":"Eletricidade","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":30,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}},{"chave":"CB2","nome":"Instalação de Espelho com LED (2/2)","fase":4,"skill":"Eletricidade","depende":["CB1"],"espera":0,"medida":"qt","fixos":0,"por_unidade":30,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.3"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Acessórios WC","passos":[{"chave":"CB1","nome":"Instalação de Acessórios WC","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":30,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}}]},{"servico":"Mão de Obra - Deslocação de Ponto de Esgoto ML","passos":[{"chave":"CB1","nome":"Mão de Obra - Deslocação de Ponto de Esgoto ML","fase":2,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":120,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"2.1"},"*":{"modo":"livre"}}},{"chave":"CZ1","nome":"Mão de Obra - Deslocação de Ponto de Esgoto ML","fase":2,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":120,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"2.1"}}}]},{"servico":"Instalação de Lavatório Cerâmica","passos":[{"chave":"CB1","nome":"Instalação de Lavatório Cerâmica","fase":4,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.1"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Bidé Compacto","passos":[{"chave":"CB1","nome":"Instalação de Bidé Compacto","fase":4,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.1"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Acessório de segurança WC","passos":[{"chave":"CB1","nome":"Instalação de Acessório de segurança WC","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":30,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}}]},{"servico":"Mão de Obra Abertura e Fecho de Roço c/ Acabamento ml","passos":[{"chave":"CB1","nome":"Mão de Obra Abertura e Fecho de Roço c/ Acabamento ml","fase":2,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"2.1"}}},{"chave":"CZ1","nome":"Mão de Obra Abertura e Fecho de Roço c/ Acabamento ml","fase":2,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"2.1"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Vidro Lateral Fixo","passos":[{"chave":"CB1","nome":"Instalação de Vidro Lateral Fixo","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":90,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Torneira de Bidé","passos":[{"chave":"CB1","nome":"Instalação de Torneira de Bidé","fase":4,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.2"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Toalheiros Eletricos","passos":[{"chave":"CB1","nome":"Instalação de Toalheiros Eletricos (1/2)","fase":2,"skill":"Eletricidade","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"2.3"},"*":{"modo":"livre"}}},{"chave":"CB2","nome":"Instalação de Toalheiros Eletricos (2/2)","fase":4,"skill":"Eletricidade","depende":["CB1"],"espera":0,"medida":"qt","fixos":0,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.3"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Ventaxia WC","passos":[{"chave":"CB1","nome":"Instalação de Ventaxia WC (1/2)","fase":2,"skill":"Eletricidade","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"2.2"},"*":{"modo":"livre"}}},{"chave":"CB2","nome":"Instalação de Ventaxia WC (2/2)","fase":4,"skill":"Eletricidade","depende":["CB1"],"espera":0,"medida":"qt","fixos":0,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"casa_banho":{"modo":"junta","alvo":"4.3"},"*":{"modo":"livre"}}}]},{"servico":"Instalação Estrutura para gaveta (valor unitário)","passos":[{"chave":"CZ1","nome":"Instalação Estrutura para gaveta (valor unitário)","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":18,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"4.1"},"*":{"modo":"livre"}}}]},{"servico":"Instalação Estrutura para gavetão (valor unitário)","passos":[{"chave":"CZ1","nome":"Instalação Estrutura para gavetão (valor unitário)","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":24,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"4.1"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Gás nas Paredes","passos":[{"chave":"CZ1","nome":"Instalação de Gás nas Paredes","fase":2,"skill":"Gás (ITG)","depende":[],"espera":0,"medida":"qt","fixos":360,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"2.3"},"*":{"modo":"livre"}}}]},{"servico":"Passagem de fio Eletrico fase/neutro 1,5mm² ML","passos":[{"chave":"CZ1","nome":"Passagem de fio Eletrico fase/neutro 1,5mm² ML","fase":2,"skill":"Eletricidade","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":9,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"2.2"},"*":{"modo":"livre"}}}]},{"servico":"Instalação Vista superior até 20cm de altura (valor p/ml)","passos":[{"chave":"CZ1","nome":"Instalação Vista superior até 20cm de altura (valor p/ml)","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":18,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"4.1"},"*":{"modo":"livre"}}}]},{"servico":"Instalação Estrutura de Gavetões Internos para dispenseiro (valor até 4 unidades)","passos":[{"chave":"CZ1","nome":"Instalação Estrutura de Gavetões Internos para dispenseiro (valor até 4 unidades)","fase":4,"skill":"Carpintaria","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"4.1"},"*":{"modo":"livre"}}}]},{"servico":"Certificação de Gás","passos":[{"chave":"CZ1","nome":"Certificação de Gás","fase":4,"skill":"Gás (ITG)","depende":[],"espera":0,"medida":"qt","fixos":120,"por_unidade":0,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"entre","alvo":["4.5","4.6"]},"*":{"modo":"livre"}}}]},{"servico":"Instalação de torneira de Cozinha","passos":[{"chave":"CZ1","nome":"Instalação de torneira de Cozinha","fase":4,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":45,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"4.5"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Rodapé ML","passos":[{"chave":"CZ1","nome":"Instalação de Rodapé ML","fase":3,"skill":"Pintura","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":15,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"3.5"},"*":{"modo":"livre"}}}]},{"servico":"Instalação de Lava Loiça","passos":[{"chave":"CZ1","nome":"Instalação de Lava Loiça","fase":4,"skill":"Canalização","depende":[],"espera":0,"medida":"qt","fixos":0,"por_unidade":60,"pessoas":1,"fatores":[],"condicao":null,"encaixe":{"cozinha":{"modo":"junta","alvo":"4.5"},"*":{"modo":"livre"}}}]}],"sem_planear":["Deslocação Fora do Raio de 30 km (valor p/km)","Projeto 3D - 3 Imagens","Projeto 3D 3 imagens - Clientes BMLAR"],"medida_para":[{"servico":"Instalação de Eletrodomésticos de Cozinha","medida":"eletrodomesticos"},{"servico":"Instalação de Eletrodomésticos Mudelar","medida":"eletrodomesticos"}]}'::jsonb $semente$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_tempos_padrao() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_tempos_padrao() TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.ops_obra_semear_tempos_padrao_impl(_org uuid, _autor uuid, _substituir boolean DEFAULT false)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_sem       jsonb := public.ops_obra_tempos_padrao();
+  v_def       jsonb;
+  v_nome      text;
+  v_ids       uuid[];
+  v_id        uuid;
+  v_servicos  integer := 0;
+  v_passos    integer := 0;
+  v_saltados  text[] := '{}';
+  v_faltam    text[] := '{}';
+  p           jsonb;
+  i           integer;
+BEGIN
+  IF to_regclass('public.services') IS NULL THEN
+    RAISE EXCEPTION 'Esta base não tem o catálogo de serviços do CRM.';
+  END IF;
+
+  INSERT INTO public.ops_skill (organization_id, nome)
+  SELECT _org, x FROM jsonb_array_elements_text(v_sem->'skills') x
+  ON CONFLICT (organization_id, nome) DO NOTHING;
+
+  -- Pacotes e extras: a mesma forma (passos), o pacote traz também o perfil.
+  FOR v_def IN
+    SELECT d || jsonb_build_object('_pacote', true) FROM jsonb_array_elements(v_sem->'pacotes') d
+    UNION ALL
+    SELECT d || jsonb_build_object('_pacote', false, 'servicos', jsonb_build_array(d->>'servico'))
+      FROM jsonb_array_elements(v_sem->'extras') d
+  LOOP
+    FOR v_nome IN SELECT jsonb_array_elements_text(v_def->'servicos') LOOP
+      EXECUTE 'SELECT COALESCE(array_agg(s.id), ''{}'') FROM public.services s
+                WHERE btrim(s.name) = btrim($2)
+                  AND NOT COALESCE(s.is_deleted, false) AND s.deleted_at IS NULL
+                  AND (s.organization_id = $1'
+        || CASE WHEN to_regclass('public.service_organizations') IS NOT NULL
+                THEN ' OR EXISTS (SELECT 1 FROM public.service_organizations so
+                                   WHERE so.service_id = s.id AND so.organization_id = $1)'
+                ELSE '' END
+        || ')'
+        INTO v_ids USING _org, v_nome;
+      IF cardinality(v_ids) = 0 THEN
+        v_faltam := v_faltam || v_nome;
+        CONTINUE;
+      END IF;
+
+      FOREACH v_id IN ARRAY v_ids LOOP
+        IF NOT _substituir AND EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa
+                                        WHERE organization_id = _org AND servico_id = v_id AND origem = 'manual') THEN
+          v_saltados := v_saltados || v_nome;
+          CONTINUE;
+        END IF;
+
+        INSERT INTO public.ops_obra_servico_perfil (organization_id, servico_id, tipo, medidas, planear, medida_para,
+                                                    atualizado_em, atualizado_por)
+        VALUES (_org, v_id,
+                CASE WHEN (v_def->>'_pacote')::boolean THEN v_def->>'tipo' END,
+                COALESCE(CASE WHEN (v_def->>'_pacote')::boolean THEN v_def->'medidas' END, '{}'::jsonb),
+                true, NULL, now(), _autor)
+        ON CONFLICT (organization_id, servico_id) DO UPDATE
+          SET tipo = EXCLUDED.tipo, medidas = EXCLUDED.medidas, planear = true, medida_para = NULL,
+              atualizado_em = now(), atualizado_por = _autor;
+
+        DELETE FROM public.ops_obra_servico_tarefa WHERE organization_id = _org AND servico_id = v_id;
+        i := 0;
+        FOR p IN SELECT x FROM jsonb_array_elements(v_def->'passos') x LOOP
+          i := i + 1;
+          INSERT INTO public.ops_obra_servico_tarefa (
+            organization_id, servico_id, ordem, nome, fase, minutos_por_unidade, minutos_fixos, pessoas,
+            skill_id, depende_ordem, origem, atualizado_por,
+            chave, depende_chaves, espera_antes_horas, medida, condicao, encaixe, fatores)
+          VALUES (
+            _org, v_id, i, p->>'nome', (p->>'fase')::smallint,
+            (p->>'por_unidade')::numeric,
+            (p->>'fixos')::integer,
+            (p->>'pessoas')::smallint,
+            (SELECT k.id FROM public.ops_skill k WHERE k.organization_id = _org AND k.nome = p->>'skill'),
+            NULL, 'padrao', _autor,
+            p->>'chave',
+            ARRAY(SELECT jsonb_array_elements_text(p->'depende')),
+            (p->>'espera')::numeric,
+            CASE WHEN (p->>'medida') = 'fixo' OR ((p->>'por_unidade')::numeric = 0 AND (p->>'medida') <> 'qt')
+                 THEN 'fixo' ELSE p->>'medida' END,
+            -- Condição: os nomes dos serviços passam a ids desta organização.
+            CASE WHEN jsonb_typeof(p->'condicao') = 'object' THEN
+              jsonb_strip_nulls(jsonb_build_object(
+                'servicos', public.ops_obra_ids_de_servicos(_org, p->'condicao'->'servicos'),
+                'ficha', p->'condicao'->'ficha')) END,
+            nullif(p->'encaixe', 'null'::jsonb),
+            ARRAY(SELECT jsonb_array_elements_text(COALESCE(p->'fatores', '[]'::jsonb))));
+          v_passos := v_passos + 1;
+        END LOOP;
+        v_servicos := v_servicos + 1;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+
+  -- O que não é trabalho no local, e o que só dá medidas ao pacote.
+  FOR v_def IN
+    SELECT jsonb_build_object('servico', x, 'planear', false) FROM jsonb_array_elements_text(v_sem->'sem_planear') x
+    UNION ALL
+    SELECT jsonb_build_object('servico', x->>'servico', 'planear', true, 'medida_para', x->>'medida')
+      FROM jsonb_array_elements(v_sem->'medida_para') x
+  LOOP
+    FOREACH v_id IN ARRAY public.ops_obra_ids_de_servicos(_org, jsonb_build_array(v_def->>'servico')) LOOP
+      INSERT INTO public.ops_obra_servico_perfil (organization_id, servico_id, planear, medida_para, atualizado_em, atualizado_por)
+      VALUES (_org, v_id, (v_def->>'planear')::boolean, v_def->>'medida_para', now(), _autor)
+      ON CONFLICT (organization_id, servico_id) DO UPDATE
+        SET planear = EXCLUDED.planear, medida_para = EXCLUDED.medida_para, tipo = NULL,
+            atualizado_em = now(), atualizado_por = _autor;
+      DELETE FROM public.ops_obra_servico_tarefa
+       WHERE organization_id = _org AND servico_id = v_id AND origem <> 'manual';
+      v_servicos := v_servicos + 1;
+    END LOOP;
+  END LOOP;
+
+  RETURN jsonb_build_object('ok', true, 'versao', v_sem->>'versao', 'servicos', v_servicos, 'passos', v_passos,
+                            'saltados', to_jsonb(v_saltados), 'nao_encontrados', to_jsonb(v_faltam));
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_semear_tempos_padrao_impl(uuid, uuid, boolean) FROM PUBLIC, anon, authenticated;
+
+-- Os ids (desta organização) dos serviços com estes nomes.
+CREATE OR REPLACE FUNCTION public.ops_obra_ids_de_servicos(_org uuid, _nomes jsonb)
+RETURNS uuid[]
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v uuid[];
+BEGIN
+  IF to_regclass('public.services') IS NULL OR jsonb_typeof(_nomes) <> 'array' THEN
+    RETURN '{}';
+  END IF;
+  EXECUTE 'SELECT COALESCE(array_agg(s.id), ''{}'') FROM public.services s
+            WHERE btrim(s.name) IN (SELECT btrim(x) FROM jsonb_array_elements_text($2) x)
+              AND NOT COALESCE(s.is_deleted, false) AND s.deleted_at IS NULL
+              AND (s.organization_id = $1'
+    || CASE WHEN to_regclass('public.service_organizations') IS NOT NULL
+            THEN ' OR EXISTS (SELECT 1 FROM public.service_organizations so
+                               WHERE so.service_id = s.id AND so.organization_id = $1)'
+            ELSE '' END
+    || ')'
+    INTO v USING _org, _nomes;
+  RETURN v;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_ids_de_servicos(uuid, jsonb) FROM PUBLIC, anon, authenticated;
+
+-- "Carregar tempos padrão" (ecrã dos modelos). Quem gere modelos.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_semear_tempos_padrao(p_org uuid, p_substituir boolean DEFAULT false)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+BEGIN
+  IF NOT public.ops_obra_pode_gerir_modelos(p_org) THEN
+    RAISE EXCEPTION 'Sem permissão para gerir modelos nesta organização.' USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  RETURN public.ops_obra_semear_tempos_padrao_impl(p_org, public.current_business_user_id(), COALESCE(p_substituir, false));
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_semear_tempos_padrao(uuid, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_semear_tempos_padrao(uuid, boolean) TO authenticated, service_role;
+
 -- O tipo de obra "Obra geral", por defeito, com as tarefas que existem sempre.
 CREATE OR REPLACE FUNCTION public.ops_obra_semear_tipo_geral_impl(_org uuid)
 RETURNS uuid
@@ -1728,7 +2534,7 @@ BEGIN
                       WHERE organization_id = p_org AND servico_id = v_id)
          OR (p_substituir AND NOT EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa
                                            WHERE organization_id = p_org AND servico_id = v_id
-                                             AND origem = 'manual')) THEN
+                                             AND origem IN ('manual','padrao'))) THEN
         v_k := public.ops_obra_servico_sugerir_impl(p_org, v_id, v_user);
         v_tarefas := v_tarefas + v_k;
         v_servicos := v_servicos + 1;
@@ -1764,6 +2570,7 @@ DECLARE
   v_dep  integer;
   v_mpu  numeric;
   v_fix  integer;
+  v_antes jsonb;
 BEGIN
   IF NOT public.ops_obra_pode_gerir_modelos(p_org) THEN
     RAISE EXCEPTION 'Sem permissão para gerir modelos nesta organização.' USING ERRCODE = 'insufficient_privilege';
@@ -1817,18 +2624,61 @@ BEGIN
     RAISE EXCEPTION 'As dependências deste serviço fecham um ciclo: nenhuma dessas tarefas poderia começar.';
   END IF;
 
+  -- Planeamento automático (2c): espera, medida e a chave; condição, encaixe
+  -- e fatores só se vierem (o ecrã simples não os mexe: ficam os de antes,
+  -- pela chave).
+  FOR t IN SELECT x FROM jsonb_array_elements(COALESCE(p_tarefas, '[]'::jsonb)) x LOOP
+    IF nullif(t->>'espera_antes_horas', '') IS NOT NULL
+       AND (public.ops_num(t->>'espera_antes_horas') BETWEEN 0 AND 2000) IS NOT TRUE THEN
+      RAISE EXCEPTION '"%": a espera tem de ser de 0 a 2000 horas.', t->>'nome';
+    END IF;
+    IF nullif(t->>'medida', '') IS NOT NULL AND t->>'medida' NOT IN
+       ('qt','fixo','m2_pavimento','m2_parede','m2_total','pontos_agua','pontos_eletricos',
+        'pecas_sanitarias','acessorios','modulos','eletrodomesticos','ml_bancada') THEN
+      RAISE EXCEPTION '"%": medida desconhecida.', t->>'nome';
+    END IF;
+    IF nullif(t->>'chave', '') IS NOT NULL AND t->>'chave' !~ '^[0-9A-Za-z._-]{1,12}$' THEN
+      RAISE EXCEPTION '"%": chave inválida (até 12 letras, números, . _ -).', t->>'nome';
+    END IF;
+  END LOOP;
+  IF (SELECT count(*) FROM jsonb_array_elements(COALESCE(p_tarefas, '[]'::jsonb)) x WHERE nullif(x->>'chave', '') IS NOT NULL)
+     <> (SELECT count(DISTINCT x->>'chave') FROM jsonb_array_elements(COALESCE(p_tarefas, '[]'::jsonb)) x WHERE nullif(x->>'chave', '') IS NOT NULL) THEN
+    RAISE EXCEPTION 'Há duas tarefas com a mesma chave.';
+  END IF;
+
+  v_antes := (SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                 'chave', x.chave, 'depende_chaves', to_jsonb(x.depende_chaves),
+                 'espera_antes_horas', x.espera_antes_horas, 'medida', x.medida,
+                 'condicao', x.condicao, 'encaixe', x.encaixe, 'fatores', to_jsonb(x.fatores))), '[]'::jsonb)
+                FROM public.ops_obra_servico_tarefa x
+               WHERE x.organization_id = p_org AND x.servico_id = p_servico_id AND x.chave IS NOT NULL);
+
   DELETE FROM public.ops_obra_servico_tarefa WHERE organization_id = p_org AND servico_id = p_servico_id;
 
   INSERT INTO public.ops_obra_servico_tarefa (
     organization_id, servico_id, ordem, nome, fase, minutos_por_unidade, minutos_fixos, pessoas,
-    skill_id, depende_ordem, procedimento, materiais, ferramentas, origem, atualizado_por)
+    skill_id, depende_ordem, procedimento, materiais, ferramentas, origem, atualizado_por,
+    chave, depende_chaves, espera_antes_horas, medida, condicao, encaixe, fatores)
   SELECT p_org, p_servico_id, x.pos::integer, btrim(x.t->>'nome'), (x.t->>'fase')::smallint,
          COALESCE((x.t->>'minutos_por_unidade')::numeric, 0), COALESCE((x.t->>'minutos_fixos')::integer, 0),
          COALESCE((x.t->>'pessoas')::smallint, 1), nullif(x.t->>'skill_id', '')::uuid,
          (x.t->>'depende_ordem')::integer,
          nullif(btrim(x.t->>'procedimento'), ''), nullif(btrim(x.t->>'materiais'), ''),
-         nullif(btrim(x.t->>'ferramentas'), ''), 'manual', v_user
-    FROM jsonb_array_elements(COALESCE(p_tarefas, '[]'::jsonb)) WITH ORDINALITY AS x(t, pos);
+         nullif(btrim(x.t->>'ferramentas'), ''), 'manual', v_user,
+         nullif(btrim(x.t->>'chave'), ''),
+         CASE WHEN jsonb_typeof(x.t->'depende_chaves') = 'array'
+              THEN ARRAY(SELECT jsonb_array_elements_text(x.t->'depende_chaves'))
+              ELSE COALESCE(ARRAY(SELECT jsonb_array_elements_text(COALESCE(a.v->'depende_chaves', '[]'::jsonb))), '{}') END,
+         COALESCE(public.ops_num(x.t->>'espera_antes_horas'), (a.v->>'espera_antes_horas')::numeric, 0),
+         COALESCE(nullif(x.t->>'medida', ''), a.v->>'medida', 'qt'),
+         CASE WHEN x.t ? 'condicao' THEN nullif(x.t->'condicao', 'null'::jsonb) ELSE nullif(a.v->'condicao', 'null'::jsonb) END,
+         CASE WHEN x.t ? 'encaixe' THEN nullif(x.t->'encaixe', 'null'::jsonb) ELSE nullif(a.v->'encaixe', 'null'::jsonb) END,
+         CASE WHEN jsonb_typeof(x.t->'fatores') = 'array'
+              THEN ARRAY(SELECT jsonb_array_elements_text(x.t->'fatores'))
+              ELSE COALESCE(ARRAY(SELECT jsonb_array_elements_text(COALESCE(a.v->'fatores', '[]'::jsonb))), '{}') END
+    FROM jsonb_array_elements(COALESCE(p_tarefas, '[]'::jsonb)) WITH ORDINALITY AS x(t, pos)
+    LEFT JOIN LATERAL (SELECT y AS v FROM jsonb_array_elements(v_antes) y
+                        WHERE y->>'chave' = nullif(btrim(x.t->>'chave'), '') LIMIT 1) a ON true;
 
   RETURN jsonb_build_object('ok', true, 'tarefas', v_n);
 END
@@ -1859,7 +2709,12 @@ BEGIN
         ''horas'', s.technical_sheet_labor_hours, ''pessoas'', s.technical_sheet_labor_people_count,
         ''descricao_mao_obra'', s.technical_sheet_labor_description,
         ''tarefas'', COALESCE(m.tarefas, ''[]''::jsonb),
-        ''editado'', COALESCE(m.editado, false)) ORDER BY c.name NULLS LAST, s.name), ''[]''::jsonb)
+        ''editado'', COALESCE(m.editado, false),
+        ''padrao'', COALESCE(m.padrao, false),
+        ''perfil'', (SELECT jsonb_build_object(''tipo'', p.tipo, ''medidas'', p.medidas, ''planear'', p.planear,
+                                               ''medida_para'', p.medida_para)
+                       FROM public.ops_obra_servico_perfil p
+                      WHERE p.organization_id = $1 AND p.servico_id = s.id)) ORDER BY c.name NULLS LAST, s.name), ''[]''::jsonb)
        FROM public.services s
        LEFT JOIN public.service_categories c ON c.id = s.service_category_id
        LEFT JOIN LATERAL (
@@ -1868,8 +2723,11 @@ BEGIN
                   ''minutos_por_unidade'', x.minutos_por_unidade, ''minutos_fixos'', x.minutos_fixos,
                   ''pessoas'', x.pessoas, ''skill_id'', x.skill_id, ''depende_ordem'', x.depende_ordem,
                   ''procedimento'', x.procedimento, ''materiais'', x.materiais, ''ferramentas'', x.ferramentas,
-                  ''origem'', x.origem) ORDER BY x.ordem) AS tarefas,
-                bool_or(x.origem = ''manual'') AS editado
+                  ''origem'', x.origem, ''chave'', x.chave, ''depende_chaves'', to_jsonb(x.depende_chaves),
+                  ''espera_antes_horas'', x.espera_antes_horas, ''medida'', x.medida, ''condicao'', x.condicao,
+                  ''encaixe'', x.encaixe, ''fatores'', to_jsonb(x.fatores)) ORDER BY x.ordem) AS tarefas,
+                bool_or(x.origem = ''manual'') AS editado,
+                bool_or(x.origem = ''padrao'') AS padrao
            FROM public.ops_obra_servico_tarefa x
           WHERE x.organization_id = $1 AND x.servico_id = s.id) m ON true
       WHERE NOT COALESCE(s.is_deleted, false) AND s.deleted_at IS NULL
@@ -2083,6 +2941,25 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_morada_sugerida(uuid, uuid, uuid, 
 -- Em todas, a organização tem de bater certo com a fonte — um orçamento de
 -- outra organização seria uma fuga de dados.
 
+-- O passo `_chave` do pacote do contexto `_ctx`, na obra acabada de nascer.
+-- `_exp` = o que ops_obra_tarefas_do_orcamento devolveu (tarefa = ordem 1000+n).
+-- Dois pacotes do mesmo tipo: o primeiro.
+CREATE OR REPLACE FUNCTION public.ops_obra_passo_do_pacote(_obra uuid, _exp jsonb, _ctx text, _chave text)
+RETURNS uuid
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT t.id
+    FROM jsonb_array_elements(COALESCE(_exp, '[]'::jsonb)) x
+    JOIN public.ops_obra_tarefa t ON t.obra_id = _obra AND t.ordem = 1000 + (x->>'ordem')::integer
+   WHERE COALESCE((x->>'pacote')::boolean, false)
+     AND x->>'contexto' = _ctx AND x->>'chave' = _chave
+   ORDER BY (x->>'ordem')::integer
+   LIMIT 1
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_passo_do_pacote(uuid, jsonb, text, text) FROM PUBLIC, anon, authenticated;
+
 -- `_tarefas` (opcional): as tarefas dos serviços, já revistas pelo gestor no
 -- passo "Serviços do contrato" (validadas antes, em ops_obra_validar_tarefas).
 -- NULL = como sempre: cada linha vendida expande-se pelo modelo do serviço.
@@ -2109,15 +2986,33 @@ AS $$
 DECLARE
   v_id     uuid;
   v_codigo text;
-  v_inicio date := public.ops_obra_somar_dias_uteis(COALESCE(_inicio, current_date), 0);
+  v_inicio date := public.ops_obra_somar_dias_uteis_org(_org, COALESCE(_inicio, current_date), 0);
   v_n      integer := 0;
   v_sup    uuid := _supervisor_id;
   v_ini    date;
   v_fim    date;
   v_fixas  uuid[] := '{}';
   f        record;
+  v_pacote boolean := false;
+  v_exp    jsonb;
+  v_x      jsonb;
+  v_tid    uuid;
+  v_alvo   uuid;
+  v_alvo2  uuid;
 BEGIN
   v_codigo := public.ops_proximo_codigo_interno(_org, 'OB');
+
+  -- Há um PACOTE no orçamento (remodelação completa de casa de banho /
+  -- cozinha)? Então ele traz as tarefas da obra inteira — proteção,
+  -- limpeza, entrega — e as do tipo de obra ficariam repetidas.
+  IF _orcamento_id IS NOT NULL AND EXISTS (SELECT 1 FROM information_schema.columns
+                    WHERE table_schema = 'public' AND table_name = 'quote_lines' AND column_name = 'service_id') THEN
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM public.quote_lines l
+                              JOIN public.ops_obra_servico_perfil p
+                                ON p.servico_id = l.service_id AND p.organization_id = $2 AND p.tipo IS NOT NULL
+                             WHERE l.quote_id = $1)'
+       INTO v_pacote USING _orcamento_id, _org;
+  END IF;
 
   INSERT INTO public.ops_obra (
     organization_id, codigo, cliente_id, orcamento_id, contrato_id, modelo_id,
@@ -2144,7 +3039,7 @@ BEGIN
       SELECT _org, v_id, nova.id, mt.id, mt.ordem, mt.nome,
              mt.procedimento, mt.materiais, mt.ferramentas, mt.minutos_previstos
         FROM nova, public.ops_obra_modelo_tarefa mt
-       WHERE mt.modelo_fase_id = f.id;
+       WHERE mt.modelo_fase_id = f.id AND NOT v_pacote;
     END LOOP;
   END IF;
 
@@ -2158,24 +3053,73 @@ BEGIN
   -- 2. O que foi vendido: cada serviço do orçamento/contrato, pelo seu modelo
   --    (ou pela ficha técnica). Ficam depois das tarefas do tipo, na fase.
   IF _tarefas IS NULL THEN
+    SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.ordem), '[]'::jsonb) INTO v_exp
+      FROM public.ops_obra_tarefas_do_orcamento(_orcamento_id) t;
+
     INSERT INTO public.ops_obra_tarefa (
       organization_id, obra_id, fase_id, ordem, nome, procedimento, materiais, ferramentas,
-      minutos_previstos, pessoas_previstas, skill_id, orcamento_linha_id, servico_id, servico_tarefa_id)
-    SELECT _org, v_id, fa.id, 1000 + t.ordem, t.nome, t.procedimento, t.materiais, t.ferramentas,
-           t.minutos, t.pessoas, t.skill_id, t.orcamento_linha_id, t.servico_id, t.servico_tarefa_id
-      FROM public.ops_obra_tarefas_do_orcamento(_orcamento_id) t
-      JOIN public.ops_obra_fase fa ON fa.obra_id = v_id AND fa.ordem = t.fase;
+      minutos_previstos, pessoas_previstas, skill_id, orcamento_linha_id, servico_id, servico_tarefa_id,
+      chave, espera_antes_horas, medida, medida_qt, minutos_origem, ritmo_n, fatores, fatores_chave)
+    SELECT _org, v_id, fa.id, 1000 + (x->>'ordem')::integer, x->>'nome', x->>'procedimento', x->>'materiais',
+           x->>'ferramentas', (x->>'minutos')::integer, (x->>'pessoas')::smallint, nullif(x->>'skill_id', '')::uuid,
+           nullif(x->>'orcamento_linha_id', '')::uuid, nullif(x->>'servico_id', '')::uuid,
+           nullif(x->>'servico_tarefa_id', '')::uuid,
+           x->>'chave', COALESCE((x->>'espera_antes_horas')::numeric, 0), x->>'medida', (x->>'medida_qt')::numeric,
+           x->>'minutos_origem', COALESCE((x->>'ritmo_n')::integer, 0),
+           COALESCE(x->'fatores', '{}'::jsonb), COALESCE(x->>'fatores_chave', '')
+      FROM jsonb_array_elements(v_exp) x
+      JOIN public.ops_obra_fase fa ON fa.obra_id = v_id AND fa.ordem = (x->>'fase')::smallint;
 
-    -- Dependências dentro de cada serviço (ex.: fechar roços depois do ensaio).
-    UPDATE public.ops_obra_tarefa t
-       SET depende_de = d.id
-      FROM public.ops_obra_servico_tarefa st,
-           public.ops_obra_tarefa d,
-           public.ops_obra_servico_tarefa sd
-     WHERE t.obra_id = v_id
-       AND st.id = t.servico_tarefa_id AND st.depende_ordem IS NOT NULL
-       AND d.obra_id = v_id AND d.orcamento_linha_id = t.orcamento_linha_id
-       AND sd.id = d.servico_tarefa_id AND sd.servico_id = st.servico_id AND sd.ordem = st.depende_ordem;
+    -- "Depois de" dentro de cada serviço, pela chave do passo (ex.: fechar
+    -- roços depois do ensaio). '#n' = pela ordem (modelos de antes das chaves).
+    INSERT INTO public.ops_obra_tarefa_dependencia (tarefa_id, depende_de_id, organization_id, obra_id)
+    SELECT DISTINCT t.id, d.id, _org, v_id
+      FROM jsonb_array_elements(v_exp) x
+      JOIN public.ops_obra_tarefa t ON t.obra_id = v_id AND t.ordem = 1000 + (x->>'ordem')::integer
+     CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(x->'depende_chaves', '[]'::jsonb)) dc(v)
+      JOIN public.ops_obra_tarefa d
+        ON d.obra_id = v_id AND d.orcamento_linha_id = t.orcamento_linha_id AND d.id <> t.id
+      LEFT JOIN public.ops_obra_servico_tarefa sd ON sd.id = d.servico_tarefa_id
+     WHERE d.chave = dc.v OR ('#' || sd.ordem) = dc.v
+    ON CONFLICT DO NOTHING;
+
+    -- Os EXTRAS no pacote do seu contexto: 'junta' soma o tempo ao passo do
+    -- pacote (e a tarefa do extra desaparece); 'entre' liga-a entre dois
+    -- passos. Sem o passo do pacote nesta obra, o extra fica uma tarefa
+    -- normal (as dependências por defeito tratam dela).
+    FOR v_x IN SELECT x FROM jsonb_array_elements(v_exp) x WHERE jsonb_typeof(x->'encaixe') = 'object' LOOP
+      SELECT t.id INTO v_tid FROM public.ops_obra_tarefa t
+       WHERE t.obra_id = v_id AND t.ordem = 1000 + (v_x->>'ordem')::integer;
+      CONTINUE WHEN v_tid IS NULL;
+      IF v_x->'encaixe'->>'modo' = 'junta' THEN
+        v_alvo := public.ops_obra_passo_do_pacote(v_id, v_exp, v_x->>'contexto', v_x->'encaixe'->>'alvo');
+        IF v_alvo IS NOT NULL THEN
+          UPDATE public.ops_obra_tarefa a
+             SET minutos_previstos = a.minutos_previstos + (v_x->>'minutos')::integer,
+                 minutos_juntos    = a.minutos_juntos + (v_x->>'minutos')::integer,
+                 procedimento      = concat_ws(E'\n', a.procedimento, '+ ' || (v_x->>'nome')),
+                 materiais         = CASE WHEN nullif(v_x->>'materiais', '') IS NULL THEN a.materiais
+                                          ELSE concat_ws('; ', a.materiais, v_x->>'materiais') END
+           WHERE a.id = v_alvo;
+          DELETE FROM public.ops_obra_tarefa WHERE id = v_tid;
+        END IF;
+      ELSIF v_x->'encaixe'->>'modo' = 'entre' THEN
+        v_alvo := public.ops_obra_passo_do_pacote(v_id, v_exp, v_x->>'contexto', v_x->'encaixe'->'alvo'->>0);
+        v_alvo2 := public.ops_obra_passo_do_pacote(v_id, v_exp, v_x->>'contexto', v_x->'encaixe'->'alvo'->>1);
+        BEGIN
+          IF v_alvo IS NOT NULL THEN
+            INSERT INTO public.ops_obra_tarefa_dependencia (tarefa_id, depende_de_id, organization_id, obra_id)
+            VALUES (v_tid, v_alvo, _org, v_id) ON CONFLICT DO NOTHING;
+          END IF;
+          IF v_alvo2 IS NOT NULL THEN
+            INSERT INTO public.ops_obra_tarefa_dependencia (tarefa_id, depende_de_id, organization_id, obra_id)
+            VALUES (v_alvo2, v_tid, _org, v_id) ON CONFLICT DO NOTHING;
+          END IF;
+        EXCEPTION WHEN OTHERS THEN
+          NULL;  -- fecharia um ciclo (modelo mal definido): fica sem essa ligação
+        END;
+      END IF;
+    END LOOP;
   ELSE
     -- As tarefas do passo "Serviços do contrato", exatamente como vieram.
     -- Fases 5..9 que o tipo não trouxe nascem com um nome genérico.
@@ -2195,7 +3139,8 @@ BEGIN
     INSERT INTO public.ops_obra_tarefa (
       organization_id, obra_id, fase_id, ordem, nome, procedimento, materiais, ferramentas,
       minutos_previstos, pessoas_previstas, skill_id, orcamento_linha_id, servico_id,
-      servico_tarefa_id, materiais_crm)
+      servico_tarefa_id, materiais_crm,
+      chave, espera_antes_horas, medida, medida_qt, minutos_origem, ritmo_n, fatores, fatores_chave, minutos_juntos)
     SELECT _org, v_id, fa.id, 1000 + x.pos::integer, btrim(x.e->>'nome'),
            nullif(btrim(x.e->>'procedimento'), ''), nullif(btrim(x.e->>'materiais'), ''),
            nullif(btrim(x.e->>'ferramentas'), ''),
@@ -2216,7 +3161,16 @@ BEGIN
                        -- O disponível no momento (stock − reservas), se o ecrã o mandar: retrato, não reserva.
                        'disponivel', (m->>'disponivel')::numeric,
                        'origem', CASE WHEN m->>'origem' IN ('contrato','stock') THEN m->>'origem' ELSE 'ficha' END))
-                       FROM jsonb_array_elements(COALESCE(x.e->'materiais_crm', '[]'::jsonb)) m), '[]'::jsonb)
+                       FROM jsonb_array_elements(COALESCE(x.e->'materiais_crm', '[]'::jsonb)) m), '[]'::jsonb),
+           nullif(btrim(x.e->>'chave_passo'), ''),
+           COALESCE(public.ops_num(x.e->>'espera_antes_horas'), 0),
+           nullif(x.e->>'medida', ''),
+           public.ops_num(x.e->>'medida_qt'),
+           nullif(x.e->>'minutos_origem', ''),
+           COALESCE(public.ops_num(x.e->>'ritmo_n'), 0)::integer,
+           CASE WHEN jsonb_typeof(x.e->'fatores') = 'object' THEN x.e->'fatores' ELSE '{}'::jsonb END,
+           COALESCE(x.e->>'fatores_chave', ''),
+           COALESCE(public.ops_num(x.e->>'minutos_juntos'), 0)::integer
       FROM jsonb_array_elements(_tarefas) WITH ORDINALITY AS x(e, pos)
       JOIN public.ops_obra_fase fa ON fa.obra_id = v_id AND fa.ordem = (x.e->>'fase')::smallint;
 
@@ -2361,6 +3315,34 @@ BEGIN
            BETWEEN 1 AND 20 IS NOT TRUE THEN
       RAISE EXCEPTION '"%": de 1 a 20 pessoas.', v_nome;
     END IF;
+    -- Planeamento automático (2c).
+    IF nullif(e->>'espera_antes_horas', '') IS NOT NULL
+       AND (public.ops_num(e->>'espera_antes_horas') BETWEEN 0 AND 2000) IS NOT TRUE THEN
+      RAISE EXCEPTION '"%": a espera tem de ser de 0 a 2000 horas.', v_nome;
+    END IF;
+    IF nullif(e->>'medida', '') IS NOT NULL AND e->>'medida' NOT IN
+       ('qt','fixo','m2_pavimento','m2_parede','m2_total','pontos_agua','pontos_eletricos',
+        'pecas_sanitarias','acessorios','modulos','eletrodomesticos','ml_bancada') THEN
+      RAISE EXCEPTION '"%": medida desconhecida.', v_nome;
+    END IF;
+    IF nullif(e->>'medida_qt', '') IS NOT NULL AND (public.ops_num(e->>'medida_qt') >= 0) IS NOT TRUE THEN
+      RAISE EXCEPTION '"%": a quantidade da medida tem de ser um número ≥ 0.', v_nome;
+    END IF;
+    IF nullif(e->>'minutos_origem', '') IS NOT NULL
+       AND e->>'minutos_origem' NOT IN ('padrao','aprendido','ficha','manual') THEN
+      RAISE EXCEPTION '"%": origem do tempo desconhecida.', v_nome;
+    END IF;
+    IF (nullif(e->>'ritmo_n', '') IS NOT NULL AND (public.ops_num(e->>'ritmo_n') >= 0) IS NOT TRUE)
+       OR (nullif(e->>'minutos_juntos', '') IS NOT NULL AND (public.ops_num(e->>'minutos_juntos') >= 0) IS NOT TRUE) THEN
+      RAISE EXCEPTION '"%": número inválido.', v_nome;
+    END IF;
+    IF e ? 'fatores' AND jsonb_typeof(e->'fatores') NOT IN ('object', 'null') THEN
+      RAISE EXCEPTION '"%": os fatores têm de vir num objeto.', v_nome;
+    END IF;
+    IF length(COALESCE(e->>'fatores_chave', '')) > 500 OR length(COALESCE(e->>'chave_passo', '')) > 12 THEN
+      RAISE EXCEPTION '"%": texto demasiado comprido.', v_nome;
+    END IF;
+
     -- "Depois de": posição(ões) 1..n de OUTRAS tarefas da lista.
     IF jsonb_typeof(e->'depende') NOT IN ('array', 'number', 'string', 'null') THEN
       RAISE EXCEPTION '"%": "depois de" inválido.', v_nome;
@@ -2772,6 +3754,10 @@ BEGIN
       LOOP
         IF NOT EXISTS (SELECT 1 FROM public.ops_obra_servico_tarefa x
                         WHERE x.organization_id = p_org AND x.servico_id = v_s)
+           -- Deslocação, projeto, linhas que só dão medidas: não se inventa modelo.
+           AND NOT EXISTS (SELECT 1 FROM public.ops_obra_servico_perfil p
+                            WHERE p.organization_id = p_org AND p.servico_id = v_s
+                              AND (NOT p.planear OR p.medida_para IS NOT NULL))
            AND public.ops_obra_servico_da_org(p_org, v_s) THEN
           PERFORM public.ops_obra_servico_sugerir_impl(p_org, v_s, v_quem.o_utilizador);
           v_sug := v_sug || v_s;
@@ -2811,6 +3797,15 @@ BEGIN
              'materiais', t.materiais,
              'ferramentas', t.ferramentas,
              'materiais_crm', t.materiais_crm,
+             'chave_passo', t.chave,
+             'espera_antes_horas', t.espera_antes_horas,
+             'medida', t.medida,
+             'medida_qt', t.medida_qt,
+             'minutos_origem', t.minutos_origem,
+             'ritmo_n', t.ritmo_n,
+             'fatores', t.fatores,
+             'fatores_chave', t.fatores_chave,
+             'minutos_juntos', t.minutos_juntos,
              'inicio', t.inicio_planeado,
              'fim', t.fim_planeado,
              'pessoas', COALESCE((SELECT jsonb_agg(tp.utilizador_id ORDER BY tp.atribuida_em, tp.utilizador_id)
@@ -3188,7 +4183,7 @@ BEGIN
     v_inicio := public.ops_obra_planear_auto_impl(p_obra_id, current_date + 1);
     SELECT count(*) INTO v_n FROM public.ops_obra_tarefa WHERE obra_id = p_obra_id;
   ELSE
-    v_inicio := public.ops_obra_somar_dias_uteis(p_data_inicio, 0);
+    v_inicio := public.ops_obra_somar_dias_uteis_org(v_o.organization_id, p_data_inicio, 0);
     v_n := public.ops_obra_replanear_impl(p_obra_id, v_inicio);
   END IF;
   RETURN jsonb_build_object('ok', true, 'tarefas', v_n, 'inicio', v_inicio);
@@ -3895,7 +4890,8 @@ LANGUAGE plpgsql SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
 DECLARE
-  d       date := public.ops_obra_somar_dias_uteis(_desde, 0);
+  v_org   uuid := (SELECT o.organization_id FROM public.ops_obra o WHERE o.id = _obra_id);
+  d       date := public.ops_obra_somar_dias_uteis_org(v_org, _desde, 0);
   v_best  date;
   v_min   integer;
   n       integer;
@@ -3924,7 +4920,7 @@ BEGIN
 
     i := i + 1;
     EXIT WHEN i >= 40;
-    d := public.ops_obra_somar_dias_uteis(d, 1);
+    d := public.ops_obra_somar_dias_uteis_org(v_org, d, 1);
   END LOOP;
 
   -- Nenhum dia sem choques: o que tem menos.
@@ -4068,11 +5064,17 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_iniciar_tarefa(uuid) TO authentica
 -- dia). `p_concluir = true` dá a tarefa por feita, fecha os relógios de toda
 -- a gente nela e — se o real passou o previsto mais a tolerância — EXIGE um
 -- motivo da lista. "Outro" exige também uma nota.
+-- `p_medida_real` (planeamento automático): quanto se fez de facto (ex.: 18
+-- m² em vez dos 22 previstos). Sem ela, fica a prevista. É com ela que o
+-- motor aprende o ritmo da tarefa.
+-- (DROP: a assinatura de 4 argumentos ficava como sobrecarga.)
+DROP FUNCTION IF EXISTS public.rpc_ops_obra_terminar_tarefa(uuid, boolean, text, text);
 CREATE OR REPLACE FUNCTION public.rpc_ops_obra_terminar_tarefa(
-  p_tarefa_id uuid,
-  p_concluir  boolean DEFAULT true,
-  p_motivo    text    DEFAULT NULL,
-  p_nota      text    DEFAULT NULL
+  p_tarefa_id   uuid,
+  p_concluir    boolean DEFAULT true,
+  p_motivo      text    DEFAULT NULL,
+  p_nota        text    DEFAULT NULL,
+  p_medida_real numeric DEFAULT NULL
 )
 RETURNS jsonb
 LANGUAGE plpgsql SECURITY DEFINER
@@ -4140,6 +5142,9 @@ BEGIN
   IF v_motivo = 'outro' AND v_nota IS NULL THEN
     RAISE EXCEPTION 'Com o motivo "outro", escreve uma nota a explicar.';
   END IF;
+  IF p_medida_real IS NOT NULL AND (p_medida_real < 0 OR p_medida_real > 100000) THEN
+    RAISE EXCEPTION 'A medida real tem de ser um número de 0 a 100000.';
+  END IF;
 
   UPDATE public.ops_obra_registo SET fim = now()
    WHERE tarefa_id = p_tarefa_id AND fim IS NULL;
@@ -4149,6 +5154,7 @@ BEGIN
          terminada_em = now(),
          motivo_desvio = v_motivo,
          nota_desvio = v_nota,
+         medida_real = COALESCE(p_medida_real, medida_qt),
          atualizada_em = now()
    WHERE id = p_tarefa_id;
 
@@ -4158,8 +5164,186 @@ BEGIN
 END
 $$;
 
-REVOKE ALL ON FUNCTION public.rpc_ops_obra_terminar_tarefa(uuid, boolean, text, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_terminar_tarefa(uuid, boolean, text, text) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_terminar_tarefa(uuid, boolean, text, text, numeric) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_terminar_tarefa(uuid, boolean, text, text, numeric) TO authenticated, service_role;
+
+
+-- ============================================================
+-- 9b. Aprender o ritmo real (planeamento automático)
+-- ============================================================
+-- Quando o supervisor valida uma tarefa que veio de um passo de modelo, o
+-- ritmo desse passo recalcula-se com TODAS as tarefas validadas dele:
+--   · o real conta por pessoa (ops_obra_minutos_reais), sem os minutos dos
+--     extras que se juntaram ao passo (proporcionalmente);
+--   · ficam de fora as tarefas que demoraram por razões de fora (material em
+--     falta, acesso do cliente, meteorologia) e as de menos de 5 min;
+--   · começa no padrão e só se afasta com provas: estimativa = (3 × padrão +
+--     Σ observado) ÷ (3 + n) — com 1 obra mexe pouco, com 10 é quase só o real;
+--   · valores absurdos (mais de 4× ou menos de ¼ da mediana) não entram;
+--   · com 5+ tarefas de tamanhos diferentes (a maior ≥ 1,5× a menor), separa
+--     o fixo do que cresce com a medida (mínimos quadrados, também puxado
+--     para o padrão);
+--   · dois níveis: geral ('') e por combinação de fatores (puxado para o
+--     geral). O motor usa o mais específico que exista.
+-- Espelho de `aprenderRitmo()` em src/domain/planeamento.ts.
+CREATE OR REPLACE FUNCTION public.ops_obra_ritmo_calcular(
+  _fix0 numeric, _pu0 numeric, _medida text, _reais numeric[], _qts numeric[],
+  OUT o_fix numeric, OUT o_pu numeric, OUT o_n integer)
+LANGUAGE plpgsql IMMUTABLE
+SET search_path TO 'public'
+AS $$
+DECLARE
+  k      constant numeric := 3;
+  n      integer := COALESCE(array_length(_reais, 1), 0);
+  obs    numeric[] := '{}';
+  qs     numeric[] := '{}';
+  rs     numeric[] := '{}';
+  med    numeric;
+  i      integer;
+  sq     numeric; sr numeric; sqq numeric; sqr numeric; mq numeric; mr numeric; b numeric; a numeric;
+BEGIN
+  o_fix := COALESCE(_fix0, 0);
+  o_pu := COALESCE(_pu0, 0);
+  o_n := 0;
+  IF n = 0 THEN RETURN; END IF;
+
+  IF _medida = 'fixo' OR o_pu = 0 THEN
+    -- Só o fixo: cada tarefa é uma observação do tempo total.
+    FOR i IN 1..n LOOP
+      IF _reais[i] >= 5 THEN obs := obs || _reais[i]; END IF;
+    END LOOP;
+  ELSE
+    FOR i IN 1..n LOOP
+      IF _reais[i] >= 5 AND COALESCE(_qts[i], 0) > 0 THEN
+        obs := obs || GREATEST(0, (_reais[i] - o_fix) / _qts[i]);
+        qs := qs || _qts[i];
+        rs := rs || _reais[i];
+      END IF;
+    END LOOP;
+  END IF;
+  n := COALESCE(array_length(obs, 1), 0);
+  IF n = 0 THEN RETURN; END IF;
+
+  -- Fora os absurdos (com 3+ observações).
+  IF n >= 3 THEN
+    SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY v) INTO med FROM unnest(obs) v;
+    IF med > 0 THEN
+      SELECT array_agg(o ORDER BY ord), array_agg(q ORDER BY ord), array_agg(r ORDER BY ord)
+        INTO obs, qs, rs
+        FROM unnest(obs, CASE WHEN cardinality(qs) = cardinality(obs) THEN qs ELSE array_fill(NULL::numeric, ARRAY[cardinality(obs)]) END,
+                    CASE WHEN cardinality(rs) = cardinality(obs) THEN rs ELSE array_fill(NULL::numeric, ARRAY[cardinality(obs)]) END)
+             WITH ORDINALITY AS u(o, q, r, ord)
+       WHERE u.o <= 4 * med AND u.o >= med / 4;
+      n := COALESCE(array_length(obs, 1), 0);
+      IF n = 0 THEN RETURN; END IF;
+    END IF;
+  END IF;
+
+  o_n := n;
+  IF _medida = 'fixo' OR COALESCE(_pu0, 0) = 0 THEN
+    o_fix := round((k * COALESCE(_fix0, 0) + (SELECT sum(v) FROM unnest(obs) v)) / (k + n), 2);
+    RETURN;
+  END IF;
+
+  o_pu := round((k * COALESCE(_pu0, 0) + (SELECT sum(v) FROM unnest(obs) v)) / (k + n), 3);
+  -- Tamanhos diferentes que cheguem: separar o fixo do variável.
+  IF n >= 5 AND (SELECT max(v) FROM unnest(qs) v) >= 1.5 * (SELECT min(v) FROM unnest(qs) v) THEN
+    SELECT avg(q), avg(r) INTO mq, mr FROM unnest(qs, rs) u(q, r);
+    SELECT sum((q - mq) * (r - mr)), sum((q - mq) ^ 2) INTO sqr, sqq FROM unnest(qs, rs) u(q, r);
+    IF sqq > 0 THEN
+      b := GREATEST(0, sqr / sqq);
+      a := GREATEST(0, mr - b * mq);
+      o_fix := round((k * COALESCE(_fix0, 0) + n * a) / (k + n), 2);
+      o_pu := round((k * COALESCE(_pu0, 0) + n * b) / (k + n), 3);
+    END IF;
+  END IF;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_ritmo_calcular(numeric, numeric, text, numeric[], numeric[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_ritmo_calcular(numeric, numeric, text, numeric[], numeric[]) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.ops_obra_ritmo_aprender(_tarefa uuid)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  t       record;
+  st      record;
+  niv     text;
+  v_reais numeric[];
+  v_qts   numeric[];
+  v_fix0  numeric;
+  v_pu0   numeric;
+  r       record;
+  ant     record;
+  g_fix   numeric;
+  g_pu    numeric;
+  v_mud   integer := 0;
+BEGIN
+  SELECT * INTO t FROM public.ops_obra_tarefa WHERE id = _tarefa;
+  IF NOT FOUND OR t.servico_tarefa_id IS NULL THEN
+    RETURN 0;
+  END IF;
+  SELECT * INTO st FROM public.ops_obra_servico_tarefa WHERE id = t.servico_tarefa_id;
+  IF NOT FOUND THEN
+    RETURN 0;
+  END IF;
+  g_fix := st.minutos_fixos;
+  g_pu := st.minutos_por_unidade;
+
+  -- Primeiro o geral; depois a combinação de fatores desta tarefa, se tiver.
+  FOREACH niv IN ARRAY CASE WHEN COALESCE(t.fatores_chave, '') <> '' THEN ARRAY['', t.fatores_chave]
+                            ELSE ARRAY[''] END LOOP
+    v_fix0 := CASE WHEN niv = '' THEN st.minutos_fixos ELSE g_fix END;
+    v_pu0 := CASE WHEN niv = '' THEN st.minutos_por_unidade ELSE g_pu END;
+
+    SELECT array_agg(x.real ORDER BY x.id), array_agg(x.q ORDER BY x.id) INTO v_reais, v_qts
+      FROM (SELECT o.id,
+                   public.ops_obra_minutos_reais(o.id)
+                   * CASE WHEN o.minutos_juntos > 0 AND o.minutos_previstos > o.minutos_juntos
+                          THEN (o.minutos_previstos - o.minutos_juntos)::numeric / o.minutos_previstos
+                          ELSE 1 END AS real,
+                   COALESCE(o.medida_real, o.medida_qt, 0) AS q
+              FROM public.ops_obra_tarefa o
+             WHERE o.organization_id = t.organization_id
+               AND o.servico_tarefa_id = st.id
+               AND o.estado = 'validada'
+               AND COALESCE(o.motivo_desvio, '') NOT IN ('material_em_falta','acesso_cliente')
+               AND NOT EXISTS (SELECT 1 FROM public.ops_obra_tarefa_atraso a
+                                WHERE a.tarefa_id = o.id
+                                  AND a.motivo IN ('material_em_falta','acesso_cliente','meteorologia'))
+               AND (niv = '' OR o.fatores_chave = niv)) x;
+
+    SELECT * INTO r FROM public.ops_obra_ritmo_calcular(v_fix0, v_pu0, st.medida, v_reais, v_qts);
+    IF COALESCE(r.o_n, 0) > 0 THEN
+      SELECT * INTO ant FROM public.ops_obra_ritmo WHERE servico_tarefa_id = st.id AND fatores_chave = niv;
+      INSERT INTO public.ops_obra_ritmo (organization_id, servico_tarefa_id, fatores_chave, n,
+                                         minutos_fixos, minutos_por_unidade, padrao_fixos, padrao_por_unidade, atualizado_em)
+      VALUES (t.organization_id, st.id, niv, r.o_n, r.o_fix, r.o_pu, st.minutos_fixos, st.minutos_por_unidade, now())
+      ON CONFLICT (servico_tarefa_id, fatores_chave) DO UPDATE
+        SET n = EXCLUDED.n, minutos_fixos = EXCLUDED.minutos_fixos,
+            minutos_por_unidade = EXCLUDED.minutos_por_unidade,
+            padrao_fixos = EXCLUDED.padrao_fixos, padrao_por_unidade = EXCLUDED.padrao_por_unidade,
+            atualizado_em = now();
+      IF ant.servico_tarefa_id IS NULL OR ant.minutos_fixos <> r.o_fix OR ant.minutos_por_unidade <> r.o_pu THEN
+        INSERT INTO public.ops_obra_ritmo_historico (organization_id, servico_tarefa_id, fatores_chave, tarefa_id, n,
+                                                     antes_fixos, antes_por_unidade, depois_fixos, depois_por_unidade)
+        VALUES (t.organization_id, st.id, niv, _tarefa, r.o_n, ant.minutos_fixos, ant.minutos_por_unidade, r.o_fix, r.o_pu);
+        v_mud := v_mud + 1;
+      END IF;
+      IF niv = '' THEN
+        g_fix := r.o_fix;
+        g_pu := r.o_pu;
+      END IF;
+    END IF;
+  END LOOP;
+  RETURN v_mud;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_ritmo_aprender(uuid) FROM PUBLIC, anon, authenticated;
 
 
 -- ============================================================
@@ -4204,6 +5388,8 @@ BEGIN
        SET estado = 'validada', validada_por = v_quem.o_utilizador, validada_em = now(),
            motivo_rejeicao = NULL, atualizada_em = now()
      WHERE id = p_tarefa_id;
+    -- O motor aprende com esta tarefa (o ritmo real do passo de modelo).
+    PERFORM public.ops_obra_ritmo_aprender(p_tarefa_id);
   ELSE
     IF v_motivo IS NULL THEN
       RAISE EXCEPTION 'Rejeitar exige motivo — é o que a equipa vai ler para corrigir.';
@@ -4966,7 +6152,11 @@ SELECT
   atr.ultimo AS ultimo_atraso,
   public.ops_obra_atrasada_inicio(t.estado, t.inicio_planeado, o.hora_inicio_dia) AS atrasada_inicio,
   -- Para o ecrã do atraso converter "mais 2 h" em mão de obra (pessoa × min).
-  t.pessoas_previstas, o.minutos_por_dia
+  t.pessoas_previstas, o.minutos_por_dia,
+  -- Planeamento automático (2c): a espera antes (cura, fabrico), a medida
+  -- prevista e a real, e de onde veio o tempo (padrão / aprendido).
+  t.espera_antes_horas, t.medida, t.medida_qt, t.medida_real, t.minutos_origem, t.ritmo_n,
+  t.minutos_juntos, t.chave, t.servico_tarefa_id
 FROM public.ops_obra_tarefa t
 JOIN public.ops_obra_fase f ON f.id = t.fase_id
 JOIN public.ops_obra o ON o.id = t.obra_id
@@ -5183,6 +6373,9 @@ ALTER TABLE public.ops_obra_modelo_tarefa ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ops_obra_servico_tarefa ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ops_obra_tarefa_dependencia ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ops_obra_tarefa_atraso ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ops_obra_servico_perfil ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ops_obra_ritmo          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ops_obra_ritmo_historico ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS ops_obra_servico_tarefa_select ON public.ops_obra_servico_tarefa;
 CREATE POLICY ops_obra_servico_tarefa_select ON public.ops_obra_servico_tarefa
@@ -5206,6 +6399,15 @@ BEGIN
       t || '_select', t);
   END LOOP;
 
+  -- O perfil do serviço e o ritmo aprendido: quem vê os modelos.
+  FOREACH t IN ARRAY ARRAY['ops_obra_servico_perfil','ops_obra_ritmo','ops_obra_ritmo_historico']
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t || '_select', t);
+    EXECUTE format(
+      'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (public.ops_obra_pode_ver_modelos(organization_id))',
+      t || '_select', t);
+  END LOOP;
+
   FOREACH t IN ARRAY ARRAY['ops_obra_modelo','ops_obra_modelo_fase','ops_obra_modelo_tarefa']
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t || '_select', t);
@@ -5220,7 +6422,8 @@ BEGIN
   FOREACH t IN ARRAY ARRAY['ops_obra','ops_obra_fase','ops_obra_tarefa','ops_obra_tarefa_pessoa',
                            'ops_obra_registo','ops_obra_extra','ops_obra_modelo',
                            'ops_obra_modelo_fase','ops_obra_modelo_tarefa','ops_obra_servico_tarefa',
-                           'ops_obra_tarefa_dependencia','ops_obra_tarefa_atraso']
+                           'ops_obra_tarefa_dependencia','ops_obra_tarefa_atraso',
+                           'ops_obra_servico_perfil','ops_obra_ritmo','ops_obra_ritmo_historico']
   LOOP
     EXECUTE format('REVOKE ALL ON public.%I FROM PUBLIC, anon', t);
     EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.%I FROM authenticated', t);
@@ -5240,7 +6443,7 @@ DO $v$
 DECLARE
   n integer;
 BEGIN
-  -- As 12 deste ficheiro, pelo nome (outros ficheiros acrescentam as suas
+  -- As 15 deste ficheiro, pelo nome (outros ficheiros acrescentam as suas
   -- ops_obra_* — ex.: obras-fotos.sql — e este ficheiro tem de poder voltar
   -- a correr depois deles).
   SELECT count(*) INTO n FROM pg_tables
@@ -5248,9 +6451,10 @@ BEGIN
      AND tablename IN ('ops_obra','ops_obra_fase','ops_obra_tarefa','ops_obra_tarefa_pessoa',
                        'ops_obra_registo','ops_obra_extra','ops_obra_modelo','ops_obra_modelo_fase',
                        'ops_obra_modelo_tarefa','ops_obra_servico_tarefa','ops_obra_tarefa_dependencia',
-                       'ops_obra_tarefa_atraso');
-  IF n <> 12 THEN
-    RAISE EXCEPTION 'Obras: esperadas 12 tabelas ops_obra*, encontradas %.', n;
+                       'ops_obra_tarefa_atraso','ops_obra_servico_perfil','ops_obra_ritmo',
+                       'ops_obra_ritmo_historico');
+  IF n <> 15 THEN
+    RAISE EXCEPTION 'Obras: esperadas 15 tabelas ops_obra*, encontradas %.', n;
   END IF;
 
   SELECT count(*) INTO n FROM pg_tables

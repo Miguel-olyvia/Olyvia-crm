@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { ErroDeDados, ErroDeEscrita } from "../lib/dados";
 import {
@@ -18,6 +18,8 @@ import ObraJustificacao from "../components/ObraJustificacao";
 import { RegistarExtra } from "../components/ObraExtras";
 import FotosTarefa from "../components/FotosTarefa";
 import ObraAtraso from "../components/ObraAtraso";
+import ObraMedidaReal from "../components/ObraMedidaReal";
+import { medidaPedeReal } from "../domain/planeamento";
 import { rotuloMotivoAtraso } from "../domain/atrasos";
 import {
   acoesDoExecutor,
@@ -57,6 +59,9 @@ export default function MinhasTarefas() {
   const [extra, setExtra] = useState<TarefaObra | null>(null);
   const [atrasar, setAtrasar] = useState<TarefaObra | null>(null);
   const [avisoAtraso, setAvisoAtraso] = useState<string | null>(null);
+  // A medida real de cada tarefa, dita antes de a dar por feita.
+  const [medir, setMedir] = useState<TarefaObra | null>(null);
+  const medidas = useRef<Record<string, number>>({});
 
   const carregar = useCallback(async () => {
     if (!activeOrgId || !businessUserId) return;
@@ -107,9 +112,14 @@ export default function MinhasTarefas() {
     };
   }, [tarefas, aberto, hoje]);
 
-  const correr = async (t: TarefaObra, acao: "iniciar" | "pausar" | "concluir") => {
+  const correr = async (t: TarefaObra, acao: "iniciar" | "pausar" | "concluir", medidaPedida = false) => {
     setErroAcao(null);
     if (acao === "concluir") {
+      // Tarefa que mede trabalho (m², pontos…): primeiro "quanto fizeste?".
+      if (!medidaPedida && medidaPedeReal(t.medida) && t.medida_qt != null) {
+        setMedir(t);
+        return;
+      }
       const reais = reaisAoVivo(t);
       const obrigatoria = precisaJustificacao(reais, t.minutos_previstos, t.tolerancia_percent);
       if (obrigatoria) {
@@ -135,7 +145,13 @@ export default function MinhasTarefas() {
     setAGravar(t.id);
     setErroAcao(null);
     try {
-      await terminarTarefa({ tarefaId: t.id, concluir: true, motivo, nota: nota || null });
+      await terminarTarefa({
+        tarefaId: t.id,
+        concluir: true,
+        motivo,
+        nota: nota || null,
+        ...(medidas.current[t.id] != null ? { medidaReal: medidas.current[t.id] } : {}),
+      });
       setJustificar(null);
       setRecarga((r) => r + 1);
     } catch (e) {
@@ -475,6 +491,21 @@ export default function MinhasTarefas() {
             setErroAcao(null);
           }}
           aoConfirmar={(m, n) => void concluir(justificar.tarefa, m, n)}
+        />
+      )}
+
+      {medir && (
+        <ObraMedidaReal
+          medida={medir.medida ?? ""}
+          prevista={medir.medida_qt == null ? null : Number(medir.medida_qt)}
+          aoCancelar={() => setMedir(null)}
+          aoConfirmar={(v) => {
+            const t = medir;
+            setMedir(null);
+            if (v != null) medidas.current[t.id] = v;
+            else delete medidas.current[t.id];
+            void correr(t, "concluir", true);
+          }}
         />
       )}
 

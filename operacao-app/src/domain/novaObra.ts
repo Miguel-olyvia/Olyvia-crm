@@ -48,6 +48,16 @@ export interface TarefaPrevistaContrato {
   materiais: string | null;
   ferramentas: string | null;
   materiais_crm: MaterialLigado[];
+  /** Planeamento automático (db/obras.sql, 2c) — passam de ida e volta. */
+  chave_passo?: string | null;
+  espera_antes_horas?: number | null;
+  medida?: string | null;
+  medida_qt?: number | null;
+  minutos_origem?: string | null;
+  ritmo_n?: number | null;
+  fatores?: Record<string, string> | null;
+  fatores_chave?: string | null;
+  minutos_juntos?: number | null;
   inicio: string | null;
   fim: string | null;
   pessoas: string[];
@@ -120,6 +130,16 @@ export interface TarefaParaCriar {
   materiais: string | null;
   ferramentas: string | null;
   materiais_crm: MaterialLigado[];
+  /** Planeamento automático (db/obras.sql, 2c) — passam de ida e volta. */
+  chave_passo?: string | null;
+  espera_antes_horas?: number | null;
+  medida?: string | null;
+  medida_qt?: number | null;
+  minutos_origem?: string | null;
+  ritmo_n?: number | null;
+  fatores?: Record<string, string> | null;
+  fatores_chave?: string | null;
+  minutos_juntos?: number | null;
 }
 
 /* ───────────────────────────── O estado do ecrã ───────────────────────────── */
@@ -146,6 +166,16 @@ export interface TarefaEditavel {
   materiais: string;
   ferramentas: string;
   materiais_crm: MaterialLigado[];
+  /** Planeamento automático (db/obras.sql, 2c) — passam de ida e volta. */
+  chave_passo?: string | null;
+  espera_antes_horas?: number | null;
+  medida?: string | null;
+  medida_qt?: number | null;
+  minutos_origem?: string | null;
+  ritmo_n?: number | null;
+  fatores?: Record<string, string> | null;
+  fatores_chave?: string | null;
+  minutos_juntos?: number | null;
   inicio: string | null;
   fim: string | null;
   /** null = ainda não se sabe (tarefa nova antes de recalcular): mostra toda a gente. */
@@ -190,6 +220,15 @@ function editavel(t: TarefaPrevistaContrato): TarefaEditavel {
     materiais: t.materiais ?? "",
     ferramentas: t.ferramentas ?? "",
     materiais_crm: (t.materiais_crm ?? []).map((m) => ({ ...m, quantidade: m.quantidade == null ? null : n(m.quantidade) })),
+    chave_passo: t.chave_passo ?? null,
+    espera_antes_horas: t.espera_antes_horas == null ? 0 : n(t.espera_antes_horas),
+    medida: t.medida ?? null,
+    medida_qt: t.medida_qt == null ? null : n(t.medida_qt),
+    minutos_origem: t.minutos_origem ?? null,
+    ritmo_n: n(t.ritmo_n, 0),
+    fatores: t.fatores ?? {},
+    fatores_chave: t.fatores_chave ?? "",
+    minutos_juntos: n(t.minutos_juntos, 0),
     inicio: t.inicio,
     fim: t.fim,
     livres: t.livres ?? null,
@@ -271,6 +310,8 @@ export function novaTarefa(s: ServicoEditavel): TarefaEditavel {
     materiais: "",
     ferramentas: "",
     materiais_crm: [],
+    espera_antes_horas: 0,
+    minutos_origem: "manual",
     inicio: null,
     fim: null,
     livres: null,
@@ -369,8 +410,22 @@ export function paraCriar(
           disponivel: (m.produto_id ? stock?.get(m.produto_id)?.disponivel : undefined) ?? m.disponivel ?? null,
           origem: m.origem,
         })),
+      chave_passo: t.chave_passo ?? null,
+      espera_antes_horas: t.espera_antes_horas ?? 0,
+      medida: t.medida ?? null,
+      medida_qt: t.medida_qt ?? null,
+      minutos_origem: t.minutos_origem ?? null,
+      ritmo_n: t.ritmo_n ?? 0,
+      fatores: t.fatores ?? {},
+      fatores_chave: t.fatores_chave ?? "",
+      minutos_juntos: t.minutos_juntos ?? 0,
     };
   });
+}
+
+/** Mudar os minutos à mão: a origem do tempo passa a "mudado à mão" (a aprendizagem continua a contar o real). */
+export function mudarMinutos(t: TarefaEditavel, minutos: number): TarefaEditavel {
+  return { ...t, minutos, minutos_origem: minutos === t.minutos ? t.minutos_origem : "manual" };
 }
 
 /**

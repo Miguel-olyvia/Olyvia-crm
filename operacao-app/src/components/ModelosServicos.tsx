@@ -5,11 +5,15 @@ import {
   gravarModeloServico,
   listarServicosComModelo,
   listarSkills,
+  ritmosAprendidos,
+  semearTemposPadrao,
   sugerirModelos,
+  type RitmoAprendido,
   type ServicoComModelo,
   type Skill,
   type TarefaServico,
 } from "../lib/obras";
+import { MEDIDAS, formatarEspera, unidadeDaMedida } from "../domain/planeamento";
 import { Badge, Button, Card, EmptyState, ErrorState, Input, Select, Skeleton, Textarea, cx } from "./ui";
 import { Plus, X } from "./icons";
 import { ObraModelo } from "./ObraIcones";
@@ -39,6 +43,15 @@ interface Linha {
   procedimento: string;
   materiais: string;
   ferramentas: string;
+  // Planeamento automático (2c). Condição, encaixe e fatores só se mostram:
+  // a base guarda-os pela chave do passo.
+  id: string | null;
+  passo: string;
+  dependeChaves: string[];
+  espera: string;
+  medida: string;
+  encaixe: TarefaServico["encaixe"];
+  condicao: TarefaServico["condicao"];
 }
 
 let seq = 0;
@@ -54,6 +67,13 @@ const nova = (): Linha => ({
   procedimento: "",
   materiais: "",
   ferramentas: "",
+  id: null,
+  passo: "",
+  dependeChaves: [],
+  espera: "0",
+  medida: "qt",
+  encaixe: null,
+  condicao: null,
 });
 
 const paraLinhas = (t: TarefaServico[]): Linha[] =>
@@ -69,7 +89,32 @@ const paraLinhas = (t: TarefaServico[]): Linha[] =>
     procedimento: x.procedimento ?? "",
     materiais: x.materiais ?? "",
     ferramentas: x.ferramentas ?? "",
+    id: x.id ?? null,
+    passo: x.chave ?? "",
+    dependeChaves: x.depende_chaves ?? [],
+    espera: String(x.espera_antes_horas ?? 0),
+    medida: x.medida ?? "qt",
+    encaixe: x.encaixe ?? null,
+    condicao: x.condicao ?? null,
   }));
+
+const TIPO: Record<string, string> = { casa_banho: "casa de banho", cozinha: "cozinha" };
+
+/** "junta-se a 2.1 (casa de banho) · entre 2.4 e 3.2 (cozinha)". */
+function descreverEncaixe(e: Linha["encaixe"]): string {
+  if (!e) return "";
+  return Object.entries(e)
+    .filter(([k]) => k !== "*")
+    .map(([k, v]) =>
+      v.modo === "junta"
+        ? `junta-se a ${v.alvo} (${TIPO[k] ?? k})`
+        : v.modo === "entre" && Array.isArray(v.alvo)
+          ? `entre ${v.alvo[0]} e ${v.alvo[1]} (${TIPO[k] ?? k})`
+          : ""
+    )
+    .filter(Boolean)
+    .join(" · ");
+}
 
 const num = (s: string) => Number(String(s).replace(",", ".")) || 0;
 
@@ -89,13 +134,15 @@ export default function ModelosServicos({ orgId, gere }: { orgId: string; gere: 
   const [aberto, setAberto] = useState<string | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const [aGerar, setAGerar] = useState(false);
+  const [ritmos, setRitmos] = useState<RitmoAprendido[]>([]);
 
   const carregar = useCallback(async () => {
     setErro(null);
     try {
-      const [s, k] = await Promise.all([listarServicosComModelo(orgId), listarSkills(orgId)]);
+      const [s, k, r] = await Promise.all([listarServicosComModelo(orgId), listarSkills(orgId), ritmosAprendidos(orgId)]);
       setServicos(s);
       setSkills(k);
+      setRitmos(r);
     } catch (e) {
       setErro(e instanceof Error ? e.message : "Algo correu mal a carregar os serviços.");
     } finally {
@@ -120,6 +167,24 @@ export default function ModelosServicos({ orgId, gere }: { orgId: string; gere: 
       setRecarga((x) => x + 1);
     } catch (e) {
       setAviso(e instanceof ErroDeEscrita ? e.message : "Não foi possível gerar os modelos.");
+    } finally {
+      setAGerar(false);
+    }
+  };
+
+  const carregarPadrao = async () => {
+    setAGerar(true);
+    setAviso(null);
+    try {
+      const r = await semearTemposPadrao(orgId);
+      const saltados = r.saltados?.length ? ` ${r.saltados.length} com modelo revisto à mão ficaram como estavam.` : "";
+      setAviso(
+        `Tempos padrão carregados em ${r.servicos} serviço${r.servicos === 1 ? "" : "s"} (${r.passos} passos).${saltados}` +
+          (r.nao_encontrados?.length ? ` ${r.nao_encontrados.length} serviço(s) dos manuais não existem neste catálogo.` : "")
+      );
+      setRecarga((x) => x + 1);
+    } catch (e) {
+      setAviso(e instanceof ErroDeEscrita ? e.message : "Não foi possível carregar os tempos padrão.");
     } finally {
       setAGerar(false);
     }
@@ -154,11 +219,24 @@ export default function ModelosServicos({ orgId, gere }: { orgId: string; gere: 
           Como se executa cada serviço vendido. A obra criada a partir de um contrato junta estes passos, com o tempo ×
           quantidade.
         </p>
-        {gere && semModelo > 0 && (
-          <Button size="sm" onClick={() => void gerar()} disabled={aGerar}>
-            {aGerar ? "A gerar…" : `Gerar sugestões para ${semModelo} sem modelo`}
-          </Button>
-        )}
+        <span className="flex flex-wrap gap-2">
+          {gere && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => void carregarPadrao()}
+              disabled={aGerar}
+              title="Os tempos dos manuais operacionais de remodelação de casa de banho e de cozinha (pacotes e extras)"
+            >
+              Carregar tempos padrão
+            </Button>
+          )}
+          {gere && semModelo > 0 && (
+            <Button size="sm" onClick={() => void gerar()} disabled={aGerar}>
+              {aGerar ? "A gerar…" : `Gerar sugestões para ${semModelo} sem modelo`}
+            </Button>
+          )}
+        </span>
       </div>
 
       {aviso && <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-800">{aviso}</p>}
@@ -204,6 +282,7 @@ export default function ModelosServicos({ orgId, gere }: { orgId: string; gere: 
                 orgId={orgId}
                 servico={s}
                 skills={skills}
+                ritmos={ritmos}
                 gere={gere}
                 aoFechar={() => setAberto(null)}
                 aoGravar={() => {
@@ -244,15 +323,24 @@ function LinhaServico({ s, aoAbrir }: { s: ServicoComModelo; aoAbrir: () => void
         </span>
       </span>
       <span className="flex shrink-0 items-center gap-2">
-        {s.tarefas.length === 0 ? (
+        {s.perfil?.tipo && (
+          <Badge className="bg-sky-50 text-sky-800 ring-sky-200">pacote {TIPO[s.perfil.tipo] ?? s.perfil.tipo}</Badge>
+        )}
+        {s.perfil && !s.perfil.planear ? (
+          <Badge>não é trabalho no local</Badge>
+        ) : s.perfil?.medida_para ? (
+          <Badge>dá a medida ao pacote</Badge>
+        ) : s.tarefas.length === 0 ? (
           <Badge className="bg-amber-50 text-amber-800 ring-amber-200">sem modelo</Badge>
         ) : (
           <>
             <span className="font-mono text-xs tabular text-slate-500">
-              {s.tarefas.length} passos · {formatarMinutos(porUnidade)}/un
+              {s.tarefas.length} passos{s.perfil?.tipo ? "" : ` · ${formatarMinutos(porUnidade)}/un`}
             </span>
             {s.editado ? (
               <Badge className="bg-brand-50 text-brand-800 ring-brand-200">revisto</Badge>
+            ) : s.padrao ? (
+              <Badge className="bg-emerald-50 text-emerald-700 ring-emerald-200">tempos padrão</Badge>
             ) : (
               <Badge>sugerido</Badge>
             )}
@@ -267,6 +355,7 @@ function EditorServico({
   orgId,
   servico,
   skills,
+  ritmos,
   gere,
   aoFechar,
   aoGravar,
@@ -275,6 +364,7 @@ function EditorServico({
   orgId: string;
   servico: ServicoComModelo;
   skills: Skill[];
+  ritmos: RitmoAprendido[];
   gere: boolean;
   aoFechar: () => void;
   aoGravar: () => void;
@@ -314,8 +404,14 @@ function EditorServico({
     procedimento: l.procedimento.trim() || null,
     materiais: l.materiais.trim() || null,
     ferramentas: l.ferramentas.trim() || null,
+    chave: l.passo || null,
+    depende_chaves: l.dependeChaves,
+    espera_antes_horas: Math.max(0, num(l.espera)),
+    medida: l.medida,
   }));
   const total = minutosDoModelo(tarefas, num(qt));
+  // O ritmo aprendido de cada passo (o geral, sem combinação de fatores).
+  const aprendido = (id: string | null) => ritmos.find((r) => r.servico_tarefa_id === id && r.fatores_chave === "");
 
   const gravar = async () => {
     setAGravar(true);
@@ -371,7 +467,10 @@ function EditorServico({
               <th className="w-6 py-1 font-normal">#</th>
               <th className="py-1 font-normal">Passo</th>
               <th className="py-1 font-normal">Fase</th>
-              <th className="py-1 font-normal" title="Minutos de trabalho (pessoa × tempo) por unidade vendida">
+              <th className="py-1 font-normal" title="O que multiplica os minutos: a quantidade vendida, ou uma medida da divisão">
+                Medida
+              </th>
+              <th className="py-1 font-normal" title="Minutos de trabalho (pessoa × tempo) por unidade da medida">
                 min/un
               </th>
               <th className="py-1 font-normal" title="Minutos fixos, seja qual for a quantidade">
@@ -380,6 +479,9 @@ function EditorServico({
               <th className="py-1 font-normal">Pessoas</th>
               <th className="py-1 font-normal">Especialidade</th>
               <th className="py-1 font-normal">Depois de</th>
+              <th className="py-1 font-normal" title="Horas de relógio de espera antes de começar (cura, secagem, fabrico)">
+                Espera (h)
+              </th>
               <th />
             </tr>
           </thead>
@@ -396,6 +498,22 @@ function EditorServico({
                   >
                     {detalhe === l.chave ? "esconder" : "procedimento, materiais, ferramentas"}
                   </button>
+                  {(l.passo || l.encaixe || l.condicao || aprendido(l.id)) && (
+                    <p className="mt-0.5 flex flex-wrap gap-x-2 text-xs text-slate-500">
+                      {l.passo && <span className="font-mono">{l.passo}</span>}
+                      {l.encaixe && <span>{descreverEncaixe(l.encaixe)}</span>}
+                      {l.condicao && <span title="Só entra se o orçamento ou a visita o pedirem">condicional</span>}
+                      {(() => {
+                        const r = aprendido(l.id);
+                        return r ? (
+                          <span className="text-emerald-700" title={`Padrão: ${r.padrao_por_unidade} min/un + ${r.padrao_fixos} fixos`}>
+                            aprendido: {String(r.minutos_por_unidade).replace(".", ",")} min/un + {Math.round(r.minutos_fixos)} fixos ({r.n}{" "}
+                            {r.n === 1 ? "tarefa" : "tarefas"})
+                          </span>
+                        ) : null;
+                      })()}
+                    </p>
+                  )}
                   {detalhe === l.chave && (
                     <div className="mt-1 grid gap-1">
                       {(["procedimento", "materiais", "ferramentas"] as const).map((c) => (
@@ -422,7 +540,23 @@ function EditorServico({
                   </Select>
                 </td>
                 <td className="py-1 pr-2">
-                  <Input value={l.mpu} onChange={(e) => mudar(i, "mpu", e.target.value)} className="w-16 font-mono" inputMode="decimal" disabled={!gere} />
+                  <Select value={l.medida} onChange={(e) => mudar(i, "medida", e.target.value)} className="w-36" disabled={!gere}>
+                    {MEDIDAS.map((m) => (
+                      <option key={m.valor} value={m.valor}>
+                        {m.rotulo}
+                      </option>
+                    ))}
+                  </Select>
+                </td>
+                <td className="py-1 pr-2">
+                  <Input
+                    value={l.mpu}
+                    onChange={(e) => mudar(i, "mpu", e.target.value)}
+                    className="w-16 font-mono"
+                    inputMode="decimal"
+                    disabled={!gere || l.medida === "fixo"}
+                    title={unidadeDaMedida(l.medida) ? `minutos por ${unidadeDaMedida(l.medida)}` : undefined}
+                  />
                 </td>
                 <td className="py-1 pr-2">
                   <Input value={l.fixos} onChange={(e) => mudar(i, "fixos", e.target.value)} className="w-16 font-mono" inputMode="numeric" disabled={!gere} />
@@ -451,6 +585,21 @@ function EditorServico({
                       )
                     )}
                   </Select>
+                  {l.dependeChaves.length > 0 && (
+                    <p className="mt-0.5 font-mono text-xs text-slate-500" title="Depois destes passos (pela chave)">
+                      depois de {l.dependeChaves.join(", ")}
+                    </p>
+                  )}
+                </td>
+                <td className="py-1 pr-2">
+                  <Input
+                    value={l.espera}
+                    onChange={(e) => mudar(i, "espera", e.target.value)}
+                    className="w-16 font-mono"
+                    inputMode="decimal"
+                    disabled={!gere}
+                    title={num(l.espera) > 0 ? formatarEspera(num(l.espera)) : "sem espera"}
+                  />
                 </td>
                 <td className="py-1">
                   {gere && (

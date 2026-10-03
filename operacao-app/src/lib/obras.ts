@@ -171,6 +171,20 @@ export interface TarefaObra {
   atrasada_inicio?: boolean;
   pessoas_previstas?: number;
   minutos_por_dia?: number;
+  // Planeamento automático (db/obras.sql, 2c) — opcionais, como os atrasos.
+  /** Horas de relógio de espera antes de começar (cura, fabrico). */
+  espera_antes_horas?: number | null;
+  /** O que mediu o tempo (m² de parede, pontos de água…) e quanto. */
+  medida?: string | null;
+  medida_qt?: number | null;
+  /** O que se fez de facto, dito por quem terminou. */
+  medida_real?: number | null;
+  /** De onde veio o tempo: padrão, aprendido, ficha, mudado à mão. */
+  minutos_origem?: string | null;
+  ritmo_n?: number | null;
+  minutos_juntos?: number | null;
+  chave?: string | null;
+  servico_tarefa_id?: string | null;
 }
 
 export interface UltimoAtraso {
@@ -857,6 +871,8 @@ export function terminarTarefa(args: {
   concluir: boolean;
   motivo?: MotivoDesvio | null;
   nota?: string | null;
+  /** Quanto se fez de facto (ex.: 18 m²). Sem ela, fica a prevista. */
+  medidaReal?: number | null;
 }) {
   return rpc<RespostaTempo>(
     "rpc_ops_obra_terminar_tarefa",
@@ -865,6 +881,8 @@ export function terminarTarefa(args: {
       p_concluir: args.concluir,
       p_motivo: args.motivo ?? null,
       p_nota: args.nota ?? null,
+      // Só se manda quando há: a base de antes da atualização não a conhece.
+      ...(args.medidaReal != null ? { p_medida_real: args.medidaReal } : {}),
     },
     "Não foi possível terminar."
   );
@@ -940,7 +958,25 @@ export interface TarefaServico {
   procedimento: string | null;
   materiais: string | null;
   ferramentas: string | null;
-  origem?: "manual" | "sugerida";
+  origem?: "manual" | "sugerida" | "padrao";
+  // Planeamento automático (2c).
+  /** Código estável do passo ("3.3"), para os extras se encaixarem. */
+  chave?: string | null;
+  depende_chaves?: string[];
+  espera_antes_horas?: number;
+  medida?: string;
+  /** {servicos: [id], ficha: {campo, valores}} — só se lê aqui. */
+  condicao?: { servicos?: string[]; ficha?: { campo: string; valores: string[] } } | null;
+  /** Por tipo de pacote: {modo: 'junta'|'entre'|'livre', alvo}. Só se lê aqui. */
+  encaixe?: Record<string, { modo: string; alvo?: string | string[] }> | null;
+  fatores?: string[];
+}
+
+export interface PerfilServico {
+  tipo: "casa_banho" | "cozinha" | null;
+  medidas: Record<string, number>;
+  planear: boolean;
+  medida_para: string | null;
 }
 
 export interface ServicoComModelo {
@@ -953,6 +989,46 @@ export interface ServicoComModelo {
   descricao_mao_obra: string | null;
   tarefas: TarefaServico[];
   editado: boolean;
+  /** Tem os tempos padrão (manuais operacionais). */
+  padrao?: boolean;
+  perfil?: PerfilServico | null;
+}
+
+export interface RitmoAprendido {
+  servico_tarefa_id: string;
+  fatores_chave: string;
+  n: number;
+  minutos_fixos: number;
+  minutos_por_unidade: number;
+  padrao_fixos: number;
+  padrao_por_unidade: number;
+  atualizado_em: string;
+}
+
+/** O ritmo aprendido de cada passo de modelo (antes do SQL novo a tabela não existe → []). */
+export async function ritmosAprendidos(orgId: string): Promise<RitmoAprendido[]> {
+  const { data, error } = await supabase
+    .from("ops_obra_ritmo")
+    .select("servico_tarefa_id, fatores_chave, n, minutos_fixos, minutos_por_unidade, padrao_fixos, padrao_por_unidade, atualizado_em")
+    .eq("organization_id", orgId);
+  if (error) return [];
+  return ((data ?? []) as unknown as RitmoAprendido[]).map((r) => ({
+    ...r,
+    n: Number(r.n),
+    minutos_fixos: Number(r.minutos_fixos),
+    minutos_por_unidade: Number(r.minutos_por_unidade),
+    padrao_fixos: Number(r.padrao_fixos),
+    padrao_por_unidade: Number(r.padrao_por_unidade),
+  }));
+}
+
+/** "Carregar tempos padrão": os manuais de casa de banho e cozinha, pelos nomes dos serviços. */
+export function semearTemposPadrao(orgId: string, substituir = false) {
+  return rpc<{ ok: boolean; versao: string; servicos: number; passos: number; saltados: string[]; nao_encontrados: string[] }>(
+    "rpc_ops_obra_semear_tempos_padrao",
+    { p_org: orgId, p_substituir: substituir },
+    "Não foi possível carregar os tempos padrão."
+  );
 }
 
 export interface Skill {
@@ -996,6 +1072,12 @@ export function gravarModeloServico(orgId: string, servicoId: string, tarefas: T
         procedimento: t.procedimento,
         materiais: t.materiais,
         ferramentas: t.ferramentas,
+        // A condição, o encaixe e os fatores não se mandam: a base guarda os
+        // que lá estão, pela chave do passo.
+        ...(t.chave ? { chave: t.chave } : {}),
+        ...(t.depende_chaves ? { depende_chaves: t.depende_chaves } : {}),
+        ...(t.espera_antes_horas != null ? { espera_antes_horas: t.espera_antes_horas } : {}),
+        ...(t.medida ? { medida: t.medida } : {}),
       })),
     },
     "Não foi possível gravar o modelo."

@@ -4,6 +4,7 @@ import {
   estadoDoStock,
   ligarMaterial,
   minutosTotais,
+  mudarMinutos,
   mudarTarefa,
   necessidadesDeMateriais,
   novaTarefa,
@@ -177,5 +178,33 @@ describe("Nova obra, passo 2 — serviços do contrato", () => {
     expect(depois[0].tarefas[1].pessoas).toEqual(["u2"]);
     expect(depois[0].tarefas[1].livres).toEqual(["u2"]);
     expect(depois[0].tarefas[0].chave).toBe("a"); // as chaves do ecrã não mudam
+  });
+
+  it("planeamento automático: a espera, a medida, os fatores e a origem do tempo fazem a ida e volta", () => {
+    const comPlano: PrevisaoContrato = {
+      ...PREVISAO,
+      servicos: [
+        {
+          ...PREVISAO.servicos[0],
+          tarefas: [
+            tarefa({
+              id: "x", ordem: 1001, nome: "WC: Impermeabilização", minutos: 400, chave_passo: "3.2",
+              espera_antes_horas: 48, medida: "m2_total", medida_qt: 27.5, minutos_origem: "aprendido", ritmo_n: 3,
+              fatores: { habitada: "sim" }, fatores_chave: "habitada=sim", minutos_juntos: 30,
+            }),
+          ],
+        },
+      ],
+    };
+    const [s] = servicosEditaveis(comPlano);
+    expect(s.tarefas[0]).toMatchObject({ espera_antes_horas: 48, medida_qt: 27.5, minutos_origem: "aprendido", ritmo_n: 3 });
+    const [p] = paraCriar([s]);
+    expect(p).toMatchObject({
+      chave_passo: "3.2", espera_antes_horas: 48, medida: "m2_total", medida_qt: 27.5, minutos_origem: "aprendido",
+      ritmo_n: 3, fatores: { habitada: "sim" }, fatores_chave: "habitada=sim", minutos_juntos: 30,
+    });
+    // Mexer nos minutos à mão: a origem passa a "mudado à mão".
+    expect(mudarMinutos(s.tarefas[0], 500).minutos_origem).toBe("manual");
+    expect(mudarMinutos(s.tarefas[0], 400).minutos_origem).toBe("aprendido");
   });
 });

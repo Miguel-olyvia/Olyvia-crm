@@ -50,6 +50,7 @@
     "validar-tempos": "node tools/validar-tempos.mjs",
     "validar-estados": "node tools/validar-estados.mjs",
     "validar-obras": "node tools/validar-obras.mjs",
+    "validar-planeamento": "node tools/validar-planeamento.mjs",
     "validar-fotos-entrar-como": "node tools/validar-fotos-entrar-como.mjs",
     "validar-pessoas-crm": "node tools/validar-pessoas-crm.mjs",
     "validar-restricao": "node tools/validar-restricao.mjs",

@@ -352,6 +352,8 @@ vi.mock("../../lib/obras", () => ({
   mudarEstadoObra: vi.fn(),
   replanearObra: vi.fn(),
   distribuirEquipa: vi.fn(async () => ({ ok: true, tarefas: 3 })),
+  ritmosAprendidos: vi.fn(async () => []),
+  semearTemposPadrao: vi.fn(async () => ({ ok: true, versao: "x", servicos: 0, passos: 0, saltados: [], nao_encontrados: [] })),
   listarServicosComModelo: vi.fn(async () => [
     {
       servico_id: "s1",

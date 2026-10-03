@@ -54,6 +54,10 @@ export interface TarefaGantt {
   atrasadaInicio?: boolean;
   /** O último atraso registado (e quantos houve, em `n`). */
   atraso?: AtrasoGantt | null;
+  /** Planeamento automático: horas de relógio de espera antes de começar (cura, fabrico). */
+  esperaAntesHoras?: number | null;
+  /** "padrão", "aprendido (3 tarefas)"… — de onde veio o tempo. */
+  origemTempo?: string | null;
 }
 
 export interface AtrasoGantt {

@@ -48,6 +48,8 @@ import {
   type TarefaGantt,
 } from "../domain/obras-gantt";
 
+import { formatarEspera } from "../domain/planeamento";
+
 export type { AtrasoGantt, TarefaGantt } from "../domain/obras-gantt";
 
 /**
@@ -705,6 +707,8 @@ export default function ObraGantt({
                         data-nao-iniciada={t.atrasadaInicio || undefined}
                         title={[
                           `${t.nome} — ${formatarMinutos(t.minutosReais)} de ${formatarMinutos(t.minutosPrevistos)}`,
+                          t.origemTempo ? `Tempo: ${t.origemTempo}` : null,
+                          t.esperaAntesHoras ? `Espera antes: ${formatarEspera(t.esperaAntesHoras)} (cura, fabrico)` : null,
                           t.atrasadaInicio ? "Não iniciada a tempo" : null,
                           txtAtraso,
                         ]
