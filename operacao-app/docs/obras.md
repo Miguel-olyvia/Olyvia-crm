@@ -263,8 +263,10 @@ node tools/validar-instalacao.mjs
 
 ## Limitações conhecidas
 
-- **Feriados.** Não contam no cálculo de dias úteis; só sábados e domingos são
-  saltados.
+- **Feriados.** Desde 03/10/2026 o plano automático (criar, replanear,
+  primeira data livre) salta os feriados da organização e os nacionais
+  (`schedule_holidays`). O empurrar de um atraso ainda conta só fins de semana.
+  Ver [planeamento.md](planeamento.md).
 - **Gantt.** O arrasto funciona com rato e toque (pointer events), mas o Gantt foi
   pensado para desktop. No telemóvel desliza na horizontal.
 - **Fotografias dos extras.** A coluna `fotos` existe, mas a UI ainda não faz
