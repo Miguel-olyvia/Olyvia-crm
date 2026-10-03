@@ -106,8 +106,9 @@ export function fatoresDoLocal(
     acesso: de(l.acesso, ["facil", "dificil"]),
     elevador: simNao(l.tem_elevador),
     andar: piso == null ? undefined : piso <= 0 ? "rc" : piso <= 2 ? "1-2" : "3+",
-    mobilada: de(l.mobilada, ["pouco", "medio", "muito"]),
-    distancia: de(l.distancia_entrada, ["curta", "media", "longa"]),
+    // O caminho até à área é da área; a ficha do local só se a área não disser.
+    mobilada: de(a.diag_mobilada ?? l.mobilada, ["pouco", "medio", "muito"]),
+    distancia: de(a.diag_distancia_entrada ?? l.distancia_entrada, ["curta", "media", "longa"]),
     animais: simNao(l.animais),
     janela: simNao(a.diag_janela),
     local_cortes: de(a.diag_local_cortes, ["na_area", "varanda", "fora"]),

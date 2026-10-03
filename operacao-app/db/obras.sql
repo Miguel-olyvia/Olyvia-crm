@@ -1665,8 +1665,12 @@ AS $$
                                 WHEN public.ops_num(_local->>'piso') <= 0 THEN 'rc'
                                 WHEN public.ops_num(_local->>'piso') <= 2 THEN '1-2'
                                 ELSE '3+' END,
-    'mobilada',            CASE WHEN _local->>'mobilada' IN ('pouco','medio','muito') THEN _local->>'mobilada' END,
-    'distancia',           CASE WHEN _local->>'distancia_entrada' IN ('curta','media','longa') THEN _local->>'distancia_entrada' END,
+    -- O caminho até à área (mobilada, distância) é da ÁREA (necessidade do
+    -- negócio); a ficha do local só se usa se a área não disser.
+    'mobilada',            CASE WHEN COALESCE(_area->>'diag_mobilada', _local->>'mobilada') IN ('pouco','medio','muito')
+                                THEN COALESCE(_area->>'diag_mobilada', _local->>'mobilada') END,
+    'distancia',           CASE WHEN COALESCE(_area->>'diag_distancia_entrada', _local->>'distancia_entrada') IN ('curta','media','longa')
+                                THEN COALESCE(_area->>'diag_distancia_entrada', _local->>'distancia_entrada') END,
     'animais',             CASE (_local->>'animais') WHEN 'true' THEN 'sim' WHEN 'false' THEN 'nao' END,
     'janela',              CASE (_area->>'diag_janela') WHEN 'true' THEN 'sim' WHEN 'false' THEN 'nao' END,
     'local_cortes',        CASE WHEN _area->>'diag_local_cortes' IN ('na_area','varanda','fora') THEN _area->>'diag_local_cortes' END,

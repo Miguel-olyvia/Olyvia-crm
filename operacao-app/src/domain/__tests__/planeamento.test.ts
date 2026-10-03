@@ -40,6 +40,11 @@ describe("fatores", () => {
     expect(descreverFatores("habitada=sim|local_cortes=fora")).toBe("casa habitada: sim · cortes: fora");
   });
 
+  it("a mobília e a distância vêm da área; a ficha do local só se a área não disser", () => {
+    expect(fatoresDoLocal({ diag_mobilada: "muito" }, { mobilada: "pouco", distancia_entrada: "longa" }))
+      .toMatchObject({ mobilada: "muito", distancia: "longa" });
+  });
+
   it("o rés-do-chão e o 1.º andar agrupam-se", () => {
     expect(fatoresDoLocal(null, { piso: 0 }).andar).toBe("rc");
     expect(fatoresDoLocal(null, { piso: 2 }).andar).toBe("1-2");

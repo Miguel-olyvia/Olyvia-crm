@@ -7053,6 +7053,21 @@ export type Database = {
           diag_intervencao_descricao: string | null
           diag_intervencao_tipo: string | null
           diag_proteger_descricao: string | null
+          diag_altura_revestimento: string | null
+          diag_cliente_recusou_fotos: boolean | null
+          diag_distancia_entrada: string | null
+          diag_gas: string | null
+          diag_janela: boolean | null
+          diag_local_cortes: string | null
+          diag_m2_pavimento: number | null
+          diag_mobilada: string | null
+          diag_pe_direito_m: number | null
+          diag_perimetro_m: number | null
+          diag_pontos_agua: number | null
+          diag_pontos_eletricos: number | null
+          diag_portas_proteger: number | null
+          diag_tipo_area: string | null
+          diag_toalheiro: boolean | null
           estimate_max: number | null
           estimate_min: number | null
           id: string
@@ -7084,6 +7099,21 @@ export type Database = {
           diag_intervencao_descricao?: string | null
           diag_intervencao_tipo?: string | null
           diag_proteger_descricao?: string | null
+          diag_altura_revestimento?: string | null
+          diag_cliente_recusou_fotos?: boolean | null
+          diag_distancia_entrada?: string | null
+          diag_gas?: string | null
+          diag_janela?: boolean | null
+          diag_local_cortes?: string | null
+          diag_m2_pavimento?: number | null
+          diag_mobilada?: string | null
+          diag_pe_direito_m?: number | null
+          diag_perimetro_m?: number | null
+          diag_pontos_agua?: number | null
+          diag_pontos_eletricos?: number | null
+          diag_portas_proteger?: number | null
+          diag_tipo_area?: string | null
+          diag_toalheiro?: boolean | null
           estimate_max?: number | null
           estimate_min?: number | null
           id?: string
@@ -7115,6 +7145,21 @@ export type Database = {
           diag_intervencao_descricao?: string | null
           diag_intervencao_tipo?: string | null
           diag_proteger_descricao?: string | null
+          diag_altura_revestimento?: string | null
+          diag_cliente_recusou_fotos?: boolean | null
+          diag_distancia_entrada?: string | null
+          diag_gas?: string | null
+          diag_janela?: boolean | null
+          diag_local_cortes?: string | null
+          diag_m2_pavimento?: number | null
+          diag_mobilada?: string | null
+          diag_pe_direito_m?: number | null
+          diag_perimetro_m?: number | null
+          diag_pontos_agua?: number | null
+          diag_pontos_eletricos?: number | null
+          diag_portas_proteger?: number | null
+          diag_tipo_area?: string | null
+          diag_toalheiro?: boolean | null
           estimate_max?: number | null
           estimate_min?: number | null
           id?: string
