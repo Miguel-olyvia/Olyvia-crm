@@ -42,7 +42,9 @@ Contrato assinado ────────────────────�
 | Calendário da organização e esperas | `ops_obra_dias_uteis_lista`, `ops_obra_minuto_apos_espera` (4) |
 | Ritmo aprendido e histórico | `ops_obra_ritmo`, `ops_obra_ritmo_historico`, `ops_obra_ritmo_aprender` (9b) |
 | Regras espelhadas no ecrã, com testes | `src/domain/planeamento.ts` |
-| Campos do diagnóstico no CRM | `src/lib/deals/diagnosticoPlaneamento.ts`, `DealNeedDiagnostic.tsx` |
+| Campos do diagnóstico no CRM | `src/lib/deals/diagnosticoPlaneamento.ts`, `DealNeedDiagnostic.tsx` — explicados em [`src/lib/deals/README.md`](../../src/lib/deals/README.md) |
+| Os dados validados dos tempos e os geradores (carga do SQL, tabela, Excel) | [`tools/planeamento/`](../tools/planeamento/README.md) |
+| Os tempos padrão, para ler | [`tempos-padrao.md`](tempos-padrao.md) |
 
 ### Como se aprende
 
