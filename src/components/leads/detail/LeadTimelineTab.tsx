@@ -81,7 +81,7 @@ const fieldLabel = (field: string): string => FIELD_LABELS[field] || field.repla
 // A lista passou a ser partilhada com as timelines do cliente e do contacto
 // (@/lib/timeline/auditIgnoredFields), que tinham ficado com uma versão curta.
 // Todas as entradas que estavam aqui — incluindo os last_contact_*, escritos
-// pela mesma acção que já produz uma "Chamada telefónica"/"Email enviado" — vão
+// pela mesma ação que já produz uma "Chamada telefónica"/"Email enviado" — vão
 // agora nessa lista.
 const AUDIT_IGNORED_FIELDS = new Set(TIMELINE_AUDIT_IGNORED_FIELDS);
 
@@ -188,7 +188,7 @@ export function LeadTimelineTab({ entityId, organizationId, onRegisterCall, user
                i.interaction_type === "whatsapp" ? "WhatsApp enviado" :
                i.interaction_type === "note" ? "Nota adicionada" :
                i.interaction_type === "visit" ? "Visita" :
-               i.subject || "Interacção",
+               i.subject || "Interação",
         description: i.notes || i.subject || null,
         date: i.interaction_at,
         actor: i.created_by ? (localUserMap[i.created_by] || null) : null,

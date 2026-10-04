@@ -1433,7 +1433,7 @@ const ClientContracts = () => {
 
   /**
    * Um contrato enviado ('pending_signature') continua a ser um contrato por
-   * assinar: para efeitos de acções disponíveis vale exactamente o mesmo que
+   * assinar: para efeitos de ações disponíveis vale exactamente o mesmo que
    * um 'draft'.
    *
    * Porquê um predicado em vez de dois ramos: enquanto nada no sistema escrevia
@@ -2173,7 +2173,7 @@ const ClientContracts = () => {
                                     </>
                                   )}
                                    <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                    <DropdownMenuItem onClick={() => handleEdit(contract)}>✏️ Editar contrato</DropdownMenuItem>
                                    <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                    <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar contrato</DropdownMenuItem>
@@ -2234,7 +2234,7 @@ const ClientContracts = () => {
                                     </>
                                   )}
                                    <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
@@ -2268,7 +2268,7 @@ const ClientContracts = () => {
                                   {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Enviar renovação</DropdownMenuItem>}
                                   {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📞 Contactar cliente</DropdownMenuItem>}
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
                                   <DropdownMenuItem disabled className="text-muted-foreground">📜 Ver histórico completo (em breve)</DropdownMenuItem>
@@ -2285,7 +2285,7 @@ const ClientContracts = () => {
                               )}
                               {contract.status === "cancelled" && (
                                 <>
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuSeparator />

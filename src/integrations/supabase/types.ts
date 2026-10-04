@@ -1383,51 +1383,6 @@ export type Database = {
         }
         Relationships: []
       }
-      anew_entities_apagadas_backup: {
-        Row: {
-          backup_em: string
-          backup_motivo: string
-          created_at: string
-          created_by: string | null
-          display_name: string
-          first_name: string | null
-          id: string
-          last_name: string | null
-          search_text: string | null
-          status: string
-          type: string
-          updated_at: string
-        }
-        Insert: {
-          backup_em?: string
-          backup_motivo?: string
-          created_at?: string
-          created_by?: string | null
-          display_name: string
-          first_name?: string | null
-          id?: string
-          last_name?: string | null
-          search_text?: string | null
-          status?: string
-          type: string
-          updated_at?: string
-        }
-        Update: {
-          backup_em?: string
-          backup_motivo?: string
-          created_at?: string
-          created_by?: string | null
-          display_name?: string
-          first_name?: string | null
-          id?: string
-          last_name?: string | null
-          search_text?: string | null
-          status?: string
-          type?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
       anew_entity_addresses: {
         Row: {
           address_id: string
@@ -1518,45 +1473,6 @@ export type Database = {
           is_verified?: boolean | null
         }
         Update: {
-          created_at?: string
-          created_by?: string | null
-          email?: string
-          email_type?: string | null
-          entity_id?: string
-          id?: string
-          is_primary?: boolean | null
-          is_verified?: boolean | null
-        }
-        Relationships: []
-      }
-      anew_entity_emails_apagados_backup: {
-        Row: {
-          backup_em: string
-          backup_motivo: string
-          created_at: string
-          created_by: string | null
-          email: string
-          email_type: string | null
-          entity_id: string
-          id: string
-          is_primary: boolean | null
-          is_verified: boolean | null
-        }
-        Insert: {
-          backup_em?: string
-          backup_motivo?: string
-          created_at?: string
-          created_by?: string | null
-          email: string
-          email_type?: string | null
-          entity_id: string
-          id?: string
-          is_primary?: boolean | null
-          is_verified?: boolean | null
-        }
-        Update: {
-          backup_em?: string
-          backup_motivo?: string
           created_at?: string
           created_by?: string | null
           email?: string
@@ -2205,111 +2121,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      anew_leads_status_backup_20261204_conversao: {
-        Row: {
-          guardado_em: string
-          lead_id: string
-          status_antes: string | null
-        }
-        Insert: {
-          guardado_em?: string
-          lead_id: string
-          status_antes?: string | null
-        }
-        Update: {
-          guardado_em?: string
-          lead_id?: string
-          status_antes?: string | null
-        }
-        Relationships: []
-      }
-      anew_leads_status_backup_20261204_no_answer: {
-        Row: {
-          etapa_id: string | null
-          guardado_em: string
-          lead_id: string
-          status_antes: string | null
-        }
-        Insert: {
-          etapa_id?: string | null
-          guardado_em?: string
-          lead_id: string
-          status_antes?: string | null
-        }
-        Update: {
-          etapa_id?: string | null
-          guardado_em?: string
-          lead_id?: string
-          status_antes?: string | null
-        }
-        Relationships: []
-      }
-      anew_leads_status_backup_20261204_rejeicao: {
-        Row: {
-          etapa_id: string | null
-          guardado_em: string
-          lead_id: string
-          lost_reason_antes: string | null
-          status_antes: string | null
-        }
-        Insert: {
-          etapa_id?: string | null
-          guardado_em?: string
-          lead_id: string
-          lost_reason_antes?: string | null
-          status_antes?: string | null
-        }
-        Update: {
-          etapa_id?: string | null
-          guardado_em?: string
-          lead_id?: string
-          lost_reason_antes?: string | null
-          status_antes?: string | null
-        }
-        Relationships: []
-      }
-      anew_leads_workflow_stage_backup_20261204: {
-        Row: {
-          guardado_em: string
-          lead_id: string
-          pipeline_dirty_at_antes: string | null
-          workflow_stage_id_antes: string | null
-        }
-        Insert: {
-          guardado_em?: string
-          lead_id: string
-          pipeline_dirty_at_antes?: string | null
-          workflow_stage_id_antes?: string | null
-        }
-        Update: {
-          guardado_em?: string
-          lead_id?: string
-          pipeline_dirty_at_antes?: string | null
-          workflow_stage_id_antes?: string | null
-        }
-        Relationships: []
-      }
-      anew_leads_workflow_stage_backup_20261204_bmgest: {
-        Row: {
-          guardado_em: string
-          lead_id: string
-          pipeline_dirty_at_antes: string | null
-          workflow_stage_id_antes: string | null
-        }
-        Insert: {
-          guardado_em?: string
-          lead_id: string
-          pipeline_dirty_at_antes?: string | null
-          workflow_stage_id_antes?: string | null
-        }
-        Update: {
-          guardado_em?: string
-          lead_id?: string
-          pipeline_dirty_at_antes?: string | null
-          workflow_stage_id_antes?: string | null
-        }
-        Relationships: []
       }
       anew_membership_permission_scopes: {
         Row: {
@@ -10514,24 +10325,6 @@ export type Database = {
         }
         Relationships: []
       }
-      lead_contact_results_backup_20261204: {
-        Row: {
-          alterado_em: string
-          result_id: string
-          workflow_next_status_antes: string | null
-        }
-        Insert: {
-          alterado_em?: string
-          result_id: string
-          workflow_next_status_antes?: string | null
-        }
-        Update: {
-          alterado_em?: string
-          result_id?: string
-          workflow_next_status_antes?: string | null
-        }
-        Relationships: []
-      }
       lead_field_definitions: {
         Row: {
           campaign_id: string | null
@@ -10735,24 +10528,6 @@ export type Database = {
             referencedColumns: ["utilizador_id"]
           },
         ]
-      }
-      lead_pipeline_settings_backup_20261204_etapas56: {
-        Row: {
-          alterado_em: string
-          organization_id: string
-          sequential_flow_antes: boolean | null
-        }
-        Insert: {
-          alterado_em?: string
-          organization_id: string
-          sequential_flow_antes?: boolean | null
-        }
-        Update: {
-          alterado_em?: string
-          organization_id?: string
-          sequential_flow_antes?: boolean | null
-        }
-        Relationships: []
       }
       lead_qualification_rules: {
         Row: {
@@ -11027,42 +10802,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      lead_workflow_stages_rules_backup_20261204: {
-        Row: {
-          normalizado_em: string
-          reached_when_antes: Json | null
-          stage_id: string
-        }
-        Insert: {
-          normalizado_em?: string
-          reached_when_antes?: Json | null
-          stage_id: string
-        }
-        Update: {
-          normalizado_em?: string
-          reached_when_antes?: Json | null
-          stage_id?: string
-        }
-        Relationships: []
-      }
-      lead_workflow_stages_rules_backup_20261204_etapas56: {
-        Row: {
-          alterado_em: string
-          reached_when_antes: Json | null
-          stage_id: string
-        }
-        Insert: {
-          alterado_em?: string
-          reached_when_antes?: Json | null
-          stage_id: string
-        }
-        Update: {
-          alterado_em?: string
-          reached_when_antes?: Json | null
-          stage_id?: string
-        }
-        Relationships: []
       }
       leads_ai_config: {
         Row: {

@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
   Plus, Target, Pencil, Trash2, Search, RefreshCw, Filter, X, Eye,
   ArrowUpDown, ArrowUp, ArrowDown, CalendarIcon,
-  User, Zap, Phone, Mail, Copy, AlertTriangle, Clock, MoreHorizontal, History
+  User, Zap, Phone, Mail, Copy, AlertTriangle, Clock, MoreHorizontal, History, FileText
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -63,6 +63,8 @@ import { format, parseISO, startOfDay, endOfDay, isWithinInterval, differenceInD
 import { pt } from "date-fns/locale";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { DealNeedsSection } from "@/components/deals/DealNeedsSection";
+import { DealQuotesPanel } from "@/components/deals/DealQuotesPanel";
+import { buildNewQuoteFromDealUrl, CREATE_QUOTE_PERMISSION } from "@/lib/quotes/dealQuoteLink";
 import { CatalogItemPicker, CatalogLineItem } from "@/components/clients/detail/CatalogItemPicker";
 import { DealsKanbanView } from "@/components/deals/DealsKanbanView";
 import { DealLostReasonDialog } from "@/components/deals/DealLostReasonDialog";
@@ -155,6 +157,11 @@ const Deals = () => {
   const { toast } = useToast();
   const { activeCompany, userType: companyUserType, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading, isSystemAdmin } = usePermissions();
+  // "Criar orçamento" a partir do pedido: a mesma permissão do botão
+  // "Novo Orçamento" em /quotes (quotes.create), mais quotes.view porque a
+  // rota /quotes a exige (sem ela o utilizador era devolvido ao dashboard).
+  const canViewQuotes = hasPermission("quotes.view");
+  const canCreateQuote = canViewQuotes && hasPermission(CREATE_QUOTE_PERMISSION);
   const { getPermissionScope, anewUserId: scopeAnewUserId, teamMemberIds, loading: scopeLoading } = usePermissionScope();
   const [viewMode, setViewMode] = useState<ViewMode>('lista');
   const [resolvedRootOrgId, setResolvedRootOrgId] = useState<string | null>(null);
@@ -2648,6 +2655,12 @@ const Deals = () => {
                                           Enviar email
                                         </DropdownMenuItem>
                                       )}
+                                      {canCreateQuote && (
+                                        <DropdownMenuItem onClick={() => navigate(buildNewQuoteFromDealUrl(deal.id))}>
+                                          <FileText className="w-3.5 h-3.5 mr-2" />
+                                          {t('deals.createQuote')}
+                                        </DropdownMenuItem>
+                                      )}
                                       {canActOnDeal(deal, "deals.create") && (
                                         <DropdownMenuItem onClick={() => handleDuplicate(deal)}>
                                           <Copy className="w-3.5 h-3.5 mr-2" />
@@ -2794,6 +2807,14 @@ const Deals = () => {
                   </>
                 )}
                 
+                {canViewQuotes && (
+                  <>
+                    <Separator />
+                    {/* Orçamentos deste pedido + "Criar orçamento" */}
+                    <DealQuotesPanel dealId={detailDeal.id} />
+                  </>
+                )}
+
                 <Separator />
 
                 {/* Levantamento de Necessidades */}
@@ -2820,11 +2841,17 @@ const Deals = () => {
             </Button>
             {detailDeal && (
               canActOnDeal(detailDeal, "deals.edit") ? (
-                <Button onClick={() => { handleEdit(detailDeal); setShowDetails(false); }}>
+                <Button variant={canCreateQuote ? "outline" : "default"} onClick={() => { handleEdit(detailDeal); setShowDetails(false); }}>
                   <Pencil className="h-4 w-4 mr-2" />
                   {t('common.edit')}
                 </Button>
               ) : null
+            )}
+            {detailDeal && canCreateQuote && (
+              <Button onClick={() => navigate(buildNewQuoteFromDealUrl(detailDeal.id))} title={t('deals.createQuote.hint')}>
+                <FileText className="h-4 w-4 mr-2" />
+                {t('deals.createQuote')}
+              </Button>
             )}
           </DialogFooter>
         </DialogContent>

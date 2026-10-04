@@ -12,6 +12,7 @@ import {
 import { TIMELINE_AUDIT_IGNORED_FIELDS, formatAuditDiff } from "@/lib/timeline/auditIgnoredFields";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { withAuditContext } from "@/utils/auditContext";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -863,12 +864,17 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         return;
       }
 
-      // Deduplication: check for recent identical deal (30s window)
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) { toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador.", variant: "destructive" }); return; }
+
+      // Deduplication: check for recent identical deal (30s window).
+      // deals.created_by guarda o utilizador de negócio (não o id de auth),
+      // tal como na deduplicação de Deals.tsx.
       const recentWindow = new Date(Date.now() - 30_000).toISOString();
       let dedupQuery = (supabase.from("deals") as any)
         .select("id")
         .eq("organization_id", client.organization_id)
-        .eq("created_by", user.id)
+        .eq("created_by", businessUserId)
         .eq("title", dealFormData.title)
         .eq("value", value)
         .gte("created_at", recentWindow)
@@ -902,57 +908,39 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         contactId = contactMatch?.id || null;
       }
 
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) { toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador.", variant: "destructive" }); return; }
-      const { data: newDeal, error: dealErr } = await supabase.from("deals").insert({
-        contact_id: contactId,
-        entity_id: client.entity_id,
-        title: dealFormData.title,
-        description: dealFormData.description,
-        value,
-        probability: 50,
-        stage_id: selectedStageId,
-        expected_close_date: dealFormData.expected_close_date || null,
-        created_by: businessUserId,
-        assigned_to: businessUserId,
-        organization_id: client.organization_id,
-        root_organization_id: client.root_organization_id || client.organization_id,
-      }).select("id").single();
-      if (dealErr) throw dealErr;
-
-      // Create pipeline_link for traceability
-      if (newDeal?.id) {
-        await supabase.from("pipeline_links" as any).insert({
-          deal_id: newDeal.id,
+      // Caminho oficial de criação (o mesmo de Deals.tsx): rpc_create_deal cria o
+      // negócio, o pipeline_link e as deal_needs/deal_need_items numa só
+      // transação, com um único registo de auditoria. O execute-workflow corre
+      // DEPOIS, para que um orçamento criado pela automação já apanhe as linhas.
+      const itemsPayload = dealLineItems.map((item, idx) => ({
+        item_type: item.type,
+        product_id: item.product_id || null,
+        service_id: item.service_id || null,
+        quantity: item.quantity,
+        unit_price: item.unit_price || 0,
+        notes: item.name,
+        sort_order: idx,
+      }));
+      const { data: newDeal, error: dealErr } = await supabase.rpc("rpc_create_deal", {
+        p_deal_data: {
+          title: dealFormData.title,
+          value,
+          stage_id: selectedStageId,
           organization_id: client.organization_id,
           root_organization_id: client.root_organization_id || client.organization_id,
-          status: "active",
-        } as any).throwOnError();
-
-        // Save catalog line items as deal_needs + deal_need_items
-        if (dealLineItems.length > 0) {
-          const { data: dealNeed } = await (supabase as any).from("deal_needs").insert({
-            deal_id: newDeal.id,
-            title: dealFormData.title || "Itens do negócio",
-            status: "pending",
-            created_by: businessUserId,
-            sort_order: 0,
-          }).select("id").single().throwOnError();
-
-          if (dealNeed?.id) {
-            const needItems = dealLineItems.map((item, idx) => ({
-              deal_need_id: dealNeed.id,
-              item_type: item.type,
-              product_id: item.product_id || null,
-              service_id: item.service_id || null,
-              quantity: item.quantity,
-              notes: item.name,
-              sort_order: idx,
-            }));
-            await (supabase as any).from("deal_need_items").insert(needItems).throwOnError();
-          }
-        }
-      }
+          lead_id: null,
+          contact_id: contactId,
+          entity_id: client.entity_id || null,
+          probability: 50,
+          description: dealFormData.description || null,
+          expected_close_date: dealFormData.expected_close_date || null,
+        },
+        p_organization_id: client.organization_id,
+        p_root_organization_id: client.root_organization_id || client.organization_id,
+        p_lead_workflow_stage_id: null,
+        p_items: itemsPayload,
+      });
+      if (dealErr) throw dealErr;
 
       // Trigger workflow automation (e.g., auto-create quote)
       let workflowFailed = false;
@@ -1006,18 +994,25 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       if (!user) throw new Error("Not authenticated");
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) { toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador.", variant: "destructive" }); return; }
-      const { data: newProposal, error: propErr } = await supabase.from("proposals").insert({
-        deal_id: selectedDeal,
-        entity_id: client.entity_id || null,
-        title: proposalFormData.title,
-        description: proposalFormData.description,
-        value,
-        valid_until: proposalFormData.valid_until,
-        status: "draft",
-        created_by: businessUserId,
-        organization_id: client.organization_id,
-        root_organization_id: client.root_organization_id || client.organization_id,
-      }).select("id").single();
+      // Caminho oficial de criação (o mesmo de ProposalCreateDialog/Proposals.tsx):
+      // rpc_create_proposal valida a permissão proposals.create e o âmbito da
+      // organização, grava a proposta e um único registo de auditoria.
+      // As linhas deste formulário continuam em proposal_manual_items (onde o
+      // ProposalManualItemsEditor e o pipeline-automation as leem), por isso
+      // não seguem por p_proposal_items (que escreve em proposal_items).
+      const { data: newProposal, error: propErr } = await supabase.rpc("rpc_create_proposal", {
+        p_proposal_data: {
+          deal_id: selectedDeal,
+          entity_id: client.entity_id || null,
+          title: proposalFormData.title,
+          description: proposalFormData.description || null,
+          value,
+          valid_until: proposalFormData.valid_until || null,
+          status: "draft",
+          organization_id: client.organization_id,
+          root_organization_id: client.root_organization_id || client.organization_id,
+        },
+      });
       if (propErr) throw propErr;
 
       // Save line items as proposal_manual_items
@@ -1030,6 +1025,12 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           sort_order: idx,
         }));
         await (supabase as any).from("proposal_manual_items").insert(manualItems).throwOnError();
+      }
+
+      // Tal como no diálogo oficial: criar a proposta resolve os alertas
+      // "enviar proposta" pendentes desta entidade.
+      if (newProposal?.id) {
+        await resolveSendProposalAlerts(newProposal.entity_id ?? client.entity_id, client.organization_id);
       }
 
       toast({ title: "Proposta criada com sucesso" });
@@ -1207,7 +1208,11 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               <TabsContent value="deals" className="space-y-4 mt-4">
                 {!showDealForm ? (
                   <>
-                    <Button onClick={() => setShowDealForm(true)} className="w-full"><Plus className="w-4 h-4 mr-2" />Novo Pedido de Proposta</Button>
+                    {/* rpc_create_deal é SECURITY DEFINER e não passa pela RLS que exige
+                        deals.create; o botão fica protegido como em Deals.tsx. */}
+                    <PermissionGate permission="deals.create">
+                      <Button onClick={() => setShowDealForm(true)} className="w-full"><Plus className="w-4 h-4 mr-2" />Novo Pedido de Proposta</Button>
+                    </PermissionGate>
                     {loading ? <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> : deals.length === 0 ? (
                       <div className="text-center py-8"><FileText className="w-12 h-12 text-muted-foreground mx-auto mb-3" /><p className="text-muted-foreground">Sem pedidos de proposta</p></div>
                     ) : (

@@ -46,7 +46,7 @@ export function ContactScoringTab({
     },
     {
       key: "engagement",
-      label: `Engagement (${interactionCount} interacções)`,
+      label: `Engagement (${interactionCount} interações)`,
       value: healthScore.breakdown.interactionFrequency,
       max: 10,
       color: healthScore.breakdown.interactionFrequency >= 7 ? "bg-green-500" : healthScore.breakdown.interactionFrequency >= 4 ? "bg-blue-500" : "bg-yellow-500",
@@ -67,7 +67,7 @@ export function ContactScoringTab({
     },
     {
       key: "nextAction",
-      label: hasNextAction ? "Tem acção agendada" : "Nenhuma acção agendada",
+      label: hasNextAction ? "Tem ação agendada" : "Nenhuma ação agendada",
       value: hasNextAction ? 6 : 0,
       max: 6,
       color: hasNextAction ? "bg-green-500" : "bg-red-500",
@@ -77,7 +77,7 @@ export function ContactScoringTab({
   // Calculate improvement tips
   const tips: string[] = [];
   let potentialGain = 0;
-  if (!hasNextAction) { tips.push("agendar próxima acção (+6)"); potentialGain += 6; }
+  if (!hasNextAction) { tips.push("agendar próxima ação (+6)"); potentialGain += 6; }
   if (healthScore.breakdown.dataCompleteness < 10) { 
     const missing = 10 - healthScore.breakdown.dataCompleteness;
     tips.push(`completar dados (+${missing})`); 

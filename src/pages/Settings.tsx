@@ -1098,7 +1098,7 @@ const Settings = () => {
                             <Label htmlFor="from_name">{t('techSettings.smtp.fromName')} *</Label>
                             <Input
                               id="from_name"
-                              placeholder="Your Company Name"
+                              placeholder={t('techSettings.smtp.fromNamePlaceholder')}
                               value={smtpForm.from_name}
                               onChange={(e) => setSmtpForm({ ...smtpForm, from_name: e.target.value })}
                             />

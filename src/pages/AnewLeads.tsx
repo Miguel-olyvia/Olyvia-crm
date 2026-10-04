@@ -5538,14 +5538,14 @@ export default function AnewLeads() {
                 ))
               ) : (
                 [
-                  { name: "new", label: "New", color: "#3b82f6" },
-                  { name: "contacted", label: "Contacted", color: "#f59e0b" },
-                  { name: "callback_scheduled", label: "Callback Agendado", color: "#a855f7" },
-                  { name: "visit_scheduled", label: "Visita Agendada", color: "#06b6d4" },
-                  { name: "qualified", label: "Qualified", color: "#22c55e" },
-                  { name: "proposal_sent", label: "Proposal Sent", color: "#6366f1" },
-                  { name: "negotiation", label: "Negotiation", color: "#ec4899" },
-                  { name: "lost", label: "Lost / Rejected", color: "#ef4444" },
+                  { name: "new", label: t('contactResults.statuses.new'), color: "#3b82f6" },
+                  { name: "contacted", label: t('contactResults.statuses.contacted'), color: "#f59e0b" },
+                  { name: "callback_scheduled", label: t('contactResults.statuses.callbackScheduled'), color: "#a855f7" },
+                  { name: "visit_scheduled", label: t('contactResults.statuses.visitScheduled'), color: "#06b6d4" },
+                  { name: "qualified", label: t('contactResults.statuses.qualified'), color: "#22c55e" },
+                  { name: "proposal_sent", label: t('contactResults.statuses.proposalSent'), color: "#6366f1" },
+                  { name: "negotiation", label: t('contactResults.statuses.negotiation'), color: "#ec4899" },
+                  { name: "lost", label: `${t('contactResults.statuses.lost')} / ${t('contactResults.statuses.rejected')}`, color: "#ef4444" },
                 ].map(status => (
                   <Card 
                     key={status.name} 
@@ -5697,15 +5697,15 @@ export default function AnewLeads() {
                           ))
                         ) : (
                           <>
-                            <SelectItem value="new">New</SelectItem>
-                            <SelectItem value="contacted">Contacted</SelectItem>
+                            <SelectItem value="new">{t('contactResults.statuses.new')}</SelectItem>
+                            <SelectItem value="contacted">{t('contactResults.statuses.contacted')}</SelectItem>
                             
                             <SelectItem value="callback_scheduled">Callback Agendado</SelectItem>
                             <SelectItem value="visit_scheduled">Visita Agendada</SelectItem>
-                            <SelectItem value="qualified">Qualified</SelectItem>
-                            <SelectItem value="converted">Converted</SelectItem>
-                            <SelectItem value="rejected">Rejected</SelectItem>
-                            <SelectItem value="lost">Lost</SelectItem>
+                            <SelectItem value="qualified">{t('contactResults.statuses.qualified')}</SelectItem>
+                            <SelectItem value="converted">{t('contactResults.statuses.converted')}</SelectItem>
+                            <SelectItem value="rejected">{t('contactResults.statuses.rejected')}</SelectItem>
+                            <SelectItem value="lost">{t('contactResults.statuses.lost')}</SelectItem>
                           </>
                         )}
                       </SelectContent>
@@ -7027,15 +7027,15 @@ export default function AnewLeads() {
         <Dialog open={showFieldsConfig} onOpenChange={setShowFieldsConfig}>
           <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Configure Lead Fields</DialogTitle>
+              <DialogTitle>{t('campaigns.fields.title')}</DialogTitle>
             </DialogHeader>
             
             {/* Campaign Selector */}
             <div className="mb-4">
-              <Label className="mb-2 block">Select Campaign</Label>
+              <Label className="mb-2 block">{t('campaigns.fields.selectCampaign')}</Label>
               <Select value={configCampaignId} onValueChange={setConfigCampaignId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select a campaign" />
+                  <SelectValue placeholder={t('campaigns.fields.selectCampaignPlaceholder')} />
                 </SelectTrigger>
                 <SelectContent>
                   {campaigns.map(c => (
@@ -7044,16 +7044,16 @@ export default function AnewLeads() {
                 </SelectContent>
               </Select>
               <p className="text-sm text-muted-foreground mt-2">
-                Each campaign has its own set of lead fields. Select a campaign to configure its form fields.
+                {t('campaigns.fields.perCampaignHint')}
               </p>
             </div>
 
             {!configCampaignId ? (
               <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
                 {campaigns.length === 0 ? (
-                  <p>No campaigns found. Create a campaign first in the Campaigns section.</p>
+                  <p>{t('campaigns.fields.noCampaigns')}</p>
                 ) : (
-                  <p>Select a campaign above to configure its lead fields.</p>
+                  <p>{t('campaigns.fields.selectCampaignAbove')}</p>
                 )}
               </div>
             ) : (
@@ -7064,23 +7064,23 @@ export default function AnewLeads() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Plus className="w-4 h-4" />
-                  Add New Field
+                  {t('campaigns.fields.addNew')}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label>Field Key</Label>
+                    <Label>{t('campaigns.fields.fieldKey')}</Label>
                     <Input
-                      placeholder="e.g. first_name"
+                      placeholder={t('campaigns.fields.keyPlaceholder')}
                       value={newField.field_key}
                       onChange={e => setNewField({ ...newField, field_key: e.target.value })}
                     />
                   </div>
                   <div>
-                    <Label>Display Label</Label>
+                    <Label>{t('campaigns.fields.displayLabel')}</Label>
                     <Input
-                      placeholder="e.g. First Name"
+                      placeholder={t('campaigns.fields.labelPlaceholder')}
                       value={newField.field_label}
                       onChange={e => setNewField({ ...newField, field_label: e.target.value })}
                     />
@@ -7088,31 +7088,31 @@ export default function AnewLeads() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <Label>Field Type</Label>
+                    <Label>{t('campaigns.fields.fieldType')}</Label>
                     <Select value={newField.field_type} onValueChange={v => setNewField({ ...newField, field_type: v })}>
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="text">Text</SelectItem>
+                        <SelectItem value="text">{t('fieldTypes.text')}</SelectItem>
                         <SelectItem value="email">Email</SelectItem>
-                        <SelectItem value="phone">Phone</SelectItem>
-                        <SelectItem value="number">Number</SelectItem>
-                        <SelectItem value="date">Date</SelectItem>
-                        <SelectItem value="datetime">Date & Time</SelectItem>
-                        <SelectItem value="boolean">Yes/No</SelectItem>
-                        <SelectItem value="select">Dropdown</SelectItem>
-                        <SelectItem value="textarea">Long Text</SelectItem>
+                        <SelectItem value="phone">{t('fieldTypes.phone')}</SelectItem>
+                        <SelectItem value="number">{t('fieldTypes.number')}</SelectItem>
+                        <SelectItem value="date">{t('fieldTypes.date')}</SelectItem>
+                        <SelectItem value="datetime">{t('fieldTypes.datetime')}</SelectItem>
+                        <SelectItem value="boolean">{t('fieldTypes.boolean')}</SelectItem>
+                        <SelectItem value="select">{t('fieldTypes.select')}</SelectItem>
+                        <SelectItem value="textarea">{t('fieldTypes.textarea')}</SelectItem>
                         <SelectItem value="url">URL</SelectItem>
-                        <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">— References —</SelectItem>
-                        <SelectItem value="ref_company">Company</SelectItem>
-                        <SelectItem value="ref_client">Client</SelectItem>
-                        <SelectItem value="ref_employee">Employee</SelectItem>
-                        <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">— Lists —</SelectItem>
-                        <SelectItem value="list_products">Product List</SelectItem>
-                        <SelectItem value="list_services">Service List</SelectItem>
-                        <SelectItem value="ref_product">Single Product</SelectItem>
-                        <SelectItem value="ref_service">Single Service</SelectItem>
+                        <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">{t('fieldTypes.references')}</SelectItem>
+                        <SelectItem value="ref_company">{t('fieldTypes.company')}</SelectItem>
+                        <SelectItem value="ref_client">{t('fieldTypes.client')}</SelectItem>
+                        <SelectItem value="ref_employee">{t('fieldTypes.employee')}</SelectItem>
+                        <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">{t('fieldTypes.lists')}</SelectItem>
+                        <SelectItem value="list_products">{t('fieldTypes.productList')}</SelectItem>
+                        <SelectItem value="list_services">{t('fieldTypes.serviceList')}</SelectItem>
+                        <SelectItem value="ref_product">{t('fieldTypes.singleProduct')}</SelectItem>
+                        <SelectItem value="ref_service">{t('fieldTypes.singleService')}</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -7171,11 +7171,11 @@ export default function AnewLeads() {
             {/* Existing Fields */}
             <div className="space-y-2">
               <h4 className="font-medium text-sm text-muted-foreground uppercase tracking-wide">
-                Configured Fields ({fieldDefs.length})
+                {t('campaigns.fields.configuredCount', { count: fieldDefs.length })}
               </h4>
               {fieldDefs.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground border-2 border-dashed rounded-lg">
-                  No fields configured yet. Add your first field above.
+                  {t('campaigns.fields.noFields')}
                 </div>
               ) : (
                 fieldDefs.map(field => (
@@ -7187,32 +7187,32 @@ export default function AnewLeads() {
                           <Input
                             value={editingField.field_label}
                             onChange={e => setEditingField({ ...editingField, field_label: e.target.value })}
-                            placeholder="Label"
+                            placeholder={t('campaigns.fields.label')}
                           />
                           <Select value={editingField.field_type} onValueChange={v => setEditingField({ ...editingField, field_type: v })}>
                             <SelectTrigger>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="text">Text</SelectItem>
+                              <SelectItem value="text">{t('fieldTypes.text')}</SelectItem>
                               <SelectItem value="email">Email</SelectItem>
-                              <SelectItem value="phone">Phone</SelectItem>
-                              <SelectItem value="number">Number</SelectItem>
-                              <SelectItem value="date">Date</SelectItem>
-                              <SelectItem value="datetime">Date & Time</SelectItem>
-                              <SelectItem value="boolean">Yes/No</SelectItem>
-                              <SelectItem value="select">Dropdown</SelectItem>
-                              <SelectItem value="textarea">Long Text</SelectItem>
+                              <SelectItem value="phone">{t('fieldTypes.phone')}</SelectItem>
+                              <SelectItem value="number">{t('fieldTypes.number')}</SelectItem>
+                              <SelectItem value="date">{t('fieldTypes.date')}</SelectItem>
+                              <SelectItem value="datetime">{t('fieldTypes.datetime')}</SelectItem>
+                              <SelectItem value="boolean">{t('fieldTypes.boolean')}</SelectItem>
+                              <SelectItem value="select">{t('fieldTypes.select')}</SelectItem>
+                              <SelectItem value="textarea">{t('fieldTypes.textarea')}</SelectItem>
                               <SelectItem value="url">URL</SelectItem>
-                              <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">— References —</SelectItem>
-                              <SelectItem value="ref_company">Company</SelectItem>
-                              <SelectItem value="ref_client">Client</SelectItem>
-                              <SelectItem value="ref_employee">Employee</SelectItem>
-                              <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">— Lists —</SelectItem>
-                              <SelectItem value="list_products">Product List</SelectItem>
-                              <SelectItem value="list_services">Service List</SelectItem>
-                              <SelectItem value="ref_product">Single Product</SelectItem>
-                              <SelectItem value="ref_service">Single Service</SelectItem>
+                              <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">{t('fieldTypes.references')}</SelectItem>
+                              <SelectItem value="ref_company">{t('fieldTypes.company')}</SelectItem>
+                              <SelectItem value="ref_client">{t('fieldTypes.client')}</SelectItem>
+                              <SelectItem value="ref_employee">{t('fieldTypes.employee')}</SelectItem>
+                              <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">{t('fieldTypes.lists')}</SelectItem>
+                              <SelectItem value="list_products">{t('fieldTypes.productList')}</SelectItem>
+                              <SelectItem value="list_services">{t('fieldTypes.serviceList')}</SelectItem>
+                              <SelectItem value="ref_product">{t('fieldTypes.singleProduct')}</SelectItem>
+                              <SelectItem value="ref_service">{t('fieldTypes.singleService')}</SelectItem>
                             </SelectContent>
                           </Select>
                         </div>
@@ -7250,19 +7250,19 @@ export default function AnewLeads() {
                               checked={editingField.is_required}
                               onCheckedChange={v => setEditingField({ ...editingField, is_required: v })}
                             />
-                            <span className="text-xs">Req</span>
+                            <span className="text-xs">{t('campaigns.fields.required')}</span>
                           </div>
                           <div className="flex items-center gap-1">
                             <Switch
                               checked={editingField.is_unique}
                               onCheckedChange={v => setEditingField({ ...editingField, is_unique: v })}
                             />
-                            <span className="text-xs">Uniq</span>
+                            <span className="text-xs">{t('campaigns.fields.unique')}</span>
                           </div>
                         </div>
                         <div className="flex gap-1 justify-end">
-                          <Button size="sm" onClick={handleUpdateField}>Save</Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingField(null)}>Cancel</Button>
+                          <Button size="sm" onClick={handleUpdateField}>{t('common.save')}</Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingField(null)}>{t('common.cancel')}</Button>
                         </div>
                       </div>
                     ) : (

@@ -296,7 +296,7 @@ export function CampaignFieldsConfig({
     });
 
     if (error) {
-      toast({ title: "Error adding step", description: error.message, variant: "destructive" });
+      toast({ title: t("campaigns.steps.addError"), description: error.message, variant: "destructive" });
     } else {
       toast({ title: t("campaigns.steps.added") || "Step added" });
       setNewStepTitle("");
@@ -320,7 +320,7 @@ export function CampaignFieldsConfig({
       .eq("id", editingStep.id);
 
     if (error) {
-      toast({ title: "Error updating step", description: error.message, variant: "destructive" });
+      toast({ title: t("campaigns.steps.updateError"), description: error.message, variant: "destructive" });
     } else {
       toast({ title: t("campaigns.steps.updated") || "Step updated" });
       setEditingStep(null);
@@ -356,7 +356,7 @@ export function CampaignFieldsConfig({
       .eq("id", stepId);
 
     if (error) {
-      toast({ title: "Error deleting step", description: error.message, variant: "destructive" });
+      toast({ title: t("campaigns.steps.deleteError"), description: error.message, variant: "destructive" });
     } else {
       toast({ title: t("campaigns.steps.deleted") || "Step deleted" });
       loadFormSteps();
@@ -400,7 +400,7 @@ export function CampaignFieldsConfig({
 
   const handleAddField = async () => {
     if (!newField.field_key || !newField.field_label) {
-      toast({ title: "Please fill key and label", variant: "destructive" });
+      toast({ title: t("campaigns.fields.keyLabelRequired"), variant: "destructive" });
       return;
     }
 
@@ -479,9 +479,9 @@ export function CampaignFieldsConfig({
     });
 
     if (error) {
-      toast({ title: "Error adding field", description: error.message, variant: "destructive" });
+      toast({ title: t("campaigns.fields.addError"), description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Field added successfully" });
+      toast({ title: t("campaigns.fields.added") });
       setNewField({
         field_key: "",
         field_label: "",
@@ -547,9 +547,9 @@ export function CampaignFieldsConfig({
       .eq("id", editingField.id);
 
     if (error) {
-      toast({ title: "Error updating field", description: error.message, variant: "destructive" });
+      toast({ title: t("campaigns.fields.updateError"), description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Field updated" });
+      toast({ title: t("campaigns.fields.updated") });
       setEditingField(null);
       setEditCustomOptionsText("");
       loadFieldDefinitions();
@@ -563,9 +563,9 @@ export function CampaignFieldsConfig({
       .eq("id", id);
 
     if (error) {
-      toast({ title: "Error deleting field", description: error.message, variant: "destructive" });
+      toast({ title: t("campaigns.fields.deleteError"), description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Field removed" });
+      toast({ title: t("campaigns.fields.removed") });
       loadFieldDefinitions();
     }
   };
@@ -808,15 +808,15 @@ export function CampaignFieldsConfig({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="text">Text</SelectItem>
+                        <SelectItem value="text">{t('fieldTypes.text')}</SelectItem>
                         <SelectItem value="email">Email</SelectItem>
-                        <SelectItem value="phone">Phone</SelectItem>
-                        <SelectItem value="number">Number</SelectItem>
-                        <SelectItem value="date">Date</SelectItem>
-                        <SelectItem value="datetime">Date & Time</SelectItem>
-                        <SelectItem value="boolean">Yes/No</SelectItem>
-                        <SelectItem value="select">Dropdown</SelectItem>
-                        <SelectItem value="textarea">Long Text</SelectItem>
+                        <SelectItem value="phone">{t('fieldTypes.phone')}</SelectItem>
+                        <SelectItem value="number">{t('fieldTypes.number')}</SelectItem>
+                        <SelectItem value="date">{t('fieldTypes.date')}</SelectItem>
+                        <SelectItem value="datetime">{t('fieldTypes.datetime')}</SelectItem>
+                        <SelectItem value="boolean">{t('fieldTypes.boolean')}</SelectItem>
+                        <SelectItem value="select">{t('fieldTypes.select')}</SelectItem>
+                        <SelectItem value="textarea">{t('fieldTypes.textarea')}</SelectItem>
                         <SelectItem value="url">URL</SelectItem>
                         <SelectItem value="radio">Radio (opção única)</SelectItem>
                         <SelectItem value="checkbox">Checkbox (múltiplas opções)</SelectItem>
@@ -1257,7 +1257,7 @@ export function CampaignFieldsConfig({
                                   onChange={(e) =>
                                     setEditingField({ ...editingField, field_label: e.target.value })
                                   }
-                                  placeholder="Label"
+                                  placeholder={t('campaigns.fields.label')}
                                 />
                                 <Select
                                   value={editingField.field_type}
@@ -1267,31 +1267,31 @@ export function CampaignFieldsConfig({
                                     <SelectValue />
                                   </SelectTrigger>
                                   <SelectContent>
-                                    <SelectItem value="text">Text</SelectItem>
+                                    <SelectItem value="text">{t('fieldTypes.text')}</SelectItem>
                                     <SelectItem value="email">Email</SelectItem>
-                                    <SelectItem value="phone">Phone</SelectItem>
-                                    <SelectItem value="number">Number</SelectItem>
-                                    <SelectItem value="date">Date</SelectItem>
-                                    <SelectItem value="datetime">Date & Time</SelectItem>
-                                    <SelectItem value="boolean">Yes/No</SelectItem>
-                                    <SelectItem value="select">Dropdown</SelectItem>
-                                    <SelectItem value="textarea">Long Text</SelectItem>
+                                    <SelectItem value="phone">{t('fieldTypes.phone')}</SelectItem>
+                                    <SelectItem value="number">{t('fieldTypes.number')}</SelectItem>
+                                    <SelectItem value="date">{t('fieldTypes.date')}</SelectItem>
+                                    <SelectItem value="datetime">{t('fieldTypes.datetime')}</SelectItem>
+                                    <SelectItem value="boolean">{t('fieldTypes.boolean')}</SelectItem>
+                                    <SelectItem value="select">{t('fieldTypes.select')}</SelectItem>
+                                    <SelectItem value="textarea">{t('fieldTypes.textarea')}</SelectItem>
                                     <SelectItem value="url">URL</SelectItem>
                                     <SelectItem value="_separator1" disabled className="text-muted-foreground font-semibold">
-                                      — References —
+                                      {t('fieldTypes.references')}
                                     </SelectItem>
-                                    <SelectItem value="ref_company">Company</SelectItem>
-                                    <SelectItem value="ref_business_unit">Business Unit</SelectItem>
-                                    <SelectItem value="ref_department">Department</SelectItem>
-                                    <SelectItem value="ref_client">Client</SelectItem>
-                                    <SelectItem value="ref_employee">Employee</SelectItem>
+                                    <SelectItem value="ref_company">{t('fieldTypes.company')}</SelectItem>
+                                    <SelectItem value="ref_business_unit">{t('fieldTypes.businessUnit')}</SelectItem>
+                                    <SelectItem value="ref_department">{t('fieldTypes.department')}</SelectItem>
+                                    <SelectItem value="ref_client">{t('fieldTypes.client')}</SelectItem>
+                                    <SelectItem value="ref_employee">{t('fieldTypes.employee')}</SelectItem>
                                     <SelectItem value="_separator2" disabled className="text-muted-foreground font-semibold">
-                                      — Lists —
+                                      {t('fieldTypes.lists')}
                                     </SelectItem>
-                                    <SelectItem value="list_products">Product List</SelectItem>
-                                    <SelectItem value="list_services">Service List</SelectItem>
-                                    <SelectItem value="ref_product">Single Product</SelectItem>
-                                    <SelectItem value="ref_service">Single Service</SelectItem>
+                                    <SelectItem value="list_products">{t('fieldTypes.productList')}</SelectItem>
+                                    <SelectItem value="list_services">{t('fieldTypes.serviceList')}</SelectItem>
+                                    <SelectItem value="ref_product">{t('fieldTypes.singleProduct')}</SelectItem>
+                                    <SelectItem value="ref_service">{t('fieldTypes.singleService')}</SelectItem>
                                   </SelectContent>
                                 </Select>
                                 <Select
@@ -1391,10 +1391,10 @@ export function CampaignFieldsConfig({
                               </div>
                               <div className="flex gap-1 justify-end">
                                 <Button size="sm" onClick={handleUpdateField}>
-                                  Save
+                                  {t('common.save')}
                                 </Button>
                                 <Button size="sm" variant="ghost" onClick={() => setEditingField(null)}>
-                                  Cancel
+                                  {t('common.cancel')}
                                 </Button>
                               </div>
                             </div>

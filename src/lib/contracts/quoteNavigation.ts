@@ -1,5 +1,5 @@
 /**
- * Para onde leva a acção "Ver orçamentos" do menu de um contrato
+ * Para onde leva a ação "Ver orçamentos" do menu de um contrato
  * (src/pages/ClientContracts.tsx), e quando é que ela deve estar activa.
  *
  * Regra: comportar-se como o "Ver proposta" ao lado — quando há um único
@@ -30,7 +30,7 @@ const liveProposalQuotes = (contract: ContractQuoteNavigationInput): ContractQuo
 const liveContractQuoteId = (contract: ContractQuoteNavigationInput): string | null =>
   contract?.quote_id && contract._contractQuoteAlive !== false ? contract.quote_id : null;
 
-/** O contrato tem algum orçamento por abrir? Se não, a acção fica desactivada. */
+/** O contrato tem algum orçamento por abrir? Se não, a ação fica desactivada. */
 export function contractHasQuotes(contract: ContractQuoteNavigationInput): boolean {
   return Boolean(liveContractQuoteId(contract)) || liveProposalQuotes(contract).length > 0;
 }

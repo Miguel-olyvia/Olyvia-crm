@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { AUTO_IMPORT_PARAM, readAutoImportParam } from "@/lib/quotes/dealQuoteLink";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
@@ -231,6 +232,8 @@ export default function Quotes() {
   const [selectedQuote, setSelectedQuote] = useState<string | null>(null);
   const [builderInitialProposalId, setBuilderInitialProposalId] = useState<string | null>(null);
   const [builderInitialDealId, setBuilderInitialDealId] = useState<string | null>(null);
+  // Vindo do detalhe do pedido ("Criar orçamento"): importar logo as necessidades.
+  const [builderAutoImport, setBuilderAutoImport] = useState(false);
   
   const [deleteQuoteId, setDeleteQuoteId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(true);
@@ -506,6 +509,8 @@ export default function Quotes() {
   }, [permissionsLoading, hasPermission, navigate, activeCompany]);
 
   // Open builder automatically when navigated with ?new=1&proposal_id=...
+  // (ou ?new=1&deal_id=...&autoImport=1 a partir do detalhe do pedido — ver
+  // src/lib/quotes/dealQuoteLink.ts).
   useEffect(() => {
     if (searchParams.get("new") === "1") {
       const proposalId = searchParams.get("proposal_id");
@@ -513,12 +518,14 @@ export default function Quotes() {
       setSelectedQuote(null);
       setBuilderInitialProposalId(proposalId);
       setBuilderInitialDealId(dealId);
+      setBuilderAutoImport(!!dealId && readAutoImportParam(searchParams));
       setShowBuilder(true);
       // Clear params so a refresh doesn't re-trigger
       const next = new URLSearchParams(searchParams);
       next.delete("new");
       next.delete("proposal_id");
       next.delete("deal_id");
+      next.delete(AUTO_IMPORT_PARAM);
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -1551,12 +1558,14 @@ export default function Quotes() {
         quoteId={selectedQuote}
         initialProposalId={builderInitialProposalId}
         initialDealId={builderInitialDealId}
+        autoImportFromDeal={builderAutoImport}
         onClose={() => {
           const returnProposalId = builderInitialProposalId;
           setShowBuilder(false);
           setSelectedQuote(null);
           setBuilderInitialProposalId(null);
           setBuilderInitialDealId(null);
+          setBuilderAutoImport(false);
           if (returnProposalId) {
             navigate(`/proposals?open=${returnProposalId}`);
             return;
@@ -2152,7 +2161,7 @@ export default function Quotes() {
                                     <DropdownMenuSeparator />
 
                                     {/* ACÇÕES */}
-                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Acções</DropdownMenuLabel>
+                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Ações</DropdownMenuLabel>
                                     {quote.estado !== 'aceite' && (
                                       <PermissionGate permission="quotes.edit">
                                         <DropdownMenuItem onClick={() => { setSelectedQuote(quote.id); setShowBuilder(true); }}>
