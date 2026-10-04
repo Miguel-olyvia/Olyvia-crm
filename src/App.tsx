@@ -226,7 +226,7 @@ const App = () => (
                       <Route path="/quotes" element={<ProtectedRoute permission="quotes.view"><Quotes /></ProtectedRoute>} />
                       <Route path="/quote-models" element={<ProtectedRoute permission="quote_templates.view"><QuoteModels /></ProtectedRoute>} />
                       <Route path="/proposal-templates" element={<ProposalTemplates />} />
-                      <Route path="/quote-templates" element={<ProtectedRoute permission="proposals.manage"><QuoteTemplates /></ProtectedRoute>} />
+                      <Route path="/quote-templates" element={<ProtectedRoute permission="quotes.manage"><QuoteTemplates /></ProtectedRoute>} />
                       {/* Venda Direta (Fase 2) — fluxo alternativo ao Orçamento -> Proposta -> Contrato. Permissões próprias: direct_sales.view/create/edit (migration 20261130230000). */}
                       <Route path="/direct-sales" element={<ProtectedRoute permission="direct_sales.view"><DirectSales /></ProtectedRoute>} />
                       <Route path="/catalog-items" element={<CatalogItems />} />

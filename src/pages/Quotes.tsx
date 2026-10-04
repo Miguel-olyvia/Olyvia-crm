@@ -1607,7 +1607,7 @@ export default function Quotes() {
                   <FileText className="h-4 w-4 mr-2" />Templates
                 </Button>
               </PermissionGate>
-              <PermissionGate permission="quotes.manage">
+              <PermissionGate permission="quote_templates.view">
                 <Button variant="outline" size="sm" onClick={() => navigate("/quote-models")}>
                   <FileText className="h-4 w-4 mr-2" />Modelos Rápidos
                 </Button>

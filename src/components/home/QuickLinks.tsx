@@ -85,7 +85,7 @@ export const QUICK_GROUPS: QuickGroup[] = [
       { id: "contracts", to: "/client-contracts", icon: FileText, labelKey: "sidebar.contracts", permission: "client_contracts.view" },
       { id: "contract-templates", to: "/contract-templates", icon: Sparkles, labelKey: "sidebar.contractTemplates", permission: "contract_templates.view" },
       { id: "quote-models", to: "/quote-models", icon: Sparkles, labelKey: "today.quick.quoteModels", permission: "quote_templates.view" },
-      { id: "quote-pdf-templates", to: "/quote-templates", icon: Sparkles, labelKey: "today.quick.quotePdfTemplates", permission: "proposals.manage" },
+      { id: "quote-pdf-templates", to: "/quote-templates", icon: Sparkles, labelKey: "today.quick.quotePdfTemplates", permission: "quotes.manage" },
       { id: "catalog-items", to: "/catalog-items", icon: Package, labelKey: "sidebar.catalogItems", permission: "catalog_items.view" },
       { id: "service-catalog", to: "/service-catalog-items", icon: Package, labelKey: "sidebar.serviceCatalogItems", permission: "service_catalog.view" },
     ],
