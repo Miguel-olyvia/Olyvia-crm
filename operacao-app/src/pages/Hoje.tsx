@@ -160,7 +160,7 @@ export default function Hoje() {
 
     // Obras: um bloco por tipo de alerta, no topo (o pior primeiro).
     const obra: Bloco[] = [];
-    for (const tipo of ["fim_ultrapassado", "nao_iniciada", "cliente_por_avisar"] as TipoAlerta[]) {
+    for (const tipo of ["fim_ultrapassado", "nao_iniciada", "material_tarde", "cliente_por_avisar"] as TipoAlerta[]) {
       const lista = alertasObra.filter((a) => a.tipo === tipo);
       if (!lista.length) continue;
       obra.push({

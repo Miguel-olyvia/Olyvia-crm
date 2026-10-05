@@ -252,6 +252,14 @@ ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS servico_tarefa_id uu
 -- obra: [{produto_id, nome, quantidade, unidade, disponivel, origem: 'ficha'|'contrato'|'stock'}]. Cópia,
 -- SEM FK (products é do CRM). `materiais` continua a ser o texto legível.
 ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS materiais_crm jsonb NOT NULL DEFAULT '[]'::jsonb;
+-- Quando chega o material (ou o fabrico) de que a tarefa precisa: o plano
+-- não a põe a começar antes. 'crm' = encomenda a fornecedor em aberto ou prazo
+-- do fornecedor (ops_obra_material_prazo, ao nascer a obra); 'manual' = dito
+-- pelo gestor (rpc_ops_obra_material_chega). A nota diz de onde veio a data.
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS material_chega_em date;
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS material_chega_origem text
+  CHECK (material_chega_origem IS NULL OR material_chega_origem IN ('crm','manual'));
+ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS material_chega_nota text;
 
 -- Quem está numa tarefa. `obra_id` vai repetido para a policy não precisar
 -- de um join por linha.
@@ -935,7 +943,16 @@ GRANT EXECUTE ON FUNCTION public.ops_obra_minuto_apos_espera(date[], time, integ
 --     ORGANIZAÇÃO (sem feriados de schedule_holidays);
 --   · `espera_antes_horas` (cura, fabrico): a tarefa só começa quando
 --     passarem essas horas de RELÓGIO depois de acabarem as de que depende —
---     noites e fins de semana contam (ops_obra_minuto_apos_espera).
+--     noites e fins de semana contam (ops_obra_minuto_apos_espera);
+--   · `material_chega_em`: não começa antes do dia em que o material chega;
+--   · CAPACIDADE POR ESPECIALIDADE: uma tarefa que pede uma especialidade
+--     com pessoas (técnicos/operadores ativos com ela) ocupa também vagas
+--     dessa especialidade — tantas quantas essas pessoas. Com 2 azulejistas,
+--     duas tarefas de revestimento correm em paralelo, a terceira espera; uma
+--     tarefa de 3 pessoas com 2 azulejistas faz-se a 2 (dura mais). Sem
+--     ninguém com a especialidade, conta só a vaga genérica (como antes).
+--     Só dentro desta obra: as outras obras entram pela distribuição, que
+--     não põe a mesma pessoa em dois sítios no mesmo dia.
 -- A ordem "fase a fase" de antes continua a sair quando as dependências a
 -- pedem (ver ops_obra_dependencias_defeito_impl: as tarefas do tipo de obra
 -- dependem de tudo o que vem antes). Um ciclo (só em dados antigos) não
@@ -962,6 +979,17 @@ DECLARE
   v_cedo    bigint[];       -- quando acabam as tarefas de que depende
   v_pronto  bigint[];       -- o mais cedo que pode começar (depois da espera)
   v_esp     numeric[];      -- espera antes, em horas de relógio
+  v_na      bigint[];       -- não antes de (minuto): o dia em que chega o material
+  v_tsk     uuid[];         -- a especialidade de cada tarefa
+  v_tq      integer[];      -- … e o seu índice em v_sk (0 = sem vagas próprias)
+  v_sk      uuid[];         -- especialidades com pessoas nesta organização
+  v_scap    integer[];      -- quantas pessoas tem cada uma
+  v_soff    integer[];      -- onde começam as vagas de cada uma em v_sl
+  v_sl      bigint[];       -- minuto em que cada vaga de especialidade fica livre
+  v_sesc    integer[];
+  v_q       integer;
+  v_ef      bigint;
+  v_efb     bigint;
   v_dias    date[];         -- os dias úteis da organização desde o arranque
   v_hora    time;
   v_feito   boolean[];
@@ -992,13 +1020,40 @@ BEGIN
   SELECT array_agg(x.id ORDER BY x.fo, x.ordem, x.criada_em, x.id),
          array_agg(x.minutos_previstos ORDER BY x.fo, x.ordem, x.criada_em, x.id),
          array_agg(LEAST(GREATEST(x.pessoas_previstas, 1), v_cap) ORDER BY x.fo, x.ordem, x.criada_em, x.id),
-         array_agg(COALESCE(x.espera_antes_horas, 0) ORDER BY x.fo, x.ordem, x.criada_em, x.id)
-    INTO v_ids, v_min, v_kk, v_esp
+         array_agg(COALESCE(x.espera_antes_horas, 0) ORDER BY x.fo, x.ordem, x.criada_em, x.id),
+         array_agg(CASE WHEN x.material_chega_em IS NULL OR x.material_chega_em <= _inicio THEN 0::bigint
+                        ELSE COALESCE((SELECT min(d.k) - 1 FROM unnest(v_dias) WITH ORDINALITY AS d(dia, k)
+                                        WHERE d.dia >= x.material_chega_em), 0)::bigint * v_mpd END
+                   ORDER BY x.fo, x.ordem, x.criada_em, x.id),
+         array_agg(x.skill_id ORDER BY x.fo, x.ordem, x.criada_em, x.id)
+    INTO v_ids, v_min, v_kk, v_esp, v_na, v_tsk
     FROM (SELECT t.id, f.ordem AS fo, t.ordem, t.criada_em, t.minutos_previstos, t.pessoas_previstas,
-                 t.espera_antes_horas
+                 t.espera_antes_horas, t.material_chega_em, t.skill_id
             FROM public.ops_obra_tarefa t JOIN public.ops_obra_fase f ON f.id = t.fase_id
            WHERE t.obra_id = _obra_id) x;
   v_n := COALESCE(array_length(v_ids, 1), 0);
+
+  -- As vagas por especialidade: as que esta obra pede e têm pessoas.
+  SELECT array_agg(z.skill_id ORDER BY z.skill_id), array_agg(z.n ORDER BY z.skill_id)
+    INTO v_sk, v_scap
+    FROM (SELECT us.skill_id, LEAST(count(DISTINCT us.utilizador_id), 20)::integer AS n
+            FROM public.ops_utilizador_skill us
+            JOIN public.ops_skill k ON k.id = us.skill_id AND k.organization_id = v_org AND k.ativo
+            JOIN public.ops_utilizador_perfil p ON p.utilizador_id = us.utilizador_id
+                 AND p.organization_id = v_org AND p.ativo AND p.funcao IN ('tecnico','operador')
+           WHERE us.skill_id = ANY (COALESCE(v_tsk, '{}'))
+           GROUP BY us.skill_id) z;
+  v_soff := '{}';
+  v_q := 0;
+  FOR i IN 1..COALESCE(array_length(v_sk, 1), 0) LOOP
+    v_soff := v_soff || v_q;
+    v_q := v_q + v_scap[i];
+  END LOOP;
+  v_sl := array_fill(0::bigint, ARRAY[GREATEST(v_q, 1)]);
+  v_tq := array_fill(0, ARRAY[GREATEST(v_n, 1)]);
+  FOR i IN 1..v_n LOOP
+    v_tq[i] := COALESCE(array_position(v_sk, v_tsk[i]), 0);
+  END LOOP;
 
   IF v_n > 0 THEN
     SELECT jsonb_object_agg(u.id::text, u.pos) INTO v_pos
@@ -1032,11 +1087,15 @@ BEGIN
 
     FOR s IN 1..v_n LOOP
       -- A tarefa pronta que pode começar mais cedo (empate: fase, ordem).
+      -- "Pronta" conta também o dia em que chega o material.
       v_best := NULL;
       FOR i IN 1..v_n LOOP
-        IF NOT v_feito[i] AND v_falta[i] = 0
-           AND (v_best IS NULL OR v_pronto[i] < v_pronto[v_best]) THEN
-          v_best := i;
+        IF NOT v_feito[i] AND v_falta[i] = 0 THEN
+          v_ef := GREATEST(v_pronto[i], v_na[i]);
+          IF v_best IS NULL OR v_ef < v_efb THEN
+            v_best := i;
+            v_efb := v_ef;
+          END IF;
         END IF;
       END LOOP;
       IF v_best IS NULL THEN
@@ -1048,6 +1107,10 @@ BEGIN
       END IF;
 
       v_k := v_kk[v_best];
+      v_q := v_tq[v_best];
+      IF v_q > 0 THEN
+        v_k := LEAST(v_k, v_scap[v_q]);    -- não há mais gente com a especialidade
+      END IF;
       v_dur := GREATEST(1, ceil(v_min[v_best]::numeric / v_k))::bigint;
 
       -- As k vagas que ficam livres mais cedo.
@@ -1062,13 +1125,33 @@ BEGIN
         v_escolha := v_escolha || v_slot;
       END LOOP;
 
-      v_ini := v_pronto[v_best];
+      -- E as k vagas da especialidade que ficam livres mais cedo.
+      v_sesc := '{}';
+      IF v_q > 0 THEN
+        FOR j IN 1..v_k LOOP
+          v_slot := NULL;
+          FOR i IN v_soff[v_q] + 1 .. v_soff[v_q] + v_scap[v_q] LOOP
+            IF NOT (i = ANY (v_sesc)) AND (v_slot IS NULL OR v_sl[i] < v_sl[v_slot]) THEN
+              v_slot := i;
+            END IF;
+          END LOOP;
+          v_sesc := v_sesc || v_slot;
+        END LOOP;
+      END IF;
+
+      v_ini := GREATEST(v_pronto[v_best], v_na[v_best]);
       FOREACH i IN ARRAY v_escolha LOOP
         v_ini := GREATEST(v_ini, v_livre[i]);
+      END LOOP;
+      FOREACH i IN ARRAY v_sesc LOOP
+        v_ini := GREATEST(v_ini, v_sl[i]);
       END LOOP;
       v_fim := v_ini + v_dur;
       FOREACH i IN ARRAY v_escolha LOOP
         v_livre[i] := v_fim;
+      END LOOP;
+      FOREACH i IN ARRAY v_sesc LOOP
+        v_sl[i] := v_fim;
       END LOOP;
 
       v_feito[v_best] := true;
@@ -2854,6 +2937,51 @@ REVOKE ALL ON FUNCTION public.rpc_ops_pessoa_planeamento(uuid, uuid, text, uuid[
 GRANT EXECUTE ON FUNCTION public.rpc_ops_pessoa_planeamento(uuid, uuid, text, uuid[]) TO authenticated, service_role;
 
 
+-- A ficha do local da obra (CRM: anew_address_building da morada de obra do
+-- orçamento, quotes.site_address_id), para a ficha da obra e para o técnico
+-- em "As minhas tarefas": exterior (acesso, estacionamento, elevador,
+-- andares, o piso da morada) e interior (tipologia, habitada, animais,
+-- amianto, gás…). Quem vê a obra vê a ficha (ops_pode_ver_obra). Só lê;
+-- dinâmico (instala sem estas tabelas). {} se não houver ficha.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_ficha_local(p_obra_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_o   record;
+  v_orc uuid;
+  v_f   jsonb;
+BEGIN
+  SELECT id, organization_id, orcamento_id, contrato_id INTO v_o FROM public.ops_obra WHERE id = p_obra_id;
+  IF NOT FOUND OR NOT public.ops_pode_ver_obra(p_obra_id) THEN
+    RAISE EXCEPTION 'Obra não encontrada.' USING ERRCODE = 'no_data_found';
+  END IF;
+  v_orc := v_o.orcamento_id;
+  IF v_orc IS NULL AND v_o.contrato_id IS NOT NULL THEN
+    v_orc := public.ops_contrato_orcamento(v_o.contrato_id);
+  END IF;
+  IF v_orc IS NULL
+     OR NOT public.ops_obra_crm_tem('anew_address_building', ARRAY['address_id'])
+     OR NOT public.ops_obra_crm_tem('anew_addresses', ARRAY['id','floor'])
+     OR NOT public.ops_obra_crm_tem('quotes', ARRAY['id','site_address_id']) THEN
+    RETURN '{}'::jsonb;
+  END IF;
+
+  EXECUTE 'SELECT (to_jsonb(b) - ''created_by'' - ''updated_by'' - ''created_at'')
+                  || jsonb_build_object(''piso'', a.floor)
+             FROM public.quotes q
+             JOIN public.anew_address_building b ON b.address_id = q.site_address_id
+             LEFT JOIN public.anew_addresses a ON a.id = q.site_address_id
+            WHERE q.id = $1'
+     INTO v_f USING v_orc;
+  RETURN COALESCE(v_f, '{}'::jsonb);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_ficha_local(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_ficha_local(uuid) TO authenticated, service_role;
+
 -- Morada da obra quando o orçamento não a tem escrita: a morada de obra do
 -- orçamento (site_address_id) e, senão, a do cliente (a principal primeiro).
 -- Só lê o CRM; dinâmico para instalar numa base sem estas tabelas.
@@ -3220,6 +3348,16 @@ BEGIN
     SELECT COALESCE(array_agg(DISTINCT tp.tarefa_id), '{}') INTO v_fixas
       FROM public.ops_obra_tarefa_pessoa tp WHERE tp.obra_id = v_id;
   END IF;
+
+  -- Quando chega o material que falta (encomenda ou prazo do fornecedor,
+  -- contado a partir de hoje): o plano não põe a tarefa antes disso.
+  UPDATE public.ops_obra_tarefa t
+     SET material_chega_em = p.data, material_chega_origem = 'crm', material_chega_nota = p.nota
+    FROM (SELECT ta.id, mp.data, mp.nota
+            FROM public.ops_obra_tarefa ta
+           CROSS JOIN LATERAL public.ops_obra_material_prazo(_org, ta.materiais_crm, current_date) mp
+           WHERE ta.obra_id = v_id AND jsonb_array_length(ta.materiais_crm) > 0) p
+   WHERE t.id = p.id AND p.data IS NOT NULL;
 
   -- Dependências por defeito, tarefa a tarefa (ver a regra na função). Com
   -- `_tarefas`, as dos serviços são as que o gestor escolheu; só se juntam
@@ -5575,6 +5713,22 @@ $$;
 REVOKE ALL ON FUNCTION public.ops_obra_dias_uteis_entre(date, date) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ops_obra_dias_uteis_entre(date, date) TO authenticated, service_role;
 
+-- Como ops_obra_dias_uteis_entre, mas com o calendário DA ORGANIZAÇÃO (sem os
+-- feriados de schedule_holidays) — o mesmo do plano. Os atrasos usam esta.
+CREATE OR REPLACE FUNCTION public.ops_obra_dias_uteis_entre_org(_org uuid, _de date, _ate date)
+RETURNS integer
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT CASE WHEN _de IS NULL OR _ate IS NULL OR _ate <= _de THEN 0
+    ELSE (SELECT count(*)::integer
+            FROM unnest(public.ops_obra_dias_uteis_lista(_org, _de + 1, _ate - _de)) d
+           WHERE d <= _ate) END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_dias_uteis_entre_org(uuid, date, date) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_dias_uteis_entre_org(uuid, date, date) TO authenticated, service_role;
+
 -- A regra "não iniciada a tempo": por fazer, e já passaram 60 min da hora de
 -- início do dia (ops_obra.hora_inicio_dia, 08:00 por defeito → 09:00) no dia
 -- de início planeado — ou o dia já passou. Hora de Lisboa. A MESMA regra na
@@ -5621,6 +5775,8 @@ GRANT EXECUTE ON FUNCTION public.ops_obra_rotulo_atraso(text) TO authenticated, 
 --   gravidade 1  fim_ultrapassado    por fazer / em curso / rejeitada, com fim_planeado < hoje
 --   gravidade 2  nao_iniciada        por fazer, ops_obra_atrasada_inicio() — e o fim ainda não passou
 --                                    (senão já é fim_ultrapassado, que é pior)
+--   gravidade 2  material_tarde      por fazer, o material chega DEPOIS do início planeado
+--                                    (alguém mexeu no plano ou a encomenda atrasou)
 --   gravidade 3  cliente_por_avisar  atraso registado com cliente_avisado = false
 -- Só obras planeadas ou em curso (os por avisar: qualquer obra não cancelada).
 CREATE OR REPLACE FUNCTION public.ops_obra_alertas_lista(_org uuid, _obra uuid DEFAULT NULL)
@@ -5648,6 +5804,7 @@ AS $$
   ),
   ta AS (
     SELECT t.id, t.obra_id, t.nome, t.estado, t.inicio_planeado, t.fim_planeado,
+           t.material_chega_em AS material, t.material_chega_nota AS material_nota,
            o.codigo, o.titulo, o.supervisor_id AS sup, COALESCE(o.hora_inicio_dia, time '08:00') AS hora,
            COALESCE((SELECT array_agg(tp.utilizador_id ORDER BY tp.atribuida_em, tp.utilizador_id)
                        FROM public.ops_obra_tarefa_pessoa tp WHERE tp.tarefa_id = t.id), '{}'::uuid[]) AS pessoas
@@ -5686,12 +5843,22 @@ AS $$
    WHERE public.ops_obra_atrasada_inicio(ta.estado, ta.inicio_planeado, ta.hora)
      AND NOT (ta.fim_planeado IS NOT NULL AND ta.fim_planeado < ag.hoje)
   UNION ALL
+  SELECT 'material_tarde'::text, 2::smallint, ta.id, ta.obra_id, ta.codigo, ta.titulo, ta.nome, ta.pessoas,
+         ((ta.inicio_planeado + ta.hora) AT TIME ZONE 'Europe/Lisbon'),
+         (public.ops_obra_dias_uteis_entre_org(_org, ta.inicio_planeado, ta.material) * 480)::integer,
+         'O material chega a ' || to_char(ta.material, 'DD/MM') || ', depois do início planeado ('
+           || to_char(ta.inicio_planeado, 'DD/MM') || ')' || COALESCE(' · ' || ta.material_nota, ''),
+         NULL::uuid, ta.sup
+    FROM ta
+   WHERE ta.estado = 'por_fazer' AND ta.material IS NOT NULL AND ta.inicio_planeado IS NOT NULL
+     AND ta.material > ta.inicio_planeado
+  UNION ALL
   SELECT 'cliente_por_avisar'::text, 3::smallint, a.tarefa_id, a.obra_id, o.codigo, o.titulo, t.nome,
          COALESCE((SELECT array_agg(tp.utilizador_id ORDER BY tp.atribuida_em, tp.utilizador_id)
                      FROM public.ops_obra_tarefa_pessoa tp WHERE tp.tarefa_id = a.tarefa_id), '{}'::uuid[]),
          a.registado_em,
          COALESCE(a.minutos_extra,
-                  public.ops_obra_dias_uteis_entre(a.fim_anterior, a.novo_fim) * o.minutos_por_dia)::integer,
+                  public.ops_obra_dias_uteis_entre_org(a.organization_id, a.fim_anterior, a.novo_fim) * o.minutos_por_dia)::integer,
          public.ops_obra_rotulo_atraso(a.motivo) || ': ' || a.contexto
            || COALESCE(' · novo fim ' || to_char(a.novo_fim, 'DD/MM'), ''),
          a.id, o.supervisor_id
@@ -5756,11 +5923,90 @@ $$;
 REVOKE ALL ON FUNCTION public.rpc_ops_obra_alertas(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_alertas(uuid) TO authenticated, service_role;
 
+-- Empurra EM CADEIA as tarefas que dependem de `_tarefa` (que acabava a
+-- `_fim_anterior` e agora acaba mais tarde) e ainda não começaram (por fazer,
+-- sem tempo registado) — só o necessário: quem tinha folga não mexe; quem
+-- começava no dia seguinte ao fim continua a começar no dia seguinte ao novo
+-- fim; a duração (dias úteis da organização) mantém-se. Guarda o plano
+-- original de cada uma (uma vez). Devolve {tarefa_id: {nome, inicio_anterior,
+-- fim_anterior, novo_inicio, novo_fim}}. Usada pelo atraso e pelo material.
+CREATE OR REPLACE FUNCTION public.ops_obra_empurrar_dependentes_impl(_tarefa uuid, _fim_anterior date)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_org     uuid;
+  v_fila    uuid[] := ARRAY[_tarefa];
+  v_atual   uuid;
+  v_cfim    date;
+  v_cant    date;
+  v_antes   jsonb := jsonb_build_object(_tarefa::text, _fim_anterior);
+  v_mexidas jsonb := '{}'::jsonb;
+  v_d       record;
+  v_req     date;
+  v_nf      date;
+  v_passos  integer := 0;
+BEGIN
+  SELECT organization_id INTO v_org FROM public.ops_obra_tarefa WHERE id = _tarefa;
+  WHILE COALESCE(array_length(v_fila, 1), 0) > 0 AND v_passos < 5000 LOOP
+    v_passos := v_passos + 1;
+    v_atual := v_fila[1];
+    v_fila := v_fila[2:array_length(v_fila, 1)];
+    SELECT COALESCE(fim_planeado, inicio_planeado) INTO v_cfim FROM public.ops_obra_tarefa WHERE id = v_atual;
+    CONTINUE WHEN v_cfim IS NULL;
+    v_cant := (v_antes ->> v_atual::text)::date;
+
+    FOR v_d IN
+      SELECT d.id, d.nome, d.inicio_planeado AS ini, COALESCE(d.fim_planeado, d.inicio_planeado) AS fim
+        FROM public.ops_obra_tarefa_dependencia x
+        JOIN public.ops_obra_tarefa d ON d.id = x.tarefa_id
+       WHERE x.depende_de_id = v_atual
+         AND d.estado = 'por_fazer' AND d.inicio_planeado IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM public.ops_obra_registo r WHERE r.tarefa_id = d.id)
+       ORDER BY d.inicio_planeado, d.id
+    LOOP
+      -- Começava no dia seguinte ao fim da anterior → continua no dia
+      -- seguinte ao novo fim; começava no próprio dia → no próprio dia.
+      v_req := CASE WHEN v_cant IS NOT NULL AND v_d.ini > v_cant
+                    THEN public.ops_obra_somar_dias_uteis_org(v_org, v_cfim, 1)
+                    ELSE public.ops_obra_somar_dias_uteis_org(v_org, v_cfim, 0) END;
+      CONTINUE WHEN v_d.ini >= v_req;
+      v_nf := public.ops_obra_somar_dias_uteis_org(v_org, v_req,
+                public.ops_obra_dias_uteis_entre_org(v_org, v_d.ini, v_d.fim));
+
+      UPDATE public.ops_obra_tarefa
+         SET inicio_original = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
+                                    THEN inicio_planeado ELSE inicio_original END,
+             fim_original    = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
+                                    THEN fim_planeado ELSE fim_original END,
+             inicio_planeado = v_req,
+             fim_planeado    = v_nf,
+             atualizada_em   = now()
+       WHERE id = v_d.id;
+
+      IF NOT (v_mexidas ? v_d.id::text) THEN
+        v_mexidas := v_mexidas || jsonb_build_object(v_d.id::text, jsonb_build_object(
+          'tarefa_id', v_d.id, 'nome', v_d.nome, 'inicio_anterior', v_d.ini, 'fim_anterior', v_d.fim));
+        v_antes := v_antes || jsonb_build_object(v_d.id::text, v_d.fim);
+      END IF;
+      v_mexidas := jsonb_set(v_mexidas, ARRAY[v_d.id::text, 'novo_inicio'], to_jsonb(v_req));
+      v_mexidas := jsonb_set(v_mexidas, ARRAY[v_d.id::text, 'novo_fim'], to_jsonb(v_nf));
+      v_fila := v_fila || v_d.id;
+    END LOOP;
+  END LOOP;
+  RETURN v_mexidas;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_empurrar_dependentes_impl(uuid, date) FROM PUBLIC, anon, authenticated;
+
 -- Registar um atraso ("vai demorar mais"). Pode: quem está na tarefa
 -- (orders.execute), o supervisor DA OBRA (orders.confirm), o gestor/admin
 -- (orders.edit). Exige motivo e contexto (≥ 5 letras) e pelo menos um de:
 --   · p_minutos_extra — mão de obra a mais (pessoa × min). O calendário
---     anda ceil(min ÷ pessoas ÷ minutos_por_dia) dias úteis: a partir do fim
+--     anda ceil(min ÷ pessoas ÷ minutos_por_dia) dias úteis da organização
+--     (sem fins de semana nem feriados, como o plano): a partir do fim
 --     previsto, ou de hoje se o fim já passou (aí conta o dia de hoje);
 --   · p_novo_fim — a nova data de fim, dita por quem sabe.
 -- Guarda o plano original (se ainda não houver), muda fim_planeado e
@@ -5798,16 +6044,7 @@ DECLARE
   v_obra_novo date;
   v_estim     integer;
   v_id        uuid;
-  v_fila      uuid[];
-  v_atual     uuid;
-  v_cfim      date;
-  v_cant      date;
-  v_antes     jsonb := '{}'::jsonb;   -- tarefa → fim antes de ser empurrada
   v_mexidas   jsonb := '{}'::jsonb;   -- tarefa → {nome, datas antes e depois}
-  v_d         record;
-  v_req       date;
-  v_nf        date;
-  v_passos    integer := 0;
   v_res       jsonb;
 BEGIN
   SELECT t.*, o.estado AS obra_estado, o.supervisor_id AS obra_supervisor, o.minutos_por_dia AS mpd
@@ -5869,9 +6106,9 @@ BEGIN
   ELSE
     v_dias := ceil(p_minutos_extra::numeric / GREATEST(v_t.pessoas_previstas, 1) / GREATEST(v_t.mpd, 1))::integer;
     IF v_fim_ant IS NULL OR v_fim_ant < v_hoje THEN
-      v_novo := public.ops_obra_somar_dias_uteis(v_hoje, GREATEST(v_dias - 1, 0));
+      v_novo := public.ops_obra_somar_dias_uteis_org(v_t.organization_id, v_hoje, GREATEST(v_dias - 1, 0));
     ELSE
-      v_novo := public.ops_obra_somar_dias_uteis(v_fim_ant, v_dias);
+      v_novo := public.ops_obra_somar_dias_uteis_org(v_t.organization_id, v_fim_ant, v_dias);
     END IF;
   END IF;
 
@@ -5894,53 +6131,7 @@ BEGIN
 
     -- As dependentes, em cadeia (sem ciclos: o trigger das dependências não deixa).
     IF COALESCE(p_empurrar, true) THEN
-      v_antes := jsonb_build_object(p_tarefa_id::text, v_fim_ant);
-      v_fila := ARRAY[p_tarefa_id];
-      WHILE COALESCE(array_length(v_fila, 1), 0) > 0 AND v_passos < 5000 LOOP
-        v_passos := v_passos + 1;
-        v_atual := v_fila[1];
-        v_fila := v_fila[2:array_length(v_fila, 1)];
-        SELECT COALESCE(fim_planeado, inicio_planeado) INTO v_cfim FROM public.ops_obra_tarefa WHERE id = v_atual;
-        CONTINUE WHEN v_cfim IS NULL;
-        v_cant := (v_antes ->> v_atual::text)::date;
-
-        FOR v_d IN
-          SELECT d.id, d.nome, d.inicio_planeado AS ini, COALESCE(d.fim_planeado, d.inicio_planeado) AS fim
-            FROM public.ops_obra_tarefa_dependencia x
-            JOIN public.ops_obra_tarefa d ON d.id = x.tarefa_id
-           WHERE x.depende_de_id = v_atual
-             AND d.estado = 'por_fazer' AND d.inicio_planeado IS NOT NULL
-             AND NOT EXISTS (SELECT 1 FROM public.ops_obra_registo r WHERE r.tarefa_id = d.id)
-           ORDER BY d.inicio_planeado, d.id
-        LOOP
-          -- Começava no dia seguinte ao fim da anterior → continua no dia
-          -- seguinte ao novo fim; começava no próprio dia → no próprio dia.
-          v_req := CASE WHEN v_cant IS NOT NULL AND v_d.ini > v_cant
-                        THEN public.ops_obra_somar_dias_uteis(v_cfim, 1)
-                        ELSE public.ops_obra_somar_dias_uteis(v_cfim, 0) END;
-          CONTINUE WHEN v_d.ini >= v_req;
-          v_nf := public.ops_obra_somar_dias_uteis(v_req, public.ops_obra_dias_uteis_entre(v_d.ini, v_d.fim));
-
-          UPDATE public.ops_obra_tarefa
-             SET inicio_original = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
-                                        THEN inicio_planeado ELSE inicio_original END,
-                 fim_original    = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
-                                        THEN fim_planeado ELSE fim_original END,
-                 inicio_planeado = v_req,
-                 fim_planeado    = v_nf,
-                 atualizada_em   = now()
-           WHERE id = v_d.id;
-
-          IF NOT (v_mexidas ? v_d.id::text) THEN
-            v_mexidas := v_mexidas || jsonb_build_object(v_d.id::text, jsonb_build_object(
-              'tarefa_id', v_d.id, 'nome', v_d.nome, 'inicio_anterior', v_d.ini, 'fim_anterior', v_d.fim));
-            v_antes := v_antes || jsonb_build_object(v_d.id::text, v_d.fim);
-          END IF;
-          v_mexidas := jsonb_set(v_mexidas, ARRAY[v_d.id::text, 'novo_inicio'], to_jsonb(v_req));
-          v_mexidas := jsonb_set(v_mexidas, ARRAY[v_d.id::text, 'novo_fim'], to_jsonb(v_nf));
-          v_fila := v_fila || v_d.id;
-        END LOOP;
-      END LOOP;
+      v_mexidas := public.ops_obra_empurrar_dependentes_impl(p_tarefa_id, v_fim_ant);
     END IF;
 
     SELECT max(COALESCE(fim_planeado, inicio_planeado)) INTO v_obra_novo
@@ -5990,6 +6181,226 @@ REVOKE ALL ON FUNCTION public.rpc_ops_obra_registar_atraso(uuid, text, text, int
   FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_registar_atraso(uuid, text, text, integer, date, boolean, boolean)
   TO authenticated, service_role;
+
+-- ============================================================================
+-- Prazos de materiais
+-- ============================================================================
+-- Quando chega o que falta a uma tarefa: para cada produto de `_materiais`
+-- (o materiais_crm da tarefa) em falta — o disponível no momento é menor que
+-- a quantidade, ou o produto não tem stock gerido (por encomenda: móveis,
+-- bancadas) —, a data é a da encomenda a fornecedor em aberto mais cedo com
+-- esse produto (purchase_orders.expected_delivery) ou, sem encomenda,
+-- `_desde` + o prazo do fornecedor (item_suppliers.lead_time_days, o
+-- preferido primeiro; senão suppliers.delivery_sla_days), em dias de
+-- calendário. A tarefa precisa de tudo: a data é a mais tardia. NULL se não
+-- houver data para nenhum. Só lê o CRM; dinâmico (instala sem estas tabelas,
+-- ou com versões delas sem estas colunas).
+CREATE OR REPLACE FUNCTION public.ops_obra_crm_tem(_tabela text, _colunas text[])
+RETURNS boolean
+LANGUAGE sql STABLE
+SET search_path TO 'public', 'pg_temp'
+AS $$
+  SELECT to_regclass('public.' || _tabela) IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM unnest(_colunas) c(nome)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM pg_attribute a
+           WHERE a.attrelid = to_regclass('public.' || _tabela)
+             AND a.attname = c.nome AND a.attnum > 0 AND NOT a.attisdropped))
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_crm_tem(text, text[]) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.ops_obra_material_prazo(_org uuid, _materiais jsonb, _desde date)
+RETURNS TABLE (data date, nota text)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_prod uuid[];
+  v_po   text := 'SELECT NULL::uuid AS product_id, NULL::date AS d WHERE false';
+  v_lt   text := 'SELECT NULL::uuid AS product_id, NULL::integer AS dias WHERE false';
+BEGIN
+  IF jsonb_typeof(_materiais) IS DISTINCT FROM 'array' THEN
+    RETURN;
+  END IF;
+  SELECT array_agg(DISTINCT (m->>'produto_id')::uuid) INTO v_prod
+    FROM jsonb_array_elements(_materiais) m
+   WHERE nullif(m->>'produto_id', '') IS NOT NULL
+     AND (public.ops_num(m->>'disponivel') IS NULL
+          OR public.ops_num(m->>'disponivel') < COALESCE(public.ops_num(m->>'quantidade'), 0));
+  IF v_prod IS NULL THEN
+    RETURN;
+  END IF;
+
+  IF public.ops_obra_crm_tem('purchase_orders', ARRAY['id','organization_id','status','deleted_at','expected_delivery'])
+     AND public.ops_obra_crm_tem('purchase_order_items', ARRAY['purchase_order_id','product_id','quantity','received_quantity']) THEN
+    v_po := 'SELECT poi.product_id, min(po.expected_delivery) AS d
+               FROM public.purchase_orders po
+               JOIN public.purchase_order_items poi ON poi.purchase_order_id = po.id
+              WHERE po.organization_id = $1 AND po.deleted_at IS NULL
+                AND po.status IN (''pending'', ''ordered'', ''partially_received'')
+                AND po.expected_delivery IS NOT NULL AND po.expected_delivery >= $3
+                AND COALESCE(poi.received_quantity, 0) < poi.quantity
+                AND poi.product_id = ANY ($2)
+              GROUP BY poi.product_id';
+  END IF;
+  IF public.ops_obra_crm_tem('item_suppliers',
+       ARRAY['product_id','supplier_id','lead_time_days','is_preferred','is_active','deleted_at']) THEN
+    v_lt := 'SELECT DISTINCT ON (s.product_id) s.product_id,
+                    COALESCE(nullif(s.lead_time_days, 0), sp.delivery_sla_days) AS dias
+               FROM public.item_suppliers s '
+         || CASE WHEN public.ops_obra_crm_tem('suppliers', ARRAY['id','delivery_sla_days'])
+                 THEN 'LEFT JOIN public.suppliers sp ON sp.id = s.supplier_id '
+                 ELSE 'LEFT JOIN (SELECT NULL::uuid AS id, NULL::integer AS delivery_sla_days) sp ON false ' END
+         || 'WHERE s.deleted_at IS NULL AND COALESCE(s.is_active, true)
+                AND s.product_id = ANY ($2)
+                AND COALESCE(nullif(s.lead_time_days, 0), sp.delivery_sla_days) > 0
+              ORDER BY s.product_id, s.is_preferred DESC NULLS LAST,
+                       COALESCE(nullif(s.lead_time_days, 0), sp.delivery_sla_days)';
+  END IF;
+
+  RETURN QUERY EXECUTE format($q$
+    WITH m AS (
+      SELECT DISTINCT ON ((e->>'produto_id')::uuid) (e->>'produto_id')::uuid AS pid,
+             COALESCE(nullif(btrim(e->>'nome'), ''), 'Material') AS nome
+        FROM jsonb_array_elements($4) e
+       WHERE nullif(e->>'produto_id', '') IS NOT NULL AND (e->>'produto_id')::uuid = ANY ($2)
+    ),
+    po AS (%s),
+    lt AS (%s),
+    x AS (
+      SELECT m.nome,
+             COALESCE(po.d, $3 + lt.dias) AS d,
+             CASE WHEN po.d IS NOT NULL THEN 'encomenda prevista para ' || to_char(po.d, 'DD/MM')
+                  ELSE 'prazo do fornecedor de ' || lt.dias || ' dias' END AS porque
+        FROM m LEFT JOIN po ON po.product_id = m.pid LEFT JOIN lt ON lt.product_id = m.pid
+       WHERE po.d IS NOT NULL OR lt.dias IS NOT NULL
+    )
+    SELECT max(x.d), left(string_agg(x.nome || ': ' || x.porque, ' · ' ORDER BY x.d DESC, x.nome), 500)
+      FROM x HAVING count(*) > 0 $q$, v_po, v_lt)
+  USING _org, v_prod, _desde, _materiais;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_material_prazo(uuid, jsonb, date) FROM PUBLIC, anon, authenticated;
+
+-- "O material desta tarefa chega a …" (ou NULL: já não se espera por nada).
+-- Gestor/admin (orders.edit) ou o supervisor da obra (orders.confirm). Grava
+-- a data como 'manual'; se a tarefa ainda não começou e estava planeada para
+-- antes, passa a começar no 1.º dia útil em que o material já cá está (mesma
+-- duração) e empurra em cadeia as dependentes — como um atraso. `p_simular`
+-- dá as contas sem gravar.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_material_chega(
+  p_tarefa_id uuid,
+  p_data      date,
+  p_nota      text    DEFAULT NULL,
+  p_simular   boolean DEFAULT false
+)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_t       record;
+  v_quem    record;
+  v_ini     date;
+  v_fim     date;
+  v_mexidas jsonb := '{}'::jsonb;
+  v_obra_ant date;
+  v_obra_novo date;
+  v_res     jsonb;
+  v_moveu   boolean := false;
+BEGIN
+  SELECT t.*, o.estado AS obra_estado, o.supervisor_id AS obra_supervisor
+    INTO v_t
+    FROM public.ops_obra_tarefa t JOIN public.ops_obra o ON o.id = t.obra_id
+   WHERE t.id = p_tarefa_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Tarefa não encontrada.' USING ERRCODE = 'no_data_found';
+  END IF;
+
+  SELECT q.utilizador_id, q.funcao INTO v_quem FROM public.ops_quem_sou(v_t.organization_id) q;
+  IF NOT (
+       (v_quem.funcao IN ('admin','gestor') AND public.ops_pode(v_t.organization_id, 'operations.orders.edit'))
+    OR (v_t.obra_supervisor = v_quem.utilizador_id
+        AND public.ops_pode(v_t.organization_id, 'operations.orders.confirm'))
+  ) THEN
+    RAISE EXCEPTION 'Só o gestor ou o supervisor da obra dizem quando chega o material.'
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  IF v_t.obra_estado IN ('concluida','cancelada') THEN
+    RAISE EXCEPTION 'A obra está %.', v_t.obra_estado;
+  END IF;
+
+  SELECT max(COALESCE(fim_planeado, inicio_planeado)) INTO v_obra_ant
+    FROM public.ops_obra_tarefa WHERE obra_id = v_t.obra_id;
+
+  BEGIN
+    UPDATE public.ops_obra_tarefa
+       SET material_chega_em     = p_data,
+           material_chega_origem = CASE WHEN p_data IS NULL THEN NULL ELSE 'manual' END,
+           material_chega_nota   = CASE WHEN p_data IS NULL THEN NULL
+                                        ELSE left(nullif(btrim(COALESCE(p_nota, '')), ''), 500) END,
+           atualizada_em         = now()
+     WHERE id = p_tarefa_id;
+
+    IF p_data IS NOT NULL AND v_t.estado = 'por_fazer' AND v_t.inicio_planeado IS NOT NULL
+       AND v_t.inicio_planeado < p_data
+       AND NOT EXISTS (SELECT 1 FROM public.ops_obra_registo r WHERE r.tarefa_id = p_tarefa_id) THEN
+      v_ini := public.ops_obra_somar_dias_uteis_org(v_t.organization_id, p_data, 0);
+      v_fim := public.ops_obra_somar_dias_uteis_org(v_t.organization_id, v_ini,
+                 public.ops_obra_dias_uteis_entre_org(v_t.organization_id, v_t.inicio_planeado,
+                                                      COALESCE(v_t.fim_planeado, v_t.inicio_planeado)));
+      UPDATE public.ops_obra_tarefa
+         SET inicio_original = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
+                                    THEN inicio_planeado ELSE inicio_original END,
+             fim_original    = CASE WHEN inicio_original IS NULL AND fim_original IS NULL
+                                    THEN fim_planeado ELSE fim_original END,
+             inicio_planeado = v_ini,
+             fim_planeado    = v_fim
+       WHERE id = p_tarefa_id;
+      v_moveu := true;
+      v_mexidas := public.ops_obra_empurrar_dependentes_impl(
+                     p_tarefa_id, COALESCE(v_t.fim_planeado, v_t.inicio_planeado));
+    END IF;
+
+    SELECT max(COALESCE(fim_planeado, inicio_planeado)) INTO v_obra_novo
+      FROM public.ops_obra_tarefa WHERE obra_id = v_t.obra_id;
+
+    IF NOT COALESCE(p_simular, false) THEN
+      PERFORM public.ops_obra_evento(v_t.organization_id, v_t.obra_id, 'material',
+        v_t.nome || ': material ' || COALESCE('chega a ' || to_char(p_data, 'DD/MM/YYYY'), 'já não condiciona'),
+        v_quem.utilizador_id,
+        jsonb_build_object('tarefa_id', p_tarefa_id, 'data', p_data, 'moveu', v_moveu,
+                           'empurradas', (SELECT count(*) FROM jsonb_object_keys(v_mexidas)),
+                           'fim_obra_anterior', v_obra_ant, 'fim_obra_novo', v_obra_novo));
+    END IF;
+
+    v_res := jsonb_build_object(
+      'ok', true,
+      'simulado', COALESCE(p_simular, false),
+      'moveu', v_moveu,
+      'novo_inicio', CASE WHEN v_moveu THEN v_ini END,
+      'novo_fim', CASE WHEN v_moveu THEN v_fim END,
+      'empurradas', COALESCE((SELECT jsonb_agg(e.value ORDER BY e.value->>'novo_inicio', e.value->>'nome')
+                                FROM jsonb_each(v_mexidas) e), '[]'::jsonb),
+      'fim_obra_anterior', v_obra_ant,
+      'fim_obra_novo', v_obra_novo);
+
+    IF COALESCE(p_simular, false) THEN
+      RAISE EXCEPTION 'simulação' USING ERRCODE = 'OB001';
+    END IF;
+  EXCEPTION WHEN SQLSTATE 'OB001' THEN
+    NULL;
+  END;
+
+  RETURN v_res;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_material_chega(uuid, date, text, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_material_chega(uuid, date, text, boolean) TO authenticated, service_role;
 
 -- "Cliente avisado" (com o que se lhe disse). Supervisor da obra ou
 -- gestor/admin. Marcar outra vez não muda nada (fica quem avisou primeiro).
@@ -6176,7 +6587,10 @@ SELECT
   -- Planeamento automático (2c): a espera antes (cura, fabrico), a medida
   -- prevista e a real, e de onde veio o tempo (padrão / aprendido).
   t.espera_antes_horas, t.medida, t.medida_qt, t.medida_real, t.minutos_origem, t.ritmo_n,
-  t.minutos_juntos, t.chave, t.servico_tarefa_id
+  t.minutos_juntos, t.chave, t.servico_tarefa_id,
+  -- Prazos de materiais: quando chega o que falta, e de onde veio a data.
+  t.material_chega_em, t.material_chega_origem, t.material_chega_nota,
+  t.skill_id
 FROM public.ops_obra_tarefa t
 JOIN public.ops_obra_fase f ON f.id = t.fase_id
 JOIN public.ops_obra o ON o.id = t.obra_id

@@ -2076,6 +2076,196 @@ console.log("\n─── atrasos e alertas do supervisor ─────");
   }
 }
 
+/* ── Atrasos com feriados ───────────────────────────────────────────────── */
+console.log("\n─── atrasos com feriados ────────────────");
+{
+  // F = uma segunda-feira daqui a ≥ 3 semanas; feriado da organização na quarta (F+2).
+  const D = await um(`
+    WITH b AS (SELECT (now() AT TIME ZONE 'Europe/Lisbon')::date AS hoje)
+    SELECT f::text AS f, (f + 1)::text AS f1, (f + 2)::text AS f2, (f + 3)::text AS f3, (f + 4)::text AS f4
+      FROM b, LATERAL (SELECT (hoje + 21) + ((8 - extract(isodow FROM hoje + 21)::int) % 7) AS f) x`);
+  await db.exec(`
+    CREATE TABLE public.schedule_holidays (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), country_code varchar(2) NOT NULL,
+      organization_id uuid, name varchar(255) NOT NULL, holiday_date date NOT NULL, is_recurring boolean NOT NULL DEFAULT false);
+    INSERT INTO public.schedule_holidays (country_code, organization_id, name, holiday_date)
+      VALUES ('PT','${ORG_A}','Feriado municipal','${D.f2}');`);
+  const n = await um(`SELECT public.ops_obra_dias_uteis_entre_org('${ORG_A}', '${D.f}', '${D.f4}') AS a,
+                             public.ops_obra_dias_uteis_entre('${D.f}', '${D.f4}') AS b`);
+  n.a === 3 && n.b === 4
+    ? ok("dias úteis entre duas datas: o feriado da organização não conta (3, e não 4)")
+    : mau(`dias úteis entre: ${JSON.stringify(n)}`);
+
+  const OF = await devePassar(
+    "uma obra para os atrasos com feriado",
+    AUTH.gestorA,
+    criar(`p_org => '${ORG_A}', p_titulo => 'Feriado', p_cliente_id => '${CLI_A}',
+           p_data_inicio => '${D.f}', p_supervisor_id => '${U.supA}'`)
+  );
+  await db.exec(`DELETE FROM public.ops_obra_tarefa WHERE obra_id='${OF.id}';`);
+  const faseF = (await um(`SELECT id FROM public.ops_obra_fase WHERE obra_id='${OF.id}' ORDER BY ordem LIMIT 1`)).id;
+  const tf = async (nome, ini, fim) => (await chamar(AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_gravar_tarefa('${OF.id}', NULL, '${faseF}', '${nome}', 60,
+       p_inicio => '${ini}', p_fim => '${fim}');`)).id;
+  const A = await tf("Antes do feriado", D.f, D.f1);
+  const B = await tf("Depois", D.f3, D.f3);
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_gravar_dependencias('${B}', ARRAY['${A}']::uuid[]);`);
+  // +480 min a 1 pessoa = 1 dia útil: de terça (F+1) salta a quarta feriado → quinta.
+  const r = await devePassar(
+    "atraso de +1 dia numa tarefa que acaba na véspera do feriado",
+    AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_registar_atraso('${A}', 'secagem', 'Ainda está húmido', 480);`
+  );
+  const b = await um(`SELECT inicio_planeado::text AS i, fim_planeado::text AS f FROM public.ops_obra_tarefa WHERE id='${B}'`);
+  r?.novo_fim === D.f3 && b.i === D.f4 && b.f === D.f4
+    ? ok(`o atraso salta o feriado: fim ${D.f1} → ${D.f3}, e a dependente passa para ${D.f4}`)
+    : mau(`atraso com feriado: ${JSON.stringify(r)} / dependente ${JSON.stringify(b)}`);
+
+  await db.exec(`DROP TABLE public.schedule_holidays;
+                 DELETE FROM public.ops_evento WHERE entidade_id='${OF.id}';
+                 DELETE FROM public.ops_obra WHERE id='${OF.id}';`);
+}
+
+/* ── Capacidade por especialidade e prazos de materiais ─────────────────── */
+console.log("\n─── especialidades e materiais no plano ─");
+{
+  const D = await um(`
+    WITH b AS (SELECT (now() AT TIME ZONE 'Europe/Lisbon')::date AS hoje)
+    SELECT f::text AS f, (f + 1)::text AS f1, (f + 2)::text AS f2, (f + 3)::text AS f3, (f + 4)::text AS f4,
+           (f + 7)::text AS f7
+      FROM b, LATERAL (SELECT (hoje + 21) + ((8 - extract(isodow FROM hoje + 21)::int) % 7) AS f) x`);
+  const OC = await devePassar(
+    "uma obra para a capacidade",
+    AUTH.gestorA,
+    criar(`p_org => '${ORG_A}', p_titulo => 'Capacidade', p_cliente_id => '${CLI_A}',
+           p_data_inicio => '${D.f}', p_supervisor_id => '${U.supA}'`)
+  );
+  await db.exec(`DELETE FROM public.ops_obra_tarefa WHERE obra_id='${OC.id}';`);
+  const faseC = (await um(`SELECT id FROM public.ops_obra_fase WHERE obra_id='${OC.id}' ORDER BY ordem LIMIT 1`)).id;
+  const SK = (await chamar(AUTH.gestorA, `SELECT public.rpc_ops_skill_criar('${ORG_A}', 'Revestimentos');`)).id;
+  const tc = async (nome) => (await chamar(AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_gravar_tarefa('${OC.id}', NULL, '${faseC}', '${nome}', 480,
+       p_inicio => '${D.f}', p_fim => '${D.f}');`)).id;
+  const R1 = await tc("Azulejo parede");
+  const R2 = await tc("Azulejo chao");
+  await db.exec(`UPDATE public.ops_obra_tarefa SET skill_id='${SK}' WHERE id IN ('${R1}','${R2}');`);
+  const datas = async () => Object.fromEntries((await q(
+    `SELECT id, inicio_planeado::text AS i FROM public.ops_obra_tarefa WHERE obra_id='${OC.id}'`)).map((x) => [x.id, x.i]));
+  const replanear = () => chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_replanear('${OC.id}', '${D.f}');`);
+
+  await replanear();
+  let d = await datas();
+  d[R1] === D.f && d[R2] === D.f
+    ? ok("sem ninguém com a especialidade: as duas correm em paralelo (2 vagas genéricas)")
+    : mau(`sem especialidade: ${JSON.stringify(d)}`);
+
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_pessoa_planeamento('${ORG_A}', '${U.tecA}', NULL, ARRAY['${SK}']::uuid[]);`);
+  await replanear();
+  d = await datas();
+  [d[R1], d[R2]].sort().join() === [D.f, D.f1].join()
+    ? ok("só 1 pessoa com 'Revestimentos': a segunda tarefa espera pelo dia seguinte")
+    : mau(`capacidade 1: ${JSON.stringify(d)}`);
+
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_pessoa_planeamento('${ORG_A}', '${U.tec2A}', NULL, ARRAY['${SK}']::uuid[]);`);
+  await replanear();
+  d = await datas();
+  d[R1] === D.f && d[R2] === D.f
+    ? ok("2 pessoas com a especialidade: voltam a correr em paralelo")
+    : mau(`capacidade 2: ${JSON.stringify(d)}`);
+
+  // Material: R3 depende de R1; o material de R1 chega na quarta (F+2).
+  const R3 = await tc("Juntas");
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_gravar_dependencias('${R3}', ARRAY['${R1}']::uuid[]);`);
+  await replanear();
+  await deveSerRecusado(
+    "o técnico não diz quando chega o material",
+    AUTH.tecA,
+    `SELECT public.rpc_ops_obra_material_chega('${R1}', '${D.f2}');`,
+    "Só o gestor ou o supervisor"
+  );
+  const sm = await devePassar(
+    "pré-visualizar 'o material chega quarta' (nada gravado)",
+    AUTH.supA,
+    `SELECT public.rpc_ops_obra_material_chega('${R1}', '${D.f2}', 'Azulejo encomendado', p_simular => true);`
+  );
+  const s0 = await um(`SELECT material_chega_em, inicio_planeado::text AS i FROM public.ops_obra_tarefa WHERE id='${R1}'`);
+  sm?.moveu === true && sm?.novo_inicio === D.f2 && s0.material_chega_em === null && s0.i === D.f
+    ? ok(`simulação: passaria a começar a ${D.f2}, e a base ficou igual`)
+    : mau(`simulação do material: ${JSON.stringify(sm)} / ${JSON.stringify(s0)}`);
+  const rm = await devePassar(
+    "o supervisor da obra diz que o material chega quarta",
+    AUTH.supA,
+    `SELECT public.rpc_ops_obra_material_chega('${R1}', '${D.f2}', 'Azulejo encomendado');`
+  );
+  d = await datas();
+  const r1 = await um(`SELECT material_chega_origem AS o, inicio_original::text AS io FROM public.ops_obra_tarefa WHERE id='${R1}'`);
+  d[R1] === D.f2 && d[R3] === D.f3 && r1.o === "manual" && r1.io === D.f &&
+  rm?.empurradas?.some((e) => e.tarefa_id === R3)
+    ? ok(`a tarefa passa para ${D.f2} (plano original guardado) e a dependente é empurrada para ${D.f3}`)
+    : mau(`material manual: ${JSON.stringify(rm)} / ${JSON.stringify(d)} / ${JSON.stringify(r1)}`);
+
+  await replanear();
+  d = await datas();
+  d[R1] === D.f2 && d[R2] === D.f && d[R3] === D.f3
+    ? ok("replanear respeita o material: R1 não volta para antes de quarta, R2 continua segunda")
+    : mau(`replanear com material: ${JSON.stringify(d)}`);
+
+  // Arrastada para antes do material → alerta ao supervisor.
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_planear_tarefa('${R1}', '${D.f1}', '${D.f1}');`);
+  const al = (await linhas(AUTH.supA, `SELECT * FROM public.rpc_ops_obra_alertas('${ORG_A}');`))
+    .filter((x) => x.obra_id === OC.id && x.tipo === "material_tarde");
+  al.length === 1 && al[0].tarefa_id === R1 && /chega a/.test(al[0].detalhe)
+    ? ok("arrastada para antes de o material chegar → alerta 'material_tarde' ao supervisor")
+    : mau(`alerta do material: ${JSON.stringify(al)}`);
+  const v = await um(`SELECT material_chega_em::text AS m, material_chega_nota AS n FROM public.ops_v_obra_tarefa WHERE id='${R1}'`);
+  v.m === D.f2 && v.n === "Azulejo encomendado"
+    ? ok("ops_v_obra_tarefa mostra quando chega o material e porquê")
+    : mau(`vista com material: ${JSON.stringify(v)}`);
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_material_chega('${R1}', NULL);`);
+  const lim = await um(`SELECT material_chega_em, material_chega_origem FROM public.ops_obra_tarefa WHERE id='${R1}'`);
+  lim.material_chega_em === null && lim.material_chega_origem === null
+    ? ok("tirar a data (NULL): o material deixa de condicionar")
+    : mau(`limpar material: ${JSON.stringify(lim)}`);
+
+  // Do CRM: encomenda em aberto, ou o prazo do fornecedor.
+  await db.exec(`
+    ALTER TABLE public.purchase_orders ADD COLUMN deleted_at timestamptz, ADD COLUMN expected_delivery date;
+    ALTER TABLE public.purchase_order_items ADD COLUMN product_id uuid, ADD COLUMN received_quantity numeric DEFAULT 0;
+    ALTER TABLE public.suppliers ADD COLUMN delivery_sla_days integer;
+    CREATE TABLE public.item_suppliers (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), product_id uuid, supplier_id uuid,
+      lead_time_days integer, is_preferred boolean DEFAULT false, is_active boolean DEFAULT true, deleted_at timestamptz);
+    INSERT INTO public.products (id) VALUES ('f1000000-0000-0000-0000-000000000001'), ('f1000000-0000-0000-0000-000000000002');
+    INSERT INTO public.suppliers (id, delivery_sla_days) VALUES ('f2000000-0000-0000-0000-000000000001', 10);
+    INSERT INTO public.purchase_orders (id, organization_id, status, expected_delivery)
+      VALUES ('f3000000-0000-0000-0000-000000000001', '${ORG_A}', 'ordered', '${D.f3}');
+    INSERT INTO public.purchase_order_items (purchase_order_id, product_id, quantity)
+      VALUES ('f3000000-0000-0000-0000-000000000001', 'f1000000-0000-0000-0000-000000000001', 4);
+    INSERT INTO public.item_suppliers (product_id, supplier_id, lead_time_days)
+      VALUES ('f1000000-0000-0000-0000-000000000002', 'f2000000-0000-0000-0000-000000000001', NULL);`);
+  const mat = (disp) => `'[{"produto_id":"f1000000-0000-0000-0000-000000000001","nome":"Bancada","quantidade":1,"disponivel":${disp}},
+                          {"produto_id":"f1000000-0000-0000-0000-000000000002","nome":"Movel","quantidade":1,"disponivel":null}]'::jsonb`;
+  const pz = await um(`SELECT data::text AS d, nota FROM public.ops_obra_material_prazo('${ORG_A}', ${mat(0)}, '${D.f}')`);
+  const esperado = await um(`SELECT ('${D.f}'::date + 10)::text AS d`);
+  pz?.d === esperado.d && /Bancada: encomenda prevista/.test(pz?.nota) && /Movel: prazo do fornecedor de 10 dias/.test(pz?.nota)
+    ? ok(`do CRM: encomenda em aberto (bancada) e prazo do fornecedor (móvel, 10 dias) → a mais tardia, ${esperado.d}`)
+    : mau(`prazo do CRM: ${JSON.stringify(pz)} (esperado ${esperado.d})`);
+  const pz2 = await um(`SELECT count(*)::int AS n FROM public.ops_obra_material_prazo('${ORG_A}',
+    '[{"produto_id":"f1000000-0000-0000-0000-000000000001","nome":"Bancada","quantidade":1,"disponivel":5}]'::jsonb, '${D.f}')`);
+  pz2.n === 0
+    ? ok("material com stock disponível não condiciona nada")
+    : mau(`material disponível deu prazo: ${JSON.stringify(pz2)}`);
+  await db.exec(`
+    DROP TABLE public.item_suppliers;
+    DELETE FROM public.purchase_orders WHERE id = 'f3000000-0000-0000-0000-000000000001';
+    DELETE FROM public.products WHERE id::text LIKE 'f1000000%';
+    DELETE FROM public.suppliers WHERE id = 'f2000000-0000-0000-0000-000000000001';
+    ALTER TABLE public.purchase_orders DROP COLUMN deleted_at, DROP COLUMN expected_delivery;
+    ALTER TABLE public.purchase_order_items DROP COLUMN product_id, DROP COLUMN received_quantity;
+    ALTER TABLE public.suppliers DROP COLUMN delivery_sla_days;
+    DELETE FROM public.ops_utilizador_skill WHERE skill_id = '${SK}';
+    DELETE FROM public.ops_evento WHERE entidade_id='${OC.id}';
+    DELETE FROM public.ops_obra WHERE id='${OC.id}';`);
+}
+
 /* ── O CRM ficou intacto ────────────────────────────────────────────────── */
 console.log("\n─── o CRM ficou intacto ─────────────────");
 {

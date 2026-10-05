@@ -24,6 +24,7 @@ import {
 import { data as formatarData } from "../lib/formatar";
 import FotosTarefa from "./FotosTarefa";
 import ObraAtraso, { ClienteAvisado } from "./ObraAtraso";
+import ObraMaterialChega from "./ObraMaterialChega";
 import { diasDeDesvio, formatarDesvio, rotuloMotivoAtraso } from "../domain/atrasos";
 import { dataHora } from "../lib/formatar";
 
@@ -256,6 +257,8 @@ export default function ObraTarefaPainel({
           />
         )}
 
+        {tarefa && <ObraMaterialChega tarefa={tarefa} podeEditar={podeRegistarAtraso} aoMudar={aoGravar} />}
+
         {podeEditar ? (
           <>
             <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
@@ -403,6 +406,12 @@ export function FichaLeitura({ tarefa, nomes }: { tarefa: TarefaObra; nomes: Rea
       )}
       {bloco("Procedimento", tarefa.procedimento)}
       {bloco("Materiais", tarefa.materiais)}
+      {tarefa.material_chega_em && (
+        <p className="text-xs text-slate-600">
+          Material chega a <b>{formatarData(tarefa.material_chega_em)}</b>
+          {tarefa.material_chega_nota && <> — {tarefa.material_chega_nota}</>}
+        </p>
+      )}
       {bloco("Ferramentas", tarefa.ferramentas)}
     </div>
   );

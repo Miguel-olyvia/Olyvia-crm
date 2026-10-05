@@ -333,6 +333,14 @@ const obraWc = await tenta("abrir a obra do contrato da casa de banho", () =>
   chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_criar(p_org => '${ORG}', p_contrato_id => '${C.wc}',
                          p_modelo_id => '${geral.id}', p_data_inicio => '2026-11-02');`));
 const tw = obraWc ? await tarefas(obraWc.id) : [];
+if (obraWc) {
+  // A ficha do local, para a obra e para o técnico (via o contrato → orçamento → morada).
+  const f = await chamar(AUTH.gestor, `SELECT public.rpc_ops_obra_ficha_local('${obraWc.id}');`);
+  verifica(f?.acesso === "dificil" && f?.tem_elevador === false && f?.habitada_durante_obra === true &&
+           f?.piso === "3.º Esq" && !("created_by" in (f ?? {})),
+    "a ficha do local chega às Operações (acesso, elevador, habitada, piso), só leitura",
+    `ficha do local: ${JSON.stringify(f)}`);
+}
 {
   const doTipo = tw.filter((t) => t.modelo_tarefa_id);
   verifica(doTipo.length === 0, "com um pacote, as tarefas do tipo de obra não se repetem",

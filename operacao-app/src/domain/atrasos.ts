@@ -38,11 +38,12 @@ export function rotuloMotivoAtraso(m: string | null | undefined): string {
 /** O contexto tem de dizer alguma coisa: é o que o supervisor e o cliente leem. */
 export const CONTEXTO_MINIMO = 5;
 
-export type TipoAlerta = "fim_ultrapassado" | "nao_iniciada" | "cliente_por_avisar";
+export type TipoAlerta = "fim_ultrapassado" | "nao_iniciada" | "material_tarde" | "cliente_por_avisar";
 
 export const ROTULO_TIPO_ALERTA: Record<TipoAlerta, string> = {
   fim_ultrapassado: "Fim ultrapassado",
   nao_iniciada: "Não iniciada a tempo",
+  material_tarde: "Material chega depois",
   cliente_por_avisar: "Cliente por avisar",
 };
 
@@ -54,6 +55,10 @@ export function rotuloContagemAlerta(tipo: TipoAlerta, n: number): string {
       return um ? "1 tarefa passou do fim previsto" : `${n} tarefas passaram do fim previsto`;
     case "nao_iniciada":
       return um ? "1 tarefa não iniciada a tempo" : `${n} tarefas não iniciadas a tempo`;
+    case "material_tarde":
+      return um
+        ? "1 tarefa planeada antes de o material chegar"
+        : `${n} tarefas planeadas antes de o material chegar`;
     case "cliente_por_avisar":
       return um ? "1 atraso por avisar ao cliente" : `${n} atrasos por avisar ao cliente`;
   }

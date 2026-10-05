@@ -263,10 +263,14 @@ node tools/validar-instalacao.mjs
 
 ## Limitações conhecidas
 
-- **Feriados.** Desde 03/10/2026 o plano automático (criar, replanear,
-  primeira data livre) salta os feriados da organização e os nacionais
-  (`schedule_holidays`). O empurrar de um atraso ainda conta só fins de semana.
-  Ver [planeamento.md](planeamento.md).
+- **Feriados.** O plano automático (criar, replanear, primeira data livre)
+  salta os feriados da organização e os nacionais (`schedule_holidays`) desde
+  03/10/2026; o empurrar de um atraso (e de um material que chega tarde)
+  também, desde 05/10/2026. Ver [planeamento.md](planeamento.md).
+- **Capacidade por especialidade.** Conta só dentro da obra que se planeia:
+  duas obras ao mesmo tempo podem pedir o mesmo azulejista. A distribuição
+  (quem faz) não põe a mesma pessoa em dois sítios no mesmo dia, e os choques
+  de agenda avisam.
 - **Gantt.** O arrasto funciona com rato e toque (pointer events), mas o Gantt foi
   pensado para desktop. No telemóvel desliza na horizontal.
 - **Fotografias dos extras.** A coluna `fotos` existe, mas a UI ainda não faz

@@ -7,7 +7,7 @@ import { ErroDeDados } from "../lib/dados";
 import { avisarAlertasMudaram, obterTarefa, type AlertaSupervisao, type TarefaObra } from "../lib/obras";
 import { ROTULO_TIPO_ALERTA, rotuloContagemAlerta, type TipoAlerta } from "../domain/atrasos";
 
-const ORDEM: TipoAlerta[] = ["fim_ultrapassado", "nao_iniciada", "cliente_por_avisar"];
+const ORDEM: TipoAlerta[] = ["fim_ultrapassado", "nao_iniciada", "material_tarde", "cliente_por_avisar"];
 
 /** "há 2 h", "há 3 dias" — a idade do alerta. */
 export function haQuanto(minutos: number | null | undefined): string {
@@ -89,7 +89,8 @@ export default function AlertasSupervisao({
                   <p className="text-sm font-semibold text-slate-800">{a.tarefa_nome}</p>
                   <p className="mt-0.5 text-xs text-slate-600">{a.detalhe}</p>
                   <p className="mt-0.5 text-[11px] text-slate-400">
-                    {a.pessoas_nomes.length ? a.pessoas_nomes.join(", ") : "ninguém atribuído"} · {haQuanto(a.minutos_atraso)}
+                    {a.pessoas_nomes.length ? a.pessoas_nomes.join(", ") : "ninguém atribuído"}
+                    {a.tipo !== "material_tarde" && <> · {haQuanto(a.minutos_atraso)}</>}
                   </p>
                 </div>
                 <div className="flex w-full flex-wrap gap-1.5 sm:w-auto">
@@ -99,7 +100,7 @@ export default function AlertasSupervisao({
                   >
                     Abrir tarefa
                   </Link>
-                  {a.tipo !== "cliente_por_avisar" && (
+                  {a.tipo !== "cliente_por_avisar" && a.tipo !== "material_tarde" && (
                     <Button
                       size="sm"
                       variant="secondary"

@@ -185,6 +185,13 @@ export interface TarefaObra {
   minutos_juntos?: number | null;
   chave?: string | null;
   servico_tarefa_id?: string | null;
+  // Prazos de materiais — opcionais, como os atrasos.
+  /** O material de que a tarefa precisa chega neste dia: o plano não a põe antes. */
+  material_chega_em?: string | null;
+  /** 'crm' = encomenda ou prazo do fornecedor; 'manual' = dito pelo gestor/supervisor. */
+  material_chega_origem?: "crm" | "manual" | null;
+  material_chega_nota?: string | null;
+  skill_id?: string | null;
 }
 
 export interface UltimoAtraso {
@@ -1212,6 +1219,81 @@ export function registarAtraso(a: ArgsAtraso): Promise<RespostaAtraso> {
 /** A mesma conta, sem gravar nada: o impacto (novo fim da tarefa e da obra). */
 export function simularAtraso(a: ArgsAtraso): Promise<RespostaAtraso> {
   return rpc("rpc_ops_obra_registar_atraso", argsAtraso(a, true), "Não foi possível calcular o impacto.");
+}
+
+export interface RespostaMaterial {
+  ok: boolean;
+  simulado: boolean;
+  /** A tarefa estava planeada para antes e passou para o dia em que o material chega. */
+  moveu: boolean;
+  novo_inicio: string | null;
+  novo_fim: string | null;
+  empurradas: EmpurradaAtraso[];
+  fim_obra_anterior: string | null;
+  fim_obra_novo: string | null;
+}
+
+/**
+ * "O material desta tarefa chega a …" (gestor ou supervisor da obra). Se a
+ * tarefa estava antes disso, passa para esse dia e empurra as dependentes.
+ * `data = null` tira a condição. `simular` dá as contas sem gravar.
+ */
+export function definirMaterialChega(args: {
+  tarefaId: string;
+  data: string | null;
+  nota?: string | null;
+  simular?: boolean;
+}): Promise<RespostaMaterial> {
+  return rpc(
+    "rpc_ops_obra_material_chega",
+    {
+      p_tarefa_id: args.tarefaId,
+      p_data: args.data || null,
+      p_nota: args.nota?.trim() || null,
+      p_simular: args.simular ?? false,
+    },
+    "Não foi possível gravar a data do material."
+  );
+}
+
+/**
+ * A ficha do local da obra, do CRM (morada de obra do orçamento): exterior e
+ * interior. `{}` se não houver ficha. Só leitura.
+ */
+export interface FichaLocal {
+  acesso?: "facil" | "dificil" | null;
+  impacto_percent?: number | null;
+  estacionamento?: "pago" | "nao_pago" | "sem_estacionamento" | null;
+  zona_estacionamento?: "verde" | "amarela" | "vermelha" | null;
+  tem_elevador?: boolean | null;
+  n_elevadores?: number | null;
+  n_andares?: number | null;
+  n_fracoes_por_andar?: number | null;
+  piso?: string | null;
+  tipologia?: string | null;
+  area_util_m2?: number | null;
+  n_divisoes?: number | null;
+  n_casas_banho?: number | null;
+  ano_construcao?: number | null;
+  pavimento?: string | null;
+  eletrica?: string | null;
+  quadro_diferencial?: boolean | null;
+  canalizacao?: string | null;
+  gas?: string | null;
+  amianto?: string | null;
+  habitada_durante_obra?: boolean | null;
+  animais?: boolean | null;
+  notas_interior?: string | null;
+}
+
+export async function fichaLocalDaObra(obraId: string): Promise<FichaLocal> {
+  const { data, error } = await supabase.rpc("rpc_ops_obra_ficha_local", { p_obra_id: obraId });
+  // Antes de o SQL desta versão correr, a função não existe: sem ficha, sem erro.
+  if (error && /rpc_ops_obra_ficha_local|function .* does not exist|PGRST202/i.test(`${error.message} ${(error as { code?: string }).code ?? ""}`)) {
+    return {};
+  }
+  rebentar("carregar a ficha do local", error);
+  return ((data ?? {}) as unknown as FichaLocal) ?? {};
 }
 
 export function marcarClienteAvisado(atrasoId: string, nota?: string | null) {

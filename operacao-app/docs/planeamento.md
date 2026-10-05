@@ -124,13 +124,49 @@ A base nova serve os ecrãs antigos sem os partir:
 
 `npm run validar-planeamento` faz os passos 5–10 numa base PGlite.
 
-## Ainda não
+## Capacidade por especialidade (05/10/2026)
 
-- **Capacidade por ofício.** O plano continua com "vagas" genéricas (até 4);
-  a distribuição é que escolhe pessoas pela especialidade. As especialidades
-  ainda não têm pessoas associadas em produção.
-- **Prazos de materiais** (móveis por encomenda) não condicionam o início; a
-  bancada usa a espera de 5 dias do modelo.
+Além das "vagas" genéricas da obra (os técnicos/operadores ativos, de 1 a 4),
+cada especialidade com pessoas tem as suas: uma tarefa de "Revestimentos" com
+1 azulejista ocupa a vaga dele, e a segunda tarefa de revestimento espera. Uma
+tarefa de 3 pessoas com só 2 azulejistas faz-se a 2 (dura mais). Uma
+especialidade sem ninguém não limita nada (como antes). Pessoas nas
+especialidades: Definições → Equipa → a pessoa → especialidades.
+Em `ops_obra_replanear_impl`; provado em `validar-obras` ("especialidades e
+materiais no plano").
+
+## Prazos de materiais (05/10/2026)
+
+`ops_obra_tarefa.material_chega_em`: a tarefa não começa antes desse dia (o
+plano respeita-o ao criar e ao replanear). Vem de dois lados:
+
+- **Do CRM, ao nascer a obra** (`ops_obra_material_prazo`, só leitura): para
+  cada produto da tarefa em falta (o disponível é menor que a quantidade, ou
+  não tem stock gerido — por encomenda), a data da encomenda a fornecedor em
+  aberto mais cedo (`purchase_orders.expected_delivery`) ou, sem encomenda,
+  hoje + o prazo do fornecedor (`item_suppliers.lead_time_days`, o preferido;
+  senão `suppliers.delivery_sla_days`). A mais tardia. ⚠ Em 05/10/2026 a
+  produção quase não tem estes dados (0 de 285 artigos com prazo, 2 de 67
+  encomendas com data): até serem preenchidos no CRM, a data vem do gestor.
+- **À mão** (`rpc_ops_obra_material_chega`): gestor ou supervisor da obra, no
+  painel da tarefa → *Material chega a…*, com pré-visualização. Se a tarefa
+  estava antes disso, passa para o dia do material e as dependentes são
+  empurradas (a mesma cascata do atraso: `ops_obra_empurrar_dependentes_impl`).
+
+Se alguém puser a tarefa antes do material (arrastar no Gantt), o supervisor
+recebe o alerta **material_tarde**. A bancada continua também com a espera de
+fabrico do modelo (5 dias depois da medição).
+
+## Ficha do local nas Operações (05/10/2026)
+
+`rpc_ops_obra_ficha_local(obra)` lê a ficha do CRM (morada de obra do
+orçamento, ou do orçamento do contrato) para quem vê a obra. Aparece na ficha
+da obra e no cartão de cada tarefa em *As minhas tarefas* — acesso, andar e
+elevador, estacionamento, casa habitada, animais, amianto… — com o que pede
+cuidado a amarelo (`src/domain/fichaLocal.ts`). Os fatores da ficha já
+entravam nos tempos (acima).
+
+## Ainda não
 - **Impacto da ficha no preço** (decisão em aberto da reunião) e distância ao
   armazém: fora deste trabalho.
 - **Medidas e tempos de referência** são estimativas nossas, validadas pela

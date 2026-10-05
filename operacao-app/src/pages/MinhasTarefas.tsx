@@ -31,6 +31,7 @@ import {
   precisaJustificacao,
   type MotivoDesvio,
 } from "../domain/obras";
+import FichaLocal from "../components/FichaLocal";
 import { data as formatarData } from "../lib/formatar";
 
 /**
@@ -334,6 +335,13 @@ export default function MinhasTarefas() {
                   ` · ${formatarData(t.inicio_planeado)}${t.fim_planeado && t.fim_planeado !== t.inicio_planeado ? ` a ${formatarData(t.fim_planeado)}` : ""}`}
               </p>
             </div>
+            <FichaLocal obraId={t.obra_id} compacta />
+            {t.material_chega_em && (
+              <p className="text-xs text-slate-600">
+                Material chega a <b>{formatarData(t.material_chega_em)}</b>
+                {t.material_chega_nota && <> — {t.material_chega_nota}</>}
+              </p>
+            )}
             {[
               ["Procedimento", t.procedimento],
               ["Materiais", t.materiais],

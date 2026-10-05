@@ -17,18 +17,17 @@ O motor está feito ([`planeamento.md`](planeamento.md)). Falta, por ordem de
 valor:
 
 1. **Pessoas nos ofícios.** As 11 especialidades da Mudelar (com Gás ITG,
-   Marmorista, Logística) não têm ninguém associado: a distribuição não tem
-   por onde escolher. É preencher dados (Equipa → especialidades).
-2. **Capacidade por ofício no plano.** O plano usa "vagas" genéricas (até 4
-   por obra). Com as pessoas nos ofícios, passa a ser "há 2 azulejistas livres
-   nessa semana". Custo médio: mexe em `ops_obra_replanear_impl`.
-3. **Prazos de materiais.** Móveis por encomenda e bancada: a data de
-   entrega do produto/fornecedor devia condicionar o início da montagem. Hoje
-   a bancada usa a espera fixa de 5 dias do modelo.
+   Marmorista, Logística) não têm ninguém associado: a distribuição e a
+   capacidade por especialidade não têm por onde escolher. É preencher dados
+   (Equipa → especialidades) — falta saber quem faz o quê.
+2. ~~**Capacidade por ofício no plano.**~~ Feito a 05/10/2026 (ver
+   [`planeamento.md`](planeamento.md)). Só dentro de cada obra.
+3. ~~**Prazos de materiais.**~~ Feito a 05/10/2026: do CRM (encomenda ou
+   prazo do fornecedor) e à mão no painel da tarefa. Os prazos no CRM estão
+   quase todos por preencher.
 4. **Medidas obrigatórias.** Quando a equipa decidir, tornar obrigatórios os
    campos de planeamento do diagnóstico nos pacotes (hoje são opcionais).
-5. **Atrasos com feriados.** O empurrar de um atraso ainda conta só fins de
-   semana (`rpc_ops_obra_registar_atraso`).
+5. ~~**Atrasos com feriados.**~~ Feito a 05/10/2026.
 6. **Fatores da ficha do local por divisão** já entram (casa habitada, acesso,
    elevador, andar); o "impacto no preço" é uma decisão em aberto do CRM.
 
@@ -62,14 +61,16 @@ faz com `quotes`, `quote_lines` e `client_contracts`. Detalhe em
 **A fazer:**
 1. ~~CRM: campos da ficha no orçamento/morada da obra.~~ Feito a 02/10/2026
    (`cfbb5173`, `7f7d25a8`).
-2. Operações: ler a ficha (via `quotes.site_address_id` → `anew_address_building`,
-   por uma RPC, porque a tabela não tem policies) na previsão da obra
-   (`rpc_ops_obra_previsao_contrato`) e aplicar fatores por família de tarefa
-   (tabela de fatores configurável por organização).
-3. Mostrar a ficha em "As minhas tarefas" (junto à morada) e na ficha da obra.
-4. Usar o desvio justificado ("condições do edifício") para afinar os fatores com dados reais.
+2. ~~Operações: ler a ficha na previsão da obra e aplicar fatores.~~ Feito a
+   03/10/2026: os fatores (acesso, elevador, andar, habitada…) entram na
+   aprendizagem por combinação de fatores (`planeamento.md`).
+3. ~~Mostrar a ficha em "As minhas tarefas" e na ficha da obra.~~ Feito a
+   05/10/2026 (`rpc_ops_obra_ficha_local`, `FichaLocal.tsx`).
+4. Usar o desvio justificado ("condições do edifício") para afinar os fatores
+   com dados reais — acontece sozinho com o uso (a aprendizagem separa por
+   fatores); falta haver obras validadas.
 
-**Estado:** a ficha existe e é preenchida no CRM. Operações ainda não a lê.
+**Estado:** a ficha é preenchida no CRM e as Operações leem-na e mostram-na.
 
 ---
 
