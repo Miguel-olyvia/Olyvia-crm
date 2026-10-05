@@ -21476,7 +21476,6 @@ export type Database = {
         }
         Returns: string
       }
-      archive_activity: { Args: { _activity_id: string }; Returns: boolean }
       archive_campaign: { Args: { _campaign_id: string }; Returns: boolean }
       archive_deal: { Args: { _deal_id: string }; Returns: boolean }
       archive_proposal: { Args: { _proposal_id: string }; Returns: boolean }
