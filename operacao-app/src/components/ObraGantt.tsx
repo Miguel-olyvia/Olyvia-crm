@@ -31,7 +31,12 @@ import {
   tarefaNaPosicao,
   textoAvisoDependencia,
   ehEscalaGantt,
+  escalaComPeriodo,
   geometriaBarra,
+  navegarPeriodo,
+  periodoGantt,
+  periodoTemHoje,
+  rotuloPeriodo,
   juntasDeFimDeSemana,
   larguraAjustadaAosNomes,
   limitarLarguraNomes,
@@ -55,8 +60,9 @@ export type { AtrasoGantt, TarefaGantt } from "../domain/obras-gantt";
 /**
  * O mapa de atividades da obra.
  *
- * Linhas: fases (recolhíveis) e as suas tarefas. Colunas: dias úteis, vistos
- * ao dia, à semana ou ao mês (só muda a largura de cada dia e o cabeçalho). A
+ * Linhas: fases (recolhíveis) e as suas tarefas. Colunas: dias úteis. "Dia",
+ * "Semana" e "Mês" mostram esse período (abre no de hoje; ‹ › andam, "Hoje"
+ * volta) à largura toda; "Obra" mostra a obra inteira. A
  * barra é o planeado; por dentro, a parte preenchida é o tempo real gasto
  * contra o previsto, com a cor do alerta. A linha vertical é hoje; as juntas
  * sombreadas são os fins de semana.
@@ -92,7 +98,7 @@ function guardar(chave: string, valor: string) {
 
 function escalaGuardada(): EscalaGantt {
   const v = lerGuardado(CHAVE_ESCALA);
-  return ehEscalaGantt(v) ? v : "dia";
+  return ehEscalaGantt(v) ? v : "semana";
 }
 
 function larguraGuardada(): number {
@@ -196,12 +202,36 @@ export default function ObraGantt({
   const colNomesRef = useRef<HTMLDivElement>(null);
   const grelhaRef = useRef<HTMLDivElement>(null);
 
-  const ppd = pxPorDia(escala);
+  // O período que se vê (Dia/Semana/Mês): abre no de hoje.
+  const [ancora, setAncora] = useState(hoje);
+  const comPeriodo = escalaComPeriodo(escala);
+  const janela = useMemo(() => (comPeriodo ? periodoGantt(escala, ancora) : null), [comPeriodo, escala, ancora]);
+  const inicioObra = useMemo(
+    () => tarefas.map((t) => t.inicio).filter((x): x is string => !!x).sort()[0] ?? null,
+    [tarefas]
+  );
+
+  // A largura disponível: no Dia/Semana/Mês, o período enche-a.
+  const [larguraGrelha, setLarguraGrelha] = useState(0);
+  useEffect(() => {
+    const el = grelhaRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setLarguraGrelha(el.clientWidth));
+    ro.observe(el);
+    setLarguraGrelha(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
 
   const layout = useMemo(
-    () => montarGantt({ fases, tarefas, hoje, recolhidas, escala }),
-    [fases, tarefas, hoje, recolhidas, escala]
+    () => montarGantt({ fases, tarefas, hoje, recolhidas, escala, janela }),
+    [fases, tarefas, hoje, recolhidas, escala, janela]
   );
+  const ppd =
+    comPeriodo && larguraGrelha > 0 && layout.dias.length > 0
+      ? Math.max(pxPorDia(escala), Math.floor(larguraGrelha / layout.dias.length))
+      : pxPorDia(escala);
+  // Colunas largas (Dia, Obra, e a Semana esticada): texto e folgas maiores.
+  const largo = ppd >= 30;
   const cabecalho = useMemo(() => cabecalhoGantt(layout.dias, escala, hoje), [layout.dias, escala, hoje]);
   const juntas = useMemo(() => (escala === "mes" ? [] : juntasDeFimDeSemana(layout.dias)), [layout.dias, escala]);
   const posHoje = xHoje(layout.dias, hoje, ppd);
@@ -209,8 +239,8 @@ export default function ObraGantt({
 
   const largura = layout.dias.length * ppd;
   // Folga entre barras: cabe na junta do fim de semana sem a tapar.
-  const folga = escala === "dia" ? 2 : 1;
-  const larguraJunta = escala === "dia" ? 4 : 2;
+  const folga = largo ? 2 : 1;
+  const larguraJunta = largo ? 4 : 2;
 
   const escolherEscala = (e: EscalaGantt) => {
     setEscala(e);
@@ -412,8 +442,8 @@ export default function ObraGantt({
         </div>
       )}
 
-      {/* ── Escala ── */}
-      <div className="flex items-center gap-2 border-b border-slate-100 px-3 py-2">
+      {/* ── Escala e período ── */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-3 py-2">
         {/* Avisos de dependência (não impedem nada) */}
         <div role="status" aria-live="polite" className="min-w-0 flex-1 text-[12px]">
           {textoAviso ? (
@@ -427,7 +457,49 @@ export default function ObraGantt({
             <span className="text-amber-700">{avisoLigacao}</span>
           ) : null}
         </div>
-        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Ver ao</span>
+        {comPeriodo && (
+          <div className="flex items-center gap-1" role="group" aria-label="Período">
+            <button
+              type="button"
+              onClick={() => setAncora((a) => navegarPeriodo(escala, a, -1))}
+              className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              aria-label="Período anterior"
+              title="Anterior"
+            >
+              ‹
+            </button>
+            <span className="min-w-[9rem] text-center text-xs font-medium text-slate-700" data-gantt-periodo>
+              {rotuloPeriodo(escala, ancora)}
+            </span>
+            <button
+              type="button"
+              onClick={() => setAncora((a) => navegarPeriodo(escala, a, 1))}
+              className="rounded-md px-2 py-1 text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              aria-label="Período seguinte"
+              title="Seguinte"
+            >
+              ›
+            </button>
+            <button
+              type="button"
+              onClick={() => setAncora(hoje)}
+              disabled={periodoTemHoje(escala, ancora, hoje)}
+              className="rounded-md px-2 py-1 text-xs text-brand hover:bg-brand-50 disabled:cursor-default disabled:text-slate-300 disabled:hover:bg-transparent"
+            >
+              Hoje
+            </button>
+            {inicioObra && !periodoTemHoje(escala, ancora, inicioObra) && (
+              <button
+                type="button"
+                onClick={() => setAncora(inicioObra)}
+                className="rounded-md px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+              >
+                Início da obra
+              </button>
+            )}
+          </div>
+        )}
+        <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Ver</span>
         <div role="group" aria-label="Escala do mapa" className="flex gap-1 rounded-lg bg-slate-100 p-1 text-xs">
           {ESCALAS_GANTT.map((s) => (
             <button
@@ -521,6 +593,14 @@ export default function ObraGantt({
                 {comConflito.has(l.tarefa.id) && (
                   <AlertTriangle width={13} height={13} className="shrink-0 text-amber-600" aria-label="Choque de agenda" />
                 )}
+                {l.tarefa.servico && (
+                  <span
+                    className="max-w-[40%] shrink-0 truncate rounded bg-slate-100 px-1 text-[10px] leading-4 text-slate-500"
+                    title={l.tarefa.servico}
+                  >
+                    {l.tarefa.servico}
+                  </span>
+                )}
                 <span
                   data-gantt-nome
                   className={cx(
@@ -528,7 +608,7 @@ export default function ObraGantt({
                     l.tarefa.estado === "validada" ? "text-slate-400" : "text-slate-700",
                     l.emAtraso && "text-red-700"
                   )}
-                  title={l.tarefa.nome}
+                  title={l.tarefa.nomeCompleto ?? l.tarefa.nome}
                 >
                   {l.tarefa.nome}
                 </span>
@@ -595,10 +675,8 @@ export default function ObraGantt({
                   )}
                   style={{ width: c.span * ppd }}
                 >
-                  <span className={cx("max-w-full truncate tabular", escala === "dia" && "text-[12px]")}>{c.rotulo}</span>
-                  {c.sub && (
-                    <span className={cx("uppercase", escala === "dia" ? "text-[9px]" : "text-[8px]")}>{c.sub}</span>
-                  )}
+                  <span className={cx("max-w-full truncate tabular", largo && "text-[12px]")}>{c.rotulo}</span>
+                  {c.sub && <span className={cx("uppercase", largo ? "text-[9px]" : "text-[8px]")}>{c.sub}</span>}
                 </div>
               ))}
             </div>

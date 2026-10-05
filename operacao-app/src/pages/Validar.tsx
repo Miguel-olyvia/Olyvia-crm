@@ -26,6 +26,7 @@ import {
   podeValidar,
 } from "../domain/obras";
 import { dataHora } from "../lib/formatar";
+import NomeTarefa from "../components/NomeTarefa";
 
 /**
  * A fila do supervisor: o que a equipa deu por feito e espera o segundo par
@@ -168,7 +169,7 @@ export default function Validar() {
                       <p className="text-[11px] uppercase tracking-wide text-slate-400">
                         {t.fase_ordem}. {t.fase_nome}
                       </p>
-                      <p className="text-sm font-semibold text-slate-800">{t.nome}</p>
+                      <NomeTarefa nome={t.nome} className="text-sm font-semibold text-slate-800" />
                       {t.obra_morada && <p className="mt-0.5 truncate text-xs text-slate-400">{t.obra_morada}</p>}
                       <p className="mt-0.5 text-xs text-slate-500">
                         {quem.map((u) => nomes.get(u) ?? "—").join(", ") || "—"} · feita {dataHora(t.terminada_em)}

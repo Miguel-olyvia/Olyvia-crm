@@ -450,6 +450,10 @@ ALTER TABLE public.ops_obra_tarefa ADD COLUMN IF NOT EXISTS minutos_estimativa i
 -- A hora a que o dia de obra começa (Europe/Lisbon). Uma tarefa por fazer
 -- conta como "não iniciada a tempo" 60 min depois desta hora no dia de início.
 ALTER TABLE public.ops_obra ADD COLUMN IF NOT EXISTS hora_inicio_dia time NOT NULL DEFAULT '08:00';
+-- A data de início foi escolhida pelo sistema (o 1.º dia em que a equipa está
+-- livre: true) ou por alguém (false)? NULL = obra anterior a esta coluna. É o
+-- que o "Porque começa a …?" da ficha da obra diz.
+ALTER TABLE public.ops_obra ADD COLUMN IF NOT EXISTS inicio_auto boolean;
 
 CREATE TABLE IF NOT EXISTS public.ops_obra_tarefa_atraso (
   id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -3372,6 +3376,7 @@ BEGIN
   ELSE
     PERFORM public.ops_obra_replanear_impl(v_id, v_inicio);
   END IF;
+  UPDATE public.ops_obra SET inicio_auto = (_inicio IS NULL) WHERE id = v_id;
   SELECT count(*) INTO v_n FROM public.ops_obra_tarefa WHERE obra_id = v_id;
 
   SELECT min(inicio_planeado), max(fim_planeado) INTO v_ini, v_fim
@@ -4344,6 +4349,10 @@ BEGIN
     v_inicio := public.ops_obra_somar_dias_uteis_org(v_o.organization_id, p_data_inicio, 0);
     v_n := public.ops_obra_replanear_impl(p_obra_id, v_inicio);
   END IF;
+  UPDATE public.ops_obra SET inicio_auto = (p_data_inicio IS NULL) WHERE id = p_obra_id;
+  PERFORM public.ops_obra_evento(v_o.organization_id, p_obra_id, 'replaneada',
+    'Datas replaneadas a partir de ' || to_char(v_inicio, 'DD/MM/YYYY'), v_quem.o_utilizador,
+    jsonb_build_object('inicio', v_inicio, 'auto', p_data_inicio IS NULL));
   RETURN jsonb_build_object('ok', true, 'tarefas', v_n, 'inicio', v_inicio);
 END
 $$;
@@ -5095,6 +5104,85 @@ END
 $$;
 
 REVOKE ALL ON FUNCTION public.ops_obra_planear_auto_impl(uuid, date, uuid[]) FROM PUBLIC, anon, authenticated;
+
+-- "Porque começa a …?": entre o dia em que a obra foi criada (ou replaneada
+-- por último) e o seu início, onde está a equipa — as OUTRAS obras (planeadas
+-- ou em curso) com tarefas abertas nesses dias, com as datas e quem lá está
+-- (técnicos/operadores). Mais quem ficou nesta obra e o tamanho da equipa.
+-- É a explicação da data automática (ops_obra_planear_auto_impl procura o 1.º
+-- dia sem choques). Quem vê a obra vê isto (ops_pode_ver_obra).
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_porque_inicio(p_obra_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_o      record;
+  v_inicio date;
+  v_desde  date;
+  v_funcs  text[];
+BEGIN
+  SELECT id, organization_id, estado, inicio_auto, data_inicio_prevista,
+         (criada_em AT TIME ZONE 'Europe/Lisbon')::date AS criada
+    INTO v_o FROM public.ops_obra WHERE id = p_obra_id;
+  IF NOT FOUND OR NOT public.ops_pode_ver_obra(p_obra_id) THEN
+    RAISE EXCEPTION 'Obra não encontrada.' USING ERRCODE = 'no_data_found';
+  END IF;
+  SELECT COALESCE(min(inicio_planeado), v_o.data_inicio_prevista) INTO v_inicio
+    FROM public.ops_obra_tarefa WHERE obra_id = p_obra_id;
+  -- Desde o último replaneamento, se houve; senão, desde a criação.
+  SELECT COALESCE(max((e.criado_em AT TIME ZONE 'Europe/Lisbon')::date), v_o.criada) INTO v_desde
+    FROM public.ops_evento e
+   WHERE e.entidade = 'obra' AND e.entidade_id = p_obra_id AND e.tipo IN ('criada','replaneada');
+  v_desde := GREATEST(v_desde, v_o.criada);
+  v_funcs := CASE WHEN EXISTS (SELECT 1 FROM public.ops_utilizador_perfil
+                                WHERE organization_id = v_o.organization_id AND ativo
+                                  AND funcao IN ('tecnico','operador'))
+                  THEN ARRAY['tecnico','operador']
+                  ELSE ARRAY['admin','gestor','supervisor','tecnico','operador'] END;
+
+  RETURN jsonb_build_object(
+    'inicio', v_inicio,
+    'desde', v_desde,
+    'auto', v_o.inicio_auto,
+    'equipa', (SELECT count(*) FROM public.ops_utilizador_perfil
+                WHERE organization_id = v_o.organization_id AND ativo AND funcao = ANY (v_funcs)),
+    'nesta_obra', COALESCE((
+      SELECT jsonb_agg(DISTINCT COALESCE(u.name, 'Sem nome'))
+        FROM public.ops_obra_tarefa_pessoa tp
+        LEFT JOIN public.anew_users u ON u.id = tp.utilizador_id
+       WHERE tp.obra_id = p_obra_id), '[]'::jsonb),
+    'ocupacao', COALESCE((
+      SELECT jsonb_agg(x ORDER BY x.inicio, x.codigo)
+        FROM (
+          SELECT o.id AS obra_id, o.codigo, o.titulo,
+                 min(t.inicio_planeado) AS inicio,
+                 max(COALESCE(t.fim_planeado, t.inicio_planeado)) AS fim,
+                 jsonb_agg(DISTINCT COALESCE(u.name, 'Sem nome')) AS pessoas,
+                 count(DISTINCT tp.utilizador_id)::integer AS n
+            FROM public.ops_obra o
+            JOIN public.ops_obra_tarefa t ON t.obra_id = o.id
+            JOIN public.ops_obra_tarefa_pessoa tp ON tp.tarefa_id = t.id
+            JOIN public.ops_utilizador_perfil p
+              ON p.utilizador_id = tp.utilizador_id AND p.organization_id = o.organization_id
+             AND p.ativo AND p.funcao = ANY (v_funcs)
+            LEFT JOIN public.anew_users u ON u.id = tp.utilizador_id
+           WHERE o.organization_id = v_o.organization_id
+             AND o.id <> p_obra_id
+             AND o.estado IN ('planeada','em_curso')
+             AND t.estado IN ('por_fazer','em_curso','rejeitada')
+             AND t.inicio_planeado IS NOT NULL
+             AND v_inicio IS NOT NULL AND v_inicio > v_desde
+             AND t.inicio_planeado < v_inicio
+             AND COALESCE(t.fim_planeado, t.inicio_planeado) >= v_desde
+           GROUP BY o.id, o.codigo, o.titulo
+        ) x), '[]'::jsonb)
+  );
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_porque_inicio(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_porque_inicio(uuid) TO authenticated, service_role;
 
 -- O botão "Distribuir equipa". `p_refazer` tira primeiro as pessoas das
 -- tarefas que ainda ninguém começou (por fazer / rejeitadas sem registo).

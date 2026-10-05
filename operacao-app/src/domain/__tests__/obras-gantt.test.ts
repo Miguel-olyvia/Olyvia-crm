@@ -30,6 +30,11 @@ import {
   larguraAjustadaAosNomes,
   limitarLarguraNomes,
   montarGantt,
+  navegarPeriodo,
+  periodoGantt,
+  periodoTemHoje,
+  recortarBarra,
+  rotuloPeriodo,
   pxPorDia,
   rotuloDia,
   rotuloSemanaCurto,
@@ -566,5 +571,39 @@ describe("plano original e atrasos", () => {
       "Fim previsto: 16 out (original 17 out, −1 dia útil) · 1 tarefa atrasada"
     );
     expect(dataCurta("2026-10-23")).toBe("23 out");
+  });
+});
+
+describe("períodos (Dia, Semana, Mês)", () => {
+  it("o dia, a semana (seg–sex) e o mês à volta de uma data; fim de semana encosta à segunda", () => {
+    expect(periodoGantt("dia", "2026-10-06")).toEqual({ ini: "2026-10-06", fim: "2026-10-06" });
+    expect(periodoGantt("dia", "2026-10-10")).toEqual({ ini: "2026-10-12", fim: "2026-10-12" });
+    expect(periodoGantt("semana", "2026-10-08")).toEqual({ ini: "2026-10-05", fim: "2026-10-09" });
+    expect(periodoGantt("mes", "2026-11-15")).toEqual({ ini: "2026-11-02", fim: "2026-11-30" });
+  });
+
+  it("navegar: um dia útil, uma semana, um mês (passa o ano)", () => {
+    expect(navegarPeriodo("dia", "2026-10-09", 1)).toBe("2026-10-12");
+    expect(navegarPeriodo("dia", "2026-10-12", -1)).toBe("2026-10-09");
+    expect(navegarPeriodo("semana", "2026-10-06", 1)).toBe("2026-10-13");
+    expect(navegarPeriodo("mes", "2026-12-15", 1)).toBe("2027-01-01");
+    expect(navegarPeriodo("mes", "2026-01-20", -1)).toBe("2025-12-01");
+  });
+
+  it("rótulos e 'hoje está à vista'", () => {
+    expect(rotuloPeriodo("dia", "2026-10-06")).toBe("terça, 6 out 2026");
+    expect(rotuloPeriodo("semana", "2026-10-06")).toBe("Sem 41 · 5–9 out 2026");
+    expect(rotuloPeriodo("mes", "2026-10-06")).toBe("outubro 2026");
+    expect(periodoTemHoje("semana", "2026-10-08", "2026-10-06")).toBe(true);
+    expect(periodoTemHoje("dia", "2026-10-07", "2026-10-06")).toBe(false);
+  });
+
+  it("com janela, montarGantt mostra só esses dias e corta as barras", () => {
+    const g = montarGantt({ fases, tarefas, hoje: "2026-10-07", janela: { ini: "2026-10-07", fim: "2026-10-07" } });
+    expect(g.dias).toEqual(["2026-10-07"]);
+    for (const l of g.linhas) if (l.barra) expect(l.barra).toEqual({ col: 0, span: 1 });
+    expect(recortarBarra({ col: -2, span: 5 }, 2)).toEqual({ col: 0, span: 2 });
+    expect(recortarBarra({ col: 3, span: 1 }, 2)).toBeNull();
+    expect(recortarBarra({ col: -3, span: 2 }, 2)).toBeNull();
   });
 });

@@ -42,6 +42,8 @@ import {
 import { AlertTriangle, ChevronLeft, MapPin, Plus } from "../components/icons";
 import ObraGantt from "../components/ObraGantt";
 import FichaLocal from "../components/FichaLocal";
+import ObraPorqueInicio from "../components/ObraPorqueInicio";
+import { etiquetaServico, nomesCurtos, servicosDistintos } from "../domain/nomesTarefas";
 import ObraTarefaPainel from "../components/ObraTarefaPainel";
 import { ClienteAvisado } from "../components/ObraAtraso";
 import { diasDeDesvio, formatarDesvio, rotuloMotivoAtraso } from "../domain/atrasos";
@@ -183,13 +185,19 @@ export default function ObraDetalhe() {
   const nomes = useMemo(() => new Map(equipa.map((m) => [m.utilizador_id, m.nome])), [equipa]);
   const comConflito = useMemo(() => new Set(conflitos.map((c) => c.tarefa_id)), [conflitos]);
 
-  const tarefasGantt: TarefaGantt[] = useMemo(
-    () =>
-      tarefas.map((t) => ({
+  const tarefasGantt: TarefaGantt[] = useMemo(() => {
+    // "<serviço>: <passo>" → só o passo; o serviço numa etiqueta, se houver mais do que um.
+    const curtos = nomesCurtos(tarefas);
+    const varios = servicosDistintos(curtos) > 1;
+    return tarefas.map((t) => {
+      const c = curtos.get(t.id);
+      return {
         id: t.id,
         faseId: t.fase_id,
         ordem: t.ordem,
-        nome: t.nome,
+        nome: c?.curto ?? t.nome,
+        nomeCompleto: t.nome,
+        servico: varios && c?.servico ? etiquetaServico(c.servico) : null,
         estado: t.estado,
         minutosPrevistos: t.minutos_previstos,
         minutosReais: t.minutos_reais,
@@ -213,9 +221,9 @@ export default function ObraDetalhe() {
               n: t.n_atrasos ?? 1,
             }
           : null,
-      })),
-    [tarefas]
-  );
+      };
+    });
+  }, [tarefas]);
 
   // Ligar duas tarefas no Gantt: junta a nova dependência às que a tarefa já tem.
   const ligar = async (tarefaId: string, dependeDeId: string) => {
@@ -389,6 +397,7 @@ export default function ObraDetalhe() {
         )}
       </Card>
 
+      <ObraPorqueInicio obraId={obra.id} estado={obra.estado} recarga={recarga} />
       <FichaLocal obraId={obra.id} />
 
       {aviso && (

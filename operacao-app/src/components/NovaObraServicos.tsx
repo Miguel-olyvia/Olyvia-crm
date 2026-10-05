@@ -440,7 +440,7 @@ function DepoisDe({
       {outras.length === 0 ? (
         <p className="text-xs text-slate-400">Não há outras tarefas.</p>
       ) : (
-        <div className="max-h-28 space-y-0.5 overflow-y-auto">
+        <div className="max-h-48 space-y-0.5 overflow-y-auto">
           {outras.map((o) => (
             <label key={o.chave} className="flex items-center gap-1.5 text-xs text-slate-700">
               <input
@@ -588,7 +588,7 @@ function Materiais({
       </div>
       {erro && <p className="text-xs text-red-700">{erro}</p>}
       {resultados && (
-        <ul className="max-h-36 space-y-0.5 overflow-y-auto rounded-lg bg-white p-1 ring-1 ring-slate-200">
+        <ul className="max-h-60 space-y-0.5 overflow-y-auto rounded-lg bg-white p-1 ring-1 ring-slate-200">
           {resultados.length === 0 && <li className="px-2 py-1 text-xs text-slate-400">Nada encontrado.</li>}
           {resultados.map((p) => (
             <li key={p.produto_id}>

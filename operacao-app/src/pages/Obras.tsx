@@ -294,6 +294,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
   const [morada, setMorada] = useState("");
   const [inicio, setInicio] = useState(somarDiasUteis(hojeIso(), 1));
   const [inicioAuto, setInicioAuto] = useState(true);
+  const [procura, setProcura] = useState("");
   const [supervisorId, setSupervisorId] = useState("");
   const [aGravar, setAGravar] = useState(false);
 
@@ -508,7 +509,7 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
   return (
     <Modal
       title={passo === 2 ? "Nova obra — serviços do contrato" : "Nova obra"}
-      size="lg"
+      size={passo === 2 ? "xxl" : "xl"}
       onClose={aoFechar}
       footer={
         passo === 2 ? (
@@ -592,14 +593,24 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
             ))}
           </div>
 
+          {fonte !== "branco" && (fonte === "orcamento" ? orcamentos.length : contratos.length) > 6 && (
+            <Input
+              value={procura}
+              onChange={(e) => setProcura(e.target.value)}
+              placeholder="Procurar por número, título ou cliente…"
+              className="w-full"
+              aria-label="Procurar"
+            />
+          )}
+
           {fonte === "orcamento" &&
             (orcamentos.length === 0 ? (
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">
                 Nenhum orçamento aceite sem obra. Os aceites aparecem aqui quando o comercial os fecha no CRM.
               </p>
             ) : (
-              <div className="max-h-56 space-y-1.5 overflow-y-auto">
-                {orcamentos.map((o) => (
+              <div className="max-h-[45vh] space-y-1.5 overflow-y-auto">
+                {orcamentos.filter((o) => corresponde(procura, o.numero, o.titulo, o.cliente_id ? nomeCliente.get(o.cliente_id) : null, o.obra_endereco)).map((o) => (
                   <Escolha
                     key={o.id}
                     on={orcamentoId === o.id}
@@ -620,8 +631,8 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
             ) : contratos.length === 0 ? (
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">Nenhum contrato assinado sem obra.</p>
             ) : (
-              <div className="max-h-56 space-y-1.5 overflow-y-auto">
-                {contratos.map((c) => (
+              <div className="max-h-[45vh] space-y-1.5 overflow-y-auto">
+                {contratos.filter((c) => corresponde(procura, c.numero, c.titulo, c.cliente_id ? nomeCliente.get(c.cliente_id) : null)).map((c) => (
                   <Escolha
                     key={c.id}
                     on={contratoId === c.id}
@@ -720,6 +731,15 @@ function NovaObra({ orgId, aoFechar, aoCriar }: { orgId: string; aoFechar: () =>
 }
 
 const NOMES_FASE = ["", "Preparação e demolições", "Instalações técnicas", "Acabamentos", "Limpeza e entrega"];
+
+/** A procura da lista: cada palavra tem de aparecer num dos campos (sem acentos nem maiúsculas). */
+function corresponde(procura: string, ...campos: (string | null | undefined)[]): boolean {
+  const norm = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  const palavras = norm(procura).split(/\s+/).filter(Boolean);
+  if (!palavras.length) return true;
+  const texto = norm(campos.filter(Boolean).join(" "));
+  return palavras.every((p) => texto.includes(p));
+}
 
 function PrevisaoTarefas({ previsao, erro }: { previsao: PrevisaoOrcamento | null; erro: string | null }) {
   if (erro) return <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>;

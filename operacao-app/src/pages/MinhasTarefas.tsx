@@ -33,6 +33,7 @@ import {
 } from "../domain/obras";
 import FichaLocal from "../components/FichaLocal";
 import { data as formatarData } from "../lib/formatar";
+import NomeTarefa from "../components/NomeTarefa";
 
 /**
  * As minhas tarefas — o ecrã do executor, no telemóvel, em obra.
@@ -222,7 +223,7 @@ export default function MinhasTarefas() {
             <p className="truncate text-[11px] font-medium uppercase tracking-wide text-slate-400">
               {t.obra_codigo} · {t.fase_ordem}. {t.fase_nome}
             </p>
-            <p className="mt-0.5 text-base font-semibold leading-snug text-slate-900">{t.nome}</p>
+            <NomeTarefa nome={t.nome} className="mt-0.5 text-base font-semibold leading-snug text-slate-900" />
             <p className="mt-0.5 truncate text-xs text-slate-500">
               {t.obra_titulo}
               {t.obra_morada && (

@@ -58,6 +58,10 @@ export interface TarefaGantt {
   esperaAntesHoras?: number | null;
   /** "padrão", "aprendido (3 tarefas)"… — de onde veio o tempo. */
   origemTempo?: string | null;
+  /** O nome inteiro, quando `nome` vem encurtado (ver domain/nomesTarefas). */
+  nomeCompleto?: string | null;
+  /** Etiqueta curta do serviço, quando a obra tem mais do que um. */
+  servico?: string | null;
 }
 
 export interface AtrasoGantt {
@@ -153,9 +157,16 @@ export function montarGantt(args: {
   margem?: number;
   minimoDias?: number;
   escala?: EscalaGantt;
+  /**
+   * Só estes dias (ver `periodoGantt`): a vista Dia mostra um dia, a Semana
+   * uma semana, o Mês um mês. As barras que passam das pontas são cortadas;
+   * as que ficam de fora não se desenham (a linha da tarefa fica).
+   */
+  janela?: { ini: string; fim: string } | null;
 }): LayoutGantt {
-  const { fases, tarefas, hoje, recolhidas = new Set(), margem = 1, escala = "dia" } = args;
+  const { fases, tarefas, hoje, recolhidas = new Set(), margem = 1, escala = "dia", janela } = args;
   const minimoDias = args.minimoDias ?? MINIMO_DIAS[escala];
+  if (janela) return linhasGantt({ fases, tarefas, hoje, recolhidas, dias: diasUteisEntre(janela.ini, janela.fim), cortar: true });
 
   // O plano original também conta, para a sombra caber na janela.
   const datas = tarefas.flatMap((t) =>
@@ -173,10 +184,35 @@ export function montarGantt(args: {
     fim = somarDiasUteis(fim, 1);
     dias = diasUteisEntre(ini, fim);
   }
-  if (escala !== "dia") {
+  if (escala === "semana" || escala === "mes") {
     [ini, fim] = alinharJanela(ini, fim, escala);
     dias = diasUteisEntre(ini, fim);
   }
+  return linhasGantt({ fases, tarefas, hoje, recolhidas, dias, cortar: false });
+}
+
+/** Corta uma barra aos dias da janela (`n` colunas); null se fica toda de fora. */
+export function recortarBarra(b: Barra | null, n: number): Barra | null {
+  if (!b || n <= 0) return null;
+  const ultima = b.col + b.span - 1;
+  if (ultima < 0 || b.col >= n) return null;
+  const col = Math.max(0, b.col);
+  return { col, span: Math.min(n - 1, ultima) - col + 1 };
+}
+
+function linhasGantt(args: {
+  fases: readonly FaseGantt[];
+  tarefas: readonly TarefaGantt[];
+  hoje: string;
+  recolhidas: ReadonlySet<string>;
+  dias: string[];
+  cortar: boolean;
+}): LayoutGantt {
+  const { fases, tarefas, hoje, recolhidas, dias, cortar } = args;
+  const barra = (ini: string | null, fim: string | null) => {
+    const b = barraDe(dias, ini, fim);
+    return cortar ? recortarBarra(b, dias.length) : b;
+  };
 
   const semanas: Semana[] = [];
   dias.forEach((d, i) => {
@@ -207,18 +243,18 @@ export function montarGantt(args: {
     }));
     const totais = totaisDaFase(resumo);
     const recolhida = recolhidas.has(f.id);
-    linhas.push({ tipo: "fase", fase: f, totais, barra: barraDe(dias, totais.inicio, totais.fim), recolhida });
+    linhas.push({ tipo: "fase", fase: f, totais, barra: barra(totais.inicio, totais.fim), recolhida });
     if (recolhida) continue;
     for (const t of daFase) {
       const aberta = t.estado === "por_fazer" || t.estado === "em_curso" || t.estado === "rejeitada";
       linhas.push({
         tipo: "tarefa",
         tarefa: t,
-        barra: barraDe(dias, t.inicio, t.fim),
+        barra: barra(t.inicio, t.fim),
         gasto: t.minutosPrevistos > 0 ? t.minutosReais / t.minutosPrevistos : 0,
         nivel: nivelDeAlerta(t.minutosReais, t.minutosPrevistos),
         emAtraso: aberta && !!t.fim && t.fim < hoje,
-        barraOriginal: planoMudou(t) ? barraDe(dias, t.inicioOriginal ?? t.inicio, t.fimOriginal ?? t.fim) : null,
+        barraOriginal: planoMudou(t) ? barra(t.inicioOriginal ?? t.inicio, t.fimOriginal ?? t.fim) : null,
       });
     }
   }
@@ -236,23 +272,76 @@ export function deltaDeArrasto(dx: number, larguraDia: number): number {
 /* ─────────────────────────── Escalas: dia, semana, mês ─────────────────────────── */
 
 /**
- * A escala só muda quantos píxeis vale um dia útil e como se agrupa o
- * cabeçalho. O eixo é sempre o mesmo (dias úteis), por isso arrastar e esticar
- * encaixam ao dia em qualquer escala.
+ * Dia, Semana e Mês mostram esse período (um dia, uma semana de segunda a
+ * sexta, um mês) à largura toda — ver `periodoGantt`. "Obra" mostra a obra
+ * inteira, com um dia a `pxPorDia("obra")`. O eixo é sempre o mesmo (dias
+ * úteis), por isso arrastar e esticar encaixam ao dia em qualquer escala.
  */
-export type EscalaGantt = "dia" | "semana" | "mes";
+export type EscalaGantt = "dia" | "semana" | "mes" | "obra";
 
 export const ESCALAS_GANTT: readonly { id: EscalaGantt; rotulo: string }[] = [
   { id: "dia", rotulo: "Dia" },
   { id: "semana", rotulo: "Semana" },
   { id: "mes", rotulo: "Mês" },
+  { id: "obra", rotulo: "Obra" },
 ];
 
-const PX_POR_DIA: Record<EscalaGantt, number> = { dia: 44, semana: 22, mes: 6 };
-const MINIMO_DIAS: Record<EscalaGantt, number> = { dia: 10, semana: 20, mes: 40 };
+/** Px por dia útil: na Obra, sempre; no Dia/Semana/Mês, o mínimo (estica à largura). */
+const PX_POR_DIA: Record<EscalaGantt, number> = { dia: 44, semana: 22, mes: 6, obra: 44 };
+const MINIMO_DIAS: Record<EscalaGantt, number> = { dia: 10, semana: 20, mes: 40, obra: 10 };
 
 export function ehEscalaGantt(x: unknown): x is EscalaGantt {
-  return x === "dia" || x === "semana" || x === "mes";
+  return x === "dia" || x === "semana" || x === "mes" || x === "obra";
+}
+
+/** A escala mostra um período fixo (dia, semana, mês) e não a obra toda? */
+export function escalaComPeriodo(escala: EscalaGantt): boolean {
+  return escala !== "obra";
+}
+
+/** Os dias que a vista mostra à volta de `ancora`: o dia, a semana (seg–sex) ou o mês. */
+export function periodoGantt(escala: EscalaGantt, ancora: string): { ini: string; fim: string } {
+  const a = somarDiasUteis(ancora, 0);
+  if (escala === "semana") {
+    const seg = somarDias(a, 1 - diaDaSemana(a));
+    return { ini: seg, fim: somarDias(seg, 4) };
+  }
+  if (escala === "mes") {
+    const [ini, fim] = alinharJanela(a, a, "mes");
+    return { ini, fim };
+  }
+  return { ini: a, fim: a };
+}
+
+/** O período seguinte (`passo` = 1) ou anterior (−1): mais um dia útil, uma semana, um mês. */
+export function navegarPeriodo(escala: EscalaGantt, ancora: string, passo: number): string {
+  const a = somarDiasUteis(ancora, 0);
+  if (escala === "semana") return somarDias(a, 7 * passo);
+  if (escala === "mes") {
+    const [ano, m] = a.split("-").map(Number);
+    const total = ano * 12 + (m - 1) + passo;
+    return somarDiasUteis(`${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}-01`, 0);
+  }
+  return somarDiasUteis(a, passo);
+}
+
+const DIA_LONGO = ["", "segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"];
+
+/** "terça, 6 out 2026" · "Sem 41 · 5–9 out 2026" · "outubro 2026". */
+export function rotuloPeriodo(escala: EscalaGantt, ancora: string): string {
+  const { ini, fim } = periodoGantt(escala, ancora);
+  const ano = fim.slice(0, 4);
+  if (escala === "mes") return `${MESES_LONGOS[Number(ini.slice(5, 7)) - 1]} ${ano}`;
+  if (escala === "semana") return `${rotuloSemanaCurto(ini, fim)} ${ano}`;
+  const [, m, d] = ini.split("-").map(Number);
+  return `${DIA_LONGO[diaDaSemana(ini)]}, ${d} ${MESES[m - 1]} ${ano}`;
+}
+
+/** Hoje está dentro do período que se vê? */
+export function periodoTemHoje(escala: EscalaGantt, ancora: string, hoje: string): boolean {
+  const { ini, fim } = periodoGantt(escala, ancora);
+  const h = somarDiasUteis(hoje, 0);
+  return ini <= h && h <= fim;
 }
 
 /** Largura, em píxeis, de um dia útil na escala. */
@@ -363,7 +452,7 @@ export function cabecalhoGantt(dias: readonly string[], escala: EscalaGantt, hoj
       col: i,
       span: 1,
       rotulo: r.dia,
-      sub: escala === "dia" ? r.semana.slice(0, 3) : LETRA_DIA[diaDaSemana(iso)],
+      sub: escala === "dia" || escala === "obra" ? r.semana.slice(0, 3) : LETRA_DIA[diaDaSemana(iso)],
       titulo: iso,
       hoje: iso === hoje,
     };

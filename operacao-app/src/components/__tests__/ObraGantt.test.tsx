@@ -88,6 +88,7 @@ describe("ObraGantt", () => {
   });
 
   it("arrastar a barra 2 dias para a direita muda as datas em dias úteis", () => {
+    localStorage.setItem("operacao-app-gantt-escala", "obra");
     const { aoMudarDatas } = montar();
     const barra = screen.getByTitle(/^Canalização —/);
     fireEvent.pointerDown(barra, { clientX: 100, pointerId: 1 });
@@ -122,7 +123,8 @@ describe("ObraGantt", () => {
     expect(screen.getByTitle("Demolição de revestimentos")).toBeInTheDocument();
   });
 
-  it("marca hoje com uma linha e sombreia os fins de semana na vista Dia", () => {
+  it("marca hoje com uma linha e sombreia os fins de semana na vista Obra", () => {
+    localStorage.setItem("operacao-app-gantt-escala", "obra");
     const { container } = render(
       <ObraGantt
         fases={fases}
@@ -142,15 +144,46 @@ describe("ObraGantt", () => {
 });
 
 describe("ObraGantt — escala", () => {
-  it("começa ao dia e troca para semana e mês", () => {
+  it("abre na semana de hoje e troca para dia, mês e obra", () => {
+    const { container } = render(<></>);
     montar();
-    expect(screen.getByRole("button", { name: "Dia" })).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByRole("button", { name: "Semana" }));
+    const periodo = () => container.ownerDocument.querySelector("[data-gantt-periodo]")?.textContent;
     expect(screen.getByRole("button", { name: "Semana" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Sem 41 · 5–9 out")).toBeInTheDocument();
+    expect(periodo()).toBe("Sem 41 · 5–9 out 2026");
+    fireEvent.click(screen.getByRole("button", { name: "Dia" }));
+    expect(periodo()).toBe("terça, 6 out 2026");
     fireEvent.click(screen.getByRole("button", { name: "Mês" }));
+    expect(periodo()).toBe("outubro 2026");
     expect(screen.getByText("outubro")).toBeInTheDocument();
-    expect(screen.queryByText("Sem 41 · 5–9 out")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Obra" }));
+    expect(periodo()).toBeUndefined();
+  });
+
+  it("ao dia mostra só esse dia: as barras de outros dias não se desenham", () => {
+    localStorage.setItem("operacao-app-gantt-escala", "dia");
+    montar();
+    expect(screen.getByTitle(/^Canalização —/)).toBeInTheDocument(); // 06–07/10
+    expect(screen.queryByTitle(/^Demolição de revestimentos —/)).not.toBeInTheDocument(); // 05/10
+    expect(screen.queryByTitle(/^Validada —/)).not.toBeInTheDocument(); // 08/10
+    // As linhas das tarefas continuam lá (para se arrastarem para outro dia).
+    expect(screen.getByTitle("Demolição de revestimentos")).toBeInTheDocument();
+  });
+
+  it("‹ › andam um período; 'Hoje' volta; 'Início da obra' vai ao 1.º dia", () => {
+    localStorage.setItem("operacao-app-gantt-escala", "dia");
+    const { container } = render(<></>);
+    montar();
+    const periodo = () => container.ownerDocument.querySelector("[data-gantt-periodo]")?.textContent;
+    expect(screen.getByRole("button", { name: "Hoje" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Período seguinte" }));
+    expect(periodo()).toBe("quarta, 7 out 2026");
+    expect(screen.getByRole("button", { name: "Hoje" })).not.toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Hoje" }));
+    expect(periodo()).toBe("terça, 6 out 2026");
+    fireEvent.click(screen.getByRole("button", { name: "Início da obra" }));
+    expect(periodo()).toBe("segunda, 5 out 2026");
+    fireEvent.click(screen.getByRole("button", { name: "Período anterior" }));
+    expect(periodo()).toBe("sexta, 2 out 2026");
   });
 
   it("lembra a escala escolhida", () => {
@@ -165,7 +198,7 @@ describe("ObraGantt — escala", () => {
   it("ignora uma escala guardada inválida", () => {
     localStorage.setItem("operacao-app-gantt-escala", "ano");
     montar();
-    expect(screen.getByRole("button", { name: "Dia" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Semana" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("sem localStorage (bloqueado), funciona na mesma", () => {
@@ -265,6 +298,7 @@ describe("ObraGantt — dependências", () => {
   });
 
   it("arrastar para antes do fim da mãe avisa, mas não impede", () => {
+    localStorage.setItem("operacao-app-gantt-escala", "obra");
     const aoMudarDatas = vi.fn();
     render(
       <ObraGantt

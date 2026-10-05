@@ -1296,6 +1296,38 @@ export async function fichaLocalDaObra(obraId: string): Promise<FichaLocal> {
   return ((data ?? {}) as unknown as FichaLocal) ?? {};
 }
 
+export interface OcupacaoObra {
+  obra_id: string;
+  codigo: string;
+  titulo: string;
+  inicio: string;
+  fim: string;
+  pessoas: string[];
+  n: number;
+}
+
+/** "Porque começa a …?": onde está a equipa entre a criação da obra e o início. */
+export interface PorqueInicio {
+  inicio: string | null;
+  desde: string | null;
+  /** true = o sistema escolheu (1.º dia sem choques); false = alguém escolheu; null = obra antiga. */
+  auto: boolean | null;
+  equipa: number;
+  nesta_obra: string[];
+  ocupacao: OcupacaoObra[];
+}
+
+export async function porqueInicio(obraId: string): Promise<PorqueInicio | null> {
+  const { data, error } = await supabase.rpc("rpc_ops_obra_porque_inicio", { p_obra_id: obraId });
+  if (error) {
+    // Antes de o SQL desta versão correr, a função não existe: sem explicação, sem erro.
+    // eslint-disable-next-line no-console
+    console.warn("[Obras] porque começa:", error.message);
+    return null;
+  }
+  return (data ?? null) as unknown as PorqueInicio | null;
+}
+
 export function marcarClienteAvisado(atrasoId: string, nota?: string | null) {
   return rpc<{ ok: boolean; ja_avisado: boolean }>(
     "rpc_ops_obra_cliente_avisado",

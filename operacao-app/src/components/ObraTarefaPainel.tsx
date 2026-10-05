@@ -25,6 +25,7 @@ import { data as formatarData } from "../lib/formatar";
 import FotosTarefa from "./FotosTarefa";
 import ObraAtraso, { ClienteAvisado } from "./ObraAtraso";
 import ObraMaterialChega from "./ObraMaterialChega";
+import { separarNome } from "../domain/nomesTarefas";
 import { diasDeDesvio, formatarDesvio, rotuloMotivoAtraso } from "../domain/atrasos";
 import { dataHora } from "../lib/formatar";
 
@@ -173,7 +174,7 @@ export default function ObraTarefaPainel({
 
   return (
     <Modal
-      title={tarefa ? tarefa.nome : "Nova tarefa"}
+      title={tarefa ? separarNome(tarefa.nome).resto : "Nova tarefa"}
       size="lg"
       onClose={aoFechar}
       footer={

@@ -1267,7 +1267,22 @@ console.log("\n─── data de início automática ─────────
   const r = await devePassar("'Replanear' sem data volta a procurar a primeira data livre", AUTH.gestorA,
     `SELECT public.rpc_ops_obra_replanear('${X2?.id}', NULL);`);
   r?.inicio === X2?.inicio ? ok("e dá a mesma data (nada mudou entretanto)") : mau(`replanear auto: ${JSON.stringify(r)}`);
-  await db.exec(`DELETE FROM public.ops_obra WHERE id IN ('${X1?.id}','${X2?.id}');`);
+
+  // "Porque começa a …?": a 2.ª espera pela 1.ª, e diz-o.
+  const pq = await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_porque_inicio('${X2?.id}');`);
+  const o1 = (pq?.ocupacao ?? []).find((x) => x.obra_id === X1?.id);
+  pq?.auto === true && pq?.inicio === X2?.inicio && o1 && o1.fim === fim1 && o1.pessoas?.length > 0 && pq?.equipa === 2
+    ? ok(`'porque começa': data automática; até ${X2?.inicio} a equipa (2) está na 1.ª obra (${o1.inicio} → ${o1.fim}, ${o1.pessoas.join(", ")})`)
+    : mau(`porque começa: ${JSON.stringify(pq)}`);
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_replanear('${X2?.id}', '${fim1}');`);
+  const pq2 = await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_porque_inicio('${X2?.id}');`);
+  pq2?.auto === false
+    ? ok("replanear com uma data escolhida: deixa de ser automática")
+    : mau(`porque começa (à mão): ${JSON.stringify(pq2)}`);
+  await deveSerRecusado("quem não vê a obra não vê o porquê", AUTH.gestorB,
+    `SELECT public.rpc_ops_obra_porque_inicio('${X2?.id}');`, "");
+  await db.exec(`DELETE FROM public.ops_evento WHERE entidade_id IN ('${X1?.id}','${X2?.id}');
+                 DELETE FROM public.ops_obra WHERE id IN ('${X1?.id}','${X2?.id}');`);
 }
 
 /* ── Contrato ligado ao orçamento só pela proposta (como no CRM) ───────── */
