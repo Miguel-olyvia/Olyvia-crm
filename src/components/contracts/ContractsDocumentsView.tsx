@@ -359,7 +359,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
                 <TableHead className="text-[10px] uppercase">Tamanho</TableHead>
                 <TableHead className="text-[10px] uppercase">Upload por</TableHead>
                 <TableHead className="text-[10px] uppercase">Data</TableHead>
-                <TableHead className="text-[10px] uppercase text-right">Acções</TableHead>
+                <TableHead className="text-[10px] uppercase text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -387,7 +387,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
                     </TableCell>
                     {/* Indicador + interruptor de visibilidade no portal. O
                         próprio distintivo é o botão: evita mais um ícone "olho"
-                        nas acções, onde já significa "visualizar". */}
+                        nas ações, onde já significa "visualizar". */}
                     <TableCell>
                       <Badge
                         role="button"
@@ -554,7 +554,7 @@ export function ContractsDocumentsView({ contracts }: ContractsDocumentsViewProp
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Eliminar Documento</AlertDialogTitle>
-            <AlertDialogDescription>Tem a certeza que deseja eliminar este documento? Esta acção é irreversível.</AlertDialogDescription>
+            <AlertDialogDescription>Tem a certeza que deseja eliminar este documento? Esta ação é irreversível.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>

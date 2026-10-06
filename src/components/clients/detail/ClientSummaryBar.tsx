@@ -37,7 +37,7 @@ export function ClientSummaryBar({
         <p className={`font-semibold mt-0.5 ${lastContactColor}`}>{lastContactText}</p>
       </div>
       <div>
-        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Total Interacções</p>
+        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Total Interações</p>
         <p className="font-semibold mt-0.5">{interactionCount}</p>
       </div>
       <div>
@@ -49,7 +49,7 @@ export function ClientSummaryBar({
         <p className="font-semibold mt-0.5">{activeContracts}</p>
       </div>
       <div>
-        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Próxima Acção</p>
+        <p className="text-muted-foreground uppercase tracking-wider text-[10px] font-medium">Próxima Ação</p>
         {nextAction ? (
           <p className="font-semibold mt-0.5 text-foreground truncate flex items-center justify-center gap-1">
             <Calendar className="h-3 w-3" /> {nextAction.description}

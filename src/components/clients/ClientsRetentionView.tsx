@@ -630,7 +630,7 @@ export function ClientsRetentionView({
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              🚨 Clientes em Risco — Acção Urgente
+              🚨 Clientes em Risco — Ação Urgente
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -827,12 +827,12 @@ export function ClientsRetentionView({
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
-              ✅ Acções de Retenção Sugeridas
+              ✅ Ações de Retenção Sugeridas
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-2">
             {suggestedActions.actions.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma acção pendente — tudo em dia! 🎉</p>
+              <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma ação pendente — tudo em dia! 🎉</p>
             ) : (
               <>
                 {suggestedActions.actions.map((action) => {
@@ -884,7 +884,7 @@ export function ClientsRetentionView({
                 {/* Summary */}
                 <div className="bg-muted/50 rounded-lg p-3 text-center mt-2">
                   <p className="text-sm text-muted-foreground">
-                    {suggestedActions.pendingCount} acções pendentes · Se completar todas, saúde média sobe para <strong>{suggestedActions.projectedHealth}/100</strong>
+                    {suggestedActions.pendingCount} ações pendentes · Se completar todas, saúde média sobe para <strong>{suggestedActions.projectedHealth}/100</strong>
                   </p>
                 </div>
               </>

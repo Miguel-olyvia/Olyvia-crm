@@ -38,6 +38,7 @@ import {
   ClipboardCheck,
   ListChecks,
   Receipt,
+  Sun,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -88,6 +89,15 @@ export interface TopLevelItem {
 
 export const topLevelItems: TopLevelItem[] = [
   {
+    // "Hoje" (/home): o primeiro ecrã depois do login — o que a pessoa tem de
+    // fazer agora. Fica no topo do rail, antes de tudo o resto.
+    id: "home",
+    to: "/home",
+    icon: Sun,
+    labelKey: "sidebar.today",
+    permissions: [],
+  },
+  {
     id: "dashboard",
     to: "/dashboard",
     icon: LayoutDashboard,
@@ -101,8 +111,9 @@ export const topLevelItems: TopLevelItem[] = [
     to: "/atividades",
     icon: ListChecks,
     labelKey: "sidebar.activities",
+    // Já não é só de administradores: a página mostra sempre e só o dia da
+    // própria pessoa (useMyDay / useMyDayTasks), por isso o comercial vê o seu.
     permissions: ["scheduling.items.view"],
-    adminOnly: true,
   },
   {
     id: "operacao",
@@ -281,11 +292,3 @@ export const menuSections: MenuSection[] = [
     ],
   },
 ];
-
-export const bottomItem: TopLevelItem = {
-  id: "home",
-  to: "/home",
-  icon: LayoutDashboard,
-  labelKey: "sidebar.panel",
-  permissions: [],
-};

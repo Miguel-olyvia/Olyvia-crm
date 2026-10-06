@@ -173,7 +173,7 @@ export function LeadJourneyTab({
             {leadToContactDays !== null && (
               <><strong className="text-foreground">{leadToContactDays} dias</strong> de Lead a Negociação · </>
             )}
-            <strong className="text-foreground">{interactionCount} interacções</strong> registadas
+            <strong className="text-foreground">{interactionCount} interações</strong> registadas
             {dealCount > 0 && (
               <> · <strong className="text-foreground">{dealCount} deals</strong> no valor de <strong className="text-foreground">€{dealValue.toLocaleString("pt-PT")}</strong></>
             )}

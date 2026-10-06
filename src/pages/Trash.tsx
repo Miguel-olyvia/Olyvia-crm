@@ -476,7 +476,7 @@ export default function Trash() {
               Eliminar definitivamente?
             </AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acção é irreversível. <strong>{purgeTarget?.name}</strong> será removido permanentemente da base de dados.
+              Esta ação é irreversível. <strong>{purgeTarget?.name}</strong> será removido permanentemente da base de dados.
               {purgeTarget?.kind === "deals" && (
                 <span className="block mt-2 text-amber-600 dark:text-amber-400">
                   Negócios só podem ser eliminados definitivamente se não tiverem orçamentos, propostas ou contratos vivos associados.

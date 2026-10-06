@@ -2325,7 +2325,7 @@ const AnewClients = () => {
                       {isColVisible('client_since') && <TableHead>Cliente Desde</TableHead>}
                       {isColVisible('origin') && <TableHead>Origem</TableHead>}
                       {isColVisible('status') && <TableHead>Estado</TableHead>}
-                      <TableHead className="text-right">Acções</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>

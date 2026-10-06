@@ -12,7 +12,6 @@ import { cn } from "@/lib/utils";
 import {
   topLevelItems,
   menuSections,
-  bottomItem,
   MenuItem,
   TopLevelItem,
   MenuSection,
@@ -163,12 +162,6 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
     // Keep submenu open - don't close on navigation
   };
 
-  const handleBottomClick = () => {
-    isManuallyClosedRef.current = false;
-    setOpenSectionId(null);
-    navigate(bottomItem.to);
-  };
-
   // Check if item is active
   const isItemActive = (to: string) => {
     return location.pathname === to || location.pathname.startsWith(to + "/");
@@ -216,7 +209,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
         <div className="flex-1 overflow-y-auto scrollbar-thin scrollbar-thumb-sidebar-accent scrollbar-track-transparent p-2">
           <TooltipProvider delayDuration={100}>
             <div className="flex flex-col gap-1">
-              {/* Top level items (Dashboard, Scheduling) */}
+              {/* Top level items (Hoje, Dashboard, Atividades, Operações) */}
               {visibleTopLevel.map((item) => {
                 const Icon = item.icon;
                 const isActive = isItemActive(item.to);
@@ -287,34 +280,6 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
           </TooltipProvider>
         </div>
 
-        {/* Footer */}
-        <div className="shrink-0 p-2 border-t border-sidebar-border">
-          <TooltipProvider delayDuration={100}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  type="button"
-                  onClick={handleBottomClick}
-                  className={cn(
-                    "flex items-center justify-center w-full p-3 rounded-xl transition-all duration-200",
-                    "text-sidebar-foreground/80 hover:text-sidebar-foreground",
-                    "hover:bg-sidebar-accent",
-                    isItemActive(bottomItem.to) && "bg-primary text-primary-foreground shadow-md"
-                  )}
-                >
-                  <bottomItem.icon className="w-5 h-5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent 
-                side="right" 
-                sideOffset={12}
-                className="bg-primary text-primary-foreground font-medium px-3 py-2 text-sm shadow-lg border-0"
-              >
-                {t(bottomItem.labelKey)}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
       </aside>
 
       {/* Flyout Panel - Shows when a section is open (no backdrop, content shifts) */}

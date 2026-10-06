@@ -127,6 +127,8 @@ interface QuoteBuilderProps {
   initialProposalId?: string | null;
   /** Pre-link the new quote to a deal (when launched from a proposal/deal context). */
   initialDealId?: string | null;
+  /** Com initialDealId: importa logo as necessidades do pedido (uma só vez). */
+  autoImportFromDeal?: boolean;
 }
 
 interface Client {
@@ -269,7 +271,7 @@ interface QuoteLine {
 const getQuoteDraftKey = (companyId?: string | null, quoteId?: string | null) =>
   quoteId ? `olyvia:quote-builder:edit:${quoteId}` : `olyvia:quote-builder:new:${companyId || "global"}`;
 
-export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null }: QuoteBuilderProps) {
+export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initialDealId = null, autoImportFromDeal = false }: QuoteBuilderProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
   // `effectiveQuoteId` é o id do orçamento a usar em todo o componente: só
   // existe quando se está a EDITAR um orçamento já gravado. "Novo Orçamento"
@@ -578,6 +580,72 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
       }
     })();
   }, [quoteId, initialProposalId, initialDealId, activeCompany?.id]);
+
+  // Aberto a partir do detalhe do pedido ("Criar orçamento" em Deals.tsx):
+  // só há deal_id, sem proposta. Escolhe o pedido tal como a pesquisa
+  // "Pedido" faz — mesmo pedido, organização, cliente, título e comercial
+  // (resolveQuoteAssignedTo: lead → contacto → cliente → pedido).
+  const dealContextLoadedRef = useRef(false);
+  useEffect(() => {
+    if (quoteId || initialProposalId || !initialDealId || dealContextLoadedRef.current) return;
+    dealContextLoadedRef.current = true;
+    (async () => {
+      try {
+        const { data: deal } = await (supabase as any)
+          .from("deals")
+          .select("id, title, entity_id, organization_id, client_id, lead_id, contact_id, assigned_to")
+          .eq("id", initialDealId)
+          .maybeSingle();
+        if (!deal) {
+          toast({ title: "Pedido não encontrado", description: "Pode não existir ou não tem permissão para o ver.", variant: "destructive" });
+          return;
+        }
+        const inheritedAssigned = await resolveQuoteAssignedTo({
+          supabase: supabase as any,
+          dealId: deal.id,
+          clienteId: deal.client_id || null,
+          organizationId: deal.organization_id || activeCompany?.id || null,
+          fallbackUserId: deal.assigned_to || null,
+        });
+        setSelectedDeal({
+          id: deal.id,
+          title: deal.title,
+          entity_id: deal.entity_id ?? null,
+          organization_id: deal.organization_id ?? null,
+          client_id: deal.client_id ?? null,
+          lead_id: deal.lead_id ?? null,
+          contact_id: deal.contact_id ?? null,
+        });
+        setSelectedSource(null);
+        setFormData(prev => ({
+          ...prev,
+          deal_id: deal.id,
+          organization_id: deal.organization_id || prev.organization_id,
+          cliente_id: deal.client_id || "",
+          title: prev.title || deal.title || "",
+          assigned_to: assignedToTouched ? prev.assigned_to : (inheritedAssigned ?? prev.assigned_to),
+        }));
+      } catch (err) {
+        console.error("[QuoteBuilder] failed to preload deal context", err);
+        captureFlowError(err, "quote-lifecycle");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteId, initialProposalId, initialDealId, activeCompany?.id]);
+
+  // autoImportFromDeal: corre UMA vez a mesma importação do botão
+  // "Importar do pedido de proposta" (handleImportFromDeal → loadDealItems),
+  // assim que o pedido ficar escolhido. O ref sobrevive à dupla execução de
+  // efeitos do StrictMode e a re-renders; além disso loadDealItems salta
+  // necessidades já importadas (source_deal_need_id), por isso nunca duplica.
+  const autoImportDoneRef = useRef(false);
+  useEffect(() => {
+    if (!autoImportFromDeal || quoteId || autoImportDoneRef.current) return;
+    if (!initialDealId || formData.deal_id !== initialDealId) return;
+    autoImportDoneRef.current = true;
+    void handleImportFromDeal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoImportFromDeal, quoteId, initialDealId, formData.deal_id]);
 
   // Resolve root organization id
   useEffect(() => {

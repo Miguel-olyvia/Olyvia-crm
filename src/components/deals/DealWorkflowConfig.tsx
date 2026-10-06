@@ -258,7 +258,7 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
    * Caminho único para qualquer alteração à composição do pipeline — arrastar
    * OU ligar/desligar um módulo. As duas coisas mudam o que cada módulo cria, e
    * ambas têm de reescrever as regras: o motor não lê a configuração de módulos,
-   * só as tabelas de acções, portanto um módulo desligado cuja regra ficasse
+   * só as tabelas de ações, portanto um módulo desligado cuja regra ficasse
    * activa continuaria a ser executado.
    */
   const proporAlteracao = useCallback(async (novosModulos: PipelineModule[]) => {
@@ -302,7 +302,7 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
             Pipeline Comercial — Automações
           </DialogTitle>
           <DialogDescription>
-            Configure estágios, fluxo e acções automáticas em cada módulo do pipeline
+            Configure estágios, fluxo e ações automáticas em cada módulo do pipeline
           </DialogDescription>
         </DialogHeader>
 
@@ -325,7 +325,7 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
         <Alert className="mt-2">
           <Zap className="h-4 w-4" />
           <AlertDescription className="text-xs">
-            Configure acções por fase em cada módulo. Quando o estado mudar, as acções são executadas automaticamente.
+            Configure ações por fase em cada módulo. Quando o estado mudar, as ações são executadas automaticamente.
             {(() => {
               const descriptions: string[] = [];
               // Build descriptions from actual configured actions (flowMap)
@@ -343,7 +343,7 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
                 </span>
               ) : (
                 <span className="block mt-1 text-muted-foreground">
-                  Nenhuma acção automática configurada. Configure acções em cada módulo.
+                  Nenhuma ação automática configurada. Configure ações em cada módulo.
                 </span>
               );
             })()}
@@ -409,7 +409,7 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
                 </TabsTrigger>
                 <TabsTrigger value="actions" className="gap-1.5">
                   <Zap className="w-3.5 h-3.5" />
-                  Acções
+                  Ações
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="stages" className="mt-4">
@@ -485,7 +485,7 @@ export function DealWorkflowConfig({ open, onOpenChange, companyId }: Props) {
             {(pendingReorder?.writes.needsTriggerStage.length ?? 0) > 0 && (
               <p className="text-xs text-amber-600 dark:text-amber-500">
                 Sem fase de disparo configurada em: {pendingReorder!.writes.needsTriggerStage.map(m => MODULE_LABEL[m] || m).join(", ")}.
-                Configure a acção nesse módulo depois de reordenar.
+                Configure a ação nesse módulo depois de reordenar.
               </p>
             )}
           </div>

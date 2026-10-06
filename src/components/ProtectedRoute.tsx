@@ -22,7 +22,7 @@ interface ProtectedRouteProps {
    * Serve para páginas que ainda não estão prontas para toda a gente. É
    * deliberadamente uma trava de PAPEL e não de permissão: a permissão que
    * guardava a página dos agendamentos guarda também o calendário, o menu e a
-   * acção na lista de leads — retirá-la a um papel fechava tudo isso junto.
+   * ação na lista de leads — retirá-la a um papel fechava tudo isso junto.
    */
   adminOnly?: boolean;
   /** The page component to render if access is granted */

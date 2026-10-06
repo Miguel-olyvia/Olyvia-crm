@@ -4,6 +4,7 @@ import { translations } from "@/translations/index";
 import { bundleTranslations } from "@/translations/bundles";
 import { priceContextsTranslations } from "@/translations/priceContexts";
 import { directSalesTranslations } from "@/translations/directSales";
+import { todayTranslations } from "@/translations/today";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -18,6 +19,10 @@ Object.keys(priceContextsTranslations).forEach((lang) => {
 // Venda Direta (Fase 2) — módulo próprio, mesmo padrão dos dois acima.
 Object.keys(directSalesTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...directSalesTranslations[lang as keyof typeof directSalesTranslations] };
+});
+// Ecrã "Hoje" (/home) — módulo próprio, mesmo padrão.
+Object.keys(todayTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...todayTranslations[lang as keyof typeof todayTranslations] };
 });
 
 export const useTranslation = () => {
