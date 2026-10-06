@@ -11,7 +11,7 @@
  * A password nunca aparece aqui: a Edge Function nunca a devolve (ver
  * `useCriarAcessoPessoa`).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,9 +29,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { KeyRound, Loader2 } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AlertTriangle, KeyRound, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import type { Pendencia } from "@/hooks/useAdmissaoPendencias";
 import { useCriarAcessoPessoa } from "@/hooks/useCriarAcessoPessoa";
+import { rotuloDeCampoAdmissao } from "@/components/hr/rotuloCampoAdmissao";
 import { usePapeisDaOrganizacao } from "@/hooks/usePapeisDaOrganizacao";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
@@ -42,6 +45,13 @@ interface CriarAcessoDialogProps {
   pessoaId: string;
   modo: "criar" | "reenviar";
   onCriado?: () => void;
+  /**
+   * O que ainda falta na ficha (ver `useAdmissaoPendencias`). Ao CRIAR o
+   * acesso, qualquer pendencia trava a confirmacao: as credenciais so se
+   * enviam com a ficha completa. Reenviar credenciais a quem ja tem conta nao
+   * e travado. Ausente = nao se sabe, e quem decide e a Edge Function.
+   */
+  pendencias?: Pendencia[];
 }
 
 export function CriarAcessoDialog({
@@ -50,15 +60,39 @@ export function CriarAcessoDialog({
   pessoaId,
   modo,
   onCriado,
+  pendencias,
 }: CriarAcessoDialogProps) {
   const { t } = useTranslation();
   const { criarAcesso, processando } = useCriarAcessoPessoa();
   const { papeis, loading: papeisLoading } = usePapeisDaOrganizacao();
   const [roleId, setRoleId] = useState("");
   const [tocado, setTocado] = useState(false);
+  /** O que a Edge Function disse que falta, quando a ficha mudou entre a
+   * leitura das pendencias e o clique (ou quando elas nao foram lidas). */
+  const [faltamDoServidor, setFaltamDoServidor] = useState<string[]>([]);
+
+  // Cada abertura recomeca sem a recusa da vez anterior: a ficha pode ter sido
+  // completada entretanto.
+  useEffect(() => {
+    if (open) setFaltamDoServidor([]);
+  }, [open]);
 
   const precisaDePapel = modo === "criar";
-  const podeConfirmar = !precisaDePapel || roleId !== "";
+  /** O que a leitura das pendencias ja sabia: trava o botao. */
+  const pendenciasConhecidas = modo === "criar" && Boolean(pendencias && pendencias.length > 0);
+  const codigosEmFalta =
+    modo !== "criar"
+      ? []
+      : pendencias && pendencias.length > 0
+        ? pendencias.map((p) => p.codigo)
+        : faltamDoServidor;
+  const fichaIncompleta = codigosEmFalta.length > 0;
+  // O que SO o servidor disse (a ficha mudou, ou as pendencias nao foram lidas)
+  // mostra-se, mas nao tranca o botao: quem decide e a Edge Function, e quem
+  // voltar a tentar depois de completar a ficha nao fica preso ate fechar e
+  // reabrir o dialogo.
+  const botaoTravado = pendenciasConhecidas;
+  const podeConfirmar = (!precisaDePapel || roleId !== "") && !botaoTravado;
   const erroPapel =
     tocado && precisaDePapel && roleId === "" ? t("hr.acesso.erroPapelObrigatorio") : null;
 
@@ -69,6 +103,7 @@ export function CriarAcessoDialog({
       forcarNovaPassword: modo === "reenviar",
     });
     if (!resultado.ok) {
+      if (resultado.faltam) setFaltamDoServidor(resultado.faltam);
       toast.error(resultado.erro ?? t("hr.acesso.erroCriar"));
       return;
     }
@@ -99,6 +134,22 @@ export function CriarAcessoDialog({
             )}
           </DialogDescription>
         </DialogHeader>
+
+        {fichaIncompleta && (
+          <Alert>
+            <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            <AlertDescription className="space-y-2">
+              <p id="hr-acesso-bloqueado">
+                {t("hr.acesso.bloqueadoPendencias", { n: codigosEmFalta.length })}
+              </p>
+              <ul className="list-disc space-y-0.5 pl-4 text-xs">
+                {codigosEmFalta.map((codigo) => (
+                  <li key={codigo}>{rotuloDeCampoAdmissao(t, codigo)}</li>
+                ))}
+              </ul>
+            </AlertDescription>
+          </Alert>
+        )}
 
         {precisaDePapel && (
           <div className="space-y-1.5">
@@ -140,7 +191,11 @@ export function CriarAcessoDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={processando}>
             {t("employees.form.cancel")}
           </Button>
-          <Button onClick={confirmar} disabled={processando}>
+          <Button
+            onClick={confirmar}
+            disabled={processando || botaoTravado}
+            aria-describedby={fichaIncompleta ? "hr-acesso-bloqueado" : undefined}
+          >
             {processando && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
             {t(modo === "criar" ? "hr.acesso.criar" : "hr.acesso.reenviar")}
           </Button>

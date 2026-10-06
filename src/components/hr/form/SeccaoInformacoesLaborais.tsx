@@ -81,7 +81,16 @@ export function SeccaoInformacoesLaborais({
         <CampoTexto
           id="hr-novo-cargo"
           label={t("hr.columns.cargo")}
-          ajuda={t("hr.form.ajudaCargo")}
+          // Cargo, data de admissao e tipo de contrato sao do RH: levam
+          // asterisco mas nao bloqueiam a criacao -- ficam como pendencia. Por
+          // isso `recomendado` e nao `obrigatorio`: um leitor de ecra nao
+          // pode anunciar "obrigatorio" num campo que se pode deixar vazio.
+          recomendado
+          ajuda={
+            valor.cargo.trim() === ""
+              ? `${t("hr.form.ajudaCargo")} ${t("hr.form.avisoCampoRhPendente")}`
+              : t("hr.form.ajudaCargo")
+          }
           valor={valor.cargo}
           onChange={(v) => onPatch({ cargo: v })}
         />
@@ -134,6 +143,8 @@ export function SeccaoInformacoesLaborais({
         <CampoTexto
           id="hr-novo-data-admissao"
           label={t("employees.form.hireDate")}
+          recomendado
+          ajuda={valor.data_admissao.trim() === "" ? t("hr.form.avisoCampoRhPendente") : undefined}
           tipo="date"
           valor={valor.data_admissao}
           erro={erroDe("hr-novo-data-admissao")}

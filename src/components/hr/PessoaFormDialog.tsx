@@ -35,7 +35,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -53,12 +52,17 @@ import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { usePapeisDaOrganizacao } from "@/hooks/usePapeisDaOrganizacao";
 import { useContasLigaveis } from "@/hooks/useContasLigaveis";
 import { usePessoaDuplicados } from "@/hooks/usePessoaDuplicados";
+import { useAdmissaoPosicoesCampos } from "@/hooks/useAdmissaoPosicoesCampos";
+import { EnviarConviteDialog } from "@/components/hr/EnviarConviteDialog";
+import { PessoaFormAvisos } from "@/components/hr/PessoaFormAvisos";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { linhasParaGravar, problemasDoHorario } from "@/lib/hr/horario";
 import {
   SECCOES,
+  camposDoConviteForaDoFormulario,
+  codigosObrigatoriosDoFormulario,
   payloadDoRascunho,
   problemasDoRascunho,
   rascunhoInicial,
@@ -123,6 +127,24 @@ export function PessoaFormDialog({
    * distingue um palpite de uma escrita a mao -- ver preenchimentoPorConta.ts. */
   const [autoPreenchido, setAutoPreenchido] = useState<Record<string, string>>({});
   const [avisosConta, setAvisosConta] = useState<AvisoPreenchimento[]>([]);
+  /**
+   * A ficha acabou de ser criada com "A pessoa, por convite": o dialogo de
+   * envio abre a seguir, ja com o e-mail pessoal do formulario. So quando ele
+   * fecha e que se segue para a ficha (`onCriada`) -- navegar antes tirava o
+   * dialogo de debaixo de quem o ia usar (e o link, quando o e-mail falha, so
+   * se mostra uma vez).
+   */
+  const [conviteDaNovaPessoa, setConviteDaNovaPessoa] = useState<{
+    pessoaId: string;
+    email: string;
+  } | null>(null);
+
+  // A configuracao da admissao: so se le com o formulario aberto.
+  const {
+    campos: configuracaoAdmissao,
+    carregando: configuracaoACarregar,
+    semAcesso: configuracaoSemAcesso,
+  } = useAdmissaoPosicoesCampos(open);
 
   const podeLigarConta = hasPermission("hr.pessoas.conta.link");
 
@@ -276,7 +298,35 @@ export function PessoaFormDialog({
   const podeCriarLocal = hasPermission("hr.locais.edit") && !semPermissaoLocais;
   const podeVerPapeis = hasPermission("roles.view");
 
-  const problemas = useMemo(() => problemasDoRascunho(rascunho), [rascunho]);
+  const problemas = useMemo(
+    () => problemasDoRascunho(rascunho, configuracaoAdmissao),
+    [rascunho, configuracaoAdmissao],
+  );
+  const quemPreenche = rascunho.geral.quem_preenche;
+  const obrigatoriosDaPessoa = useMemo(
+    () => codigosObrigatoriosDoFormulario(quemPreenche, configuracaoAdmissao),
+    [quemPreenche, configuracaoAdmissao],
+  );
+  /** O RH preenche agora, mas o formulario nao tem estes campos: a ficha fica
+   * com eles como pendencia, e di-se aqui para ninguem achar o contrario. */
+  const camposForaDoFormulario = useMemo(
+    () => (quemPreenche === "rh" ? camposDoConviteForaDoFormulario(configuracaoAdmissao) : []),
+    [quemPreenche, configuracaoAdmissao],
+  );
+  /**
+   * "RH, agora" sem saber a configuracao: `campos = null` NAO e "sem
+   * configuracao" -- os campos que a organizacao pos no convite deixariam de
+   * ser exigidos e deixaria de aparecer o aviso do que fica como pendencia.
+   * Enquanto carrega, o botao espera; depois de carregar, sem configuracao e
+   * sem a base a ter recusado por permissao (falha de leitura, ou a leitura
+   * nunca correu), o aviso e persistente (a ficha pode sair incompleta e di-se).
+   */
+  const aEsperarConfiguracao = quemPreenche === "rh" && configuracaoACarregar;
+  const configuracaoNaoCarregada =
+    quemPreenche === "rh" &&
+    configuracaoAdmissao === null &&
+    !configuracaoACarregar &&
+    !configuracaoSemAcesso;
   const problemasHorario = useMemo(
     () =>
       rascunho.contrato.horario_variavel ? problemasDoHorario(rascunho.contrato.horario) : [],
@@ -379,9 +429,32 @@ export function PessoaFormDialog({
         toast.warning(t("hr.acesso.convitePendente"));
       }
 
+      // "A pessoa, por convite": abre o envio do convite para a ficha que
+      // acabou de nascer, com o e-mail pessoal escrito aqui. Sem e-mail (nao
+      // devia acontecer: o formulario exige-o neste modo) segue-se para a ficha.
+      const emailDoConvite = payload.nucleo.email_pessoal;
+      const querConvite = rascunho.geral.quem_preenche === "convite";
+      const podeEnviarConvite = hasPermission("hr.pessoas.convite.enviar");
+      const abreConvite = querConvite && emailDoConvite !== null && podeEnviarConvite;
+      // Quem escolheu "A pessoa, por convite" e nao pode abri-lo nao fica a
+      // espera de um e-mail que nunca sai: diz-se que o convite NAO foi aberto.
+      if (querConvite && !abreConvite) {
+        toast.warning(
+          t(
+            podeEnviarConvite
+              ? "hr.form.conviteNaoAberto.semEmail"
+              : "hr.form.conviteNaoAberto.semPermissao",
+          ),
+        );
+      }
+
       limpar();
       onOpenChange(false);
-      onCriada?.(id);
+      if (abreConvite && emailDoConvite) {
+        setConviteDaNovaPessoa({ pessoaId: id, email: emailDoConvite });
+      } else {
+        onCriada?.(id);
+      }
     } catch (e) {
       toast.error(await getFriendlyErrorMessage(e, t("hr.erros.guardar")));
     } finally {
@@ -466,7 +539,7 @@ export function PessoaFormDialog({
           </div>
 
           <ScrollArea className="max-h-[70vh]">
-            <CamposTocadosProvider onTocar={tocar}>
+            <CamposTocadosProvider onTocar={tocar} rotuloObrigatorio={t("hr.campos.obrigatorio")}>
               <div
                 role="tabpanel"
                 id={`hr-novo-painel-${seccao}`}
@@ -480,116 +553,26 @@ export function PessoaFormDialog({
                     .replace("{nome}", t(`hr.form.seccoes.${seccao}`))}
                 </div>
 
-                {mostrarResumo && (problemas.length > 0 || problemasHorario.length > 0) && (
-                  <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
-                    <p className="text-sm font-medium text-destructive">
-                      {t("hr.form.resumoProblemas").replace(
-                        "{n}",
-                        String(problemas.length + problemasHorario.length),
-                      )}
-                    </p>
-                    <ul className="space-y-1">
-                      {problemas.map((problema) => (
-                        <li key={`${problema.seccao}-${problema.campoId}`}>
-                          <Button
-                            type="button"
-                            variant="link"
-                            size="sm"
-                            className="h-auto p-0 text-xs"
-                            onClick={() => {
-                              setSeccao(problema.seccao);
-                              requestAnimationFrame(() =>
-                                document.getElementById(problema.campoId)?.focus(),
-                              );
-                            }}
-                          >
-                            {t(`hr.form.seccoes.${problema.seccao}`)} → {t(problema.rotuloKey)}
-                          </Button>
-                        </li>
-                      ))}
-                      {problemasHorario.length > 0 && (
-                        <li className="text-xs text-destructive">
-                          {t("hr.form.seccoes.contrato")} → {t("hr.horario.titulo")} (
-                          {problemasHorario.length})
-                        </li>
-                      )}
-                    </ul>
-                  </div>
-                )}
-
-                {(duplicadosTravao.length > 0 || duplicadosSinal.length > 0) && (
-                  <div
-                    className={cn(
-                      "space-y-2 rounded-md border p-3",
-                      temDuplicadoTravao
-                        ? "border-destructive/40 bg-destructive/5"
-                        : "border-amber-400/50 bg-amber-50/50 dark:bg-amber-950/20",
-                    )}
-                  >
-                    {duplicadosTravao.map((c) => (
-                      <div key={`travao-${c.pessoaId}-${c.campoCoincidente}`} className="space-y-1">
-                        <p className="text-sm font-medium text-destructive">
-                          {t(`hr.duplicados.campo.${c.campoCoincidente}`)} —{" "}
-                          {t("hr.duplicados.travao.titulo")}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {c.estado === "apagada"
-                            ? t("hr.duplicados.apagada.descricao")
-                            : t("hr.duplicados.travao.descricao")}
-                        </p>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => abrirFichaExistente(c.pessoaId)}
-                        >
-                          {t("hr.duplicados.abrirFicha")}
-                        </Button>
-                      </div>
-                    ))}
-
-                    {!temDuplicadoTravao && duplicadosSinal.length > 0 && (
-                      <div className="space-y-2">
-                        <p className="text-sm font-medium text-amber-700 dark:text-amber-400">
-                          {t("hr.duplicados.sinal.titulo")}
-                        </p>
-                        <ul className="space-y-1 text-xs text-muted-foreground">
-                          {duplicadosSinal.map((c) => (
-                            <li key={`sinal-${c.pessoaId}-${c.campoCoincidente}`}>
-                              {t(`hr.duplicados.campo.${c.campoCoincidente}`)} —{" "}
-                              {c.estado === "apagada"
-                                ? t("hr.duplicados.apagada.descricao")
-                                : t("hr.duplicados.sinal.descricao")}
-                            </li>
-                          ))}
-                        </ul>
-                        <label className="flex items-center gap-2 text-xs">
-                          <Checkbox
-                            checked={confirmouSinal}
-                            onCheckedChange={(v) => setConfirmouSinal(v === true)}
-                          />
-                          {t("hr.duplicados.sinal.confirmar")}
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {duplicadosSemAcesso && (
-                  <p className="text-xs text-muted-foreground">{t("hr.duplicados.semAcesso")}</p>
-                )}
-
-                {/* Travao de tentativas (20261201030000): lista vazia AQUI nao
-                    e "sem duplicado" -- e a verificacao temporariamente
-                    indisponivel. O formulario continua a deixar gravar: a
-                    unicidade real vem dos indices unicos por organizacao
-                    (idx_pessoas_identificacao_nif_org / ..._niss_org,
-                    20261130040000), nao desta verificacao de conforto. */}
-                {duplicadosDemasiadasTentativas && (
-                  <p className="text-xs text-muted-foreground">
-                    {t("hr.duplicados.demasiadasTentativas")}
-                  </p>
-                )}
+                <PessoaFormAvisos
+                  camposForaDoFormulario={camposForaDoFormulario}
+                  mostrarForaDoFormulario={seccao === "geral" || mostrarResumo}
+                  mostrarResumo={mostrarResumo}
+                  problemas={problemas}
+                  problemasHorario={problemasHorario.length}
+                  onIrParaProblema={(problema) => {
+                    setSeccao(problema.seccao);
+                    requestAnimationFrame(() => document.getElementById(problema.campoId)?.focus());
+                  }}
+                  duplicadosTravao={duplicadosTravao}
+                  duplicadosSinal={duplicadosSinal}
+                  temDuplicadoTravao={temDuplicadoTravao}
+                  confirmouSinal={confirmouSinal}
+                  onConfirmarSinal={setConfirmouSinal}
+                  onAbrirFichaExistente={abrirFichaExistente}
+                  duplicadosSemAcesso={duplicadosSemAcesso}
+                  duplicadosDemasiadasTentativas={duplicadosDemasiadasTentativas}
+                  configuracaoNaoCarregada={configuracaoNaoCarregada}
+                />
 
                 {seccao === "geral" && (
                   <SeccaoInformacoesGerais
@@ -614,6 +597,7 @@ export function PessoaFormDialog({
                   <SeccaoDetalhesPessoais
                     valor={rascunho.pessoais}
                     erroDe={erroDe}
+                    obrigatorios={obrigatoriosDaPessoa}
                     onPatch={(patch) =>
                       setRascunho((anterior) => ({
                         ...anterior,
@@ -709,7 +693,9 @@ export function PessoaFormDialog({
               admissao as pressas nunca ve um bloqueio. */}
           <Button
             onClick={criar}
-            disabled={aCriar || !temNomes || temDuplicadoTravao || precisaConfirmarSinal}
+            disabled={
+              aCriar || !temNomes || temDuplicadoTravao || precisaConfirmarSinal || aEsperarConfiguracao
+            }
           >
             {aCriar && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
             {t("hr.form.criarFicha")}
@@ -731,6 +717,23 @@ export function PessoaFormDialog({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* O envio do convite da ficha acabada de criar. Fica fora do conteudo do
+          assistente (que ja fechou e limpou o rascunho): e a sua propria raiz
+          de dialogo, so montada aqui para nao precisar de um fragmento. Fechar
+          (com ou sem envio) segue para a ficha, como se o assistente tivesse
+          terminado agora. */}
+      <EnviarConviteDialog
+        open={conviteDaNovaPessoa !== null}
+        onOpenChange={(aberto) => {
+          if (aberto || conviteDaNovaPessoa === null) return;
+          const { pessoaId } = conviteDaNovaPessoa;
+          setConviteDaNovaPessoa(null);
+          onCriada?.(pessoaId);
+        }}
+        pessoaId={conviteDaNovaPessoa?.pessoaId ?? ""}
+        emailSugerido={conviteDaNovaPessoa?.email ?? null}
+      />
     </Dialog>
   );
 }

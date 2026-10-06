@@ -219,6 +219,16 @@ describe("obrigatoriosResolvidos", () => {
     expect(obrigatoriosResolvidos(null)).toBe(CAMPOS_OBRIGATORIOS_ADMISSAO);
   });
 
+  it("uma lista VAZIA do servidor (nenhum campo na posicao convite) e nada obrigatorio, nao o fallback", () => {
+    // `[]` e uma resposta; so `null`/`undefined` e "nao se sabe". Confundir os
+    // dois fazia o convite mostrar os 28 campos com asterisco e bloquear o
+    // botao de submeter, quando o servidor nao pedia nenhum.
+    const resolvidos = obrigatoriosResolvidos([]);
+    expect(resolvidos).toEqual([]);
+    expect(resolvidos).not.toBe(CAMPOS_OBRIGATORIOS_ADMISSAO);
+    expect(pendenciasDoRascunho(VAZIO, resolvidos)).toEqual([]);
+  });
+
   it("um codigo omitido pelo servidor deixa de ser obrigatorio", () => {
     const doServidor = CAMPOS_OBRIGATORIOS_ADMISSAO.filter((c) => c.codigo !== "niss").map((c) => ({
       codigo: c.codigo as string,

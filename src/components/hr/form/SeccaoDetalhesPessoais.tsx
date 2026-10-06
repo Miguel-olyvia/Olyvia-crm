@@ -50,20 +50,30 @@ interface SeccaoDetalhesPessoaisProps {
   valor: RascunhoPessoais;
   onPatch: (patch: Partial<RascunhoPessoais>) => void;
   erroDe: (campoId: string) => string | null;
+  /**
+   * Os codigos de admissao que ESTE formulario exige agora (ver
+   * `codigosObrigatoriosDoFormulario`): so o e-mail quando a pessoa preenche
+   * por convite; os da posicao `convite` quando e o RH a preencher.
+   */
+  obrigatorios?: ReadonlySet<string>;
 }
 
 export function SeccaoDetalhesPessoais({
   valor,
   onPatch,
   erroDe,
+  obrigatorios,
 }: SeccaoDetalhesPessoaisProps) {
   const { t } = useTranslation();
+  const obr = (codigo: string): boolean => obrigatorios?.has(codigo) ?? false;
 
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <CampoTexto
           id="hr-novo-data-nascimento"
+          obrigatorio={obr("data_nascimento")}
+          erro={erroDe("hr-novo-data-nascimento")}
           label={t("employees.form.birthDate")}
           tipo="date"
           valor={valor.data_nascimento}
@@ -71,6 +81,8 @@ export function SeccaoDetalhesPessoais({
         />
         <CampoSelect
           id="hr-novo-genero"
+          obrigatorio={obr("genero")}
+          erro={erroDe("hr-novo-genero")}
           label={t("hr.campos.genero")}
           valor={valor.genero}
           vazioLabel={t("hr.campos.semValor")}
@@ -81,12 +93,16 @@ export function SeccaoDetalhesPessoais({
             fonte (`countries`): para a base ambos sao duas letras maiusculas. */}
         <CampoPais
           id="hr-novo-nacionalidade"
+          obrigatorio={obr("nacionalidade")}
+          erro={erroDe("hr-novo-nacionalidade")}
           label={t("hr.campos.nacionalidade")}
           valor={valor.nacionalidade}
           onChange={(v) => onPatch({ nacionalidade: v })}
         />
         <CampoSelect
           id="hr-novo-estado-civil"
+          obrigatorio={obr("estado_civil")}
+          erro={erroDe("hr-novo-estado-civil")}
           label={t("hr.campos.estadoCivil")}
           valor={valor.estado_civil}
           vazioLabel={t("hr.campos.semValor")}
@@ -95,6 +111,7 @@ export function SeccaoDetalhesPessoais({
         />
         <CampoTexto
           id="hr-novo-dependentes"
+          obrigatorio={obr("dependentes")}
           label={t("hr.campos.dependentes")}
           tipo="number"
           min={0}
@@ -104,6 +121,8 @@ export function SeccaoDetalhesPessoais({
         />
         <CampoTexto
           id="hr-novo-telefone-pessoal"
+          obrigatorio={obr("telefone_pessoal")}
+          erro={erroDe("hr-novo-telefone-pessoal")}
           label={t("hr.campos.telefonePessoal")}
           tipo="tel"
           valor={valor.telefone_pessoal}
@@ -111,6 +130,7 @@ export function SeccaoDetalhesPessoais({
         />
         <CampoTexto
           id="hr-novo-email-pessoal"
+          obrigatorio={obr("email_pessoal")}
           label={t("hr.campos.emailPessoal")}
           tipo="email"
           valor={valor.email_pessoal}
@@ -132,6 +152,8 @@ export function SeccaoDetalhesPessoais({
         <div className="grid gap-4 sm:grid-cols-2">
           <CampoSelect
             id="hr-novo-tipo-documento"
+            obrigatorio={obr("tipo_documento")}
+            erro={erroDe("hr-novo-tipo-documento")}
             label={t("hr.campos.tipoDocumento")}
             valor={valor.tipo_documento}
             vazioLabel={t("hr.campos.semValor")}
@@ -143,12 +165,16 @@ export function SeccaoDetalhesPessoais({
           />
           <CampoTexto
             id="hr-novo-numero-documento"
+            obrigatorio={obr("numero_documento")}
+            erro={erroDe("hr-novo-numero-documento")}
             label={t("hr.campos.numeroDocumento")}
             valor={valor.numero_documento}
             onChange={(v) => onPatch({ numero_documento: v })}
           />
           <CampoTexto
             id="hr-novo-validade-documento"
+            obrigatorio={obr("validade_documento") && valor.tipo_documento !== "cartao_cidadao"}
+            erro={erroDe("hr-novo-validade-documento")}
             label={t("hr.campos.validadeDocumento")}
             tipo="date"
             valor={valor.validade_documento}
@@ -156,6 +182,7 @@ export function SeccaoDetalhesPessoais({
           />
           <CampoTexto
             id="hr-novo-nif"
+            obrigatorio={obr("nif")}
             label={t("hr.campos.nif")}
             valor={valor.nif}
             erro={erroDe("hr-novo-nif")}
@@ -163,6 +190,7 @@ export function SeccaoDetalhesPessoais({
           />
           <CampoTexto
             id="hr-novo-niss"
+            obrigatorio={obr("niss")}
             label={t("hr.campos.niss")}
             ajuda={t("hr.form.ajudaNiss")}
             valor={valor.niss}
@@ -185,6 +213,8 @@ export function SeccaoDetalhesPessoais({
               duas coisas na mesma linha. */}
           <CampoTexto
             id="hr-novo-morada-linha1"
+            obrigatorio={obr("linha1")}
+            erro={erroDe("hr-novo-morada-linha1")}
             label={t("hr.campos.enderecoRua")}
             className="sm:col-span-2"
             valor={valor.morada_linha1}
@@ -199,12 +229,16 @@ export function SeccaoDetalhesPessoais({
           />
           <CampoTexto
             id="hr-novo-morada-localidade"
+            obrigatorio={obr("localidade")}
+            erro={erroDe("hr-novo-morada-localidade")}
             label={t("hr.campos.cidade")}
             valor={valor.morada_localidade}
             onChange={(v) => onPatch({ morada_localidade: v })}
           />
           <CampoTexto
             id="hr-novo-morada-codigo-postal"
+            obrigatorio={obr("codigo_postal")}
+            erro={erroDe("hr-novo-morada-codigo-postal")}
             label={t("employees.form.postalCode")}
             valor={valor.morada_codigo_postal}
             onChange={(v) => onPatch({ morada_codigo_postal: v })}
@@ -246,6 +280,7 @@ export function SeccaoDetalhesPessoais({
               a ler "IBAN" em cima do campo. */}
           <CampoTexto
             id="hr-novo-conta-numero"
+            obrigatorio={obr("conta_numero")}
             label={t(chaveDoRotuloDaConta(valor.conta_formato))}
             ajuda={t("hr.form.ajudaConta")}
             valor={valor.conta_numero}

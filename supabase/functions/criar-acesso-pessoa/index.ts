@@ -17,10 +17,13 @@
  *   5. ENVIA AS CREDENCIAIS por e-mail, sem segundo botao e sem ninguem
  *      redigir o e-mail.
  *
- * O destinatario e SEMPRE o `email_pessoal` da ficha -- que e campo obrigatorio
- * da admissao, por isso nunca falta a quem esta em condicoes de receber acesso.
- * Nunca o `email_trabalho`: mandar as credenciais para a caixa da empresa a
- * quem ainda nao entrou na empresa nao chega a lado nenhum.
+ * Na CRIACAO o destinatario e o `email_pessoal` da ficha -- que e campo
+ * obrigatorio da admissao, por isso nunca falta a quem esta em condicoes de
+ * receber acesso. Nunca o `email_trabalho`: mandar as credenciais para a caixa
+ * da empresa a quem ainda nao entrou na empresa nao chega a lado nenhum. No
+ * REENVIO e o e-mail da CONTA de autenticacao (nunca o `email_pessoal`, que se
+ * edita com outra permissao). Se a conta de autenticacao ja existia, a sua
+ * password nao se repoe nem se envia.
  *
  * A PASSWORD NUNCA SAI NA RESPOSTA
  * --------------------------------
@@ -41,6 +44,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { orgScoped, type OrgScopedQueryBuilder } from "../_shared/orgScopedQuery.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { corpoDoEmail, destinatarioDoReenvio } from "./emailCredenciais.ts";
+import { avaliarFichaCompleta } from "./fichaCompleta.ts";
 
 initSentry();
 
@@ -59,32 +64,6 @@ function gerarPassword(): string {
   let saida = "";
   for (const b of bytes) saida += ALFABETO[b % ALFABETO.length];
   return saida;
-}
-
-function escaparHtml(texto: string): string {
-  return texto
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function corpoDoEmail(nome: string, email: string, password: string, baseUrl: string) {
-  const link = baseUrl ? `${baseUrl}/login` : "";
-  const html =
-    `<p>Ola ${escaparHtml(nome)},</p>` +
-    `<p>Foi-lhe criado acesso a Olyvia. Os seus dados de entrada:</p>` +
-    `<p><strong>Utilizador:</strong> ${escaparHtml(email)}<br>` +
-    `<strong>Password:</strong> ${escaparHtml(password)}</p>` +
-    (link ? `<p><a href="${escaparHtml(link)}">Entrar na Olyvia</a></p>` : "") +
-    `<p>Altere a password depois da primeira entrada. Esta mensagem e a unica ` +
-    `copia da password: ninguem na sua organizacao a consegue ver.</p>`;
-  const text =
-    `Ola ${nome},\n\nFoi-lhe criado acesso a Olyvia.\n\n` +
-    `Utilizador: ${email}\nPassword: ${password}\n\n` +
-    (link ? `Entrar: ${link}\n\n` : "") +
-    `Altere a password depois da primeira entrada. Esta mensagem e a unica copia da password.`;
-  return { html, text };
 }
 
 Deno.serve(async (req: Request): Promise<Response> => {
@@ -235,6 +214,20 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return responder({ error: "conta_sem_utilizador_de_autenticacao" }, 409);
       }
 
+      // O destinatario e o e-mail da CONTA de autenticacao, nunca o
+      // `email_pessoal` da ficha: esse campo edita-se com `hr.pessoas.edit`, e
+      // com ele quem edita a ficha de um colega recebia a password dele. A
+      // password so se altera depois de haver para onde a mandar.
+      const { data: authConta, error: erroAuthConta } = await svc.auth.admin.getUserById(
+        conta.auth_user_id,
+      );
+      if (erroAuthConta) {
+        captureError(erroAuthConta);
+        return responder({ error: "erro_inesperado" }, 500);
+      }
+      const emailConta = destinatarioDoReenvio({ emailConta: authConta?.user?.email });
+      if (!emailConta) return responder({ error: "conta_sem_email" }, 409);
+
       const { error: erroPassword } = await svc.auth.admin.updateUserById(conta.auth_user_id, {
         password,
       });
@@ -243,7 +236,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
         return responder({ error: "password_nao_alterada" }, 400);
       }
 
-      const enviado = await enviarCredenciais(svc, { email, nome, password, baseUrl, org });
+      const enviado = await enviarCredenciais(svc, { email: emailConta, nome, password, baseUrl, org });
       return responder({
         ok: true,
         email_enviado: enviado,
@@ -254,6 +247,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // ========================================================================
     // CRIAR: conta nova, papel escolhido, ligacao a ficha, e-mail.
     // ========================================================================
+    // GUARDA: so a PRIMEIRA criacao de acesso exige a ficha completa (reenviar
+    // credenciais a quem ja tem conta, acima, continua permitido). Com
+    // `service_role` `auth.uid()` e nulo e `hr_admissao_pendencias` devolve
+    // todas as pendencias (convite e ficha, nunca as opcionais). Se a consulta
+    // falhar, fecha: 500 e nada se cria.
+    const { data: pendencias, error: erroPendencias } = await svc.rpc("hr_admissao_pendencias", {
+      p_pessoa_id: pessoaId,
+    });
+    if (erroPendencias) captureError(erroPendencias);
+    const fichaIncompleta = avaliarFichaCompleta({ data: pendencias, error: erroPendencias });
+    if (fichaIncompleta) return responder(fichaIncompleta.body, fichaIncompleta.status);
+
     if (!roleId) return responder({ error: "papel_obrigatorio" }, 400);
 
     // EXCEPCAO 3 ao orgScoped: `anew_roles.organization_id` e NULO nos papeis
@@ -283,6 +288,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
     // A conta de autenticacao. `admin_created` diz ao trigger handle_new_user()
     // para nao pre-criar o perfil -- ver o comentario longo em create-user.
     let authUserId: string;
+    // `null` quando a conta ja existia: nesse caso nao se envia password nenhuma.
+    let passwordParaEnviar: string | null = password;
     const { data: criada, error: erroCriar } = await svc.auth.admin.createUser({
       email,
       password,
@@ -299,15 +306,14 @@ Deno.serve(async (req: Request): Promise<Response> => {
       }
       // Ja ha conta com este e-mail (a pessoa ja trabalhou aqui, ou tem conta
       // noutra organizacao). Reaproveita-se: a alternativa e deixar a ficha sem
-      // acesso possivel para sempre.
+      // acesso possivel para sempre. A password dessa conta NAO se toca: pode
+      // ser de uma pessoa de outra organizacao, e repo-la por indicacao de um
+      // terceiro invalidava-lhe a sessao. A pessoa entra com a que ja tem, ou
+      // recupera-a (o e-mail diz-lho, sem password).
       const existente = await procurarAuthUserPorEmail(svc, email);
       if (!existente) return responder({ error: "conta_existente_nao_encontrada" }, 400);
       authUserId = existente.id;
-      const { error: erroPassword } = await svc.auth.admin.updateUserById(authUserId, { password });
-      if (erroPassword) {
-        captureError(erroPassword);
-        return responder({ error: "password_nao_alterada" }, 400);
-      }
+      passwordParaEnviar = null;
     } else {
       authUserId = criada.user!.id;
     }
@@ -372,7 +378,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return responder({ error: erroLigar.message ?? "conta_nao_ligada_a_ficha" }, 400);
     }
 
-    const enviado = await enviarCredenciais(svc, { email, nome, password, baseUrl, org });
+    const enviado = await enviarCredenciais(svc, {
+      email,
+      nome,
+      password: passwordParaEnviar,
+      baseUrl,
+      org,
+    });
     return responder({
       ok: true,
       email_enviado: enviado,
@@ -393,7 +405,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 async function enviarCredenciais(
   // deno-lint-ignore no-explicit-any
   svc: any,
-  args: { email: string; nome: string; password: string; baseUrl: string; org: string },
+  args: { email: string; nome: string; password: string | null; baseUrl: string; org: string },
 ): Promise<boolean> {
   try {
     const { html, text } = corpoDoEmail(args.nome, args.email, args.password, args.baseUrl);

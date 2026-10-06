@@ -14,7 +14,7 @@
  *
  * O separador vai no URL (`?tab=`) para o link ser partilhavel.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,6 @@ import {
   CalendarRange,
   FileText,
   FolderOpen,
-  KeyRound,
   LayoutDashboard,
   ListChecks,
   MoreHorizontal,
@@ -45,6 +44,9 @@ import { PessoaContratoTab } from "@/components/hr/PessoaContratoTab";
 import { PessoaDocumentosTab } from "@/components/hr/PessoaDocumentosTab";
 import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
 import { PessoaAdmissaoPendencias } from "@/components/hr/PessoaAdmissaoPendencias";
+import { PessoaConviteAdmissaoEstado } from "@/components/hr/PessoaConviteAdmissaoEstado";
+import { BotaoCriarAcesso } from "@/components/hr/BotaoCriarAcesso";
+import { modoDeEnvioDoConvite } from "@/components/hr/modoEnvioConvite";
 import { PessoaAusenciasTab } from "@/components/hr/PessoaAusenciasTab";
 import { PessoaHorarioTab } from "@/components/hr/PessoaHorarioTab";
 import { PessoaLaboraisTab } from "@/components/hr/PessoaLaboraisTab";
@@ -56,6 +58,8 @@ import { PessoaVisaoGeralTab } from "@/components/hr/PessoaVisaoGeralTab";
 import { derivarEstadoContrato } from "@/lib/hr/estadoContrato";
 import { horasContratadasSemanaisReais } from "@/lib/hr/horas";
 import { useCompany } from "@/contexts/CompanyContext";
+import { useAdmissaoPendencias } from "@/hooks/useAdmissaoPendencias";
+import { useConviteAdmissaoResumo } from "@/hooks/useConviteAdmissaoResumo";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { useCargos } from "@/hooks/useCargos";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -83,11 +87,35 @@ export default function PessoaDetail() {
   const [conviteDialogoAberto, setConviteDialogoAberto] = useState(false);
   const [acessoDialogoAberto, setAcessoDialogoAberto] = useState(false);
   const [acessoModo, setAcessoModo] = useState<"criar" | "reenviar">("criar");
+  const [conviteModo, setConviteModo] = useState<"enviar" | "reenviar">("enviar");
 
   const { companies, activeCompany } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
 
   const ficha = usePessoa(id);
+
+  // O que falta na admissao e o estado do convite vivem AQUI, e nao dentro dos
+  // cartoes, porque tres coisas precisam deles: os cartoes, o botao "Criar
+  // acesso" (desactivado com pendencias) e o reenvio do convite (que precisa do
+  // e-mail do convite actual e de recarregar o estado depois).
+  const pendenciasAdmissao = useAdmissaoPendencias(id ?? null);
+  const conviteResumo = useConviteAdmissaoResumo(id ?? null);
+  const recarregarPendencias = pendenciasAdmissao.recarregar;
+  const recarregarConvite = conviteResumo.recarregar;
+
+  // Gravar num separador recarrega a ficha (`loading` desce de novo): e o sinal
+  // para reler o que falta, senao o cartao ficava a dizer o que ja se preencheu.
+  const fichaJaCarregou = useRef(false);
+  useEffect(() => {
+    if (ficha.loading) return;
+    if (!fichaJaCarregou.current) {
+      // A primeira carga ja foi lida pelos proprios hooks.
+      fichaJaCarregou.current = true;
+      return;
+    }
+    recarregarPendencias();
+    recarregarConvite();
+  }, [ficha.loading, recarregarPendencias, recarregarConvite]);
   // A lista da organizacao serve duas coisas: resolver o nome de quem a pessoa
   // reporta, e alimentar o selector de chefia nos detalhes laborais.
   const { pessoas: colegas } = usePessoas();
@@ -339,24 +367,43 @@ export default function PessoaDetail() {
             e-mail (PLANO FECHADO, seccao 5-7). */}
         {!ficha.conta && (
           <PermissionGate permission="hr.pessoas.convite.enviar">
-            <Button variant="outline" className="gap-2" onClick={() => setConviteDialogoAberto(true)}>
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={() => {
+                // Com um convite pendente, reenvia-se (com o e-mail dele): o
+                // servidor so herda o rascunho com o mesmo e-mail.
+                setConviteModo(modoDeEnvioDoConvite(conviteResumo.resumo));
+                setConviteDialogoAberto(true);
+              }}
+            >
               <Send className="h-4 w-4" />
               {t("hr.convite.enviar")}
             </Button>
           </PermissionGate>
         )}
         <PermissionGate permission="hr.pessoas.conta.criar">
-          <Button
-            variant="outline"
-            className="gap-2"
+          {/* "Criar acesso" so com a ficha completa: com pendencias fica
+              desactivado e a razao esta ao lado, em texto -- um botao
+              desactivado sem explicacao e so um enigma. Reenviar credenciais
+              a quem ja tem conta nao e travado. Se nao se sabe o que falta
+              (sem permissao para o ver, ou a leitura falhou) o botao fica
+              activo: quem decide e a Edge Function, que fecha na duvida. */}
+          <BotaoCriarAcesso
+            reenviar={Boolean(ficha.conta)}
+            pendencias={
+              !ficha.conta &&
+              !pendenciasAdmissao.carregando &&
+              !pendenciasAdmissao.semAcesso &&
+              !pendenciasAdmissao.erro
+                ? pendenciasAdmissao.pendencias.length
+                : 0
+            }
             onClick={() => {
               setAcessoModo(ficha.conta ? "reenviar" : "criar");
               setAcessoDialogoAberto(true);
             }}
-          >
-            <KeyRound className="h-4 w-4" />
-            {t(ficha.conta ? "hr.acesso.reenviar" : "hr.acesso.criar")}
-          </Button>
+          />
         </PermissionGate>
       </div>
 
@@ -364,7 +411,17 @@ export default function PessoaDetail() {
         open={conviteDialogoAberto}
         onOpenChange={setConviteDialogoAberto}
         pessoaId={pessoa.id}
-        emailSugerido={pessoa.email_pessoal}
+        modo={conviteModo}
+        // No reenvio, o e-mail do convite actual; se o RH o mudar, o convite
+        // novo vai para o outro e o rascunho antigo nao o acompanha.
+        emailSugerido={
+          conviteModo === "reenviar"
+            ? (conviteResumo.resumo?.emailDestino ?? pessoa.email_pessoal)
+            : pessoa.email_pessoal
+        }
+        // So o estado do convite se relê: recarregar a ficha inteira faria a
+        // pagina piscar e fechar o dialogo com o link por copiar.
+        onEnviado={recarregarConvite}
       />
 
       <CriarAcessoDialog
@@ -372,13 +429,26 @@ export default function PessoaDetail() {
         onOpenChange={setAcessoDialogoAberto}
         pessoaId={pessoa.id}
         modo={acessoModo}
+        pendencias={pendenciasAdmissao.pendencias}
         onCriado={() => void ficha.refresh()}
+      />
+
+      {/* O convite: enviado a quem, valido ate quando, preenchido ou nao, e o
+          que travou a ultima tentativa. Fica ali, nao e um toast. */}
+      <PessoaConviteAdmissaoEstado
+        pessoaId={pessoa.id}
+        estado={conviteResumo}
+        podeEnviar={hasPermission("hr.pessoas.convite.enviar") && !ficha.conta}
+        onReenviar={() => {
+          setConviteModo("reenviar");
+          setConviteDialogoAberto(true);
+        }}
       />
 
       {/* O que ainda falta para a admissao ficar completa -- e, quando nao
           falta nada, o sinal de que se podem enviar as credenciais. Some-se
           sozinho a quem nao tem permissao para saber. */}
-      <PessoaAdmissaoPendencias pessoaId={pessoa.id} />
+      <PessoaAdmissaoPendencias pessoaId={pessoa.id} estado={pendenciasAdmissao} />
 
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
         <div className="overflow-x-auto">
@@ -468,6 +538,8 @@ export default function PessoaDetail() {
 
         <TabsContent value="pessoais">
           <PessoaPessoaisTab
+            pessoaId={pessoa.id}
+            organizationId={pessoa.organization_id}
             dadosPessoais={ficha.dadosPessoais}
             identificacao={ficha.identificacao}
             morada={ficha.morada}

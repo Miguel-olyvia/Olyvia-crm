@@ -26,7 +26,8 @@
  * duas incondicionalmente -- e para na primeira escrita que falhar: primeiro
  * `pessoas_dados_pessoais`, depois `pessoas`.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -41,6 +42,8 @@ import {
 } from "@/components/ui/select";
 import { CreditCard, IdCard, Loader2, MapPin, Phone, Receipt, User } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { usePessoaDuplicados } from "@/hooks/usePessoaDuplicados";
+import { nifValido, nissValido } from "@/lib/hr/identificadoresPt";
 import { toast } from "@/lib/toast";
 import { PessoaContaBancariaField } from "@/components/hr/PessoaContaBancariaField";
 import { CountrySelect } from "@/components/CountrySelect";
@@ -94,7 +97,43 @@ export interface PessoaPessoaisPermissoes {
   laboraisEdit: boolean;
 }
 
+/**
+ * Erro inline de NIF/NISS: `ficha` so existe quando o numero ja esta noutra
+ * ficha da organizacao -- diz-se QUAL (nome e ligacao), porque e o RH quem
+ * decide se e a mesma pessoa duplicada ou uma gralha.
+ */
+interface ErroNumero {
+  texto: string;
+  ficha?: { id: string; nome: string };
+}
+
+function ErroDeNumero({ id, erro }: { id: string; erro: ErroNumero }) {
+  const { t } = useTranslation();
+  return (
+    // role=alert: o erro aparece depois de carregar em Gravar, e o leitor de
+    // ecra tem de o anunciar sem o RH o ir procurar.
+    <p id={id} role="alert" className="text-xs text-destructive">
+      {erro.texto}
+      {erro.ficha && (
+        <>
+          {" "}
+          <Link to={`/rh/pessoas/${erro.ficha.id}`} className="font-medium underline underline-offset-2">
+            {t("hr.duplicados.abrirFicha")}
+          </Link>
+        </>
+      )}
+    </p>
+  );
+}
+
 interface PessoaPessoaisTabProps {
+  /**
+   * A ficha e a organizacao em causa, para verificar se um NIF/NISS novo ja
+   * esta noutra ficha antes de o gravar. Ausentes, essa verificacao nao se faz
+   * (a validacao do digito de controlo continua).
+   */
+  pessoaId?: string;
+  organizationId?: string;
   dadosPessoais: PessoaDadosPessoais | null;
   identificacao: PessoaIdentificacao | null;
   morada: PessoaMorada | null;
@@ -167,6 +206,8 @@ export function PessoaPessoaisTab({
   identificacao,
   morada,
   emergencia,
+  pessoaId,
+  organizationId,
   bancarios,
   saude,
   fardamento,
@@ -309,14 +350,93 @@ export function PessoaPessoaisTab({
     [ident, idOriginal],
   );
   const [nissNovo, setNissNovo] = useState("");
+  const [erroNif, setErroNif] = useState<ErroNumero | null>(null);
+  const [erroNiss, setErroNiss] = useState<ErroNumero | null>(null);
+  const { verificar: verificarDuplicados } = usePessoaDuplicados();
 
-  const gravarIdent = async () => {
+  /**
+   * Um numero novo so se grava se o digito de controlo bate e se nenhuma outra
+   * ficha da organizacao o tem -- a mesma regra do convite e do formulario de
+   * criar. Quem decide por ultimo e a base (trigger do digito de controlo e
+   * indices unicos por organizacao); isto e para o RH ver a razao junto do
+   * campo, com a ficha em causa, em vez de um erro seco depois de gravar.
+   *
+   * Se a verificacao de duplicados nao puder correr (sem permissao, travao de
+   * tentativas, falha de rede) nao se bloqueia a gravacao: os indices unicos
+   * apanham o resto.
+   */
+  const numeroBloqueado = async (
+    campo: "nif" | "niss",
+    valor: string,
+  ): Promise<ErroNumero | null> => {
+    const valido = campo === "nif" ? nifValido(valor) : nissValido(valor);
+    if (!valido) {
+      return {
+        texto: t(campo === "nif" ? "hr.convite.erro.nifInvalido" : "hr.convite.erro.nissInvalido"),
+      };
+    }
+    if (!pessoaId || !organizationId) return null;
+    const candidatos = await verificarDuplicados({
+      organizationId,
+      nif: campo === "nif" ? valor : null,
+      niss: campo === "niss" ? valor : null,
+      excluirPessoaId: pessoaId,
+    });
+    const travao = (candidatos ?? []).find(
+      (c) => c.forca === "travao" && c.campoCoincidente === campo,
+    );
+    if (!travao) return null;
+    return {
+      texto: t(campo === "nif" ? "hr.duplicados.nifNaFicha" : "hr.duplicados.nissNaFicha", {
+        nome: travao.nomeCompleto,
+      }),
+      ficha: { id: travao.pessoaId, nome: travao.nomeCompleto },
+    };
+  };
+
+  /**
+   * A verificacao (rede) e a gravacao a seguir correm uma de cada vez: o botao
+   * so ficava desactivado por `saving`, que nao cobre o `await` da verificacao,
+   * e um duplo clique disparava duas verificacoes e duas gravacoes.
+   */
+  const [aVerificarNumero, setAVerificarNumero] = useState(false);
+  const aVerificarRef = useRef(false);
+  const umaDeCadaVez = async (accao: () => Promise<void>) => {
+    if (aVerificarRef.current) return;
+    aVerificarRef.current = true;
+    setAVerificarNumero(true);
+    try {
+      await accao();
+    } finally {
+      aVerificarRef.current = false;
+      setAVerificarNumero(false);
+    }
+  };
+
+  const gravarIdent = () => umaDeCadaVez(gravarIdentificacao);
+  const gravarNiss = () => umaDeCadaVez(gravarNissNovo);
+
+  const gravarIdentificacao = async () => {
+    // So se valida o NIF quando mudou e nao ficou vazio: apagar um NIF e
+    // legitimo, e uma ficha antiga com NIF invalido continua editavel nos
+    // outros campos.
+    const nifNovo = ident.nif.replace(/\s+/g, "");
+    if (ident.nif.trim() !== idOriginal.nif.trim() && nifNovo !== "") {
+      const bloqueio = await numeroBloqueado("nif", nifNovo);
+      if (bloqueio) {
+        setErroNif(bloqueio);
+        // O leitor de ecra anuncia o erro (role=alert); o foco volta ao campo.
+        document.getElementById("hr-nif")?.focus();
+        return;
+      }
+    }
+    setErroNif(null);
     const erro = await onGuardarIdentificacao({
       tipo_documento:
         ident.tipo_documento === SEM_ESCOLHA ? null : (ident.tipo_documento as TipoDocumento),
       numero_documento: ouNull(ident.numero_documento),
       validade_documento: ouNull(ident.validade_documento),
-      nif: ouNull(ident.nif),
+      nif: ouNull(nifNovo),
       carta_conducao_numero: ouNull(ident.carta_conducao_numero),
       carta_conducao_categorias: ouNull(ident.carta_conducao_categorias),
       carta_conducao_validade: ouNull(ident.carta_conducao_validade),
@@ -328,8 +448,16 @@ export function PessoaPessoaisTab({
     toast.success(t("hr.sucesso.guardado"));
   };
 
-  const gravarNiss = async () => {
-    const erro = await onDefinirNiss(nissNovo.replace(/\s+/g, ""));
+  const gravarNissNovo = async () => {
+    const nissLimpo = nissNovo.replace(/\s+/g, "");
+    const bloqueio = await numeroBloqueado("niss", nissLimpo);
+    if (bloqueio) {
+      setErroNiss(bloqueio);
+      document.getElementById("hr-niss-novo")?.focus();
+      return;
+    }
+    setErroNiss(null);
+    const erro = await onDefinirNiss(nissLimpo);
     if (erro) {
       toast.error(erro);
       return;
@@ -608,11 +736,18 @@ export function PessoaPessoaisTab({
                 <Input
                   id="hr-nif"
                   inputMode="numeric"
-                  maxLength={9}
+                  maxLength={11}
                   value={ident.nif}
                   disabled={!permissoes.identificacaoEdit}
-                  onChange={(e) => setIdent({ ...ident, nif: e.target.value })}
+                  aria-invalid={erroNif ? true : undefined}
+                  aria-describedby={erroNif ? "hr-nif-erro" : undefined}
+                  className={erroNif ? "border-destructive" : undefined}
+                  onChange={(e) => {
+                    setErroNif(null);
+                    setIdent({ ...ident, nif: e.target.value });
+                  }}
                 />
+                {erroNif && <ErroDeNumero id="hr-nif-erro" erro={erroNif} />}
               </div>
             </div>
 
@@ -632,11 +767,27 @@ export function PessoaPessoaisTab({
                     maxLength={11}
                     placeholder="00000000000"
                     value={nissNovo}
-                    onChange={(e) => setNissNovo(e.target.value)}
+                    aria-invalid={erroNiss ? true : undefined}
+                    aria-describedby={erroNiss ? "hr-niss-erro" : undefined}
+                    className={erroNiss ? "border-destructive" : undefined}
+                    onChange={(e) => {
+                      setErroNiss(null);
+                      setNissNovo(e.target.value);
+                    }}
                   />
+                  {erroNiss && <ErroDeNumero id="hr-niss-erro" erro={erroNiss} />}
                 </div>
-                <Button size="sm" onClick={gravarNiss} disabled={saving || nissNovo.trim().length !== 11}>
-                  {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                {/* Nao depende so de ter onze algarismos: um NISS com o digito
+                    de controlo errado tambem tem onze, e e a validacao ao
+                    clicar que diz porque nao serve. */}
+                <Button
+                  size="sm"
+                  onClick={gravarNiss}
+                  disabled={saving || aVerificarNumero || nissNovo.trim() === ""}
+                >
+                  {(saving || aVerificarNumero) && (
+                    <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  )}
                   {t("employees.form.update")}
                 </Button>
               </div>
@@ -685,7 +836,7 @@ export function PessoaPessoaisTab({
 
             <AccoesBloco
               visivel={permissoes.identificacaoEdit && identAlterado}
-              saving={saving}
+              saving={saving || aVerificarNumero}
               onGravar={gravarIdent}
               onCancelar={() => setIdent(idOriginal)}
             />

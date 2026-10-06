@@ -2,8 +2,16 @@
  * O formulario do convite de admissao -- pagina publica, SEM sessao, aberta
  * pelo link que o e-mail de convite leva. Duas paginas:
  *
- *  1. Dados pessoais, identificacao e morada.
- *  2. Dados bancarios, fardamento e assinatura.
+ *  1. Dados pessoais, identificacao e morada (`ConvitePagina1`).
+ *  2. Dados bancarios, fardamento e assinatura (`ConvitePagina2`).
+ *
+ * O QUE E OBRIGATORIO AQUI
+ * ------------------------
+ * So o que a organizacao pediu na posicao "convite": o servidor devolve essa
+ * lista em `campos_obrigatorios` e e ela que decide o asterisco e o que trava o
+ * avanco. Os campos de posicao "ficha" ou "opcional" nao travam nada -- ficam
+ * para o RH completar. A assinatura e a declaracao de veracidade sao sempre
+ * obrigatorias.
  *
  * O QUE NAO SE PEDE AQUI
  * ------------------------
@@ -17,48 +25,51 @@
  * convite so aceita IBAN -- e o unico formato que a RPC sabe gravar -- e por
  * isso nao ha formato nenhum a escolher aqui.
  *
+ * LINGUA E ERROS
+ * --------------
+ * Quem abre o link nao tem sessao: a lingua escolhe-se pelo navegador (pt, es,
+ * fr, de ou en; portugues por omissao), so neste ecra. Todo o erro que o
+ * servidor devolve acaba num texto nessa lingua -- nunca o codigo em bruto.
+ *
  * TODO O CAMPO TEM ETIQUETA ASSOCIADA, e os obrigatorios sao anunciados a
  * leitor de ecra (nao so a vermelho) -- ver `obrigatorio` em `form/Campos.tsx`.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
+import { Card, CardHeader, CardDescription } from "@/components/ui/card";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { IdiomaForcadoProvider } from "@/contexts/IdiomaForcadoContext";
 import {
   useConviteAdmissaoPublico,
   type DadosSubmissaoConvite,
 } from "@/hooks/useConviteAdmissaoPublico";
-import {
-  CamposTocadosProvider,
-  CampoPais,
-  CampoSelect,
-  CampoTexto,
-} from "@/components/hr/form/Campos";
-import {
-  CONJUGE_SITUACOES_PROFISSIONAIS,
-  ESTADOS_CIVIS,
-  GENEROS,
-  HABILITACOES_ACADEMICAS,
-  TAMANHOS_FARDAMENTO,
-  TAMANHOS_CALCADO,
-  TAMANHOS_CALCAS,
-  TIPOS_DOCUMENTO,
-} from "@/types/hr";
+import { CamposTocadosProvider } from "@/components/hr/form/Campos";
+import { ConvitePagina1 } from "@/components/hr/convite/ConvitePagina1";
+import { ConvitePagina2 } from "@/components/hr/convite/ConvitePagina2";
+import { ConviteCartaoLinkInvalido } from "@/components/hr/convite/ConviteCartaoLinkInvalido";
+import { ConviteSaudacao } from "@/components/hr/convite/ConviteSaudacao";
 import {
   CODIGOS_PAGINA_2,
   campoEhObrigatorio,
   obrigatoriosResolvidos,
   pendenciasDoRascunho,
+  type CodigoCampoObrigatorioAdmissao,
 } from "@/lib/hr/admissaoObrigatorios";
 import {
   RASCUNHO_CONVITE_VAZIO,
   construirPayloadConvite,
   type RascunhoConvite,
 } from "@/lib/hr/conviteAdmissaoPayload";
+import {
+  campoDoErroDeServidor,
+  errosDeFormato,
+  idiomaDoNavegador,
+  type CampoComFormato,
+  type IdiomaConvite,
+} from "@/lib/hr/conviteAdmissaoEcra";
+import { camposDeAdmissaoIncompleta, mensagemErroAdmissao } from "@/lib/hr/errosAdmissao";
 
 /** Um debounce generoso: nao vale a pena gravar a cada tecla. */
 const DEBOUNCE_RASCUNHO_MS = 3000;
@@ -71,18 +82,45 @@ const DEBOUNCE_RASCUNHO_MS = 3000;
 type Rascunho = RascunhoConvite;
 const VAZIO: Rascunho = RASCUNHO_CONVITE_VAZIO;
 
-/** Numeros (calcado, calcas) mostram-se como sao; letras/outro passam por i18n. */
-function rotuloTamanho(t: (chave: string) => string, tamanho: string): string {
-  return /^[0-9]+$/.test(tamanho) ? tamanho : t(`hr.tamanhoFardamento.${tamanho}`);
+/** O `id` de cada campo com validacao de formato, para saber se ja foi tocado. */
+const ID_DOM_DO_CAMPO: Record<CampoComFormato, string> = {
+  nif: "convite-nif",
+  niss: "convite-niss",
+  conta_numero: "convite-conta-numero",
+};
+
+const CAMPOS_COM_FORMATO: readonly string[] = ["nif", "niss", "conta_numero"];
+
+/**
+ * Nada preenchido nem herdado: nao ha rascunho a guardar. A declaracao de
+ * veracidade (`aceite`) nao conta -- nunca viaja num rascunho.
+ */
+function rascunhoEstaVazio(r: Rascunho): boolean {
+  return (Object.keys(VAZIO) as Array<keyof Rascunho>).every(
+    (campo) => campo === "aceite" || r[campo] === VAZIO[campo],
+  );
 }
 
 export default function ConviteAdmissao() {
-  const { t } = useTranslation();
+  // A lingua deste ecra vem do navegador; o resto da aplicacao nao a muda.
+  // O provider faz com que os componentes partilhados da arvore (que chamam
+  // useTranslation() sem argumento) usem a mesma lingua.
+  const idioma = useMemo(() => idiomaDoNavegador(), []);
+  return (
+    <IdiomaForcadoProvider idioma={idioma}>
+      <ConviteAdmissaoEcra idioma={idioma} />
+    </IdiomaForcadoProvider>
+  );
+}
+
+function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
+  const { t } = useTranslation(idioma);
   const { token } = useParams<{ token: string }>();
   const {
     estado,
     loading,
     erroInicial,
+    motivo,
     submetendo,
     submeter,
     gravarRascunho,
@@ -95,6 +133,9 @@ export default function ConviteAdmissao() {
   const [mostrarTodos, setMostrarTodos] = useState(false);
   const [concluido, setConcluido] = useState<{ avisos: string[] } | null>(null);
   const [erroSubmissao, setErroSubmissao] = useState<string | null>(null);
+  const [errosServidor, setErrosServidor] = useState<Partial<Record<CampoComFormato, string>>>({});
+  const [erroAssinatura, setErroAssinatura] = useState<string | null>(null);
+  const [erroAceite, setErroAceite] = useState<string | null>(null);
   const [rascunhoRestaurado, setRascunhoRestaurado] = useState(false);
 
   const tocar = (campoId: string) =>
@@ -103,12 +144,23 @@ export default function ConviteAdmissao() {
       return new Set(anteriores).add(campoId);
     });
 
-  const definir = <K extends keyof Rascunho>(campo: K, valor: Rascunho[K]) =>
+  const definir = <K extends keyof Rascunho>(campo: K, valor: Rascunho[K]) => {
     setRascunho((anterior) => ({ ...anterior, [campo]: valor }));
+    // Mexer num campo tira-lhe o erro que o servidor lhe tinha posto.
+    if (CAMPOS_COM_FORMATO.includes(campo)) {
+      setErrosServidor((anteriores) => {
+        if (!(campo in anteriores)) return anteriores;
+        const { [campo as CampoComFormato]: _removido, ...resto } = anteriores;
+        return resto;
+      });
+    }
+    if (campo === "assinatura_nome") setErroAssinatura(null);
+    if (campo === "aceite") setErroAceite(null);
+  };
 
-  // Restaura o rascunho gravado (accao "rascunho", ainda por publicar no
-  // lado do servidor -- ver o cabecalho do hook) assim que o token e
-  // validado. Uma so vez: depois disso e o utilizador quem manda no estado.
+  // Restaura o rascunho gravado (herdado do convite anterior, se o houve)
+  // assim que o token e validado. Uma so vez: depois disso e o utilizador quem
+  // manda no estado.
   useEffect(() => {
     if (rascunhoRestaurado || !estado) return;
     const bruto = estado.rascunho;
@@ -154,9 +206,19 @@ export default function ConviteAdmissao() {
   }, [rascunho, rascunhoRestaurado, concluido, gravarRascunho]);
 
   // E ao fechar a aba -- o debounce acima pode nunca chegar a disparar.
+  //
+  // So se regista DEPOIS do restauro do rascunho e com o convite valido. Antes
+  // disso o rascunho local e o vazio, e a gravacao substitui o rascunho inteiro
+  // na base: fechar a aba a meio do carregamento apagava o rascunho herdado do
+  // convite anterior. Pelo mesmo motivo, um rascunho igual ao vazio nunca se
+  // envia (nao ha nada de novo a guardar e pode haver algo de real la).
+  const conviteValido = Boolean(estado) && !erroInicial;
   useEffect(() => {
-    if (concluido) return;
-    const aoFechar = () => gravarRascunhoAoFechar(paraGravar(rascunhoRef.current));
+    if (concluido || !rascunhoRestaurado || !conviteValido) return;
+    const aoFechar = () => {
+      if (rascunhoEstaVazio(rascunhoRef.current)) return;
+      gravarRascunhoAoFechar(paraGravar(rascunhoRef.current));
+    };
     const aoMudarVisibilidade = () => {
       if (document.visibilityState === "hidden") aoFechar();
     };
@@ -166,13 +228,36 @@ export default function ConviteAdmissao() {
       window.removeEventListener("pagehide", aoFechar);
       document.removeEventListener("visibilitychange", aoMudarVisibilidade);
     };
-  }, [concluido, gravarRascunhoAoFechar]);
+  }, [concluido, rascunhoRestaurado, conviteValido, gravarRascunhoAoFechar]);
+
+  // FOCO. Ao mudar de pagina o botao que tinha o foco desaparece e o foco cairia
+  // para o corpo da pagina: leva-se ao topo (saudacao). Declarado ANTES do foco
+  // no campo invalido, para este ganhar quando ha os dois pedidos.
+  const topoRef = useRef<HTMLDivElement>(null);
+  const formularioRef = useRef<HTMLDivElement>(null);
+  const [pedidoFoco, setPedidoFoco] = useState(0);
+  const pedirFocoNoErro = () => setPedidoFoco((n) => n + 1);
+  const primeiraPagina = useRef(true);
+  useEffect(() => {
+    if (primeiraPagina.current) {
+      primeiraPagina.current = false;
+      return;
+    }
+    topoRef.current?.scrollIntoView?.();
+    topoRef.current?.focus({ preventScroll: true });
+  }, [pagina]);
+  // Com erros, o foco vai para o primeiro campo invalido: o erro pode estar
+  // fora do ecra (telemovel) e um leitor de ecra nao o anuncia sozinho.
+  useEffect(() => {
+    if (pedidoFoco === 0) return;
+    formularioRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
+  }, [pedidoFoco]);
 
   // Os obrigatorios REAIS desta organizacao, cruzados com a lista fixa do
-  // ecra (20261201050000): `estado.campos_obrigatorios` respeita
-  // `organization_admissao_settings`; quando vier vazio (convite antigo,
-  // falha), cai-se na lista estatica de sempre -- nunca uma regressao para
-  // "nada e obrigatorio".
+  // ecra: `estado.campos_obrigatorios` traz so os de posicao "convite". Um
+  // array VAZIO e uma resposta (a organizacao nao pos nenhum no convite) e vale
+  // "nada e obrigatorio"; so a chave ausente (convite antigo, falha) cai na
+  // lista estatica de sempre.
   const camposObrigatorios = useMemo(
     () => obrigatoriosResolvidos(estado?.campos_obrigatorios),
     [estado],
@@ -192,37 +277,96 @@ export default function ConviteAdmissao() {
     [pendencias],
   );
 
+  // Formato (digito de controlo do NIF/NISS, IBAN): tambem trava o avanco.
+  const errosFormato = useMemo(
+    () => errosDeFormato({ nif: rascunho.nif, niss: rascunho.niss, conta_numero: rascunho.conta_numero }),
+    [rascunho.nif, rascunho.niss, rascunho.conta_numero],
+  );
+  const formatoErradoNaPagina1 = Boolean(errosFormato.nif || errosFormato.niss);
+
   const erroDe = (campoId: keyof Rascunho): string | null => {
+    if (CAMPOS_COM_FORMATO.includes(campoId)) {
+      const campo = campoId as CampoComFormato;
+      if (errosServidor[campo]) return errosServidor[campo] ?? null;
+      const chave = errosFormato[campo];
+      if (chave && (mostrarTodos || tocados.has(ID_DOM_DO_CAMPO[campo]))) return t(chave);
+    }
     if (!mostrarTodos && !tocados.has(campoId)) return null;
     return pendenciasTodas.has(campoId) ? t("hr.convite.erroObrigatorio") : null;
   };
 
-  const obrigatorio1 = (campoId: Parameters<typeof campoEhObrigatorio>[1]): boolean =>
-    campoEhObrigatorio(rascunho, campoId, camposObrigatorios);
+  const obrigatorio = (codigo: CodigoCampoObrigatorioAdmissao): boolean =>
+    campoEhObrigatorio(rascunho, codigo, camposObrigatorios);
 
   const avancar = () => {
-    if (pendencias1.size > 0) {
+    if (pendencias1.size > 0 || formatoErradoNaPagina1) {
       setMostrarTodos(true);
+      pedirFocoNoErro();
       return;
     }
     setMostrarTodos(false);
+    setErroSubmissao(null);
     void gravarRascunho(paraGravar(rascunho));
     setPagina(2);
   };
 
-  const podeSubmeter =
-    rascunho.assinatura_nome.trim() !== "" && rascunho.aceite && !submetendo;
+  /** Voltar a pagina 1: o erro da recusa pertencia a pagina que se deixa. */
+  const voltar = () => {
+    setErroSubmissao(null);
+    setPagina(1);
+  };
+
+  /** Uma recusa do servidor: marca o campo, ou diz o que falta, e leva a pessoa onde ha trabalho. */
+  const tratarRecusa = (corpo: { error?: string; campos?: unknown }) => {
+    const codigo = corpo.error?.split(":")[0].trim();
+    const mensagem = mensagemErroAdmissao(t, corpo);
+    const campo = campoDoErroDeServidor(codigo);
+    if (campo) {
+      setErrosServidor((anteriores) => ({ ...anteriores, [campo]: mensagem }));
+      setPagina(campo === "conta_numero" ? 2 : 1);
+      pedirFocoNoErro();
+      return;
+    }
+    setErroSubmissao(mensagem);
+    if (codigo === "admissao_incompleta") {
+      setMostrarTodos(true);
+      const primeiro = camposDeAdmissaoIncompleta(corpo)[0];
+      if (primeiro) {
+        setPagina(CODIGOS_PAGINA_2.has(primeiro as CodigoCampoObrigatorioAdmissao) ? 2 : 1);
+      }
+      pedirFocoNoErro();
+    }
+  };
 
   const submeterFormulario = async () => {
-    if (!podeSubmeter) return;
+    if (submetendo) return;
 
-    // Faltar um obrigatorio nao e erro de servidor: mostra-se onde falta e,
-    // se for na pagina 1, volta-se la -- submeter assim so gastava uma ida a
-    // base para ser recusado pelo portao de obrigatorios.
+    // A assinatura e a declaracao pedem-se sempre; falta-lhes o erro, junto do
+    // campo, em vez de um botao que nao carrega e nao diz porque.
+    const faltaAssinatura = rascunho.assinatura_nome.trim() === "";
+    const faltaAceite = !rascunho.aceite;
+    setErroAssinatura(faltaAssinatura ? t("hr.convite.erro.assinatura") : null);
+    setErroAceite(faltaAceite ? t("hr.convite.erroObrigatorio") : null);
+    if (faltaAssinatura || faltaAceite) {
+      pedirFocoNoErro();
+      return;
+    }
+
+    // Faltar um obrigatorio, ou um numero com formato errado, nao e erro de
+    // servidor: mostra-se onde falta e, se for na pagina 1, volta-se la --
+    // submeter assim so gastava uma ida a base para ser recusado.
     if (pendenciasTodas.size > 0) {
       setMostrarTodos(true);
       setErroSubmissao(t("hr.convite.erroObrigatorio"));
       if (pendencias1.size > 0) setPagina(1);
+      pedirFocoNoErro();
+      return;
+    }
+    if (Object.keys(errosFormato).length > 0) {
+      setMostrarTodos(true);
+      setErroSubmissao(null);
+      setPagina(formatoErradoNaPagina1 ? 1 : 2);
+      pedirFocoNoErro();
       return;
     }
 
@@ -233,7 +377,7 @@ export default function ConviteAdmissao() {
     setErroSubmissao(null);
     const resultado = await submeter(dados, rascunho.assinatura_nome.trim());
     if (!resultado.ok) {
-      setErroSubmissao(resultado.erro ?? t("hr.convite.erroSubmeter"));
+      tratarRecusa(resultado.corpoErro);
       return;
     }
     setConcluido({ avisos: resultado.avisos });
@@ -241,23 +385,15 @@ export default function ConviteAdmissao() {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      <div role="status" className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
+        <span className="sr-only">{t("common.loading")}</span>
       </div>
     );
   }
 
   if (erroInicial || !estado) {
-    return (
-      <div className="flex min-h-screen items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>{t("hr.convite.tokenInvalidoTitulo")}</CardTitle>
-            <CardDescription>{t("hr.convite.tokenInvalidoDescricao")}</CardDescription>
-          </CardHeader>
-        </Card>
-      </div>
-    );
+    return <ConviteCartaoLinkInvalido t={t} motivo={motivo ?? "inexistente"} />;
   }
 
   if (concluido) {
@@ -266,7 +402,10 @@ export default function ConviteAdmissao() {
         <Card className="w-full max-w-md">
           <CardHeader className="items-center text-center">
             <CheckCircle2 className="h-10 w-10 text-primary" />
-            <CardTitle>{t("hr.convite.sucessoTitulo")}</CardTitle>
+            {/* Titulo de nivel 1: e a unica coisa desta pagina e o leitor de ecra tem de a anunciar. */}
+            <h1 className="text-2xl font-semibold leading-none tracking-tight">
+              {t("hr.convite.sucessoTitulo")}
+            </h1>
             <CardDescription>{t("hr.convite.sucessoDescricao")}</CardDescription>
           </CardHeader>
         </Card>
@@ -274,467 +413,48 @@ export default function ConviteAdmissao() {
     );
   }
 
+  const propsPagina = { t, rascunho, definir, erroDe, obrigatorio };
+
   return (
     <div className="mx-auto max-w-2xl space-y-6 p-4 py-10">
-      <div>
-        <h1 className="text-2xl font-bold">{t("hr.convite.tituloPagina")}</h1>
-        <p className="text-muted-foreground">
-          {estado.nome
-            ? t("hr.convite.saudacao", { nome: estado.nome })
-            : t("hr.convite.subtituloPagina")}
-        </p>
-        <p className="mt-2 text-sm text-muted-foreground" role="status">
-          {t("hr.convite.paginaDe", { atual: String(pagina), total: "2" })}
-        </p>
+      {/* tabIndex -1: recebe o foco ao mudar de pagina, sem entrar na ordem de tabulacao. */}
+      <div ref={topoRef} id="convite-topo" tabIndex={-1} className="outline-none">
+        <ConviteSaudacao t={t} estado={estado} pagina={pagina} />
       </div>
 
-      <CamposTocadosProvider onTocar={tocar}>
-        {pagina === 1 && (
-          <div className="space-y-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("hr.pessoais.geral")}</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 sm:grid-cols-2">
-                <CampoTexto
-                  id="convite-data-nascimento"
-                  label={t("employees.form.birthDate")}
-                  tipo="date"
-                  obrigatorio
-                  erro={erroDe("data_nascimento")}
-                  valor={rascunho.data_nascimento}
-                  onChange={(v) => definir("data_nascimento", v)}
-                />
-                <CampoSelect
-                  id="convite-genero"
-                  label={t("hr.campos.genero")}
-                  obrigatorio
-                  erro={erroDe("genero")}
-                  valor={rascunho.genero}
-                  vazioLabel={t("hr.campos.semValor")}
-                  opcoes={GENEROS.map((g) => ({ value: g, label: t(`hr.genero.${g}`) }))}
-                  onChange={(v) => definir("genero", v)}
-                />
-                <CampoPais
-                  id="convite-nacionalidade"
-                  label={t("hr.campos.nacionalidade")}
-                  obrigatorio
-                  erro={erroDe("nacionalidade")}
-                  valor={rascunho.nacionalidade}
-                  onChange={(v) => definir("nacionalidade", v)}
-                />
-                <CampoTexto
-                  id="convite-telefone-pessoal"
-                  label={t("hr.campos.telefonePessoal")}
-                  obrigatorio
-                  erro={erroDe("telefone_pessoal")}
-                  valor={rascunho.telefone_pessoal}
-                  onChange={(v) => definir("telefone_pessoal", v)}
-                />
-                <CampoTexto
-                  id="convite-email-pessoal"
-                  label={t("hr.campos.emailPessoal")}
-                  tipo="email"
-                  obrigatorio
-                  erro={erroDe("email_pessoal")}
-                  valor={rascunho.email_pessoal}
-                  onChange={(v) => definir("email_pessoal", v)}
-                />
-                <CampoSelect
-                  id="convite-estado-civil"
-                  label={t("hr.campos.estadoCivil")}
-                  obrigatorio
-                  erro={erroDe("estado_civil")}
-                  valor={rascunho.estado_civil}
-                  vazioLabel={t("hr.campos.semValor")}
-                  opcoes={ESTADOS_CIVIS.map((e) => ({ value: e, label: t(`hr.estadoCivil.${e}`) }))}
-                  onChange={(v) => definir("estado_civil", v)}
-                />
-                <CampoTexto
-                  id="convite-dependentes"
-                  label={t("hr.campos.dependentes")}
-                  tipo="number"
-                  min={0}
-                  max={30}
-                  obrigatorio
-                  erro={erroDe("dependentes")}
-                  ajuda={t("hr.convite.ajudaDependentesZero")}
-                  valor={rascunho.dependentes}
-                  onChange={(v) => definir("dependentes", v)}
-                />
-                {rascunho.estado_civil === "casado" || rascunho.estado_civil === "uniao_de_facto" ? (
-                  <CampoSelect
-                    id="convite-conjuge-situacao"
-                    label={t("hr.campos.conjugeSituacaoProfissional")}
-                    obrigatorio={obrigatorio1("conjuge_situacao_profissional")}
-                    erro={erroDe("conjuge_situacao_profissional")}
-                    valor={rascunho.conjuge_situacao_profissional}
-                    vazioLabel={t("hr.campos.semValor")}
-                    opcoes={CONJUGE_SITUACOES_PROFISSIONAIS.map((s) => ({
-                      value: s,
-                      label: t(`hr.conjugeSituacaoProfissional.${s}`),
-                    }))}
-                    onChange={(v) => definir("conjuge_situacao_profissional", v)}
-                  />
-                ) : null}
-                <CampoTexto
-                  id="convite-dependentes-deficientes"
-                  label={t("hr.campos.dependentesDeficientes")}
-                  tipo="number"
-                  min={0}
-                  max={30}
-                  obrigatorio
-                  erro={erroDe("dependentes_deficientes")}
-                  ajuda={t("hr.convite.ajudaDependentesZero")}
-                  valor={rascunho.dependentes_deficientes}
-                  onChange={(v) => definir("dependentes_deficientes", v)}
-                />
-              </CardContent>
-            </Card>
+      <CamposTocadosProvider onTocar={tocar} rotuloObrigatorio={t("hr.campos.obrigatorio")}>
+        <div ref={formularioRef} className="space-y-6">
+          {pagina === 1 && <ConvitePagina1 {...propsPagina} />}
+          {pagina === 2 && (
+            <ConvitePagina2
+              {...propsPagina}
+              erroAssinatura={erroAssinatura}
+              erroAceite={erroAceite}
+            />
+          )}
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("hr.convite.naturalidadeHabilitacao")}</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 sm:grid-cols-2">
-                <CampoTexto
-                  id="convite-naturalidade-freguesia"
-                  label={t("hr.campos.naturalidadeFreguesia")}
-                  obrigatorio
-                  erro={erroDe("naturalidade_freguesia")}
-                  valor={rascunho.naturalidade_freguesia}
-                  onChange={(v) => definir("naturalidade_freguesia", v)}
-                />
-                <CampoTexto
-                  id="convite-naturalidade-concelho"
-                  label={t("hr.campos.naturalidadeConcelho")}
-                  obrigatorio
-                  erro={erroDe("naturalidade_concelho")}
-                  valor={rascunho.naturalidade_concelho}
-                  onChange={(v) => definir("naturalidade_concelho", v)}
-                />
-                <CampoPais
-                  id="convite-naturalidade-pais"
-                  label={t("hr.campos.naturalidadePais")}
-                  obrigatorio
-                  erro={erroDe("naturalidade_pais")}
-                  valor={rascunho.naturalidade_pais}
-                  onChange={(v) => definir("naturalidade_pais", v)}
-                />
-                <CampoSelect
-                  id="convite-habilitacao"
-                  label={t("hr.campos.habilitacaoAcademica")}
-                  obrigatorio
-                  erro={erroDe("habilitacao_academica")}
-                  valor={rascunho.habilitacao_academica}
-                  vazioLabel={t("hr.campos.semValor")}
-                  opcoes={HABILITACOES_ACADEMICAS.map((h) => ({
-                    value: h,
-                    label: t(`hr.habilitacaoAcademica.${h}`),
-                  }))}
-                  onChange={(v) => definir("habilitacao_academica", v)}
-                />
-                <CampoTexto
-                  id="convite-habilitacao-data"
-                  label={t("hr.campos.habilitacaoDataConclusao")}
-                  tipo="date"
-                  obrigatorio
-                  erro={erroDe("habilitacao_data_conclusao")}
-                  valor={rascunho.habilitacao_data_conclusao}
-                  onChange={(v) => definir("habilitacao_data_conclusao", v)}
-                />
-              </CardContent>
-            </Card>
+          {erroSubmissao && (
+            <p role="alert" className="text-sm text-destructive">
+              {erroSubmissao}
+            </p>
+          )}
 
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("hr.pessoais.documento")}</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 sm:grid-cols-2">
-                <CampoSelect
-                  id="convite-tipo-documento"
-                  label={t("hr.campos.tipoDocumento")}
-                  obrigatorio
-                  erro={erroDe("tipo_documento")}
-                  valor={rascunho.tipo_documento}
-                  vazioLabel={t("hr.campos.semValor")}
-                  opcoes={TIPOS_DOCUMENTO.map((tp) => ({
-                    value: tp,
-                    label: t(`hr.tipoDocumento.${tp}`),
-                  }))}
-                  onChange={(v) => definir("tipo_documento", v)}
-                />
-                <CampoTexto
-                  id="convite-numero-documento"
-                  label={t("hr.campos.numeroDocumento")}
-                  obrigatorio
-                  erro={erroDe("numero_documento")}
-                  valor={rascunho.numero_documento}
-                  onChange={(v) => definir("numero_documento", v)}
-                />
-                <CampoTexto
-                  id="convite-validade-documento"
-                  label={t("hr.campos.validadeDocumento")}
-                  tipo="date"
-                  obrigatorio={obrigatorio1("validade_documento")}
-                  erro={erroDe("validade_documento")}
-                  valor={rascunho.validade_documento}
-                  onChange={(v) => definir("validade_documento", v)}
-                />
-                <CampoTexto
-                  id="convite-nif"
-                  label={t("hr.campos.nif")}
-                  obrigatorio={obrigatorio1("nif")}
-                  erro={erroDe("nif")}
-                  valor={rascunho.nif}
-                  onChange={(v) => definir("nif", v)}
-                />
-                <CampoTexto
-                  id="convite-niss"
-                  label={t("hr.campos.niss")}
-                  obrigatorio={obrigatorio1("niss")}
-                  erro={erroDe("niss")}
-                  valor={rascunho.niss}
-                  onChange={(v) => definir("niss", v.replace(/\s+/g, ""))}
-                />
-                <CampoTexto
-                  id="convite-carta-numero"
-                  label={t("hr.campos.cartaConducaoNumero")}
-                  valor={rascunho.carta_conducao_numero}
-                  onChange={(v) => definir("carta_conducao_numero", v)}
-                />
-                <CampoTexto
-                  id="convite-carta-categorias"
-                  label={t("hr.campos.cartaConducaoCategorias")}
-                  placeholder="B, B1"
-                  valor={rascunho.carta_conducao_categorias}
-                  onChange={(v) => definir("carta_conducao_categorias", v)}
-                />
-                <CampoTexto
-                  id="convite-carta-validade"
-                  label={t("hr.campos.cartaConducaoValidade")}
-                  tipo="date"
-                  valor={rascunho.carta_conducao_validade}
-                  onChange={(v) => definir("carta_conducao_validade", v)}
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("hr.pessoais.morada")}</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 sm:grid-cols-2">
-                <CampoTexto
-                  id="convite-linha1"
-                  label={t("hr.campos.linha1")}
-                  className="sm:col-span-2"
-                  obrigatorio
-                  erro={erroDe("linha1")}
-                  valor={rascunho.linha1}
-                  onChange={(v) => definir("linha1", v)}
-                />
-                <CampoTexto
-                  id="convite-linha2"
-                  label={t("hr.campos.linha2")}
-                  className="sm:col-span-2"
-                  valor={rascunho.linha2}
-                  onChange={(v) => definir("linha2", v)}
-                />
-                <CampoTexto
-                  id="convite-codigo-postal"
-                  label={t("employees.form.postalCode")}
-                  obrigatorio
-                  erro={erroDe("codigo_postal")}
-                  valor={rascunho.codigo_postal}
-                  onChange={(v) => definir("codigo_postal", v)}
-                />
-                <CampoTexto
-                  id="convite-localidade"
-                  label={t("hr.campos.localidade")}
-                  obrigatorio
-                  erro={erroDe("localidade")}
-                  valor={rascunho.localidade}
-                  onChange={(v) => definir("localidade", v)}
-                />
-                <CampoTexto
-                  id="convite-distrito"
-                  label={t("employees.form.district")}
-                  valor={rascunho.distrito}
-                  onChange={(v) => definir("distrito", v)}
-                />
-                <CampoPais
-                  id="convite-pais"
-                  label={t("employees.form.country")}
-                  valor={rascunho.pais}
-                  onChange={(v) => definir("pais", v)}
-                />
-              </CardContent>
-            </Card>
-
+          {pagina === 1 ? (
             <div className="flex justify-end">
               <Button onClick={avancar}>{t("hr.convite.seguinte")}</Button>
             </div>
-          </div>
-        )}
-
-        {pagina === 2 && (
-          <div className="space-y-4">
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("hr.pessoais.bancarios")}</CardTitle>
-              </CardHeader>
-              {/*
-                So IBAN: e o unico formato de conta que a RPC sabe gravar, e
-                oferecer os outros seis era prometer o que o servidor recusa.
-                `conta_formato` fica fixo em "iban" no rascunho.
-              */}
-              <CardContent className="grid gap-4 sm:grid-cols-2">
-                <CampoTexto
-                  id="convite-conta-numero"
-                  label={t("hr.campos.iban")}
-                  className="sm:col-span-2"
-                  obrigatorio
-                  erro={erroDe("conta_numero")}
-                  valor={rascunho.conta_numero}
-                  onChange={(v) => definir("conta_numero", v)}
-                />
-                <CampoTexto
-                  id="convite-conta-titular"
-                  label={t("hr.campos.titularConta")}
-                  obrigatorio
-                  erro={erroDe("conta_titular")}
-                  valor={rascunho.conta_titular}
-                  onChange={(v) => definir("conta_titular", v)}
-                />
-                <CampoTexto
-                  id="convite-conta-banco"
-                  label={t("hr.campos.banco")}
-                  obrigatorio
-                  erro={erroDe("conta_banco")}
-                  valor={rascunho.conta_banco}
-                  onChange={(v) => definir("conta_banco", v)}
-                />
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("hr.fardamento.titulo")}</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 sm:grid-cols-3">
-                <CampoSelect
-                  id="convite-tamanho-cima"
-                  label={t("hr.fardamento.tamanhoCima")}
-                  obrigatorio
-                  erro={erroDe("tamanho_cima")}
-                  valor={rascunho.tamanho_cima}
-                  vazioLabel={t("hr.campos.semValor")}
-                  opcoes={TAMANHOS_FARDAMENTO.map((tm) => ({
-                    value: tm,
-                    label: t(`hr.tamanhoFardamento.${tm}`),
-                  }))}
-                  onChange={(v) => definir("tamanho_cima", v)}
-                />
-                {rascunho.tamanho_cima === "outro" && (
-                  <CampoTexto
-                    id="convite-tamanho-cima-detalhe"
-                    label={t("hr.fardamento.detalhe")}
-                    valor={rascunho.tamanho_cima_detalhe}
-                    onChange={(v) => definir("tamanho_cima_detalhe", v)}
-                  />
-                )}
-                <CampoSelect
-                  id="convite-tamanho-baixo"
-                  label={t("hr.fardamento.tamanhoBaixo")}
-                  obrigatorio
-                  erro={erroDe("tamanho_baixo")}
-                  valor={rascunho.tamanho_baixo}
-                  vazioLabel={t("hr.campos.semValor")}
-                  opcoes={TAMANHOS_CALCAS.map((tm) => ({
-                    value: tm,
-                    label: rotuloTamanho(t, tm),
-                  }))}
-                  onChange={(v) => definir("tamanho_baixo", v)}
-                />
-                {rascunho.tamanho_baixo === "outro" && (
-                  <CampoTexto
-                    id="convite-tamanho-baixo-detalhe"
-                    label={t("hr.fardamento.detalhe")}
-                    valor={rascunho.tamanho_baixo_detalhe}
-                    onChange={(v) => definir("tamanho_baixo_detalhe", v)}
-                  />
-                )}
-                <CampoSelect
-                  id="convite-tamanho-calcado"
-                  label={t("hr.fardamento.tamanhoCalcado")}
-                  obrigatorio
-                  erro={erroDe("tamanho_calcado")}
-                  valor={rascunho.tamanho_calcado}
-                  vazioLabel={t("hr.campos.semValor")}
-                  opcoes={TAMANHOS_CALCADO.map((tm) => ({
-                    value: tm,
-                    label: rotuloTamanho(t, tm),
-                  }))}
-                  onChange={(v) => definir("tamanho_calcado", v)}
-                />
-                {rascunho.tamanho_calcado === "outro" && (
-                  <CampoTexto
-                    id="convite-tamanho-calcado-detalhe"
-                    label={t("hr.fardamento.detalhe")}
-                    valor={rascunho.tamanho_calcado_detalhe}
-                    onChange={(v) => definir("tamanho_calcado_detalhe", v)}
-                  />
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">{t("hr.convite.assinatura")}</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <CampoTexto
-                  id="convite-assinatura-nome"
-                  label={t("hr.convite.assinaturaNome")}
-                  obrigatorio
-                  valor={rascunho.assinatura_nome}
-                  onChange={(v) => definir("assinatura_nome", v)}
-                />
-                <div className="flex items-start gap-2">
-                  <Checkbox
-                    id="convite-aceite"
-                    checked={rascunho.aceite}
-                    aria-required="true"
-                    onCheckedChange={(v) => definir("aceite", v === true)}
-                  />
-                  <Label htmlFor="convite-aceite" className="font-normal">
-                    {t("hr.convite.declaracaoVeracidade")}
-                    <span aria-hidden="true" className="ml-0.5 text-destructive">
-                      *
-                    </span>
-                    <span className="sr-only"> ({t("hr.campos.obrigatorio")})</span>
-                  </Label>
-                </div>
-                {erroSubmissao && (
-                  <p role="alert" className="text-sm text-destructive">
-                    {erroSubmissao}
-                  </p>
-                )}
-              </CardContent>
-            </Card>
-
+          ) : (
             <div className="flex justify-between">
-              <Button variant="ghost" onClick={() => setPagina(1)} disabled={submetendo}>
+              <Button variant="ghost" onClick={voltar} disabled={submetendo}>
                 {t("hr.convite.anterior")}
               </Button>
-              <Button onClick={submeterFormulario} disabled={!podeSubmeter}>
+              <Button onClick={submeterFormulario} disabled={submetendo}>
                 {submetendo && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
                 {t("hr.convite.submeter")}
               </Button>
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </CamposTocadosProvider>
     </div>
   );

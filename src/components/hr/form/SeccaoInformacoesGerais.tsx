@@ -32,7 +32,9 @@
 import { useTranslation } from "@/hooks/useTranslation";
 import { CampoTexto } from "@/components/hr/form/Campos";
 import { CampoConta } from "@/components/hr/form/CampoConta";
-import type { RascunhoGeral } from "@/lib/hr/novaPessoa";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import type { QuemPreenche, RascunhoGeral } from "@/lib/hr/novaPessoa";
 import type { ContaLigavel } from "@/hooks/useContasLigaveis";
 
 interface SeccaoInformacoesGeraisProps {
@@ -66,6 +68,40 @@ export function SeccaoInformacoesGerais({
 
   return (
     <div className="space-y-4">
+      {/* Quem preenche os dados pessoais: decide o que o formulario exige e
+          se o convite se abre a seguir. A pessoa, por convite, e o caminho
+          normal da admissao; "O RH, agora" e para quem tem os papeis a mao. */}
+      <fieldset className="space-y-2 rounded-md border p-3">
+        <legend className="px-1 text-sm font-medium">{t("hr.form.quemPreenche")}</legend>
+        {/* O nome do grupo e o da <legend>: repeti-lo num aria-label fazia o
+            leitor de ecra anuncia-lo duas vezes. A ajuda diz a consequencia. */}
+        <RadioGroup
+          value={valor.quem_preenche}
+          onValueChange={(v) => onPatch({ quem_preenche: v as QuemPreenche })}
+          aria-describedby="hr-novo-quem-preenche-ajuda"
+        >
+          <div className="flex items-center gap-2">
+            <RadioGroupItem id="hr-novo-quem-preenche-convite" value="convite" />
+            <Label htmlFor="hr-novo-quem-preenche-convite" className="font-normal">
+              {t("hr.form.quemPreenche.convite")}
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <RadioGroupItem id="hr-novo-quem-preenche-rh" value="rh" />
+            <Label htmlFor="hr-novo-quem-preenche-rh" className="font-normal">
+              {t("hr.form.quemPreenche.rh")}
+            </Label>
+          </div>
+        </RadioGroup>
+        <p id="hr-novo-quem-preenche-ajuda" className="text-xs text-muted-foreground">
+          {t(
+            valor.quem_preenche === "convite"
+              ? "hr.form.quemPreenche.ajudaConvite"
+              : "hr.form.quemPreenche.ajudaRh",
+          )}
+        </p>
+      </fieldset>
+
       <CampoConta
         id="hr-novo-conta"
         label={t("hr.conta.label")}

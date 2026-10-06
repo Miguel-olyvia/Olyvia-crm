@@ -6,10 +6,14 @@
  * QUATRO ACCOES, DOIS NIVEIS DE CONFIANCA
  * ---------------------------------------
  *  - "criar": chamada por um utilizador AUTENTICADO com
- *    `hr.pessoas.convite.enviar`. Reencaminha o `Authorization` do pedido para
- *    o cliente Supabase, para que `auth.uid()` dentro da RPC resolva a pessoa
- *    certa -- a verificacao de permissao e a que ja existe na base, nao uma
- *    reimplementacao aqui.
+ *    `hr.pessoas.convite.enviar`. Esta funcao valida o JWT (`getUser`), verifica
+ *    a permissao NA ORGANIZACAO DA PESSOA com `has_anew_permission_in_org` (o
+ *    mesmo padrao de `criar-acesso-pessoa`) e SO DEPOIS chama
+ *    `rpc_hr_convite_admissao_criar` com a chave de servico, passando em
+ *    `p_actor` o id de auth.users de quem chamou (a base volta a verificar a
+ *    permissao com ele e deriva dai o `created_by`). A RPC deixou de ser
+ *    executavel por `authenticated`: o hash do token e escolhido aqui, nunca
+ *    pelo cliente, porque o novo convite herda o rascunho do anterior.
  *  - "estado", "rascunho" e "submeter": SEM sessao nenhuma -- e todo o sentido de um
  *    convite. Correm com `service_role`, atras de rate limit por IP (o mesmo
  *    mecanismo de `validate-contract-signature`).
@@ -29,6 +33,22 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { checkRateLimit, getClientIp, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import {
+  CODIGOS_RECUSA_SUBMISSAO,
+  eCodigoPublico,
+  mapearErroRpc,
+  statusDoCodigo,
+} from "./erros.ts";
+import {
+  LIMITE_CRIAR_POR_PESSOA,
+  LIMITE_CRIAR_POR_UTILIZADOR,
+  lerResultadoCriar,
+  linkDoConvite,
+  linkParaOCriador,
+  resolverBaseUrl,
+  sanearEmailErro,
+  validarPedidoCriar,
+} from "./pedidoCriar.ts";
 
 initSentry();
 
@@ -121,7 +141,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const anonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
   const responder = (body: Record<string, unknown>, status = 200) =>
     new Response(JSON.stringify(body), {
       status,
@@ -132,35 +151,98 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const payload = await req.json().catch(() => null);
     const action = payload?.action;
 
-    // -- criar: autenticado, forward do JWT do chamador -----------------------
+    // -- criar: autenticado, JWT validado aqui, permissao verificada aqui -----
     if (action === "criar") {
       const authHeader = req.headers.get("Authorization");
       if (!authHeader) return responder({ error: "sem_sessao" }, 401);
 
-      const pessoaId = payload?.pessoa_id;
-      const email = payload?.email;
-      if (typeof pessoaId !== "string" || typeof email !== "string" || !email.includes("@")) {
-        return responder({ error: "pedido_invalido" }, 400);
+      const pedido = validarPedidoCriar(payload);
+      if (!pedido) return responder({ error: "pedido_invalido" }, 400);
+      const { pessoaId, email } = pedido;
+
+      // O URL base e obrigatorio ANTES de criar seja o que for: sem ele o link
+      // (que so se mostra uma vez) sairia relativo e o convite ficava perdido.
+      const baseUrl = resolverBaseUrl(Deno.env.get("APP_BASE_URL"));
+      if (!baseUrl) {
+        captureError(new Error("convite-admissao: APP_BASE_URL em falta ou invalido"));
+        return responder({ error: "erro_inesperado" }, 500);
       }
 
-      const supabaseComoUtilizador = createClient(supabaseUrl, anonKey, {
-        global: { headers: { Authorization: authHeader } },
+      const svcCriar = createClient(supabaseUrl, serviceKey, {
+        auth: { autoRefreshToken: false, persistSession: false },
       });
+
+      const { data: sessao, error: erroSessao } = await svcCriar.auth.getUser(
+        authHeader.replace(/^Bearer\s+/i, ""),
+      );
+      if (erroSessao || !sessao?.user) return responder({ error: "sem_sessao" }, 401);
+      const authUidChamador = sessao.user.id;
+
+      // `pessoas.id` e chave primaria: a consulta que DESCOBRE a organizacao nao
+      // tem fuga possivel entre organizacoes (mesmo raciocinio de criar-acesso-pessoa).
+      const { data: pessoaOrg, error: erroPessoa } = await svcCriar
+        .from("pessoas")
+        .select("organization_id, deleted_at")
+        .eq("id", pessoaId)
+        .maybeSingle();
+      if (erroPessoa) {
+        captureError(erroPessoa);
+        return responder({ error: "erro_inesperado" }, 500);
+      }
+      if (!pessoaOrg || pessoaOrg.deleted_at || !pessoaOrg.organization_id) {
+        return responder({ error: "pessoa_nao_encontrada" }, statusDoCodigo("pessoa_nao_encontrada"));
+      }
+      const organizationId: string = pessoaOrg.organization_id;
+
+      const { data: pode, error: erroPermissao } = await svcCriar.rpc("has_anew_permission_in_org", {
+        _auth_uid: authUidChamador,
+        _permission_code: "hr.pessoas.convite.enviar",
+        _organization_id: organizationId,
+      });
+      if (erroPermissao) {
+        captureError(erroPermissao);
+        return responder({ error: "erro_inesperado" }, 500);
+      }
+      if (!pode) return responder({ error: "insufficient_privilege" }, 403);
+
+      // Rate limit so depois da permissao: quem nao pode nao enche o contador.
+      const limitesCriar = [
+        { bucket: "convite-admissao-criar", identifier: authUidChamador, maxAttempts: LIMITE_CRIAR_POR_UTILIZADOR },
+        { bucket: "convite-admissao-criar-pessoa", identifier: pessoaId, maxAttempts: LIMITE_CRIAR_POR_PESSOA },
+      ];
+      for (const l of limitesCriar) {
+        const r = await checkRateLimit(svcCriar, { ...l, windowMinutes: 60 });
+        if (!r.allowed) return responder({ error: "demasiadas_tentativas" }, 429);
+      }
+      for (const l of limitesCriar) {
+        await recordRateLimitAttempt(svcCriar, l.bucket, l.identifier);
+      }
 
       const { token, hash } = await gerarTokenEHash();
       const validUntil = new Date(Date.now() + VALIDADE_DIAS * 24 * 60 * 60 * 1000).toISOString();
 
-      const { error } = await supabaseComoUtilizador.rpc("rpc_hr_convite_admissao_criar", {
+      // O actor e o id de auth.users (o mesmo que `has_anew_permission_in_org`
+      // recebe em `_auth_uid`): a RPC ja nao tem `auth.uid()` com a chave de
+      // servico, volta a verificar a permissao com ele e e ela que deriva o
+      // `created_by` (anew_users.id). Nao se passa anew_users.id.
+      const { data: resultadoCriar, error } = await svcCriar.rpc("rpc_hr_convite_admissao_criar", {
         p_pessoa_id: pessoaId,
         p_token_hash: hash,
         p_valid_until: validUntil,
         p_email: email,
+        p_actor: authUidChamador,
       });
       if (error) {
-        // Uma recusa por permissao e resposta legitima, nao um defeito.
-        if (error.code !== "42501" && error.code !== "PGRST301") captureError(error);
-        return responder({ error: error.message ?? "erro_desconhecido" }, 400);
+        // Nunca `error.message` em bruto: so um codigo do catalogo. Uma recusa
+        // de negocio (permissao, pessoa inexistente) e resposta legitima, nao
+        // um defeito -- so o que nao se reconhece vai para o Sentry.
+        const mapeado = mapearErroRpc(error);
+        if (mapeado.codigo === "erro_inesperado") captureError(error);
+        return responder({ error: mapeado.codigo }, statusDoCodigo(mapeado.codigo));
       }
+
+      // RETURNS TABLE (convite_id, rascunho_herdado): um array de UMA linha.
+      const { conviteId, rascunhoHerdado } = lerResultadoCriar(resultadoCriar);
 
       // O envio de e-mail e melhor-esforco: se falhar, quem enviou o convite
       // ainda tem o link para copiar e mandar a mao. Nunca faz a criacao
@@ -178,26 +260,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
         // nenhuma e devolvia 401 "Authentication required", em silencio (so
         // visivel depois de a resposta desta funcao passar a incluir o erro).
         // O mesmo padrao ja e usado em criar-acesso-pessoa/index.ts.
-        const svc = createClient(supabaseUrl, serviceKey, {
-          auth: { autoRefreshToken: false, persistSession: false },
-        });
         // O SMTP a usar e o da organizacao da pessoa (resolveOrganizationSmtp
         // em _shared/smtp.ts devolve null, e falha em silencio, sem
-        // organization_id) -- a RPC acima nao o devolve, so o id do convite,
-        // por isso confirma-se aqui, pela mesma pessoa ja validada por ela.
-        const { data: pessoaOrg } = await svc
-          .from("pessoas")
-          .select("organization_id")
-          .eq("id", pessoaId)
-          .maybeSingle();
-        const { error: erroEmail } = await svc.functions.invoke("send-email", {
+        // organization_id): a organizacao ja foi lida acima, ao verificar a
+        // permissao.
+        const { error: erroEmail } = await svcCriar.functions.invoke("send-email", {
           headers: { Authorization: `Bearer ${serviceKey}` },
           body: {
             to: email,
             subject: "Convite de admissao",
             html: `<p>Foi convidado a completar a sua admissao. Use o link (valido ${VALIDADE_DIAS} dias): </p>` +
-              `<p><a href="${Deno.env.get("APP_BASE_URL") ?? ""}/admissao/${token}">Completar admissao</a></p>`,
-            organization_id: pessoaOrg?.organization_id ?? undefined,
+              `<p><a href="${linkDoConvite(baseUrl, token)}">Completar admissao</a></p>`,
+            organization_id: organizationId,
           },
         });
         emailEnviado = !erroEmail;
@@ -215,8 +289,48 @@ Deno.serve(async (req: Request): Promise<Response> => {
         captureError(e);
         emailErro = e instanceof Error ? e.message : String(e);
       }
+      // Nunca o token nem o caminho do link no texto que vai para a base e para
+      // o RH (quem tem `hr.pessoas.view` le `email_erro`).
+      emailErro = sanearEmailErro(typeof emailErro === "string" ? emailErro : String(emailErro ?? ""), token);
 
-      return responder({ ok: true, email_enviado: emailEnviado, valid_until: validUntil, email_erro: emailErro });
+      // Registo do envio para o RH (melhor-esforco: nunca faz o convite falhar).
+      // Sem id de convite nao ha nada a registar: a RPC faria um UPDATE a vazio.
+      if (!conviteId) {
+        captureError(new Error("convite-admissao: rpc_hr_convite_admissao_criar sem id"));
+      } else {
+        try {
+          const { data: registado, error: erroRegisto } = await svcCriar.rpc("rpc_hr_convite_admissao_registar_envio", {
+            p_convite_id: conviteId,
+            p_enviado: emailEnviado,
+            p_erro: emailErro,
+          });
+          if (erroRegisto) captureError(erroRegisto);
+          // A RPC devolve boolean: false = nenhum convite com esse id.
+          else if (registado !== true) {
+            captureError(new Error("convite-admissao: registar_envio nao encontrou o convite"));
+          }
+        } catch (e) {
+          captureError(e);
+        }
+      }
+
+      // O link so sai quando o e-mail NAO foi: e a unica vez que quem criou o
+      // convite o pode ver. Nunca e gravado, nunca entra em log nem no Sentry,
+      // e nao ha accao que o volte a mostrar -- reenviar e criar outro convite.
+      // Sempre absoluto: o URL base foi exigido antes de criar o convite.
+      // Com o rascunho HERDADO o link nunca sai, mesmo com o e-mail falhado: abri-lo
+      // mostraria ao RH os dados que a pessoa ja tinha preenchido (NIF, NISS, IBAN).
+      const link = linkParaOCriador({ emailEnviado, rascunhoHerdado, baseUrl, token });
+      return responder({
+        ok: true,
+        convite_id: conviteId,
+        rascunho_herdado: rascunhoHerdado,
+        link_retido: !emailEnviado && link === null,
+        email_enviado: emailEnviado,
+        valid_until: validUntil,
+        email_erro: emailErro,
+        link,
+      });
     }
 
     // -- estado / submeter: sem sessao, service_role, atras de rate limit ----
@@ -226,7 +340,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const token = payload?.token;
     if (typeof token !== "string" || token.length < 20 || token.length > 200) {
-      return responder({ error: "token_invalido" }, 400);
+      return responder({ error: "convite_invalido" }, 401);
     }
 
     const svc = createClient(supabaseUrl, serviceKey, {
@@ -257,14 +371,17 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
       if (error) {
         captureError(error);
-        return responder({ error: "convite_invalido" }, 401);
+        return responder({ error: "erro_inesperado" }, 500);
       }
       // A RPC devolve o motivo EM JSONB (nao por excepcao) precisamente para
       // o incremento de `attempts` sobreviver -- um RAISE abortava a
-      // transaccao e levava o proprio contador com ele.
+      // transaccao e levava o proprio contador com ele. So sai o motivo se
+      // for um codigo do catalogo.
       const motivo = (data as Record<string, unknown> | null)?.erro;
       if (typeof motivo === "string") {
-        return responder({ error: motivo }, 401);
+        if (eCodigoPublico(motivo)) return responder({ error: motivo }, statusDoCodigo(motivo));
+        captureError(new Error("convite-admissao: motivo de estado fora do catalogo"));
+        return responder({ error: "erro_inesperado" }, 500);
       }
       return responder({ ok: true, convite: data });
     }
@@ -280,23 +397,51 @@ Deno.serve(async (req: Request): Promise<Response> => {
         p_rascunho: rascunho,
       });
       if (error) {
+        // Defensivo: a RPC devolve `rascunho_demasiado_grande` em jsonb ({erro}),
+        // tratado mais abaixo; so chegaria aqui por excepcao com esse texto.
+        if (mapearErroRpc(error).codigo === "rascunho_demasiado_grande") {
+          return responder({ error: "rascunho_demasiado_grande" }, 400);
+        }
         captureError(error);
         return responder({ error: "rascunho_nao_gravado" }, 400);
       }
       const motivo = (data as Record<string, unknown> | null)?.erro;
       if (typeof motivo === "string") {
-        return responder({ error: motivo }, 401);
+        const codigo = eCodigoPublico(motivo) ? motivo : "convite_invalido";
+        return responder({ error: codigo }, statusDoCodigo(codigo));
       }
       return responder({ ok: true });
     }
 
     // -- submeter --------------------------------------------------------------
+    // Regista a ultima recusa no convite, para o RH a ver. Melhor-esforco:
+    // nunca muda a resposta ao candidato. So os codigos de recusa de submissao;
+    // os `pessoa_id` em conflito vao so para a base, nunca para a resposta.
+    const registarRecusa = async (codigo: string, campos: string[], conflitos: string[]) => {
+      if (!(CODIGOS_RECUSA_SUBMISSAO as readonly string[]).includes(codigo)) return;
+      try {
+        const { error: erroRecusa } = await svc.rpc("rpc_hr_convite_admissao_registar_recusa", {
+          p_token_hash: tokenHash,
+          p_codigo: codigo,
+          p_campos: campos,
+          p_conflito_pessoa_ids: conflitos,
+        });
+        // O boolean devolvido nao muda nada: false = recusa ignorada (convite ja
+        // usado, revogado ou inexistente), que e uma resposta legitima da base.
+        if (erroRecusa) captureError(erroRecusa);
+      } catch (e) {
+        captureError(e);
+      }
+    };
+
     const dados = payload?.dados;
     if (!dados || typeof dados !== "object") {
+      await registarRecusa("pedido_invalido", [], []);
       return responder({ error: "pedido_invalido" }, 400);
     }
     const assinaturaNome = typeof payload?.assinatura_nome === "string" ? payload.assinatura_nome : null;
     if (!assinaturaNome || assinaturaNome.trim() === "") {
+      await registarRecusa("assinatura_obrigatoria", [], []);
       return responder({ error: "assinatura_obrigatoria" }, 400);
     }
 
@@ -313,8 +458,18 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
     const { error } = await svc.rpc("rpc_hr_convite_admissao_submeter", corpo);
     if (error) {
-      captureError(error);
-      return responder({ error: error.message ?? "convite_invalido_ou_usado" }, 400);
+      const mapeado = mapearErroRpc(error);
+      // As recusas de negocio nao sao defeitos: so o que nao se reconhece.
+      if (mapeado.codigo === "erro_inesperado") captureError(error);
+      await registarRecusa(mapeado.codigo, mapeado.campos ?? [], mapeado.conflitos ?? []);
+      return responder(
+        {
+          error: mapeado.codigo,
+          // Os campos em falta so saem em `admissao_incompleta`; os conflitos NUNCA.
+          ...(mapeado.codigo === "admissao_incompleta" ? { campos: mapeado.campos ?? [] } : {}),
+        },
+        statusDoCodigo(mapeado.codigo),
+      );
     }
 
     // `avisos` fica, vazio: a conta ja e gravada e nao ha nada a avisar. O ecra

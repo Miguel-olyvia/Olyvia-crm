@@ -65,6 +65,15 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   // recusa -- o ecra ja filtra por `useFiliaisDaArvore`, mas a base e que
   // decide por ultimo.
   { match: /organograma_no_fora_da_arvore/i, key: "hr.locais.erroFilialForaDaArvore" },
+  // NIF/NISS de `pessoas_identificacao`: dois indices unicos por organizacao e
+  // um trigger com o digito de controlo (HRA11/HRA12). Antes do generico, para
+  // dizer ao RH QUAL numero e porque -- nao so "ja existe".
+  { match: /idx_pessoas_identificacao_nif_org/i, key: "hr.duplicados.nifJaExisteRh" },
+  { match: /idx_pessoas_identificacao_niss_org/i, key: "hr.duplicados.nissJaExisteRh" },
+  { match: /nif_invalido|pessoas_identificacao_nif_valido/i, key: "hr.convite.erro.nifInvalido" },
+  { match: /niss_invalido/i, key: "hr.convite.erro.nissInvalido" },
+  // `criar-acesso-pessoa` recusa criar acesso a uma ficha com pendencias.
+  { match: /ficha_incompleta/i, key: "hr.acesso.erroFichaIncompleta" },
   { match: /duplicate|already exists|unique/i, key: "friendlyError.duplicate" },
   // Mensagens da Edge Function export-data. Sem estas, mapFriendly devolvia o
   // texto cru em ingles ("Unable to generate export") a um utilizador com a

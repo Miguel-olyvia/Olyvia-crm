@@ -97,6 +97,9 @@ export type BusinessFlow =
   | "hr-convite-admissao-criar"
   | "hr-convite-admissao-publico"
   | "hr-convite-admissao-rascunho"
+  | "hr-convite-admissao-resumo"
+  | "hr-convite-admissao-conflitos"
+  | "hr-admissao-posicoes-campos"
   | "hr-criar-acesso-pessoa"
   // Locais de trabalho e papeis de acesso, lidos pelo assistente de criacao de
   // pessoa e pelo editor de horario. Uma recusa por permissao nao vem para

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { useIdiomaForcado } from "@/contexts/IdiomaForcadoContext";
 import { translations } from "@/translations/index";
 import { bundleTranslations } from "@/translations/bundles";
 import { priceContextsTranslations } from "@/translations/priceContexts";
@@ -15,8 +16,15 @@ Object.keys(priceContextsTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...priceContextsTranslations[lang as keyof typeof priceContextsTranslations] };
 });
 
-export const useTranslation = () => {
-  const { language } = useLanguage();
+/**
+ * `idioma` e opcional e serve so para ecras que escolhem a sua propria lingua
+ * (o convite de admissao publico, pelo navegador); sem ele vale a lingua do
+ * contexto, como sempre.
+ */
+export const useTranslation = (idioma?: Language) => {
+  const { language: linguaDoContexto } = useLanguage();
+  const idiomaForcado = useIdiomaForcado();
+  const language = idioma ?? idiomaForcado ?? linguaDoContexto;
 
   const t = useCallback(
     (key: string, params?: Record<string, string | number>): string => {

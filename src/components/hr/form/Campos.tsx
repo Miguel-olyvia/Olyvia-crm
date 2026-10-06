@@ -38,14 +38,30 @@ import { cn } from "@/lib/utils";
  */
 const CamposTocadosContext = createContext<(campoId: string) => void>(() => {});
 
+/**
+ * O texto que o leitor de ecra ouve junto de um campo obrigatorio, JA
+ * traduzido por quem monta o formulario (o ecra publico do convite escolhe a
+ * lingua pelo navegador, por isso nao se pode ir buscar a lingua da aplicacao
+ * aqui dentro). Sem provider ou sem texto nao se inventa uma lingua: o
+ * controlo continua com `aria-required`, que o leitor anuncia na sua lingua.
+ */
+const RotuloObrigatorioContext = createContext<string | null>(null);
+
 export function CamposTocadosProvider({
   onTocar,
+  rotuloObrigatorio,
   children,
 }: {
   onTocar: (campoId: string) => void;
+  /** Ex.: `t("hr.campos.obrigatorio")`, na lingua do formulario. */
+  rotuloObrigatorio?: string;
   children: ReactNode;
 }) {
-  return <CamposTocadosContext.Provider value={onTocar}>{children}</CamposTocadosContext.Provider>;
+  return (
+    <RotuloObrigatorioContext.Provider value={rotuloObrigatorio ?? null}>
+      <CamposTocadosContext.Provider value={onTocar}>{children}</CamposTocadosContext.Provider>
+    </RotuloObrigatorioContext.Provider>
+  );
 }
 
 /**
@@ -78,12 +94,19 @@ interface CampoBaseProps {
   marcado?: boolean;
   /**
    * Obrigatorio, anunciado a quem usa leitor de ecra -- nao so a vermelho. O
-   * asterisco visual e decorativo (`aria-hidden`); o "(obrigatorio)" que o
+   * asterisco visual e decorativo (`aria-hidden`); o "(obrigatorio)" -- na lingua
+   * do formulario, recebido pelo `CamposTocadosProvider` (`rotuloObrigatorio`) -- que o
    * acompanha e que da o nome acessivel a exigencia, e `aria-required` no
    * proprio controlo e o que faz um leitor de ecra dizer "obrigatorio" ao
    * entrar no campo, antes mesmo de o tentar submeter vazio.
    */
   obrigatorio?: boolean;
+  /**
+   * Pedido, mas que NAO trava a criacao (fica como pendencia na ficha): so o
+   * asterisco visual, sem `required` nem `aria-required` -- um leitor de ecra
+   * nao pode anunciar "obrigatorio" num campo que se pode deixar vazio.
+   */
+  recomendado?: boolean;
 }
 
 function Envolvente({
@@ -94,8 +117,10 @@ function Envolvente({
   className,
   marcado,
   obrigatorio,
+  recomendado,
   children,
 }: CampoBaseProps & { children: ReactNode }) {
+  const rotuloObrigatorio = useContext(RotuloObrigatorioContext);
   return (
     <div
       className={cn(
@@ -111,8 +136,15 @@ function Envolvente({
             <span aria-hidden="true" className="ml-0.5 text-destructive">
               *
             </span>
-            <span className="sr-only"> (obrigatorio)</span>
+            {rotuloObrigatorio && <span className="sr-only"> ({rotuloObrigatorio})</span>}
           </>
+        )}
+        {/* Recomendado: asterisco so visual. Nao bloqueia nada (fica como
+            pendencia), por isso o leitor de ecra nao o anuncia como obrigatorio. */}
+        {recomendado && !obrigatorio && (
+          <span aria-hidden="true" className="ml-0.5 text-amber-600 dark:text-amber-400">
+            *
+          </span>
         )}
       </Label>
       {children}
@@ -149,6 +181,7 @@ export function CampoTexto({
   className,
   marcado,
   obrigatorio,
+  recomendado,
   valor,
   onChange,
   tipo = "text",
@@ -168,6 +201,7 @@ export function CampoTexto({
       className={className}
       marcado={marcado}
       obrigatorio={obrigatorio}
+      recomendado={recomendado}
     >
       <Input
         id={id}
@@ -212,6 +246,7 @@ export function CampoSelect({
   erro,
   className,
   obrigatorio,
+  recomendado,
   valor,
   onChange,
   opcoes,
@@ -228,6 +263,7 @@ export function CampoSelect({
       erro={erro}
       className={className}
       obrigatorio={obrigatorio}
+      recomendado={recomendado}
     >
       <Select
         value={valor === "" ? SEM_ESCOLHA : valor}
@@ -279,6 +315,7 @@ export function CampoPais({
   erro,
   className,
   obrigatorio,
+  recomendado,
   valor,
   onChange,
   disabled,
@@ -292,6 +329,7 @@ export function CampoPais({
       erro={erro}
       className={className}
       obrigatorio={obrigatorio}
+      recomendado={recomendado}
     >
       <CountrySelect
         id={id}

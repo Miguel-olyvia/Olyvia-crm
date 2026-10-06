@@ -1,150 +1,134 @@
 /**
- * Le e grava `organization_admissao_settings.campos_override` da organizacao
- * activa -- o mapa `{ "<codigo>": false }` que torna um campo de admissao
- * FACULTATIVO para esta organizacao (20261201050000). Segue o padrao de
- * `useDocumentSettings.ts`: uma linha por organizacao, upsert por
- * `organization_id`.
+ * Le e grava a configuracao de admissao da organizacao activa: para cada campo
+ * da pessoa, UMA de tres posicoes (`convite`, `ficha`, `opcional`); os campos do
+ * RH vem fixos (`configuravel = false`, posicao `rh`).
  *
- * SO SE GRAVA `false` EXPLICITO
- * -------------------------------
- * Um codigo ausente do mapa continua obrigatorio -- e a omissao de sempre, e
- * a que `hr_admissao_campos_obrigatorios_org()` assume quando nao ha linha
- * nenhuma. Gravar `true` para o resto so faria o objecto crescer sem mudar
- * nada; `definirObrigatorio(codigo, true)` por isso REMOVE a chave em vez de
- * a escrever.
+ * LEITURA: `rpc_hr_admissao_configuracao_ler` -- gate baixo (gerir OU criar OU
+ * ver pessoas na organizacao), para o formulario interno de criar pessoa ler a
+ * configuracao sem a permissao de a alterar.
  *
- * As UNICAS chaves aceites sao as que `hr_admissao_campos_obrigatorios()`
- * devolve (29 codigos) -- a mesma lista que `CAMPOS_OBRIGATORIOS_ADMISSAO`
- * mais `data_admissao` espelha do lado 'pessoa'/'rh'. A validacao final e o
- * CHECK constraint na base; este hook nao tenta reimplementa-la.
+ * ESCRITA: `rpc_hr_admissao_definir_posicao` -- so quem tem
+ * `hr.admissao.obrigatorios.gerir`. O ecra deixou de fazer upsert directo em
+ * `organization_admissao_settings`: a validacao (posicao valida, codigo
+ * configuravel) vive na base.
+ *
+ * ROBUSTEZ: ate o lote da base estar aplicado, uma linha pode ainda trazer o
+ * antigo `obrigatorio` booleano em vez de `posicao` (true = convite, false =
+ * opcional); tolera-se so para o ecra nao ficar vazio nesse intervalo.
  */
-import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
+import { hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { getGenericFriendlyFallback, mapFriendlyErrorText } from "@/utils/friendlyError";
+import type { ConfiguracaoCampo, PosicaoCampoPessoa } from "@/lib/hr/admissaoObrigatorios";
+
+export type { ConfiguracaoCampo, PosicaoCampoPessoa };
 
 /**
- * Erros do Supabase (RPC/PostgREST) chegam como objecto `{ message, code, ... }`,
- * nunca `instanceof Error`. `String(erro)` nesse caso da so "[object Object]" --
- * por isso vai-se buscar `message` explicitamente antes de recorrer a String().
+ * O que o ecra mostra quando a LEITURA falha: nunca o `message` cru da base
+ * ("permission denied for function ..."). Recusa por permissao -> o texto
+ * traduzido de "sem permissao"; qualquer outra falha -> o texto generico
+ * traduzido. O erro original continua em `erroOriginal` para quem o quiser
+ * registar.
  */
-function mensagemDeErro(erro: unknown): string {
-  if (erro instanceof Error) return erro.message;
-  if (typeof erro === "object" && erro !== null && "message" in erro) {
-    const mensagem = (erro as { message: unknown }).message;
-    if (typeof mensagem === "string") return mensagem;
-  }
-  return String(erro);
+function mensagemDeLeitura(erro: unknown): string {
+  return isPermissionError(erro)
+    ? mapFriendlyErrorText("insufficient_privilege")
+    : getGenericFriendlyFallback();
 }
 
-export type ObrigatoriosOverride = Record<string, boolean>;
+/** Codigo (nao texto): so acontece se a mutacao correr sem organizacao activa, o que o ecra nao permite. */
+const SEM_ORGANIZACAO = "sem_organizacao_activa";
 
-interface SettingsRow {
-  organization_id: string;
-  campos_override: ObrigatoriosOverride;
-}
-
-/** Uma linha de `hr_admissao_campos_obrigatorios_org()`, ja com o override aplicado. */
-export interface CampoObrigatorioOrg {
+interface LinhaConfiguracao {
   codigo: string;
   origem: "pessoa" | "rh";
-  condicional: boolean;
-  obrigatorio: boolean;
+  condicional?: boolean;
+  posicao?: string | null;
+  obrigatorio?: boolean;
+  configuravel?: boolean;
+}
+
+const POSICOES_VALIDAS: readonly string[] = ["convite", "ficha", "opcional", "rh"];
+
+/** Normaliza uma linha da base, incluindo o formato antigo com `obrigatorio`. */
+export function normalizarLinhaConfiguracao(linha: LinhaConfiguracao): ConfiguracaoCampo {
+  const origem = linha.origem === "rh" ? "rh" : "pessoa";
+  let posicao: ConfiguracaoCampo["posicao"];
+  if (origem === "rh") {
+    posicao = "rh";
+  } else if (linha.posicao && POSICOES_VALIDAS.includes(linha.posicao)) {
+    posicao = linha.posicao as ConfiguracaoCampo["posicao"];
+  } else {
+    posicao = linha.obrigatorio === false ? "opcional" : "convite";
+  }
+  return {
+    codigo: linha.codigo,
+    origem,
+    condicional: linha.condicional === true,
+    posicao,
+    configuravel: linha.configuravel ?? origem === "pessoa",
+  };
 }
 
 export function useConfiguracaoObrigatoriosAdmissao() {
   const { activeCompany } = useCompany();
   const queryClient = useQueryClient();
   const orgId = activeCompany?.id;
-  const queryKey = ["organization-admissao-settings", orgId];
-  const camposQueryKey = ["hr-admissao-campos-obrigatorios-org", orgId];
+  const camposQueryKey = ["hr-admissao-configuracao", orgId];
 
-  const { data, isLoading } = useQuery({
-    queryKey,
-    queryFn: async (): Promise<SettingsRow> => {
-      if (!orgId) throw new Error("Sem organizacao activa");
-      const { data: row, error } = await (supabase as any)
-        .from("organization_admissao_settings")
-        .select("organization_id, campos_override")
-        .eq("organization_id", orgId)
-        .maybeSingle();
-      if (error) throw error;
-      return row ?? { organization_id: orgId, campos_override: {} };
-    },
-    enabled: !!orgId,
-  });
-
-  // A lista dos 29 codigos, JA cruzada com o override -- a mesma funcao que
-  // `hr_admissao_pendencias` usa. Evita duplicar a lista de codigos aqui: a
-  // autoridade continua a ser a base.
-  //
-  // Chama o WRAPPER (`rpc_hr_admissao_campos_obrigatorios_org`, 20261201130000),
-  // nao `hr_admissao_campos_obrigatorios_org` directamente -- essa e SO
-  // service_role desde 20261201050000 (sem gate proprio, um GRANT a
-  // authenticated deixaria ver a configuracao de QUALQUER organizacao). O
-  // wrapper confirma `hr.admissao.obrigatorios.gerir` NESTA organizacao antes
-  // de devolver seja o que for.
   const {
     data: campos,
-    isLoading: camposLoading,
+    isLoading,
     error: camposErro,
   } = useQuery({
     queryKey: camposQueryKey,
-    queryFn: async (): Promise<CampoObrigatorioOrg[]> => {
-      if (!orgId) throw new Error("Sem organizacao activa");
-      const { data: linhas, error } = await (supabase as any).rpc(
-        "rpc_hr_admissao_campos_obrigatorios_org",
-        { p_organization_id: orgId },
-      );
+    queryFn: async (): Promise<ConfiguracaoCampo[]> => {
+      if (!orgId) throw new Error(SEM_ORGANIZACAO);
+      const { data: linhas, error } = await hrRpc("rpc_hr_admissao_configuracao_ler", {
+        p_organization_id: orgId,
+      });
       if (error) throw error;
-      return (linhas ?? []) as CampoObrigatorioOrg[];
+      return ((linhas ?? []) as LinhaConfiguracao[]).map(normalizarLinhaConfiguracao);
     },
     enabled: !!orgId,
   });
 
-  const override: ObrigatoriosOverride = useMemo(() => data?.campos_override ?? {}, [data]);
-
   const saveMutation = useMutation({
-    mutationFn: async (novoOverride: ObrigatoriosOverride) => {
-      if (!orgId) throw new Error("Sem organizacao activa");
-      const { data: sessao } = await supabase.auth.getUser();
-      const { error } = await (supabase as any)
-        .from("organization_admissao_settings")
-        .upsert(
-          {
-            organization_id: orgId,
-            campos_override: novoOverride,
-            updated_at: new Date().toISOString(),
-            updated_by: sessao?.user?.id ?? null,
-          },
-          { onConflict: "organization_id" },
-        );
+    mutationFn: async ({ codigo, posicao }: { codigo: string; posicao: PosicaoCampoPessoa }) => {
+      if (!orgId) throw new Error(SEM_ORGANIZACAO);
+      const { error } = await hrRpc("rpc_hr_admissao_definir_posicao", {
+        p_organization_id: orgId,
+        p_codigo: codigo,
+        p_posicao: posicao,
+      });
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey });
+      // A configuracao e o mapa antigo que o convite e as pendencias possam
+      // ainda ter em cache.
       queryClient.invalidateQueries({ queryKey: camposQueryKey });
+      queryClient.invalidateQueries({ queryKey: ["organization-admissao-settings", orgId] });
+      // O formulario interno de criar/editar pessoa le a MESMA configuracao com
+      // staleTime de 60 s: sem isto, durante um minuto pediria os campos pela
+      // configuracao antiga.
+      queryClient.invalidateQueries({ queryKey: ["hr-admissao-posicoes-campos", orgId] });
     },
   });
 
-  /**
-   * `true` (o omissao) remove a chave -- nunca grava `true` explicito.
-   * `false` marca o codigo como facultativo para esta organizacao.
-   */
-  const definirObrigatorio = async (codigo: string, obrigatorio: boolean): Promise<void> => {
-    const { [codigo]: _removido, ...resto } = override;
-    const novoOverride = obrigatorio ? resto : { ...resto, [codigo]: false };
-    await saveMutation.mutateAsync(novoOverride);
+  const definirPosicao = async (codigo: string, posicao: PosicaoCampoPessoa): Promise<void> => {
+    await saveMutation.mutateAsync({ codigo, posicao });
   };
 
-  const erro: string | null = camposErro ? mensagemDeErro(camposErro) : null;
+  const erro: string | null = camposErro ? mensagemDeLeitura(camposErro) : null;
 
   return {
     campos: campos ?? [],
-    override,
-    isLoading: isLoading || camposLoading,
+    isLoading,
     isSaving: saveMutation.isPending,
-    definirObrigatorio,
+    definirPosicao,
     erro,
+    /** O erro tal como veio (para registo); NUNCA mostrar o `message`. */
+    erroOriginal: camposErro ?? null,
   };
 }

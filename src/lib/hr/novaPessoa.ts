@@ -31,6 +31,10 @@ import {
   type CampoNumericoContrato,
 } from "@/lib/hr/contrato";
 import { horasImplausiveis } from "@/lib/hr/horas";
+import { nifValido, nissValido } from "@/lib/hr/identificadoresPt";
+import type { ConfiguracaoCampo } from "@/lib/hr/admissaoObrigatorios";
+import { problemasDeObrigatoriosDaConfiguracao } from "@/lib/hr/novaPessoaAdmissao";
+import { dataDeHoje, dataDoPeriodoExperimental } from "@/lib/hr/novaPessoaDatas";
 import type {
   DiaSemana,
   EstadoCivil,
@@ -55,7 +59,22 @@ export const SECCOES: readonly SeccaoId[] = [
   "acesso",
 ];
 
+/**
+ * Quem preenche os dados pessoais desta ficha:
+ *  - `convite`: a propria pessoa, por convite. O formulario so exige nome,
+ *    apelido e o e-mail pessoal (o destino do convite), e abre o envio do
+ *    convite logo a seguir a criar;
+ *  - `rh`: o RH, agora. Aplica-se a configuracao da organizacao: os campos da
+ *    pessoa que estao na posicao `convite` passam a ser exigidos aqui.
+ */
+export type QuemPreenche = "convite" | "rh";
+
 export interface RascunhoGeral {
+  /**
+   * UI, nao dados: decide que campos se exigem e se o convite se abre a
+   * seguir. Nunca vai para a base.
+   */
+  quem_preenche: QuemPreenche;
   primeiro_nome: string;
   apelido: string;
   /** O futuro identificador de entrada, se se vier a autenticar por aqui. */
@@ -169,6 +188,9 @@ export interface RascunhoPessoa {
 export function rascunhoInicial(): RascunhoPessoa {
   return {
     geral: {
+      // Por omissao a propria pessoa preenche, por convite: e o fluxo da
+      // admissao. O RH que tem os dados a frente escolhe "O RH, agora".
+      quem_preenche: "convite",
       primeiro_nome: "",
       apelido: "",
       email_trabalho: "",
@@ -287,8 +309,20 @@ function numeroDe(valor: string): number | null {
  * Formato verifica-se campo a campo; coerencia (termo antes do inicio, maximo
  * semanal abaixo das horas contratadas) so aqui, porque so aqui existem todos
  * os valores ao mesmo tempo.
+ *
+ * OBRIGATORIEDADE, POR QUEM PREENCHE
+ * ----------------------------------
+ * `quem_preenche = 'convite'`: so primeiro nome, apelido e o e-mail pessoal
+ * (o destino do convite). `quem_preenche = 'rh'`: alem dos nomes, tudo o que a
+ * configuracao da organizacao poe na posicao `convite` -- se a configuracao
+ * ainda nao chegou (ou quem preenche nao a pode ler) nao se inventa nada: so
+ * os nomes. Os campos so do RH (data de admissao, cargo, tipo de contrato) nao
+ * bloqueiam a criacao; ver `avisosDoRascunho`.
  */
-export function problemasDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
+export function problemasDoRascunho(
+  rascunho: RascunhoPessoa,
+  config?: readonly ConfiguracaoCampo[] | null,
+): ProblemaCampo[] {
   const problemas: ProblemaCampo[] = [];
   const { geral, pessoais, contrato } = rascunho;
 
@@ -324,7 +358,10 @@ export function problemasDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
       mensagemKey: "hr.form.erroEmail",
     });
   }
-  if (pessoais.nif.trim() !== "" && !/^\d{9}$/.test(pessoais.nif.trim())) {
+  // NIF e NISS: formato E digito de controlo -- a mesma regra que a base aplica
+  // (`hr_nif_valido` / `hr_niss_valido`). Um numero com o digito errado e quase
+  // sempre uma gralha e, gravado, ficava a bloquear a admissao.
+  if (pessoais.nif.trim() !== "" && !nifValido(pessoais.nif)) {
     problemas.push({
       seccao: "pessoais",
       campoId: "hr-novo-nif",
@@ -332,7 +369,7 @@ export function problemasDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
       mensagemKey: "hr.form.erroNif",
     });
   }
-  if (pessoais.niss.trim() !== "" && !/^\d{11}$/.test(pessoais.niss.trim())) {
+  if (pessoais.niss.trim() !== "" && !nissValido(pessoais.niss)) {
     problemas.push({
       seccao: "pessoais",
       campoId: "hr-novo-niss",
@@ -354,6 +391,21 @@ export function problemasDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
         pessoais.conta_formato === "iban" ? "hr.form.erroIban" : "hr.form.erroConta",
     });
   }
+  // -- Obrigatoriedade, conforme quem preenche -------------------------------
+  if (geral.quem_preenche === "convite") {
+    // O convite vai para o e-mail pessoal: sem ele nao ha para onde o enviar.
+    if (pessoais.email_pessoal.trim() === "") {
+      problemas.push({
+        seccao: "pessoais",
+        campoId: "hr-novo-email-pessoal",
+        rotuloKey: "hr.campos.emailPessoal",
+        mensagemKey: "hr.form.erroObrigatorio",
+      });
+    }
+  } else if (config) {
+    problemas.push(...problemasDeObrigatoriosDaConfiguracao(pessoais, config));
+  }
+
   const dependentes = numeroDe(pessoais.dependentes);
   if (pessoais.dependentes.trim() !== "" && (dependentes === null || dependentes < 0)) {
     problemas.push({
@@ -450,6 +502,34 @@ export function avisosDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
     });
   }
 
+  // Os campos so do RH (data de admissao, cargo, tipo de contrato) nao
+  // bloqueiam a criacao -- quem tem uma admissao as pressas cria a ficha e
+  // completa depois -- mas ficam como pendencia da ficha, e o ecra di-lo.
+  if (rascunho.laborais.data_admissao.trim() === "") {
+    avisos.push({
+      seccao: "laborais",
+      campoId: "hr-novo-data-admissao",
+      rotuloKey: "employees.form.hireDate",
+      mensagemKey: "hr.form.avisoCampoRhPendente",
+    });
+  }
+  if (rascunho.laborais.cargo.trim() === "") {
+    avisos.push({
+      seccao: "laborais",
+      campoId: "hr-novo-cargo",
+      rotuloKey: "hr.columns.cargo",
+      mensagemKey: "hr.form.avisoCampoRhPendente",
+    });
+  }
+  if (contrato.tipo_contrato === "") {
+    avisos.push({
+      seccao: "contrato",
+      campoId: "hr-novo-tipo-contrato",
+      rotuloKey: "hr.contrato.tipoContrato",
+      mensagemKey: "hr.form.avisoCampoRhPendente",
+    });
+  }
+
   return avisos;
 }
 
@@ -457,7 +537,11 @@ export function avisosDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
 export function seccaoPreenchida(rascunho: RascunhoPessoa, seccao: SeccaoId): boolean {
   switch (seccao) {
     case "geral":
-      return Object.values(rascunho.geral).some((v) => String(v).trim() !== "");
+      // `quem_preenche` nasce preenchido e nao conta: e uma escolha de UI, nao
+      // um dado da pessoa.
+      return Object.entries(rascunho.geral).some(
+        ([chave, valor]) => chave !== "quem_preenche" && String(valor).trim() !== "",
+      );
     case "pessoais":
       return Object.entries(rascunho.pessoais).some(([chave, valor]) => {
         if (chave === "ocultar_aniversario") return valor === true;
@@ -543,51 +627,6 @@ function texto(valor: string): string | null {
   return limpo === "" ? null : limpo;
 }
 
-function numero(valor: string): number | null {
-  return numeroDe(valor);
-}
-
-/**
- * Calcula a data de fim do periodo experimental a partir da duracao.
- *
- * A base guarda as duas coisas (`periodo_experimental_dias` e
- * `periodo_experimental_ate`) e NAO deriva uma da outra por trigger, para nao
- * haver duas fontes de verdade em silencio. Quem deriva e o ecra, aqui, e so
- * quando a duracao esta preenchida e a data nao.
- */
-export function dataDoPeriodoExperimental(dataInicio: string, dias: number): string | null {
-  if (dataInicio.trim() === "") return null;
-  const inicio = new Date(`${dataInicio}T00:00:00`);
-  if (Number.isNaN(inicio.getTime())) return null;
-  inicio.setDate(inicio.getDate() + dias);
-  // NAO se usa `toISOString`: ela converte para UTC e, em Lisboa no horario de
-  // verao, devolvia o dia ANTERIOR -- 90 dias a partir de 1 de Janeiro davam
-  // 31 de Marco em vez de 1 de Abril. A data e civil, nao um instante.
-  const mes = String(inicio.getMonth() + 1).padStart(2, "0");
-  const dia = String(inicio.getDate()).padStart(2, "0");
-  return `${inicio.getFullYear()}-${mes}-${dia}`;
-}
-
-/**
- * Mesmo padrao de `dataDoPeriodoExperimental`, para a data de termino de um
- * contrato com prazo (termo certo/incerto): quem preenche a duracao em meses,
- * o ecra calcula a data sozinho -- `data_fim` continua um campo normal,
- * directamente editavel e sobreponivel a seguir, a base nunca deriva nada por
- * trigger.
- */
-export function dataFimPorDuracaoMeses(dataInicio: string, meses: number): string | null {
-  if (dataInicio.trim() === "") return null;
-  const inicio = new Date(`${dataInicio}T00:00:00`);
-  if (Number.isNaN(inicio.getTime())) return null;
-  inicio.setMonth(inicio.getMonth() + meses);
-  // Mesma razao do cabecalho de dataDoPeriodoExperimental: nao usar
-  // toISOString, que converte para UTC e pode devolver o dia anterior em
-  // horario de verao. A data e civil, nao um instante.
-  const mes = String(inicio.getMonth() + 1).padStart(2, "0");
-  const dia = String(inicio.getDate()).padStart(2, "0");
-  return `${inicio.getFullYear()}-${mes}-${dia}`;
-}
-
 export function payloadDoRascunho(
   rascunho: RascunhoPessoa,
   linhasDeHorario: (horario: HorarioRascunho) => LinhaPlaneadoParaGravar[],
@@ -617,7 +656,7 @@ export function payloadDoRascunho(
     texto(pessoais.nif) !== null;
 
   const experimentalDias = contrato.tem_periodo_experimental
-    ? numero(contrato.periodo_experimental_dias)
+    ? numeroDe(contrato.periodo_experimental_dias)
     : null;
 
   const temVinculo =
@@ -627,12 +666,12 @@ export function payloadDoRascunho(
     contrato.tipo_trabalho !== "" ||
     contrato.dias_uteis.length > 0;
 
-  const valorBase = numero(contrato.valor_base);
+  const valorBase = numeroDe(contrato.valor_base);
 
   // Usada tanto em `vinculo.data_inicio` como em `horasVinculo.valido_de`: as
   // duas tem de nascer com a MESMA data (a versao de horas comeca exactamente
   // quando o vinculo comeca).
-  const dataInicioVinculo = texto(contrato.data_inicio) ?? texto(laborais.data_admissao) ?? hoje();
+  const dataInicioVinculo = texto(contrato.data_inicio) ?? texto(laborais.data_admissao) ?? dataDeHoje();
 
   return {
     nucleo: {
@@ -655,7 +694,7 @@ export function payloadDoRascunho(
           genero: pessoais.genero === "" ? null : pessoais.genero,
           nacionalidade: texto(pessoais.nacionalidade)?.toUpperCase() ?? null,
           estado_civil: pessoais.estado_civil === "" ? null : pessoais.estado_civil,
-          dependentes: numero(pessoais.dependentes),
+          dependentes: numeroDe(pessoais.dependentes),
           telefone_pessoal: texto(pessoais.telefone_pessoal),
         }
       : null,
@@ -664,10 +703,11 @@ export function payloadDoRascunho(
           tipo_documento: pessoais.tipo_documento === "" ? null : pessoais.tipo_documento,
           numero_documento: texto(pessoais.numero_documento),
           validade_documento: texto(pessoais.validade_documento),
-          nif: texto(pessoais.nif),
+          // Sem espacos: `nifValido` aceita "123 456 789", a coluna nao.
+          nif: texto(pessoais.nif.replace(/\s+/g, "")),
         }
       : null,
-    niss: texto(pessoais.niss),
+    niss: texto(pessoais.niss.replace(/\s+/g, "")),
     morada:
       texto(pessoais.morada_linha1) !== null
         ? {
@@ -712,11 +752,11 @@ export function payloadDoRascunho(
               ? null
               : dataDoPeriodoExperimental(dataInicioVinculo, experimentalDias),
           tipo_trabalho: contrato.tipo_trabalho === "" ? null : contrato.tipo_trabalho,
-          tempo_trabalho_pct: numero(contrato.tempo_trabalho_pct),
+          tempo_trabalho_pct: numeroDe(contrato.tempo_trabalho_pct),
           dias_uteis: contrato.dias_uteis.length > 0 ? contrato.dias_uteis : null,
           politica_feriados: contrato.politica_feriados,
-          horas_anuais_maximas: numero(contrato.horas_anuais_maximas),
-          horas_semanais_maximas: numero(contrato.horas_semanais_maximas),
+          horas_anuais_maximas: numeroDe(contrato.horas_anuais_maximas),
+          horas_semanais_maximas: numeroDe(contrato.horas_semanais_maximas),
           estado: "activo",
         }
       : null,
@@ -726,9 +766,9 @@ export function payloadDoRascunho(
     // e prestador de servicos). horas_frequencia da tabela nova e NOT NULL,
     // por isso so se cria o par quando ha quantidade.
     horasVinculo:
-      temVinculo && numero(contrato.horas_trabalho) !== null
+      temVinculo && numeroDe(contrato.horas_trabalho) !== null
         ? {
-            horas_periodo: numero(contrato.horas_trabalho) as number,
+            horas_periodo: numeroDe(contrato.horas_trabalho) as number,
             horas_frequencia: contrato.horas_frequencia,
             valido_de: dataInicioVinculo,
           }
@@ -751,23 +791,9 @@ export function payloadDoRascunho(
   };
 }
 
-/**
- * A data de hoje como data CIVIL, no fuso de quem esta a usar a aplicacao.
- *
- * `toISOString().slice(0, 10)` parece equivalente e nao e: converte para UTC e,
- * em Lisboa, a meia-noite e meia devolve o dia anterior. Uma data de admissao
- * errada por um dia nao da erro nenhum -- so fica errada.
- */
-export function dataDeHoje(): string {
-  const agora = new Date();
-  const mes = String(agora.getMonth() + 1).padStart(2, "0");
-  const dia = String(agora.getDate()).padStart(2, "0");
-  return `${agora.getFullYear()}-${mes}-${dia}`;
-}
-
-function hoje(): string {
-  return dataDeHoje();
-}
-
 /** Reexportado para quem valida horas nas seccoes, sem importar dois modulos. */
 export { minutosDe };
+
+/** Reexportados: moram em `novaPessoaAdmissao.ts` e `novaPessoaDatas.ts` (este ficheiro passava das 800 linhas). */
+export { camposDoConviteForaDoFormulario, codigosObrigatoriosDoFormulario } from "@/lib/hr/novaPessoaAdmissao";
+export { dataDeHoje, dataDoPeriodoExperimental, dataFimPorDuracaoMeses } from "@/lib/hr/novaPessoaDatas";

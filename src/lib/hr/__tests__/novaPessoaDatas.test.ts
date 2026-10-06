@@ -1,0 +1,49 @@
+/**
+ * As datas civis do formulario de criar pessoa, e a garantia de que a
+ * separacao de `novaPessoa.ts` em `novaPessoaDatas.ts` e `novaPessoaAdmissao.ts`
+ * nao partiu quem as importava de `novaPessoa`.
+ */
+import { describe, expect, it, vi, afterEach } from "vitest";
+import * as nova from "../novaPessoa";
+import * as datas from "../novaPessoaDatas";
+import * as admissao from "../novaPessoaAdmissao";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("novaPessoaDatas", () => {
+  it("o periodo experimental e uma data civil: 90 dias de 1 de Janeiro sao 1 de Abril", () => {
+    expect(datas.dataDoPeriodoExperimental("2026-01-01", 90)).toBe("2026-04-01");
+  });
+
+  it("sem data de inicio ou com data invalida devolve null", () => {
+    expect(datas.dataDoPeriodoExperimental("", 90)).toBeNull();
+    expect(datas.dataDoPeriodoExperimental("   ", 90)).toBeNull();
+    expect(datas.dataDoPeriodoExperimental("nao-e-data", 90)).toBeNull();
+    expect(datas.dataFimPorDuracaoMeses("", 6)).toBeNull();
+    expect(datas.dataFimPorDuracaoMeses("2026-13-45", 6)).toBeNull();
+  });
+
+  it("a duracao em meses soma meses civis, atravessando o ano", () => {
+    expect(datas.dataFimPorDuracaoMeses("2026-10-15", 6)).toBe("2027-04-15");
+    expect(datas.dataFimPorDuracaoMeses("2026-01-01", 12)).toBe("2027-01-01");
+  });
+
+  it("dataDeHoje usa o dia local, nao o UTC (meia-noite e meia em Lisboa e hoje, nao ontem)", () => {
+    vi.useFakeTimers();
+    // 00:30 locais de 3 de Abril: em UTC (UTC+1 no verao) ainda seria dia 2.
+    vi.setSystemTime(new Date(2026, 3, 3, 0, 30, 0));
+    expect(datas.dataDeHoje()).toBe("2026-04-03");
+  });
+});
+
+describe("a separacao de novaPessoa.ts nao partiu os importadores", () => {
+  it("novaPessoa reexporta exactamente as mesmas funcoes", () => {
+    expect(nova.dataDeHoje).toBe(datas.dataDeHoje);
+    expect(nova.dataDoPeriodoExperimental).toBe(datas.dataDoPeriodoExperimental);
+    expect(nova.dataFimPorDuracaoMeses).toBe(datas.dataFimPorDuracaoMeses);
+    expect(nova.camposDoConviteForaDoFormulario).toBe(admissao.camposDoConviteForaDoFormulario);
+    expect(nova.codigosObrigatoriosDoFormulario).toBe(admissao.codigosObrigatoriosDoFormulario);
+  });
+});

@@ -4,9 +4,12 @@
  * folha de cadastro em papel, nao so a primeira.
  *
  * SO OS CAMPOS DE ORIGEM "pessoa". A autoridade vive na base, em
- * `hr_admissao_campos_obrigatorios()` (20261128010000), que declara tambem os
- * de origem "rh" -- hoje so `data_admissao`, que e o RH quem preenche e que
- * NUNCA trava a submissao do convite. Esta lista e o espelho do lado do ecra,
+ * `hr_admissao_campos_obrigatorios()`, que declara tambem os de origem "rh"
+ * (data de admissao, cargo, tipo de contrato, subsidio de alimentacao e
+ * duodecimos), que o RH preenche e que NUNCA travam a submissao do convite.
+ * Cada campo da pessoa tem tres posicoes (convite, ficha, opcional): so os de
+ * posicao `convite` travam a submissao; os de posicao `ficha` ficam como
+ * pendencia do RH. Esta lista e o espelho do lado do ecra,
  * e `conviteAdmissaoContrato.test.ts` compara as duas: os codigos, e quais sao
  * condicionais.
  *
@@ -29,6 +32,25 @@
  * `precisaDeNiss` mais abaixo, e a mesma excepcao em `hr_admissao_pendencias`).
  */
 export type OrigemCampoAdmissao = "pessoa" | "rh";
+
+/**
+ * TRES POSICOES por campo da pessoa, configuraveis por organizacao:
+ * - `convite`: a pessoa tem de o preencher para submeter o convite;
+ * - `ficha`: a pessoa pode submeter sem ele e fica pendencia para o RH
+ *   completar na ficha (nao trava o convite, mas trava as credenciais);
+ * - `opcional`: nunca fica pendente.
+ * Os campos de origem `rh` vivem sempre na posicao `rh` e nao se configuram.
+ */
+export type PosicaoCampoPessoa = "convite" | "ficha" | "opcional";
+
+/** Uma linha de `rpc_hr_admissao_configuracao_ler`. */
+export interface ConfiguracaoCampo {
+  codigo: string;
+  origem: OrigemCampoAdmissao;
+  condicional: boolean;
+  posicao: PosicaoCampoPessoa | "rh";
+  configuravel: boolean;
+}
 
 /**
  * Os campos do rascunho de que esta lista precisa para decidir
@@ -195,6 +217,22 @@ export function obrigatoriosResolvidos(
   if (!codigosObrigatoriosDoServidor) return CAMPOS_OBRIGATORIOS_ADMISSAO;
   const permitidos = new Set(codigosObrigatoriosDoServidor.map((c) => c.codigo));
   return CAMPOS_OBRIGATORIOS_ADMISSAO.filter((campo) => permitidos.has(campo.codigo));
+}
+
+/**
+ * Os campos que a configuracao da organizacao poe na posicao `convite`, pela
+ * ordem da lista fixa. `null`/`undefined` (configuracao ainda por carregar ou
+ * falhada) devolve a lista completa: o comportamento de sempre, nunca "nada e
+ * obrigatorio".
+ */
+export function camposDoConvite(
+  config: readonly ConfiguracaoCampo[] | null | undefined,
+): readonly CampoObrigatorioAdmissao[] {
+  if (!config) return CAMPOS_OBRIGATORIOS_ADMISSAO;
+  const noConvite = new Set(
+    config.filter((c) => c.origem === "pessoa" && c.posicao === "convite").map((c) => c.codigo),
+  );
+  return CAMPOS_OBRIGATORIOS_ADMISSAO.filter((campo) => noConvite.has(campo.codigo));
 }
 
 /** Verdadeiro quando ESTE campo, NESTE rascunho, e obrigatorio. */

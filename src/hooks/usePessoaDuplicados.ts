@@ -85,10 +85,17 @@ export function usePessoaDuplicados() {
     setErro(false);
   }, []);
 
-  const verificar = useCallback(async (valores: ValoresParaVerificar): Promise<void> => {
+  /**
+   * Verifica e, alem de actualizar o estado do hook, DEVOLVE os candidatos --
+   * quem decide logo a seguir (a edicao de NIF/NISS na ficha, que grava ou nao
+   * conforme o resultado) nao pode esperar pelo proximo render para os ler.
+   * `null` quando nao foi possivel verificar (sem permissao, travao de
+   * tentativas, falha, ou nada a verificar): nunca se le como "sem duplicado".
+   */
+  const verificar = useCallback(async (valores: ValoresParaVerificar): Promise<CandidatoDuplicado[] | null> => {
     if (!valores.organizationId || !temAlgumValor(valores)) {
       limpar();
-      return;
+      return null;
     }
 
     const meuPedido = ++pedidoAtual.current;
@@ -110,7 +117,7 @@ export function usePessoaDuplicados() {
         p_excluir_pessoa_id: valores.excluirPessoaId || null,
       });
 
-      if (meuPedido !== pedidoAtual.current) return; // uma resposta mais recente ja chegou
+      if (meuPedido !== pedidoAtual.current) return null; // uma resposta mais recente ja chegou
 
       if (error) {
         if (isPermissionError(error)) {
@@ -125,26 +132,27 @@ export function usePessoaDuplicados() {
           setErro(true);
         }
         setCandidatos([]);
-        return;
+        return null;
       }
 
       const linhas: RespostaRpc[] = Array.isArray(data) ? data : [];
-      setCandidatos(
-        linhas
-          .filter((linha) => linha && typeof linha.pessoa_id === "string")
-          .map((linha) => ({
-            pessoaId: linha.pessoa_id,
-            nomeCompleto: linha.nome_completo,
-            campoCoincidente: linha.campo_coincidente,
-            forca: linha.forca === "travao" ? "travao" : "sinal",
-            estado: linha.estado === "apagada" ? "apagada" : "activa",
-          })),
-      );
+      const lidos: CandidatoDuplicado[] = linhas
+        .filter((linha) => linha && typeof linha.pessoa_id === "string")
+        .map((linha) => ({
+          pessoaId: linha.pessoa_id,
+          nomeCompleto: linha.nome_completo,
+          campoCoincidente: linha.campo_coincidente,
+          forca: linha.forca === "travao" ? "travao" : "sinal",
+          estado: linha.estado === "apagada" ? "apagada" : "activa",
+        }));
+      setCandidatos(lidos);
+      return lidos;
     } catch (e) {
-      if (meuPedido !== pedidoAtual.current) return;
+      if (meuPedido !== pedidoAtual.current) return null;
       captureFlowError(e, "hr-pessoa-duplicados-candidatos");
       setErro(true);
       setCandidatos([]);
+      return null;
     } finally {
       if (meuPedido === pedidoAtual.current) setAVerificar(false);
     }

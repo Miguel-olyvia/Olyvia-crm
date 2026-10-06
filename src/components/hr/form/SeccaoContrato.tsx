@@ -153,6 +153,8 @@ export function SeccaoContrato({
         <CampoSelect
           id="hr-novo-tipo-contrato"
           label={t("hr.contrato.tipoContrato")}
+          recomendado
+          ajuda={valor.tipo_contrato === "" ? t("hr.form.avisoCampoRhPendente") : undefined}
           valor={valor.tipo_contrato}
           vazioLabel={t("hr.campos.semValor")}
           opcoes={TIPOS_CONTRATO.map((tipo) => ({
