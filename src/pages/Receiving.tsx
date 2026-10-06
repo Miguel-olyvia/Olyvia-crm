@@ -172,6 +172,12 @@ interface BasketEntry {
   submitError?: string;
   /** Resultado desconhecido (sem resposta do servidor): só se pode tentar de novo com o mesmo id. */
   retryable?: boolean;
+  /**
+   * Cópia do que foi enviado com o requestId (para quando a pendente do
+   * localStorage já não existir). A pendente é a fonte de verdade de cada id:
+   * um reenvio leva exatamente estes dados, não os da entrada.
+   */
+  sent?: PendingReceipt;
 }
 
 interface ReceivedEntry {
@@ -250,6 +256,17 @@ interface StoredBasket {
 }
 
 /**
+ * Entrada que ficou por enviar e não pôde voltar ao cesto (outro armazém, ecrã
+ * já desmontado). Nada foi recebido; fica em "Por enviar" até voltar ao cesto
+ * ou ser dispensada. sessionStorage, por utilizador e empresa.
+ */
+interface UnsentEntry extends StoredEntry {
+  warehouseId: string;
+  supplierId: string;
+  at: string;
+}
+
+/**
  * Receção real registada antes de chamar a RPC; sai da lista só com resposta
  * definitiva do servidor ou descarte explícito. Persistida em localStorage.
  */
@@ -315,6 +332,12 @@ const RETRYABLE_CODES = new Set(["40001", "40P01", "57014", "08000", "08003", "0
 const BUSINESS_REJECTION_CODES = new Set(["23514", "22003", "22P02", "P0001"]);
 /** Intervalo mínimo entre o último envio de uma pendente e o "Descartar". */
 const DISCARD_MIN_AGE_MS = 60_000;
+/**
+ * Numa nova tentativa, uma recusa de negócio só larga o id se o envio anterior
+ * tiver sido há mais do que isto (statement_timeout do authenticated = 8 s):
+ * antes disso o pedido anterior pode ainda estar a correr no servidor.
+ */
+const REJECT_MIN_AGE_MS = 10_000;
 const PREVIEW_AUTO_RETRIES = 3;
 const PREVIEW_RETRY_MS = 3000;
 const SCAN_AUTO_RETRIES = 3;
@@ -341,6 +364,9 @@ function warehouseStorageKey(orgId: string) {
 const KEYBOARD_MODE_KEY = "olyvia.receiving.scannerMode";
 const pendingStorageKey = (userId: string) => `olyvia.receiving.pending.${userId}`;
 const basketStorageKey = (userId: string, orgId: string) => `olyvia.receiving.basket.${userId}.${orgId}`;
+const unsentStorageKey = (userId: string, orgId: string) => `olyvia.receiving.unsent.${userId}.${orgId}`;
+/** Avisa as instâncias montadas de que a lista "Por enviar" mudou (detail = chave). */
+const UNSENT_EVENT = "olyvia-receiving-unsent";
 
 function readStorage(key: string): string | null {
   try {
@@ -414,6 +440,38 @@ function writeSessionBasket(key: string, value: StoredBasket | null) {
   }
 }
 
+function readUnsent(key: string): UnsentEntry[] {
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return [];
+    const v = JSON.parse(raw) as unknown;
+    if (!Array.isArray(v)) return [];
+    return v.filter(
+      (e): e is UnsentEntry =>
+        !!e && typeof e.id === "string" && typeof e.productId === "string" && typeof e.warehouseId === "string" && Number(e.quantity) >= 1,
+    );
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Read-modify-write sobre o que está guardado (outra instância — ex.: a antiga,
+ * já desmontada — pode ter acrescentado entretanto); nunca substitui às cegas.
+ * Devolve a lista resultante, ou null se o sessionStorage não estiver disponível.
+ */
+function mutateUnsent(key: string, op: (list: UnsentEntry[]) => UnsentEntry[]): UnsentEntry[] | null {
+  try {
+    const next = op(readUnsent(key));
+    if (next.length === 0) window.sessionStorage.removeItem(key);
+    else window.sessionStorage.setItem(key, JSON.stringify(next));
+    window.dispatchEvent(new CustomEvent(UNSENT_EVENT, { detail: key }));
+    return next;
+  } catch {
+    return null;
+  }
+}
+
 const toStoredEntry = (e: BasketEntry): StoredEntry => ({
   id: e.id,
   key: e.key,
@@ -448,6 +506,7 @@ const freeEntry = (e: BasketEntry): BasketEntry => ({
   submitting: false,
   submitError: undefined,
   retryable: false,
+  sent: undefined,
 });
 
 /** Não deixa o botão tirar o foco ao campo de leitura (o Enter do leitor ativaria o botão). */
@@ -601,6 +660,8 @@ export default function Receiving() {
 
   const [basket, setBasket] = useState<BasketEntry[]>([]);
   const [received, setReceived] = useState<ReceivedEntry[]>([]);
+  /** "Por enviar" da empresa ativa (espelho do sessionStorage). */
+  const [unsent, setUnsent] = useState<UnsentEntry[]>([]);
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState<PendingReceipt[]>([]);
   const [pendingBusy, setPendingBusy] = useState<Set<string>>(() => new Set());
@@ -631,6 +692,8 @@ export default function Receiving() {
   const orgEpochRef = useRef(0);
   /** Chave do cesto em sessionStorage já reposta nesta instância (só se grava depois). */
   const restoredBasketKeyRef = useRef<string | null>(null);
+  /** Armazéns/fornecedores carregados para a época indicada (para validar o cesto reposto). */
+  const optionsRef = useRef<{ epoch: number; warehouses: Option[]; suppliers: Option[] } | null>(null);
 
   const previewTimers = useRef(new Map<string, number>());
   const previewSeq = useRef(new Map<string, number>());
@@ -827,8 +890,8 @@ export default function Receiving() {
     void checkPending();
   }, [userId, orgId, checkPending]);
 
-  // Relógio do "Descartar": só corre enquanto houver pendentes.
-  const hasPending = pending.length > 0;
+  // Relógio do "Descartar": só corre enquanto houver pendentes ou entradas incertas.
+  const hasPending = pending.length > 0 || basket.some(isUncertain);
   useEffect(() => {
     if (!hasPending) return;
     setNowMs(Date.now());
@@ -888,13 +951,17 @@ export default function Receiving() {
     setSupplierId("");
     setWarehouses([]);
     setSuppliers([]);
+    // Síncrono: o efeito que repõe o cesto corre a seguir, neste mesmo commit,
+    // e não pode ver o armazém/fornecedor da empresa anterior.
     warehouseRef.current = "";
     supplierRef.current = "";
+    optionsRef.current = null;
     if (!orgId) {
       setOptionsLoading(false);
       return;
     }
     let cancelled = false;
+    const epoch = orgEpochRef.current;
     setOptionsLoading(true);
     (async () => {
       const [whRes, supRes] = await Promise.all([
@@ -910,15 +977,29 @@ export default function Receiving() {
         toast({ title: "Erro ao carregar fornecedores", description: supRes.error.message, variant: "destructive" });
       }
       const whs = (whRes.data ?? []) as Option[];
+      const sups = (supRes.data ?? []) as Option[];
       setWarehouses(whs);
-      setSuppliers((supRes.data ?? []) as Option[]);
+      setSuppliers(sups);
+      // Só se a carga correu: com erro a lista vem vazia e não serve para validar.
+      optionsRef.current = whRes.error || supRes.error ? null : { epoch, warehouses: whs, suppliers: sups };
       // Um cesto reposto do sessionStorage já trouxe o armazém: mantém-no se ainda existir.
       const current = warehouseRef.current;
       const remembered = readStorage(warehouseStorageKey(orgId));
-      if (current && whs.some((w) => w.id === current)) {
-        // mantém
-      } else if (remembered && whs.some((w) => w.id === remembered)) setWarehouseId(remembered);
-      else if (whs.length === 1) setWarehouseId(whs[0].id);
+      let nextWh = "";
+      if (whRes.error || (current && whs.some((w) => w.id === current))) {
+        nextWh = current; // mantém (com erro na carga não há como validar)
+      } else if (remembered && whs.some((w) => w.id === remembered)) nextWh = remembered;
+      else if (whs.length === 1) nextWh = whs[0].id;
+      if (nextWh !== current) {
+        setWarehouseId(nextWh);
+        warehouseRef.current = nextWh;
+      }
+      // Fornecedor reposto que já não pertence a esta empresa: volta a "Todos".
+      const curSup = supplierRef.current;
+      if (curSup && !supRes.error && !sups.some((s) => s.id === curSup)) {
+        setSupplierId("");
+        supplierRef.current = "";
+      }
       focusScan();
     })();
     return () => {
@@ -960,19 +1041,46 @@ export default function Receiving() {
     const entries = saved.entries.filter((e) => !pendingEntryIds.has(e.id)).map(fromStoredEntry);
     if (entries.length === 0) return;
     setBasket((prev) => [...prev, ...entries.filter((x) => !prev.some((p) => p.id === x.id))]);
-    if (saved.warehouseId && !warehouseRef.current) {
+    // O cesto volta com o armazém e o fornecedor com que foi gravado. Se ainda
+    // não houver nada no cesto, sobrepõe-se ao armazém escolhido entretanto
+    // (ex.: o lembrado, carregado antes de a sessão chegar). Se as opções desta
+    // empresa já estiverem carregadas, só se aceitam ids que lhe pertençam; se
+    // não, a carga valida-os quando chegar.
+    const opts = optionsRef.current && optionsRef.current.epoch === orgEpochRef.current ? optionsRef.current : null;
+    const whOk = !!saved.warehouseId && (!opts || opts.warehouses.some((w) => w.id === saved.warehouseId));
+    if (whOk && (!warehouseRef.current || basketRef.current.length === 0)) {
+      const supOk = !saved.supplierId || !opts || opts.suppliers.some((s) => s.id === saved.supplierId);
+      const sup = supOk ? saved.supplierId : "";
       setWarehouseId(saved.warehouseId);
       warehouseRef.current = saved.warehouseId;
-      setSupplierId(saved.supplierId);
-      supplierRef.current = saved.supplierId;
+      setSupplierId(sup);
+      supplierRef.current = sup;
     }
     setAnnouncement(`Cesto reposto: ${entries.length} ${entries.length === 1 ? "entrada" : "entradas"}.`);
+  }, [userId, orgId]);
+
+  // "Por enviar" da empresa ativa: carrega ao entrar/trocar e acompanha o que
+  // outra instância (ex.: a antiga, já desmontada) lá escrever.
+  useEffect(() => {
+    if (!userId || !orgId) return;
+    const key = unsentStorageKey(userId, orgId);
+    setUnsent(readUnsent(key));
+    const onChange = (ev: Event) => {
+      if ((ev as CustomEvent<string>).detail !== key) return;
+      if (mountedRef.current) setUnsent(readUnsent(key));
+    };
+    window.addEventListener(UNSENT_EVENT, onChange);
+    return () => window.removeEventListener(UNSENT_EVENT, onChange);
   }, [userId, orgId]);
 
   /**
    * Entradas que ficaram por enviar quando o ciclo parou (troca de empresa ou
    * saída do ecrã): voltam ao cesto livres, no ecrã se ainda for o da mesma
-   * empresa e armazém, senão ao cesto guardado dessa empresa.
+   * empresa e armazém; com o ecrã montado noutra empresa, ao cesto guardado
+   * dessa empresa (esta instância só grava na chave da empresa ativa, por isso
+   * não há sobreposição). Em todos os outros casos — ecrã desmontado (uma
+   * instância nova pode já ter reposto o cesto e regravá-lo-ia por cima),
+   * outro armazém — vão para "Por enviar", sempre por read-modify-write.
    */
   const returnUnsent = useCallback(
     (org: string, orgName: string, wh: string, sup: string, list: BasketEntry[]) => {
@@ -984,7 +1092,7 @@ export default function Receiving() {
       }
       const uid = userIdRef.current;
       const onOtherScreen = mountedRef.current && orgRef.current === org; // mesma empresa, outro armazém
-      if (uid && !onOtherScreen) {
+      if (uid && mountedRef.current && !onOtherScreen) {
         const key = basketStorageKey(uid, org);
         const saved = readSessionBasket(key);
         if (!saved || saved.entries.length === 0 || saved.warehouseId === wh) {
@@ -1002,6 +1110,22 @@ export default function Receiving() {
           return;
         }
       }
+      if (uid) {
+        const at = new Date().toISOString();
+        const items: UnsentEntry[] = freed.map((e) => ({ ...toStoredEntry(e), warehouseId: wh, supplierId: sup, at }));
+        const next = mutateUnsent(unsentStorageKey(uid, org), (cur) => [
+          ...cur,
+          ...items.filter((x) => !cur.some((c) => c.id === x.id)),
+        ]);
+        if (next) {
+          if (mountedRef.current && orgRef.current === org) setUnsent(next);
+          toast({
+            title: `Ficaram por enviar em «${orgName}»`,
+            description: `${freed.length} ${freed.length === 1 ? "entrada ficou" : "entradas ficaram"} em "Por enviar" — nada foi recebido.`,
+          });
+          return;
+        }
+      }
       toast({
         title: `Ficaram por enviar em «${orgName}»`,
         description: freed.map((e) => `${e.name} — ${fmt(e.quantity)} ${unitLabel(e.uomCode, e.unitsPerUom)}`).join("; "),
@@ -1010,6 +1134,51 @@ export default function Receiving() {
     },
     [toast],
   );
+
+  /** "Por enviar" → cesto: só com o cesto vazio ou no mesmo armazém e fornecedor. */
+  const restoreUnsent = (id: string) => {
+    const uid = userIdRef.current;
+    const org = orgRef.current;
+    if (!uid || !org || submittingRef.current) return;
+    const key = unsentStorageKey(uid, org);
+    const item = readUnsent(key).find((x) => x.id === id) ?? unsent.find((x) => x.id === id);
+    if (!item) return;
+    const empty = basketRef.current.length === 0;
+    if (!empty && (item.warehouseId !== warehouseRef.current || item.supplierId !== supplierRef.current)) {
+      toast({
+        title: "Armazém ou fornecedor diferente",
+        description: "Confirma ou esvazia o cesto primeiro — esta entrada foi lida noutro armazém/fornecedor.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (empty) {
+      const opts = optionsRef.current && optionsRef.current.epoch === orgEpochRef.current ? optionsRef.current : null;
+      if (opts && !opts.warehouses.some((w) => w.id === item.warehouseId)) {
+        toast({ title: "Armazém indisponível", description: "O armazém desta entrada já não existe.", variant: "destructive" });
+        return;
+      }
+      const sup = !item.supplierId || !opts || opts.suppliers.some((s) => s.id === item.supplierId) ? item.supplierId : "";
+      setWarehouseId(item.warehouseId);
+      warehouseRef.current = item.warehouseId;
+      setSupplierId(sup);
+      supplierRef.current = sup;
+    }
+    const entry = fromStoredEntry(item);
+    setBasket((prev) => (prev.some((p) => p.id === entry.id) ? prev : [entry, ...prev]));
+    const next = mutateUnsent(key, (cur) => cur.filter((x) => x.id !== id));
+    setUnsent(next ?? ((cur) => cur.filter((x) => x.id !== id)));
+    focusScan();
+  };
+
+  const dismissUnsent = (id: string) => {
+    const uid = userIdRef.current;
+    const org = orgRef.current;
+    if (!uid || !org) return;
+    const next = mutateUnsent(unsentStorageKey(uid, org), (cur) => cur.filter((x) => x.id !== id));
+    setUnsent(next ?? ((cur) => cur.filter((x) => x.id !== id)));
+    focusScan();
+  };
 
   const handleWarehouseChange = (id: string) => {
     setWarehouseId(id);
@@ -1349,8 +1518,12 @@ export default function Receiving() {
    * Leitor com o foco fora de um campo editável (num botão, no <select> da linha
    * de PO, no corpo da página): apanha a rajada em captura, antes do elemento.
    * O Enter final, se a escrita foi de leitor (SCANNER_BURST_MS), não ativa o
-   * botão — vai para a fila de leituras. Nos <select> as teclas imprimíveis são
-   * sempre travadas, senão a 1.ª tecla da rajada mudava a opção (type-ahead).
+   * botão — vai para a fila de leituras. Nos <select> a 1.ª tecla de uma rajada
+   * mudaria a opção (type-ahead) e o onChange dos selects de armazém/fornecedor
+   * limpa as escolhas pendentes — reverter depois não as recupera. Por isso a
+   * tecla é retida e só é aplicada (type-ahead feito aqui, com evento change)
+   * se não vier outra logo a seguir: escrita de pessoa funciona como antes (com
+   * ~140 ms de atraso); uma rajada de leitor nunca chega a mexer no select.
    * Campos editáveis e diálogos abertos não são tocados.
    */
   useEffect(() => {
@@ -1359,6 +1532,50 @@ export default function Receiving() {
     const reset = () => {
       chars = "";
       times = [];
+    };
+    // Type-ahead retido do <select> com foco.
+    let selEl: HTMLSelectElement | null = null;
+    let selBuf = "";
+    let selTimes: number[] = [];
+    let selLastKey = 0;
+    let selTimer: number | undefined;
+    const cancelSelect = () => {
+      if (selTimer) window.clearTimeout(selTimer);
+      selTimer = undefined;
+      selEl = null;
+      selBuf = "";
+      selTimes = [];
+    };
+    const applyTypeAhead = () => {
+      selTimer = undefined;
+      const el = selEl;
+      const t = selTimes;
+      selTimes = []; // o texto fica (1 s) para procura com várias letras, como no browser
+      if (!el || !el.isConnected || el.disabled || document.activeElement !== el) return;
+      // Rajada sem Enter (leitor configurado sem sufixo): não é escrita de pessoa.
+      if (t.length >= 4 && (t[t.length - 1] - t[0]) / (t.length - 1) < SCANNER_BURST_MS) {
+        selBuf = "";
+        return;
+      }
+      const q = selBuf.toLocaleLowerCase("pt-PT");
+      if (!q.trim()) return;
+      // A mesma letra repetida percorre as opções que começam por ela.
+      const needle = q.length > 1 && q.split("").every((c) => c === q[0]) ? q[0] : q;
+      const opts = Array.from(el.options);
+      const n = opts.length;
+      const start = el.selectedIndex;
+      const from = needle.length === 1 ? start + 1 : Math.max(start, 0);
+      for (let k = 0; k < n; k++) {
+        const idx = (from + k) % n;
+        const o = opts[idx];
+        if (!o.disabled && o.text.trim().toLocaleLowerCase("pt-PT").startsWith(needle)) {
+          if (idx !== el.selectedIndex) {
+            el.selectedIndex = idx;
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          return;
+        }
+      }
     };
     const onKeyDown = (ev: globalThis.KeyboardEvent) => {
       if (ev.isComposing || ev.ctrlKey || ev.altKey || ev.metaKey) {
@@ -1390,6 +1607,7 @@ export default function Receiving() {
           ev.stopPropagation();
           const value = chars.trim();
           reset();
+          cancelSelect(); // a rajada era uma leitura: nada de type-ahead
           if (value) enqueueRef.current({ id: newRequestId(), value, attempts: 0 });
           focusScan();
         } else {
@@ -1398,15 +1616,33 @@ export default function Receiving() {
         return;
       }
       if (ev.key.length !== 1) return;
-      const inSelect = active instanceof HTMLSelectElement;
-      // A meio de uma rajada (ou num select) a tecla não chega ao elemento.
       const fastSoFar = times.length >= 1 && now - last < SCANNER_BURST_MS * 2;
-      if (inSelect || fastSoFar) ev.preventDefault();
+      if (active instanceof HTMLSelectElement) {
+        // A tecla não chega ao select: fica retida e só se aplica se a escrita
+        // parar sem formar rajada (ver applyTypeAhead).
+        ev.preventDefault();
+        if (selEl !== active || now - selLastKey > 1000) {
+          selBuf = "";
+          selTimes = [];
+        }
+        selEl = active;
+        selBuf += ev.key;
+        selTimes.push(now);
+        selLastKey = now;
+        if (selTimer) window.clearTimeout(selTimer);
+        selTimer = window.setTimeout(applyTypeAhead, SCANNER_BURST_MS * 4);
+      } else if (fastSoFar) {
+        // A meio de uma rajada a tecla não chega ao elemento.
+        ev.preventDefault();
+      }
       chars += ev.key;
       times.push(now);
     };
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      cancelSelect();
+    };
   }, [focusScan]);
 
   const retryFailedScan = (id: string) => {
@@ -1586,18 +1822,31 @@ export default function Receiving() {
    * foi desfeita (exceto mayHaveCommitted). Numa receção JÁ incerta, nada se
    * larga sem consultar receiving_scans: existe → recebida; não existe e o erro
    * é de negócio → recusada; consulta falhou ou erro de rede/auth → incerta.
+   * A recusa de negócio só conta se o envio ANTERIOR (prevSentAt) tiver sido
+   * há mais de REJECT_MIN_AGE_MS: antes disso esse pedido pode ainda estar a
+   * correr e gravar depois da consulta. Sem data do envio anterior → incerta.
    */
   const settleFailedReceive = async (
     requestId: string,
     err: RpcErrorLike | undefined,
     wasUncertain: boolean,
+    prevSentAt?: number,
   ): Promise<{ kind: "received"; row: ScanRow } | { kind: "rejected" } | { kind: "uncertain" }> => {
     if (!wasUncertain) return mayHaveCommitted(err) ? { kind: "uncertain" } : { kind: "rejected" };
     const rows = await fetchScans([requestId]);
     if (rows === null) return { kind: "uncertain" };
     const row = rows.find((r) => r.id === requestId);
     if (row) return { kind: "received", row };
-    return isBusinessRejection(err) ? { kind: "rejected" } : { kind: "uncertain" };
+    const oldEnough = !!prevSentAt && Date.now() - prevSentAt > REJECT_MIN_AGE_MS;
+    return isBusinessRejection(err) && oldEnough ? { kind: "rejected" } : { kind: "uncertain" };
+  };
+
+  /** Mensagem de uma receção que fica incerta (P0002: sugere verificar e descartar). */
+  const uncertainMessage = (err: RpcErrorLike | undefined) => {
+    const msg = errorMessage(err, "receive");
+    return err?.code === "P0002"
+      ? `${msg} Verifica se chegou a ser recebida; se tens a certeza de que não foi, usa Descartar.`
+      : msg;
   };
 
   const submitEntries = async (onlyId?: string) => {
@@ -1642,17 +1891,27 @@ export default function Receiving() {
       }
       if (!isCurrent(epoch, org)) return;
 
-      // Bloqueia e fotografa no MESMO passo, sobre o estado mais recente (o
-      // updater recebe tudo o que já estava em fila). Depois disto, uma leitura
-      // ou "+" vai para outra entrada — nunca soma à que vai ser enviada. Os ids
-      // ficam no Map para o updater ser idempotente (StrictMode chama-o 2×).
+      // Bloqueia e fotografa no MESMO passo. A fotografia é tirada UMA vez (na
+      // 1.ª chamada do updater) e nunca mais muda: o React 18 pode voltar a
+      // aplicar este updater (StrictMode, ou rebase quando havia um setBasket de
+      // leitura pendente noutra faixa — o flushSync só processa a síncrona). Nesse
+      // caso a entrada bloqueada no estado pode acabar com mais quantidade do que
+      // a enviada; é por isso que, no fim, se subtrai a quantidade ENVIADA (a da
+      // pendente) e o resto fica livre. Depois disto, uma leitura ou "+" vai para
+      // outra entrada — nunca soma à que vai ser enviada.
+      let snapped = false;
       flushSync(() => {
         setBasket((prev) => {
-          const picked = prev.filter((e) => (!onlyId || e.id === onlyId) && qtyValid(e) && !e.submitting);
-          for (const e of picked) if (!ids.has(e.id)) ids.set(e.id, e.requestId ?? newRequestId());
-          entries = picked.map((e) => ({ ...e, requestId: ids.get(e.id), submitting: true, submitError: undefined }));
-          if (picked.length === 0) return prev;
-          return prev.map((x) => entries.find((y) => y.id === x.id) ?? x);
+          if (!snapped) {
+            snapped = true;
+            const picked = prev.filter((e) => (!onlyId || e.id === onlyId) && qtyValid(e) && !e.submitting);
+            for (const e of picked) ids.set(e.id, e.requestId ?? newRequestId());
+            entries = picked.map((e) => ({ ...e, requestId: ids.get(e.id), submitting: true, submitError: undefined }));
+          }
+          if (ids.size === 0) return prev;
+          return prev.map((x) =>
+            ids.has(x.id) && !x.submitting ? { ...x, requestId: ids.get(x.id), submitting: true, submitError: undefined } : x,
+          );
         });
       });
       if (entries.length === 0) return;
@@ -1669,12 +1928,16 @@ export default function Receiving() {
         const wasUncertain = isUncertain(e);
         // Regista ANTES de chamar: se a página desmontar ou a rede cair, fica para confirmar.
         const nowIso = new Date().toISOString();
-        const prevPending = pendingRef.current.find((x) => x.requestId === requestId);
-        const p: PendingReceipt = {
-          ...pendingFromEntry(e, requestId, org, orgName, wh, sup),
-          createdAt: prevPending?.createdAt ?? nowIso,
-          lastSentAt: nowIso,
-        };
+        // A pendente é a única fonte de verdade de cada request_id: num reenvio
+        // vão EXATAMENTE os dados guardados nela (quantidade, unidade, linha,
+        // armazém, fornecedor, produto, código), nunca os da entrada — que pode
+        // ter mudado (rebase do updater) e daria 23514 com o mesmo id.
+        const prevPending =
+          pendingRef.current.find((x) => x.requestId === requestId) ?? (e.sent?.requestId === requestId ? e.sent : undefined);
+        const prevSentAt = prevPending ? sentAtMs(prevPending) : undefined;
+        const p: PendingReceipt = prevPending
+          ? { ...prevPending, entryId: e.id, state: "inflight", lastError: undefined, lastSentAt: nowIso }
+          : { ...pendingFromEntry(e, requestId, org, orgName, wh, sup), createdAt: nowIso, lastSentAt: nowIso };
         upsertPending(p);
         inflightRef.current.add(requestId);
         let result: Partial<ReceiveResult> | undefined;
@@ -1688,7 +1951,8 @@ export default function Receiving() {
             replayed = !!r.result.replayed;
           } else {
             err = r.err;
-            const s = await settleFailedReceive(requestId, err, wasUncertain);
+            // Com pendente anterior é sempre uma nova tentativa (mesmo id já enviado).
+            const s = await settleFailedReceive(requestId, err, wasUncertain || !!prevPending, prevSentAt);
             if (s.kind === "received") {
               result = (s.row.result ?? {}) as Partial<ReceiveResult>;
               replayed = true;
@@ -1709,13 +1973,15 @@ export default function Receiving() {
           toOrder += Number(result.units_to_order_total) || 0;
           toStock += Number(result.units_to_stock_total) || 0;
           if (here) {
-            setReceived((prev) => [receivedFromResult(requestId, e, result ?? {}, replayed), ...prev.filter((r) => r.id !== requestId)]);
-            // A entrada esteve bloqueada (não pode mudar), por isso sai inteira. Por
-            // defesa, se tiver mais do que o enviado, fica só a diferença, livre.
+            setReceived((prev) => [receivedFromResult(requestId, p, result ?? {}, replayed), ...prev.filter((r) => r.id !== requestId)]);
+            // Subtrai a quantidade ENVIADA com este id (p.quantity — a fotografia ou
+            // a pendente), nunca a quantidade atual da entrada: se a entrada ficou
+            // com mais (rebase do updater de bloqueio), o resto fica livre no cesto.
+            const sentQty = p.quantity;
             setBasket((prev) =>
               prev.flatMap((x) => {
                 if (x.id !== e.id) return [x];
-                const rest = x.quantity - e.quantity;
+                const rest = x.quantity - sentQty;
                 return rest > 0 ? [freeEntry({ ...x, quantity: rest })] : [];
               }),
             );
@@ -1727,7 +1993,7 @@ export default function Receiving() {
           }
         } else {
           failed += 1;
-          const msg = errorMessage(err, "receive");
+          const msg = uncertain ? uncertainMessage(err) : errorMessage(err, "receive");
           if (uncertain) {
             patchPending(requestId, { state: "unknown", lastError: msg });
           } else {
@@ -1750,6 +2016,8 @@ export default function Receiving() {
             retryable: uncertain,
             requestId: uncertain ? requestId : undefined,
             preview: uncertain ? e.preview : undefined,
+            // Incerta: guarda o que foi enviado com este id (o reenvio usa isto se a pendente faltar).
+            sent: uncertain ? { ...p, state: "unknown", lastError: msg } : undefined,
           });
         }
       }
@@ -1811,6 +2079,7 @@ export default function Receiving() {
     const p = pendingRef.current.find((x) => x.requestId === requestId);
     if (!p || p.orgId !== orgRef.current || inflightRef.current.has(requestId)) return;
     const epoch = orgEpochRef.current;
+    const prevSentAt = sentAtMs(p);
     setBusy(requestId, true);
     patchPending(requestId, { state: "inflight", lastError: undefined, lastSentAt: new Date().toISOString() });
     inflightRef.current.add(requestId);
@@ -1827,7 +2096,7 @@ export default function Receiving() {
       } else {
         err = r.err;
         // Uma pendente é sempre incerta: nunca se larga o id sem prova.
-        const s = await settleFailedReceive(requestId, err, true);
+        const s = await settleFailedReceive(requestId, err, true, prevSentAt);
         if (s.kind === "received") {
           result = (s.row.result ?? {}) as Partial<ReceiveResult>;
           replayed = true;
@@ -1851,7 +2120,7 @@ export default function Receiving() {
         description: `${p.label} · ${fmt(result.units_to_order_total)} un para EC, ${fmt(result.units_to_stock_total)} un para stock`,
       });
     } else if (uncertain) {
-      patchPending(requestId, { state: "unknown", lastError: errorMessage(err, "receive") });
+      patchPending(requestId, { state: "unknown", lastError: uncertainMessage(err) });
     } else {
       removePending(requestId);
       toast({ title: "Receção recusada", description: `${p.label}: ${errorMessage(err, "receive")}`, variant: "destructive" });
@@ -1879,6 +2148,62 @@ export default function Receiving() {
     }
     if (pendingRef.current.some((x) => x.requestId === requestId) && !inflightRef.current.has(requestId)) {
       removePending(requestId);
+    }
+    focusScan();
+  };
+
+  /**
+   * "Descartar" de uma entrada incerta no cesto: as mesmas regras do da lista
+   * "Receção por confirmar" (só DISCARD_MIN_AGE_MS depois do último envio, e só
+   * se a consulta a receiving_scans correr e não encontrar o id). Se afinal
+   * ficou registada, passa a recebida; se não, larga o id e a entrada fica livre
+   * (pode ser removida ou confirmada de novo, com id novo).
+   */
+  const discardEntry = async (entryId: string) => {
+    const e = basketRef.current.find((x) => x.id === entryId);
+    if (!e || !isUncertain(e) || e.submitting || submittingRef.current) return;
+    const requestId = e.requestId as string;
+    if (inflightRef.current.has(requestId)) return;
+    const p = pendingRef.current.find((x) => x.requestId === requestId) ?? (e.sent?.requestId === requestId ? e.sent : undefined);
+    if (!p || Date.now() - sentAtMs(p) < DISCARD_MIN_AGE_MS) return;
+    const epoch = orgEpochRef.current;
+    const org = orgRef.current;
+    setBusy(requestId, true);
+    const rows = await fetchScans([requestId]);
+    if (mountedRef.current) setBusy(requestId, false);
+    if (!isCurrent(epoch, org)) return;
+    if (rows === null) {
+      toast({
+        title: "Não foi possível verificar",
+        description: `${p.label}: sem resposta do servidor. Não foi descartada — tenta de novo daqui a pouco.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    // Entretanto pode ter sido reenviada (Confirmar/Tentar de novo): nesse caso a
+    // consulta é anterior ao reenvio e não prova nada — não se descarta.
+    const cur = basketRef.current.find((x) => x.id === entryId);
+    if (!cur || cur.requestId !== requestId || cur.submitting || submittingRef.current || inflightRef.current.has(requestId)) return;
+    const pNow = pendingRef.current.find((x) => x.requestId === requestId) ?? (cur.sent?.requestId === requestId ? cur.sent : undefined);
+    if (!pNow || sentAtMs(pNow) !== sentAtMs(p)) return;
+    const row = rows.find((r) => r.id === requestId);
+    removePending(requestId);
+    if (row) {
+      const result = (row.result ?? {}) as Partial<ReceiveResult>;
+      setReceived((prev) => [receivedFromResult(requestId, p, result, true), ...prev.filter((r) => r.id !== requestId)]);
+      setBasket((prev) =>
+        prev.flatMap((x) => {
+          if (x.id !== entryId || x.requestId !== requestId || x.submitting) return [x];
+          const rest = x.quantity - p.quantity;
+          return rest > 0 ? [freeEntry({ ...x, quantity: rest })] : [];
+        }),
+      );
+      refreshSameProduct(p.productId);
+      toast({ title: "Já tinha ficado registada", description: `${p.label} — não foi recebida outra vez.` });
+    } else {
+      scheduledSig.current.delete(entryId);
+      setBasket((prev) => prev.map((x) => (x.id === entryId && x.requestId === requestId && !x.submitting ? freeEntry(x) : x)));
+      setAnnouncement(`${p.label}: descartada. A entrada voltou a estar livre no cesto.`);
     }
     focusScan();
   };
@@ -2174,6 +2499,57 @@ export default function Receiving() {
         </Card>
       )}
 
+      {/* Por enviar — entradas que não puderam voltar ao cesto (nada foi recebido) */}
+      {unsent.length > 0 && (
+        <Card className="border-amber-500/60">
+          <CardHeader className="p-4 pb-2">
+            <CardTitle className="text-base">Por enviar ({unsent.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 p-4 pt-0">
+            <p className="text-sm text-muted-foreground">
+              Ficaram por enviar quando o ecrã mudou — nada foi recebido. Volta a pô-las no cesto ou dispensa-as.
+            </p>
+            {unsent.map((u) => {
+              const whName = warehouses.find((w) => w.id === u.warehouseId)?.name;
+              const supName = u.supplierId ? suppliers.find((s) => s.id === u.supplierId)?.name : undefined;
+              return (
+                <div key={u.id} className="flex flex-wrap items-center gap-2 rounded-lg border p-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words font-medium">
+                      {u.name} — {fmt(u.quantity)} {unitLabel(u.uomCode, u.unitsPerUom)}
+                    </p>
+                    <p className="break-words text-xs text-muted-foreground">
+                      {[whName ? `Armazém ${whName}` : null, supName ? `fornecedor ${supName}` : null].filter(Boolean).join(" · ")}
+                    </p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 shrink-0"
+                    disabled={confirming}
+                    onMouseDown={keepScanFocus}
+                    onClick={() => restoreUnsent(u.id)}
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Voltar ao cesto
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-11 w-11 shrink-0 p-0"
+                    onMouseDown={keepScanFocus}
+                    onClick={() => dismissUnsent(u.id)}
+                    aria-label={`Dispensar ${u.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
       {choices.map((ch) => (
         <ChoiceCard
           key={ch.id}
@@ -2207,12 +2583,19 @@ export default function Receiving() {
               </CardContent>
             </Card>
           ) : (
-            basket.map((e) => (
+            basket.map((e) => {
+              const sentRec = e.requestId
+                ? (pending.find((x) => x.requestId === e.requestId) ?? (e.sent?.requestId === e.requestId ? e.sent : undefined))
+                : undefined;
+              return (
               <BasketCard
                 key={e.id}
                 entry={e}
                 preview={previewFor(e)}
                 busy={confirming}
+                discardBusy={!!e.requestId && pendingBusy.has(e.requestId)}
+                discardWaitMs={sentRec ? DISCARD_MIN_AGE_MS - (nowMs - sentAtMs(sentRec)) : Number.POSITIVE_INFINITY}
+                onDiscard={() => void discardEntry(e.id)}
                 qtyValid={qtyValid(e)}
                 onMinus={() => {
                   setQuantity(e.id, e.quantity - 1);
@@ -2241,7 +2624,8 @@ export default function Receiving() {
                   focusScan();
                 }}
               />
-            ))
+              );
+            })
           )}
         </section>
 
@@ -2457,6 +2841,8 @@ function BasketCard({
   entry,
   preview,
   busy,
+  discardBusy,
+  discardWaitMs,
   qtyValid,
   onMinus,
   onPlus,
@@ -2468,11 +2854,15 @@ function BasketCard({
   onToggleAdvanced,
   onPoItem,
   onRetry,
+  onDiscard,
   onRecalc,
 }: {
   entry: BasketEntry;
   preview: Preview | undefined;
   busy: boolean;
+  discardBusy: boolean;
+  /** Tempo até o "Descartar" ficar disponível (≤ 0 = já pode). */
+  discardWaitMs: number;
   qtyValid: boolean;
   onMinus: () => void;
   onPlus: () => void;
@@ -2484,9 +2874,12 @@ function BasketCard({
   onToggleAdvanced: () => void;
   onPoItem: (id: string) => void;
   onRetry: () => void;
+  onDiscard: () => void;
   onRecalc: () => void;
 }) {
   const uncertain = isUncertain(entry);
+  const discardTooRecent = discardWaitMs > 0;
+  const discardHintId = `discard-wait-${entry.id}`;
   const locked = busy || isLocked(entry);
   const lines = sameUnitLines(entry.openLines);
   const openTotal = lines.reduce((s, l) => s + Number(l.open_quantity), 0);
@@ -2619,14 +3012,13 @@ function BasketCard({
           )}
         </div>
 
-        {/* Pré-visualização — região aria-live sempre montada, o conteúdo muda lá dentro */}
-        <div aria-live="polite">
-          <PreviewView entry={entry} preview={preview} onRecalc={onRecalc} />
-        </div>
+        {/* Pré-visualização — sem região aria-live por cartão: os anúncios vão
+            todos pela região global (announcement), para não se sobreporem. */}
+        <PreviewView entry={entry} preview={preview} onRecalc={onRecalc} />
 
-        {/* Erro do pedido real */}
+        {/* Erro do pedido real (anunciado pela região global no fim do Confirmar) */}
         {entry.submitError && (
-          <div role="alert" className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="space-y-2 rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
             <p className="break-words">{entry.submitError}</p>
             {uncertain && (
               <>
@@ -2634,10 +3026,36 @@ function BasketCard({
                   Pode já ter ficado registada — tenta de novo. "Tentar de novo" usa o mesmo pedido e não recebe duas vezes;
                   por isso esta entrada não pode ser removida nem alterada.
                 </p>
-                <Button type="button" variant="outline" className="h-11" onMouseDown={keepScanFocus} onClick={onRetry} disabled={busy}>
-                  <RotateCcw className="mr-2 h-4 w-4" />
-                  Tentar de novo
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11"
+                    onMouseDown={keepScanFocus}
+                    onClick={onRetry}
+                    disabled={busy || discardBusy}
+                  >
+                    <RotateCcw className="mr-2 h-4 w-4" />
+                    Tentar de novo
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 whitespace-normal text-left"
+                    onMouseDown={keepScanFocus}
+                    onClick={onDiscard}
+                    disabled={busy || discardBusy || discardTooRecent}
+                    aria-describedby={discardTooRecent && Number.isFinite(discardWaitMs) ? discardHintId : undefined}
+                  >
+                    {discardBusy ? "A verificar…" : "Descartar — confirmo que não foi recebida"}
+                  </Button>
+                </div>
+                {discardTooRecent && Number.isFinite(discardWaitMs) && (
+                  <p id={discardHintId} className="text-xs text-destructive/90">
+                    Enviada há pouco — o pedido pode ainda estar a ser processado. Podes descartar daqui a{" "}
+                    {Math.max(1, Math.ceil(discardWaitMs / 1000))} s.
+                  </p>
+                )}
               </>
             )}
           </div>
