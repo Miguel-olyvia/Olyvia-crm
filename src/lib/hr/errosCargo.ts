@@ -33,6 +33,7 @@ export const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   HRC11: "hr.cargos.erro.retribuicaoSemCargo",
   HRC12: "hr.cargos.erro.pessoaNaoEncontrada",
   HRC13: "hr.cargos.erro.demasiadosCortes",
+  HRC14: "hr.cargos.erro.nomeDuplicado",
   igualdade_salarial: "hr.cargos.erro.igualdadeSalarial",
   // 23P01 (exclusao): dois periodos do mesmo cargo, ou dois cargos da mesma
   // pessoa, que se cruzam. So se reconhece pelo TOKEN da mensagem: um 23P01
@@ -56,6 +57,7 @@ export const CODIGO_POR_TOKEN: Readonly<Record<string, string>> = {
   retribuicao_sem_cargo: "HRC11",
   pessoa_nao_encontrada: "HRC12",
   retribuicao_demasiados_cortes: "HRC13",
+  cargo_nome_duplicado: "HRC14",
   igualdade_salarial: "igualdade_salarial",
   cargo_periodo_sobreposto: "periodo_sobreposto",
   pessoa_cargo_sobreposto: "periodo_sobreposto",
@@ -72,13 +74,26 @@ function temPropria(objecto: object, chave: string): boolean {
 }
 
 /**
- * O codigo conhecido deste erro (HRC01..HRC13 ou "igualdade_salarial"), ou
+ * Os indices unicos do NOME do cargo: o constraint antigo (nome exacto) e o
+ * indice da chave (20261210160000). O trigger recusa antes com HRC14; este 23505
+ * so chega numa corrida entre dois pedidos. So se reconhece pelo NOME do indice
+ * na mensagem: um 23505 de outra tabela (ou de `hr_cargos_periodos`) nao e nosso.
+ */
+const INDICES_NOME_CARGO = ["hr_cargos_nome_unico_por_org", "hr_cargos_nome_chave_unica_por_org"];
+
+function ehUnicoDoNomeDoCargo(message: unknown): boolean {
+  return typeof message === "string" && INDICES_NOME_CARGO.some((indice) => message.includes(`"${indice}"`));
+}
+
+/**
+ * O codigo conhecido deste erro (HRC01..HRC14 ou "igualdade_salarial"), ou
  * `null`. Le `error.code`; em falta, ou se for um SQLSTATE generico (23514), o
  * token antes dos dois pontos da `message`.
  */
 export function codigoDeErroCargo(erro: unknown): string | null {
   if (!erro || typeof erro !== "object") return null;
   const { code, message } = erro as { code?: unknown; message?: unknown };
+  if (code === "23505") return ehUnicoDoNomeDoCargo(message) ? "HRC14" : null;
   if (typeof code === "string" && temPropria(CHAVE_POR_CODIGO, code)) return code;
   if (typeof message === "string") {
     const token = message.split(":")[0].trim();

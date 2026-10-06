@@ -94,6 +94,7 @@ import type { PessoaListItem, Periodicidade } from "@/types/hr";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { mensagemDeErroCargo } from "@/lib/hr/errosCargo";
+import { cargoComMesmoNome } from "@/lib/hr/cargosNome";
 import {
   AlertTriangle,
   Banknote,
@@ -165,6 +166,12 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
     return { porCargo: mapa, semCargo: sem, fichasSemCargo: fichas };
   }, [pessoas]);
 
+  // O outro cargo (activo ou nao) com o mesmo nome: a base recusa-o (HRC14), aqui avisa-se antes.
+  const nomeRepetido = useMemo(
+    () => (dialogoAberto ? cargoComMesmoNome(cargos, form.nome, cargoAEditar) : null),
+    [dialogoAberto, cargos, form.nome, cargoAEditar],
+  );
+
   const cargosVisiveis = mostrarInactivos ? cargos : cargos.filter((c) => c.activo);
   const mostrarSemCargo = !loading && semCargo.total > 0;
   const vazio = cargosVisiveis.length === 0 && !mostrarSemCargo;
@@ -229,7 +236,7 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   };
 
   const submeter = async () => {
-    if (!form.nome.trim()) return;
+    if (!form.nome.trim() || nomeRepetido) return;
     if (!cargoAEditar && form.salario_base < 0) return;
     try {
       if (cargoAEditar) {
@@ -591,7 +598,16 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
                 id="cargo-nome"
                 value={form.nome}
                 onChange={(e) => setForm((f) => ({ ...f, nome: e.target.value }))}
+                aria-invalid={nomeRepetido !== null}
+                aria-describedby={nomeRepetido ? "cargo-nome-repetido" : undefined}
               />
+              {nomeRepetido && (
+                <p id="cargo-nome-repetido" role="alert" className="text-xs text-destructive">
+                  {t(nomeRepetido.activo ? "hr.cargos.nomeDuplicado" : "hr.cargos.nomeDuplicadoDesactivado", {
+                    nome: nomeRepetido.nome,
+                  })}
+                </p>
+              )}
             </div>
 
             {cargoAEditar ? (
@@ -671,7 +687,9 @@ export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
             <Button
               type="button"
               onClick={submeter}
-              disabled={isSaving || !form.nome.trim() || (!cargoAEditar && form.salario_base < 0)}
+              disabled={
+                isSaving || !form.nome.trim() || nomeRepetido !== null || (!cargoAEditar && form.salario_base < 0)
+              }
             >
               {isSaving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {cargoAEditar ? t("common.save") : t("hr.cargos.novoCargo")}

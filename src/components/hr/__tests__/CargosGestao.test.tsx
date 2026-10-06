@@ -531,6 +531,133 @@ describe("CargosGestao: achados da revisao React (fluxo 2)", () => {
   });
 });
 
+describe("CargosGestao: nome de cargo repetido", () => {
+  const PERMISSOES_EDITAR = ["hr.pessoas.laborais.view", "hr.pessoas.laborais.edit"];
+
+  async function abrirNovo() {
+    permissoes.activas = new Set(PERMISSOES_EDITAR);
+    montar();
+    fireEvent.click(screen.getByText("hr.cargos.novoCargo"));
+    return screen.findByRole("dialog");
+  }
+
+  function escrever(dialogo: HTMLElement, nome: string) {
+    fireEvent.change(within(dialogo).getByLabelText("hr.cargos.coluna.cargo"), { target: { value: nome } });
+  }
+
+  const botaoCriar = (dialogo: HTMLElement) => within(dialogo).getByRole("button", { name: "hr.cargos.novoCargo" });
+
+  it("um nome livre nao avisa e deixa gravar", async () => {
+    const dialogo = await abrirNovo();
+    escrever(dialogo, "Rececionista");
+    expect(within(dialogo).queryByRole("alert")).not.toBeInTheDocument();
+    expect(botaoCriar(dialogo)).toBeEnabled();
+  });
+
+  it.each([
+    ["exacto", "Comercial"],
+    ["em minusculas", "comercial"],
+    ["com espaco no fim", "Comercial "],
+    ["com espacos e pontuacao a mais", " c o m e r c i a l ."],
+    ["com acentos a mais", "Cómércial"],
+  ])("criar com o nome %s de um cargo existente avisa, diz qual, e desactiva gravar", async (_nome, escrito) => {
+    const dialogo = await abrirNovo();
+    escrever(dialogo, escrito);
+
+    const aviso = within(dialogo).getByRole("alert");
+    expect(aviso.textContent).toMatch(/^hr\.cargos\.nomeDuplicado \{/);
+    expect(aviso.textContent).toContain('"nome":"Comercial"');
+    expect(botaoCriar(dialogo)).toBeDisabled();
+    expect(within(dialogo).getByLabelText("hr.cargos.coluna.cargo")).toHaveAttribute("aria-invalid", "true");
+
+    fireEvent.click(botaoCriar(dialogo));
+    expect(hooks.criar).not.toHaveBeenCalled();
+  });
+
+  it("avisa quando o cargo que ja existe esta desactivado, e diz o nome dele", async () => {
+    const dialogo = await abrirNovo();
+    escrever(dialogo, "antigo");
+
+    const aviso = within(dialogo).getByRole("alert");
+    expect(aviso.textContent).toMatch(/^hr\.cargos\.nomeDuplicadoDesactivado \{/);
+    expect(aviso.textContent).toContain('"nome":"Antigo"');
+    expect(botaoCriar(dialogo)).toBeDisabled();
+  });
+
+  it("o aviso desaparece e o botao volta quando o nome deixa de colidir", async () => {
+    const dialogo = await abrirNovo();
+    escrever(dialogo, "comercial");
+    expect(botaoCriar(dialogo)).toBeDisabled();
+    escrever(dialogo, "comercial 2");
+    expect(within(dialogo).queryByRole("alert")).not.toBeInTheDocument();
+    expect(botaoCriar(dialogo)).toBeEnabled();
+  });
+
+  it("editar: o proprio cargo nao colide consigo (mudar so as maiusculas passa)", async () => {
+    permissoes.activas = new Set(PERMISSOES_EDITAR);
+    montar();
+    fireEvent.click(within(linhaDe("Gestor")).getByTitle("hr.cargos.editarCargo"));
+    const dialogo = await screen.findByRole("dialog");
+    escrever(dialogo, "GESTOR ");
+
+    expect(within(dialogo).queryByRole("alert")).not.toBeInTheDocument();
+    expect(within(dialogo).getByText("common.save")).toBeEnabled();
+    fireEvent.click(within(dialogo).getByText("common.save"));
+    await waitFor(() => expect(hooks.editar).toHaveBeenCalledTimes(1));
+  });
+
+  it("editar: renomear para o nome de OUTRO cargo avisa e nao grava", async () => {
+    permissoes.activas = new Set(PERMISSOES_EDITAR);
+    montar();
+    fireEvent.click(within(linhaDe("Gestor")).getByTitle("hr.cargos.editarCargo"));
+    const dialogo = await screen.findByRole("dialog");
+    escrever(dialogo, "comercial");
+
+    expect(within(dialogo).getByRole("alert").textContent).toContain('"nome":"Comercial"');
+    expect(within(dialogo).getByText("common.save")).toBeDisabled();
+    fireEvent.click(within(dialogo).getByText("common.save"));
+    expect(hooks.editar).not.toHaveBeenCalled();
+  });
+
+  it("editar: renomear para o nome de um cargo desactivado avisa que esta desactivado", async () => {
+    permissoes.activas = new Set(PERMISSOES_EDITAR);
+    montar();
+    fireEvent.click(within(linhaDe("Gestor")).getByTitle("hr.cargos.editarCargo"));
+    const dialogo = await screen.findByRole("dialog");
+    escrever(dialogo, "Ántigo");
+
+    expect(within(dialogo).getByRole("alert").textContent).toMatch(/^hr\.cargos\.nomeDuplicadoDesactivado \{/);
+    expect(within(dialogo).getByText("common.save")).toBeDisabled();
+  });
+
+  it("a rede de seguranca: um HRC14 da base (corrida entre dois pedidos) volta traduzido, nunca em bruto", async () => {
+    const erro = { code: "HRC14", message: 'cargo_nome_duplicado: ja existe o cargo "Rececionista"' };
+    hooks.criar.mockRejectedValue(erro);
+    const dialogo = await abrirNovo();
+    escrever(dialogo, "Rececionista");
+    fireEvent.click(botaoCriar(dialogo));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(erros.mensagem).toHaveBeenCalledWith(erro, expect.any(String));
+    expect(String(toastError.mock.calls[0][0])).not.toContain("HRC14");
+    expect(String(toastError.mock.calls[0][0])).not.toContain("cargo_nome_duplicado");
+  });
+
+  it("a rede de seguranca: um 23505 do indice do nome tambem", async () => {
+    const erro = {
+      code: "23505",
+      message: 'duplicate key value violates unique constraint "hr_cargos_nome_chave_unica_por_org"',
+    };
+    hooks.criar.mockRejectedValue(erro);
+    const dialogo = await abrirNovo();
+    escrever(dialogo, "Rececionista");
+    fireEvent.click(botaoCriar(dialogo));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(String(toastError.mock.calls[0][0])).not.toContain("duplicate key");
+  });
+});
+
 describe("CargosGestao: fichas sem cargo e divergencias do periodo", () => {
   it("o cartao 'Fichas sem cargo' lista as fichas com ligacao para Laborais", () => {
     permissoes.activas = new Set(["hr.pessoas.laborais.view"]);

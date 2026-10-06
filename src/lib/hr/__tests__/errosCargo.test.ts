@@ -29,6 +29,7 @@ const CODIGOS_HRC = [
   "HRC11",
   "HRC12",
   "HRC13",
+  "HRC14",
 ];
 
 describe("CHAVE_POR_CODIGO", () => {
@@ -93,6 +94,58 @@ describe("chaves herdadas do prototipo nao sao codigos nossos", () => {
       expect(chaveDeErroCargo({ code: nome, message: `${nome}: x` })).toBeNull();
     },
   );
+});
+
+describe("nome de cargo duplicado (HRC14 e 23505)", () => {
+  const CHAVE = "hr.cargos.erro.nomeDuplicado";
+
+  it("HRC14 pelo code e pelo token cargo_nome_duplicado", () => {
+    const message = 'cargo_nome_duplicado: ja existe o cargo "Administrativo(a)"';
+    expect(codigoDeErroCargo({ code: "HRC14", message })).toBe("HRC14");
+    expect(codigoDeErroCargo({ message })).toBe("HRC14");
+    expect(chaveDeErroCargo({ code: "HRC14", message })).toBe(CHAVE);
+    expect(chaveDeErroCargo({ message })).toBe(CHAVE);
+  });
+
+  it.each(["hr_cargos_nome_unico_por_org", "hr_cargos_nome_chave_unica_por_org"])(
+    "um 23505 do indice %s tem a mesma chave",
+    (indice) => {
+      const erro = {
+        code: "23505",
+        message: `duplicate key value violates unique constraint "${indice}"`,
+        details: "Key (organization_id, nome)=(o, x) already exists.",
+      };
+      expect(codigoDeErroCargo(erro)).toBe("HRC14");
+      expect(chaveDeErroCargo(erro)).toBe(CHAVE);
+    },
+  );
+
+  it("um 23505 de outra tabela nao e reclamado", () => {
+    expect(
+      chaveDeErroCargo({
+        code: "23505",
+        message: 'duplicate key value violates unique constraint "pessoas_nif_key"',
+      }),
+    ).toBeNull();
+    expect(chaveDeErroCargo({ code: "23505" })).toBeNull();
+  });
+
+  it("um 23505 de hr_cargos_periodos (prefixo parecido, outra tabela) nao e reclamado", () => {
+    expect(
+      chaveDeErroCargo({
+        code: "23505",
+        message: 'duplicate key value violates unique constraint "hr_cargos_periodos_pkey"',
+      }),
+    ).toBeNull();
+  });
+
+  it("o texto existe nas cinco linguas e nao e a propria chave", () => {
+    for (const lingua of LINGUAS) {
+      const tabela = translations[lingua] as Record<string, string>;
+      expect(tabela[CHAVE], lingua).toBeTruthy();
+      expect(tabela[CHAVE], lingua).not.toBe(CHAVE);
+    }
+  });
 });
 
 describe("sobreposicao de periodos (23P01)", () => {

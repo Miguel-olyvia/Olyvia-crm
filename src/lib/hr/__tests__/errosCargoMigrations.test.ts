@@ -21,6 +21,7 @@ const VERSOES = [
   "20261210120000",
   "20261210130000",
   "20261210140000",
+  "20261210160000",
 ] as const;
 
 interface Raise {
@@ -67,7 +68,7 @@ describe("errosCargo.ts contra os RAISE reais das migrations do fluxo 2", () => 
   it("o leitor de SQL encontra os RAISE do fluxo 2 (guarda contra um regex que nao apanha nada)", () => {
     expect(raises.length).toBeGreaterThan(40);
     const codigos = new Set(raises.map((r) => r.errcode));
-    for (let n = 1; n <= 13; n++) expect(codigos.has(`HRC${String(n).padStart(2, "0")}`), `HRC${n}`).toBe(true);
+    for (let n = 1; n <= 14; n++) expect(codigos.has(`HRC${String(n).padStart(2, "0")}`), `HRC${n}`).toBe(true);
     expect(codigos.has("23514")).toBe(true);
     expect(codigos.has("23P01")).toBe(true);
   });

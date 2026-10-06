@@ -32,6 +32,7 @@ const VERSOES = [
   "20261210120000",
   "20261210130000",
   "20261210140000",
+  "20261210160000",
 ] as const;
 
 const M1 = () => migrationPorVersao(VERSOES[0]);
