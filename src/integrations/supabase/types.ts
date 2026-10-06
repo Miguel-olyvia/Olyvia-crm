@@ -18248,6 +18248,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "purchase_order_receipts_delivery_note_id_fkey"
+            columns: ["delivery_note_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_delivery_notes"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "purchase_order_receipts_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
@@ -19622,6 +19629,13 @@ export type Database = {
           warehouse_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "receiving_scans_delivery_note_id_fkey"
+            columns: ["delivery_note_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_delivery_notes"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "receiving_scans_organization_id_fkey"
             columns: ["organization_id"]
@@ -21953,6 +21967,225 @@ export type Database = {
           type?: string | null
         }
         Relationships: []
+      }
+      supplier_delivery_note_lines: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          delivery_note_id: string
+          description: string | null
+          id: string
+          organization_id: string
+          position: number
+          product_id: string
+          purchase_order_item_id: string | null
+          quantity: number
+          units_per_uom: number
+          uom_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          delivery_note_id: string
+          description?: string | null
+          id?: string
+          organization_id: string
+          position?: number
+          product_id: string
+          purchase_order_item_id?: string | null
+          quantity: number
+          units_per_uom?: number
+          uom_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          delivery_note_id?: string
+          description?: string | null
+          id?: string
+          organization_id?: string
+          position?: number
+          product_id?: string
+          purchase_order_item_id?: string | null
+          quantity?: number
+          units_per_uom?: number
+          uom_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_delivery_note_lines_delivery_note_id_fkey"
+            columns: ["delivery_note_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_delivery_notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_delivery_note_lines_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_delivery_note_lines_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_delivery_note_lines_purchase_order_item_id_fkey"
+            columns: ["purchase_order_item_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_compra_linha"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_delivery_note_lines_purchase_order_item_id_fkey"
+            columns: ["purchase_order_item_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_order_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_delivery_note_lines_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_delivery_note_orders: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          delivery_note_id: string
+          organization_id: string
+          purchase_order_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          delivery_note_id: string
+          organization_id: string
+          purchase_order_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          delivery_note_id?: string
+          organization_id?: string
+          purchase_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_delivery_note_orders_delivery_note_id_fkey"
+            columns: ["delivery_note_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_delivery_notes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_delivery_note_orders_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_delivery_note_orders_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "ops_v_compra_linha"
+            referencedColumns: ["compra_id"]
+          },
+          {
+            foreignKeyName: "supplier_delivery_note_orders_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: false
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_delivery_notes: {
+        Row: {
+          cancel_reason: string | null
+          cancelled_at: string | null
+          cancelled_by: string | null
+          close_notes: string | null
+          close_summary: Json | null
+          closed_at: string | null
+          closed_by: string | null
+          created_at: string
+          created_by: string | null
+          document_date: string | null
+          history: Json
+          id: string
+          note_number: string
+          notes: string | null
+          organization_id: string
+          status: string
+          supplier_id: string
+          updated_at: string
+        }
+        Insert: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          close_notes?: string | null
+          close_summary?: Json | null
+          closed_at?: string | null
+          closed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          document_date?: string | null
+          history?: Json
+          id: string
+          note_number: string
+          notes?: string | null
+          organization_id: string
+          status?: string
+          supplier_id: string
+          updated_at?: string
+        }
+        Update: {
+          cancel_reason?: string | null
+          cancelled_at?: string | null
+          cancelled_by?: string | null
+          close_notes?: string | null
+          close_summary?: Json | null
+          closed_at?: string | null
+          closed_by?: string | null
+          created_at?: string
+          created_by?: string | null
+          document_date?: string | null
+          history?: Json
+          id?: string
+          note_number?: string
+          notes?: string | null
+          organization_id?: string
+          status?: string
+          supplier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_delivery_notes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_delivery_notes_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       suppliers: {
         Row: {
@@ -24322,6 +24555,14 @@ export type Database = {
         Returns: number
       }
       fn_deal_org_in_scope: { Args: { p_org_id: string }; Returns: boolean }
+      fn_delivery_note_scope: {
+        Args: { p_delivery_note_id: string }
+        Returns: string[]
+      }
+      fn_delivery_note_summary: {
+        Args: { p_delivery_note_id: string }
+        Returns: Json
+      }
       fn_entity_delivery_address_access: {
         Args: { p_entity_id: string; p_mode: string }
         Returns: boolean
@@ -25709,6 +25950,8 @@ export type Database = {
         Args: { _orc: string; _org: string; _tarefas: Json }
         Returns: undefined
       }
+      ops_obras_que_vejo: { Args: never; Returns: string[] }
+      ops_obras_visiveis: { Args: { _org: string }; Returns: string[] }
       ops_pack_conteudo: { Args: { _pack: string }; Returns: Json }
       ops_pode: { Args: { _org_id: string; _perm: string }; Returns: boolean }
       ops_pode_ver_obra: { Args: { _obra_id: string }; Returns: boolean }
@@ -27752,6 +27995,39 @@ export type Database = {
       rpc_delete_supplier: { Args: { p_id: string }; Returns: undefined }
       rpc_delete_user: { Args: { p_user_id: string }; Returns: undefined }
       rpc_delete_warehouse: { Args: { p_id: string }; Returns: undefined }
+      rpc_delivery_note_cancel: {
+        Args: { p_delivery_note_id: string; p_reason: string }
+        Returns: Json
+      }
+      rpc_delivery_note_close: {
+        Args: {
+          p_delivery_note_id: string
+          p_expected_updated_at?: string
+          p_notes?: string
+        }
+        Returns: Json
+      }
+      rpc_delivery_note_get: {
+        Args: { p_delivery_note_id: string }
+        Returns: Json
+      }
+      rpc_delivery_note_reopen: {
+        Args: { p_delivery_note_id: string; p_reason: string }
+        Returns: Json
+      }
+      rpc_delivery_note_save: {
+        Args: {
+          p_delivery_note_id: string
+          p_document_date?: string
+          p_expected_updated_at?: string
+          p_lines?: Json
+          p_note_number: string
+          p_notes?: string
+          p_purchase_order_ids?: string[]
+          p_supplier_id: string
+        }
+        Returns: Json
+      }
       rpc_discard_draft_quote: {
         Args: { p_quote_id: string }
         Returns: boolean
@@ -28744,6 +29020,52 @@ export type Database = {
         Args: { p_aprovar: boolean; p_motivo?: string; p_tarefa_id: string }
         Returns: Json
       }
+      rpc_ops_obras_alertas_tempo: {
+        Args: { p_org: string }
+        Returns: {
+          a_correr: number
+          estado: string
+          minutos_previstos: number
+          minutos_reais: number
+          nivel: string
+          nome: string
+          obra_codigo: string
+          obra_id: string
+          tarefa_id: string
+        }[]
+      }
+      rpc_ops_obras_lista: {
+        Args: { p_org: string }
+        Returns: {
+          cliente_id: string
+          cliente_nome: string
+          codigo: string
+          contrato_id: string
+          criada_em: string
+          data_inicio_prevista: string
+          estado: string
+          fim_original: string
+          fim_planeado: string
+          gestor_id: string
+          id: string
+          inicio_planeado: string
+          minutos_previstos: number
+          minutos_reais: number
+          modelo_id: string
+          morada: string
+          n_alertas: number
+          n_extras: number
+          n_feitas: number
+          n_por_validar: number
+          n_tarefas: number
+          n_validadas: number
+          orcamento_id: string
+          organization_id: string
+          supervisor_id: string
+          titulo: string
+          tolerancia_percent: number
+        }[]
+      }
       rpc_ops_packs: {
         Args: never
         Returns: {
@@ -28939,6 +29261,7 @@ export type Database = {
       rpc_receive_by_code: {
         Args: {
           p_code?: string
+          p_delivery_note_id?: string
           p_dry_run?: boolean
           p_product_id: string
           p_purchase_order_item_id?: string
@@ -28968,7 +29291,12 @@ export type Database = {
         Returns: Json
       }
       rpc_receiving_lookup: {
-        Args: { p_code: string; p_supplier_id?: string; p_warehouse_id: string }
+        Args: {
+          p_code: string
+          p_delivery_note_id?: string
+          p_supplier_id?: string
+          p_warehouse_id: string
+        }
         Returns: Json
       }
       rpc_record_diagnostic_suggestion_accepted: {
