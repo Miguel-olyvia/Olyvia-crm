@@ -7318,17 +7318,19 @@ BEGIN
   END IF;
 
   v_chave := v_t.chave;
-  SELECT * INTO v_ant FROM public.ops_obra_aviso WHERE obra_id = _obra AND tipo = 'bancada';
-  IF FOUND AND v_ant.chave = v_chave THEN
-    RETURN jsonb_build_object('bancada', true, 'novo', false, 'enviado_em', v_ant.enviado_em);
-  END IF;
-
   SELECT COALESCE(array_agg(DISTINCT us.utilizador_id), '{}') INTO v_para
     FROM public.ops_utilizador_skill us
     JOIN public.ops_utilizador_perfil p ON p.utilizador_id = us.utilizador_id
                                        AND p.organization_id = v_o.organization_id AND p.ativo
    WHERE us.skill_id = ANY (v_skills);
   v_sem := cardinality(v_para) = 0;
+
+  -- Já avisado com as mesmas datas — a não ser que da outra vez não houvesse
+  -- marmorista e agora haja (avisa-se quem passou a ter a especialidade).
+  SELECT * INTO v_ant FROM public.ops_obra_aviso WHERE obra_id = _obra AND tipo = 'bancada';
+  IF FOUND AND v_ant.chave = v_chave AND NOT (v_ant.sem_especialidade AND NOT v_sem) THEN
+    RETURN jsonb_build_object('bancada', true, 'novo', false, 'enviado_em', v_ant.enviado_em);
+  END IF;
 
   v_ficha := public.ops_obra_ficha_local_dados(_obra);
   v_local := public.ops_obra_local_resumo(v_ficha);
