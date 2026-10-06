@@ -1,4 +1,65 @@
-# O cliente a pedir assistência sozinho
+# O cliente a acompanhar (e, depois, a pedir) trabalho
+
+> **06/10/2026 — feita a "variante mais barata" para as OBRAS: o cliente
+> acompanha a sua obra por um link privado.** Ver a secção
+> [Acompanhamento da obra por link](#acompanhamento-da-obra-por-link-feito-a-06102026).
+> O "pedir assistência" (ordens) continua por fazer — o resto deste
+> documento é o levantamento original, de agosto.
+
+---
+
+## Acompanhamento da obra por link (feito a 06/10/2026)
+
+**O que o cliente vê** — `/operacao/acompanhar/<token>`, sem conta, no
+telemóvel: a marca da empresa, o título e a morada da obra, o progresso
+(pesado pelo tempo previsto), início e conclusão prevista (com a data
+original riscada se mudou), a etapa atual e a seguinte, todas as etapas com
+datas, as **atualizações** (atrasos já comunicados: motivo, a nota dada ao
+cliente e a nova data), as **fotos escolhidas** e o contacto do supervisor
+(ligar / email).
+
+**O que nunca vê:** custos, tempos, nomes da equipa (além do supervisor),
+notas internas, o "contexto" dos atrasos, atrasos ainda não comunicados,
+fotos não marcadas.
+
+**Na ficha da obra (Operações):** "Partilhar com o cliente" → gerar o link
+(30 dias a 1 ano), copiar, enviar por WhatsApp ou email, ver quantas vezes o
+cliente o abriu, desativar, e **"Ver o que o cliente vê"** (a mesma página,
+numa moldura de telemóvel). Nas fotos de cada tarefa, o interruptor
+**"Mostrar ao cliente"** (por defeito, nenhuma foto é visível).
+
+**Quem pode:** pré-visualizar — quem vê a obra. Gerar/desativar o link e
+escolher as fotos — o supervisor da obra ou admin/gestor (a mesma regra do
+"cliente avisado").
+
+**Como está feito** (`db/acompanhamento-cliente.sql`, depois de `obras.sql`
+e `obras-fotos.sql`):
+
+- `ops_obra_partilha`: um link por obra, com **só o hash** (sha256) do token
+  — quem lê a base não reconstrói o link; o token aparece uma vez, ao gerar.
+  Validade, revogação, contagem de acessos. Gerar um novo revoga o anterior.
+  Tabela fechada: só as RPCs lhe tocam.
+- `rpc_ops_acompanhar(token)` (anon): mesma mensagem para "não existe" e
+  "revogado"; "expirou" diz-se. Obra cancelada fecha o link.
+- `ops_obra_acompanhamento_dados(obra)`: a ÚNICA fonte do que o cliente vê —
+  usada pelo link e pela pré-visualização, para nunca divergirem.
+- Fotos: `ops_obra_tarefa_foto.visivel_cliente`; a política de storage
+  `ops_acompanhar_fotos_ler` deixa assinar (URL de 1 h) só fotos marcadas de
+  obras com link ativo. Consequência conhecida: quem souber o caminho exato
+  de uma foto marcada (uuids) consegue assiná-la enquanto o link estiver
+  ativo — o mesmo nível de segredo do próprio link.
+- Provado em `tools/validar-acompanhamento.mjs` (44 verificações).
+- Zero escritas no CRM.
+
+**Porque link e não o portal do cliente do CRM:** o portal exige conta e
+ligação `client_portal_users` → cliente → obra, e a maioria dos clientes de
+obra não tem conta. O link resolve já o telefonema do "quando é que vêm?";
+quando o portal for a porta habitual, a mesma `ops_obra_acompanhamento_dados`
+serve-o (só muda a verificação de acesso).
+
+---
+
+## Levantamento original: o cliente a pedir assistência sozinho
 
 > Hipótese registada em agosto de 2026, **não construída**. Este documento
 > existe para quem a for construir não ter de refazer o levantamento.

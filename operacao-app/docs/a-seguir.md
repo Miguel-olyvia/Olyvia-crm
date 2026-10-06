@@ -11,6 +11,20 @@
 
 ---
 
+## Acompanhamento da obra pelo cliente — feito a 06/10/2026
+
+Link privado por obra (`/operacao/acompanhar/<token>`): progresso, etapas
+com datas, fotos escolhidas, atrasos já comunicados e contacto do
+supervisor. "Partilhar com o cliente" na ficha da obra; "Mostrar ao cliente"
+nas fotos. SQL: `db/acompanhamento-cliente.sql`. Detalhe em
+[`portal-do-cliente.md`](portal-do-cliente.md).
+
+**Por fazer:** escolher fotos também na fila "Validar" (não toquei para não
+chocar com o novo layout); avisar o cliente por SMS/WhatsApp quando há uma
+atualização; servir a mesma vista no portal do cliente do CRM.
+
+---
+
 ## Planeamento automático — o que ficou por fazer (03/10/2026)
 
 O motor está feito ([`planeamento.md`](planeamento.md)). Falta, por ordem de

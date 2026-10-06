@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ErroDeEscrita, urlsDosAnexos } from "../lib/dados";
 import { enviarFotoTarefa, fotosDasTarefas, removerFotoTarefa, type FotoTarefa } from "../lib/obrasFotos";
-import { Button, Spinner } from "./ui";
-import { Plus, X } from "./icons";
+import { marcarFotoCliente } from "../lib/acompanhamento";
+import { Button, Spinner, Toggle } from "./ui";
+import { Eye, Plus, X } from "./icons";
 import { dataHora } from "../lib/formatar";
 
 /**
@@ -10,7 +11,8 @@ import { dataHora } from "../lib/formatar";
  * vê-as antes de validar. Os URLs são assinados (1 h), como nas ordens.
  *
  * `podeEnviar` decide só se aparece o botão — a base verifica na mesma
- * (rpc_ops_obra_registar_foto).
+ * (rpc_ops_obra_registar_foto). `podeMarcarCliente` mostra "Mostrar ao
+ * cliente" (o supervisor da obra ou o gestor — rpc_ops_obra_foto_cliente).
  */
 export default function FotosTarefa({
   tarefa,
@@ -19,6 +21,7 @@ export default function FotosTarefa({
   podeApagarTodas = false,
   nomes,
   aoMudarContagem,
+  podeMarcarCliente = false,
 }: {
   tarefa: { id: string; obra_id: string; organization_id: string; estado: string };
   podeEnviar: boolean;
@@ -26,6 +29,7 @@ export default function FotosTarefa({
   podeApagarTodas?: boolean;
   nomes?: ReadonlyMap<string, string>;
   aoMudarContagem?: (n: number) => void;
+  podeMarcarCliente?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fotos, setFotos] = useState<FotoTarefa[] | null>(null);
@@ -87,6 +91,19 @@ export default function FotosTarefa({
     }
   };
 
+  const mudarCliente = async (f: FotoTarefa, visivel: boolean) => {
+    setErro(null);
+    try {
+      await marcarFotoCliente(f.id, visivel);
+      setFotos((fs) => (fs ?? []).map((x) => (x.id === f.id ? { ...x, visivel_cliente: visivel } : x)));
+      setAVer((v) => (v && v.id === f.id ? { ...v, visivel_cliente: visivel } : v));
+    } catch (e) {
+      setErro(e instanceof ErroDeEscrita ? e.message : "Não foi possível mudar a foto.");
+    }
+  };
+  // Só com o acompanhamento-cliente.sql a coluna existe.
+  const marcaCliente = podeMarcarCliente && (fotos ?? []).some((f) => typeof f.visivel_cliente === "boolean");
+
   if (fotos === null) return <Spinner label="A carregar as fotos" />;
   if (fotos.length === 0 && !ativo) {
     return <p className="text-xs text-slate-400">Sem fotos.</p>;
@@ -124,8 +141,16 @@ export default function FotosTarefa({
               <button
                 type="button"
                 onClick={() => setAVer(f)}
-                className="block aspect-square w-full overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200 hover:ring-brand/40"
+                className="relative block aspect-square w-full overflow-hidden rounded-lg bg-slate-100 ring-1 ring-slate-200 hover:ring-brand/40"
               >
+                {f.visivel_cliente && (
+                  <span
+                    className="absolute left-1 top-1 inline-flex items-center gap-0.5 rounded-full bg-brand px-1.5 py-0.5 text-[9px] font-medium text-white shadow"
+                    title="O cliente vê esta foto"
+                  >
+                    <Eye width={9} height={9} /> cliente
+                  </span>
+                )}
                 {urls.get(f.caminho) ? (
                   <img src={urls.get(f.caminho)} alt={f.legenda ?? f.nome} loading="lazy" className="h-full w-full object-cover" />
                 ) : (
@@ -161,6 +186,16 @@ export default function FotosTarefa({
             </div>
             {urls.get(aVer.caminho) && (
               <img src={urls.get(aVer.caminho)} alt={aVer.legenda ?? aVer.nome} className="mt-3 w-full rounded-lg" />
+            )}
+            {marcaCliente && (
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                <Toggle
+                  checked={!!aVer.visivel_cliente}
+                  onChange={(v) => void mudarCliente(aVer, v)}
+                  label="Mostrar ao cliente"
+                  hint="Aparece no link de acompanhamento da obra."
+                />
+              </div>
             )}
             {!validada && (podeApagarTodas || (euId && aVer.carregado_por === euId)) && (
               <div className="mt-3 border-t border-slate-100 pt-3">

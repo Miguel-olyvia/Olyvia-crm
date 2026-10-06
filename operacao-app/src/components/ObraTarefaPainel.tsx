@@ -378,6 +378,7 @@ export default function ObraTarefaPainel({
               podeApagarTodas={podeEditar}
               euId={null}
               nomes={nomes}
+              podeMarcarCliente={podeAvisarCliente}
             />
           </div>
         )}

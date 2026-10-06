@@ -43,6 +43,7 @@ import { AlertTriangle, ChevronLeft, MapPin, Plus } from "../components/icons";
 import ObraGantt from "../components/ObraGantt";
 import FichaLocal from "../components/FichaLocal";
 import ObraAvisoBancada from "../components/ObraAvisoBancada";
+import PartilharCliente from "../components/PartilharCliente";
 import ObraPorqueInicio from "../components/ObraPorqueInicio";
 import { etiquetaServico, nomesCurtos, servicosDistintos } from "../domain/nomesTarefas";
 import ObraTarefaPainel from "../components/ObraTarefaPainel";
@@ -364,6 +365,8 @@ export default function ObraDetalhe() {
             )}
           </div>
         </div>
+
+        {obra.estado !== "cancelada" && <PartilharCliente obraId={obra.id} codigo={obra.codigo} />}
 
         {planeia && (
           <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">

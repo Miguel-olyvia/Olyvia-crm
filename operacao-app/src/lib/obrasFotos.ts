@@ -20,13 +20,17 @@ export interface FotoTarefa {
   legenda: string | null;
   carregado_por: string | null;
   carregado_em: string;
+  /** Escolhida para o acompanhamento do cliente (acompanhamento-cliente.sql). Sem o SQL, não vem. */
+  visivel_cliente?: boolean;
 }
 
 export async function fotosDasTarefas(tarefaIds: readonly string[]): Promise<FotoTarefa[]> {
   if (tarefaIds.length === 0) return [];
   const { data, error } = await supabase
     .from("ops_obra_tarefa_foto")
-    .select("id, tarefa_id, obra_id, caminho, nome, mime, legenda, carregado_por, carregado_em")
+    // "*": a coluna visivel_cliente só existe com o acompanhamento-cliente.sql —
+    // pedi-la pelo nome partia este ecrã numa base sem ele.
+    .select("*")
     .in("tarefa_id", [...tarefaIds])
     .order("carregado_em");
   if (error) {
