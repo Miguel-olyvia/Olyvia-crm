@@ -1,6 +1,14 @@
 /**
  * Cargos de RH -- lista, cria, edita e activa/desactiva `hr_cargos`
- * (20261202070000). Segue o padrao de `ConfiguracaoModelosDocumentos.tsx`.
+ * (20261202070000), e diz quantas pessoas tem cada um. Vive no separador
+ * Funcoes de Pessoas: e o UNICO sitio onde os cargos se gerem.
+ *
+ * AS CONTAGENS SAO POR `pessoas.cargo_id`
+ * ---------------------------------------
+ * "Pessoas" e "Em curso" contam as pessoas da lista recebida por `cargo_id`.
+ * O texto livre antigo (`pessoas.cargo`) NAO conta: uma pessoa sem `cargo_id`
+ * cai na linha "Sem cargo", ao fim, mesmo que o texto livre diga "Comercial".
+ * A coluna "Em curso" so se mostra a quem tem `hr.pessoas.vinculos.view`.
  *
  * O SALARIO AQUI E OBRIGATORIO POR LEI, NAO SO CONFIGURACAO
  * -------------------------------------------------------------------
@@ -14,22 +22,23 @@
  * -----------------------------------------------------
  * A lista de cargos (texto legado, `pessoas.cargo`) com mais do que um
  * salario activo hoje e so leitura -- nao ha nenhum botao aqui para "corrigir
- * tudo". Cada pessoa listada tem de ser resolvida na propria ficha, escolhendo
- * um cargo do catalogo (ou nao), caso a caso.
+ * tudo". Cada pessoa listada tem de ser resolvida na propria ficha.
  *
  * NUNCA SE APAGA -- SO SE (DES)ACTIVA
  * -------------------------------------
- * A RLS bloqueia DELETE por politica RESTRICTIVE; este ecra nem mostra a
- * opcao. "Desactivar" e "Reactivar" sao o UPDATE de `activo`.
+ * A RLS bloqueia DELETE por politica RESTRICTIVE; este componente nem mostra
+ * a opcao. "Desactivar" e "Reactivar" sao o UPDATE de `activo`.
+ *
+ * Permissoes: ver = `hr.pessoas.laborais.view`; criar/editar/activar =
+ * `hr.pessoas.laborais.edit`.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { SemAcessoCard } from "@/components/hr/SemAcessoCard";
 import {
   Dialog,
@@ -54,12 +63,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useTranslation } from "@/hooks/useTranslation";
-import { useCargos, type NovoCargoRH } from "@/hooks/useCargos";
+import { useCargos, type HrCargo, type NovoCargoRH } from "@/hooks/useCargos";
 import { useCargosSalariosDivergentes } from "@/hooks/useCargosSalariosDivergentes";
-import type { Periodicidade } from "@/types/hr";
+import type { PessoaListItem, Periodicidade } from "@/types/hr";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { Briefcase, Loader2, Plus, Pencil, Ban, RotateCcw, AlertTriangle } from "lucide-react";
@@ -71,12 +79,22 @@ const FORM_VAZIO: NovoCargoRH = {
   horas_referencia: null,
 };
 
-export default function ConfiguracaoCargos() {
+interface Contagem {
+  total: number;
+  emCurso: number;
+}
+
+interface CargosGestaoProps {
+  pessoas: PessoaListItem[];
+  loading: boolean;
+}
+
+export function CargosGestao({ pessoas, loading }: CargosGestaoProps) {
   const { t } = useTranslation();
-  const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
   const podeVer = hasPermission("hr.pessoas.laborais.view");
   const podeEditar = hasPermission("hr.pessoas.laborais.edit");
+  const podeVerVinculos = hasPermission("hr.pessoas.vinculos.view");
 
   const { cargos, isLoading, isSaving, criar, editar, definirActivo } = useCargos();
   const { divergencias, isLoading: divergenciasALoad } = useCargosSalariosDivergentes();
@@ -86,7 +104,23 @@ export default function ConfiguracaoCargos() {
   const [cargoAEditar, setCargoAEditar] = useState<string | null>(null);
   const [form, setForm] = useState<NovoCargoRH>(FORM_VAZIO);
 
+  const { porCargo, semCargo } = useMemo(() => {
+    const mapa = new Map<string, Contagem>();
+    const sem: Contagem = { total: 0, emCurso: 0 };
+    for (const pessoa of pessoas) {
+      const alvo = pessoa.cargo_id
+        ? (mapa.get(pessoa.cargo_id) ?? { total: 0, emCurso: 0 })
+        : sem;
+      alvo.total += 1;
+      if (pessoa.estado_contrato_derivado === "em_curso") alvo.emCurso += 1;
+      if (pessoa.cargo_id) mapa.set(pessoa.cargo_id, alvo);
+    }
+    return { porCargo: mapa, semCargo: sem };
+  }, [pessoas]);
+
   const cargosVisiveis = mostrarInactivos ? cargos : cargos.filter((c) => c.activo);
+  const mostrarSemCargo = !loading && semCargo.total > 0;
+  const vazio = cargosVisiveis.length === 0 && !mostrarSemCargo;
 
   const abrirNovo = () => {
     setCargoAEditar(null);
@@ -94,7 +128,7 @@ export default function ConfiguracaoCargos() {
     setDialogoAberto(true);
   };
 
-  const abrirEdicao = (cargo: (typeof cargos)[number]) => {
+  const abrirEdicao = (cargo: HrCargo) => {
     setCargoAEditar(cargo.id);
     setForm({
       nome: cargo.nome,
@@ -127,7 +161,7 @@ export default function ConfiguracaoCargos() {
     }
   };
 
-  const alternarActivo = async (cargo: (typeof cargos)[number]) => {
+  const alternarActivo = async (cargo: HrCargo) => {
     try {
       await definirActivo(cargo.id, !cargo.activo);
       toast.success(cargo.activo ? t("hr.cargos.desactivarSucesso") : t("hr.cargos.reactivarSucesso"));
@@ -136,24 +170,11 @@ export default function ConfiguracaoCargos() {
     }
   };
 
-  if (companyLoading || permissionsLoading) return <OlyviaLoader />;
-  if (!activeCompany) return <NoOrganizationState />;
-  if (!podeVer) return <SemAcessoCard className="m-6" />;
+  if (permissionsLoading) return <OlyviaLoader />;
+  if (!podeVer) return <SemAcessoCard />;
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">{t("hr.cargos.tituloPagina")}</h1>
-          <p className="text-muted-foreground">{t("hr.cargos.subtitulo")}</p>
-        </div>
-        {podeEditar && (
-          <Button onClick={abrirNovo}>
-            <Plus className="h-4 w-4 mr-2" /> {t("hr.cargos.novoCargo")}
-          </Button>
-        )}
-      </div>
-
+    <div className="space-y-4">
       {!divergenciasALoad && divergencias.length > 0 && (
         <Card className="border-amber-400/50">
           <CardHeader className="pb-3">
@@ -189,79 +210,128 @@ export default function ConfiguracaoCargos() {
       )}
 
       <Card>
-        <CardHeader className="pb-3 flex flex-row items-center justify-between">
-          <CardTitle className="text-base">{t("hr.cargos.tituloPagina")}</CardTitle>
-          <div className="flex items-center gap-2">
-            <Label htmlFor="mostrar-inactivos" className="text-sm font-normal">
-              {t("hr.cargos.mostrarInactivos")}
-            </Label>
-            <input
-              id="mostrar-inactivos"
-              type="checkbox"
-              checked={mostrarInactivos}
-              onChange={(e) => setMostrarInactivos(e.target.checked)}
-              className="h-4 w-4"
-            />
+        <CardHeader className="pb-3 flex flex-row items-center justify-between gap-3">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Briefcase className="h-4 w-4 text-muted-foreground" />
+              {t("hr.cargos.tituloPagina")}
+            </CardTitle>
+            <p className="mt-1 text-sm text-muted-foreground">{t("hr.cargos.subtitulo")}</p>
+          </div>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="mostrar-inactivos" className="text-sm font-normal">
+                {t("hr.cargos.mostrarInactivos")}
+              </Label>
+              <input
+                id="mostrar-inactivos"
+                type="checkbox"
+                checked={mostrarInactivos}
+                onChange={(e) => setMostrarInactivos(e.target.checked)}
+                className="h-4 w-4"
+              />
+            </div>
+            {podeEditar && (
+              <Button size="sm" onClick={abrirNovo}>
+                <Plus className="h-4 w-4 mr-2" /> {t("hr.cargos.novoCargo")}
+              </Button>
+            )}
           </div>
         </CardHeader>
-        <CardContent className="space-y-1">
-          {isLoading ? (
+        <CardContent className="p-0">
+          {isLoading || loading ? (
             <div className="flex justify-center py-12">
               <OlyviaLoader size={32} />
             </div>
-          ) : cargosVisiveis.length === 0 ? (
+          ) : vazio ? (
             <div className="text-center py-12 text-muted-foreground">
               <Briefcase className="h-10 w-10 mx-auto mb-3 opacity-50" />
               <p>{t("hr.cargos.semCargos")}</p>
             </div>
           ) : (
-            cargosVisiveis.map((cargo) => (
-              <div
-                key={cargo.id}
-                className="flex items-center justify-between gap-4 border-b py-3 last:border-b-0"
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Briefcase className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-medium">{cargo.nome}</span>
-                      <Badge variant="outline" className="text-[10px] font-mono">
-                        {cargo.salario_base} {t(`hr.periodicidade.${cargo.periodicidade}`)}
-                      </Badge>
-                      <Badge variant={cargo.activo ? "default" : "secondary"} className="text-[10px]">
-                        {cargo.activo ? t("hr.cargos.activo") : t("hr.cargos.inactivo")}
-                      </Badge>
-                    </div>
-                  </div>
-                </div>
-                {podeEditar && (
-                  <div className="flex items-center gap-1 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => abrirEdicao(cargo)}
-                      title={t("hr.cargos.editarCargo")}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => alternarActivo(cargo)}
-                      title={cargo.activo ? t("hr.cargos.desactivar") : t("hr.cargos.reactivar")}
-                    >
-                      {cargo.activo ? (
-                        <Ban className="h-4 w-4 text-destructive" />
-                      ) : (
-                        <RotateCcw className="h-4 w-4" />
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{t("hr.columns.cargo")}</TableHead>
+                    <TableHead>{t("hr.cargos.coluna.salario")}</TableHead>
+                    <TableHead className="w-28">{t("hr.funcoes.pessoas")}</TableHead>
+                    {podeVerVinculos && (
+                      <TableHead className="w-28">{t("hr.estadoContrato.em_curso")}</TableHead>
+                    )}
+                    {podeEditar && <TableHead className="w-24" />}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {cargosVisiveis.map((cargo) => {
+                    const contagem = porCargo.get(cargo.id) ?? { total: 0, emCurso: 0 };
+                    return (
+                      <TableRow key={cargo.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium">{cargo.nome}</span>
+                            <Badge
+                              variant={cargo.activo ? "default" : "secondary"}
+                              className="text-[10px]"
+                            >
+                              {cargo.activo ? t("hr.cargos.activo") : t("hr.cargos.inactivo")}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                        <TableCell className="font-mono text-sm">
+                          {cargo.salario_base} {t(`hr.periodicidade.${cargo.periodicidade}`)}
+                        </TableCell>
+                        <TableCell className="tabular-nums">{contagem.total}</TableCell>
+                        {podeVerVinculos && (
+                          <TableCell className="tabular-nums">{contagem.emCurso}</TableCell>
+                        )}
+                        {podeEditar && (
+                          <TableCell>
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => abrirEdicao(cargo)}
+                                title={t("hr.cargos.editarCargo")}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                onClick={() => alternarActivo(cargo)}
+                                title={cargo.activo ? t("hr.cargos.desactivar") : t("hr.cargos.reactivar")}
+                              >
+                                {cargo.activo ? (
+                                  <Ban className="h-4 w-4 text-destructive" />
+                                ) : (
+                                  <RotateCcw className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    );
+                  })}
+                  {mostrarSemCargo && (
+                    <TableRow>
+                      <TableCell>
+                        <span className="text-muted-foreground">{t("hr.funcoes.semCargo")}</span>
+                      </TableCell>
+                      <TableCell />
+                      <TableCell className="tabular-nums">{semCargo.total}</TableCell>
+                      {podeVerVinculos && (
+                        <TableCell className="tabular-nums">{semCargo.emCurso}</TableCell>
                       )}
-                    </Button>
-                  </div>
-                )}
-              </div>
-            ))
+                      {podeEditar && <TableCell />}
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -100,6 +100,7 @@ const COLUNAS_LISTA = [
   "email_pessoal",
   "telefone_trabalho",
   "cargo",
+  "cargo_id",
   "local_trabalho",
   "local_id",
   "entidade_legal_org_id",

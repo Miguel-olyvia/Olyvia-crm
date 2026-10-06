@@ -6,8 +6,8 @@
  * "Atividade" e "Equipas" NAO existem: nao foram pedidos e foram retirados.
  * Organograma e Funcoes deixaram de ser estados vazios -- o primeiro desenha a
  * arvore de chefia sobre `pessoas.reporta_a_pessoa_id` e remete para o
- * organograma de EMPRESAS que ja existe (`/org-chart`); o segundo lista os
- * cargos em uso e remete para o ecra de Papeis que ja existe (`/roles`).
+ * organograma de EMPRESAS que ja existe (`/org-chart`); o segundo gere o catalogo
+ * de cargos (com contagem de pessoas) e remete para o ecra de Papeis que ja existe (`/roles`).
  *
  * O separador vive no URL (`?tab=`), no padrao de CampaignDetail: recarregar a
  * pagina ou partilhar o link nao perde o separador aberto -- que e a regra de
