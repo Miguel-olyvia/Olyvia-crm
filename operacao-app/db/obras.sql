@@ -2981,15 +2981,19 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_pessoa_planeamento(uuid, uuid, text, uu
 -- andares, o piso da morada) e interior (tipologia, habitada, animais,
 -- amianto, gás…). Quem vê a obra vê a ficha (ops_pode_ver_obra). Só lê;
 -- dinâmico (instala sem estas tabelas). {} se não houver ficha.
+-- `extra`: os campos que a empresa da obra acrescentou à ficha
+-- (anew_address_extra, CRM 20261209100000) — só os desta empresa.
 CREATE OR REPLACE FUNCTION public.rpc_ops_obra_ficha_local(p_obra_id uuid)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path TO 'public'
 AS $$
 DECLARE
-  v_o   record;
-  v_orc uuid;
-  v_f   jsonb;
+  v_o    record;
+  v_orc  uuid;
+  v_f    jsonb;
+  v_addr uuid;
+  v_x    jsonb;
 BEGIN
   SELECT id, organization_id, orcamento_id, contrato_id INTO v_o FROM public.ops_obra WHERE id = p_obra_id;
   IF NOT FOUND OR NOT public.ops_pode_ver_obra(p_obra_id) THEN
@@ -3006,13 +3010,34 @@ BEGIN
     RETURN '{}'::jsonb;
   END IF;
 
+  EXECUTE 'SELECT q.site_address_id FROM public.quotes q WHERE q.id = $1' INTO v_addr USING v_orc;
+  IF v_addr IS NULL THEN
+    RETURN '{}'::jsonb;
+  END IF;
+
   EXECUTE 'SELECT (to_jsonb(b) - ''created_by'' - ''updated_by'' - ''created_at'')
                   || jsonb_build_object(''piso'', a.floor)
-             FROM public.quotes q
-             JOIN public.anew_address_building b ON b.address_id = q.site_address_id
-             LEFT JOIN public.anew_addresses a ON a.id = q.site_address_id
-            WHERE q.id = $1'
-     INTO v_f USING v_orc;
+             FROM public.anew_address_building b
+             LEFT JOIN public.anew_addresses a ON a.id = b.address_id
+            WHERE b.address_id = $1'
+     INTO v_f USING v_addr;
+
+  IF public.ops_obra_crm_tem('anew_address_extra', ARRAY['address_id','organization_id','valores']) THEN
+    EXECUTE 'SELECT x.valores FROM public.anew_address_extra x
+              WHERE x.address_id = $1 AND x.organization_id = $2'
+       INTO v_x USING v_addr, v_o.organization_id;
+    IF v_x IS NOT NULL AND v_x <> '{}'::jsonb THEN
+      IF v_f IS NULL THEN
+        EXECUTE 'SELECT jsonb_build_object(''piso'', a.floor) FROM public.anew_addresses a WHERE a.id = $1'
+           INTO v_f USING v_addr;
+      END IF;
+      v_f := COALESCE(v_f, '{}'::jsonb) || jsonb_build_object('extra', v_x);
+    END IF;
+  END IF;
+  -- A empresa da obra: o ecrã lê com ela a configuração dos campos (cfg_campos).
+  IF v_f IS NOT NULL THEN
+    v_f := v_f || jsonb_build_object('organization_id', v_o.organization_id);
+  END IF;
   RETURN COALESCE(v_f, '{}'::jsonb);
 END
 $$;

@@ -1,4 +1,4 @@
-import { useEffect, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -29,6 +29,15 @@ import {
   type ErrosMorada,
   type MoradaCampos,
 } from "@/lib/addresses/validarMorada";
+import { useCamposEmpresa } from "@/hooks/useCamposEmpresa";
+import { useExtraLocal, useInvalidarExtraLocal } from "@/hooks/useExtraLocal";
+import { gravarExtraLocal } from "@/lib/campos/api";
+import {
+  emFalta,
+  paraFormulario,
+  validarValores,
+  type ValoresFormulario,
+} from "@/lib/campos/definicoes";
 
 export interface DeliveryAddressFormProps {
   entityId: string;
@@ -78,6 +87,17 @@ export const DeliveryAddressForm = ({
   const [fichaErrors, setFichaErrors] = useState<ErrosFichaTecnica>({});
   const [saving, setSaving] = useState(false);
 
+  // Campos da empresa (cfg_campos, ficha "local"). Sem configuração não há
+  // campos extra e a ficha é a de sempre.
+  const campos = useCamposEmpresa();
+  const configLocal = campos.fichas.local;
+  const temCamposEmpresa = configLocal.extra.length > 0;
+  const { porMorada } = useExtraLocal(entityId, campos.org, temCamposEmpresa && editing);
+  const invalidarExtra = useInvalidarExtraLocal();
+  const [extra, setExtra] = useState<ValoresFormulario>({});
+  const [extraErrors, setExtraErrors] = useState<Record<string, string>>({});
+  const extraCarregadoPara = useRef<string | null>(null);
+
   // Outra morada para editar → recomeça com os dados dela.
   const existenteId = existente?.entity_address_id;
   useEffect(() => {
@@ -85,9 +105,30 @@ export const DeliveryAddressForm = ({
     setFicha(valoresDaFichaTecnica(existente?.ficha_tecnica));
     setErrors({});
     setFichaErrors({});
+    setExtra({});
+    setExtraErrors({});
+    extraCarregadoPara.current = null;
     // Só quando muda a morada (não a cada render do pai).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [existenteId]);
+
+  // Os valores extra chegam depois (outro pedido): preenche uma vez por morada.
+  const existenteAddressId = existente?.address_id;
+  const gravadosExtra = existenteAddressId ? porMorada[existenteAddressId] : undefined;
+  useEffect(() => {
+    if (!existenteAddressId || !gravadosExtra || extraCarregadoPara.current === existenteAddressId) return;
+    extraCarregadoPara.current = existenteAddressId;
+    setExtra(paraFormulario(configLocal.extra, gravadosExtra));
+  }, [existenteAddressId, gravadosExtra, configLocal.extra]);
+
+  const handleExtraChange = (next: ValoresFormulario) => {
+    setExtraErrors((prev) => {
+      const rest = { ...prev };
+      for (const k of Object.keys(prev)) if (next[k] !== extra[k]) delete rest[k];
+      return rest;
+    });
+    setExtra(next);
+  };
 
   const handleChange = (next: MoradaCampos) => {
     setErrors((prev) => limparErrosAlterados(prev, values, next));
@@ -133,12 +174,39 @@ export const DeliveryAddressForm = ({
       });
       return;
     }
+    // Campos da empresa: as mesmas regras de fn_cfg_validar_valores.
+    const extraValidation = validarValores(configLocal.todos, extra, { ...fichaValidation.ficha, piso: values.floor });
+    setExtraErrors(extraValidation.erros);
+    if (Object.keys(extraValidation.erros).length > 0) {
+      toast({
+        title: t('deliveryAddresses.validation.buildingTitle'),
+        description: Object.values(extraValidation.erros)[0],
+        variant: "destructive",
+      });
+      return;
+    }
+    const gravarExtra = temCamposEmpresa || Object.keys(extraValidation.valores).length > 0;
     const submitted: DeliveryAddressInput = { ...normalizarMorada(values), ficha_tecnica: fichaValidation.ficha };
+    // A morada já ficou gravada quando isto corre: um erro aqui não a desfaz.
+    const gravarCamposEmpresa = async (addressId: string | null | undefined) => {
+      if (!gravarExtra || !addressId || !campos.org) return;
+      try {
+        await gravarExtraLocal(entityId, addressId, campos.org, extraValidation.valores);
+        void invalidarExtra(entityId, campos.org);
+      } catch (error: any) {
+        toast({
+          title: "A morada foi gravada, mas os campos da empresa não",
+          description: error?.message,
+          variant: "destructive",
+        });
+      }
+    };
     setSaving(true);
     try {
       if (existente) {
         const result = await updateEntityDeliveryAddress(existente.entity_address_id, submitted);
         toast({ title: t('deliveryAddresses.toast.updated') });
+        await gravarCamposEmpresa(result?.address_id);
         await onSaved?.(result, submitted);
       } else {
         const result = await addEntityDeliveryAddress(entityId, submitted);
@@ -147,8 +215,10 @@ export const DeliveryAddressForm = ({
         } else {
           toast({ title: t('deliveryAddresses.toast.added') });
         }
+        await gravarCamposEmpresa(result?.address_id);
         setValues({ ...EMPTY_DELIVERY_ADDRESS_INPUT });
         setFicha({ ...FICHA_TECNICA_VALORES_VAZIOS });
+        setExtra({});
         await onAdded?.(result, submitted);
       }
     } catch (error: any) {
@@ -173,6 +243,8 @@ export const DeliveryAddressForm = ({
   const busy = saving || !!disabled;
   // O erro "piso acima dos andares" aparece também no campo Andar.
   const moradaErros: ErrosMorada = fichaErrors.piso && !errors.floor ? { ...errors, floor: fichaErrors.piso } : errors;
+  // Obrigatórios da empresa por preencher: só aviso (não bloqueia a gravação).
+  const porPreencher = emFalta(configLocal.extra, { ...ficha, ...extra });
 
   return (
     <div className="space-y-3" onKeyDown={handleKeyDown}>
@@ -183,7 +255,17 @@ export const DeliveryAddressForm = ({
         erros={fichaErrors}
         idPrefix={`${idPrefix}_ficha`}
         disabled={busy}
+        config={configLocal}
+        extra={extra}
+        onExtraChange={handleExtraChange}
+        errosExtra={extraErrors}
+        termoLocal={campos.termos.local.singular}
       />
+      {porPreencher.length > 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-400" data-testid={`${idPrefix}_por_preencher`}>
+          Por preencher: {porPreencher.map((d) => d.rotulo).join(", ")}
+        </p>
+      )}
       <div className="flex justify-end gap-2">
         {onCancel && (
           <Button type="button" variant="outline" size="sm" onClick={onCancel} disabled={saving}>

@@ -18,6 +18,7 @@ import { QuoteMoradaEntrega } from "../QuoteMoradaEntrega";
 
 const h = vi.hoisted(() => ({ list: vi.fn() }));
 
+vi.mock("@/hooks/useExtraLocal", () => ({ useFichaLocalEmpresa: () => ({ config: undefined, extraDe: () => undefined }) }));
 vi.mock("@/lib/addresses/entityDeliveryAddresses", () => ({
   listEntityDeliveryAddresses: (...a: unknown[]) => h.list(...a),
   formatDeliveryAddress: (a: { street?: string | null; number?: string | null; city?: string | null }) =>

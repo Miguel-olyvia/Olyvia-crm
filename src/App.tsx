@@ -29,6 +29,7 @@ const Proposals = lazy(() => import("./pages/Proposals"));
 
 
 const Settings = lazy(() => import("./pages/Settings"));
+const CamposConfig = lazy(() => import("./pages/CamposConfig"));
 const Quotes = lazy(() => import("./pages/Quotes"));
 const QuoteModels = lazy(() => import("./pages/QuoteModels"));
 const QuoteTemplates = lazy(() => import("./pages/QuoteTemplates"));
@@ -266,6 +267,7 @@ const App = () => (
                       <Route path="/service-catalog-items" element={<ServiceCatalogItems />} />
                       <Route path="/service-fees" element={<ServiceFees />} />
                       <Route path="/settings" element={<ProtectedRoute permission="settings.update"><Settings /></ProtectedRoute>} />
+                      <Route path="/configuracoes/campos" element={<ProtectedRoute permission="settings.update"><CamposConfig /></ProtectedRoute>} />
                       <Route path="/alert-settings" element={<ProtectedRoute permission="settings.update"><AlertSettings /></ProtectedRoute>} />
                       <Route path="/docs/architecture" element={<DocsArchitecture />} />
                       <Route path="/docs/user-model" element={<DocsUserModel />} />

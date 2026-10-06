@@ -13,8 +13,18 @@ import DiagnosticServicePicker, { type DiagnosticServicePickerService } from "@/
 import {
   CAMPOS_PLANEAMENTO,
   m2Parede,
+  paraPayload,
   type DiagnosticoPlaneamento,
 } from "@/lib/deals/diagnosticoPlaneamento";
+import { CamposDinamicos } from "@/components/campos/CamposDinamicos";
+import {
+  rotulo as rotuloSistema,
+  rotuloOpcao,
+  seccoesExtra,
+  visivel,
+  type FichaCombinada,
+  type ValoresFormulario,
+} from "@/lib/campos/definicoes";
 
 /**
  * Aba "Diagnóstico" do diálogo Editar Necessidade (DealNeedsSection.tsx).
@@ -95,6 +105,17 @@ interface DealNeedDiagnosticProps {
    */
   plano?: DiagnosticoPlaneamento;
   onPlanoChange?: (plano: DiagnosticoPlaneamento) => void;
+
+  /**
+   * Configuração da empresa para o diagnóstico (cfg_campos, ficha
+   * "diagnostico"): rótulos e campos escondidos no planeamento, e os campos
+   * da empresa. Ausente = como sempre.
+   */
+  fichaDiagnostico?: FichaCombinada;
+  /** Valores dos campos da empresa (deal_needs.diag_extra). Ausente = a secção não aparece. */
+  extra?: ValoresFormulario;
+  onExtraChange?: (valores: ValoresFormulario) => void;
+  errosExtra?: Record<string, string>;
 }
 
 /** Uma escolha em botões (rápido no tablet): carregar outra vez tira a escolha. */
@@ -171,7 +192,31 @@ export function DealNeedDiagnostic({
   onRemoveMaterial,
   plano,
   onPlanoChange,
+  fichaDiagnostico,
+  extra,
+  onExtraChange,
+  errosExtra,
 }: DealNeedDiagnosticProps) {
+  // Campos do planeamento com os ajustes da empresa: escondidos saem, e a
+  // ordem configurada só se aplica quando a empresa configurou (sem
+  // configuração fica a ordem de sempre deste ecrã).
+  const camposPlano = CAMPOS_PLANEAMENTO
+    .filter((d) => visivel(fichaDiagnostico, `diag_${d.campo}`))
+    .map((d, i) => ({ d, i, ordem: fichaDiagnostico?.configurada ? fichaDiagnostico.sistema[`diag_${d.campo}`]?.ordem ?? i : i }))
+    .sort((a, b) => a.ordem - b.ordem || a.i - b.i)
+    .map(({ d }) => {
+      const chave = `diag_${d.campo}`;
+      const sis = fichaDiagnostico?.sistema[chave];
+      return {
+        ...d,
+        rotulo: rotuloSistema(fichaDiagnostico, chave, d.rotulo),
+        ajuda: sis?.ajuda ?? d.ajuda,
+        obrigatorio: !!sis?.obrigatorio,
+        opcoes: d.opcoes?.map((o) => ({ ...o, rotulo: rotuloOpcao(fichaDiagnostico, chave, o.valor, o.rotulo) })),
+      };
+    });
+  const seccoesDaEmpresa = fichaDiagnostico && extra && onExtraChange ? seccoesExtra(fichaDiagnostico) : [];
+
   const { toast } = useToast();
   const [loadingService, setLoadingService] = useState(false);
 
@@ -424,11 +469,12 @@ export function DealNeedDiagnostic({
               </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              {CAMPOS_PLANEAMENTO.map((d) => (
+              {camposPlano.map((d) => (
                 <div key={d.campo} className="space-y-1.5">
                   <Label className="text-xs text-muted-foreground">
                     {d.rotulo}
                     {d.unidade ? ` (${d.unidade})` : ""}
+                    {d.obrigatorio && <span className="text-destructive" aria-hidden> *</span>}
                   </Label>
                   {d.tipo === "escolha" || d.tipo === "sim_nao" ? (
                     <Escolha
@@ -458,6 +504,32 @@ export function DealNeedDiagnostic({
                 </div>
               ))}
             </div>
+          </div>
+        </>
+      )}
+
+      {seccoesDaEmpresa.length > 0 && extra && onExtraChange && (
+        <>
+          <Separator />
+
+          {/* ─── Campos da empresa (cfg_campos, ficha "diagnostico") ─── */}
+          <div className="space-y-3" data-testid="diag-campos-empresa">
+            {seccoesDaEmpresa.map((sec) => (
+              <div key={sec.chave} className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  {sec.chave === "planeamento" ? "Campos da empresa" : sec.rotulo}
+                </Label>
+                <CamposDinamicos
+                  campos={sec.campos}
+                  valores={extra}
+                  onChange={onExtraChange}
+                  erros={errosExtra}
+                  contexto={plano ? paraPayload(plano) : undefined}
+                  idPrefix={`diag_extra_${sec.chave}`}
+                  disabled={readOnly}
+                />
+              </div>
+            ))}
           </div>
         </>
       )}

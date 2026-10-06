@@ -40,6 +40,9 @@ import {
   type DiagnosticoPlaneamento,
 } from "@/lib/deals/diagnosticoPlaneamento";
 import { withAuditContext } from "@/utils/auditContext";
+import { useCamposEmpresa } from "@/hooks/useCamposEmpresa";
+import { gravarExtraDiagnostico } from "@/lib/campos/api";
+import { gravadosParaFormulario, validarValores, type ValoresFormulario } from "@/lib/campos/definicoes";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // ─── Types ───────────────────────────────────────────────────
@@ -366,6 +369,15 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   const [formDiagPlano, setFormDiagPlano] = useState<DiagnosticoPlaneamento>(DIAGNOSTICO_PLANEAMENTO_VAZIO);
   const diagPlanoLoadedRef = useRef(true);
   const [planoDisponivel, setPlanoDisponivel] = useState(true);
+  // Campos da empresa no diagnóstico (cfg_campos, deal_needs.diag_extra —
+  // 20261209100000). Mesmo contrato: só se gravam depois de lidos (ou numa
+  // criação); sem a coluna, a secção não aparece.
+  const { fichas: fichasEmpresa } = useCamposEmpresa(organizationId);
+  const fichaDiagnostico = fichasEmpresa.diagnostico;
+  const [formDiagExtra, setFormDiagExtra] = useState<ValoresFormulario>({});
+  const [errosDiagExtra, setErrosDiagExtra] = useState<Record<string, string>>({});
+  const diagExtraLoadedRef = useRef(true);
+  const [extraDisponivel, setExtraDisponivel] = useState(true);
 
   // Item linking state
   const [linkedItems, setLinkedItems] = useState<DealNeedItem[]>([]);
@@ -508,7 +520,9 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     diagMaterialsLoadedRef.current = true; // criação: não há nada na BD para perder
     diagFieldsLoadedRef.current = true;    // idem para as colunas diag_*
     diagPlanoLoadedRef.current = true;     // e para as de planeamento
+    diagExtraLoadedRef.current = true;     // e para os campos da empresa
     setFormDiagPlano(DIAGNOSTICO_PLANEAMENTO_VAZIO);
+    setFormDiagExtra({}); setErrosDiagExtra({});
     setFormDiagAreaM2(""); setFormDiagDemolirDescricao(""); setFormDiagDemolirM2("");
     setFormDiagProtegerDescricao(""); setFormDiagIntervencaoTipo(""); setFormDiagIntervencaoDescricao("");
     setFormDiagMaterials([]);
@@ -586,7 +600,9 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     diagMaterialsLoadedRef.current = false;
     diagFieldsLoadedRef.current = false;
     diagPlanoLoadedRef.current = false;
+    diagExtraLoadedRef.current = false;
     setFormDiagPlano(DIAGNOSTICO_PLANEAMENTO_VAZIO);
+    setFormDiagExtra({}); setErrosDiagExtra({});
     void loadDiagnosticForNeed(need.id);
 
     setDialogOpen(true);
@@ -636,6 +652,25 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       }
     } catch (err) {
       setPlanoDisponivel(false);
+      captureFlowError(err, "deal-lifecycle");
+    }
+
+    // Campos da empresa: leitura à parte (base sem 20261209100000 = sem secção).
+    try {
+      const { data, error } = await (supabase as any)
+        .from("deal_needs")
+        .select("diag_extra")
+        .eq("id", needId)
+        .maybeSingle();
+      if (error) {
+        setExtraDisponivel(false);
+      } else if (diagLoadTokenRef.current === needId) {
+        setExtraDisponivel(true);
+        diagExtraLoadedRef.current = true;
+        setFormDiagExtra(gravadosParaFormulario(data?.diag_extra));
+      }
+    } catch (err) {
+      setExtraDisponivel(false);
       captureFlowError(err, "deal-lifecycle");
     }
 
@@ -888,6 +923,17 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       toast({ title: "Diagnóstico: planeamento da obra", description: erroPlano, variant: "destructive" });
       return;
     }
+    // Campos da empresa: valida como fn_cfg_validar_valores (erros bloqueiam).
+    const comExtra = extraDisponivel && fichaDiagnostico.extra.length > 0;
+    const extraValidado = comExtra
+      ? validarValores(fichaDiagnostico.todos, formDiagExtra, paraPayload(formDiagPlano))
+      : null;
+    if (extraValidado && Object.keys(extraValidado.erros).length > 0) {
+      setErrosDiagExtra(extraValidado.erros);
+      toast({ title: "Diagnóstico: campos da empresa", description: Object.values(extraValidado.erros)[0], variant: "destructive" });
+      return;
+    }
+    setErrosDiagExtra({});
     setFieldErrors({});
 
     setSavingNeed(true);
@@ -979,6 +1025,30 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       // Materiais da ficha técnica (só informativos para o armazém) — gravados
       // depois da necessidade, porque numa criação o id só existe aqui.
       await syncDiagnosticMaterials(savedNeed?.id || editingNeed?.id || null, businessUserId);
+
+      // Campos da empresa: depois da necessidade (numa criação o id só existe
+      // aqui) e só se foram lidos — senão a gravação apagava o que lá está.
+      const needIdGravado: string | null = savedNeed?.id || editingNeed?.id || null;
+      if (extraValidado && needIdGravado) {
+        if (diagExtraLoadedRef.current) {
+          try {
+            await gravarExtraDiagnostico(needIdGravado, extraValidado.valores);
+          } catch (errExtra: any) {
+            captureFlowError(errExtra, "deal-lifecycle");
+            toast({
+              title: "Campos da empresa não gravados",
+              description: errExtra?.message || "Tente de novo.",
+              variant: "destructive",
+            });
+          }
+        } else if (Object.keys(formDiagExtra).length > 0) {
+          toast({
+            title: "Campos da empresa não gravados",
+            description: "Os valores existentes ainda não tinham sido lidos, por isso não foram alterados. Reabra a necessidade e tente de novo.",
+            variant: "destructive",
+          });
+        }
+      }
 
       toast({ title: editingNeed ? "Necessidade atualizada" : "Necessidade adicionada" });
       setDialogOpen(false);
@@ -1684,6 +1754,10 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
                   onRemoveMaterial={handleDiagnosticRemoveMaterial}
                   plano={planoDisponivel ? formDiagPlano : undefined}
                   onPlanoChange={setFormDiagPlano}
+                  fichaDiagnostico={fichaDiagnostico}
+                  extra={extraDisponivel ? formDiagExtra : undefined}
+                  onExtraChange={setFormDiagExtra}
+                  errosExtra={errosDiagExtra}
                 />
               </TabsContent>
 

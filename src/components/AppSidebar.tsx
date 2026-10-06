@@ -2,6 +2,7 @@ import React, { useMemo, memo, useCallback, useState, useEffect } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { X } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useRotuloMenu } from "@/hooks/useRotuloMenu";
 import { usePermissionScope } from '@/hooks/usePermissionScope';
 import { usePermissions } from "@/hooks/usePermissions";
 import { useSidebarExpand } from "@/contexts/SidebarContext";
@@ -32,6 +33,7 @@ interface AppSidebarProps {
 
 export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSidebarProps) {
   const { t } = useTranslation();
+  const tMenu = useRotuloMenu(t);
   const location = useLocation();
   const navigate = useNavigate();
   const { hasPermission, hasAnyPermission, loading: permissionsLoading } = usePermissions();
@@ -286,7 +288,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
       {openSection && (
         <FlyoutPanel
           section={openSection}
-          t={t}
+          t={tMenu}
           canViewItem={canViewItem}
           onItemClick={handleItemClick}
           onClose={closeSubmenu}

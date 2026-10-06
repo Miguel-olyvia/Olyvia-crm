@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { cx } from "./ui";
 import { areasDaVisitaDoOrcamento, fichaLocalDaObra, type FichaLocal as Ficha } from "../lib/obras";
-import { fichaTemDados, linhasExterior, linhasInterior, type LinhaFicha } from "../domain/fichaLocal";
+import { ajustesDaFicha, fichaTemDados, linhasExterior, linhasInterior, type LinhaFicha } from "../domain/fichaLocal";
+import { camposLocalDaEmpresa } from "../lib/camposEmpresa";
+import { formatarValor, type FichaCombinada } from "../domain/campos/definicoes";
 import {
   diasUteisEntre,
   fichaDaSugestao,
@@ -53,6 +55,7 @@ export default function FichaLocal({
   plano?: PlanoParaSugestao;
 }) {
   const [ficha, setFicha] = useState<Ficha | null>(null);
+  const [config, setConfig] = useState<FichaCombinada | null>(null);
   const [areas, setAreas] = useState<AreaParaSugestao[]>([]);
   const orcamentoId = plano?.orcamentoId ?? null;
 
@@ -84,9 +87,32 @@ export default function FichaLocal({
     };
   }, [obraId]);
 
-  if (!ficha || (!fichaTemDados(ficha) && !sugestao)) return null;
-  const ext = linhasExterior(ficha);
-  const int = linhasInterior(ficha);
+  // A configuração da empresa da obra: campos escondidos, rótulos e campos próprios.
+  const org = ficha?.organization_id ?? null;
+  useEffect(() => {
+    let vivo = true;
+    setConfig(null);
+    if (!org) return;
+    camposLocalDaEmpresa(org)
+      .then((c) => vivo && setConfig(c))
+      .catch(() => undefined);
+    return () => {
+      vivo = false;
+    };
+  }, [org]);
+
+  const ajustes = ajustesDaFicha(config);
+  const outros = (config?.extra ?? [])
+    .map((d) => {
+      const t = formatarValor(d, ficha?.extra?.[d.chave]);
+      return t === null ? null : { chave: d.chave, rotulo: d.rotulo, texto: t };
+    })
+    .filter((x): x is { chave: string; rotulo: string; texto: string } => !!x);
+
+  if (!ficha || (!fichaTemDados(ficha, ajustes) && !sugestao && outros.length === 0)) return null;
+  const ext = linhasExterior(ficha, ajustes);
+  const int = linhasInterior(ficha, ajustes);
+  const notas = ajustes?.ocultar?.has("notas_interior") ? "" : ficha.notas_interior?.trim();
 
   const chips = (linhas: LinhaFicha[]) => (
     <div className="mt-1 flex flex-wrap gap-1">
@@ -109,8 +135,19 @@ export default function FichaLocal({
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Ficha do local</p>
       {ext.length > 0 && chips(ext)}
       {int.length > 0 && chips(int)}
-      {ficha.notas_interior?.trim() && (
-        <p className="mt-1 whitespace-pre-line text-xs text-slate-600">{ficha.notas_interior.trim()}</p>
+      {notas && <p className="mt-1 whitespace-pre-line text-xs text-slate-600">{notas}</p>}
+      {outros.length > 0 && (
+        <div className="mt-2" data-testid="ficha-local-outros">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Outros dados</p>
+          <dl className="mt-1 grid grid-cols-[auto,1fr] gap-x-3 gap-y-0.5 text-xs">
+            {outros.map((o) => (
+              <div key={o.chave} className="contents">
+                <dt className="text-slate-500">{o.rotulo}</dt>
+                <dd className="text-slate-800">{o.texto}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
       )}
       {sugestao && <APreparar linhas={[...sugestao.protecoes, ...sugestao.logistica]} avisos={sugestao.avisos} dias={sugestao.dias} doPlano={sugestao.diasOrigem === "plano"} falta={sugestao.faltaSaber} />}
     </div>

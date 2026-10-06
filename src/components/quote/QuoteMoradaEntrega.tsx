@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Building2, Loader2, Pencil, Plus, RefreshCw, Truck } from "lucide-react";
 import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
 import { FichaLocalResumo } from "@/components/addresses/FichaLocalResumo";
+import { useFichaLocalEmpresa } from "@/hooks/useExtraLocal";
 import { SugestaoFichaLocalPainel } from "@/components/addresses/SugestaoFichaLocalPainel";
 import {
   formatDeliveryAddress,
@@ -47,6 +48,7 @@ const textoMorada = (address: EntityDeliveryAddress) =>
  * DeliveryAddressForm da ficha do cliente — mesmas regras, mesma RPC.
  */
 export const QuoteMoradaEntrega = ({ entityId, value, onChange, savedText, disabled, needIds }: QuoteMoradaEntregaProps) => {
+  const fichaEmpresa = useFichaLocalEmpresa(entityId);
   const [addresses, setAddresses] = useState<EntityDeliveryAddress[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -188,6 +190,8 @@ export const QuoteMoradaEntrega = ({ entityId, value, onChange, savedText, disab
           <FichaLocalResumo
             ficha={selected.ficha_tecnica}
             piso={selected.floor}
+            config={fichaEmpresa.config}
+            extra={fichaEmpresa.extraDe(selected.address_id)}
             vazio="Ficha do local por preencher (use “Editar”)."
           />
         </div>

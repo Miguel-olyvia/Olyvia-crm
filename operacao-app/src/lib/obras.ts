@@ -1308,6 +1308,10 @@ export interface FichaLocal {
   habitada_durante_obra?: boolean | null;
   animais?: boolean | null;
   notas_interior?: string | null;
+  /** Campos que a empresa acrescentou à ficha (CRM cfg_campos), chave → valor. */
+  extra?: Record<string, unknown> | null;
+  /** A empresa da obra (para ler a configuração dos campos). */
+  organization_id?: string | null;
 }
 
 export async function fichaLocalDaObra(obraId: string): Promise<FichaLocal> {

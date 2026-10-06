@@ -3,6 +3,7 @@ import { differenceInDays } from "date-fns";
 import { Check, Star, HelpCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { LeadQualificationCard } from "./LeadQualificationCard";
+import { LeadCamposEmpresaResumo } from "./LeadCamposEmpresaResumo";
 
 interface LeadStage {
   id: string;
@@ -165,6 +166,9 @@ export function LeadJourneyTab({
         userId={userId ?? ""}
         onQualificationUpdated={onQualificationUpdated}
       />
+
+      {/* Campos da empresa (cfg_campos) */}
+      <LeadCamposEmpresaResumo organizationId={lead?.organization_id} fieldValues={lead?.field_values} />
 
       {/* Summary */}
       {(leadToContactDays !== null || interactionCount > 0 || dealCount > 0) && (

@@ -43,6 +43,7 @@ import { calculateClientHealth, type ClientContractInfo, type ClientInteractionI
 import { RequestErasureButton } from "@/components/RequestErasureButton";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { ClientDeliveryAddressesSection } from "@/components/clients/ClientDeliveryAddressesSection";
+import { ClientCamposEmpresa } from "@/components/clients/ClientCamposEmpresa";
 import { CamposMorada } from "@/components/addresses/CamposMorada";
 import {
   MORADA_VAZIA,
@@ -1185,6 +1186,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
               {/* SUMMARY */}
               <TabsContent value="summary">
+                <div className="mt-4">
+                  <ClientCamposEmpresa clientId={client.id} organizationId={client.organization_id} modo="resumo" />
+                </div>
                 <ClientSummaryTab
                   client={client} deals={deals} contracts={contracts} interactions={interactions}
                   healthScore={healthScore} nextAction={nextAction} sourceLead={sourceLead} userMap={userMap}
@@ -1382,6 +1386,8 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                   </div>
                   {/* Moradas de entrega: gravam logo por RPC, fora do Guardar da ficha. */}
                   {client.entity_id && <ClientDeliveryAddressesSection entityId={client.entity_id} />}
+                  {/* Campos da empresa (cfg_campos): também gravam à parte. */}
+                  <ClientCamposEmpresa clientId={client.id} organizationId={client.organization_id} modo="editar" />
                   <div className="space-y-2"><Label>Notas</Label><Textarea value={editFormData.notes} onChange={e => setEditFormData({ ...editFormData, notes: e.target.value })} rows={4} /></div>
                   <div className="flex justify-end gap-2">
                     <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>

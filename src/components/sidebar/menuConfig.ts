@@ -40,6 +40,7 @@ import {
   Receipt,
   Sun,
   ScanBarcode,
+  SlidersHorizontal,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -272,10 +273,11 @@ export const menuSections: MenuSection[] = [
     id: "settings",
     icon: Settings,
     labelKey: "sidebar.settings",
-    paths: ["/settings", "/smtp-management", "/email-templates", "/trash", "/send-failures"],
+    paths: ["/settings", "/configuracoes/campos", "/smtp-management", "/email-templates", "/trash", "/send-failures"],
     permissions: [],
     items: [
       { to: "/settings", icon: Settings, labelKey: "sidebar.settings", permission: "settings.update" },
+      { to: "/configuracoes/campos", icon: SlidersHorizontal, labelKey: "sidebar.fieldsConfig", permission: "settings.update" },
       { to: "/smtp-management", icon: Mail, labelKey: "sidebar.smtpManagement", permission: "smtp.view" },
       { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates", permission: "email_templates.view" },
       { to: "/send-failures", icon: AlertTriangle, labelKey: "sidebar.sendFailures", permission: "scheduling.items.view" },

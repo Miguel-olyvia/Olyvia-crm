@@ -9,6 +9,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { Loader2, Pencil, Trash2, Truck } from "lucide-react";
 import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
 import { FichaLocalResumo } from "@/components/addresses/FichaLocalResumo";
+import { useFichaLocalEmpresa } from "@/hooks/useExtraLocal";
 import {
   listEntityDeliveryAddresses,
   formatDeliveryAddress,
@@ -29,6 +30,7 @@ interface ClientDeliveryAddressesSectionProps {
 export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddressesSectionProps) => {
   const { toast } = useToast();
   const { t } = useTranslation();
+  const fichaEmpresa = useFichaLocalEmpresa(entityId);
   const [addresses, setAddresses] = useState<EntityDeliveryAddress[]>([]);
   const [loading, setLoading] = useState(false);
   const [pendingRemoval, setPendingRemoval] = useState<EntityDeliveryAddress | null>(null);
@@ -106,7 +108,13 @@ export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddre
               <li key={address.entity_address_id} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
                 <div className="min-w-0">
                   <p className="text-sm break-words">{text}</p>
-                  <FichaLocalResumo ficha={address.ficha_tecnica} piso={address.floor} className="mt-0.5" />
+                  <FichaLocalResumo
+                    ficha={address.ficha_tecnica}
+                    piso={address.floor}
+                    className="mt-0.5"
+                    config={fichaEmpresa.config}
+                    extra={fichaEmpresa.extraDe(address.address_id)}
+                  />
                 </div>
                 <div className="flex shrink-0 items-center">
                 <Button

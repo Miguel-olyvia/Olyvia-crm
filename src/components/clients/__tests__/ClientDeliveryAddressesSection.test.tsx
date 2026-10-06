@@ -11,6 +11,7 @@ import { FICHA_TECNICA_VAZIA } from "@/lib/addresses/fichaTecnicaEdificio";
 // toast estável: o carregamento depende dele (useCallback).
 const h = vi.hoisted(() => ({ list: vi.fn(), toast: vi.fn() }));
 
+vi.mock("@/hooks/useExtraLocal", () => ({ useFichaLocalEmpresa: () => ({ config: undefined, extraDe: () => undefined }) }));
 vi.mock("@/contexts/LanguageContext", () => ({ useLanguage: () => ({ language: "pt" }) }));
 vi.mock("@/hooks/use-toast", () => ({ useToast: () => ({ toast: h.toast }) }));
 vi.mock("@/components/clients/DeliveryAddressForm", () => ({ DeliveryAddressForm: () => <div data-testid="form" /> }));

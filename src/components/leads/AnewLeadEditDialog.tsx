@@ -1,4 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
+import { CamposDinamicos } from "@/components/campos/CamposDinamicos";
+import { useCamposEmpresa } from "@/hooks/useCamposEmpresa";
+import { gravarExtraLead } from "@/lib/campos/api";
+import { emFalta, gravadosParaFormulario, validarValores, type ValoresFormulario } from "@/lib/campos/definicoes";
 import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
@@ -199,6 +203,12 @@ export function AnewLeadEditDialog({
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  // Campos da empresa (cfg_campos, ficha "lead" — 20261209100000). Vivem em
+  // anew_leads.field_values, ao lado dos campos dos formulários das campanhas.
+  const { fichas: fichasEmpresa } = useCamposEmpresa(companyId);
+  const fichaLead = fichasEmpresa.lead;
+  const [extraValores, setExtraValores] = useState<ValoresFormulario>({});
+  const [extraErros, setExtraErros] = useState<Record<string, string>>({});
 
   // Load field definitions and populate form when dialog opens
   useEffect(() => {
@@ -244,6 +254,8 @@ export function AnewLeadEditDialog({
     setQualificationType(lead.qualification_type ?? null);
     setLostReason(lead.lost_reason || "");
     setFieldErrors({});
+    setExtraValores(gravadosParaFormulario(lead.field_values));
+    setExtraErros({});
   };
 
   const generalKeyToFormKey = useMemo(() => buildGeneralKeyToFormKey(fieldDefs), [fieldDefs]);
@@ -360,12 +372,31 @@ export function AnewLeadEditDialog({
       return;
     }
 
+    // Campos da empresa: valida antes de gravar (como fn_cfg_validar_valores).
+    const extraValidado = fichaLead.extra.length > 0 ? validarValores(fichaLead.todos, extraValores) : null;
+    if (extraValidado && Object.keys(extraValidado.erros).length > 0) {
+      setExtraErros(extraValidado.erros);
+      toast({ title: "Campos da empresa", description: Object.values(extraValidado.erros)[0], variant: "destructive" });
+      return;
+    }
+    setExtraErros({});
+
     setSaving(true);
     try {
       // Preserve _meta if it exists
       const existingMeta = lead.field_values?._meta;
+      // Os campos da empresa já seguem limpos no snapshot (as chaves dos
+      // campos ativos são substituídas; as outras ficam como estavam).
+      const fieldValuesComExtra = extraValidado
+        ? {
+            ...Object.fromEntries(
+              Object.entries(fieldValues).filter(([k]) => !fichaLead.extra.some((d) => d.chave === k)),
+            ),
+            ...extraValidado.valores,
+          }
+        : fieldValues;
       const updatedFieldValues = {
-        ...fieldValues,
+        ...fieldValuesComExtra,
         ...(existingMeta ? { _meta: existingMeta } : {}),
       };
 
@@ -521,6 +552,18 @@ export function AnewLeadEditDialog({
 
         if (error) throw error;
       });
+
+      // Campos da empresa: passam também pela RPC própria, que os valida no
+      // servidor. Best-effort — a lead já ficou gravada acima com os mesmos
+      // valores.
+      if (extraValidado) {
+        try {
+          await gravarExtraLead(lead.id, extraValidado.valores);
+        } catch (extraError) {
+          const description = await getFriendlyErrorMessage(extraError);
+          toast({ title: "Lead guardada, mas os campos da empresa falharam", description, variant: "destructive" });
+        }
+      }
 
       // Link the lead's NIF (if any) to the shared, encrypted fiscal-entities
       // system — same resolve/link mechanism already used for organizations
@@ -809,6 +852,27 @@ export function AnewLeadEditDialog({
                       />
                     ))}
                 </div>
+              </div>
+            )}
+
+            {/* Campos da empresa (cfg_campos) */}
+            {fichaLead.extra.length > 0 && (
+              <div className="space-y-4" data-testid="lead-campos-empresa">
+                <h4 className="text-sm font-semibold border-b pb-2">Campos da empresa</h4>
+                <CamposDinamicos
+                  campos={fichaLead.extra}
+                  valores={extraValores}
+                  onChange={setExtraValores}
+                  erros={extraErros}
+                  idPrefix={`lead_${lead?.id ?? "nova"}_extra`}
+                  disabled={saving}
+                />
+                {(() => {
+                  const faltam = emFalta(fichaLead.extra, validarValores(fichaLead.todos, extraValores).valores);
+                  return faltam.length > 0 ? (
+                    <p className="text-xs text-amber-600">Por preencher: {faltam.map((d) => d.rotulo).join(", ")}</p>
+                  ) : null;
+                })()}
               </div>
             )}
 

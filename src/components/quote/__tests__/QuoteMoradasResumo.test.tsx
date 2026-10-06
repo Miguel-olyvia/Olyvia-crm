@@ -14,6 +14,7 @@ import { FICHA_TECNICA_VAZIA } from "@/lib/addresses/fichaTecnicaEdificio";
 
 const h = vi.hoisted(() => ({ list: vi.fn(), fiscal: vi.fn() }));
 
+vi.mock("@/hooks/useExtraLocal", () => ({ useFichaLocalEmpresa: () => ({ config: undefined, extraDe: () => undefined }) }));
 vi.mock("@/lib/quotes/quoteMoradas", () => ({
   fetchMoradaFiscal: (...a: unknown[]) => h.fiscal(...a),
   textoMoradaFiscal: (m: { texto?: string } | null) => m?.texto ?? "",

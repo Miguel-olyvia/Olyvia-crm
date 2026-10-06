@@ -6,7 +6,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Settings as SettingsIcon, User, Shield, Database, Plus, Trash2, Loader2, ListPlus, Calendar, Mail, CheckCircle, XCircle, Radio, Package } from "lucide-react";
+import { Settings as SettingsIcon, User, Shield, Database, Plus, Trash2, Loader2, ListPlus, Calendar, Mail, CheckCircle, XCircle, Radio, Package, SlidersHorizontal } from "lucide-react";
+import { Link } from "react-router-dom";
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/lib/toast";
@@ -714,6 +715,23 @@ const Settings = () => {
           </div>
           <PageFAQSheet pageKey="admin.settings" />
         </div>
+
+        <Card>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <SlidersHorizontal className="w-5 h-5" />
+                Fichas e campos
+              </CardTitle>
+              <CardDescription>
+                Adaptar as fichas (local, diagnóstico, cliente, lead) e os nomes ao seu negócio.
+              </CardDescription>
+            </div>
+            <Button asChild variant="outline">
+              <Link to="/configuracoes/campos">Abrir</Link>
+            </Button>
+          </CardHeader>
+        </Card>
 
         <div className="grid gap-6 md:grid-cols-2">
           <Card>

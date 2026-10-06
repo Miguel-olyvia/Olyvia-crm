@@ -9,6 +9,16 @@ import { Textarea } from "@/components/ui/textarea";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import { CamposDinamicos } from "@/components/campos/CamposDinamicos";
+import { CATALOGO_SISTEMA, type DefCampo } from "@/lib/campos/catalogo";
+import {
+  rotulo as rotuloEmpresa,
+  rotuloOpcao,
+  seccoesExtra,
+  visivel,
+  type FichaCombinada,
+  type ValoresFormulario,
+} from "@/lib/campos/definicoes";
 import {
   CAMPOS_EXTERIOR,
   CAMPOS_INTERIOR,
@@ -31,6 +41,17 @@ interface FichaTecnicaCamposProps {
    * dados; uma secção com erros abre-se sempre.
    */
   defaultOpen?: boolean;
+  /**
+   * Configuração da empresa (useCamposEmpresa().fichas.local): rótulos,
+   * campos escondidos e campos da empresa. Sem ela, a ficha de sempre.
+   */
+  config?: FichaCombinada;
+  /** Valores dos campos da empresa (cfg_campos). */
+  extra?: ValoresFormulario;
+  onExtraChange?: (extra: ValoresFormulario) => void;
+  errosExtra?: Record<string, string>;
+  /** Nome que a empresa dá ao "Local" (cfg_empresa.termos.local.singular). */
+  termoLocal?: string;
 }
 
 type Seccao = "exterior" | "interior";
@@ -63,13 +84,36 @@ const seccaoTemErros = (erros: ErrosFichaTecnica | undefined, seccao: Seccao) =>
  * guarda o valor e os erros — ver validarFichaTecnica). O piso não está aqui:
  * é o campo "Andar" da morada.
  */
-export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled, defaultOpen }: FichaTecnicaCamposProps) => {
+export const FichaTecnicaCampos = ({
+  valor, onChange, erros, idPrefix, disabled, defaultOpen,
+  config, extra, onExtraChange, errosExtra, termoLocal,
+}: FichaTecnicaCamposProps) => {
   const { t } = useTranslation();
   const k = (chave: string) => t(`deliveryAddresses.building.${chave}`);
 
-  const [abertas, setAbertas] = useState<Record<Seccao, boolean>>(() => ({
-    exterior: defaultOpen ?? seccaoTemDados(valor, "exterior"),
-    interior: defaultOpen ?? seccaoTemDados(valor, "interior"),
+  // Configuração da empresa (sem ela, tudo como sempre).
+  const vis = (campo: string) => visivel(config, campo);
+  const rot = (campo: string, porOmissao: string) => rotuloEmpresa(config, campo, porOmissao);
+  const opc = (campo: string, v: string, porOmissao: string) => rotuloOpcao(config, campo, v, porOmissao);
+  const ajudaEmpresa = (campo: string) => {
+    const d = config?.sistema[campo];
+    const base = CATALOGO_SISTEMA.local.find((x) => x.chave === campo);
+    return d?.ajuda && d.ajuda !== base?.ajuda ? <p className="text-xs text-muted-foreground">{d.ajuda}</p> : null;
+  };
+  const valoresExtra = extra ?? {};
+  const extrasDe = (seccao: string): DefCampo[] => (config ? config.extra.filter((d) => d.seccao === seccao) : []);
+  const outrasSeccoes = config ? seccoesExtra(config).filter((x) => x.chave !== "exterior" && x.chave !== "interior") : [];
+  const extraTemDados = (campos: readonly DefCampo[]) =>
+    campos.some((d) => valoresExtra[d.chave] !== undefined && valoresExtra[d.chave] !== "");
+  // Contexto para as condições "só aparece se" sobre campos de sistema.
+  const contexto: Record<string, unknown> = Object.fromEntries(
+    Object.entries(valor).filter(([, v]) => v !== ""),
+  );
+
+  const [abertas, setAbertas] = useState<Record<string, boolean>>(() => ({
+    exterior: defaultOpen ?? (seccaoTemDados(valor, "exterior") || extraTemDados(extrasDe("exterior"))),
+    interior: defaultOpen ?? (seccaoTemDados(valor, "interior") || extraTemDados(extrasDe("interior"))),
+    ...Object.fromEntries(outrasSeccoes.map((x) => [x.chave, defaultOpen ?? extraTemDados(x.campos)])),
   }));
 
   const set = <K extends keyof FichaTecnicaValores>(campo: K, v: FichaTecnicaValores[K]) => {
@@ -88,9 +132,9 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
     campo: K,
     label: string,
     opcoes: { value: Exclude<FichaTecnicaValores[K], "">; label: string }[],
-  ) => (
+  ) => !vis(campo) ? null : (
     <div className="space-y-1">
-      <Label className="text-xs" id={`${idPrefix}_${campo}_label`}>{label}</Label>
+      <Label className="text-xs" id={`${idPrefix}_${campo}_label`}>{rot(campo, label)}</Label>
       <RadioGroup
         aria-labelledby={`${idPrefix}_${campo}_label`}
         aria-invalid={!!erros?.[campo]}
@@ -99,13 +143,14 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
         onValueChange={(v) => set(campo, (v === NAO_INDICADO ? "" : v) as FichaTecnicaValores[K])}
         disabled={disabled}
       >
-        {[{ value: NAO_INDICADO, label: k("notSet") }, ...opcoes].map((o) => (
+        {[{ value: NAO_INDICADO, label: k("notSet") }, ...opcoes.map((o) => ({ ...o, label: opc(campo, o.value, o.label) }))].map((o) => (
           <div key={o.value} className="flex items-center gap-1.5">
             <RadioGroupItem value={o.value} id={`${idPrefix}_${campo}_${o.value}`} />
             <Label htmlFor={`${idPrefix}_${campo}_${o.value}`} className="text-sm font-normal">{o.label}</Label>
           </div>
         ))}
       </RadioGroup>
+      {ajudaEmpresa(campo)}
       {erro(campo)}
     </div>
   );
@@ -118,9 +163,10 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
   ) => {
     const id = `${idPrefix}_${campo}`;
     const temErro = !!erros?.[campo];
+    if (!vis(campo)) return null;
     return (
       <div className="space-y-1">
-        <Label htmlFor={id} className="text-xs">{label}</Label>
+        <Label htmlFor={id} className="text-xs">{rot(campo, label)}</Label>
         <div className="relative">
           <Input
             id={id}
@@ -143,6 +189,7 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
             </span>
           )}
         </div>
+        {ajudaEmpresa(campo)}
         {erro(campo)}
       </div>
     );
@@ -153,9 +200,9 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
     return caixa(campo, label, { inputMode: "numeric", min: limite.min, max: max ?? limite.max }, extraDisabled);
   };
 
-  const interruptor = (campo: CampoSwitch, label: string) => (
+  const interruptor = (campo: CampoSwitch, label: string) => !vis(campo) ? null : (
     <div className="space-y-1">
-      <Label htmlFor={`${idPrefix}_${campo}`} className="text-xs">{label}</Label>
+      <Label htmlFor={`${idPrefix}_${campo}`} className="text-xs">{rot(campo, label)}</Label>
       <div className="flex h-10 items-center">
         <Switch
           id={`${idPrefix}_${campo}`}
@@ -164,6 +211,7 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
           disabled={disabled}
         />
       </div>
+      {ajudaEmpresa(campo)}
     </div>
   );
 
@@ -173,27 +221,32 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
     opcoes: { value: Exclude<FichaTecnicaValores[K], "">; label: string }[],
   ) => {
     const id = `${idPrefix}_${campo}`;
+    if (!vis(campo)) return null;
     return (
       <div className="space-y-1">
-        <Label htmlFor={id} className="text-xs">{label}</Label>
+        <Label htmlFor={id} className="text-xs">{rot(campo, label)}</Label>
         <NativeSelect
           id={id}
           value={valor[campo]}
           onValueChange={(v) => set(campo, v as FichaTecnicaValores[K])}
-          options={[{ value: "", label: k("notSet") }, ...opcoes]}
+          options={[{ value: "", label: k("notSet") }, ...opcoes.map((o) => ({ ...o, label: opc(campo, o.value, o.label) }))]}
           disabled={disabled}
           aria-invalid={!!erros?.[campo]}
         />
+        {ajudaEmpresa(campo)}
         {erro(campo)}
       </div>
     );
   };
 
-  const seccao = (s: Seccao, titulo: string, conteudo: ReactNode) => {
-    const comErros = seccaoTemErros(erros, s);
+  const seccao = (s: string, titulo: string, conteudo: ReactNode) => {
+    const padrao = s === "exterior" || s === "interior";
+    const camposExtra = padrao ? extrasDe(s) : outrasSeccoes.find((x) => x.chave === s)?.campos ?? [];
+    const comErros = (padrao && seccaoTemErros(erros, s as Seccao)) || camposExtra.some((d) => !!errosExtra?.[d.chave]);
     const open = abertas[s] || comErros;
     return (
       <Collapsible
+        key={s}
         open={open}
         onOpenChange={(o) => setAbertas((prev) => ({ ...prev, [s]: o }))}
         className="rounded-md border"
@@ -215,6 +268,19 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
   const anoAtual = new Date().getFullYear();
   const notasLen = comprimentoTexto(valor.notas_interior.trim());
 
+  const blocoExtra = (campos: readonly DefCampo[]) =>
+    campos.length > 0 ? (
+      <CamposDinamicos
+        campos={campos}
+        valores={valoresExtra}
+        onChange={(v) => onExtraChange?.(v)}
+        erros={errosExtra}
+        contexto={contexto}
+        idPrefix={`${idPrefix}_x`}
+        disabled={disabled}
+      />
+    ) : null;
+
   const exterior = (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-start">
@@ -224,14 +290,14 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
             { value: "dificil", label: k("accessHard") },
           ])}
         </div>
-        {inteiro("impacto_percent", k("impact"), valor.acesso !== "dificil")}
+        {vis("acesso") && inteiro("impacto_percent", k("impact"), valor.acesso !== "dificil")}
       </div>
       {radios("estacionamento", k("parking"), [
         { value: "pago", label: k("parkingPaid") },
         { value: "nao_pago", label: k("parkingFree") },
         { value: "sem_estacionamento", label: k("parkingNone") },
       ])}
-      {(valor.estacionamento && valor.estacionamento !== "sem_estacionamento") || valor.zona_estacionamento
+      {vis("estacionamento") && ((valor.estacionamento && valor.estacionamento !== "sem_estacionamento") || valor.zona_estacionamento)
         ? radios("zona_estacionamento", k("parkingZone"), [
             { value: "verde", label: k("zoneGreen") },
             { value: "amarela", label: k("zoneYellow") },
@@ -240,13 +306,14 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
         : null}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end">
         {interruptor("tem_elevador", k("hasElevator"))}
-        {inteiro("n_elevadores", k("elevators"), !valor.tem_elevador)}
+        {vis("tem_elevador") && inteiro("n_elevadores", k("elevators"), !valor.tem_elevador)}
         {inteiro("n_andares", k("floors"))}
         {inteiro("n_fracoes_por_andar", k("unitsPerFloor"))}
       </div>
       {erros?.piso
         ? <p className="text-xs text-destructive">{erros.piso}</p>
-        : <p className="text-xs text-muted-foreground">{k("floorHint")}</p>}
+        : vis("n_andares") ? <p className="text-xs text-muted-foreground">{k("floorHint")}</p> : null}
+      {blocoExtra(extrasDe("exterior"))}
     </>
   );
 
@@ -299,8 +366,8 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
         {interruptor("habitada_durante_obra", k("occupied"))}
         {interruptor("animais", k("pets"))}
       </div>
-      <div className="space-y-1">
-        <Label htmlFor={`${idPrefix}_notas_interior`} className="text-xs">{k("interiorNotes")}</Label>
+      {vis("notas_interior") && <div className="space-y-1">
+        <Label htmlFor={`${idPrefix}_notas_interior`} className="text-xs">{rot("notas_interior", k("interiorNotes"))}</Label>
         <Textarea
           id={`${idPrefix}_notas_interior`}
           rows={3}
@@ -317,16 +384,20 @@ export const FichaTecnicaCampos = ({ valor, onChange, erros, idPrefix, disabled,
             {notasLen}/{LIMITES_FICHA_TECNICA.notas_interior.max}
           </p>
         </div>
-      </div>
+      </div>}
+      {blocoExtra(extrasDe("interior"))}
       <p className="text-xs text-muted-foreground">{k("switchHint")}</p>
     </>
   );
 
   return (
     <div className="space-y-2" role="group" aria-labelledby={`${idPrefix}_titulo`}>
-      <p id={`${idPrefix}_titulo`} className="text-sm font-medium">{k("title")}</p>
-      {seccao("exterior", k("exterior"), exterior)}
-      {seccao("interior", k("interior"), interior)}
+      <p id={`${idPrefix}_titulo`} className="text-sm font-medium">
+        {termoLocal && termoLocal !== "Local" ? `${k("title")} — ${termoLocal}` : k("title")}
+      </p>
+      {(CAMPOS_EXTERIOR.some((c) => vis(c)) || extrasDe("exterior").length > 0) && seccao("exterior", k("exterior"), exterior)}
+      {(CAMPOS_INTERIOR.some((c) => vis(c)) || extrasDe("interior").length > 0) && seccao("interior", k("interior"), interior)}
+      {outrasSeccoes.map((x) => seccao(x.chave, x.rotulo, blocoExtra(x.campos)))}
     </div>
   );
 };

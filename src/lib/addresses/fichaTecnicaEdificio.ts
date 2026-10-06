@@ -555,11 +555,20 @@ export interface LinhaResumoFicha {
   texto: string;
 }
 
-/** As linhas do resumo (só as secções com dados): Exterior e/ou Interior. */
+/**
+ * As linhas do resumo (só as secções com dados): Exterior e/ou Interior.
+ * `ocultar`: campos que a empresa escondeu (cfg_campos) — não entram no resumo.
+ */
 export const linhasResumoFichaLocal = (
   ficha: Partial<FichaTecnicaEdificio> | null | undefined,
   piso?: string | null,
+  ocultar?: ReadonlySet<string>,
 ): LinhaResumoFicha[] => {
+  if (ficha && ocultar?.size) {
+    ficha = Object.fromEntries(
+      Object.entries(ficha).map(([c, v]) => [c, ocultar.has(c) ? null : v]),
+    ) as Partial<FichaTecnicaEdificio>;
+  }
   const linhas: LinhaResumoFicha[] = [];
   const ext = resumoExterior(ficha, piso);
   if (ext) linhas.push({ seccao: "exterior", rotulo: "Exterior", texto: ext });

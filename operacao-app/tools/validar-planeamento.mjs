@@ -147,6 +147,10 @@ await db.exec(`
   CREATE TABLE public.anew_address_building (
     address_id uuid PRIMARY KEY, acesso text, tem_elevador boolean, n_andares integer,
     habitada_durante_obra boolean, animais boolean, mobilada text, distancia_entrada text, gas text);
+  -- Campos que a empresa acrescentou à ficha (CRM 20261209100000), por empresa.
+  CREATE TABLE public.anew_address_extra (
+    address_id uuid NOT NULL, organization_id uuid NOT NULL, valores jsonb NOT NULL DEFAULT '{}'::jsonb,
+    PRIMARY KEY (address_id, organization_id));
   CREATE TABLE public.schedule_holidays (id uuid PRIMARY KEY DEFAULT gen_random_uuid(), country_code varchar(2) NOT NULL,
     organization_id uuid, name varchar(255) NOT NULL, holiday_date date NOT NULL, is_recurring boolean NOT NULL DEFAULT false);
 
@@ -158,6 +162,9 @@ await db.exec(`
     VALUES ('${MORADA}', 'Rua da Obra', '5', '3.º Esq', '1000-100', 'Lisboa');
   INSERT INTO public.anew_address_building (address_id, acesso, tem_elevador, habitada_durante_obra)
     VALUES ('${MORADA}', 'dificil', false, true);
+  INSERT INTO public.anew_address_extra (address_id, organization_id, valores) VALUES
+    ('${MORADA}', '${ORG}', '{"horario": "noite"}'),
+    ('${MORADA}', '22222222-0000-0000-0000-000000000000', '{"de_outra_empresa": true}');
   -- A casa de banho medida na visita: 5 m² de chão, 9 m de perímetro,
   -- revestimento até ao teto (2,5 m) → 22,5 m² de parede; 4 pontos de água.
   INSERT INTO public.deal_needs (id, diag_area_m2, diag_tipo_area, diag_m2_pavimento, diag_perimetro_m,
@@ -340,6 +347,9 @@ if (obraWc) {
            f?.piso === "3.º Esq" && !("created_by" in (f ?? {})),
     "a ficha do local chega às Operações (acesso, elevador, habitada, piso), só leitura",
     `ficha do local: ${JSON.stringify(f)}`);
+  verifica(f?.extra?.horario === "noite" && !("de_outra_empresa" in (f?.extra ?? {})),
+    "os campos da empresa chegam na ficha (só os da empresa da obra)",
+    `extra da ficha: ${JSON.stringify(f?.extra)}`);
 }
 {
   const doTipo = tw.filter((t) => t.modelo_tarefa_id);

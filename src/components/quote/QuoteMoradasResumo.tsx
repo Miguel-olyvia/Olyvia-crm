@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { fetchMoradaFiscal, textoMoradaFiscal } from "@/lib/quotes/quoteMoradas";
 import { listEntityDeliveryAddresses, type EntityDeliveryAddress } from "@/lib/addresses/entityDeliveryAddresses";
 import { FichaLocalResumo } from "@/components/addresses/FichaLocalResumo";
+import { useFichaLocalEmpresa } from "@/hooks/useExtraLocal";
 import { SugestaoFichaLocalPainel } from "@/components/addresses/SugestaoFichaLocalPainel";
 import { needIdsDoOrcamento } from "@/lib/addresses/sugestaoAreas";
 
@@ -28,6 +29,7 @@ export const QuoteMoradasResumo = ({ quoteId, obraEndereco, entityId, siteAddres
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [entregaMorada, setEntregaMorada] = useState<EntityDeliveryAddress | null>(null);
   const [needIds, setNeedIds] = useState<string[]>([]);
+  const fichaEmpresa = useFichaLocalEmpresa(entityId);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,7 +85,13 @@ export const QuoteMoradasResumo = ({ quoteId, obraEndereco, entityId, siteAddres
         <p className="text-sm" data-testid="quote-detalhe-morada-entrega">{entrega || "—"}</p>
         {entregaMorada && (
           <div data-testid="quote-detalhe-ficha-local">
-            <FichaLocalResumo ficha={entregaMorada.ficha_tecnica} piso={entregaMorada.floor} className="mt-1" />
+            <FichaLocalResumo
+              ficha={entregaMorada.ficha_tecnica}
+              piso={entregaMorada.floor}
+              className="mt-1"
+              config={fichaEmpresa.config}
+              extra={fichaEmpresa.extraDe(entregaMorada.address_id)}
+            />
           </div>
         )}
         {entregaMorada && (

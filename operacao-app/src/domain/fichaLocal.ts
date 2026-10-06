@@ -4,6 +4,9 @@
  * Os valores são os do CRM — ver src/lib/addresses/README.md na raiz.
  */
 
+import { CATALOGO_SISTEMA } from "./campos/catalogo";
+import type { FichaCombinada } from "./campos/definicoes";
+
 export interface FichaLocalCampos {
   acesso?: string | null;
   impacto_percent?: number | null;
@@ -58,7 +61,23 @@ export function pisoNumero(piso: string | null | undefined): number | null {
   return m ? Number(m[0]) : null;
 }
 
-export function linhasExterior(f: FichaLocalCampos): LinhaFicha[] {
+/**
+ * O que a empresa configurou para a ficha (cfg_campos): campos escondidos
+ * (não aparecem) e rótulos próprios dos campos de sistema que viram frase
+ * (ex.: "Casa habitada durante a obra" → "Loja aberta ao público").
+ */
+export interface AjustesFicha {
+  ocultar?: ReadonlySet<string>;
+  rotulos?: Readonly<Record<string, string>>;
+}
+
+const semOcultos = (f: FichaLocalCampos, a?: AjustesFicha): FichaLocalCampos =>
+  a?.ocultar?.size
+    ? (Object.fromEntries(Object.entries(f).map(([c, v]) => [c, a.ocultar!.has(c) ? null : v])) as FichaLocalCampos)
+    : f;
+
+export function linhasExterior(ficha: FichaLocalCampos, ajustes?: AjustesFicha): LinhaFicha[] {
+  const f = semOcultos(ficha, ajustes);
   const l: LinhaFicha[] = [];
   if (f.acesso === "dificil") {
     l.push({ texto: `Acesso difícil${f.impacto_percent ? ` (+${f.impacto_percent} %)` : ""}`, atencao: true });
@@ -93,10 +112,12 @@ export function linhasExterior(f: FichaLocalCampos): LinhaFicha[] {
   return l;
 }
 
-export function linhasInterior(f: FichaLocalCampos): LinhaFicha[] {
+export function linhasInterior(ficha: FichaLocalCampos, ajustes?: AjustesFicha): LinhaFicha[] {
+  const f = semOcultos(ficha, ajustes);
+  const r = ajustes?.rotulos ?? {};
   const l: LinhaFicha[] = [];
-  if (f.habitada_durante_obra) l.push({ texto: "Casa habitada durante a obra", atencao: true });
-  if (f.animais) l.push({ texto: "Há animais", atencao: true });
+  if (f.habitada_durante_obra) l.push({ texto: r.habitada_durante_obra ?? "Casa habitada durante a obra", atencao: true });
+  if (f.animais) l.push({ texto: r.animais ?? "Há animais", atencao: true });
   if (f.amianto === "sim") l.push({ texto: "Amianto", atencao: true });
   else if (f.amianto === "nao_sei") l.push({ texto: "Amianto: não se sabe", atencao: true });
   const casa = [
@@ -121,7 +142,20 @@ export function linhasInterior(f: FichaLocalCampos): LinhaFicha[] {
 }
 
 /** Tem alguma coisa para mostrar? */
-export function fichaTemDados(f: FichaLocalCampos | null | undefined): boolean {
+export function fichaTemDados(f: FichaLocalCampos | null | undefined, ajustes?: AjustesFicha): boolean {
   if (!f) return false;
-  return linhasExterior(f).length + linhasInterior(f).length > 0 || !!f.notas_interior?.trim();
+  return linhasExterior(f, ajustes).length + linhasInterior(f, ajustes).length > 0 ||
+    (!ajustes?.ocultar?.has("notas_interior") && !!f.notas_interior?.trim());
+}
+
+/** Da configuração da empresa (cfg_campos) para os ajustes das linhas. */
+export function ajustesDaFicha(f: FichaCombinada | null | undefined): AjustesFicha | undefined {
+  if (!f?.configurada) return undefined;
+  const ocultar = new Set(f.todos.filter((d) => d.sistema && !d.ativo).map((d) => d.chave));
+  const rotulos: Record<string, string> = {};
+  for (const base of CATALOGO_SISTEMA.local) {
+    const d = f.sistema[base.chave];
+    if (d && d.rotulo !== base.rotulo) rotulos[base.chave] = d.rotulo;
+  }
+  return { ocultar, rotulos };
 }
