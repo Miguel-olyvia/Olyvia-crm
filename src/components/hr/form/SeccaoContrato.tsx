@@ -2,8 +2,8 @@
  * Passo 4 -- Informacoes de contrato: o que se assina.
  *
  * Tres blocos, e a ordem importa: o CONTRATO (tipo, datas, periodo
- * experimental), a RETRIBUICAO (montante, moeda, periodicidade) e o TEMPO DE
- * TRABALHO (modalidade, horas, FTE, dias uteis, feriados, maximos).
+ * experimental), a RETRIBUICAO (so o que e DA PESSOA: subsidio de alimentacao
+ * e duodecimos) e o TEMPO DE TRABALHO (modalidade, horas, FTE, dias uteis, feriados, maximos).
  *
  * "Tipo de trabalho" e "Modalidade" NAO sao o mesmo campo e por isso nao
  * aparecem lado a lado sem legenda:
@@ -20,6 +20,11 @@
  * campos podem contradizer-se. Ao escolher esse tipo, o regime segue -- excepto
  * se a pessoa ja o tiver escolhido a mao, caso em que a escolha dela fica e
  * aparece um aviso. A regra vive em `lib/hr/contrato`, com a justificacao.
+ *
+ * O VALOR BASE NAO SE ESCREVE AQUI (fluxo 2): vem do cargo escolhido no passo 3.
+ * Mostra-se em leitura ("Salario base do cargo: X"). O subsidio e os duodecimos
+ * so se definem com `hr.pessoas.retribuicao.edit`; sem ela, a nota diz que o RH
+ * completa depois. Os duodecimos propoem 50.
  *
  * No fim, a escolha que abre o horario variavel: "horas iguais todas as
  * semanas" ou "horario variavel por dia e por local". A segunda abre o mesmo
@@ -54,7 +59,6 @@ import {
 import {
   DIAS_SEMANA,
   HORAS_FREQUENCIAS,
-  PERIODICIDADES,
   POLITICAS_FERIADOS,
   REGIMES_TRABALHO,
   TIPOS_CONTRATO,
@@ -62,7 +66,7 @@ import {
   type DiaSemana,
   type HorasFrequencia,
   type LocalTrabalho,
-  type Periodicidade,
+  type SubsidioAlimentacaoModo,
   type PoliticaFeriados,
   type RegimeTrabalho,
   type TipoContrato,
@@ -78,6 +82,10 @@ interface SeccaoContratoProps {
   dataAdmissao: string;
   locais: LocalTrabalho[];
   locaisALoad: boolean;
+  /** O salario base do cargo escolhido no passo 3, ja formatado; `null` sem cargo ou sem periodo. */
+  salarioDoCargo: string | null;
+  /** `hr.pessoas.retribuicao.edit`: sem ela o subsidio e os duodecimos ficam para o RH. */
+  podeEditarRetribuicao: boolean;
 }
 
 export function SeccaoContrato({
@@ -87,6 +95,8 @@ export function SeccaoContrato({
   dataAdmissao,
   locais,
   locaisALoad,
+  salarioDoCargo,
+  podeEditarRetribuicao,
 }: SeccaoContratoProps) {
   const { t } = useTranslation();
 
@@ -256,34 +266,45 @@ export function SeccaoContrato({
 
       <div className="space-y-3 rounded-md border p-3">
         <p className="text-sm font-medium">{t("hr.contrato.retribuicao")}</p>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <CampoTexto
-            id="hr-novo-valor-base"
-            label={t("hr.contrato.valorBase")}
-            tipo="number"
-            min={0}
-            step="0.01"
-            valor={valor.valor_base}
-            erro={erroDe("hr-novo-valor-base")}
-            onChange={(v) => onPatch({ valor_base: v })}
-          />
-          <CampoTexto
-            id="hr-novo-moeda"
-            label={t("hr.contrato.moeda")}
-            valor={valor.moeda}
-            onChange={(v) => onPatch({ moeda: v.toUpperCase() })}
-          />
-          <CampoSelect
-            id="hr-novo-periodicidade"
-            label={t("hr.contrato.periodicidade")}
-            valor={valor.periodicidade}
-            opcoes={PERIODICIDADES.map((p) => ({
-              value: p,
-              label: t(`hr.periodicidade.${p}`),
-            }))}
-            onChange={(v) => onPatch({ periodicidade: v as Periodicidade })}
-          />
-        </div>
+        {salarioDoCargo !== null && (
+          <p className="text-sm">{t("hr.form.salarioDoCargo", { valor: salarioDoCargo })}</p>
+        )}
+        {podeEditarRetribuicao ? (
+          <div className="grid gap-4 sm:grid-cols-3">
+            <CampoTexto
+              id="hr-novo-subsidio"
+              label={t("hr.retribuicaoCartao.subsidioAlimentacao")}
+              tipo="number"
+              min={0}
+              step="0.01"
+              valor={valor.subsidio}
+              erro={erroDe("hr-novo-subsidio")}
+              onChange={(v) => onPatch({ subsidio: v })}
+            />
+            <CampoSelect
+              id="hr-novo-subsidio-modo"
+              label={t("hr.retribuicaoCartao.subsidioAlimentacaoModo")}
+              valor={valor.subsidio_modo}
+              vazioLabel={t("common.none")}
+              opcoes={(["dinheiro", "cartao"] as const).map((m) => ({
+                value: m,
+                label: t(`hr.subsidioAlimentacaoModo.${m}`),
+              }))}
+              onChange={(v) => onPatch({ subsidio_modo: v as SubsidioAlimentacaoModo | "" })}
+            />
+            <CampoSelect
+              id="hr-novo-duodecimos"
+              label={t("hr.contrato.duodecimos")}
+              valor={valor.duodecimos_pct}
+              vazioLabel={t("common.none")}
+              ajuda={t("hr.form.duodecimosProposta")}
+              opcoes={[0, 50, 100].map((d) => ({ value: String(d), label: `${d}%` }))}
+              onChange={(v) => onPatch({ duodecimos_pct: v as RascunhoContrato["duodecimos_pct"] })}
+            />
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">{t("hr.form.parteDaPessoaDepois")}</p>
+        )}
       </div>
 
       <div className="space-y-3 rounded-md border p-3">

@@ -80,7 +80,12 @@ function montar(onGuardar = vi.fn().mockResolvedValue(null)) {
       locais={[]}
       locaisALoad={false}
       cargos={[]}
-      cargosALoad={false}
+      periodosDosCargos={[]}
+      podeVerRetribuicao={false}
+      podeEditarRetribuicao={false}
+      temRetribuicao={false}
+      salarioActual={null}
+      onCargoMudou={vi.fn()}
       entidadeLegalNome="Organizacao Nike"
       estadoContratoDerivado="em_curso"
       podeEditar
@@ -118,5 +123,7 @@ describe("PessoaLaboraisTab -- sem e-mail pessoal", () => {
     const patch = onGuardar.mock.calls[0][0];
     expect(patch).not.toHaveProperty("email_pessoal");
     expect(patch).toMatchObject({ cargo: "Directora" });
+    // O cargo do catalogo muda-se pela RPC, nunca por este patch (HRC10).
+    expect(patch).not.toHaveProperty("cargo_id");
   });
 });

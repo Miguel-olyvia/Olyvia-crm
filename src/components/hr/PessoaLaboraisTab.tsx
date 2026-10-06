@@ -25,13 +25,14 @@
  * e aqui a lista ja vem filtrada pela organizacao activa -- as duas coisas de
  * acordo, nao uma a confiar na outra.
  *
- * CARGO: TEXTO LIVRE, MAIS UM SELECTOR DO CATALOGO (20261202070000)
+ * O CARGO DO CATALOGO JA NAO SE ESCOLHE NEM SE GRAVA AQUI (fluxo 2)
  * -----------------------------------------------------------------
- * `cargo` (texto) continua editavel -- legado, sem efeito na retribuicao.
- * `cargo_id`, novo, aponta para `hr_cargos`: quando preenchido, o salario
- * base da pessoa fica IMPOSTO pelo cargo (trigger em pessoas_retribuicoes,
- * ver `PessoaRetribuicaoCard.tsx`). Sem cargo_id (o normal hoje, sem
- * backfill), nada muda. Um cargo so aparece na lista se estiver `activo`.
+ * Toda a pessoa tem cargo (`cargo_id`, `hr_cargos`), e e do cargo que vem o
+ * salario base. `pessoas.cargo_id` e DERIVADO do historico `pessoas_cargos`:
+ * escreve-lo pelo patch deste separador seria recusado (HRC10). O cargo muda-se
+ * em `PessoaCargoCard` ("Atribuir cargo" / "Mudar cargo"), que avisa antes de
+ * confirmar e guarda o historico. O texto livre `cargo` continua editavel mas
+ * e so legenda -- sem efeito no salario.
  *
  * O E-MAIL PESSOAL SAIU DAQUI. Vive agora em Detalhes pessoais
  * (`PessoaPessoaisTab.tsx`, bloco 1), a pedido do utilizador -- "se e detalhes
@@ -59,10 +60,12 @@ import { Briefcase, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { PessoaAfectacoesSeccao } from "@/components/hr/PessoaAfectacoesSeccao";
+import { PessoaCargoCard } from "@/components/hr/PessoaCargoCard";
 import { PessoaColocacaoOrganogramaSeccao } from "@/components/hr/PessoaColocacaoOrganogramaSeccao";
 import type { EstadoContratoDerivado } from "@/lib/hr/estadoContrato";
 import { type LocalTrabalho, type Pessoa } from "@/types/hr";
 import type { HrCargo } from "@/hooks/useCargos";
+import type { HrCargoPeriodo, ValorDoSalario } from "@/lib/hr/cargosPeriodos";
 
 /** Valor do Select quando nao ha escolha. O Radix nao aceita `value=""`. */
 const SEM_ESCOLHA = "__sem_escolha__";
@@ -75,10 +78,26 @@ interface PessoaLaboraisTabProps {
    *  actual e para a seccao de afectacoes. */
   locais: LocalTrabalho[];
   locaisALoad: boolean;
-  /** Cargos do catalogo da organizacao activa (`hr_cargos`) -- para o
-   *  selector que liga a pessoa a um cargo com salario imposto. */
+  /** Cargos do catalogo da organizacao activa (`hr_cargos`) e os periodos do
+   *  seu salario -- para `PessoaCargoCard` (mudar o cargo e avisar do salario). */
   cargos: HrCargo[];
-  cargosALoad: boolean;
+  periodosDosCargos: HrCargoPeriodo[];
+  /** Os cargos ou os seus periodos ainda a carregar. */
+  periodosLoading?: boolean;
+  /** Falhou a leitura dos cargos ou dos periodos. */
+  periodosError?: boolean;
+  /** `hr.pessoas.retribuicao.corrigir`: mudar o cargo com data passada pode reescrever uma versao em vigor. */
+  podeCorrigirRetribuicao?: boolean;
+  /** `hr.pessoas.retribuicao.view`: a coluna do salario do historico de cargos. */
+  podeVerRetribuicao: boolean;
+  /** `hr.pessoas.retribuicao.edit`: exigida para mudar o cargo de quem ja tem retribuicao. */
+  podeEditarRetribuicao: boolean;
+  /** A pessoa ja tem alguma versao de retribuicao. */
+  temRetribuicao: boolean;
+  /** O salario base de hoje, para o aviso quando a ficha ainda nao tem cargo. */
+  salarioActual: ValorDoSalario | null;
+  /** O cargo mudou: o pai recarrega a ficha, a retribuicao e as pendencias. */
+  onCargoMudou: () => void;
   /** Nome da organizacao activa: a entidade legal, mostrada e nao escolhida. */
   entidadeLegalNome: string | null;
   /** So-leitura aqui -- ver o comentario de topo. `null` quando quem olha nao
@@ -106,7 +125,6 @@ type Rascunho = {
   telefone_trabalho: string;
   numero_interno: string;
   cargo: string;
-  cargo_id: string;
   data_admissao: string;
   data_antiguidade: string;
   data_saida: string;
@@ -119,7 +137,6 @@ function rascunhoDe(pessoa: Pessoa): Rascunho {
     telefone_trabalho: pessoa.telefone_trabalho ?? "",
     numero_interno: pessoa.numero_interno ?? "",
     cargo: pessoa.cargo ?? "",
-    cargo_id: pessoa.cargo_id ?? SEM_ESCOLHA,
     data_admissao: pessoa.data_admissao ?? "",
     data_antiguidade: pessoa.data_antiguidade ?? "",
     data_saida: pessoa.data_saida ?? "",
@@ -133,7 +150,15 @@ export function PessoaLaboraisTab({
   locais,
   locaisALoad,
   cargos,
-  cargosALoad,
+  periodosDosCargos,
+  periodosLoading,
+  periodosError,
+  podeCorrigirRetribuicao,
+  podeVerRetribuicao,
+  podeEditarRetribuicao,
+  temRetribuicao,
+  salarioActual,
+  onCargoMudou,
   entidadeLegalNome,
   estadoContratoDerivado,
   podeEditar,
@@ -171,7 +196,6 @@ export function PessoaLaboraisTab({
       telefone_trabalho: vazioParaNull(rascunho.telefone_trabalho),
       numero_interno: vazioParaNull(rascunho.numero_interno),
       cargo: vazioParaNull(rascunho.cargo),
-      cargo_id: rascunho.cargo_id === SEM_ESCOLHA ? null : rascunho.cargo_id,
       data_admissao: vazioParaNull(rascunho.data_admissao),
       data_antiguidade: vazioParaNull(rascunho.data_antiguidade),
       data_saida: vazioParaNull(rascunho.data_saida),
@@ -185,9 +209,14 @@ export function PessoaLaboraisTab({
     toast.success(t("hr.sucesso.guardado"));
   };
 
-  const campos: Array<{ id: keyof Rascunho; labelKey: string; tipo?: "date" | "email" | "text" }> = [
+  const campos: Array<{
+    id: keyof Rascunho;
+    labelKey: string;
+    tipo?: "date" | "email" | "text";
+    ajudaKey?: string;
+  }> = [
     { id: "numero_interno", labelKey: "hr.laborais.numeroInterno" },
-    { id: "cargo", labelKey: "hr.columns.cargo" },
+    { id: "cargo", labelKey: "hr.columns.cargo", ajudaKey: "hr.laborais.cargoTextoLegadoAjuda" },
     { id: "email_trabalho", labelKey: "hr.laborais.emailTrabalho", tipo: "email" },
     { id: "telefone_trabalho", labelKey: "hr.laborais.telefoneTrabalho" },
     { id: "data_admissao", labelKey: "hr.columns.contratacao", tipo: "date" },
@@ -206,7 +235,7 @@ export function PessoaLaboraisTab({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {campos.map(({ id, labelKey, tipo }) => (
+          {campos.map(({ id, labelKey, tipo, ajudaKey }) => (
             <div key={id} className="space-y-1.5">
               <Label htmlFor={`hr-laborais-${id}`}>{t(labelKey)}</Label>
               <Input
@@ -216,6 +245,7 @@ export function PessoaLaboraisTab({
                 disabled={!podeEditar}
                 onChange={(e) => definir(id, e.target.value as Rascunho[typeof id])}
               />
+              {ajudaKey && <p className="text-xs text-muted-foreground">{t(ajudaKey)}</p>}
             </div>
           ))}
 
@@ -240,30 +270,6 @@ export function PessoaLaboraisTab({
                   ))}
               </SelectContent>
             </Select>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="hr-laborais-cargo-id">{t("hr.laborais.cargoCatalogo")}</Label>
-            <Select
-              value={rascunho.cargo_id}
-              disabled={!podeEditar || cargosALoad}
-              onValueChange={(v) => definir("cargo_id", v)}
-            >
-              <SelectTrigger id="hr-laborais-cargo-id">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={SEM_ESCOLHA}>{t("hr.campos.semValor")}</SelectItem>
-                {cargos
-                  .filter((c) => c.activo || c.id === pessoa.cargo_id)
-                  .map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.nome}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">{t("hr.laborais.cargoCatalogoAjuda")}</p>
           </div>
 
           {/* So-leitura: `local_id` e DERIVADO da afectacao em aberto mais
@@ -338,6 +344,22 @@ export function PessoaLaboraisTab({
         )}
       </CardContent>
     </Card>
+
+    <PessoaCargoCard
+      pessoaId={pessoa.id}
+      organizationId={pessoa.organization_id}
+      cargos={cargos}
+      periodos={periodosDosCargos}
+      podeEditar={podeEditar}
+      podeVerRetribuicao={podeVerRetribuicao}
+      podeEditarRetribuicao={podeEditarRetribuicao}
+      podeCorrigirRetribuicao={podeCorrigirRetribuicao}
+      periodosLoading={periodosLoading}
+      periodosError={periodosError}
+      temRetribuicao={temRetribuicao}
+      salarioActual={salarioActual}
+      onMudou={onCargoMudou}
+    />
 
     <PessoaAfectacoesSeccao
       pessoaId={pessoa.id}

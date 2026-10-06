@@ -24,6 +24,7 @@
  * identificadores e e ele que os mapeia.
  */
 import { equivalenteSemanal, TECTO_SEMANAL_EQUIVALENTE } from "@/lib/hr/horas";
+import { numeroDe } from "@/lib/hr/numeros";
 import type { HorasFrequencia, RegimeTrabalho, TipoContrato } from "@/types/hr";
 
 export type CampoNumericoContrato =
@@ -47,14 +48,6 @@ export interface NumerosDoContrato {
   tempo_trabalho_pct: string;
   /** Vazio quando o contrato nao tem periodo experimental. */
   periodo_experimental_dias: string;
-}
-
-/** Texto -> numero. Vazio e ausencia, nao zero; ilegivel e `NaN` controlado. */
-function numeroDe(valor: string): number | null {
-  const limpo = valor.trim().replace(",", ".");
-  if (limpo === "") return null;
-  const n = Number(limpo);
-  return Number.isFinite(n) ? n : null;
 }
 
 export function problemasDosNumerosDoContrato(

@@ -14,7 +14,7 @@
  *
  * O separador vai no URL (`?tab=`) para o link ser partilhavel.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,6 +64,7 @@ import { useAdmissaoPendencias } from "@/hooks/useAdmissaoPendencias";
 import { useConviteAdmissaoResumo } from "@/hooks/useConviteAdmissaoResumo";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { useCargos } from "@/hooks/useCargos";
+import { dataDeHojeISO } from "@/lib/hr/afectacoes";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { usePermissoesAssiduidade } from "@/hooks/usePermissoesAssiduidade";
@@ -223,11 +224,36 @@ export default function PessoaDetail() {
   // (HorarioEditor, PessoaAfectacoesSeccao) filtra os inactivos por si,
   // mantendo so o valor ja escolhido quando esse for o caso.
   const { locais, loading: locaisALoad } = useLocaisTrabalho({ apenasAtivos: false });
-  const { cargos, isLoading: cargosALoad } = useCargos();
+  const {
+    cargos,
+    periodos: periodosDosCargos,
+    isLoading: cargosALoad,
+    periodosLoading,
+    periodosError,
+  } = useCargos();
+  // Enquanto os cargos ou os periodos nao chegam nao se diz "sem cargo" nem "sem salario".
+  const cargosPorChegar = cargosALoad || periodosLoading;
   // Para saber se quem abre a ficha e a propria pessoa: muda o que pode pedir.
   const { pessoaId: minhaPessoaId } = useMinhaPessoa();
 
   const pessoa = ficha.pessoa;
+
+  // Depois de mudar o cargo mudam: a ficha (cargo_id), a retribuicao (versoes
+  // refeitas pela base) e a pendencia "cargo". Hooks antes dos returns antecipados.
+  const fichaRecarregar = ficha.refresh;
+  const aoMudarCargo = useCallback(() => {
+    void fichaRecarregar();
+    recarregarPendencias();
+  }, [fichaRecarregar, recarregarPendencias]);
+
+  /** O salario base que a pessoa tem HOJE (versao em vigor), para o aviso de "atribuir cargo" a uma ficha antiga. */
+  const salarioActual = useMemo(() => {
+    const r = ficha.retribuicao;
+    if (!r) return null;
+    const hoje = dataDeHojeISO();
+    const emVigor = r.valido_de <= hoje && (r.valido_ate === null || r.valido_ate > hoje);
+    return emVigor ? { salarioBase: r.valor_base, periodicidade: r.periodicidade } : null;
+  }, [ficha.retribuicao]);
 
   // A fotografia vem do convite de admissao e vive num bucket privado: so se
   // mostra por URL assinado (renovado antes de expirar). Sem ela, ou se o
@@ -388,7 +414,9 @@ export default function PessoaDetail() {
             )}
           </div>
           <p className="mt-1 text-muted-foreground">
-            {[pessoa.cargo, pessoa.local_trabalho].filter(Boolean).join(" · ") || "—"}
+            {[cargos.find((c) => c.id === pessoa.cargo_id)?.nome ?? pessoa.cargo, pessoa.local_trabalho]
+              .filter(Boolean)
+              .join(" · ") || "—"}
           </p>
         </div>
         {/* So faz sentido convidar ou criar acesso a quem ainda nao tem
@@ -544,7 +572,15 @@ export default function PessoaDetail() {
               locais={locais}
               locaisALoad={locaisALoad}
               cargos={cargos}
-              cargosALoad={cargosALoad}
+              periodosDosCargos={periodosDosCargos}
+              periodosLoading={cargosPorChegar}
+              periodosError={periodosError}
+              podeCorrigirRetribuicao={podeCorrigirRetribuicaoVinculo}
+              podeVerRetribuicao={podeVerRetribuicao}
+              podeEditarRetribuicao={podeEditarRetribuicao}
+              temRetribuicao={ficha.retribuicao !== null}
+              salarioActual={salarioActual}
+              onCargoMudou={aoMudarCargo}
               entidadeLegalNome={entidadeLegalNome}
               estadoContratoDerivado={estadoContratoDerivado}
               podeEditar={podeEditarLaborais}
@@ -607,6 +643,10 @@ export default function PessoaDetail() {
               podeEditarRetribuicao={podeEditarRetribuicao}
               podeCorrigirRetribuicao={podeCorrigirRetribuicaoVinculo}
               cargo={cargos.find((c) => c.id === pessoa.cargo_id) ?? null}
+              periodosDosCargos={periodosDosCargos}
+              periodosLoading={cargosPorChegar}
+              periodosError={periodosError}
+              onRetribuicaoMudou={() => void fichaRecarregar()}
               podeCorrigirHoras={podeCorrigirHorasVinculo}
               podeAnexarContratoAssinado={permissoesDocumentos.emitir}
               vinculosOpcoesDocumento={vinculosOpcoesDocumento}

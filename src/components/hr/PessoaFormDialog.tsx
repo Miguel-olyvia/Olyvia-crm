@@ -51,6 +51,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
 import { usePapeisDaOrganizacao } from "@/hooks/usePapeisDaOrganizacao";
 import { useContasLigaveis } from "@/hooks/useContasLigaveis";
+import { useCargos } from "@/hooks/useCargos";
 import { usePessoaDuplicados } from "@/hooks/usePessoaDuplicados";
 import { useAdmissaoPosicoesCampos } from "@/hooks/useAdmissaoPosicoesCampos";
 import { EnviarConviteDialog } from "@/components/hr/EnviarConviteDialog";
@@ -59,6 +60,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { linhasParaGravar, problemasDoHorario } from "@/lib/hr/horario";
+import { formatarSalario, periodoDoCargoEm } from "@/lib/hr/cargosPeriodos";
+import { dataDeHoje } from "@/lib/hr/novaPessoaDatas";
 import {
   SECCOES,
   camposDoConviteForaDoFormulario,
@@ -113,6 +116,8 @@ export function PessoaFormDialog({
   } = useLocaisTrabalho();
   const { papeis, loading: papeisALoad } = usePapeisDaOrganizacao();
   const { contas, loading: contasALoad } = useContasLigaveis();
+  const { cargos, periodos: periodosDosCargos, isLoading: cargosALoad } = useCargos();
+  const cargosActivos = useMemo(() => cargos.filter((c) => c.activo), [cargos]);
 
   const [rascunho, setRascunho] = useState<RascunhoPessoa>(() => rascunhoInicial());
   const [seccao, setSeccao] = useState<SeccaoId>("geral");
@@ -210,7 +215,7 @@ export function PessoaFormDialog({
     apelido: r.geral.apelido,
     email_trabalho: r.geral.email_trabalho,
     telefone_trabalho: r.geral.telefone_trabalho,
-    cargo: r.laborais.cargo,
+    cargo_id: r.laborais.cargo_id,
     local_id: r.laborais.local_id,
   });
 
@@ -226,7 +231,7 @@ export function PessoaFormDialog({
       case "hr-novo-telefone-trabalho":
         return actuais.telefone_trabalho;
       case "hr-novo-cargo":
-        return actuais.cargo;
+        return actuais.cargo_id;
       case "hr-novo-local":
         return actuais.local_id;
       default:
@@ -281,7 +286,13 @@ export function PessoaFormDialog({
           return depoisDaReversao;
         }
 
-        const resultado = preenchimentoDaConta(conta, camposActuais(depoisDaReversao), {}, locais);
+        const resultado = preenchimentoDaConta(
+          conta,
+          camposActuais(depoisDaReversao),
+          {},
+          locais,
+          cargosActivos,
+        );
         setAutoPreenchido(resultado.autoNovo);
         setAvisosConta(resultado.avisos);
 
@@ -292,10 +303,31 @@ export function PessoaFormDialog({
         };
       });
     },
-    [autoPreenchido, contas, locais],
+    [autoPreenchido, contas, locais, cargosActivos],
   );
 
   const podeCriarLocal = hasPermission("hr.locais.edit") && !semPermissaoLocais;
+  const podeEditarRetribuicao = hasPermission("hr.pessoas.retribuicao.edit");
+
+  /** O salario base do cargo escolhido, na data em que o contrato comeca (so leitura no passo 4). */
+  const salarioDoCargo = useMemo(() => {
+    const cargoId = rascunho.laborais.cargo_id;
+    if (cargoId === "") return null;
+    const data =
+      rascunho.contrato.data_inicio.trim() || rascunho.laborais.data_admissao.trim() || dataDeHoje();
+    const periodo = periodoDoCargoEm(periodosDosCargos, cargoId, data);
+    if (!periodo) return null;
+    return formatarSalario(
+      { salarioBase: periodo.salario_base, periodicidade: periodo.periodicidade },
+      (chave) => t(chave),
+    );
+  }, [
+    rascunho.laborais.cargo_id,
+    rascunho.laborais.data_admissao,
+    rascunho.contrato.data_inicio,
+    periodosDosCargos,
+    t,
+  ]);
   const podeVerPapeis = hasPermission("roles.view");
 
   const problemas = useMemo(
@@ -408,7 +440,12 @@ export function PessoaFormDialog({
     if (temDuplicadoTravao || precisaConfirmarSinal) return;
     setACriar(true);
     try {
-      const payload = payloadDoRascunho(rascunho, linhasParaGravar, podeLigarConta);
+      const payload = payloadDoRascunho(
+        rascunho,
+        linhasParaGravar,
+        podeLigarConta,
+        cargos.find((c) => c.id === rascunho.laborais.cargo_id)?.nome ?? null,
+      );
       const { id, falhas } = await onCriar(payload);
 
       const pendenciaDeAcesso = falhas.find((falha) => falha.seccao === "acesso");
@@ -616,6 +653,9 @@ export function PessoaFormDialog({
                     podeCriarLocal={podeCriarLocal}
                     onCriarLocal={criarLocal}
                     colegas={colegas}
+                    cargos={cargosActivos}
+                    cargosALoad={cargosALoad}
+                    podeAbrirCargos={hasPermission("hr.pessoas.laborais.view")}
                     onPatch={(patch) =>
                       setRascunho((anterior) => ({
                         ...anterior,
@@ -632,6 +672,8 @@ export function PessoaFormDialog({
                     dataAdmissao={rascunho.laborais.data_admissao}
                     locais={locais}
                     locaisALoad={locaisALoad}
+                    salarioDoCargo={salarioDoCargo}
+                    podeEditarRetribuicao={podeEditarRetribuicao}
                     onPatch={(patch) =>
                       setRascunho((anterior) => ({
                         ...anterior,

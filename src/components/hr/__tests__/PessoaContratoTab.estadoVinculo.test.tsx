@@ -85,6 +85,7 @@ function montar(overrides: { podeEditar?: boolean; onGuardarVinculo?: OnGuardarV
       podeEditarRetribuicao={false}
       podeCorrigirRetribuicao={false}
       cargo={null}
+      periodosDosCargos={[]}
       podeCorrigirHoras={false}
       podeAnexarContratoAssinado={false}
       vinculosOpcoesDocumento={[]}

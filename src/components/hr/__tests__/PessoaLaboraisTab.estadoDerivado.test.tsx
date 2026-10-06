@@ -90,7 +90,12 @@ function montar(onGuardar = vi.fn().mockResolvedValue(null)) {
       locais={[]}
       locaisALoad={false}
       cargos={[]}
-      cargosALoad={false}
+      periodosDosCargos={[]}
+      podeVerRetribuicao={false}
+      podeEditarRetribuicao={false}
+      temRetribuicao={false}
+      salarioActual={null}
+      onCargoMudou={vi.fn()}
       entidadeLegalNome="Organizacao Nike"
       estadoContratoDerivado="sem_contrato"
       podeEditar
@@ -135,5 +140,16 @@ describe("PessoaLaboraisTab -- estado do contrato derivado", () => {
     expect(onGuardar).toHaveBeenCalledTimes(1);
     const patch = onGuardar.mock.calls[0][0];
     expect(patch).not.toHaveProperty("estado_contrato");
+  });
+
+  it("gravar outro campo nao leva cargo_id no patch (o cargo muda pela RPC propria)", () => {
+    const { onGuardar } = montar();
+
+    fireEvent.change(screen.getByLabelText("hr.columns.cargo"), {
+      target: { value: "Directora" },
+    });
+    fireEvent.click(screen.getByText("employees.form.update"));
+
+    expect(onGuardar.mock.calls[0][0]).not.toHaveProperty("cargo_id");
   });
 });

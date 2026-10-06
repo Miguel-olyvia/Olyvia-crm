@@ -35,12 +35,20 @@ export interface LocalParaCorrespondencia {
   nome: string;
 }
 
+/** Um cargo do catalogo, para a correspondencia com `anew_users.position`. */
+export interface CargoParaCorrespondencia {
+  id: string;
+  nome: string;
+  activo: boolean;
+}
+
 export interface CamposPreenchiveis {
   primeiro_nome: string;
   apelido: string;
   email_trabalho: string;
   telefone_trabalho: string;
-  cargo: string;
+  /** O cargo do catalogo (`hr_cargos`): o assistente ja nao tem cargo em texto livre. */
+  cargo_id: string;
   local_id: string;
 }
 
@@ -54,7 +62,7 @@ export interface ResultadoPreenchimento {
   patchGeral: Partial<
     Pick<CamposPreenchiveis, "primeiro_nome" | "apelido" | "email_trabalho" | "telefone_trabalho">
   >;
-  patchLaborais: Partial<Pick<CamposPreenchiveis, "cargo" | "local_id">>;
+  patchLaborais: Partial<Pick<CamposPreenchiveis, "cargo_id" | "local_id">>;
   /** O que a conta escreveu em cada campo que ela conseguiu preencher, para a
    * proxima troca de conta saber o que reverter. So entram aqui os campos
    * efectivamente aplicados -- um campo recusado por estar escrito a mao NAO
@@ -123,6 +131,21 @@ function localCorrespondente(
 }
 
 /**
+ * Encontra, por correspondencia EXACTA (aparada, sem distinguir maiusculas), o
+ * UNICO cargo ACTIVO cujo nome bate com o texto livre `anew_users.position`.
+ * Nunca cria um cargo, nunca escolhe entre dois, nunca usa um desactivado.
+ */
+function cargoCorrespondente(
+  position: string,
+  cargos: readonly CargoParaCorrespondencia[],
+): CargoParaCorrespondencia | null {
+  const alvo = position.trim().toLowerCase();
+  if (alvo === "") return null;
+  const encontrados = cargos.filter((c) => c.activo && c.nome.trim().toLowerCase() === alvo);
+  return encontrados.length === 1 ? encontrados[0] : null;
+}
+
+/**
  * Calcula o que preencher a partir de uma conta, respeitando o que ja esta
  * escrito. Nao muta nada -- devolve patches parciais para quem chama aplicar.
  */
@@ -131,6 +154,8 @@ export function preenchimentoDaConta(
   actual: CamposPreenchiveis,
   autoAnterior: Readonly<Record<string, string>>,
   locais: readonly LocalParaCorrespondencia[],
+  /** Os cargos do catalogo: o cargo so se preenche se coincidir com UM cargo activo. */
+  cargos: readonly CargoParaCorrespondencia[] = [],
 ): ResultadoPreenchimento {
   const patchGeral: ResultadoPreenchimento["patchGeral"] = {};
   const patchLaborais: ResultadoPreenchimento["patchLaborais"] = {};
@@ -187,11 +212,11 @@ export function preenchimentoDaConta(
     autoNovo[CAMPO_TELEFONE_TRABALHO] = telefone;
   }
 
-  // -- Cargo --------------------------------------------------------------
-  const cargo = (conta.position ?? "").trim();
-  if (cargo !== "" && podeEscrever(actual.cargo, autoAnterior[CAMPO_CARGO])) {
-    patchLaborais.cargo = cargo;
-    autoNovo[CAMPO_CARGO] = cargo;
+  // -- Cargo: so por correspondencia exacta com UM cargo activo ---------------
+  const cargo = cargoCorrespondente(conta.position ?? "", cargos);
+  if (cargo && podeEscrever(actual.cargo_id, autoAnterior[CAMPO_CARGO])) {
+    patchLaborais.cargo_id = cargo.id;
+    autoNovo[CAMPO_CARGO] = cargo.id;
   }
 
   // -- Local de trabalho: so por correspondencia exacta ------------------
@@ -247,8 +272,8 @@ export function reverterAutoPreenchido(
   ) {
     patchGeral.telefone_trabalho = "";
   }
-  if (autoAnterior[CAMPO_CARGO] !== undefined && actual.cargo === autoAnterior[CAMPO_CARGO]) {
-    patchLaborais.cargo = "";
+  if (autoAnterior[CAMPO_CARGO] !== undefined && actual.cargo_id === autoAnterior[CAMPO_CARGO]) {
+    patchLaborais.cargo_id = "";
   }
   if (autoAnterior[CAMPO_LOCAL] !== undefined && actual.local_id === autoAnterior[CAMPO_LOCAL]) {
     patchLaborais.local_id = "";

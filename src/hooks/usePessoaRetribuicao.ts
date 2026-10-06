@@ -2,42 +2,45 @@
  * A retribuicao versionada de UMA pessoa (`pessoas_retribuicoes`,
  * 20261120060000) -- copia estrutural de `usePessoaVinculoHoras`.
  *
- * ALTERAR != CORRIGIR, A MESMA DISTINCAO DE `usePessoaVinculoHoras`
- * -------------------------------------------------------------------
- * ALTERAR fecha a versao em vigor (se existir) e abre outra, com data de
- * efeito -- o gesto normal ("a partir de 1 de Abril passa a ganhar X"),
- * `hr.pessoas.retribuicao.edit` (reaproveitada: e a MESMA permissao que ja
- * escreve na admissao, nao se duplica). CORRIGIR reescreve uma versao cujo
- * periodo ja decorreu -- "o que registamos para Marco estava errado" --
- * `hr.pessoas.retribuicao.corrigir`, permissao a parte, mais perigosa
- * (20261201040000). A base decide pelo `valido_ate` da linha
- * (`public.hr_periodo_decorrido`); este hook nunca decide sozinho, so evita
- * gastar um pedido que a base ia recusar.
+ * O VALOR BASE JA NAO SE ESCREVE AQUI (fluxo 2)
+ * ------------------------------------------------
+ * O salario base de uma pessoa vem SO do cargo (`hr_cargos_periodos`): muda-se
+ * mudando o cargo da pessoa (`usePessoaCargo`) ou o salario do cargo
+ * (`useCargos.definirSalario`). A base recusa o INSERT directo em
+ * `pessoas_retribuicoes` a `authenticated` e o trigger de igualdade recusa
+ * qualquer valor que nao seja o do cargo na data da versao. Por isso este hook
+ * ja nao tem `alterar` (que fechava a versao em vigor e abria outra por INSERT).
  *
- * PORQUE FECHAR A VERSAO EM ABERTO NAO PRECISA DE "UM DIA ANTES"
- * ------------------------------------------------------------------
- * O trigger de nao-sobreposicao de `pessoas_retribuicoes` compara intervalos
- * com fim EXCLUSIVO. Fechar a versao em vigor com `valido_ate = dataEfeito`
- * e abrir a nova com `valido_de = dataEfeito` da dois intervalos contiguos,
- * sem sobreposicao e sem buraco.
+ * O QUE E DA PESSOA: SUBSIDIO E DUODECIMOS
+ * ------------------------------------------
+ * `definirPessoal` -- `rpc_hr_retribuicao_definir_pessoal`, permissao
+ * `hr.pessoas.retribuicao.edit` -- cria uma versao nova a partir de `desde` com o
+ * valor base do cargo nessa data e o subsidio (valor e modo) e os duodecimos que
+ * se passam. E tambem a RPC que cria a PRIMEIRA versao de quem tem cargo e ainda
+ * nao tem retribuicao. Quem fecha e abre versoes e a base, na mesma transaccao.
+ *
+ * CORRIGIR reescreve uma versao cujo periodo ja decorreu -- "o que registamos
+ * para Marco estava errado" -- `hr.pessoas.retribuicao.corrigir`, permissao a
+ * parte, mais perigosa (20261201040000). A base decide pelo `valido_ate` da
+ * linha (`public.hr_periodo_decorrido`); este hook nunca decide sozinho. O valor
+ * base e a periodicidade da linha NAO se enviam: ficam os que la estao.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
-import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
-import { estaEmAberto } from "@/lib/hr/afectacoes";
-import type { Periodicidade, PessoaRetribuicao, SubsidioAlimentacaoModo } from "@/types/hr";
+import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { mensagemDeErroCargo } from "@/lib/hr/errosCargo";
+import { dataDeHojeBase } from "@/lib/hr/dataBase";
+import type { PessoaRetribuicao, SubsidioAlimentacaoModo } from "@/types/hr";
 
 const COLUNAS =
   "id, pessoa_id, organization_id, vinculo_id, valor_base, moeda, periodicidade, " +
   "subsidio_alimentacao, subsidio_alimentacao_modo, duodecimos_pct, valido_de, " +
-  "valido_ate, motivo, created_at, updated_at";
+  "valido_ate, motivo, origem, created_at, updated_at";
 
+/** O que se corrige numa versao ja decorrida (o valor base e a periodicidade ficam como estao). */
 export interface CorrigirVersaoRetribuicaoPatch {
-  valorBase: number;
   moeda: string;
-  periodicidade: Periodicidade;
   subsidioAlimentacao: number | null;
   subsidioAlimentacaoModo: SubsidioAlimentacaoModo | null;
   duodecimosPct: 0 | 50 | 100 | null;
@@ -50,12 +53,17 @@ export function usePessoaRetribuicao(
   pessoaId: string | undefined,
   organizationId: string | undefined,
 ) {
+  void organizationId;
   const [versoes, setVersoes] = useState<PessoaRetribuicao[]>([]);
   const [loading, setLoading] = useState(true);
   const [recusado, setRecusado] = useState(false);
   const [saving, setSaving] = useState(false);
+  // O pedido corrente: uma resposta so se aplica se ainda for o ultimo lancado
+  // (trocar de pessoa com um pedido em voo nao pode mostrar a retribuicao da anterior).
+  const pedidoCorrente = useRef(0);
 
   const load = useCallback(async () => {
+    const pedido = ++pedidoCorrente.current;
     if (!pessoaId) {
       setVersoes([]);
       setLoading(false);
@@ -67,6 +75,7 @@ export function usePessoaRetribuicao(
       .eq("pessoa_id", pessoaId)
       .is("deleted_at", null)
       .order("valido_de", { ascending: false });
+    if (pedido !== pedidoCorrente.current) return;
     if (error) {
       if (isPermissionError(error)) {
         setRecusado(true);
@@ -83,23 +92,35 @@ export function usePessoaRetribuicao(
 
   useEffect(() => {
     void load();
+    return () => {
+      // Desmontar (ou trocar de pessoa) invalida o pedido em voo.
+      pedidoCorrente.current += 1;
+    };
   }, [load]);
 
-  /** A versao em vigor -- no maximo uma, garantida pelo indice unico parcial. */
-  const aberta = versoes.find((v) => estaEmAberto(v)) ?? null;
+  /**
+   * A versao EM VIGOR HOJE: ja comecou e ainda nao acabou. Nao e "a que nao tem
+   * fim": desde o fluxo 2 uma subida agendada do cargo fecha a versao actual na
+   * data da subida e abre outra (futura, sem fim) -- essa e a agendada, nao a
+   * actual.
+   */
+  // O "hoje" da base (UTC), nao o dia local: ver `dataBase.ts`.
+  const hoje = dataDeHojeBase();
+  const aberta =
+    versoes.find((v) => v.valido_de <= hoje && (v.valido_ate === null || v.valido_ate > hoje)) ??
+    null;
 
+  /** Corre uma escrita, recarrega, e devolve `null` (sucesso) ou o texto traduzido da recusa. */
   const executar = useCallback(
-    async (accao: (autorId: string | null) => Promise<{ error: unknown }>): Promise<string | null> => {
+    async (accao: () => Promise<{ error: unknown }>): Promise<string | null> => {
       setSaving(true);
       try {
-        const autorId = await resolveCurrentBusinessUserId();
-        const { error } = await accao(autorId);
+        const { error } = await accao();
         if (error) throw error;
         await load();
         return null;
       } catch (e) {
-        if (!isPermissionError(e)) captureFlowError(e, "hr-retribuicao-write");
-        return await getFriendlyErrorMessage(e);
+        return await mensagemDeErroCargo(e, "hr-retribuicao-write");
       } finally {
         setSaving(false);
       }
@@ -108,52 +129,31 @@ export function usePessoaRetribuicao(
   );
 
   /**
-   * ALTERAR: a partir de `dataEfeito` a retribuicao passa a este valor. Fecha
-   * a versao em aberto (se existir) e abre outra -- ver o porque de
-   * `valido_ate = dataEfeito` no cabecalho deste ficheiro. Se nao houver
-   * versao em aberto (nunca deveria acontecer depois da admissao, mas nao se
-   * assume), so insere a primeira.
+   * DEFINIR O QUE E DA PESSOA: a partir de `desde` a pessoa passa a ter este
+   * subsidio (valor e modo) e estes duodecimos, com o valor base do cargo nessa
+   * data. `desde` futuro e permitido. Devolve `null` ou o texto da recusa (por
+   * exemplo HRC11: "atribua primeiro um cargo").
    */
-  const alterar = useCallback(
-    (args: {
-      vinculoId: string | null;
-      valorBase: number;
-      moeda: string;
-      periodicidade: Periodicidade;
-      subsidioAlimentacao: number | null;
-      subsidioAlimentacaoModo: SubsidioAlimentacaoModo | null;
-      duodecimosPct: 0 | 50 | 100 | null;
-      dataEfeito: string;
-      motivo: string | null;
-    }) =>
-      executar(async (autorId) => {
-        if (!pessoaId || !organizationId) {
-          return { error: new Error("Ficha sem organizacao resolvida") };
-        }
-        if (aberta) {
-          const { error: erroFecho } = await hrFrom("pessoas_retribuicoes")
-            .update({ valido_ate: args.dataEfeito, updated_by: autorId })
-            .eq("id", aberta.id);
-          if (erroFecho) return { error: erroFecho };
-        }
-        return hrFrom("pessoas_retribuicoes").insert({
-          pessoa_id: pessoaId,
-          organization_id: organizationId,
-          vinculo_id: args.vinculoId,
-          valor_base: args.valorBase,
-          moeda: args.moeda,
-          periodicidade: args.periodicidade,
-          subsidio_alimentacao: args.subsidioAlimentacao,
-          subsidio_alimentacao_modo: args.subsidioAlimentacaoModo,
-          duodecimos_pct: args.duodecimosPct,
-          valido_de: args.dataEfeito,
-          valido_ate: null,
-          motivo: args.motivo,
-          created_by: autorId,
-          updated_by: autorId,
+  const definirPessoal = useCallback(
+    (
+      desde: string,
+      subsidio: number | null,
+      subsidioModo: SubsidioAlimentacaoModo | null,
+      duodecimosPct: 0 | 50 | 100 | null,
+      motivo: string | null,
+    ) =>
+      executar(() => {
+        if (!pessoaId) return Promise.resolve({ error: new Error("Ficha sem pessoa resolvida") });
+        return hrRpc("rpc_hr_retribuicao_definir_pessoal", {
+          p_pessoa_id: pessoaId,
+          p_desde: desde,
+          p_subsidio: subsidio,
+          p_subsidio_modo: subsidioModo,
+          p_duodecimos_pct: duodecimosPct,
+          p_motivo: motivo,
         });
       }),
-    [executar, pessoaId, organizationId, aberta],
+    [executar, pessoaId],
   );
 
   /**
@@ -164,12 +164,11 @@ export function usePessoaRetribuicao(
    */
   const corrigir = useCallback(
     (versaoId: string, patch: CorrigirVersaoRetribuicaoPatch) =>
-      executar(async (autorId) =>
-        hrFrom("pessoas_retribuicoes")
+      executar(async () => {
+        const autorId = await resolveCurrentBusinessUserId();
+        return hrFrom("pessoas_retribuicoes")
           .update({
-            valor_base: patch.valorBase,
             moeda: patch.moeda,
-            periodicidade: patch.periodicidade,
             subsidio_alimentacao: patch.subsidioAlimentacao,
             subsidio_alimentacao_modo: patch.subsidioAlimentacaoModo,
             duodecimos_pct: patch.duodecimosPct,
@@ -178,8 +177,8 @@ export function usePessoaRetribuicao(
             motivo: patch.motivo,
             updated_by: autorId,
           })
-          .eq("id", versaoId),
-      ),
+          .eq("id", versaoId);
+      }),
     [executar],
   );
 
@@ -190,7 +189,7 @@ export function usePessoaRetribuicao(
     saving,
     recusado,
     recarregar: load,
-    alterar,
+    definirPessoal,
     corrigir,
   };
 }

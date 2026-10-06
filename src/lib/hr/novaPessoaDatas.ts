@@ -1,10 +1,13 @@
 /**
- * Datas civis do formulario de criar pessoa (periodo experimental, termo do
+ * Datas do formulario de criar pessoa (periodo experimental, termo do
  * contrato, "hoje"). Saiu de `novaPessoa.ts`, que reexporta as tres funcoes.
  *
- * NUNCA `toISOString`: converte para UTC e, em Lisboa, devolve o dia anterior.
- * Uma data civil nao e um instante.
+ * As duas somas (periodo experimental e termo) sao datas CIVIS: NUNCA
+ * `toISOString`, que converte para UTC e, em Lisboa, devolve o dia anterior.
+ * O "hoje", pelo contrario, e o da base (UTC): ver `dataDeHoje`.
  */
+import { dataDeHojeBase } from "@/lib/hr/dataBase";
+
 
 /**
  * Calcula a data de fim do periodo experimental a partir da duracao.
@@ -48,15 +51,12 @@ export function dataFimPorDuracaoMeses(dataInicio: string, meses: number): strin
 }
 
 /**
- * A data de hoje como data CIVIL, no fuso de quem esta a usar a aplicacao.
- *
- * `toISOString().slice(0, 10)` parece equivalente e nao e: converte para UTC e,
- * em Lisboa, a meia-noite e meia devolve o dia anterior. Uma data de admissao
- * errada por um dia nao da erro nenhum -- so fica errada.
+ * A data de hoje QUE SE ENVIA A BASE (admissao por omissao, inicio do vinculo,
+ * afectacao, retribuicao): o dia UTC, igual ao `current_date` das migrations.
+ * Ver `dataBase.ts`: o dia civil local difere do da base entre as 00:00 e as
+ * 01:00 de Lisboa no verao, e as regras "so de hoje para a frente" / "nao antes
+ * de o cargo abrir" comparam com o `current_date`.
  */
 export function dataDeHoje(): string {
-  const agora = new Date();
-  const mes = String(agora.getMonth() + 1).padStart(2, "0");
-  const dia = String(agora.getDate()).padStart(2, "0");
-  return `${agora.getFullYear()}-${mes}-${dia}`;
+  return dataDeHojeBase();
 }

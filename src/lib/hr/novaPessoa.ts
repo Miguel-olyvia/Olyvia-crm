@@ -35,15 +35,23 @@ import { nifValido, nissValido } from "@/lib/hr/identificadoresPt";
 import type { ConfiguracaoCampo } from "@/lib/hr/admissaoObrigatorios";
 import { problemasDeObrigatoriosDaConfiguracao } from "@/lib/hr/novaPessoaAdmissao";
 import { dataDeHoje, dataDoPeriodoExperimental } from "@/lib/hr/novaPessoaDatas";
+import { numeroDe } from "@/lib/hr/numeros";
+import { getLocalizedFallback } from "@/utils/friendlyError";
+import {
+  parteDaPessoaDoContrato,
+  problemaDoCargo,
+  problemaDoSubsidio,
+  type ParteDaPessoa,
+} from "@/lib/hr/novaPessoaCargo";
 import type {
   DiaSemana,
   EstadoCivil,
   FormatoConta,
   Genero,
   HorasFrequencia,
-  Periodicidade,
   PoliticaFeriados,
   RegimeTrabalho,
+  SubsidioAlimentacaoModo,
   TipoContrato,
   TipoDocumento,
   TipoTrabalho,
@@ -128,7 +136,8 @@ export interface RascunhoPessoais {
 }
 
 export interface RascunhoLaborais {
-  cargo: string;
+  /** O cargo do catalogo (`hr_cargos`): obrigatorio. Dele vem o salario base. */
+  cargo_id: string;
   local_id: string;
   reporta_a_pessoa_id: string;
   data_admissao: string;
@@ -157,9 +166,14 @@ export interface RascunhoContrato {
   duracao_meses: string;
   tem_periodo_experimental: boolean;
   periodo_experimental_dias: string;
-  valor_base: string;
-  moeda: string;
-  periodicidade: Periodicidade;
+  /**
+   * O que da retribuicao e DA PESSOA (o valor base vem do cargo): subsidio de
+   * alimentacao, o seu modo e os duodecimos. Vai por RPC depois de a ficha
+   * existir -- ver `novaPessoaCargo.ts`.
+   */
+  subsidio: string;
+  subsidio_modo: SubsidioAlimentacaoModo | "";
+  duodecimos_pct: "" | "0" | "50" | "100";
   tipo_trabalho: TipoTrabalho | "";
   horas_trabalho: string;
   horas_frequencia: HorasFrequencia;
@@ -228,7 +242,7 @@ export function rascunhoInicial(): RascunhoPessoa {
       emergencia_telefone: "",
     },
     laborais: {
-      cargo: "",
+      cargo_id: "",
       local_id: "",
       reporta_a_pessoa_id: "",
       data_admissao: "",
@@ -243,9 +257,9 @@ export function rascunhoInicial(): RascunhoPessoa {
       duracao_meses: "",
       tem_periodo_experimental: false,
       periodo_experimental_dias: "",
-      valor_base: "",
-      moeda: "EUR",
-      periodicidade: "mensal",
+      subsidio: "",
+      subsidio_modo: "",
+      duodecimos_pct: "",
       tipo_trabalho: "",
       horas_trabalho: "",
       horas_frequencia: "semanal",
@@ -298,13 +312,6 @@ const CAMPOS_NUMERICOS_DO_CONTRATO: Record<
     rotuloKey: "hr.contrato.periodoExperimentalDias",
   },
 };
-
-function numeroDe(valor: string): number | null {
-  const limpo = valor.trim().replace(",", ".");
-  if (limpo === "") return null;
-  const n = Number(limpo);
-  return Number.isFinite(n) ? n : null;
-}
 
 /**
  * Todos os problemas de FORMATO e de COERENCIA do rascunho.
@@ -427,16 +434,11 @@ export function problemasDoRascunho(
     });
   }
 
-  // -- Contrato: formato ----------------------------------------------------
-  const valorBase = numeroDe(contrato.valor_base);
-  if (contrato.valor_base.trim() !== "" && (valorBase === null || valorBase < 0)) {
-    problemas.push({
-      seccao: "contrato",
-      campoId: "hr-novo-valor-base",
-      rotuloKey: "hr.contrato.valorBase",
-      mensagemKey: "hr.form.erroNumero",
-    });
-  }
+  // -- Cargo (obrigatorio, fluxo 2) e subsidio ------------------------------
+  const problemaCargo = problemaDoCargo(rascunho.laborais);
+  if (problemaCargo) problemas.push(problemaCargo);
+  const problemaSubsidio = problemaDoSubsidio(contrato);
+  if (problemaSubsidio) problemas.push(problemaSubsidio);
   // Os cinco numeros do contrato -- e o cruzamento entre dois deles -- estao
   // em `lib/hr/contrato.ts`, porque o separador Contratos da ficha edita
   // exactamente os mesmos e nao podem divergir. Aqui so se traduz o campo
@@ -513,7 +515,7 @@ export function avisosDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
     });
   }
 
-  // Os campos so do RH (data de admissao, cargo, tipo de contrato) nao
+  // Os campos so do RH (data de admissao, tipo de contrato) nao
   // bloqueiam a criacao -- quem tem uma admissao as pressas cria a ficha e
   // completa depois -- mas ficam como pendencia da ficha, e o ecra di-lo.
   if (rascunho.laborais.data_admissao.trim() === "") {
@@ -521,14 +523,6 @@ export function avisosDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
       seccao: "laborais",
       campoId: "hr-novo-data-admissao",
       rotuloKey: "employees.form.hireDate",
-      mensagemKey: "hr.form.avisoCampoRhPendente",
-    });
-  }
-  if (rascunho.laborais.cargo.trim() === "") {
-    avisos.push({
-      seccao: "laborais",
-      campoId: "hr-novo-cargo",
-      rotuloKey: "hr.columns.cargo",
       mensagemKey: "hr.form.avisoCampoRhPendente",
     });
   }
@@ -567,7 +561,8 @@ export function seccaoPreenchida(rascunho: RascunhoPessoa, seccao: SeccaoId): bo
       return (
         rascunho.contrato.tipo_contrato !== "" ||
         rascunho.contrato.data_inicio.trim() !== "" ||
-        rascunho.contrato.valor_base.trim() !== "" ||
+        rascunho.contrato.subsidio.trim() !== "" ||
+        rascunho.contrato.duodecimos_pct !== "" ||
         rascunho.contrato.horas_trabalho.trim() !== "" ||
         rascunho.contrato.horario_variavel
       );
@@ -593,7 +588,10 @@ export interface NovaPessoaPayload {
     email_pessoal: string | null;
     telefone_trabalho: string | null;
     numero_interno: string | null;
+    /** O texto livre (legenda): o nome do cargo escolhido. */
     cargo: string | null;
+    /** Obrigatorio: sem ele a base recusa a ficha (HRC08). */
+    cargo_id: string;
     local_id: string | null;
     reporta_a_pessoa_id: string | null;
     data_admissao: string | null;
@@ -624,7 +622,8 @@ export interface NovaPessoaPayload {
    * `pessoas_vinculos` deixou de os poder levar; esta e a unica via.
    */
   horasVinculo: { horas_periodo: number; horas_frequencia: HorasFrequencia; valido_de: string } | null;
-  retribuicao: { valor_base: number; moeda: string; periodicidade: Periodicidade } | null;
+  /** So a parte DA PESSOA (subsidio e duodecimos), por `rpc_hr_retribuicao_definir_pessoal`. */
+  retribuicao: ParteDaPessoa | null;
   /** Linhas de `pessoas_horario_planeado`, uma por intervalo. */
   horario: LinhaPlaneadoParaGravar[] | null;
   acesso: { role_id: string | null; enviar_convite: boolean; email_convite: string | null };
@@ -653,8 +652,21 @@ export function payloadDoRascunho(
    * servidor uma ligacao que o ecra ja disse que nao ia acontecer.
    */
   podeLigarConta: boolean,
+  /** O nome do cargo escolhido: vai para o texto livre `pessoas.cargo`, so como legenda. */
+  cargoNome: string | null = null,
 ): NovaPessoaPayload {
   const { geral, pessoais, laborais, contrato, acesso } = rascunho;
+
+  // `pessoas.cargo` e o texto legivel do cargo escolhido (a legenda que as
+  // listas mostram). Com `cargo_id` mas sem o nome do catalogo (catalogo ainda
+  // por carregar, ou cargo que ja nao esta nele) a ficha ficava com a legenda a
+  // NULL sem aviso nenhum: falha-se aqui, com uma mensagem clara, antes de
+  // mandar seja o que for a base. Sem `cargo_id` nao ha nada a legendar (e o
+  // problema bloqueante `problemaDoCargo` ja o apanhou).
+  const nomeDoCargo = cargoNome === null ? null : texto(cargoNome);
+  if (laborais.cargo_id.trim() !== "" && nomeDoCargo === null) {
+    throw new Error(getLocalizedFallback("hr.form.cargoObrigatorio"));
+  }
 
   const temPessoais =
     texto(pessoais.data_nascimento) !== null ||
@@ -682,8 +694,6 @@ export function payloadDoRascunho(
     contrato.tipo_trabalho !== "" ||
     contrato.dias_uteis.length > 0;
 
-  const valorBase = numeroDe(contrato.valor_base);
-
   // Usada tanto em `vinculo.data_inicio` como em `horasVinculo.valido_de`: as
   // duas tem de nascer com a MESMA data (a versao de horas comeca exactamente
   // quando o vinculo comeca).
@@ -697,7 +707,8 @@ export function payloadDoRascunho(
       email_pessoal: texto(pessoais.email_pessoal),
       telefone_trabalho: texto(geral.telefone_trabalho),
       numero_interno: texto(geral.numero_interno),
-      cargo: texto(laborais.cargo),
+      cargo: nomeDoCargo,
+      cargo_id: laborais.cargo_id.trim(),
       local_id: texto(laborais.local_id),
       reporta_a_pessoa_id: texto(laborais.reporta_a_pessoa_id),
       data_admissao: texto(laborais.data_admissao),
@@ -794,14 +805,7 @@ export function payloadDoRascunho(
             valido_de: dataInicioVinculo,
           }
         : null,
-    retribuicao:
-      valorBase !== null
-        ? {
-            valor_base: valorBase,
-            moeda: contrato.moeda.trim().toUpperCase() || "EUR",
-            periodicidade: contrato.periodicidade,
-          }
-        : null,
+    retribuicao: parteDaPessoaDoContrato(contrato),
     horario: contrato.horario_variavel ? linhasDeHorario(contrato.horario) : null,
     acesso: {
       role_id: texto(acesso.role_id),

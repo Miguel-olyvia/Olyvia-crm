@@ -6,7 +6,9 @@
  *  - com a permissao, abre o envio e so segue para a ficha quando ele fecha;
  *  - "RH, agora" sem a configuracao da admissao: espera enquanto carrega e,
  *    se a leitura falhou, diz que a configuracao nao chegou (nao trata o `null`
- *    como "sem configuracao").
+ *    como "sem configuracao");
+ *  - o cargo e obrigatorio (fluxo 2): sem ele nao se cria a ficha e o resumo
+ *    de problemas di-lo; o payload leva cargo_id e o nome do cargo escolhido.
  *
  * As seccoes do assistente sao simuladas com campos minimos: aqui testa-se o
  * assistente, nao os campos.
@@ -31,6 +33,16 @@ vi.mock("@/hooks/usePermissions", () => ({
 
 vi.mock("@/hooks/useLocaisTrabalho", () => ({
   useLocaisTrabalho: () => ({ locais: [], loading: false, semPermissao: false, criarLocal: vi.fn() }),
+}));
+vi.mock("@/hooks/useCargos", () => ({
+  useCargos: () => ({
+    cargos: [
+      { id: "c1", nome: "Operador", activo: true },
+      { id: "c2", nome: "Antigo", activo: false },
+    ],
+    periodos: [],
+    isLoading: false,
+  }),
 }));
 vi.mock("@/hooks/usePapeisDaOrganizacao", () => ({
   usePapeisDaOrganizacao: () => ({ papeis: [], loading: false }),
@@ -121,7 +133,22 @@ vi.mock("@/components/hr/form/SeccaoDetalhesPessoais", () => ({
     />
   ),
 }));
-vi.mock("@/components/hr/form/SeccaoInformacoesLaborais", () => ({ SeccaoInformacoesLaborais: () => null }));
+vi.mock("@/components/hr/form/SeccaoInformacoesLaborais", () => ({
+  SeccaoInformacoesLaborais: ({
+    onPatch,
+    cargos,
+  }: {
+    onPatch: (patch: Record<string, string>) => void;
+    cargos: Array<{ id: string; nome: string }>;
+  }) => (
+    <div>
+      <span data-testid="cargos-oferecidos">{cargos.map((c) => c.nome).join(",")}</span>
+      <button type="button" onClick={() => onPatch({ cargo_id: "c1" })}>
+        escolher-cargo
+      </button>
+    </div>
+  ),
+}));
 vi.mock("@/components/hr/form/SeccaoContrato", () => ({ SeccaoContrato: () => null }));
 vi.mock("@/components/hr/form/SeccaoConfiguracoesGerais", () => ({ SeccaoConfiguracoesGerais: () => null }));
 
@@ -155,6 +182,11 @@ function escreverEmailPessoal() {
   fireEvent.change(screen.getByLabelText("email-pessoal"), { target: { value: "ana@exemplo.pt" } });
 }
 
+function escolherCargo() {
+  fireEvent.click(screen.getByRole("tab", { name: /hr\.form\.seccoes\.laborais/ }));
+  fireEvent.click(screen.getByRole("button", { name: "escolher-cargo" }));
+}
+
 const botaoCriar = () => screen.getByRole("button", { name: "hr.form.criarFicha" });
 
 describe("PessoaFormDialog: admissao", () => {
@@ -169,6 +201,7 @@ describe("PessoaFormDialog: admissao", () => {
       const { onCriada } = montar();
       escreverNomes();
       escreverEmailPessoal();
+      escolherCargo();
 
       fireEvent.click(botaoCriar());
 
@@ -182,6 +215,7 @@ describe("PessoaFormDialog: admissao", () => {
       const { onCriada } = montar();
       escreverNomes();
       escreverEmailPessoal();
+      escolherCargo();
 
       fireEvent.click(botaoCriar());
 
@@ -193,6 +227,40 @@ describe("PessoaFormDialog: admissao", () => {
 
       fireEvent.click(fechar);
       expect(onCriada).toHaveBeenCalledWith("p-nova");
+    });
+  });
+
+  describe("o cargo e obrigatorio", () => {
+    it("sem cargo, Criar ficha nao grava: mostra o resumo de problemas", async () => {
+      const { onCriar } = montar();
+      escreverNomes();
+      escreverEmailPessoal();
+
+      fireEvent.click(botaoCriar());
+
+      expect(onCriar).not.toHaveBeenCalled();
+      // O resumo aponta o cargo (o texto do erro vive no proprio campo).
+      expect(await screen.findByText(/hr.form.seccoes.laborais → hr.columns.cargo/)).toBeInTheDocument();
+    });
+
+    it("so oferece cargos activos ao assistente", () => {
+      montar();
+      fireEvent.click(screen.getByRole("tab", { name: /hr\.form\.seccoes\.laborais/ }));
+      expect(screen.getByTestId("cargos-oferecidos")).toHaveTextContent("Operador");
+      expect(screen.getByTestId("cargos-oferecidos")).not.toHaveTextContent("Antigo");
+    });
+
+    it("com cargo, o payload leva cargo_id e o nome do cargo como texto", async () => {
+      const { onCriar } = montar();
+      escreverNomes();
+      escreverEmailPessoal();
+      escolherCargo();
+
+      fireEvent.click(botaoCriar());
+
+      await waitFor(() => expect(onCriar).toHaveBeenCalledTimes(1));
+      expect(onCriar.mock.calls[0][0].nucleo).toMatchObject({ cargo_id: "c1", cargo: "Operador" });
+      expect(JSON.stringify(onCriar.mock.calls[0][0])).not.toContain("valor_base");
     });
   });
 

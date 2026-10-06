@@ -30,9 +30,14 @@ const CAMPOS_VAZIOS: CamposPreenchiveis = {
   apelido: "",
   email_trabalho: "",
   telefone_trabalho: "",
-  cargo: "",
+  cargo_id: "",
   local_id: "",
 };
+
+const CARGOS_ACTIVOS = [
+  { id: "c-gestora", nome: "Gestora", activo: true },
+  { id: "c-operador", nome: "Operador", activo: true },
+];
 
 const CONTA_BASE: ContaParaPreencher = {
   name: "Ana Alves",
@@ -66,9 +71,13 @@ describe("dividirNome", () => {
 
 describe("preenchimentoDaConta", () => {
   it("preenche nome, email, telefone e cargo numa ficha vazia", () => {
-    const resultado = preenchimentoDaConta(CONTA_BASE, CAMPOS_VAZIOS, {}, [
-      { id: "loc-1", nome: "Lisboa" },
-    ]);
+    const resultado = preenchimentoDaConta(
+      CONTA_BASE,
+      CAMPOS_VAZIOS,
+      {},
+      [{ id: "loc-1", nome: "Lisboa" }],
+      CARGOS_ACTIVOS,
+    );
 
     expect(resultado.patchGeral).toEqual({
       primeiro_nome: "Ana",
@@ -76,7 +85,7 @@ describe("preenchimentoDaConta", () => {
       email_trabalho: "ana.alves@empresa.pt",
       telefone_trabalho: "912345678",
     });
-    expect(resultado.patchLaborais).toEqual({ cargo: "Gestora", local_id: "loc-1" });
+    expect(resultado.patchLaborais).toEqual({ cargo_id: "c-gestora", local_id: "loc-1" });
     expect(resultado.avisos.find((a) => a.campoId === CAMPO_PRIMEIRO_NOME)).toBeTruthy();
   });
 
@@ -137,7 +146,7 @@ describe("preenchimentoDaConta", () => {
     const resultado = preenchimentoDaConta(conta, CAMPOS_VAZIOS, {}, []);
 
     expect(resultado.patchGeral.telefone_trabalho).toBeUndefined();
-    expect(resultado.patchLaborais.cargo).toBeUndefined();
+    expect(resultado.patchLaborais.cargo_id).toBeUndefined();
     expect(resultado.avisos.some((a) => a.campoId === CAMPO_TELEFONE_TRABALHO)).toBe(false);
   });
 
@@ -164,19 +173,60 @@ describe("reverterAutoPreenchido", () => {
       apelido: "Escrito a mao", // divergiu do palpite -- fica
       email_trabalho: "",
       telefone_trabalho: "",
-      cargo: "Gestor", // ainda o palpite anterior
+      cargo_id: "c-gestor", // ainda o palpite anterior
       local_id: "",
     };
     const autoAnterior = {
       [CAMPO_PRIMEIRO_NOME]: "Bruno",
       [CAMPO_APELIDO]: "Bastos",
-      [CAMPO_CARGO]: "Gestor",
+      [CAMPO_CARGO]: "c-gestor",
     };
 
     const { patchGeral, patchLaborais } = reverterAutoPreenchido(actual, autoAnterior);
 
     expect(patchGeral.primeiro_nome).toBe("");
     expect(patchGeral.apelido).toBeUndefined();
-    expect(patchLaborais.cargo).toBe("");
+    expect(patchLaborais.cargo_id).toBe("");
+  });
+});
+
+describe("cargo da conta: so preenche por correspondencia exacta com UM cargo activo", () => {
+  const cargoPor = (position: string | null, cargos = CARGOS_ACTIVOS, actual = CAMPOS_VAZIOS) =>
+    preenchimentoDaConta({ ...CONTA_BASE, position }, actual, {}, [], cargos);
+
+  it("coincidencia exacta com um cargo activo preenche cargo_id", () => {
+    const r = cargoPor("Gestora");
+    expect(r.patchLaborais.cargo_id).toBe("c-gestora");
+    expect(r.autoNovo[CAMPO_CARGO]).toBe("c-gestora");
+  });
+
+  it("ignora maiusculas e espacos nas pontas", () => {
+    expect(cargoPor("  gestora ").patchLaborais.cargo_id).toBe("c-gestora");
+  });
+
+  it("nenhuma coincidencia: nao preenche", () => {
+    const r = cargoPor("Directora de Marketing");
+    expect(r.patchLaborais.cargo_id).toBeUndefined();
+    expect(r.autoNovo[CAMPO_CARGO]).toBeUndefined();
+  });
+
+  it("coincidencia ambigua (dois activos com o mesmo nome): nao escolhe", () => {
+    const duplicados = [...CARGOS_ACTIVOS, { id: "c-gestora-2", nome: "gestora", activo: true }];
+    expect(cargoPor("Gestora", duplicados).patchLaborais.cargo_id).toBeUndefined();
+  });
+
+  it("um cargo desactivado nunca e escolhido", () => {
+    const inactivo = [{ id: "c-velho", nome: "Gestora", activo: false }];
+    expect(cargoPor("Gestora", inactivo).patchLaborais.cargo_id).toBeUndefined();
+  });
+
+  it("sem lista de cargos (ainda a carregar) nao preenche nada", () => {
+    const r = preenchimentoDaConta(CONTA_BASE, CAMPOS_VAZIOS, {}, []);
+    expect(r.patchLaborais.cargo_id).toBeUndefined();
+  });
+
+  it("nunca escreve por cima de um cargo ja escolhido a mao", () => {
+    const r = cargoPor("Gestora", CARGOS_ACTIVOS, { ...CAMPOS_VAZIOS, cargo_id: "c-operador" });
+    expect(r.patchLaborais.cargo_id).toBeUndefined();
   });
 });

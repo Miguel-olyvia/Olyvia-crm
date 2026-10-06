@@ -25,7 +25,7 @@ import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
 import { usePessoaConta } from "@/hooks/usePessoaConta";
-import { dataDeHoje } from "@/lib/hr/novaPessoa";
+import { dataDeHojeBase } from "@/lib/hr/dataBase";
 import type {
   Pessoa,
   PessoaConta,
@@ -185,14 +185,55 @@ async function carregarUm<T>(
   pessoaId: string,
   extra?: (query: any) => any,
 ): Promise<T | null> {
+  return (await carregarUmComErro<T>(tabela, colunas, pessoaId, extra)).valor;
+}
+
+/** Como `carregarUm`, mas diz se falhou: "nao ha linha" e "nao consegui ler" nao sao o mesmo. */
+async function carregarUmComErro<T>(
+  tabela: string,
+  colunas: string,
+  pessoaId: string,
+  extra?: (query: any) => any,
+): Promise<{ valor: T | null; falhou: boolean }> {
   let query = hrFrom(tabela).select(colunas).eq("pessoa_id", pessoaId);
   if (extra) query = extra(query);
   const { data, error } = await query.limit(1).maybeSingle();
   if (error) {
     if (!isPermissionError(error)) captureFlowError(error, "hr-pessoas-load");
-    return null;
+    return { valor: null, falhou: true };
   }
-  return (data ?? null) as T | null;
+  return { valor: (data ?? null) as T | null, falhou: false };
+}
+
+/**
+ * A retribuicao que a ficha mostra como `retribuicao`: a VERSAO EM VIGOR HOJE
+ * (a mais recente que ja comecou). Desde o fluxo 2 pode haver uma versao FUTURA
+ * (subida agendada do cargo, ou admissao futura) com data de inicio posterior,
+ * e "a mais recente por `valido_de`" passaria a mostra-la como se fosse a
+ * actual. So se nenhuma tiver comecado (admissao futura) cai-se na mais recente.
+ *
+ * Se a PRIMEIRA consulta falhar, devolve `null`: cair na mais recente seria
+ * mostrar como actual, sem aviso, uma versao que pode ser futura. "Hoje" e o
+ * da base (UTC): ver `lib/hr/dataBase.ts`.
+ */
+export async function carregarRetribuicaoActual(
+  pessoaId: string,
+): Promise<PessoaRetribuicao | null> {
+  const emVigor = await carregarUmComErro<PessoaRetribuicao>(
+    "pessoas_retribuicoes",
+    COLUNAS_RETRIBUICAO,
+    pessoaId,
+    (q) =>
+      q
+        .is("deleted_at", null)
+        .lte("valido_de", dataDeHojeBase())
+        .order("valido_de", { ascending: false }),
+  );
+  if (emVigor.falhou) return null;
+  if (emVigor.valor) return emVigor.valor;
+  return carregarUm<PessoaRetribuicao>("pessoas_retribuicoes", COLUNAS_RETRIBUICAO, pessoaId, (q) =>
+    q.is("deleted_at", null).order("valido_de", { ascending: false }),
+  );
 }
 
 async function carregarMuitos<T>(
@@ -273,12 +314,7 @@ export function usePessoa(pessoaId: string | undefined) {
           carregarMuitos<PessoaVinculo>("pessoas_vinculos", COLUNAS_VINCULO, pessoaId, (q) =>
             q.is("deleted_at", null).order("data_inicio", { ascending: false }),
           ),
-          carregarUm<PessoaRetribuicao>(
-            "pessoas_retribuicoes",
-            COLUNAS_RETRIBUICAO,
-            pessoaId,
-            (q) => q.is("deleted_at", null).order("valido_de", { ascending: false }),
-          ),
+          carregarRetribuicaoActual(pessoaId),
           carregarMuitos<HorarioPlaneado>(
             "pessoas_horario_planeado",
             COLUNAS_HORARIO_PLANEADO,
@@ -566,7 +602,7 @@ export function usePessoa(pessoaId: string | undefined) {
         // Satelite: falhar isto NAO desfaz o vinculo, mas o erro chega ao
         // utilizador -- ver o cabecalho.
         if (horasPeriodo != null && horasFrequencia) {
-          const dataEfeito = patch.data_inicio ?? dataDeHoje();
+          const dataEfeito = patch.data_inicio ?? dataDeHojeBase();
           // Fecha PRIMEIRO qualquer versao ainda aberta desta pessoa (de um
           // vinculo anterior, ja terminado) -- ver o cabecalho: sem isto, uma
           // readmissao/renovacao e sempre rejeitada pela base, e entretanto o

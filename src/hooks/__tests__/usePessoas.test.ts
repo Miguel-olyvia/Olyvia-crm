@@ -22,7 +22,7 @@
  *
  * Supabase simulado. Nada toca em base nenhuma.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 
 const ORG_ACTIVA = "org-activa";
@@ -42,6 +42,11 @@ let rpcImpl: (fn: string, args?: Record<string, unknown>) => Promise<{ data: unk
 /** Faz a consulta a `pessoas_vinculos` falhar, para o teste da janela de
  * deploy / falta de permissao. Reatribuido em cada `it`. */
 let falharVinculos = false;
+/** Todas as escritas (insert e RPC) pela ordem em que chegaram, ex.: "insert:pessoas", "rpc:rpc_x". */
+let ordem: string[] = [];
+/** Erro a devolver no INSERT de uma tabela (por nome), para os testes de falha. */
+let falharInsert: Record<string, unknown> = {};
+const captureFlowError = vi.hoisted(() => vi.fn());
 
 /**
  * Amostra fixa. As datas sao calculadas a partir do momento em que a suite
@@ -129,13 +134,16 @@ function buildChain(table: string) {
     insert: (registo: unknown) => {
       ultimaOperacao = "insert";
       inserts[table].push(registo);
+      ordem.push(`insert:${table}`);
       return chain;
     },
     single: () => chain,
     then: (onFulfilled: any, onRejected: any) => {
       const resolver = () => {
         if (ultimaOperacao === "insert") {
+          if (falharInsert[table]) return { data: null, error: falharInsert[table] };
           if (table === "pessoas") return { data: { id: "pessoa-nova" }, error: null };
+          if (table === "pessoas_vinculos") return { data: { id: "vinculo-novo" }, error: null };
           return { data: null, error: null };
         }
         if (table === "pessoas") return { data: PESSOAS, error: null };
@@ -159,6 +167,7 @@ vi.mock("@/integrations/supabase/client", () => ({
     from: (table: string) => buildChain(table),
     rpc: (fn: string, args?: Record<string, unknown>) => {
       chamadasRpc.push({ fn, args });
+      ordem.push(`rpc:${fn}`);
       return rpcImpl(fn, args);
     },
   },
@@ -168,9 +177,7 @@ vi.mock("@/contexts/CompanyContext", () => ({
   useCompany: () => ({ activeCompany: { id: ORG_ACTIVA, name: "Nike" }, companies: [] }),
 }));
 
-vi.mock("@/lib/observability/captureFlowError", () => ({
-  captureFlowError: vi.fn(),
-}));
+vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError }));
 
 vi.mock("@/lib/identity/resolveBusinessUserId", () => ({
   resolveCurrentBusinessUserId: () => Promise.resolve("autor-1"),
@@ -178,6 +185,7 @@ vi.mock("@/lib/identity/resolveBusinessUserId", () => ({
 
 import { usePessoas } from "@/hooks/usePessoas";
 import type { NovaPessoaPayload } from "@/lib/hr/novaPessoa";
+import { getLocalizedFallback } from "@/utils/friendlyError";
 
 /** Um payload minimo: so o nucleo, nada de satelites -- para isolar o
  * comportamento da ligacao a conta sem montar as nove tabelas do assistente. */
@@ -191,6 +199,7 @@ function payloadMinimo(overrides: Partial<NovaPessoaPayload> = {}): NovaPessoaPa
       telefone_trabalho: null,
       numero_interno: null,
       cargo: null,
+      cargo_id: "cargo-1",
       local_id: null,
       reporta_a_pessoa_id: null,
       data_admissao: null,
@@ -222,6 +231,13 @@ describe("usePessoas", () => {
     chamadasRpc = [];
     rpcImpl = () => Promise.resolve({ data: null, error: null });
     falharVinculos = false;
+    ordem = [];
+    falharInsert = {};
+    captureFlowError.mockReset();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("filtra pela organizacao activa e ignora as fichas apagadas", async () => {
@@ -428,5 +444,292 @@ describe("usePessoas", () => {
       result.current.pessoas.map((p) => [p.id, p.estado_contrato_derivado]),
     );
     expect(porId.p1, "o contrato que estava na segunda pagina nao foi lido").toBe("em_curso");
+  });
+
+  // Fluxo 2: o valor base vem so do cargo. O nucleo leva cargo_id, e a parte
+  // pessoal (subsidio e duodecimos) vai pela RPC, DEPOIS do vinculo.
+  it("o nucleo vai com cargo_id", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(payloadMinimo());
+    });
+
+    expect(inserts.pessoas[0]).toMatchObject({ organization_id: ORG_ACTIVA, cargo_id: "cargo-1" });
+  });
+
+  it("a parte da pessoa grava-se pela RPC e nunca por INSERT em pessoas_retribuicoes", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(
+        payloadMinimo({
+          // Admissao ate ao inicio do vinculo: o cargo ja esta aberto em 2026-02-01.
+          nucleo: { ...payloadMinimo().nucleo, data_admissao: "2026-01-15" },
+          vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-02-01" },
+          retribuicao: { subsidio: 6.5, subsidioModo: "cartao", duodecimosPct: 50 },
+        }),
+      );
+    });
+
+    expect(inserts.pessoas_retribuicoes).toBeUndefined();
+    const chamada = chamadasRpc.find((c) => c.fn === "rpc_hr_retribuicao_definir_pessoal");
+    expect(chamada?.args).toEqual({
+      p_pessoa_id: "pessoa-nova",
+      p_desde: "2026-02-01",
+      p_subsidio: 6.5,
+      p_subsidio_modo: "cartao",
+      p_duodecimos_pct: 50,
+      p_motivo: null,
+    });
+  });
+
+  it("a data da parte da pessoa: inicio do vinculo, senao admissao, senao hoje", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const parte = { subsidio: null, subsidioModo: null, duodecimosPct: 50 as const };
+
+    await act(async () => {
+      await result.current.criarPessoa(
+        payloadMinimo({
+          nucleo: { ...payloadMinimo().nucleo, data_admissao: "2026-03-01" },
+          retribuicao: parte,
+        }),
+      );
+    });
+    expect(chamadasRpc[chamadasRpc.length - 1]?.args).toMatchObject({ p_desde: "2026-03-01" });
+
+    chamadasRpc = [];
+    await act(async () => {
+      await result.current.criarPessoa(payloadMinimo({ retribuicao: parte }));
+    });
+    expect(chamadasRpc[chamadasRpc.length - 1]?.args).toMatchObject({
+      p_desde: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+    });
+  });
+
+  it("a RPC da parte pessoal corre depois do vinculo", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(
+        payloadMinimo({
+          vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-02-01" },
+          retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 },
+        }),
+      );
+    });
+
+    expect(inserts.pessoas_vinculos).toHaveLength(1);
+    const escritas = ordem.filter((o) => o.startsWith("insert:") || o.startsWith("rpc:"));
+    const iNucleo = escritas.indexOf("insert:pessoas");
+    const iVinculo = escritas.indexOf("insert:pessoas_vinculos");
+    const iRpc = escritas.indexOf("rpc:rpc_hr_retribuicao_definir_pessoal");
+    expect(iNucleo).toBe(0);
+    expect(iVinculo).toBeGreaterThan(iNucleo);
+    expect(iRpc).toBeGreaterThan(iVinculo);
+  });
+
+  it("vinculo ANTERIOR a admissao: a primeira retribuicao nao comeca antes de o cargo abrir (evita HRC11)", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(
+        payloadMinimo({
+          nucleo: { ...payloadMinimo().nucleo, data_admissao: "2026-03-01" },
+          vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-01-01" },
+          retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 },
+        }),
+      );
+    });
+
+    const chamada = chamadasRpc.find((c) => c.fn === "rpc_hr_retribuicao_definir_pessoal");
+    expect(chamada?.args).toMatchObject({ p_desde: "2026-03-01" });
+  });
+
+  it("sem admissao, o 'hoje' e o da base (UTC): as 00:30 de Lisboa no verao ainda e o dia anterior", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-07-01T23:30:00Z"));
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(
+        payloadMinimo({
+          nucleo: { ...payloadMinimo().nucleo, local_id: "local-1" },
+          retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 },
+        }),
+      );
+    });
+
+    const chamada = chamadasRpc.find((c) => c.fn === "rpc_hr_retribuicao_definir_pessoal");
+    expect(chamada?.args).toMatchObject({ p_desde: "2026-07-01" });
+    expect(inserts.pessoas_afectacoes[0]).toMatchObject({ valido_de: "2026-07-01" });
+  });
+
+  describe("falhas de regra de negocio nao vao para o Sentry; as inesperadas vao", () => {
+    it("INSERT de pessoas recusado com HRC08: lanca texto traduzido, sem captureFlowError", async () => {
+      falharInsert.pessoas = { code: "HRC08", message: "cargo_obrigatorio: toda a pessoa nova tem de ter um cargo" };
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      let lancado: unknown;
+      await act(async () => {
+        try {
+          await result.current.criarPessoa(payloadMinimo());
+        } catch (e) {
+          lancado = e;
+        }
+      });
+
+      expect((lancado as Error).message).toBe(getLocalizedFallback("hr.cargos.erro.cargoObrigatorio"));
+      expect(captureFlowError).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["HRC09", "cargo_desactivado: o cargo escolhido esta desactivado", "hr.cargos.erro.desactivado"],
+      ["23514", "igualdade_salarial: o cargo paga 1000", "hr.cargos.erro.igualdadeSalarial"],
+    ])("INSERT de pessoas com %s e traduzido e nao reportado", async (code, message, chave) => {
+      falharInsert.pessoas = { code, message };
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      let lancado: unknown;
+      await act(async () => {
+        try {
+          await result.current.criarPessoa(payloadMinimo());
+        } catch (e) {
+          lancado = e;
+        }
+      });
+      expect((lancado as Error).message).toBe(getLocalizedFallback(chave));
+      expect(captureFlowError).not.toHaveBeenCalled();
+    });
+
+    it("INSERT de pessoas recusado por permissao (42501) lanca e nao e reportado", async () => {
+      falharInsert.pessoas = { code: "42501", message: "permission denied for table pessoas" };
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await act(async () => {
+        await expect(result.current.criarPessoa(payloadMinimo())).rejects.toBeDefined();
+      });
+      expect(captureFlowError).not.toHaveBeenCalled();
+    });
+
+    it("INSERT de pessoas com defeito inesperado e reportado ao Sentry", async () => {
+      falharInsert.pessoas = { code: "XX000", message: "boom" };
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await act(async () => {
+        await expect(result.current.criarPessoa(payloadMinimo())).rejects.toBeDefined();
+      });
+      expect(captureFlowError).toHaveBeenCalledTimes(1);
+    });
+
+    it("retribuicao recusada com HRC11: falha da seccao com texto traduzido e sem Sentry", async () => {
+      rpcImpl = (fn) =>
+        fn === "rpc_hr_retribuicao_definir_pessoal"
+          ? Promise.resolve({
+              data: null,
+              error: { code: "HRC11", message: "retribuicao_sem_cargo: a pessoa nao tem cargo em 2026-01-01" },
+            })
+          : Promise.resolve({ data: null, error: null });
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+      await act(async () => {
+        resultado = await result.current.criarPessoa(
+          payloadMinimo({ retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 } }),
+        );
+      });
+
+      expect(resultado?.falhas).toEqual([
+        { seccao: "retribuicao", mensagem: getLocalizedFallback("hr.cargos.erro.retribuicaoSemCargo") },
+      ]);
+      expect(captureFlowError).not.toHaveBeenCalled();
+    });
+
+    it("retribuicao com permissao recusada (42501): falha da seccao e sem Sentry", async () => {
+      rpcImpl = (fn) =>
+        fn === "rpc_hr_retribuicao_definir_pessoal"
+          ? Promise.resolve({ data: null, error: { code: "42501", message: "insufficient_privilege: ..." } })
+          : Promise.resolve({ data: null, error: null });
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+      await act(async () => {
+        resultado = await result.current.criarPessoa(
+          payloadMinimo({ retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 } }),
+        );
+      });
+      expect(resultado?.falhas.map((f) => f.seccao)).toEqual(["retribuicao"]);
+      expect(captureFlowError).not.toHaveBeenCalled();
+    });
+
+    it("vinculo recusado com HRC04 (data invalida): falha traduzida e sem Sentry; defeito inesperado reporta", async () => {
+      falharInsert.pessoas_vinculos = { code: "HRC04", message: "data_invalida: a data ..." };
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+      await act(async () => {
+        resultado = await result.current.criarPessoa(
+          payloadMinimo({ vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-02-01" } }),
+        );
+      });
+      expect(resultado?.falhas).toEqual([
+        { seccao: "vinculo", mensagem: getLocalizedFallback("hr.cargos.erro.dataInvalida") },
+      ]);
+      expect(captureFlowError).not.toHaveBeenCalled();
+
+      falharInsert.pessoas_vinculos = { code: "XX000", message: "boom" };
+      await act(async () => {
+        await result.current.criarPessoa(
+          payloadMinimo({ vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-02-01" } }),
+        );
+      });
+      expect(captureFlowError).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("sem parte da pessoa a RPC nunca e chamada", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(payloadMinimo({ retribuicao: null }));
+    });
+
+    expect(chamadasRpc.find((c) => c.fn === "rpc_hr_retribuicao_definir_pessoal")).toBeUndefined();
+  });
+
+  it("se a RPC da parte pessoal falhar, a ficha fica criada e a falha volta como 'retribuicao'", async () => {
+    rpcImpl = (fn) =>
+      fn === "rpc_hr_retribuicao_definir_pessoal"
+        ? Promise.resolve({
+            data: null,
+            error: { code: "HRC11", message: "retribuicao_sem_cargo: atribua primeiro um cargo" },
+          })
+        : Promise.resolve({ data: null, error: null });
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+    await act(async () => {
+      resultado = await result.current.criarPessoa(
+        payloadMinimo({ retribuicao: { subsidio: null, subsidioModo: null, duodecimosPct: 50 } }),
+      );
+    });
+
+    expect(resultado?.id).toBe("pessoa-nova");
+    expect(resultado?.falhas.map((x) => x.seccao)).toEqual(["retribuicao"]);
   });
 });

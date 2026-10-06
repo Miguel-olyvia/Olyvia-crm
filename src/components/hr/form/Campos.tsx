@@ -168,8 +168,9 @@ interface CampoTextoProps extends CampoBaseProps {
   tipo?: "text" | "email" | "date" | "number" | "tel" | "time";
   placeholder?: string;
   disabled?: boolean;
-  min?: number;
-  max?: number;
+  /** Numero para `tipo="number"`; data ISO (AAAA-MM-DD) para `tipo="date"`. */
+  min?: number | string;
+  max?: number | string;
   step?: string;
 }
 

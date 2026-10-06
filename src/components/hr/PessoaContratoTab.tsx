@@ -135,6 +135,7 @@ import {
   type TipoTrabalho,
 } from "@/types/hr";
 import type { HrCargo } from "@/hooks/useCargos";
+import type { HrCargoPeriodo } from "@/lib/hr/cargosPeriodos";
 
 interface PessoaContratoTabProps {
   pessoaId: string;
@@ -159,6 +160,14 @@ interface PessoaContratoTabProps {
   /** Cargo desta pessoa (`pessoas.cargo_id`), ou `null` sem cargo estruturado
    *  -- ver `PessoaRetribuicaoCard`: com cargo, o salario fica imposto. */
   cargo: HrCargo | null;
+  /** Os periodos do salario dos cargos -- de onde `PessoaRetribuicaoCard` tira o valor base. */
+  periodosDosCargos: HrCargoPeriodo[];
+  /** Os cargos ou os seus periodos ainda a carregar: o cartao nao diz "sem cargo". */
+  periodosLoading?: boolean;
+  /** Falhou a leitura dos cargos ou dos periodos. */
+  periodosError?: boolean;
+  /** Depois de definir ou corrigir a retribuicao: o pai recarrega a ficha. */
+  onRetribuicaoMudou?: () => void;
   /**
    * `hr.pessoas.vinculos.horas.corrigir`: CORRIGIR uma versao ja decorrida de
    * `pessoas_vinculos_horas` e permissao a parte, mais perigosa que ALTERAR
@@ -295,6 +304,10 @@ export function PessoaContratoTab({
   podeEditarRetribuicao,
   podeCorrigirRetribuicao,
   cargo,
+  periodosDosCargos,
+  periodosLoading,
+  periodosError,
+  onRetribuicaoMudou,
   podeCorrigirHoras,
   podeAnexarContratoAssinado,
   vinculosOpcoesDocumento,
@@ -1017,6 +1030,10 @@ export function PessoaContratoTab({
           podeAlterar={podeEditarRetribuicao}
           podeCorrigir={podeCorrigirRetribuicao}
           cargo={cargo}
+          periodosDoCargo={periodosDosCargos}
+          periodosLoading={periodosLoading}
+          periodosError={periodosError}
+          onMudou={onRetribuicaoMudou}
         />
       )}
 

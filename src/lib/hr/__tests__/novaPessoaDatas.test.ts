@@ -30,11 +30,14 @@ describe("novaPessoaDatas", () => {
     expect(datas.dataFimPorDuracaoMeses("2026-01-01", 12)).toBe("2027-01-01");
   });
 
-  it("dataDeHoje usa o dia local, nao o UTC (meia-noite e meia em Lisboa e hoje, nao ontem)", () => {
+  it("dataDeHoje e o dia da BASE (UTC, o current_date das migrations), nao o dia local", () => {
     vi.useFakeTimers();
-    // 00:30 locais de 3 de Abril: em UTC (UTC+1 no verao) ainda seria dia 2.
-    vi.setSystemTime(new Date(2026, 3, 3, 0, 30, 0));
-    expect(datas.dataDeHoje()).toBe("2026-04-03");
+    // 00:30 de 3 de Abril em Lisboa (UTC+1) = 23:30 de 2 de Abril em UTC. A base
+    // ainda esta no dia 2: e esse o "hoje" que o RH tem de enviar-lhe (ver
+    // `dataBase.ts`). Os calculos de datas civis (periodo experimental, termo)
+    // continuam locais e a salvo do UTC.
+    vi.setSystemTime(new Date("2026-04-02T23:30:00Z"));
+    expect(datas.dataDeHoje()).toBe("2026-04-02");
   });
 });
 

@@ -41,7 +41,9 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { mensagemDeErroCargo } from "@/lib/hr/errosCargo";
 import { dataDeHoje, type NovaPessoaPayload } from "@/lib/hr/novaPessoa";
+import { dataDaPrimeiraRetribuicao } from "@/lib/hr/novaPessoaCargo";
 import { derivarEstadoContrato } from "@/lib/hr/estadoContrato";
 import type { EstadoAcesso, EstadoVinculo, Pessoa, PessoaListItem } from "@/types/hr";
 
@@ -299,8 +301,10 @@ export function usePessoas() {
         .select("id")
         .single();
       if (erro) {
-        if (!isPermissionError(erro)) captureFlowError(erro, "hr-pessoa-write");
-        throw erro;
+        // Recusas de regra de negocio do cargo (HRC08/09/02, igualdade salarial)
+        // e de permissao nao sao defeitos: voltam traduzidas e nao vao para o
+        // Sentry. So o inesperado e reportado (dentro de `mensagemDeErroCargo`).
+        throw new Error(await mensagemDeErroCargo(erro, "hr-pessoa-write"));
       }
       const pessoaId = (data as { id: string }).id;
 
@@ -316,8 +320,10 @@ export function usePessoas() {
           p_anew_user_id: payload.contaALigar,
         });
         if (erroLigacao) {
-          if (!isPermissionError(erroLigacao)) captureFlowError(erroLigacao, "hr-pessoa-write");
-          falhas.push({ seccao: "conta", mensagem: await getFriendlyErrorMessage(erroLigacao) });
+          falhas.push({
+            seccao: "conta",
+            mensagem: await mensagemDeErroCargo(erroLigacao, "hr-pessoa-write"),
+          });
         }
       }
 
@@ -334,8 +340,7 @@ export function usePessoas() {
       ) => {
         const { error: falha } = await executar();
         if (!falha) return;
-        if (!isPermissionError(falha)) captureFlowError(falha, "hr-pessoa-write");
-        falhas.push({ seccao, mensagem: await getFriendlyErrorMessage(falha) });
+        falhas.push({ seccao, mensagem: await mensagemDeErroCargo(falha, "hr-pessoa-write") });
       };
 
       if (payload.dadosPessoais) {
@@ -397,8 +402,10 @@ export function usePessoas() {
           .select("id")
           .single();
         if (falha) {
-          if (!isPermissionError(falha)) captureFlowError(falha, "hr-pessoa-write");
-          falhas.push({ seccao: "vinculo", mensagem: await getFriendlyErrorMessage(falha) });
+          falhas.push({
+            seccao: "vinculo",
+            mensagem: await mensagemDeErroCargo(falha, "hr-pessoa-write"),
+          });
         } else {
           vinculoId = (linha as { id: string }).id;
         }
@@ -424,16 +431,25 @@ export function usePessoas() {
         );
       }
 
+      // So a parte DA PESSOA (subsidio e duodecimos): o valor base vem do cargo
+      // (fluxo 2) e a base recusa o INSERT directo em `pessoas_retribuicoes`. Vai
+      // pela RPC, DEPOIS do vinculo (que ela procura sozinha). A falha nao desfaz
+      // a ficha (doutrina dos satelites): fica a pendencia e corrige-se na ficha.
       if (payload.retribuicao) {
         await gravar("retribuicao", () =>
-          hrFrom("pessoas_retribuicoes").insert({
-            ...base,
-            ...payload.retribuicao,
-            vinculo_id: vinculoId,
-            valido_de:
-              (payload.vinculo?.data_inicio as string | undefined) ??
-              payload.nucleo.data_admissao ??
+          hrRpc("rpc_hr_retribuicao_definir_pessoal", {
+            p_pessoa_id: pessoaId,
+            // O cargo abre na admissao (ou hoje, da base); a primeira retribuicao
+            // nao pode comecar antes, senao a base recusa com HRC11.
+            p_desde: dataDaPrimeiraRetribuicao(
+              payload.vinculo?.data_inicio as string | undefined,
+              payload.nucleo.data_admissao,
               dataDeHoje(),
+            ),
+            p_subsidio: payload.retribuicao!.subsidio,
+            p_subsidio_modo: payload.retribuicao!.subsidioModo,
+            p_duodecimos_pct: payload.retribuicao!.duodecimosPct,
+            p_motivo: null,
           }),
         );
       }

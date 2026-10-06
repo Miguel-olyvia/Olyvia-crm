@@ -11,6 +11,7 @@
  *  2. vazio nunca e erro. So os dois nomes sao exigidos, e um campo malformado
  *     e erro mesmo que o resto esteja em branco.
  */
+import { getLocalizedFallback } from "@/utils/friendlyError";
 import { describe, expect, it } from "vitest";
 import { linhasParaGravar } from "@/lib/hr/horario";
 import type { ConfiguracaoCampo } from "@/lib/hr/admissaoObrigatorios";
@@ -21,17 +22,32 @@ import {
   dataDoPeriodoExperimental,
   payloadDoRascunho,
   problemasDoRascunho,
-  rascunhoInicial,
+  rascunhoInicial as rascunhoInicialBase,
   seccaoPreenchida,
 } from "@/lib/hr/novaPessoa";
 
+const CARGO_ID = "cargo-1";
+const NOME_CARGO = "Operador";
+
+/**
+ * Desde o fluxo 2 toda a pessoa tem cargo: sem `laborais.cargo_id` a ficha nao
+ * se cria. Quase todos os testes querem um rascunho valido, por isso este
+ * ponto de partida ja traz cargo; os que testam a falta dele usam o base.
+ */
+function rascunhoInicial() {
+  const r = rascunhoInicialBase();
+  r.laborais.cargo_id = CARGO_ID;
+  return r;
+}
+
 describe("rascunho de nova pessoa", () => {
-  it("so exige primeiro nome e apelido (sem configuracao a que recorrer)", () => {
-    const vazio = rascunhoInicial();
+  it("so exige nomes e cargo (sem configuracao a que recorrer)", () => {
+    const vazio = rascunhoInicialBase();
     vazio.geral.quem_preenche = "rh";
     const problemas = problemasDoRascunho(vazio);
     expect(problemas.map((p) => p.campoId).sort()).toEqual([
       "hr-novo-apelido",
+      "hr-novo-cargo",
       "hr-novo-primeiro-nome",
     ]);
 
@@ -75,7 +91,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
     const chaves = Object.keys(payload.nucleo);
     expect(chaves).not.toContain("organization_id");
     expect(chaves).not.toContain("entidade_legal_org_id");
@@ -87,7 +103,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
     expect(payload.dadosPessoais).toBeNull();
     expect(payload.identificacao).toBeNull();
     expect(payload.morada).toBeNull();
@@ -105,7 +121,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.pessoais.niss = "12345678901";
     rascunho.pessoais.nif = "123456789";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
     expect(payload.niss).toBe("12345678901");
     expect(payload.identificacao).not.toBeNull();
     expect(payload.identificacao).not.toHaveProperty("niss");
@@ -122,7 +138,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.contrato.tem_periodo_experimental = true;
     rascunho.contrato.periodo_experimental_dias = "90";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
     expect(payload.vinculo).toMatchObject({
       periodo_experimental_dias: 90,
       periodo_experimental_ate: "2026-04-01",
@@ -155,7 +171,6 @@ describe("rascunho de nova pessoa", () => {
     rascunho.geral.apelido = "Silva";
     // Os campos so do RH preenchidos: senao ha tambem o aviso de pendencia.
     rascunho.laborais.data_admissao = "2026-01-01";
-    rascunho.laborais.cargo = "Operador";
     rascunho.contrato.tipo_contrato = "sem_termo";
     rascunho.contrato.horas_trabalho = "40";
     rascunho.contrato.horas_frequencia = "mensal";
@@ -188,7 +203,7 @@ describe("rascunho de nova pessoa", () => {
     expect(problemasDoRascunho(rascunho)).toHaveLength(0);
 
     // E vai FORA do insert -- a tabela tem a escrita revogada.
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
     expect(payload.conta).toEqual({
       formato: "clabe",
       numero: "PT51000201231234567890154",
@@ -225,7 +240,7 @@ describe("rascunho de nova pessoa", () => {
       const rascunho = rascunhoComNomes();
       rascunho.pessoais.conta_bic = " cgdi ptpl ";
       expect(problemasDoRascunho(rascunho)).toHaveLength(0);
-      const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+      const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
       expect(payload.conta).toBeNull();
       expect(payload.bicSozinho).toBe("CGDIPTPL");
     });
@@ -234,13 +249,13 @@ describe("rascunho de nova pessoa", () => {
       const rascunho = rascunhoComNomes();
       rascunho.pessoais.conta_numero = IBAN_BOM;
       rascunho.pessoais.conta_bic = "CGDIPTPL";
-      const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+      const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
       expect(payload.conta?.swift).toBe("CGDIPTPL");
       expect(payload.bicSozinho).toBeNull();
     });
 
     it("sem BIC nem conta, bicSozinho e null", () => {
-      const payload = payloadDoRascunho(rascunhoComNomes(), linhasParaGravar, false);
+      const payload = payloadDoRascunho(rascunhoComNomes(), linhasParaGravar, false, NOME_CARGO);
       expect(payload.bicSozinho).toBeNull();
     });
 
@@ -255,14 +270,14 @@ describe("rascunho de nova pessoa", () => {
       rascunho.pessoais.conta_numero = IBAN_BOM;
       rascunho.pessoais.conta_bic = " cgdi ptpl ";
       expect(problemasDoRascunho(rascunho)).toHaveLength(0);
-      expect(payloadDoRascunho(rascunho, linhasParaGravar, false).conta).toEqual({
+      expect(payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO).conta).toEqual({
         formato: "iban",
         numero: IBAN_BOM,
         swift: "CGDIPTPL",
       });
 
       rascunho.pessoais.conta_bic = "";
-      expect(payloadDoRascunho(rascunho, linhasParaGravar, false).conta?.swift).toBeNull();
+      expect(payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO).conta?.swift).toBeNull();
     });
 
     it("o BIC aplica-se a todos os formatos de conta", () => {
@@ -271,7 +286,7 @@ describe("rascunho de nova pessoa", () => {
       rascunho.pessoais.conta_numero = "0123456789";
       rascunho.pessoais.conta_bic = "CGDIPTPLXXX";
       expect(problemasDoRascunho(rascunho)).toHaveLength(0);
-      expect(payloadDoRascunho(rascunho, linhasParaGravar, false).conta?.swift).toBe(
+      expect(payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO).conta?.swift).toBe(
         "CGDIPTPLXXX",
       );
     });
@@ -289,7 +304,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.geral.apelido = "Silva";
     rascunho.pessoais.nacionalidade = "PT";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
     const serializado = JSON.stringify(payload);
     expect(serializado).not.toContain("nome_social");
     expect(serializado).not.toContain("pronomes");
@@ -304,7 +319,7 @@ describe("rascunho de nova pessoa", () => {
     rascunho.pessoais.email_pessoal = "ana@exemplo.pt";
     rascunho.pessoais.data_nascimento = "1990-01-01";
 
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
     expect(payload.nucleo.email_pessoal).toBe("ana@exemplo.pt");
     expect(payload.dadosPessoais).not.toHaveProperty("email_comunicacoes");
   });
@@ -463,27 +478,127 @@ describe("NIF e NISS com digito de controlo", () => {
     const rascunho = comNomes("rh");
     rascunho.pessoais.nif = "123 456 789";
     rascunho.pessoais.niss = "123 4567 8902";
-    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
     expect(payload.identificacao).toMatchObject({ nif: "123456789" });
     expect(payload.niss).toBe("12345678902");
   });
 });
 
 describe("campos so do RH", () => {
-  it("nao bloqueiam a criacao mas avisam que ficam pendencia", () => {
+  it("nao bloqueiam a criacao mas avisam que ficam pendencia (o cargo ja nao e um deles)", () => {
     const rascunho = comNomes("rh");
     expect(problemasDoRascunho(rascunho)).toHaveLength(0);
     const avisos = avisosDoRascunho(rascunho);
     expect(avisos.map((a) => a.campoId).sort()).toEqual([
-      "hr-novo-cargo",
       "hr-novo-data-admissao",
       "hr-novo-tipo-contrato",
     ]);
     expect(avisos.every((a) => a.mensagemKey === "hr.form.avisoCampoRhPendente")).toBe(true);
 
-    rascunho.laborais.cargo = "Operador";
     rascunho.laborais.data_admissao = "2026-01-01";
     rascunho.contrato.tipo_contrato = "sem_termo";
     expect(avisosDoRascunho(rascunho)).toHaveLength(0);
+  });
+});
+
+describe("o cargo e obrigatorio (fluxo 2)", () => {
+  it("sem cargo_id e um PROBLEMA bloqueante, nao um aviso", () => {
+    const rascunho = rascunhoInicialBase();
+    rascunho.geral.primeiro_nome = "Ana";
+    rascunho.geral.apelido = "Silva";
+    rascunho.pessoais.email_pessoal = "ana@exemplo.pt";
+
+    const problemas = problemasDoRascunho(rascunho);
+    expect(problemas).toEqual([
+      {
+        seccao: "laborais",
+        campoId: "hr-novo-cargo",
+        rotuloKey: "hr.columns.cargo",
+        mensagemKey: "hr.form.cargoObrigatorio",
+      },
+    ]);
+    expect(avisosDoRascunho(rascunho).map((a) => a.campoId)).not.toContain("hr-novo-cargo");
+  });
+
+  it("e obrigatorio tambem por convite", () => {
+    const rascunho = rascunhoInicialBase();
+    rascunho.geral.quem_preenche = "convite";
+    rascunho.geral.primeiro_nome = "Ana";
+    rascunho.geral.apelido = "Silva";
+    rascunho.pessoais.email_pessoal = "ana@exemplo.pt";
+    expect(problemasDoRascunho(rascunho).map((p) => p.campoId)).toEqual(["hr-novo-cargo"]);
+  });
+
+  it("o nucleo leva cargo_id e o nome do cargo escolhido como texto", () => {
+    const rascunho = comNomes("rh");
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, "Operador");
+    expect(payload.nucleo).toMatchObject({ cargo_id: CARGO_ID, cargo: "Operador" });
+  });
+
+  it("com cargo_id mas sem o nome do catalogo FALHA com erro claro: pessoas.cargo nunca fica null sem aviso", () => {
+    expect(() => payloadDoRascunho(comNomes("rh"), linhasParaGravar, false)).toThrow(getLocalizedFallback("hr.form.cargoObrigatorio"));
+    expect(() => payloadDoRascunho(comNomes("rh"), linhasParaGravar, false, null)).toThrow(getLocalizedFallback("hr.form.cargoObrigatorio"));
+    expect(() => payloadDoRascunho(comNomes("rh"), linhasParaGravar, false, "   ")).toThrow(getLocalizedFallback("hr.form.cargoObrigatorio"));
+  });
+
+  it("sem cargo_id (problema bloqueante, tratado antes) nao ha nome a exigir", () => {
+    const sem = comNomes("rh");
+    sem.laborais.cargo_id = "";
+    const payload = payloadDoRascunho(sem, linhasParaGravar, false);
+    expect(payload.nucleo.cargo_id).toBe("");
+    expect(payload.nucleo.cargo).toBeNull();
+  });
+
+  it("numeros em hexadecimal ou notacao cientifica nao passam para o payload (0x10, 1e3)", () => {
+    const rascunho = comNomes("rh");
+    rascunho.pessoais.dependentes = "0x10";
+    rascunho.contrato.horas_trabalho = "1e3";
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
+    expect(payload.dadosPessoais?.dependentes ?? null).toBeNull();
+    expect(payload.horasVinculo).toBeNull();
+  });
+});
+
+describe("o valor base ja nao vem do contrato (fluxo 2)", () => {
+  it("o rascunho do contrato perdeu valor_base, moeda e periodicidade", () => {
+    const contrato = rascunhoInicial().contrato as unknown as Record<string, unknown>;
+    expect(contrato).not.toHaveProperty("valor_base");
+    expect(contrato).not.toHaveProperty("moeda");
+    expect(contrato).not.toHaveProperty("periodicidade");
+  });
+
+  it("sem subsidio nem duodecimos escolhidos nao ha parte da pessoa", () => {
+    const payload = payloadDoRascunho(comNomes("rh"), linhasParaGravar, false, NOME_CARGO);
+    expect(payload.retribuicao).toBeNull();
+  });
+
+  it("com subsidio, os duodecimos propoem 50 por omissao", () => {
+    const rascunho = comNomes("rh");
+    rascunho.contrato.subsidio = "6,5";
+    rascunho.contrato.subsidio_modo = "cartao";
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
+    expect(payload.retribuicao).toEqual({
+      subsidio: 6.5,
+      subsidioModo: "cartao",
+      duodecimosPct: 50,
+    });
+    expect(JSON.stringify(payload)).not.toContain("valor_base");
+  });
+
+  it("os duodecimos escolhidos a mao prevalecem sobre a proposta", () => {
+    const rascunho = comNomes("rh");
+    rascunho.contrato.duodecimos_pct = "0";
+    const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
+    expect(payload.retribuicao).toEqual({ subsidio: null, subsidioModo: null, duodecimosPct: 0 });
+  });
+
+  it("um subsidio negativo ou ilegivel e erro de formato no campo do subsidio", () => {
+    const rascunho = comNomes("rh");
+    rascunho.contrato.subsidio = "-1";
+    expect(problemasDoRascunho(rascunho).map((p) => p.campoId)).toEqual(["hr-novo-subsidio"]);
+    rascunho.contrato.subsidio = "abc";
+    expect(problemasDoRascunho(rascunho).map((p) => p.campoId)).toEqual(["hr-novo-subsidio"]);
+    rascunho.contrato.subsidio = "";
+    expect(problemasDoRascunho(rascunho)).toHaveLength(0);
   });
 });

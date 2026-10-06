@@ -329,8 +329,10 @@ export interface Pessoa {
    * catalogo (`hr_cargos`) que manda no salario -- este texto perde efeito.
    */
   cargo: string | null;
-  /** Cargo do catalogo (`hr_cargos`). Quando preenchido, o salario base da
-   * pessoa passa a ser IMPOSTO pelo cargo -- ver `hr_retribuicao_valor_conforme_cargo`. */
+  /** Cargo do catalogo (`hr_cargos`): o salario base da pessoa vem DELE -- ver
+   * `hr_retribuicao_valor_conforme_cargo`. Desde o fluxo 2 e DERIVADO do cargo
+   * em aberto de `pessoas_cargos`: so se muda por `rpc_hr_pessoa_mudar_cargo`
+   * (um UPDATE directo e recusado, HRC10). `null` so em fichas antigas. */
   cargo_id: string | null;
   /**
    * LEGADO. Texto livre da ronda 1, mantido por `20261120170000` como legenda.
@@ -561,9 +563,21 @@ export interface PessoaRetribuicao {
    * retribuicao -- ver `PessoaRetribuicaoCard`.
    */
   duodecimos_pct: 0 | 50 | 100 | null;
+  /**
+   * Porque nasceu esta versao (fluxo 2): `pessoa` (escolha da pessoa: subsidio e
+   * duodecimos), `cargo` (mudanca de cargo) ou `subida_cargo` (o salario do
+   * cargo subiu). Ausente nas leituras que nao a pedem.
+   */
+  origem?: OrigemRetribuicao;
   created_at?: string;
   updated_at?: string;
 }
+
+/** `pessoas_retribuicoes.origem` (fluxo 2). */
+export type OrigemRetribuicao = "pessoa" | "cargo" | "subida_cargo";
+
+/** Uma linha do historico de cargos da pessoa (`pessoas_cargos`, fluxo 2). */
+export type { PessoaCargoPeriodo } from "@/lib/hr/cargosPeriodos";
 
 /** Como um codigo de processamento se calcula (`hr_codigos_processamento.modo_calculo`, 20261201260000). */
 export type HrCodigoProcessamentoModoCalculo =

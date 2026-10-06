@@ -10,9 +10,16 @@
  * pode, oferece criar um ali mesmo. O campo aceita ficar vazio -- vazio
  * significa "o local predefinido da pessoa".
  *
+ * O CARGO E OBRIGATORIO E VEM DO CATALOGO (fluxo 2): toda a pessoa tem cargo e e
+ * do cargo que vem o salario base. O texto livre de antes e um selector dos cargos
+ * ACTIVOS. Sem cargos no catalogo nao se cria ficha: diz-se e, a quem pode ver
+ * cargos (`hr.pessoas.laborais.view`), oferece-se o ecra de Cargos NUM NOVO
+ * SEPARADOR -- navegar nesta janela perderia o rascunho da ficha.
+ *
  * "Entidade legal" NAO existe aqui: e sempre a da organizacao activa.
  */
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -38,6 +45,11 @@ interface SeccaoInformacoesLaboraisProps {
   podeCriarLocal: boolean;
   onCriarLocal: (dados: { nome: string; tipo: TipoLocal }) => Promise<string>;
   colegas: Array<{ id: string; nome_completo: string }>;
+  /** Os cargos ACTIVOS do catalogo (`hr_cargos`). */
+  cargos: Array<{ id: string; nome: string }>;
+  cargosALoad: boolean;
+  /** `hr.pessoas.laborais.view`: so quem pode ver cargos tem a ligacao para o ecra de Cargos. */
+  podeAbrirCargos: boolean;
 }
 
 export function SeccaoInformacoesLaborais({
@@ -49,6 +61,9 @@ export function SeccaoInformacoesLaborais({
   podeCriarLocal,
   onCriarLocal,
   colegas,
+  cargos,
+  cargosALoad,
+  podeAbrirCargos,
 }: SeccaoInformacoesLaboraisProps) {
   const { t } = useTranslation();
   const [dialogoLocal, setDialogoLocal] = useState(false);
@@ -78,22 +93,36 @@ export function SeccaoInformacoesLaborais({
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        <CampoTexto
-          id="hr-novo-cargo"
-          label={t("hr.columns.cargo")}
-          // Cargo, data de admissao e tipo de contrato sao do RH: levam
-          // asterisco mas nao bloqueiam a criacao -- ficam como pendencia. Por
-          // isso `recomendado` e nao `obrigatorio`: um leitor de ecra nao
-          // pode anunciar "obrigatorio" num campo que se pode deixar vazio.
-          recomendado
-          ajuda={
-            valor.cargo.trim() === ""
-              ? `${t("hr.form.ajudaCargo")} ${t("hr.form.avisoCampoRhPendente")}`
-              : t("hr.form.ajudaCargo")
-          }
-          valor={valor.cargo}
-          onChange={(v) => onPatch({ cargo: v })}
-        />
+        <div className="space-y-1.5">
+          <CampoSelect
+            id="hr-novo-cargo"
+            label={t("hr.columns.cargo")}
+            obrigatorio
+            ajuda={t("hr.form.ajudaCargo")}
+            valor={valor.cargo_id}
+            erro={erroDe("hr-novo-cargo")}
+            placeholder={cargosALoad ? t("common.loading") : undefined}
+            disabled={cargosALoad || cargos.length === 0}
+            opcoes={cargos.map((cargo) => ({ value: cargo.id, label: cargo.nome }))}
+            onChange={(v) => onPatch({ cargo_id: v })}
+          />
+          {!cargosALoad && cargos.length === 0 && (
+            <p className="text-xs text-muted-foreground">
+              {t("hr.form.cargoSemCatalogo")}{" "}
+              {podeAbrirCargos && (
+                // Novo separador: o rascunho desta ficha continua aqui, intacto.
+                <Link
+                  to="/rh/pessoas?tab=funcoes"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-primary underline underline-offset-2"
+                >
+                  {t("hr.cargos.tituloPagina")}
+                </Link>
+              )}
+            </p>
+          )}
+        </div>
 
         <div className="space-y-1.5">
           <CampoSelect

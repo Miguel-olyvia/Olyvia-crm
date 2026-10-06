@@ -11,13 +11,12 @@
  * calculada no cliente, para o ecra poder desenhar o botao certo e recusar
  * antes de gastar um pedido -- nunca para decidir sozinho o que a base aceita.
  */
+import { dataDeHojeBase } from "@/lib/hr/dataBase";
 import type { PessoaAfectacao } from "@/types/hr";
 
+/** O "hoje" da base (UTC, `current_date`): ver `dataBase.ts` para o porque. */
 export function dataDeHojeISO(): string {
-  const agora = new Date();
-  const mes = String(agora.getMonth() + 1).padStart(2, "0");
-  const dia = String(agora.getDate()).padStart(2, "0");
-  return `${agora.getFullYear()}-${mes}-${dia}`;
+  return dataDeHojeBase();
 }
 
 /**

@@ -138,6 +138,13 @@ export type BusinessFlow =
   // CORRIGIR desde 20261201040000). Mesma razao das horas contratadas.
   | "hr-retribuicao-load"
   | "hr-retribuicao-write"
+  // Cargo e salario (fluxo 2): o historico de cargos da pessoa (`pessoas_cargos`,
+  // `rpc_hr_pessoa_mudar_cargo`) e a RPC que muda o salario de um cargo
+  // (`rpc_hr_cargo_definir_salario`). As recusas de regra de negocio (HRC01..HRC12)
+  // NAO se reportam: sao a resposta correcta da base.
+  | "hr-pessoa-cargo-load"
+  | "hr-pessoa-cargo-write"
+  | "hr-cargo-definir-salario"
   | "hr-assiduidade-load"
   | "hr-assiduidade-write"
   | "hr-relatorio-assiduidade-mensal-load"
