@@ -54,6 +54,8 @@ export interface PessoaEquipa {
   ausencia_inicio: string | null;
   ausencia_fim: string | null;
   ausencia_origem: "crm" | "rh" | null;
+  /** Só cliente desta empresa no CRM: não pode ser da equipa (db/equipa.sql). */
+  e_cliente?: boolean;
 }
 
 export interface EquipaCrm {
@@ -102,6 +104,7 @@ function normalizar(r: Record<string, unknown>): PessoaEquipa {
     pode_ver_custos: !!p.pode_ver_custos,
     rh_disponivel: !!p.rh_disponivel,
     rh_ligado: !!p.rh_ligado,
+    e_cliente: !!p.e_cliente,
   };
 }
 
