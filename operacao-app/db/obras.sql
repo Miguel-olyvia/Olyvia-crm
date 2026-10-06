@@ -7338,11 +7338,17 @@ BEGIN
                                        AND p.organization_id = v_o.organization_id AND p.ativo
    WHERE us.skill_id = ANY (v_skills);
   v_sem := cardinality(v_para) = 0;
+  IF v_sem THEN
+    v_para := public.ops_obra_coordenacao(_obra);
+  ELSIF v_o.supervisor_id IS NOT NULL THEN
+    v_para := v_para || v_o.supervisor_id;
+  END IF;
 
-  -- Já avisado com as mesmas datas — a não ser que da outra vez não houvesse
-  -- marmorista e agora haja (avisa-se quem passou a ter a especialidade).
+  -- Já avisado com as mesmas datas e às mesmas pessoas → nada. Se há alguém
+  -- novo (passou a ter a especialidade, mudou o supervisor…), avisa-se; quem
+  -- já tinha o aviso aberto não o recebe duas vezes (ops_obra_notificar).
   SELECT * INTO v_ant FROM public.ops_obra_aviso WHERE obra_id = _obra AND tipo = 'bancada';
-  IF FOUND AND v_ant.chave = v_chave AND NOT (v_ant.sem_especialidade AND NOT v_sem) THEN
+  IF FOUND AND v_ant.chave = v_chave AND v_para <@ COALESCE(v_ant.destinatarios, '{}') THEN
     RETURN jsonb_build_object('bancada', true, 'novo', false, 'enviado_em', v_ant.enviado_em);
   END IF;
 
@@ -7361,9 +7367,6 @@ BEGIN
 
   IF v_sem THEN
     v_tit := v_tit || ' — ninguém com a especialidade Marmorista';
-    v_para := public.ops_obra_coordenacao(_obra);
-  ELSIF v_o.supervisor_id IS NOT NULL THEN
-    v_para := v_para || v_o.supervisor_id;
   END IF;
 
   FOREACH v_p IN ARRAY v_para LOOP
