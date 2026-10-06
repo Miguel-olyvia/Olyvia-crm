@@ -32,12 +32,6 @@ export const SidebarSkeleton = memo(function SidebarSkeleton() {
         </div>
       </div>
 
-      {/* Footer skeleton */}
-      <div className="shrink-0 p-2 border-t border-sidebar-border">
-        <div className="flex items-center justify-center w-full p-3">
-          <Skeleton className="w-5 h-5 rounded-lg bg-sidebar-accent/50" />
-        </div>
-      </div>
     </aside>
   );
 });

@@ -183,7 +183,10 @@ export function distanciaUteis(de: string, ate: string): number {
 
 export interface TarefaParaPlanear {
   id: string;
+  /** Pessoa × tempo. */
   minutos: number;
+  /** Quantas pessoas a fazem (default 1): no calendário dura minutos ÷ pessoas. */
+  pessoas?: number;
 }
 
 export interface Intervalo {
@@ -204,7 +207,7 @@ export function planearSequencial(
   const out = new Map<string, Intervalo>();
   let cursor = 0;
   for (const t of tarefas) {
-    const m = Math.max(1, Math.round(t.minutos));
+    const m = Math.max(1, Math.ceil(Math.round(t.minutos) / Math.max(1, t.pessoas ?? 1)));
     out.set(t.id, {
       inicio: somarDiasUteis(inicio, Math.floor(cursor / minutosPorDia)),
       fim: somarDiasUteis(inicio, Math.floor((cursor + m - 1) / minutosPorDia)),

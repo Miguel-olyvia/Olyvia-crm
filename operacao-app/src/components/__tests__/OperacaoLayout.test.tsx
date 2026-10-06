@@ -19,6 +19,7 @@ const auth = {
 };
 
 vi.mock("../../auth/AuthProvider", () => ({ useAuth: () => auth }));
+vi.mock("../../lib/supabase", () => ({ supabase: { from: () => ({ select: () => ({ in: () => ({ order: async () => ({ data: [], error: null }) }) }) }), storage: { from: () => ({ createSignedUrls: async () => ({ data: [], error: null }) }) }, auth: {}, functions: {}, rpc: async () => ({ data: null, error: null }) } }));
 
 function montar(rota = "/") {
   return render(
@@ -54,7 +55,7 @@ describe("OperacaoLayout — menu", () => {
     montar();
     const nav = screen.getByRole("navigation", { name: "Operações" });
     expect(within(nav).queryByText("Validar")).toBeNull();
-    expect(within(nav).getByText("Minhas tarefas")).toBeInTheDocument();
+    expect(within(nav).getByText("As minhas tarefas")).toBeInTheDocument();
   });
 
   it("nada no menu desliza na horizontal", () => {

@@ -1383,51 +1383,6 @@ export type Database = {
         }
         Relationships: []
       }
-      anew_entities_apagadas_backup: {
-        Row: {
-          backup_em: string
-          backup_motivo: string
-          created_at: string
-          created_by: string | null
-          display_name: string
-          first_name: string | null
-          id: string
-          last_name: string | null
-          search_text: string | null
-          status: string
-          type: string
-          updated_at: string
-        }
-        Insert: {
-          backup_em?: string
-          backup_motivo?: string
-          created_at?: string
-          created_by?: string | null
-          display_name: string
-          first_name?: string | null
-          id?: string
-          last_name?: string | null
-          search_text?: string | null
-          status?: string
-          type: string
-          updated_at?: string
-        }
-        Update: {
-          backup_em?: string
-          backup_motivo?: string
-          created_at?: string
-          created_by?: string | null
-          display_name?: string
-          first_name?: string | null
-          id?: string
-          last_name?: string | null
-          search_text?: string | null
-          status?: string
-          type?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
       anew_entity_addresses: {
         Row: {
           address_id: string
@@ -1518,45 +1473,6 @@ export type Database = {
           is_verified?: boolean | null
         }
         Update: {
-          created_at?: string
-          created_by?: string | null
-          email?: string
-          email_type?: string | null
-          entity_id?: string
-          id?: string
-          is_primary?: boolean | null
-          is_verified?: boolean | null
-        }
-        Relationships: []
-      }
-      anew_entity_emails_apagados_backup: {
-        Row: {
-          backup_em: string
-          backup_motivo: string
-          created_at: string
-          created_by: string | null
-          email: string
-          email_type: string | null
-          entity_id: string
-          id: string
-          is_primary: boolean | null
-          is_verified: boolean | null
-        }
-        Insert: {
-          backup_em?: string
-          backup_motivo?: string
-          created_at?: string
-          created_by?: string | null
-          email: string
-          email_type?: string | null
-          entity_id: string
-          id?: string
-          is_primary?: boolean | null
-          is_verified?: boolean | null
-        }
-        Update: {
-          backup_em?: string
-          backup_motivo?: string
           created_at?: string
           created_by?: string | null
           email?: string
@@ -2205,111 +2121,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      anew_leads_status_backup_20261204_conversao: {
-        Row: {
-          guardado_em: string
-          lead_id: string
-          status_antes: string | null
-        }
-        Insert: {
-          guardado_em?: string
-          lead_id: string
-          status_antes?: string | null
-        }
-        Update: {
-          guardado_em?: string
-          lead_id?: string
-          status_antes?: string | null
-        }
-        Relationships: []
-      }
-      anew_leads_status_backup_20261204_no_answer: {
-        Row: {
-          etapa_id: string | null
-          guardado_em: string
-          lead_id: string
-          status_antes: string | null
-        }
-        Insert: {
-          etapa_id?: string | null
-          guardado_em?: string
-          lead_id: string
-          status_antes?: string | null
-        }
-        Update: {
-          etapa_id?: string | null
-          guardado_em?: string
-          lead_id?: string
-          status_antes?: string | null
-        }
-        Relationships: []
-      }
-      anew_leads_status_backup_20261204_rejeicao: {
-        Row: {
-          etapa_id: string | null
-          guardado_em: string
-          lead_id: string
-          lost_reason_antes: string | null
-          status_antes: string | null
-        }
-        Insert: {
-          etapa_id?: string | null
-          guardado_em?: string
-          lead_id: string
-          lost_reason_antes?: string | null
-          status_antes?: string | null
-        }
-        Update: {
-          etapa_id?: string | null
-          guardado_em?: string
-          lead_id?: string
-          lost_reason_antes?: string | null
-          status_antes?: string | null
-        }
-        Relationships: []
-      }
-      anew_leads_workflow_stage_backup_20261204: {
-        Row: {
-          guardado_em: string
-          lead_id: string
-          pipeline_dirty_at_antes: string | null
-          workflow_stage_id_antes: string | null
-        }
-        Insert: {
-          guardado_em?: string
-          lead_id: string
-          pipeline_dirty_at_antes?: string | null
-          workflow_stage_id_antes?: string | null
-        }
-        Update: {
-          guardado_em?: string
-          lead_id?: string
-          pipeline_dirty_at_antes?: string | null
-          workflow_stage_id_antes?: string | null
-        }
-        Relationships: []
-      }
-      anew_leads_workflow_stage_backup_20261204_bmgest: {
-        Row: {
-          guardado_em: string
-          lead_id: string
-          pipeline_dirty_at_antes: string | null
-          workflow_stage_id_antes: string | null
-        }
-        Insert: {
-          guardado_em?: string
-          lead_id: string
-          pipeline_dirty_at_antes?: string | null
-          workflow_stage_id_antes?: string | null
-        }
-        Update: {
-          guardado_em?: string
-          lead_id?: string
-          pipeline_dirty_at_antes?: string | null
-          workflow_stage_id_antes?: string | null
-        }
-        Relationships: []
       }
       anew_membership_permission_scopes: {
         Row: {
@@ -7053,6 +6864,21 @@ export type Database = {
           diag_intervencao_descricao: string | null
           diag_intervencao_tipo: string | null
           diag_proteger_descricao: string | null
+          diag_altura_revestimento: string | null
+          diag_cliente_recusou_fotos: boolean | null
+          diag_distancia_entrada: string | null
+          diag_gas: string | null
+          diag_janela: boolean | null
+          diag_local_cortes: string | null
+          diag_m2_pavimento: number | null
+          diag_mobilada: string | null
+          diag_pe_direito_m: number | null
+          diag_perimetro_m: number | null
+          diag_pontos_agua: number | null
+          diag_pontos_eletricos: number | null
+          diag_portas_proteger: number | null
+          diag_tipo_area: string | null
+          diag_toalheiro: boolean | null
           estimate_max: number | null
           estimate_min: number | null
           id: string
@@ -7084,6 +6910,21 @@ export type Database = {
           diag_intervencao_descricao?: string | null
           diag_intervencao_tipo?: string | null
           diag_proteger_descricao?: string | null
+          diag_altura_revestimento?: string | null
+          diag_cliente_recusou_fotos?: boolean | null
+          diag_distancia_entrada?: string | null
+          diag_gas?: string | null
+          diag_janela?: boolean | null
+          diag_local_cortes?: string | null
+          diag_m2_pavimento?: number | null
+          diag_mobilada?: string | null
+          diag_pe_direito_m?: number | null
+          diag_perimetro_m?: number | null
+          diag_pontos_agua?: number | null
+          diag_pontos_eletricos?: number | null
+          diag_portas_proteger?: number | null
+          diag_tipo_area?: string | null
+          diag_toalheiro?: boolean | null
           estimate_max?: number | null
           estimate_min?: number | null
           id?: string
@@ -7115,6 +6956,21 @@ export type Database = {
           diag_intervencao_descricao?: string | null
           diag_intervencao_tipo?: string | null
           diag_proteger_descricao?: string | null
+          diag_altura_revestimento?: string | null
+          diag_cliente_recusou_fotos?: boolean | null
+          diag_distancia_entrada?: string | null
+          diag_gas?: string | null
+          diag_janela?: boolean | null
+          diag_local_cortes?: string | null
+          diag_m2_pavimento?: number | null
+          diag_mobilada?: string | null
+          diag_pe_direito_m?: number | null
+          diag_perimetro_m?: number | null
+          diag_pontos_agua?: number | null
+          diag_pontos_eletricos?: number | null
+          diag_portas_proteger?: number | null
+          diag_tipo_area?: string | null
+          diag_toalheiro?: boolean | null
           estimate_max?: number | null
           estimate_min?: number | null
           id?: string
@@ -10469,24 +10325,6 @@ export type Database = {
         }
         Relationships: []
       }
-      lead_contact_results_backup_20261204: {
-        Row: {
-          alterado_em: string
-          result_id: string
-          workflow_next_status_antes: string | null
-        }
-        Insert: {
-          alterado_em?: string
-          result_id: string
-          workflow_next_status_antes?: string | null
-        }
-        Update: {
-          alterado_em?: string
-          result_id?: string
-          workflow_next_status_antes?: string | null
-        }
-        Relationships: []
-      }
       lead_field_definitions: {
         Row: {
           campaign_id: string | null
@@ -10690,24 +10528,6 @@ export type Database = {
             referencedColumns: ["utilizador_id"]
           },
         ]
-      }
-      lead_pipeline_settings_backup_20261204_etapas56: {
-        Row: {
-          alterado_em: string
-          organization_id: string
-          sequential_flow_antes: boolean | null
-        }
-        Insert: {
-          alterado_em?: string
-          organization_id: string
-          sequential_flow_antes?: boolean | null
-        }
-        Update: {
-          alterado_em?: string
-          organization_id?: string
-          sequential_flow_antes?: boolean | null
-        }
-        Relationships: []
       }
       lead_qualification_rules: {
         Row: {
@@ -10982,42 +10802,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
-      }
-      lead_workflow_stages_rules_backup_20261204: {
-        Row: {
-          normalizado_em: string
-          reached_when_antes: Json | null
-          stage_id: string
-        }
-        Insert: {
-          normalizado_em?: string
-          reached_when_antes?: Json | null
-          stage_id: string
-        }
-        Update: {
-          normalizado_em?: string
-          reached_when_antes?: Json | null
-          stage_id?: string
-        }
-        Relationships: []
-      }
-      lead_workflow_stages_rules_backup_20261204_etapas56: {
-        Row: {
-          alterado_em: string
-          reached_when_antes: Json | null
-          stage_id: string
-        }
-        Insert: {
-          alterado_em?: string
-          reached_when_antes?: Json | null
-          stage_id: string
-        }
-        Update: {
-          alterado_em?: string
-          reached_when_antes?: Json | null
-          stage_id?: string
-        }
-        Relationships: []
       }
       leads_ai_config: {
         Row: {
@@ -25456,13 +25240,35 @@ export type Database = {
       }
       rpc_add_entity_delivery_address: {
         Args: {
+          p_acesso?: string
+          p_amianto?: string
+          p_animais?: boolean
+          p_ano_construcao?: number
+          p_area_util_m2?: number
+          p_canalizacao?: string
           p_city?: string
+          p_eletrica?: string
           p_entity_id: string
+          p_estacionamento?: string
           p_floor?: string
+          p_gas?: string
+          p_habitada_durante_obra?: boolean
+          p_impacto_percent?: number
+          p_n_andares?: number
+          p_n_casas_banho?: number
+          p_n_divisoes?: number
+          p_n_elevadores?: number
+          p_n_fracoes_por_andar?: number
+          p_notas_interior?: string
           p_number?: string
+          p_pavimento?: string
           p_postal_code?: string
+          p_quadro_diferencial?: boolean
           p_street: string
+          p_tem_elevador?: boolean
+          p_tipologia?: string
           p_unit?: string
+          p_zona_estacionamento?: string
         }
         Returns: Json
       }
@@ -25946,6 +25752,7 @@ export type Database = {
           p_address_number: string
           p_address_postal_code: string
           p_address_street: string
+          p_address_unit?: string
           p_client_type: string
           p_display_name?: string
           p_email?: string
@@ -27272,16 +27079,39 @@ export type Database = {
       rpc_list_entity_delivery_addresses: {
         Args: { p_entity_id: string }
         Returns: {
+          acesso: string
           address_id: string
+          amianto: string
+          animais: boolean
+          ano_construcao: number
+          area_util_m2: number
+          canalizacao: string
           city: string
           created_at: string
+          eletrica: string
           entity_address_id: string
+          estacionamento: string
           floor: string
           formatted: string
+          gas: string
+          habitada_durante_obra: boolean
+          has_building: boolean
+          impacto_percent: number
+          n_andares: number
+          n_casas_banho: number
+          n_divisoes: number
+          n_elevadores: number
+          n_fracoes_por_andar: number
+          notas_interior: string
           number: string
+          pavimento: string
           postal_code: string
+          quadro_diferencial: boolean
           street: string
+          tem_elevador: boolean
+          tipologia: string
           unit: string
+          zona_estacionamento: string
         }[]
       }
       rpc_manage_attribute_option_group: {
@@ -28701,9 +28531,11 @@ export type Database = {
       rpc_update_client: {
         Args: {
           p_address_city?: string
+          p_address_floor?: string
           p_address_number?: string
           p_address_postal_code?: string
           p_address_street?: string
+          p_address_unit?: string
           p_assigned_to: string
           p_clear_nif?: boolean
           p_client_id: string
@@ -28957,6 +28789,41 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      rpc_update_entity_delivery_address: {
+        Args: {
+          p_acesso?: string
+          p_amianto?: string
+          p_animais?: boolean
+          p_ano_construcao?: number
+          p_area_util_m2?: number
+          p_canalizacao?: string
+          p_city?: string
+          p_com_interior?: boolean
+          p_eletrica?: string
+          p_entity_address_id: string
+          p_estacionamento?: string
+          p_floor?: string
+          p_gas?: string
+          p_habitada_durante_obra?: boolean
+          p_impacto_percent?: number
+          p_n_andares?: number
+          p_n_casas_banho?: number
+          p_n_divisoes?: number
+          p_n_elevadores?: number
+          p_n_fracoes_por_andar?: number
+          p_notas_interior?: string
+          p_number?: string
+          p_pavimento?: string
+          p_postal_code?: string
+          p_quadro_diferencial?: boolean
+          p_street: string
+          p_tem_elevador?: boolean
+          p_tipologia?: string
+          p_unit?: string
+          p_zona_estacionamento?: string
+        }
+        Returns: Json
       }
       rpc_update_inventory_count_line_quantity: {
         Args: { p_counted_quantity: number; p_line_id: string }

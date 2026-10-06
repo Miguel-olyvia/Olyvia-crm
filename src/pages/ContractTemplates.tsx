@@ -953,7 +953,7 @@ const ContractTemplates = () => {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Eliminar Minuta</AlertDialogTitle>
-              <AlertDialogDescription>Tem a certeza que deseja eliminar esta minuta? Esta acção é irreversível.</AlertDialogDescription>
+              <AlertDialogDescription>Tem a certeza que deseja eliminar esta minuta? Esta ação é irreversível.</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>

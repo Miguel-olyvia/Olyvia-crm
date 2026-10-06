@@ -95,6 +95,20 @@ describe("planear em sequência (espelho de ops_obra_replanear_impl)", () => {
     expect(p.get("a")).toEqual({ inicio: "2026-10-08", fim: "2026-10-12" });
   });
 
+  it("com 2 pessoas, no calendário dura metade (como ops_obra_replanear_impl)", () => {
+    const p = planearSequencial(
+      [
+        { id: "a", minutos: 600, pessoas: 2 },
+        { id: "b", minutos: 180 },
+        { id: "c", minutos: 60 },
+      ],
+      "2026-10-12"
+    );
+    expect(p.get("a")).toEqual({ inicio: "2026-10-12", fim: "2026-10-12" });
+    expect(p.get("b")).toEqual({ inicio: "2026-10-12", fim: "2026-10-12" });
+    expect(p.get("c")).toEqual({ inicio: "2026-10-13", fim: "2026-10-13" });
+  });
+
   it("respeita outra capacidade diária", () => {
     const p = planearSequencial([{ id: "a", minutos: 240 }, { id: "b", minutos: 240 }], "2026-10-05", 240);
     expect(p.get("b")).toEqual({ inicio: "2026-10-06", fim: "2026-10-06" });

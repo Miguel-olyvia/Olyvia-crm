@@ -35,7 +35,9 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { usePostalCodeLookup } from "@/hooks/usePostalCodeLookup";
-import { contactSchema, contactCompanySchema, addressSchema } from "@/lib/validations";
+import { contactSchema, contactCompanySchema } from "@/lib/validations";
+import { CamposMorada } from "@/components/addresses/CamposMorada";
+import { limparErrosAlterados, normalizarMorada, primeiroErroMorada, validarMorada, type ErrosMorada, type MoradaCampos } from "@/lib/addresses/validarMorada";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
@@ -111,9 +113,17 @@ interface SelectedClientRecord extends ClientRecord {
 }
 
 interface ClientAddress {
-  street: string; number: string; floor_number: string; city: string;
+  street: string; number: string; floor_number: string; unit: string; city: string;
   postal_code: string; district: string; municipality: string; is_primary: boolean;
 }
+
+const EMPTY_CLIENT_ADDRESS: ClientAddress = { street: "", number: "", floor_number: "", unit: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true };
+
+// A morada do cliente usa os campos partilhados (CamposMorada), que chamam
+// "floor" ao andar; aqui o estado guarda-o em floor_number.
+const clientAddressToMorada = (a: ClientAddress): MoradaCampos => ({
+  street: a.street, number: a.number, floor: a.floor_number, unit: a.unit, postal_code: a.postal_code, city: a.city,
+});
 
 interface MatchesStatusFilterContext {
   getIdentity: (entityId: string) => { vat?: string | null } | undefined | null;
@@ -237,7 +247,12 @@ const AnewClients = () => {
   const [formData, setFormData] = useState({ first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351", vat: "", position: "", status: "active" });
   const [companyFormData, setCompanyFormData] = useState({ name: "", email: "", phone: "", phone_country_code: "+351", vat: "", website: "", industry: "", status: "active" });
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [addressData, setAddressData] = useState<ClientAddress>({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
+  const [addressData, setAddressData] = useState<ClientAddress>(EMPTY_CLIENT_ADDRESS);
+  const [addressErrors, setAddressErrors] = useState<ErrosMorada>({});
+  const handleMoradaChange = (next: MoradaCampos) => {
+    setAddressErrors(prev => limparErrosAlterados(prev, clientAddressToMorada(addressData), next));
+    setAddressData(prev => ({ ...prev, street: next.street, number: next.number, floor_number: next.floor, unit: next.unit, postal_code: next.postal_code, city: next.city }));
+  };
 
   const [searchQuery, setSearchQuery] = useState("");
   const debouncedSearch = useDebounce(searchQuery, 400);
@@ -1381,10 +1396,11 @@ const AnewClients = () => {
       return;
     }
     setFieldErrors({});
-    if (addressData.postal_code) {
-      const av = addressSchema.safeParse(addressData);
-      if (!av.success) { toast({ title: t('clients.toast.addressValidationError'), description: av.error.errors[0]?.message, variant: "destructive" }); return; }
-    }
+    // Morada opcional, mas se algum campo estiver preenchido aplicam-se as
+    // regras da morada de entrega (rua, código postal 0000-000, localidade).
+    const moradaValidacao = validarMorada(clientAddressToMorada(addressData), { obrigatoria: false });
+    setAddressErrors(moradaValidacao.erros);
+    if (!moradaValidacao.valido) { toast({ title: t('clients.toast.addressValidationError'), description: primeiroErroMorada(moradaValidacao.erros), variant: "destructive" }); return; }
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("User not authenticated");
@@ -1526,7 +1542,8 @@ const AnewClients = () => {
       setOpen(false); setClientType("person");
       setFormData({ first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351", vat: "", position: "", status: "active" });
       setCompanyFormData({ name: "", email: "", phone: "", phone_country_code: "+351", vat: "", website: "", industry: "", status: "active" });
-      setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
+      setAddressData(EMPTY_CLIENT_ADDRESS);
+      setAddressErrors({});
       setFieldErrors({});
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (error: any) { captureFlowError(error, "client-lifecycle"); const description = await getFriendlyErrorMessage(error); toast({ title: t('clients.toast.createError'), description, variant: "destructive" }); }
@@ -1560,18 +1577,20 @@ const AnewClients = () => {
     entityFields?: ClientEntityFields,
   ) => {
     const nif = entityFields?.vat ?? null;
+    const morada = normalizarMorada(clientAddressToMorada(addr));
     const { error } = await callNifWriteProxy("rpc_create_client_manual", {
       p_entity_id: entityId,
       p_organization_id: organizationId,
       p_root_organization_id: resolvedRootOrgId || organizationId,
       p_status: status || "active",
       p_client_type: entityType,
-      p_address_street: addr.street || null,
-      p_address_number: addr.number || null,
-      p_address_floor: addr.floor_number || null,
-      p_address_city: addr.city || null,
-      p_address_postal_code: addr.postal_code || null,
-      p_address_district: addr.district || null,
+      p_address_street: morada.street || null,
+      p_address_number: morada.number || null,
+      p_address_floor: morada.floor || null,
+      p_address_city: morada.city || null,
+      p_address_postal_code: morada.postal_code || null,
+      p_address_district: addr.district?.trim() || null,
+      p_address_unit: morada.unit || null,
       p_display_name: entityFields?.displayName ?? null,
       p_first_name: entityFields?.firstName ?? null,
       p_last_name: entityFields?.lastName ?? null,
@@ -1717,7 +1736,8 @@ const AnewClients = () => {
       setOpen(false); setPendingClientData(null); setClientDuplicateMatches([]);
       setFormData({ first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351", vat: "", position: "", status: "active" });
       setCompanyFormData({ name: "", email: "", phone: "", phone_country_code: "+351", vat: "", website: "", industry: "", status: "active" });
-      setAddressData({ street: "", number: "", floor_number: "", city: "", postal_code: "", district: "", municipality: "", is_primary: true });
+      setAddressData(EMPTY_CLIENT_ADDRESS);
+      setAddressErrors({});
       setClients([]); setHasMore(true); loadClients(0, true); setDashboardKey(prev => prev + 1);
     } catch (err: any) {
       captureFlowError(err, "client-lifecycle");
@@ -2305,7 +2325,7 @@ const AnewClients = () => {
                       {isColVisible('client_since') && <TableHead>Cliente Desde</TableHead>}
                       {isColVisible('origin') && <TableHead>Origem</TableHead>}
                       {isColVisible('status') && <TableHead>Estado</TableHead>}
-                      <TableHead className="text-right">Acções</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -2776,21 +2796,20 @@ const AnewClients = () => {
                 <Separator />
                 <div>
                   <h3 className="text-sm font-semibold mb-3">{t('clients.form.address')}</h3>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>{t('clients.form.postalCode')}</Label>
-                      <div className="flex gap-2">
-                        <Input value={addressData.postal_code} onChange={(e) => setAddressData({ ...addressData, postal_code: e.target.value })} />
-                        <Button type="button" variant="outline" onClick={handlePostalCodeLookup} disabled={postalLoading || !addressData.postal_code}>
-                          {postalLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t('clients.form.lookup')}
-                        </Button>
-                      </div>
+                  <CamposMorada
+                    valor={clientAddressToMorada(addressData)}
+                    onChange={handleMoradaChange}
+                    erros={addressErrors}
+                    idPrefix="new_client_morada"
+                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mt-3 items-end">
+                    <div className="space-y-1 sm:col-span-3">
+                      <Label htmlFor="new_client_morada_district" className="text-xs">{t('clients.form.district')}</Label>
+                      <Input id="new_client_morada_district" value={addressData.district} onChange={(e) => setAddressData({ ...addressData, district: e.target.value })} />
                     </div>
-                    <div className="space-y-2"><Label>{t('clients.form.street')}</Label><Input value={addressData.street} onChange={(e) => setAddressData({ ...addressData, street: e.target.value })} /></div>
-                    <div className="space-y-2"><Label>{t('clients.form.number')}</Label><Input value={addressData.number} onChange={(e) => setAddressData({ ...addressData, number: e.target.value })} /></div>
-                    <div className="space-y-2"><Label>{t('clients.form.floor')}</Label><Input value={addressData.floor_number} onChange={(e) => setAddressData({ ...addressData, floor_number: e.target.value })} /></div>
-                    <div className="space-y-2"><Label>{t('clients.form.city')}</Label><Input value={addressData.city} onChange={(e) => setAddressData({ ...addressData, city: e.target.value })} /></div>
-                    <div className="space-y-2"><Label>{t('clients.form.district')}</Label><Input value={addressData.district} onChange={(e) => setAddressData({ ...addressData, district: e.target.value })} /></div>
+                    <Button type="button" variant="outline" onClick={handlePostalCodeLookup} disabled={postalLoading || !addressData.postal_code}>
+                      {postalLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : t('clients.form.lookup')}
+                    </Button>
                   </div>
                 </div>
               </div>

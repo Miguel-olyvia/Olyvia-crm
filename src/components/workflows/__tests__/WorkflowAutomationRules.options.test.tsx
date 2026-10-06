@@ -158,7 +158,7 @@ describe("WorkflowAutomationRules — opções oferecidas", () => {
     ]);
   });
 
-  it("oferece apenas a acção que o motor executa (change_stage)", async () => {
+  it("oferece apenas a ação que o motor executa (change_stage)", async () => {
     await renderAndOpenForm();
 
     expect(await readOptions(COMBOBOX.actionType)).toEqual(["Mudar Fase"]);

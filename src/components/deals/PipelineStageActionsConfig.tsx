@@ -170,7 +170,7 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
         }))
       );
     } else {
-      // Read that fails and shows the empty state ("Nenhuma acção configurada"):
+      // Read that fails and shows the empty state ("Nenhuma ação configurada"):
       // report the raw cause to Sentry only. No toast — an empty panel is not
       // catastrophic (the user can reopen), and a toast would blur "no actions"
       // into "failed to load".
@@ -186,7 +186,7 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
 
   const handleAdd = async () => {
     if (!companyId || !selectedStageId || !selectedActionType) {
-      toast({ title: "Selecione estágio e tipo de acção", variant: "destructive" });
+      toast({ title: "Selecione estágio e tipo de ação", variant: "destructive" });
       return;
     }
 
@@ -213,9 +213,9 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
     if (error) {
       // Raw cause to Sentry; the user sees a normalized message only.
       captureFlowError(error, "config-partial-write");
-      toast({ title: "Não foi possível adicionar a acção", variant: "destructive" });
+      toast({ title: "Não foi possível adicionar a ação", variant: "destructive" });
     } else {
-      toast({ title: "Acção adicionada" });
+      toast({ title: "Ação adicionada" });
       resetForm();
       loadActions();
       onActionsChanged?.();
@@ -234,21 +234,21 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
       // raw cause to Sentry and tell the user, so they don't believe the switch
       // took effect when it did not.
       captureFlowError(error, "config-partial-write");
-      toast({ title: "Não foi possível actualizar a acção", variant: "destructive" });
+      toast({ title: "Não foi possível actualizar a ação", variant: "destructive" });
     }
   };
 
   const handleDelete = async (id: string) => {
     const { error } = await (supabase.from(tableName as any) as any).delete().eq("id", id);
     if (!error) {
-      toast({ title: "Acção removida" });
+      toast({ title: "Ação removida" });
       loadActions();
       onActionsChanged?.();
     } else {
       // Destructive action that failed silently until now: raw cause to Sentry
       // and a normalized destructive toast, symmetric to the success toast.
       captureFlowError(error, "config-partial-write");
-      toast({ title: "Não foi possível remover a acção", variant: "destructive" });
+      toast({ title: "Não foi possível remover a ação", variant: "destructive" });
     }
   };
 
@@ -294,7 +294,7 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
         <div>
           <h4 className="font-medium flex items-center gap-2">
             <Zap className="w-4 h-4 text-amber-500" />
-            Acções – {moduleLabel}
+            Ações – {moduleLabel}
           </h4>
           <p className="text-xs text-muted-foreground">
             Automações quando o estado muda neste módulo
@@ -302,7 +302,7 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
         </div>
         <Button size="sm" onClick={() => setIsFormOpen(true)}>
           <Plus className="w-4 h-4 mr-1" />
-          Nova Acção
+          Nova Ação
         </Button>
       </div>
 
@@ -310,7 +310,7 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
         <Card>
           <CardContent className="py-6 text-center">
             <Zap className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
-            <p className="text-sm text-muted-foreground">Nenhuma acção configurada para {moduleLabel}</p>
+            <p className="text-sm text-muted-foreground">Nenhuma ação configurada para {moduleLabel}</p>
           </CardContent>
         </Card>
       ) : (
@@ -367,7 +367,7 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
       <Collapsible open={isFormOpen} onOpenChange={setIsFormOpen}>
         <CollapsibleTrigger asChild>
           <Button variant="ghost" className="w-full justify-between" size="sm">
-            Nova Acção
+            Nova Ação
             {isFormOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </Button>
         </CollapsibleTrigger>
@@ -395,10 +395,10 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Tipo de Acção *</Label>
+                  <Label>Tipo de Ação *</Label>
                   <Select value={selectedActionType} onValueChange={setSelectedActionType}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecionar acção..." />
+                      <SelectValue placeholder="Selecionar ação..." />
                     </SelectTrigger>
                     <SelectContent>
                       {Object.entries(actionLabels).map(([key, meta]) => (
@@ -441,7 +441,7 @@ export function PipelineStageActionsConfig({ stages, companyId, module, moduleLa
 
               <div className="flex justify-end gap-2">
                 <Button variant="outline" size="sm" onClick={resetForm}>Cancelar</Button>
-                <Button size="sm" onClick={handleAdd}>Adicionar Acção</Button>
+                <Button size="sm" onClick={handleAdd}>Adicionar Ação</Button>
               </div>
             </CardContent>
           </Card>

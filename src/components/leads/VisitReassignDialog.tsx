@@ -719,7 +719,7 @@ export function VisitReassignDialog({
 
       const anewUserId = anewUserData.id;
 
-      // Data + recurso da visita numa só transacção. A base alinha o dono da
+      // Data + recurso da visita numa só transação. A base alinha o dono da
       // lead/cliente e as outras visitas futuras dessa ficha, e devolve o que mudou.
       const { data: reassignData, error: reassignError } = await supabase.rpc("rpc_reassign_visit", {
         p_item_id: visit.id,

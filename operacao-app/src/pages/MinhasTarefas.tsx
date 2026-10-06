@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { ErroDeDados, ErroDeEscrita } from "../lib/dados";
 import {
@@ -16,6 +16,11 @@ import { ObraCronometro, ObraExtra } from "../components/ObraIcones";
 import { ObraTarefaEstadoBadge } from "../components/ObraEstadoBadge";
 import ObraJustificacao from "../components/ObraJustificacao";
 import { RegistarExtra } from "../components/ObraExtras";
+import FotosTarefa from "../components/FotosTarefa";
+import ObraAtraso from "../components/ObraAtraso";
+import ObraMedidaReal from "../components/ObraMedidaReal";
+import { medidaPedeReal } from "../domain/planeamento";
+import { rotuloMotivoAtraso } from "../domain/atrasos";
 import {
   acoesDoExecutor,
   formatarCronometro,
@@ -26,7 +31,9 @@ import {
   precisaJustificacao,
   type MotivoDesvio,
 } from "../domain/obras";
+import FichaLocal from "../components/FichaLocal";
 import { data as formatarData } from "../lib/formatar";
+import NomeTarefa from "../components/NomeTarefa";
 
 /**
  * As minhas tarefas — o ecrã do executor, no telemóvel, em obra.
@@ -52,6 +59,11 @@ export default function MinhasTarefas() {
   const [expandida, setExpandida] = useState<string | null>(null);
   const [justificar, setJustificar] = useState<{ tarefa: TarefaObra; obrigatoria: boolean; reais: number } | null>(null);
   const [extra, setExtra] = useState<TarefaObra | null>(null);
+  const [atrasar, setAtrasar] = useState<TarefaObra | null>(null);
+  const [avisoAtraso, setAvisoAtraso] = useState<string | null>(null);
+  // A medida real de cada tarefa, dita antes de a dar por feita.
+  const [medir, setMedir] = useState<TarefaObra | null>(null);
+  const medidas = useRef<Record<string, number>>({});
 
   const carregar = useCallback(async () => {
     if (!activeOrgId || !businessUserId) return;
@@ -102,9 +114,14 @@ export default function MinhasTarefas() {
     };
   }, [tarefas, aberto, hoje]);
 
-  const correr = async (t: TarefaObra, acao: "iniciar" | "pausar" | "concluir") => {
+  const correr = async (t: TarefaObra, acao: "iniciar" | "pausar" | "concluir", medidaPedida = false) => {
     setErroAcao(null);
     if (acao === "concluir") {
+      // Tarefa que mede trabalho (m², pontos…): primeiro "quanto fizeste?".
+      if (!medidaPedida && medidaPedeReal(t.medida) && t.medida_qt != null) {
+        setMedir(t);
+        return;
+      }
       const reais = reaisAoVivo(t);
       const obrigatoria = precisaJustificacao(reais, t.minutos_previstos, t.tolerancia_percent);
       if (obrigatoria) {
@@ -130,7 +147,13 @@ export default function MinhasTarefas() {
     setAGravar(t.id);
     setErroAcao(null);
     try {
-      await terminarTarefa({ tarefaId: t.id, concluir: true, motivo, nota: nota || null });
+      await terminarTarefa({
+        tarefaId: t.id,
+        concluir: true,
+        motivo,
+        nota: nota || null,
+        ...(medidas.current[t.id] != null ? { medidaReal: medidas.current[t.id] } : {}),
+      });
       setJustificar(null);
       setRecarga((r) => r + 1);
     } catch (e) {
@@ -200,7 +223,7 @@ export default function MinhasTarefas() {
             <p className="truncate text-[11px] font-medium uppercase tracking-wide text-slate-400">
               {t.obra_codigo} · {t.fase_ordem}. {t.fase_nome}
             </p>
-            <p className="mt-0.5 text-base font-semibold leading-snug text-slate-900">{t.nome}</p>
+            <NomeTarefa nome={t.nome} className="mt-0.5 text-base font-semibold leading-snug text-slate-900" />
             <p className="mt-0.5 truncate text-xs text-slate-500">
               {t.obra_titulo}
               {t.obra_morada && (
@@ -216,7 +239,18 @@ export default function MinhasTarefas() {
                 previsto <b className="font-mono tabular">{formatarMinutos(t.minutos_previstos)}</b>
               </span>
               {t.inicio_planeado && <span className="text-xs text-slate-400">{formatarData(t.inicio_planeado)}</span>}
+              {t.atrasada_inicio && (
+                <span className="inline-flex items-center gap-1 rounded-md bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-700">
+                  <AlertTriangle width={11} height={11} /> devia ter começado
+                </span>
+              )}
             </div>
+            {t.ultimo_atraso && (
+              <p className="mt-1 text-xs text-amber-800">
+                Atraso registado ({rotuloMotivoAtraso(t.ultimo_atraso.motivo)})
+                {t.ultimo_atraso.novo_fim && <> · novo fim {formatarData(t.ultimo_atraso.novo_fim)}</>}
+              </p>
+            )}
           </div>
           {!destaque && (
             <ChevronRight
@@ -279,6 +313,36 @@ export default function MinhasTarefas() {
 
         {aberta && (
           <div className="space-y-3 border-t border-slate-100 bg-slate-50/50 px-4 py-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Onde</p>
+              {t.obra_morada ? (
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(t.obra_morada)}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-0.5 inline-flex items-start gap-1.5 text-sm font-medium text-brand"
+                >
+                  <MapPin width={14} height={14} className="mt-0.5 shrink-0" />
+                  <span>
+                    {t.obra_morada} <span className="font-normal text-slate-400">· abrir no mapa</span>
+                  </span>
+                </a>
+              ) : (
+                <p className="mt-0.5 text-sm text-slate-400">Sem morada na obra — pergunta ao gestor.</p>
+              )}
+              <p className="mt-0.5 text-xs text-slate-500">
+                {t.obra_codigo} · {t.obra_titulo}
+                {t.inicio_planeado &&
+                  ` · ${formatarData(t.inicio_planeado)}${t.fim_planeado && t.fim_planeado !== t.inicio_planeado ? ` a ${formatarData(t.fim_planeado)}` : ""}`}
+              </p>
+            </div>
+            <FichaLocal obraId={t.obra_id} compacta />
+            {t.material_chega_em && (
+              <p className="text-xs text-slate-600">
+                Material chega a <b>{formatarData(t.material_chega_em)}</b>
+                {t.material_chega_nota && <> — {t.material_chega_nota}</>}
+              </p>
+            )}
             {[
               ["Procedimento", t.procedimento],
               ["Materiais", t.materiais],
@@ -296,6 +360,8 @@ export default function MinhasTarefas() {
                 Só depois de: <b>{dep.nome}</b>
               </p>
             )}
+            <FotosTarefa tarefa={t} podeEnviar euId={businessUserId} />
+
             <button
               type="button"
               onClick={() => setExtra(t)}
@@ -303,6 +369,15 @@ export default function MinhasTarefas() {
             >
               <ObraExtra width={15} height={15} /> Encontrei um imprevisto (trabalho extra)
             </button>
+            {(t.estado === "por_fazer" || t.estado === "em_curso" || t.estado === "rejeitada") && (
+              <button
+                type="button"
+                onClick={() => setAtrasar(t)}
+                className="flex items-center gap-1.5 text-sm font-medium text-amber-700"
+              >
+                <AlertTriangle width={15} height={15} /> Vai atrasar — avisar o supervisor
+              </button>
+            )}
           </div>
         )}
 
@@ -373,6 +448,15 @@ export default function MinhasTarefas() {
         </p>
       )}
 
+      {avisoAtraso && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2.5 text-sm text-amber-900" role="status">
+          {avisoAtraso}{" "}
+          <button type="button" className="text-xs underline" onClick={() => setAvisoAtraso(null)}>
+            fechar
+          </button>
+        </p>
+      )}
+
       {aberto && !grupos.aCorrer.length && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
           Tens um relógio a correr numa tarefa que já não está na tua lista. Pede ao gestor para o fechar.
@@ -416,6 +500,37 @@ export default function MinhasTarefas() {
             setErroAcao(null);
           }}
           aoConfirmar={(m, n) => void concluir(justificar.tarefa, m, n)}
+        />
+      )}
+
+      {medir && (
+        <ObraMedidaReal
+          medida={medir.medida ?? ""}
+          prevista={medir.medida_qt == null ? null : Number(medir.medida_qt)}
+          aoCancelar={() => setMedir(null)}
+          aoConfirmar={(v) => {
+            const t = medir;
+            setMedir(null);
+            if (v != null) medidas.current[t.id] = v;
+            else delete medidas.current[t.id];
+            void correr(t, "concluir", true);
+          }}
+        />
+      )}
+
+      {atrasar && (
+        <ObraAtraso
+          tarefa={atrasar}
+          aoFechar={() => setAtrasar(null)}
+          aoGravar={(r) => {
+            setAtrasar(null);
+            setAvisoAtraso(
+              `Atraso registado: "${atrasar.nome}" acaba a ${formatarData(r.novo_fim)}.` +
+                (r.empurradas.length ? ` ${r.empurradas.length} tarefa(s) a seguir foram empurradas.` : "") +
+                " O supervisor já vê."
+            );
+            setRecarga((x) => x + 1);
+          }}
         />
       )}
 

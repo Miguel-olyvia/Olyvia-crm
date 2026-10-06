@@ -3,7 +3,6 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { ErroDeDados, ErroDeEscrita, listarClientes, listarLocais, type Cliente, type LocalRow } from "../lib/dados";
 import {
-  custosHora,
   gravarAtivo,
   gravarCategoria,
   gravarChecklist,
@@ -12,7 +11,6 @@ import {
   gravarPerfil,
   listarCategorias,
   listarMedicoes,
-  listarPessoas,
   listarTodasChecklists,
   medicoesDasTarefas,
   opcoesDasMedicoes,
@@ -22,10 +20,18 @@ import {
   type Checklist,
   type MedicaoDef,
   type OpcaoDef,
-  type Pessoa,
   type TarefaParaGravar,
 } from "../lib/config";
 import { ativosDoLocal, type AtivoRow } from "../lib/dados";
+import { gravarPlaneamentoPessoa, listarSkills, type Skill } from "../lib/obras";
+import { listarEquipaCrm, type EquipaCrm, type PessoaEquipa } from "../lib/equipaCrm";
+import {
+  EquipaOrigem,
+  EquipaPessoaCartao,
+  camposCrm,
+  camposRh,
+  textoAusencia,
+} from "../components/EquipaPessoa";
 import {
   Badge,
   Button,
@@ -42,9 +48,8 @@ import {
   cx,
 } from "../components/ui";
 import { Building, Check, Layers, Plus, User, X } from "../components/icons";
-import { euros } from "../lib/formatar";
 import { minutosParaSegundos, segundosParaMinutos } from "../domain/tempo";
-import { ROTULO_FUNCAO, ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type Funcao, type TipoTarefa } from "../domain/tipos";
+import { ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type TipoTarefa } from "../domain/tipos";
 
 /**
  * Onde se monta a operação.
@@ -1177,13 +1182,18 @@ function FormChecklist({
 
 /* ══════════════════════════════ 3. Equipa ═══════════════════════════════ */
 
+/**
+ * A equipa vem do Olyvia: as pessoas, o papel, a equipa, os distritos da
+ * agenda e (havendo RH) a ficha. Nada disso se escreve aqui — mostra-se com a
+ * origem ao lado. O que é de Operações (função, ativo, especialidades,
+ * zona-base como override, custo/hora) continua a editar-se aqui.
+ */
 function PainelEquipa() {
   const { activeOrgId, businessUserId } = useAuth();
-  const [pessoas, setPessoas] = useState<Pessoa[]>([]);
-  const [custos, setCustos] = useState<Map<string, number | null>>(new Map());
+  const [equipa, setEquipa] = useState<EquipaCrm | null>(null);
   const [estado, setEstado] = useState<Estado>({ carregar: true, erro: null });
   const [recarga, setRecarga] = useState(0);
-  const [aEditar, setAEditar] = useState<Pessoa | null>(null);
+  const [aEditar, setAEditar] = useState<PessoaEquipa | null>(null);
 
   useEffect(() => {
     if (!activeOrgId) return;
@@ -1191,10 +1201,9 @@ function PainelEquipa() {
     setEstado({ carregar: true, erro: null });
     (async () => {
       try {
-        const [ps, cs] = await Promise.all([listarPessoas(activeOrgId), custosHora(activeOrgId)]);
+        const eq = await listarEquipaCrm(activeOrgId);
         if (!vivo) return;
-        setPessoas(ps);
-        setCustos(cs);
+        setEquipa(eq);
         setEstado({ carregar: false, erro: null });
       } catch (e) {
         if (vivo) setEstado({ carregar: false, erro: mensagem(e, "a equipa") });
@@ -1204,64 +1213,75 @@ function PainelEquipa() {
   }, [activeOrgId, recarga]);
 
   if (estado.carregar) return <Carregando />;
-  if (estado.erro) return <ErrorState message={estado.erro} onRetry={() => setRecarga((r) => r + 1)} />;
+  if (estado.erro || !equipa) {
+    return <ErrorState message={estado.erro ?? "Algo correu mal a carregar a equipa."} onRetry={() => setRecarga((r) => r + 1)} />;
+  }
 
-  const dentro = pessoas.filter((p) => p.em_operacoes && p.ativo);
-  const vejoCustos = custos.size > 0;
+  const { pessoas, rhDisponivel, podeVerCustos: vejoCustos, ligadaAoCrm } = equipa;
+  const emOps = pessoas.filter((p) => p.em_operacoes);
+  const fora = pessoas.filter((p) => !p.em_operacoes);
+  const ativos = emOps.filter((p) => p.ativo);
 
   return (
     <>
       <p className="text-sm text-slate-500">
-        {dentro.length === 0
+        {ativos.length === 0
           ? "Ainda ninguém em Operações."
-          : `${dentro.length} ${dentro.length === 1 ? "pessoa" : "pessoas"} em Operações, de ${pessoas.length} com acesso ao Olyvia.`}
+          : `${ativos.length} ${ativos.length === 1 ? "pessoa" : "pessoas"} em Operações, de ${pessoas.length} com acesso ao Olyvia.`}{" "}
+        As pessoas, o papel, a equipa e os distritos vêm do CRM
+        {rhDisponivel ? "; o cargo, o contrato e as ausências vêm do RH" : ""} — mudam-se lá.
       </p>
 
-      <Card className="divide-y divide-slate-100">
-        {pessoas.map((p) => (
-          <div key={p.utilizador_id} className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-slate-800">
-                {p.nome}
-                {p.utilizador_id === businessUserId && (
-                  <span className="ml-2 text-xs font-normal text-slate-400">(tu)</span>
-                )}
-              </p>
-              <p className="mt-0.5 text-xs text-slate-500">{p.email}</p>
-            </div>
+      {!ligadaAoCrm && (
+        <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          Os dados do CRM e do RH aparecem depois de instalar <code>db/pessoas-crm.sql</code>. Até lá
+          mostra-se só o que é de Operações.
+        </p>
+      )}
 
-            <div className="flex flex-wrap items-center gap-3">
-              {p.em_operacoes ? (
-                <>
-                  <Badge
-                    className={
-                      p.ativo
-                        ? "bg-brand-50 text-brand-800 ring-brand-200"
-                        : "bg-slate-100 text-slate-500 ring-slate-200"
-                    }
-                  >
-                    {ROTULO_FUNCAO[p.funcao as Funcao] ?? p.funcao}
-                    {!p.ativo && " · inativo"}
-                  </Badge>
-                  {vejoCustos && (
-                    <span className="font-mono text-xs tabular text-slate-500">
-                      {custos.get(p.utilizador_id) != null
-                        ? `${euros(custos.get(p.utilizador_id))}/h`
-                        : "sem custo/h"}
-                    </span>
-                  )}
-                </>
-              ) : (
-                <span className="text-xs text-slate-400">fora de Operações</span>
-              )}
+      {emOps.length > 0 && (
+        <Card className="divide-y divide-slate-100">
+          {emOps.map((p) => (
+            <EquipaPessoaCartao
+              key={p.utilizador_id}
+              pessoa={p}
+              eu={p.utilizador_id === businessUserId}
+              rhDisponivel={rhDisponivel}
+              acao={
+                <Button size="sm" variant="secondary" onClick={() => setAEditar(p)}>
+                  Editar
+                </Button>
+              }
+            />
+          ))}
+        </Card>
+      )}
 
-              <Button size="sm" variant="secondary" onClick={() => setAEditar(p)}>
-                {p.em_operacoes ? "Editar" : "Adicionar"}
-              </Button>
-            </div>
+      {fora.length > 0 && (
+        <section className="space-y-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">Pessoas do Olyvia sem acesso a Operações</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              Já existem no Olyvia — não se criam de novo. Dar-lhes uma função é o que lhes abre Operações.
+            </p>
           </div>
-        ))}
-      </Card>
+          <Card className="divide-y divide-slate-100">
+            {fora.map((p) => (
+              <EquipaPessoaCartao
+                key={p.utilizador_id}
+                pessoa={p}
+                eu={p.utilizador_id === businessUserId}
+                rhDisponivel={rhDisponivel}
+                acao={
+                  <Button size="sm" variant="secondary" onClick={() => setAEditar(p)}>
+                    <Plus width={13} height={13} /> Dar função
+                  </Button>
+                }
+              />
+            ))}
+          </Card>
+        </section>
+      )}
 
       {!vejoCustos && (
         <p className="text-xs text-slate-400">
@@ -1273,8 +1293,8 @@ function PainelEquipa() {
       {aEditar && (
         <FormPerfil
           pessoa={aEditar}
-          custoAtual={custos.get(aEditar.utilizador_id) ?? null}
           podeVerCusto={vejoCustos}
+          rhDisponivel={rhDisponivel}
           aoFechar={() => setAEditar(null)}
           aoGravar={() => { setAEditar(null); setRecarga((r) => r + 1); }}
         />
@@ -1285,26 +1305,52 @@ function PainelEquipa() {
 
 function FormPerfil({
   pessoa,
-  custoAtual,
   podeVerCusto,
+  rhDisponivel,
   aoFechar,
   aoGravar,
 }: {
-  pessoa: Pessoa;
-  custoAtual: number | null;
+  pessoa: PessoaEquipa;
   podeVerCusto: boolean;
+  rhDisponivel: boolean;
   aoFechar: () => void;
   aoGravar: () => void;
 }) {
   const { activeOrgId } = useAuth();
   const [funcao, setFuncao] = useState(pessoa.funcao ?? "tecnico");
-  const [custo, setCusto] = useState(custoAtual?.toString() ?? "");
+  const [custo, setCusto] = useState(pessoa.custo_hora?.toString() ?? "");
   const [ativo, setAtivo] = useState(pessoa.ativo ?? true);
+  const [zona, setZona] = useState(pessoa.zona_base ?? "");
+  const [skills, setSkills] = useState<Skill[]>([]);
+  const [minhas, setMinhas] = useState<string[]>(pessoa.skills);
   const { aGravar, erro, gravar } = useGravar();
+
+  // As especialidades da organização, para escolher. As desta pessoa já vêm
+  // com ela (rpc_ops_equipa_crm).
+  useEffect(() => {
+    if (!activeOrgId) return;
+    let vivo = true;
+    listarSkills(activeOrgId)
+      .then((k) => { if (vivo) setSkills(k); })
+      .catch(() => undefined);
+    return () => { vivo = false; };
+  }, [activeOrgId]);
+
+  const crm = camposCrm(pessoa);
+  const rh = pessoa.rh_ligado ? camposRh(pessoa) : [];
+  const ausencia = textoAusencia(pessoa);
+  const distritos = pessoa.distritos?.length ? pessoa.distritos.join(", ") : null;
+
+  // A zona e as especialidades só se gravam se mudaram: quem dá uma função a
+  // alguém novo não tem de passar pela regra do planeamento.
+  const mudouPlaneamento =
+    (zona.trim() || null) !== (pessoa.zona_base ?? null) ||
+    minhas.length !== pessoa.skills.length ||
+    minhas.some((s) => !pessoa.skills.includes(s));
 
   return (
     <Modal
-      title={pessoa.em_operacoes ? `Editar ${pessoa.nome}` : `Adicionar ${pessoa.nome}`}
+      title={pessoa.em_operacoes ? `Editar ${pessoa.nome}` : `Dar acesso a Operações — ${pessoa.nome}`}
       onClose={aoFechar}
       footer={
         <>
@@ -1320,19 +1366,54 @@ function FormPerfil({
                     funcao,
                     custoHora: podeVerCusto && custo.trim() ? Number(custo.replace(",", ".")) : null,
                     ativo,
-                  }),
+                  }).then(() =>
+                    mudouPlaneamento
+                      ? gravarPlaneamentoPessoa({
+                          orgId: activeOrgId!,
+                          utilizadorId: pessoa.utilizador_id,
+                          zona: zona.trim() || null,
+                          skills: minhas,
+                        })
+                      : undefined
+                  ),
                 aoGravar
               )
             }
           >
-            {aGravar ? "A gravar…" : "Gravar"}
+            {aGravar ? "A gravar…" : pessoa.em_operacoes ? "Gravar" : "Dar acesso"}
           </Button>
         </>
       }
     >
       <div className="space-y-4">
+        {(crm.length > 0 || rh.length > 0 || ausencia) && (
+          <div className="space-y-1.5 rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+              Só de leitura — muda-se no {rhDisponivel ? "CRM ou no RH" : "CRM"}
+            </p>
+            {crm.map(([k, v]) => (
+              <p key={`crm-${k}`} className="flex flex-wrap items-baseline gap-2">
+                <EquipaOrigem de="crm" />
+                <span className="text-slate-400">{k}:</span> {v}
+              </p>
+            ))}
+            {rh.map(([k, v]) => (
+              <p key={`rh-${k}`} className="flex flex-wrap items-baseline gap-2">
+                <EquipaOrigem de="rh" />
+                <span className="text-slate-400">{k}:</span> {v}
+              </p>
+            ))}
+            {ausencia && (
+              <p className="flex flex-wrap items-baseline gap-2">
+                <EquipaOrigem de={pessoa.ausencia_origem ?? "crm"} />
+                <span className="font-medium text-amber-700">{ausencia}</span>
+              </p>
+            )}
+          </div>
+        )}
+
         <Field
-          label="Função"
+          label="Função em Operações"
           hint="Um técnico executa. Um supervisor acompanha e valida o trabalho feito, sem mexer em definições nem custos. Um gestor distribui, marca datas e vê custos."
         >
           <Select value={funcao} onChange={(e) => setFuncao(e.target.value)} className="w-full">
@@ -1355,6 +1436,47 @@ function FormPerfil({
               placeholder="18.50"
               className="w-40 font-mono"
             />
+          </Field>
+        )}
+
+        <Field
+          label="Zona-base (override de Operações)"
+          hint={
+            distritos
+              ? `A agenda do CRM já diz: ${distritos}. Escreve aqui só se, para as obras, a zona for outra.`
+              : "A agenda do CRM não tem distritos para esta pessoa. Ex.: Lisboa, Margem Sul — quem é da zona da obra é escolhido primeiro."
+          }
+        >
+          <Input
+            value={zona}
+            onChange={(e) => setZona(e.target.value)}
+            placeholder={distritos ?? "Lisboa"}
+            className="w-56"
+          />
+        </Field>
+
+        {skills.length > 0 && (
+          <Field label="Especialidades" hint="As tarefas que pedem uma especialidade vão primeiro para quem a tem.">
+            <div className="flex flex-wrap gap-2">
+              {skills.map((k) => {
+                const tem = minhas.includes(k.id);
+                return (
+                  <button
+                    key={k.id}
+                    type="button"
+                    aria-pressed={tem}
+                    onClick={() => setMinhas((m) => (tem ? m.filter((x) => x !== k.id) : [...m, k.id]))}
+                    className={
+                      tem
+                        ? "rounded-full bg-brand-50 px-3 py-1 text-xs font-medium text-brand-800 ring-1 ring-inset ring-brand-200"
+                        : "rounded-full bg-white px-3 py-1 text-xs text-slate-600 ring-1 ring-inset ring-slate-200 hover:bg-slate-50"
+                    }
+                  >
+                    {k.nome}
+                  </button>
+                );
+              })}
+            </div>
           </Field>
         )}
 

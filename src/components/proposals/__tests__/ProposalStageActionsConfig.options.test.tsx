@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach } from "vitest";
 import { render, screen, waitFor, within, fireEvent } from "@testing-library/react";
 
 /**
- * `send_notification` deixou de ser oferecido como acção nova nesta superfície:
+ * `send_notification` deixou de ser oferecido como ação nova nesta superfície:
  * a string não existe em lado nenhum de `supabase/`, logo nada a executa. O
  * teste lê as opções realmente renderizadas pelo Radix, não a constante.
  */
@@ -63,14 +63,14 @@ async function openActionTypeOptions(): Promise<string[]> {
 
   await waitFor(() =>
     expect(
-      screen.getByText("Nenhuma acção automática configurada")
+      screen.getByText("Nenhuma ação automática configurada")
     ).toBeInTheDocument()
   );
 
-  fireEvent.click(screen.getAllByRole("button", { name: /Nova Acção/i })[0]);
-  await screen.findByText("Tipo de Acção *");
+  fireEvent.click(screen.getAllByRole("button", { name: /Nova Ação/i })[0]);
+  await screen.findByText("Tipo de Ação *");
 
-  // 0 = Fase, 1 = Tipo de Acção
+  // 0 = Fase, 1 = Tipo de Ação
   fireEvent.keyDown(screen.getAllByRole("combobox")[1], { key: "Enter" });
   const listbox = await screen.findByRole("listbox");
   return within(listbox)
@@ -79,11 +79,11 @@ async function openActionTypeOptions(): Promise<string[]> {
 }
 
 describe("ProposalStageActionsConfig — opções oferecidas", () => {
-  it("não oferece 'Enviar Notificação' como acção nova", async () => {
+  it("não oferece 'Enviar Notificação' como ação nova", async () => {
     expect(await openActionTypeOptions()).not.toContain("Enviar Notificação");
   });
 
-  it("não oferece 'Enviar Email' como acção nova — o motor já dispara templates de email a cada mudança de fase da proposta (trigger-email-template), ter as duas portas duplicava envios", async () => {
+  it("não oferece 'Enviar Email' como ação nova — o motor já dispara templates de email a cada mudança de fase da proposta (trigger-email-template), ter as duas portas duplicava envios", async () => {
     expect(await openActionTypeOptions()).not.toContain("Enviar Email");
   });
 

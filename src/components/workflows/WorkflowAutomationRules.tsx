@@ -87,7 +87,7 @@ const ENTITY_LABELS: Record<string, string> = {
  * Não há mais nenhum ramo, em edge function, migração ou trigger de BD.
  *
  * Estavam aqui oferecidos, além dos acima, os triggers `create` ("Quando
- * Criado") e `update` ("Quando Atualizado") e as acções `update_field`
+ * Criado") e `update` ("Quando Atualizado") e as ações `update_field`
  * ("Atualizar Campo") e `send_notification` ("Enviar Notificação"). Nenhum
  * deles era executado: só existiam nesta lista de UI. Uma regra guardada com
  * qualquer um deles ficava com aspecto de activa na interface e nunca corria.

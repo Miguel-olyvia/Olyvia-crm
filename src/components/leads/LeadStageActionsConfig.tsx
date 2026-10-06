@@ -120,7 +120,7 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
 
   const handleAdd = async () => {
     if (!companyId || !selectedStageId || !selectedActionType) {
-      toast({ title: "Selecione estágio e tipo de acção", variant: "destructive" });
+      toast({ title: "Selecione estágio e tipo de ação", variant: "destructive" });
       return;
     }
 
@@ -145,7 +145,7 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
     if (error) {
       toast({ title: "Erro ao adicionar", description: error.message, variant: "destructive" });
     } else {
-      toast({ title: "Acção adicionada" });
+      toast({ title: "Ação adicionada" });
       resetForm();
       loadActions();
     }
@@ -162,7 +162,7 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
   const handleDelete = async (id: string) => {
     const { error } = await (supabase.from("lead_stage_actions") as any).delete().eq("id", id);
     if (!error) {
-      toast({ title: "Acção removida" });
+      toast({ title: "Ação removida" });
       loadActions();
     }
   };
@@ -205,7 +205,7 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
         <div>
           <h4 className="font-medium flex items-center gap-2">
             <Zap className="w-4 h-4 text-amber-500" />
-            Acções por Estágio
+            Ações por Estágio
           </h4>
           <p className="text-xs text-muted-foreground">
             Configure conversões e tarefas automáticas quando uma lead entra num estágio
@@ -213,7 +213,7 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
         </div>
         <Button size="sm" onClick={() => setIsFormOpen(true)}>
           <Plus className="w-4 h-4 mr-1" />
-          Nova Acção
+          Nova Ação
         </Button>
       </div>
 
@@ -221,9 +221,9 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
         <Card>
           <CardContent className="py-8 text-center">
             <Zap className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
-            <p className="text-muted-foreground">Nenhuma acção automática configurada</p>
+            <p className="text-muted-foreground">Nenhuma ação automática configurada</p>
             <p className="text-xs text-muted-foreground mt-1">
-              Adicione acções para automatizar conversões e tarefas
+              Adicione ações para automatizar conversões e tarefas
             </p>
           </CardContent>
         </Card>
@@ -284,7 +284,7 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
       <Collapsible open={isFormOpen} onOpenChange={setIsFormOpen}>
         <CollapsibleTrigger asChild>
           <Button variant="ghost" className="w-full justify-between" size="sm">
-            Nova Acção
+            Nova Ação
             {isFormOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </Button>
         </CollapsibleTrigger>
@@ -312,10 +312,10 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Tipo de Acção *</Label>
+                  <Label>Tipo de Ação *</Label>
                   <Select value={selectedActionType} onValueChange={setSelectedActionType}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecionar acção..." />
+                      <SelectValue placeholder="Selecionar ação..." />
                     </SelectTrigger>
                     <SelectContent>
                       {Object.entries(ACTION_LABELS)
@@ -375,7 +375,7 @@ export function LeadStageActionsConfig({ stages, companyId }: Props) {
                   Cancelar
                 </Button>
                 <Button size="sm" onClick={handleAdd}>
-                  Adicionar Acção
+                  Adicionar Ação
                 </Button>
               </div>
             </CardContent>

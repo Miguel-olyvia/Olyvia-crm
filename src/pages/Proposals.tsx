@@ -2912,7 +2912,7 @@ const Proposals = () => {
         </DropdownMenuItem>
 
         <DropdownMenuSeparator />
-        <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Acções</DropdownMenuLabel>
+        <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Ações</DropdownMenuLabel>
         {(sn === "draft" || sn === "rascunho" || sn === "sent" || sn === "enviada") && (
           <PermissionGate permission="proposals.edit">
             <DropdownMenuItem onClick={() => handleEdit(proposal)}>
@@ -3930,7 +3930,7 @@ const Proposals = () => {
                         <TableHead className="cursor-pointer hover:bg-muted/50" onClick={() => handleSort("created_at")}>
                           <div className="flex items-center">Criada <SortIcon column="created_at" /></div>
                         </TableHead>
-                        <TableHead className="text-right">Acções</TableHead>
+                        <TableHead className="text-right">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -4205,7 +4205,7 @@ const Proposals = () => {
                         Tem portal de cliente activo: ao eliminar, deixa de estar visível no portal — o cliente já não a vê lá, mas o portal em si continua a funcionar normalmente para os outros documentos.
                       </p>
                     )}
-                    <p className="text-xs text-muted-foreground">Esta acção não pode ser desfeita a partir daqui.</p>
+                    <p className="text-xs text-muted-foreground">Esta ação não pode ser desfeita a partir daqui.</p>
                   </div>
                 </AlertDialogDescription>
               </AlertDialogHeader>

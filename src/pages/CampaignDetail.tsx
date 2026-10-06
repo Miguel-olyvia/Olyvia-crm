@@ -944,8 +944,8 @@ const CampaignDetail = () => {
     return (
       <>
         <div className="text-center py-12">
-          <p className="text-muted-foreground">Campaign not found</p>
-          <Button variant="outline" onClick={() => navigate("/campaigns")} className="mt-4">Back to Campaigns</Button>
+          <p className="text-muted-foreground">{t('campaignDetail.notFound')}</p>
+          <Button variant="outline" onClick={() => navigate("/campaigns")} className="mt-4">{t('campaignDetail.backToCampaigns')}</Button>
         </div>
       </>
     );
@@ -989,7 +989,7 @@ const CampaignDetail = () => {
               onClick={() => navigate("/campaigns", { state: { editCampaignId: campaign.id } })}
             >
               <Pencil className="w-4 h-4 mr-2" />
-              Edit
+              {t('campaignDetail.edit')}
             </Button>
           </PermissionGate>
         </div>
@@ -1000,7 +1000,7 @@ const CampaignDetail = () => {
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
                 <Eye className="w-4 h-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Impressions</span>
+                <span className="text-xs text-muted-foreground">{t('campaignDetail.kpi.impressions')}</span>
               </div>
               <p className="text-2xl font-bold mt-1">{formatNumber(totalMetrics.impressions)}</p>
             </CardContent>
@@ -1010,7 +1010,7 @@ const CampaignDetail = () => {
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
                 <MousePointer className="w-4 h-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Clicks</span>
+                <span className="text-xs text-muted-foreground">{t('campaignDetail.kpi.clicks')}</span>
               </div>
               <p className="text-2xl font-bold mt-1">{formatNumber(totalMetrics.clicks)}</p>
               <p className="text-xs text-muted-foreground">CTR: {overallCTR.toFixed(2)}%</p>
@@ -1021,7 +1021,7 @@ const CampaignDetail = () => {
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
                 <UserPlus className="w-4 h-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Leads (real)</span>
+                <span className="text-xs text-muted-foreground">{t('campaignDetail.kpi.leadsReal')}</span>
               </div>
               <p className="text-2xl font-bold mt-1">{formatNumber(realLeadsMeta.real)}</p>
               <p className="text-xs text-muted-foreground">
@@ -1044,7 +1044,7 @@ const CampaignDetail = () => {
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
                 <Zap className="w-4 h-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Conversions</span>
+                <span className="text-xs text-muted-foreground">{t('campaignDetail.kpi.conversions')}</span>
               </div>
               <p className="text-2xl font-bold mt-1">{formatNumber(totalMetrics.conversions)}</p>
             </CardContent>
@@ -1054,7 +1054,7 @@ const CampaignDetail = () => {
             <CardContent className="pt-4 pb-3">
               <div className="flex items-center justify-between">
                 <DollarSign className="w-4 h-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Spend</span>
+                <span className="text-xs text-muted-foreground">{t('campaignDetail.kpi.spend')}</span>
               </div>
               <p className="text-2xl font-bold mt-1">{formatCurrency(totalMetrics.spend)}</p>
               {campaign.budget && (
@@ -1086,11 +1086,11 @@ const CampaignDetail = () => {
               <div className="flex items-center justify-between">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <Target className="w-5 h-5" />
-                  Campaign Goals
+                  {t('campaignDetail.goals.title')}
                 </CardTitle>
                 <Button size="sm" variant="outline" onClick={() => setGoalDialogOpen(true)}>
                   <Plus className="w-4 h-4 mr-1" />
-                  Add Goal
+                  {t('campaignDetail.goals.addGoal')}
                 </Button>
               </div>
             </CardHeader>
@@ -1115,11 +1115,11 @@ const CampaignDetail = () => {
 
         <Tabs value={activeTab} onValueChange={(v) => setSearchParams((prev) => { const p = new URLSearchParams(prev); p.set("tab", v); return p; }, { replace: true })} className="space-y-4">
           <TabsList>
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="channels">Channels ({channels.length})</TabsTrigger>
-            <TabsTrigger value="leads">Leads ({leads.length})</TabsTrigger>
-            <TabsTrigger value="lists">Lists ({marketingLists.length})</TabsTrigger>
-            <TabsTrigger value="utm">UTM Mappings</TabsTrigger>
+            <TabsTrigger value="overview">{t('campaignDetail.tabs.overview')}</TabsTrigger>
+            <TabsTrigger value="channels">{t('campaignDetail.tabs.channels')} ({channels.length})</TabsTrigger>
+            <TabsTrigger value="leads">{t('campaignDetail.tabs.leads')} ({leads.length})</TabsTrigger>
+            <TabsTrigger value="lists">{t('campaignDetail.tabs.lists')} ({marketingLists.length})</TabsTrigger>
+            <TabsTrigger value="utm">{t('campaignDetail.tabs.utm')}</TabsTrigger>
           </TabsList>
 
           {/* Overview Tab */}
@@ -1183,7 +1183,7 @@ const CampaignDetail = () => {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2">
                     <Activity className="w-5 h-5" />
-                    Performance Over Time
+                    {t('campaignDetail.overview.performanceOverTime')}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1200,7 +1200,7 @@ const CampaignDetail = () => {
                     </ResponsiveContainer>
                   ) : (
                     <div className="flex items-center justify-center h-[250px] text-muted-foreground">
-                      No data available
+                      {t('campaignDetail.overview.noData')}
                     </div>
                   )}
                 </CardContent>
@@ -1211,7 +1211,7 @@ const CampaignDetail = () => {
                 <CardHeader className="pb-2">
                   <CardTitle className="text-lg flex items-center gap-2">
                     <PieChart className="w-5 h-5" />
-                    Spend by Channel
+                    {t('campaignDetail.overview.spendByChannel')}
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -1237,7 +1237,7 @@ const CampaignDetail = () => {
                     </ResponsiveContainer>
                   ) : (
                     <div className="flex items-center justify-center h-[250px] text-muted-foreground">
-                      No spend data
+                      {t('campaignDetail.overview.noSpendData')}
                     </div>
                   )}
                 </CardContent>
@@ -1249,7 +1249,7 @@ const CampaignDetail = () => {
               <CardHeader className="pb-2">
                 <CardTitle className="text-lg flex items-center gap-2">
                   <BarChart3 className="w-5 h-5" />
-                  Channel Performance
+                  {t('campaignDetail.overview.channelPerformance')}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -1257,14 +1257,14 @@ const CampaignDetail = () => {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Channel</TableHead>
-                        <TableHead className="text-right">Impressions</TableHead>
-                        <TableHead className="text-right">Clicks</TableHead>
+                        <TableHead>{t('campaignDetail.leads.table.channel')}</TableHead>
+                        <TableHead className="text-right">{t('campaignDetail.kpi.impressions')}</TableHead>
+                        <TableHead className="text-right">{t('campaignDetail.kpi.clicks')}</TableHead>
                         <TableHead className="text-right">CTR</TableHead>
-                        <TableHead className="text-right">Leads</TableHead>
-                        <TableHead className="text-right">Conversions</TableHead>
-                        <TableHead className="text-right">Spend</TableHead>
-                        <TableHead className="text-right">Revenue</TableHead>
+                        <TableHead className="text-right">{t('campaignDetail.kpi.leads')}</TableHead>
+                        <TableHead className="text-right">{t('campaignDetail.kpi.conversions')}</TableHead>
+                        <TableHead className="text-right">{t('campaignDetail.kpi.spend')}</TableHead>
+                        <TableHead className="text-right">{t('campaignDetail.kpi.revenue')}</TableHead>
                         <TableHead className="text-right">ROAS</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -1298,7 +1298,7 @@ const CampaignDetail = () => {
                   </Table>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
-                    No metrics recorded yet. Add metrics to your channels to see performance data.
+                    {t('campaignDetail.overview.noMetrics')}
                   </div>
                 )}
               </CardContent>
@@ -1308,11 +1308,11 @@ const CampaignDetail = () => {
           {/* Channels Tab */}
           <TabsContent value="channels" className="space-y-4">
             <div className="flex justify-between items-center">
-              <p className="text-muted-foreground">Manage channels and record metrics</p>
+              <p className="text-muted-foreground">{t('campaignDetail.channels.subtitle')}</p>
               <PermissionGate permission="campaigns.create">
                 <Button onClick={() => { resetChannelForm(); setChannelDialogOpen(true); }}>
                   <Plus className="w-4 h-4 mr-2" />
-                  Add Channel
+                  {t('campaignDetail.channels.addChannel')}
                 </Button>
               </PermissionGate>
             </div>
@@ -1321,10 +1321,10 @@ const CampaignDetail = () => {
               <Card>
                 <CardContent className="flex flex-col items-center justify-center py-12">
                   <Radio className="w-12 h-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground mb-4">No channels created yet</p>
+                  <p className="text-muted-foreground mb-4">{t('campaignDetail.channels.noChannels')}</p>
                   <Button onClick={() => { resetChannelForm(); setChannelDialogOpen(true); }}>
                     <Plus className="w-4 h-4 mr-2" />
-                    Create First Channel
+                    {t('campaignDetail.channels.createFirst')}
                   </Button>
                 </CardContent>
               </Card>
@@ -1351,9 +1351,9 @@ const CampaignDetail = () => {
                             <div className="flex gap-2 mt-2">
                               <Badge variant="outline">{channelType?.label || channel.type}</Badge>
                               {channel.is_active ? (
-                                <Badge className="bg-success/10 text-success"><Eye className="w-3 h-3 mr-1" />Active</Badge>
+                                <Badge className="bg-success/10 text-success"><Eye className="w-3 h-3 mr-1" />{t('common.active')}</Badge>
                               ) : (
-                                <Badge className="bg-muted text-muted-foreground"><EyeOff className="w-3 h-3 mr-1" />Inactive</Badge>
+                                <Badge className="bg-muted text-muted-foreground"><EyeOff className="w-3 h-3 mr-1" />{t('common.inactive')}</Badge>
                               )}
                             </div>
                           </div>
@@ -1397,13 +1397,13 @@ const CampaignDetail = () => {
                       <CardContent className="space-y-3">
                         {metrics ? (
                           <div className="grid grid-cols-2 gap-2 text-sm">
-                            <div><span className="text-muted-foreground">Impressions:</span> {formatNumber(metrics.impressions)}</div>
-                            <div><span className="text-muted-foreground">Clicks:</span> {formatNumber(metrics.clicks)}</div>
-                            <div><span className="text-muted-foreground">Leads:</span> {formatNumber(metrics.leads)}</div>
-                            <div><span className="text-muted-foreground">Spend:</span> {formatCurrency(metrics.spend)}</div>
+                            <div><span className="text-muted-foreground">{t('campaignDetail.kpi.impressions')}:</span> {formatNumber(metrics.impressions)}</div>
+                            <div><span className="text-muted-foreground">{t('campaignDetail.kpi.clicks')}:</span> {formatNumber(metrics.clicks)}</div>
+                            <div><span className="text-muted-foreground">{t('campaignDetail.kpi.leads')}:</span> {formatNumber(metrics.leads)}</div>
+                            <div><span className="text-muted-foreground">{t('campaignDetail.kpi.spend')}:</span> {formatCurrency(metrics.spend)}</div>
                           </div>
                         ) : (
-                          <p className="text-sm text-muted-foreground">No metrics recorded</p>
+                          <p className="text-sm text-muted-foreground">{t('campaignDetail.channels.noMetricsRecorded')}</p>
                         )}
                       </CardContent>
                     </Card>
@@ -1416,10 +1416,10 @@ const CampaignDetail = () => {
           {/* Leads Tab */}
           <TabsContent value="leads" className="space-y-4">
             <div className="flex justify-between items-center">
-              <p className="text-muted-foreground">Track leads generated by this campaign</p>
+              <p className="text-muted-foreground">{t('campaignDetail.leads.subtitle')}</p>
               <Button onClick={() => setLeadDialogOpen(true)}>
                 <Plus className="w-4 h-4 mr-2" />
-                Add Lead
+                {t('campaignDetail.leads.addLead')}
               </Button>
             </div>
 
@@ -1427,10 +1427,10 @@ const CampaignDetail = () => {
               <Card>
                 <CardContent className="flex flex-col items-center justify-center py-12">
                   <UserPlus className="w-12 h-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground mb-4">No leads recorded yet</p>
+                  <p className="text-muted-foreground mb-4">{t('campaignDetail.leads.noLeads')}</p>
                   <Button onClick={() => setLeadDialogOpen(true)}>
                     <Plus className="w-4 h-4 mr-2" />
-                    Add First Lead
+                    {t('campaignDetail.leads.addFirst')}
                   </Button>
                 </CardContent>
               </Card>
@@ -1439,13 +1439,13 @@ const CampaignDetail = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Date</TableHead>
+                      <TableHead>{t('campaignDetail.leads.table.date')}</TableHead>
                       <TableHead>Lead</TableHead>
-                      <TableHead>Channel</TableHead>
-                      <TableHead>Source</TableHead>
-                      <TableHead>Medium</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Value</TableHead>
+                      <TableHead>{t('campaignDetail.leads.table.channel')}</TableHead>
+                      <TableHead>{t('campaignDetail.leads.table.source')}</TableHead>
+                      <TableHead>{t('campaignDetail.leads.table.medium')}</TableHead>
+                      <TableHead>{t('campaignDetail.leads.table.status')}</TableHead>
+                      <TableHead className="text-right">{t('campaignDetail.leads.table.value')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1486,7 +1486,7 @@ const CampaignDetail = () => {
               </div>
               <Button onClick={openListsDialog}>
                 <ListPlus className="w-4 h-4 mr-2" />
-                Manage Lists
+                {t('campaignDetail.lists.manage')}
               </Button>
             </div>
 
@@ -1494,10 +1494,10 @@ const CampaignDetail = () => {
               <Card>
                 <CardContent className="flex flex-col items-center justify-center py-12">
                   <Users className="w-12 h-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground mb-4">No marketing lists linked</p>
+                  <p className="text-muted-foreground mb-4">{t('campaignDetail.lists.noLists')}</p>
                   <Button onClick={openListsDialog}>
                     <ListPlus className="w-4 h-4 mr-2" />
-                    Link Marketing Lists
+                    {t('campaignDetail.lists.linkLists')}
                   </Button>
                 </CardContent>
               </Card>
@@ -1506,8 +1506,8 @@ const CampaignDetail = () => {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>List Name</TableHead>
-                      <TableHead className="text-right">Actions</TableHead>
+                      <TableHead>{t('campaignDetail.lists.table.name')}</TableHead>
+                      <TableHead className="text-right">{t('campaignDetail.lists.table.actions')}</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -1520,7 +1520,7 @@ const CampaignDetail = () => {
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => navigate("/lists")}>View</Button>
+                          <Button variant="ghost" size="sm" onClick={() => navigate("/lists")}>{t('campaignDetail.lists.view')}</Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1540,17 +1540,17 @@ const CampaignDetail = () => {
       <Dialog open={channelDialogOpen} onOpenChange={(open) => { setChannelDialogOpen(open); if (!open) resetChannelForm(); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingChannel ? "Edit Channel" : "New Channel"}</DialogTitle>
+            <DialogTitle>{editingChannel ? t('campaignDetail.channel.editChannel') : t('campaignDetail.channel.newChannel')}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleChannelSubmit} className="space-y-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Channel Name *</Label>
+                <Label>{t('campaignDetail.channel.name')} *</Label>
                 <Input value={channelFormData.name} onChange={(e) => setChannelFormData({ ...channelFormData, name: e.target.value })} required className={channelFieldErrors.name ? "border-destructive" : ""} />
                 {channelFieldErrors.name && <p className="text-sm text-destructive">{channelFieldErrors.name}</p>}
               </div>
               <div className="space-y-2">
-                <Label>Channel Type</Label>
+                <Label>{t('campaignDetail.channel.type')}</Label>
                 <Select value={channelFormData.type} onValueChange={(value) => setChannelFormData({ ...channelFormData, type: value })}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -1581,29 +1581,29 @@ const CampaignDetail = () => {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Target Audience</Label>
+                <Label>{t('campaignDetail.channel.targetAudience')}</Label>
                 <Input value={channelFormData.target_audience} onChange={(e) => setChannelFormData({ ...channelFormData, target_audience: e.target.value })} />
               </div>
               <div className="space-y-2">
-                <Label>Start Date</Label>
+                <Label>{t('campaignDetail.channel.startDate')}</Label>
                 <Input type="date" value={channelFormData.start_date} onChange={(e) => setChannelFormData({ ...channelFormData, start_date: e.target.value })} />
               </div>
               <div className="space-y-2">
-                <Label>End Date</Label>
+                <Label>{t('campaignDetail.channel.endDate')}</Label>
                 <Input type="date" value={channelFormData.end_date} onChange={(e) => setChannelFormData({ ...channelFormData, end_date: e.target.value })} />
               </div>
               <div className="col-span-2 space-y-2">
-                <Label>Description</Label>
+                <Label>{t('campaignDetail.channel.description')}</Label>
                 <Textarea value={channelFormData.description} onChange={(e) => setChannelFormData({ ...channelFormData, description: e.target.value })} rows={3} />
               </div>
               <div className="col-span-2 flex items-center space-x-2">
                 <Switch checked={channelFormData.is_active} onCheckedChange={(checked) => setChannelFormData({ ...channelFormData, is_active: checked })} />
-                <Label>Active channel</Label>
+                <Label>{t('campaignDetail.channel.active')}</Label>
               </div>
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setChannelDialogOpen(false)}>Cancel</Button>
-              <Button type="submit">{editingChannel ? "Update" : "Create"}</Button>
+              <Button type="button" variant="outline" onClick={() => setChannelDialogOpen(false)}>{t('campaignDetail.channel.cancel')}</Button>
+              <Button type="submit">{editingChannel ? t('campaignDetail.channel.update') : t('campaignDetail.channel.create')}</Button>
             </div>
           </form>
         </DialogContent>
@@ -1613,23 +1613,23 @@ const CampaignDetail = () => {
       <Dialog open={metricsDialogOpen} onOpenChange={setMetricsDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Log External Metrics - {selectedChannelForMetrics?.name}</DialogTitle>
+            <DialogTitle>{t('campaignDetail.metrics.logExternalTitle', { name: selectedChannelForMetrics?.name ?? '' })}</DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground -mt-2">
             Leads, conversões e receita são derivados automaticamente — não são editáveis aqui. Use Spend Schedule no detalhe do canal para spend canónico.
           </p>
           <form onSubmit={handleAddMetrics} className="space-y-4">
             <div className="space-y-2">
-              <Label>Date *</Label>
+              <Label>{t('campaignDetail.metrics.date')} *</Label>
               <Input type="date" value={metricsFormData.metric_date} onChange={(e) => setMetricsFormData({ ...metricsFormData, metric_date: e.target.value })} required />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Impressions</Label>
+                <Label>{t('campaignDetail.metrics.impressions')}</Label>
                 <Input type="number" value={metricsFormData.impressions} onChange={(e) => setMetricsFormData({ ...metricsFormData, impressions: e.target.value })} />
               </div>
               <div className="space-y-2">
-                <Label>Clicks</Label>
+                <Label>{t('campaignDetail.metrics.clicks')}</Label>
                 <Input type="number" value={metricsFormData.clicks} onChange={(e) => setMetricsFormData({ ...metricsFormData, clicks: e.target.value })} />
               </div>
               <div className="space-y-2 col-span-2">
@@ -1640,19 +1640,19 @@ const CampaignDetail = () => {
               {selectedChannelForMetrics?.type === 'email' && (
                 <>
                   <div className="space-y-2">
-                    <Label>Opens</Label>
+                    <Label>{t('campaignDetail.metrics.opens')}</Label>
                     <Input type="number" value={metricsFormData.opens} onChange={(e) => setMetricsFormData({ ...metricsFormData, opens: e.target.value })} />
                   </div>
                   <div className="space-y-2">
-                    <Label>Bounces</Label>
+                    <Label>{t('campaignDetail.metrics.bounces')}</Label>
                     <Input type="number" value={metricsFormData.bounces} onChange={(e) => setMetricsFormData({ ...metricsFormData, bounces: e.target.value })} />
                   </div>
                 </>
               )}
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setMetricsDialogOpen(false)}>Cancel</Button>
-              <Button type="submit">Save Metrics</Button>
+              <Button type="button" variant="outline" onClick={() => setMetricsDialogOpen(false)}>{t('campaignDetail.metrics.cancel')}</Button>
+              <Button type="submit">{t('campaignDetail.metrics.save')}</Button>
             </div>
           </form>
         </DialogContent>
@@ -1662,30 +1662,30 @@ const CampaignDetail = () => {
       <Dialog open={goalDialogOpen} onOpenChange={setGoalDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Campaign Goal</DialogTitle>
+            <DialogTitle>{t('campaignDetail.goal.title')}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleAddGoal} className="space-y-4">
             <div className="space-y-2">
-              <Label>Goal Type</Label>
+              <Label>{t('campaignDetail.goal.type')}</Label>
               <Select value={goalFormData.goal_type} onValueChange={(value) => setGoalFormData({ ...goalFormData, goal_type: value })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="leads">Leads</SelectItem>
-                  <SelectItem value="conversions">Conversions</SelectItem>
-                  <SelectItem value="revenue">Revenue</SelectItem>
-                  <SelectItem value="impressions">Impressions</SelectItem>
-                  <SelectItem value="clicks">Clicks</SelectItem>
-                  <SelectItem value="engagement">Engagement</SelectItem>
+                  <SelectItem value="leads">{t('campaignDetail.goal.type.leads')}</SelectItem>
+                  <SelectItem value="conversions">{t('campaignDetail.goal.type.conversions')}</SelectItem>
+                  <SelectItem value="revenue">{t('campaignDetail.goal.type.revenue')}</SelectItem>
+                  <SelectItem value="impressions">{t('campaignDetail.goal.type.impressions')}</SelectItem>
+                  <SelectItem value="clicks">{t('campaignDetail.goal.type.clicks')}</SelectItem>
+                  <SelectItem value="engagement">{t('campaignDetail.goal.type.engagement')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Target Value</Label>
+              <Label>{t('campaignDetail.goal.targetValue')}</Label>
               <Input type="number" value={goalFormData.target_value} onChange={(e) => setGoalFormData({ ...goalFormData, target_value: e.target.value })} required />
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setGoalDialogOpen(false)}>Cancel</Button>
-              <Button type="submit">Add Goal</Button>
+              <Button type="button" variant="outline" onClick={() => setGoalDialogOpen(false)}>{t('campaignDetail.goal.cancel')}</Button>
+              <Button type="submit">{t('campaignDetail.goals.addGoal')}</Button>
             </div>
           </form>
         </DialogContent>
@@ -1695,15 +1695,15 @@ const CampaignDetail = () => {
       <Dialog open={leadDialogOpen} onOpenChange={setLeadDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Lead</DialogTitle>
+            <DialogTitle>{t('campaignDetail.leads.addLead')}</DialogTitle>
           </DialogHeader>
           <form onSubmit={handleAddLead} className="space-y-4">
             <div className="space-y-2">
-              <Label>Channel</Label>
+              <Label>{t('campaignDetail.lead.channel')}</Label>
               <Select value={leadFormData.channel_id} onValueChange={(value) => setLeadFormData({ ...leadFormData, channel_id: value })}>
-                <SelectTrigger><SelectValue placeholder="Select channel" /></SelectTrigger>
+                <SelectTrigger><SelectValue placeholder={t('campaignDetail.lead.selectChannel')} /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">No channel</SelectItem>
+                  <SelectItem value="none">{t('campaignDetail.lead.noChannel')}</SelectItem>
                   {channels.map((ch) => (
                     <SelectItem key={ch.id} value={ch.id}>{ch.name}</SelectItem>
                   ))}
@@ -1712,34 +1712,34 @@ const CampaignDetail = () => {
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Source (utm_source)</Label>
-                <Input value={leadFormData.source} onChange={(e) => setLeadFormData({ ...leadFormData, source: e.target.value })} placeholder="e.g. facebook" />
+                <Label>{t('campaignDetail.lead.sourceUtm')}</Label>
+                <Input value={leadFormData.source} onChange={(e) => setLeadFormData({ ...leadFormData, source: e.target.value })} placeholder={t('campaignDetail.lead.sourcePlaceholder')} />
               </div>
               <div className="space-y-2">
-                <Label>Medium (utm_medium)</Label>
-                <Input value={leadFormData.medium} onChange={(e) => setLeadFormData({ ...leadFormData, medium: e.target.value })} placeholder="e.g. cpc" />
+                <Label>{t('campaignDetail.lead.mediumUtm')}</Label>
+                <Input value={leadFormData.medium} onChange={(e) => setLeadFormData({ ...leadFormData, medium: e.target.value })} placeholder={t('campaignDetail.lead.mediumPlaceholder')} />
               </div>
             </div>
             <div className="space-y-2">
-              <Label>Status</Label>
+              <Label>{t('campaignDetail.lead.status')}</Label>
               <Select value={leadFormData.status} onValueChange={(value) => setLeadFormData({ ...leadFormData, status: value })}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="new">New</SelectItem>
-                  <SelectItem value="contacted">Contacted</SelectItem>
-                  <SelectItem value="qualified">Qualified</SelectItem>
-                  <SelectItem value="converted">Converted</SelectItem>
-                  <SelectItem value="lost">Lost</SelectItem>
+                  <SelectItem value="new">{t('campaignDetail.lead.status.new')}</SelectItem>
+                  <SelectItem value="contacted">{t('campaignDetail.lead.status.contacted')}</SelectItem>
+                  <SelectItem value="qualified">{t('campaignDetail.lead.status.qualified')}</SelectItem>
+                  <SelectItem value="converted">{t('campaignDetail.lead.status.converted')}</SelectItem>
+                  <SelectItem value="lost">{t('campaignDetail.lead.status.lost')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Notes</Label>
+              <Label>{t('campaignDetail.lead.notes')}</Label>
               <Textarea value={leadFormData.notes} onChange={(e) => setLeadFormData({ ...leadFormData, notes: e.target.value })} rows={2} />
             </div>
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setLeadDialogOpen(false)}>Cancel</Button>
-              <Button type="submit">Add Lead</Button>
+              <Button type="button" variant="outline" onClick={() => setLeadDialogOpen(false)}>{t('campaignDetail.lead.cancel')}</Button>
+              <Button type="submit">{t('campaignDetail.leads.addLead')}</Button>
             </div>
           </form>
         </DialogContent>
@@ -1749,12 +1749,12 @@ const CampaignDetail = () => {
       <Dialog open={listsDialogOpen} onOpenChange={setListsDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>Manage Marketing Lists</DialogTitle>
+            <DialogTitle>{t('campaignDetail.lists.dialog.title')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="border rounded-md p-4 max-h-64 overflow-y-auto space-y-2">
               {availableLists.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No marketing lists available</p>
+                <p className="text-sm text-muted-foreground">{t('campaignDetail.lists.dialog.noLists')}</p>
               ) : (
                 availableLists.map((list) => (
                   <div key={list.id} className="flex items-center gap-2">
@@ -1772,8 +1772,8 @@ const CampaignDetail = () => {
             </div>
             {listsFieldError && <p className="text-sm text-destructive">{listsFieldError}</p>}
             <div className="flex justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => setListsDialogOpen(false)}>Cancel</Button>
-              <Button onClick={handleSaveLists}>Save</Button>
+              <Button type="button" variant="outline" onClick={() => setListsDialogOpen(false)}>{t('campaignDetail.lists.dialog.cancel')}</Button>
+              <Button onClick={handleSaveLists}>{t('campaignDetail.lists.dialog.save')}</Button>
             </div>
           </div>
         </DialogContent>
@@ -1783,14 +1783,14 @@ const CampaignDetail = () => {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Channel</AlertDialogTitle>
+            <AlertDialogTitle>{t('campaignDetail.delete.title')}</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete "{channelToDelete?.name}"? This will also delete all associated metrics.
+              {t('campaignDetail.delete.descriptionNamed', { name: channelToDelete?.name ?? '' })}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setChannelToDelete(null)}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteChannel}>Delete</AlertDialogAction>
+            <AlertDialogCancel onClick={() => setChannelToDelete(null)}>{t('campaignDetail.delete.cancel')}</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteChannel}>{t('campaignDetail.delete.confirm')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

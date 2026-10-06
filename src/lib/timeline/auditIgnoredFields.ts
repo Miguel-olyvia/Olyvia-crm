@@ -10,7 +10,7 @@
  * Dois grupos, com razões diferentes:
  *
  *  · **Escrituração interna** — colunas que o sistema mexe sozinho a cada
- *    recálculo automático. Nunca foram uma acção de ninguém.
+ *    recálculo automático. Nunca foram uma ação de ninguém.
  *
  *  · **Espelhos da mudança de estado** — `signature_date`, `accepted_at`,
  *    `status_changed_by` e companhia mudam na MESMA escrita que muda o estado.
@@ -25,7 +25,7 @@ export const TIMELINE_AUDIT_IGNORED_FIELDS: readonly string[] = [
   // Escrituração interna
   "pipeline_dirty_at", "workflow_stage_id", "raw_status", "previous_status",
   "field_values", "needs_manual_scheduling",
-  // Escritos pela mesma acção que já produz "Chamada telefónica"/"Email enviado"
+  // Escritos pela mesma ação que já produz "Chamada telefónica"/"Email enviado"
   "last_contact_at", "last_contact_by", "last_contact_result",
 
   // Espelhos da mudança de estado em propostas/orçamentos/contratos

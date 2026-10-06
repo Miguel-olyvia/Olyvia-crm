@@ -14,7 +14,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test'
  * Orçamento. Orçamento — Aceite cria Proposta. …" — porque essa é construída só
  * a partir das regras ACTIVAS.
  *
- * Não verifica "a acção certa aparece no separador do módulo": as regras
+ * Não verifica "a ação certa aparece no separador do módulo": as regras
  * substituídas ficam listadas mesmo depois de desactivadas, portanto essa
  * verificação passa sempre e não prova nada. Foi assim que uma versão anterior
  * chegou a 144 verificações das quais metade não podia falhar.

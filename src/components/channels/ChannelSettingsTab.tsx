@@ -8,12 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface Props { channel: any }
 
 export function ChannelSettingsTab({ channel }: Props) {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { t } = useTranslation();
   const [name, setName] = useState(channel.name ?? "");
   const [description, setDescription] = useState(channel.description ?? "");
   const [isActive, setIsActive] = useState(!!channel.is_active);
@@ -38,7 +40,7 @@ export function ChannelSettingsTab({ channel }: Props) {
 
   return (
     <Card>
-      <CardHeader><CardTitle className="text-base">Settings</CardTitle></CardHeader>
+      <CardHeader><CardTitle className="text-base">{t('channelSettings.title')}</CardTitle></CardHeader>
       <CardContent className="space-y-4 max-w-xl">
         <div className="space-y-2">
           <Label>Nome</Label>

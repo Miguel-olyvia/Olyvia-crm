@@ -175,6 +175,12 @@ const ClientContracts = () => {
   } = usePermissionScope();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  // Abre a FICHA do cliente do contrato (a lista de clientes aceita ?open=<id do cliente ou da entidade>).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const verCliente = (c: any) => {
+    const id: string | null | undefined = c?.client_id || c?.entity_id;
+    navigate(id ? `/clients?open=${encodeURIComponent(id)}` : "/clients");
+  };
   const [searchParams, setSearchParams] = useSearchParams();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [presetClientId, setPresetClientId] = useState<string | null>(null);
@@ -1427,7 +1433,7 @@ const ClientContracts = () => {
 
   /**
    * Um contrato enviado ('pending_signature') continua a ser um contrato por
-   * assinar: para efeitos de acções disponíveis vale exactamente o mesmo que
+   * assinar: para efeitos de ações disponíveis vale exactamente o mesmo que
    * um 'draft'.
    *
    * Porquê um predicado em vez de dois ramos: enquanto nada no sistema escrevia
@@ -1690,7 +1696,7 @@ const ClientContracts = () => {
           sentNoSignDays={alertSettings.get("contract_sent_no_sign", 5).days_threshold}
           onAction={(action, c) => {
             if (action === "send_signature" && c) handleOpenSendChannel(c);
-            if (action === "view_client" && c) navigate("/clients");
+            if (action === "view_client" && c) verCliente(c);
             if (action === "followup" && c) toast.info(t('clientContracts.toast.followUpFor', { name: c._clientName || "" }));
           }}
         />
@@ -2111,7 +2117,7 @@ const ClientContracts = () => {
                             <>
                               <Button variant="ghost" size="icon" title="Ver contrato" onClick={() => handleEdit(contract)}><Eye className="h-4 w-4" /></Button>
                               <Button variant="ghost" size="icon" title="PDF" onClick={() => handleDownloadPdf(contract)}><Download className="h-4 w-4" /></Button>
-                              <Button variant="ghost" size="icon" className="text-green-600" title="Ver cliente" onClick={() => navigate("/clients")}>
+                              <Button variant="ghost" size="icon" className="text-green-600" title="Ver cliente" onClick={() => verCliente(contract)}>
                                 <User className="h-4 w-4" />
                               </Button>
                             </>
@@ -2167,7 +2173,7 @@ const ClientContracts = () => {
                                     </>
                                   )}
                                    <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                    <DropdownMenuItem onClick={() => handleEdit(contract)}>✏️ Editar contrato</DropdownMenuItem>
                                    <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                    <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar contrato</DropdownMenuItem>
@@ -2212,7 +2218,7 @@ const ClientContracts = () => {
                               {(contract.status === "signed" || contract.status === "active") && (
                                 <>
                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">👤 Cliente</DropdownMenuLabel>
-                                  <DropdownMenuItem className="text-green-600 font-medium" onClick={() => navigate("/clients")}>👤 Ver ficha do cliente (workflow)</DropdownMenuItem>
+                                  <DropdownMenuItem className="text-green-600 font-medium" onClick={() => verCliente(contract)}>👤 Ver ficha do cliente (workflow)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleEmailClientDirect(contract)}>📧 Enviar email ao cliente</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleWhatsAppClientDirect(contract)}>📱 WhatsApp</DropdownMenuItem>
                                   {canSendSignature && (
@@ -2228,7 +2234,7 @@ const ClientContracts = () => {
                                     </>
                                   )}
                                    <DropdownMenuSeparator />
-                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                   <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>🔄 Renovar contrato (novas datas)</DropdownMenuItem>
@@ -2243,7 +2249,7 @@ const ClientContracts = () => {
                                     disabled={!contractHasQuotes(contract)}
                                     onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   {(isSystemAdmin || canEdit) && (
                                     <DropdownMenuItem className="text-destructive" onClick={() => handleOpenCancelDialog(contract)}>
@@ -2262,7 +2268,7 @@ const ClientContracts = () => {
                                   {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📧 Enviar renovação</DropdownMenuItem>}
                                   {canSendSignature && <DropdownMenuItem onClick={() => handleOpenSendChannel(contract)}>📞 Contactar cliente</DropdownMenuItem>}
                                   <DropdownMenuSeparator />
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar</DropdownMenuItem>
                                   <DropdownMenuItem disabled className="text-muted-foreground">📜 Ver histórico completo (em breve)</DropdownMenuItem>
@@ -2272,14 +2278,14 @@ const ClientContracts = () => {
                                     disabled={!contract.proposal_id}
                                     onClick={() => navigate(`/proposals?open=${contract.proposal_id}`)}
                                   >📑 Ver proposta</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   <DropdownMenuItem className="text-muted-foreground" disabled>🗑 Eliminar (expirado mantém histórico)</DropdownMenuItem>
                                 </>
                               )}
                               {contract.status === "cancelled" && (
                                 <>
-                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Acções</DropdownMenuLabel>
+                                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase">📋 Ações</DropdownMenuLabel>
                                   <DropdownMenuItem onClick={() => handleDownloadPdf(contract)}>📥 Download PDF</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => handleDuplicate(contract)}>📄 Duplicar (novo baseado neste)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
@@ -2292,7 +2298,7 @@ const ClientContracts = () => {
                                     disabled={!contractHasQuotes(contract)}
                                     onClick={() => navigate(contractQuotesRoute(contract))}
                                   >📊 Ver orçamentos</DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => navigate("/clients")}>👤 Ver cliente</DropdownMenuItem>
+                                  <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
                                   {canDelete && canDeleteContract(contract) ? (
                                     <DropdownMenuItem className="text-destructive" onClick={() => { setDeleteId(contract.id); setIsDeleteOpen(true); }}>

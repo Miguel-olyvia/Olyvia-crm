@@ -15,6 +15,11 @@ import type {
   EstadoTarefaObra,
   MotivoDesvio,
 } from "../domain/obras";
+import type { MaterialLigado, PrevisaoContrato, ProdutoStock, TarefaParaCriar } from "../domain/novaObra";
+import type { MotivoAtraso, TipoAlerta } from "../domain/atrasos";
+import type { AreaParaSugestao } from "../domain/sugestaoFichaLocal";
+
+export type { MaterialLigado, PrevisaoContrato, ProdutoStock, TarefaParaCriar } from "../domain/novaObra";
 
 function rebentar(contexto: string, error: { message: string } | null): void {
   if (!error) return;
@@ -56,6 +61,10 @@ export interface ObraResumo {
   inicio_planeado: string | null;
   fim_planeado: string | null;
   n_extras: number;
+  /** O fim do plano original (antes dos atrasos). Opcional até o SQL dos atrasos correr. */
+  fim_original?: string | null;
+  /** Alertas da obra (não iniciadas, fim ultrapassado, cliente por avisar). */
+  n_alertas?: number;
 }
 
 export async function listarObras(orgId: string): Promise<ObraResumo[]> {
@@ -80,7 +89,19 @@ export async function obterObra(codigo: string, orgId: string): Promise<ObraResu
     .eq("codigo", codigo)
     .maybeSingle();
   rebentar("carregar a obra", error);
-  if (!data) return null;
+  if (!data) {
+    // Não está na empresa ativa (ex.: link aberto noutro endereço, ou outra
+    // empresa escolhida): procura nas que a pessoa vê — a RLS filtra.
+    const { data: outras, error: e2 } = await supabase
+      .from("ops_v_obra_resumo")
+      .select("*")
+      .eq("codigo", codigo)
+      .limit(1);
+    rebentar("carregar a obra", e2);
+    if (!outras?.length) return null;
+    const o = outras[0] as unknown as ObraResumo;
+    return { ...o, minutos_reais: Number(o.minutos_reais) };
+  }
   const o = data as unknown as ObraResumo;
   return { ...o, minutos_reais: Number(o.minutos_reais) };
 }
@@ -135,10 +156,65 @@ export interface TarefaObra {
   minutos_reais: number;
   a_correr: number;
   pessoas: string[];
+  /** Todas as tarefas de que esta depende (ops_obra_tarefa_dependencia) — as setas do Gantt. */
+  dependencias?: string[];
+  /** Materiais do CRM ligados no passo "Serviços do contrato". */
+  materiais_crm?: MaterialLigado[];
+  // Atrasos (db/obras.sql, 11b) — opcionais: a app não rebenta antes de o SQL correr.
+  /** Plano original (guardado no 1.º atraso/replaneamento com a obra em curso). */
+  inicio_original?: string | null;
+  fim_original?: string | null;
+  /** Estimativa final de mão de obra depois dos atrasos. null = igual ao previsto. */
+  minutos_estimativa?: number | null;
+  n_atrasos?: number;
+  ultimo_atraso?: UltimoAtraso | null;
+  /** Devia ter começado (hora de início + 60 min) e está por fazer. */
+  atrasada_inicio?: boolean;
+  pessoas_previstas?: number;
+  minutos_por_dia?: number;
+  // Planeamento automático (db/obras.sql, 2c) — opcionais, como os atrasos.
+  /** Horas de relógio de espera antes de começar (cura, fabrico). */
+  espera_antes_horas?: number | null;
+  /** O que mediu o tempo (m² de parede, pontos de água…) e quanto. */
+  medida?: string | null;
+  medida_qt?: number | null;
+  /** O que se fez de facto, dito por quem terminou. */
+  medida_real?: number | null;
+  /** De onde veio o tempo: padrão, aprendido, ficha, mudado à mão. */
+  minutos_origem?: string | null;
+  ritmo_n?: number | null;
+  minutos_juntos?: number | null;
+  chave?: string | null;
+  servico_tarefa_id?: string | null;
+  // Prazos de materiais — opcionais, como os atrasos.
+  /** O material de que a tarefa precisa chega neste dia: o plano não a põe antes. */
+  material_chega_em?: string | null;
+  /** 'crm' = encomenda ou prazo do fornecedor; 'manual' = dito pelo gestor/supervisor. */
+  material_chega_origem?: "crm" | "manual" | null;
+  material_chega_nota?: string | null;
+  skill_id?: string | null;
+}
+
+export interface UltimoAtraso {
+  id: string;
+  motivo: MotivoAtraso;
+  contexto: string;
+  minutos_extra: number | null;
+  novo_fim: string | null;
+  fim_anterior: string | null;
+  registado_em: string;
+  registado_por: string | null;
+  cliente_avisado: boolean;
 }
 
 function normalizarTarefa(t: TarefaObra): TarefaObra {
-  return { ...t, minutos_reais: Number(t.minutos_reais), pessoas: t.pessoas ?? [] };
+  return {
+    ...t,
+    minutos_reais: Number(t.minutos_reais),
+    pessoas: t.pessoas ?? [],
+    dependencias: t.dependencias ?? (t.depende_de ? [t.depende_de] : []),
+    materiais_crm: t.materiais_crm ?? [],
+  };
 }
 
 export async function tarefasDaObra(obraId: string): Promise<TarefaObra[]> {
@@ -256,7 +332,13 @@ export async function conflitosDaObra(obraId: string): Promise<ConflitoObra[]> {
     .from("ops_v_obra_conflito")
     .select("tarefa_id, utilizador_id, outra_tarefa_id, outra_tarefa, outra_obra, outro_inicio, outro_fim")
     .eq("obra_id", obraId);
-  rebentar("carregar os choques de agenda", error);
+  if (error) {
+    // Os choques são um aviso, não o essencial: se falharem (ex.: tempo
+    // esgotado), a obra abre na mesma, sem os avisos — em vez de um erro.
+    // eslint-disable-next-line no-console
+    console.warn("[Obras] choques de agenda indisponíveis:", error);
+    return [];
+  }
   return (data ?? []) as unknown as ConflitoObra[];
 }
 
@@ -338,6 +420,8 @@ export interface ModeloObra {
   descricao: string | null;
   tipo_servico: string | null;
   ativo: boolean;
+  /** O tipo que vem escolhido numa obra nova a partir de orçamento/contrato. */
+  por_defeito?: boolean;
   fases: ModeloFase[];
 }
 
@@ -345,7 +429,7 @@ export async function listarModelos(orgId: string): Promise<ModeloObra[]> {
   const [m, f, t] = await Promise.all([
     supabase
       .from("ops_obra_modelo")
-      .select("id, nome, descricao, tipo_servico, ativo")
+      .select("id, nome, descricao, tipo_servico, ativo, por_defeito")
       .eq("organization_id", orgId)
       .order("nome"),
     supabase
@@ -429,6 +513,10 @@ export interface ContratoAssinado {
   assinado_em: string | null;
   valor: number | null;
   tem_obra: boolean;
+  /** Linhas de serviço do orçamento do contrato (viram tarefas). Ausente em bases antigas. */
+  n_servicos?: number | null;
+  /** Linhas só de produto. */
+  n_produtos?: number | null;
 }
 
 /**
@@ -441,7 +529,8 @@ export async function listarContratos(
 ): Promise<{ contratos: ContratoAssinado[]; indisponivel: boolean }> {
   const { data, error } = await supabase
     .from("ops_v_contrato")
-    .select("id, cliente_id, numero, estado, orcamento_id, titulo, obra_endereco, assinado_em, valor, tem_obra")
+    // "*": as colunas n_servicos/n_produtos só existem depois do SQL novo.
+    .select("*")
     .eq("organization_id", orgId)
     .order("assinado_em", { ascending: false, nullsFirst: false })
     .limit(200);
@@ -463,6 +552,167 @@ export async function orcamentosComObra(orgId: string): Promise<Set<string>> {
     .not("orcamento_id", "is", null);
   rebentar("ver que orçamentos já têm obra", error);
   return new Set(((data ?? []) as { orcamento_id: string }[]).map((r) => r.orcamento_id));
+}
+
+export interface TarefaPrevista {
+  fase: number;
+  nome: string;
+  minutos: number;
+  sem_ficha: boolean;
+  materiais: string | null;
+}
+
+export interface PrevisaoOrcamento {
+  orcamento_id: string | null;
+  tarefas: TarefaPrevista[];
+  minutos: number;
+  sem_ficha: number;
+}
+
+/**
+ * As tarefas que uma obra SEM modelo vai ter, vindas dos serviços do
+ * orçamento (ou do orçamento do contrato): uma por serviço, com o tempo da
+ * ficha técnica. Só lê.
+ */
+export function previsaoDoOrcamento(args: {
+  orgId: string;
+  orcamentoId?: string | null;
+  contratoId?: string | null;
+}): Promise<PrevisaoOrcamento> {
+  return rpc(
+    "rpc_ops_obra_previsao_orcamento",
+    {
+      p_org: args.orgId,
+      p_orcamento_id: args.orcamentoId ?? null,
+      p_contrato_id: args.contratoId ?? null,
+    },
+    "Não foi possível ler os serviços do orçamento."
+  );
+}
+
+/**
+ * O passo 2 da Nova obra, "Serviços do contrato": cada serviço vendido com as
+ * tarefas que vai ter (do modelo do serviço, ou sugeridas pela biblioteca),
+ * datas, pessoas sugeridas e quem está livre. A base cria a obra numa
+ * subtransação e desfaz — nada fica gravado. Com `tarefas`, recalcula com as
+ * tarefas já editadas.
+ */
+export function previsaoDoContrato(args: {
+  orgId: string;
+  contratoId?: string | null;
+  orcamentoId?: string | null;
+  modeloId?: string | null;
+  dataInicio?: string | null;
+  morada?: string | null;
+  tarefas?: TarefaParaCriar[] | null;
+}): Promise<PrevisaoContrato> {
+  return rpc(
+    "rpc_ops_obra_previsao_contrato",
+    {
+      p_org: args.orgId,
+      p_contrato_id: args.contratoId ?? null,
+      p_orcamento_id: args.orcamentoId ?? null,
+      p_modelo_id: args.modeloId ?? null,
+      p_data_inicio: args.dataInicio ?? null,
+      p_morada: args.morada ?? null,
+      p_tarefas: args.tarefas ?? null,
+    },
+    "Não foi possível preparar os serviços do contrato."
+  );
+}
+
+/** Stock dos produtos (por ids, ou pesquisa por nome/SKU). Só lê o inventário do CRM; não reserva. */
+export async function stockDosProdutos(args: {
+  orgId: string;
+  produtoIds?: readonly string[] | null;
+  pesquisa?: string | null;
+  limite?: number;
+}): Promise<{ com_inventario: boolean; com_reservas?: boolean; produtos: ProdutoStock[] }> {
+  const r = await rpc<{ com_inventario: boolean; com_reservas?: boolean; produtos: ProdutoStock[] | null }>(
+    "rpc_ops_obra_stock",
+    {
+      p_org: args.orgId,
+      p_produto_ids: args.produtoIds ?? null,
+      p_pesquisa: args.pesquisa ?? null,
+      p_limite: args.limite ?? 30,
+    },
+    "Não foi possível ler o stock."
+  );
+  return {
+    ...r,
+    produtos: (r.produtos ?? []).map((p) => ({
+      ...p,
+      stock: p.stock == null ? null : Number(p.stock),
+      reservado: Number(p.reservado ?? 0),
+      disponivel: p.disponivel == null ? null : Number(p.disponivel),
+    })),
+  };
+}
+
+export interface PessoaLivre {
+  utilizador_id: string;
+  nome: string;
+  funcao: string;
+  skills: string[];
+  zona: string | null;
+  minutos_ocupados: number;
+  dias_cheios: number;
+  ordens: number;
+  livre: boolean;
+  /** Porque não está livre ('ausência: Férias', 'feriado: …', 'agenda cheia: OB-…', 'ordem OT-…'); null se livre. */
+  motivo: string | null;
+}
+
+/**
+ * Quem está livre entre duas datas (≥ 8 h planeadas num dia ou uma ordem
+ * agendada = ocupado). Devolve toda a gente ativa, com `livre`.
+ */
+export async function pessoasLivres(args: {
+  orgId: string;
+  inicio: string;
+  fim?: string | null;
+  excluirTarefa?: string | null;
+}): Promise<PessoaLivre[]> {
+  const r = await rpc<PessoaLivre[] | null>(
+    "rpc_ops_pessoas_livres",
+    {
+      p_org: args.orgId,
+      p_inicio: args.inicio,
+      p_fim: args.fim ?? null,
+      p_excluir_tarefa: args.excluirTarefa ?? null,
+    },
+    "Não foi possível ler a agenda da equipa."
+  );
+  return r ?? [];
+}
+
+/** "Depois de": substitui as dependências da tarefa (recusa ciclos). */
+export function gravarDependencias(tarefaId: string, dependeDe: readonly string[]) {
+  return rpc<{ ok: boolean; dependencias: string[]; antes_de_acabar: string[] }>(
+    "rpc_ops_obra_gravar_dependencias",
+    { p_tarefa_id: tarefaId, p_depende_de: dependeDe },
+    "Não foi possível gravar as dependências."
+  );
+}
+
+/** A morada que a obra vai ter: a do orçamento/contrato, ou a do cliente. Só lê. */
+export async function moradaSugerida(args: {
+  orgId: string;
+  clienteId?: string | null;
+  orcamentoId?: string | null;
+  contratoId?: string | null;
+}): Promise<string | null> {
+  const r = await rpc<string | null>(
+    "rpc_ops_obra_morada_sugerida",
+    {
+      p_org: args.orgId,
+      p_cliente_id: args.clienteId ?? null,
+      p_orcamento_id: args.orcamentoId ?? null,
+      p_contrato_id: args.contratoId ?? null,
+    },
+    "Não foi possível ler a morada."
+  );
+  return r ?? null;
 }
 
 /* ─────────────────────────────── Escritas ─────────────────────────────── */
@@ -488,23 +738,24 @@ export function criarObra(args: {
   morada?: string | null;
   gestorId?: string | null;
   supervisorId?: string | null;
+  /** As tarefas dos serviços revistas no passo 2. Omitido = expansão automática de sempre. */
+  tarefas?: TarefaParaCriar[] | null;
 }): Promise<{ ok: boolean; id: string; codigo: string; tarefas: number }> {
-  return rpc(
-    "rpc_ops_obra_criar",
-    {
-      p_org: args.orgId,
-      p_titulo: args.titulo ?? null,
-      p_cliente_id: args.clienteId ?? null,
-      p_modelo_id: args.modeloId ?? null,
-      p_data_inicio: args.dataInicio ?? null,
-      p_orcamento_id: args.orcamentoId ?? null,
-      p_contrato_id: args.contratoId ?? null,
-      p_morada: args.morada ?? null,
-      p_gestor_id: args.gestorId ?? null,
-      p_supervisor_id: args.supervisorId ?? null,
-    },
-    "Não foi possível abrir a obra."
-  );
+  const params: Record<string, unknown> = {
+    p_org: args.orgId,
+    p_titulo: args.titulo ?? null,
+    p_cliente_id: args.clienteId ?? null,
+    p_modelo_id: args.modeloId ?? null,
+    p_data_inicio: args.dataInicio ?? null,
+    p_orcamento_id: args.orcamentoId ?? null,
+    p_contrato_id: args.contratoId ?? null,
+    p_morada: args.morada ?? null,
+    p_gestor_id: args.gestorId ?? null,
+    p_supervisor_id: args.supervisorId ?? null,
+  };
+  // Só se manda quando há: assim a chamada de sempre continua igual.
+  if (args.tarefas) params.p_tarefas = args.tarefas;
+  return rpc("rpc_ops_obra_criar", params, "Não foi possível abrir a obra.");
 }
 
 export function atualizarObra(args: {
@@ -537,11 +788,21 @@ export function mudarEstadoObra(obraId: string, estado: EstadoObra, motivo?: str
   );
 }
 
-export function replanearObra(obraId: string, dataInicio: string) {
-  return rpc<{ ok: boolean; tarefas: number }>(
+/** `dataInicio` null = a primeira data em que a equipa está livre (replaneia e redistribui). */
+export function replanearObra(obraId: string, dataInicio: string | null) {
+  return rpc<{ ok: boolean; tarefas: number; inicio: string }>(
     "rpc_ops_obra_replanear",
     { p_obra_id: obraId, p_data_inicio: dataInicio },
     "Não foi possível replanear."
+  );
+}
+
+/** Distribui a equipa pelas tarefas sem ninguém; `refazer` redistribui as que ninguém começou. */
+export function distribuirEquipa(obraId: string, refazer = false) {
+  return rpc<{ ok: boolean; tarefas: number }>(
+    "rpc_ops_obra_distribuir",
+    { p_obra_id: obraId, p_refazer: refazer },
+    "Não foi possível distribuir a equipa."
   );
 }
 
@@ -618,6 +879,8 @@ export function terminarTarefa(args: {
   concluir: boolean;
   motivo?: MotivoDesvio | null;
   nota?: string | null;
+  /** Quanto se fez de facto (ex.: 18 m²). Sem ela, fica a prevista. */
+  medidaReal?: number | null;
 }) {
   return rpc<RespostaTempo>(
     "rpc_ops_obra_terminar_tarefa",
@@ -626,6 +889,8 @@ export function terminarTarefa(args: {
       p_concluir: args.concluir,
       p_motivo: args.motivo ?? null,
       p_nota: args.nota ?? null,
+      // Só se manda quando há: a base de antes da atualização não a conhece.
+      ...(args.medidaReal != null ? { p_medida_real: args.medidaReal } : {}),
     },
     "Não foi possível terminar."
   );
@@ -684,4 +949,510 @@ export async function custosDaObra(obraId: string): Promise<CustosObra> {
   const { data, error } = await supabase.rpc("rpc_ops_obra_custos", { p_obra_id: obraId });
   rebentar("calcular o previsto contra o real", error);
   return data as unknown as CustosObra;
+}
+
+/* ─────────────────────────── Modelos por serviço ─────────────────────────── */
+
+export interface TarefaServico {
+  id?: string;
+  ordem?: number;
+  nome: string;
+  fase: number;
+  minutos_por_unidade: number;
+  minutos_fixos: number;
+  pessoas: number;
+  skill_id: string | null;
+  depende_ordem: number | null;
+  procedimento: string | null;
+  materiais: string | null;
+  ferramentas: string | null;
+  origem?: "manual" | "sugerida" | "padrao";
+  // Planeamento automático (2c).
+  /** Código estável do passo ("3.3"), para os extras se encaixarem. */
+  chave?: string | null;
+  depende_chaves?: string[];
+  espera_antes_horas?: number;
+  medida?: string;
+  /** {servicos: [id], ficha: {campo, valores}} — só se lê aqui. */
+  condicao?: { servicos?: string[]; ficha?: { campo: string; valores: string[] } } | null;
+  /** Por tipo de pacote: {modo: 'junta'|'entre'|'livre', alvo}. Só se lê aqui. */
+  encaixe?: Record<string, { modo: string; alvo?: string | string[] }> | null;
+  fatores?: string[];
+}
+
+export interface PerfilServico {
+  tipo: "casa_banho" | "cozinha" | null;
+  medidas: Record<string, number>;
+  planear: boolean;
+  medida_para: string | null;
+}
+
+export interface ServicoComModelo {
+  servico_id: string;
+  nome: string;
+  sku: string | null;
+  categoria: string | null;
+  horas: number | null;
+  pessoas: number | null;
+  descricao_mao_obra: string | null;
+  tarefas: TarefaServico[];
+  editado: boolean;
+  /** Tem os tempos padrão (manuais operacionais). */
+  padrao?: boolean;
+  perfil?: PerfilServico | null;
+}
+
+export interface RitmoAprendido {
+  servico_tarefa_id: string;
+  fatores_chave: string;
+  n: number;
+  minutos_fixos: number;
+  minutos_por_unidade: number;
+  padrao_fixos: number;
+  padrao_por_unidade: number;
+  atualizado_em: string;
+}
+
+/** O ritmo aprendido de cada passo de modelo (antes do SQL novo a tabela não existe → []). */
+export async function ritmosAprendidos(orgId: string): Promise<RitmoAprendido[]> {
+  const { data, error } = await supabase
+    .from("ops_obra_ritmo")
+    .select("servico_tarefa_id, fatores_chave, n, minutos_fixos, minutos_por_unidade, padrao_fixos, padrao_por_unidade, atualizado_em")
+    .eq("organization_id", orgId);
+  if (error) return [];
+  return ((data ?? []) as unknown as RitmoAprendido[]).map((r) => ({
+    ...r,
+    n: Number(r.n),
+    minutos_fixos: Number(r.minutos_fixos),
+    minutos_por_unidade: Number(r.minutos_por_unidade),
+    padrao_fixos: Number(r.padrao_fixos),
+    padrao_por_unidade: Number(r.padrao_por_unidade),
+  }));
+}
+
+/** "Carregar tempos padrão": os manuais de casa de banho e cozinha, pelos nomes dos serviços. */
+export function semearTemposPadrao(orgId: string, substituir = false) {
+  return rpc<{ ok: boolean; versao: string; servicos: number; passos: number; saltados: string[]; nao_encontrados: string[] }>(
+    "rpc_ops_obra_semear_tempos_padrao",
+    { p_org: orgId, p_substituir: substituir },
+    "Não foi possível carregar os tempos padrão."
+  );
+}
+
+export interface Skill {
+  id: string;
+  nome: string;
+}
+
+/** Os serviços do catálogo do CRM desta organização, com o modelo de cada um. */
+export async function listarServicosComModelo(orgId: string): Promise<ServicoComModelo[]> {
+  const r = await rpc<ServicoComModelo[] | null>(
+    "rpc_ops_servicos_com_modelo",
+    { p_org: orgId },
+    "Não foi possível carregar os serviços."
+  );
+  return r ?? [];
+}
+
+/** Gera modelos pela biblioteca: um serviço, ou todos os que faltam (`substituir` refaz os sugeridos). */
+export function sugerirModelos(args: { orgId: string; servicoId?: string | null; substituir?: boolean }) {
+  return rpc<{ ok: boolean; servicos: number; tarefas: number }>(
+    "rpc_ops_servico_modelo_sugerir",
+    { p_org: args.orgId, p_servico_id: args.servicoId ?? null, p_substituir: args.substituir ?? false },
+    "Não foi possível gerar os modelos."
+  );
+}
+
+export function gravarModeloServico(orgId: string, servicoId: string, tarefas: TarefaServico[]) {
+  return rpc<{ ok: boolean; tarefas: number }>(
+    "rpc_ops_servico_modelo_gravar",
+    {
+      p_org: orgId,
+      p_servico_id: servicoId,
+      p_tarefas: tarefas.map((t) => ({
+        nome: t.nome,
+        fase: t.fase,
+        minutos_por_unidade: t.minutos_por_unidade,
+        minutos_fixos: t.minutos_fixos,
+        pessoas: t.pessoas,
+        skill_id: t.skill_id,
+        depende_ordem: t.depende_ordem,
+        procedimento: t.procedimento,
+        materiais: t.materiais,
+        ferramentas: t.ferramentas,
+        // A condição, o encaixe e os fatores não se mandam: a base guarda os
+        // que lá estão, pela chave do passo.
+        ...(t.chave ? { chave: t.chave } : {}),
+        ...(t.depende_chaves ? { depende_chaves: t.depende_chaves } : {}),
+        ...(t.espera_antes_horas != null ? { espera_antes_horas: t.espera_antes_horas } : {}),
+        ...(t.medida ? { medida: t.medida } : {}),
+      })),
+    },
+    "Não foi possível gravar o modelo."
+  );
+}
+
+export async function listarSkills(orgId: string): Promise<Skill[]> {
+  const { data, error } = await supabase
+    .from("ops_skill")
+    .select("id, nome")
+    .eq("organization_id", orgId)
+    .eq("ativo", true)
+    .order("nome");
+  rebentar("carregar as especialidades", error);
+  return (data ?? []) as unknown as Skill[];
+}
+
+export function criarSkill(orgId: string, nome: string) {
+  return rpc<{ ok: boolean; id: string }>("rpc_ops_skill_criar", { p_org: orgId, p_nome: nome }, "Não foi possível criar a especialidade.");
+}
+
+export function tornarTipoPorDefeito(modeloId: string) {
+  return rpc<{ ok: boolean }>("rpc_ops_obra_modelo_por_defeito", { p_modelo_id: modeloId }, "Não foi possível mudar o tipo por defeito.");
+}
+
+/** Zona base e especialidades de cada pessoa da equipa (para a distribuição automática). */
+export async function planeamentoDaEquipa(
+  orgId: string
+): Promise<Map<string, { zona: string | null; skills: string[] }>> {
+  const [p, s] = await Promise.all([
+    supabase.from("ops_utilizador_perfil").select("utilizador_id, zona_base").eq("organization_id", orgId),
+    supabase.from("ops_utilizador_skill").select("utilizador_id, skill_id, ops_skill!inner(organization_id)").eq("ops_skill.organization_id", orgId),
+  ]);
+  rebentar("carregar a zona e as especialidades", p.error ?? s.error);
+  const out = new Map<string, { zona: string | null; skills: string[] }>();
+  for (const r of (p.data ?? []) as { utilizador_id: string; zona_base: string | null }[]) {
+    out.set(r.utilizador_id, { zona: r.zona_base, skills: [] });
+  }
+  for (const r of (s.data ?? []) as unknown as { utilizador_id: string; skill_id: string }[]) {
+    out.get(r.utilizador_id)?.skills.push(r.skill_id);
+  }
+  return out;
+}
+
+export function gravarPlaneamentoPessoa(args: { orgId: string; utilizadorId: string; zona: string | null; skills: string[] }) {
+  return rpc<{ ok: boolean }>(
+    "rpc_ops_pessoa_planeamento",
+    { p_org: args.orgId, p_utilizador: args.utilizadorId, p_zona: args.zona, p_skills: args.skills },
+    "Não foi possível gravar a zona e as especialidades."
+  );
+}
+
+/* ─────────────────────────────── Atrasos e alertas ─────────────────────────────── */
+
+export interface AtrasoTarefa {
+  id: string;
+  obra_id: string;
+  tarefa_id: string;
+  motivo: MotivoAtraso;
+  contexto: string;
+  minutos_extra: number | null;
+  novo_fim: string | null;
+  fim_anterior: string | null;
+  registado_por: string | null;
+  registado_em: string;
+  cliente_avisado: boolean;
+  cliente_avisado_em: string | null;
+  cliente_avisado_por: string | null;
+  nota_cliente: string | null;
+}
+
+const COLUNAS_ATRASO =
+  "id, obra_id, tarefa_id, motivo, contexto, minutos_extra, novo_fim, fim_anterior, registado_por, " +
+  "registado_em, cliente_avisado, cliente_avisado_em, cliente_avisado_por, nota_cliente";
+
+/** Os atrasos de uma obra (ou de uma tarefa), o mais recente primeiro. */
+export async function atrasosDaObra(obraId: string, tarefaId?: string | null): Promise<AtrasoTarefa[]> {
+  let pedido = supabase.from("ops_obra_tarefa_atraso").select(COLUNAS_ATRASO).eq("obra_id", obraId);
+  if (tarefaId) pedido = pedido.eq("tarefa_id", tarefaId);
+  const { data, error } = await pedido.order("registado_em", { ascending: false }).limit(500);
+  rebentar("carregar os atrasos", error);
+  return (data ?? []) as unknown as AtrasoTarefa[];
+}
+
+export interface EmpurradaAtraso {
+  tarefa_id: string;
+  nome: string;
+  inicio_anterior: string | null;
+  fim_anterior: string | null;
+  novo_inicio: string;
+  novo_fim: string;
+}
+
+export interface RespostaAtraso {
+  ok: boolean;
+  simulado: boolean;
+  atraso_id: string | null;
+  fim_anterior: string | null;
+  novo_fim: string;
+  minutos_estimativa: number | null;
+  empurradas: EmpurradaAtraso[];
+  fim_obra_anterior: string | null;
+  fim_obra_novo: string | null;
+}
+
+export interface ArgsAtraso {
+  tarefaId: string;
+  motivo: MotivoAtraso | null;
+  contexto: string;
+  minutosExtra?: number | null;
+  novoFim?: string | null;
+  empurrar?: boolean;
+}
+
+function argsAtraso(a: ArgsAtraso, simular: boolean) {
+  return {
+    p_tarefa_id: a.tarefaId,
+    p_motivo: a.motivo,
+    p_contexto: a.contexto,
+    p_minutos_extra: a.minutosExtra ?? null,
+    p_novo_fim: a.novoFim || null,
+    p_empurrar: a.empurrar ?? true,
+    p_simular: simular,
+  };
+}
+
+/** Regista o atraso: novo fim, plano original guardado, dependentes empurradas. */
+export function registarAtraso(a: ArgsAtraso): Promise<RespostaAtraso> {
+  return rpc("rpc_ops_obra_registar_atraso", argsAtraso(a, false), "Não foi possível registar o atraso.");
+}
+
+/** A mesma conta, sem gravar nada: o impacto (novo fim da tarefa e da obra). */
+export function simularAtraso(a: ArgsAtraso): Promise<RespostaAtraso> {
+  return rpc("rpc_ops_obra_registar_atraso", argsAtraso(a, true), "Não foi possível calcular o impacto.");
+}
+
+export interface RespostaMaterial {
+  ok: boolean;
+  simulado: boolean;
+  /** A tarefa estava planeada para antes e passou para o dia em que o material chega. */
+  moveu: boolean;
+  novo_inicio: string | null;
+  novo_fim: string | null;
+  empurradas: EmpurradaAtraso[];
+  fim_obra_anterior: string | null;
+  fim_obra_novo: string | null;
+}
+
+/**
+ * "O material desta tarefa chega a …" (gestor ou supervisor da obra). Se a
+ * tarefa estava antes disso, passa para esse dia e empurra as dependentes.
+ * `data = null` tira a condição. `simular` dá as contas sem gravar.
+ */
+export function definirMaterialChega(args: {
+  tarefaId: string;
+  data: string | null;
+  nota?: string | null;
+  simular?: boolean;
+}): Promise<RespostaMaterial> {
+  return rpc(
+    "rpc_ops_obra_material_chega",
+    {
+      p_tarefa_id: args.tarefaId,
+      p_data: args.data || null,
+      p_nota: args.nota?.trim() || null,
+      p_simular: args.simular ?? false,
+    },
+    "Não foi possível gravar a data do material."
+  );
+}
+
+/**
+ * A ficha do local da obra, do CRM (morada de obra do orçamento): exterior e
+ * interior. `{}` se não houver ficha. Só leitura.
+ */
+export interface FichaLocal {
+  acesso?: "facil" | "dificil" | null;
+  impacto_percent?: number | null;
+  estacionamento?: "pago" | "nao_pago" | "sem_estacionamento" | null;
+  zona_estacionamento?: "verde" | "amarela" | "vermelha" | null;
+  tem_elevador?: boolean | null;
+  n_elevadores?: number | null;
+  n_andares?: number | null;
+  n_fracoes_por_andar?: number | null;
+  piso?: string | null;
+  tipologia?: string | null;
+  area_util_m2?: number | null;
+  n_divisoes?: number | null;
+  n_casas_banho?: number | null;
+  ano_construcao?: number | null;
+  pavimento?: string | null;
+  eletrica?: string | null;
+  quadro_diferencial?: boolean | null;
+  canalizacao?: string | null;
+  gas?: string | null;
+  amianto?: string | null;
+  habitada_durante_obra?: boolean | null;
+  animais?: boolean | null;
+  notas_interior?: string | null;
+}
+
+export async function fichaLocalDaObra(obraId: string): Promise<FichaLocal> {
+  const { data, error } = await supabase.rpc("rpc_ops_obra_ficha_local", { p_obra_id: obraId });
+  // Antes de o SQL desta versão correr, a função não existe: sem ficha, sem erro.
+  if (error && /rpc_ops_obra_ficha_local|function .* does not exist|PGRST202/i.test(`${error.message} ${(error as { code?: string }).code ?? ""}`)) {
+    return {};
+  }
+  rebentar("carregar a ficha do local", error);
+  return ((data ?? {}) as unknown as FichaLocal) ?? {};
+}
+
+export interface OcupacaoObra {
+  obra_id: string;
+  codigo: string;
+  titulo: string;
+  inicio: string;
+  fim: string;
+  pessoas: string[];
+  n: number;
+}
+
+/** "Porque começa a …?": onde está a equipa entre a criação da obra e o início. */
+export interface PorqueInicio {
+  inicio: string | null;
+  desde: string | null;
+  /** true = o sistema escolheu (1.º dia sem choques); false = alguém escolheu; null = obra antiga. */
+  auto: boolean | null;
+  equipa: number;
+  nesta_obra: string[];
+  ocupacao: OcupacaoObra[];
+}
+
+export async function porqueInicio(obraId: string): Promise<PorqueInicio | null> {
+  const { data, error } = await supabase.rpc("rpc_ops_obra_porque_inicio", { p_obra_id: obraId });
+  if (error) {
+    // Antes de o SQL desta versão correr, a função não existe: sem explicação, sem erro.
+    // eslint-disable-next-line no-console
+    console.warn("[Obras] porque começa:", error.message);
+    return null;
+  }
+  return (data ?? null) as unknown as PorqueInicio | null;
+}
+
+export function marcarClienteAvisado(atrasoId: string, nota?: string | null) {
+  return rpc<{ ok: boolean; ja_avisado: boolean }>(
+    "rpc_ops_obra_cliente_avisado",
+    { p_atraso_id: atrasoId, p_nota: nota?.trim() || null },
+    "Não foi possível marcar o cliente como avisado."
+  );
+}
+
+export interface AlertaSupervisao {
+  tipo: TipoAlerta;
+  gravidade: number;
+  tarefa_id: string;
+  obra_id: string;
+  obra_codigo: string;
+  obra_titulo: string;
+  tarefa_nome: string;
+  pessoas: string[];
+  pessoas_nomes: string[];
+  desde: string | null;
+  minutos_atraso: number | null;
+  detalhe: string;
+  atraso_id: string | null;
+}
+
+/**
+ * Os alertas que a pessoa deve ver (gestor/admin: todas as obras; supervisor:
+ * as suas; os outros: nenhum). O pior primeiro. Não confundir com
+ * `alertasDaOrganizacao` (tarefas a ≥ 80 % do tempo previsto).
+ */
+export async function alertasDeSupervisao(orgId: string): Promise<AlertaSupervisao[]> {
+  const { data, error } = await supabase.rpc("rpc_ops_obra_alertas", { p_org: orgId });
+  rebentar("carregar os alertas de atraso", error);
+  return ((data ?? []) as unknown as AlertaSupervisao[]).map((a) => ({
+    ...a,
+    pessoas: a.pessoas ?? [],
+    pessoas_nomes: a.pessoas_nomes ?? [],
+  }));
+}
+
+// Pôr os avisos do sino do CRM em dia (alertas e bancada). Corre também de
+// 15 em 15 min na base (pg_cron); daqui, no máximo uma vez a cada 5 min por
+// organização. Nunca falha para quem chama: o sino é acessório.
+const ultimaSincronizacao = new Map<string, number>();
+export async function sincronizarAvisos(orgId: string, forcar = false): Promise<void> {
+  const agora = Date.now();
+  if (!forcar && agora - (ultimaSincronizacao.get(orgId) ?? 0) < 5 * 60_000) return;
+  ultimaSincronizacao.set(orgId, agora);
+  try {
+    const { error } = await supabase.rpc("rpc_ops_obra_sincronizar_avisos", { p_org: orgId });
+    // eslint-disable-next-line no-console
+    if (error) console.warn("[Obras] avisos:", error.message);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("[Obras] avisos:", e);
+  }
+}
+
+/** O aviso da bancada ao marmorista (quando, a quem). `null` se não houve. */
+export interface AvisoBancada {
+  enviado_em: string;
+  sem_especialidade: boolean;
+  para: string[];
+  primeira: string | null;
+  datas: string | null;
+  medidas: string | null;
+  local: string | null;
+}
+
+export async function avisoBancada(obraId: string): Promise<AvisoBancada | null> {
+  const { data, error } = await supabase.rpc("rpc_ops_obra_aviso_bancada", { p_obra_id: obraId });
+  // Antes de o SQL desta versão correr, a função não existe: sem aviso, sem erro.
+  if (error) return null;
+  const a = (data ?? {}) as unknown as Partial<AvisoBancada>;
+  return a.enviado_em ? ({ ...a, para: a.para ?? [] } as AvisoBancada) : null;
+}
+
+/** Os alertas de uma obra (filtrados dos da organização). */
+export async function alertasDaObra(orgId: string, obraId: string): Promise<AlertaSupervisao[]> {
+  return (await alertasDeSupervisao(orgId)).filter((a) => a.obra_id === obraId);
+}
+
+/** Uma tarefa (a linha da vista), para abrir a folha do atraso a partir de um alerta. */
+export async function obterTarefa(tarefaId: string): Promise<TarefaObra | null> {
+  const { data, error } = await supabase.from("ops_v_obra_tarefa").select("*").eq("id", tarefaId).maybeSingle();
+  rebentar("carregar a tarefa", error);
+  return data ? normalizarTarefa(data as unknown as TarefaObra) : null;
+}
+
+/** Avisa o resto da app (o contador do menu) de que os alertas mudaram. */
+export const EVENTO_ALERTAS = "ops:alertas-mudaram";
+export function avisarAlertasMudaram(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(EVENTO_ALERTAS));
+}
+
+/**
+ * As medidas da visita (CRM, deal_needs.diag_*) das áreas do orçamento da obra,
+ * para afinar a sugestão de proteções e logística. Só lê. É um extra: sem
+ * permissão no CRM, ou sem orçamento, devolve [] (a sugestão usa a ficha).
+ */
+export async function areasDaVisitaDoOrcamento(orcamentoId: string | null | undefined): Promise<AreaParaSugestao[]> {
+  if (!orcamentoId) return [];
+  try {
+    const { data: linhas, error } = await supabase
+      .from("quote_lines")
+      .select("source_deal_need_id")
+      .eq("quote_id", orcamentoId);
+    if (error) return [];
+    const ids = [
+      ...new Set(
+        ((linhas ?? []) as { source_deal_need_id: string | null }[])
+          .map((l) => l.source_deal_need_id)
+          .filter((x): x is string => !!x)
+      ),
+    ];
+    if (ids.length === 0) return [];
+    const { data, error: e2 } = await supabase
+      .from("deal_needs")
+      .select(
+        "id, diag_tipo_area, diag_m2_pavimento, diag_area_m2, diag_distancia_entrada, diag_mobilada, diag_portas_proteger, diag_local_cortes, diag_demolir_m2"
+      )
+      .in("id", ids);
+    if (e2) return [];
+    return (data ?? []) as AreaParaSugestao[];
+  } catch {
+    return [];
+  }
 }

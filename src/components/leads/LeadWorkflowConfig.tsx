@@ -1247,7 +1247,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                         <TableHead className="w-16">Cor</TableHead>
                         <TableHead className="w-28">Tipo</TableHead>
                         <TableHead className="w-20">Leads</TableHead>
-                        <TableHead className="text-right w-28">Acções</TableHead>
+                        <TableHead className="text-right w-28">Ações</TableHead>
                       </TableRow>
                     </TableHeader>
                     <SortableContext items={displayStages.map(s => s.id)} strategy={verticalListSortingStrategy}>
@@ -1492,7 +1492,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
               </div>
               <div className="flex items-center gap-2">
                 <Switch checked={newStage.is_rejection} onCheckedChange={v => setNewStage({ ...newStage, is_rejection: v, is_conversion: v ? false : newStage.is_conversion })} />
-                <Label>Lost</Label>
+                <Label>{t('leads.workflow.lostFlag')}</Label>
               </div>
             </div>
           </div>
@@ -1598,7 +1598,7 @@ export function LeadWorkflowConfig({ open, onOpenChange, companyId, onStagesUpda
                   </div>
                   <div className="flex items-center gap-2">
                     <Switch checked={editingStage.is_rejection} onCheckedChange={v => setEditingStage({ ...editingStage, is_rejection: v, is_conversion: v ? false : editingStage.is_conversion })} />
-                    <Label>Lost</Label>
+                    <Label>{t('leads.workflow.lostFlag')}</Label>
                   </div>
                 </div>
               </TabsContent>

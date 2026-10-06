@@ -122,7 +122,7 @@ export function ContractsAlertBars({
           {expiringUrgent.length} contrato{expiringUrgent.length > 1 ? "s" : ""} expira em {daysLeft} dia{daysLeft > 1 ? "s" : ""}
         </span>
         <span className="text-sm text-red-600/80 dark:text-red-400/80 hidden md:inline">
-          — {d.contract_number} ({d._clientName}, {fmt(d.total_value || 0)}). Acção urgente.
+          — {d.contract_number} ({d._clientName}, {fmt(d.total_value || 0)}). Ação urgente.
         </span>
         <Button size="sm" className="ml-auto bg-red-600 hover:bg-red-700 text-white" onClick={() => onAction?.("schedule_reminder", d)}>
           <CalendarClock className="h-3 w-3 mr-1" /> Renovar

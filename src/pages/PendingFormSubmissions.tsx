@@ -88,10 +88,10 @@ interface PendingSubmissionRow {
 }
 
 /**
- * Só há uma acção: registar na ficha. NÃO se oferece "criar lead nova".
+ * Só há uma ação: registar na ficha. NÃO se oferece "criar lead nova".
  *
  * A invariante do produto é que uma entidade não tem mais do que UMA lead. A
- * acção `new_lead` da RPC insere uma lead apontada à MESMA entidade — não
+ * ação `new_lead` da RPC insere uma lead apontada à MESMA entidade — não
  * separa a pessoa em duas, cria-lhe uma segunda lead, que é exactamente o que
  * se quer evitar. Quando uma submissão bate com quem já existe, o que acontece
  * é avisar o comercial; não nasce lead nenhuma.
