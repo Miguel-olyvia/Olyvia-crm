@@ -62,6 +62,7 @@
     "validar-capacidade": "node tools/validar-capacidade.mjs",
     "validar-dados-encomendas": "node tools/validar-dados-encomendas.mjs",
     "validar-obras-fecho": "node tools/validar-obras-fecho.mjs",
+    "validar-tudo-junto": "node tools/validar-tudo-junto.mjs",
     "supabase:obras-fecho": "node tools/correr-sql.mjs db/obras-fecho.sql"
   },
   "dependencies": {
