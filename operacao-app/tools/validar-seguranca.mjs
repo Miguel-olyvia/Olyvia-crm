@@ -172,6 +172,14 @@ await db.exec(`
 
   INSERT INTO public.quotes (id, organization_id, cliente_id, quote_number, title, estado)
     VALUES ('${QUOTE_B}','${ORG_B}','${CLI_B}','ORC-B-1','Obra na B','aceite');
+  -- Contrato assinado: sem ele o orçamento não vira obra (orcamentos.sql, 2b).
+  CREATE TABLE IF NOT EXISTS public.client_contracts (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_number text, status text NOT NULL DEFAULT 'draft',
+    organization_id uuid, quote_id uuid, proposal_id uuid,
+    created_at timestamptz DEFAULT now(), deleted_at timestamptz);
+  INSERT INTO public.client_contracts (contract_number, status, organization_id, quote_id)
+    VALUES ('CC-B-1','signed','${ORG_B}','${QUOTE_B}');
 `);
 
 /* ── Como uma pessoa ────────────────────────────────────────────────────── */

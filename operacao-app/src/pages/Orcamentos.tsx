@@ -24,12 +24,17 @@ import {
   Skeleton,
   Toggle,
 } from "../components/ui";
-import { Euro, Inbox, MapPin } from "../components/icons";
+import { AlertTriangle, CheckCircle, Euro, Inbox, MapPin } from "../components/icons";
 import { euros } from "../lib/formatar";
+import { estadoDoContrato, motivoBloqueio } from "../lib/orcamentos";
 import SeletorDeLocal from "../components/SeletorDeLocal";
 
 /**
  * Orçamentos aceites à espera de virar obra.
+ *
+ * Só vira obra um orçamento ASSINADO E CONTRATUALIZADO: aceite e com um
+ * contrato assinado no CRM. Os aceites sem contrato assinado aparecem, mas
+ * bloqueados e com a razão à vista — a base recusa-os de qualquer forma.
  *
  * A ponte entre as duas metades da empresa. O comercial fecha um orçamento no
  * CRM; até hoje alguém tinha de abrir o Infraspeak e reescrever tudo à mão,
@@ -91,6 +96,8 @@ export default function Orcamentos() {
   );
 
   const porFazer = orcamentos.filter((o) => !o.tem_obra).length;
+  const prontos = orcamentos.filter((o) => !o.tem_obra && o.contratado).length;
+  const semContrato = porFazer - prontos;
 
   const abrir = async () => {
     if (!aAbrir) return;
@@ -134,9 +141,14 @@ export default function Orcamentos() {
           <p className="mt-0.5 text-sm text-slate-500">
             {porFazer === 0
               ? "Nenhum orçamento aceite à espera de obra."
-              : porFazer === 1
-                ? "1 orçamento aceite à espera de obra."
-                : `${porFazer} orçamentos aceites à espera de obra.`}
+              : `${prontos === 1 ? "1 pronto" : `${prontos} prontos`} a pôr a andar` +
+                (semContrato > 0
+                  ? ` · ${semContrato} à espera de contrato assinado`
+                  : "") +
+                "."}
+          </p>
+          <p className="mt-0.5 text-xs text-slate-400">
+            Só se põe a andar um orçamento assinado e contratualizado (contrato assinado no CRM).
           </p>
         </div>
         <Toggle
@@ -158,7 +170,9 @@ export default function Orcamentos() {
         />
       ) : (
         <div className="space-y-2">
-          {visiveis.map((o) => (
+          {visiveis.map((o) => {
+            const bloqueio = motivoBloqueio(o);
+            return (
             <Card key={o.id} className="p-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -170,9 +184,13 @@ export default function Orcamentos() {
                       <Badge className="bg-emerald-50 text-emerald-700 ring-emerald-200">
                         já tem obra
                       </Badge>
+                    ) : !o.contratado ? (
+                      <Badge className="bg-amber-50 text-amber-800 ring-amber-200">
+                        falta contrato assinado
+                      </Badge>
                     ) : (
                       <Badge className="bg-brand-50 text-brand-800 ring-brand-200">
-                        por pôr a andar
+                        pronto a pôr a andar
                       </Badge>
                     )}
                   </div>
@@ -195,6 +213,24 @@ export default function Orcamentos() {
                       {o.obra_endereco}
                     </p>
                   )}
+
+                  {o.contratado ? (
+                    <p className="mt-1 flex items-center gap-1 text-xs text-emerald-700">
+                      <CheckCircle width={12} height={12} />
+                      Contrato {o.contrato_numero ?? ""} {estadoDoContrato(o.contrato_estado)}
+                    </p>
+                  ) : (
+                    !o.tem_obra &&
+                    bloqueio && (
+                      <p
+                        className="mt-1 flex items-start gap-1 text-xs text-amber-800"
+                        data-testid="motivo-bloqueio"
+                      >
+                        <AlertTriangle width={12} height={12} className="mt-0.5 shrink-0" />
+                        {bloqueio}
+                      </p>
+                    )
+                  )}
                 </div>
 
                 <div className="shrink-0 text-right">
@@ -214,7 +250,10 @@ export default function Orcamentos() {
                     <Button
                       size="sm"
                       className="mt-2"
+                      disabled={bloqueio !== null}
+                      title={bloqueio ?? undefined}
                       onClick={() => {
+                        if (bloqueio) return;
                         setAAbrir(o);
                         setLocalId("");
                         setQuando("");
@@ -227,7 +266,8 @@ export default function Orcamentos() {
                 </div>
               </div>
             </Card>
-          ))}
+            );
+          })}
         </div>
       )}
 

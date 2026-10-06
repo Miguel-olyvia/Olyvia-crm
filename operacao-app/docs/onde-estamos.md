@@ -7,6 +7,22 @@
 
 ---
 
+## 06/10/2026 — orçamento só vira obra se assinado e contratualizado
+
+Em `/operacao/orcamentos`, um orçamento aceite só se põe a andar quando há um
+contrato do CRM (`client_contracts`), não apagado, em estado `signed`,
+`assinado` ou `active`, que o cobre — pelo `quote_id` ou, sem ele, pela
+proposta (mesmos caminhos de `ops_contrato_orcamento`). Os outros aparecem
+bloqueados, com a razão. Na base: `ops_orcamento_contrato()`, colunas novas no
+fim de `ops_v_orcamento` e o trigger `ops_ordem_exigir_contrato` em `ops_ordem`
+(db/orcamentos.sql, secções 2b, 3 e 5b).
+
+Na produção: colar **`db/orcamentos-contrato.sql`** no SQL Editor ANTES de
+publicar a app (a app nova lê as colunas novas). Provado por
+`validar-orcamentos` e `validar-atualizacao`.
+
+---
+
 ## 03/10/2026 — planeamento automático das obras
 
 Tempos padrão dos manuais de remodelação (casa de banho, cozinha), extras

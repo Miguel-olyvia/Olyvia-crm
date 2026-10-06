@@ -21,6 +21,7 @@
     "supabase:medicoes": "node tools/correr-sql.mjs db/medicoes.sql",
     "supabase:despacho": "node tools/correr-sql.mjs db/despacho.sql",
     "supabase:orcamentos": "node tools/correr-sql.mjs db/orcamentos.sql",
+    "supabase:orcamentos-contrato": "node tools/correr-sql.mjs db/orcamentos-contrato.sql",
     "supabase:anexos": "node tools/correr-sql.mjs db/anexos.sql",
     "supabase:planos-crud": "node tools/correr-sql.mjs db/planos-crud.sql",
     "supabase:config": "node tools/correr-sql.mjs db/config.sql",

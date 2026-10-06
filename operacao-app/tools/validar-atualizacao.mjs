@@ -5,6 +5,7 @@
  * é só a sequência nova de `docs/onde-estamos.md` §0:
  *
  *     seguranca.sql → tempos.sql → rpcs-tarefas.sql → medicoes.sql → obras.sql
+ *     → orcamentos-contrato.sql
  *
  * Este script monta duas bases:
  *   A) a produção de hoje: a sequência ANTIGA (lida do git, no commit-base)
@@ -35,7 +36,11 @@ const ANTIGA = [
   "correcoes-modelo.sql", "medicoes.sql", "despacho.sql", "orcamentos.sql",
   "anexos.sql", "planos-crud.sql", "config.sql", "custos.sql", "cliente-crm.sql",
 ];
-const ATUALIZACAO = ["seguranca.sql", "tempos.sql", "rpcs-tarefas.sql", "medicoes.sql", "obras.sql"];
+const ATUALIZACAO = [
+  "seguranca.sql", "tempos.sql", "rpcs-tarefas.sql", "medicoes.sql", "obras.sql",
+  // 06/10: só vira obra um orçamento assinado e contratualizado.
+  "orcamentos-contrato.sql",
+];
 const LIMPA = [...ANTIGA, "seguranca.sql", "tempos.sql", "obras.sql"];
 
 async function montar(nome, passos) {

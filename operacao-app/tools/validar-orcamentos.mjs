@@ -6,6 +6,8 @@
  *   · as linhas ficam congeladas — rever o orçamento depois não reescreve
  *     aquilo contra o qual se está a comparar;
  *   · um orçamento gera UMA obra, por muitas vezes que se carregue no botão;
+ *   · só vira obra um orçamento ASSINADO E CONTRATUALIZADO — aceite e com
+ *     um contrato assinado no CRM (pelo quote_id ou pela proposta);
  *   · o desvio é nulo quando não houve orçamento, e não zero;
  *   · nada disto escreve uma linha em `quotes` ou `quote_lines`.
  *
@@ -41,8 +43,27 @@ const AUTH = {
 const ORC = "99990000-0000-0000-0000-000000000001";
 const ORC_RASCUNHO = "99990000-0000-0000-0000-000000000002";
 const ORC_SEM_CLIENTE = "99990000-0000-0000-0000-000000000003";
+const ORC_SEM_CONTRATO = "99990000-0000-0000-0000-000000000004";
+const ORC_POR_ASSINAR = "99990000-0000-0000-0000-000000000005";
+const ORC_PROPOSTA = "99990000-0000-0000-0000-000000000006";
+const PROPOSTA = "66660000-0000-0000-0000-000000000001";
 
 await db.exec(STUBS_CRM);
+await db.exec(`
+  -- Contratos do CRM: só as colunas que a regra "assinado e contratualizado"
+  -- lê. Aqui e não em _stubs-crm.mjs (ver validar-obras.mjs). E a proposta
+  -- do orçamento, para o caminho contrato → proposta → orçamento.
+  CREATE TABLE public.client_contracts (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    contract_number text,
+    status text NOT NULL DEFAULT 'draft',
+    organization_id uuid,
+    quote_id uuid,
+    proposal_id uuid,
+    created_at timestamptz DEFAULT now(),
+    deleted_at timestamptz);
+  ALTER TABLE public.quotes ADD COLUMN proposal_id uuid;
+`);
 await db.exec(`
   CREATE TABLE public.auth_to_business_user_map (auth_user_id uuid, business_user_id uuid);
   CREATE OR REPLACE FUNCTION public.current_business_user_id() RETURNS uuid
@@ -109,7 +130,23 @@ await db.exec(`
     ('${ORC}','${ORG}','${CLI}','ORC-2026-001','Remodelacao da casa de banho',
      'Rua das Flores 12, Lisboa','Cliente pede obra antes do Natal.','aceite',now(),615.00),
     ('${ORC_RASCUNHO}','${ORG}','${CLI}','ORC-2026-002','Ainda a pensar',NULL,NULL,'rascunho',NULL,0),
-    ('${ORC_SEM_CLIENTE}','${ORG}',NULL,'ORC-2026-003','Sem cliente',NULL,NULL,'aceite',now(),0);
+    ('${ORC_SEM_CLIENTE}','${ORG}',NULL,'ORC-2026-003','Sem cliente',NULL,NULL,'aceite',now(),0),
+    ('${ORC_SEM_CONTRATO}','${ORG}','${CLI}','ORC-2026-004','Aceite mas sem contrato',NULL,NULL,'aceite',now(),100),
+    ('${ORC_POR_ASSINAR}','${ORG}','${CLI}','ORC-2026-005','Contrato por assinar',NULL,NULL,'aceite',now(),100);
+  INSERT INTO public.quotes (id, organization_id, cliente_id, quote_number, title,
+                             estado, accepted_at, total, proposal_id) VALUES
+    ('${ORC_PROPOSTA}','${ORG}','${CLI}','ORC-2026-006','Pela proposta','aceite',now(),100,'${PROPOSTA}');
+
+  -- ORC: contrato assinado pelo quote_id. ORC_POR_ASSINAR: contrato à espera
+  -- de assinatura (e um cancelado antes, que não conta). ORC_PROPOSTA: contrato
+  -- 'active' da proposta, sem quote_id — o caso da maioria dos contratos reais.
+  -- ORC_SEM_CONTRATO: nenhum. O rascunho tem um contrato apagado, que não conta.
+  INSERT INTO public.client_contracts (contract_number, status, organization_id, quote_id, proposal_id, created_at, deleted_at) VALUES
+    ('CC-001','signed','${ORG}','${ORC}',NULL, now(), NULL),
+    ('CC-002','cancelled','${ORG}','${ORC_POR_ASSINAR}',NULL, now() - interval '2 days', NULL),
+    ('CC-003','pending_signature','${ORG}','${ORC_POR_ASSINAR}',NULL, now() - interval '1 day', NULL),
+    ('CC-004','active','${ORG}',NULL,'${PROPOSTA}', now(), NULL),
+    ('CC-005','signed','${ORG}','${ORC_RASCUNHO}',NULL, now(), now());
 
   INSERT INTO public.quote_lines (quote_id, ordem, categoria, item_description, unidade,
                                   qt, custo_material_unit, custo_mao_obra_unit, total_sem_iva) VALUES
@@ -156,11 +193,26 @@ const porAndar = (id) => `SELECT public.rpc_ops_obra_de_orcamento('${id}');`;
 /* ── A lista de orçamentos por pôr a andar ──────────────────────────────── */
 console.log("\n─── o que falta pôr a andar ─────────────");
 {
-  const v = await q(`SELECT numero, custo_previsto, linhas, tem_obra, total
+  const v = await q(`SELECT numero, custo_previsto, linhas, tem_obra, total,
+                            contratado, contrato_numero, contrato_estado
                        FROM public.ops_v_orcamento ORDER BY numero`);
-  v.length === 2
+  v.length === 5
     ? ok("só os aceites aparecem — o rascunho fica de fora")
-    : mau(`a vista trouxe ${v.length} orçamentos, esperava 2`);
+    : mau(`a vista trouxe ${v.length} orçamentos, esperava 5`);
+
+  const por = Object.fromEntries(v.map((x) => [x.numero, x]));
+  por["ORC-2026-001"].contratado === true && por["ORC-2026-001"].contrato_numero === "CC-001"
+    ? ok("contrato assinado pelo quote_id: contratado (CC-001)")
+    : mau(`ORC-001: ${JSON.stringify(por["ORC-2026-001"])}`);
+  por["ORC-2026-006"].contratado === true && por["ORC-2026-006"].contrato_numero === "CC-004"
+    ? ok("contrato 'active' da proposta, sem quote_id: contratado (CC-004)")
+    : mau(`ORC-006: ${JSON.stringify(por["ORC-2026-006"])}`);
+  por["ORC-2026-004"].contratado === false && por["ORC-2026-004"].contrato_numero === null
+    ? ok("aceite sem contrato: não contratado, e sem contrato a mostrar")
+    : mau(`ORC-004: ${JSON.stringify(por["ORC-2026-004"])}`);
+  por["ORC-2026-005"].contratado === false && por["ORC-2026-005"].contrato_estado === "pending_signature"
+    ? ok("contrato por assinar: não contratado, e diz qual (o mais recente, não o cancelado)")
+    : mau(`ORC-005: ${JSON.stringify(por["ORC-2026-005"])}`);
 
   const o = v.find((x) => x.numero === "ORC-2026-001");
   Number(o.custo_previsto) === 300
@@ -181,6 +233,34 @@ await deveSerRecusado(
   porAndar(ORC_RASCUNHO),
   "orçamento aceite"
 );
+
+await deveSerRecusado(
+  "um orçamento aceite SEM contrato não vira obra",
+  AUTH.gestor,
+  porAndar(ORC_SEM_CONTRATO),
+  "ainda não tem contrato"
+);
+
+await deveSerRecusado(
+  "um orçamento com o contrato por assinar não vira obra",
+  AUTH.gestor,
+  porAndar(ORC_POR_ASSINAR),
+  "CC-003 deste orçamento ainda não está assinado"
+);
+
+{
+  // Nem por fora da RPC: a regra está num trigger em ops_ordem.
+  try {
+    await db.exec(`INSERT INTO public.ops_ordem (organization_id, codigo, origem, estado, prioridade,
+                                                 cliente_id, titulo, orcamento_id)
+                   VALUES ('${ORG}','OT-X','obra','agendada','normal','${CLI}','Por fora','${ORC_SEM_CONTRATO}')`);
+    mau("uma ordem ligada a um orçamento sem contrato entrou por fora da RPC");
+  } catch (e) {
+    e.message.includes("ainda não tem contrato")
+      ? ok("nem com um INSERT direto (até como dono da base) — o trigger recusa")
+      : mau(`recusado com a mensagem errada: ${e.message.split("\n")[0]}`);
+  }
+}
 
 await deveSerRecusado(
   "um orçamento sem cliente não vira obra",
@@ -213,6 +293,12 @@ let CODIGO, ID;
   o.descricao?.includes("Rua das Flores") && o.descricao?.includes("antes do Natal")
     ? ok("a morada da obra e as notas do cliente vieram no corpo, para quem lá chega ler")
     : mau(`descrição sem a morada ou as notas: ${o.descricao}`);
+}
+
+{
+  const r = await chamar(AUTH.gestor, porAndar(ORC_PROPOSTA));
+  r?.ok ? ok(`contratualizado pela proposta também anda: ${r.codigo}`)
+        : mau(`não criou pela proposta: ${JSON.stringify(r)}`);
 }
 
 await deveSerRecusado(
@@ -326,9 +412,10 @@ console.log("\n─── o CRM ficou intacto ───────────�
 {
   const qs = await um(`SELECT count(*)::int AS n FROM public.quotes`);
   const ls = await um(`SELECT count(*)::int AS n FROM public.quote_lines`);
-  qs.n === 3 && ls.n === 2
-    ? ok("os 3 orçamentos e as 2 linhas continuam como estavam")
-    : mau(`quotes=${qs.n} quote_lines=${ls.n}`);
+  const cs = await um(`SELECT count(*)::int AS n FROM public.client_contracts`);
+  qs.n === 6 && ls.n === 2 && cs.n === 5
+    ? ok("os 6 orçamentos, as 2 linhas e os 5 contratos continuam como estavam")
+    : mau(`quotes=${qs.n} quote_lines=${ls.n} client_contracts=${cs.n}`);
 
   const e = await um(`
     SELECT COALESCE(estado,'') AS estado, accepted_at IS NOT NULL AS aceite
@@ -350,8 +437,8 @@ console.log("\n─── o CRM ficou intacto ───────────�
   const tr = await um(`
     SELECT count(*)::int AS n FROM pg_trigger g
       JOIN pg_class t ON t.oid = g.tgrelid
-     WHERE NOT g.tgisinternal AND t.relname IN ('quotes','quote_lines')`);
-  tr.n === 0 ? ok("e nenhum trigger nosso em quotes ou quote_lines")
+     WHERE NOT g.tgisinternal AND t.relname IN ('quotes','quote_lines','client_contracts')`);
+  tr.n === 0 ? ok("e nenhum trigger nosso em quotes, quote_lines ou client_contracts")
              : mau(`${tr.n} trigger(s) postos por nós no CRM`);
 }
 

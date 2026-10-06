@@ -612,6 +612,19 @@ export interface OrcamentoAceite {
   custo_previsto: number;
   linhas: number;
   tem_obra: boolean;
+  /**
+   * O contrato do CRM que cobre o orçamento (o assinado, se houver; senão o
+   * mais recente). Nulo = não há contrato nenhum.
+   */
+  contrato_id: string | null;
+  contrato_numero: string | null;
+  /** `client_contracts.status`: draft, pending_signature, signed, active, cancelled… */
+  contrato_estado: string | null;
+  /**
+   * Assinado e contratualizado: há contrato assinado ('signed'/'assinado'/'active').
+   * Só assim o orçamento pode virar obra — a base recusa o resto.
+   */
+  contratado: boolean;
 }
 
 export async function listarOrcamentos(orgId: string): Promise<OrcamentoAceite[]> {
@@ -619,7 +632,8 @@ export async function listarOrcamentos(orgId: string): Promise<OrcamentoAceite[]
     .from("ops_v_orcamento")
     .select(
       "id, cliente_id, numero, titulo, obra_endereco, estado, accepted_at, " +
-        "total, moeda, custo_previsto, linhas, tem_obra"
+        "total, moeda, custo_previsto, linhas, tem_obra, " +
+        "contrato_id, contrato_numero, contrato_estado, contratado"
     )
     .eq("organization_id", orgId)
     .order("accepted_at", { ascending: false, nullsFirst: false })
