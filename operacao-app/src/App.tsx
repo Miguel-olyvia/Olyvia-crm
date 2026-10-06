@@ -24,6 +24,7 @@ const ObraModelos = lazy(() => import("./pages/ObraModelos"));
 const ObraMetricas = lazy(() => import("./pages/ObraMetricas"));
 const MinhasTarefas = lazy(() => import("./pages/MinhasTarefas"));
 const Validar = lazy(() => import("./pages/Validar"));
+const Capacidade = lazy(() => import("./pages/Capacidade"));
 
 export default function App() {
   return (
@@ -109,6 +110,14 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar os modelos…" />}>
               <ObraModelos />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/capacidade"
+          element={
+            <Suspense fallback={<Spinner label="A calcular a capacidade…" />}>
+              <Capacidade />
             </Suspense>
           }
         />

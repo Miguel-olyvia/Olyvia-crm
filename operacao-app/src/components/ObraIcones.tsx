@@ -51,6 +51,15 @@ export const ObraMetricas = (p: P) => (
   </svg>
 );
 
+/** Pessoas com uma barra a encher — capacidade da equipa. */
+export const ObraCapacidade = (p: P) => (
+  <svg {...base(p)}>
+    <circle cx="9" cy="7" r="3" />
+    <path d="M3 20v-1a6 6 0 0 1 9.5-4.9" />
+    <path d="M15 20v-6M18.5 20v-9M22 20v-4" />
+  </svg>
+);
+
 /** Moldes — modelos de obra. */
 export const ObraModelo = (p: P) => (
   <svg {...base(p)}>
