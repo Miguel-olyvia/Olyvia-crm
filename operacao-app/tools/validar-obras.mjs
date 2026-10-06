@@ -2281,6 +2281,130 @@ console.log("\n─── especialidades e materiais no plano ─");
     DELETE FROM public.ops_obra WHERE id='${OC.id}';`);
 }
 
+/* ── Avisos no sino do CRM ──────────────────────────────────────────────── */
+console.log("\n─── avisos no sino do CRM ───────────────");
+{
+  // Tudo o que as obras escreveram até aqui no sino (os triggers já correram
+  // nos testes de cima): visível no sino, para o id de auth, marcado como nosso.
+  const formato = await um(`
+    SELECT count(*)::int AS n,
+           count(*) FILTER (WHERE kind <> 'notification' OR data->>'modulo' <> 'operacoes'
+                              OR entity_type <> 'ops_obra' OR entity_id IS NULL
+                              OR NOT EXISTS (SELECT 1 FROM public.anew_users u WHERE u.auth_user_id = n.user_id)
+                              OR link NOT LIKE '/operacao/%')::int AS maus
+      FROM public.notifications n`);
+  formato.maus === 0
+    ? ok(`os ${formato.n} avisos já escritos têm kind=notification, id de auth, a obra e link /operacao`)
+    : mau(`${formato.maus} aviso(s) mal formados`);
+
+  const OB = (await um(`
+    INSERT INTO public.ops_obra (organization_id, codigo, titulo, morada, estado, supervisor_id, data_inicio_prevista)
+    VALUES ('${ORG_A}','OB-AVISOS','Cozinha com bancada','Rua da Pedra 5, Lisboa','planeada','${U.supA}', current_date)
+    RETURNING id`)).id;
+  const FASE = (await um(`
+    INSERT INTO public.ops_obra_fase (organization_id, obra_id, ordem, nome)
+    VALUES ('${ORG_A}','${OB}',1,'Execução') RETURNING id`)).id;
+  await q(`INSERT INTO public.ops_skill (organization_id, nome) VALUES ('${ORG_A}','Marmorista')
+           ON CONFLICT (organization_id, nome) DO NOTHING`);
+  const MARM = (await um(`SELECT id FROM public.ops_skill WHERE organization_id='${ORG_A}' AND nome='Marmorista'`)).id;
+  await q(`DELETE FROM public.ops_utilizador_skill WHERE skill_id='${MARM}'`);
+  const T = await q(`
+    INSERT INTO public.ops_obra_tarefa (organization_id, obra_id, fase_id, ordem, nome, inicio_planeado, fim_planeado,
+                                        skill_id, medida, medida_qt)
+    VALUES ('${ORG_A}','${OB}','${FASE}',1,'Demolição', current_date - 5, current_date - 2, NULL, NULL, NULL),
+           ('${ORG_A}','${OB}','${FASE}',2,'Medição da bancada', current_date + 5, current_date + 5, '${MARM}', 'ml_bancada', 3.2),
+           ('${ORG_A}','${OB}','${FASE}',3,'Pintura', current_date + 8, current_date + 9, NULL, NULL, NULL)
+    RETURNING id, nome`);
+  const tid = Object.fromEntries(T.map((r) => [r.nome, r.id]));
+  const aviso = (auth, tipo) => um(`
+    SELECT count(*)::int AS n, max(title) AS titulo, max(message) AS msg, bool_or(is_read) AS lido,
+           bool_or(is_resolved) AS resolvido, max(priority) AS prio, max(link) AS link
+      FROM public.notifications
+     WHERE user_id='${auth}' AND type='${tipo}' AND entity_id='${OB}'`);
+
+  // Bancada sem ninguém com a especialidade → supervisor e gestora.
+  {
+    const g = await aviso(AUTH.gestorA, "operacoes_obra_bancada");
+    const s2 = await aviso(AUTH.supA, "operacoes_obra_bancada");
+    g.n === 1 && s2.n === 1 && /ninguém com a especialidade Marmorista/.test(g.titulo) && /ml bancada 3[.,]2/.test(g.msg)
+      ? ok("bancada sem marmorista: avisa supervisor e gestora, com a medida (ml bancada 3,2)")
+      : mau(`bancada sem marmorista: ${JSON.stringify({ g, s2 })}`);
+  }
+
+  // Passa a haver marmorista e a medição muda de dia → avisa-o, uma vez.
+  await q(`INSERT INTO public.ops_utilizador_skill (utilizador_id, skill_id) VALUES ('${U.tecA}','${MARM}')`);
+  await q(`UPDATE public.ops_obra_tarefa SET inicio_planeado = current_date + 6, fim_planeado = current_date + 6
+            WHERE id='${tid["Medição da bancada"]}'`);
+  {
+    const t = await aviso(AUTH.tecA, "operacoes_obra_bancada");
+    const reg = await um(`SELECT sem_especialidade, destinatarios FROM public.ops_obra_aviso WHERE obra_id='${OB}'`);
+    t.n === 1 && t.prio === "high" && t.link === "/operacao/obras/OB-AVISOS" && reg && !reg.sem_especialidade
+      ? ok("replaneada: o marmorista recebe o aviso da bancada (link para a obra) e fica registado")
+      : mau(`bancada com marmorista: ${JSON.stringify({ t, reg })}`);
+    // Mexer noutra coisa não volta a avisar.
+    await q(`UPDATE public.notifications SET is_read = true WHERE user_id='${AUTH.tecA}' AND type='operacoes_obra_bancada'`);
+    await q(`UPDATE public.ops_obra_tarefa SET nome = 'Pintura final' WHERE id='${tid["Pintura"]}'`);
+    await q(`UPDATE public.ops_obra_tarefa SET procedimento = 'x' WHERE id='${tid["Medição da bancada"]}'`);
+    const t2 = await aviso(AUTH.tecA, "operacoes_obra_bancada");
+    t2.n === 1 && t2.lido ? ok("sem datas novas não volta a avisar") : mau(`bancada repetida: ${JSON.stringify(t2)}`);
+    const v = await chamar(AUTH.supA, `SELECT public.rpc_ops_obra_aviso_bancada('${OB}');`);
+    v?.enviado_em && v.para?.includes("Tecnico A")
+      ? ok("o ecrã da obra sabe quando e a quem foi o aviso da bancada")
+      : mau(`rpc_ops_obra_aviso_bancada: ${JSON.stringify(v)}`);
+  }
+
+  // Atribuir: a pessoa recebe UM aviso por obra; quem atribui a si não.
+  {
+    await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_atribuir_tarefa('${tid["Demolição"]}', ARRAY['${U.tecA}','${U.gestorA}']::uuid[]);`);
+    const t = await aviso(AUTH.tecA, "operacoes_obra_tarefas");
+    const eu = await aviso(AUTH.gestorA, "operacoes_obra_tarefas");
+    t.n === 1 && /tens 1 tarefa/.test(t.titulo) && t.link === "/operacao/minhas-tarefas" && eu.n === 0
+      ? ok("atribuir avisa o técnico (as minhas tarefas) e não avisa quem se atribuiu a si")
+      : mau(`atribuição: ${JSON.stringify({ t, eu })}`);
+    await q(`UPDATE public.notifications SET is_read = true WHERE user_id='${AUTH.tecA}' AND type='operacoes_obra_tarefas'`);
+    await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_atribuir_tarefa('${tid["Pintura"]}', ARRAY['${U.tecA}']::uuid[]);`);
+    const t2 = await aviso(AUTH.tecA, "operacoes_obra_tarefas");
+    t2.n === 1 && /tens 2 tarefas/.test(t2.titulo) && !t2.lido
+      ? ok("mais trabalho na mesma obra: o mesmo aviso, atualizado e outra vez por ler")
+      : mau(`segunda atribuição: ${JSON.stringify(t2)}`);
+  }
+
+  // Alertas: um aviso por obra ao supervisor e à gestora; sem duplicar; resolve.
+  {
+    const r1 = await chamar(AUTH.supA, `SELECT public.rpc_ops_obra_sincronizar_avisos('${ORG_A}');`);
+    await chamar(AUTH.supA, `SELECT public.rpc_ops_obra_sincronizar_avisos('${ORG_A}');`);
+    const s2 = await aviso(AUTH.supA, "operacoes_obra_alertas");
+    const g = await aviso(AUTH.gestorA, "operacoes_obra_alertas");
+    const tec = await aviso(AUTH.tecA, "operacoes_obra_alertas");
+    r1?.ok && s2.n === 1 && g.n === 1 && tec.n === 0 && s2.prio === "high" && /fora do prazo/.test(s2.msg)
+      ? ok("alertas da obra: um aviso ao supervisor e à gestora (não ao técnico), sem duplicar")
+      : mau(`alertas: ${JSON.stringify({ r1, s2, g, tec })}`);
+    await q(`UPDATE public.ops_obra_tarefa SET estado = 'feita', terminada_em = now() WHERE id='${tid["Demolição"]}'`);
+    await chamar(AUTH.supA, `SELECT public.rpc_ops_obra_sincronizar_avisos('${ORG_A}');`);
+    const s3 = await aviso(AUTH.supA, "operacoes_obra_alertas");
+    s3.resolvido ? ok("acabou o alerta: o aviso resolve-se sozinho") : mau(`não resolveu: ${JSON.stringify(s3)}`);
+    let out;
+    try {
+      out = await chamar(AUTH.gestorB, `SELECT public.rpc_ops_obra_sincronizar_avisos('${ORG_A}');`);
+    } catch (e) {
+      await db.exec("ROLLBACK").catch(() => {});
+      out = e.message;
+    }
+    out?.ok !== true ? ok("o gestor de outra organização não mexe nos avisos desta") : mau("org B sincronizou a A");
+  }
+
+  const internas = await um(`
+    SELECT count(*)::int AS n FROM pg_proc p
+     WHERE p.pronamespace='public'::regnamespace
+       AND p.proname IN ('ops_obra_notificar','ops_obra_notificacoes_resolver','ops_obra_coordenacao',
+                         'ops_obra_ficha_local_dados','ops_obra_avisar_atribuicao','ops_obra_avisar_bancada',
+                         'ops_obra_sincronizar_avisos')
+       AND (has_function_privilege('authenticated', p.oid, 'EXECUTE') OR has_function_privilege('anon', p.oid, 'EXECUTE'))`);
+  internas.n === 0 ? ok("as funções que escrevem no sino não estão abertas a quem entra") : mau(`${internas.n} abertas`);
+
+  await q(`DELETE FROM public.ops_obra WHERE id='${OB}'`);
+}
+
 /* ── O CRM ficou intacto ────────────────────────────────────────────────── */
 console.log("\n─── o CRM ficou intacto ─────────────────");
 {

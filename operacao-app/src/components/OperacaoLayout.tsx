@@ -24,7 +24,7 @@ import {
 import { ObraCapacete, ObraCronometro, ObraModelo, ObraValidar } from "./ObraIcones";
 import { podePlanear, podeValidar } from "../domain/obras";
 import { EscolherPessoa, FaixaEntrarComo, sairDoEntrarComo, useEntrarComo } from "./EntrarComo";
-import { EVENTO_ALERTAS, alertasDeSupervisao } from "../lib/obras";
+import { EVENTO_ALERTAS, alertasDeSupervisao, sincronizarAvisos } from "../lib/obras";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 const CHAVE_PAINEL = "operacao.menu-aberto";
@@ -105,6 +105,8 @@ export function useContadorAlertas(orgId: string | null, funcao: string | null):
         .catch(() => vivo && setN(0));
     };
     perguntar();
+    // Quem supervisiona abre a aplicação: os avisos do sino do CRM põem-se em dia.
+    void sincronizarAvisos(orgId);
     const id = window.setInterval(perguntar, INTERVALO_ALERTAS_MS);
     const aoFocar = () => perguntar();
     const aoVer = () => document.visibilityState === "visible" && perguntar();

@@ -84,7 +84,15 @@ não tem de preencher em cima de um telhado é meio minuto e um erro a menos.
 
 ---
 
-## 1. Notificações — usar as do CRM
+## 1. ~~Notificações — usar as do CRM~~
+
+> **Feito a 06/10/2026 para as obras** (`db/obras.sql`, secção "Avisos no
+> sino do CRM"; ver [`obras.md`](obras.md#avisos-no-sino-do-crm)): trabalho
+> atribuído, alertas da obra (resumidos por obra, resolvem-se sozinhos) e
+> aviso da bancada ao marmorista. O sino do CRM passou a abrir os links
+> `/operacao/...` (antes caíam na página 404 do CRM). As ordens de
+> manutenção já tinham os seus avisos no ramo `feature/operacoes`
+> (`notificacoes.sql`, `ops_notificar`), aplicados na produção.
 
 **Prioridade: alta. É a falha mais sentida.**
 
@@ -367,7 +375,7 @@ a sessão de trabalho começa na mesma, e o tempo continua certo.
 
 Assumindo que o piloto corre e a equipa fica a usar:
 
-1. **Notificações** — a falha mais sentida, e a mais barata (meio dia)
+1. ~~**Notificações**~~ — feito a 06/10/2026 (obras)
 2. **Iniciar a ordem sozinha** — uma hora, e tira um passo a toda a gente
 3. **Relatório do ativo** — o que a operação mais pede depois de usar
 4. **Agenda: férias e horários** — para o aviso de choque dizer a verdade
