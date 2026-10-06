@@ -26,7 +26,15 @@ async function clickSend() {
   });
 }
 
-describe("SignatoryOtpDialog - pausa entre envios de SMS", () => {
+async function clickResend() {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /^Reenviar código/ }));
+  });
+}
+
+const button = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+
+describe("SignatoryOtpDialog - pausa só no Reenviar código", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     invoke.mockReset();
@@ -37,70 +45,98 @@ describe("SignatoryOtpDialog - pausa entre envios de SMS", () => {
     vi.restoreAllMocks();
   });
 
-  it("um duplo clique rápido envia um só SMS", async () => {
+  it("o botão Enviar não tem contagem nem aviso antes do primeiro envio", () => {
     renderDialog();
-    const button = screen.getByRole("button", { name: /Enviar Código SMS/ });
+    expect(button("Enviar Código SMS").disabled).toBe(false);
+    expect(screen.queryByText(NOTICE)).toBeNull();
+  });
+
+  it("um duplo clique rápido no Enviar envia um só SMS", async () => {
+    renderDialog();
+    const send = screen.getByRole("button", { name: /Enviar Código SMS/ });
     await act(async () => {
-      fireEvent.click(button);
-      fireEvent.click(button);
+      fireEvent.click(send);
+      fireEvent.click(send);
     });
     expect(invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("depois de enviar, Reenviar fica desactivado com os segundos e o aviso é neutro", async () => {
+  it("um primeiro envio aceite deixa o Reenviar bloqueado com 60 segundos e o aviso junto a ele", async () => {
     renderDialog();
-    expect(screen.queryByText(NOTICE)).toBeNull();
     await clickSend();
-    const resend = screen.getByRole("button", { name: "Reenviar código (60s)" }) as HTMLButtonElement;
-    expect(resend.disabled).toBe(true);
+    expect(button("Reenviar código (60s)").disabled).toBe(true);
     expect(screen.getByText(NOTICE)).toBeTruthy();
     expect(screen.queryByRole("status")).toBeNull();
 
     act(() => { vi.advanceTimersByTime(15000); });
-    expect(screen.getByRole("button", { name: "Reenviar código (45s)" })).toBeTruthy();
+    expect(button("Reenviar código (45s)").disabled).toBe(true);
+  });
 
-    act(() => { vi.advanceTimersByTime(45000); });
-    const ready = screen.getByRole("button", { name: "Reenviar código" }) as HTMLButtonElement;
-    expect(ready.disabled).toBe(false);
+  it("a contagem chega a 0 e o Reenviar volta a ficar activo", async () => {
+    renderDialog();
+    await clickSend();
+    act(() => { vi.advanceTimersByTime(60000); });
+    expect(button("Reenviar código").disabled).toBe(false);
     expect(screen.queryByText(NOTICE)).toBeNull();
   });
 
-  it("no passo do código, o campo do código recebe o foco", async () => {
+  it("cada Reenviar bloqueia outros 60 segundos", async () => {
     renderDialog();
     await clickSend();
-    expect(document.activeElement).toBe(screen.getByPlaceholderText("000000"));
+    act(() => { vi.advanceTimersByTime(60000); });
+    await clickResend();
+    expect(invoke).toHaveBeenCalledTimes(2);
+    expect(button("Reenviar código (60s)").disabled).toBe(true);
+
+    act(() => { vi.advanceTimersByTime(60000); });
+    await clickResend();
+    expect(invoke).toHaveBeenCalledTimes(3);
+    expect(button("Reenviar código (60s)").disabled).toBe(true);
   });
 
-  it("se o servidor recusar com rate_limit, a contagem não é reposta", async () => {
-    invoke.mockResolvedValue({
-      data: { error: "rate_limit", message: "Demasiados pedidos. Aguarde alguns minutos antes de tentar novamente." },
-      error: null,
-    });
+  it("se o servidor recusar um Reenviar, a contagem não é reposta", async () => {
     renderDialog();
     await clickSend();
-    expect((screen.getByRole("button", { name: "Enviar Código SMS (60s)" }) as HTMLButtonElement).disabled).toBe(true);
+    act(() => { vi.advanceTimersByTime(60000); });
+    invoke.mockResolvedValue({ data: { error: "rate_limit", message: "Demasiados pedidos." }, error: null });
+    await clickResend();
+    expect(button("Reenviar código (60s)").disabled).toBe(true);
     act(() => { vi.advanceTimersByTime(20000); });
-    expect(screen.getByRole("button", { name: "Enviar Código SMS (40s)" })).toBeTruthy();
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(button("Reenviar código (40s)").disabled).toBe(true);
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 
-  it("se o signatário não tem telefone (no_phone), a contagem continua e não é reposta", async () => {
-    invoke.mockResolvedValue({ data: { error: "no_phone", message: "sem telefone" }, error: null });
+  it("o campo do código recebe o foco e Verificar não fica bloqueado pela contagem", async () => {
     renderDialog();
     await clickSend();
-    act(() => { vi.advanceTimersByTime(10000); });
-    const button = screen.getByRole("button", { name: "Enviar Código SMS (50s)" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(invoke).toHaveBeenCalledTimes(1);
+    const field = screen.getByPlaceholderText("000000") as HTMLInputElement;
+    expect(document.activeElement).toBe(field);
+    expect(field.disabled).toBe(false);
+    await act(async () => { fireEvent.change(field, { target: { value: "123456" } }); });
+    expect(button("Verificar").disabled).toBe(false);
   });
 
-  it("num erro de rede, a contagem continua activa e não é reposta", async () => {
+  it.each([
+    ["rate_limit", { data: { error: "rate_limit", message: "Demasiados pedidos." }, error: null }],
+    ["no_phone", { data: { error: "no_phone", message: "sem telefone" }, error: null }],
+  ])("um primeiro envio recusado (%s) não bloqueia nada e deixa o Enviar clicável", async (_nome, resposta) => {
+    invoke.mockResolvedValue(resposta);
+    renderDialog();
+    await clickSend();
+    expect(button("Enviar Código SMS").disabled).toBe(false);
+    expect(screen.queryByText(NOTICE)).toBeNull();
+    await clickSend();
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("um erro de rede no primeiro envio não bloqueia nada e liberta o Enviar", async () => {
     invoke.mockRejectedValue(new Error("Failed to fetch"));
     vi.spyOn(console, "error").mockImplementation(() => {});
     renderDialog();
     await clickSend();
-    act(() => { vi.advanceTimersByTime(5000); });
-    expect((screen.getByRole("button", { name: "Enviar Código SMS (55s)" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(button("Enviar Código SMS").disabled).toBe(false);
+    expect(screen.queryByText(NOTICE)).toBeNull();
+    await clickSend();
+    expect(invoke).toHaveBeenCalledTimes(2);
   });
 });

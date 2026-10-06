@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
@@ -40,6 +40,7 @@ const ClientPortalContractDetail = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
+  const otpSendingRef = useRef(false);
 
   const [contract, setContract] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
@@ -49,6 +50,8 @@ const ClientPortalContractDetail = () => {
   // OTP states
   const [otpStep, setOtpStep] = useState<"idle" | "sending" | "input" | "verifying" | "verified">("idle");
   const [otpCode, setOtpCode] = useState("");
+  // O Reenviar não muda o passo (o campo do código fica); só desactiva o botão durante o pedido.
+  const [reenviando, setReenviando] = useState(false);
   const [maskedPhone, setMaskedPhone] = useState("");
   const [otpError, setOtpError] = useState("");
 
@@ -144,11 +147,16 @@ const ClientPortalContractDetail = () => {
   const isRejected = contract?.status === "rejected";
   const isCancelled = contract?.status === "cancelled";
 
-  async function handleSendOtp() {
+  // A contagem de 60 s é só do Reenviar: no primeiro envio começa quando o servidor aceita;
+  // no Reenviar começa no clique e não é reposta se o servidor recusar.
+  async function sendOtp(isResend: boolean) {
     if (!id) return; // H4
-    // A contagem começa no clique (antes da resposta) e não é reposta se o servidor recusar.
-    if (!otpCooldown.iniciar()) return;
-    setOtpStep("sending");
+    // Ref (e não estado) para que um segundo clique durante o pedido seja ignorado.
+    if (otpSendingRef.current) return;
+    if (isResend && !otpCooldown.iniciar()) return;
+    otpSendingRef.current = true;
+    if (isResend) setReenviando(true);
+    else setOtpStep("sending");
     setOtpError("");
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
@@ -159,7 +167,7 @@ const ClientPortalContractDetail = () => {
       if (data?.error) {
         if (data.error === "no_phone") {
           setOtpError("Não foi encontrado um número de telefone associado à sua conta. Contacte o comercial.");
-          setOtpStep("idle");
+          if (!isResend) setOtpStep("idle");
           return;
         }
         throw new Error(data.message || data.error);
@@ -167,14 +175,21 @@ const ClientPortalContractDetail = () => {
 
       setMaskedPhone(data.masked_phone || "");
       setOtpStep("input");
+      if (!isResend) otpCooldown.iniciar();
       toast({ title: "Código SMS enviado", description: `Enviámos um código para ${data.masked_phone}` });
     } catch (err: any) {
       setOtpError(err.message);
-      setOtpStep("idle");
+      if (!isResend) setOtpStep("idle");
       captureFlowError(err, "client-portal-contract");
       toast({ title: "Erro ao enviar SMS", description: err.message, variant: "destructive" });
+    } finally {
+      otpSendingRef.current = false;
+      setReenviando(false);
     }
   }
+
+  const handleSendOtp = () => sendOtp(false);
+  const handleResendOtp = () => sendOtp(true);
 
   async function handleVerifyOtp() {
     if (!id) return; // H4
@@ -533,12 +548,11 @@ const ClientPortalContractDetail = () => {
                     size="lg"
                     className="gap-2"
                     onClick={handleSendOtp}
-                    disabled={actionLoading || otpCooldown.activo}
+                    disabled={actionLoading}
                   >
                     <Smartphone className="h-5 w-5" />
-                    {cooldownLabel("Enviar código SMS", otpCooldown.restante)}
+                    Enviar código SMS
                   </Button>
-                  <OtpCooldownNotice activo={otpCooldown.activo} />
                   {otpError && (
                     <p className="text-sm text-destructive">{otpError}</p>
                   )}
@@ -577,7 +591,7 @@ const ClientPortalContractDetail = () => {
                   )}
                   <OtpCooldownNotice activo={otpCooldown.activo} />
                   <div className="flex gap-3 justify-center">
-                    <Button variant="outline" size="sm" onClick={handleSendOtp} disabled={actionLoading || otpCooldown.activo}>
+                    <Button variant="outline" size="sm" onClick={handleResendOtp} disabled={actionLoading || otpCooldown.activo || reenviando}>
                       {cooldownLabel("Reenviar código", otpCooldown.restante)}
                     </Button>
                     <Button

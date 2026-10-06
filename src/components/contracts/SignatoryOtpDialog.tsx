@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useCooldown, cooldownLabel, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
 import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -29,10 +29,16 @@ export function SignatoryOtpDialog({ open, onOpenChange, signatory, templateId, 
 
   const cooldown = useCooldown(OTP_COOLDOWN_SECONDS);
 
-  const handleSendOtp = async () => {
+  // Ref (e não estado) para que um segundo clique durante o pedido seja ignorado.
+  const sendingRef = useRef(false);
+
+  // A contagem de 60 s é só do Reenviar: no primeiro envio começa quando o servidor aceita;
+  // no Reenviar começa no clique e não é reposta se o servidor recusar.
+  const sendOtp = async (isResend: boolean) => {
     if (!signatory) return;
-    // A contagem começa no clique (antes da resposta) e não é reposta se o servidor recusar.
-    if (!cooldown.iniciar()) return;
+    if (sendingRef.current) return;
+    if (isResend && !cooldown.iniciar()) return;
+    sendingRef.current = true;
     setSending(true);
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
@@ -58,14 +64,19 @@ export function SignatoryOtpDialog({ open, onOpenChange, signatory, templateId, 
 
       setMaskedPhone(data.masked_phone || "");
       setStep("verify");
+      if (!isResend) cooldown.iniciar();
       toast.success("Código enviado por SMS");
     } catch (err: any) {
       console.error("Send OTP error:", err);
       toast.error("Erro ao enviar código SMS");
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   };
+
+  const handleSendOtp = () => sendOtp(false);
+  const handleResendOtp = () => sendOtp(true);
 
   const handleVerify = async () => {
     if (!signatory) return;
@@ -136,12 +147,11 @@ export function SignatoryOtpDialog({ open, onOpenChange, signatory, templateId, 
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-              <Button onClick={handleSendOtp} disabled={sending || cooldown.activo}>
+              <Button onClick={handleSendOtp} disabled={sending}>
                 {sending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Phone className="h-4 w-4 mr-2" />}
-                {cooldownLabel("Enviar Código SMS", cooldown.restante)}
+                Enviar Código SMS
               </Button>
             </DialogFooter>
-            <OtpCooldownNotice activo={cooldown.activo} className="text-center" />
           </div>
         ) : (
           <div className="space-y-4 py-4">
@@ -158,7 +168,7 @@ export function SignatoryOtpDialog({ open, onOpenChange, signatory, templateId, 
               <OtpCooldownNotice activo={cooldown.activo} className="text-center" />
             </div>
             <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button variant="ghost" size="sm" onClick={handleSendOtp} disabled={sending || cooldown.activo}>
+              <Button variant="ghost" size="sm" onClick={handleResendOtp} disabled={sending || cooldown.activo}>
                 {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
                 {cooldownLabel("Reenviar código", cooldown.restante)}
               </Button>
