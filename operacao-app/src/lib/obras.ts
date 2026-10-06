@@ -65,9 +65,27 @@ export interface ObraResumo {
   fim_original?: string | null;
   /** Alertas da obra (não iniciadas, fim ultrapassado, cliente por avisar). */
   n_alertas?: number;
+  /** Nome do cliente — só na lista (rpc_ops_obras_lista). */
+  cliente_nome?: string | null;
+}
+
+/** A RPC ainda não foi instalada (SQL por correr): cai-se para a vista. */
+function rpcEmFalta(error: { message: string; code?: string } | null, nome: string): boolean {
+  return !!error && (error.code === "PGRST202" || error.code === "42883" ||
+    new RegExp(`${nome}|function .* does not exist`, "i").test(error.message));
 }
 
 export async function listarObras(orgId: string): Promise<ObraResumo[]> {
+  // Rápida: a visibilidade decide-se uma vez na base (rpc_ops_obras_lista),
+  // em vez da RLS linha a linha das vistas; e já traz o nome do cliente.
+  const r = await supabase.rpc("rpc_ops_obras_lista", { p_org: orgId });
+  if (!rpcEmFalta(r.error, "rpc_ops_obras_lista")) {
+    rebentar("carregar as obras", r.error);
+    return ((r.data ?? []) as unknown as ObraResumo[]).map((o) => ({
+      ...o,
+      minutos_reais: Number(o.minutos_reais),
+    }));
+  }
   const { data, error } = await supabase
     .from("ops_v_obra_resumo")
     .select("*")
@@ -355,6 +373,11 @@ export interface AlertaObra {
 }
 
 export async function alertasDaOrganizacao(orgId: string): Promise<AlertaObra[]> {
+  const r = await supabase.rpc("rpc_ops_obras_alertas_tempo", { p_org: orgId });
+  if (!rpcEmFalta(r.error, "rpc_ops_obras_alertas_tempo")) {
+    rebentar("carregar os alertas", r.error);
+    return ((r.data ?? []) as unknown as AlertaObra[]).map((a) => ({ ...a, minutos_reais: Number(a.minutos_reais) }));
+  }
   const { data, error } = await supabase
     .from("ops_v_obra_alerta")
     .select("tarefa_id, obra_id, obra_codigo, nome, estado, minutos_previstos, minutos_reais, a_correr, nivel")

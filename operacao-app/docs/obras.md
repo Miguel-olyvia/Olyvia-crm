@@ -326,3 +326,20 @@ As pessoas são as que já têm perfil em Operações: atribuir funções em
 Definições ANTES de gerar dá Métricas por pessoa e uma fila Validar que se
 pode testar (quem fez uma tarefa não a valida). Provado em
 `npm run validar-demo`.
+
+## Desempenho (06/10/2026)
+
+As páginas das Operações demoravam a carregar porque a RLS das tabelas da obra
+(`ops_obra`, fases, tarefas, pessoas, dependências, registos, extras, atrasos,
+avisos) chamava `ops_pode_ver_obra(obra_id)` — e com ela `ops_pode` — **linha a
+linha**, milhares de vezes por pedido nas vistas da obra.
+
+- As policies passaram a `obra_id IN (SELECT public.ops_obras_que_vejo())`: o
+  conjunto das obras que a pessoa vê calcula-se **uma vez por consulta**, com
+  as mesmas regras (e `ops_pode` decidido por organização, não por obra).
+- A página Obras usa `rpc_ops_obras_lista` (o resumo das obras, com o nome do
+  cliente) e `rpc_ops_obras_alertas_tempo`, que decidem a visibilidade uma vez
+  e já não carregam os clientes todos da organização. Sem o SQL novo, a app cai
+  para as vistas antigas.
+- `validar-obras` confirma que as RPCs dão exatamente o que as vistas dão, para
+  cinco pessoas em duas organizações.

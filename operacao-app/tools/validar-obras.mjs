@@ -1921,6 +1921,33 @@ console.log("\n─── atrasos e alertas do supervisor ─────");
     r?.fim === DT.f4 && r?.fo === DT.f3 && r?.n_alertas === 4
       ? ok(`ops_v_obra_resumo: fim ${DT.f4} (original ${DT.f3}) e 4 alertas`)
       : mau(`resumo: ${JSON.stringify(r)}`);
+
+    // A lista rápida (rpc_ops_obras_lista / rpc_ops_obras_alertas_tempo)
+    // tem de dar EXATAMENTE o que as vistas dão, a cada pessoa.
+    const COLS = `id, codigo, estado, cliente_id, gestor_id, supervisor_id, tolerancia_percent,
+      n_tarefas, n_feitas, n_validadas, n_por_validar, minutos_previstos, minutos_reais::text AS mr,
+      inicio_planeado::text AS ip, fim_planeado::text AS fp, n_extras, fim_original::text AS fo, n_alertas`;
+    const ordenar = (xs, k) => JSON.stringify([...xs].sort((a, b) => String(a[k]).localeCompare(String(b[k]))));
+    let iguais = true;
+    for (const quem of ["gestorA", "supA", "tecA", "tec2A", "gestorB"]) {
+      for (const org of [ORG_A, ORG_B]) {
+        const vista = await linhas(AUTH[quem], `SELECT ${COLS} FROM public.ops_v_obra_resumo WHERE organization_id='${org}';`);
+        const rpc = await linhas(AUTH[quem], `SELECT ${COLS} FROM public.rpc_ops_obras_lista('${org}');`);
+        const av = await linhas(AUTH[quem], `SELECT tarefa_id, obra_id, nivel, minutos_reais::text AS mr, a_correr
+                                               FROM public.ops_v_obra_alerta WHERE organization_id='${org}';`);
+        const ar = await linhas(AUTH[quem], `SELECT tarefa_id, obra_id, nivel, minutos_reais::text AS mr, a_correr
+                                               FROM public.rpc_ops_obras_alertas_tempo('${org}');`);
+        if (ordenar(vista, "id") !== ordenar(rpc, "id") || ordenar(av, "tarefa_id") !== ordenar(ar, "tarefa_id")) {
+          iguais = false;
+          mau(`lista rápida ≠ vistas (${quem}, ${org === ORG_A ? "A" : "B"}): vista=${JSON.stringify(vista)} rpc=${JSON.stringify(rpc)} alertas ${av.length}/${ar.length}`);
+        }
+      }
+    }
+    if (iguais) ok("rpc_ops_obras_lista e rpc_ops_obras_alertas_tempo = as vistas, para as 5 pessoas e as 2 organizações");
+    const nomes = await linhas(AUTH.gestorA, `SELECT codigo, cliente_id, cliente_nome FROM public.rpc_ops_obras_lista('${ORG_A}');`);
+    nomes.every((o) => !o.cliente_id || o.cliente_nome)
+      ? ok("a lista traz o nome do cliente (sem carregar os clientes todos)")
+      : mau(`cliente_nome em falta: ${JSON.stringify(nomes)}`);
   }
 
   // Os alertas.

@@ -91,14 +91,17 @@ export default function Obras() {
     setACarregar(true);
     setErro(null);
     try {
-      const [os, al, cs] = await Promise.all([
-        listarObras(activeOrgId),
-        alertasDaOrganizacao(activeOrgId),
-        listarClientes(activeOrgId),
-      ]);
+      const [os, al] = await Promise.all([listarObras(activeOrgId), alertasDaOrganizacao(activeOrgId)]);
       setObras(os);
       setAlertas(al);
-      setClientes(new Map(cs.map((c) => [c.id, c.nome])));
+      // O nome do cliente já vem na lista; os clientes todos só se a base
+      // ainda não tiver a RPC nova (SQL por correr).
+      const semNome = os.some((o) => o.cliente_id && o.cliente_nome === undefined);
+      const cs = semNome ? await listarClientes(activeOrgId) : [];
+      setClientes(new Map([
+        ...cs.map((c) => [c.id, c.nome] as [string, string]),
+        ...os.filter((o) => o.cliente_id && o.cliente_nome).map((o) => [o.cliente_id as string, o.cliente_nome as string] as [string, string]),
+      ]));
     } catch (e) {
       setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar as obras.");
     } finally {

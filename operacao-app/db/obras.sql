@@ -768,6 +768,39 @@ $$;
 REVOKE ALL ON FUNCTION public.ops_pode_ver_obra(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.ops_pode_ver_obra(uuid) TO authenticated, service_role;
 
+-- As obras que EU vejo, todas de uma vez (as mesmas regras de
+-- ops_pode_ver_obra). As policies usam `obra_id IN (SELECT …)`: o Postgres
+-- calcula o conjunto UMA vez por consulta, em vez de chamar
+-- ops_pode_ver_obra → ops_pode linha a linha (milhares de vezes nas vistas
+-- da obra — era isso que tornava as páginas das Operações lentas).
+-- ops_pode decide-se por organização, não por obra.
+CREATE OR REPLACE FUNCTION public.ops_obras_que_vejo()
+RETURNS SETOF uuid
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  WITH eu AS (SELECT public.current_business_user_id() AS id),
+  orgs AS (
+    SELECT g.organization_id,
+           public.ops_pode(g.organization_id, 'operations.orders.view_all') AS todas,
+           public.ops_pode(g.organization_id, 'operations.orders.view') AS ver
+      FROM (SELECT DISTINCT organization_id FROM public.ops_obra) g
+  )
+  SELECT o.id
+    FROM public.ops_obra o
+    JOIN orgs ON orgs.organization_id = o.organization_id
+   CROSS JOIN eu
+   WHERE orgs.todas
+      OR (orgs.ver AND (
+            o.gestor_id = eu.id
+         OR o.supervisor_id = eu.id
+         OR EXISTS (SELECT 1 FROM public.ops_obra_tarefa_pessoa tp
+                     WHERE tp.obra_id = o.id AND tp.utilizador_id = eu.id)))
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obras_que_vejo() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obras_que_vejo() TO authenticated, service_role;
+
 
 -- ============================================================
 -- 4. Auxiliares internas (não dadas a `authenticated`)
@@ -6906,7 +6939,7 @@ CREATE POLICY ops_obra_servico_tarefa_select ON public.ops_obra_servico_tarefa
 
 DROP POLICY IF EXISTS ops_obra_select ON public.ops_obra;
 CREATE POLICY ops_obra_select ON public.ops_obra
-  FOR SELECT TO authenticated USING (public.ops_pode_ver_obra(id));
+  FOR SELECT TO authenticated USING (id IN (SELECT public.ops_obras_que_vejo()));
 
 DO $pol$
 DECLARE
@@ -6918,7 +6951,7 @@ BEGIN
   LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON public.%I', t || '_select', t);
     EXECUTE format(
-      'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (public.ops_pode_ver_obra(obra_id))',
+      'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (obra_id IN (SELECT public.ops_obras_que_vejo()))',
       t || '_select', t);
   END LOOP;
 
@@ -7006,7 +7039,7 @@ CREATE TABLE IF NOT EXISTS public.ops_obra_aviso (
 ALTER TABLE public.ops_obra_aviso ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS ops_obra_aviso_select ON public.ops_obra_aviso;
 CREATE POLICY ops_obra_aviso_select ON public.ops_obra_aviso
-  FOR SELECT TO authenticated USING (public.ops_pode_ver_obra(obra_id));
+  FOR SELECT TO authenticated USING (obra_id IN (SELECT public.ops_obras_que_vejo()));
 REVOKE ALL ON public.ops_obra_aviso FROM PUBLIC, anon;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.ops_obra_aviso FROM authenticated;
 GRANT SELECT ON public.ops_obra_aviso TO authenticated;
@@ -7597,6 +7630,166 @@ $cron$;
 
 
 -- ============================================================
+-- Lista das obras, rápida (06/10/2026)
+-- ============================================================
+-- A página Obras lia ops_v_obra_resumo e ops_v_obra_alerta: vistas
+-- security_invoker por cima de ops_v_obra_tarefa, em que CADA linha de cada
+-- tabela (tarefas, pessoas, dependências, fases, registos, atrasos) passa
+-- pela policy ops_pode_ver_obra(obra_id) → ops_pode(...) → as orgs visíveis
+-- do utilizador. Milhares de chamadas por carregamento, mais os alertas
+-- calculados obra a obra e todos os clientes da organização só para o nome.
+-- Estas RPCs decidem a visibilidade UMA vez (as mesmas regras de
+-- ops_pode_ver_obra) e depois lêem as tabelas sem RLS. Devolvem as mesmas
+-- colunas das vistas (+ o nome do cliente); as vistas ficam como estavam.
+CREATE OR REPLACE FUNCTION public.ops_obras_visiveis(_org uuid)
+RETURNS SETOF uuid
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_todas boolean := public.ops_pode(_org, 'operations.orders.view_all');
+  v_ver   boolean;
+  v_eu    uuid;
+BEGIN
+  IF v_todas THEN
+    RETURN QUERY SELECT o.id FROM public.ops_obra o WHERE o.organization_id = _org;
+    RETURN;
+  END IF;
+  v_ver := public.ops_pode(_org, 'operations.orders.view');
+  IF NOT v_ver THEN
+    RETURN;
+  END IF;
+  v_eu := public.current_business_user_id();
+  RETURN QUERY
+  SELECT o.id FROM public.ops_obra o
+   WHERE o.organization_id = _org
+     AND (o.gestor_id = v_eu OR o.supervisor_id = v_eu
+          OR EXISTS (SELECT 1 FROM public.ops_obra_tarefa_pessoa tp
+                      WHERE tp.obra_id = o.id AND tp.utilizador_id = v_eu));
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obras_visiveis(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ops_obras_visiveis(uuid) TO service_role;
+
+CREATE OR REPLACE FUNCTION public.rpc_ops_obras_lista(p_org uuid)
+RETURNS TABLE (
+  id uuid, organization_id uuid, codigo text, titulo text, estado text, cliente_id uuid,
+  orcamento_id uuid, contrato_id uuid, modelo_id uuid, morada text,
+  data_inicio_prevista date, gestor_id uuid, supervisor_id uuid, tolerancia_percent integer,
+  criada_em timestamptz,
+  n_tarefas integer, n_feitas integer, n_validadas integer, n_por_validar integer,
+  minutos_previstos integer, minutos_reais numeric, inicio_planeado date, fim_planeado date,
+  n_extras integer, fim_original date, n_alertas integer, cliente_nome text
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+#variable_conflict use_column
+BEGIN
+  RETURN QUERY
+  WITH vis AS (SELECT public.ops_obras_visiveis(p_org) AS id),
+  reg AS (
+    SELECT x.tarefa_id,
+           round(sum(EXTRACT(EPOCH FROM (COALESCE(x.fim, now()) - x.inicio))) / 60.0, 1) AS minutos
+      FROM public.ops_obra_registo x
+     WHERE x.obra_id IN (SELECT vis.id FROM vis)
+     GROUP BY x.tarefa_id
+  ),
+  tar AS (
+    SELECT t.obra_id,
+           count(*) AS n_tarefas,
+           max(COALESCE(t.fim_original, t.fim_planeado)) AS fim_original,
+           count(*) FILTER (WHERE t.estado IN ('feita','validada')) AS n_feitas,
+           count(*) FILTER (WHERE t.estado = 'validada') AS n_validadas,
+           count(*) FILTER (WHERE t.estado = 'feita') AS n_por_validar,
+           sum(t.minutos_previstos) AS minutos_previstos,
+           sum(COALESCE(reg.minutos, 0)) AS minutos_reais,
+           min(t.inicio_planeado) AS inicio_planeado,
+           max(t.fim_planeado) AS fim_planeado
+      FROM public.ops_obra_tarefa t
+      JOIN public.ops_obra_fase f ON f.id = t.fase_id
+      LEFT JOIN reg ON reg.tarefa_id = t.id
+     WHERE t.obra_id IN (SELECT vis.id FROM vis)
+     GROUP BY t.obra_id
+  ),
+  ext AS (
+    SELECT e.obra_id, count(*) AS n
+      FROM public.ops_obra_extra e
+     WHERE e.obra_id IN (SELECT vis.id FROM vis) AND e.estado IN ('registado','aprovado')
+     GROUP BY e.obra_id
+  ),
+  al AS (
+    SELECT a.obra_id, count(*) AS n
+      FROM public.ops_obra_alertas_lista(p_org, NULL) a
+     GROUP BY a.obra_id
+  )
+  SELECT o.id, o.organization_id, o.codigo, o.titulo, o.estado, o.cliente_id,
+         o.orcamento_id, o.contrato_id, o.modelo_id, o.morada,
+         o.data_inicio_prevista, o.gestor_id, o.supervisor_id, o.tolerancia_percent,
+         o.criada_em,
+         COALESCE(tar.n_tarefas, 0)::integer, COALESCE(tar.n_feitas, 0)::integer,
+         COALESCE(tar.n_validadas, 0)::integer, COALESCE(tar.n_por_validar, 0)::integer,
+         COALESCE(tar.minutos_previstos, 0)::integer, COALESCE(tar.minutos_reais, 0)::numeric(12,1),
+         tar.inicio_planeado, tar.fim_planeado,
+         COALESCE(ext.n, 0)::integer, tar.fim_original, COALESCE(al.n, 0)::integer,
+         c.nome
+    FROM public.ops_obra o
+    JOIN vis ON vis.id = o.id
+    LEFT JOIN tar ON tar.obra_id = o.id
+    LEFT JOIN ext ON ext.obra_id = o.id
+    LEFT JOIN al  ON al.obra_id = o.id
+    LEFT JOIN public.ops_v_cliente c ON c.id = o.cliente_id
+   ORDER BY o.criada_em DESC
+   LIMIT 200;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obras_lista(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obras_lista(uuid) TO authenticated, service_role;
+
+-- O mesmo que ops_v_obra_alerta (tarefas abertas a ≥ 80 % do previsto), com
+-- a visibilidade decidida uma vez.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obras_alertas_tempo(p_org uuid)
+RETURNS TABLE (
+  tarefa_id uuid, obra_id uuid, obra_codigo text, nome text, estado text,
+  minutos_previstos integer, minutos_reais numeric, a_correr integer, nivel text
+)
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+#variable_conflict use_column
+BEGIN
+  RETURN QUERY
+  WITH vis AS (SELECT public.ops_obras_visiveis(p_org) AS id),
+  t AS (
+    SELECT t.id, t.obra_id, o.codigo, t.nome, t.estado, t.minutos_previstos,
+           COALESCE(r.minutos, 0)::numeric(12,1) AS minutos_reais,
+           COALESCE(r.a_correr, 0)::integer AS a_correr
+      FROM public.ops_obra_tarefa t
+      JOIN public.ops_obra_fase f ON f.id = t.fase_id
+      JOIN public.ops_obra o ON o.id = t.obra_id
+      LEFT JOIN LATERAL (
+        SELECT round(sum(EXTRACT(EPOCH FROM (COALESCE(x.fim, now()) - x.inicio))) / 60.0, 1) AS minutos,
+               count(*) FILTER (WHERE x.fim IS NULL) AS a_correr
+          FROM public.ops_obra_registo x WHERE x.tarefa_id = t.id
+      ) r ON true
+     WHERE t.obra_id IN (SELECT vis.id FROM vis)
+       AND t.estado IN ('por_fazer','em_curso','rejeitada')
+  )
+  SELECT t.id, t.obra_id, t.codigo, t.nome, t.estado, t.minutos_previstos, t.minutos_reais, t.a_correr,
+         CASE WHEN t.minutos_reais > t.minutos_previstos THEN 'excedido' ELSE 'aviso' END
+    FROM t
+   WHERE t.minutos_reais >= 0.8 * t.minutos_previstos
+   LIMIT 200;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obras_alertas_tempo(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obras_alertas_tempo(uuid) TO authenticated, service_role;
+
+
+-- ============================================================
 -- Verificação
 -- ============================================================
 DO $v$
@@ -7654,7 +7847,7 @@ BEGIN
   -- Todas as funções SECURITY DEFINER de obras têm search_path fixo.
   SELECT count(*) INTO n FROM pg_proc p
    WHERE p.pronamespace = 'public'::regnamespace
-     AND (p.proname LIKE 'rpc\_ops\_obra%' OR p.proname LIKE 'ops\_obra%' OR p.proname = 'ops_pode_ver_obra')
+     AND (p.proname LIKE 'rpc\_ops\_obra%' OR p.proname LIKE 'ops\_obra%' OR p.proname IN ('ops_pode_ver_obra','ops_obras_que_vejo'))
      AND p.prosecdef
      AND NOT EXISTS (SELECT 1 FROM unnest(COALESCE(p.proconfig, '{}')) cfg WHERE cfg LIKE 'search_path=%');
   IF n > 0 THEN
