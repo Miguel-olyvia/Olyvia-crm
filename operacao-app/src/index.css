@@ -94,3 +94,31 @@ body {
   main { max-width: none !important; padding: 0 !important; }
   section[data-section], table { break-inside: avoid; }
 }
+
+/* QR da porta da obra (ObraQr.tsx): a folha só existe na impressão. */
+.qr-impressao {
+  display: none;
+}
+@page qr-obra {
+  size: A6 portrait;
+  margin: 6mm;
+}
+@media print {
+  body.imprimir-qr #root {
+    display: none !important;
+  }
+  body.imprimir-qr .qr-impressao {
+    display: flex !important;
+    page: qr-obra;
+    justify-content: center;
+    align-items: flex-start;
+  }
+  body.imprimir-qr .qr-impressao .cartao-qr {
+    border: 0;
+    width: 93mm;
+  }
+  body.imprimir-qr .qr-impressao svg {
+    width: 62mm;
+    height: 62mm;
+  }
+}
