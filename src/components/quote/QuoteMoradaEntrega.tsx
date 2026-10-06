@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import { Building2, Loader2, Pencil, Plus, RefreshCw, Truck } from "lucide-react";
 import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
 import { FichaLocalResumo } from "@/components/addresses/FichaLocalResumo";
+import { SugestaoFichaLocalPainel } from "@/components/addresses/SugestaoFichaLocalPainel";
 import {
   formatDeliveryAddress,
   listEntityDeliveryAddresses,
@@ -29,6 +30,11 @@ export interface QuoteMoradaEntregaProps {
    */
   savedText?: string | null;
   disabled?: boolean;
+  /**
+   * deal_needs.id das áreas já no orçamento (linhas importadas do negócio):
+   * as medidas da visita afinam a sugestão de proteções e logística.
+   */
+  needIds?: string[];
 }
 
 const textoMorada = (address: EntityDeliveryAddress) =>
@@ -40,7 +46,7 @@ const textoMorada = (address: EntityDeliveryAddress) =>
  * nova (fica escolhida) e editar a escolhida. Os formulários são o
  * DeliveryAddressForm da ficha do cliente — mesmas regras, mesma RPC.
  */
-export const QuoteMoradaEntrega = ({ entityId, value, onChange, savedText, disabled }: QuoteMoradaEntregaProps) => {
+export const QuoteMoradaEntrega = ({ entityId, value, onChange, savedText, disabled, needIds }: QuoteMoradaEntregaProps) => {
   const [addresses, setAddresses] = useState<EntityDeliveryAddress[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -185,6 +191,10 @@ export const QuoteMoradaEntrega = ({ entityId, value, onChange, savedText, disab
             vazio="Ficha do local por preencher (use “Editar”)."
           />
         </div>
+      )}
+
+      {selected && mode === "idle" && (
+        <SugestaoFichaLocalPainel ficha={selected.ficha_tecnica} piso={selected.floor} needIds={needIds} />
       )}
 
       {mode === "add" && (

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { fetchMoradaFiscal, textoMoradaFiscal } from "@/lib/quotes/quoteMoradas";
 import { listEntityDeliveryAddresses, type EntityDeliveryAddress } from "@/lib/addresses/entityDeliveryAddresses";
 import { FichaLocalResumo } from "@/components/addresses/FichaLocalResumo";
+import { SugestaoFichaLocalPainel } from "@/components/addresses/SugestaoFichaLocalPainel";
+import { needIdsDoOrcamento } from "@/lib/addresses/sugestaoAreas";
 
 export interface QuoteMoradasResumoProps {
   quoteId: string;
@@ -25,6 +27,14 @@ export const QuoteMoradasResumo = ({ quoteId, obraEndereco, entityId, siteAddres
   const [fiscal, setFiscal] = useState<string | null>(null);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [entregaMorada, setEntregaMorada] = useState<EntityDeliveryAddress | null>(null);
+  const [needIds, setNeedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setNeedIds([]);
+    needIdsDoOrcamento(quoteId).then((ids) => { if (!cancelled) setNeedIds(ids); });
+    return () => { cancelled = true; };
+  }, [quoteId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +85,14 @@ export const QuoteMoradasResumo = ({ quoteId, obraEndereco, entityId, siteAddres
           <div data-testid="quote-detalhe-ficha-local">
             <FichaLocalResumo ficha={entregaMorada.ficha_tecnica} piso={entregaMorada.floor} className="mt-1" />
           </div>
+        )}
+        {entregaMorada && (
+          <SugestaoFichaLocalPainel
+            ficha={entregaMorada.ficha_tecnica}
+            piso={entregaMorada.floor}
+            needIds={needIds}
+            className="mt-2"
+          />
         )}
       </div>
     </>

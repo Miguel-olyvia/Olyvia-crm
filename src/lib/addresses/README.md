@@ -149,13 +149,41 @@ Correm **por esta ordem e antes** de publicar a app. Cada uma corre numa
 transação, é idempotente e acaba com um bloco `CONFERIR`. Todas já foram
 aplicadas em produção a 02/10/2026.
 
+## Sugestão de proteções e logística (06/10/2026)
+
+A partir da ficha do local e das medidas da visita (`deal_needs.diag_*` das
+áreas do orçamento), calcula-se sozinha uma lista discriminada:
+
+- **Proteções:** cartão canelado no percurso (reforçado em madeira, flutuante
+  ou vinílico), plástico para mobília e vãos, protetores de portas, porta de pó
+  com a casa habitada, elevador ou escadas, e fita.
+- **Logística:** parquímetro (zona verde, amarela ou vermelha), parque público
+  sem estacionamento, horas de escada sem elevador (do 2.º andar para cima),
+  deslocações e big bags de entulho.
+
+**É só sugestão: não entra no preço.** O impacto no orçamento continua em
+aberto. Quando falta um dado, a quantidade aparece com "≈" e o painel diz o
+que falta saber.
+
+- **Lógica:** `sugestaoFichaLocal.ts`, sem dependências. Os valores unitários
+  estão em `PARAMETROS_SUGESTAO`. O ficheiro é igual a
+  `operacao-app/src/domain/sugestaoFichaLocal.ts` (um teste das Operações
+  confirma-o): quem mudar um, copia para o outro.
+- **CRM:** o painel `SugestaoFichaLocalPainel` aparece por baixo do resumo da
+  ficha no construtor do orçamento (morada de entrega) e no detalhe do
+  orçamento.
+- **Operações:** a ficha da obra mostra "A preparar", só com as quantidades,
+  usando os dias úteis do plano.
+- Não há SQL novo. As medidas lêem-se de `quote_lines.source_deal_need_id` →
+  `deal_needs`. Sem permissão, usa só a ficha.
+
 ## A seguir
 
 - **Operações a ler a ficha:** aplicar fatores aos tempos previstos da obra
   (por exemplo, demolições num 4.º andar sem elevador) e mostrar a ficha ao
   técnico junto à morada. Ver [`operacao-app/docs/a-seguir.md`](../../../operacao-app/docs/a-seguir.md).
-- O `impacto_percent` ainda não entra no preço do orçamento. Por agora é
-  só informativo.
+- O `impacto_percent` e a sugestão de proteções e logística ainda não entram
+  no preço do orçamento. Por agora são só informativos.
 - Os ecrãs foram verificados com testes (tipos, 74 testes das moradas,
   clientes e orçamentos, build), mas não com um teste de ponta a ponta no
   browser.

@@ -17,6 +17,7 @@ import type {
 } from "../domain/obras";
 import type { MaterialLigado, PrevisaoContrato, ProdutoStock, TarefaParaCriar } from "../domain/novaObra";
 import type { MotivoAtraso, TipoAlerta } from "../domain/atrasos";
+import type { AreaParaSugestao } from "../domain/sugestaoFichaLocal";
 
 export type { MaterialLigado, PrevisaoContrato, ProdutoStock, TarefaParaCriar } from "../domain/novaObra";
 
@@ -1383,4 +1384,38 @@ export async function obterTarefa(tarefaId: string): Promise<TarefaObra | null> 
 export const EVENTO_ALERTAS = "ops:alertas-mudaram";
 export function avisarAlertasMudaram(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(EVENTO_ALERTAS));
+}
+
+/**
+ * As medidas da visita (CRM, deal_needs.diag_*) das áreas do orçamento da obra,
+ * para afinar a sugestão de proteções e logística. Só lê. É um extra: sem
+ * permissão no CRM, ou sem orçamento, devolve [] (a sugestão usa a ficha).
+ */
+export async function areasDaVisitaDoOrcamento(orcamentoId: string | null | undefined): Promise<AreaParaSugestao[]> {
+  if (!orcamentoId) return [];
+  try {
+    const { data: linhas, error } = await supabase
+      .from("quote_lines")
+      .select("source_deal_need_id")
+      .eq("quote_id", orcamentoId);
+    if (error) return [];
+    const ids = [
+      ...new Set(
+        ((linhas ?? []) as { source_deal_need_id: string | null }[])
+          .map((l) => l.source_deal_need_id)
+          .filter((x): x is string => !!x)
+      ),
+    ];
+    if (ids.length === 0) return [];
+    const { data, error: e2 } = await supabase
+      .from("deal_needs")
+      .select(
+        "id, diag_tipo_area, diag_m2_pavimento, diag_area_m2, diag_distancia_entrada, diag_mobilada, diag_portas_proteger, diag_local_cortes, diag_demolir_m2"
+      )
+      .in("id", ids);
+    if (e2) return [];
+    return (data ?? []) as AreaParaSugestao[];
+  } catch {
+    return [];
+  }
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import React from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -285,6 +285,11 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
   const [products, setProducts] = useState<ProductCatalogItem[]>([]);
   const [services, setServices] = useState<ProductCatalogItem[]>([]);
   const [lines, setLines] = useState<QuoteLine[]>([]);
+  // Áreas do negócio já no orçamento — afinam a sugestão da ficha do local.
+  const needIdsDasLinhas = useMemo(
+    () => [...new Set(lines.map((l) => l.source_deal_need_id).filter((x): x is string => !!x))],
+    [lines],
+  );
   // Unidade de stock dos produtos das linhas — quantidade inteira em unidades contáveis.
   const productUom = useProductBaseUomCodes(lines.map((l) => (l.bundle_id ? null : l.product_id)));
   // Importação (explícita) dos itens do Pedido de Proposta em curso.
@@ -3976,6 +3981,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
                     value={moradaEntregaEscolhida}
                     savedText={moradaGravada.entityId === moradaEntityId ? moradaGravada.obraEndereco : null}
                     onChange={(addressId, address) => setMoradaEntrega({ entityId: moradaEntityId, addressId, texto: address ? (formatDeliveryAddress(address) || address.formatted || null) : null })}
+                    needIds={needIdsDasLinhas}
                   />
                 </div>
               )}

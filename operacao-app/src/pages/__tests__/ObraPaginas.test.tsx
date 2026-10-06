@@ -213,6 +213,7 @@ vi.mock("../../lib/dados", () => ({
 vi.mock("../../lib/obras", () => ({
   listarObras: vi.fn(async () => [OBRA]),
   obterObra: vi.fn(async () => OBRA),
+  areasDaVisitaDoOrcamento: vi.fn(async () => []),
   alertasDaOrganizacao: vi.fn(async () => [
     {
       tarefa_id: "t1",
