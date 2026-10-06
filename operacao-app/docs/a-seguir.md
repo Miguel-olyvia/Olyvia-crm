@@ -22,6 +22,12 @@ nas fotos. SQL: `db/acompanhamento-cliente.sql`. Detalhe em
 **Por fazer:** escolher fotos também na fila "Validar" (não toquei para não
 chocar com o novo layout); avisar o cliente por SMS/WhatsApp quando há uma
 atualização; servir a mesma vista no portal do cliente do CRM.
+\n## ~~Margem em tempo real e fim provável ("e se…")~~ — feito a 06/10/2026
+
+Semáforo de margem por obra (na venda, a esta data, projetada), aviso no sino
+abaixo do limiar, fim provável (P50/P80) e simulador "e se…" sem gravar. Ver
+[`margem-previsao.md`](margem-previsao.md). Falta: custo/hora nos perfis (hoje
+conta o implícito no orçamento) e histórico real de tarefas validadas.
 
 ---
 

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
+import { MargemNaLista } from "../components/ObraMargem";
+import { useMargensDaOrganizacao } from "../lib/margem";
 import {
   ErroDeDados,
   ErroDeEscrita,
@@ -85,6 +87,7 @@ export default function Obras() {
   const [filtro, setFiltro] = useState<"abertas" | "todas">("abertas");
 
   const planeia = podePlanear(funcao);
+  const margens = useMargensDaOrganizacao(activeOrgId, recarga);
 
   const carregar = useCallback(async () => {
     if (!activeOrgId) return;
@@ -221,6 +224,7 @@ export default function Obras() {
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-mono text-xs font-medium tabular text-slate-500">{o.codigo}</span>
                         <ObraEstadoBadge estado={o.estado} />
+                        <MargemNaLista m={margens.get(o.id)} />
                       </div>
                       <p className="mt-1 truncate text-sm font-semibold text-slate-800">{o.titulo}</p>
                       <p className="mt-0.5 truncate text-xs text-slate-500">
