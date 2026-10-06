@@ -39,7 +39,10 @@ import {
   Toggle,
   cx,
 } from "../components/ui";
-import { AlertTriangle, ChevronLeft, MapPin, Plus } from "../components/icons";
+import { AlertTriangle, ChevronLeft, MapPin, Plus, QrCode } from "../components/icons";
+import ObraQr from "../components/ObraQr";
+import ChegadaObra from "./ChegadaObra";
+import { chegadasDaObra, type ChegadaObra as Chegada } from "../lib/chegadas";
 import ObraGantt from "../components/ObraGantt";
 import FichaLocal from "../components/FichaLocal";
 import ObraAvisoBancada from "../components/ObraAvisoBancada";
@@ -56,6 +59,7 @@ import {
   hojeIso,
   podeDecidirExtras,
   podePlanear,
+  podeValidar,
   sobrecargas,
   type EstadoObra,
   type Intervalo,
@@ -93,7 +97,17 @@ const TRANSICOES: Record<EstadoObra, { para: EstadoObra; rotulo: string; motivo:
   cancelada: [],
 };
 
+/**
+ * /obras/<código>: a ficha da obra; com ?chegada=1 (o QR da porta), o ecrã de
+ * chegada de quem trabalha lá.
+ */
 export default function ObraDetalhe() {
+  const { codigo = "" } = useParams();
+  const [params] = useSearchParams();
+  return params.get("chegada") === "1" ? <ChegadaObra codigo={codigo} /> : <ObraDetalheFicha />;
+}
+
+function ObraDetalheFicha() {
   const { codigo = "" } = useParams();
   const { activeOrgId, funcao, orgs, setActiveOrgId, businessUserId } = useAuth();
   const [obra, setObra] = useState<ObraResumo | null>(null);
@@ -121,6 +135,7 @@ export default function ObraDetalhe() {
   const [replanear, setReplanear] = useState(false);
   const [faseAEditar, setFaseAEditar] = useState<FaseObra | null>(null);
   const [erroAcao, setErroAcao] = useState<string | null>(null);
+  const [verQr, setVerQr] = useState(false);
 
   const planeia = podePlanear(funcao);
   const recarregar = () => setRecarga((r) => r + 1);
@@ -365,9 +380,9 @@ export default function ObraDetalhe() {
           </div>
         </div>
 
-        {planeia && (
+        {(planeia || podeValidar(funcao)) && (
           <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
-            {TRANSICOES[obra.estado].map((t) => (
+            {planeia && TRANSICOES[obra.estado].map((t) => (
               <Button
                 key={t.para}
                 size="sm"
@@ -394,6 +409,11 @@ export default function ObraDetalhe() {
                 </Button>
               </>
             )}
+            {obra.estado !== "concluida" && obra.estado !== "cancelada" && (
+              <Button size="sm" variant="ghost" onClick={() => setVerQr(true)}>
+                <QrCode width={14} height={14} /> Imprimir QR da obra
+              </Button>
+            )}
           </div>
         )}
       </Card>
@@ -404,6 +424,10 @@ export default function ObraDetalhe() {
         plano={{ inicio: obra.inicio_planeado, fim: obra.fim_planeado, orcamentoId: obra.orcamento_id }}
       />
       <ObraAvisoBancada obraId={obra.id} recarga={recarga} />
+      {podeValidar(funcao) && <ChegadasDeHoje obraId={obra.id} recarga={recarga} />}
+      {verQr && (
+        <ObraQr obra={{ codigo: obra.codigo, titulo: obra.titulo, morada: obra.morada }} aoFechar={() => setVerQr(false)} />
+      )}
 
       {aviso && (
         <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
@@ -790,5 +814,35 @@ function RenomearFase({ fase, aoFechar, aoGravar }: { fase: FaseObra; aoFechar: 
       </Field>
       {erro && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
     </Modal>
+  );
+}
+
+/** "Chegaram hoje": quem leu o QR da porta (db/chegadas.sql). Nada se não houver. */
+function ChegadasDeHoje({ obraId, recarga }: { obraId: string; recarga: number }) {
+  const [lista, setLista] = useState<Chegada[]>([]);
+  useEffect(() => {
+    let vivo = true;
+    const inicioDoDia = new Date();
+    inicioDoDia.setHours(0, 0, 0, 0);
+    chegadasDaObra(obraId, inicioDoDia.toISOString()).then((l) => vivo && setLista(l));
+    return () => {
+      vivo = false;
+    };
+  }, [obraId, recarga]);
+  if (!lista.length) return null;
+  // A primeira chegada de cada pessoa hoje.
+  const primeiras = new Map<string, Chegada>();
+  for (const c of [...lista].reverse()) if (!primeiras.has(c.utilizador_id)) primeiras.set(c.utilizador_id, c);
+  return (
+    <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+      <b>Chegaram hoje:</b>{" "}
+      {[...primeiras.values()]
+        .map(
+          (c) =>
+            `${c.nome.split(" ")[0]} ${new Date(c.chegou_em).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" })}` +
+            (c.com_localizacao ? " (com localização)" : "")
+        )
+        .join(" · ")}
+    </p>
   );
 }

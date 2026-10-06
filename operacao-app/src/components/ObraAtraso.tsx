@@ -43,10 +43,19 @@ export default function ObraAtraso({
   tarefa,
   podeEmpurrar = true,
   atrasoPreviewMs = 400,
+  inicial,
   aoFechar,
   aoGravar,
 }: {
   tarefa: TarefaParaAtraso;
+  /** Já preenchida (ex.: a partir do que se ditou). A pessoa revê e grava. */
+  inicial?: {
+    motivo?: MotivoAtraso | null;
+    contexto?: string;
+    novoFim?: string | null;
+    quantidade?: number | null;
+    unidade?: UnidadeExtra | null;
+  };
   /** Mostrar a escolha "empurrar as que dependem desta". Sem ela, empurra sempre. */
   podeEmpurrar?: boolean;
   /** Espera antes de pedir a pré-visualização (0 nos testes). */
@@ -54,12 +63,12 @@ export default function ObraAtraso({
   aoFechar: () => void;
   aoGravar: (r: RespostaAtraso) => void;
 }) {
-  const [motivo, setMotivo] = useState<MotivoAtraso | "">("");
-  const [contexto, setContexto] = useState("");
-  const [modo, setModo] = useState<"tempo" | "data">("tempo");
-  const [quantidade, setQuantidade] = useState("");
-  const [unidade, setUnidade] = useState<UnidadeExtra>("horas");
-  const [novoFim, setNovoFim] = useState("");
+  const [motivo, setMotivo] = useState<MotivoAtraso | "">(inicial?.motivo ?? "");
+  const [contexto, setContexto] = useState(inicial?.contexto ?? "");
+  const [modo, setModo] = useState<"tempo" | "data">(inicial?.novoFim && inicial?.quantidade == null ? "data" : "tempo");
+  const [quantidade, setQuantidade] = useState(inicial?.quantidade != null ? String(inicial.quantidade) : "");
+  const [unidade, setUnidade] = useState<UnidadeExtra>(inicial?.unidade ?? "horas");
+  const [novoFim, setNovoFim] = useState(inicial?.novoFim ?? "");
   const [empurrar, setEmpurrar] = useState(true);
   const [impacto, setImpacto] = useState<RespostaAtraso | null>(null);
   const [erroImpacto, setErroImpacto] = useState<string | null>(null);

@@ -24,6 +24,8 @@ import {
 import { data as formatarData } from "../lib/formatar";
 import FotosTarefa from "./FotosTarefa";
 import ObraAtraso, { ClienteAvisado } from "./ObraAtraso";
+import FalarTarefa from "./FalarTarefa";
+import type { PropostaFala } from "../domain/voz";
 import ObraMaterialChega from "./ObraMaterialChega";
 import { separarNome } from "../domain/nomesTarefas";
 import { diasDeDesvio, formatarDesvio, rotuloMotivoAtraso } from "../domain/atrasos";
@@ -441,6 +443,7 @@ function AtrasosDaTarefa({
   const [atrasos, setAtrasos] = useState<AtrasoTarefa[]>([]);
   const [recarga, setRecarga] = useState(0);
   const [registar, setRegistar] = useState(false);
+  const [ditado, setDitado] = useState<PropostaFala | null>(null);
   const [avisar, setAvisar] = useState<AtrasoTarefa | null>(null);
   const [erro, setErro] = useState<string | null>(null);
   const nAtrasos = tarefa.n_atrasos ?? 0;
@@ -475,9 +478,20 @@ function AtrasosDaTarefa({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Prazos e atrasos</p>
         {podeRegistar && aberta && (
-          <Button size="sm" variant="secondary" onClick={() => setRegistar(true)}>
-            <AlertTriangle width={13} height={13} /> Registar atraso
-          </Button>
+          <div className="flex items-center gap-3">
+            <FalarTarefa
+              tarefa={tarefa}
+              rotulo="Ditar atraso"
+              intencoes={["atraso"]}
+              aoConfirmar={(p) => {
+                setDitado(p);
+                setRegistar(true);
+              }}
+            />
+            <Button size="sm" variant="secondary" onClick={() => setRegistar(true)}>
+              <AlertTriangle width={13} height={13} /> Registar atraso
+            </Button>
+          </div>
         )}
       </div>
       {tarefa.atrasada_inicio && (
@@ -539,9 +553,24 @@ function AtrasosDaTarefa({
       {registar && (
         <ObraAtraso
           tarefa={tarefa}
-          aoFechar={() => setRegistar(false)}
+          inicial={
+            ditado
+              ? {
+                  motivo: ditado.motivo,
+                  contexto: ditado.texto,
+                  novoFim: ditado.novoFim,
+                  quantidade: ditado.quantidade,
+                  unidade: ditado.unidade,
+                }
+              : undefined
+          }
+          aoFechar={() => {
+            setRegistar(false);
+            setDitado(null);
+          }}
           aoGravar={() => {
             setRegistar(false);
+            setDitado(null);
             mudou();
           }}
         />

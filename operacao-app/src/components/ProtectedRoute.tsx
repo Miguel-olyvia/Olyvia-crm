@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Spinner } from "./ui";
 import { OperacaoMark } from "./icons";
@@ -15,6 +15,7 @@ import { OperacaoMark } from "./icons";
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { loading, session, businessUserId, funcao, perfilCarregado, orgs, activeOrgId } =
     useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -24,7 +25,9 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     );
   }
 
-  if (!session) return <Navigate to="/login" replace />;
+  // Volta ao mesmo sítio depois do login (ex.: o QR da porta da obra).
+  if (!session)
+    return <Navigate to="/login" replace state={{ de: location.pathname + location.search }} />;
 
   if (!businessUserId) {
     return (

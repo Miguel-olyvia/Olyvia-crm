@@ -42,6 +42,8 @@ export async function enviarFotoTarefa(args: {
   obraId: string;
   tarefaId: string;
   ficheiro: File;
+  /** Ex.: a nota ditada ("O técnico fala…"). */
+  legenda?: string | null;
 }): Promise<void> {
   const f = args.ficheiro;
   const ext = f.name.includes(".") ? f.name.slice(f.name.lastIndexOf(".")).toLowerCase() : "";
@@ -69,6 +71,8 @@ export async function enviarFotoTarefa(args: {
     p_nome: f.name,
     p_mime: f.type || null,
     p_tamanho: f.size,
+    // Só se manda quando há (a assinatura antiga também a aceita, com DEFAULT NULL).
+    ...(args.legenda?.trim() ? { p_legenda: args.legenda.trim() } : {}),
   });
   if (error) {
     await supabase.storage.from(BUCKET).remove([caminho]);

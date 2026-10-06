@@ -36,6 +36,7 @@
     "validar-instalacao": "node tools/validar-instalacao.mjs",
     "validar-atualizacao": "node tools/validar-atualizacao.mjs",
     "validar-demo": "node tools/validar-demo.mjs",
+    "validar-chegadas": "node tools/validar-chegadas.mjs",
     "gerar-dados-de-teste": "node tools/gerar-dados-de-teste.mjs",
     "validar-rpcs": "node tools/validar-rpcs.mjs",
     "validar-planos": "node tools/validar-planos.mjs",
@@ -58,6 +59,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.80.0",
+    "qrcode-generator": "^2.0.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.1",

@@ -19,6 +19,8 @@ export default function FotosTarefa({
   podeApagarTodas = false,
   nomes,
   aoMudarContagem,
+  legendaPendente,
+  aoUsarLegenda,
 }: {
   tarefa: { id: string; obra_id: string; organization_id: string; estado: string };
   podeEnviar: boolean;
@@ -26,6 +28,10 @@ export default function FotosTarefa({
   podeApagarTodas?: boolean;
   nomes?: ReadonlyMap<string, string>;
   aoMudarContagem?: (n: number) => void;
+  /** Uma nota ditada à espera de foto: vai como legenda da próxima. */
+  legendaPendente?: string | null;
+  /** A legenda foi usada (ou posta de lado). */
+  aoUsarLegenda?: () => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [fotos, setFotos] = useState<FotoTarefa[] | null>(null);
@@ -65,8 +71,10 @@ export default function FotosTarefa({
           obraId: tarefa.obra_id,
           tarefaId: tarefa.id,
           ficheiro: f,
+          legenda: legendaPendente ?? null,
         });
       }
+      if (legendaPendente) aoUsarLegenda?.();
       await carregar();
     } catch (e) {
       setErro(e instanceof ErroDeEscrita ? e.message : "Não foi possível enviar a foto. Tenta outra vez.");
@@ -113,6 +121,14 @@ export default function FotosTarefa({
         className="hidden"
         onChange={(e) => void enviar(e.target.files)}
       />
+      {ativo && legendaPendente && (
+        <div className="mt-2 rounded-lg bg-brand-50/60 px-3 py-2 text-xs text-slate-700" data-testid="legenda-pendente">
+          A próxima foto leva a legenda: <b>«{legendaPendente}»</b>{" "}
+          <button type="button" className="ml-1 text-slate-500 underline" onClick={() => aoUsarLegenda?.()}>
+            não usar
+          </button>
+        </div>
+      )}
       {erro && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{erro}</p>}
 
       {fotos.length === 0 ? (
@@ -162,6 +178,7 @@ export default function FotosTarefa({
             {urls.get(aVer.caminho) && (
               <img src={urls.get(aVer.caminho)} alt={aVer.legenda ?? aVer.nome} className="mt-3 w-full rounded-lg" />
             )}
+            {aVer.legenda && <p className="mt-2 text-sm text-slate-700">{aVer.legenda}</p>}
             {!validada && (podeApagarTodas || (euId && aVer.carregado_por === euId)) && (
               <div className="mt-3 border-t border-slate-100 pt-3">
                 <Button size="sm" variant="danger" onClick={() => void apagar(aVer)}>

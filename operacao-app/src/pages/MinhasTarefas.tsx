@@ -34,6 +34,8 @@ import {
 import FichaLocal from "../components/FichaLocal";
 import { data as formatarData } from "../lib/formatar";
 import NomeTarefa from "../components/NomeTarefa";
+import FalarTarefa from "../components/FalarTarefa";
+import type { IntencaoFala, PropostaFala } from "../domain/voz";
 
 /**
  * As minhas tarefas — o ecrã do executor, no telemóvel, em obra.
@@ -60,6 +62,10 @@ export default function MinhasTarefas() {
   const [justificar, setJustificar] = useState<{ tarefa: TarefaObra; obrigatoria: boolean; reais: number } | null>(null);
   const [extra, setExtra] = useState<TarefaObra | null>(null);
   const [atrasar, setAtrasar] = useState<TarefaObra | null>(null);
+  // O que se ditou: o atraso já preenchido, a nota à espera de foto, a nota do "terminei".
+  const [atrasoDitado, setAtrasoDitado] = useState<PropostaFala | null>(null);
+  const [legendas, setLegendas] = useState<Record<string, string>>({});
+  const notasDitas = useRef<Record<string, string>>({});
   const [avisoAtraso, setAvisoAtraso] = useState<string | null>(null);
   // A medida real de cada tarefa, dita antes de a dar por feita.
   const [medir, setMedir] = useState<TarefaObra | null>(null);
@@ -151,10 +157,11 @@ export default function MinhasTarefas() {
         tarefaId: t.id,
         concluir: true,
         motivo,
-        nota: nota || null,
+        nota: nota || notasDitas.current[t.id] || null,
         ...(medidas.current[t.id] != null ? { medidaReal: medidas.current[t.id] } : {}),
       });
       setJustificar(null);
+      delete notasDitas.current[t.id];
       setRecarga((r) => r + 1);
     } catch (e) {
       const msg = e instanceof ErroDeEscrita ? e.message : "Sem ligação. Tenta outra vez.";
@@ -360,7 +367,25 @@ export default function MinhasTarefas() {
                 Só depois de: <b>{dep.nome}</b>
               </p>
             )}
-            <FotosTarefa tarefa={t} podeEnviar euId={businessUserId} />
+            <FotosTarefa
+              tarefa={t}
+              podeEnviar
+              euId={businessUserId}
+              legendaPendente={legendas[t.id] ?? null}
+              aoUsarLegenda={() =>
+                setLegendas((l) => {
+                  const { [t.id]: _usada, ...resto } = l;
+                  return resto;
+                })
+              }
+            />
+
+            <FalarTarefa
+              tarefa={t}
+              rotulo="Ditar (atraso, nota, terminei)"
+              intencoes={intencoesDe(t, acoes.includes("concluir"))}
+              aoConfirmar={(p) => aoDitar(t, p)}
+            />
 
             <button
               type="button"
@@ -419,6 +444,25 @@ export default function MinhasTarefas() {
         )}
       </Card>
     );
+  };
+
+  /** O que se pode fazer com uma frase ditada nesta tarefa. */
+  const intencoesDe = (t: TarefaObra, podeConcluir: boolean): IntencaoFala[] => {
+    const aberta = t.estado === "por_fazer" || t.estado === "em_curso" || t.estado === "rejeitada";
+    return [...(aberta ? (["atraso"] as const) : []), ...(podeConcluir ? (["feita"] as const) : []), "nota"];
+  };
+
+  const aoDitar = (t: TarefaObra, p: PropostaFala) => {
+    if (p.intencao === "atraso") {
+      setAtrasoDitado(p);
+      setAtrasar(t);
+    } else if (p.intencao === "feita") {
+      if (p.texto) notasDitas.current[t.id] = p.texto;
+      void correr(t, "concluir");
+    } else {
+      setLegendas((l) => ({ ...l, [t.id]: p.texto }));
+      setExpandida(t.id);
+    }
   };
 
   const secao = (titulo: string, lista: TarefaObra[], tom = "text-slate-500") =>
@@ -521,9 +565,24 @@ export default function MinhasTarefas() {
       {atrasar && (
         <ObraAtraso
           tarefa={atrasar}
-          aoFechar={() => setAtrasar(null)}
+          inicial={
+            atrasoDitado
+              ? {
+                  motivo: atrasoDitado.motivo,
+                  contexto: atrasoDitado.texto,
+                  novoFim: atrasoDitado.novoFim,
+                  quantidade: atrasoDitado.quantidade,
+                  unidade: atrasoDitado.unidade,
+                }
+              : undefined
+          }
+          aoFechar={() => {
+            setAtrasar(null);
+            setAtrasoDitado(null);
+          }}
           aoGravar={(r) => {
             setAtrasar(null);
+            setAtrasoDitado(null);
             setAvisoAtraso(
               `Atraso registado: "${atrasar.nome}" acaba a ${formatarData(r.novo_fim)}.` +
                 (r.empurradas.length ? ` ${r.empurradas.length} tarefa(s) a seguir foram empurradas.` : "") +

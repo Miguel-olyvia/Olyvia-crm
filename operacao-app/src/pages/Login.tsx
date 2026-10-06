@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { getRememberSession, setRememberSession, supabase } from "../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, Field, Input, Toggle } from "../components/ui";
@@ -10,6 +10,10 @@ const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvi
 export default function Login() {
   const { session, loading } = useAuth();
   const navigate = useNavigate();
+  // Para onde voltar depois de entrar (ex.: o QR da porta da obra). Só
+  // caminhos internos da app — nunca um endereço de fora.
+  const de = (useLocation().state as { de?: string } | null)?.de;
+  const destino = de && de.startsWith("/") && !de.startsWith("//") ? de : "/";
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [verPassword, setVerPassword] = useState(false);
@@ -17,7 +21,7 @@ export default function Login() {
   const [aEntrar, setAEntrar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
-  if (!loading && session) return <Navigate to="/" replace />;
+  if (!loading && session) return <Navigate to={destino} replace />;
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -32,7 +36,7 @@ export default function Login() {
       setErro("Credenciais inválidas. Usa o mesmo email e password da Olyvia.");
       return;
     }
-    navigate("/", { replace: true });
+    navigate(destino, { replace: true });
   };
 
   return (

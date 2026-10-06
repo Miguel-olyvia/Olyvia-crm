@@ -346,12 +346,12 @@ agrupar o dia por zona sem geolocalização nenhuma.
 **Para o fazer a sério** faltam coordenadas em `ops_local` — nem o CRM as tem
 em `anew_addresses`. Seria preciso geocodificar.
 
-### c) A foto tirada não devia precisar de legenda
+### c) ~~A foto tirada não devia precisar de legenda~~
 
-Hoje a legenda escreve-se depois. Bem — mas quase ninguém escreve.
-
-Uma ideia: transcrever uma nota de voz. O técnico carrega, fala cinco segundos,
-e a legenda escreve-se sozinha. O bucket já aceita áudio.
+Feito a 06/10/2026 nas obras ([`voz-e-qr.md`](voz-e-qr.md)): "Ditar" em "As
+minhas tarefas" — o técnico fala, o sistema propõe (atraso, terminei, ou nota
+que vai como legenda da próxima foto) e a pessoa confirma. Web Speech API do
+browser, sem áudio guardado. Falta nas ordens de manutenção.
 
 ### d) Ler o código do equipamento com a câmara
 
@@ -360,6 +360,11 @@ funciona em qualquer telemóvel: aponta-se ao extintor e abre a ordem daquele
 equipamento.
 
 `ops_ativo.codigo` já é único por organização — bastaria imprimir e ler.
+
+**Obras: feito a 06/10/2026** ([`voz-e-qr.md`](voz-e-qr.md)) — "Imprimir QR
+da obra" na ficha da obra; o QR na porta abre "Registar chegada" (hora,
+localização só com consentimento, relógio da 1.ª tarefa do dia). Falta o mesmo
+para os ativos da manutenção (o componente `QrSvg` serve tal e qual).
 
 ### e) O passo que ninguém dá: iniciar a ordem
 
