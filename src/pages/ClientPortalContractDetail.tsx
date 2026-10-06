@@ -16,6 +16,8 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useCooldown, cooldownLabel, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
+import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { ArrowLeft, ScrollText, Download, CheckSquare, FileDown, Smartphone, ShieldCheck, Loader2 } from "lucide-react";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -37,6 +39,7 @@ const ClientPortalContractDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
 
   const [contract, setContract] = useState<any>(null);
   const [documents, setDocuments] = useState<any[]>([]);
@@ -143,6 +146,8 @@ const ClientPortalContractDetail = () => {
 
   async function handleSendOtp() {
     if (!id) return; // H4
+    // A contagem começa no clique (antes da resposta) e não é reposta se o servidor recusar.
+    if (!otpCooldown.iniciar()) return;
     setOtpStep("sending");
     setOtpError("");
     try {
@@ -528,11 +533,12 @@ const ClientPortalContractDetail = () => {
                     size="lg"
                     className="gap-2"
                     onClick={handleSendOtp}
-                    disabled={actionLoading}
+                    disabled={actionLoading || otpCooldown.activo}
                   >
                     <Smartphone className="h-5 w-5" />
-                    Enviar código SMS
+                    {cooldownLabel("Enviar código SMS", otpCooldown.restante)}
                   </Button>
+                  <OtpCooldownNotice activo={otpCooldown.activo} />
                   {otpError && (
                     <p className="text-sm text-destructive">{otpError}</p>
                   )}
@@ -555,7 +561,7 @@ const ClientPortalContractDetail = () => {
                     <p className="text-xs text-muted-foreground">Válido por 5 minutos</p>
                   </div>
                   <div className="flex justify-center">
-                    <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode}>
+                    <InputOTP autoFocus maxLength={6} value={otpCode} onChange={setOtpCode}>
                       <InputOTPGroup>
                         <InputOTPSlot index={0} />
                         <InputOTPSlot index={1} />
@@ -569,9 +575,10 @@ const ClientPortalContractDetail = () => {
                   {otpError && (
                     <p className="text-sm text-destructive">{otpError}</p>
                   )}
+                  <OtpCooldownNotice activo={otpCooldown.activo} />
                   <div className="flex gap-3 justify-center">
-                    <Button variant="outline" size="sm" onClick={handleSendOtp} disabled={actionLoading}>
-                      Reenviar código
+                    <Button variant="outline" size="sm" onClick={handleSendOtp} disabled={actionLoading || otpCooldown.activo}>
+                      {cooldownLabel("Reenviar código", otpCooldown.restante)}
                     </Button>
                     <Button
                       size="sm"

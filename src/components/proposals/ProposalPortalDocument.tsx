@@ -12,6 +12,8 @@ import {
 } from "@/components/ui/input-otp";
 import type { ProposalPortalCommercial } from "@/components/proposals/proposalPortalData";
 import { formatCurrency } from "@/lib/utils";
+import { cooldownLabel } from "@/hooks/useCooldown";
+import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { computeQuoteTotals, computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
 
 /**
@@ -48,6 +50,8 @@ interface ProposalPortalDocumentProps {
   maskedPhone?: string;
   otpError?: string;
   onSendOtp?: () => void;
+  /** Segundos que faltam até se poder pedir novo código (0 = livre). */
+  otpCooldown?: number;
   onVerifyOtp?: () => void;
   onOtpCodeChange?: (code: string) => void;
   onAcceptQuote?: (quoteId: string) => void;
@@ -105,6 +109,7 @@ export function ProposalPortalDocument({
   maskedPhone = "",
   otpError = "",
   onSendOtp,
+  otpCooldown = 0,
   onVerifyOtp,
   onOtpCodeChange,
   onAcceptQuote,
@@ -962,11 +967,12 @@ export function ProposalPortalDocument({
                       size="lg"
                       className="gap-2"
                       onClick={onSendOtp}
-                      disabled={actionLoading}
+                      disabled={actionLoading || otpCooldown > 0}
                     >
                       <Smartphone className="h-5 w-5" />
-                      Enviar código SMS
+                      {cooldownLabel("Enviar código SMS", otpCooldown)}
                     </Button>
+                    <OtpCooldownNotice activo={otpCooldown > 0} />
                     {otpError && (
                       <p className="text-sm text-destructive">{otpError}</p>
                     )}
@@ -989,7 +995,7 @@ export function ProposalPortalDocument({
                       <p className="text-xs text-muted-foreground">Válido por 5 minutos</p>
                     </div>
                     <div className="flex justify-center">
-                      <InputOTP maxLength={6} value={otpCode} onChange={(val) => onOtpCodeChange?.(val)}>
+                      <InputOTP autoFocus maxLength={6} value={otpCode} onChange={(val) => onOtpCodeChange?.(val)}>
                         <InputOTPGroup>
                           <InputOTPSlot index={0} />
                           <InputOTPSlot index={1} />
@@ -1003,9 +1009,10 @@ export function ProposalPortalDocument({
                     {otpError && (
                       <p className="text-sm text-destructive">{otpError}</p>
                     )}
+                    <OtpCooldownNotice activo={otpCooldown > 0} />
                     <div className="flex gap-3 justify-center">
-                      <Button variant="outline" size="sm" onClick={onSendOtp} disabled={actionLoading}>
-                        Reenviar código
+                      <Button variant="outline" size="sm" onClick={onSendOtp} disabled={actionLoading || otpCooldown > 0}>
+                        {cooldownLabel("Reenviar código", otpCooldown)}
                       </Button>
                       <Button
                         size="sm"
@@ -1084,11 +1091,11 @@ export function ProposalPortalDocument({
                 size="lg"
                 className="gap-2"
                 style={{ backgroundColor: hasSelectedQuotes ? "#16a34a" : undefined }}
-                disabled={actionLoading || (!isPreview && !hasSelectedQuotes)}
+                disabled={actionLoading || otpCooldown > 0 || (!isPreview && !hasSelectedQuotes)}
                 onClick={onSendOtp}
               >
                 <CheckSquare className="h-5 w-5 text-white" />
-                <span className="text-white">Aceitar e Assinar</span>
+                <span className="text-white">{cooldownLabel("Aceitar e Assinar", otpCooldown)}</span>
               </Button>
             </div>
             {needsSelection && !hasSelectedQuotes && !isPreview && (

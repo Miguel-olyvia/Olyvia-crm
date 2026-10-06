@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useCooldown, cooldownLabel, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
+import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,8 +27,12 @@ export function SignatoryOtpDialog({ open, onOpenChange, signatory, templateId, 
 
   const referenceId = templateId || `template_sig_${signatory?.userId}`;
 
+  const cooldown = useCooldown(OTP_COOLDOWN_SECONDS);
+
   const handleSendOtp = async () => {
     if (!signatory) return;
+    // A contagem começa no clique (antes da resposta) e não é reposta se o servidor recusar.
+    if (!cooldown.iniciar()) return;
     setSending(true);
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
@@ -130,11 +136,12 @@ export function SignatoryOtpDialog({ open, onOpenChange, signatory, templateId, 
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={handleClose}>Cancelar</Button>
-              <Button onClick={handleSendOtp} disabled={sending}>
+              <Button onClick={handleSendOtp} disabled={sending || cooldown.activo}>
                 {sending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Phone className="h-4 w-4 mr-2" />}
-                Enviar Código SMS
+                {cooldownLabel("Enviar Código SMS", cooldown.restante)}
               </Button>
             </DialogFooter>
+            <OtpCooldownNotice activo={cooldown.activo} className="text-center" />
           </div>
         ) : (
           <div className="space-y-4 py-4">
@@ -148,11 +155,12 @@ export function SignatoryOtpDialog({ open, onOpenChange, signatory, templateId, 
                 autoFocus
               />
               <p className="text-xs text-muted-foreground text-center">O código é válido por 5 minutos</p>
+              <OtpCooldownNotice activo={cooldown.activo} className="text-center" />
             </div>
             <DialogFooter className="flex-col sm:flex-row gap-2">
-              <Button variant="ghost" size="sm" onClick={handleSendOtp} disabled={sending}>
+              <Button variant="ghost" size="sm" onClick={handleSendOtp} disabled={sending || cooldown.activo}>
                 {sending ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : null}
-                Reenviar código
+                {cooldownLabel("Reenviar código", cooldown.restante)}
               </Button>
               <div className="flex gap-2">
                 <Button variant="outline" onClick={handleClose}>Cancelar</Button>
