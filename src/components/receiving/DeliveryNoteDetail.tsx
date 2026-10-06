@@ -28,6 +28,7 @@ import {
   fmtQty,
   normalizeNote,
   noteErrorMessage,
+  noteLabel,
   type DeliveryNoteFull,
   type DeliveryNoteProductStatus,
   type RpcErrorLike,
@@ -174,7 +175,7 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
         <DialogContent className={FULLSCREEN_DIALOG_CLASS}>
           <DialogHeader className="border-b p-4 pr-12 text-left">
             <DialogTitle className="flex flex-wrap items-center gap-2">
-              <span>Guia GR {note?.note_number ?? ""}</span>
+              <span>Guia {note ? noteLabel(note.note_number) : ""}</span>
               {note && (
                 <Badge variant={note.status === "open" ? "secondary" : "outline"}>{NOTE_STATUS_LABEL[note.status] ?? note.status}</Badge>
               )}

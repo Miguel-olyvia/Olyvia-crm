@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { FileText, Plus, RefreshCw, Search, X } from "lucide-react";
-import { FULLSCREEN_DIALOG_CLASS, fmtDay } from "./deliveryNotes";
+import { FULLSCREEN_DIALOG_CLASS, fmtDay, noteLabel } from "./deliveryNotes";
 
 export interface PickerNote {
   id: string;
@@ -169,7 +169,7 @@ export function DeliveryNotePicker({ open, onOpenChange, orgId, currentId, canCr
                   >
                     <FileText className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
                     <span className="min-w-0 flex-1">
-                      <span className="block break-words font-medium">GR {n.note_number}</span>
+                      <span className="block break-words font-medium">{noteLabel(n.note_number)}</span>
                       <span className="block break-words text-sm text-muted-foreground">
                         {[
                           n.supplier_name ?? "Fornecedor",

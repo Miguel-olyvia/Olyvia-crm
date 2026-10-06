@@ -30,6 +30,8 @@ import {
   newClientId,
   normalizeNote,
   noteErrorMessage,
+  noteLabel,
+  todayIso,
   type DeliveryNoteFull,
   type RpcErrorLike,
 } from "./deliveryNotes";
@@ -105,7 +107,14 @@ const linesFromNote = (n: DeliveryNoteFull): LineDraft[] =>
   }));
 
 export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], defaultSupplierId, note, onSaved, onOpenExisting }: Props) {
-  const editing = !!note;
+  /**
+   * A guia já existe no servidor. Começa como !!note; passa a true quando um
+   * "criar" repetido (depois de uma falha de rede) descobre que a guia já
+   * ficou gravada — a partir daí grava-se como edição, com o updated_at lido.
+   */
+  const [editing, setEditing] = useState(!!note);
+  /** Nº gravado no servidor (título "Editar guia …"). */
+  const [savedNumber, setSavedNumber] = useState<string | null>(note?.note_number ?? null);
   const [noteId, setNoteId] = useState("");
   const [supplierId, setSupplierId] = useState("");
   const [number, setNumber] = useState("");
@@ -123,6 +132,7 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
   const [productQuery, setProductQuery] = useState("");
   const [productHits, setProductHits] = useState<ProductHit[]>([]);
   const [productSearching, setProductSearching] = useState(false);
+  const [productError, setProductError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
 
   const [saving, setSaving] = useState(false);
@@ -142,6 +152,7 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
     setSelectedPos(new Set(n.purchase_orders.map((p) => p.purchase_order_id)));
     setLines(linesFromNote(n));
     setExpectedUpdatedAt(n.updated_at);
+    setSavedNumber(n.note_number);
   };
 
   // Cada abertura: id novo (criar) ou dados da guia (editar).
@@ -152,14 +163,18 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
     setDuplicate(null);
     setProductQuery("");
     setProductHits([]);
+    setProductError(null);
+    setEditing(!!note);
     if (note) {
       loadFromNote(note);
     } else {
       setNoteId(newClientId());
+      setSavedNumber(null);
       setSupplierId(defaultSupplierId ?? "");
       setSupplierName(null);
       setNumber("");
-      setDocDate("");
+      // Data obrigatória: por omissão a de hoje (corrige-se se a guia for de outro dia).
+      setDocDate(todayIso());
       setNotes("");
       setSelectedPos(new Set());
       setLines([]);
@@ -226,17 +241,20 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
 
   // Procura de produtos para linhas à mão (nome, SKU ou código de barras).
   useEffect(() => {
-    const q = productQuery.trim().replace(/[,()%*\\]/g, " ").trim();
+    // Fora do termo tudo o que tem significado na sintaxe do .or() do PostgREST
+    // (vírgula, parênteses, aspas, dois pontos, ponto) ou do ilike (%, *, \).
+    const q = productQuery.trim().replace(/[,()%*\\":.]/g, " ").replace(/\s+/g, " ").trim();
     if (!open || !orgId || q.length < 2) {
       setProductHits([]);
       setProductSearching(false);
+      setProductError(null);
       return;
     }
     const seq = ++searchSeq.current;
     setProductSearching(true);
     const t = window.setTimeout(async () => {
       try {
-        const { data } = await supabase
+        const { data, error: searchErr } = await supabase
           .from("products")
           .select("id, name, sku, uom:uom_id(code)")
           .eq("organization_id", orgId)
@@ -246,6 +264,12 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
           .order("name")
           .limit(20);
         if (seq !== searchSeq.current) return;
+        if (searchErr) {
+          setProductHits([]);
+          setProductError(searchErr.message || "Não foi possível procurar produtos.");
+          return;
+        }
+        setProductError(null);
         setProductHits(
           (data ?? []).map((p) => ({
             id: p.id,
@@ -255,7 +279,10 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
           })),
         );
       } catch {
-        if (seq === searchSeq.current) setProductHits([]);
+        if (seq === searchSeq.current) {
+          setProductHits([]);
+          setProductError("Sem ligação ao servidor — não foi possível procurar produtos.");
+        }
       } finally {
         if (seq === searchSeq.current) setProductSearching(false);
       }
@@ -352,10 +379,12 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
   };
 
   const invalidLines = lines.filter((l) => !(parseQty(l.qtyText) > 0));
-  const canSave = !!supplierId && number.trim() !== "" && invalidLines.length === 0 && !saving;
+  const canSave = !!supplierId && number.trim() !== "" && docDate !== "" && invalidLines.length === 0 && !saving;
 
   const save = async () => {
     if (savingRef.current || !canSave || !noteId) return;
+    // Capturado no início: o modo pode mudar (criar → editar) no fim desta gravação.
+    const wasEditing = editing;
     savingRef.current = true;
     setSaving(true);
     setError(null);
@@ -378,7 +407,7 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
           purchase_order_item_id: l.purchase_order_item_id,
           description: l.description,
         })) as unknown as Json,
-        p_expected_updated_at: editing ? (expectedUpdatedAt ?? undefined) : undefined,
+        p_expected_updated_at: wasEditing ? (expectedUpdatedAt ?? undefined) : undefined,
       });
       if (rpcErr) err = rpcErr;
       else saved = normalizeNote(data);
@@ -398,19 +427,43 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
       setDuplicate({ id: (err.details ?? "").trim(), number: number.trim() });
       return;
     }
-    if (err?.code === "40001" && !editing) {
+    if (err?.code === "40001" && !wasEditing) {
       // Criar repetido depois de uma falha de rede, já com outros dados: a guia
-      // com este id já existe (o 1.º envio ficou gravado) — usa-se essa.
+      // com este id já existe (o 1.º envio ficou gravado, com os dados de
+      // então). NÃO se fecha como se tivesse gravado o que está no ecrã: passa
+      // a edição dessa guia (updated_at acertado), mantendo o que a pessoa
+      // escreveu, e pede para rever e gravar de novo.
       const r = await fetchDeliveryNote(noteId);
       if (r.note) {
-        onSaved(r.note);
-        onOpenChange(false);
+        const stored = r.note;
+        setEditing(true);
+        setSavedNumber(stored.note_number);
+        setSupplierName(stored.supplier_name);
+        setExpectedUpdatedAt(stored.updated_at);
+        if (stored.status !== "open") {
+          loadFromNote(stored);
+          setError(
+            `A guia ${noteLabel(stored.note_number)} já tinha ficado gravada e está agora ${stored.status === "closed" ? "fechada" : "cancelada"} — já não pode ser editada.`,
+          );
+          return;
+        }
+        if (stored.supplier_id !== supplierId) {
+          // O fornecedor de uma guia não muda: repõe-se tudo como ficou gravado.
+          loadFromNote(stored);
+          setError(
+            `A guia já tinha ficado gravada (${noteLabel(stored.note_number)}), com outro fornecedor (${stored.supplier_name ?? "fornecedor"}). Recarreguei os dados gravados — revê e grava de novo.`,
+          );
+          return;
+        }
+        setError(
+          `A guia já tinha ficado gravada (${noteLabel(stored.note_number)}) com dados diferentes destes. Mantive o que escreveste — revê e grava de novo.`,
+        );
         return;
       }
       setError(`${noteErrorMessage(err)} Tenta de novo.`);
       return;
     }
-    if (err?.code === "40001" && editing) {
+    if (err?.code === "40001" && wasEditing) {
       // Alterada por outra pessoa: recarrega e avisa (as alterações feitas aqui perdem-se).
       const r = await fetchDeliveryNote(noteId);
       if (r.note) {
@@ -441,7 +494,7 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
     <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
       <DialogContent className={FULLSCREEN_DIALOG_CLASS}>
         <DialogHeader className="border-b p-4 pr-12 text-left">
-          <DialogTitle>{editing ? `Editar guia GR ${note?.note_number ?? ""}` : "Nova guia do fornecedor"}</DialogTitle>
+          <DialogTitle>{editing ? `Editar guia ${noteLabel(savedNumber ?? note?.note_number)}` : "Nova guia do fornecedor"}</DialogTitle>
           <DialogDescription>
             Regista a guia de remessa que veio com a mercadoria. As encomendas escolhidas limitam onde as leituras recebem.
           </DialogDescription>
@@ -482,15 +535,24 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="dn-date">Data da guia</Label>
+              <Label htmlFor="dn-date">Data da guia *</Label>
               <Input
                 id="dn-date"
                 type="date"
                 value={docDate}
                 onChange={(e) => setDocDate(e.target.value)}
-                className="h-12 text-base"
+                required
+                aria-required="true"
+                aria-invalid={docDate === ""}
+                aria-describedby={docDate === "" ? "dn-date-error" : undefined}
+                className={`h-12 text-base ${docDate === "" ? "border-destructive" : ""}`}
                 disabled={saving}
               />
+              {docDate === "" && (
+                <p id="dn-date-error" className="text-sm text-destructive">
+                  Indica a data da guia.
+                </p>
+              )}
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="dn-notes">Notas</Label>
@@ -631,7 +693,12 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
                 />
               </div>
               {productSearching && <p className="text-sm text-muted-foreground">A procurar…</p>}
-              {!productSearching && productQuery.trim().length >= 2 && productHits.length === 0 && (
+              {!productSearching && productError && (
+                <p role="alert" className="text-sm text-destructive">
+                  {productError}
+                </p>
+              )}
+              {!productSearching && !productError && productQuery.trim().length >= 2 && productHits.length === 0 && (
                 <p className="text-sm text-muted-foreground">Nenhum produto encontrado.</p>
               )}
               {productHits.length > 0 && (
@@ -666,7 +733,7 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
           {duplicate && (
             <div role="alert" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-3 text-sm">
               <AlertTriangle className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" aria-hidden />
-              <span className="min-w-0 flex-1">Já existe a GR {duplicate.number} deste fornecedor — abrir?</span>
+              <span className="min-w-0 flex-1">Já existe a {noteLabel(duplicate.number)} deste fornecedor — abrir?</span>
               {duplicate.id && (
                 <Button
                   type="button"

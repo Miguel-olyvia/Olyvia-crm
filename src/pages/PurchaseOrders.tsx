@@ -47,6 +47,7 @@ import { PurchaseOrderPDFDocument } from "@/components/PurchaseOrderPDFDocument"
 import { purchaseOrderSchema } from "@/lib/validations";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
+import { noteLabel } from "@/components/receiving/deliveryNotes";
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
@@ -3862,7 +3863,7 @@ const PurchaseOrders = () => {
                       <span className="font-medium">Guias: </span>
                       {Object.entries(orderReceipts.deliveryNotes)
                         .sort(([, a], [, b]) => a.number.localeCompare(b.number, "pt-PT", { numeric: true }))
-                        .map(([, n]) => `GR ${n.number} (${n.status === "open" ? "aberta" : n.status === "closed" ? "fechada" : "cancelada"})`)
+                        .map(([, n]) => `${noteLabel(n.number)} (${n.status === "open" ? "aberta" : n.status === "closed" ? "fechada" : "cancelada"})`)
                         .join(", ")}
                     </p>
                   )}
@@ -3941,7 +3942,7 @@ const PurchaseOrders = () => {
                                         </TableCell>
                                         <TableCell className="whitespace-nowrap">{r.warehouse_id ? warehouseNames[r.warehouse_id] || "—" : "—"}</TableCell>
                                         <TableCell className="whitespace-nowrap">
-                                          {r.delivery_note_id ? (deliveryNotes[r.delivery_note_id] ? `GR ${deliveryNotes[r.delivery_note_id].number}` : "Guia") : "—"}
+                                          {r.delivery_note_id ? (deliveryNotes[r.delivery_note_id] ? noteLabel(deliveryNotes[r.delivery_note_id].number) : "Guia") : "—"}
                                         </TableCell>
                                         <TableCell>
                                           {r.reverted_at ? (

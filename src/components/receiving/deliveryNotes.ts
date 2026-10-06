@@ -150,7 +150,25 @@ export function fmtDay(s: string | null | undefined): string {
   return m ? `${m[3]}/${m[2]}/${m[1]}` : s;
 }
 
-export const fmtDateTime = (s: string | null | undefined) => (s ? new Date(s).toLocaleString("pt-PT") : "");
+/**
+ * Rótulo do nº da guia: "GR 123", mas sem duplicar quando o nº já começa por
+ * "GR" (ex.: "GR-teste-2" → "GR-teste-2", não "GR GR-teste-2"). Único sítio
+ * onde se decide o prefixo (picker, botão, cartão, ficha, encomendas, avisos).
+ */
+export function noteLabel(number: string | null | undefined): string {
+  const n = (number ?? "").trim();
+  if (!n) return "Guia";
+  return /^gr/i.test(n) ? n : `GR ${n}`;
+}
+
+/** Data de hoje (local) em 'YYYY-MM-DD' para um <input type="date">. */
+export function todayIso(): string {
+  const d = new Date();
+  const p = (x: number) => String(x).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+export const fmtDateTime =(s: string | null | undefined) => (s ? new Date(s).toLocaleString("pt-PT") : "");
 
 /** Identificador gerado no cliente (idempotência do rpc_delivery_note_save). */
 export function newClientId(): string {
