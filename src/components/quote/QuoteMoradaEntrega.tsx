@@ -6,6 +6,7 @@ import { Building2, Loader2, Pencil, Plus, RefreshCw, Truck } from "lucide-react
 import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
 import { FichaLocalResumo } from "@/components/addresses/FichaLocalResumo";
 import { SugestaoFichaLocalPainel } from "@/components/addresses/SugestaoFichaLocalPainel";
+import { camposEmFaltaFicha } from "@/lib/addresses/fichaEmFalta";
 import {
   formatDeliveryAddress,
   listEntityDeliveryAddresses,
@@ -193,8 +194,15 @@ export const QuoteMoradaEntrega = ({ entityId, value, onChange, savedText, disab
         </div>
       )}
 
+      {selected && mode === "idle" && camposEmFaltaFicha(selected.ficha_tecnica, selected.floor).length > 0 && (
+        <p className="text-[11px] text-amber-700 dark:text-amber-400" data-testid="quote-morada-ficha-em-falta">
+          Falta na ficha: {camposEmFaltaFicha(selected.ficha_tecnica, selected.floor).join(", ")} — o planeamento da obra
+          usa-os para os tempos e as proteções. Não é obrigatório.
+        </p>
+      )}
+
       {selected && mode === "idle" && (
-        <SugestaoFichaLocalPainel ficha={selected.ficha_tecnica} piso={selected.floor} needIds={needIds} />
+        <SugestaoFichaLocalPainel ficha={selected.ficha_tecnica} piso={selected.floor} needIds={needIds} codigoPostal={selected.postal_code} />
       )}
 
       {mode === "add" && (

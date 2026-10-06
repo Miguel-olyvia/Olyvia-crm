@@ -30,6 +30,12 @@ valor:
 5. ~~**Atrasos com feriados.**~~ Feito a 05/10/2026.
 6. **Fatores da ficha do local por divisão** já entram (casa habitada, acesso,
    elevador, andar); o "impacto no preço" é uma decisão em aberto do CRM.
+7. ~~**Distância ao armazém, encomendas na data certa, dados em falta.**~~
+   Feito a 06/10/2026 ([`encomendas-e-dados.md`](encomendas-e-dados.md)):
+   distância pelo código postal (sem serviço externo), "encomendar até" por
+   material com aviso no sino, e avisos discretos do que falta (CRM e
+   Operações). Fica à espera de dados: 0/216 tarefas com materiais ligados e
+   0/286 fornecedores com prazo.
 
 ---
 

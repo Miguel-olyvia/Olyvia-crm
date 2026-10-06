@@ -14,6 +14,7 @@ import {
   ExternalLink,
   Eye,
   Home,
+  Inbox,
   Layers,
   List,
   LogOut,
@@ -61,6 +62,7 @@ export const GRUPOS: { titulo: string | null; itens: Item[] }[] = [
     itens: [
       { to: "/ordens", rotulo: "Ordens", Icone: List },
       { to: "/obras", rotulo: "Obras", Icone: ObraCapacete },
+      { to: "/encomendas", rotulo: "A encomendar", Icone: Inbox, so: podeValidar },
       { to: "/obras/modelos", rotulo: "Modelos", Icone: ObraModelo, so: podePlanear },
       { to: "/planos", rotulo: "Planos", Icone: Clock },
     ],

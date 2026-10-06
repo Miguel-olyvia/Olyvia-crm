@@ -9,6 +9,8 @@ import {
   type AreaParaSugestao,
   type LinhaSugestao,
 } from "../domain/sugestaoFichaLocal";
+import { distanciaDaObra } from "../lib/encomendas";
+import { textoDistancia, type DistanciaArmazem } from "../domain/encomendas";
 
 // Uma leitura por obra, partilhada pelas tarefas da mesma obra na lista.
 const cache = new Map<string, Promise<Ficha>>();
@@ -54,7 +56,23 @@ export default function FichaLocal({
 }) {
   const [ficha, setFicha] = useState<Ficha | null>(null);
   const [areas, setAreas] = useState<AreaParaSugestao[]>([]);
+  const [distancia, setDistancia] = useState<DistanciaArmazem | null>(null);
   const orcamentoId = plano?.orcamentoId ?? null;
+  const comPlano = !!plano;
+
+  // Só na ficha da obra (com plano): a distância ao armazém, pelo código postal.
+  useEffect(() => {
+    let vivo = true;
+    setDistancia(null);
+    if (!comPlano) return;
+    Promise.resolve()
+      .then(() => distanciaDaObra(obraId))
+      .then((d) => vivo && setDistancia(d))
+      .catch(() => undefined);
+    return () => {
+      vivo = false;
+    };
+  }, [obraId, comPlano]);
 
   useEffect(() => {
     let vivo = true;
@@ -71,8 +89,11 @@ export default function FichaLocal({
 
   const sugestao = useMemo(() => {
     if (!plano || !ficha || !fichaDaSugestao(ficha, areas)) return null;
-    return sugerirProtecoesELogistica(ficha, areas, { diasObra: diasUteisEntre(plano.inicio, plano.fim) });
-  }, [plano, ficha, areas]);
+    return sugerirProtecoesELogistica(ficha, areas, {
+      diasObra: diasUteisEntre(plano.inicio, plano.fim),
+      kmIdaVolta: distancia?.km_ida_volta ?? null,
+    });
+  }, [plano, ficha, areas, distancia]);
 
   useEffect(() => {
     let vivo = true;
@@ -84,7 +105,7 @@ export default function FichaLocal({
     };
   }, [obraId]);
 
-  if (!ficha || (!fichaTemDados(ficha) && !sugestao)) return null;
+  if (!ficha || (!fichaTemDados(ficha) && !sugestao && !distancia)) return null;
   const ext = linhasExterior(ficha);
   const int = linhasInterior(ficha);
 
@@ -109,6 +130,11 @@ export default function FichaLocal({
       <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Ficha do local</p>
       {ext.length > 0 && chips(ext)}
       {int.length > 0 && chips(int)}
+      {distancia && (
+        <p className="mt-1 text-xs text-slate-600" data-testid="ficha-local-distancia">
+          {textoDistancia(distancia)}
+        </p>
+      )}
       {ficha.notas_interior?.trim() && (
         <p className="mt-1 whitespace-pre-line text-xs text-slate-600">{ficha.notas_interior.trim()}</p>
       )}

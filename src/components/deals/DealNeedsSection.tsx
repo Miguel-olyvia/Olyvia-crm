@@ -36,6 +36,7 @@ import {
   DIAGNOSTICO_PLANEAMENTO_VAZIO,
   deLinha,
   paraPayload,
+  semMedidasDaVisita,
   validarPlaneamento,
   type DiagnosticoPlaneamento,
 } from "@/lib/deals/diagnosticoPlaneamento";
@@ -257,6 +258,28 @@ const dealNeedSchema = z.object({
 
 export function DealNeedsSection({ dealId, organizationId, readOnly = false }: DealNeedsSectionProps) {
   const [needs, setNeeds] = useState<DealNeed[]>([]);
+  // Áreas sem as medidas da visita (m²) — só um aviso discreto ao lado do título.
+  const [semMedidas, setSemMedidas] = useState<Set<string>>(new Set());
+  // Depende da lista (não só dos ids): depois de gravar o diagnóstico, a
+  // lista recarrega e o aviso desaparece.
+  useEffect(() => {
+    let vivo = true;
+    const ids = needs.map((n) => n.id);
+    if (ids.length === 0) {
+      setSemMedidas(new Set());
+      return;
+    }
+    Promise.resolve(supabase.from("deal_needs").select("id, diag_m2_pavimento, diag_area_m2").in("id", ids))
+      .then(({ data, error }) => {
+        if (!vivo || error) return;
+        const linhas = (data ?? []) as { id: string; diag_m2_pavimento: unknown; diag_area_m2: unknown }[];
+        setSemMedidas(new Set(linhas.filter(semMedidasDaVisita).map((l) => l.id)));
+      })
+      .catch(() => undefined);
+    return () => {
+      vivo = false;
+    };
+  }, [needs]);
   const [needItems, setNeedItems] = useState<Record<string, DealNeedItem[]>>({});
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -1277,6 +1300,16 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
                             <span className="font-medium text-sm truncate">{need.title}</span>
                             <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", pConfig.color)}>{pConfig.label}</Badge>
                             <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0", sConfig.color)}>{sConfig.label}</Badge>
+                            {semMedidas.has(need.id) && (
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] px-1.5 py-0 border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
+                                title="Sem as medidas da visita (m² de pavimento). Editar → Diagnóstico. O planeamento da obra usa-as para os tempos; não é obrigatório."
+                                data-testid="need-sem-medidas"
+                              >
+                                sem medidas
+                              </Badge>
+                            )}
                           </div>
                           <div className="flex items-center gap-3 mt-0.5 text-xs text-muted-foreground">
                             {(() => {

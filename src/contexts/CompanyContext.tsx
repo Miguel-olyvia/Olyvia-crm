@@ -46,7 +46,7 @@ interface UserContextRpc {
   permissions: string[];
 }
 
-const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
+export const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
 
 // Role priority map — higher index = higher privilege
 const ROLE_PRIORITY: Record<string, number> = {

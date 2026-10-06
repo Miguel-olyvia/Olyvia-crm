@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useContext, useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Info, ShieldCheck, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { FichaTecnicaEdificio } from "@/lib/addresses/fichaTecnicaEdificio";
@@ -9,6 +9,8 @@ import {
   type LinhaSugestao,
 } from "@/lib/addresses/sugestaoFichaLocal";
 import { lerAreasDaVisita } from "@/lib/addresses/sugestaoAreas";
+import { distanciaArmazem, textoDistanciaArmazem, type DistanciaArmazem } from "@/lib/addresses/distanciaArmazem";
+import { CompanyContext } from "@/contexts/CompanyContext";
 
 const eur = new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" });
 const qtd = new Intl.NumberFormat("pt-PT", { maximumFractionDigits: 1 });
@@ -21,6 +23,8 @@ interface Props {
   className?: string;
   /** Aberto ao carregar (por defeito, fechado — só o resumo). */
   abertoInicial?: boolean;
+  /** Código postal da morada da obra: dá a distância real ao armazém. */
+  codigoPostal?: string | null;
 }
 
 /**
@@ -29,8 +33,11 @@ interface Props {
  * deslocações, entulho), calculadas sozinhas da ficha do local e das medidas
  * da visita. Só sugestão — não muda o preço do orçamento.
  */
-export const SugestaoFichaLocalPainel = ({ ficha, piso, needIds, className, abertoInicial = false }: Props) => {
+export const SugestaoFichaLocalPainel = ({ ficha, piso, needIds, className, abertoInicial = false, codigoPostal }: Props) => {
   const [areas, setAreas] = useState<AreaParaSugestao[]>([]);
+  const [distancia, setDistancia] = useState<DistanciaArmazem | null>(null);
+  // Sem CompanyProvider (testes, ecrãs soltos) não há empresa: fica a distância por defeito.
+  const orgId = useContext(CompanyContext)?.activeCompany?.id ?? null;
   const [aberto, setAberto] = useState(abertoInicial);
   const chaveNeeds = (needIds ?? []).slice().sort().join(",");
 
@@ -40,8 +47,18 @@ export const SugestaoFichaLocalPainel = ({ ficha, piso, needIds, className, aber
     return () => { vivo = false; };
   }, [chaveNeeds]);
 
+  useEffect(() => {
+    let vivo = true;
+    setDistancia(null);
+    distanciaArmazem(orgId, codigoPostal).then((d) => vivo && setDistancia(d));
+    return () => { vivo = false; };
+  }, [orgId, codigoPostal]);
+
   const fichaComPiso = useMemo(() => ({ ...(ficha ?? {}), piso: piso ?? null }), [ficha, piso]);
-  const s = useMemo(() => sugerirProtecoesELogistica(fichaComPiso, areas), [fichaComPiso, areas]);
+  const s = useMemo(
+    () => sugerirProtecoesELogistica(fichaComPiso, areas, { kmIdaVolta: distancia?.km_ida_volta ?? null }),
+    [fichaComPiso, areas, distancia],
+  );
 
   if (!fichaDaSugestao(fichaComPiso, areas)) return null;
 
@@ -94,6 +111,12 @@ export const SugestaoFichaLocalPainel = ({ ficha, piso, needIds, className, aber
         <div className="mt-2 space-y-3">
           {tabela("Proteções", <ShieldCheck className="h-3.5 w-3.5" />, s.protecoes, s.totalProtecoes)}
           {tabela("Logística", <Truck className="h-3.5 w-3.5" />, s.logistica, s.totalLogistica)}
+          {distancia && (
+            <p className="text-xs text-muted-foreground" data-testid="sugestao-distancia">
+              <Truck className="mr-1 inline h-3 w-3" />
+              {textoDistanciaArmazem(distancia)}
+            </p>
+          )}
           {s.avisos.length > 0 && (
             <ul className="space-y-0.5 text-xs text-amber-700 dark:text-amber-400">
               {s.avisos.map((a) => <li key={a}>⚠ {a}</li>)}
