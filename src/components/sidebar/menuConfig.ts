@@ -39,6 +39,7 @@ import {
   ListChecks,
   Receipt,
   Sun,
+  ScanBarcode,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -237,12 +238,14 @@ export const menuSections: MenuSection[] = [
     id: "inventory",
     icon: ShoppingCart,
     labelKey: "sidebar.inventory",
-    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/stocks", "/client-orders", "/stock-counts"],
+    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/receiving", "/stocks", "/client-orders", "/stock-counts"],
     permissions: ["suppliers.view"],
     items: [
       { to: "/suppliers", icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view" },
       { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses" },
       { to: "/purchase-orders", icon: ShoppingCart, labelKey: "sidebar.purchaseOrders" },
+      // Receção por código: mesma regra da rota (receber OU consultar encomendas).
+      { to: "/receiving", icon: ScanBarcode, labelKey: "sidebar.receiving", permissions: ["purchase_orders.receive", "purchase_orders.view"] },
       { to: "/stocks", icon: BarChart3, labelKey: "sidebar.stocks" },
       // Permissão própria (client_orders.view): quem trabalha no armazém vê as
       // encomendas de cliente sem precisar de acesso aos contratos. Os RPCs das
