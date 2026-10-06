@@ -23,7 +23,9 @@ import {
   Modal,
   Skeleton,
   Toggle,
+  cx,
 } from "../components/ui";
+import PrevisaoOrcamentos from "../components/PrevisaoOrcamentos";
 import { AlertTriangle, CheckCircle, Euro, Inbox, MapPin } from "../components/icons";
 import { euros } from "../lib/formatar";
 import { estadoDoContrato, motivoBloqueio } from "../lib/orcamentos";
@@ -57,6 +59,7 @@ export default function Orcamentos() {
   const [erro, setErro] = useState<string | null>(null);
   const [recarga, setRecarga] = useState(0);
   const [mostrarFeitos, setMostrarFeitos] = useState(false);
+  const [separador, setSeparador] = useState<"andar" | "previsao">("andar");
 
   const [aAbrir, setAAbrir] = useState<OrcamentoAceite | null>(null);
   const [localId, setLocalId] = useState("");
@@ -121,6 +124,43 @@ export default function Orcamentos() {
     }
   };
 
+  const separadores = (
+    <div role="tablist" aria-label="Orçamentos" className="inline-flex rounded-lg bg-slate-100 p-0.5 text-sm">
+      {(
+        [
+          ["andar", "Pôr a andar"],
+          ["previsao", "Previsão"],
+        ] as const
+      ).map(([id, rotulo]) => (
+        <button
+          key={id}
+          type="button"
+          role="tab"
+          aria-selected={separador === id}
+          onClick={() => setSeparador(id)}
+          className={cx(
+            "rounded-md px-3 py-1.5 font-medium transition-colors",
+            separador === id ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+          )}
+        >
+          {rotulo}
+        </button>
+      ))}
+    </div>
+  );
+
+  if (separador === "previsao" && activeOrgId) {
+    return (
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900">Orçamentos</h1>
+          {separadores}
+        </div>
+        <PrevisaoOrcamentos orgId={activeOrgId} clientes={clientes} />
+      </div>
+    );
+  }
+
   if (aCarregar) {
     return (
       <div className="space-y-3">
@@ -135,6 +175,7 @@ export default function Orcamentos() {
 
   return (
     <div className="space-y-4">
+      {separadores}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight text-slate-900">Orçamentos</h1>

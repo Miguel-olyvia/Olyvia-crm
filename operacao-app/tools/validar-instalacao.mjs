@@ -169,6 +169,8 @@ await passo("db/seguranca.sql outra vez, depois dos antigos", ler("seguranca.sql
 await passo("db/tempos.sql outra vez, depois dos antigos", ler("tempos.sql"));
 await passo("db/obras.sql", ler("obras.sql"));
 await passo("db/obras.sql outra vez (idempotência)", ler("obras.sql"));
+await passo("db/previsao.sql", ler("previsao.sql"));
+await passo("db/previsao.sql outra vez (idempotência)", ler("previsao.sql"));
 
 // ── 3. Criar o perfil de CRM de uma conta que so existe na autenticacao ──
 await passo("db/criar-utilizador.sql", ler("criar-utilizador.sql"));

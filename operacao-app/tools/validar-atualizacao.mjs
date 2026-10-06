@@ -5,7 +5,7 @@
  * é só a sequência nova de `docs/onde-estamos.md` §0:
  *
  *     seguranca.sql → tempos.sql → rpcs-tarefas.sql → medicoes.sql → obras.sql
- *     → orcamentos-contrato.sql
+ *     → orcamentos-contrato.sql → previsao.sql
  *
  * Este script monta duas bases:
  *   A) a produção de hoje: a sequência ANTIGA (lida do git, no commit-base)
@@ -40,8 +40,10 @@ const ATUALIZACAO = [
   "seguranca.sql", "tempos.sql", "rpcs-tarefas.sql", "medicoes.sql", "obras.sql",
   // 06/10: só vira obra um orçamento assinado e contratualizado.
   "orcamentos-contrato.sql",
+  // 06/10: a Previsão na página dos orçamentos (só leitura).
+  "previsao.sql",
 ];
-const LIMPA = [...ANTIGA, "seguranca.sql", "tempos.sql", "obras.sql"];
+const LIMPA = [...ANTIGA, "seguranca.sql", "tempos.sql", "obras.sql", "previsao.sql"];
 
 async function montar(nome, passos) {
   const db = new PGlite();

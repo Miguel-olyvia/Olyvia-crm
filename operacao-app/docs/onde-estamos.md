@@ -7,6 +7,22 @@
 
 ---
 
+## 06/10/2026 — Previsão na página dos orçamentos
+
+Aba **Previsão** em `/operacao/orcamentos`: e se os orçamentos em aberto (ou
+os escolhidos) fossem todos aprovados? Cada linha é cruzada com o modelo do
+seu serviço pelo motor das obras (`ops_obra_tarefas_do_orcamento`) — as que
+não têm modelo aparecem marcadas para corrigir. Por orçamento e no total:
+horas, duração em dias úteis, pessoas por especialidade, mão de obra pelas
+tarifas, valor e margem. Contra a equipa: obras em simultâneo e gargalo,
+fila (início/fim de cada obra) e ocupação por especialidade × semana/mês,
+com as obras já planeadas. Só leitura.
+
+Na base: `db/previsao.sql` (depois do `orcamentos-contrato.sql`). Contas em
+`src/domain/previsao.ts`. Provado por `validar-previsao` e pelos testes.
+
+---
+
 ## 06/10/2026 — orçamento só vira obra se assinado e contratualizado
 
 Em `/operacao/orcamentos`, um orçamento aceite só se põe a andar quando há um
