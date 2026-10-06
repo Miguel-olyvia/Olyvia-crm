@@ -11,6 +11,14 @@ import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 import { estadoEntrarComo, voltarAMinhaConta } from "../lib/entrarComo";
 import type { Funcao } from "../domain/tipos";
+import { guardarNaCache, lerDaCache } from "../lib/offline";
+
+/** O que se sabia de quem entrou, para abrir a app sem rede. */
+interface PerfilGuardado {
+  businessUserId: string;
+  userName: string | null;
+  orgs: OrgOption[];
+}
 
 export interface OrgOption {
   id: string;
@@ -85,6 +93,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (userErr) {
       // eslint-disable-next-line no-console
       console.error("[Operações] erro a resolver o utilizador (anew_users):", userErr);
+      // Sem rede: quem era, da última vez que entrou com rede neste telemóvel.
+      // A base continua a decidir tudo quando a rede voltar.
+      const g = await lerDaCache<PerfilGuardado>(`perfil:${currentSession.user.id}`);
+      if (g) {
+        setBusinessUserId(g.valor.businessUserId);
+        setUserName(g.valor.userName);
+        setOrgs(g.valor.orgs);
+        setActiveOrgIdState((prev) => (prev && g.valor.orgs.some((o) => o.id === prev) ? prev : g.valor.orgs[0]?.id ?? null));
+        return;
+      }
     }
 
     if (!anewUser) {
@@ -130,6 +148,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }));
     }
     setOrgs(options);
+    if (!membErr) {
+      void guardarNaCache<PerfilGuardado>(`perfil:${currentSession.user.id}`, {
+        businessUserId: uid,
+        userName: (anewUser.name as string) ?? currentSession.user.email ?? null,
+        orgs: options,
+      });
+    }
 
     let orgAtiva: string | null = null;
     setActiveOrgIdState((prev) => {
@@ -182,12 +207,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .limit(1);
 
       if (!vivo) return;
+      const chave = `funcao:${businessUserId}:${activeOrgId}`;
       if (error) {
         // eslint-disable-next-line no-console
         console.error("[Operações] erro a ler o perfil do módulo:", error);
-        setFuncao(null);
+        // Sem rede: a função que tinha da última vez (a base volta a decidir
+        // em cada escrita, por isso isto só abre o ecrã).
+        const g = await lerDaCache<Funcao | null>(chave);
+        if (!vivo) return;
+        setFuncao(g?.valor ?? null);
       } else {
-        setFuncao((data?.[0]?.funcao as Funcao | undefined) ?? null);
+        const f = (data?.[0]?.funcao as Funcao | undefined) ?? null;
+        setFuncao(f);
+        void guardarNaCache(chave, f);
       }
       setPerfilCarregado(true);
     })();

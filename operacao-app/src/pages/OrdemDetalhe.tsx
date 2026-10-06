@@ -68,6 +68,8 @@ import PainelAnexos from "../components/PainelAnexos";
 import PainelCustos from "../components/PainelCustos";
 import { comparacaoPorItem, custosDaOrdem, type ComparacaoPorItem, type LinhaDeCusto } from "../lib/custos";
 import type { Estado, EstadoTarefa } from "../domain/tipos";
+import { guardarNaCache, lerDaCache } from "../lib/offline";
+import { dataHora } from "../lib/formatar";
 
 /**
  * Ficha de ordem — uma só, para as três origens.
@@ -103,6 +105,8 @@ export default function OrdemDetalhe() {
   const [erro, setErro] = useState<string | null>(null);
   const [aCarregar, setACarregar] = useState(true);
   const [recarga, setRecarga] = useState(0);
+  // Sem rede: a ordem tal como estava da última vez que se abriu com rede.
+  const [deCache, setDeCache] = useState<string | null>(null);
 
   const [dialogo, setDialogo] = useState<Transicao | null>(null);
   const [motivo, setMotivo] = useState("");
@@ -162,8 +166,36 @@ export default function OrdemDetalhe() {
       setCustos(lin);
       setPorItem(cmp);
       setCliente(cls.find((c) => c.id === o.cliente_id)?.nome ?? null);
+      setDeCache(null);
+      void guardarNaCache<InstantaneoOrdem>(`ordem:${activeOrgId}:${codigo}`, {
+        ordem: o, alvos: als, tarefas: tfs, sessoes: sss, tempos: tps, medicoes: meds, opcoes: ops,
+        equipa: eq, naOrdem: pes.map((p) => p.utilizador_id), custo: cst, previsto: prv, anexos: anx,
+        custos: lin, porItem: cmp, cliente: cls.find((c) => c.id === o.cliente_id)?.nome ?? null,
+      });
     } catch (e) {
-      setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar a ordem.");
+      // Sem rede: o que ficou guardado neste telemóvel, com aviso de quando é.
+      const c = await lerDaCache<InstantaneoOrdem>(`ordem:${activeOrgId}:${codigo}`);
+      if (c) {
+        const v = c.valor;
+        setOrdem(v.ordem);
+        setAlvos(v.alvos);
+        setTarefas(v.tarefas);
+        setSessoes(v.sessoes);
+        setTempos(new Map(v.tempos.map((t) => [t.ordem_tarefa_id, t])));
+        setMedicoes(v.medicoes);
+        setOpcoes(v.opcoes);
+        setEquipa(new Map(v.equipa.map((m) => [m.utilizador_id, m])));
+        setNaOrdem(v.naOrdem);
+        setCusto(v.custo);
+        setPrevisto(v.previsto);
+        setAnexos(v.anexos);
+        setCustos(v.custos);
+        setPorItem(v.porItem);
+        setCliente(v.cliente);
+        setDeCache(c.guardadoEm);
+      } else {
+        setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar a ordem.");
+      }
     } finally {
       setACarregar(false);
     }
@@ -318,6 +350,13 @@ export default function OrdemDetalhe() {
   return (
     <div className="space-y-4">
       <Voltar />
+
+      {deCache && (
+        <p className="rounded-lg bg-slate-100 px-3 py-2.5 text-sm text-slate-700" role="status">
+          Sem ligação à base: esta é a ordem como estava guardada neste telemóvel ({dataHora(deCache)}). As respostas
+          que deres ficam guardadas e vão quando houver rede.
+        </p>
+      )}
 
       {/* Cabeçalho */}
       <Card className="p-4 sm:p-5">
@@ -698,3 +737,22 @@ function formatarJanela(inicio: string | null, fim: string | null): string {
 }
 
 export type { Estado };
+
+/** Tudo o que a página leu, para a abrir sem rede. */
+interface InstantaneoOrdem {
+  ordem: OrdemCompleta;
+  alvos: AlvoDaOrdem[];
+  tarefas: TarefaDaOrdem[];
+  sessoes: SessaoDaOrdem[];
+  tempos: TempoDaTarefa[];
+  medicoes: MedicaoDaTarefa[];
+  opcoes: OpcaoDeMedicao[];
+  equipa: MembroEquipa[];
+  naOrdem: string[];
+  custo: CustoDaOrdem | null;
+  previsto: LinhaPrevista[];
+  anexos: Anexo[];
+  custos: LinhaDeCusto[];
+  porItem: ComparacaoPorItem[];
+  cliente: string | null;
+}

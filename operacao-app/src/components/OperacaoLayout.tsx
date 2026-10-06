@@ -24,6 +24,7 @@ import {
 import { ObraCapacete, ObraCronometro, ObraModelo, ObraValidar } from "./ObraIcones";
 import { podePlanear, podeValidar } from "../domain/obras";
 import { EscolherPessoa, FaixaEntrarComo, sairDoEntrarComo, useEntrarComo } from "./EntrarComo";
+import BarraOffline from "./BarraOffline";
 import { EVENTO_ALERTAS, alertasDeSupervisao, sincronizarAvisos } from "../lib/obras";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
@@ -476,6 +477,7 @@ export function OperacaoLayout() {
         )}
       >
         <div className="mx-auto max-w-6xl">
+          <BarraOffline />
           <Outlet />
         </div>
       </main>

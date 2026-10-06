@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ErroDeEscrita, urlsDosAnexos } from "../lib/dados";
-import { enviarFotoTarefa, fotosDasTarefas, removerFotoTarefa, type FotoTarefa } from "../lib/obrasFotos";
+import { caminhoDaFoto, fotosDasTarefas, removerFotoTarefa, type FotoTarefa } from "../lib/obrasFotos";
+import { filaOffline, semRede, useImagemLocal, useOffline, type AcaoOffline } from "../lib/offline";
 import { Button, Spinner } from "./ui";
 import { Plus, X } from "./icons";
 import { dataHora } from "../lib/formatar";
@@ -33,16 +34,28 @@ export default function FotosTarefa({
   const [aSubir, setASubir] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [aVer, setAVer] = useState<FotoTarefa | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
+  const offline = useOffline();
+  // As fotos tiradas sem rede, guardadas no telemóvel à espera de ligação.
+  const porEnviar = useMemo(
+    () =>
+      offline.acoes.filter(
+        (a) => a.tipo === "obra_foto" && (a.args as { tarefaId?: string }).tarefaId === tarefa.id
+      ),
+    [offline.acoes, tarefa.id]
+  );
 
   const carregar = useCallback(async () => {
     try {
       const fs = await fotosDasTarefas([tarefa.id]);
       setFotos(fs);
+      setErro(null);
       aoMudarContagem?.(fs.length);
       setUrls(await urlsDosAnexos(fs.map((f) => f.caminho)));
-    } catch {
+    } catch (e) {
       setFotos([]);
-      setErro("Não foi possível carregar as fotos.");
+      setErro(semRede(e) ? null : "Não foi possível carregar as fotos.");
+      if (semRede(e)) setAviso("Sem rede: as fotos já enviadas aparecem quando houver ligação.");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tarefa.id]);
@@ -50,6 +63,17 @@ export default function FotosTarefa({
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  // Uma foto da fila chegou à base: mostra-se a lista verdadeira.
+  const nPorEnviar = porEnviar.length;
+  const antes = useRef(nPorEnviar);
+  useEffect(() => {
+    if (nPorEnviar < antes.current) {
+      setAviso(null);
+      void carregar();
+    }
+    antes.current = nPorEnviar;
+  }, [nPorEnviar, carregar]);
 
   const validada = tarefa.estado === "validada";
   const ativo = podeEnviar && !validada;
@@ -59,13 +83,28 @@ export default function FotosTarefa({
     setASubir(true);
     setErro(null);
     try {
+      let guardadas = 0;
       for (const f of Array.from(ficheiros)) {
-        await enviarFotoTarefa({
+        // O caminho decide-se já: se a rede cair a meio, o reenvio usa o mesmo.
+        const caminho = caminhoDaFoto({
           organizationId: tarefa.organization_id,
           obraId: tarefa.obra_id,
           tarefaId: tarefa.id,
+          nome: f.name,
+        });
+        const r = await filaOffline().executarOuGuardar({
+          tipo: "obra_foto",
+          chave: `foto:${caminho}`,
+          args: { tarefaId: tarefa.id, caminho, nome: f.name, mime: f.type || null },
+          rotulo: `Foto em «${tarefa.id.slice(0, 8)}»`,
           ficheiro: f,
         });
+        if (r.guardada) guardadas++;
+      }
+      if (guardadas > 0) {
+        setAviso(
+          `Sem rede — ${guardadas === 1 ? "a foto ficou guardada" : `${guardadas} fotos ficaram guardadas`} no telemóvel e ${guardadas === 1 ? "vai" : "vão"} quando houver ligação.`
+        );
       }
       await carregar();
     } catch (e) {
@@ -88,7 +127,7 @@ export default function FotosTarefa({
   };
 
   if (fotos === null) return <Spinner label="A carregar as fotos" />;
-  if (fotos.length === 0 && !ativo) {
+  if (fotos.length === 0 && porEnviar.length === 0 && !ativo) {
     return <p className="text-xs text-slate-400">Sem fotos.</p>;
   }
 
@@ -114,8 +153,17 @@ export default function FotosTarefa({
         onChange={(e) => void enviar(e.target.files)}
       />
       {erro && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{erro}</p>}
+      {aviso && <p className="mt-2 rounded-lg bg-sky-50 px-3 py-2 text-xs text-sky-900">{aviso}</p>}
 
-      {fotos.length === 0 ? (
+      {porEnviar.length > 0 && (
+        <ul className="mt-2 grid grid-cols-3 gap-1.5 sm:grid-cols-4" aria-label="Fotos por enviar">
+          {porEnviar.map((a) => (
+            <FotoPorEnviar key={a.id} acao={a} />
+          ))}
+        </ul>
+      )}
+
+      {fotos.length === 0 && porEnviar.length > 0 ? null : fotos.length === 0 ? (
         <p className="mt-1 text-xs text-slate-400">Tira uma foto do trabalho feito — o supervisor vê-a antes de validar.</p>
       ) : (
         <ul className="mt-2 grid grid-cols-3 gap-1.5 sm:grid-cols-4">
@@ -173,5 +221,29 @@ export default function FotosTarefa({
         </div>
       )}
     </div>
+  );
+}
+
+/** Uma foto tirada sem rede: miniatura local e o estado do envio. */
+function FotoPorEnviar({ acao }: { acao: AcaoOffline }) {
+  const url = useImagemLocal(acao.ficheiro);
+  const recusada = acao.estado === "conflito";
+  return (
+    <li className="relative aspect-square overflow-hidden rounded-lg bg-slate-100 ring-1 ring-sky-300">
+      {url ? (
+        <img src={url} alt="Foto por enviar" className="h-full w-full object-cover opacity-80" />
+      ) : (
+        <span className="flex h-full items-center justify-center text-[10px] text-slate-400">a preparar…</span>
+      )}
+      <span
+        className={
+          "absolute inset-x-0 bottom-0 px-1 py-0.5 text-center text-[10px] font-medium text-white " +
+          (recusada ? "bg-red-600/90" : "bg-sky-700/80")
+        }
+        title={acao.erro}
+      >
+        {recusada ? "não aceite" : "por enviar"}
+      </span>
+    </li>
   );
 }

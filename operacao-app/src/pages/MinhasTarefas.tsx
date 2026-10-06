@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
-import { ErroDeDados, ErroDeEscrita } from "../lib/dados";
+import { ErroDeDados } from "../lib/dados";
 import {
-  iniciarTarefa,
   meuRegistoAberto,
   minhasTarefas,
   registosDasTarefas,
-  terminarTarefa,
   type RegistoObra,
   type TarefaObra,
 } from "../lib/obras";
@@ -32,8 +30,10 @@ import {
   type MotivoDesvio,
 } from "../domain/obras";
 import FichaLocal from "../components/FichaLocal";
-import { data as formatarData } from "../lib/formatar";
+import { data as formatarData, dataHora } from "../lib/formatar";
 import NomeTarefa from "../components/NomeTarefa";
+import { aplicarPendentesObra } from "../domain/offlineObras";
+import { filaOffline, guardarNaCache, lerDaCache, semRede, useOffline } from "../lib/offline";
 
 /**
  * As minhas tarefas — o ecrã do executor, no telemóvel, em obra.
@@ -46,9 +46,13 @@ import NomeTarefa from "../components/NomeTarefa";
 
 export default function MinhasTarefas() {
   const { activeOrgId, businessUserId } = useAuth();
-  const [tarefas, setTarefas] = useState<TarefaObra[]>([]);
+  const [tarefasLidas, setTarefas] = useState<TarefaObra[]>([]);
   const [meus, setMeus] = useState<RegistoObra[]>([]);
-  const [aberto, setAberto] = useState<RegistoObra | null>(null);
+  const [abertoLido, setAberto] = useState<RegistoObra | null>(null);
+  // Sem rede: a lista guardada no telemóvel, e de quando é.
+  const [deCache, setDeCache] = useState<string | null>(null);
+  const [guardadoSemRede, setGuardadoSemRede] = useState<string | null>(null);
+  const offline = useOffline();
   const [lidoEm, setLidoEm] = useState(() => Date.now());
   const [agora, setAgora] = useState(() => Date.now());
   const [aCarregar, setACarregar] = useState(true);
@@ -68,15 +72,36 @@ export default function MinhasTarefas() {
   const carregar = useCallback(async () => {
     if (!activeOrgId || !businessUserId) return;
     setErro(null);
+    const chave = `minhas-tarefas:${activeOrgId}:${businessUserId}`;
     try {
       const [ts, ab] = await Promise.all([minhasTarefas(activeOrgId, businessUserId), meuRegistoAberto(businessUserId)]);
       const rs = await registosDasTarefas(ts.map((t) => t.id));
+      const mr = rs.filter((r) => r.utilizador_id === businessUserId);
       setTarefas(ts);
       setAberto(ab);
-      setMeus(rs.filter((r) => r.utilizador_id === businessUserId));
+      setMeus(mr);
       setLidoEm(Date.now());
+      setDeCache(null);
+      void guardarNaCache(chave, { tarefas: ts, aberto: ab, meus: mr });
     } catch (e) {
-      setErro(e instanceof ErroDeDados ? e.message : "Algo correu mal a carregar as tuas tarefas.");
+      // Sem rede (ou a base não respondeu): o que ficou guardado da última vez,
+      // com aviso de quando é. Só se não houver nada guardado é que é erro.
+      const c = await lerDaCache<{ tarefas: TarefaObra[]; aberto: RegistoObra | null; meus: RegistoObra[] }>(chave);
+      if (c) {
+        setTarefas(c.valor.tarefas);
+        setAberto(c.valor.aberto);
+        setMeus(c.valor.meus);
+        setLidoEm(new Date(c.guardadoEm).getTime());
+        setDeCache(c.guardadoEm);
+      } else {
+        setErro(
+          semRede(e)
+            ? "Sem rede, e este telemóvel ainda não tem as tuas tarefas guardadas. Abre esta página uma vez com rede."
+            : e instanceof ErroDeDados
+              ? e.message
+              : "Algo correu mal a carregar as tuas tarefas."
+        );
+      }
     } finally {
       setACarregar(false);
     }
@@ -85,6 +110,33 @@ export default function MinhasTarefas() {
   useEffect(() => {
     void carregar();
   }, [carregar]);
+
+  // As ações feitas sem rede, por cima da lista lida.
+  const minhasAcoes = useMemo(
+    () => offline.acoes.filter((a) => a.tipo.startsWith("obra_") && a.tipo !== "obra_foto"),
+    [offline.acoes]
+  );
+  const vista = useMemo(
+    () => aplicarPendentesObra(tarefasLidas, abertoLido, minhasAcoes, businessUserId ?? ""),
+    [tarefasLidas, abertoLido, minhasAcoes, businessUserId]
+  );
+  const tarefas = vista.tarefas;
+  const aberto = vista.aberto;
+
+  // Quando o que estava por enviar chega à base, lê-se a lista outra vez
+  // (os minutos certos vêm de lá). E quando a rede volta a uma lista guardada.
+  const nPorEnviar = minhasAcoes.length;
+  const antes = useRef(nPorEnviar);
+  useEffect(() => {
+    if (nPorEnviar < antes.current && offline.online) setRecarga((r) => r + 1);
+    if (nPorEnviar === 0) setGuardadoSemRede(null);
+    antes.current = nPorEnviar;
+  }, [nPorEnviar, offline.online]);
+  const estavaSemRede = useRef(!offline.online);
+  useEffect(() => {
+    if (offline.online && estavaSemRede.current) setRecarga((r) => r + 1);
+    estavaSemRede.current = !offline.online;
+  }, [offline.online]);
 
   // O relógio. Só bate quando há alguma coisa a correr.
   const algoACorrer = tarefas.some((t) => t.a_correr > 0);
@@ -133,11 +185,18 @@ export default function MinhasTarefas() {
     }
     setAGravar(t.id);
     try {
-      if (acao === "iniciar") await iniciarTarefa(t.id);
-      else await terminarTarefa({ tarefaId: t.id, concluir: false });
-      setRecarga((r) => r + 1);
+      // Com rede vai já; sem rede (ou a meio de uma falha) fica na fila do
+      // telemóvel e segue depois, com a hora a que se carregou no botão.
+      const r = await filaOffline().executarOuGuardar({
+        tipo: acao === "iniciar" ? "obra_iniciar" : "obra_pausar",
+        chave: t.id,
+        args: { tarefaId: t.id },
+        rotulo: `${acao === "iniciar" ? "Iniciar" : "Pausar"} «${t.nome}»`,
+      });
+      if (r.guardada) setGuardadoSemRede("Sem rede — ficou guardado no telemóvel e vai quando houver ligação, com a hora certa.");
+      else setRecarga((x) => x + 1);
     } catch (e) {
-      setErroAcao(e instanceof ErroDeEscrita ? e.message : "Sem ligação. Tenta outra vez.");
+      setErroAcao(e instanceof Error ? e.message : "Sem ligação. Tenta outra vez.");
     } finally {
       setAGravar(null);
     }
@@ -147,17 +206,17 @@ export default function MinhasTarefas() {
     setAGravar(t.id);
     setErroAcao(null);
     try {
-      await terminarTarefa({
-        tarefaId: t.id,
-        concluir: true,
-        motivo,
-        nota: nota || null,
-        ...(medidas.current[t.id] != null ? { medidaReal: medidas.current[t.id] } : {}),
+      const r = await filaOffline().executarOuGuardar({
+        tipo: "obra_concluir",
+        chave: t.id,
+        args: { tarefaId: t.id, motivo, nota: nota || null, medidaReal: medidas.current[t.id] ?? null },
+        rotulo: `Terminar «${t.nome}»`,
       });
       setJustificar(null);
-      setRecarga((r) => r + 1);
+      if (r.guardada) setGuardadoSemRede("Sem rede — a tarefa fica dada como feita no telemóvel e vai quando houver ligação, com a hora certa.");
+      else setRecarga((x) => x + 1);
     } catch (e) {
-      const msg = e instanceof ErroDeEscrita ? e.message : "Sem ligação. Tenta outra vez.";
+      const msg = e instanceof Error ? e.message : "Sem ligação. Tenta outra vez.";
       // A base contou mais do que o ecrã: abre a folha em vez de só falhar.
       if (msg.includes("Justificação obrigatória")) {
         setJustificar({ tarefa: t, obrigatoria: true, reais: reaisAoVivo(t) });
@@ -235,6 +294,9 @@ export default function MinhasTarefas() {
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <ObraTarefaEstadoBadge estado={t.estado} />
+              {vista.porEnviar.has(t.id) && !vista.recusadas.has(t.id) && (
+                <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-800">por enviar</span>
+              )}
               <span className="text-xs text-slate-500">
                 previsto <b className="font-mono tabular">{formatarMinutos(t.minutos_previstos)}</b>
               </span>
@@ -303,6 +365,12 @@ export default function MinhasTarefas() {
               <p className="mt-0.5 text-[11px] text-slate-400">Tu, até agora: {formatarMinutos(meusMin + meuSeg / 60)}</p>
             )}
           </div>
+        )}
+
+        {vista.recusadas.has(t.id) && (
+          <p className="mx-4 mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-800">
+            <b>A base não aceitou o que fizeste sem rede:</b> {vista.recusadas.get(t.id)} Vê no topo da página.
+          </p>
         )}
 
         {t.estado === "rejeitada" && t.motivo_rejeicao && (
@@ -441,6 +509,19 @@ export default function MinhasTarefas() {
           {new Date().toLocaleDateString("pt-PT", { weekday: "long", day: "numeric", month: "long" })}
         </p>
       </div>
+
+      {deCache && (
+        <p className="rounded-lg bg-slate-100 px-3 py-2.5 text-sm text-slate-700" role="status">
+          Sem ligação à base: estás a ver o que estava guardado neste telemóvel ({dataHora(deCache)}). Podes trabalhar
+          na mesma — o que fizeres vai quando houver rede.
+        </p>
+      )}
+
+      {guardadoSemRede && (
+        <p className="rounded-lg bg-sky-50 px-3 py-2.5 text-sm text-sky-900" role="status">
+          {guardadoSemRede}
+        </p>
+      )}
 
       {erroAcao && (
         <p className="rounded-lg bg-red-50 px-3 py-2.5 text-sm text-red-700" role="alert">

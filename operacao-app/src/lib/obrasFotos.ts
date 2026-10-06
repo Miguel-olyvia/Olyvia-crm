@@ -44,13 +44,41 @@ export async function enviarFotoTarefa(args: {
   ficheiro: File;
 }): Promise<void> {
   const f = args.ficheiro;
-  const ext = f.name.includes(".") ? f.name.slice(f.name.lastIndexOf(".")).toLowerCase() : "";
-  const caminho = `${args.organizationId}/${args.obraId}/${args.tarefaId}/${nomeSorteado()}${ext}`;
+  await registarFotoTarefaNoCaminho({
+    tarefaId: args.tarefaId,
+    caminho: caminhoDaFoto({ ...args, nome: f.name }),
+    nome: f.name,
+    mime: f.type || null,
+    ficheiro: f,
+  });
+}
 
+/** Onde a foto vai ficar no storage. Decide-se UMA vez (também sem rede). */
+export function caminhoDaFoto(args: { organizationId: string; obraId: string; tarefaId: string; nome: string }): string {
+  const ext = args.nome.includes(".") ? args.nome.slice(args.nome.lastIndexOf(".")).toLowerCase() : "";
+  return `${args.organizationId}/${args.obraId}/${args.tarefaId}/${nomeSorteado()}${ext}`;
+}
+
+/**
+ * Envia a foto para um caminho já decidido e regista-a. Serve também à fila
+ * sem rede: se um envio anterior chegou ao storage e a rede caiu antes do
+ * registo, o reenvio encontra o ficheiro lá ("already exists") e só regista.
+ */
+export async function registarFotoTarefaNoCaminho(args: {
+  tarefaId: string;
+  caminho: string;
+  nome: string;
+  mime: string | null;
+  ficheiro: Blob;
+}): Promise<void> {
+  const f = args.ficheiro;
+  const caminho = args.caminho;
   const { error: erroUpload } = await supabase.storage
     .from(BUCKET)
-    .upload(caminho, f, { contentType: f.type || undefined, upsert: false });
-  if (erroUpload) {
+    .upload(caminho, f, { contentType: args.mime || undefined, upsert: false });
+  if (erroUpload && /already exists|duplicate/i.test(erroUpload.message ?? "")) {
+    // Já lá está (de um envio anterior): segue para o registo.
+  } else if (erroUpload) {
     // eslint-disable-next-line no-console
     console.error("[Obras] falha a enviar a foto:", erroUpload);
     const m = erroUpload.message ?? "";
@@ -66,12 +94,15 @@ export async function enviarFotoTarefa(args: {
   const { error } = await supabase.rpc("rpc_ops_obra_registar_foto", {
     p_tarefa_id: args.tarefaId,
     p_caminho: caminho,
-    p_nome: f.name,
-    p_mime: f.type || null,
+    p_nome: args.nome,
+    p_mime: args.mime,
     p_tamanho: f.size,
   });
   if (error) {
-    await supabase.storage.from(BUCKET).remove([caminho]);
+    // Sem rede o ficheiro fica no storage: o reenvio só tem de o registar.
+    if (!/failed to fetch|networkerror|load failed|fetch failed/i.test(error.message ?? "")) {
+      await supabase.storage.from(BUCKET).remove([caminho]);
+    }
     throw new ErroDeEscrita(error.message || "Não foi possível registar a foto.");
   }
 }
