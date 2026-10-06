@@ -367,6 +367,17 @@ export function usePessoas() {
             p_pessoa_id: pessoaId,
             p_formato: payload.conta!.formato,
             p_conta: payload.conta!.numero,
+            p_swift: payload.conta!.swift,
+          }),
+        );
+      }
+      // So o BIC, sem conta: `rpc_hr_definir_conta` exige o numero, por isso
+      // o BIC tem a sua RPC pequena.
+      if (payload.bicSozinho) {
+        await gravar("bancarios", async () =>
+          hrRpc("rpc_hr_definir_bic", {
+            p_pessoa_id: pessoaId,
+            p_bic: payload.bicSozinho,
           }),
         );
       }

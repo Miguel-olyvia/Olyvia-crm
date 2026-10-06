@@ -42,6 +42,8 @@ import { EnviarConviteDialog } from "@/components/hr/EnviarConviteDialog";
 import { PermissionGate } from "@/components/PermissionGate";
 import { PessoaContratoTab } from "@/components/hr/PessoaContratoTab";
 import { PessoaDocumentosTab } from "@/components/hr/PessoaDocumentosTab";
+import { PessoaAnexosCard } from "@/components/hr/PessoaAnexosCard";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { PessoaEmConstrucaoTab } from "@/components/hr/PessoaEmConstrucaoTab";
 import { PessoaAdmissaoPendencias } from "@/components/hr/PessoaAdmissaoPendencias";
 import { PessoaConviteAdmissaoEstado } from "@/components/hr/PessoaConviteAdmissaoEstado";
@@ -68,6 +70,8 @@ import { usePermissoesAssiduidade } from "@/hooks/usePermissoesAssiduidade";
 import { usePessoa } from "@/hooks/usePessoa";
 import { usePessoas } from "@/hooks/usePessoas";
 import { useTranslation } from "@/hooks/useTranslation";
+import { usePessoaFotografia } from "@/hooks/usePessoaFotografia";
+import { iniciaisDoNome } from "@/lib/hr/anexosAdmissao";
 
 /** Os separadores que ficam visiveis mas vazios nesta ronda. */
 const TABS_EM_CONSTRUCAO = [
@@ -225,6 +229,25 @@ export default function PessoaDetail() {
 
   const pessoa = ficha.pessoa;
 
+  // A fotografia vem do convite de admissao e vive num bucket privado: so se
+  // mostra por URL assinado (renovado antes de expirar). Sem ela, ou se o
+  // pedido falhar, o cabecalho mostra as iniciais. Hook antes dos returns
+  // antecipados abaixo.
+  const fotografiaUrl = usePessoaFotografia(pessoa?.fotografia_anexo_id);
+
+  // Quem pode ABRIR cada tipo de anexo da admissao (o servidor repete a
+  // decisao): fotografia = ver a ficha; cartao = revelar identificacao;
+  // comprovativo = editar dados bancarios.
+  const permissoesAnexos = useMemo(
+    () => ({
+      pessoasView: hasPermission("hr.pessoas.view"),
+      viewOwn: hasPermission("hr.pessoas.view.own"),
+      identificacaoReveal: hasPermission("hr.pessoas.identificacao.reveal"),
+      bancariosEdit: hasPermission("hr.pessoas.bancarios.edit"),
+    }),
+    [hasPermission],
+  );
+
   // `null` quando quem olha nao pode ver vinculos -- nao se inventa "Sem
   // contrato" para quem simplesmente nao tem a permissao de o ler.
   const estadoContratoDerivado = podeVerVinculos
@@ -338,6 +361,14 @@ export default function PessoaDetail() {
         </Button>
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-3">
+            <Avatar className="h-12 w-12">
+              {fotografiaUrl && (
+                // Decorativa: o nome ja esta no titulo logo a seguir, e um alt com
+                // o mesmo nome fazia o leitor de ecra le-lo duas vezes.
+                <AvatarImage src={fotografiaUrl} alt="" />
+              )}
+              <AvatarFallback aria-hidden="true">{iniciaisDoNome(pessoa.nome_completo)}</AvatarFallback>
+            </Avatar>
             <h1 className="text-2xl font-bold">{pessoa.nome_completo}</h1>
             {estadoContratoDerivado && (
               <Badge
@@ -560,6 +591,7 @@ export default function PessoaDetail() {
             onRevelarNiss={ficha.revelarNiss}
             onDefinirNiss={ficha.definirNiss}
             onDefinirConta={ficha.definirConta}
+            onDefinirBic={ficha.definirBic}
           />
         </TabsContent>
 
@@ -624,7 +656,18 @@ export default function PessoaDetail() {
           />
         </TabsContent>
 
-        <TabsContent value="documentos">
+        <TabsContent value="documentos" className="space-y-6">
+          {/* Irmao do separador, e nao filho: PessoaDocumentosTab devolve
+              "sem acesso" a quem nao tem permissoes de documentos, e isso
+              escondia os anexos a quem ve a ficha. */}
+          {/* O servidor (hr-anexo-url) exige view.own E ser a propria pessoa:
+              so se oferece "Abrir" por ser a propria quando ha as duas. */}
+          <PessoaAnexosCard
+            pessoaId={pessoa.id}
+            organizationId={pessoa.organization_id}
+            souAPessoa={minhaPessoaId === pessoa.id && hasPermission("hr.pessoas.view.own")}
+            permissoes={permissoesAnexos}
+          />
           <PessoaDocumentosTab
             pessoaId={pessoa.id}
             organizationId={pessoa.organization_id}

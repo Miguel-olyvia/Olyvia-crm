@@ -26,7 +26,7 @@ describe("idiomaDoNavegador", () => {
 });
 
 describe("errosDeFormato", () => {
-  const vazio = { nif: "", niss: "", conta_numero: "" };
+  const vazio = { nif: "", niss: "", conta_numero: "", conta_bic: "" };
 
   it("campos vazios nao sao erro de formato", () => {
     expect(errosDeFormato(vazio)).toEqual({});
@@ -34,8 +34,30 @@ describe("errosDeFormato", () => {
 
   it("valores validos nao dao erro", () => {
     expect(
-      errosDeFormato({ nif: "123456789", niss: "12345678902", conta_numero: "PT50 0002 0123 1234 5678 9015 4" }),
+      errosDeFormato({
+        nif: "123456789",
+        niss: "12345678902",
+        conta_numero: "PT50 0002 0123 1234 5678 9015 4",
+        conta_bic: "cgdi ptpl",
+      }),
     ).toEqual({});
+  });
+
+  it("BIC malformado da erro; vazio e ignorado", () => {
+    expect(errosDeFormato({ ...vazio, conta_bic: "ABCD1234" })).toEqual({
+      conta_bic: "hr.convite.erro.bicInvalido",
+    });
+    expect(errosDeFormato({ ...vazio, conta_bic: "CGDIPTP" })).toEqual({
+      conta_bic: "hr.convite.erro.bicInvalido",
+    });
+    expect(errosDeFormato({ ...vazio, conta_bic: "   " })).toEqual({});
+    expect(errosDeFormato({ ...vazio, conta_bic: "CGDIPTPLXXX" })).toEqual({});
+  });
+
+  it("o erro do BIC nao depende do IBAN", () => {
+    expect(
+      errosDeFormato({ ...vazio, conta_numero: "PT50 0002 0123 1234 5678 9015 4", conta_bic: "1234" }),
+    ).toEqual({ conta_bic: "hr.convite.erro.bicInvalido" });
   });
 
   it("NIF e NISS com digito de controlo errado dao erro", () => {
@@ -57,6 +79,7 @@ describe("campoDoErroDeServidor", () => {
     expect(campoDoErroDeServidor("niss_ja_existe")).toBe("niss");
     expect(campoDoErroDeServidor("niss_invalido")).toBe("niss");
     expect(campoDoErroDeServidor("iban_invalido")).toBe("conta_numero");
+    expect(campoDoErroDeServidor("bic_invalido")).toBe("conta_bic");
   });
 
   it("as outras nao marcam campo nenhum", () => {

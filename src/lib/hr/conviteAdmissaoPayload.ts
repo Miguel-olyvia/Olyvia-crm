@@ -20,6 +20,8 @@
  * Function e a que a RPC le do jsonb. Se divergirem outra vez, o teste parte.
  */
 
+import { normalizarBic } from "@/lib/hr/conta";
+
 /** O estado do formulario publico. Nomes de ECRA, nao nomes de contrato. */
 export interface RascunhoConvite {
   // Pagina 1 -- pessoas_dados_pessoais, pessoas_identificacao, pessoas_moradas.
@@ -61,6 +63,7 @@ export interface RascunhoConvite {
   conta_numero: string;
   conta_titular: string;
   conta_banco: string;
+  conta_bic: string;
   tamanho_cima: string;
   tamanho_cima_detalhe: string;
   tamanho_baixo: string;
@@ -104,6 +107,7 @@ export const RASCUNHO_CONVITE_VAZIO: RascunhoConvite = {
   conta_numero: "",
   conta_titular: "",
   conta_banco: "",
+  conta_bic: "",
   tamanho_cima: "",
   tamanho_cima_detalhe: "",
   tamanho_baixo: "",
@@ -126,6 +130,9 @@ export const CHAVES_PAYLOAD_CONVITE = [
   "carta_conducao_validade",
   "conjuge_situacao_profissional",
   "conta_banco",
+  // O BIC viaja como `conta_swift` (o nome que a RPC ja lia); no ecra e na
+  // configuracao chama-se `conta_bic`.
+  "conta_swift",
   "conta_titular",
   "data_nascimento",
   "dependentes",
@@ -227,6 +234,9 @@ export function construirPayloadConvite(
     iban: ouNull(r.conta_numero)?.replace(/\s+/g, "").toUpperCase() ?? null,
     conta_titular: ouNull(r.conta_titular),
     conta_banco: ouNull(r.conta_banco),
+    // O BIC: sempre a chave presente (null limpa, ausente preservaria). A RPC
+    // valida-o e grava-o mesmo sem IBAN.
+    conta_swift: ouNull(normalizarBic(r.conta_bic)),
   };
 }
 

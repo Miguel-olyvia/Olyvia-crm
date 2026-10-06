@@ -5,6 +5,10 @@
  * 20261210020000  as tres posicoes (convite, ficha, opcional) e os campos do RH
  * 20261210030000  recusas, heranca do rascunho, codigos de erro, limpeza
  *
+ * O BIC (20261210040000) tem o seu proprio ficheiro, loteBBicMigrations.test.ts;
+ * aqui ficam so as assercoes de "a versao mais recente" que o tocam. Os
+ * auxiliares sao partilhados em migrationSql.ts.
+ *
  * Excepcao deliberada a regra "nao testar SQL por texto" (a mesma de
  * conviteAdmissaoContrato.test.ts): isto NAO testa comportamento de SQL --
  * esse fica nos blocos de conferir das proprias migrations, que correm contra
@@ -23,57 +27,21 @@
  */
 import { describe, expect, it } from "vitest";
 import { CODIGOS_PUBLICOS } from "../../../../supabase/functions/convite-admissao/erros";
-
-const MIGRATIONS = import.meta.glob("../../../../supabase/migrations/*.sql", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-
-function migrationPorVersao(versao: string): string {
-  const chave = Object.keys(MIGRATIONS).find((k) => k.includes(`/${versao}_`));
-  if (!chave) throw new Error(`Migration ${versao} nao encontrada.`);
-  return MIGRATIONS[chave];
-}
+import {
+  MIGRATIONS,
+  camposObrigatoriosDe,
+  corpoDaFuncao,
+  migrationPorVersao,
+  migrationQueDefine,
+  padraoDeCriacao,
+  semComentarios,
+  temComando,
+} from "./migrationSql";
 
 const M1 = migrationPorVersao("20261210010000");
 const M2 = migrationPorVersao("20261210020000");
 const M3 = migrationPorVersao("20261210030000");
-
-function padraoDeCriacao(nomeFuncao: string): RegExp {
-  return new RegExp("CREATE (?:OR REPLACE )?FUNCTION public\\." + nomeFuncao + "\\(");
-}
-
-/** A migration mais recente (por nome) que define esta funcao. */
-function migrationQueDefine(nomeFuncao: string): string {
-  const padrao = padraoDeCriacao(nomeFuncao);
-  const candidatas = Object.keys(MIGRATIONS)
-    .sort()
-    .filter((ficheiro) => padrao.test(MIGRATIONS[ficheiro]));
-  if (candidatas.length === 0) throw new Error(`Nenhuma migration define public.${nomeFuncao}.`);
-  return MIGRATIONS[candidatas[candidatas.length - 1]];
-}
-
-/** O corpo entre `AS $$` e o `$$;` seguinte, a partir da definicao da funcao. */
-function corpoDaFuncao(sql: string, nomeFuncao: string): string {
-  const inicio = sql.search(padraoDeCriacao(nomeFuncao));
-  const abre = sql.indexOf("AS $$", inicio);
-  const fecha = sql.indexOf("$$;", abre);
-  if (inicio < 0 || abre < 0 || fecha < 0) {
-    throw new Error(`Nao consegui isolar o corpo de public.${nomeFuncao}.`);
-  }
-  return sql.slice(abre, fecha);
-}
-
-/** Tira os comentarios de linha (--): os testes olham para o codigo, nao para a prosa. */
-function semComentarios(sql: string): string {
-  return sql.replace(/--.*$/gm, "");
-}
-
-/** O comando GRANT/REVOKE de uma funcao existe, tal como esta escrito. */
-function temComando(sql: string, comando: string): boolean {
-  return sql.replace(/\s+/g, " ").includes(comando);
-}
+const M4 = migrationPorVersao("20261210040000");
 
 // -----------------------------------------------------------------------------
 // O contrato de codigos de erro
@@ -94,6 +62,7 @@ const SQLSTATE_POR_CODIGO: Readonly<Record<string, string>> = {
   pais_invalido: "HRA15",
   iban_invalido: "HRA16",
   admissao_incompleta: "HRA17",
+  bic_invalido: "HRA18",
   pessoa_nao_encontrada: "HRA30",
 };
 
@@ -103,8 +72,12 @@ function raisesDe(corpo: string): Array<[string, string]> {
   return [...corpo.matchAll(RAISE_COM_ERRCODE)].map((m): [string, string] => [m[1], m[2]]);
 }
 
-describe("migration 20261210030000 -- o contrato de codigos de erro", () => {
-  const corpoSubmeter = corpoDaFuncao(M3, "rpc_hr_convite_admissao_submeter");
+describe("o contrato de codigos de erro (20261210030000, com o BIC de 20261210040000)", () => {
+  // A versao MAIS RECENTE de submeter: o contrato e o dela, nao o de M3.
+  const corpoSubmeter = corpoDaFuncao(
+    migrationQueDefine("rpc_hr_convite_admissao_submeter"),
+    "rpc_hr_convite_admissao_submeter",
+  );
 
   it("submeter lanca exactamente os codigos do contrato, cada um com o seu SQLSTATE", () => {
     const lancados = raisesDe(corpoSubmeter);
@@ -212,19 +185,8 @@ describe("migration 20261210010000 -- NIF e NISS", () => {
 // As tres posicoes
 // -----------------------------------------------------------------------------
 
-interface CampoSql {
-  codigo: string;
-  origem: string;
-  condicional: boolean;
-}
-
-function camposObrigatorios(): CampoSql[] {
-  const corpo = corpoDaFuncao(M2, "hr_admissao_campos_obrigatorios");
-  return [...corpo.matchAll(/\('([a-z0-9_]+)',\s*'(pessoa|rh)',\s*(true|false)\)/g)].map((m) => ({
-    codigo: m[1],
-    origem: m[2],
-    condicional: m[3] === "true",
-  }));
+function camposObrigatorios(sql: string = M2) {
+  return camposObrigatoriosDe(sql);
 }
 
 describe("migration 20261210020000 -- as tres posicoes", () => {
@@ -239,10 +201,10 @@ describe("migration 20261210020000 -- as tres posicoes", () => {
     ).toEqual(["cargo", "data_admissao", "duodecimos", "subsidio_alimentacao", "tipo_contrato"]);
   });
 
-  it("e a versao mais recente da lista (nenhuma migration posterior a redefine)", () => {
-    expect(migrationQueDefine("hr_admissao_campos_obrigatorios")).toBe(M2);
-    expect(migrationQueDefine("hr_admissao_campo_permissao")).toBe(M2);
-    expect(migrationQueDefine("hr_admissao_pendencias")).toBe(M2);
+  it("a lista de 28 campos de M2 foi superada pela de M4 (20261210040000, o BIC)", () => {
+    expect(migrationQueDefine("hr_admissao_campos_obrigatorios")).toBe(M4);
+    expect(migrationQueDefine("hr_admissao_campo_permissao")).toBe(M4);
+    expect(migrationQueDefine("hr_admissao_pendencias")).toBe(M4);
   });
 
   it("o gancho do horario esta comentado e nao entrou como linha", () => {
@@ -432,7 +394,10 @@ describe("migration 20261210030000 -- recusas, heranca e limpeza", () => {
   });
 
   it("a recusa so aceita os codigos de recusa de submissao e so os duplicados contam em attempts", () => {
-    const corpo = corpoDaFuncao(M3, "rpc_hr_convite_admissao_registar_recusa");
+    const corpo = corpoDaFuncao(
+      migrationQueDefine("rpc_hr_convite_admissao_registar_recusa"),
+      "rpc_hr_convite_admissao_registar_recusa",
+    );
     for (const codigo of [
       "nif_invalido",
       "niss_invalido",
@@ -440,6 +405,7 @@ describe("migration 20261210030000 -- recusas, heranca e limpeza", () => {
       "niss_ja_existe",
       "pais_invalido",
       "iban_invalido",
+      "bic_invalido",
       "admissao_incompleta",
       "assinatura_obrigatoria",
       "pedido_invalido",
@@ -477,7 +443,7 @@ describe("migration 20261210030000 -- recusas, heranca e limpeza", () => {
   });
 
   it("submeter compara com a ficha ja gravada (coalesce) antes de procurar duplicados", () => {
-    const corpo = corpoDaFuncao(M3, "rpc_hr_convite_admissao_submeter");
+    const corpo = corpoDaFuncao(migrationQueDefine("rpc_hr_convite_admissao_submeter"), "rpc_hr_convite_admissao_submeter");
     expect(corpo).toMatch(/coalesce\(public\.hr_json_texto\(p_dados, 'nif'\), i\.nif\)/);
     expect(corpo).toMatch(/coalesce\(public\.hr_json_texto\(p_dados, 'niss'\), i\.niss\)/);
   });
@@ -519,7 +485,9 @@ describe("migration 20261210030000 -- recusas, heranca e limpeza", () => {
   });
 
   it("o corpo de submeter respeita a lista branca do convite", () => {
-    const corpo = semComentarios(corpoDaFuncao(M3, "rpc_hr_convite_admissao_submeter"));
+    const corpo = semComentarios(
+      corpoDaFuncao(migrationQueDefine("rpc_hr_convite_admissao_submeter"), "rpc_hr_convite_admissao_submeter"),
+    );
     expect(corpo).not.toMatch(/retribuic/i);
     expect(corpo).not.toMatch(/vinculo/i);
     expect(corpo).not.toMatch(/membership/i);
@@ -528,9 +496,12 @@ describe("migration 20261210030000 -- recusas, heranca e limpeza", () => {
     expect(corpo).not.toMatch(/pessoas_sindicalizacao/);
   });
 
-  it("e a versao mais recente de submeter, criar e estado nao e redefinida depois", () => {
-    expect(migrationQueDefine("rpc_hr_convite_admissao_submeter")).toBe(M3);
-    expect(migrationQueDefine("rpc_hr_convite_admissao_criar")).toBe(M3);
+  it("submeter (o BIC, os anexos) e criar (os anexos) foram redefinidas depois, mas estado nao", () => {
+    // submeter: a mais recente ja leva o BIC (HRA18); a de M3 e o ponto de partida.
+    expect(corpoDaFuncao(migrationQueDefine("rpc_hr_convite_admissao_submeter"), "rpc_hr_convite_admissao_submeter")).toContain("HRA18");
+    expect(corpoDaFuncao(M3, "rpc_hr_convite_admissao_submeter")).not.toContain("HRA18");
+    // criar: a mais recente e a dos anexos (20261210070000), que parte da de M3 e so acrescenta a heranca dos ficheiros.
+    expect(migrationQueDefine("rpc_hr_convite_admissao_criar")).toBe(migrationPorVersao("20261210070000"));
     expect(migrationQueDefine("rpc_hr_convite_admissao_estado")).toBe(M2);
   });
 
@@ -719,9 +690,11 @@ describe("NIF e NISS: a unicidade e por organizacao", () => {
   });
 
   it("submeter procura duplicados com a organizacao do CONVITE, lida do proprio convite", () => {
-    const corpo = semComentarios(corpoDaFuncao(M3, "rpc_hr_convite_admissao_submeter"));
+    const corpo = semComentarios(
+      corpoDaFuncao(migrationQueDefine("rpc_hr_convite_admissao_submeter"), "rpc_hr_convite_admissao_submeter"),
+    );
     // v_org vem do UPDATE ... RETURNING do convite consumido, nunca do pedido.
-    expect(corpo).toMatch(/RETURNING pessoa_id, organization_id INTO v_pessoa_id, v_org/);
+    expect(corpo).toMatch(/RETURNING (?:id, )?pessoa_id, organization_id INTO (?:v_convite_id, )?v_pessoa_id, v_org/);
     expect(corpo).toMatch(/hr_pessoa_duplicados_candidatos\(\s*v_org,\s*v_dup_nif,\s*v_dup_niss/);
     expect(corpo).not.toMatch(/p_dados\s*(?:->>|\?)\s*'organization_id'/);
     // O proprio pessoa fica de fora (so conflitam OUTRAS fichas).
@@ -729,7 +702,9 @@ describe("NIF e NISS: a unicidade e por organizacao", () => {
   });
 
   it("registar_recusa so aceita pessoa_id da mesma organizacao do convite", () => {
-    const corpo = semComentarios(corpoDaFuncao(M3, "rpc_hr_convite_admissao_registar_recusa"));
+    const corpo = semComentarios(
+      corpoDaFuncao(migrationQueDefine("rpc_hr_convite_admissao_registar_recusa"), "rpc_hr_convite_admissao_registar_recusa"),
+    );
     expect(corpo).toMatch(/SELECT c\.id, c\.organization_id INTO v_convite/);
     expect(corpo).toMatch(
       /WHERE p\.id = ANY \(coalesce\(p_conflito_pessoa_ids, ARRAY\[\]::uuid\[\]\)\)\s+AND p\.organization_id = v_convite\.organization_id/,

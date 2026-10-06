@@ -192,8 +192,95 @@ describe("rascunho de nova pessoa", () => {
     expect(payload.conta).toEqual({
       formato: "clabe",
       numero: "PT51000201231234567890154",
+      swift: null,
     });
     expect(JSON.stringify(payload.dadosPessoais)).not.toContain("PT51");
+  });
+
+  describe("BIC", () => {
+    function rascunhoComNomes() {
+      const rascunho = rascunhoInicial();
+      rascunho.geral.quem_preenche = "rh";
+      rascunho.geral.primeiro_nome = "Ana";
+      rascunho.geral.apelido = "Silva";
+      return rascunho;
+    }
+    const IBAN_BOM = "PT50000201231234567890154";
+
+    it("um BIC malformado e problema do campo hr-novo-conta-bic", () => {
+      const rascunho = rascunhoComNomes();
+      rascunho.pessoais.conta_numero = IBAN_BOM;
+      rascunho.pessoais.conta_bic = "ABCD1234";
+      const problemas = problemasDoRascunho(rascunho);
+      expect(problemas).toHaveLength(1);
+      expect(problemas[0]).toMatchObject({
+        seccao: "pessoais",
+        campoId: "hr-novo-conta-bic",
+        rotuloKey: "hr.campos.swift",
+        mensagemKey: "hr.form.erroBic",
+      });
+    });
+
+    it("um BIC valido sem numero de conta nao e problema: vai sozinho, por rpc_hr_definir_bic", () => {
+      const rascunho = rascunhoComNomes();
+      rascunho.pessoais.conta_bic = " cgdi ptpl ";
+      expect(problemasDoRascunho(rascunho)).toHaveLength(0);
+      const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+      expect(payload.conta).toBeNull();
+      expect(payload.bicSozinho).toBe("CGDIPTPL");
+    });
+
+    it("com numero de conta o BIC viaja em conta.swift e bicSozinho fica null", () => {
+      const rascunho = rascunhoComNomes();
+      rascunho.pessoais.conta_numero = IBAN_BOM;
+      rascunho.pessoais.conta_bic = "CGDIPTPL";
+      const payload = payloadDoRascunho(rascunho, linhasParaGravar, false);
+      expect(payload.conta?.swift).toBe("CGDIPTPL");
+      expect(payload.bicSozinho).toBeNull();
+    });
+
+    it("sem BIC nem conta, bicSozinho e null", () => {
+      const payload = payloadDoRascunho(rascunhoComNomes(), linhasParaGravar, false);
+      expect(payload.bicSozinho).toBeNull();
+    });
+
+    it("vazio nao e erro", () => {
+      const rascunho = rascunhoComNomes();
+      rascunho.pessoais.conta_bic = "   ";
+      expect(problemasDoRascunho(rascunho)).toHaveLength(0);
+    });
+
+    it("o BIC sai normalizado em payload.conta.swift, e null quando nao ha BIC", () => {
+      const rascunho = rascunhoComNomes();
+      rascunho.pessoais.conta_numero = IBAN_BOM;
+      rascunho.pessoais.conta_bic = " cgdi ptpl ";
+      expect(problemasDoRascunho(rascunho)).toHaveLength(0);
+      expect(payloadDoRascunho(rascunho, linhasParaGravar, false).conta).toEqual({
+        formato: "iban",
+        numero: IBAN_BOM,
+        swift: "CGDIPTPL",
+      });
+
+      rascunho.pessoais.conta_bic = "";
+      expect(payloadDoRascunho(rascunho, linhasParaGravar, false).conta?.swift).toBeNull();
+    });
+
+    it("o BIC aplica-se a todos os formatos de conta", () => {
+      const rascunho = rascunhoComNomes();
+      rascunho.pessoais.conta_formato = "clabe";
+      rascunho.pessoais.conta_numero = "0123456789";
+      rascunho.pessoais.conta_bic = "CGDIPTPLXXX";
+      expect(problemasDoRascunho(rascunho)).toHaveLength(0);
+      expect(payloadDoRascunho(rascunho, linhasParaGravar, false).conta?.swift).toBe(
+        "CGDIPTPLXXX",
+      );
+    });
+
+    it("escrever so o BIC conta como seccao preenchida", () => {
+      const rascunho = rascunhoInicial();
+      rascunho.pessoais.conta_bic = "CGDIPTPL";
+      expect(seccaoPreenchida(rascunho, "pessoais")).toBe(true);
+    });
   });
 
   it("o nome social e os pronomes deixaram de existir no payload", () => {

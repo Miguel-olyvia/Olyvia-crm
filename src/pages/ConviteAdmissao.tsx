@@ -34,7 +34,7 @@
  * TODO O CAMPO TEM ETIQUETA ASSOCIADA, e os obrigatorios sao anunciados a
  * leitor de ecra (nao so a vermelho) -- ver `obrigatorio` em `form/Campos.tsx`.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardDescription } from "@/components/ui/card";
@@ -69,7 +69,13 @@ import {
   type CampoComFormato,
   type IdiomaConvite,
 } from "@/lib/hr/conviteAdmissaoEcra";
-import { camposDeAdmissaoIncompleta, mensagemErroAdmissao } from "@/lib/hr/errosAdmissao";
+import {
+  camposDeAdmissaoIncompleta,
+  mensagemErroAdmissao,
+  motivoDoCodigo,
+} from "@/lib/hr/errosAdmissao";
+import { useConviteAnexos } from "@/hooks/useConviteAnexos";
+import { ConviteAnexosCard } from "@/components/hr/convite/ConviteAnexosCard";
 
 /** Um debounce generoso: nao vale a pena gravar a cada tecla. */
 const DEBOUNCE_RASCUNHO_MS = 3000;
@@ -87,9 +93,10 @@ const ID_DOM_DO_CAMPO: Record<CampoComFormato, string> = {
   nif: "convite-nif",
   niss: "convite-niss",
   conta_numero: "convite-conta-numero",
+  conta_bic: "convite-conta-bic",
 };
 
-const CAMPOS_COM_FORMATO: readonly string[] = ["nif", "niss", "conta_numero"];
+const CAMPOS_COM_FORMATO: readonly string[] = ["nif", "niss", "conta_numero", "conta_bic"];
 
 /**
  * Nada preenchido nem herdado: nao ha rascunho a guardar. A declaracao de
@@ -126,6 +133,30 @@ function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
     gravarRascunho,
     gravarRascunhoAoFechar,
   } = useConviteAdmissaoPublico(token);
+
+  // Os ficheiros (cartao de cidadao, comprovativo de IBAN, fotografia) vivem
+  // num hook proprio e NAO entram no rascunho nem nos `dados` da submissao.
+  // Fica aqui, antes de qualquer return antecipado, porque hooks nao podem vir
+  // depois deles; adopta os ficheiros que o estado trouxe quando este chega.
+  const anexosConvite = useConviteAnexos(token, estado?.anexos);
+
+  // Uma remocao pedida e ainda por terminar conta como "em curso": submeter
+  // antes dela acabar promovia a ficha o ficheiro que a pessoa quis apagar.
+  // Conta-se aqui (e nao no cartao) para sobreviver a mudar de pagina.
+  const [aRemoverAnexos, setARemoverAnexos] = useState(0);
+  const removerAnexo = anexosConvite.remover;
+  const removerAnexoRastreado = useCallback(
+    async (id: string): Promise<void> => {
+      setARemoverAnexos((n) => n + 1);
+      try {
+        await removerAnexo(id);
+      } finally {
+        setARemoverAnexos((n) => n - 1);
+      }
+    },
+    [removerAnexo],
+  );
+  const anexosEmCurso = anexosConvite.emCurso || aRemoverAnexos > 0;
 
   const [pagina, setPagina] = useState<1 | 2>(1);
   const [rascunho, setRascunho] = useState<Rascunho>(VAZIO);
@@ -279,8 +310,8 @@ function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
 
   // Formato (digito de controlo do NIF/NISS, IBAN): tambem trava o avanco.
   const errosFormato = useMemo(
-    () => errosDeFormato({ nif: rascunho.nif, niss: rascunho.niss, conta_numero: rascunho.conta_numero }),
-    [rascunho.nif, rascunho.niss, rascunho.conta_numero],
+    () => errosDeFormato({ nif: rascunho.nif, niss: rascunho.niss, conta_numero: rascunho.conta_numero, conta_bic: rascunho.conta_bic }),
+    [rascunho.nif, rascunho.niss, rascunho.conta_numero, rascunho.conta_bic],
   );
   const formatoErradoNaPagina1 = Boolean(errosFormato.nif || errosFormato.niss);
 
@@ -323,7 +354,7 @@ function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
     const campo = campoDoErroDeServidor(codigo);
     if (campo) {
       setErrosServidor((anteriores) => ({ ...anteriores, [campo]: mensagem }));
-      setPagina(campo === "conta_numero" ? 2 : 1);
+      setPagina(campo === "conta_numero" || campo === "conta_bic" ? 2 : 1);
       pedirFocoNoErro();
       return;
     }
@@ -339,7 +370,8 @@ function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
   };
 
   const submeterFormulario = async () => {
-    if (submetendo) return;
+    // Ficheiros ainda a subir: submeter agora deixava-os de fora sem avisar.
+    if (submetendo || anexosEmCurso) return;
 
     // A assinatura e a declaracao pedem-se sempre; falta-lhes o erro, junto do
     // campo, em vez de um botao que nao carrega e nao diz porque.
@@ -392,8 +424,12 @@ function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
     );
   }
 
-  if (erroInicial || !estado) {
-    return <ConviteCartaoLinkInvalido t={t} motivo={motivo ?? "inexistente"} />;
+  // Um motivo de convite devolvido pelos anexos (link expirado a meio do
+  // envio) vale o mesmo que um devolvido pela submissao: o link ja nao serve.
+  if (erroInicial || anexosConvite.erroConvite || !estado) {
+    const motivoFinal =
+      motivo ?? (anexosConvite.erroConvite ? motivoDoCodigo(anexosConvite.erroConvite) : "inexistente");
+    return <ConviteCartaoLinkInvalido t={t} motivo={motivoFinal} />;
   }
 
   if (concluido) {
@@ -430,6 +466,13 @@ function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
               {...propsPagina}
               erroAssinatura={erroAssinatura}
               erroAceite={erroAceite}
+              anexos={
+                <ConviteAnexosCard
+                  t={t}
+                  idioma={idioma}
+                  estado={{ ...anexosConvite, remover: removerAnexoRastreado }}
+                />
+              }
             />
           )}
 
@@ -444,14 +487,29 @@ function ConviteAdmissaoEcra({ idioma }: { idioma: IdiomaConvite }) {
               <Button onClick={avancar}>{t("hr.convite.seguinte")}</Button>
             </div>
           ) : (
-            <div className="flex justify-between">
-              <Button variant="ghost" onClick={voltar} disabled={submetendo}>
-                {t("hr.convite.anterior")}
-              </Button>
-              <Button onClick={submeterFormulario} disabled={submetendo}>
-                {submetendo && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                {t("hr.convite.submeter")}
-              </Button>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <Button variant="ghost" onClick={voltar} disabled={submetendo}>
+                  {t("hr.convite.anterior")}
+                </Button>
+                <Button
+                  onClick={submeterFormulario}
+                  disabled={submetendo || anexosEmCurso}
+                  aria-describedby={anexosEmCurso ? "convite-aguardar-envio" : undefined}
+                >
+                  {submetendo && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                  {t("hr.convite.submeter")}
+                </Button>
+              </div>
+              {anexosEmCurso && (
+                <p
+                  id="convite-aguardar-envio"
+                  role="status"
+                  className="text-right text-sm text-muted-foreground"
+                >
+                  {t("hr.convite.anexos.aguardarEnvio")}
+                </p>
+              )}
             </div>
           )}
         </div>

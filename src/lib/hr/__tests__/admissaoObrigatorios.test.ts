@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CAMPOS_OBRIGATORIOS_ADMISSAO,
+  CODIGOS_PAGINA_2,
   campoEhObrigatorio,
   obrigatoriosResolvidos,
   pendenciasDoRascunho,
@@ -48,6 +49,7 @@ const VAZIO: RascunhoConviteObrigatorios = {
   conta_numero: "",
   conta_titular: "",
   conta_banco: "",
+  conta_bic: "",
 };
 
 const COMPLETO: RascunhoConviteObrigatorios = {
@@ -80,6 +82,7 @@ const COMPLETO: RascunhoConviteObrigatorios = {
   conta_numero: "PT50000201231234567890154",
   conta_titular: "Maria Silva",
   conta_banco: "Banco Exemplo",
+  conta_bic: "CGDIPTPL",
 };
 
 describe("pendenciasDoRascunho", () => {
@@ -113,6 +116,25 @@ describe("pendenciasDoRascunho", () => {
     expect(pendenciasDoRascunho({ ...COMPLETO, conta_numero: "" })).toContain("conta_numero");
     expect(pendenciasDoRascunho({ ...COMPLETO, conta_titular: "" })).toContain("conta_titular");
     expect(pendenciasDoRascunho({ ...COMPLETO, conta_banco: "" })).toContain("conta_banco");
+  });
+
+  it("o BIC e um campo como os outros da conta: em falta fica pendente", () => {
+    expect(pendenciasDoRascunho({ ...COMPLETO, conta_bic: "" })).toContain("conta_bic");
+    expect(pendenciasDoRascunho({ ...COMPLETO, conta_bic: "   " })).toContain("conta_bic");
+    expect(pendenciasDoRascunho(VAZIO)).toContain("conta_bic");
+    expect(campoEhObrigatorio(VAZIO, "conta_bic")).toBe(true);
+  });
+
+  it("o BIC fica logo a seguir ao banco, e e da pagina 2", () => {
+    const codigos = CAMPOS_OBRIGATORIOS_ADMISSAO.map((c) => c.codigo as string);
+    expect(codigos.indexOf("conta_bic")).toBe(codigos.indexOf("conta_banco") + 1);
+    expect(CODIGOS_PAGINA_2.has("conta_bic")).toBe(true);
+  });
+
+  it("com o BIC em posicao opcional (fora do convite) nao e exigido", () => {
+    const semBic = CAMPOS_OBRIGATORIOS_ADMISSAO.filter((c) => c.codigo !== "conta_bic");
+    expect(pendenciasDoRascunho({ ...COMPLETO, conta_bic: "" }, semBic)).not.toContain("conta_bic");
+    expect(campoEhObrigatorio(VAZIO, "conta_bic", semBic)).toBe(false);
   });
 
   it("dependentes = '0' conta como preenchido, nao como ausente", () => {

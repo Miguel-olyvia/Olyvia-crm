@@ -5,7 +5,7 @@
  * que sai para o browser. O sufixo `.vitest.` e o que faz o vitest apanha-lo.
  */
 import { describe, expect, it } from "vitest";
-import { CODIGOS_PUBLICOS, mapearErroRpc, statusDoCodigo } from "./erros.ts";
+import { CODIGOS_PUBLICOS, CODIGOS_RECUSA_SUBMISSAO, mapearErroRpc, statusDoCodigo } from "./erros.ts";
 
 const U1 = "11111111-1111-1111-1111-111111111111";
 const U2 = "22222222-2222-2222-2222-222222222222";
@@ -21,6 +21,17 @@ describe("mapearErroRpc", () => {
     expect(mapearErroRpc({ message: "outra coisa", code: "HRA04" }).codigo).toBe("convite_expirado");
     expect(mapearErroRpc({ message: "permission denied", code: "42501" }).codigo).toBe("insufficient_privilege");
     expect(mapearErroRpc({ message: "x", code: "HRA30" }).codigo).toBe("pessoa_nao_encontrada");
+  });
+
+  it("o BIC malformado mapeia pela mensagem e pelo SQLSTATE HRA18", () => {
+    expect(mapearErroRpc({ message: "bic_invalido" })).toEqual({ codigo: "bic_invalido" });
+    expect(mapearErroRpc({ message: "outra coisa", code: "HRA18" }).codigo).toBe("bic_invalido");
+  });
+
+  it("bic_invalido e codigo publico e codigo de recusa registado para o RH", () => {
+    expect(CODIGOS_PUBLICOS).toContain("bic_invalido");
+    expect(CODIGOS_RECUSA_SUBMISSAO).toContain("bic_invalido");
+    expect(statusDoCodigo("bic_invalido")).toBe(400);
   });
 
   it("admissao_incompleta le os campos do DETAIL e descarta lixo", () => {
@@ -48,6 +59,51 @@ describe("mapearErroRpc", () => {
     expect(mapearErroRpc({ message: "relation \"x\" does not exist", code: "42P01" }).codigo).toBe("erro_inesperado");
     expect(mapearErroRpc(null).codigo).toBe("erro_inesperado");
     expect(mapearErroRpc({}).codigo).toBe("erro_inesperado");
+  });
+});
+
+describe("codigos de anexo", () => {
+  const ANEXOS = [
+    "anexo_tipo_invalido",
+    "anexo_formato_invalido",
+    "anexo_fotografia_formato",
+    "anexo_demasiado_grande",
+    "anexo_fotografia_demasiado_grande",
+    "anexo_vazio",
+    "anexo_maximo_ficheiros",
+    "anexo_tipo_cheio",
+    "anexo_limite_convite",
+    "anexo_nao_encontrado",
+    "anexo_nao_carregado",
+    "anexo_estado_invalido",
+    "anexo_falha_envio",
+  ];
+
+  it("todos sao codigos publicos", () => {
+    for (const c of ANEXOS) expect(CODIGOS_PUBLICOS).toContain(c);
+  });
+
+  it("nenhum conta como recusa de submissao (nao gastam tentativas do convite)", () => {
+    for (const c of ANEXOS) expect(CODIGOS_RECUSA_SUBMISSAO).not.toContain(c);
+  });
+
+  it("cada codigo tem o seu estado HTTP", () => {
+    expect(statusDoCodigo("anexo_demasiado_grande")).toBe(413);
+    expect(statusDoCodigo("anexo_fotografia_demasiado_grande")).toBe(413);
+    expect(statusDoCodigo("anexo_nao_encontrado")).toBe(404);
+    expect(statusDoCodigo("anexo_nao_carregado")).toBe(409);
+    expect(statusDoCodigo("anexo_estado_invalido")).toBe(409);
+    for (const c of ["anexo_formato_invalido", "anexo_fotografia_formato", "anexo_vazio", "anexo_tipo_invalido"]) {
+      expect(statusDoCodigo(c)).toBe(422);
+    }
+    for (const c of ["anexo_maximo_ficheiros", "anexo_tipo_cheio", "anexo_limite_convite"]) {
+      expect(statusDoCodigo(c)).toBe(409);
+    }
+    expect(statusDoCodigo("anexo_falha_envio")).toBe(400);
+  });
+
+  it("mapearErroRpc reconhece o codigo de anexo pela mensagem", () => {
+    expect(mapearErroRpc({ message: "anexo_tipo_cheio" })).toEqual({ codigo: "anexo_tipo_cheio" });
   });
 });
 

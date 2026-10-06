@@ -6,11 +6,13 @@
  * for a configuracao da organizacao. O botao de submeter fica activo e valida ao
  * clicar: um botao desactivado nao diz a quem preenche o que lhe falta.
  */
+import type { ReactNode } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { CampoSelect, CampoTexto } from "@/components/hr/form/Campos";
 import { TAMANHOS_FARDAMENTO, TAMANHOS_CALCADO, TAMANHOS_CALCAS } from "@/types/hr";
+import { normalizarBic } from "@/lib/hr/conta";
 import type { PaginaConviteProps } from "@/components/hr/convite/tiposConvite";
 
 /** Numeros (calcado, calcas) mostram-se como sao; letras/outro passam por i18n. */
@@ -21,6 +23,12 @@ function rotuloTamanho(t: (chave: string) => string, tamanho: string): string {
 interface ConvitePagina2Props extends PaginaConviteProps {
   erroAssinatura: string | null;
   erroAceite: string | null;
+  /**
+   * O cartao de anexos (cartao de cidadao, comprovativo de IBAN, fotografia).
+   * Fica entre o fardamento e a assinatura. Opcional: a pagina nao sabe nada
+   * de ficheiros -- quem os envia e o hook da pagina que a monta.
+   */
+  anexos?: ReactNode;
 }
 
 export function ConvitePagina2({
@@ -31,6 +39,7 @@ export function ConvitePagina2({
   obrigatorio,
   erroAssinatura,
   erroAceite,
+  anexos,
 }: ConvitePagina2Props) {
   return (
     <div className="space-y-4">
@@ -43,19 +52,30 @@ export function ConvitePagina2({
           oferecer os outros seis era prometer o que o servidor recusa.
           `conta_formato` fica fixo em "iban" no rascunho.
         */}
-        <CardContent className="grid gap-4 sm:grid-cols-2">
+        <CardContent className="grid gap-4 sm:grid-cols-6">
           <CampoTexto
             id="convite-conta-numero"
             label={t("hr.campos.iban")}
-            className="sm:col-span-2"
+            className="sm:col-span-4"
             obrigatorio={obrigatorio("conta_numero")}
             erro={erroDe("conta_numero")}
             valor={rascunho.conta_numero}
             onChange={(v) => definir("conta_numero", v)}
           />
           <CampoTexto
+            id="convite-conta-bic"
+            label={t("hr.campos.swift")}
+            ajuda={t("hr.campos.bicAjuda")}
+            className="sm:col-span-2"
+            obrigatorio={obrigatorio("conta_bic")}
+            erro={erroDe("conta_bic")}
+            valor={rascunho.conta_bic}
+            onChange={(v) => definir("conta_bic", normalizarBic(v).slice(0, 11))}
+          />
+          <CampoTexto
             id="convite-conta-titular"
             label={t("hr.campos.titularConta")}
+            className="sm:col-span-3"
             obrigatorio={obrigatorio("conta_titular")}
             erro={erroDe("conta_titular")}
             valor={rascunho.conta_titular}
@@ -64,6 +84,7 @@ export function ConvitePagina2({
           <CampoTexto
             id="convite-conta-banco"
             label={t("hr.campos.banco")}
+            className="sm:col-span-3"
             obrigatorio={obrigatorio("conta_banco")}
             erro={erroDe("conta_banco")}
             valor={rascunho.conta_banco}
@@ -142,6 +163,8 @@ export function ConvitePagina2({
           )}
         </CardContent>
       </Card>
+
+      {anexos}
 
       <Card>
         <CardHeader className="pb-3">

@@ -25,7 +25,7 @@ import {
   horarioVazio,
   minutosDe,
 } from "@/lib/hr/horario";
-import { contaValida, normalizarConta } from "@/lib/hr/conta";
+import { bicValido, contaValida, normalizarBic, normalizarConta } from "@/lib/hr/conta";
 import {
   problemasDosNumerosDoContrato,
   type CampoNumericoContrato,
@@ -120,6 +120,8 @@ export interface RascunhoPessoais {
    */
   conta_formato: FormatoConta;
   conta_numero: string;
+  /** O BIC (codigo SWIFT); na base e a coluna `swift`. Aplica-se a todos os formatos. */
+  conta_bic: string;
   emergencia_nome: string;
   emergencia_relacao: string;
   emergencia_telefone: string;
@@ -220,6 +222,7 @@ export function rascunhoInicial(): RascunhoPessoa {
       morada_pais: "PT",
       conta_formato: "iban",
       conta_numero: "",
+      conta_bic: "",
       emergencia_nome: "",
       emergencia_relacao: "",
       emergencia_telefone: "",
@@ -389,6 +392,14 @@ export function problemasDoRascunho(
       // IBAN falha o digito de controlo, nos outros o proprio formato.
       mensagemKey:
         pessoais.conta_formato === "iban" ? "hr.form.erroIban" : "hr.form.erroConta",
+    });
+  }
+  if (pessoais.conta_bic.trim() !== "" && !bicValido(pessoais.conta_bic)) {
+    problemas.push({
+      seccao: "pessoais",
+      campoId: "hr-novo-conta-bic",
+      rotuloKey: "hr.campos.swift",
+      mensagemKey: "hr.form.erroBic",
     });
   }
   // -- Obrigatoriedade, conforme quem preenche -------------------------------
@@ -597,7 +608,12 @@ export interface NovaPessoaPayload {
    * Vai por `rpc_hr_definir_conta`, nunca por insert: a tabela tem a escrita
    * revogada. Como o NISS, pode falhar sozinha -- e a ficha fica criada.
    */
-  conta: { formato: FormatoConta; numero: string } | null;
+  conta: { formato: FormatoConta; numero: string; swift: string | null } | null;
+  /**
+   * O BIC escrito SEM numero de conta. Vai por `rpc_hr_definir_bic`, que grava
+   * so o BIC; com numero, o BIC viaja dentro de `conta.swift`.
+   */
+  bicSozinho: string | null;
   emergencia: Record<string, unknown> | null;
   vinculo: Record<string, unknown> | null;
   /**
@@ -726,7 +742,12 @@ export function payloadDoRascunho(
         ? {
             formato: pessoais.conta_formato,
             numero: normalizarConta(pessoais.conta_numero),
+            swift: normalizarBic(pessoais.conta_bic) || null,
           }
+        : null,
+    bicSozinho:
+      normalizarConta(pessoais.conta_numero) === ""
+        ? normalizarBic(pessoais.conta_bic) || null
         : null,
     emergencia:
       texto(pessoais.emergencia_nome) !== null && texto(pessoais.emergencia_telefone) !== null

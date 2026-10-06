@@ -161,6 +161,8 @@ interface PessoaPessoaisTabProps {
     banco?: string | null;
     swift?: string | null;
   }) => Promise<string | null>;
+  /** Corrige so o BIC (`rpc_hr_definir_bic`); sem ela a ficha nao oferece a edicao isolada. */
+  onDefinirBic?: (bic: string | null) => Promise<string | null>;
 }
 
 /** Texto -> valor de coluna: string vazia e ausencia, nao string vazia. */
@@ -224,6 +226,7 @@ export function PessoaPessoaisTab({
   onRevelarNiss,
   onDefinirNiss,
   onDefinirConta,
+  onDefinirBic,
 }: PessoaPessoaisTabProps) {
   const { t } = useTranslation();
 
@@ -1017,6 +1020,7 @@ export function PessoaPessoaisTab({
               podeEditar={permissoes.bancariosEdit}
               saving={saving}
               onDefinir={onDefinirConta}
+              onDefinirBic={onDefinirBic}
             />
           </CardContent>
         </Card>

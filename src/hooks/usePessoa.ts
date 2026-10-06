@@ -24,6 +24,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { hrFrom, hrRpc, isPermissionError } from "@/lib/hr/hrDb";
+import { usePessoaConta } from "@/hooks/usePessoaConta";
 import { dataDeHoje } from "@/lib/hr/novaPessoa";
 import type {
   Pessoa,
@@ -40,7 +41,6 @@ import type {
   PessoaVinculo,
   HorarioPlaneado,
   HorarioRealizado,
-  FormatoConta,
 } from "@/types/hr";
 import {
   hojeIsoServidor,
@@ -62,6 +62,10 @@ const COLUNAS_PESSOA =
   "local_id, " +
   "entidade_legal_org_id, reporta_a_pessoa_id, data_admissao, data_antiguidade, " +
   "data_saida, " +
+  // `fotografia_anexo_id` (anexos da admissao): so o id; o ficheiro abre-se por
+  // URL assinado de `hr-anexo-url`, nunca por caminho. Precisa da migration
+  // dos anexos (20261210050000..080000) aplicada ANTES deste codigo.
+  "fotografia_anexo_id, " +
   "estado_registo, notas, created_at, updated_at";
 
 const COLUNAS_DADOS_PESSOAIS =
@@ -751,52 +755,7 @@ export function usePessoa(pessoaId: string | undefined) {
     [guardar, pessoaId],
   );
 
-  /**
-   * A conta bancaria, em qualquer dos seis formatos.
-   *
-   * `rpc_hr_definir_conta` substituiu `rpc_hr_definir_iban` e a antiga foi
-   * largada na mesma migration (20261120220000): duas funcoes com o mesmo
-   * proposito e assinaturas diferentes deixam o PostgREST sem saber qual
-   * escolher -- ja parou um botao neste projecto.
-   */
-  const definirConta = useCallback(
-    (args: {
-      formato: FormatoConta;
-      conta: string;
-      titular?: string | null;
-      banco?: string | null;
-      agencia?: string | null;
-      swift?: string | null;
-    }) =>
-      guardar(async () =>
-        hrRpc("rpc_hr_definir_conta", {
-          p_pessoa_id: pessoaId,
-          p_formato: args.formato,
-          p_conta: args.conta,
-          p_titular: args.titular ?? null,
-          p_banco: args.banco ?? null,
-          p_agencia: args.agencia ?? null,
-          p_swift: args.swift ?? null,
-        }),
-      ),
-    [guardar, pessoaId],
-  );
-
-  const ligarConta = useCallback(
-    (anewUserId: string) =>
-      guardar(async () =>
-        hrRpc("rpc_hr_ligar_conta", { p_pessoa_id: pessoaId, p_anew_user_id: anewUserId }),
-      ),
-    [guardar, pessoaId],
-  );
-
-  const revogarConta = useCallback(
-    (motivo: string | null) =>
-      guardar(async () =>
-        hrRpc("rpc_hr_revogar_conta", { p_pessoa_id: pessoaId, p_motivo: motivo }),
-      ),
-    [guardar, pessoaId],
-  );
+  const { definirConta, definirBic, ligarConta, revogarConta } = usePessoaConta(pessoaId, guardar);
 
   return {
     ...ficha,
@@ -819,6 +778,7 @@ export function usePessoa(pessoaId: string | undefined) {
     revelarNiss,
     definirNiss,
     definirConta,
+    definirBic,
     ligarConta,
     revogarConta,
   };

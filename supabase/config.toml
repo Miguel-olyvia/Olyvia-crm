@@ -120,3 +120,12 @@ verify_jwt = false
 # Authorization de quem convida e verifica a permissao na propria base.
 [functions.convite-admissao]
 verify_jwt = false
+
+# Chamada por pg_cron com o segredo partilhado do cron (guardado no Vault como
+# cron_service_role_key; o valor e o CRON_SHARED_SECRET, nao a chave de servico),
+# que nao e um JWT -- com verify_jwt o gateway rejeita-o com
+# UNAUTHORIZED_INVALID_JWT_FORMAT antes de a funcao arrancar (mesmo caso de
+# generate-notifications). A funcao autentica-se sozinha com
+# requireServiceRoleOrCronSecret(); sem esse segredo responde 401.
+[functions.convite-admissao-limpeza]
+verify_jwt = false

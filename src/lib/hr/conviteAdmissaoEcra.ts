@@ -3,7 +3,7 @@
  * validacao local de formato e a data legivel. Fora do componente para se
  * poderem testar sem renderizar nada.
  */
-import { contaValida } from "@/lib/hr/conta";
+import { bicValido, contaValida } from "@/lib/hr/conta";
 import { nifValido, nissValido } from "@/lib/hr/identificadoresPt";
 
 export type IdiomaConvite = "pt" | "es" | "fr" | "de" | "en";
@@ -32,18 +32,20 @@ export function idiomaDoNavegador(
 }
 
 /** Os campos cujo FORMATO se valida no ecra, alem de estarem ou nao vazios. */
-export type CampoComFormato = "nif" | "niss" | "conta_numero";
+export type CampoComFormato = "nif" | "niss" | "conta_numero" | "conta_bic";
 
 export interface ValoresComFormato {
   nif: string;
   niss: string;
   conta_numero: string;
+  conta_bic: string;
 }
 
 const CHAVE_ERRO_FORMATO: Readonly<Record<CampoComFormato, string>> = {
   nif: "hr.convite.erro.nifInvalido",
   niss: "hr.convite.erro.nissInvalido",
   conta_numero: "hr.convite.erro.ibanInvalido",
+  conta_bic: "hr.convite.erro.bicInvalido",
 };
 
 /**
@@ -64,6 +66,9 @@ export function errosDeFormato(
   if (valores.conta_numero.trim() !== "" && !contaValida("iban", valores.conta_numero)) {
     erros.conta_numero = CHAVE_ERRO_FORMATO.conta_numero;
   }
+  if (valores.conta_bic.trim() !== "" && !bicValido(valores.conta_bic)) {
+    erros.conta_bic = CHAVE_ERRO_FORMATO.conta_bic;
+  }
   return erros;
 }
 
@@ -78,6 +83,8 @@ export function campoDoErroDeServidor(codigo: string | undefined): CampoComForma
       return "niss";
     case "iban_invalido":
       return "conta_numero";
+    case "bic_invalido":
+      return "conta_bic";
     default:
       return null;
   }

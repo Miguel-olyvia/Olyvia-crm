@@ -56,6 +56,25 @@ export const isModuleLoadError = (error: unknown): boolean => {
 // rebuild the URL from `origin + pathname` instead of trying to strip the
 // parts we recognise — an unparseable or unexpected URL fails closed to
 // `[Filtered]` rather than being passed through.
+//
+// The admission invitation token travels in the route path (`/admissao/:token`)
+// and alone authorises reading the draft and uploading or removing files, so
+// the segment after `/admissao/` is replaced by `[token]`.
+const PATH_SECRET_PREFIXES = ["admissao"] as const;
+
+function redactPathSecrets(pathname: string): string {
+  const segments = pathname.split("/");
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    if (
+      (PATH_SECRET_PREFIXES as readonly string[]).includes(segments[i].toLowerCase()) &&
+      segments[i + 1] !== ""
+    ) {
+      segments[i + 1] = "[token]";
+    }
+  }
+  return segments.join("/");
+}
+
 export function sanitizeUrl(rawUrl: unknown): string {
   if (typeof rawUrl !== "string" || rawUrl.length === 0) return REDACTED;
   const base = typeof window !== "undefined" ? window.location?.origin : undefined;
@@ -63,7 +82,7 @@ export function sanitizeUrl(rawUrl: unknown): string {
     const parsed = new URL(rawUrl, base);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return REDACTED;
     // `origin` already excludes any `user:password@` credentials.
-    return `${parsed.origin}${parsed.pathname}`;
+    return `${parsed.origin}${redactPathSecrets(parsed.pathname)}`;
   } catch {
     return REDACTED;
   }

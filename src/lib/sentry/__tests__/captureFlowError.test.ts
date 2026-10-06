@@ -9,6 +9,11 @@ vi.mock("@sentry/react", () => ({
 
 import { captureFlowError } from "../../observability/captureFlowError";
 import { beforeSend, REDACTED } from "../scrub";
+import fonteCaptureFlowError from "../../observability/captureFlowError.ts?raw";
+import fonteConviteAnexos from "../../../hooks/useConviteAnexos.ts?raw";
+import fontePessoaAnexos from "../../../hooks/usePessoaAnexos.ts?raw";
+import fontePessoaFotografia from "../../../hooks/usePessoaFotografia.ts?raw";
+import fonteAnexoUrl from "../../hr/anexoUrl.ts?raw";
 
 const CUSTOMER_EMAIL = "alguem@exemplo.pt";
 
@@ -19,7 +24,7 @@ const leaksEmail = (payload: unknown): boolean =>
 
 /** Rebuild the Sentry event the SDK would produce from the captured call. */
 const eventFromLastCapture = (): ErrorEvent => {
-  const [reportedError, context] = captureException.mock.calls.at(-1) as [
+  const [reportedError, context] = captureException.mock.calls[captureException.mock.calls.length - 1] as [
     Error,
     { contexts?: ErrorEvent["contexts"] },
   ];
@@ -83,5 +88,22 @@ describe("captureFlowError on a Supabase-shaped error", () => {
     expect(reportedError).toBe(original);
     expect(context.tags.flow).toBe("proposal-workflow");
     expect(context.contexts).toBeUndefined();
+  });
+});
+
+// `BusinessFlow` e uma uniao fechada: uma origem usada num hook e nao
+// declarada aqui parte o `tsc` (TS2345) e o build. Este teste apanha-o antes,
+// sem depender de o tsc correr.
+describe("BusinessFlow declara as origens dos anexos de admissao", () => {
+  const casos: Array<[string, string, string]> = [
+    ["hr-convite-anexos", "useConviteAnexos", fonteConviteAnexos],
+    ["hr-pessoa-anexos-carregar", "usePessoaAnexos", fontePessoaAnexos],
+    ["hr-pessoa-fotografia", "usePessoaFotografia", fontePessoaFotografia],
+    ["hr-anexo-obter-url", "anexoUrl", fonteAnexoUrl],
+  ];
+
+  it.each(casos)("%s esta na uniao e e usada por %s", (origem, _quem, fonte) => {
+    expect(fonte).toContain(`"${origem}"`);
+    expect(fonteCaptureFlowError).toMatch(new RegExp(`\\|\\s*"${origem}"`));
   });
 });

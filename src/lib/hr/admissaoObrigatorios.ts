@@ -89,6 +89,7 @@ export interface RascunhoConviteObrigatorios {
   conta_numero: string;
   conta_titular: string;
   conta_banco: string;
+  conta_bic: string;
 }
 
 export type CodigoCampoObrigatorioAdmissao = keyof RascunhoConviteObrigatorios;
@@ -169,6 +170,7 @@ export const CAMPOS_OBRIGATORIOS_ADMISSAO: readonly CampoObrigatorioAdmissao[] =
   { codigo: "conta_numero", origem: "pessoa", condicao: sempre },
   { codigo: "conta_titular", origem: "pessoa", condicao: sempre },
   { codigo: "conta_banco", origem: "pessoa", condicao: sempre },
+  { codigo: "conta_bic", origem: "pessoa", condicao: sempre },
 ] as const;
 
 /**
@@ -268,4 +270,5 @@ export const CODIGOS_PAGINA_2: ReadonlySet<CodigoCampoObrigatorioAdmissao> = new
   "conta_numero",
   "conta_titular",
   "conta_banco",
+  "conta_bic",
 ]);

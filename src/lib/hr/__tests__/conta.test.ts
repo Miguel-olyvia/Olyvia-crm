@@ -12,7 +12,9 @@ import {
   contaValida,
   ibanValido,
   mascaraDaConta,
+  bicValido,
   minimoDaConta,
+  normalizarBic,
   normalizarConta,
 } from "@/lib/hr/conta";
 
@@ -74,5 +76,56 @@ describe("conta bancaria", () => {
     expect(chaveDoRotuloDaConta("banco_mais_conta")).toBe("hr.campos.numeroConta");
     expect(minimoDaConta("iban")).toBe(15);
     expect(minimoDaConta("outro")).toBe(4);
+  });
+});
+
+describe("BIC (codigo SWIFT)", () => {
+  it("normaliza: sem espacos e em maiusculas", () => {
+    expect(normalizarBic(" cgdi ptpl ")).toBe("CGDIPTPL");
+    expect(normalizarBic("cgdiptplxxx")).toBe("CGDIPTPLXXX");
+    expect(normalizarBic("")).toBe("");
+    expect(normalizarBic("   ")).toBe("");
+  });
+
+  it("aceita 8 e 11 caracteres validos", () => {
+    expect(bicValido("CGDIPTPL")).toBe(true);
+    expect(bicValido("CGDIPTPLXXX")).toBe(true);
+    expect(bicValido("BBVAESMM123")).toBe(true);
+    // Localidade alfanumerica (posicoes 7-8).
+    expect(bicValido("DEUTDEF2")).toBe(true);
+  });
+
+  it("normaliza antes de validar", () => {
+    expect(bicValido("cgdi ptpl")).toBe(true);
+    expect(bicValido("cgdiptplxxx")).toBe(true);
+  });
+
+  it("vazio e ausencia, nao erro de formato", () => {
+    expect(bicValido("")).toBe(true);
+    expect(bicValido("   ")).toBe(true);
+  });
+
+  it("recusa os comprimentos que nao sao 8 nem 11", () => {
+    expect(bicValido("CGDIPTP")).toBe(false); // 7
+    expect(bicValido("CGDIPTPLX")).toBe(false); // 9
+    expect(bicValido("CGDIPTPLXX")).toBe(false); // 10
+    expect(bicValido("CGDIPTPLXXXX")).toBe(false); // 12
+  });
+
+  it("recusa digitos nas posicoes do banco e do pais", () => {
+    expect(bicValido("CGDI1TPL")).toBe(false);
+    expect(bicValido("1GDIPTPL")).toBe(false);
+    expect(bicValido("CGD1PTPL")).toBe(false);
+  });
+
+  it("recusa o que tem a forma de um codigo de banco mas nao e um BIC", () => {
+    expect(bicValido("ABCD1234")).toBe(false);
+  });
+
+  it("recusa caracteres especiais", () => {
+    expect(bicValido("CGDI-TPL")).toBe(false);
+    expect(bicValido("CGDIPTP!")).toBe(false);
+    expect(bicValido("CGDIPTPL€XX")).toBe(false);
+    expect(bicValido("CGDIPTPL;--")).toBe(false);
   });
 });

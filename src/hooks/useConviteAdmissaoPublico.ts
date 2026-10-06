@@ -32,6 +32,7 @@ import {
   type CorpoErroEdge,
   type MotivoConvite,
 } from "@/lib/hr/errosAdmissao";
+import type { AnexoConvite } from "@/lib/hr/conviteAnexos";
 
 export interface ConviteEstado {
   pessoa_nome: string | null;
@@ -53,6 +54,12 @@ export interface ConviteEstado {
    * apenas nesse caso, ver `obrigatoriosResolvidos`.
    */
   campos_obrigatorios: { codigo: string; condicional: boolean }[] | null;
+  /**
+   * Os ficheiros que a pessoa ja enviou neste convite (cartao de cidadao,
+   * comprovativo de IBAN, fotografia), para os mostrar ao recarregar a pagina.
+   * Ausente em respostas antigas; nunca traz organizacao nem pessoa.
+   */
+  anexos?: AnexoConvite[];
 }
 
 export interface DadosSubmissaoConvite {

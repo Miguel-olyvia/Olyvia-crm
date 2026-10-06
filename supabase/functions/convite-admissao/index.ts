@@ -28,11 +28,16 @@
  * Vault, a linha so com os ultimos quatro caracteres. A decisao que faltava
  * (um token valido substitui a permissao do utilizador para escrever o IBAN?)
  * esta tomada: o token E a autorizacao, tal como ja era para o NISS.
+ * O BIC (codigo SWIFT) viaja como `conta_swift`: a RPC valida-o e grava-o
+ * mesmo sem IBAN (no ecra e na configuracao chama-se `conta_bic`).
  */
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { checkRateLimit, getClientIp, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
+import { detectClientIp } from "../_shared/clientIp.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { erroSemDados } from "../_shared/erroSemDados.ts";
+import { eAccaoAnexo, listarAnexosDoConvite, tratarAccaoAnexo, type ClienteAnexos } from "./accoesAnexos.ts";
 import {
   CODIGOS_RECUSA_SUBMISSAO,
   eCodigoPublico,
@@ -54,6 +59,13 @@ initSentry();
 
 const VALIDADE_DIAS = 7;
 
+/**
+ * O que vai para o Sentry quando uma accao de anexos falha: so o tipo e o
+ * codigo do erro. Nunca error.message: o Storage e a base podem la meter o
+ * caminho do ficheiro ou o nome que a pessoa escolheu.
+ */
+const erroDeAnexoSemDados = (e: unknown): Error => erroSemDados("convite-admissao anexos", e);
+
 // A LISTA BRANCA DO CONVITE -- plana, com prefixo de tabela so onde o nome
 // colidiria (`morada_*`). E EXACTAMENTE a lista de
 // `src/lib/hr/conviteAdmissaoPayload.ts` e exactamente a que
@@ -71,6 +83,7 @@ const CAMPOS_CONVITE = [
   "carta_conducao_validade",
   "conjuge_situacao_profissional",
   "conta_banco",
+  "conta_swift",
   "conta_titular",
   "data_nascimento",
   "dependentes",
@@ -333,8 +346,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       });
     }
 
-    // -- estado / submeter: sem sessao, service_role, atras de rate limit ----
-    if (action !== "estado" && action !== "submeter" && action !== "rascunho") {
+    // -- estado / submeter / anexos: sem sessao, service_role, atras de rate limit --
+    if (action !== "estado" && action !== "submeter" && action !== "rascunho" && !eAccaoAnexo(action)) {
       return responder({ error: "accao_desconhecida" }, 400);
     }
 
@@ -352,7 +365,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       identifier: ip,
       // O rascunho grava com "debounce" de 3s enquanto a pessoa escreve: um
       // tecto de 10/hora, como o da submissao, matava o preenchimento normal.
-      maxAttempts: action === "estado" ? 30 : action === "rascunho" ? 240 : 10,
+      maxAttempts: action === "estado" ? 30 : action === "rascunho" ? 240 : eAccaoAnexo(action) ? 30 : 10,
       windowMinutes: 60,
     });
     if (!limite.allowed) {
@@ -364,6 +377,23 @@ Deno.serve(async (req: Request): Promise<Response> => {
     const tokenHash = Array.from(new Uint8Array(hashBuffer))
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
+
+    // -- anexos: toda a logica em accoesAnexos.ts; aqui so se despacha ------------
+    if (eAccaoAnexo(action)) {
+      const resultado = await tratarAccaoAnexo({
+        accao: action,
+        svc: svc as unknown as ClienteAnexos,
+        tokenHash,
+        payload,
+        // So um IP valido ou null (a coluna e inet): nunca o "unknown" do rate limit.
+        ip: detectClientIp(req),
+        supabaseUrl,
+        registarErro: (e) => {
+          captureError(erroDeAnexoSemDados(e));
+        },
+      });
+      return responder(resultado.body, resultado.status);
+    }
 
     if (action === "estado") {
       const { data, error } = await svc.rpc("rpc_hr_convite_admissao_estado", {
@@ -383,7 +413,21 @@ Deno.serve(async (req: Request): Promise<Response> => {
         captureError(new Error("convite-admissao: motivo de estado fora do catalogo"));
         return responder({ error: "erro_inesperado" }, 500);
       }
-      return responder({ ok: true, convite: data });
+      // Os ficheiros ja ligados ao convite, para o ecra os mostrar ao recarregar.
+      // Nunca faz a abertura falhar, mas tambem nunca finge que nao ha ficheiros:
+      // se a lista nao se pode ler, `anexos_indisponiveis: true` diz-o ao ecra (que
+      // avisa e nao deixa enviar mais ficheiros ate a lista carregar).
+      const { anexos, indisponiveis } = await listarAnexosDoConvite(
+        svc as unknown as ClienteAnexos,
+        tokenHash,
+        (e) => {
+          captureError(erroDeAnexoSemDados(e));
+        },
+      );
+      const convite = data !== null && typeof data === "object" && !Array.isArray(data)
+        ? { ...(data as Record<string, unknown>), anexos, anexos_indisponiveis: indisponiveis }
+        : data;
+      return responder({ ok: true, convite });
     }
 
     // -- rascunho: gravacao intermedia, melhor-esforco ------------------------

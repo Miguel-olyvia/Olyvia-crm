@@ -33,7 +33,7 @@ import {
   CampoSelect,
   CampoTexto,
 } from "@/components/hr/form/Campos";
-import { chaveDoRotuloDaConta } from "@/lib/hr/conta";
+import { chaveDoRotuloDaConta, normalizarBic } from "@/lib/hr/conta";
 import type { RascunhoPessoais } from "@/lib/hr/novaPessoa";
 import {
   ESTADOS_CIVIS,
@@ -286,6 +286,16 @@ export function SeccaoDetalhesPessoais({
             valor={valor.conta_numero}
             erro={erroDe("hr-novo-conta-numero")}
             onChange={(v) => onPatch({ conta_numero: v })}
+          />
+          {/* O BIC aplica-se a todos os formatos e grava-se mesmo sem numero. */}
+          <CampoTexto
+            id="hr-novo-conta-bic"
+            obrigatorio={obr("conta_bic")}
+            label={t("hr.campos.swift")}
+            ajuda={t("hr.campos.bicAjuda")}
+            valor={valor.conta_bic}
+            erro={erroDe("hr-novo-conta-bic")}
+            onChange={(v) => onPatch({ conta_bic: normalizarBic(v).slice(0, 11) })}
           />
         </CollapsibleContent>
       </Collapsible>

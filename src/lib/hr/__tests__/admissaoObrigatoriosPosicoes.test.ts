@@ -45,6 +45,16 @@ describe("camposDoConvite", () => {
     expect(codigos).toEqual(["data_nascimento", "genero"]);
   });
 
+  it("o BIC em posicao ficha ou opcional deixa de ser exigido no convite", () => {
+    for (const posicao of ["ficha", "opcional"] as const) {
+      const campos = camposDoConvite([linha("conta_bic", posicao), linha("conta_banco", "convite")]);
+      expect(campoEhObrigatorio(VAZIO, "conta_bic", campos)).toBe(false);
+      expect(campoEhObrigatorio(VAZIO, "conta_banco", campos)).toBe(true);
+    }
+    const noConvite = camposDoConvite([linha("conta_bic", "convite")]);
+    expect(campoEhObrigatorio(VAZIO, "conta_bic", noConvite)).toBe(true);
+  });
+
   it("um campo na ficha ou opcional deixa de ser obrigatorio no convite", () => {
     const config = [linha("telefone_pessoal", "ficha"), linha("genero", "convite")];
     const campos = camposDoConvite(config);

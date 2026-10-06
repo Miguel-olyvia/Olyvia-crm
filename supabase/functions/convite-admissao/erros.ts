@@ -28,6 +28,7 @@ export const CODIGOS_PUBLICOS = [
   "niss_ja_existe",
   "pais_invalido",
   "iban_invalido",
+  "bic_invalido",
   "admissao_incompleta",
   "pessoa_nao_encontrada",
   "insufficient_privilege",
@@ -40,6 +41,20 @@ export const CODIGOS_PUBLICOS = [
   "erro_inesperado",
   "ficha_incompleta",
   "validade_invalida",
+  // Anexos do convite (cartao de cidadao, comprovativo de IBAN, fotografia).
+  "anexo_tipo_invalido",
+  "anexo_formato_invalido",
+  "anexo_fotografia_formato",
+  "anexo_demasiado_grande",
+  "anexo_fotografia_demasiado_grande",
+  "anexo_vazio",
+  "anexo_maximo_ficheiros",
+  "anexo_tipo_cheio",
+  "anexo_limite_convite",
+  "anexo_nao_encontrado",
+  "anexo_nao_carregado",
+  "anexo_estado_invalido",
+  "anexo_falha_envio",
 ] as const;
 
 export type CodigoPublico = (typeof CODIGOS_PUBLICOS)[number];
@@ -52,6 +67,7 @@ export const CODIGOS_RECUSA_SUBMISSAO: readonly CodigoPublico[] = [
   "niss_ja_existe",
   "pais_invalido",
   "iban_invalido",
+  "bic_invalido",
   "admissao_incompleta",
   "assinatura_obrigatoria",
   "pedido_invalido",
@@ -71,6 +87,7 @@ const CODIGO_POR_SQLSTATE: Record<string, CodigoPublico> = {
   HRA14: "niss_ja_existe",
   HRA15: "pais_invalido",
   HRA16: "iban_invalido",
+  HRA18: "bic_invalido",
   HRA17: "admissao_incompleta",
   HRA30: "pessoa_nao_encontrada",
   "42501": "insufficient_privilege",
@@ -132,8 +149,25 @@ export function mapearErroRpc(error: ErroRpc | null | undefined): ErroMapeado {
   return { codigo };
 }
 
+/** Os anexo_* que nao seguem a regra por omissao (400). */
+const STATUS_ANEXO: Readonly<Record<string, number>> = {
+  anexo_demasiado_grande: 413,
+  anexo_fotografia_demasiado_grande: 413,
+  anexo_nao_encontrado: 404,
+  anexo_nao_carregado: 409,
+  anexo_estado_invalido: 409,
+  anexo_maximo_ficheiros: 409,
+  anexo_tipo_cheio: 409,
+  anexo_limite_convite: 409,
+  anexo_formato_invalido: 422,
+  anexo_fotografia_formato: 422,
+  anexo_vazio: 422,
+  anexo_tipo_invalido: 422,
+};
+
 export function statusDoCodigo(codigo: string): number {
   if (codigo.startsWith("convite_")) return 401;
+  if (codigo in STATUS_ANEXO) return STATUS_ANEXO[codigo];
   if (codigo.endsWith("_ja_existe")) return 409;
   if (codigo === "demasiadas_tentativas") return 429;
   if (codigo === "insufficient_privilege") return 403;

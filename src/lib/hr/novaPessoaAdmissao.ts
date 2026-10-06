@@ -24,7 +24,8 @@ import type { ProblemaCampo, QuemPreenche, RascunhoPessoais } from "@/lib/hr/nov
  * deficiencia, situacao do conjuge, naturalidade, habilitacoes, tamanhos de
  * farda, titular e banco da conta) nao existem neste formulario: nunca o
  * bloqueiam, ficam como pendencia na ficha (ver
- * `camposDoConviteForaDoFormulario`).
+ * `camposDoConviteForaDoFormulario`). O BIC ja NAO esta nesta lista: passou a
+ * estar dentro do formulario.
  */
 const CAMPO_DO_FORMULARIO_POR_CODIGO: Readonly<
   Record<string, { campoId: string; rotuloKey: string }>
@@ -51,6 +52,7 @@ const CAMPO_DO_FORMULARIO_POR_CODIGO: Readonly<
   },
   localidade: { campoId: "hr-novo-morada-localidade", rotuloKey: "hr.campos.cidade" },
   conta_numero: { campoId: "hr-novo-conta-numero", rotuloKey: "hr.campos.numeroConta" },
+  conta_bic: { campoId: "hr-novo-conta-bic", rotuloKey: "hr.campos.swift" },
 };
 
 /** O que este formulario sabe dizer sobre cada codigo da lista de admissao. */
@@ -87,6 +89,7 @@ function valoresDoFormularioParaAdmissao(
     conta_numero: pessoais.conta_numero,
     conta_titular: "",
     conta_banco: "",
+    conta_bic: pessoais.conta_bic,
   };
 }
 

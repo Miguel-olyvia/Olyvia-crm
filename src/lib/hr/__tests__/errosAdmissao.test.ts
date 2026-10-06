@@ -35,17 +35,21 @@ describe("contrato com CODIGOS_PUBLICOS da Edge Function convite-admissao", () =
   it("todo o codigo com texto e um codigo que a Edge Function emite (nada de chaves mortas)", () => {
     const comTexto = [
       "assinatura_obrigatoria", "nif_ja_existe", "niss_ja_existe", "nif_invalido", "niss_invalido",
-      "iban_invalido", "pais_invalido", "admissao_incompleta", "convite_invalido", "convite_ja_usado",
+      "iban_invalido", "bic_invalido", "pais_invalido", "admissao_incompleta", "convite_invalido", "convite_ja_usado",
       "convite_revogado", "convite_expirado", "convite_bloqueado", "demasiadas_tentativas",
       "ficha_incompleta", "sem_sessao", "insufficient_privilege",
       "pessoa_nao_encontrada", "validade_invalida", "erro_inesperado",
+      "anexo_tipo_invalido", "anexo_formato_invalido", "anexo_fotografia_formato", "anexo_demasiado_grande",
+      "anexo_fotografia_demasiado_grande", "anexo_vazio", "anexo_maximo_ficheiros", "anexo_tipo_cheio",
+      "anexo_limite_convite", "anexo_nao_encontrado", "anexo_nao_carregado", "anexo_estado_invalido",
+      "anexo_falha_envio",
     ];
     for (const codigo of comTexto) {
       expect(publicos).toContain(codigo);
       expect(chaveDeErroAdmissao(codigo)).not.toBeNull();
     }
     // Codigos que nenhuma migration nem a Edge Function emitem nao tem entrada.
-    for (const morto of ["convite_substituido", "token_invalido", "anexo_formato_invalido", "anexos_demasiados", "fotografia_demasiado_grande"]) {
+    for (const morto of ["convite_substituido", "token_invalido", "anexos_demasiados", "fotografia_demasiado_grande"]) {
       expect(publicos).not.toContain(morto);
       expect(chaveDeErroAdmissao(morto)).toBeNull();
     }
@@ -84,6 +88,20 @@ describe("chaveDeErroAdmissao", () => {
     ["niss_invalido", "hr.convite.erro.nissInvalido"],
     ["iban_invalido", "hr.convite.erro.ibanInvalido"],
     ["pais_invalido", "hr.convite.erro.paisInvalido"],
+    ["bic_invalido", "hr.convite.erro.bicInvalido"],
+    ["anexo_formato_invalido", "hr.convite.erro.anexoFormato"],
+    ["anexo_demasiado_grande", "hr.convite.erro.anexoFormato"],
+    ["anexo_fotografia_formato", "hr.convite.erro.fotografiaFormato"],
+    ["anexo_fotografia_demasiado_grande", "hr.convite.erro.fotografiaGrande"],
+    ["anexo_maximo_ficheiros", "hr.convite.erro.anexosDemasiados"],
+    ["anexo_tipo_cheio", "hr.convite.erro.anexoTipoCheio"],
+    ["anexo_vazio", "hr.convite.erro.anexoVazio"],
+    ["anexo_limite_convite", "hr.convite.erro.anexoLimiteConvite"],
+    ["anexo_nao_encontrado", "hr.convite.erro.anexoNaoEncontrado"],
+    ["anexo_nao_carregado", "hr.convite.erro.anexoNaoCarregado"],
+    ["anexo_estado_invalido", "hr.convite.erro.anexoEstadoInvalido"],
+    ["anexo_tipo_invalido", "hr.convite.erro.anexoFalhaEnvio"],
+    ["anexo_falha_envio", "hr.convite.erro.anexoFalhaEnvio"],
     ["admissao_incompleta", "hr.convite.erro.faltaPreencher"],
     ["convite_invalido", "hr.convite.motivo.inexistente"],
     ["convite_ja_usado", "hr.convite.motivo.usado"],

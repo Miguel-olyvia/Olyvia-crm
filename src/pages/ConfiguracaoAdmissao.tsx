@@ -73,7 +73,7 @@ const GRUPOS: ReadonlyArray<{ chave: string; codigos: readonly string[] }> = [
   },
   {
     chave: "hr.admissao.grupo.conta",
-    codigos: ["conta_numero", "conta_titular", "conta_banco"],
+    codigos: ["conta_numero", "conta_titular", "conta_banco", "conta_bic"],
   },
 ];
 

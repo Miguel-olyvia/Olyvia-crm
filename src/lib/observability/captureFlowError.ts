@@ -156,6 +156,18 @@ export type BusinessFlow =
   | "hr-documentos-assinatura-externa"
   | "hr-admissao-pendencias"
   | "hr-pessoa-duplicados-candidatos"
+  // Anexos da admissao (cartao de cidadao, comprovativo de IBAN, fotografia).
+  // So entram falhas inesperadas (rede, 5xx, resposta sem corpo, falha do PUT
+  // para a quarentena): uma recusa de formato/tamanho/limite ou de permissao
+  // e a resposta correcta e nao vem para aqui.
+  // - `hr-convite-anexos`: o ecra publico do convite (sem sessao).
+  // - `hr-pessoa-anexos-carregar`: a lista de anexos na ficha do RH.
+  // - `hr-anexo-obter-url`: o URL assinado de um anexo (`hr-anexo-url`).
+  // - `hr-pessoa-fotografia`: o URL da fotografia do cabecalho da ficha.
+  | "hr-convite-anexos"
+  | "hr-pessoa-anexos-carregar"
+  | "hr-anexo-obter-url"
+  | "hr-pessoa-fotografia"
   // Periodo de processamento salarial (`hr_periodos_processamento`,
   // 20261201220000) -- ciclo de vida abrir/fechar. Mesma razao das outras
   // escritas versionadas de RH: a leitura falhada esconde se o periodo esta

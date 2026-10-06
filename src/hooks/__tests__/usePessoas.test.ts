@@ -201,6 +201,7 @@ function payloadMinimo(overrides: Partial<NovaPessoaPayload> = {}): NovaPessoaPa
     niss: null,
     morada: null,
     conta: null,
+    bicSozinho: null,
     emergencia: null,
     vinculo: null,
     horasVinculo: null,
@@ -330,6 +331,60 @@ describe("usePessoas", () => {
     // pelo proprio `await` sequencial em `criarPessoa` -- aqui confirma-se que
     // ambas aconteceram e que a ficha nao ficou por criar.
     expect(indiceMorada).toBe(0);
+  });
+
+  it("com conta, o BIC segue em rpc_hr_definir_conta como p_swift e nao ha rpc_hr_definir_bic", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(
+        payloadMinimo({
+          conta: { formato: "iban", numero: "PT50000201231234567890154", swift: "CGDIPTPL" },
+        }),
+      );
+    });
+
+    const definirConta = chamadasRpc.find((c) => c.fn === "rpc_hr_definir_conta");
+    expect(definirConta?.args).toEqual({
+      p_pessoa_id: "pessoa-nova",
+      p_formato: "iban",
+      p_conta: "PT50000201231234567890154",
+      p_swift: "CGDIPTPL",
+    });
+    expect(chamadasRpc.find((c) => c.fn === "rpc_hr_definir_bic")).toBeUndefined();
+  });
+
+  it("so com BIC (sem conta), chama rpc_hr_definir_bic e nunca rpc_hr_definir_conta", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(payloadMinimo({ bicSozinho: "CGDIPTPL" }));
+    });
+
+    expect(chamadasRpc.find((c) => c.fn === "rpc_hr_definir_bic")?.args).toEqual({
+      p_pessoa_id: "pessoa-nova",
+      p_bic: "CGDIPTPL",
+    });
+    expect(chamadasRpc.find((c) => c.fn === "rpc_hr_definir_conta")).toBeUndefined();
+  });
+
+  it("se rpc_hr_definir_bic falhar, a ficha fica criada e a falha volta na seccao bancarios", async () => {
+    rpcImpl = (fn) =>
+      fn === "rpc_hr_definir_bic"
+        ? Promise.resolve({ data: null, error: { message: "bic_invalido", code: "P0001" } })
+        : Promise.resolve({ data: null, error: null });
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+    await act(async () => {
+      resultado = await result.current.criarPessoa(payloadMinimo({ bicSozinho: "CGDIPTPL" }));
+    });
+
+    expect(resultado?.id).toBe("pessoa-nova");
+    expect(resultado?.falhas.map((f) => f.seccao)).toContain("bancarios");
   });
 
   it("se rpc_hr_ligar_conta falhar, a ficha fica criada e a falha volta com seccao 'conta'", async () => {

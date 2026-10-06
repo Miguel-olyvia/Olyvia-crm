@@ -2,6 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { resolveCallerIdentity, authErrorResponse, validateOrgScope } from "../_shared/auth.ts";
 import { orgScoped, type OrgScopedQueryBuilder } from "../_shared/orgScopedQuery.ts";
+import { detectSignature, toHex } from "../_shared/fileSignature.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -41,49 +42,9 @@ const ALLOWED_SIGNATURES_BY_BUCKET: Record<FinalBucket, ReadonlySet<string>> = {
   "hr-documentos": new Set(["pdf", "png", "jpeg"]),
 };
 
-/**
- * Formata os bytes de um digest (ex.: SHA-256) como hexadecimal minusculo,
- * o mesmo formato que pessoas_documentos_ficheiro_hash_formato exige.
- */
-function toHex(bytes: ArrayBuffer): string {
-  return Array.from(new Uint8Array(bytes))
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-function bytesStartWith(bytes: Uint8Array, signature: number[], offset = 0): boolean {
-  if (bytes.length < offset + signature.length) return false;
-  return signature.every((byte, index) => bytes[offset + index] === byte);
-}
-
-/**
- * Detects the real file type from its binary signature (magic bytes), ignoring
- * whatever MIME type the client claims. Returns a signature category or null
- * when nothing recognized is found.
- */
-export function detectSignature(bytes: Uint8Array): string | null {
-  if (bytesStartWith(bytes, [0x25, 0x50, 0x44, 0x46, 0x2d])) return "pdf";
-  if (bytesStartWith(bytes, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "png";
-  if (bytesStartWith(bytes, [0xff, 0xd8, 0xff])) return "jpeg";
-  if (bytesStartWith(bytes, [0x47, 0x49, 0x46, 0x38])) return "gif";
-  if (bytesStartWith(bytes, [0x52, 0x49, 0x46, 0x46]) && bytesStartWith(bytes, [0x57, 0x45, 0x42, 0x50], 8)) {
-    return "webp";
-  }
-  if (bytesStartWith(bytes, [0x50, 0x4b, 0x03, 0x04])) return "zip-office";
-  if (bytesStartWith(bytes, [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) return "ole2-office";
-  // MP4's signature lives at byte offset 4 ("ftyp"), not at byte 0.
-  if (bytesStartWith(bytes, [0x66, 0x74, 0x79, 0x70], 4)) return "mp4";
-  if (bytesStartWith(bytes, [0x1a, 0x45, 0xdf, 0xa3])) return "webm";
-  if (
-    bytesStartWith(bytes, [0xff, 0xfb]) ||
-    bytesStartWith(bytes, [0xff, 0xf3]) ||
-    bytesStartWith(bytes, [0xff, 0xf2]) ||
-    bytesStartWith(bytes, [0x49, 0x44, 0x33])
-  ) {
-    return "mp3";
-  }
-  return null;
-}
+// A deteccao de assinaturas vive em _shared/fileSignature.ts (partilhada com os
+// anexos do convite de admissao); re-exportada para o index.test.ts nao mudar.
+export { detectSignature };
 
 export function isSignatureAllowedForBucket(signature: string | null, finalBucket: string): boolean {
   if (!signature) return false;

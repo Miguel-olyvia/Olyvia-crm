@@ -18,9 +18,10 @@
  *      Function e exactamente as que a RPC le de `p_dados`;
  *   2. a lista declarada nao pode divergir do que a funcao de construcao
  *      devolve de facto;
- *   3. as unicas chaves que a RPC le e que o payload nao traz sao a agencia e
- *      o SWIFT, que nao existem na folha de cadastro em papel -- e a lista
- *      dessas e fechada, para nao servir de saco de excepcoes;
+ *   3. a unica chave que a RPC le e que o payload nao traz e a agencia, que
+ *      nao existe na folha de cadastro em papel -- e a lista dessas e fechada,
+ *      para nao servir de saco de excepcoes (o BIC, `conta_swift`, passou a
+ *      contrato);
  *   4. a lista de campos obrigatorios em TypeScript e a mesma que a base
  *      declara em `hr_admissao_campos_obrigatorios()`, incluindo quais sao
  *      condicionais.
@@ -76,16 +77,17 @@ const EDGE = Object.values(
 )[0];
 
 /**
- * As chaves que a RPC le e que NENHUM payload traz: a agencia e o SWIFT, que a
- * folha de cadastro em papel nao pede e o formulario por isso nao tem. A RPC
- * sabe grava-las para o dia em que alguem as pedir por outro caminho. A lista e
+ * As chaves que a RPC le e que NENHUM payload traz: a agencia, que a folha de
+ * cadastro em papel nao pede e o formulario por isso nao tem. A RPC sabe
+ * grava-la para o dia em que alguem a pedir por outro caminho. A lista e
  * comparada por igualdade, nao por "contem": uma excepcao nova tem de ser
  * escrita aqui de propria mao, com esta explicacao a frente.
  *
- * O IBAN, o titular e o banco SAIRAM desta lista a 28/11: passaram a ser chaves
- * do contrato como as outras, e a conta deixou de ser deitada fora.
+ * O IBAN, o titular e o banco SAIRAM desta lista a 28/11, e o BIC
+ * (`conta_swift`) saiu com a migration 20261210040000: passaram a ser chaves do
+ * contrato como as outras, e a conta deixou de ser deitada fora.
  */
-const CHAVES_SO_DA_RPC = ["conta_agencia", "conta_swift"] as const;
+const CHAVES_SO_DA_RPC = ["conta_agencia"] as const;
 
 const SO_DA_RPC = new Set<string>(CHAVES_SO_DA_RPC);
 
@@ -163,7 +165,7 @@ describe("o contrato de chaves do convite de admissao", () => {
     expect(chavesDaEdgeFunction()).toEqual(esperadas);
   });
 
-  it("a RPC de submeter le exactamente essas chaves, mais a agencia e o SWIFT", () => {
+  it("a RPC de submeter le exactamente essas chaves, mais a agencia", () => {
     const sql = migrationQueDefine("rpc_hr_convite_admissao_submeter");
     const lidas = chavesLidasPelaRpc(corpoDaFuncao(sql, "rpc_hr_convite_admissao_submeter"));
 
@@ -230,6 +232,7 @@ const VAZIO_OBRIGATORIOS: RascunhoConviteObrigatorios = {
   conta_numero: "",
   conta_titular: "",
   conta_banco: "",
+  conta_bic: "",
 };
 
 describe("a lista de obrigatorios da admissao", () => {

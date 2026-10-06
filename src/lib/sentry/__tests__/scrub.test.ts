@@ -116,6 +116,34 @@ describe("network breadcrumb PII", () => {
     );
   });
 
+  it("replaces the invitation token in /admissao/:token (the token alone authorises the draft and the files)", () => {
+    const TOKEN = "tok-secreto-1234567890abcdef";
+    expect(sanitizeUrl(`https://app.olyvia.pt/admissao/${TOKEN}`)).toBe(
+      "https://app.olyvia.pt/admissao/[token]"
+    );
+    expect(sanitizeUrl(`/admissao/${TOKEN}?lang=en#x`)).toMatch(/\/admissao\/\[token\]$/);
+    expect(sanitizeUrl(`https://app.olyvia.pt/admissao/${TOKEN}/`)).not.toContain(TOKEN);
+    expect(sanitizeUrl(`https://app.olyvia.pt/admissao/${TOKEN}/outra/coisa`)).not.toContain(TOKEN);
+    // Outras rotas nao sao tocadas.
+    expect(sanitizeUrl("https://app.olyvia.pt/admissoes/lista")).toBe(
+      "https://app.olyvia.pt/admissoes/lista"
+    );
+  });
+
+  it("never lets the invitation token through breadcrumbs or the event request url", () => {
+    const TOKEN = "tok-secreto-1234567890abcdef";
+    const nav = beforeBreadcrumb({
+      category: "navigation",
+      data: { from: "/rh", to: `/admissao/${TOKEN}` },
+    });
+    expect(JSON.stringify(nav)).not.toContain(TOKEN);
+    const xhr = beforeBreadcrumb({
+      category: "fetch",
+      data: { url: `https://app.olyvia.pt/admissao/${TOKEN}`, method: "GET" },
+    });
+    expect(JSON.stringify(xhr)).not.toContain(TOKEN);
+  });
+
   it("still key-scrubs PII on non-network breadcrumbs", () => {
     const sanitized = beforeBreadcrumb({
       category: "ui.click",

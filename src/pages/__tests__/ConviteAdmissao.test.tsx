@@ -26,6 +26,7 @@ const NOVAS: Record<string, string> = {
   "hr.convite.erro.nifInvalido": "O NIF não é válido. Verifique os números.",
   "hr.convite.erro.nissInvalido": "O número da Segurança Social não é válido. Verifique os números.",
   "hr.convite.erro.ibanInvalido": "O IBAN não é válido. Verifique os números.",
+  "hr.convite.erro.bicInvalido": "O BIC não é válido. Tem 8 ou 11 caracteres.",
   "hr.convite.erro.faltaPreencher": "Falta preencher: {{campos}}.",
   "hr.convite.saudacao": "Olá, {{nome}}.",
   "hr.convite.jaRegistado": "Já temos registado:",
@@ -356,6 +357,107 @@ describe("ConviteAdmissao (ecra publico)", () => {
 
       expect(await screen.findByText("O IBAN não é válido. Verifique os números.")).toBeTruthy();
       expect(accoesChamadas("submeter")).toHaveLength(0);
+    });
+  });
+
+  describe("BIC na conta bancaria", () => {
+    function corpoDaSubmissao(): { dados: Record<string, unknown> } {
+      const [chamada] = accoesChamadas("submeter");
+      return (chamada[1] as { body: { dados: Record<string, unknown> } }).body;
+    }
+
+    it("o campo BIC aparece na pagina 2, a seguir ao IBAN", async () => {
+      renderConvite();
+      await esperarFormulario();
+      await irParaPagina2();
+
+      const iban = document.getElementById("convite-conta-numero") as HTMLElement;
+      const bic = document.getElementById("convite-conta-bic") as HTMLElement;
+      expect(bic).not.toBeNull();
+      expect(iban.compareDocumentPosition(bic) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByLabelText(/SWIFT \/ BIC/)).toBe(bic);
+    });
+
+    it("escreve-se em maiusculas, sem espacos e com no maximo 11 caracteres", async () => {
+      renderConvite();
+      await esperarFormulario();
+      await irParaPagina2();
+
+      preencher("convite-conta-bic", "cgdi ptpl xxx yy");
+
+      expect((document.getElementById("convite-conta-bic") as HTMLInputElement).value).toBe(
+        "CGDIPTPLXXX",
+      );
+    });
+
+    it("um BIC malformado mostra a mensagem traduzida e nao submete", async () => {
+      renderConvite();
+      await esperarFormulario();
+      await irParaPagina2();
+
+      preencher("convite-conta-bic", "ABCD1234");
+      assinarEAceitar();
+      fireEvent.click(screen.getByRole("button", { name: "Submeter" }));
+
+      expect(await screen.findByText("O BIC não é válido. Tem 8 ou 11 caracteres.")).toBeTruthy();
+      expect(
+        document.getElementById("convite-conta-bic")?.getAttribute("aria-invalid"),
+      ).toBe("true");
+      expect(accoesChamadas("submeter")).toHaveLength(0);
+    });
+
+    it("o payload leva conta_swift normalizado, mesmo sem IBAN", async () => {
+      renderConvite();
+      await esperarFormulario();
+      await irParaPagina2();
+
+      preencher("convite-conta-bic", "cgdiptpl");
+      assinarEAceitar();
+      fireEvent.click(screen.getByRole("button", { name: "Submeter" }));
+
+      await waitFor(() => expect(accoesChamadas("submeter")).toHaveLength(1));
+      expect(corpoDaSubmissao().dados.conta_swift).toBe("CGDIPTPL");
+      expect(corpoDaSubmissao().dados.iban).toBeNull();
+    });
+
+    it("sem BIC, conta_swift vai a null (a chave esta sempre presente)", async () => {
+      renderConvite();
+      await esperarFormulario();
+      await irParaPagina2();
+
+      assinarEAceitar();
+      fireEvent.click(screen.getByRole("button", { name: "Submeter" }));
+
+      await waitFor(() => expect(accoesChamadas("submeter")).toHaveLength(1));
+      expect(Object.prototype.hasOwnProperty.call(corpoDaSubmissao().dados, "conta_swift")).toBe(
+        true,
+      );
+      expect(corpoDaSubmissao().dados.conta_swift).toBeNull();
+    });
+
+    it("bic_invalido recusado pelo servidor marca o campo e fica na pagina 2", async () => {
+      renderConvite();
+      await esperarFormulario();
+      await irParaPagina2();
+      submissao = erroHttp(400, { error: "bic_invalido" });
+      preencher("convite-conta-bic", "CGDIPTPL");
+      assinarEAceitar();
+      fireEvent.click(screen.getByRole("button", { name: "Submeter" }));
+
+      expect(await screen.findByText("O BIC não é válido. Tem 8 ou 11 caracteres.")).toBeTruthy();
+      expect(document.getElementById("convite-conta-bic")).not.toBeNull();
+      expect(screen.queryByText("bic_invalido")).toBeNull();
+    });
+
+    it("o BIC marca-se como obrigatorio quando o servidor o pede", async () => {
+      estado = estadoOk({ campos_obrigatorios: [{ codigo: "conta_bic", condicional: false }] });
+      renderConvite();
+      await esperarFormulario();
+      await irParaPagina2();
+
+      expect(document.getElementById("convite-conta-bic")?.getAttribute("aria-required")).toBe(
+        "true",
+      );
     });
   });
 

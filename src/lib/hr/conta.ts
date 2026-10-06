@@ -52,6 +52,28 @@ export function ibanValido(valor: string): boolean {
   return resto === 1;
 }
 
+/** O BIC como a base o guarda: maiusculas e sem espacos (mesma ideia de `normalizarConta`). */
+export function normalizarBic(valor: string): string {
+  return valor.replace(/\s+/g, "").toUpperCase();
+}
+
+/**
+ * 4 letras do banco, 2 do pais, 2 alfanumericos da localidade e, opcionalmente,
+ * 3 alfanumericos da agencia: 8 ou 11 caracteres.
+ */
+const FORMATO_BIC = /^[A-Z]{6}[A-Z0-9]{2}([A-Z0-9]{3})?$/;
+
+/**
+ * BIC valido. E A MESMA regra de `public.hr_bic_valido` (20261210040000); se
+ * divergirem, manda a base. Vazio nao e invalido -- e ausencia, como em
+ * `contaValida`.
+ */
+export function bicValido(valor: string): boolean {
+  const bic = normalizarBic(valor);
+  if (bic === "") return true;
+  return FORMATO_BIC.test(bic);
+}
+
 /** O valor serve para o formato escolhido? Vazio nao e invalido -- e ausencia. */
 export function contaValida(formato: FormatoConta, valor: string): boolean {
   const conta = normalizarConta(valor);

@@ -354,6 +354,13 @@ export interface Pessoa {
   data_saida: string | null;
   estado_registo: EstadoRegisto;
   notas: string | null;
+  /**
+   * A fotografia da pessoa (`pessoas_anexos.id`, tipo `fotografia`, estado
+   * `promovido`), vinda do convite de admissao. So se mostra por URL assinado
+   * (`usePessoaFotografia`); sem ela, o cabecalho mostra as iniciais.
+   * Opcional: so as leituras da ficha a pedem.
+   */
+  fotografia_anexo_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -1002,4 +1009,28 @@ export interface PessoaDocumento {
   anulado_em: string | null;
   anulado_motivo: string | null;
   created_at?: string;
+}
+
+// -- Anexos da admissao -------------------------------------------------------
+
+/** O que um anexo da admissao e: so estes tres tipos existem. */
+export type TipoAnexoAdmissao = "cartao_cidadao" | "comprovativo_iban" | "fotografia";
+
+/**
+ * Um anexo PROMOVIDO (a admissao foi aceite) em `pessoas_anexos`. So as colunas
+ * que `authenticated` pode ler: o caminho no Storage, o hash, o IP e o convite
+ * ficam fechados por GRANT por coluna. O conteudo so se abre por um URL
+ * assinado de `hr-anexo-url`, que decide por tipo e audita.
+ */
+export interface PessoaAnexo {
+  id: string;
+  organization_id: string;
+  pessoa_id: string;
+  tipo: TipoAnexoAdmissao;
+  estado: "promovido";
+  nome_original: string;
+  mime_type: string | null;
+  tamanho_bytes: number | null;
+  promovido_em: string | null;
+  criado_em: string;
 }
