@@ -61,6 +61,15 @@ body {
   .animate-in-pop {
     animation: pop-in 0.16s cubic-bezier(0.16, 1, 0.3, 1);
   }
+  /* Uma linha que acabou de ser arrastada: acende e apaga. */
+  .animate-realce {
+    animation: realce 0.9s ease-out;
+  }
+}
+
+@keyframes realce {
+  0% { background-color: rgb(237 233 254); box-shadow: inset 3px 0 0 #7c3aed; }
+  100% { background-color: transparent; box-shadow: inset 3px 0 0 transparent; }
 }
 
 @keyframes fade-in {
@@ -75,7 +84,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .animate-in-fade,
-  .animate-in-pop {
+  .animate-in-pop,
+  .animate-realce {
     animation: none;
   }
 }

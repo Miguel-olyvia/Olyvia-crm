@@ -1103,8 +1103,10 @@ export function gravarModeloServico(orgId: string, servicoId: string, tarefas: T
         procedimento: t.procedimento,
         materiais: t.materiais,
         ferramentas: t.ferramentas,
-        // A condição, o encaixe e os fatores não se mandam: a base guarda os
-        // que lá estão, pela chave do passo.
+        // A condição, o encaixe e os fatores só se mandam quando o ecrã os
+        // mudou; senão a base guarda os que lá estão, pela chave do passo.
+        ...(t.condicao !== undefined ? { condicao: t.condicao } : {}),
+        ...(t.fatores !== undefined ? { fatores: t.fatores } : {}),
         ...(t.chave ? { chave: t.chave } : {}),
         ...(t.depende_chaves ? { depende_chaves: t.depende_chaves } : {}),
         ...(t.espera_antes_horas != null ? { espera_antes_horas: t.espera_antes_horas } : {}),

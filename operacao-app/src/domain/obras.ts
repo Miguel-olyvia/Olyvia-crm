@@ -82,6 +82,28 @@ export const FASES_POR_DEFEITO = [
 
 export const MINUTOS_POR_DIA = 480;
 
+/**
+ * Tipos de serviço de um modelo de obra — lista fechada (não é campo livre):
+ * é por aqui que se agrupam e filtram os modelos.
+ */
+export const TIPOS_SERVICO = [
+  { valor: "remodelacao", rotulo: "Remodelação geral" },
+  { valor: "casa_banho", rotulo: "Casa de banho" },
+  { valor: "cozinha", rotulo: "Cozinha" },
+  { valor: "pintura", rotulo: "Pintura" },
+  { valor: "pavimentos", rotulo: "Pavimentos e revestimentos" },
+  { valor: "canalizacao", rotulo: "Canalização" },
+  { valor: "eletricidade", rotulo: "Eletricidade" },
+  { valor: "carpintaria", rotulo: "Carpintaria e caixilharia" },
+  { valor: "climatizacao", rotulo: "Climatização" },
+  { valor: "impermeabilizacao", rotulo: "Impermeabilização e coberturas" },
+  { valor: "manutencao", rotulo: "Manutenção" },
+  { valor: "outro", rotulo: "Outro" },
+] as const;
+
+export const rotuloTipoServico = (v: string | null | undefined): string =>
+  !v ? "" : TIPOS_SERVICO.find((t) => t.valor === v)?.rotulo ?? v;
+
 /* ───────────────────────────── Perfis ───────────────────────────── */
 
 export function podePlanear(funcao: string | null | undefined): boolean {

@@ -635,4 +635,42 @@ describe("páginas de Obras (fumo)", () => {
     expect(servico).toBe("s1");
     expect(tarefas[1]).toMatchObject({ nome: "Instalar", depende_ordem: 1, minutos_fixos: 30, skill_id: "k1" });
   });
+
+  it("Modelos → Serviços: passos agrupados por fase, mudam de fase com as setas e arrastando, e a dependência segue o passo", async () => {
+    vi.mocked(obras.gravarModeloServico).mockClear();
+    em("/obras/modelos", <ObraModelos />);
+    fireEvent.click(await screen.findByText("Base de duche"));
+    expect(await screen.findByText(/Fase 2 · Instalações técnicas/)).toBeInTheDocument();
+    // "Instalar" é o último da fase 2: descer leva-o para o início da fase 3.
+    fireEvent.click(screen.getAllByLabelText("Descer")[1]);
+    // Arrastar "Abrir roços" para cima de "Instalar" (fase 3): fica antes dele.
+    const linhas = () => screen.getAllByPlaceholderText("Ex.: Abrir roços").map((i) => i.closest("tr")!);
+    const pegas = () => screen.getAllByTitle("Arrastar");
+    fireEvent.pointerDown(pegas()[0]);
+    const dt = { setData: vi.fn(), effectAllowed: "", dropEffect: "" };
+    fireEvent.dragStart(linhas()[0], { dataTransfer: dt });
+    fireEvent.dragOver(linhas()[1], { dataTransfer: dt });
+    fireEvent.drop(linhas()[1], { dataTransfer: dt });
+    fireEvent.click(screen.getByText("Gravar modelo"));
+    await waitFor(() => expect(obras.gravarModeloServico).toHaveBeenCalled());
+    const [, , tarefas] = vi.mocked(obras.gravarModeloServico).mock.calls[0];
+    expect(tarefas.map((t) => [t.nome, t.fase])).toEqual([
+      ["Abrir roços", 3],
+      ["Instalar", 3],
+    ]);
+    // A dependência segue o passo, não a posição.
+    expect(tarefas[1].depende_ordem).toBe(1);
+  });
+
+  it("Modelos → Tipos de obra: o tipo de serviço é uma lista, e o editor mostra a árvore de fases", async () => {
+    em("/obras/modelos", <ObraModelos />);
+    fireEvent.click(await screen.findByText("Tipos de obra"));
+    fireEvent.click(await screen.findByText("Editar"));
+    const tipo = screen.getByLabelText("Tipo de serviço") as HTMLSelectElement;
+    expect(tipo.tagName).toBe("SELECT");
+    expect(tipo.value).toBe("remodelacao");
+    expect(screen.getByRole("option", { name: "Casa de banho" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Preparação e demolições")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Proteção")).toBeInTheDocument();
+  });
 });

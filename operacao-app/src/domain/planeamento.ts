@@ -127,6 +127,10 @@ const ROTULO_FATOR: Record<string, string> = {
   distancia: "distância à entrada", animais: "animais", janela: "janela", local_cortes: "cortes",
   altura_revestimento: "revestimento",
 };
+/** Os fatores que um passo pode declarar (os que `fatoresDoLocal` sabe calcular). */
+export const FATORES_CONHECIDOS = Object.keys(ROTULO_FATOR);
+export const rotuloDoFator = (k: string): string => ROTULO_FATOR[k] ?? k;
+
 const ROTULO_VALOR: Record<string, string> = {
   sim: "sim", nao: "não", facil: "fácil", dificil: "difícil", rc: "r/c", pouco: "pouco", medio: "médio",
   muito: "muito", curta: "curta", media: "média", longa: "longa", na_area: "na área", varanda: "na varanda",
