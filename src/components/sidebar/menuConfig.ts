@@ -12,7 +12,6 @@ import {
   UsersRound,
   Crosshair,
   FileText,
-  BookText,
   Briefcase,
   Megaphone,
   Shield,
@@ -207,7 +206,7 @@ export const menuSections: MenuSection[] = [
     id: "rh",
     icon: IdCard,
     labelKey: "sidebar.hrModule",
-    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/assiduidade-e-ausencias", "/rh/centros", "/rh/cargos", "/rh/admissao/configuracao", "/rh/documentos/modelos", "/rh/documentos/clausulas", "/rh/processamento-salarial"],
+    paths: ["/rh/pessoas", "/rh/ausencias/aprovacoes", "/rh/ausencias/organizacao", "/rh/assiduidade/organizacao", "/rh/assiduidade-e-ausencias", "/rh/centros", "/rh/cargos", "/rh/admissao/configuracao", "/rh/documentos/modelos", "/rh/processamento-salarial"],
     permissions: ["hr.module.access", "hr.pessoas.view", "hr.ausencias.view", "hr.assiduidade.view", "hr.ausencias.aprovar.chefia", "hr.ausencias.aprovar.rh", "hr.locais.view", "hr.pessoas.laborais.view", "hr.admissao.obrigatorios.gerir", "hr.pessoas.documentos.modelos.view", "hr.vencimento.codigos.view", "hr.vencimento.subsidio.view"],
     items: [
       { to: "/rh/pessoas", icon: Users, labelKey: "sidebar.hr", permission: "hr.pessoas.view" },
@@ -230,9 +229,6 @@ export const menuSections: MenuSection[] = [
       // para emitir a um pessoa (20261123020000). Permissao ja existe, so
       // atribuida a super_admin -- ver hrDb/useModelosDocumentosRH.
       { to: "/rh/documentos/modelos", icon: FileText, labelKey: "sidebar.hrModelosDocumentos", permission: "hr.pessoas.documentos.modelos.view" },
-      // Clausulas reutilizaveis (20261202010000): mesma permissao dos
-      // modelos -- quem edita modelos edita clausulas.
-      { to: "/rh/documentos/clausulas", icon: BookText, labelKey: "sidebar.hrClausulasDocumentos", permission: "hr.pessoas.documentos.modelos.view" },
       // "Processamento Salarial" (nome de apresentacao; dominio interno
       // continua "vencimento" -- permissoes hr.vencimento.*, tabelas e hooks
       // nao mudam de nome, 20261201180000..20261201200000) e o dominio, nao
