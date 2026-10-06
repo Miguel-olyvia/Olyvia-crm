@@ -24,11 +24,21 @@ const ObraModelos = lazy(() => import("./pages/ObraModelos"));
 const ObraMetricas = lazy(() => import("./pages/ObraMetricas"));
 const MinhasTarefas = lazy(() => import("./pages/MinhasTarefas"));
 const Validar = lazy(() => import("./pages/Validar"));
+// Pública: o cliente acompanha a obra por um link privado, sem conta.
+const Acompanhar = lazy(() => import("./pages/Acompanhar"));
 
 export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route
+        path="/acompanhar/:token"
+        element={
+          <Suspense fallback={<Spinner label="A abrir a sua obra…" />}>
+            <Acompanhar />
+          </Suspense>
+        }
+      />
       <Route
         element={
           <ProtectedRoute>
