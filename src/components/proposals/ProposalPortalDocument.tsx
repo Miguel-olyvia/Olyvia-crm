@@ -49,8 +49,11 @@ interface ProposalPortalDocumentProps {
   otpCode?: string;
   maskedPhone?: string;
   otpError?: string;
+  /** Primeiro envio do código (Enviar código SMS e Aceitar e Assinar). */
   onSendOtp?: () => void;
-  /** Segundos que faltam até se poder pedir novo código (0 = livre). */
+  /** Reenviar código; se não vier, usa onSendOtp. */
+  onResendOtp?: () => void;
+  /** Segundos que faltam até se poder reenviar o código (0 = livre). Só afecta o Reenviar. */
   otpCooldown?: number;
   onVerifyOtp?: () => void;
   onOtpCodeChange?: (code: string) => void;
@@ -109,6 +112,7 @@ export function ProposalPortalDocument({
   maskedPhone = "",
   otpError = "",
   onSendOtp,
+  onResendOtp,
   otpCooldown = 0,
   onVerifyOtp,
   onOtpCodeChange,
@@ -967,12 +971,11 @@ export function ProposalPortalDocument({
                       size="lg"
                       className="gap-2"
                       onClick={onSendOtp}
-                      disabled={actionLoading || otpCooldown > 0}
+                      disabled={actionLoading}
                     >
                       <Smartphone className="h-5 w-5" />
-                      {cooldownLabel("Enviar código SMS", otpCooldown)}
+                      Enviar código SMS
                     </Button>
-                    <OtpCooldownNotice activo={otpCooldown > 0} />
                     {otpError && (
                       <p className="text-sm text-destructive">{otpError}</p>
                     )}
@@ -1011,7 +1014,7 @@ export function ProposalPortalDocument({
                     )}
                     <OtpCooldownNotice activo={otpCooldown > 0} />
                     <div className="flex gap-3 justify-center">
-                      <Button variant="outline" size="sm" onClick={onSendOtp} disabled={actionLoading || otpCooldown > 0}>
+                      <Button variant="outline" size="sm" onClick={onResendOtp ?? onSendOtp} disabled={actionLoading || otpCooldown > 0}>
                         {cooldownLabel("Reenviar código", otpCooldown)}
                       </Button>
                       <Button
@@ -1091,11 +1094,11 @@ export function ProposalPortalDocument({
                 size="lg"
                 className="gap-2"
                 style={{ backgroundColor: hasSelectedQuotes ? "#16a34a" : undefined }}
-                disabled={actionLoading || otpCooldown > 0 || (!isPreview && !hasSelectedQuotes)}
+                disabled={actionLoading || (!isPreview && !hasSelectedQuotes)}
                 onClick={onSendOtp}
               >
                 <CheckSquare className="h-5 w-5 text-white" />
-                <span className="text-white">{cooldownLabel("Aceitar e Assinar", otpCooldown)}</span>
+                <span className="text-white">Aceitar e Assinar</span>
               </Button>
             </div>
             {needsSelection && !hasSelectedQuotes && !isPreview && (

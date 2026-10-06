@@ -48,6 +48,7 @@ const ClientPortalProposalDetail = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
+  const otpSendingRef = useRef(false);
 
   const [portalData, setPortalData] = useState<ProposalPortalData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -175,7 +176,9 @@ const ClientPortalProposalDetail = () => {
     }
   }
 
-  async function handleSendOtp() {
+  // A contagem de 60 s é só do Reenviar: no primeiro envio começa quando o servidor aceita;
+  // no Reenviar começa no clique e não é reposta se o servidor recusar.
+  async function sendOtp(isResend: boolean) {
     if (!id) return; // H4
     // Validação local primeiro: sem orçamento seleccionado não se pede SMS nem começa a contagem.
     const quotes = portalData?.quotes || [];
@@ -190,9 +193,12 @@ const ClientPortalProposalDetail = () => {
       return;
     }
 
-    // A contagem começa no clique (antes da resposta) e não é reposta se o servidor recusar.
-    if (!otpCooldown.iniciar()) return;
-    setOtpStep("sending");
+    // Ref (e não estado) para que um segundo clique durante o pedido seja ignorado.
+    if (otpSendingRef.current) return;
+    if (isResend && !otpCooldown.iniciar()) return;
+    otpSendingRef.current = true;
+    // No Reenviar o passo não muda: o campo do código e o que já foi escrito mantêm-se.
+    if (!isResend) setOtpStep("sending");
     setOtpError("");
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
@@ -203,7 +209,7 @@ const ClientPortalProposalDetail = () => {
       if (data?.error) {
         if (data.error === "no_phone") {
           setOtpError("Não foi encontrado um número de telefone associado à sua conta. Contacte o comercial.");
-          setOtpStep("idle");
+          if (!isResend) setOtpStep("idle");
           return;
         }
         throw new Error(data.message || data.error);
@@ -211,14 +217,20 @@ const ClientPortalProposalDetail = () => {
 
       setMaskedPhone(data.masked_phone || "");
       setOtpStep("input");
+      if (!isResend) otpCooldown.iniciar();
       toast({ title: "Código SMS enviado", description: `Enviámos um código para ${data.masked_phone}` });
     } catch (err: any) {
       setOtpError(err.message);
-      setOtpStep("idle");
+      if (!isResend) setOtpStep("idle");
       captureFlowError(err, "client-portal-proposal");
       toast({ title: "Erro ao enviar SMS", description: err.message, variant: "destructive" });
+    } finally {
+      otpSendingRef.current = false;
     }
   }
+
+  const handleSendOtp = () => sendOtp(false);
+  const handleResendOtp = () => sendOtp(true);
 
   async function handleVerifyOtp() {
     if (!id) return; // H4
@@ -423,6 +435,7 @@ const ClientPortalProposalDetail = () => {
           maskedPhone={maskedPhone}
           otpError={otpError}
           onSendOtp={handleSendOtp}
+          onResendOtp={handleResendOtp}
           otpCooldown={otpCooldown.restante}
           onVerifyOtp={handleVerifyOtp}
           onOtpCodeChange={setOtpCode}
