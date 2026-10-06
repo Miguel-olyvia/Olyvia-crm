@@ -7045,6 +7045,20 @@ BEGIN
   IF v_auth IS NULL THEN
     RETURN 'sem_sino';   -- existe em Operações mas não entra na aplicação
   END IF;
+  -- Só a equipa: nunca um cliente do CRM (membership role_is_client) nem
+  -- quem não tem perfil ativo em Operações nesta organização.
+  IF NOT EXISTS (SELECT 1 FROM public.ops_utilizador_perfil p
+                  WHERE p.organization_id = _org AND p.utilizador_id = _utilizador AND p.ativo) THEN
+    RETURN 'fora_da_equipa';
+  END IF;
+  IF public.ops_obra_crm_tem('anew_memberships', ARRAY['user_id','organization_id','role_is_client']) THEN
+    EXECUTE 'SELECT EXISTS (SELECT 1 FROM public.anew_memberships m
+                             WHERE m.user_id = $1 AND m.organization_id = $2 AND m.role_is_client)'
+       INTO v_novas USING _utilizador, _org;
+    IF v_novas THEN
+      RETURN 'cliente';
+    END IF;
+  END IF;
 
   v_dados := COALESCE(_dados, '{}'::jsonb)
              || jsonb_build_object('modulo', 'operacoes', 'obra_id', _obra, 'chaves', to_jsonb(v_chaves));
