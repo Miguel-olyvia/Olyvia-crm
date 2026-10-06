@@ -232,10 +232,43 @@ As permissões são sempre verificadas **na organização da obra**, com `ops_po
 - Não há FK para o CRM nem escritas no CRM.
 - A verificação no fim do ficheiro rebenta se alguma destas regras falhar.
 
+## Fecho da obra (`db/obras-fecho.sql`, 06/10/2026)
+
+O último dia da obra, no local, de telemóvel na mão — separador **Fecho** na
+ficha da obra.
+
+| Peça | O que faz | Quem |
+|---|---|---|
+| **Divisões** | Cozinha, casa de banho, geral. Sem divisões, o ecrã sugere-as pelo título/modelo (um toque). | supervisor da obra, gestor |
+| **Vistoria** | Lista curta por tipo de divisão; cada item responde-se num toque (✓ / ✕ / n/a). "✕" abre um remate, uma vez. A lista muda-se por organização ("Editar a lista"); vazia = volta à de origem (`ops_obra_vistoria_padrao`). | supervisor, gestor; a lista só o gestor |
+| **Remates** | Divisão, descrição, foto, responsável, origem (vistoria/receção). aberto → resolvido → verificado; reabrir. | cria/verifica: supervisor, gestor; resolve: também o responsável |
+| **Antes/depois** | Marca fotos das tarefas como "antes"/"depois" de uma divisão; lado a lado. | quem tirou, supervisor, gestor |
+| **Auto de receção** | Resumo (obra, cliente, morada, datas previstas vs reais, tarefas, remates por fechar), observações, nome e **assinatura desenhada no ecrã**. Gera o PDF no telemóvel (`src/domain/pdfAuto.ts`, sem biblioteca) e guarda-o na obra; "Descarregar PDF". Refazer: só o gestor (o anterior fica em `ops_evento`). | supervisor, gestor |
+| **Concluir sem auto** | Justificação escrita (≥ 10 letras), registada na obra. | só gestor/admin |
+
+**A regra do fecho é um trigger** (`ops_obra_fecho_regra_trg`, BEFORE UPDATE OF
+estado em `ops_obra`), não uma mudança em `rpc_ops_obra_mudar_estado`: correr
+outra vez o `obras.sql` (que recria a RPC) não a desfaz. Vale para qualquer
+caminho — o ecrã publicado antes também passa a recusar, com a mensagem a
+apontar para o separador "Fecho".
+
+**Ficheiros** no bucket `operacoes`: `<org>/<obra>/fecho/…` (assinatura JPEG e
+PDF) e `<org>/<obra>/remates/…` (fotos dos remates). As políticas que já
+existem chegam (o 2.º segmento é a obra); as RPCs recusam caminhos de outra obra.
+
+**Email ao cliente: não.** A única função de email (`send-email`) exige a
+chave de serviço e usa o SMTP do CRM — chamá-la das Operações seria abrir uma
+porta nova. Fica "Descarregar PDF" (o supervisor envia-o pelo telemóvel). Se
+for para enviar sozinho, é uma decisão: uma edge function própria, com a
+permissão das Operações e o SMTP da organização.
+
+Validação: `npm run validar-obras-fecho` (52 verificações em PGlite, incluindo
+"a regra sobrevive a correr outra vez o obras.sql").
+
 ## Ordem de aplicação
 
 ```
-… sequência existente … → seguranca.sql → tempos.sql → obras.sql → margem-previsao.sql → capacidade.sql
+… sequência existente … → seguranca.sql → tempos.sql → obras.sql → obras-fotos.sql → obras-fecho.sql → margem-previsao.sql → capacidade.sql
 opcional (demo): demo-obras.sql   ·   remover: demo-obras-remover.sql
 ```
 
@@ -274,8 +307,11 @@ node tools/validar-instalacao.mjs
    criar o orçamento adicional automaticamente, Operações teria de escrever no CRM,
    o que é proibido por desenho. É preciso decidir: ou um botão no CRM que lê
    `ops_obra_extra`, ou uma exceção à regra.
-4. **Fecho da obra.** Hoje fecha-se com todas as tarefas validadas. Falta decidir se
-   é preciso a assinatura do cliente e quem fecha cada fase.
+4. **Fecho da obra.** ~~Falta decidir se é preciso a assinatura do cliente.~~
+   Desde 06/10/2026 (`db/obras-fecho.sql`): concluir exige todas as tarefas
+   validadas **e** o auto de receção assinado pelo cliente, ou uma justificação
+   do gestor. Continua em aberto: quem fecha cada **fase** (hoje só a obra tem
+   fecho) e o envio do auto ao cliente por email (ver "Fecho da obra").
 5. **Origem da obra.** Nasce do contrato assinado ou de quando o material está
    completo? Hoje o gestor cria-a quando quer, e o agendamento do início é a data
    que escolhe.

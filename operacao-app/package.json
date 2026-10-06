@@ -60,7 +60,9 @@
     "validar-equipa": "node tools/validar-equipa.mjs",
     "validar-margem-previsao": "node tools/validar-margem-previsao.mjs",
     "validar-capacidade": "node tools/validar-capacidade.mjs",
-    "validar-dados-encomendas": "node tools/validar-dados-encomendas.mjs"
+    "validar-dados-encomendas": "node tools/validar-dados-encomendas.mjs",
+    "validar-obras-fecho": "node tools/validar-obras-fecho.mjs",
+    "supabase:obras-fecho": "node tools/correr-sql.mjs db/obras-fecho.sql"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.80.0",

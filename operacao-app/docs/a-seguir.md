@@ -29,6 +29,18 @@ abaixo do limiar, fim provável (P50/P80) e simulador "e se…" sem gravar. Ver
 [`margem-previsao.md`](margem-previsao.md). Falta: custo/hora nos perfis (hoje
 conta o implícito no orçamento) e histórico real de tarefas validadas.
 
+## Fecho da obra no telemóvel — feito a 06/10/2026
+
+Remates, vistoria por divisão, fotos antes/depois e auto de receção assinado
+no ecrã, com PDF guardado na obra; concluir exige o auto ou a justificação do
+gestor. Ver [`obras.md`](obras.md) ("Fecho da obra"). Fica por fazer:
+
+1. **Enviar o auto ao cliente por email** — não há caminho seguro hoje (o
+   `send-email` é só de serviço). Decidir se vale uma edge function própria.
+2. **Fecho por fase** (quem fecha cada fase) — só a obra tem fecho.
+3. **Remates depois da entrega** (garantia): hoje, com a obra concluída, os
+   remates ficam como estão.
+
 ---
 
 ## Planeamento automático — o que ficou por fazer (03/10/2026)

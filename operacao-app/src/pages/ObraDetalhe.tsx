@@ -59,6 +59,7 @@ import { ClienteAvisado } from "../components/ObraAtraso";
 import { diasDeDesvio, formatarDesvio, rotuloMotivoAtraso } from "../domain/atrasos";
 import ObraPrevistoReal from "../components/ObraPrevistoReal";
 import ObraExtras from "../components/ObraExtras";
+import ObraFecho from "../components/ObraFecho";
 import { ObraEstadoBadge } from "../components/ObraEstadoBadge";
 import {
   formatarMinutos,
@@ -82,7 +83,7 @@ import { data as formatarData } from "../lib/formatar";
  * devolve os choques de agenda.
  */
 
-type Separador = "mapa" | "simular" | "previsto" | "extras";
+type Separador = "mapa" | "simular" | "previsto" | "extras" | "fecho";
 
 const TRANSICOES: Record<EstadoObra, { para: EstadoObra; rotulo: string; motivo: boolean }[]> = {
   planeada: [
@@ -499,6 +500,7 @@ function ObraDetalheFicha() {
             ["simular", "E se…?"],
             ["previsto", "Previsto vs real"],
             ["extras", `Trabalhos extra${extras.length ? ` (${extras.length})` : ""}`],
+            ["fecho", "Fecho"],
           ] as const
         ).map(([s, r]) => (
           <button
@@ -588,6 +590,17 @@ function ObraDetalheFicha() {
 
       {separador === "previsto" && <ObraPrevistoReal obraId={obra.id} recarga={recarga} />}
 
+      {separador === "fecho" && (
+        <ObraFecho
+          obraId={obra.id}
+          orgId={obra.organization_id}
+          funcao={funcao}
+          equipa={equipa}
+          recarga={recarga}
+          aoMudar={recarregar}
+        />
+      )}
+
       {separador === "extras" && (
         <ObraExtras
           obraId={obra.id}
@@ -643,7 +656,10 @@ function ObraDetalheFicha() {
         >
           <div className="space-y-3">
             {transicao.para === "concluida" && (
-              <p className="text-sm text-slate-600">Só se conclui com todas as tarefas validadas pelo supervisor.</p>
+              <p className="text-sm text-slate-600">
+                Só se conclui com todas as tarefas validadas e com o auto de receção assinado pelo cliente (ou a
+                justificação do gestor) — ver o separador “Fecho”.
+              </p>
             )}
             {transicao.para === "suspensa" && (
               <p className="text-sm text-slate-600">Suspender pára os relógios de quem estiver a trabalhar nela.</p>
