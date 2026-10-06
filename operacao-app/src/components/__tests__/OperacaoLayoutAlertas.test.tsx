@@ -20,6 +20,7 @@ vi.mock("../../auth/AuthProvider", () => ({ useAuth: () => auth }));
 vi.mock("../../lib/supabase", () => ({ supabase: { from: () => ({}), rpc: async () => ({ data: null, error: null }), auth: {}, functions: {}, storage: { from: () => ({}) } } }));
 vi.mock("../../lib/obras", () => ({
   EVENTO_ALERTAS: "ops:alertas-mudaram",
+  sincronizarAvisos: vi.fn(async () => undefined),
   alertasDeSupervisao: vi.fn(async () => [{ tipo: "nao_iniciada" }, { tipo: "fim_ultrapassado" }, { tipo: "cliente_por_avisar" }]),
 }));
 

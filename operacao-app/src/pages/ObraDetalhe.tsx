@@ -42,6 +42,7 @@ import {
 import { AlertTriangle, ChevronLeft, MapPin, Plus } from "../components/icons";
 import ObraGantt from "../components/ObraGantt";
 import FichaLocal from "../components/FichaLocal";
+import ObraAvisoBancada from "../components/ObraAvisoBancada";
 import ObraPorqueInicio from "../components/ObraPorqueInicio";
 import { etiquetaServico, nomesCurtos, servicosDistintos } from "../domain/nomesTarefas";
 import ObraTarefaPainel from "../components/ObraTarefaPainel";
@@ -402,6 +403,7 @@ export default function ObraDetalhe() {
         obraId={obra.id}
         plano={{ inicio: obra.inicio_planeado, fim: obra.fim_planeado, orcamentoId: obra.orcamento_id }}
       />
+      <ObraAvisoBancada obraId={obra.id} recarga={recarga} />
 
       {aviso && (
         <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">

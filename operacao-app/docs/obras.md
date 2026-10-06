@@ -137,6 +137,30 @@ Em branco ────────┘                               │
   - Por pessoa: real/previsto das tarefas em que trabalhou, pesado pelo tempo dela.
     Indica se é mais lento (formação?) ou mais rápido (boa prática?).
 
+## Avisos no sino do CRM
+
+Desde 06/10/2026, as obras avisam no sino do CRM. É a única escrita do
+módulo fora de `ops_*`: linhas em `public.notifications` (`kind =
+'notification'`, `user_id` = id de auth, `entity_type = 'ops_obra'`,
+`data.modulo = 'operacoes'`). Há três tipos de aviso, todos **por obra**:
+
+| Tipo | Quem recebe | Quando |
+|---|---|---|
+| `operacoes_obra_tarefas` | quem recebeu trabalho | ao atribuir (trigger; um aviso por pessoa e obra; quem se atribui a si não é avisado) → `/operacao/minhas-tarefas` |
+| `operacoes_obra_alertas` | o supervisor da obra e os gestores/admin | quando há alertas (fora do prazo, por começar, material tarde, cliente por avisar), resumidos; resolvem-se sozinhos quando acabam → `/operacao/obras/<código>` |
+| `operacoes_obra_bancada` | quem tem a especialidade **Marmorista** (e o supervisor) | quando a obra é planeada ou replaneada com tarefas de bancada: datas, medidas (ml de bancada) e local (piso, elevador, acesso) — para cortar e encomendar a pedra com antecedência. Sem ninguém com a especialidade, avisa o supervisor e os gestores a dizê-lo |
+
+Não há duplicados: cada aviso guarda as suas "chaves" (tarefas, alertas,
+datas). Se aparece uma chave nova, o mesmo aviso volta a ficar por ler. Se
+não, só o texto se atualiza. A ficha da obra mostra "Bancada: avisado o
+marmorista a …" (`rpc_ops_obra_aviso_bancada`, tabela `ops_obra_aviso`).
+
+Quando corre: os triggers (atribuição, datas das tarefas de bancada), o
+pg_cron de 15 em 15 minutos (`ops-obras-avisos` →
+`ops_obra_sincronizar_avisos()`) e a abertura das Operações por quem
+supervisiona (`rpc_ops_obra_sincronizar_avisos`, no máximo uma vez a cada 5
+minutos). Um aviso que falha nunca desfaz o trabalho que o gerou.
+
 ## Perfis
 
 | Função | Planear (criar obra, tarefas, datas, pessoas) | Executar | Validar | Extras: decidir | Custos (€) |

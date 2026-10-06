@@ -386,6 +386,8 @@ vi.mock("../../lib/obras", () => ({
   // Atrasos e alertas do supervisor.
   EVENTO_ALERTAS: "ops:alertas-mudaram",
   avisarAlertasMudaram: vi.fn(),
+  avisoBancada: vi.fn(async () => null),
+  sincronizarAvisos: vi.fn(async () => undefined),
   alertasDeSupervisao: vi.fn(async () => ALERTAS),
   atrasosDaObra: vi.fn(async () => ATRASOS),
   obterTarefa: vi.fn(async (id: string) => TAREFAS.find((t) => t.id === id) ?? null),

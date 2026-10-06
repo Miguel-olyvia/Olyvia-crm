@@ -1368,6 +1368,43 @@ export async function alertasDeSupervisao(orgId: string): Promise<AlertaSupervis
   }));
 }
 
+// Pôr os avisos do sino do CRM em dia (alertas e bancada). Corre também de
+// 15 em 15 min na base (pg_cron); daqui, no máximo uma vez a cada 5 min por
+// organização. Nunca falha para quem chama: o sino é acessório.
+const ultimaSincronizacao = new Map<string, number>();
+export async function sincronizarAvisos(orgId: string, forcar = false): Promise<void> {
+  const agora = Date.now();
+  if (!forcar && agora - (ultimaSincronizacao.get(orgId) ?? 0) < 5 * 60_000) return;
+  ultimaSincronizacao.set(orgId, agora);
+  try {
+    const { error } = await supabase.rpc("rpc_ops_obra_sincronizar_avisos", { p_org: orgId });
+    // eslint-disable-next-line no-console
+    if (error) console.warn("[Obras] avisos:", error.message);
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.warn("[Obras] avisos:", e);
+  }
+}
+
+/** O aviso da bancada ao marmorista (quando, a quem). `null` se não houve. */
+export interface AvisoBancada {
+  enviado_em: string;
+  sem_especialidade: boolean;
+  para: string[];
+  primeira: string | null;
+  datas: string | null;
+  medidas: string | null;
+  local: string | null;
+}
+
+export async function avisoBancada(obraId: string): Promise<AvisoBancada | null> {
+  const { data, error } = await supabase.rpc("rpc_ops_obra_aviso_bancada", { p_obra_id: obraId });
+  // Antes de o SQL desta versão correr, a função não existe: sem aviso, sem erro.
+  if (error) return null;
+  const a = (data ?? {}) as unknown as Partial<AvisoBancada>;
+  return a.enviado_em ? ({ ...a, para: a.para ?? [] } as AvisoBancada) : null;
+}
+
 /** Os alertas de uma obra (filtrados dos da organização). */
 export async function alertasDaObra(orgId: string, obraId: string): Promise<AlertaSupervisao[]> {
   return (await alertasDeSupervisao(orgId)).filter((a) => a.obra_id === obraId);

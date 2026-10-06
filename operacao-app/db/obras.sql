@@ -19,8 +19,9 @@
 --
 --  Regras de desenho, as mesmas do resto do módulo:
 --
---   · Escreve fora de `ops_*`? NÃO. Lê `quotes`, `quote_lines` e
---     `client_contracts`, nunca lhes escreve. Zero chaves estrangeiras para
+--   · Escreve fora de `ops_*`? Só avisos no sino do CRM
+--     (`notifications`, ver "Avisos no sino do CRM"). Lê `quotes`,
+--     `quote_lines` e `client_contracts`, nunca lhes escreve. Zero chaves estrangeiras para
 --     o CRM: `cliente_id`, `orcamento_id` e `contrato_id` são uuid soltos.
 --   · RLS ligada em todas as tabelas, com leitura por `ops_pode()` (filtra a
 --     organização — ver seguranca.sql). NÃO há policies de escrita: tudo o
@@ -6955,7 +6956,625 @@ BEGIN
 END
 $pol$;
 
+-- ============================================================
+-- Avisos no sino do CRM (06/10/2026)
+-- ============================================================
+-- A ÚNICA escrita deste ficheiro fora de `ops_*`: linhas em
+-- `public.notifications`, a tabela genérica do sino que a equipa já abre
+-- todos os dias no CRM. Decidido de propósito (a-seguir.md §1): um segundo
+-- sino dentro de Operações ninguém o via. Só INSERT e UPDATE nas NOSSAS
+-- linhas (data->>'modulo' = 'operacoes'); nunca DELETE, nunca o esquema.
+--
+-- O que se aprendeu a ler o CRM (e o feature/operacoes, que já escrevia
+-- avisos de ordens na produção com ops_notificar):
+--   · `kind` TEM de ser 'notification' — o sino filtra por isso (o default
+--     'alert' entra na tabela e nunca aparece);
+--   · `user_id` é o id de AUTH (anew_users.auth_user_id), não anew_users.id;
+--   · `entity_id` sempre preenchido (a obra): o cleanup_duplicate_notifications
+--     do CRM agrupa por (type, entity_id, user_id);
+--   · o sino abre `link` — /operacao/... abre a aplicação de Operações.
+--
+-- Três avisos, todos POR OBRA (não por tarefa — 17 obras com 78 tarefas
+-- davam dezenas de sinos ao gestor):
+--   operacoes_obra_tarefas     a quem foi atribuído trabalho na obra
+--   operacoes_obra_alertas     ao supervisor e aos gestores: os alertas da
+--                              obra (ops_obra_alertas_lista), resumidos;
+--                              resolve-se sozinho quando os alertas acabam
+--   operacoes_obra_bancada     ao marmorista (especialidade "Marmorista"):
+--                              medidas, local e datas, para preparar cortes
+--                              e encomendar; sem marmorista → supervisor e
+--                              gestores, a dizer que não há ninguém
+-- Sem duplicar: um aviso aberto por (pessoa, tipo, obra). Cada aviso guarda
+-- as suas "chaves" (tarefas, alertas, datas). Chave nova → o aviso volta a
+-- ficar por ler, com o texto novo; sem chave nova → só o texto se atualiza.
+-- Nunca rebenta: um aviso que falha não desfaz o trabalho que o gerou.
+
+-- Quem viu o aviso da bancada, e quando (para o ecrã da obra: o sino é de
+-- cada pessoa e a RLS do CRM não deixa ler o dos outros).
+CREATE TABLE IF NOT EXISTS public.ops_obra_aviso (
+  obra_id          uuid NOT NULL REFERENCES public.ops_obra(id) ON DELETE CASCADE,
+  tipo             text NOT NULL CHECK (tipo IN ('bancada')),
+  organization_id  uuid NOT NULL,
+  chave            text NOT NULL,          -- o que, se mudar, volta a avisar (as datas)
+  enviado_em       timestamptz NOT NULL DEFAULT now(),
+  destinatarios    uuid[] NOT NULL DEFAULT '{}',   -- → anew_users.id
+  sem_especialidade boolean NOT NULL DEFAULT false,
+  detalhe          jsonb NOT NULL DEFAULT '{}'::jsonb,
+  PRIMARY KEY (obra_id, tipo)
+);
+
+ALTER TABLE public.ops_obra_aviso ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS ops_obra_aviso_select ON public.ops_obra_aviso;
+CREATE POLICY ops_obra_aviso_select ON public.ops_obra_aviso
+  FOR SELECT TO authenticated USING (public.ops_pode_ver_obra(obra_id));
+REVOKE ALL ON public.ops_obra_aviso FROM PUBLIC, anon;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON public.ops_obra_aviso FROM authenticated;
+GRANT SELECT ON public.ops_obra_aviso TO authenticated;
+GRANT ALL ON public.ops_obra_aviso TO service_role;
+
+-- Escrever (ou refrescar) o aviso de UMA pessoa sobre UMA obra.
+-- Devolve 'novo' | 'de_novo' (chave nova: volta a por ler) | 'atualizado' |
+-- 'igual' | 'sem_sino' (sem tabela, sem login, ou falhou).
+CREATE OR REPLACE FUNCTION public.ops_obra_notificar(
+  _org        uuid,
+  _utilizador uuid,          -- → anew_users.id
+  _tipo       text,
+  _obra       uuid,
+  _titulo     text,
+  _mensagem   text,
+  _link       text,
+  _prioridade text,
+  _chaves     text[],
+  _dados      jsonb DEFAULT '{}'::jsonb
+)
+RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_auth   uuid;
+  v_ant    record;
+  v_chaves text[] := COALESCE((SELECT array_agg(DISTINCT c ORDER BY c) FROM unnest(_chaves) c WHERE c IS NOT NULL), '{}');
+  v_dados  jsonb;
+  v_novas  boolean;
+BEGIN
+  IF to_regclass('public.notifications') IS NULL OR _utilizador IS NULL OR _obra IS NULL THEN
+    RETURN 'sem_sino';
+  END IF;
+  SELECT auth_user_id INTO v_auth FROM public.anew_users WHERE id = _utilizador;
+  IF v_auth IS NULL THEN
+    RETURN 'sem_sino';   -- existe em Operações mas não entra na aplicação
+  END IF;
+
+  v_dados := COALESCE(_dados, '{}'::jsonb)
+             || jsonb_build_object('modulo', 'operacoes', 'obra_id', _obra, 'chaves', to_jsonb(v_chaves));
+
+  SELECT id, is_dismissed, title, message, data INTO v_ant
+    FROM public.notifications
+   WHERE user_id = v_auth AND type = _tipo AND entity_id = _obra AND NOT is_resolved
+   ORDER BY created_at DESC
+   LIMIT 1;
+
+  IF NOT FOUND THEN
+    INSERT INTO public.notifications
+      (user_id, organization_id, kind, type, title, message, link, entity_type, entity_id, priority, data)
+    VALUES
+      (v_auth, _org, 'notification', _tipo, _titulo, _mensagem, _link, 'ops_obra', _obra,
+       COALESCE(_prioridade, 'medium'), v_dados);
+    RETURN 'novo';
+  END IF;
+
+  v_novas := EXISTS (
+    SELECT 1 FROM unnest(v_chaves) c
+     WHERE NOT (COALESCE(v_ant.data->'chaves', '[]'::jsonb) ? c));
+
+  IF v_novas AND v_ant.is_dismissed THEN
+    -- Fechou o anterior; isto é coisa nova → um aviso novo.
+    UPDATE public.notifications
+       SET is_resolved = true, resolved_at = now(), resolved_reason = 'substituido'
+     WHERE id = v_ant.id;
+    INSERT INTO public.notifications
+      (user_id, organization_id, kind, type, title, message, link, entity_type, entity_id, priority, data)
+    VALUES
+      (v_auth, _org, 'notification', _tipo, _titulo, _mensagem, _link, 'ops_obra', _obra,
+       COALESCE(_prioridade, 'medium'), v_dados);
+    RETURN 'de_novo';
+  ELSIF v_novas THEN
+    UPDATE public.notifications
+       SET title = _titulo, message = _mensagem, link = _link, priority = COALESCE(_prioridade, priority),
+           data = v_dados, is_read = false, read_at = NULL, created_at = now()
+     WHERE id = v_ant.id;
+    RETURN 'de_novo';
+  ELSIF v_ant.title IS DISTINCT FROM _titulo OR v_ant.message IS DISTINCT FROM _mensagem
+        OR v_ant.data IS DISTINCT FROM v_dados THEN
+    UPDATE public.notifications
+       SET title = _titulo, message = _mensagem, link = _link, data = v_dados
+     WHERE id = v_ant.id;
+    RETURN 'atualizado';
+  END IF;
+  RETURN 'igual';
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Aviso não enviado (%): %', _tipo, SQLERRM;
+  RETURN 'sem_sino';
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_notificar(uuid, uuid, text, uuid, text, text, text, text, text[], jsonb)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ops_obra_notificar(uuid, uuid, text, uuid, text, text, text, text, text[], jsonb)
+  TO service_role;
+
+-- Dar por resolvidos os avisos de um tipo nas obras que já não os têm.
+-- `_manter` = obras onde o aviso continua; `_obra` limita a uma obra.
+CREATE OR REPLACE FUNCTION public.ops_obra_notificacoes_resolver(
+  _org uuid, _tipo text, _manter uuid[], _obra uuid DEFAULT NULL, _motivo text DEFAULT 'resolvido'
+)
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  n integer := 0;
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN RETURN 0; END IF;
+  UPDATE public.notifications
+     SET is_resolved = true, resolved_at = now(), resolved_reason = _motivo
+   WHERE organization_id = _org AND type = _tipo AND entity_type = 'ops_obra'
+     AND NOT is_resolved AND data->>'modulo' = 'operacoes'
+     AND (_obra IS NULL OR entity_id = _obra)
+     AND NOT (entity_id = ANY (COALESCE(_manter, '{}')));
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RETURN n;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Avisos não resolvidos (%): %', _tipo, SQLERRM;
+  RETURN 0;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_notificacoes_resolver(uuid, text, uuid[], uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ops_obra_notificacoes_resolver(uuid, text, uuid[], uuid, text) TO service_role;
+
+-- Quem coordena a obra: o supervisor dela e os gestores/admin ativos.
+CREATE OR REPLACE FUNCTION public.ops_obra_coordenacao(_obra uuid)
+RETURNS uuid[]
+LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+  SELECT COALESCE(array_agg(DISTINCT u), '{}')
+    FROM (
+      SELECT o.supervisor_id AS u FROM public.ops_obra o WHERE o.id = _obra AND o.supervisor_id IS NOT NULL
+      UNION
+      SELECT p.utilizador_id FROM public.ops_obra o
+        JOIN public.ops_utilizador_perfil p ON p.organization_id = o.organization_id
+       WHERE o.id = _obra AND p.ativo AND p.funcao IN ('admin','gestor')
+    ) x
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_coordenacao(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ops_obra_coordenacao(uuid) TO service_role;
+
+-- A ficha do local sem verificar quem pergunta (para os avisos). A RPC
+-- rpc_ops_obra_ficha_local continua a ser a porta para os ecrãs.
+CREATE OR REPLACE FUNCTION public.ops_obra_ficha_local_dados(_obra uuid)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_o   record;
+  v_orc uuid;
+  v_f   jsonb;
+BEGIN
+  SELECT orcamento_id, contrato_id INTO v_o FROM public.ops_obra WHERE id = _obra;
+  IF NOT FOUND THEN RETURN '{}'::jsonb; END IF;
+  v_orc := v_o.orcamento_id;
+  IF v_orc IS NULL AND v_o.contrato_id IS NOT NULL THEN
+    v_orc := public.ops_contrato_orcamento(v_o.contrato_id);
+  END IF;
+  IF v_orc IS NULL
+     OR NOT public.ops_obra_crm_tem('anew_address_building', ARRAY['address_id'])
+     OR NOT public.ops_obra_crm_tem('anew_addresses', ARRAY['id','floor'])
+     OR NOT public.ops_obra_crm_tem('quotes', ARRAY['id','site_address_id']) THEN
+    RETURN '{}'::jsonb;
+  END IF;
+  EXECUTE 'SELECT to_jsonb(b) || jsonb_build_object(''piso'', a.floor)
+             FROM public.quotes q
+             JOIN public.anew_address_building b ON b.address_id = q.site_address_id
+             LEFT JOIN public.anew_addresses a ON a.id = q.site_address_id
+            WHERE q.id = $1'
+     INTO v_f USING v_orc;
+  RETURN COALESCE(v_f, '{}'::jsonb);
+EXCEPTION WHEN OTHERS THEN
+  RETURN '{}'::jsonb;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_ficha_local_dados(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ops_obra_ficha_local_dados(uuid) TO service_role;
+
+-- O local numa linha, para quem vai lá: "3.º andar · sem elevador · acesso difícil".
+CREATE OR REPLACE FUNCTION public.ops_obra_local_resumo(_f jsonb)
+RETURNS text
+LANGUAGE sql IMMUTABLE
+SET search_path TO 'public'
+AS $$
+  SELECT NULLIF(concat_ws(' · ',
+    CASE WHEN NULLIF(btrim(_f->>'piso'), '') IS NOT NULL THEN 'piso ' || (_f->>'piso') END,
+    CASE (_f->>'tem_elevador') WHEN 'true' THEN 'com elevador' WHEN 'false' THEN 'sem elevador' END,
+    CASE WHEN NULLIF(_f->>'acesso', '') IS NOT NULL THEN 'acesso ' || (_f->>'acesso') END,
+    CASE WHEN NULLIF(_f->>'estacionamento', '') IS NOT NULL THEN 'estacionamento ' || (_f->>'estacionamento') END,
+    CASE (_f->>'habitada_durante_obra') WHEN 'true' THEN 'casa habitada' END), '')
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_local_resumo(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.ops_obra_local_resumo(jsonb) TO authenticated, service_role;
+
+-- Trabalho atribuído: um aviso por pessoa e obra, com as tarefas por fazer
+-- que tem lá. Não avisa quem se atribuiu a si próprio.
+CREATE OR REPLACE FUNCTION public.ops_obra_avisar_atribuicao(_obra uuid, _pessoas uuid[])
+RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_o   record;
+  v_p   uuid;
+  v_eu  uuid;
+  v_t   record;
+  v_n   integer := 0;
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN RETURN 0; END IF;
+  SELECT id, organization_id, codigo, titulo, morada, estado INTO v_o FROM public.ops_obra WHERE id = _obra;
+  IF NOT FOUND OR v_o.estado NOT IN ('planeada','em_curso') THEN RETURN 0; END IF;
+  BEGIN
+    SELECT id INTO v_eu FROM public.anew_users WHERE auth_user_id = auth.uid() LIMIT 1;
+  EXCEPTION WHEN OTHERS THEN v_eu := NULL;
+  END;
+
+  FOREACH v_p IN ARRAY COALESCE(_pessoas, '{}') LOOP
+    CONTINUE WHEN v_p IS NOT DISTINCT FROM v_eu;
+    SELECT count(*)::int AS n,
+           array_agg(t.id::text ORDER BY t.id) AS chaves,
+           min(t.inicio_planeado) AS primeira,
+           (array_agg(t.nome ORDER BY t.inicio_planeado NULLS LAST, t.ordem))[1:3] AS nomes
+      INTO v_t
+      FROM public.ops_obra_tarefa_pessoa tp
+      JOIN public.ops_obra_tarefa t ON t.id = tp.tarefa_id
+     WHERE tp.obra_id = _obra AND tp.utilizador_id = v_p AND t.estado IN ('por_fazer','rejeitada');
+    CONTINUE WHEN COALESCE(v_t.n, 0) = 0;
+    IF public.ops_obra_notificar(
+         v_o.organization_id, v_p, 'operacoes_obra_tarefas', _obra,
+         v_o.codigo || ': tens ' || v_t.n || CASE WHEN v_t.n = 1 THEN ' tarefa' ELSE ' tarefas' END,
+         COALESCE(v_o.titulo, 'Obra')
+           || COALESCE(' · ' || NULLIF(btrim(v_o.morada), ''), '')
+           || COALESCE(' · a primeira a ' || to_char(v_t.primeira, 'DD/MM'), '')
+           || '. ' || array_to_string(v_t.nomes, ', ')
+           || CASE WHEN v_t.n > 3 THEN '…' ELSE '' END,
+         '/operacao/minhas-tarefas', 'medium', v_t.chaves,
+         jsonb_build_object('codigo', v_o.codigo)) IN ('novo','de_novo') THEN
+      v_n := v_n + 1;
+    END IF;
+  END LOOP;
+  RETURN v_n;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Aviso de atribuição não enviado: %', SQLERRM;
+  RETURN v_n;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_avisar_atribuicao(uuid, uuid[]) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ops_obra_avisar_atribuicao(uuid, uuid[]) TO service_role;
+
+-- Bancada: avisa o marmorista (e o supervisor) com o que precisa para
+-- preparar cortes e encomendar com antecedência. Volta a avisar quando as
+-- datas mudam (replaneamento). Regista em ops_obra_aviso para o ecrã da obra.
+CREATE OR REPLACE FUNCTION public.ops_obra_avisar_bancada(_obra uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_o       record;
+  v_skills  uuid[];
+  v_t       record;
+  v_chave   text;
+  v_ficha   jsonb;
+  v_local   text;
+  v_para    uuid[];
+  v_sem     boolean;
+  v_med     text;
+  v_msg     text;
+  v_tit     text;
+  v_p       uuid;
+  v_ant     record;
+BEGIN
+  SELECT id, organization_id, codigo, titulo, morada, estado, supervisor_id INTO v_o
+    FROM public.ops_obra WHERE id = _obra;
+  IF NOT FOUND OR v_o.estado NOT IN ('planeada','em_curso') THEN
+    RETURN '{}'::jsonb;
+  END IF;
+
+  SELECT COALESCE(array_agg(id), '{}') INTO v_skills
+    FROM public.ops_skill WHERE organization_id = v_o.organization_id AND nome ILIKE 'marmor%';
+
+  -- As tarefas de bancada que ainda vêm aí (medição, colocação…).
+  SELECT count(*)::int AS n,
+         min(t.inicio_planeado) AS primeira,
+         max(COALESCE(t.fim_planeado, t.inicio_planeado)) AS ultima,
+         string_agg(t.nome || ' a ' || to_char(t.inicio_planeado, 'DD/MM'), ', '
+                    ORDER BY t.inicio_planeado, t.ordem) AS datas,
+         string_agg(DISTINCT CASE WHEN t.medida IS NOT NULL AND t.medida_qt IS NOT NULL
+                      THEN replace(t.medida, '_', ' ') || ' ' || trim(to_char(t.medida_qt, 'FM999990D0')) END, ', ') AS medidas,
+         string_agg(t.id::text || '@' || t.inicio_planeado::text, ',' ORDER BY t.id) AS chave
+    INTO v_t
+    FROM public.ops_obra_tarefa t
+   WHERE t.obra_id = _obra AND t.estado = 'por_fazer' AND t.inicio_planeado IS NOT NULL
+     AND (t.skill_id = ANY (v_skills) OR t.nome ILIKE '%bancada%');
+
+  IF COALESCE(v_t.n, 0) = 0 THEN
+    -- Já não há bancada por fazer: o aviso deixa de fazer falta.
+    PERFORM public.ops_obra_notificacoes_resolver(v_o.organization_id, 'operacoes_obra_bancada', '{}', _obra, 'sem_bancada');
+    RETURN jsonb_build_object('bancada', false);
+  END IF;
+
+  v_chave := v_t.chave;
+  SELECT * INTO v_ant FROM public.ops_obra_aviso WHERE obra_id = _obra AND tipo = 'bancada';
+  IF FOUND AND v_ant.chave = v_chave THEN
+    RETURN jsonb_build_object('bancada', true, 'novo', false, 'enviado_em', v_ant.enviado_em);
+  END IF;
+
+  SELECT COALESCE(array_agg(DISTINCT us.utilizador_id), '{}') INTO v_para
+    FROM public.ops_utilizador_skill us
+    JOIN public.ops_utilizador_perfil p ON p.utilizador_id = us.utilizador_id
+                                       AND p.organization_id = v_o.organization_id AND p.ativo
+   WHERE us.skill_id = ANY (v_skills);
+  v_sem := cardinality(v_para) = 0;
+
+  v_ficha := public.ops_obra_ficha_local_dados(_obra);
+  v_local := public.ops_obra_local_resumo(v_ficha);
+  v_med := v_t.medidas;
+
+  v_tit := v_o.codigo || ': bancada ' || CASE WHEN v_t.primeira IS NOT NULL
+             THEN 'a ' || to_char(v_t.primeira, 'DD/MM') ELSE 'por marcar' END;
+  v_msg := COALESCE(v_o.titulo, 'Obra')
+           || COALESCE(' · ' || NULLIF(btrim(v_o.morada), ''), '')
+           || '. ' || v_t.datas || '.'
+           || COALESCE(' Medidas: ' || v_med || '.', '')
+           || COALESCE(' Local: ' || v_local || '.', '')
+           || ' Preparar cortes e encomendar a pedra com antecedência.';
+
+  IF v_sem THEN
+    v_tit := v_tit || ' — ninguém com a especialidade Marmorista';
+    v_para := public.ops_obra_coordenacao(_obra);
+  ELSIF v_o.supervisor_id IS NOT NULL THEN
+    v_para := v_para || v_o.supervisor_id;
+  END IF;
+
+  FOREACH v_p IN ARRAY v_para LOOP
+    PERFORM public.ops_obra_notificar(v_o.organization_id, v_p, 'operacoes_obra_bancada', _obra,
+      v_tit, v_msg, '/operacao/obras/' || v_o.codigo, 'high', ARRAY[v_chave],
+      jsonb_build_object('codigo', v_o.codigo, 'primeira', v_t.primeira, 'sem_especialidade', v_sem));
+  END LOOP;
+
+  INSERT INTO public.ops_obra_aviso (obra_id, tipo, organization_id, chave, enviado_em, destinatarios,
+                                    sem_especialidade, detalhe)
+  VALUES (_obra, 'bancada', v_o.organization_id, v_chave, now(), v_para, v_sem,
+          jsonb_build_object('primeira', v_t.primeira, 'datas', v_t.datas, 'medidas', v_med, 'local', v_local))
+  ON CONFLICT (obra_id, tipo) DO UPDATE
+     SET chave = EXCLUDED.chave, enviado_em = EXCLUDED.enviado_em, destinatarios = EXCLUDED.destinatarios,
+         sem_especialidade = EXCLUDED.sem_especialidade, detalhe = EXCLUDED.detalhe;
+
+  RETURN jsonb_build_object('bancada', true, 'novo', true, 'para', cardinality(v_para), 'sem_especialidade', v_sem);
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Aviso da bancada não enviado: %', SQLERRM;
+  RETURN jsonb_build_object('erro', SQLERRM);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_avisar_bancada(uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ops_obra_avisar_bancada(uuid) TO service_role;
+
+-- Os alertas (ops_obra_alertas_lista) no sino: um aviso por obra ao
+-- supervisor e aos gestores; resolve os das obras que já não têm alertas; e
+-- passa pela bancada. Corre de 15 em 15 minutos (pg_cron, abaixo) e quando
+-- alguém abre as obras (rpc_ops_obra_sincronizar_avisos). Sem _org: todas.
+CREATE OR REPLACE FUNCTION public.ops_obra_sincronizar_avisos(_org uuid DEFAULT NULL, _obra uuid DEFAULT NULL)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v_org    uuid;
+  v_a      record;
+  v_p      uuid;
+  v_com    uuid[];
+  v_novos  integer := 0;
+  v_resolv integer := 0;
+  v_banc   integer := 0;
+  v_ob     uuid;
+  v_r      text;
+BEGIN
+  FOR v_org IN
+    SELECT DISTINCT o.organization_id FROM public.ops_obra o
+     WHERE (_org IS NULL OR o.organization_id = _org)
+       AND (_obra IS NULL OR o.id = _obra)
+  LOOP
+    v_com := '{}';
+    IF to_regclass('public.notifications') IS NOT NULL THEN
+      FOR v_a IN
+        SELECT a.obra_id, max(a.obra_codigo) AS codigo, max(a.obra_titulo) AS titulo,
+               min(a.gravidade) AS gravidade, count(*)::int AS n,
+               array_agg(a.tipo || ':' || COALESCE(a.tarefa_id, a.atraso_id)::text) AS chaves,
+               concat_ws(' · ',
+                 NULLIF(count(*) FILTER (WHERE a.tipo = 'fim_ultrapassado'), 0)::text || ' fora do prazo',
+                 NULLIF(count(*) FILTER (WHERE a.tipo = 'nao_iniciada'), 0)::text || ' por começar',
+                 NULLIF(count(*) FILTER (WHERE a.tipo = 'material_tarde'), 0)::text || ' com material tarde',
+                 NULLIF(count(*) FILTER (WHERE a.tipo = 'cliente_por_avisar'), 0)::text || ' cliente por avisar') AS resumo,
+               (array_agg(a.tarefa_nome || ' — ' || a.detalhe ORDER BY a.gravidade, a.minutos_atraso DESC NULLS LAST))[1] AS pior
+          FROM public.ops_obra_alertas_lista(v_org, _obra) a
+         GROUP BY a.obra_id
+      LOOP
+        v_com := v_com || v_a.obra_id;
+        FOREACH v_p IN ARRAY public.ops_obra_coordenacao(v_a.obra_id) LOOP
+          v_r := public.ops_obra_notificar(v_org, v_p, 'operacoes_obra_alertas', v_a.obra_id,
+            v_a.codigo || ': ' || v_a.n || CASE WHEN v_a.n = 1 THEN ' alerta' ELSE ' alertas' END,
+            COALESCE(v_a.titulo, 'Obra') || '. ' || v_a.resumo || '. ' || v_a.pior,
+            '/operacao/obras/' || v_a.codigo,
+            CASE WHEN v_a.gravidade = 1 THEN 'high' ELSE 'medium' END,
+            v_a.chaves, jsonb_build_object('codigo', v_a.codigo));
+          IF v_r IN ('novo','de_novo') THEN v_novos := v_novos + 1; END IF;
+        END LOOP;
+      END LOOP;
+      v_resolv := v_resolv + public.ops_obra_notificacoes_resolver(v_org, 'operacoes_obra_alertas', v_com, _obra, 'alertas_resolvidos');
+    END IF;
+
+    FOR v_ob IN
+      SELECT o.id FROM public.ops_obra o
+       WHERE o.organization_id = v_org AND (_obra IS NULL OR o.id = _obra)
+         AND o.estado IN ('planeada','em_curso')
+    LOOP
+      IF (public.ops_obra_avisar_bancada(v_ob)->>'novo')::boolean THEN v_banc := v_banc + 1; END IF;
+    END LOOP;
+  END LOOP;
+
+  RETURN jsonb_build_object('alertas_novos', v_novos, 'resolvidos', v_resolv, 'bancadas', v_banc);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_sincronizar_avisos(uuid, uuid) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.ops_obra_sincronizar_avisos(uuid, uuid) TO service_role;
+
+-- A porta para os ecrãs: quem vê as obras da organização pode pedir que os
+-- avisos se ponham em dia (o resultado não revela nada que não veja já).
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_sincronizar_avisos(p_org uuid)
+RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+BEGIN
+  PERFORM public.ops_quem_sou(p_org);
+  IF NOT public.ops_pode(p_org, 'operations.orders.view') THEN
+    RETURN jsonb_build_object('ok', false);
+  END IF;
+  RETURN public.ops_obra_sincronizar_avisos(p_org, NULL) || jsonb_build_object('ok', true);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_sincronizar_avisos(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_sincronizar_avisos(uuid) TO authenticated, service_role;
+
+-- O aviso da bancada de uma obra, para o ecrã: quando, a quem, e se faltou
+-- marmorista. {} se não houve.
+CREATE OR REPLACE FUNCTION public.rpc_ops_obra_aviso_bancada(p_obra_id uuid)
+RETURNS jsonb
+LANGUAGE plpgsql STABLE SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v jsonb;
+BEGIN
+  IF NOT public.ops_pode_ver_obra(p_obra_id) THEN
+    RAISE EXCEPTION 'Obra não encontrada.' USING ERRCODE = 'no_data_found';
+  END IF;
+  SELECT jsonb_build_object(
+           'enviado_em', a.enviado_em,
+           'sem_especialidade', a.sem_especialidade,
+           'para', COALESCE((SELECT jsonb_agg(COALESCE(u.name, 'Sem nome') ORDER BY u.name)
+                               FROM public.anew_users u WHERE u.id = ANY (a.destinatarios)), '[]'::jsonb),
+           'primeira', a.detalhe->>'primeira',
+           'datas', a.detalhe->>'datas',
+           'medidas', a.detalhe->>'medidas',
+           'local', a.detalhe->>'local')
+    INTO v
+    FROM public.ops_obra_aviso a
+   WHERE a.obra_id = p_obra_id AND a.tipo = 'bancada';
+  RETURN COALESCE(v, '{}'::jsonb);
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.rpc_ops_obra_aviso_bancada(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.rpc_ops_obra_aviso_bancada(uuid) TO authenticated, service_role;
+
+-- Triggers: atribuir avisa já; mexer nas datas das tarefas revê a bancada.
+-- De instrução (não de linha): a distribuição automática atribui dezenas de
+-- tarefas de uma vez, e cada pessoa recebe UM aviso por obra.
+CREATE OR REPLACE FUNCTION public.ops_obra_tg_avisar_atribuicao()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v record;
+BEGIN
+  FOR v IN SELECT obra_id, array_agg(DISTINCT utilizador_id) AS pessoas FROM novas GROUP BY obra_id LOOP
+    PERFORM public.ops_obra_avisar_atribuicao(v.obra_id, v.pessoas);
+  END LOOP;
+  RETURN NULL;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Avisos de atribuição: %', SQLERRM;
+  RETURN NULL;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_tg_avisar_atribuicao() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS ops_obra_tarefa_pessoa_avisar ON public.ops_obra_tarefa_pessoa;
+CREATE TRIGGER ops_obra_tarefa_pessoa_avisar
+  AFTER INSERT ON public.ops_obra_tarefa_pessoa
+  REFERENCING NEW TABLE AS novas
+  FOR EACH STATEMENT EXECUTE FUNCTION public.ops_obra_tg_avisar_atribuicao();
+
+CREATE OR REPLACE FUNCTION public.ops_obra_tg_rever_bancada()
+RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER
+SET search_path TO 'public'
+AS $$
+DECLARE
+  v uuid;
+BEGIN
+  -- Só as obras onde mudou alguma tarefa de bancada (ou marmorista).
+  FOR v IN
+    SELECT DISTINCT n.obra_id FROM novas n
+      LEFT JOIN public.ops_skill k ON k.id = n.skill_id
+     WHERE n.nome ILIKE '%bancada%' OR k.nome ILIKE 'marmor%'
+  LOOP
+    PERFORM public.ops_obra_avisar_bancada(v);
+  END LOOP;
+  RETURN NULL;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Aviso da bancada: %', SQLERRM;
+  RETURN NULL;
+END
+$$;
+
+REVOKE ALL ON FUNCTION public.ops_obra_tg_rever_bancada() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS ops_obra_tarefa_rever_bancada_ins ON public.ops_obra_tarefa;
+CREATE TRIGGER ops_obra_tarefa_rever_bancada_ins
+  AFTER INSERT ON public.ops_obra_tarefa
+  REFERENCING NEW TABLE AS novas
+  FOR EACH STATEMENT EXECUTE FUNCTION public.ops_obra_tg_rever_bancada();
+DROP TRIGGER IF EXISTS ops_obra_tarefa_rever_bancada_upd ON public.ops_obra_tarefa;
+CREATE TRIGGER ops_obra_tarefa_rever_bancada_upd
+  AFTER UPDATE ON public.ops_obra_tarefa
+  REFERENCING NEW TABLE AS novas
+  FOR EACH STATEMENT EXECUTE FUNCTION public.ops_obra_tg_rever_bancada();
+
+
 COMMIT;
+
+-- Os avisos dos alertas e da bancada põem-se em dia de 15 em 15 minutos, se
+-- a base tiver pg_cron (o Supabase tem). Sem pg_cron, ficam as chamadas dos
+-- ecrãs (rpc_ops_obra_sincronizar_avisos) e os triggers.
+DO $cron$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_cron') THEN
+    PERFORM cron.schedule('ops-obras-avisos', '*/15 * * * *', 'SELECT public.ops_obra_sincronizar_avisos()');
+  END IF;
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'Avisos: não ficou agendado no pg_cron (%).', SQLERRM;
+END
+$cron$;
 
 
 -- ============================================================
