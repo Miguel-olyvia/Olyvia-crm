@@ -7,6 +7,11 @@ import {
   paraRRule,
   regraEmPortugues,
   RECORRENCIA_VAZIA,
+  PERIODICIDADES,
+  comPeriodicidade,
+  nomeDaPeriodicidade,
+  periodicidadeDe,
+  type ChavePeriodicidade,
   type Recorrencia,
 } from "../recorrencia";
 
@@ -182,5 +187,79 @@ describe("o que falta, e o que convém saber", () => {
   it("e não avisa quando não há nada a avisar", () => {
     expect(avisoDaRecorrencia(r({ frequencia: "MONTHLY", diaDoMes: 15 }))).toBeNull();
     expect(avisoDaRecorrencia(r({ frequencia: "WEEKLY", dias: ["MO"] }))).toBeNull();
+  });
+});
+
+describe("periodicidades", () => {
+  const casos: Array<[ChavePeriodicidade, string]> = [
+    ["diaria", "FREQ=DAILY"],
+    ["semanal", "FREQ=WEEKLY;BYDAY=MO"],
+    ["quinzenal", "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO"],
+    ["mensal", "FREQ=MONTHLY;BYMONTHDAY=1"],
+    ["bimestral", "FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=1"],
+    ["trimestral", "FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=1"],
+    ["quadrimestral", "FREQ=MONTHLY;INTERVAL=4;BYMONTHDAY=1"],
+    ["semestral", "FREQ=MONTHLY;INTERVAL=6;BYMONTHDAY=1"],
+    ["anual", "FREQ=YEARLY"],
+    ["bienal", "FREQ=YEARLY;INTERVAL=2"],
+    ["trienal", "FREQ=YEARLY;INTERVAL=3"],
+    ["quinquenal", "FREQ=YEARLY;INTERVAL=5"],
+  ];
+
+  it("a lista tem as pedidas, sem repetidas", () => {
+    const chaves = PERIODICIDADES.map((p) => p.chave);
+    expect(new Set(chaves).size).toBe(chaves.length);
+    for (const c of ["diaria", "semanal", "quinzenal", "mensal", "bimestral", "trimestral",
+      "quadrimestral", "semestral", "anual", "bienal"]) {
+      expect(chaves).toContain(c);
+    }
+    const pares = PERIODICIDADES.map((p) => `${p.frequencia}/${p.intervalo}`);
+    expect(new Set(pares).size).toBe(pares.length);
+  });
+
+  it.each(casos)("%s → %s, e volta a ler-se como a mesma", (chave, rrule) => {
+    let rec = comPeriodicidade(RECORRENCIA_VAZIA, chave);
+    if (rec.frequencia === "WEEKLY") rec = { ...rec, dias: ["MO"] };
+    expect(faltaNaRecorrencia(rec)).toBeNull();
+    expect(paraRRule(rec)).toBe(rrule);
+    const lida = deRRule(rrule)!;
+    expect(periodicidadeDe(lida)).toBe(chave);
+  });
+
+  it("semanal sem dia não se grava; anual sem dia sim (na data de início)", () => {
+    expect(faltaNaRecorrencia(comPeriodicidade(RECORRENCIA_VAZIA, "quinzenal"))).toContain(
+      "dia da semana"
+    );
+    const bienal = comPeriodicidade(RECORRENCIA_VAZIA, "bienal");
+    expect(faltaNaRecorrencia(bienal)).toBeNull();
+    expect(emPortugues(bienal)).toBe("De 2 em 2 anos, na data de início");
+    expect(emPortugues(comPeriodicidade(RECORRENCIA_VAZIA, "anual"))).toBe(
+      "Todos os anos, na data de início"
+    );
+  });
+
+  it("mudar entre mensais mantém o dia; vir de semanal põe dia 1", () => {
+    const mensal = { ...RECORRENCIA_VAZIA, diaDoMes: 15 };
+    expect(comPeriodicidade(mensal, "trimestral")).toMatchObject({
+      frequencia: "MONTHLY",
+      intervalo: 3,
+      diaDoMes: 15,
+    });
+    const semanal = { ...RECORRENCIA_VAZIA, frequencia: "WEEKLY" as const, dias: ["TU"], diaDoMes: null };
+    expect(comPeriodicidade(semanal, "quinzenal").dias).toEqual(["TU"]);
+    expect(comPeriodicidade(semanal, "semestral")).toMatchObject({ diaDoMes: 1, dias: [] });
+  });
+
+  it("uma regra antiga fora da lista é reconhecida e nomeada tal como é", () => {
+    const r = deRRule("FREQ=DAILY;INTERVAL=3")!;
+    expect(periodicidadeDe(r)).toBeNull();
+    expect(nomeDaPeriodicidade(r)).toBe("De 3 em 3 dias");
+    expect(nomeDaPeriodicidade(deRRule("FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=1")!)).toBe(
+      "Trimestral (de 3 em 3 meses)"
+    );
+  });
+
+  it("regras anuais antigas com dia do mês continuam legíveis", () => {
+    expect(regraEmPortugues("FREQ=YEARLY;BYMONTHDAY=15")).toBe("Todos os anos, no dia 15 do mês de início");
   });
 });

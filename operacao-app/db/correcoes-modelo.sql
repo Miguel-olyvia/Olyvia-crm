@@ -250,17 +250,32 @@ ALTER TABLE public.ops_plano
 
 
 -- ============================================================
--- 7. O expansor de RRULE passa a saber "última segunda-feira"
+-- 7. O expansor de RRULE: "última segunda-feira" e periodicidades
 -- ============================================================
 -- O formulário do Infraspeak oferece, na mensal:
 --   "[Primeiro|Segundo|Terceiro|Quarto|Último] [dia da semana] a cada N meses"
 -- Em RRULE isso é BYDAY com ordinal: 1MO, 2MO, 3MO, 4MO, -1MO.
--- O expansor anterior recusava-o.
+--
+-- 06/10/2026 — periodicidades (quinzenal, trimestral, semestral, bienal…).
+-- São frequência + INTERVAL, que o expansor já lia. O que faltava era a
+-- ÂNCORA: o job expande uma janela que começa em `materializado_ate + 1`, e
+-- contar "de 3 em 3 meses" a partir do início da janela (e não do início do
+-- plano) perde o passo — um trimestral passava a mensal, e um anual sem dia
+-- gerava uma ordem por cada corrida do job. Agora conta-se sempre a partir da
+-- âncora (o início do plano) e só se devolve o que cai na janela.
+--
+--   · WEEKLY com BYDAY: blocos de semanas a começar à segunda-feira da semana
+--     da âncora; quinzenal = de 2 em 2 desses blocos.
+--   · MONTHLY e YEARLY com BYMONTHDAY/BYDAY: o dia é escolhido no mês de cada
+--     passo (na YEARLY, o mês da âncora).
+--   · Sem BY*: a própria âncora + n passos (anual = no dia da data de início).
+--   · Nada antes da âncora; COUNT conta a partir da âncora.
 
 CREATE OR REPLACE FUNCTION public.ops_expandir_rrule(
   _regra  text,
   _inicio date,
-  _fim    date
+  _fim    date,
+  _ancora date
 )
 RETURNS SETOF date
 LANGUAGE plpgsql IMMUTABLE
@@ -276,16 +291,20 @@ DECLARE
   v_until   date;
   v_d       date;
   v_n       integer := 0;
-  v_passo   interval;
+  v_k       integer := 0;
+  v_unid    text;
   v_dow     text[] := ARRAY['SU','MO','TU','WE','TH','FR','SA'];
   v_tok     text;
   v_ord     integer;
   v_dia     text;
   v_base    date;
   v_cand    date;
+  v_periodo date;
+  v_cands   date[];
   v_i       integer;
 BEGIN
   IF _regra IS NULL OR btrim(_regra) = '' THEN RETURN; END IF;
+  _ancora := COALESCE(_ancora, _inicio);
 
   v_partes := string_to_array(upper(replace(btrim(_regra), 'RRULE:', '')), ';');
 
@@ -308,91 +327,102 @@ BEGIN
   IF v_until IS NOT NULL THEN _fim := LEAST(_fim, v_until); END IF;
 
   CASE v_freq
-    WHEN 'DAILY'   THEN v_passo := (v_inter || ' days')::interval;
-    WHEN 'WEEKLY'  THEN v_passo := (v_inter || ' weeks')::interval;
-    WHEN 'MONTHLY' THEN v_passo := (v_inter || ' months')::interval;
-    WHEN 'YEARLY'  THEN v_passo := (v_inter || ' years')::interval;
+    WHEN 'DAILY'   THEN v_unid := ' days';
+    WHEN 'WEEKLY'  THEN v_unid := ' weeks';
+    WHEN 'MONTHLY' THEN v_unid := ' months';
+    WHEN 'YEARLY'  THEN v_unid := ' years';
     ELSE RAISE EXCEPTION 'FREQ não suportada: %', v_freq;
   END CASE;
 
-  v_d := _inicio;
-
-  WHILE v_d <= _fim LOOP
+  LOOP
+    -- Cada passo conta-se a partir da âncora (e não do passo anterior), para
+    -- um dia 31 não escorregar para 28 e ficar em 28 para sempre.
+    v_d := (_ancora + ((v_k * v_inter) || v_unid)::interval)::date;
+    v_k := v_k + 1;
+    v_cands := ARRAY[]::date[];
 
     IF v_freq = 'WEEKLY' AND v_byday IS NOT NULL THEN
+      v_periodo := v_d - (EXTRACT(ISODOW FROM v_d)::int - 1);
       FOR v_i IN 0..6 LOOP
-        IF (v_d + v_i) BETWEEN _inicio AND _fim
-           AND v_dow[EXTRACT(DOW FROM (v_d + v_i))::int + 1] = ANY (v_byday) THEN
-          IF v_count IS NOT NULL AND v_n >= v_count THEN RETURN; END IF;
-          v_n := v_n + 1;
-          RETURN NEXT (v_d + v_i);
+        IF v_dow[EXTRACT(DOW FROM (v_periodo + v_i))::int + 1] = ANY (v_byday) THEN
+          v_cands := v_cands || (v_periodo + v_i);
         END IF;
       END LOOP;
 
-    ELSIF v_freq = 'MONTHLY' AND v_byday IS NOT NULL THEN
+    ELSIF v_freq IN ('MONTHLY','YEARLY') AND v_byday IS NOT NULL THEN
       -- "Primeira segunda-feira", "última sexta-feira". BYDAY com ordinal.
       v_base := date_trunc('month', v_d)::date;
+      v_periodo := v_base;
       FOREACH v_tok IN ARRAY v_byday LOOP
         v_ord := NULLIF(regexp_replace(v_tok, '[A-Z]', '', 'g'), '')::integer;
         v_dia := regexp_replace(v_tok, '[^A-Z]', '', 'g');
 
         IF v_ord IS NULL THEN
-          RAISE EXCEPTION 'BYDAY sem ordinal não é suportado em FREQ=MONTHLY: %', v_tok;
+          RAISE EXCEPTION 'BYDAY sem ordinal não é suportado em FREQ=%: %', v_freq, v_tok;
         END IF;
 
         IF v_ord > 0 THEN
-          -- Primeiro dia do mês que calha nesse dia da semana, mais (ord-1) semanas.
           v_cand := v_base;
           WHILE v_dow[EXTRACT(DOW FROM v_cand)::int + 1] <> v_dia LOOP
             v_cand := v_cand + 1;
           END LOOP;
           v_cand := v_cand + (v_ord - 1) * 7;
-          -- Se transbordou para o mês seguinte, esse mês não tem esse ordinal.
-          IF EXTRACT(MONTH FROM v_cand) <> EXTRACT(MONTH FROM v_base) THEN
-            CONTINUE;
-          END IF;
         ELSE
-          -- Ordinal negativo: contar a partir do fim do mês.
           v_cand := (v_base + interval '1 month - 1 day')::date;
           WHILE v_dow[EXTRACT(DOW FROM v_cand)::int + 1] <> v_dia LOOP
             v_cand := v_cand - 1;
           END LOOP;
           v_cand := v_cand + (v_ord + 1) * 7;
-          IF EXTRACT(MONTH FROM v_cand) <> EXTRACT(MONTH FROM v_base) THEN
-            CONTINUE;
-          END IF;
         END IF;
-
-        IF v_cand BETWEEN _inicio AND _fim THEN
-          IF v_count IS NOT NULL AND v_n >= v_count THEN RETURN; END IF;
-          v_n := v_n + 1;
-          RETURN NEXT v_cand;
+        -- Se transbordou para outro mês, esse mês não tem esse ordinal.
+        IF date_trunc('month', v_cand)::date = v_base THEN
+          v_cands := v_cands || v_cand;
         END IF;
       END LOOP;
 
-    ELSIF v_freq = 'MONTHLY' AND v_bymday IS NOT NULL THEN
+    ELSIF v_freq IN ('MONTHLY','YEARLY') AND v_bymday IS NOT NULL THEN
+      v_base := date_trunc('month', v_d)::date;
+      v_periodo := v_base;
       FOR v_i IN 1..array_length(v_bymday, 1) LOOP
-        IF v_bymday[v_i] <= EXTRACT(DAY FROM (date_trunc('month', v_d) + interval '1 month - 1 day'))::int THEN
-          v_cand := date_trunc('month', v_d)::date + (v_bymday[v_i] - 1);
-          IF v_cand BETWEEN _inicio AND _fim THEN
-            IF v_count IS NOT NULL AND v_n >= v_count THEN RETURN; END IF;
-            v_n := v_n + 1;
-            RETURN NEXT v_cand;
-          END IF;
+        -- Um dia 31 num mês de 30 não existe; salta-se em vez de escorregar
+        -- para o mês seguinte, que seria pior do que não gerar.
+        IF v_bymday[v_i] <= EXTRACT(DAY FROM (v_base + interval '1 month - 1 day'))::int THEN
+          v_cands := v_cands || (v_base + (v_bymday[v_i] - 1));
         END IF;
       END LOOP;
 
     ELSE
-      IF v_count IS NOT NULL AND v_n >= v_count THEN RETURN; END IF;
-      v_n := v_n + 1;
-      RETURN NEXT v_d;
+      v_periodo := v_d;
+      v_cands := ARRAY[v_d];
     END IF;
 
-    v_d := (v_d + v_passo)::date;
+    EXIT WHEN v_periodo > _fim;
+
+    FOR v_cand IN SELECT c FROM unnest(v_cands) c ORDER BY c LOOP
+      CONTINUE WHEN v_cand < _ancora OR v_cand > _fim;
+      IF v_count IS NOT NULL AND v_n >= v_count THEN RETURN; END IF;
+      v_n := v_n + 1;
+      IF v_cand >= _inicio THEN
+        RETURN NEXT v_cand;
+      END IF;
+    END LOOP;
   END LOOP;
 END
 $$;
 
+-- A versão de três argumentos fica: a âncora é o início da janela.
+CREATE OR REPLACE FUNCTION public.ops_expandir_rrule(
+  _regra  text,
+  _inicio date,
+  _fim    date
+)
+RETURNS SETOF date
+LANGUAGE sql IMMUTABLE
+AS $$
+  SELECT public.ops_expandir_rrule(_regra, _inicio, _fim, _inicio);
+$$;
+
+GRANT EXECUTE ON FUNCTION public.ops_expandir_rrule(text, date, date, date) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.ops_expandir_rrule(text, date, date) TO authenticated, service_role;
 
 
@@ -520,7 +550,9 @@ BEGIN
     v_desde := GREATEST(COALESCE(v_plano.materializado_ate + 1, v_plano.inicio_em), current_date);
 
     BEGIN
-      FOR v_dia IN SELECT public.ops_expandir_rrule(v_plano.regra_recorrencia, v_desde, v_ate)
+      -- Ancorada no início do plano: quinzenal, trimestral, anual… contam a
+      -- partir daí, e não do início da janela.
+      FOR v_dia IN SELECT public.ops_expandir_rrule(v_plano.regra_recorrencia, v_desde, v_ate, v_plano.inicio_em)
       LOOP
         CONTINUE WHEN EXISTS (
           SELECT 1 FROM public.ops_ordem o

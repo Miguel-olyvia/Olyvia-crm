@@ -261,7 +261,8 @@ GRANT EXECUTE ON FUNCTION public.rpc_ops_gravar_plano(
 -- Ver o que uma regra vai gerar, antes de gravar
 -- ============================================================
 -- O botão "experimentar" do formulário. Devolve as próximas datas sem tocar
--- em nada — é a diferença entre confiar numa regra e verificá-la.
+-- em nada (até 6 anos à frente, para uma quinquenal mostrar pelo menos
+-- uma data) — é a diferença entre confiar numa regra e verificá-la.
 
 CREATE OR REPLACE FUNCTION public.rpc_ops_experimentar_regra(
   p_regra   text,
@@ -279,7 +280,10 @@ BEGIN
   BEGIN
     SELECT array_agg(d ORDER BY d) INTO v_datas
       FROM (
-        SELECT d FROM public.ops_expandir_rrule(p_regra, v_de, v_de + 730) d
+        -- Ancorada no início do plano (p_de), mas só mostra de hoje em diante:
+        -- num plano que começou há um ano, o que interessa são as próximas.
+        SELECT d FROM public.ops_expandir_rrule(
+                 p_regra, GREATEST(v_de, CURRENT_DATE), GREATEST(v_de, CURRENT_DATE) + 2200, v_de) d
          ORDER BY d LIMIT GREATEST(1, LEAST(COALESCE(p_quantas, 6), 24))
       ) x;
   EXCEPTION WHEN OTHERS THEN

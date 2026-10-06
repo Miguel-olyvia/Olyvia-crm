@@ -42,8 +42,12 @@ import {
   emPortugues,
   faltaNaRecorrencia,
   paraRRule,
+  periodicidadeDe,
+  comPeriodicidade,
+  PERIODICIDADES,
+  nomeDaPeriodicidade,
   regraEmPortugues,
-  type Frequencia,
+  type ChavePeriodicidade,
   type Recorrencia,
 } from "../domain/recorrencia";
 
@@ -578,33 +582,37 @@ function EditorRecorrencia({
   desativado?: boolean;
 }) {
   const set = (p: Partial<Recorrencia>) => aoMudar({ ...rec, ...p });
-  const mensal = rec.frequencia === "MONTHLY" || rec.frequencia === "YEARLY";
+  // As anuais repetem-se na data de início. Uma regra anual antiga com dia do
+  // mês continua a abrir-se como estava, para não se perder ao editar.
+  const mensal =
+    rec.frequencia === "MONTHLY" ||
+    (rec.frequencia === "YEARLY" && (rec.diaDoMes != null || rec.ordinal != null));
+  const periodicidade = periodicidadeDe(rec);
 
   return (
     <div className="mt-3 space-y-3">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="Frequência">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Periodicidade">
           <Select
-            value={rec.frequencia}
+            value={periodicidade ?? "fora-da-lista"}
             disabled={desativado}
-            onChange={(e) => set({ frequencia: e.target.value as Frequencia })}
+            onChange={(e) => {
+              if (e.target.value === "fora-da-lista") return;
+              aoMudar(comPeriodicidade(rec, e.target.value as ChavePeriodicidade));
+            }}
             className="w-full"
           >
-            <option value="DAILY">Diária</option>
-            <option value="WEEKLY">Semanal</option>
-            <option value="MONTHLY">Mensal</option>
-            <option value="YEARLY">Anual</option>
+            {/* Uma regra antiga fora da lista (ex.: de 3 em 3 dias) mostra-se
+                tal como está, para não ser trocada por outra sem se dar por isso. */}
+            {periodicidade == null && (
+              <option value="fora-da-lista">{nomeDaPeriodicidade(rec)}</option>
+            )}
+            {PERIODICIDADES.map((p) => (
+              <option key={p.chave} value={p.chave}>
+                {p.nome}
+              </option>
+            ))}
           </Select>
-        </Field>
-        <Field label="De quantas em quantas">
-          <Input
-            type="number"
-            min={1}
-            value={rec.intervalo}
-            disabled={desativado}
-            onChange={(e) => set({ intervalo: Math.max(1, Number(e.target.value) || 1) })}
-            className="w-full"
-          />
         </Field>
         <Field label="Hora prevista">
           <Input
@@ -616,6 +624,12 @@ function EditorRecorrencia({
           />
         </Field>
       </div>
+
+      {rec.frequencia === "YEARLY" && !mensal && (
+        <p className="text-xs text-slate-500">
+          Repete-se no dia e mês da data de início do plano.
+        </p>
+      )}
 
       {rec.frequencia === "WEEKLY" && (
         <div>

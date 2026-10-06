@@ -295,7 +295,9 @@ DO $verificar$
 DECLARE v integer;
 BEGIN
   SELECT count(*) INTO v FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-   WHERE n.nspname = 'public' AND p.proname IN ('ops_expandir_rrule','rpc_ops_materializar_planos');
+   WHERE n.nspname = 'public' AND p.proname IN ('ops_expandir_rrule','rpc_ops_materializar_planos')
+     AND pg_get_function_identity_arguments(p.oid) IN ('_regra text, _inicio date, _fim date',
+                                                       '_org_id uuid, _horizonte_dias integer');
   IF v <> 2 THEN RAISE EXCEPTION 'Esperadas 2 funções, encontradas %', v; END IF;
   RAISE NOTICE 'Operações: planos preventivos prontos. Correr rpc_ops_materializar_planos() todos os dias.';
 END

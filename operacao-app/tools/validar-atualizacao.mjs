@@ -35,7 +35,13 @@ const ANTIGA = [
   "correcoes-modelo.sql", "medicoes.sql", "despacho.sql", "orcamentos.sql",
   "anexos.sql", "planos-crud.sql", "config.sql", "custos.sql", "cliente-crm.sql",
 ];
-const ATUALIZACAO = ["seguranca.sql", "tempos.sql", "rpcs-tarefas.sql", "medicoes.sql", "obras.sql"];
+// planos-periodicidades.sql (06/10/2026): a entrega do expansor com âncora.
+// Na instalação limpa já vem de correcoes-modelo.sql e planos-crud.sql; aqui
+// prova-se que colá-la na produção dá exatamente as mesmas funções.
+const ATUALIZACAO = [
+  "seguranca.sql", "tempos.sql", "rpcs-tarefas.sql", "medicoes.sql", "obras.sql",
+  "planos-periodicidades.sql",
+];
 const LIMPA = [...ANTIGA, "seguranca.sql", "tempos.sql", "obras.sql"];
 
 async function montar(nome, passos) {

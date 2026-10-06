@@ -40,6 +40,79 @@ export const RECORRENCIA_VAZIA: Recorrencia = {
   ordinal: null,
 };
 
+/* ───────────────────────────── Periodicidades ───────────────────────────── */
+
+/**
+ * As periodicidades que o formulário oferece. A escolha é sempre desta lista —
+ * não há campo livre de "de quantas em quantas": quem faz manutenção pensa em
+ * "trimestral", não em "MONTHLY com intervalo 3".
+ *
+ * Por baixo continua a ser uma RRULE (frequência + intervalo), que é o que a
+ * base guarda e expande. Acrescentar uma periodicidade é acrescentar uma linha
+ * aqui; a base já sabe expandir qualquer intervalo.
+ */
+export const PERIODICIDADES = [
+  { chave: "diaria", nome: "Diária", frequencia: "DAILY", intervalo: 1 },
+  { chave: "semanal", nome: "Semanal", frequencia: "WEEKLY", intervalo: 1 },
+  { chave: "quinzenal", nome: "Quinzenal (de 2 em 2 semanas)", frequencia: "WEEKLY", intervalo: 2 },
+  { chave: "mensal", nome: "Mensal", frequencia: "MONTHLY", intervalo: 1 },
+  { chave: "bimestral", nome: "Bimestral (de 2 em 2 meses)", frequencia: "MONTHLY", intervalo: 2 },
+  { chave: "trimestral", nome: "Trimestral (de 3 em 3 meses)", frequencia: "MONTHLY", intervalo: 3 },
+  { chave: "quadrimestral", nome: "Quadrimestral (de 4 em 4 meses)", frequencia: "MONTHLY", intervalo: 4 },
+  { chave: "semestral", nome: "Semestral (de 6 em 6 meses)", frequencia: "MONTHLY", intervalo: 6 },
+  { chave: "anual", nome: "Anual", frequencia: "YEARLY", intervalo: 1 },
+  { chave: "bienal", nome: "Bienal (de 2 em 2 anos)", frequencia: "YEARLY", intervalo: 2 },
+  { chave: "trienal", nome: "Trienal (de 3 em 3 anos)", frequencia: "YEARLY", intervalo: 3 },
+  { chave: "quinquenal", nome: "Quinquenal (de 5 em 5 anos)", frequencia: "YEARLY", intervalo: 5 },
+] as const satisfies ReadonlyArray<{
+  chave: string;
+  nome: string;
+  frequencia: Frequencia;
+  intervalo: number;
+}>;
+
+export type ChavePeriodicidade = (typeof PERIODICIDADES)[number]["chave"];
+
+/** A periodicidade da lista que corresponde à regra, ou `null` se não houver. */
+export function periodicidadeDe(r: Recorrencia): ChavePeriodicidade | null {
+  return (
+    PERIODICIDADES.find((p) => p.frequencia === r.frequencia && p.intervalo === r.intervalo)
+      ?.chave ?? null
+  );
+}
+
+/**
+ * O nome curto da periodicidade: "Trimestral (de 3 em 3 meses)", ou, para uma
+ * regra antiga fora da lista, "De 3 em 3 dias".
+ */
+export function nomeDaPeriodicidade(r: Recorrencia): string {
+  const chave = periodicidadeDe(r);
+  if (chave) return PERIODICIDADES.find((p) => p.chave === chave)!.nome;
+  const plural = { DAILY: "dias", WEEKLY: "semanas", MONTHLY: "meses", YEARLY: "anos" }[r.frequencia];
+  return `De ${r.intervalo} em ${r.intervalo} ${plural}`;
+}
+
+/**
+ * Muda a periodicidade, ajustando o resto ao que a nova frequência usa.
+ *
+ * As anuais (anual, bienal, …) repetem-se na DATA DE INÍCIO do plano: um
+ * "dia do mês" sem mês não quer dizer nada numa regra anual.
+ */
+export function comPeriodicidade(r: Recorrencia, chave: ChavePeriodicidade): Recorrencia {
+  const p = PERIODICIDADES.find((x) => x.chave === chave);
+  if (!p) return r;
+  const base = { ...r, frequencia: p.frequencia, intervalo: p.intervalo };
+
+  if (p.frequencia === "DAILY") return { ...base, dias: [], diaDoMes: null, ordinal: null };
+  if (p.frequencia === "YEARLY") return { ...base, dias: [], diaDoMes: null, ordinal: null };
+  if (p.frequencia === "WEEKLY") {
+    return { ...base, dias: r.frequencia === "WEEKLY" ? r.dias : [], diaDoMes: null, ordinal: null };
+  }
+  // MONTHLY: mantém o que já havia de mensal; senão, dia 1.
+  if (r.frequencia === "MONTHLY") return base;
+  return { ...base, dias: [], diaDoMes: 1, ordinal: null };
+}
+
 /* ─────────────────────────── Escrever a RRULE ─────────────────────────── */
 
 export function paraRRule(r: Recorrencia): string {
@@ -166,14 +239,22 @@ export function emPortugues(r: Recorrencia | null): string {
 
   const base = cada(r.frequencia === "MONTHLY" ? "meses" : "anos", false);
 
+  // Numa anual, o mês é o da data de início do plano.
+  const doMesDeInicio = r.frequencia === "YEARLY" ? " do mês de início" : "";
+
+  // Anual sem dia: repete-se na data de início do plano.
+  if (r.frequencia === "YEARLY" && r.ordinal == null && r.diaDoMes == null) {
+    return `${base}, na data de início`;
+  }
+
   if (r.ordinal != null && r.dias.length > 0) {
     const dia = DIAS.find((x) => x.chave === r.dias[0])?.nome ?? r.dias[0];
     const ord = ORDINAIS[r.ordinal] ?? `${r.ordinal}.ª`;
-    return `${base}, na ${ord} ${dia}`;
+    return `${base}, na ${ord} ${dia}${doMesDeInicio}`;
   }
 
   if (r.diaDoMes != null) {
-    return `${base}, no dia ${r.diaDoMes}`;
+    return `${base}, no dia ${r.diaDoMes}${doMesDeInicio}`;
   }
 
   return base;
@@ -193,8 +274,9 @@ export function faltaNaRecorrencia(r: Recorrencia): string | null {
   if ((r.frequencia === "MONTHLY" || r.frequencia === "YEARLY") && r.ordinal != null) {
     if (r.dias.length === 0) return "Escolhe o dia da semana.";
   }
+  // Anual sem dia é válido: repete-se na data de início.
   if (
-    (r.frequencia === "MONTHLY" || r.frequencia === "YEARLY") &&
+    r.frequencia === "MONTHLY" &&
     r.ordinal == null &&
     (r.diaDoMes == null || r.diaDoMes < 1 || r.diaDoMes > 31)
   ) {

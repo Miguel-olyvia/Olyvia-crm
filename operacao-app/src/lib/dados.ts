@@ -993,12 +993,16 @@ export async function experimentarRegra(
 }
 
 /** Corre a materialização à mão, para quem não quer esperar pelo job diário. */
-export async function materializarPlanos(
-  planoId?: string | null
-): Promise<{ ordens_criadas: number; planos_vistos: number; ignorados: unknown[] }> {
+export async function materializarPlanos(): Promise<{
+  ordens_criadas: number;
+  planos_vistos: number;
+  ignorados: unknown[];
+}> {
+  // Os nomes têm de ser os da função na base (_org_id, _horizonte_dias); com
+  // outros nomes o PostgREST não a encontra. Sem organização = as que se vê.
   const { data, error } = await supabase.rpc("rpc_ops_materializar_planos", {
-    p_plano_id: planoId ?? null,
-    p_dias: 120,
+    _org_id: null,
+    _horizonte_dias: 120,
   });
   if (error) throw new ErroDeEscrita(error.message || "Não foi possível gerar as ordens.");
   return data as unknown as {

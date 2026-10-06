@@ -139,6 +139,81 @@ const expandir = async (regra, de, ate) =>
     : mau(`5MO devia dar vazio, deu ${quinta5}`);
 }
 
+// ── Periodicidades, ancoradas no início do plano ─────────────────────────
+// A âncora é o 4.º argumento. O job expande janelas que começam onde a
+// anterior acabou; o passo tem de contar a partir do início do plano.
+console.log("\n─── periodicidades (âncora) ─────────────");
+{
+  const exp4 = async (regra, de, ate, ancora) =>
+    (await q(`SELECT public.ops_expandir_rrule('${regra}','${de}'::date,'${ate}'::date,'${ancora}'::date) AS d`))
+      .map((r) => iso(r.d));
+  const igual = (nome, obtido, esperado) =>
+    obtido.join() === esperado.join() ? ok(nome) : mau(`${nome}: deu ${obtido}, esperava ${esperado}`);
+
+  // Âncora: 2026-09-01 (terça-feira).
+  const A = "2026-09-01";
+  igual("diária", await exp4("FREQ=DAILY", "2026-09-01", "2026-09-03", A),
+    ["2026-09-01", "2026-09-02", "2026-09-03"]);
+  igual("semanal à terça", await exp4("FREQ=WEEKLY;BYDAY=TU", "2026-09-01", "2026-09-22", A),
+    ["2026-09-01", "2026-09-08", "2026-09-15", "2026-09-22"]);
+  igual("quinzenal à terça", await exp4("FREQ=WEEKLY;INTERVAL=2;BYDAY=TU", "2026-09-01", "2026-10-31", A),
+    ["2026-09-01", "2026-09-15", "2026-09-29", "2026-10-13", "2026-10-27"]);
+  // A segunda-feira da semana da âncora (31/08) fica antes do início: não conta.
+  igual("quinzenal à segunda e quinta (nada antes do início)",
+    await exp4("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH", "2026-08-01", "2026-09-30", A),
+    ["2026-09-03", "2026-09-14", "2026-09-17", "2026-09-28"]);
+  igual("mensal ao dia 15", await exp4("FREQ=MONTHLY;BYMONTHDAY=15", "2026-09-01", "2026-11-30", A),
+    ["2026-09-15", "2026-10-15", "2026-11-15"]);
+  igual("bimestral ao dia 1", await exp4("FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=1", "2026-09-01", "2027-03-31", A),
+    ["2026-09-01", "2026-11-01", "2027-01-01", "2027-03-01"]);
+  igual("trimestral ao dia 1", await exp4("FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=1", "2026-09-01", "2027-09-30", A),
+    ["2026-09-01", "2026-12-01", "2027-03-01", "2027-06-01", "2027-09-01"]);
+  igual("quadrimestral ao dia 10", await exp4("FREQ=MONTHLY;INTERVAL=4;BYMONTHDAY=10", "2026-09-01", "2027-09-30", A),
+    ["2026-09-10", "2027-01-10", "2027-05-10", "2027-09-10"]);
+  igual("semestral na primeira segunda", await exp4("FREQ=MONTHLY;INTERVAL=6;BYDAY=1MO", "2026-09-01", "2027-09-30", A),
+    ["2026-09-07", "2027-03-01", "2027-09-06"]);
+  igual("anual na data de início", await exp4("FREQ=YEARLY", "2026-09-01", "2029-12-31", A),
+    ["2026-09-01", "2027-09-01", "2028-09-01", "2029-09-01"]);
+  igual("bienal na data de início", await exp4("FREQ=YEARLY;INTERVAL=2", "2026-09-01", "2031-12-31", A),
+    ["2026-09-01", "2028-09-01", "2030-09-01"]);
+  igual("trienal", await exp4("FREQ=YEARLY;INTERVAL=3", "2026-09-01", "2032-12-31", A),
+    ["2026-09-01", "2029-09-01", "2032-09-01"]);
+  igual("quinquenal", await exp4("FREQ=YEARLY;INTERVAL=5", "2026-09-01", "2036-12-31", A),
+    ["2026-09-01", "2031-09-01", "2036-09-01"]);
+  igual("anual com dia do mês: no mês da âncora", await exp4("FREQ=YEARLY;BYMONTHDAY=20", "2026-09-01", "2028-12-31", A),
+    ["2026-09-20", "2027-09-20", "2028-09-20"]);
+  // Anual a 29/02: nos anos sem 29 de fevereiro o Postgres dá 28.
+  igual("anual a 29/02", await exp4("FREQ=YEARLY", "2028-02-29", "2030-12-31", "2028-02-29"),
+    ["2028-02-29", "2029-02-28", "2030-02-28"]);
+  // Mensal a partir de 31/01 sem dia: conta-se da âncora, não escorrega para 28.
+  igual("mensal desde 31/01 não fica preso em 28", await exp4("FREQ=MONTHLY", "2027-01-31", "2027-04-30", "2027-01-31"),
+    ["2027-01-31", "2027-02-28", "2027-03-31", "2027-04-30"]);
+
+  // O caso que estava partido: a janela do job começa a meio do ciclo.
+  igual("trimestral, janela a começar a meio do ciclo",
+    await exp4("FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=1", "2026-10-15", "2027-04-30", A),
+    ["2026-12-01", "2027-03-01"]);
+  igual("quinzenal, janela de um só dia na semana de folga",
+    await exp4("FREQ=WEEKLY;INTERVAL=2;BYDAY=TU", "2026-09-08", "2026-09-08", A), []);
+  igual("anual, janela de um só dia que não é o aniversário",
+    await exp4("FREQ=YEARLY", "2026-09-02", "2026-09-02", A), []);
+  igual("COUNT conta a partir da âncora, não da janela",
+    await exp4("FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=1;COUNT=2", "2026-10-01", "2027-12-31", A),
+    ["2026-12-01"]);
+
+  // Correr o job dia a dia (janelas de 1 dia) dá o mesmo que de uma vez.
+  {
+    const regra = "FREQ=MONTHLY;INTERVAL=3;BYMONTHDAY=1";
+    const tudo = await exp4(regra, A, "2027-06-30", A);
+    const aos = [];
+    for (let d = new Date(A + "T12:00:00Z"); d <= new Date("2027-06-30T12:00:00Z"); d.setUTCDate(d.getUTCDate() + 1)) {
+      const dia = iso(d);
+      aos.push(...(await exp4(regra, dia, dia, A)));
+    }
+    igual("trimestral: dia a dia = de uma vez", aos, tudo);
+  }
+}
+
 // ── A materialização ─────────────────────────────────────────────────────
 console.log("\n─── materializar ────────────────────────");
 {
@@ -192,6 +267,38 @@ console.log("\n─── materializar ──────────────
   const depois = (await um(`SELECT count(*)::int n FROM public.ops_ordem WHERE origem='preventiva'`)).n;
   antes === depois ? ok("correr o job três vezes gera o mesmo que correr uma")
                    : mau(`duplicou: ${antes} → ${depois}`);
+}
+
+// ── Trimestral e anual: o job não perde o passo ───────────────────────────
+console.log("\n─── trimestral e anual no job ───────────");
+{
+  // Começou há 40 dias, ao dia de hoje: a janela do job começa a meio do ciclo.
+  await db.exec(`
+    INSERT INTO public.ops_plano (id, organization_id, codigo, nome, cliente_id, regra_recorrencia, hora_prevista, inicio_em)
+      VALUES ('dddd3333-0000-0000-0000-0000000000d3'::uuid,'${ORG}','PLN-0003','Extintores trimestral','${CLI}',
+              'FREQ=MONTHLY;INTERVAL=3','09:00', current_date - 40),
+             ('dddd4444-0000-0000-0000-0000000000d4'::uuid,'${ORG}','PLN-0004','Para-raios anual','${CLI}',
+              'FREQ=YEARLY','09:00', current_date - 40);
+  `);
+  for (let i = 0; i < 3; i++) await db.exec(`SELECT public.rpc_ops_materializar_planos(NULL, 120);`);
+  const tri = (await q(`
+    SELECT agendada_para::date AS d FROM public.ops_ordem
+     WHERE plano_id = 'dddd3333-0000-0000-0000-0000000000d3' ORDER BY 1`)).map((r) => iso(r.d));
+  const esperado = iso(new Date(Date.UTC(
+    new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()) - 40 * 864e5));
+  const [ea, em, ed] = esperado.split("-").map(Number);
+  // início + 3 meses (dentro dos 120 dias); a regra não gera mais nada na janela.
+  const passo = new Date(Date.UTC(ea, em - 1 + 3, 1));
+  const ultimo = new Date(Date.UTC(passo.getUTCFullYear(), passo.getUTCMonth() + 1, 0)).getUTCDate();
+  const prox = iso(new Date(Date.UTC(passo.getUTCFullYear(), passo.getUTCMonth(), Math.min(ed, ultimo))));
+  tri.join() === prox
+    ? ok(`trimestral iniciado há 40 dias: uma ordem só, a ${prox}`)
+    : mau(`trimestral gerou ${tri}, esperava só ${prox}`);
+  const anu = (await um(`SELECT count(*)::int n FROM public.ops_ordem
+                          WHERE plano_id = 'dddd4444-0000-0000-0000-0000000000d4'`)).n;
+  anu === 0
+    ? ok("anual iniciado há 40 dias: nenhuma ordem nos próximos 120 dias")
+    : mau(`anual gerou ${anu} ordens na janela (devia ser 0)`);
 }
 
 // ── Um plano com regra inválida não derruba os outros ─────────────────────

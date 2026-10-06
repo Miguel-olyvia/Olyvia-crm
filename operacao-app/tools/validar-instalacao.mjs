@@ -5,7 +5,7 @@
  *                 → planos.sql → correcoes-modelo.sql → medicoes.sql
  *                 → despacho.sql → orcamentos.sql → anexos.sql
  *                 → planos-crud.sql → config.sql → custos.sql → cliente-crm.sql
- *                 → seguranca.sql → tempos.sql → obras.sql
+ *                 → seguranca.sql → tempos.sql → [planos-periodicidades.sql] → obras.sql
  *                 → criar-utilizador.sql
  *                 → pos-instalacao.sql → demo.sql → demo-remover.sql
  *
@@ -125,6 +125,10 @@ await passo("db/seguranca.sql", ler("seguranca.sql"));
 await passo("db/seguranca.sql outra vez (idempotência)", ler("seguranca.sql"));
 await passo("db/tempos.sql", ler("tempos.sql"));
 await passo("db/tempos.sql outra vez (idempotência)", ler("tempos.sql"));
+// Entrega das periodicidades (06/10/2026): as mesmas funções que já vêm de
+// correcoes-modelo.sql e planos-crud.sql. Correr por cima não muda nada.
+await passo("db/planos-periodicidades.sql", ler("planos-periodicidades.sql"));
+await passo("db/planos-periodicidades.sql outra vez (idempotência)", ler("planos-periodicidades.sql"));
 
 // ── 2b. Voltar a correr um ficheiro antigo não pode fazer regredir nada ──
 // planos.sql, rpcs.sql e orcamentos.sql têm a PRIMEIRA versão de funções e
@@ -145,7 +149,7 @@ await passo("db/medicoes.sql depois de tempos.sql", ler("medicoes.sql"));
   (await def("public.rpc_ops_materializar_planos(uuid,integer)")).includes("tipo_recorrencia")
     ? ok("rpc_ops_materializar_planos continua a ser a de correcoes-modelo.sql")
     : mau("planos.sql fez regredir rpc_ops_materializar_planos");
-  (await def("public.ops_expandir_rrule(text,date,date)")).includes("v_ord")
+  (await def("public.ops_expandir_rrule(text,date,date,date)")).includes("v_ord")
     ? ok("ops_expandir_rrule continua a saber 'última segunda-feira'")
     : mau("planos.sql fez regredir ops_expandir_rrule");
   (await def("public.rpc_ops_transitar_ordem(uuid,text,text,timestamptz)")).includes("supervisor")
