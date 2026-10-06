@@ -15,6 +15,8 @@ import { CONTRACT_VARIABLES, extractPromptTokens, substituteVariables } from "@/
 import { GenerateFromTemplateDialog } from "@/components/contracts/GenerateFromTemplateDialog";
 import { FillPromptVariablesDialog, type PromptVariable } from "@/components/contracts/FillPromptVariablesDialog";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
+import { useCooldown, cooldownLabel, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
+import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock, UNFREEZE_CONTRACT_COLUMNS, isContractInForce } from "@/components/contracts/contractDocument";
 import { renderContractHeaderHtml } from "@/components/contracts/contractHeader";
 import { format } from "date-fns";
@@ -48,6 +50,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   const [otpCode, setOtpCode] = useState("");
   const [otpError, setOtpError] = useState("");
   const [maskedPhone, setMaskedPhone] = useState("");
+  const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
 
   useEffect(() => {
     setBodyHtml(contract?.contract_body_html || "");
@@ -234,6 +237,8 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
 
   // ── SMS OTP flow for company signature ──
   const handleSendOtp = async () => {
+    // A contagem começa no clique (antes da resposta) e não é reposta se o servidor recusar.
+    if (!otpCooldown.iniciar()) return;
     setOtpStep("sending");
     setOtpError("");
     try {
@@ -690,10 +695,11 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
                 {otpError && (
                   <p className="text-sm text-destructive">{otpError}</p>
                 )}
-                <Button onClick={handleSendOtp} className="w-full gap-2" style={{ backgroundColor: "#2563eb" }}>
+                <Button onClick={handleSendOtp} disabled={otpCooldown.activo} className="w-full gap-2" style={{ backgroundColor: "#2563eb" }}>
                   <Smartphone className="h-4 w-4 text-white" />
-                  <span className="text-white">Enviar código SMS</span>
+                  <span className="text-white">{cooldownLabel("Enviar código SMS", otpCooldown.restante)}</span>
                 </Button>
+                <OtpCooldownNotice activo={otpCooldown.activo} />
               </div>
             )}
 
@@ -710,7 +716,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
                   Código enviado para <strong>{maskedPhone}</strong>
                 </p>
                 <div className="flex justify-center">
-                  <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode}>
+                  <InputOTP autoFocus maxLength={6} value={otpCode} onChange={setOtpCode}>
                     <InputOTPGroup>
                       <InputOTPSlot index={0} />
                       <InputOTPSlot index={1} />
@@ -724,9 +730,10 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
                 {otpError && (
                   <p className="text-sm text-destructive">{otpError}</p>
                 )}
+                <OtpCooldownNotice activo={otpCooldown.activo} />
                 <div className="flex gap-2">
-                  <Button variant="outline" onClick={handleSendOtp} className="flex-1 text-xs">
-                    Reenviar código
+                  <Button variant="outline" onClick={handleSendOtp} disabled={otpCooldown.activo} className="flex-1 text-xs">
+                    {cooldownLabel("Reenviar código", otpCooldown.restante)}
                   </Button>
                   <Button
                     onClick={handleVerifyOtp}

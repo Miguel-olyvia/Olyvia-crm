@@ -22,6 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { useCooldown, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const STATUS_LABELS: Record<string, string> = {
@@ -46,6 +47,7 @@ const ClientPortalProposalDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
 
   const [portalData, setPortalData] = useState<ProposalPortalData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -175,23 +177,24 @@ const ClientPortalProposalDetail = () => {
 
   async function handleSendOtp() {
     if (!id) return; // H4
+    // Validação local primeiro: sem orçamento seleccionado não se pede SMS nem começa a contagem.
+    const quotes = portalData?.quotes || [];
+    const hasAcceptedQuote = quotes.some((q) => q.estado === "aceite");
+    const hasSelectedQuote = selectedQuoteIds.length > 0;
+    if (quotes.length > 0 && !hasAcceptedQuote && !hasSelectedQuote) {
+      toast({
+        title: "Aceite pelo menos 1 orçamento",
+        description: "Antes de assinar a proposta, aceite pelo menos um orçamento.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // A contagem começa no clique (antes da resposta) e não é reposta se o servidor recusar.
+    if (!otpCooldown.iniciar()) return;
     setOtpStep("sending");
     setOtpError("");
     try {
-      // Check if at least one quote is selected or already accepted
-      const quotes = portalData?.quotes || [];
-      const hasAcceptedQuote = quotes.some((q) => q.estado === "aceite");
-      const hasSelectedQuote = selectedQuoteIds.length > 0;
-      if (quotes.length > 0 && !hasAcceptedQuote && !hasSelectedQuote) {
-        toast({
-          title: "Aceite pelo menos 1 orçamento",
-          description: "Antes de assinar a proposta, aceite pelo menos um orçamento.",
-          variant: "destructive",
-        });
-        setOtpStep("idle");
-        return;
-      }
-
       const { data, error } = await supabase.functions.invoke("sms-otp", {
         body: { action: "send_otp", reference_id: id, reference_type: "proposal", purpose: "proposal_signature" },
       });
@@ -420,6 +423,7 @@ const ClientPortalProposalDetail = () => {
           maskedPhone={maskedPhone}
           otpError={otpError}
           onSendOtp={handleSendOtp}
+          otpCooldown={otpCooldown.restante}
           onVerifyOtp={handleVerifyOtp}
           onOtpCodeChange={setOtpCode}
           onAcceptQuote={handleAcceptQuote}
