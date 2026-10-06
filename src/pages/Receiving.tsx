@@ -334,10 +334,11 @@ const BUSINESS_REJECTION_CODES = new Set(["23514", "22003", "22P02", "P0001"]);
 const DISCARD_MIN_AGE_MS = 60_000;
 /**
  * Numa nova tentativa, uma recusa de negócio só larga o id se o envio anterior
- * tiver sido há mais do que isto (statement_timeout do authenticated = 8 s):
- * antes disso o pedido anterior pode ainda estar a correr no servidor.
+ * tiver sido há mais do que isto. O statement_timeout do authenticated é 8 s,
+ * mas o pedido pode antes esperar na fila de ligações do PostgREST (~10 s) —
+ * usa a mesma margem do "Descartar".
  */
-const REJECT_MIN_AGE_MS = 10_000;
+const REJECT_MIN_AGE_MS = DISCARD_MIN_AGE_MS;
 const PREVIEW_AUTO_RETRIES = 3;
 const PREVIEW_RETRY_MS = 3000;
 const SCAN_AUTO_RETRIES = 3;
