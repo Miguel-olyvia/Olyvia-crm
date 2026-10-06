@@ -6,7 +6,6 @@ import { Upload, FileText, FileWarning, Loader2 } from "lucide-react";
 import { toast } from "@/lib/toast";
 import mammoth from "mammoth";
 import { supabase } from "@/integrations/supabase/client";
-import { useTranslation } from "@/hooks/useTranslation";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 
 GlobalWorkerOptions.workerSrc = new URL(
@@ -16,8 +15,6 @@ GlobalWorkerOptions.workerSrc = new URL(
 
 interface TemplateFileImportProps {
   onImport: (html: string, fileName: string, isFromPdf: boolean) => void;
-  /** Organization charged for the AI extraction (3 credits). Without it, PDFs use the local PDF.js fallback. */
-  organizationId?: string;
 }
 
 const escapeHtml = (value: string) => value
@@ -80,22 +77,7 @@ async function extractTextWithPdfJs(file: File): Promise<string> {
     .join("\n");
 }
 
-type PdfFallbackReason = "creditsInsufficient" | "aiUnavailable" | "noOrganization";
-
-interface PdfExtraction {
-  html: string;
-  mode: "pdfjs" | "ai";
-  /** Why the AI extraction was skipped/failed (only when mode is "pdfjs"). */
-  fallbackReason?: PdfFallbackReason;
-}
-
-async function extractTextFromPdf(file: File, organizationId?: string): Promise<PdfExtraction> {
-  if (!organizationId) {
-    const html = await extractTextWithPdfJs(file);
-    return { html, mode: "pdfjs", fallbackReason: "noOrganization" };
-  }
-  let fallbackReason: PdfFallbackReason = "aiUnavailable";
-
+async function extractTextFromPdf(file: File): Promise<{ html: string; mode: "pdfjs" | "ai" }> {
   // Fast base64 encoding via FileReader — avoids slow byte-by-byte string concatenation
   const pdfBase64 = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -109,7 +91,7 @@ async function extractTextFromPdf(file: File, organizationId?: string): Promise<
     const timeoutSignal = AbortSignal.timeout(AI_TIMEOUT_MS);
 
     const invokePromise = supabase.functions.invoke("import-contract-pdf", {
-      body: { organization_id: organizationId, fileName: file.name, pdfBase64 },
+      body: { fileName: file.name, pdfBase64 },
     });
 
     const { data, error } = await Promise.race([
@@ -122,9 +104,6 @@ async function extractTextFromPdf(file: File, organizationId?: string): Promise<
     if (!error && data?.html) {
       return { html: data.html as string, mode: "ai" };
     }
-    // 402 = out of AI credits (our credits gate or the gateway); anything else = unavailable.
-    const status = (error as any)?.context?.status;
-    if (status === 402) fallbackReason = "creditsInsufficient";
     console.warn("AI extraction failed, falling back to PDF.js:", error || data?.error);
   } catch (err: any) {
     if (err?.message === "AI_TIMEOUT") {
@@ -136,11 +115,10 @@ async function extractTextFromPdf(file: File, organizationId?: string): Promise<
 
   // Fallback: local pdfjs extraction (no formatting)
   const html = await extractTextWithPdfJs(file);
-  return { html, mode: "pdfjs", fallbackReason };
+  return { html, mode: "pdfjs" };
 }
 
-export function TemplateFileImport({ onImport, organizationId }:TemplateFileImportProps) {
-  const { t } = useTranslation();
+export function TemplateFileImport({ onImport }: TemplateFileImportProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [preview, setPreview] = useState<{ html: string; fileName: string; isPdf: boolean } | null>(null);
@@ -169,12 +147,10 @@ export function TemplateFileImport({ onImport, organizationId }:TemplateFileImpo
           console.warn("Mammoth warnings:", result.messages);
         }
       } else {
-        const result = await extractTextFromPdf(file, organizationId);
+        const result = await extractTextFromPdf(file);
         html = result.html;
         if (result.mode === "ai") {
-          toast.info("PDF importado com extracção avançada para corrigir texto corrompido ou scannado.");
-        } else if (result.fallbackReason) {
-          toast.warning(t(`contractTemplates.import.${result.fallbackReason}`));
+          toast.info("PDF importado com extração avançada para corrigir texto corrompido ou scannado.");
         }
       }
 
@@ -255,7 +231,7 @@ export function TemplateFileImport({ onImport, organizationId }:TemplateFileImpo
                 <div className="flex items-start gap-2 px-3 py-2 rounded-md bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800">
                   <FileWarning className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
                   <p className="text-xs text-amber-700 dark:text-amber-400">
-                    Texto extraído do PDF — reveja a formatação. A extracção de PDFs pode não preservar a estrutura original.
+                    Texto extraído do PDF — reveja a formatação. A extração de PDFs pode não preservar a estrutura original.
                   </p>
                 </div>
               )}

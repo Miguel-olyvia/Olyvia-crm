@@ -24,6 +24,7 @@ import {
 import { toast } from "@/lib/toast";
 import { Plus, Pencil, Trash2, Globe, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface Country {
   id: string;
@@ -36,6 +37,7 @@ interface Country {
 }
 
 export default function Countries() {
+  const { t } = useTranslation();
   const [countries, setCountries] = useState<Country[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -64,7 +66,7 @@ export default function Countries() {
       if (error) throw error;
       setCountries(data || []);
     } catch (error: any) {
-      toast.error("Error loading countries");
+      toast.error(t('countriesPage.toast.loadError'));
       console.error(error);
     } finally {
       setLoading(false);
@@ -96,7 +98,7 @@ export default function Countries() {
 
   const handleSave = async () => {
     if (!formData.name || !formData.code) {
-      toast.error("Name and code are required");
+      toast.error(t('countriesPage.toast.required'));
       return;
     }
 
@@ -114,7 +116,7 @@ export default function Countries() {
           .eq("id", editingCountry.id);
 
         if (error) throw error;
-        toast.success("Country updated successfully");
+        toast.success(t('countriesPage.toast.updated'));
       } else {
         const { error } = await supabase.from("countries").insert({
           name: formData.name,
@@ -125,19 +127,19 @@ export default function Countries() {
         });
 
         if (error) throw error;
-        toast.success("Country created successfully");
+        toast.success(t('countriesPage.toast.created'));
       }
 
       setDialogOpen(false);
       loadCountries();
     } catch (error: any) {
-      toast.error(error.message || "Error saving country");
+      toast.error(error.message || t('countriesPage.toast.saveError'));
       console.error(error);
     }
   };
 
   const handleDelete = async (country: Country) => {
-    if (!confirm(`Are you sure you want to delete "${country.name}"?`)) return;
+    if (!confirm(t('countriesPage.deleteConfirm', { name: country.name }))) return;
 
     try {
       const { error } = await supabase
@@ -146,10 +148,10 @@ export default function Countries() {
         .eq("id", country.id);
 
       if (error) throw error;
-      toast.success("Country deleted successfully");
+      toast.success(t('countriesPage.toast.deleted'));
       loadCountries();
     } catch (error: any) {
-      toast.error(error.message || "Error deleting country");
+      toast.error(error.message || t('countriesPage.toast.deleteError'));
       console.error(error);
     }
   };
@@ -164,9 +166,9 @@ export default function Countries() {
     <>
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Countries</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t('countriesPage.title')}</h1>
           <p className="text-muted-foreground">
-            Manage the list of countries available in the system
+            {t('countriesPage.subtitle')}
           </p>
         </div>
 
@@ -174,7 +176,7 @@ export default function Countries() {
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
-              placeholder="Search countries..."
+              placeholder={t('countriesPage.searchPlaceholder')}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10"
@@ -182,7 +184,7 @@ export default function Countries() {
           </div>
           <Button onClick={() => handleOpenDialog()}>
             <Plus className="h-4 w-4 mr-2" />
-            New Country
+            {t('countriesPage.newCountry')}
           </Button>
         </div>
 
@@ -190,25 +192,25 @@ export default function Countries() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Code</TableHead>
-                <TableHead>Phone Code</TableHead>
-                <TableHead>Order</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t('countriesPage.name')}</TableHead>
+                <TableHead>{t('countriesPage.code')}</TableHead>
+                <TableHead>{t('countriesPage.phoneCode')}</TableHead>
+                <TableHead>{t('countriesPage.order')}</TableHead>
+                <TableHead>{t('common.status')}</TableHead>
+                <TableHead className="text-right">{t('common.actions')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-8">
-                    Loading...
+                    {t('common.loading')}
                   </TableCell>
                 </TableRow>
               ) : filteredCountries.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center py-8">
-                    No countries found
+                    {t('countriesPage.noResults')}
                   </TableCell>
                 </TableRow>
               ) : (
@@ -227,7 +229,7 @@ export default function Countries() {
                     <TableCell>{country.sort_order}</TableCell>
                     <TableCell>
                       <Badge variant={country.is_active ? "default" : "secondary"}>
-                        {country.is_active ? "Active" : "Inactive"}
+                        {country.is_active ? t('countriesPage.active') : t('countriesPage.inactive')}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
@@ -260,58 +262,58 @@ export default function Countries() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {editingCountry ? "Edit Country" : "New Country"}
+              {editingCountry ? t('countriesPage.editCountry') : t('countriesPage.newCountry')}
             </DialogTitle>
             <DialogDescription>
               {editingCountry
-                ? "Update the country information"
-                : "Add a new country to the system"}
+                ? t('countriesPage.editDescription')
+                : t('countriesPage.newDescription')}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="name">Name *</Label>
+              <Label htmlFor="name">{t('countriesPage.name')} *</Label>
               <Input
                 id="name"
                 value={formData.name}
                 onChange={(e) =>
                   setFormData({ ...formData, name: e.target.value })
                 }
-                placeholder="E.g.: Portugal"
+                placeholder={t('countriesPage.namePlaceholder')}
               />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="code">Code (ISO) *</Label>
+                <Label htmlFor="code">{t('countriesPage.codeIso')} *</Label>
                 <Input
                   id="code"
                   value={formData.code}
                   onChange={(e) =>
                     setFormData({ ...formData, code: e.target.value.toUpperCase() })
                   }
-                  placeholder="E.g.: PT"
+                  placeholder={t('countriesPage.codePlaceholder')}
                   maxLength={3}
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="phone_code">Phone Code</Label>
+                <Label htmlFor="phone_code">{t('countriesPage.phoneCode')}</Label>
                 <Input
                   id="phone_code"
                   value={formData.phone_code}
                   onChange={(e) =>
                     setFormData({ ...formData, phone_code: e.target.value })
                   }
-                  placeholder="E.g.: +351"
+                  placeholder={t('countriesPage.phoneCodePlaceholder')}
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="sort_order">Sort Order</Label>
+                <Label htmlFor="sort_order">{t('countriesPage.sortOrder')}</Label>
                 <Input
                   id="sort_order"
                   type="number"
@@ -330,17 +332,17 @@ export default function Countries() {
                     setFormData({ ...formData, is_active: checked })
                   }
                 />
-                <Label htmlFor="is_active">Active</Label>
+                <Label htmlFor="is_active">{t('countriesPage.active')}</Label>
               </div>
             </div>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
+              {t('common.cancel')}
             </Button>
             <Button onClick={handleSave}>
-              {editingCountry ? "Update" : "Create"}
+              {editingCountry ? t('countriesPage.update') : t('common.create')}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -13,13 +13,13 @@
  *  - a FASE de disparo mantém-se: o módulo continua a disparar quando disparava,
  *    só muda o que cria;
  *  - o que fica para trás é DESACTIVADO, nunca apagado — reversível;
- *  - acções que não são arestas (`create_task`, `send_email`, …) nunca são tocadas;
+ *  - ações que não são arestas (`create_task`, `send_email`, …) nunca são tocadas;
  *  - o módulo terminal não emite nada: `convert_to_client` é a aresta que ENTRA
  *    nele, escrita no módulo anterior.
  */
 import { isTerminal, type OrderableModule } from "./moduleOrder";
 
-/** A acção que CRIA cada módulo. Espelha STEP_TO_CREATE_ACTION da UI. */
+/** A ação que CRIA cada módulo. Espelha STEP_TO_CREATE_ACTION da UI. */
 export const ACTION_THAT_CREATES: Record<string, string> = {
   pedido: "create_deal",
   orcamento: "create_quote",

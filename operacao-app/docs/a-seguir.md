@@ -11,6 +11,69 @@
 
 ---
 
+## Planeamento automático — o que ficou por fazer (03/10/2026)
+
+O motor está feito ([`planeamento.md`](planeamento.md)). Falta, por ordem de
+valor:
+
+1. **Pessoas nos ofícios.** As 11 especialidades da Mudelar (com Gás ITG,
+   Marmorista, Logística) não têm ninguém associado: a distribuição e a
+   capacidade por especialidade não têm por onde escolher. É preencher dados
+   (Equipa → especialidades) — falta saber quem faz o quê.
+2. ~~**Capacidade por ofício no plano.**~~ Feito a 05/10/2026 (ver
+   [`planeamento.md`](planeamento.md)). Só dentro de cada obra.
+3. ~~**Prazos de materiais.**~~ Feito a 05/10/2026: do CRM (encomenda ou
+   prazo do fornecedor) e à mão no painel da tarefa. Os prazos no CRM estão
+   quase todos por preencher.
+4. **Medidas obrigatórias.** Quando a equipa decidir, tornar obrigatórios os
+   campos de planeamento do diagnóstico nos pacotes (hoje são opcionais).
+5. ~~**Atrasos com feriados.**~~ Feito a 05/10/2026.
+6. **Fatores da ficha do local por divisão** já entram (casa habitada, acesso,
+   elevador, andar); o "impacto no preço" é uma decisão em aberto do CRM.
+
+---
+
+## Ficha do local (pedido de 02/10/2026 — CRM feito, falta Operações)
+
+**O pedido.** No orçamento, o comercial preenche uma ficha técnica do local
+da obra: facilidade de acesso, estacionamento (e para carrinha?), elevador
+(dimensões, se leva material), andar, horários permitidos pelo condomínio,
+licença de ocupação de via, quadro elétrico/água acessíveis, exposição solar e
+humidade (secagens), presença do cliente, animais, etc.
+
+**Porquê importa às Operações.** Estas condições mudam as tarefas e a duração:
+um 4.º andar sem elevador aumenta demolições e descargas; sem estacionamento
+há tempo perdido; condomínio com horário reduz os minutos por dia; um edifício
+sem sol alonga secagens (é um dos motivos de desvio já previstos: "condições
+do edifício", "secagem"). Com a ficha, o planeamento pode aplicar
+**fatores** aos tempos previstos (ex.: +15 % em tarefas de "Demolições" sem
+elevador) e mostrar a ficha ao executor na tarefa, ao lado da morada.
+
+**Onde vive.** No CRM, na morada de entrega: tabela `anew_address_building`,
+1:1 com `anew_addresses`, com as secções **Exterior** (acesso e impacto %,
+estacionamento e zona, elevador, andares, frações por andar; o piso é o andar
+da morada) e **Interior** (tipologia, área, divisões, WC, ano, pavimento,
+elétrica, canalização, gás, amianto, habitada, animais, notas). O orçamento
+aponta para a morada em `quotes.site_address_id`. Operações só LÊ, como já
+faz com `quotes`, `quote_lines` e `client_contracts`. Detalhe em
+[`src/lib/addresses/README.md`](../../src/lib/addresses/README.md).
+
+**A fazer:**
+1. ~~CRM: campos da ficha no orçamento/morada da obra.~~ Feito a 02/10/2026
+   (`cfbb5173`, `7f7d25a8`).
+2. ~~Operações: ler a ficha na previsão da obra e aplicar fatores.~~ Feito a
+   03/10/2026: os fatores (acesso, elevador, andar, habitada…) entram na
+   aprendizagem por combinação de fatores (`planeamento.md`).
+3. ~~Mostrar a ficha em "As minhas tarefas" e na ficha da obra.~~ Feito a
+   05/10/2026 (`rpc_ops_obra_ficha_local`, `FichaLocal.tsx`).
+4. Usar o desvio justificado ("condições do edifício") para afinar os fatores
+   com dados reais — acontece sozinho com o uso (a aprendizagem separa por
+   fatores); falta haver obras validadas.
+
+**Estado:** a ficha é preenchida no CRM e as Operações leem-na e mostram-na.
+
+---
+
 ## Em duas linhas
 
 O ganho maior não está em construir coisas novas. Está em **usar o que o CRM
@@ -21,7 +84,15 @@ não tem de preencher em cima de um telhado é meio minuto e um erro a menos.
 
 ---
 
-## 1. Notificações — usar as do CRM
+## 1. ~~Notificações — usar as do CRM~~
+
+> **Feito a 06/10/2026 para as obras** (`db/obras.sql`, secção "Avisos no
+> sino do CRM"; ver [`obras.md`](obras.md#avisos-no-sino-do-crm)): trabalho
+> atribuído, alertas da obra (resumidos por obra, resolvem-se sozinhos) e
+> aviso da bancada ao marmorista. O sino do CRM passou a abrir os links
+> `/operacao/...` (antes caíam na página 404 do CRM). As ordens de
+> manutenção já tinham os seus avisos no ramo `feature/operacoes`
+> (`notificacoes.sql`, `ops_notificar`), aplicados na produção.
 
 **Prioridade: alta. É a falha mais sentida.**
 
@@ -304,7 +375,7 @@ a sessão de trabalho começa na mesma, e o tempo continua certo.
 
 Assumindo que o piloto corre e a equipa fica a usar:
 
-1. **Notificações** — a falha mais sentida, e a mais barata (meio dia)
+1. ~~**Notificações**~~ — feito a 06/10/2026 (obras)
 2. **Iniciar a ordem sozinha** — uma hora, e tira um passo a toda a gente
 3. **Relatório do ativo** — o que a operação mais pede depois de usar
 4. **Agenda: férias e horários** — para o aviso de choque dizer a verdade

@@ -6,3 +6,4 @@ dist-ssr
 SUPABASE.md
 .supabase-token
 .DS_Store
+dist-sql

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from "@/integrations/supabase/client";
@@ -8,7 +8,18 @@ import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck, Undo2 } from "lucide-react";
+import { Plus, ShoppingCart, Pencil, Trash2, Download, Upload, Tag, X, FileDown, PackageCheck, Undo2, ChevronDown, ChevronRight, Layers, List, Ban } from "lucide-react";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
 import { PermissionGate } from "@/components/PermissionGate";
 import LineAttributesDialog from "@/components/LineAttributesDialog";
@@ -39,6 +50,15 @@ type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
 };
 
+// Pré-seleção de linhas no diálogo "Reverter receção" — vem do link por linha
+// em ClientOrders.tsx (?open=<po>&item=… ou &product=…&quote_line=…&component=…).
+type RevertPreselect = {
+  itemIds?: string[];
+  productId?: string | null;
+  quoteLineId?: string | null;
+  componentIndex?: number | null;
+};
+
 type PurchaseOrderItem = {
   id?: string;
   item_type: 'product' | 'service';
@@ -61,9 +81,135 @@ type PurchaseOrderItem = {
 // diálogo — a `description` da linha é um snapshot da altura da encomenda e
 // não distingue variantes cujo nome só difere na medida (ex.: "Base Duche
 // Stone Plus" 70x70 vs 70x90 guardam a mesma description genérica).
+// units_per_uom / received_to_stock_units vêm da própria linha (Row).
+// products.uom (opcional) só serve para o rótulo das unidades de stock.
 type PurchaseOrderItemWithReceipt = Database["public"]["Tables"]["purchase_order_items"]["Row"] & {
-  products?: { name: string } | null;
+  products?: { name: string; uom?: { code: string | null } | null } | null;
 };
+
+// Destino por linha da receção (20261206130000): mesmo formato em
+// rpc_receive_purchase_order_lines e rpc_preview_po_receipt. units_* em
+// unidades de stock (já × units_per_uom); qty_* na unidade da linha.
+type ReceiptAllocationLine = {
+  purchase_order_item_id: string;
+  units_per_uom?: number | null;
+  destination?: "client_order" | "stock" | "split" | null;
+  allocation_reason?: string | null;
+  contract_order_number?: string | null;
+  contract_active?: boolean | null;
+  units_to_order?: number | null;
+  units_to_stock?: number | null;
+  qty_to_order?: number | null;
+  qty_to_stock?: number | null;
+  stock_quantity_now?: number | null;
+  // Só no cliente: quantidade enviada na pré-visualização (descarta
+  // repartições de uma quantidade já alterada).
+  requested_quantity?: number;
+};
+
+type ReceiptAllocationResult = {
+  order_number?: string;
+  status?: string;
+  stock_skipped?: boolean;
+  units_to_order_total?: number | null;
+  units_to_stock_total?: number | null;
+  lines?: ReceiptAllocationLine[];
+};
+
+type PurchaseOrderReceiptRow = Database["public"]["Tables"]["purchase_order_receipts"]["Row"];
+
+const formatQty = (value: number | null | undefined) =>
+  (Number(value) || 0).toLocaleString("pt-PT", { maximumFractionDigits: 4 });
+
+// Anular o resto de uma linha / da PO inteira ("não vou receber o resto").
+// Tabela purchase_order_item_cancellations e RPCs rpc_cancel_po_line_remainder,
+// rpc_cancel_po_remainder, rpc_undo_po_line_cancellation e
+// rpc_undo_po_cancellation_batch ainda não estão nos tipos gerados — cast local.
+type PoCancellationReason = "found_stock" | "supplier_unavailable" | "other";
+
+const PO_CANCELLATION_REASON_LABELS: Record<PoCancellationReason, string> = {
+  found_stock: "Encontrei stock / outra solução",
+  supplier_unavailable: "Fornecedor sem produto",
+  other: "Outro",
+};
+
+const poCancellationReasonLabel = (reason: string | null | undefined) =>
+  PO_CANCELLATION_REASON_LABELS[reason as PoCancellationReason] || reason || "—";
+
+type PoItemCancellationRow = {
+  id: string;
+  organization_id: string;
+  purchase_order_id: string;
+  // null quando a linha da PO foi recriada na edição (ON DELETE SET NULL).
+  purchase_order_item_id: string | null;
+  quantity_cancelled: number;
+  quantity_before: number | null;
+  quantity_after: number | null;
+  reason: string;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  undone_at: string | null;
+  undone_by: string | null;
+  undo_reason: string | null;
+  // Preenchido nas anulações da PO inteira (desfazem-se em lote — a BD recusa
+  // desfazer só uma linha de um lote).
+  batch_id?: string | null;
+  po_status_after?: string | null;
+};
+
+type PoCancelTarget =
+  | {
+      kind: "line";
+      source: "receive";
+      orderId: string;
+      orderNumber: string;
+      itemId: string;
+      quantity: number;
+      uomLabel: string;
+      productName: string;
+      isClientOrder: boolean;
+    }
+  | {
+      kind: "order";
+      source: "receive" | "list";
+      orderId: string;
+      orderNumber: string;
+      // null quando não se conhecem as linhas (ação na lista).
+      lineCount: number | null;
+      isClientOrder: boolean;
+    };
+
+type PoUndoTarget = {
+  cancellationId: string;
+  batchId: string | null;
+  orderId: string;
+  source: "receive" | "orderDialog";
+  description: string;
+};
+
+const poCancellationsDb = () => supabase as any;
+
+// Unidade da linha para as notas de anulação: a da embalagem (uom da linha,
+// quando a query a trouxe) ou a do produto se a linha não for embalagem.
+const poCancellationUomCode = (item: PurchaseOrderItemWithReceipt | undefined) => {
+  const units = Number(item?.units_per_uom) || 1;
+  const lineUom = (item as { uom?: { code: string | null } | null } | undefined)?.uom?.code;
+  return lineUom || (units === 1 ? item?.products?.uom?.code : null) || "";
+};
+
+// Números de EC distintos referidos nas linhas (normalmente só um por PO).
+const distinctContractNumbers = (lines: ReceiptAllocationLine[] | undefined) =>
+  Array.from(new Set((lines || []).map((l) => l.contract_order_number).filter((n): n is string => !!n)));
+
+// Rótulo da unidade de stock do produto (ex. "un", "m2"); "un" por omissão.
+const stockUnitCode = (item: PurchaseOrderItemWithReceipt | undefined) =>
+  item?.products?.uom?.code || "un";
+
+// Unidades de stock recebidas numa linha que ainda não estão em stock (as
+// que foram entregues à Encomenda Cliente).
+const getUnitsNotInStock = (item: PurchaseOrderItemWithReceipt) =>
+  (Number(item.received_quantity) || 0) * (Number(item.units_per_uom) || 1) - (Number(item.received_to_stock_units) || 0);
 
 type ProductCatalogItem = {
   id: string;
@@ -112,6 +258,12 @@ const fetchAllRows = async (
   return { data: rows, error: null };
 };
 
+const PURCHASE_ORDERS_VIEW_STORAGE_KEY = "purchaseOrders.listViewMode";
+// Chave do grupo "Sem fornecedor" na vista agrupada.
+const NO_SUPPLIER_GROUP_KEY = "__no_supplier__";
+// Lote de ids por pedido .in(...) — mantém o URL do PostgREST num tamanho seguro.
+const ORIGIN_LOOKUP_CHUNK = 150;
+
 const PurchaseOrders = () => {
   const { t } = useTranslation();
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
@@ -139,7 +291,9 @@ const PurchaseOrders = () => {
   // armazém de destino e liga-se a rpc_receive_purchase_order (gera a entrada
   // em stock_movements na mesma transação que muda o estado para 'received').
   const [receiveDialogOpen, setReceiveDialogOpen] = useState(false);
-  const [receivingOrder, setReceivingOrder] = useState<{ id: string; order_number: string } | null>(null);
+  // isClientOrder: PO ligada a uma Encomenda Cliente (source_type='contract') —
+  // o destino de cada linha (EC / stock / misto) vem de rpc_preview_po_receipt.
+  const [receivingOrder, setReceivingOrder] = useState<{ id: string; order_number: string; isClientOrder: boolean } | null>(null);
   const [receiveWarehouses, setReceiveWarehouses] = useState<{ id: string; name: string }[]>([]);
   const [receiveWarehouseId, setReceiveWarehouseId] = useState("");
   // Receção parcial (20261114040000): linhas de produto desta encomenda e a
@@ -153,6 +307,45 @@ const PurchaseOrders = () => {
   // (também é usada pelo relatório de SLA mesmo em receções parciais sucessivas).
   const [actualDeliveryDate, setActualDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
   const [receiving, setReceiving] = useState(false);
+  // Pré-visualização do destino por linha (rpc_preview_po_receipt, debounce):
+  // chave = purchase_order_item_id. O erro (ex. acima do saldo) fica inline.
+  const [receivePreview, setReceivePreview] = useState<Record<string, ReceiptAllocationLine>>({});
+  const [receivePreviewError, setReceivePreviewError] = useState<string | null>(null);
+  const [receivePreviewLoading, setReceivePreviewLoading] = useState(false);
+  const receivePreviewRequestRef = useRef(0);
+
+  // "Não vou receber o resto" (linha ou PO inteira) — anulações ativas por PO
+  // (no diálogo de receção e no diálogo da encomenda) e diálogos de motivo /
+  // desfazer.
+  const [receiveCancellations, setReceiveCancellations] = useState<{ orderId: string; rows: PoItemCancellationRow[] } | null>(null);
+  const [orderCancellations, setOrderCancellations] = useState<{ orderId: string; rows: PoItemCancellationRow[] } | null>(null);
+  const [poCancelTarget, setPoCancelTarget] = useState<PoCancelTarget | null>(null);
+  const [poCancelReason, setPoCancelReason] = useState<PoCancellationReason>("found_stock");
+  const [poCancelNotes, setPoCancelNotes] = useState("");
+  const [poCancelSubmitting, setPoCancelSubmitting] = useState(false);
+  const [poUndoTarget, setPoUndoTarget] = useState<PoUndoTarget | null>(null);
+  const [poUndoSubmitting, setPoUndoSubmitting] = useState(false);
+  // Passar para stock (rpc_po_receipt_release_to_stock): recebido de linhas de
+  // PO de contrato cuja Encomenda Cliente ficou inativa.
+  const [releaseDialogOpen, setReleaseDialogOpen] = useState(false);
+  // contractInactiveKnown=false: estado da EC desconhecido (texto neutro).
+  const [releaseOrder, setReleaseOrder] = useState<{ id: string; order_number: string; contractNumber: string; contractInactiveKnown: boolean } | null>(null);
+  const [releaseLines, setReleaseLines] = useState<PurchaseOrderItemWithReceipt[]>([]);
+  const [releaseSelectedIds, setReleaseSelectedIds] = useState<Set<string>>(new Set());
+  const [releaseWarehouses, setReleaseWarehouses] = useState<{ id: string; name: string }[]>([]);
+  const [releaseWarehouseId, setReleaseWarehouseId] = useState("");
+  const [releaseReason, setReleaseReason] = useState("");
+  const [releasing, setReleasing] = useState(false);
+  // Diálogo de detalhe: estado da EC ligada, linhas tal como gravadas
+  // (received_to_stock_units) e histórico de receções — sempre com o id da PO,
+  // para não mostrar dados de outra encomenda aberta entretanto.
+  // active: null = estado da EC desconhecido (a RLS não devolveu o contrato).
+  const [orderContractState, setOrderContractState] = useState<{ orderId: string; contractId: string; number: string; active: boolean | null } | null>(null);
+  // PO aberta no diálogo de detalhe — respostas de outra PO são descartadas.
+  const openOrderIdRef = useRef<string | null>(null);
+  const [orderReceiptItems, setOrderReceiptItems] = useState<{ orderId: string; items: PurchaseOrderItemWithReceipt[] } | null>(null);
+  const [orderReceipts, setOrderReceipts] = useState<{ orderId: string; rows: PurchaseOrderReceiptRow[]; warehouseNames: Record<string, string> } | null>(null);
+  const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
   // Reverter receção (por linha) — para encomendas marcadas como recebidas por
   // engano. Liga a rpc_revert_purchase_order_receipt: as linhas escolhidas
   // voltam a "por receber" e o stock que entrou é retirado (recusa se já saiu).
@@ -162,6 +355,21 @@ const PurchaseOrders = () => {
   const [revertSelectedIds, setRevertSelectedIds] = useState<Set<string>>(new Set());
   const [revertReason, setRevertReason] = useState("");
   const [reverting, setReverting] = useState(false);
+  // Encomenda aberta no diálogo de detalhe: nº, fornecedor e estado ORIGINAL
+  // (não o do formulário) — decide o modo só de leitura. hasReceivedLines é
+  // preenchido quando as linhas carregam (handleEdit).
+  const [editingOrderMeta, setEditingOrderMeta] = useState<{
+    id: string;
+    orderNumber: string;
+    supplierName: string;
+    status: string;
+    hasReceivedLines: boolean;
+  } | null>(null);
+  // Linha a pré-selecionar em "Reverter receção", lida do URL (?item=/?product=).
+  const [pendingRevertPreselect, setPendingRevertPreselect] = useState<(RevertPreselect & { orderId: string }) | null>(null);
+  // Ao passar do diálogo da encomenda para o de reversão, o primeiro não deve
+  // devolver o foco ao gatilho (roubava-o ao diálogo que acabou de abrir).
+  const skipOrderDialogFocusRestoreRef = useRef(false);
   // Fase 5.0F: link inverso — quando a encomenda foi gerada automaticamente a
   // partir de um Contrato assinado (source_type='contract'), mostra a origem
   // no diálogo de detalhe, com link de volta para "Encomendas Clientes".
@@ -171,6 +379,27 @@ const PurchaseOrders = () => {
     number: string;
     clientName: string;
   } | null>(null);
+  // Coluna "Origem / Cliente" da lista: a mesma resolução de orderSourceInfo
+  // (ver handleEdit), mas em lote para todas as encomendas com
+  // source_type='contract' — chave = client_contracts.id (source_id).
+  // Best-effort: se a leitura falhar ou a RLS não devolver a linha, a célula
+  // mostra "—" e a lista continua a funcionar.
+  const [listOriginByContract, setListOriginByContract] = useState<Record<string, {
+    originType: 'contract' | 'direct_sale' | 'manual';
+    number: string;
+    clientName: string;
+  }>>({});
+  const listOriginRequestRef = useRef(0);
+  // Vista da lista: agrupada por fornecedor (omissão) ou todas as encomendas.
+  // A última escolha fica em localStorage.
+  const [listViewMode, setListViewMode] = useState<'grouped' | 'all'>(() => {
+    try {
+      return localStorage.getItem(PURCHASE_ORDERS_VIEW_STORAGE_KEY) === 'all' ? 'all' : 'grouped';
+    } catch {
+      return 'grouped';
+    }
+  });
+  const [expandedSupplierGroups, setExpandedSupplierGroups] = useState<Set<string>>(new Set());
   // Ligação manual, só na criação (20261115200000) — resolve o caso
   // "sem_fornecedor" em Encomendas Clientes: ao criar a encomenda daqui,
   // escolhe-se a Encomenda Cliente que está a satisfazer.
@@ -195,6 +424,12 @@ const PurchaseOrders = () => {
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission } = usePermissions();
   const [searchParams, setSearchParams] = useSearchParams();
+  // Encomendas recebidas (total ou parcialmente) abrem só de leitura, venha o
+  // diálogo de onde vier (lista, ?open= de Encomendas Clientes, …).
+  const isOrderReadOnly =
+    !!editingId &&
+    editingOrderMeta?.id === editingId &&
+    (editingOrderMeta.status === 'received' || editingOrderMeta.status === 'partially_received');
 
   const [formData, setFormData] = useState({
     supplier_id: "",
@@ -392,6 +627,24 @@ const PurchaseOrders = () => {
 
     const target = orders.find((o) => o.id === openId);
     if (target) {
+      const itemId = searchParams.get("item");
+      const productId = searchParams.get("product");
+      const quoteLineId = searchParams.get("quote_line");
+      const componentRaw = searchParams.get("component");
+      const componentIndex = componentRaw !== null && componentRaw !== "" && Number.isFinite(Number(componentRaw))
+        ? Number(componentRaw)
+        : null;
+      setPendingRevertPreselect(
+        itemId || productId
+          ? {
+              orderId: target.id,
+              itemIds: itemId ? [itemId] : undefined,
+              productId: productId || null,
+              quoteLineId: quoteLineId || null,
+              componentIndex,
+            }
+          : null,
+      );
       handleEdit(target);
     } else {
       toast({
@@ -402,6 +655,10 @@ const PurchaseOrders = () => {
     }
 
     searchParams.delete("open");
+    searchParams.delete("item");
+    searchParams.delete("product");
+    searchParams.delete("quote_line");
+    searchParams.delete("component");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, setSearchParams, orders, loading]);
@@ -715,8 +972,37 @@ const PurchaseOrders = () => {
     }
   };
 
+  // Histórico de receções (purchase_order_receipts, só leitura) — best-effort:
+  // se falhar, a secção simplesmente não aparece. Nomes dos armazéns por id
+  // (inclui armazéns já apagados, para o histórico continuar legível).
+  const loadOrderReceipts = async (orderId: string) => {
+    const { data, error } = await supabase
+      .from("purchase_order_receipts")
+      .select("*")
+      .eq("purchase_order_id", orderId)
+      .order("received_at", { ascending: false });
+    if (error || !data || openOrderIdRef.current !== orderId) return;
+    const warehouseIds = Array.from(new Set(data.map((r) => r.warehouse_id).filter((id): id is string => !!id)));
+    const warehouseNames: Record<string, string> = {};
+    if (warehouseIds.length > 0) {
+      const { data: whs } = await supabase.from("warehouses").select("id, name").in("id", warehouseIds);
+      (whs || []).forEach((w) => { warehouseNames[w.id] = w.name; });
+    }
+    // Entretanto pode ter sido aberta outra PO — descarta a resposta.
+    if (openOrderIdRef.current !== orderId) return;
+    setOrderReceipts({ orderId, rows: data, warehouseNames });
+  };
+
   const handleEdit = async (order: PurchaseOrder) => {
+    openOrderIdRef.current = order.id;
     setEditingId(order.id);
+    setEditingOrderMeta({
+      id: order.id,
+      orderNumber: order.order_number,
+      supplierName: order.suppliers?.name || "",
+      status: order.status,
+      hasReceivedLines: false,
+    });
     setFormData({
       supplier_id: order.supplier_id,
       order_date: order.order_date,
@@ -733,16 +1019,34 @@ const PurchaseOrders = () => {
     // A query a direct_sales é silenciosa: sem direct_sales.view a RLS devolve
     // vazio e cai-se para o caso manual (mesma regra de ClientOrders.tsx).
     setOrderSourceInfo(null);
+    setOrderContractState(null);
+    setOrderReceiptItems(null);
+    setOrderReceipts(null);
+    setReceiptHistoryOpen(false);
+    void loadOrderReceipts(order.id);
     if ((order as any).source_type === "contract" && (order as any).source_id) {
       const contractId: string = (order as any).source_id;
       (async () => {
         const { data } = await supabase
           .from("client_contracts")
-          .select("contract_number, order_number, is_manual_order, entity_id, anew_entities(display_name)")
+          .select("contract_number, order_number, is_manual_order, entity_id, status, deleted_at, anew_entities(display_name)")
           .eq("id", contractId)
           .maybeSingle();
-        if (!data) return;
+        if (openOrderIdRef.current !== order.id) return;
+        if (!data) {
+          // Sem client_contracts.view (ou EC não devolvida pela RLS): estado
+          // desconhecido — a RPC de passagem para stock decide e explica.
+          setOrderContractState({ orderId: order.id, contractId, number: "", active: null });
+          return;
+        }
         const row = data as any;
+        // Mesma regra das RPCs de receção: ativa = assinada e não apagada.
+        setOrderContractState({
+          orderId: order.id,
+          contractId,
+          number: row.order_number || row.contract_number || "",
+          active: !row.deleted_at && (row.status === "signed" || row.status === "assinado"),
+        });
         const clientName: string = row.anew_entities?.display_name || "";
         const contractNumber: string = row.contract_number || "";
         if (!row.is_manual_order) {
@@ -761,16 +1065,28 @@ const PurchaseOrders = () => {
         } else {
           setOrderSourceInfo({ contractId, originType: "manual", number: row.order_number || contractNumber, clientName });
         }
-      })().catch(() => { /* best-effort */ });
+      })().catch(() => {
+        // best-effort; estado da EC fica desconhecido (não bloqueia o botão).
+        if (openOrderIdRef.current === order.id) {
+          setOrderContractState((prev) => prev ?? { orderId: order.id, contractId, number: "", active: null });
+        }
+      });
     }
 
     // Load existing items
     const { data: items } = await supabase
       .from("purchase_order_items")
-      .select("*")
+      .select("*, products(name, uom:uom_id(code))")
       .eq("purchase_order_id", order.id);
-    
+
     if (items) {
+      if (openOrderIdRef.current === order.id) {
+        setOrderReceiptItems({ orderId: order.id, items: items as unknown as PurchaseOrderItemWithReceipt[] });
+      }
+      const hasReceivedLines = (items as unknown as Array<PurchaseOrderItemWithReceipt>).some(
+        (item) => item.item_type === 'product' && Number(item.received_quantity) > 0,
+      );
+      setEditingOrderMeta((prev) => (prev && prev.id === order.id ? { ...prev, hasReceivedLines } : prev));
       setOrderItems(items.map(item => ({
         id: item.id,
         item_type: item.item_type as 'product' | 'service',
@@ -833,10 +1149,15 @@ const PurchaseOrders = () => {
   };
 
   const openReceiveDialog = async (order: PurchaseOrder) => {
-    setReceivingOrder({ id: order.id, order_number: order.order_number });
+    // Ligada a uma Encomenda Cliente: o que a EC ainda precisa vai para a EC e
+    // o excedente entra em stock (20261206130000) — ver a pré-visualização.
+    setReceivingOrder({ id: order.id, order_number: order.order_number, isClientOrder: (order as any).source_type === "contract" });
     setReceiveWarehouseId("");
     setReceiveLines([]);
     setReceiveLineQuantities({});
+    setReceivePreview({});
+    setReceivePreviewError(null);
+    setReceivePreviewLoading(false);
     setActualDeliveryDate(new Date().toISOString().slice(0, 10));
     setReceiveDialogOpen(true);
 
@@ -851,7 +1172,7 @@ const PurchaseOrders = () => {
         .order("name"),
       supabase
         .from("purchase_order_items")
-        .select("*, products(name)")
+        .select("*, products(name, uom:uom_id(code))")
         .eq("purchase_order_id", order.id)
         .eq("item_type", "product"),
     ]);
@@ -892,6 +1213,55 @@ const PurchaseOrders = () => {
     setReceiveLineQuantities(quantities);
   };
 
+  // Pré-visualização do destino (rpc_preview_po_receipt simula a receção e
+  // desfaz): debounce de 400 ms; pedidos antigos descartados pelo requestId.
+  // Erros ficam inline (sem toast a cada tecla). Só em POs ligadas a uma EC —
+  // numa PO de stock tudo entra em stock. O armazém vai no pedido mas não é
+  // dependência: o destino não depende dele.
+  useEffect(() => {
+    if (!receiveDialogOpen || !receivingOrder) return;
+    const orderId = receivingOrder.id;
+    const lines = receiveLines
+      .map((item) => ({ purchase_order_item_id: item.id, quantity: receiveLineQuantities[item.id] || 0 }))
+      .filter((line) => line.quantity > 0);
+    const requestId = ++receivePreviewRequestRef.current;
+    if (!receivingOrder.isClientOrder || lines.length === 0) {
+      setReceivePreview({});
+      setReceivePreviewError(null);
+      setReceivePreviewLoading(false);
+      return;
+    }
+    setReceivePreviewLoading(true);
+    const handle = setTimeout(async () => {
+      const { data, error } = await supabase.rpc("rpc_preview_po_receipt", {
+        p_purchase_order_id: orderId,
+        p_lines: lines,
+        p_warehouse_id: receiveWarehouseId || undefined,
+      });
+      if (receivePreviewRequestRef.current !== requestId) return;
+      setReceivePreviewLoading(false);
+      if (error) {
+        setReceivePreview({});
+        setReceivePreviewError(error.message);
+        return;
+      }
+      const result = data as unknown as ReceiptAllocationResult | null;
+      const requested = new Map(lines.map((l) => [l.purchase_order_item_id, l.quantity]));
+      const byItem: Record<string, ReceiptAllocationLine> = {};
+      (result?.lines || []).forEach((l) => {
+        byItem[l.purchase_order_item_id] = { ...l, requested_quantity: requested.get(l.purchase_order_item_id) };
+      });
+      setReceivePreview(byItem);
+      setReceivePreviewError(null);
+    }, 400);
+    return () => {
+      clearTimeout(handle);
+      // Descarta a resposta em voo (diálogo fechado ou quantidades mudadas).
+      receivePreviewRequestRef.current++;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiveDialogOpen, receivingOrder, receiveLines, receiveLineQuantities]);
+
   const handleReceiveOrder = async () => {
     if (!receivingOrder || !receiveWarehouseId) return;
 
@@ -923,13 +1293,30 @@ const PurchaseOrders = () => {
 
       // O status devolvido pelo RPC é a fonte da verdade — não assumir
       // 'received' (pode ter ficado 'partially_received').
-      const result = data as { status?: string; stock_skipped?: boolean } | null;
+      const result = data as unknown as ReceiptAllocationResult | null;
       const isFullyReceived = result?.status === 'received';
-      // Ligada a uma Encomenda Cliente (já tem destino certo) — a receção
-      // não infla o stock geral, ver 20261115210000.
-      const stockNote = result?.stock_skipped
-        ? " Ligada a uma Encomenda Cliente — o stock geral não foi alterado."
-        : " Stock atualizado.";
+      const resultLines = result?.lines || [];
+      // Destino por linha (20261206130000): units_*_total em unidades de stock.
+      // stock_skipped=true só quando nada entrou em stock numa PO de contrato.
+      const unitsToOrder = Number(result?.units_to_order_total) || 0;
+      const unitsToStock = Number(result?.units_to_stock_total) || 0;
+      const ecNumbers = distinctContractNumbers(resultLines);
+      const ecLabel = ecNumbers.length > 0 ? ecNumbers.join(", ") : "Encomenda Cliente";
+      // EC inativa decide-se pelo motivo da alocação (o número pode faltar).
+      const inactiveLines = resultLines.filter((l) => l.allocation_reason === "client_order_inactive");
+      const inactiveEcNumbers = distinctContractNumbers(inactiveLines);
+      const inactiveEcLabel = inactiveEcNumbers.length > 0
+        ? `A encomenda cliente ${inactiveEcNumbers.join(", ")}`
+        : "A encomenda cliente ligada";
+      const stockNote = unitsToOrder > 0 && unitsToStock > 0
+        ? ` ${formatQty(unitsToOrder)} unidades para a ${ecLabel}, ${formatQty(unitsToStock)} para stock.`
+        : result?.stock_skipped || (unitsToOrder > 0 && unitsToStock === 0)
+          ? ` Tudo para a ${ecLabel} — o stock geral não foi alterado.`
+          : inactiveLines.length > 0
+            ? ` ${inactiveEcLabel} está inativa — entraram ${formatQty(unitsToStock)} unidades em stock.`
+            : resultLines.some((l) => l.allocation_reason === "client_order_already_covered")
+              ? ` A ${ecLabel} já estava coberta — entraram ${formatQty(unitsToStock)} unidades em stock.`
+              : " Stock atualizado.";
 
       toast({
         title: isFullyReceived ? "Encomenda totalmente recebida" : "Receção parcial registada",
@@ -941,6 +1328,8 @@ const PurchaseOrders = () => {
       setReceivingOrder(null);
       setReceiveLines([]);
       setReceiveLineQuantities({});
+      setReceivePreview({});
+      setReceivePreviewError(null);
       setActualDeliveryDate(new Date().toISOString().slice(0, 10));
       loadData();
     } catch (error: any) {
@@ -950,7 +1339,236 @@ const PurchaseOrders = () => {
     }
   };
 
-  const openRevertDialog = async (order: PurchaseOrder) => {
+  // ---------------------------------------------------------------------------
+  // "Não vou receber o resto" — anular o que falta de uma linha ou da PO inteira.
+  // Best-effort na leitura: se a tabela não responder, as notas não aparecem e
+  // o resto do ecrã funciona como antes.
+  const fetchActivePoCancellations = async (orderId: string): Promise<PoItemCancellationRow[] | null> => {
+    const { data, error } = await poCancellationsDb()
+      .from("purchase_order_item_cancellations")
+      .select("*")
+      .eq("purchase_order_id", orderId)
+      .is("undone_at", null)
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.warn("[PurchaseOrders] não foi possível carregar as anulações da encomenda", error);
+      return null;
+    }
+    return ((data as PoItemCancellationRow[] | null) || []);
+  };
+
+  const loadReceiveCancellations = async (orderId: string) => {
+    const rows = await fetchActivePoCancellations(orderId);
+    if (rows) setReceiveCancellations({ orderId, rows });
+  };
+
+  // Anulações da PO aberta no diálogo de receção.
+  useEffect(() => {
+    if (!receiveDialogOpen || !receivingOrder?.id) return;
+    setReceiveCancellations(null);
+    void loadReceiveCancellations(receivingOrder.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [receiveDialogOpen, receivingOrder?.id]);
+
+  // Anulações da PO aberta no diálogo da encomenda (ver/editar).
+  useEffect(() => {
+    if (!open || !editingId) return;
+    const orderId = editingId;
+    setOrderCancellations(null);
+    void fetchActivePoCancellations(orderId).then((rows) => {
+      if (rows && openOrderIdRef.current === orderId) setOrderCancellations({ orderId, rows });
+    });
+  }, [open, editingId]);
+
+  // Depois de anular/desfazer com o diálogo de receção aberto: relê as linhas
+  // (a quantidade encomendada muda) sem tocar no armazém/data escolhidos; o
+  // "Receber agora" de cada linha nunca passa do novo pendente.
+  const refreshReceiveLinesAfterCancellation = async (orderId: string) => {
+    const { data, error } = await supabase
+      .from("purchase_order_items")
+      .select("*, products(name, uom:uom_id(code))")
+      .eq("purchase_order_id", orderId)
+      .eq("item_type", "product");
+    if (error || !data) return;
+    const items = data as unknown as PurchaseOrderItemWithReceipt[];
+    setReceiveLines((prev) => (prev.length === 0 || prev[0].purchase_order_id === orderId ? items : prev));
+    setReceiveLineQuantities((prev) => {
+      const next = { ...prev };
+      items.forEach((item) => {
+        const remaining = Math.max(item.quantity - (item.received_quantity || 0), 0);
+        if (item.id in next) next[item.id] = Math.min(next[item.id] ?? 0, remaining);
+      });
+      return next;
+    });
+  };
+
+  // Mesmo fecho que a receção faz quando a PO fica totalmente recebida.
+  const closeReceiveDialogAfterCancellation = () => {
+    setReceiveDialogOpen(false);
+    setReceivingOrder(null);
+    setReceiveLines([]);
+    setReceiveLineQuantities({});
+    setReceivePreview({});
+    setReceivePreviewError(null);
+    setActualDeliveryDate(new Date().toISOString().slice(0, 10));
+  };
+
+  const resetPoCancelForm = () => {
+    setPoCancelReason("found_stock");
+    setPoCancelNotes("");
+  };
+
+  const openPoLineCancel = (item: PurchaseOrderItemWithReceipt, remaining: number, uomLabel: string) => {
+    if (!receivingOrder || remaining <= 0) return;
+    resetPoCancelForm();
+    setPoCancelTarget({
+      kind: "line",
+      source: "receive",
+      orderId: receivingOrder.id,
+      orderNumber: receivingOrder.order_number,
+      itemId: item.id,
+      quantity: remaining,
+      uomLabel,
+      productName: item.products?.name || item.description || "produto",
+      isClientOrder: receivingOrder.isClientOrder,
+    });
+  };
+
+  const openPoOrderCancelFromReceive = () => {
+    if (!receivingOrder) return;
+    const pendingCount = receiveLines.filter((item) => getReceiveRemaining(item) > 0).length;
+    if (pendingCount === 0) return;
+    resetPoCancelForm();
+    setPoCancelTarget({
+      kind: "order",
+      source: "receive",
+      orderId: receivingOrder.id,
+      orderNumber: receivingOrder.order_number,
+      lineCount: pendingCount,
+      isClientOrder: receivingOrder.isClientOrder,
+    });
+  };
+
+  const openPoOrderCancelFromList = (order: PurchaseOrder) => {
+    resetPoCancelForm();
+    setPoCancelTarget({
+      kind: "order",
+      source: "list",
+      orderId: order.id,
+      orderNumber: order.order_number,
+      lineCount: null,
+      isClientOrder: (order as any).source_type === "contract",
+    });
+  };
+
+  const handleConfirmPoCancel = async () => {
+    const target = poCancelTarget;
+    if (!target) return;
+    const notes = poCancelNotes.trim();
+    if (poCancelReason === "other" && !notes) {
+      toast({ title: t('purchaseOrders.toast.error'), description: "Indica uma nota para o motivo «Outro».", variant: "destructive" });
+      return;
+    }
+    setPoCancelSubmitting(true);
+    try {
+      const { data, error } = target.kind === "line"
+        ? await poCancellationsDb().rpc("rpc_cancel_po_line_remainder", {
+            p_purchase_order_item_id: target.itemId,
+            p_reason: poCancelReason,
+            p_notes: notes || null,
+          })
+        : await poCancellationsDb().rpc("rpc_cancel_po_remainder", {
+            p_purchase_order_id: target.orderId,
+            p_reason: poCancelReason,
+            p_notes: notes || null,
+          });
+      if (error) throw error;
+      const result = (data || {}) as { status?: string; quantity_cancelled?: number | null; lines_cancelled?: number | null };
+      const status = result.status;
+      const linesCancelled = target.kind === "order" ? Number(result.lines_cancelled ?? target.lineCount ?? 0) || 0 : 0;
+      toast({
+        title: "Resto anulado",
+        description: target.kind === "line"
+          ? `${formatQty(result.quantity_cancelled ?? target.quantity)}${target.uomLabel ? ` ${target.uomLabel}` : ""} de ${target.productName} já não vão ser recebidos (${target.orderNumber}).`
+          : status === "cancelled"
+            ? `${target.orderNumber} ficou cancelada — nada tinha sido recebido.`
+            : `${target.orderNumber}: anulado o que faltava${linesCancelled > 0 ? ` de ${linesCancelled} linha(s)` : ""}.`,
+      });
+      setPoCancelTarget(null);
+      resetPoCancelForm();
+      if (target.source === "receive") {
+        if (status === "received" || status === "cancelled") {
+          closeReceiveDialogAfterCancellation();
+        } else {
+          void refreshReceiveLinesAfterCancellation(target.orderId);
+          void loadReceiveCancellations(target.orderId);
+        }
+      }
+      loadData();
+    } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setPoCancelSubmitting(false);
+    }
+  };
+
+  const handleConfirmPoUndo = async () => {
+    const target = poUndoTarget;
+    if (!target) return;
+    setPoUndoSubmitting(true);
+    try {
+      const { error } = target.batchId
+        ? await poCancellationsDb().rpc("rpc_undo_po_cancellation_batch", { p_batch_id: target.batchId, p_reason: null })
+        : await poCancellationsDb().rpc("rpc_undo_po_line_cancellation", { p_cancellation_id: target.cancellationId, p_reason: null });
+      if (error) throw error;
+      toast({
+        title: "Anulação desfeita",
+        description: target.batchId
+          ? "As linhas desta encomenda voltam a ficar por receber."
+          : "A quantidade volta a ficar por receber.",
+      });
+      setPoUndoTarget(null);
+      if (target.source === "receive") {
+        void refreshReceiveLinesAfterCancellation(target.orderId);
+        void loadReceiveCancellations(target.orderId);
+      } else {
+        // O estado da PO mudou: fecha o diálogo da encomenda para não ficar um
+        // formulário com o estado antigo (que podia ser regravado).
+        handleOrderDialogOpenChange(false);
+      }
+      loadData();
+    } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setPoUndoSubmitting(false);
+    }
+  };
+
+  // Linhas a marcar à partida: ids explícitos; senão as do produto, e dessas
+  // só as ligadas à linha da Encomenda Cliente (quote_line_id/component_index)
+  // quando alguma o estiver. Só ids que existam na lista carregada.
+  const resolveRevertPreselection = (lines: PurchaseOrderItemWithReceipt[], preselect: RevertPreselect): string[] => {
+    if (preselect.itemIds && preselect.itemIds.length > 0) {
+      const wanted = new Set(preselect.itemIds);
+      const byId = lines.filter((l) => wanted.has(l.id)).map((l) => l.id);
+      if (byId.length > 0 || !preselect.productId) return byId;
+    }
+    if (!preselect.productId) return [];
+    const byProduct = lines.filter((l) => l.product_id === preselect.productId);
+    if (preselect.quoteLineId) {
+      const wantedComponent = preselect.componentIndex ?? null;
+      const byQuoteLine = byProduct.filter((l) => {
+        const row = l as unknown as { quote_line_id?: string | null; component_index?: number | null };
+        return row.quote_line_id === preselect.quoteLineId && (row.component_index ?? null) === wantedComponent;
+      });
+      if (byQuoteLine.length > 0) return byQuoteLine.map((l) => l.id);
+    }
+    return byProduct.map((l) => l.id);
+  };
+
+  const openRevertDialog = async (order: Pick<PurchaseOrder, 'id' | 'order_number'>, preselect?: RevertPreselect) => {
     setRevertingOrder({ id: order.id, order_number: order.order_number });
     setRevertLines([]);
     setRevertSelectedIds(new Set());
@@ -969,7 +1587,51 @@ const PurchaseOrders = () => {
       toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
       return;
     }
-    setRevertLines((data as unknown as PurchaseOrderItemWithReceipt[] | null) || []);
+    const lines = (data as unknown as PurchaseOrderItemWithReceipt[] | null) || [];
+    setRevertLines(lines);
+    if (preselect) {
+      const ids = resolveRevertPreselection(lines, preselect);
+      if (ids.length > 0) setRevertSelectedIds(new Set(ids));
+    }
+  };
+
+  const handleOrderDialogOpenChange = (isOpen: boolean) => {
+    setOpen(isOpen);
+    if (!isOpen) {
+      openOrderIdRef.current = null;
+      setEditingId(null);
+      setEditingOrderMeta(null);
+      setPendingRevertPreselect(null);
+      setFormData({
+        supplier_id: "",
+        order_date: new Date().toISOString().split('T')[0],
+        expected_delivery: "",
+        status: "pending",
+        notes: "",
+      });
+      setFieldErrors({});
+      setOrderItems([]);
+      setOrganizationSelection({
+        tenantId: "",
+        companyId: activeCompany?.id || "",
+        businessUnitId: "",
+        departmentId: "",
+        secondaryCompanyIds: [],
+      });
+      setNewOrderClientOrderId("");
+      setPendingClientOrderLines([]);
+    }
+  };
+
+  // "Reverter receção" dentro do diálogo da encomenda (só de leitura): fecha-o
+  // e abre o diálogo de reversão já existente, com a linha vinda do link.
+  const handleRevertFromOrderDialog = () => {
+    const meta = editingOrderMeta;
+    if (!meta) return;
+    const preselect = pendingRevertPreselect?.orderId === meta.id ? pendingRevertPreselect : undefined;
+    skipOrderDialogFocusRestoreRef.current = true;
+    handleOrderDialogOpenChange(false);
+    void openRevertDialog({ id: meta.id, order_number: meta.orderNumber }, preselect);
   };
 
   const toggleRevertLine = (id: string, checked: boolean) => {
@@ -998,13 +1660,28 @@ const PurchaseOrders = () => {
       });
       if (error) throw error;
 
-      const result = data as { order_number?: string; status?: string; lines?: unknown[] } | null;
+      const result = data as {
+        order_number?: string;
+        status?: string;
+        lines?: Array<{ units_reverted_from_stock?: number | null; units_reverted_from_client_order?: number | null }>;
+      } | null;
+      // Destino por linha (20261206130000): quanto saiu do stock e quanto
+      // deixou de estar entregue à Encomenda Cliente (unidades de stock).
+      const fromStock = (result?.lines || []).reduce((sum, l) => sum + (Number(l.units_reverted_from_stock) || 0), 0);
+      const fromClientOrder = (result?.lines || []).reduce((sum, l) => sum + (Number(l.units_reverted_from_client_order) || 0), 0);
+      const revertNote = fromStock > 0 && fromClientOrder > 0
+        ? ` Retiradas ${formatQty(fromStock)} unidades do stock e ${formatQty(fromClientOrder)} da Encomenda Cliente.`
+        : fromClientOrder > 0
+          ? ` Retiradas ${formatQty(fromClientOrder)} unidades da Encomenda Cliente — o stock geral não foi alterado.`
+          : fromStock > 0
+            ? ` Retiradas ${formatQty(fromStock)} unidades do stock.`
+            : "";
       toast({
         title: t('purchaseOrders.revert.successTitle') || "Receção revertida",
         description: t('purchaseOrders.revert.successDescription', {
           order: result?.order_number || revertingOrder.order_number,
           count: result?.lines?.length ?? revertSelectedIds.size,
-        }),
+        }) + revertNote,
       });
       setRevertDialogOpen(false);
       setRevertingOrder(null);
@@ -1017,6 +1694,92 @@ const PurchaseOrders = () => {
       toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
     } finally {
       setReverting(false);
+    }
+  };
+
+  // Linhas da encomenda aberta que podem passar para stock: só PO de contrato
+  // (orderContractState só existe para source_type='contract') com a EC
+  // inativa OU de estado desconhecido (sem client_contracts.view). Se a EC for
+  // conhecida e ativa, não. rpc_po_receipt_release_to_stock volta a validar
+  // tudo e explica a recusa.
+  const releasableLines =
+    editingId &&
+    orderContractState?.orderId === editingId &&
+    orderContractState.active !== true &&
+    orderReceiptItems?.orderId === editingId
+      ? orderReceiptItems.items.filter((item) => item.item_type === "product" && getUnitsNotInStock(item) > 0)
+      : [];
+
+  // Fecha o diálogo da encomenda e abre o de "Passar para stock" (mesmo
+  // padrão de handleRevertFromOrderDialog).
+  const handleReleaseFromOrderDialog = async () => {
+    const meta = editingOrderMeta;
+    if (!meta || releasableLines.length === 0) return;
+    const lines = releasableLines;
+    setReleaseOrder({
+      id: meta.id,
+      order_number: meta.orderNumber,
+      contractNumber: orderContractState?.number || "",
+      contractInactiveKnown: orderContractState?.active === false,
+    });
+    setReleaseLines(lines);
+    setReleaseSelectedIds(new Set(lines.map((l) => l.id)));
+    setReleaseWarehouseId("");
+    setReleaseReason("");
+    skipOrderDialogFocusRestoreRef.current = true;
+    handleOrderDialogOpenChange(false);
+    setReleaseDialogOpen(true);
+
+    if (!activeCompany?.id) return;
+    const { data, error } = await supabase
+      .from("warehouses")
+      .select("id, name")
+      .eq("organization_id", activeCompany.id)
+      .is("deleted_at", null)
+      .order("name");
+    if (error) {
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+      return;
+    }
+    setReleaseWarehouses(data || []);
+  };
+
+  const toggleReleaseLine = (id: string, checked: boolean) => {
+    setReleaseSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const handleReleaseToStock = async () => {
+    if (!releaseOrder || releaseSelectedIds.size === 0 || !releaseWarehouseId) return;
+    setReleasing(true);
+    try {
+      const { data, error } = await supabase.rpc("rpc_po_receipt_release_to_stock", {
+        p_item_ids: Array.from(releaseSelectedIds),
+        p_warehouse_id: releaseWarehouseId,
+        p_reason: releaseReason.trim() || undefined,
+      });
+      if (error) throw error;
+      const result = data as { lines?: Array<{ units_to_stock?: number | null }> } | null;
+      const units = (result?.lines || []).reduce((sum, l) => sum + (Number(l.units_to_stock) || 0), 0);
+      toast({
+        title: "Passado para stock",
+        description: `${releaseOrder.order_number}: entraram ${formatQty(units)} unidades em stock.`,
+      });
+      setReleaseDialogOpen(false);
+      setReleaseOrder(null);
+      setReleaseLines([]);
+      setReleaseSelectedIds(new Set());
+      setReleaseReason("");
+      loadData();
+    } catch (error: any) {
+      captureFlowError(error, "purchase-order-lifecycle");
+      toast({ title: t('purchaseOrders.toast.error'), description: error.message, variant: "destructive" });
+    } finally {
+      setReleasing(false);
     }
   };
 
@@ -1316,6 +2079,8 @@ const PurchaseOrders = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // Encomenda recebida: só de leitura — nunca grava, mesmo que algo submeta o form.
+    if (isOrderReadOnly) return;
 
     const validation = purchaseOrderSchema.safeParse(formData);
     if (!validation.success) {
@@ -1693,6 +2458,296 @@ const PurchaseOrders = () => {
     setDateFilterField("order_date");
   };
 
+  // Origem / Cliente em lote para a lista — mesma regra de handleEdit
+  // (client_contracts → se is_manual_order, procura a Venda Direta ligada;
+  // senão é Encomenda Cliente manual EC-…; não manual = Contrato CC-…), mas com
+  // .in(...) por lotes em vez de uma consulta por encomenda.
+  useEffect(() => {
+    const requestId = ++listOriginRequestRef.current;
+    const contractIds = Array.from(new Set(
+      orders
+        .filter((o) => (o as any).source_type === "contract" && (o as any).source_id)
+        .map((o) => (o as any).source_id as string)
+    ));
+    if (contractIds.length === 0) {
+      setListOriginByContract({});
+      return;
+    }
+    const chunks: string[][] = [];
+    for (let i = 0; i < contractIds.length; i += ORIGIN_LOOKUP_CHUNK) {
+      chunks.push(contractIds.slice(i, i + ORIGIN_LOOKUP_CHUNK));
+    }
+    (async () => {
+      const contractResults = await Promise.all(chunks.map((ids) =>
+        supabase
+          .from("client_contracts")
+          .select("id, contract_number, order_number, is_manual_order, anew_entities(display_name)")
+          .in("id", ids)
+      ));
+      const contractRows: any[] = [];
+      for (const res of contractResults) {
+        if (res.error) throw res.error;
+        contractRows.push(...((res.data as any[]) || []));
+      }
+
+      // Só os contratos sintéticos podem ter Venda Direta. Sem direct_sales.view
+      // a RLS devolve vazio e cai-se para o caso manual (EC-…).
+      const manualIds = contractRows.filter((r) => r.is_manual_order).map((r) => r.id as string);
+      const saleByContract = new Map<string, string>();
+      if (manualIds.length > 0) {
+        const saleChunks: string[][] = [];
+        for (let i = 0; i < manualIds.length; i += ORIGIN_LOOKUP_CHUNK) {
+          saleChunks.push(manualIds.slice(i, i + ORIGIN_LOOKUP_CHUNK));
+        }
+        const saleResults = await Promise.all(saleChunks.map((ids) =>
+          supabase
+            .from("direct_sales")
+            .select("client_contract_id, sale_number")
+            .in("client_contract_id", ids)
+            .is("deleted_at", null)
+        ));
+        for (const res of saleResults) {
+          if (res.error) continue; // silencioso, como em handleEdit
+          for (const sale of ((res.data as any[]) || [])) {
+            if (sale.client_contract_id && sale.sale_number && !saleByContract.has(sale.client_contract_id)) {
+              saleByContract.set(sale.client_contract_id, sale.sale_number);
+            }
+          }
+        }
+      }
+
+      const next: Record<string, { originType: 'contract' | 'direct_sale' | 'manual'; number: string; clientName: string }> = {};
+      for (const row of contractRows) {
+        const clientName: string = row.anew_entities?.display_name || "";
+        const contractNumber: string = row.contract_number || "";
+        if (!row.is_manual_order) {
+          next[row.id] = { originType: "contract", number: contractNumber, clientName };
+        } else if (saleByContract.has(row.id)) {
+          next[row.id] = { originType: "direct_sale", number: saleByContract.get(row.id) as string, clientName };
+        } else {
+          next[row.id] = { originType: "manual", number: row.order_number || contractNumber, clientName };
+        }
+      }
+      if (listOriginRequestRef.current !== requestId) return;
+      setListOriginByContract(next);
+    })().catch((error) => {
+      console.error("Error loading purchase order origins:", error);
+      if (listOriginRequestRef.current !== requestId) return;
+      setListOriginByContract({});
+    });
+  }, [orders]);
+
+  // Vista agrupada: os filtros já foram aplicados em filteredOrders, por isso
+  // um fornecedor sem encomendas filtradas não chega a ter grupo.
+  const supplierGroups = useMemo(() => {
+    const groups = new Map<string, {
+      key: string;
+      supplierName: string;
+      orders: PurchaseOrder[];
+      toReceive: number;
+      received: number;
+      lastOrderDate: string;
+      totalValue: number;
+    }>();
+    for (const order of filteredOrders) {
+      const key = order.supplier_id || NO_SUPPLIER_GROUP_KEY;
+      let group = groups.get(key);
+      if (!group) {
+        group = {
+          key,
+          supplierName: order.supplier_id
+            ? (order.suppliers?.name || suppliers.find((s) => s.id === order.supplier_id)?.name || "N/A")
+            : (t('purchaseOrders.groups.noSupplier') || 'Sem fornecedor'),
+          orders: [],
+          toReceive: 0,
+          received: 0,
+          lastOrderDate: "",
+          totalValue: 0,
+        };
+        groups.set(key, group);
+      }
+      group.orders.push(order);
+      if (order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') group.toReceive += 1;
+      if (order.status === 'received') group.received += 1;
+      if (order.order_date && order.order_date > group.lastOrderDate) group.lastOrderDate = order.order_date;
+      group.totalValue += Number(order.total_value) || 0;
+    }
+    return Array.from(groups.values()).sort((a, b) => b.lastOrderDate.localeCompare(a.lastOrderDate));
+  }, [filteredOrders, suppliers, t]);
+
+  const changeListViewMode = (mode: 'grouped' | 'all') => {
+    setListViewMode(mode);
+    try {
+      localStorage.setItem(PURCHASE_ORDERS_VIEW_STORAGE_KEY, mode);
+    } catch {
+      /* localStorage indisponível — fica só nesta sessão */
+    }
+  };
+
+  const toggleSupplierGroup = (key: string) => {
+    setExpandedSupplierGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const renderOrderOrigin = (order: PurchaseOrder) => {
+    if ((order as any).source_type !== "contract" || !(order as any).source_id) {
+      return <span className="text-muted-foreground">{t('purchaseOrders.origin.stock') || 'Stock'}</span>;
+    }
+    const contractId: string = (order as any).source_id;
+    const info = listOriginByContract[contractId];
+    if (!info) return <span className="text-muted-foreground">—</span>;
+    const numberLabel = info.originType === "contract"
+      ? (t('purchaseOrders.origin.contract', { number: info.number }) || `Contrato ${info.number}`)
+      : info.number;
+    const label = info.clientName ? `${numberLabel} — ${info.clientName}` : numberLabel;
+    return (
+      <Link
+        to={`/client-orders?open=${contractId}`}
+        className="block max-w-[280px] truncate hover:underline"
+        title={label}
+      >
+        {label}
+      </Link>
+    );
+  };
+
+  // Coluna de ações fixa à direita: fundo opaco (a cor do cartão + a mesma tinta
+  // da linha/hover em camadas), para não ficar transparente por cima das colunas
+  // que passam por baixo durante o scroll horizontal. Sem border-l porque em
+  // border-collapse a borda não acompanha o sticky — usa-se box-shadow.
+  // A vista agrupada (sem coluna de fornecedor) está dentro de uma célula com
+  // bg-muted/30, por isso a camada base inclui essa tinta.
+  const stickyActionsBase =
+    "sticky right-0 z-10 whitespace-nowrap bg-card shadow-[inset_1px_0_0_hsl(var(--border)),-6px_0_6px_-6px_rgb(0_0_0/0.15)]";
+  const stickyActionsFlat =
+    "group-hover:[background-image:linear-gradient(hsl(var(--muted)/0.5),hsl(var(--muted)/0.5))]";
+  const stickyActionsNested =
+    "[background-image:linear-gradient(hsl(var(--muted)/0.3),hsl(var(--muted)/0.3))] group-hover:[background-image:linear-gradient(hsl(var(--muted)/0.5),hsl(var(--muted)/0.5)),linear-gradient(hsl(var(--muted)/0.3),hsl(var(--muted)/0.3))]";
+  const stickyActionsClass = (nested: boolean) =>
+    `${stickyActionsBase} ${nested ? stickyActionsNested : stickyActionsFlat}`;
+
+  // Linha de encomenda — usada tal e qual nas duas vistas ("Ver todas" e dentro
+  // de cada grupo). Ações, condições e PermissionGate inalterados.
+  // showSupplier=false só é usado dentro do grupo expandido (tabela aninhada).
+  const renderOrderRow = (order: PurchaseOrder, showSupplier: boolean) => (
+    <TableRow key={order.id} className="group">
+      <TableCell className="font-mono font-semibold whitespace-nowrap">{order.order_number}</TableCell>
+      {showSupplier && <TableCell>{order.suppliers?.name || "N/A"}</TableCell>}
+      <TableCell className="whitespace-nowrap">{renderOrderOrigin(order)}</TableCell>
+      <TableCell className="whitespace-nowrap">{new Date(order.order_date).toLocaleDateString()}</TableCell>
+      <TableCell className="whitespace-nowrap">
+        {order.expected_delivery
+          ? new Date(order.expected_delivery).toLocaleDateString()
+          : "N/A"}
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        <Badge className={`whitespace-nowrap ${getStatusColor(order.status)}`}>
+          {getStatusLabel(order.status)}
+        </Badge>
+      </TableCell>
+      <TableCell className="font-semibold whitespace-nowrap">€{order.total_value.toFixed(2)}</TableCell>
+      <TableCell className={`text-right ${stickyActionsClass(!showSupplier)}`}>
+        <div className="flex justify-end gap-2">
+          {showDeleted ? (
+            <PermissionGate permission="purchase_orders.delete">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleRestore(order.id)}
+              >
+                {t('purchaseOrders.restore') || 'Restaurar'}
+              </Button>
+            </PermissionGate>
+          ) : (
+            <>
+              <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
+                <FileDown className="w-4 h-4" />
+              </Button>
+              {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
+                // Mesmas permissões que rpc_receive_purchase_order_lines exige (a receção dá entrada de stock).
+                <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                  <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
+                    <PackageCheck className="w-4 h-4" />
+                  </Button>
+                </PermissionGate>
+              )}
+              {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
+                // "Não vou receber o resto" da PO inteira — mesmas permissões que a receção.
+                <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openPoOrderCancelFromList(order)}
+                    title="Não vou receber"
+                    aria-label="Não vou receber o resto da encomenda"
+                  >
+                    <Ban className="w-4 h-4" />
+                  </Button>
+                </PermissionGate>
+              )}
+              {(order.status === 'received' || order.status === 'partially_received') && (
+                // Mesmas permissões que rpc_revert_purchase_order_receipt exige (a reversão retira stock).
+                <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => openRevertDialog(order)}
+                    title={t('purchaseOrders.revert.action') || "Reverter receção"}
+                  >
+                    <Undo2 className="w-4 h-4" />
+                  </Button>
+                </PermissionGate>
+              )}
+              <PermissionGate permission="purchase_orders.edit">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleEdit(order)}
+                  disabled={order.status === 'partially_received' || order.status === 'received'}
+                  title={
+                    order.status === 'partially_received' || order.status === 'received'
+                      ? "Não é possível editar uma encomenda já recebida"
+                      : undefined
+                  }
+                >
+                  <Pencil className="w-4 h-4" />
+                </Button>
+              </PermissionGate>
+              <PermissionGate permission="purchase_orders.delete">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => handleDelete(order.id)}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </Button>
+              </PermissionGate>
+            </>
+          )}
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+
+  const renderOrderTableHeader = (showSupplier: boolean) => (
+    <TableHeader>
+      <TableRow className="group">
+        <TableHead className="whitespace-nowrap">{t('purchaseOrders.table.number')}</TableHead>
+        {showSupplier && <TableHead>{t('purchaseOrders.table.supplier')}</TableHead>}
+        <TableHead>{t('purchaseOrders.table.origin') || 'Origem / Cliente'}</TableHead>
+        <TableHead>{t('purchaseOrders.table.date')}</TableHead>
+        <TableHead>{t('purchaseOrders.table.delivery')}</TableHead>
+        <TableHead>{t('purchaseOrders.table.status')}</TableHead>
+        <TableHead>{t('purchaseOrders.table.totalValue')}</TableHead>
+        <TableHead className={`text-right ${stickyActionsClass(!showSupplier)}`}>{t('purchaseOrders.table.actions')}</TableHead>
+      </TableRow>
+    </TableHeader>
+  );
+
   if (companyLoading) {
     return (
       <>
@@ -1783,39 +2838,35 @@ const PurchaseOrders = () => {
             </Dialog>
             </PermissionGate>
             <PermissionGate permission="purchase_orders.create">
-           <Dialog open={open} onOpenChange={(isOpen) => {
-              setOpen(isOpen);
-              if (!isOpen) {
-                setEditingId(null);
-                setFormData({
-                  supplier_id: "",
-                  order_date: new Date().toISOString().split('T')[0],
-                  expected_delivery: "",
-                  status: "pending",
-                  notes: "",
-                });
-                setFieldErrors({});
-                setOrderItems([]);
-                setOrganizationSelection({
-                  tenantId: "",
-                  companyId: activeCompany?.id || "",
-                  businessUnitId: "",
-                  departmentId: "",
-                  secondaryCompanyIds: [],
-                });
-                setNewOrderClientOrderId("");
-                setPendingClientOrderLines([]);
-               }
-             }}>
+           <Dialog open={open} onOpenChange={handleOrderDialogOpenChange}>
               <DialogTrigger asChild>
                 <Button>
                   <Plus className="w-4 h-4 mr-2" />
                   {t('purchaseOrders.newOrder')}
                 </Button>
               </DialogTrigger>
-              <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+              <DialogContent
+                className="max-w-6xl max-h-[90vh] overflow-y-auto"
+                onCloseAutoFocus={(e) => {
+                  if (skipOrderDialogFocusRestoreRef.current) {
+                    skipOrderDialogFocusRestoreRef.current = false;
+                    e.preventDefault();
+                  }
+                }}
+              >
                 <DialogHeader>
-                  <DialogTitle>{editingId ? t('purchaseOrders.editOrder') : t('purchaseOrders.newOrder')}</DialogTitle>
+                  <DialogTitle>
+                    {!editingId
+                      ? t('purchaseOrders.newOrder')
+                      : editingOrderMeta?.id === editingId
+                        ? (isOrderReadOnly
+                            ? t('purchaseOrders.orderTitle', {
+                                number: editingOrderMeta.orderNumber,
+                                supplier: editingOrderMeta.supplierName || '—',
+                              })
+                            : `${t('purchaseOrders.editOrder')} ${editingOrderMeta.orderNumber} — ${editingOrderMeta.supplierName || '—'}`)
+                        : t('purchaseOrders.editOrder')}
+                  </DialogTitle>
                   {editingId && orderSourceInfo && (
                     <p className="text-sm text-muted-foreground">
                       {orderSourceInfo.originType === 'direct_sale'
@@ -1840,13 +2891,54 @@ const PurchaseOrders = () => {
                   )}
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="space-y-6">
-                  {/* Organization Selection */}
-                  <OrganizationFormSection
-                    value={organizationSelection}
-                    onChange={setOrganizationSelection}
-                    showSecondaryCompanies={false}
-                    multiSelectCompanies={false}
-                  />
+                  {/* Encomenda recebida: só de leitura. A reversão é por linha, no
+                      diálogo próprio — mesmas permissões que o botão ↩ da lista. */}
+                  {isOrderReadOnly && (
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-muted/40 px-3 py-2">
+                      <p className="text-sm text-muted-foreground">
+                        {t('purchaseOrders.readOnlyReceived')}
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {/* EC inativa: o que foi entregue à EC pode passar para stock.
+                            Mesmas permissões que rpc_po_receipt_release_to_stock. */}
+                        {releasableLines.length > 0 && (
+                          <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                            <Button type="button" variant="outline" size="sm" onClick={() => void handleReleaseFromOrderDialog()}>
+                              <PackageCheck className="w-4 h-4 mr-2" />
+                              Passar para stock
+                            </Button>
+                          </PermissionGate>
+                        )}
+                        {editingOrderMeta?.hasReceivedLines && (
+                          <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
+                            <Button type="button" variant="outline" size="sm" onClick={handleRevertFromOrderDialog}>
+                              <Undo2 className="w-4 h-4 mr-2" />
+                              {t('purchaseOrders.revert.action')}
+                            </Button>
+                          </PermissionGate>
+                        )}
+                      </div>
+                      {releasableLines.length > 0 && orderContractState?.active === false && (
+                        <p className="w-full text-xs text-amber-700 dark:text-amber-400">
+                          A encomenda cliente {orderContractState.number || "ligada"} está inativa — o que foi recebido para ela pode passar para stock.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Organization Selection — sem prop disabled; em só de leitura o
+                      fieldset desativa os controlos e bloqueia o rato. */}
+                  <fieldset
+                    disabled={isOrderReadOnly}
+                    className={isOrderReadOnly ? "min-w-0 pointer-events-none opacity-70" : "min-w-0"}
+                  >
+                    <OrganizationFormSection
+                      value={organizationSelection}
+                      onChange={setOrganizationSelection}
+                      showSecondaryCompanies={false}
+                      multiSelectCompanies={false}
+                    />
+                  </fieldset>
 
                   {/* Fase 5.0F: ligação manual opcional a uma Encomenda Cliente — só
                       na criação, resolve o caso "sem_fornecedor" em Encomendas
@@ -1894,7 +2986,7 @@ const PurchaseOrders = () => {
                       <Select value={formData.supplier_id} onValueChange={(value) => {
                         setFormData({ ...formData, supplier_id: value });
                         setOrderItems([]);
-                      }} required>
+                      }} required disabled={isOrderReadOnly}>
                         <SelectTrigger>
                           <SelectValue placeholder={t('purchaseOrders.form.selectSupplier')} />
                         </SelectTrigger>
@@ -1916,6 +3008,7 @@ const PurchaseOrders = () => {
                         value={formData.order_date}
                         onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
                         required
+                        disabled={isOrderReadOnly}
                         className={fieldErrors.order_date ? "border-destructive" : ""}
                       />
                       {fieldErrors.order_date && <p className="text-xs text-destructive">{fieldErrors.order_date}</p>}
@@ -1927,11 +3020,12 @@ const PurchaseOrders = () => {
                         type="date"
                         value={formData.expected_delivery}
                         onChange={(e) => setFormData({ ...formData, expected_delivery: e.target.value })}
+                        disabled={isOrderReadOnly}
                       />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="status">{t('purchaseOrders.form.status')} *</Label>
-                      <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
+                      <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })} disabled={isOrderReadOnly}>
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
@@ -1967,19 +3061,9 @@ const PurchaseOrders = () => {
                           <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
-                      {!hasPermission('purchase_orders.approve') && formData.status !== 'ordered' && (
+                      {!isOrderReadOnly && !hasPermission('purchase_orders.approve') && formData.status !== 'ordered' && (
                         <p className="text-xs text-muted-foreground">
                           Sem permissão para aprovar encomendas (mudar para "{t('purchaseOrders.status.ordered')}").
-                        </p>
-                      )}
-                      {formData.status === 'received' && (
-                        <p className="text-xs text-muted-foreground">
-                          Esta encomenda já foi recebida (stock atualizado). Para reverter, usa um ajuste em Stocks.
-                        </p>
-                      )}
-                      {formData.status === 'partially_received' && (
-                        <p className="text-xs text-muted-foreground">
-                          Esta encomenda já tem linhas parcialmente recebidas — não é possível editá-la nem cancelá-la. Para devolver mercadoria já recebida, usa a devolução ao fornecedor.
                         </p>
                       )}
                     </div>
@@ -1992,12 +3076,14 @@ const PurchaseOrders = () => {
                       value={formData.notes}
                       onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                       rows={3}
+                      disabled={isOrderReadOnly}
                     />
                   </div>
 
                   <div className="border-t pt-4">
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-semibold">{t('purchaseOrders.form.orderItems')}</h3>
+                      {!isOrderReadOnly && (
                       <Button 
                         type="button" 
                         onClick={() => setShowItemsDialog(true)}
@@ -2006,6 +3092,7 @@ const PurchaseOrders = () => {
                         <Plus className="w-4 h-4 mr-2" />
                         {t('purchaseOrders.form.addItems')}
                       </Button>
+                      )}
                     </div>
 
                     {orderItems.length > 0 ? (
@@ -2033,6 +3120,7 @@ const PurchaseOrders = () => {
                                        type="number"
                                        value={item.quantity}
                                        onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
+                                       disabled={isOrderReadOnly}
                                        className="w-20"
                                        min="0"
                                        step={itemRequiresIntegerQty(item) ? "1" : "0.01"}
@@ -2044,6 +3132,7 @@ const PurchaseOrders = () => {
                                        type="number"
                                        value={item.unit_price}
                                        onChange={(e) => handleItemChange(index, 'unit_price', e.target.value)}
+                                       disabled={isOrderReadOnly}
                                        className="w-24"
                                        min="0"
                                        step="0.01"
@@ -2053,7 +3142,7 @@ const PurchaseOrders = () => {
                                    <TableCell className="font-semibold">€{item.total_price.toFixed(2)}</TableCell>
                                    <TableCell>
                                      <div className="flex gap-1">
-                                        {item.item_type === 'product' && item.product_id && (
+                                        {!isOrderReadOnly && item.item_type === 'product' && item.product_id && (
                                          <Button
                                            type="button"
                                            variant="ghost"
@@ -2069,6 +3158,7 @@ const PurchaseOrders = () => {
                                            <Tag className="w-4 h-4" />
                                          </Button>
                                        )}
+                                       {!isOrderReadOnly && (
                                        <Button
                                          type="button"
                                          variant="ghost"
@@ -2077,6 +3167,7 @@ const PurchaseOrders = () => {
                                        >
                                          <Trash2 className="w-4 h-4" />
                                        </Button>
+                                       )}
                                      </div>
                                    </TableCell>
                                  </TableRow>
@@ -2117,13 +3208,173 @@ const PurchaseOrders = () => {
                     )}
                   </div>
 
+                  {/* "Não vou receber o resto": anulações ativas desta PO (linha ou
+                      PO inteira). Só informação + Desfazer; a anulação da PO
+                      inteira (batch_id) desfaz-se em lote. */}
+                  {editingId && orderCancellations?.orderId === editingId && orderCancellations.rows.length > 0 && (() => {
+                    const rows = orderCancellations.rows;
+                    const itemsById = new Map(
+                      (orderReceiptItems?.orderId === editingId ? orderReceiptItems.items : []).map((i) => [i.id, i]),
+                    );
+                    return (
+                      <div className="border-t pt-4 space-y-2">
+                        <p className="text-sm font-medium">Resto anulado (não vai ser recebido)</p>
+                        <ul className="space-y-1">
+                          {rows.map((c, idx) => {
+                            // purchase_order_item_id null = linha recriada na edição
+                            // da PO: mostra-se sem nome de linha e sem Desfazer.
+                            const lineGone = !c.purchase_order_item_id;
+                            const item = c.purchase_order_item_id ? itemsById.get(c.purchase_order_item_id) : undefined;
+                            const lineUomCode = poCancellationUomCode(item);
+                            const name = item?.products?.name || item?.description || (lineGone ? "Linha já não existe" : "Linha");
+                            // Lote: um só "Desfazer" (na primeira linha do lote que ainda existe).
+                            const isBatchFollower = lineGone || (!!c.batch_id &&
+                              rows.findIndex((r) => r.batch_id === c.batch_id && !!r.purchase_order_item_id) !== idx);
+                            return (
+                              <li key={c.id} className="flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground">
+                                <span>
+                                  {name}: {formatQty(c.quantity_cancelled)}{lineUomCode ? ` ${lineUomCode}` : ""} anulado(s) — {poCancellationReasonLabel(c.reason)}
+                                  {c.notes ? ` (${c.notes})` : ""} · {new Date(c.created_at).toLocaleString("pt-PT")}
+                                </span>
+                                {!isBatchFollower && (
+                                  <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
+                                    <Button
+                                      type="button"
+                                      variant="link"
+                                      size="sm"
+                                      className="h-6 px-1 text-xs"
+                                      onClick={() => setPoUndoTarget({
+                                        cancellationId: c.id,
+                                        batchId: c.batch_id ?? null,
+                                        orderId: c.purchase_order_id,
+                                        source: "orderDialog",
+                                        description: `Volta a ficar por receber: ${formatQty(c.quantity_cancelled)}${lineUomCode ? ` ${lineUomCode}` : ""} de ${name}.`,
+                                      })}
+                                    >
+                                      {c.batch_id ? "Desfazer (toda a encomenda)" : "Desfazer"}
+                                    </Button>
+                                  </PermissionGate>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Histórico de receções (purchase_order_receipts, 20261206130000) —
+                      só de leitura, colapsável. Receções anteriores à tabela não
+                      têm registo aqui. */}
+                  {editingId && (
+                    (orderReceipts?.orderId === editingId && orderReceipts.rows.length > 0) ||
+                    (editingOrderMeta?.id === editingId && editingOrderMeta.hasReceivedLines)
+                  ) && (() => {
+                    const rows = orderReceipts?.orderId === editingId ? orderReceipts.rows : [];
+                    const warehouseNames = orderReceipts?.orderId === editingId ? orderReceipts.warehouseNames : {};
+                    const itemsById = new Map(
+                      (orderReceiptItems?.orderId === editingId ? orderReceiptItems.items : []).map((i) => [i.id, i]),
+                    );
+                    return (
+                      <div className="border-t pt-4">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="px-2 -ml-2"
+                          onClick={() => setReceiptHistoryOpen((v) => !v)}
+                          aria-expanded={receiptHistoryOpen}
+                        >
+                          {receiptHistoryOpen ? <ChevronDown className="w-4 h-4 mr-1" /> : <ChevronRight className="w-4 h-4 mr-1" />}
+                          Histórico de receções{rows.length > 0 ? ` (${rows.length})` : ""}
+                        </Button>
+                        {receiptHistoryOpen && (
+                          rows.length === 0 ? (
+                            <p className="text-sm text-muted-foreground mt-2">
+                              Sem registo detalhado — as receções feitas antes desta funcionalidade não aparecem aqui.
+                            </p>
+                          ) : (
+                            <div className="mt-2 overflow-x-auto">
+                              <Table>
+                                <TableHeader>
+                                  <TableRow>
+                                    <TableHead>Data</TableHead>
+                                    <TableHead>Linha / produto</TableHead>
+                                    <TableHead>Tipo</TableHead>
+                                    <TableHead className="text-right">Quantidade</TableHead>
+                                    <TableHead className="text-right">Para EC</TableHead>
+                                    <TableHead className="text-right">Para stock</TableHead>
+                                    <TableHead>Armazém</TableHead>
+                                    <TableHead>Estado</TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {rows.map((r) => {
+                                    const item = r.purchase_order_item_id ? itemsById.get(r.purchase_order_item_id) : undefined;
+                                    const units = Number(r.units_per_uom) || 1;
+                                    const baseCode = stockUnitCode(item);
+                                    const isRelease = r.kind === "release_to_stock";
+                                    return (
+                                      <TableRow key={r.id} className={r.reverted_at ? "opacity-60" : ""}>
+                                        <TableCell className="whitespace-nowrap">{new Date(r.received_at).toLocaleString("pt-PT")}</TableCell>
+                                        <TableCell>
+                                          <div className="max-w-[240px] truncate" title={item?.products?.name || item?.description || ""}>
+                                            {item?.products?.name || item?.description || "Linha removida"}
+                                          </div>
+                                        </TableCell>
+                                        <TableCell className="whitespace-nowrap">{isRelease ? "Passagem para stock" : "Receção"}</TableCell>
+                                        <TableCell className="text-right whitespace-nowrap">
+                                          {isRelease ? "—" : `${formatQty(r.quantity)}${units === 1 && item ? ` ${baseCode}` : ""}`}
+                                        </TableCell>
+                                        <TableCell className="text-right whitespace-nowrap">
+                                          {Number(r.units_to_order) > 0 ? `${formatQty(r.units_to_order)} ${baseCode}` : "—"}
+                                        </TableCell>
+                                        <TableCell className="text-right whitespace-nowrap">
+                                          {Number(r.units_to_stock) > 0 ? `${formatQty(r.units_to_stock)} ${baseCode}` : "—"}
+                                        </TableCell>
+                                        <TableCell className="whitespace-nowrap">{r.warehouse_id ? warehouseNames[r.warehouse_id] || "—" : "—"}</TableCell>
+                                        <TableCell>
+                                          {r.reverted_at ? (
+                                            <span className="text-xs">
+                                              Revertida em {new Date(r.reverted_at).toLocaleString("pt-PT")}
+                                              {r.revert_reason ? ` — ${r.revert_reason}` : ""}
+                                            </span>
+                                          ) : (
+                                            <span className="text-xs text-muted-foreground">
+                                              Ativa{isRelease && r.notes ? ` — ${r.notes}` : ""}
+                                            </span>
+                                          )}
+                                        </TableCell>
+                                      </TableRow>
+                                    );
+                                  })}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="flex gap-2 justify-end pt-4 border-t">
-                    <Button type="button" variant="outline" onClick={() => setOpen(false)}>
-                      {t('purchaseOrders.form.cancel')}
-                    </Button>
-                    <Button type="submit">
-                      {editingId ? t('purchaseOrders.form.update') : t('purchaseOrders.form.create')}
-                    </Button>
+                    {isOrderReadOnly ? (
+                      // Fecho completo (repõe o formulário) — o Cancelar abaixo só
+                      // fecha, e deixaria o editingId/modo só de leitura agarrados
+                      // à próxima "Nova Encomenda".
+                      <Button type="button" variant="outline" onClick={() => handleOrderDialogOpenChange(false)}>
+                        {t('purchaseOrders.form.close')}
+                      </Button>
+                    ) : (
+                      <>
+                        <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+                          {t('purchaseOrders.form.cancel')}
+                        </Button>
+                        <Button type="submit">
+                          {editingId ? t('purchaseOrders.form.update') : t('purchaseOrders.form.create')}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </form>
               </DialogContent>
@@ -2201,6 +3452,24 @@ const PurchaseOrders = () => {
                   {t('purchaseOrders.filters.clear')}
                 </Button>
               )}
+
+              <Button
+                variant="outline"
+                className="md:ml-auto"
+                onClick={() => changeListViewMode(listViewMode === 'grouped' ? 'all' : 'grouped')}
+              >
+                {listViewMode === 'grouped' ? (
+                  <>
+                    <List className="w-4 h-4 mr-2" />
+                    {t('purchaseOrders.view.all') || 'Ver todas'}
+                  </>
+                ) : (
+                  <>
+                    <Layers className="w-4 h-4 mr-2" />
+                    {t('purchaseOrders.view.grouped') || 'Agrupar por fornecedor'}
+                  </>
+                )}
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -2213,104 +3482,80 @@ const PurchaseOrders = () => {
                 {hasActiveOrderFilters ? t('purchaseOrders.filters.noResults') : t('purchaseOrders.noOrders')}
               </p>
             </div>
-          ) : (
+          ) : listViewMode === 'grouped' ? (
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>{t('purchaseOrders.table.number')}</TableHead>
+                  <TableHead className="w-10" />
                   <TableHead>{t('purchaseOrders.table.supplier')}</TableHead>
-                  <TableHead>{t('purchaseOrders.table.date')}</TableHead>
-                  <TableHead>{t('purchaseOrders.table.delivery')}</TableHead>
-                  <TableHead>{t('purchaseOrders.table.status')}</TableHead>
-                  <TableHead>{t('purchaseOrders.table.totalValue')}</TableHead>
-                  <TableHead className="text-right">{t('purchaseOrders.table.actions')}</TableHead>
+                  <TableHead className="text-right">{t('purchaseOrders.groups.orderCount') || 'Nº encomendas'}</TableHead>
+                  <TableHead className="text-right">{t('purchaseOrders.groups.toReceive') || 'Por receber'}</TableHead>
+                  <TableHead className="text-right">{t('purchaseOrders.groups.received') || 'Recebidas'}</TableHead>
+                  <TableHead>{t('purchaseOrders.groups.lastOrder') || 'Última encomenda'}</TableHead>
+                  <TableHead className="text-right">{t('purchaseOrders.groups.totalValue') || 'Valor total'}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredOrders.map((order) => (
-                  <TableRow key={order.id}>
-                    <TableCell className="font-mono font-semibold">{order.order_number}</TableCell>
-                    <TableCell>{order.suppliers?.name || "N/A"}</TableCell>
-                    <TableCell>{new Date(order.order_date).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      {order.expected_delivery
-                        ? new Date(order.expected_delivery).toLocaleDateString()
-                        : "N/A"}
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={getStatusColor(order.status)}>
-                        {getStatusLabel(order.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-semibold">€{order.total_value.toFixed(2)}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        {showDeleted ? (
-                          <PermissionGate permission="purchase_orders.delete">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleRestore(order.id)}
-                            >
-                              {t('purchaseOrders.restore') || 'Restaurar'}
-                            </Button>
-                          </PermissionGate>
-                        ) : (
-                          <>
-                            <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
-                              <FileDown className="w-4 h-4" />
-                            </Button>
-                            {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
-                              // Mesmas permissões que rpc_receive_purchase_order_lines exige (a receção dá entrada de stock).
-                              <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
-                                <Button variant="ghost" size="icon" onClick={() => openReceiveDialog(order)} title="Marcar como recebida">
-                                  <PackageCheck className="w-4 h-4" />
-                                </Button>
-                              </PermissionGate>
-                            )}
-                            {(order.status === 'received' || order.status === 'partially_received') && (
-                              // Mesmas permissões que rpc_revert_purchase_order_receipt exige (a reversão retira stock).
-                              <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  onClick={() => openRevertDialog(order)}
-                                  title={t('purchaseOrders.revert.action') || "Reverter receção"}
-                                >
-                                  <Undo2 className="w-4 h-4" />
-                                </Button>
-                              </PermissionGate>
-                            )}
-                            <PermissionGate permission="purchase_orders.edit">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleEdit(order)}
-                                disabled={order.status === 'partially_received' || order.status === 'received'}
-                                title={
-                                  order.status === 'partially_received' || order.status === 'received'
-                                    ? "Não é possível editar uma encomenda já recebida"
-                                    : undefined
-                                }
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                            <PermissionGate permission="purchase_orders.delete">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => handleDelete(order.id)}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </PermissionGate>
-                          </>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {supplierGroups.map((group) => {
+                  const isExpanded = expandedSupplierGroups.has(group.key);
+                  return (
+                    <Fragment key={group.key}>
+                      <TableRow
+                        className="cursor-pointer"
+                        onClick={() => toggleSupplierGroup(group.key)}
+                      >
+                        <TableCell className="w-10">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-expanded={isExpanded}
+                            aria-label={isExpanded
+                              ? (t('purchaseOrders.groups.collapse') || 'Recolher')
+                              : (t('purchaseOrders.groups.expand') || 'Expandir')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSupplierGroup(group.key);
+                            }}
+                          >
+                            {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                          </Button>
+                        </TableCell>
+                        <TableCell className="font-semibold">{group.supplierName}</TableCell>
+                        <TableCell className="text-right">{group.orders.length}</TableCell>
+                        <TableCell className="text-right">{group.toReceive}</TableCell>
+                        <TableCell className="text-right">{group.received}</TableCell>
+                        <TableCell className="whitespace-nowrap">
+                          {group.lastOrderDate ? new Date(group.lastOrderDate).toLocaleDateString() : "N/A"}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold">€{group.totalValue.toFixed(2)}</TableCell>
+                      </TableRow>
+                      {isExpanded && (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell colSpan={7} className="bg-muted/30 p-2 md:pl-10">
+                            {/* w-0 + min-w-full: o contentor com overflow-auto não contribui
+                                com a largura da tabela interna para a célula, por isso fica
+                                com a largura disponível e o scroll horizontal (e o sticky das
+                                ações) passam a ser deste contentor, não da tabela exterior. */}
+                            <Table containerClassName="w-0 min-w-full">
+                              {renderOrderTableHeader(false)}
+                              <TableBody>
+                                {group.orders.map((order) => renderOrderRow(order, false))}
+                              </TableBody>
+                            </Table>
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          ) : (
+            <Table>
+              {renderOrderTableHeader(true)}
+              <TableBody>
+                {filteredOrders.map((order) => renderOrderRow(order, true))}
               </TableBody>
             </Table>
           )}
@@ -2491,10 +3736,23 @@ const PurchaseOrders = () => {
           </DialogHeader>
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              Indica, por linha, a quantidade a dar entrada em stock agora. Só as quantidades
+              Indica, por linha, a quantidade a receber agora. Só as quantidades
               indicadas são recebidas — o que ficar por preencher continua por receber para uma
               entrega posterior.
+              {receivingOrder?.isClientOrder &&
+                " Esta encomenda está ligada a uma Encomenda Cliente: o que ela ainda precisa fica para ela e o excedente entra em stock."}
             </p>
+            {(() => {
+              // Decide-se pelo motivo da alocação; o número da EC pode faltar.
+              const inactiveLines = Object.values(receivePreview).filter((l) => l.allocation_reason === "client_order_inactive");
+              if (inactiveLines.length === 0) return null;
+              const numbers = distinctContractNumbers(inactiveLines);
+              return (
+                <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                  {numbers.length > 0 ? `A encomenda cliente ${numbers.join(", ")}` : "A encomenda cliente ligada"} está inativa — o recebido entra em stock.
+                </div>
+              );
+            })()}
             <div className="space-y-2">
               <Label>Armazém de destino</Label>
               <Select value={receiveWarehouseId} onValueChange={setReceiveWarehouseId}>
@@ -2551,28 +3809,145 @@ const PurchaseOrders = () => {
                           <TableCell className="text-right">{item.received_quantity || 0}</TableCell>
                           <TableCell className="text-right">
                             {fullyReceived ? (
-                              <span className="text-xs text-muted-foreground">já recebida</span>
+                              <span className="text-xs text-muted-foreground">
+                                {/* quantity=0 só acontece numa linha anulada sem nada recebido. */}
+                                {Number(item.quantity) <= 0 && !(Number(item.received_quantity) > 0) ? "anulada" : "já recebida"}
+                              </span>
                             ) : (
-                              <Input
-                                type="number"
-                                min={0}
-                                max={remaining}
-                                step="1"
-                                className="w-24 ml-auto"
-                                value={receiveLineQuantities[item.id] ?? 0}
-                                onChange={(e) => {
-                                  const raw = parseFloat(e.target.value);
-                                  const clamped = isNaN(raw) ? 0 : Math.min(Math.max(raw, 0), remaining);
-                                  setReceiveLineQuantities((prev) => ({ ...prev, [item.id]: clamped }));
-                                }}
-                              />
+                              <>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  max={remaining}
+                                  step="1"
+                                  className="w-24 ml-auto"
+                                  value={receiveLineQuantities[item.id] ?? 0}
+                                  onChange={(e) => {
+                                    const raw = parseFloat(e.target.value);
+                                    const clamped = isNaN(raw) ? 0 : Math.min(Math.max(raw, 0), remaining);
+                                    setReceiveLineQuantities((prev) => ({ ...prev, [item.id]: clamped }));
+                                  }}
+                                />
+                                {/* Destino por linha (só PO ligada a uma EC; numa PO
+                                    de stock tudo entra em stock, sem pré-visualização). */}
+                                {receivingOrder?.isClientOrder && (() => {
+                                  const toReceive = receiveLineQuantities[item.id] || 0;
+                                  if (toReceive <= 0) return null;
+                                  const preview = receivePreview[item.id];
+                                  // Repartição de uma quantidade já alterada (ou ainda sem resposta).
+                                  if (!preview || preview.requested_quantity !== toReceive) {
+                                    return receivePreviewError ? null : (
+                                      <div className="text-xs text-muted-foreground mt-1 whitespace-nowrap">a calcular destino…</div>
+                                    );
+                                  }
+                                  const units = Number(preview.units_per_uom ?? item.units_per_uom) || 1;
+                                  const baseCode = stockUnitCode(item);
+                                  const qtyToOrder = Number(preview.qty_to_order) || 0;
+                                  const qtyToStock = Number(preview.qty_to_stock) || 0;
+                                  const parts: string[] = [];
+                                  if (qtyToOrder > 0) {
+                                    parts.push(
+                                      `${formatQty(qtyToOrder)} para ${preview.contract_order_number || "a EC"}` +
+                                        (units > 1 ? ` (${formatQty(preview.units_to_order)} ${baseCode})` : ""),
+                                    );
+                                  }
+                                  if (qtyToStock > 0) {
+                                    parts.push(
+                                      `${formatQty(qtyToStock)} para stock` +
+                                        (units > 1 ? ` (${formatQty(preview.units_to_stock)} ${baseCode})` : ""),
+                                    );
+                                  }
+                                  if (parts.length === 0) return null;
+                                  return (
+                                    <div className="text-xs text-muted-foreground mt-1 whitespace-nowrap">{parts.join(" / ")}</div>
+                                  );
+                                })()}
+                              </>
                             )}
+                            {(() => {
+                              // "Não vou receber o resto": anulações ativas desta
+                              // linha + ação para anular o que ainda falta.
+                              const lineCancellations = receiveCancellations && receiveCancellations.orderId === receivingOrder?.id
+                                ? receiveCancellations.rows.filter((c) => c.purchase_order_item_id === item.id)
+                                : [];
+                              if (lineCancellations.length === 0 && fullyReceived) return null;
+                              const uomLabel = poCancellationUomCode(item);
+                              const productName = item.products?.name || item.description || "produto";
+                              return (
+                                <div className="mt-1 flex flex-col items-end text-xs">
+                                  {lineCancellations.map((c) => {
+                                    // Lote: um só "Desfazer (toda a encomenda)", na
+                                    // primeira linha do lote que está na tabela.
+                                    const isBatchFollower = !!c.batch_id && receiveCancellations?.rows.find(
+                                      (r) => r.batch_id === c.batch_id && !!r.purchase_order_item_id &&
+                                        receiveLines.some((l) => l.id === r.purchase_order_item_id),
+                                    )?.id !== c.id;
+                                    return (
+                                    <div key={c.id} className="flex items-center gap-1 text-muted-foreground whitespace-nowrap">
+                                      <span title={c.notes || undefined}>
+                                        {formatQty(c.quantity_cancelled)}{uomLabel ? ` ${uomLabel}` : ""} anulado(s) — {poCancellationReasonLabel(c.reason)}
+                                      </span>
+                                      {!isBatchFollower && (
+                                      <Button
+                                        type="button"
+                                        variant="link"
+                                        size="sm"
+                                        className="h-6 px-1 text-xs"
+                                        disabled={receiving || poUndoSubmitting}
+                                        onClick={() => setPoUndoTarget({
+                                          cancellationId: c.id,
+                                          batchId: c.batch_id ?? null,
+                                          orderId: c.purchase_order_id,
+                                          source: "receive",
+                                          description: `Volta a ficar por receber: ${formatQty(c.quantity_cancelled)}${uomLabel ? ` ${uomLabel}` : ""} de ${productName}.`,
+                                        })}
+                                      >
+                                        {/* Anulação da PO inteira: a BD só aceita desfazer o lote. */}
+                                        {c.batch_id ? "Desfazer (toda a encomenda)" : "Desfazer"}
+                                      </Button>
+                                      )}
+                                    </div>
+                                    );
+                                  })}
+                                  {!fullyReceived && (
+                                    <Button
+                                      type="button"
+                                      variant="link"
+                                      size="sm"
+                                      className="h-6 px-1 text-xs text-muted-foreground"
+                                      disabled={receiving}
+                                      onClick={() => openPoLineCancel(item, remaining, uomLabel)}
+                                    >
+                                      Não vou receber o resto
+                                    </Button>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </TableCell>
                         </TableRow>
                       );
                     })}
                   </TableBody>
                 </Table>
+                {receivePreviewError && (
+                  <p className="text-xs text-destructive" role="alert">{receivePreviewError}</p>
+                )}
+                {receiveLines.some((item) => getReceiveRemaining(item) > 0) && (
+                  <div className="flex justify-start">
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-6 px-1 text-xs text-muted-foreground"
+                      disabled={receiving}
+                      onClick={openPoOrderCancelFromReceive}
+                    >
+                      <Ban className="w-3.5 h-3.5 mr-1" />
+                      Não vou receber o resto da encomenda
+                    </Button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -2587,6 +3962,113 @@ const PurchaseOrders = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* "Não vou receber o resto" — motivo da anulação (linha ou PO inteira).
+          Liga a rpc_cancel_po_line_remainder / rpc_cancel_po_remainder; os
+          erros vêm da RPC. Pode abrir por cima do diálogo de receção. */}
+      <Dialog
+        open={!!poCancelTarget}
+        onOpenChange={(o) => {
+          if (!o && !poCancelSubmitting) setPoCancelTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {poCancelTarget?.kind === "order" ? "Não vou receber o resto da encomenda" : "Não vou receber o resto"}
+            </DialogTitle>
+          </DialogHeader>
+          {poCancelTarget && (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                {poCancelTarget.kind === "line"
+                  ? `Vais anular ${formatQty(poCancelTarget.quantity)}${poCancelTarget.uomLabel ? ` ${poCancelTarget.uomLabel}` : ""} de ${poCancelTarget.productName}.`
+                  : poCancelTarget.lineCount !== null
+                    ? `Vais anular o que falta de ${poCancelTarget.lineCount} linha(s) da encomenda ${poCancelTarget.orderNumber}. Se nada tiver sido recebido, a encomenda fica cancelada.`
+                    : `Vais anular tudo o que falta receber da encomenda ${poCancelTarget.orderNumber}. Se nada tiver sido recebido, a encomenda fica cancelada.`}
+                {poCancelTarget.isClientOrder
+                  ? " A encomenda de cliente ligada deixa de esperar por este fornecedor e passa a usar stock disponível ou a ficar em falta."
+                  : " Esta quantidade deixa de estar por receber."}
+              </p>
+              <div className="space-y-2">
+                <Label>Motivo</Label>
+                <RadioGroup
+                  value={poCancelReason}
+                  onValueChange={(v) => setPoCancelReason(v as PoCancellationReason)}
+                  disabled={poCancelSubmitting}
+                >
+                  {(Object.keys(PO_CANCELLATION_REASON_LABELS) as PoCancellationReason[]).map((value) => (
+                    <div key={value} className="flex items-center gap-2">
+                      <RadioGroupItem value={value} id={`po-cancel-reason-${value}`} />
+                      <Label htmlFor={`po-cancel-reason-${value}`} className="font-normal">
+                        {PO_CANCELLATION_REASON_LABELS[value]}
+                      </Label>
+                    </div>
+                  ))}
+                </RadioGroup>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="po-cancel-notes">
+                  Nota{poCancelReason === "other" ? " (obrigatória)" : " (opcional)"}
+                </Label>
+                <Textarea
+                  id="po-cancel-notes"
+                  rows={3}
+                  value={poCancelNotes}
+                  onChange={(e) => setPoCancelNotes(e.target.value)}
+                  disabled={poCancelSubmitting}
+                  aria-required={poCancelReason === "other"}
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setPoCancelTarget(null)} disabled={poCancelSubmitting}>
+                  Cancelar
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => void handleConfirmPoCancel()}
+                  disabled={poCancelSubmitting || (poCancelReason === "other" && !poCancelNotes.trim())}
+                >
+                  {poCancelSubmitting ? "A anular..." : "Confirmar anulação"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Desfazer uma anulação (linha) ou o lote da PO inteira. */}
+      <AlertDialog
+        open={!!poUndoTarget}
+        onOpenChange={(o) => {
+          if (!o && !poUndoSubmitting) setPoUndoTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Desfazer anulação?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {poUndoTarget?.batchId
+                ? "Desfaz a anulação de todas as linhas desta encomenda."
+                : poUndoTarget?.description}
+              {poUndoTarget?.source === "orderDialog" &&
+                " O diálogo da encomenda vai fechar — alterações não gravadas perdem-se."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={poUndoSubmitting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={poUndoSubmitting}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleConfirmPoUndo();
+              }}
+            >
+              {poUndoSubmitting ? "A desfazer..." : "Desfazer"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Reverter receção, por linha — para receções registadas por engano.
           Liga a rpc_revert_purchase_order_receipt; os erros (sem permissão,
@@ -2648,7 +4130,15 @@ const PurchaseOrders = () => {
                             )}
                           </TableCell>
                           <TableCell className="text-right whitespace-nowrap">{item.quantity}</TableCell>
-                          <TableCell className="text-right whitespace-nowrap">{item.received_quantity || 0}</TableCell>
+                          <TableCell className="text-right whitespace-nowrap">
+                            {item.received_quantity || 0}
+                            {/* Destino por linha: parte que saiu do stock vs. parte entregue à EC. */}
+                            {getUnitsNotInStock(item) > 0 && (
+                              <div className="text-xs text-muted-foreground">
+                                {formatQty(item.received_to_stock_units)} {stockUnitCode(item)} do stock · {formatQty(getUnitsNotInStock(item))} {stockUnitCode(item)} da EC
+                              </div>
+                            )}
+                          </TableCell>
                         </TableRow>
                       );
                     })}
@@ -2686,6 +4176,97 @@ const PurchaseOrders = () => {
                 {reverting
                   ? (t('purchaseOrders.revert.processing') || "A reverter...")
                   : (t('purchaseOrders.revert.confirm') || "Reverter receção")}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Passar para stock — o recebido de uma PO de contrato cuja Encomenda
+          Cliente ficou inativa. Liga a rpc_po_receipt_release_to_stock, que
+          volta a validar tudo (EC ativa, linha de stock, nada pendente). */}
+      <Dialog open={releaseDialogOpen} onOpenChange={(o) => { if (!releasing) setReleaseDialogOpen(o); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Passar para stock{releaseOrder ? ` — ${releaseOrder.order_number}` : ""}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              {releaseOrder?.contractInactiveKnown
+                ? `A encomenda cliente ${releaseOrder.contractNumber || "ligada"} está inativa. O que foi recebido para ela nas linhas escolhidas dá entrada no armazém indicado.`
+                : "Só é possível se a encomenda cliente estiver inativa. O que foi recebido para ela nas linhas escolhidas dá entrada no armazém indicado."}
+            </p>
+
+            <div className="space-y-2">
+              <Label>Armazém de destino</Label>
+              <Select value={releaseWarehouseId} onValueChange={setReleaseWarehouseId} disabled={releasing}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Escolhe um armazém" />
+                </SelectTrigger>
+                <SelectContent>
+                  {releaseWarehouses.map((w) => (
+                    <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10" />
+                  <TableHead>Item</TableHead>
+                  <TableHead className="text-right">Recebida</TableHead>
+                  <TableHead className="text-right">Passa para stock</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {releaseLines.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell>
+                      <Checkbox
+                        checked={releaseSelectedIds.has(item.id)}
+                        onCheckedChange={(v) => toggleReleaseLine(item.id, v === true)}
+                        disabled={releasing}
+                        aria-label={item.products?.name || item.description}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="font-medium">{item.products?.name || item.description}</div>
+                      {item.sku && <div className="text-xs text-muted-foreground font-mono">{item.sku}</div>}
+                    </TableCell>
+                    <TableCell className="text-right whitespace-nowrap">
+                      {item.received_quantity || 0}
+                    </TableCell>
+                    <TableCell className="text-right whitespace-nowrap">
+                      {formatQty(getUnitsNotInStock(item))} {stockUnitCode(item)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+
+            <div className="space-y-2">
+              <Label htmlFor="release-reason">Motivo (opcional)</Label>
+              <Textarea
+                id="release-reason"
+                value={releaseReason}
+                onChange={(e) => setReleaseReason(e.target.value)}
+                placeholder="Ex.: encomenda cliente cancelada"
+                disabled={releasing}
+                rows={2}
+              />
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setReleaseDialogOpen(false)} disabled={releasing}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleReleaseToStock}
+                disabled={releasing || releaseSelectedIds.size === 0 || !releaseWarehouseId}
+              >
+                {releasing ? "A passar..." : "Passar para stock"}
               </Button>
             </div>
           </div>

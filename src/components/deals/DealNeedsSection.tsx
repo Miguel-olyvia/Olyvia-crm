@@ -31,6 +31,14 @@ import {
   type DealNeedDiagnosticService,
   type DealNeedDiagnosticAcceptedService,
 } from "@/components/deals/DealNeedDiagnostic";
+import {
+  COLUNAS_PLANEAMENTO,
+  DIAGNOSTICO_PLANEAMENTO_VAZIO,
+  deLinha,
+  paraPayload,
+  validarPlaneamento,
+  type DiagnosticoPlaneamento,
+} from "@/lib/deals/diagnosticoPlaneamento";
 import { withAuditContext } from "@/utils/auditContext";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
@@ -351,6 +359,13 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
   // `CASE WHEN p_need_data ? 'diag_x' THEN ... ELSE diag_x END`, portanto a
   // ausência da chave preserva o que está na BD; a presença com null apagava.
   const diagFieldsLoadedRef = useRef(true);
+  // Medidas e características para o planeamento da obra (diag_* de
+  // 20261208100000). O mesmo contrato do ref de cima: só seguem no payload
+  // depois de a leitura confirmar o que está na BD. `planoDisponivel` = as
+  // colunas existem (a leitura não falhou) — senão a secção nem aparece.
+  const [formDiagPlano, setFormDiagPlano] = useState<DiagnosticoPlaneamento>(DIAGNOSTICO_PLANEAMENTO_VAZIO);
+  const diagPlanoLoadedRef = useRef(true);
+  const [planoDisponivel, setPlanoDisponivel] = useState(true);
 
   // Item linking state
   const [linkedItems, setLinkedItems] = useState<DealNeedItem[]>([]);
@@ -492,6 +507,8 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     diagLoadTokenRef.current = null;
     diagMaterialsLoadedRef.current = true; // criação: não há nada na BD para perder
     diagFieldsLoadedRef.current = true;    // idem para as colunas diag_*
+    diagPlanoLoadedRef.current = true;     // e para as de planeamento
+    setFormDiagPlano(DIAGNOSTICO_PLANEAMENTO_VAZIO);
     setFormDiagAreaM2(""); setFormDiagDemolirDescricao(""); setFormDiagDemolirM2("");
     setFormDiagProtegerDescricao(""); setFormDiagIntervencaoTipo(""); setFormDiagIntervencaoDescricao("");
     setFormDiagMaterials([]);
@@ -568,6 +585,8 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
     diagLoadTokenRef.current = need.id;
     diagMaterialsLoadedRef.current = false;
     diagFieldsLoadedRef.current = false;
+    diagPlanoLoadedRef.current = false;
+    setFormDiagPlano(DIAGNOSTICO_PLANEAMENTO_VAZIO);
     void loadDiagnosticForNeed(need.id);
 
     setDialogOpen(true);
@@ -597,6 +616,26 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         setFormDiagIntervencaoDescricao(data.diag_intervencao_descricao || "");
       }
     } catch (err) {
+      captureFlowError(err, "deal-lifecycle");
+    }
+
+    // Planeamento da obra: leitura à parte, para uma base sem a migração
+    // 20261208100000 não estragar a leitura de cima.
+    try {
+      const { data, error } = await supabase
+        .from("deal_needs")
+        .select(COLUNAS_PLANEAMENTO)
+        .eq("id", needId)
+        .maybeSingle();
+      if (error) {
+        setPlanoDisponivel(false);
+      } else if (diagLoadTokenRef.current === needId) {
+        setPlanoDisponivel(true);
+        diagPlanoLoadedRef.current = true;
+        setFormDiagPlano(deLinha(data as unknown as Record<string, unknown> | null));
+      }
+    } catch (err) {
+      setPlanoDisponivel(false);
       captureFlowError(err, "deal-lifecycle");
     }
 
@@ -844,6 +883,11 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
       toast({ title: "Erro de validação", description: firstError.message, variant: "destructive" });
       return;
     }
+    const erroPlano = planoDisponivel ? validarPlaneamento(formDiagPlano) : null;
+    if (erroPlano) {
+      toast({ title: "Diagnóstico: planeamento da obra", description: erroPlano, variant: "destructive" });
+      return;
+    }
     setFieldErrors({});
 
     setSavingNeed(true);
@@ -904,6 +948,8 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
         // Chaves extra no payload jsonb são ignoradas pela função caso a
         // migração ainda não esteja aplicada — não alteram o comportamento atual.
         ...diagFields,
+        // Planeamento da obra: só depois de a leitura confirmar a BD (ou numa criação).
+        ...(planoDisponivel && diagPlanoLoadedRef.current ? paraPayload(formDiagPlano) : {}),
       };
 
       const itemsPayload = linkedItems.map((li, idx) => ({
@@ -1636,6 +1682,8 @@ export function DealNeedsSection({ dealId, organizationId, readOnly = false }: D
                   onRemoveService={handleDiagnosticRemoveService}
                   materials={formDiagMaterials}
                   onRemoveMaterial={handleDiagnosticRemoveMaterial}
+                  plano={planoDisponivel ? formDiagPlano : undefined}
+                  onPlanoChange={setFormDiagPlano}
                 />
               </TabsContent>
 

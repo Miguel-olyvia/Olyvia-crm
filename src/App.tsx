@@ -40,7 +40,6 @@ const CatalogItems = lazy(() => import("./pages/CatalogItems"));
 
 const Roles = lazy(() => import("./pages/Roles"));
 const ApiKeys = lazy(() => import("./pages/ApiKeys"));
-const Billing = lazy(() => import("./pages/Billing"));
 const Campaigns = lazy(() => import("./pages/Campaigns"));
 const CampaignDetail = lazy(() => import("./pages/CampaignDetail"));
 const Channels = lazy(() => import("./pages/Channels"));
@@ -61,6 +60,7 @@ const Bundles = lazy(() => import("./pages/Bundles"));
 const Stocks = lazy(() => import("./pages/Stocks"));
 const Warehouses = lazy(() => import("./pages/Warehouses"));
 const PurchaseOrders = lazy(() => import("./pages/PurchaseOrders"));
+const Receiving = lazy(() => import("./pages/Receiving"));
 const ClientOrders = lazy(() => import("./pages/ClientOrders"));
 const StockCounts = lazy(() => import("./pages/StockCounts"));
 const Suppliers = lazy(() => import("./pages/Suppliers"));
@@ -218,7 +218,7 @@ const App = () => (
                       <Route path="/modelos-orcamento" element={<Navigate to="/quote-models" replace />} />
                       <Route path="/clients" element={<ProtectedRoute permission="clients.view"><AnewClients /></ProtectedRoute>} />
                       <Route path="/contacts" element={<Navigate to="/leads" replace />} />
-                      <Route path="/atividades" element={<ProtectedRoute permission="scheduling.items.view" adminOnly><Atividades /></ProtectedRoute>} />
+                      <Route path="/atividades" element={<ProtectedRoute permission="scheduling.items.view"><Atividades /></ProtectedRoute>} />
                       <Route path="/leads" element={<ProtectedRoute permission="leads.view"><AnewLeads /></ProtectedRoute>} />
                       <Route path="/leads/pending-submissions" element={<ProtectedRoute permission="platform.pending_submissions.view"><PendingFormSubmissions /></ProtectedRoute>} />
                       <Route path="/deals" element={<ProtectedRoute permission="deals.view"><Deals /></ProtectedRoute>} />
@@ -227,13 +227,12 @@ const App = () => (
                       <Route path="/quotes" element={<ProtectedRoute permission="quotes.view"><Quotes /></ProtectedRoute>} />
                       <Route path="/quote-models" element={<ProtectedRoute permission="quote_templates.view"><QuoteModels /></ProtectedRoute>} />
                       <Route path="/proposal-templates" element={<ProposalTemplates />} />
-                      <Route path="/quote-templates" element={<ProtectedRoute permission="proposals.manage"><QuoteTemplates /></ProtectedRoute>} />
+                      <Route path="/quote-templates" element={<ProtectedRoute permission="quotes.manage"><QuoteTemplates /></ProtectedRoute>} />
                       {/* Venda Direta (Fase 2) — fluxo alternativo ao Orçamento -> Proposta -> Contrato. Permissões próprias: direct_sales.view/create/edit (migration 20261130230000). */}
                       <Route path="/direct-sales" element={<ProtectedRoute permission="direct_sales.view"><DirectSales /></ProtectedRoute>} />
                       <Route path="/catalog-items" element={<CatalogItems />} />
                       <Route path="/users" element={<ProtectedRoute permission="users.view"><UsersNew /></ProtectedRoute>} />
                       <Route path="/roles" element={<ProtectedRoute permission="roles.view"><Roles /></ProtectedRoute>} />
-                      <Route path="/billing" element={<Billing />} />
                       <Route path="/api-keys" element={<ProtectedRoute permission="settings.update"><ApiKeys /></ProtectedRoute>} />
                       <Route path="/forms" element={<ProtectedRoute permission="forms.view"><Forms /></ProtectedRoute>} />
                       <Route path="/campaigns" element={<ProtectedRoute permission="campaigns.view"><Campaigns /></ProtectedRoute>} />
@@ -254,6 +253,8 @@ const App = () => (
                       <Route path="/stocks" element={<ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
                       <Route path="/warehouses" element={<ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />
                       <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
+                      {/* Receção por código (Fase 2): entra quem pode receber OU consultar encomendas — mesma regra de rpc_receiving_lookup. Receber exige purchase_orders.receive + inventory.edit, verificado pelo servidor (can_receive / rpc_receive_by_code); sem isso o ecrã fica em modo consulta. */}
+                      <Route path="/receiving" element={<ProtectedRoute permissions={["purchase_orders.receive", "purchase_orders.view"]}><Receiving /></ProtectedRoute>} />
                       {/* Permissão própria client_orders.view — o armazém vê as encomendas sem precisar de ver contratos. Mesma verificação dos RPCs (rpc_list_client_order_documents/rpc_get_client_order_document). */}
                       <Route path="/client-orders" element={<ProtectedRoute permission="client_orders.view"><ClientOrders /></ProtectedRoute>} />
                       {/* Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/inventory.edit controlam ações DENTRO da página (contar/resolver/finalizar), não o acesso à rota. */}

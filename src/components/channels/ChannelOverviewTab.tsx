@@ -5,6 +5,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RTooltip, ResponsiveContainer,
   ComposedChart, Bar, Line, Legend,
 } from "recharts";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface Props { data: any }
 
@@ -49,6 +50,7 @@ function Kpi({ label, value, hint, size = "lg" }: { label: string; value: string
 }
 
 export function ChannelOverviewTab({ data }: Props) {
+  const { t } = useTranslation();
   const s = data?.summary ?? {};
   const top = data?.top_origins ?? [];
   const series = data?.series ?? [];
@@ -138,9 +140,9 @@ export function ChannelOverviewTab({ data }: Props) {
         <CardHeader><CardTitle className="text-sm text-muted-foreground">Métricas externas</CardTitle></CardHeader>
         <CardContent>
           <div className="grid gap-2 grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
-            <Kpi label="Impressions" value={fmtNum(s.impressions)} size="sm" />
-            <Kpi label="Clicks" value={fmtNum(s.clicks)} size="sm" />
-            <Kpi label="Opens" value={fmtNum(s.opens)} size="sm" />
+            <Kpi label={t('campaignDetail.metrics.impressions')} value={fmtNum(s.impressions)} size="sm" />
+            <Kpi label={t('campaignDetail.metrics.clicks')} value={fmtNum(s.clicks)} size="sm" />
+            <Kpi label={t('campaignDetail.metrics.opens')} value={fmtNum(s.opens)} size="sm" />
             <Kpi label="Bounces" value={fmtNum(s.bounces)} size="sm" />
             <Kpi label="Spend importado" value={fmtCur(s.spend_imported)} size="sm"
               hint="channel_metrics.spend, separado e nunca somado ao spend canónico." />

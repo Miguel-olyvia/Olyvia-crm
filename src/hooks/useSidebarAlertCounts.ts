@@ -46,7 +46,7 @@ const POLL_INTERVAL_MS = 180000;
  * per-module alert list, since the two hooks need different derived shapes
  * from the same underlying notifications table.
  */
-async function fetchSidebarAlertData(activeOrgId?: string): Promise<SidebarAlertData> {
+export async function fetchSidebarAlertData(activeOrgId?: string): Promise<SidebarAlertData> {
   const { data: user } = await getCachedAuthUser();
   if (!user.user) {
     return emptySidebarAlertData;

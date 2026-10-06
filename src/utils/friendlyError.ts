@@ -44,13 +44,6 @@ const FRIENDLY_MAP: Array<{ match: RegExp; key: string }> = [
   // "anew_leads_conversao_coerente"') a quem arrastasse a lead noutro estado.
   // Vem primeiro por ser a regra mais especifica das que aqui estao.
   { match: /anew_leads_conversao_coerente/i, key: "friendlyError.leadAlreadyConverted" },
-  // A limit trigger that blocks because the subscription is not active (e.g.
-  // "plan_limit_exceeded:users (no_active_subscription)") is NOT "limit reached":
-  // it must be checked before the per-limit rules below.
-  {
-    match: /plan_limit_exceeded:[a-z_]+.*(no_active_subscription|no_subscription|subscription_(expired|inactive|canceled)|expired|past_due|inactive|canceled|cancelled)/i,
-    key: "friendlyError.planNotActive",
-  },
   { match: /plan_limit_exceeded:leads/i, key: "friendlyError.leadLimitExceeded" },
   { match: /plan_limit_exceeded:users/i, key: "friendlyError.userLimitExceeded" },
   { match: /plan_limit_exceeded:proposals/i, key: "friendlyError.proposalLimitExceeded" },

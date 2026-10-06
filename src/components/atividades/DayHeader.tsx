@@ -20,7 +20,7 @@ interface DayHeaderProps {
   /** Salta para um dia qualquer, escolhido no calendario. */
   onSelectDay: (next: Date) => void;
   onRefresh: () => void;
-  /** Acção principal do ecrã (criar tarefa), no canto do cabeçalho. */
+  /** Ação principal do ecrã (criar tarefa), no canto do cabeçalho. */
   action?: ReactNode;
 }
 

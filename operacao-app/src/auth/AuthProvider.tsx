@@ -9,6 +9,7 @@ import {
 } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
+import { estadoEntrarComo, voltarAMinhaConta } from "../lib/entrarComo";
 import type { Funcao } from "../domain/tipos";
 
 export interface OrgOption {
@@ -224,6 +225,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadProfile]);
 
   const signOut = useCallback(async () => {
+    // A ver como outra pessoa: "sair" é voltar à conta do admin. Um signOut
+    // normal (global) terminaria TODAS as sessões dela — também a do telemóvel.
+    if (estadoEntrarComo()) {
+      await voltarAMinhaConta();
+      return;
+    }
     await supabase.auth.signOut();
     setSession(null);
     setBusinessUserId(null);

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { AUTO_IMPORT_PARAM, readAutoImportParam } from "@/lib/quotes/dealQuoteLink";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PageFAQSheet } from "@/components/PageFAQSheet";
@@ -35,6 +36,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { QuoteBuilder } from "@/components/QuoteBuilder";
+import { QuoteMoradasResumo } from "@/components/quote/QuoteMoradasResumo";
 import { generateQuotePdfBlob } from "@/utils/generateQuotePdfBlob";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -95,6 +97,8 @@ interface Quote {
   root_organization_id: string | null;
   deal_id: string | null;
   obra_endereco: string | null;
+  /** anew_addresses.id da morada de entrega escolhida (select *). */
+  site_address_id?: string | null;
   modelo_base: string;
   estado: string;
   created_at: string;
@@ -228,6 +232,8 @@ export default function Quotes() {
   const [selectedQuote, setSelectedQuote] = useState<string | null>(null);
   const [builderInitialProposalId, setBuilderInitialProposalId] = useState<string | null>(null);
   const [builderInitialDealId, setBuilderInitialDealId] = useState<string | null>(null);
+  // Vindo do detalhe do pedido ("Criar orçamento"): importar logo as necessidades.
+  const [builderAutoImport, setBuilderAutoImport] = useState(false);
   
   const [deleteQuoteId, setDeleteQuoteId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(true);
@@ -503,6 +509,8 @@ export default function Quotes() {
   }, [permissionsLoading, hasPermission, navigate, activeCompany]);
 
   // Open builder automatically when navigated with ?new=1&proposal_id=...
+  // (ou ?new=1&deal_id=...&autoImport=1 a partir do detalhe do pedido — ver
+  // src/lib/quotes/dealQuoteLink.ts).
   useEffect(() => {
     if (searchParams.get("new") === "1") {
       const proposalId = searchParams.get("proposal_id");
@@ -510,12 +518,14 @@ export default function Quotes() {
       setSelectedQuote(null);
       setBuilderInitialProposalId(proposalId);
       setBuilderInitialDealId(dealId);
+      setBuilderAutoImport(!!dealId && readAutoImportParam(searchParams));
       setShowBuilder(true);
       // Clear params so a refresh doesn't re-trigger
       const next = new URLSearchParams(searchParams);
       next.delete("new");
       next.delete("proposal_id");
       next.delete("deal_id");
+      next.delete(AUTO_IMPORT_PARAM);
       setSearchParams(next, { replace: true });
     }
   }, [searchParams, setSearchParams]);
@@ -1024,15 +1034,6 @@ export default function Quotes() {
     organizationId: activeCompany?.id,
     bulkDeleteRpc: "rpc_bulk_delete_quote",
   });
-
-  const getClientAddress = (quote: Quote) => {
-    if (quote.clients?.client_addresses?.length) {
-      const primaryAddress = quote.clients.client_addresses.find(addr => addr.is_primary) || quote.clients.client_addresses[0];
-      const parts = [primaryAddress.street, primaryAddress.number, primaryAddress.postal_code, primaryAddress.city].filter(Boolean);
-      if (parts.length > 0) return parts.join(", ");
-    }
-    return "—";
-  };
 
   const getEntityId = (quote: Quote): string | undefined => {
     return (quote as any).entity_id || quote.clients?.entity_id || (quote.deals as any)?.entity_id;
@@ -1557,12 +1558,14 @@ export default function Quotes() {
         quoteId={selectedQuote}
         initialProposalId={builderInitialProposalId}
         initialDealId={builderInitialDealId}
+        autoImportFromDeal={builderAutoImport}
         onClose={() => {
           const returnProposalId = builderInitialProposalId;
           setShowBuilder(false);
           setSelectedQuote(null);
           setBuilderInitialProposalId(null);
           setBuilderInitialDealId(null);
+          setBuilderAutoImport(false);
           if (returnProposalId) {
             navigate(`/proposals?open=${returnProposalId}`);
             return;
@@ -1604,7 +1607,7 @@ export default function Quotes() {
                   <FileText className="h-4 w-4 mr-2" />Templates
                 </Button>
               </PermissionGate>
-              <PermissionGate permission="quotes.manage">
+              <PermissionGate permission="quote_templates.view">
                 <Button variant="outline" size="sm" onClick={() => navigate("/quote-models")}>
                   <FileText className="h-4 w-4 mr-2" />Modelos Rápidos
                 </Button>
@@ -2158,7 +2161,7 @@ export default function Quotes() {
                                     <DropdownMenuSeparator />
 
                                     {/* ACÇÕES */}
-                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Acções</DropdownMenuLabel>
+                                    <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase tracking-wider">📋 Ações</DropdownMenuLabel>
                                     {quote.estado !== 'aceite' && (
                                       <PermissionGate permission="quotes.edit">
                                         <DropdownMenuItem onClick={() => { setSelectedQuote(quote.id); setShowBuilder(true); }}>
@@ -2325,13 +2328,19 @@ export default function Quotes() {
                         <p className="font-medium">{getClientName(detailQuote).name}</p>
                       </div>
                       <div>
-                        <label className="text-xs font-medium text-muted-foreground">{t('quotes.columns.location')}</label>
-                        <p className="text-sm">{getClientAddress(detailQuote)}</p>
-                      </div>
-                      <div>
                         <label className="text-xs font-medium text-muted-foreground">Comercial</label>
                         <p className="text-sm">{detailQuote.assigned_to ? (comercialNamesMap[detailQuote.assigned_to] || "...") : "—"}</p>
                       </div>
+                    </div>
+                    {/* Morada fiscal (da entidade, lida pelo orçamento) e morada
+                        de entrega gravada no orçamento (obra_endereco). */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <QuoteMoradasResumo
+                        quoteId={detailQuote.id}
+                        obraEndereco={detailQuote.obra_endereco}
+                        entityId={getEntityId(detailQuote) ?? null}
+                        siteAddressId={detailQuote.site_address_id ?? null}
+                      />
                     </div>
                     <Separator />
                     <div className="grid grid-cols-3 gap-4">
@@ -2596,7 +2605,7 @@ export default function Quotes() {
       <SensitiveExportDialog
         open={sensitiveExportOpen}
         onOpenChange={setSensitiveExportOpen}
-        sensitiveFields={["morada da obra"]}
+        sensitiveFields={["morada do serviço"]}
         loading={exporting}
         onConfirm={(includeSensitive) => void performExport(includeSensitive)}
       />

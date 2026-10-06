@@ -10,7 +10,6 @@ import { TopHeader } from "@/components/TopHeader";
 
 import { InternalChatWidget } from "@/components/chat/InternalChatWidget";
 import { SupportAccessBanner } from "@/components/platform/SupportAccessBanner";
-import { BillingStatusBanner } from "@/components/billing/BillingStatusBanner";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -180,10 +179,9 @@ const LayoutContent = memo(function LayoutContent({
 
       {/* Main Content - fixed, left edge shifts with sidebar */}
       <main className={cn(
-        "fixed top-14 right-0 bottom-0 left-0 flex flex-col overflow-auto bg-background transition-[left] duration-300",
+        "fixed top-14 right-0 bottom-0 left-0 overflow-auto bg-background transition-[left] duration-300",
         isSubmenuOpen ? "md:left-80" : "md:left-16"
       )}>
-        <BillingStatusBanner />
         {companyLoading && !isExemptRoute ? (
           <div className="flex items-center justify-center min-h-[60vh]">
             <OlyviaLoader size={40} />
@@ -192,10 +190,10 @@ const LayoutContent = memo(function LayoutContent({
           showNoOrgState ? (
             <div className="p-6 md:p-8"><NoOrganizationState /></div>
           ) : (
-            <div className="flex-1 min-h-0 flex flex-col px-6 md:px-11">{children}</div>
+            <div className="h-full flex flex-col px-6 md:px-11">{children}</div>
           )
         ) : (
-          <div className="container mx-auto shrink-0 p-6 md:p-8">
+          <div className="container mx-auto p-6 md:p-8">
             {showNoOrgState ? <NoOrganizationState /> : children}
           </div>
         )}

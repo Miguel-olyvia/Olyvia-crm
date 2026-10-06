@@ -1,16 +1,12 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { resolveCallerIdentity, validateOrgScope, authErrorResponse } from "../_shared/auth.ts";
+import { resolveCallerIdentity, authErrorResponse } from "../_shared/auth.ts";
 import { z } from "npm:zod";
 
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { callAiGateway, getAiGatewayKey } from "../_shared/aiGateway.ts";
-import { checkAndConsumeAiCredits, aiCreditsBlockedResponse, refundAiCredits } from "../_shared/aiCredits.ts";
-import { AI_CREDIT_COSTS } from "../_shared/aiCreditsCosts.ts";
-import { requireActiveMembership } from "../_shared/orgMembership.ts";
-import { logAiGatewayUsage } from "../_shared/aiUsageLog.ts";
 
 initSentry();
 
@@ -23,7 +19,6 @@ const RATE_LIMIT_WINDOW_MINUTES = 1;
 const stripMarkdownCodeFences = (value: string) => value.replace(/^```(?:html)?\s*/i, "").replace(/\s*```$/i, "").trim();
 
 const requestSchema = z.object({
-  organization_id: z.string().uuid(),
   fileName: z.string(),
   pdfBase64: z.string().max(10_000_000),
 });
@@ -50,17 +45,6 @@ serve(async (req) => {
   const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-
-  // Credits debited and not yet earned; refunded (once) on any failure path.
-  let creditsToRefund = 0;
-  let refundOrgId = "";
-  const refundPending = async () => {
-    if (creditsToRefund > 0) {
-      const amount = creditsToRefund;
-      creditsToRefund = 0;
-      await refundAiCredits(supabaseAdmin, refundOrgId, amount);
-    }
-  };
 
   try {
     let caller;
@@ -92,15 +76,7 @@ serve(async (req) => {
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
-    const { organization_id, fileName, pdfBase64 } = parsed.data;
-
-    const hasAccess = await validateOrgScope(supabase, caller, organization_id);
-    if (!hasAccess) {
-      return new Response(
-        JSON.stringify({ error: "Sem permissão para aceder a esta organização" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
+    const { fileName, pdfBase64 } = parsed.data;
 
     const base64Payload = pdfBase64.startsWith("data:")
       ? (pdfBase64.split(",")[1] ?? "")
@@ -117,29 +93,22 @@ serve(async (req) => {
       ? pdfBase64
       : `data:application/pdf;base64,${pdfBase64}`;
 
-    // Visibility is not enough to spend an organization's credits: require an
-    // ACTIVE membership in exactly this organization, before any charge.
-    if (!(await requireActiveMembership(supabaseAdmin, caller.anewUserId, organization_id))) {
-      return new Response(
-        JSON.stringify({ error: "Forbidden" }),
-        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
-    }
-
-    // AI credits — billing gate, scoped to the org-scope-validated
-    // organization_id. Charged before the gateway call; refunded (best-effort)
-    // on any gateway failure. See _shared/aiCredits.ts.
-    const creditCost = AI_CREDIT_COSTS["import-contract-pdf"];
-    const creditsResult = await checkAndConsumeAiCredits(supabaseAdmin, organization_id, creditCost);
-    if (creditsResult.blocked) {
-      return aiCreditsBlockedResponse(creditsResult, corsHeaders);
-    }
-    creditsToRefund = creditCost;
-    refundOrgId = organization_id;
-
-    let response: Response;
-    try {
-      response = await callAiGateway({
+    // NOTE (AI credits): unlike the other 6 callers of callAiGateway, this
+    // function has no reliable organization_id to charge here. The request
+    // body (requestSchema above) carries only fileName/pdfBase64 — the
+    // frontend caller (src/components/contracts/TemplateFileImport.tsx)
+    // never sends an organization_id, and resolveCallerIdentity()/auth.ts
+    // only resolves the caller's anew_users.id, not which organization they
+    // are currently acting in (a user can belong to several). Deriving an
+    // org from the caller's anew_memberships would be guessing at an
+    // "active org" this repo has no stored concept of, so the AI-credits
+    // check (see _shared/aiCredits.ts, added to the other 6 functions) was
+    // deliberately NOT added here rather than picking a possibly-wrong org
+    // to charge. If organization_id becomes available on this request (the
+    // frontend would need to start sending it, matching the pattern already
+    // used by generate-proposal-ai/leads-dashboard-ai-report/etc.), wire the
+    // same checkAndConsumeAiCredits/refundAiCredits calls in here too.
+    const response = await callAiGateway({
         model: "gemini-3.5-flash-lite",
         temperature: 0.1,
         messages: [
@@ -164,14 +133,9 @@ serve(async (req) => {
             ]
           }
         ]
-      });
-    } catch (gatewayError) {
-      await refundPending();
-      throw gatewayError;
-    }
+    });
 
     if (!response.ok) {
-      await refundPending();
       if (response.status === 429) {
         return new Response(
           JSON.stringify({ error: "Limite temporário excedido no processamento automático. Tente novamente dentro de instantes." }),
@@ -191,25 +155,12 @@ serve(async (req) => {
     }
 
     const aiResponse = await response.json();
-
     const content = aiResponse.choices?.[0]?.message?.content?.trim?.() || "";
     const html = stripMarkdownCodeFences(content);
 
     if (!html || html.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().length < 20) {
-      // No usable output: the customer is not charged. Tokens were still spent,
-      // so the usage is logged with 0 credits charged.
-      await refundPending();
-      await logAiGatewayUsage(supabaseAdmin, organization_id, "import-contract-pdf", 0, aiResponse.usage);
-      return new Response(
-        JSON.stringify({ error: "extraction_empty" }),
-        { status: 422, headers: { ...corsHeaders, "Content-Type": "application/json" } },
-      );
+      throw new Error("A extracção AI não devolveu texto suficiente");
     }
-
-    // Real Google token cost, separate from the flat credit price charged
-    // above — see _shared/aiUsageLog.ts.
-    await logAiGatewayUsage(supabaseAdmin, organization_id, "import-contract-pdf", creditCost, aiResponse.usage);
-    creditsToRefund = 0;
 
     return new Response(
       JSON.stringify({ html, extractedWith: "ai" }),
@@ -218,11 +169,13 @@ serve(async (req) => {
   } catch (error: any) {
     console.error("import-contract-pdf error:", error);
     await captureError(error, { function: "import-contract-pdf" });
-    await refundPending();
 
-    // Never expose internal error text to the client: it is logged and sent to Sentry above.
+    const fallbackMessage = error?.message?.includes("AI gateway")
+      ? "Não foi possível processar este PDF automaticamente neste momento."
+      : error?.message || "Falha ao importar PDF";
+
     return new Response(
-      JSON.stringify({ error: "Não foi possível processar este PDF automaticamente neste momento." }),
+      JSON.stringify({ error: fallbackMessage }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
     );
   }

@@ -491,9 +491,11 @@ export function Modal({
   onClose: () => void;
   children: ReactNode;
   footer?: ReactNode;
-  size?: "sm" | "md" | "lg";
+  /** xl/xxl: formulários com tabelas (a Nova obra) — mais largos e mais altos. */
+  size?: "sm" | "md" | "lg" | "xl" | "xxl";
 }) {
-  const widths = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl" };
+  const widths = { sm: "max-w-sm", md: "max-w-lg", lg: "max-w-2xl", xl: "max-w-4xl", xxl: "max-w-6xl" };
+  const alto = size === "xl" || size === "xxl";
   return (
     <div
       className="animate-in-fade fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
@@ -501,7 +503,8 @@ export function Modal({
     >
       <div
         className={cx(
-          "animate-in-pop flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-elevated sm:max-h-[85vh] sm:rounded-2xl",
+          "animate-in-pop flex max-h-[92vh] w-full flex-col overflow-hidden rounded-t-2xl bg-white shadow-elevated sm:rounded-2xl",
+          alto ? "sm:max-h-[92vh]" : "sm:max-h-[85vh]",
           widths[size]
         )}
         onClick={(e) => e.stopPropagation()}

@@ -534,7 +534,7 @@ const ContractTemplates = () => {
           </div>
           {canManage && (
             <div className="flex items-center gap-2">
-              <TemplateFileImport onImport={handleFileImport} organizationId={activeCompany?.id} />
+              <TemplateFileImport onImport={handleFileImport} />
               <Button onClick={() => setIsEditorOpen(true)}>
                 <Plus className="h-4 w-4 mr-2" /> Nova Minuta
               </Button>
@@ -953,7 +953,7 @@ const ContractTemplates = () => {
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Eliminar Minuta</AlertDialogTitle>
-              <AlertDialogDescription>Tem a certeza que deseja eliminar esta minuta? Esta acção é irreversível.</AlertDialogDescription>
+              <AlertDialogDescription>Tem a certeza que deseja eliminar esta minuta? Esta ação é irreversível.</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>

@@ -202,7 +202,7 @@ export default function QuoteTemplates() {
               </p>
             </div>
           </div>
-          <PermissionGate permission="proposals.manage">
+          <PermissionGate permission="quotes.manage">
             <Button onClick={() => { setEditingTemplateId(null); setShowEditor(true); }}>
               <Plus className="mr-2 h-4 w-4" />
               Novo Template
@@ -272,7 +272,7 @@ export default function QuoteTemplates() {
                     <TableCell>{format(new Date(template.created_at), "dd/MM/yyyy", { locale: pt })}</TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <PermissionGate permission="proposals.manage">
+                        <PermissionGate permission="quotes.manage">
                           <Button variant="ghost" size="icon" onClick={() => { setEditingTemplateId(template.id); setShowEditor(true); }}>
                             <Pencil className="h-4 w-4" />
                           </Button>

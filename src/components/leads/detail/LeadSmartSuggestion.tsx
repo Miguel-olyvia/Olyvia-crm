@@ -26,12 +26,12 @@ export function LeadSmartSuggestion({
 
   if (!hasNextAction && (!hasContactHistory || (daysSince !== null && daysSince > 5))) {
     const contactPhrase = hasContactHistory ? `sem contacto há ${daysSince} dias` : "nunca contactada";
-    suggestion = `${firstName} ${contactPhrase} e sem acção planeada. Sugerimos contactar para dar seguimento.`;
+    suggestion = `${firstName} ${contactPhrase} e sem ação planeada. Sugerimos contactar para dar seguimento.`;
     actionLabel = "Ligar";
     ActionIcon = Phone;
     onAction = onCall;
   } else if (!hasNextAction) {
-    suggestion = `Sem acção planeada para ${firstName}. Agende um follow-up para manter o contacto activo.`;
+    suggestion = `Sem ação planeada para ${firstName}. Agende um follow-up para manter o contacto activo.`;
     actionLabel = "Agendar";
     ActionIcon = Calendar;
     onAction = onCall;

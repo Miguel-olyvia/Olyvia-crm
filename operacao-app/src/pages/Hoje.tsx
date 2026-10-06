@@ -5,6 +5,9 @@ import { ErroDeDados, listarOrdens, type LinhaOrdem } from "../lib/dados";
 import { Card, ErrorState, Skeleton, cx } from "../components/ui";
 import { AlertTriangle, CheckCircle, ChevronRight, Inbox } from "../components/icons";
 import { alertasDaOrdem, type Alerta } from "../domain/alertas";
+import { alertasDeSupervisao, type AlertaSupervisao } from "../lib/obras";
+import { podeValidar } from "../domain/obras";
+import { rotuloContagemAlerta, type TipoAlerta } from "../domain/atrasos";
 
 /**
  * O ecrã das 8h30.
@@ -42,10 +45,29 @@ function contexto(o: LinhaOrdem) {
 }
 
 export default function Hoje() {
-  const { activeOrgId, userName } = useAuth();
+  const { activeOrgId, userName, funcao } = useAuth();
   const [ordens, setOrdens] = useState<LinhaOrdem[] | null>(null);
+  const [alertasObra, setAlertasObra] = useState<AlertaSupervisao[]>([]);
   const [erro, setErro] = useState<string | null>(null);
   const [tentativa, setTentativa] = useState(0);
+  const supervisiona = podeValidar(funcao);
+
+  // Obras: os alertas do supervisor/gestor (não iniciadas, fim ultrapassado,
+  // cliente por avisar). Se falharem (ex.: SQL ainda por aplicar), o dia das
+  // ordens mostra-se na mesma.
+  useEffect(() => {
+    if (!activeOrgId || !supervisiona) {
+      setAlertasObra([]);
+      return;
+    }
+    let vivo = true;
+    alertasDeSupervisao(activeOrgId)
+      .then((a) => vivo && setAlertasObra(a))
+      .catch(() => vivo && setAlertasObra([]));
+    return () => {
+      vivo = false;
+    };
+  }, [activeOrgId, supervisiona, tentativa]);
 
   useEffect(() => {
     if (!activeOrgId) return;
@@ -136,8 +158,23 @@ export default function Hoje() {
     }
     mal.sort((a, b) => (a.tom === b.tom ? b.contagem - a.contagem : a.tom === "critico" ? -1 : 1));
 
-    return { precisamDeMim: precisam, aCorrerMal: mal, total: ordens.length };
-  }, [ordens]);
+    // Obras: um bloco por tipo de alerta, no topo (o pior primeiro).
+    const obra: Bloco[] = [];
+    for (const tipo of ["fim_ultrapassado", "nao_iniciada", "material_tarde", "cliente_por_avisar"] as TipoAlerta[]) {
+      const lista = alertasObra.filter((a) => a.tipo === tipo);
+      if (!lista.length) continue;
+      obra.push({
+        chave: `obra-${tipo}`,
+        rotulo: rotuloContagemAlerta(tipo, lista.length),
+        detalhe: lista.length === 1 ? `${lista[0].obra_codigo} · ${lista[0].tarefa_nome}` : lista[0].obra_codigo,
+        contagem: lista.length,
+        href: "/validar",
+        tom: tipo === "cliente_por_avisar" ? "aviso" : "critico",
+      });
+    }
+
+    return { precisamDeMim: precisam, aCorrerMal: [...obra, ...mal], total: ordens.length + alertasObra.length };
+  }, [ordens, alertasObra]);
 
   const primeiroNome = userName?.split(/\s+/)[0] ?? null;
 

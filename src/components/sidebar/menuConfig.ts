@@ -38,7 +38,8 @@ import {
   ClipboardCheck,
   ListChecks,
   Receipt,
-  CreditCard,
+  Sun,
+  ScanBarcode,
 } from "lucide-react";
 
 export interface MenuItem {
@@ -89,6 +90,15 @@ export interface TopLevelItem {
 
 export const topLevelItems: TopLevelItem[] = [
   {
+    // "Hoje" (/home): o primeiro ecrã depois do login — o que a pessoa tem de
+    // fazer agora. Fica no topo do rail, antes de tudo o resto.
+    id: "home",
+    to: "/home",
+    icon: Sun,
+    labelKey: "sidebar.today",
+    permissions: [],
+  },
+  {
     id: "dashboard",
     to: "/dashboard",
     icon: LayoutDashboard,
@@ -102,8 +112,9 @@ export const topLevelItems: TopLevelItem[] = [
     to: "/atividades",
     icon: ListChecks,
     labelKey: "sidebar.activities",
+    // Já não é só de administradores: a página mostra sempre e só o dia da
+    // própria pessoa (useMyDay / useMyDayTasks), por isso o comercial vê o seu.
     permissions: ["scheduling.items.view"],
-    adminOnly: true,
   },
   {
     id: "operacao",
@@ -227,12 +238,14 @@ export const menuSections: MenuSection[] = [
     id: "inventory",
     icon: ShoppingCart,
     labelKey: "sidebar.inventory",
-    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/stocks", "/client-orders", "/stock-counts"],
+    paths: ["/suppliers", "/warehouses", "/purchase-orders", "/receiving", "/stocks", "/client-orders", "/stock-counts"],
     permissions: ["suppliers.view"],
     items: [
       { to: "/suppliers", icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view" },
       { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses" },
       { to: "/purchase-orders", icon: ShoppingCart, labelKey: "sidebar.purchaseOrders" },
+      // Receção por código: mesma regra da rota (receber OU consultar encomendas).
+      { to: "/receiving", icon: ScanBarcode, labelKey: "sidebar.receiving", permissions: ["purchase_orders.receive", "purchase_orders.view"] },
       { to: "/stocks", icon: BarChart3, labelKey: "sidebar.stocks" },
       // Permissão própria (client_orders.view): quem trabalha no armazém vê as
       // encomendas de cliente sem precisar de acesso aos contratos. Os RPCs das
@@ -259,11 +272,10 @@ export const menuSections: MenuSection[] = [
     id: "settings",
     icon: Settings,
     labelKey: "sidebar.settings",
-    paths: ["/settings", "/billing", "/smtp-management", "/email-templates", "/trash", "/send-failures"],
+    paths: ["/settings", "/smtp-management", "/email-templates", "/trash", "/send-failures"],
     permissions: [],
     items: [
       { to: "/settings", icon: Settings, labelKey: "sidebar.settings", permission: "settings.update" },
-      { to: "/billing", icon: CreditCard, labelKey: "sidebar.billing" },
       { to: "/smtp-management", icon: Mail, labelKey: "sidebar.smtpManagement", permission: "smtp.view" },
       { to: "/email-templates", icon: Mail, labelKey: "sidebar.emailTemplates", permission: "email_templates.view" },
       { to: "/send-failures", icon: AlertTriangle, labelKey: "sidebar.sendFailures", permission: "scheduling.items.view" },
@@ -283,11 +295,3 @@ export const menuSections: MenuSection[] = [
     ],
   },
 ];
-
-export const bottomItem: TopLevelItem = {
-  id: "home",
-  to: "/home",
-  icon: LayoutDashboard,
-  labelKey: "sidebar.panel",
-  permissions: [],
-};

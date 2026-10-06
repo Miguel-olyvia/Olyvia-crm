@@ -6,10 +6,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
-import { Loader2, Trash2, Truck } from "lucide-react";
+import { Loader2, Pencil, Trash2, Truck } from "lucide-react";
 import { DeliveryAddressForm } from "@/components/clients/DeliveryAddressForm";
+import { FichaLocalResumo } from "@/components/addresses/FichaLocalResumo";
 import {
-  fetchEntityDeliveryAddresses,
+  listEntityDeliveryAddresses,
   formatDeliveryAddress,
   removeEntityDeliveryAddress,
   type EntityDeliveryAddress,
@@ -21,7 +22,8 @@ interface ClientDeliveryAddressesSectionProps {
 
 /**
  * Secção "Moradas de entrega" da ficha do cliente. Independente do botão
- * Guardar da ficha: acrescentar e remover gravam logo, por RPC. Não toca na
+ * Guardar da ficha: acrescentar, editar e remover gravam logo, por RPC. Cada
+ * morada mostra o resumo da ficha do local (Exterior / Interior). Não toca na
  * morada principal (essa continua a ser gravada pelo rpc_update_client).
  */
 export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddressesSectionProps) => {
@@ -31,6 +33,7 @@ export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddre
   const [loading, setLoading] = useState(false);
   const [pendingRemoval, setPendingRemoval] = useState<EntityDeliveryAddress | null>(null);
   const [removing, setRemoving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   // Último entityId pedido, para ignorar respostas fora de ordem.
   const requestRef = useRef<string | null>(null);
 
@@ -38,7 +41,7 @@ export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddre
     requestRef.current = entityId;
     setLoading(true);
     try {
-      const rows = await fetchEntityDeliveryAddresses(entityId);
+      const rows = await listEntityDeliveryAddresses(entityId);
       if (requestRef.current !== entityId) return;
       setAddresses(rows);
     } catch (error: any) {
@@ -52,6 +55,7 @@ export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddre
 
   useEffect(() => {
     setAddresses([]);
+    setEditingId(null);
     void loadAddresses();
   }, [loadAddresses]);
 
@@ -83,9 +87,38 @@ export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddre
         <ul className="space-y-2 mb-4">
           {addresses.map((address) => {
             const text = formatDeliveryAddress(address) || address.formatted || '—';
+            if (editingId === address.entity_address_id) {
+              return (
+                <li key={address.entity_address_id} className="rounded-md border px-3 py-3 space-y-2">
+                  <p className="text-xs font-medium text-muted-foreground">{t('deliveryAddresses.editTitle')}</p>
+                  <DeliveryAddressForm
+                    key={address.entity_address_id}
+                    entityId={entityId}
+                    idPrefix={`client_delivery_address_edit_${address.entity_address_id}`}
+                    existente={address}
+                    onSaved={async () => { setEditingId(null); await loadAddresses(); }}
+                    onCancel={() => setEditingId(null)}
+                  />
+                </li>
+              );
+            }
             return (
               <li key={address.entity_address_id} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
-                <span className="text-sm break-words">{text}</span>
+                <div className="min-w-0">
+                  <p className="text-sm break-words">{text}</p>
+                  <FichaLocalResumo ficha={address.ficha_tecnica} piso={address.floor} className="mt-0.5" />
+                </div>
+                <div className="flex shrink-0 items-center">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setEditingId(address.entity_address_id)}
+                  title={t('deliveryAddresses.edit')}
+                  aria-label={`${t('deliveryAddresses.edit')}: ${text}`}
+                >
+                  <Pencil className="w-4 h-4" />
+                </Button>
                 <Button
                   type="button"
                   variant="ghost"
@@ -97,6 +130,7 @@ export const ClientDeliveryAddressesSection = ({ entityId }: ClientDeliveryAddre
                 >
                   <Trash2 className="w-4 h-4" />
                 </Button>
+                </div>
               </li>
             );
           })}

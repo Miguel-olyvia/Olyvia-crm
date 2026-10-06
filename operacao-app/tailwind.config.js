@@ -42,6 +42,14 @@ export default {
           800: "#5b21b6",
           900: "#4c1d95",
         },
+        // Barra lateral escura do CRM: --sidebar-background (262 70% 15%),
+        // --sidebar-accent (262 50% 22%) e --sidebar-border (262 50% 20%).
+        sidebar: {
+          DEFAULT: "#1e0b41",
+          accent: "#301c54",
+          border: "#2c194d",
+          foreground: "#f9f5fc",
+        },
         accent: {
           DEFAULT: "#e5197f",
           50: "#fdf2f8",

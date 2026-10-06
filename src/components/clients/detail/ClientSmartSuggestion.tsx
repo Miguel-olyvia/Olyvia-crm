@@ -61,7 +61,7 @@ export function ClientSmartSuggestion({
     ActionIcon = Briefcase;
     onAction = onCreateDeal;
   } else if (!hasNextAction) {
-    suggestion = `Sem acção planeada para ${firstName}. Agende um follow-up para manter o contacto activo.`;
+    suggestion = `Sem ação planeada para ${firstName}. Agende um follow-up para manter o contacto activo.`;
     actionLabel = "Agendar";
     ActionIcon = Calendar;
     onAction = onSchedule || onCall;

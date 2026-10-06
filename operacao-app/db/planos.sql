@@ -12,6 +12,11 @@
 --
 -- Aditivo e idempotente. Correr DEPOIS de db/rpcs.sql.
 --
+-- ⚠ As duas funções deste ficheiro foram depois substituídas por versões
+-- novas em db/correcoes-modelo.sql. Para que voltar a correr ESTE ficheiro
+-- não as faça regredir, só são criadas aqui se correcoes-modelo.sql ainda
+-- não correu. Validado em tools/validar-instalacao.mjs.
+--
 --
 -- SUBCONJUNTO DE RRULE SUPORTADO — e porquê
 -- ==========================================
@@ -44,6 +49,19 @@ $guarda$;
 -- 1. Expandir uma RRULE numa janela
 -- ============================================================
 
+DO $expandir$
+BEGIN
+  -- Esta é a PRIMEIRA versão. A que vale vive em correcoes-modelo.sql, e
+  -- voltar a correr este ficheiro depois desse não a pode desfazer: se o
+  -- modelo corrigido já existe (ops_plano.tipo_recorrencia), fica como está.
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'ops_plano'
+                AND column_name = 'tipo_recorrencia') THEN
+    RAISE NOTICE 'expandir: já existe a versão de correcoes-modelo.sql — não se mexe.';
+    RETURN;
+  END IF;
+
+  EXECUTE $def$
 CREATE OR REPLACE FUNCTION public.ops_expandir_rrule(
   _regra  text,
   _inicio date,
@@ -136,6 +154,9 @@ BEGIN
   END LOOP;
 END
 $$;
+  $def$;
+END
+$expandir$;
 
 
 -- ============================================================
@@ -145,6 +166,19 @@ $$;
 -- (plano, dia agendado). Correr isto dez vezes seguidas gera o mesmo que
 -- correr uma.
 
+DO $materializar$
+BEGIN
+  -- Esta é a PRIMEIRA versão. A que vale vive em correcoes-modelo.sql, e
+  -- voltar a correr este ficheiro depois desse não a pode desfazer: se o
+  -- modelo corrigido já existe (ops_plano.tipo_recorrencia), fica como está.
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+              WHERE table_schema = 'public' AND table_name = 'ops_plano'
+                AND column_name = 'tipo_recorrencia') THEN
+    RAISE NOTICE 'materializar: já existe a versão de correcoes-modelo.sql — não se mexe.';
+    RETURN;
+  END IF;
+
+  EXECUTE $def$
 CREATE OR REPLACE FUNCTION public.rpc_ops_materializar_planos(
   _org_id         uuid DEFAULT NULL,
   _horizonte_dias integer DEFAULT 120
@@ -244,6 +278,9 @@ BEGIN
   );
 END
 $$;
+  $def$;
+END
+$materializar$;
 
 REVOKE ALL ON FUNCTION public.rpc_ops_materializar_planos(uuid, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rpc_ops_materializar_planos(uuid, integer) TO authenticated, service_role;

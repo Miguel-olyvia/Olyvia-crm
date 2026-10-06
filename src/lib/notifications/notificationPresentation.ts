@@ -34,6 +34,22 @@ export const appendTimestamp = (route: string) => {
   return `${route}${separator}_t=${Date.now()}`;
 };
 
+// /operacao e /duc-app são aplicações à parte (o Vercel serve-as noutro
+// index.html): o router do CRM não as conhece e mostrava a página 404. Esses
+// links abrem com uma navegação normal do browser.
+const OTHER_APP_PREFIXES = ["/operacao", "/duc-app"];
+
+export const isOtherAppRoute = (route: string) =>
+  OTHER_APP_PREFIXES.some((p) => route === p || route.startsWith(`${p}/`) || route.startsWith(`${p}?`));
+
+export const openNotificationRoute = (navigate: (to: string, opts?: { replace?: boolean }) => void, route: string) => {
+  if (isOtherAppRoute(route)) {
+    window.location.assign(route);
+    return;
+  }
+  navigate(appendTimestamp(route), { replace: true });
+};
+
 export const getNotificationRoute = async (notification: NotificationLike): Promise<string | null> => {
   if (notification.link) return notification.link;
 

@@ -1,53 +1,59 @@
 /**
  * stripe-create-checkout-session
  * ============================================================
- * Authenticated (verify_jwt = true), org-scoped entry point for both billing
- * flows:
- *   - type: "creditos" -> buy a fixed AI-credit package (package_id) or a
- *                         custom amount of credits (credits_amount, max
- *                         10 000, at EUR 0.70/credit).
- *   - type: "plano"    -> buy a paid plan (starter | pro | enterprise),
- *                         priced from plan_pricing.
+ * Authenticated (verify_jwt = true — see supabase/config.toml), org-scoped
+ * entry point for both billing flows in the app:
+ *   - type: "creditos"  -> buy a fixed AI-credit package (package_id) or a
+ *                          custom amount of credits (credits_amount, at
+ *                          €0.70/credit).
+ *   - type: "plano"     -> upgrade the organization's subscription plan
+ *                          (target_plan), priced from plan_pricing.
  *
- * BILLING BELONGS TO THE ROOT PAYER USER, not to an organization. One payer
- * may own several work orgs sharing one plan. So:
- *   - the billing org is resolved server-side (resolve_billing_organization_id)
- *     and every invoice / subscription / Stripe customer is keyed on it, never
- *     on the incoming organization_id;
- *   - only the root payer (resolve_root_payer_user_id) may start a checkout
- *     (403 otherwise, no system_admin exception);
- *   - nobody changes plan except through a Stripe payment verified
- *     server-side by stripe-webhook.
+ * FEATURE FLAG — this is the load-bearing behavior of this whole file:
+ *   - isStripeConfigured() === false (STRIPE_SECRET_KEY not set as a
+ *     Supabase secret): falls back to the EXACT pre-Stripe manual flow —
+ *     insert an `invoices` row with status='pendente', same as
+ *     PlanoFaturacaoCard.tsx already does today directly from the
+ *     frontend. No Stripe API call is made. Returns { mode: "manual",
+ *     invoice_id }.
+ *   - isStripeConfigured() === true: creates the `invoices` row (also
+ *     status='pendente' — it only becomes 'pago' once stripe-webhook
+ *     confirms payment) AND a real Stripe Checkout Session, returning
+ *     { mode: "stripe", url } for the frontend to redirect to.
  *
- * Without STRIPE_SECRET_KEY the function answers 503 billing_unavailable: the
- * old "manual" mode created pending invoices anyone could later be tricked
- * into paying, and is gone.
- *
- * Pure rules live in _shared/checkoutPolicy.ts (unit-tested with vitest).
+ * This means: until the business configures STRIPE_SECRET_KEY, calling
+ * this function has identical observable effects to today's direct
+ * `invoices` insert from the frontend — nothing breaks, nothing changes.
+ * See supabase/functions/_shared/STRIPE_SETUP.md for the activation steps.
  */
 
 import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
+import { z } from "npm:zod";
 import {
   authErrorResponse,
   resolveCallerIdentity,
   validateOrgScope,
 } from "../_shared/auth.ts";
-import {
-  creditsPriceEur,
-  collectOpenPlanSessions,
-  decidePendingCheckout,
-  evaluateCreditsPurchase,
-  ensureStripeCustomer,
-  evaluatePlanPurchase,
-  gateCheckout,
-  validateCheckoutRequest,
-} from "../_shared/checkoutPolicy.ts";
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { captureError, initSentry } from "../_shared/sentry.ts";
 import { isStripeConfigured, stripeRequest } from "../_shared/stripe.ts";
 
 initSentry();
+
+// €0.70 per AI credit for "à vulso" (custom amount, no fixed package)
+// purchases — same price point already implied by ai_credit_packages'
+// existing packages (e.g. "Mini": 100 credits / €50 ≈ €0.50/credit at bulk
+// discount; à-vulso is intentionally priced higher than any fixed package).
+const CREDITS_PRICE_PER_UNIT_EUR = 0.70;
+
+const requestSchema = z.object({
+  organization_id: z.string().uuid(),
+  type: z.enum(["creditos", "plano"]),
+  package_id: z.string().uuid().optional(),
+  credits_amount: z.number().int().positive().optional(),
+  target_plan: z.enum(["trial", "starter", "pro", "enterprise"]).optional(),
+});
 
 function jsonResponse(
   body: unknown,
@@ -60,47 +66,17 @@ function jsonResponse(
   });
 }
 
-/** APP_URL, else SITE_URL, else the production origin. */
+/**
+ * APP_URL is the primary, documented env var for this function (see
+ * STRIPE_SETUP.md) — falls back to the existing SITE_URL convention used
+ * elsewhere in this repo (send-proposal-email, book-slot, ...), and finally
+ * to the known production origin, so success_url/cancel_url are never
+ * malformed even before either secret is configured.
+ */
 function resolveAppUrl(): string {
   const raw = Deno.env.get("APP_URL") || Deno.env.get("SITE_URL") ||
     "https://www.olyvia-ai.com";
   return raw.replace(/\/$/, "");
-}
-
-// deno-lint-ignore no-explicit-any
-type Admin = any;
-
-function ensureCustomer(
-  admin: Admin,
-  billingOrgId: string,
-  existing: string | null | undefined,
-): Promise<string> {
-  return ensureStripeCustomer(
-    admin,
-    billingOrgId,
-    existing,
-    (idempotencyKey) =>
-      stripeRequest(
-        "customers",
-        { metadata: { organization_id: billingOrgId } },
-        { idempotencyKey },
-      ),
-  );
-}
-
-async function insertInvoice(
-  admin: Admin,
-  row: Record<string, unknown>,
-): Promise<string> {
-  const { data, error } = await admin
-    .from("invoices")
-    .insert({ ...row, status: "pendente" })
-    .select("id")
-    .single();
-  if (error || !data) {
-    throw new Error(error?.message || "Failed to create invoice");
-  }
-  return data.id as string;
 }
 
 serve(async (req) => {
@@ -118,7 +94,9 @@ serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Caller-scoped client: identity + org-scope run under the caller's RLS.
+    // Scoped client (caller's own JWT) — identity resolution and org-scope
+    // validation run under the caller's real RLS, exactly like
+    // quote-ai-assistant/index.ts and every other org-scoped AI function.
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       auth: { autoRefreshToken: false, persistSession: false },
       global: {
@@ -126,8 +104,14 @@ serve(async (req) => {
       },
     });
 
-    // Service-role client: invoices are inserted only here (members have no
-    // INSERT policy), plus billing-org resolution and Stripe id storage.
+    // Service-role client — ALL writes here (invoices inserts/updates,
+    // plan_pricing / ai_credit_packages reads including stripe_price_id)
+    // intentionally bypass RLS. This mirrors 20261112390000's documented
+    // model: authenticated can INSERT a status='pendente' invoice for its
+    // own org directly, but this function does it centrally instead so the
+    // Stripe-specific columns (stripe_checkout_session_id, credits_amount
+    // exclusivity, etc.) are always written correctly and atomically with
+    // the Stripe API call.
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
@@ -141,17 +125,19 @@ serve(async (req) => {
       return jsonResponse({ error: "Invalid JSON body" }, 400, corsHeaders);
     }
 
-    const parsed = validateCheckoutRequest(rawBody);
-    if (!parsed.ok) {
+    const parsed = requestSchema.safeParse(rawBody);
+    if (!parsed.success) {
       return jsonResponse(
-        { error: parsed.error, details: parsed.details },
-        parsed.status,
+        { error: "Invalid request", details: parsed.error.issues },
+        400,
         corsHeaders,
       );
     }
     const { organization_id, type, package_id, credits_amount, target_plan } =
       parsed.data;
 
+    // Scope check: caller must belong to (or have visibility over) this org
+    // — same helper/pattern used by every other org-scoped Edge Function.
     const hasAccess = await validateOrgScope(supabase, caller, organization_id);
     if (!hasAccess) {
       return jsonResponse(
@@ -161,64 +147,131 @@ serve(async (req) => {
       );
     }
 
-    // ------------------------------------------------------------------
-    // Billing org + root payer. Every write below uses billingOrgId.
-    // ------------------------------------------------------------------
-    const { data: billingOrgId, error: billingErr } = await supabaseAdmin.rpc(
-      "resolve_billing_organization_id",
-      { p_organization_id: organization_id },
-    );
-    if (billingErr || !billingOrgId) {
-      throw new Error(
-        `resolve_billing_organization_id failed: ${billingErr?.message ?? "null"}`,
+    if (type === "creditos") {
+      if (!package_id && !credits_amount) {
+        return jsonResponse(
+          { error: "package_id ou credits_amount é obrigatório para type=creditos" },
+          400,
+          corsHeaders,
+        );
+      }
+      if (package_id && credits_amount) {
+        return jsonResponse(
+          { error: "package_id e credits_amount são mutuamente exclusivos" },
+          400,
+          corsHeaders,
+        );
+      }
+    }
+    if (type === "plano" && !target_plan) {
+      return jsonResponse(
+        { error: "target_plan é obrigatório para type=plano" },
+        400,
+        corsHeaders,
       );
     }
-    const { data: rootPayerId, error: payerErr } = await supabaseAdmin.rpc(
-      "resolve_root_payer_user_id",
-      { p_organization_id: organization_id },
-    );
-    if (payerErr) {
-      throw new Error(`resolve_root_payer_user_id failed: ${payerErr.message}`);
-    }
-    const gate = gateCheckout({
-      callerAnewUserId: caller.anewUserId,
-      rootPayerUserId: rootPayerId,
-      stripeConfigured: isStripeConfigured(),
-    });
-    if (!gate.ok) {
-      return jsonResponse({ error: gate.error }, gate.status, corsHeaders);
-    }
 
-    const { data: sub, error: subErr } = await supabaseAdmin
-      .from("organization_subscriptions")
-      .select("plan, status, stripe_customer_id, stripe_subscription_id")
-      .eq("organization_id", billingOrgId)
-      .maybeSingle();
-    if (subErr) {
-      throw new Error(`Failed to read subscription: ${subErr.message}`);
-    }
+    // ------------------------------------------------------------------
+    // MODO MANUAL — Stripe não configurado. Comportamento idêntico ao
+    // insert direto que PlanoFaturacaoCard.tsx já faz hoje: cria a fatura
+    // 'pendente' e para por aqui, sem nenhuma chamada Stripe.
+    // ------------------------------------------------------------------
+    if (!isStripeConfigured()) {
+      if (type === "creditos") {
+        if (package_id) {
+          const { data: pkg, error: pkgError } = await supabaseAdmin
+            .from("ai_credit_packages")
+            .select("id, name, price_sale, active")
+            .eq("id", package_id)
+            .maybeSingle();
+          if (pkgError || !pkg) {
+            return jsonResponse({ error: "package_not_found" }, 404, corsHeaders);
+          }
 
-    const appUrl = resolveAppUrl();
-    const successUrl =
-      `${appUrl}/billing?checkout=success&session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl = `${appUrl}/billing?checkout=cancel`;
+          const { data: invoice, error: invoiceError } = await supabaseAdmin
+            .from("invoices")
+            .insert({
+              organization_id,
+              type: "creditos",
+              package_id: pkg.id,
+              amount: pkg.price_sale,
+              status: "pendente",
+              description: `Compra de créditos: ${pkg.name}`,
+            })
+            .select("id")
+            .single();
+          if (invoiceError || !invoice) {
+            throw new Error(invoiceError?.message || "Failed to create invoice");
+          }
 
-    // ================================================================
-    // type === "creditos"
-    // ================================================================
-    if (type === "creditos") {
-      const creditsDecision = evaluateCreditsPurchase(sub);
-      if (!creditsDecision.ok) {
-        return jsonResponse({ error: creditsDecision.error }, creditsDecision.status, corsHeaders);
+          return jsonResponse({ mode: "manual", invoice_id: invoice.id }, 200, corsHeaders);
+        }
+
+        // credits_amount (compra à vulso)
+        const amount = Math.round(credits_amount! * CREDITS_PRICE_PER_UNIT_EUR * 100) / 100;
+        const { data: invoice, error: invoiceError } = await supabaseAdmin
+          .from("invoices")
+          .insert({
+            organization_id,
+            type: "creditos",
+            credits_amount,
+            amount,
+            status: "pendente",
+            description: `Compra de ${credits_amount} créditos IA`,
+          })
+          .select("id")
+          .single();
+        if (invoiceError || !invoice) {
+          throw new Error(invoiceError?.message || "Failed to create invoice");
+        }
+
+        return jsonResponse({ mode: "manual", invoice_id: invoice.id }, 200, corsHeaders);
       }
+
+      // type === "plano"
+      const { data: pricing } = await supabaseAdmin
+        .from("plan_pricing")
+        .select("price_eur")
+        .eq("plan", target_plan)
+        .maybeSingle();
+      if (!pricing || pricing.price_eur === null) {
+        return jsonResponse({ error: "plan_pricing_not_configured" }, 400, corsHeaders);
+      }
+
+      const { data: invoice, error: invoiceError } = await supabaseAdmin
+        .from("invoices")
+        .insert({
+          organization_id,
+          type: "plano",
+          amount: pricing.price_eur,
+          status: "pendente",
+          description: `Upgrade de plano: ${target_plan}`,
+        })
+        .select("id")
+        .single();
+      if (invoiceError || !invoice) {
+        throw new Error(invoiceError?.message || "Failed to create invoice");
+      }
+
+      return jsonResponse({ mode: "manual", invoice_id: invoice.id }, 200, corsHeaders);
+    }
+
+    // ------------------------------------------------------------------
+    // MODO STRIPE — STRIPE_SECRET_KEY configurado. Cria a fatura 'pendente'
+    // (idêntico ao modo manual — só passa a 'pago' via stripe-webhook) e a
+    // Checkout Session correspondente, correlacionadas via metadata +
+    // stripe_checkout_session_id.
+    // ------------------------------------------------------------------
+    const appUrl = resolveAppUrl();
+    // A rota real de definições é /settings (ver src/App.tsx) — /definicoes
+    // não existe e dava 404 a qualquer pagamento Stripe bem-sucedido.
+    const successUrl =
+      `${appUrl}/settings?checkout=success&session_id={CHECKOUT_SESSION_ID}`;
+    const cancelUrl = `${appUrl}/settings?checkout=cancel`;
+
+    if (type === "creditos") {
       let invoiceId: string;
       let lineItem: Record<string, unknown>;
-      // Customer first: an invoice must never be left orphaned by a failure here.
-      const customerId = await ensureCustomer(
-        supabaseAdmin,
-        billingOrgId,
-        sub?.stripe_customer_id,
-      );
 
       if (package_id) {
         const { data: pkg, error: pkgError } = await supabaseAdmin
@@ -233,204 +286,169 @@ serve(async (req) => {
           return jsonResponse({ error: "package_inactive" }, 400, corsHeaders);
         }
 
-        invoiceId = await insertInvoice(supabaseAdmin, {
-          organization_id: billingOrgId,
-          type: "creditos",
-          package_id: pkg.id,
-          amount: pkg.price_sale,
-          description: `Compra de créditos: ${pkg.name}`,
-        });
+        const { data: invoice, error: invoiceError } = await supabaseAdmin
+          .from("invoices")
+          .insert({
+            organization_id,
+            type: "creditos",
+            package_id: pkg.id,
+            amount: pkg.price_sale,
+            status: "pendente",
+            description: `Compra de créditos: ${pkg.name}`,
+          })
+          .select("id")
+          .single();
+        if (invoiceError || !invoice) {
+          throw new Error(invoiceError?.message || "Failed to create invoice");
+        }
+        invoiceId = invoice.id;
 
-        // The webhook checks amount_total against invoice.amount, so the
-        // line item is always priced from the invoice amount.
-        lineItem = {
-          price_data: {
-            currency: "eur",
-            unit_amount: Math.round(Number(pkg.price_sale) * 100),
-            product_data: { name: pkg.name },
-          },
-          quantity: 1,
-        };
+        lineItem = pkg.stripe_price_id
+          ? { price: pkg.stripe_price_id, quantity: 1 }
+          : {
+            price_data: {
+              currency: "eur",
+              unit_amount: Math.round(Number(pkg.price_sale) * 100),
+              product_data: { name: pkg.name },
+            },
+            quantity: 1,
+          };
       } else {
-        const amount = creditsPriceEur(credits_amount!);
-        invoiceId = await insertInvoice(supabaseAdmin, {
-          organization_id: billingOrgId,
-          type: "creditos",
-          credits_amount,
-          amount,
-          description: `Compra de ${credits_amount} créditos IA`,
-        });
+        const amount = Math.round(credits_amount! * CREDITS_PRICE_PER_UNIT_EUR * 100) / 100;
+
+        const { data: invoice, error: invoiceError } = await supabaseAdmin
+          .from("invoices")
+          .insert({
+            organization_id,
+            type: "creditos",
+            credits_amount,
+            amount,
+            status: "pendente",
+            description: `Compra de ${credits_amount} créditos IA`,
+          })
+          .select("id")
+          .single();
+        if (invoiceError || !invoice) {
+          throw new Error(invoiceError?.message || "Failed to create invoice");
+        }
+        invoiceId = invoice.id;
+
         lineItem = {
           price_data: {
             currency: "eur",
-            unit_amount: Math.round(amount * 100),
+            unit_amount: Math.round(credits_amount! * CREDITS_PRICE_PER_UNIT_EUR * 100),
             product_data: { name: `${credits_amount} créditos IA` },
           },
           quantity: 1,
         };
       }
 
-      let session: { id: string; url: string };
+      let session: any;
       try {
         session = await stripeRequest("checkout/sessions", {
           mode: "payment",
-          customer: customerId,
           line_items: [lineItem],
-          metadata: { invoice_id: invoiceId, organization_id: billingOrgId },
+          metadata: { invoice_id: invoiceId, organization_id },
           success_url: successUrl,
           cancel_url: cancelUrl,
-        }, { idempotencyKey: `checkout:${invoiceId}` });
+        });
       } catch (stripeError) {
+        // Invoice already exists as 'pendente' with no
+        // stripe_checkout_session_id — safe to leave as-is (same shape as
+        // a manual-mode invoice); the user can retry the purchase, which
+        // creates a fresh invoice. Not auto-cancelled here to avoid
+        // masking the real Stripe error with a second DB write that could
+        // itself fail.
         console.error("stripe-create-checkout-session: Stripe error (creditos)", stripeError);
-        await deleteOrphanInvoice(supabaseAdmin, invoiceId);
         throw stripeError;
       }
 
-      await persistSessionId(supabaseAdmin, invoiceId, session.id);
+      const { error: updateError } = await supabaseAdmin
+        .from("invoices")
+        .update({ stripe_checkout_session_id: session.id })
+        .eq("id", invoiceId);
+      if (updateError) {
+        // Session was created successfully in Stripe; failing to record its
+        // id locally would break the webhook's ability to match it back to
+        // this invoice (see idx_invoices_stripe_checkout_session_id) — this
+        // must surface as an error rather than be silently swallowed.
+        throw new Error(
+          `Checkout session created but failed to persist stripe_checkout_session_id: ${updateError.message}`,
+        );
+      }
+
       return jsonResponse({ mode: "stripe", url: session.url }, 200, corsHeaders);
     }
 
-    // ================================================================
     // type === "plano"
-    // ================================================================
-    const decision = evaluatePlanPurchase(target_plan!, sub);
-    if (!decision.ok) {
-      return jsonResponse({ error: decision.error }, decision.status, corsHeaders);
-    }
-
-    // Any live plan checkout of this billing org blocks a different one.
-    const { data: pendingRows, error: pendingErr } = await supabaseAdmin
-      .from("invoices")
-      .select("id, created_at, target_plan, stripe_checkout_session_id")
-      .eq("organization_id", billingOrgId)
-      .eq("type", "plano")
-      .eq("status", "pendente")
-      .not("stripe_checkout_session_id", "is", null)
-      .order("created_at", { ascending: false });
-    if (pendingErr) {
-      throw new Error(`Failed to read pending invoices: ${pendingErr.message}`);
-    }
-    const openSessions = await collectOpenPlanSessions(
-      pendingRows ?? [],
-      (sessionId) =>
-        stripeRequest(`checkout/sessions/${sessionId}`, {}, { method: "GET" }),
-      async (invoiceId) => {
-        const { error } = await supabaseAdmin
-          .from("invoices")
-          .update({ status: "cancelado" })
-          .eq("id", invoiceId)
-          .eq("status", "pendente");
-        if (error) {
-          throw new Error(`Failed to cancel dead pending invoice: ${error.message}`);
-        }
-      },
-    );
-    const pendingDecision = decidePendingCheckout(openSessions, target_plan!);
-    if (pendingDecision.action === "reuse") {
-      return jsonResponse({ mode: "stripe", url: pendingDecision.url }, 200, corsHeaders);
-    }
-    if (pendingDecision.action === "conflict") {
-      return jsonResponse({ error: pendingDecision.error }, pendingDecision.status, corsHeaders);
-    }
-
-    const { data: pricing, error: pricingErr } = await supabaseAdmin
+    const { data: pricing } = await supabaseAdmin
       .from("plan_pricing")
-      .select("price_eur")
+      .select("price_eur, stripe_price_id")
       .eq("plan", target_plan)
       .maybeSingle();
-    if (pricingErr) {
-      throw new Error(`Failed to read plan_pricing: ${pricingErr.message}`);
-    }
     if (!pricing || pricing.price_eur === null) {
       return jsonResponse({ error: "plan_pricing_not_configured" }, 400, corsHeaders);
     }
+
     const amount = Number(pricing.price_eur);
 
-    const customerId = await ensureCustomer(
-      supabaseAdmin,
-      billingOrgId,
-      sub?.stripe_customer_id,
-    );
+    const { data: invoice, error: invoiceError } = await supabaseAdmin
+      .from("invoices")
+      .insert({
+        organization_id,
+        type: "plano",
+        amount,
+        status: "pendente",
+        description: `Upgrade de plano: ${target_plan}`,
+      })
+      .select("id")
+      .single();
+    if (invoiceError || !invoice) {
+      throw new Error(invoiceError?.message || "Failed to create invoice");
+    }
 
-    const invoiceId = await insertInvoice(supabaseAdmin, {
-      organization_id: billingOrgId,
-      type: "plano",
-      target_plan,
-      amount,
-      description: `Upgrade de plano: ${target_plan}`,
-    });
+    const lineItem = pricing.stripe_price_id
+      ? { price: pricing.stripe_price_id, quantity: 1 }
+      : {
+        price_data: {
+          currency: "eur",
+          unit_amount: Math.round(amount * 100),
+          recurring: { interval: "month" },
+          product_data: { name: `Plano ${target_plan}` },
+        },
+        quantity: 1,
+      };
 
-    let session: { id: string; url: string };
+    let session: any;
     try {
       session = await stripeRequest("checkout/sessions", {
         mode: "subscription",
-        customer: customerId,
-        // Stripe allows 30 min - 24 h; 23 h matches the reuse window.
-        expires_at: Math.floor(Date.now() / 1000) + 23 * 60 * 60,
-        line_items: [{
-          price_data: {
-            currency: "eur",
-            unit_amount: Math.round(amount * 100),
-            recurring: { interval: "month" },
-            product_data: { name: `Plano ${target_plan}` },
-          },
-          quantity: 1,
-        }],
-        // target_plan stays for the compat window with the previous webhook;
-        // the current webhook takes the plan from invoices.target_plan.
-        metadata: {
-          invoice_id: invoiceId,
-          organization_id: billingOrgId,
-          target_plan,
-        },
-        // Lets subscription-scoped webhook events find the invoice that
-        // binds them even before checkout.session.completed is processed.
-        subscription_data: {
-          metadata: { invoice_id: invoiceId, organization_id: billingOrgId },
-        },
+        line_items: [lineItem],
+        metadata: { invoice_id: invoice.id, organization_id, target_plan },
         success_url: successUrl,
         cancel_url: cancelUrl,
-      }, { idempotencyKey: `checkout:${invoiceId}` });
+      });
     } catch (stripeError) {
       console.error("stripe-create-checkout-session: Stripe error (plano)", stripeError);
-      await deleteOrphanInvoice(supabaseAdmin, invoiceId);
       throw stripeError;
     }
 
-    await persistSessionId(supabaseAdmin, invoiceId, session.id);
+    const { error: updateError } = await supabaseAdmin
+      .from("invoices")
+      .update({ stripe_checkout_session_id: session.id })
+      .eq("id", invoice.id);
+    if (updateError) {
+      throw new Error(
+        `Checkout session created but failed to persist stripe_checkout_session_id: ${updateError.message}`,
+      );
+    }
+
     return jsonResponse({ mode: "stripe", url: session.url }, 200, corsHeaders);
-  } catch (error: unknown) {
+  } catch (error: any) {
     const authResp = authErrorResponse(error, corsHeaders);
     if (authResp) return authResp;
     console.error("stripe-create-checkout-session error:", error);
     await captureError(error, { function: "stripe-create-checkout-session" });
-    // Never leak internal messages (SQL, Stripe) to the browser.
-    return jsonResponse({ error: "internal_error" }, 500, corsHeaders);
+    return jsonResponse({ error: error.message }, 500, corsHeaders);
   }
 });
-
-async function persistSessionId(
-  admin: Admin,
-  invoiceId: string,
-  sessionId: string,
-): Promise<void> {
-  const { error } = await admin
-    .from("invoices")
-    .update({ stripe_checkout_session_id: sessionId })
-    .eq("id", invoiceId);
-  if (error) {
-    // Without this id the webhook cannot match the payment back.
-    throw new Error(
-      `Checkout session created but failed to persist stripe_checkout_session_id: ${error.message}`,
-    );
-  }
-}
-
-/** Best-effort: a pending invoice with no Stripe session is dead weight. */
-async function deleteOrphanInvoice(admin: Admin, invoiceId: string): Promise<void> {
-  try {
-    await admin.from("invoices").delete().eq("id", invoiceId).eq("status", "pendente");
-  } catch (e) {
-    console.error("stripe-create-checkout-session: could not delete orphan invoice", invoiceId, e);
-  }
-}

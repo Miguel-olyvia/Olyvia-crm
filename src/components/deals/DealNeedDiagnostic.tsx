@@ -10,6 +10,11 @@ import { useToast } from "@/hooks/use-toast";
 import { Package, Wrench, X, Loader2, Stethoscope } from "lucide-react";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import DiagnosticServicePicker, { type DiagnosticServicePickerService } from "@/components/quote/DiagnosticServicePicker";
+import {
+  CAMPOS_PLANEAMENTO,
+  m2Parede,
+  type DiagnosticoPlaneamento,
+} from "@/lib/deals/diagnosticoPlaneamento";
 
 /**
  * Aba "Diagnóstico" do diálogo Editar Necessidade (DealNeedsSection.tsx).
@@ -83,7 +88,53 @@ interface DealNeedDiagnosticProps {
 
   materials: DealNeedDiagnosticMaterial[];
   onRemoveMaterial: (materialId: string) => void;
+
+  /**
+   * Medidas e características para o planeamento da obra (campos fechados,
+   * opcionais). Ausente = a secção não aparece (ex.: antes da migração).
+   */
+  plano?: DiagnosticoPlaneamento;
+  onPlanoChange?: (plano: DiagnosticoPlaneamento) => void;
 }
+
+/** Uma escolha em botões (rápido no tablet): carregar outra vez tira a escolha. */
+function Escolha({
+  valor,
+  opcoes,
+  onChange,
+  disabled,
+  rotulo,
+}: {
+  valor: string;
+  opcoes: readonly { valor: string; rotulo: string }[];
+  onChange: (v: string) => void;
+  disabled?: boolean;
+  rotulo: string;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5" role="group" aria-label={rotulo}>
+      {opcoes.map((o) => (
+        <Button
+          key={o.valor}
+          type="button"
+          size="sm"
+          variant={valor === o.valor ? "default" : "outline"}
+          className="h-8"
+          aria-pressed={valor === o.valor}
+          disabled={disabled}
+          onClick={() => onChange(valor === o.valor ? "" : o.valor)}
+        >
+          {o.rotulo}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+const SIM_NAO = [
+  { valor: "sim", rotulo: "Sim" },
+  { valor: "nao", rotulo: "Não" },
+] as const;
 
 interface ServiceMaterialRow {
   product_id: string;
@@ -118,6 +169,8 @@ export function DealNeedDiagnostic({
   onRemoveService,
   materials,
   onRemoveMaterial,
+  plano,
+  onPlanoChange,
 }: DealNeedDiagnosticProps) {
   const { toast } = useToast();
   const [loadingService, setLoadingService] = useState(false);
@@ -347,6 +400,60 @@ export function DealNeedDiagnostic({
                     >
                       <X className="h-3 w-3" />
                     </Button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {plano && onPlanoChange && (
+        <>
+          <Separator />
+
+          {/* ─── Planeamento da obra ─── */}
+          <div className="space-y-3">
+            <div>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Para o planeamento da obra
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                Opcional. Com as medidas e o caminho até à área, as Operações calculam os tempos de cada tarefa e
+                aprendem com o real.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {CAMPOS_PLANEAMENTO.map((d) => (
+                <div key={d.campo} className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">
+                    {d.rotulo}
+                    {d.unidade ? ` (${d.unidade})` : ""}
+                  </Label>
+                  {d.tipo === "escolha" || d.tipo === "sim_nao" ? (
+                    <Escolha
+                      rotulo={d.rotulo}
+                      valor={plano[d.campo]}
+                      opcoes={d.tipo === "sim_nao" ? SIM_NAO : d.opcoes!}
+                      disabled={readOnly}
+                      onChange={(v) => onPlanoChange({ ...plano, [d.campo]: v })}
+                    />
+                  ) : (
+                    <Input
+                      inputMode={d.tipo === "inteiro" ? "numeric" : "decimal"}
+                      value={plano[d.campo]}
+                      onChange={(e) => onPlanoChange({ ...plano, [d.campo]: e.target.value })}
+                      disabled={readOnly}
+                      placeholder="—"
+                      className="h-9 max-w-[140px]"
+                      aria-label={d.rotulo}
+                    />
+                  )}
+                  {d.ajuda && <p className="text-[11px] text-muted-foreground">{d.ajuda}</p>}
+                  {d.campo === "altura_revestimento" && m2Parede(plano) != null && (
+                    <p className="text-[11px] text-muted-foreground">
+                      = {String(m2Parede(plano)).replace(".", ",")} m² de parede
+                    </p>
                   )}
                 </div>
               ))}

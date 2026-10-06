@@ -12,6 +12,7 @@ import {
 import { TIMELINE_AUDIT_IGNORED_FIELDS, formatAuditDiff } from "@/lib/timeline/auditIgnoredFields";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { withAuditContext } from "@/utils/auditContext";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -42,16 +43,26 @@ import { calculateClientHealth, type ClientContractInfo, type ClientInteractionI
 import { RequestErasureButton } from "@/components/RequestErasureButton";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { ClientDeliveryAddressesSection } from "@/components/clients/ClientDeliveryAddressesSection";
+import { CamposMorada } from "@/components/addresses/CamposMorada";
+import {
+  MORADA_VAZIA,
+  limparErrosAlterados,
+  normalizarMorada,
+  primeiroErroMorada,
+  validarMorada,
+  type ErrosMorada,
+  type MoradaCampos,
+} from "@/lib/addresses/validarMorada";
 import { CLIENT_BUSINESS_SELECT, deriveClientBusinessOrigin, type ClientBusinessOriginType } from "@/components/clients/detail/clientBusinessOrigin";
 
 /**
- * Args for rpc_update_client. `types.ts` (`Database["public"]["Functions"]
- * ["rpc_update_client"]["Args"]`) has not yet been regenerated to include the
- * 4 additive trailing address params added in
- * supabase/migrations/20260902010000_contacts_clients_atomic_create_and_fixes.sql
- * (p_address_street/p_address_city/p_address_postal_code/p_address_number,
- * all optional). This local type reflects the current SQL function signature;
- * it does not change what the compiler enforces.
+ * Args for rpc_update_client (the call goes through nif-write-proxy, so the
+ * generated `Database["public"]["Functions"]["rpc_update_client"]["Args"]` is
+ * not enforced at the call site). This local type mirrors the current SQL
+ * signature: the address params p_address_street/city/postal_code/number
+ * (20260902010000) plus p_address_floor/p_address_unit
+ * (20261206160000_rpc_update_client_morada_completa.sql — NULL keeps the
+ * stored floor/unit, '' clears it).
  */
 type RpcUpdateClientArgs = {
   p_assigned_to: string | null;
@@ -71,6 +82,8 @@ type RpcUpdateClientArgs = {
   p_address_postal_code?: string | null;
   p_address_number?: string | null;
   p_entity_type?: string | null;
+  p_address_floor?: string | null;
+  p_address_unit?: string | null;
 };
 
 import { ClientDetailHeader } from "@/components/clients/detail/ClientDetailHeader";
@@ -187,9 +200,17 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
   const [editFormData, setEditFormData] = useState({
     first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351",
-    vat: "", position: "", status: "", notes: "", organization_id: "", address: "", city: "", postal_code: "",
+    vat: "", position: "", status: "", notes: "", organization_id: "",
     assigned_to: "" as string | null,
   });
+  // Morada principal: mesmos campos e validação que as moradas de entrega
+  // (CamposMorada + validarMorada). Vazia = cliente sem morada (válido).
+  const [moradaPrincipal, setMoradaPrincipal] = useState<MoradaCampos>(MORADA_VAZIA);
+  const [moradaErros, setMoradaErros] = useState<ErrosMorada>({});
+  const handleMoradaChange = (next: MoradaCampos) => {
+    setMoradaErros(prev => limparErrosAlterados(prev, moradaPrincipal, next));
+    setMoradaPrincipal(next);
+  };
   const [orgUsers, setOrgUsers] = useState<{ id: string; name: string }[]>([]);
   const [editFormErrors, setEditFormErrors] = useState<Record<string, string>>({});
 
@@ -234,9 +255,15 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       email: client.email || "", phone: client.phone || "", phone_country_code: client.phone_country_code || "+351",
       vat: client.vat || "", position: client.position || "", status: client.status || "active",
       notes: client.notes || "", organization_id: client.organization_id || "",
-      address: client.address || "", city: client.city || "", postal_code: client.postal_code || "",
       assigned_to: client.assigned_to || null,
     });
+    // Ponto de partida até a morada principal (com número/andar/fração)
+    // chegar de anew_addresses — ver o efeito sobre `addresses` abaixo.
+    setMoradaPrincipal({
+      ...MORADA_VAZIA,
+      street: client.address || "", city: client.city || "", postal_code: client.postal_code || "",
+    });
+    setMoradaErros({});
 
     // C14: Parallel fetch of entity type + org users (independent queries)
     // C15: isCancelled guard on all setState calls
@@ -295,12 +322,15 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       const primary = addresses.find((a: any) => a.is_primary)
         || addresses.find((a: any) => a.address_type !== "delivery");
       if (primary) {
-        setEditFormData(prev => ({
-          ...prev,
-          address: [primary.street, primary.number, primary.floor].filter(Boolean).join(", ") || prev.address,
-          city: primary.city || prev.city,
-          postal_code: primary.postal_code || prev.postal_code,
-        }));
+        setMoradaPrincipal({
+          street: primary.street || "",
+          number: primary.number || "",
+          floor: primary.floor || "",
+          unit: primary.unit || "",
+          postal_code: primary.postal_code || "",
+          city: primary.city || "",
+        });
+        setMoradaErros({});
       }
     }
   }, [addresses]);
@@ -629,7 +659,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       if (client?.entity_id) {
         const { data: addressesData, error: addressesError } = await (supabase as any)
           .from("anew_entity_addresses")
-          .select(`id, address_id, is_primary, address_type, anew_addresses:anew_addresses!anew_entity_addresses_address_id_fkey (id, street, number, floor, postal_code, city, district, country)`)
+          .select(`id, address_id, is_primary, address_type, anew_addresses:anew_addresses!anew_entity_addresses_address_id_fkey (id, street, number, floor, unit, postal_code, city, district, country)`)
           .eq("entity_id", client.entity_id).is("valid_to", null).order("is_primary", { ascending: false });
         // The error used to be discarded: a failed lookup was indistinguishable
         // from "this client has no address", so the edit form silently showed
@@ -645,6 +675,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         setAddresses((addressesData || []).map((item: any) => ({
           id: item.id, is_primary: item.is_primary, address_type: item.address_type,
           street: item.anew_addresses?.street, number: item.anew_addresses?.number, floor: item.anew_addresses?.floor,
+          unit: item.anew_addresses?.unit,
           postal_code: item.anew_addresses?.postal_code, city: item.anew_addresses?.city, district: item.anew_addresses?.district,
         })));
       } else {
@@ -726,6 +757,13 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     e.preventDefault();
     const schema = entityType === "organization" ? contactCompanySchema : contactSchema;
     const validation = schema.safeParse(editFormData);
+    // Morada principal: as mesmas regras da morada de entrega (e da base) —
+    // rua, código postal 0000-000 e localidade obrigatórios assim que algum
+    // campo está preenchido. Antes, uma morada incompleta era descartada em
+    // silêncio pelo rpc_update_client; agora o Guardar fica bloqueado com o
+    // erro em cada campo.
+    const moradaValidacao = validarMorada(moradaPrincipal, { obrigatoria: false });
+    setMoradaErros(moradaValidacao.erros);
     if (!validation.success) {
       const nextErrors: Record<string, string> = {};
       for (const issue of validation.error.issues) {
@@ -737,26 +775,18 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       return;
     }
     setEditFormErrors({});
+    if (!moradaValidacao.valido) {
+      toast({ title: "Morada incompleta ou inválida", description: primeiroErroMorada(moradaValidacao.erros), variant: "destructive" });
+      return;
+    }
+    const morada = normalizarMorada(moradaPrincipal);
+    const temMorada = !!(morada.street || morada.postal_code);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not found for current auth user");
       const entityId = client.entity_id;
-
-      // rpc_update_client only writes the address when BOTH street and postal
-      // code are present — a deliberate rule (never persist half an address),
-      // shared with create-lead. It enforces it silently, so filling only
-      // "Morada" used to return success while the address was discarded, and
-      // the user found the field empty on reopening. Fail loudly instead.
-      if (editFormData.address?.trim() && !editFormData.postal_code?.trim()) {
-        toast({
-          title: "Código postal em falta",
-          description: "Para guardar a morada é preciso preencher também o código postal.",
-          variant: "destructive",
-        });
-        return;
-      }
 
       // O dono do cliente e o recurso das visitas futuras nunca divergem: muda-se o
       // dono PRIMEIRO (a base troca o recurso das visitas futuras) e, se o novo dono
@@ -787,17 +817,16 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
             p_status: editFormData.status,
             p_notes: editFormData.notes || null,
             p_assigned_to: editFormData.assigned_to || null,
-            // Address fields were captured in editFormData (populated from the
-            // client's primary anew_addresses row) but were previously never sent
-            // to the RPC, silently dropping any address edit. The edit form only
-            // exposes a single combined "address" text input (no separate
-            // street/number split), so — matching rpc_update_contact's own
-            // single p_address convention — it is sent as street with no number.
-            p_address_street: editFormData.address || null,
-            p_address_city: editFormData.city || null,
-            p_address_postal_code: editFormData.postal_code || null,
-            p_address_number: null,
+            // Morada principal já validada e normalizada (código postal
+            // 0000-000). Sem morada → tudo a null e a RPC não toca na morada.
+            // Andar/fração: '' apaga o valor gravado, null mantém-no.
+            p_address_street: morada.street || null,
+            p_address_city: morada.city || null,
+            p_address_postal_code: morada.postal_code || null,
+            p_address_number: morada.number || null,
             p_entity_type: entityType,
+            p_address_floor: temMorada ? morada.floor : null,
+            p_address_unit: temMorada ? morada.unit : null,
           } satisfies RpcUpdateClientArgs, nif);
           if (rpcError) throw rpcError;
         });
@@ -835,12 +864,17 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         return;
       }
 
-      // Deduplication: check for recent identical deal (30s window)
+      const businessUserId = await resolveCurrentBusinessUserId();
+      if (!businessUserId) { toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador.", variant: "destructive" }); return; }
+
+      // Deduplication: check for recent identical deal (30s window).
+      // deals.created_by guarda o utilizador de negócio (não o id de auth),
+      // tal como na deduplicação de Deals.tsx.
       const recentWindow = new Date(Date.now() - 30_000).toISOString();
       let dedupQuery = (supabase.from("deals") as any)
         .select("id")
         .eq("organization_id", client.organization_id)
-        .eq("created_by", user.id)
+        .eq("created_by", businessUserId)
         .eq("title", dealFormData.title)
         .eq("value", value)
         .gte("created_at", recentWindow)
@@ -874,57 +908,39 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         contactId = contactMatch?.id || null;
       }
 
-      const businessUserId = await resolveCurrentBusinessUserId();
-      if (!businessUserId) { toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador.", variant: "destructive" }); return; }
-      const { data: newDeal, error: dealErr } = await supabase.from("deals").insert({
-        contact_id: contactId,
-        entity_id: client.entity_id,
-        title: dealFormData.title,
-        description: dealFormData.description,
-        value,
-        probability: 50,
-        stage_id: selectedStageId,
-        expected_close_date: dealFormData.expected_close_date || null,
-        created_by: businessUserId,
-        assigned_to: businessUserId,
-        organization_id: client.organization_id,
-        root_organization_id: client.root_organization_id || client.organization_id,
-      }).select("id").single();
-      if (dealErr) throw dealErr;
-
-      // Create pipeline_link for traceability
-      if (newDeal?.id) {
-        await supabase.from("pipeline_links" as any).insert({
-          deal_id: newDeal.id,
+      // Caminho oficial de criação (o mesmo de Deals.tsx): rpc_create_deal cria o
+      // negócio, o pipeline_link e as deal_needs/deal_need_items numa só
+      // transação, com um único registo de auditoria. O execute-workflow corre
+      // DEPOIS, para que um orçamento criado pela automação já apanhe as linhas.
+      const itemsPayload = dealLineItems.map((item, idx) => ({
+        item_type: item.type,
+        product_id: item.product_id || null,
+        service_id: item.service_id || null,
+        quantity: item.quantity,
+        unit_price: item.unit_price || 0,
+        notes: item.name,
+        sort_order: idx,
+      }));
+      const { data: newDeal, error: dealErr } = await supabase.rpc("rpc_create_deal", {
+        p_deal_data: {
+          title: dealFormData.title,
+          value,
+          stage_id: selectedStageId,
           organization_id: client.organization_id,
           root_organization_id: client.root_organization_id || client.organization_id,
-          status: "active",
-        } as any).throwOnError();
-
-        // Save catalog line items as deal_needs + deal_need_items
-        if (dealLineItems.length > 0) {
-          const { data: dealNeed } = await (supabase as any).from("deal_needs").insert({
-            deal_id: newDeal.id,
-            title: dealFormData.title || "Itens do negócio",
-            status: "pending",
-            created_by: businessUserId,
-            sort_order: 0,
-          }).select("id").single().throwOnError();
-
-          if (dealNeed?.id) {
-            const needItems = dealLineItems.map((item, idx) => ({
-              deal_need_id: dealNeed.id,
-              item_type: item.type,
-              product_id: item.product_id || null,
-              service_id: item.service_id || null,
-              quantity: item.quantity,
-              notes: item.name,
-              sort_order: idx,
-            }));
-            await (supabase as any).from("deal_need_items").insert(needItems).throwOnError();
-          }
-        }
-      }
+          lead_id: null,
+          contact_id: contactId,
+          entity_id: client.entity_id || null,
+          probability: 50,
+          description: dealFormData.description || null,
+          expected_close_date: dealFormData.expected_close_date || null,
+        },
+        p_organization_id: client.organization_id,
+        p_root_organization_id: client.root_organization_id || client.organization_id,
+        p_lead_workflow_stage_id: null,
+        p_items: itemsPayload,
+      });
+      if (dealErr) throw dealErr;
 
       // Trigger workflow automation (e.g., auto-create quote)
       let workflowFailed = false;
@@ -978,18 +994,25 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       if (!user) throw new Error("Not authenticated");
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) { toast({ title: "Erro de identidade", description: "Não foi possível identificar o utilizador.", variant: "destructive" }); return; }
-      const { data: newProposal, error: propErr } = await supabase.from("proposals").insert({
-        deal_id: selectedDeal,
-        entity_id: client.entity_id || null,
-        title: proposalFormData.title,
-        description: proposalFormData.description,
-        value,
-        valid_until: proposalFormData.valid_until,
-        status: "draft",
-        created_by: businessUserId,
-        organization_id: client.organization_id,
-        root_organization_id: client.root_organization_id || client.organization_id,
-      }).select("id").single();
+      // Caminho oficial de criação (o mesmo de ProposalCreateDialog/Proposals.tsx):
+      // rpc_create_proposal valida a permissão proposals.create e o âmbito da
+      // organização, grava a proposta e um único registo de auditoria.
+      // As linhas deste formulário continuam em proposal_manual_items (onde o
+      // ProposalManualItemsEditor e o pipeline-automation as leem), por isso
+      // não seguem por p_proposal_items (que escreve em proposal_items).
+      const { data: newProposal, error: propErr } = await supabase.rpc("rpc_create_proposal", {
+        p_proposal_data: {
+          deal_id: selectedDeal,
+          entity_id: client.entity_id || null,
+          title: proposalFormData.title,
+          description: proposalFormData.description || null,
+          value,
+          valid_until: proposalFormData.valid_until || null,
+          status: "draft",
+          organization_id: client.organization_id,
+          root_organization_id: client.root_organization_id || client.organization_id,
+        },
+      });
       if (propErr) throw propErr;
 
       // Save line items as proposal_manual_items
@@ -1002,6 +1025,12 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           sort_order: idx,
         }));
         await (supabase as any).from("proposal_manual_items").insert(manualItems).throwOnError();
+      }
+
+      // Tal como no diálogo oficial: criar a proposta resolve os alertas
+      // "enviar proposta" pendentes desta entidade.
+      if (newProposal?.id) {
+        await resolveSendProposalAlerts(newProposal.entity_id ?? client.entity_id, client.organization_id);
       }
 
       toast({ title: "Proposta criada com sucesso" });
@@ -1179,7 +1208,11 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
               <TabsContent value="deals" className="space-y-4 mt-4">
                 {!showDealForm ? (
                   <>
-                    <Button onClick={() => setShowDealForm(true)} className="w-full"><Plus className="w-4 h-4 mr-2" />Novo Pedido de Proposta</Button>
+                    {/* rpc_create_deal é SECURITY DEFINER e não passa pela RLS que exige
+                        deals.create; o botão fica protegido como em Deals.tsx. */}
+                    <PermissionGate permission="deals.create">
+                      <Button onClick={() => setShowDealForm(true)} className="w-full"><Plus className="w-4 h-4 mr-2" />Novo Pedido de Proposta</Button>
+                    </PermissionGate>
                     {loading ? <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin text-primary" /></div> : deals.length === 0 ? (
                       <div className="text-center py-8"><FileText className="w-12 h-12 text-muted-foreground mx-auto mb-3" /><p className="text-muted-foreground">Sem pedidos de proposta</p></div>
                     ) : (
@@ -1339,13 +1372,13 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                   </div>
                   <div className="pt-4 border-t">
                     <h4 className="text-sm font-medium mb-3 flex items-center gap-2"><MapPin className="w-4 h-4" />Morada</h4>
-                    <div className="grid grid-cols-1 gap-4">
-                      <div className="space-y-2"><Label>Morada</Label><Input value={editFormData.address} onChange={e => setEditFormData({ ...editFormData, address: e.target.value })} /></div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2"><Label>Código Postal</Label><Input value={editFormData.postal_code} onChange={e => setEditFormData({ ...editFormData, postal_code: e.target.value })} placeholder="1000-001" /></div>
-                        <div className="space-y-2"><Label>Cidade</Label><Input value={editFormData.city} onChange={e => setEditFormData({ ...editFormData, city: e.target.value })} /></div>
-                      </div>
-                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">Opcional. Se preencher a morada, a rua, o código postal e a localidade são obrigatórios.</p>
+                    <CamposMorada
+                      valor={moradaPrincipal}
+                      onChange={handleMoradaChange}
+                      erros={moradaErros}
+                      idPrefix={`client_${client.id}_morada`}
+                    />
                   </div>
                   {/* Moradas de entrega: gravam logo por RPC, fora do Guardar da ficha. */}
                   {client.entity_id && <ClientDeliveryAddressesSection entityId={client.entity_id} />}

@@ -229,12 +229,14 @@ export interface TarefaDeChecklist {
   tipo: string;
   obrigatoria: boolean;
   privada: boolean;
+  /** Segundos. 0 = sem estimativa. */
+  tempo_estimado: number;
 }
 
 export async function tarefasDaChecklist(checklistId: string): Promise<TarefaDeChecklist[]> {
   const { data, error } = await supabase
     .from("ops_checklist_tarefa")
-    .select("id, posicao, nome, descricao, tipo, obrigatoria, privada")
+    .select("id, posicao, nome, descricao, tipo, obrigatoria, privada, tempo_estimado")
     .eq("checklist_id", checklistId)
     .order("posicao");
   rebentar("carregar as tarefas da checklist", error);
@@ -259,6 +261,8 @@ export interface TarefaParaGravar {
   tipo: string;
   obrigatoria: boolean;
   privada: boolean;
+  /** Segundos. É contra isto que o tempo real de cada tarefa se compara. */
+  tempo_estimado?: number;
   medicoes: string[];
 }
 
