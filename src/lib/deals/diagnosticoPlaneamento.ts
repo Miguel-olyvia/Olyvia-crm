@@ -172,3 +172,13 @@ export function m2Parede(f: DiagnosticoPlaneamento): number | null {
 
 /** Algum campo preenchido? */
 export const temPlaneamento = (f: DiagnosticoPlaneamento): boolean => Object.values(f).some((v) => v.trim() !== "");
+
+/**
+ * A área não tem as medidas que o planeamento da obra usa (m² de pavimento,
+ * ou a área antiga `diag_area_m2`). Sem elas, os tempos das tarefas ficam
+ * pelos valores padrão — é o que o aviso "sem medidas" diz, sem obrigar.
+ */
+export function semMedidasDaVisita(linha: { diag_m2_pavimento?: unknown; diag_area_m2?: unknown } | null | undefined): boolean {
+  const tem = (v: unknown) => v !== null && v !== undefined && v !== "" && Number(v) > 0;
+  return !linha || !(tem(linha.diag_m2_pavimento) || tem(linha.diag_area_m2));
+}

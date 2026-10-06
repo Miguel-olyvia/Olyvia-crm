@@ -277,8 +277,16 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
     onChanged?.();
   };
 
+  const semPrazo = rows.filter((r) => r.is_active && !r.lead_time_days).length;
+
   return (
     <div className="space-y-3">
+      {!loading && semPrazo > 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="fornecedores-sem-prazo">
+          {semPrazo === 1 ? "1 fornecedor sem prazo de entrega" : `${semPrazo} fornecedores sem prazo de entrega`}: com ele, o
+          planeamento das obras diz até quando encomendar. Não é obrigatório.
+        </p>
+      )}
       {loading ? (
         <div className="flex justify-center py-8"><Loader2 className="w-6 h-6 animate-spin" /></div>
       ) : (
@@ -353,7 +361,19 @@ export default function ItemSuppliersTable({ itemType, itemId, organizationId, o
                     <TableCell className="font-medium">{row.suppliers?.name || "-"}</TableCell>
                     <TableCell>{canViewCost ? (row.supplier_sku || "-") : <span className="text-muted-foreground italic">Sem permissão</span>}</TableCell>
                     <TableCell>{canViewCost ? (row.purchase_price != null ? `${row.purchase_price} ${row.currency}` : "-") : <span className="text-muted-foreground italic">Sem permissão</span>}</TableCell>
-                    <TableCell>{row.lead_time_days ?? "-"}</TableCell>
+                    <TableCell>
+                      {row.lead_time_days ? (
+                        row.lead_time_days
+                      ) : (
+                        <span
+                          className="text-xs text-amber-700 dark:text-amber-400"
+                          title="Sem prazo de entrega, as Operações não sabem até quando encomendar este material para as obras."
+                          data-testid="fornecedor-sem-prazo"
+                        >
+                          falta
+                        </span>
+                      )}
+                    </TableCell>
                     <TableCell>{row.moq ?? "-"}</TableCell>
                     <TableCell>
                       <Badge variant={row.is_active ? "default" : "secondary"}>{row.is_active ? "Sim" : "Não"}</Badge>

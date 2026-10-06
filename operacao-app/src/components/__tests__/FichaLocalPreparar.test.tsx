@@ -16,6 +16,14 @@ vi.mock("../../lib/obras", () => ({
   ]),
 }));
 
+vi.mock("../../lib/encomendas", () => ({
+  distanciaDaObra: vi.fn(async (obraId: string) =>
+    obraId === "o-preparar"
+      ? { armazem: "Lisboa", km_reta: 23.3, km_estrada: 30.3, km_ida_volta: 61, minutos: 49, precisao_obra: "cp7" }
+      : null
+  ),
+}));
+
 describe("FichaLocal — a preparar", () => {
   it("na ficha da obra mostra as proteções e a logística com os dias do plano", async () => {
     render(<FichaLocal obraId="o-preparar" plano={{ inicio: "2026-10-05", fim: "2026-10-16", orcamentoId: "q1" }} />);
@@ -25,6 +33,13 @@ describe("FichaLocal — a preparar", () => {
     expect(screen.getByText("Porta de pó com fecho (kit)")).toBeInTheDocument();
     expect(await screen.findByText(/distância longa/)).toBeInTheDocument();
     expect(screen.getByText(/10 dias úteis do plano/)).toBeInTheDocument();
+  });
+
+  it("com a distância real ao armazém: mostra-a e as deslocações usam-na (em vez dos 30 km)", async () => {
+    render(<FichaLocal obraId="o-preparar" plano={{ inicio: "2026-10-05", fim: "2026-10-16", orcamentoId: "q1" }} />);
+    expect(await screen.findByTestId("ficha-local-distancia")).toHaveTextContent("Armazém Lisboa · 30,3 km · ~49 min");
+    expect(await screen.findByText(/61 km ida e volta × 10 dias/)).toBeInTheDocument();
+    expect(screen.queryByText(/distância ao armazém estimada/)).not.toBeInTheDocument();
   });
 
   it("no cartão do técnico (sem plano) não mostra a lista", async () => {

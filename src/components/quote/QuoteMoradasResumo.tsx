@@ -91,6 +91,7 @@ export const QuoteMoradasResumo = ({ quoteId, obraEndereco, entityId, siteAddres
             ficha={entregaMorada.ficha_tecnica}
             piso={entregaMorada.floor}
             needIds={needIds}
+            codigoPostal={entregaMorada.postal_code}
             className="mt-2"
           />
         )}

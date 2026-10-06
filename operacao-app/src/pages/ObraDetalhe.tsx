@@ -47,6 +47,8 @@ import ObraAvisoBancada from "../components/ObraAvisoBancada";
 import PartilharCliente from "../components/PartilharCliente";
 import ObraMargem from "../components/ObraMargem";
 import ObraPrevisao from "../components/ObraPrevisao";
+import ObraDadosEmFalta from "../components/ObraDadosEmFalta";
+import ObraEncomendas from "../components/ObraEncomendas";
 import ObraPorqueInicio from "../components/ObraPorqueInicio";
 import { etiquetaServico, nomesCurtos, servicosDistintos } from "../domain/nomesTarefas";
 import ObraTarefaPainel from "../components/ObraTarefaPainel";
@@ -420,6 +422,8 @@ export default function ObraDetalhe() {
       />
       <ObraAvisoBancada obraId={obra.id} recarga={recarga} />
       <ObraMargem obraId={obra.id} orgId={obra.organization_id} recarga={recarga} />
+      <ObraEncomendas orgId={obra.organization_id} obraId={obra.id} recarga={recarga} />
+      <ObraDadosEmFalta obraId={obra.id} recarga={recarga} />
 
       {aviso && (
         <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">

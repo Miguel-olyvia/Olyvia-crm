@@ -176,6 +176,13 @@ que falta saber.
   usando os dias úteis do plano.
 - Não há SQL novo. As medidas lêem-se de `quote_lines.source_deal_need_id` →
   `deal_needs`. Sem permissão, usa só a ficha.
+- **Distância real (06/10/2026):** com `operacao-app/db/dados-encomendas.sql`
+  aplicado, as deslocações usam os km do armazém mais próximo da empresa até
+  ao código postal da morada (`distanciaArmazem.ts` →
+  `rpc_ops_distancia_armazem`; coordenadas de `postal_codes`, sem serviço
+  externo). Sem o SQL, ou sem código postal, ficam os 30 km por defeito.
+- **Ficha incompleta:** "Falta na ficha: …" por baixo do resumo
+  (`fichaEmFalta.ts`) — os campos que o planeamento da obra usa. Não obriga.
 
 ## A seguir
 
