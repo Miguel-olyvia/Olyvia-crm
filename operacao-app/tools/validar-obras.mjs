@@ -2432,6 +2432,88 @@ console.log("\n─── avisos no sino do CRM ───────────
   await q(`DELETE FROM public.ops_obra WHERE id='${OB}'`);
 }
 
+/* ── Sem rede (db/offline.sql) ──────────────────────────────────────────── */
+console.log("\n─── sem rede: hora do telemóvel e sem duplicar ──");
+try {
+  await db.exec(ler("offline.sql"));
+  await db.exec(ler("offline.sql"));
+  ok("offline.sql corre duas vezes");
+} catch (e) {
+  mau(`offline.sql falhou: ${e.message}`);
+}
+{
+  // Uma tarefa nova, de 60 min, na obra 1 (posta em curso para o teste), só do técnico.
+  await q(`UPDATE public.ops_obra SET estado = 'em_curso' WHERE id = '${OB1.id}'`);
+  await q(`UPDATE public.ops_obra_registo SET fim = now() - interval '6 hours'
+            WHERE utilizador_id = '${U.tecA}' AND fim IS NULL`);
+  await q(`UPDATE public.ops_obra_registo SET fim = LEAST(fim, now() - interval '6 hours'),
+                                             inicio = LEAST(inicio, now() - interval '7 hours')
+            WHERE utilizador_id = '${U.tecA}'`);
+  const fase = (await um(`SELECT id FROM public.ops_obra_fase WHERE obra_id='${OB1.id}' ORDER BY ordem LIMIT 1`)).id;
+  const nova = await chamar(AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_gravar_tarefa('${OB1.id}', NULL, '${fase}', 'Tarefa sem rede', 60);`);
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_atribuir_tarefa('${nova.id}', ARRAY['${U.tecA}']::uuid[]);`);
+  const A1 = "0ff10000-0000-0000-0000-000000000001";
+  const A2 = "0ff10000-0000-0000-0000-000000000002";
+  const A3 = "0ff10000-0000-0000-0000-000000000003";
+
+  await deveSerRecusado("um tipo de ação desconhecido é recusado", AUTH.tecA,
+    `SELECT public.rpc_ops_obra_offline('${A1}', 'apagar', '${nova.id}', now());`, "desconhecido");
+
+  // Iniciou às (agora − 3 h), sem rede; a ação só chega agora.
+  const r1 = await devePassar("iniciar sem rede, enviado 3 h depois", AUTH.tecA,
+    `SELECT public.rpc_ops_obra_offline('${A1}', 'iniciar', '${nova.id}', now() - interval '3 hours');`);
+  const reg = await um(`SELECT round(extract(epoch FROM now() - inicio) / 60)::int AS min FROM public.ops_obra_registo
+                         WHERE tarefa_id = '${nova.id}' AND fim IS NULL`);
+  reg && reg.min >= 179 && reg.min <= 181
+    ? ok("o relógio começou à hora do telemóvel (há 3 h), não à hora do envio")
+    : mau(`início do relógio: ${JSON.stringify(reg)} / ${JSON.stringify(r1)}`);
+
+  const r1b = await devePassar("a mesma ação chega outra vez (resposta perdida)", AUTH.tecA,
+    `SELECT public.rpc_ops_obra_offline('${A1}', 'iniciar', '${nova.id}', now() - interval '3 hours');`);
+  const n = await um(`SELECT count(*)::int AS n FROM public.ops_obra_registo WHERE tarefa_id = '${nova.id}'`);
+  r1b?.repetida === true && n.n === 1
+    ? ok("devolve o mesmo resultado e não abre um segundo relógio")
+    : mau(`repetida: ${JSON.stringify(r1b)} · registos ${n.n}`);
+
+  await deveSerRecusado("o identificador de outra pessoa não serve", AUTH.tec2A,
+    `SELECT public.rpc_ops_obra_offline('${A1}', 'iniciar', '${nova.id}', now());`, "outra pessoa");
+
+  // Concluiu há 2 h (1 h de trabalho, dentro dos 60+10 %): sem justificação.
+  const r2 = await devePassar("concluir sem rede, com a hora do telemóvel", AUTH.tecA,
+    `SELECT public.rpc_ops_obra_offline('${A2}', 'concluir', '${nova.id}', now() - interval '2 hours');`);
+  const t = await um(`SELECT estado, round(extract(epoch FROM now() - terminada_em) / 60)::int AS desde
+                        FROM public.ops_obra_tarefa WHERE id = '${nova.id}'`);
+  r2?.estado === "feita" && Math.round(Number(r2.minutos_reais)) === 60 && t.desde >= 119 && t.desde <= 121
+    ? ok("feita com 60 min reais (não 180) e sem pedir justificação")
+    : mau(`concluir: ${JSON.stringify(r2)} · ${JSON.stringify(t)}`);
+
+  // Uma hora no futuro não é aceite como tal; e o que a RPC recusa não fica escrito.
+  const outra = await chamar(AUTH.gestorA,
+    `SELECT public.rpc_ops_obra_gravar_tarefa('${OB1.id}', NULL, '${fase}', 'Tarefa longa sem rede', 30);`);
+  await chamar(AUTH.gestorA, `SELECT public.rpc_ops_obra_atribuir_tarefa('${outra.id}', ARRAY['${U.tecA}']::uuid[]);`);
+  await chamar(AUTH.tecA,
+    `SELECT public.rpc_ops_obra_offline('0ff10000-0000-0000-0000-000000000004', 'iniciar', '${outra.id}', now() + interval '5 hours');`);
+  const fut = await um(`SELECT inicio <= now() AS ok FROM public.ops_obra_registo WHERE tarefa_id = '${outra.id}' AND fim IS NULL`);
+  fut?.ok ? ok("uma hora no futuro fica limitada a agora") : mau(`hora no futuro aceite: ${JSON.stringify(fut)}`);
+  await q(`UPDATE public.ops_obra_registo SET inicio = now() - interval '2 hours'
+            WHERE tarefa_id = '${outra.id}' AND fim IS NULL`);
+  await deveSerRecusado("acima da tolerância sem motivo continua a ser recusado", AUTH.tecA,
+    `SELECT public.rpc_ops_obra_offline('${A3}', 'concluir', '${outra.id}', now());`, "Justificação obrigatória");
+  const aberto = await um(`SELECT count(*)::int AS n FROM public.ops_obra_registo WHERE tarefa_id = '${outra.id}' AND fim IS NULL`);
+  const guardada = await um(`SELECT count(*)::int AS n FROM public.ops_offline_acao WHERE id = '${A3}'`);
+  aberto.n === 1 && guardada.n === 0
+    ? ok("e a recusa não fechou o relógio nem guardou a ação (pode reenviar-se com o motivo)")
+    : mau(`depois da recusa: abertos ${aberto.n}, guardada ${guardada.n}`);
+  await devePassar("reenviada com o motivo, passa", AUTH.tecA,
+    `SELECT public.rpc_ops_obra_offline('${A3}', 'concluir', '${outra.id}', now(), 'trabalho_imprevisto');`);
+
+  const direto = await um(`SELECT has_table_privilege('authenticated', 'public.ops_offline_acao', 'SELECT') AS pode`);
+  direto.pode === false
+    ? ok("a tabela das ações não se lê diretamente")
+    : mau("ops_offline_acao está aberta a authenticated");
+}
+
 /* ── O CRM ficou intacto ────────────────────────────────────────────────── */
 console.log("\n─── o CRM ficou intacto ─────────────────");
 {

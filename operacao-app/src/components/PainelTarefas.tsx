@@ -4,8 +4,6 @@ import {
   ErroDeEscrita,
   iniciarTarefa,
   pararTarefa,
-  responderMedicao,
-  responderTarefa,
   type MedicaoDaTarefa,
   type OpcaoDeMedicao,
   type TarefaDaOrdem,
@@ -34,6 +32,8 @@ import {
   type Permissao,
 } from "../domain/respostas";
 import { ROTULO_TIPO_TAREFA, type EstadoTarefa, type TipoTarefa } from "../domain/tipos";
+import { filaOffline, semRede, useOffline, type NovaAcao } from "../lib/offline";
+import { aplicarPendentesOrdem } from "../domain/offlineOrdens";
 
 /**
  * O ecrã onde o trabalho acontece.
@@ -56,8 +56,8 @@ import { ROTULO_TIPO_TAREFA, type EstadoTarefa, type TipoTarefa } from "../domai
 type Rascunho = { num: string; texto: string };
 
 export default function PainelTarefas({
-  tarefas,
-  medicoes,
+  tarefas: tarefasLidas,
+  medicoes: medicoesLidas,
   opcoes,
   permissao,
   tempos = new Map(),
@@ -80,6 +80,17 @@ export default function PainelTarefas({
   const [aGravar, setAGravar] = useState<string | null>(null);
   const [erros, setErros] = useState<Record<string, string>>({});
   const [corretivas, setCorretivas] = useState<Record<string, string>>({});
+  const [guardadas, setGuardadas] = useState<Record<string, boolean>>({});
+
+  // Sem rede: as respostas guardadas no telemóvel aparecem já, marcadas
+  // "por enviar", até a base as receber.
+  const offline = useOffline();
+  const vista = useMemo(
+    () => aplicarPendentesOrdem(tarefasLidas, medicoesLidas, offline.acoes),
+    [tarefasLidas, medicoesLidas, offline.acoes]
+  );
+  const tarefas = vista.tarefas;
+  const medicoes = vista.medicoes;
 
   const porTarefa = useMemo(() => {
     const m = new Map<string, Leitura[]>();
@@ -131,13 +142,20 @@ export default function PainelTarefas({
     }
   }, [tarefas, permissao.pode]);
 
-  const gravar = async (chave: string, fn: () => Promise<{ corretiva_gerada: string | null }>) => {
+  const gravar = async (chave: string, acao: NovaAcao) => {
     setAGravar(chave);
     setErros((e) => ({ ...e, [chave]: "" }));
     try {
-      const r = await fn();
-      if (r.corretiva_gerada) {
-        setCorretivas((c) => ({ ...c, [chave]: r.corretiva_gerada as string }));
+      // Com rede vai já (e um erro da base aparece aqui, como sempre); sem
+      // rede fica guardada no telemóvel e segue quando houver ligação.
+      const r = await filaOffline().executarOuGuardar(acao);
+      if (r.guardada) {
+        setGuardadas((g) => ({ ...g, [chave]: true }));
+        return;
+      }
+      const v = r.valor as { corretiva_gerada?: string | null } | undefined;
+      if (v?.corretiva_gerada) {
+        setCorretivas((c) => ({ ...c, [chave]: v.corretiva_gerada as string }));
       }
       aoGravar();
     } catch (e) {
@@ -167,8 +185,11 @@ export default function PainelTarefas({
     } catch (e) {
       setErros((er) => ({
         ...er,
-        [tarefaId]:
-          e instanceof ErroDeEscrita ? e.message : "Não foi possível falar com o servidor. Tenta outra vez.",
+        [tarefaId]: semRede(e)
+          ? "Sem rede: o relógio precisa de ligação. As respostas, essas, guardam-se no telemóvel."
+          : e instanceof ErroDeEscrita
+            ? e.message
+            : "Não foi possível falar com o servidor. Tenta outra vez.",
       }));
     } finally {
       setAGravar(null);
@@ -236,6 +257,17 @@ export default function PainelTarefas({
                         *
                       </span>
                     )}
+                    {vista.porEnviar.has(t.id) && (
+                      <Badge
+                        className={
+                          vista.recusadas.has(t.id)
+                            ? "bg-red-50 text-red-700 ring-red-200"
+                            : "bg-sky-50 text-sky-800 ring-sky-200"
+                        }
+                      >
+                        {vista.recusadas.has(t.id) ? "não aceite pela base" : "por enviar"}
+                      </Badge>
+                    )}
                     {t.privada && (
                       <Badge className="bg-slate-100 text-slate-500 ring-slate-200">
                         não sai no relatório
@@ -292,6 +324,16 @@ export default function PainelTarefas({
                       </span>
                     </div>
                   )}
+                  {vista.recusadas.has(t.id) && (
+                    <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                      A base não aceitou a resposta dada sem rede: {vista.recusadas.get(t.id)}
+                    </p>
+                  )}
+                  {(guardadas[t.id] || leituras.some((l) => guardadas[l.id])) && vista.porEnviar.has(t.id) && (
+                    <p className="rounded-lg bg-sky-50 px-3 py-2 text-sm text-sky-900">
+                      Sem rede — a resposta ficou guardada no telemóvel e vai quando houver ligação.
+                    </p>
+                  )}
                   {erros[t.id] && caminho === "medicoes" && (
                     <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erros[t.id]}</p>
                   )}
@@ -308,13 +350,12 @@ export default function PainelTarefas({
                         rascunho={rascunhos[l.id]}
                         aoMudar={(r) => setRascunhos((x) => ({ ...x, [l.id]: r }))}
                         aoResponder={(args) =>
-                          gravar(l.id, () =>
-                            responderMedicao({
-                              tarefaId: t.id,
-                              medicaoDefId: l.medicaoDefId,
-                              ...args,
-                            })
-                          )
+                          gravar(l.id, {
+                            tipo: "ordem_medicao",
+                            chave: t.id,
+                            args: { tarefaId: t.id, medicaoDefId: l.medicaoDefId, ...args },
+                            rotulo: `Leitura «${l.nome}» em «${t.nome}»`,
+                          })
                         }
                       />
                     ))
@@ -328,7 +369,12 @@ export default function PainelTarefas({
                       rascunho={rascunhos[t.id]}
                       aoMudar={(r) => setRascunhos((x) => ({ ...x, [t.id]: r }))}
                       aoResponder={(args) =>
-                        gravar(t.id, () => responderTarefa({ tarefaId: t.id, ...args }))
+                        gravar(t.id, {
+                          tipo: "ordem_responder",
+                          chave: t.id,
+                          args: { tarefaId: t.id, ...args },
+                          rotulo: `Resposta a «${t.nome}»`,
+                        })
                       }
                     />
                   )}

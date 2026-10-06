@@ -25,6 +25,7 @@ import {
 import { ObraCapacete, ObraCapacidade, ObraCronometro, ObraModelo, ObraValidar } from "./ObraIcones";
 import { podePlanear, podeValidar } from "../domain/obras";
 import { EscolherPessoa, FaixaEntrarComo, sairDoEntrarComo, useEntrarComo } from "./EntrarComo";
+import BarraOffline from "./BarraOffline";
 import { EVENTO_ALERTAS, alertasDeSupervisao, sincronizarAvisos } from "../lib/obras";
 import { useModulos, type Modulos } from "../lib/modulos";
 
@@ -487,6 +488,7 @@ export function OperacaoLayout() {
         )}
       >
         <div className="mx-auto max-w-6xl">
+          <BarraOffline />
           <Outlet />
         </div>
       </main>

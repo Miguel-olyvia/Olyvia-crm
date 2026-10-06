@@ -409,6 +409,7 @@ import Validar from "../Validar";
 import ObraMetricas from "../ObraMetricas";
 import ObraModelos from "../ObraModelos";
 import * as obras from "../../lib/obras";
+import { supabase } from "../../lib/supabase";
 
 function em(rota: string, elemento: JSX.Element, caminho = rota) {
   return render(
@@ -512,9 +513,15 @@ describe("páginas de Obras (fumo)", () => {
   it("Minhas tarefas: terminar dentro da tolerância é um toque", async () => {
     auth.funcao = "tecnico";
     em("/minhas-tarefas", <MinhasTarefas />);
+    // Vai pela fila sem rede (com rede, envia já): a RPC que leva a hora do
+    // telemóvel e o id da ação (db/offline.sql).
+    const rpc = vi.spyOn(supabase, "rpc");
     fireEvent.click(await screen.findByText("Terminar"));
     await waitFor(() =>
-      expect(obras.terminarTarefa).toHaveBeenCalledWith({ tarefaId: "t1", concluir: true, motivo: null, nota: null })
+      expect(rpc).toHaveBeenCalledWith(
+        "rpc_ops_obra_offline",
+        expect.objectContaining({ p_tipo: "concluir", p_tarefa_id: "t1", p_motivo: null, p_nota: null, p_medida_real: null })
+      )
     );
   });
 

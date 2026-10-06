@@ -383,7 +383,13 @@ tem o telemóvel na mão. É a diferença entre um papel que se perde e uma prov
 
 Estas não vêm do CRM. Vêm de olhar para o que o técnico tem de fazer.
 
-### a) Modo offline ⭐
+### a) ~~Modo offline~~ ⭐ — feito a 06/10/2026
+
+Feito em [`sem-rede.md`](sem-rede.md): "As minhas tarefas" e o painel de
+tarefas das ordens funcionam sem rede (lista guardada no telemóvel, fila do
+que se faz, envio sozinho quando a rede volta, hora certa nos tempos, fotos
+guardadas), e a app abre sem rede. Fica de fora o que está no fim desse
+documento (relógio das ordens, mudar o estado da ordem, extras e atrasos).
 
 **É a falha que mais depressa mata um piloto.**
 
