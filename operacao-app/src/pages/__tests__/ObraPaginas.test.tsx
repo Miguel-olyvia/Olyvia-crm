@@ -522,10 +522,31 @@ describe("páginas de Obras (fumo)", () => {
     auth.funcao = "supervisor";
     auth.businessUserId = "u-s";
     em("/validar", <Validar />);
-    expect(await screen.findByText("Canalização")).toBeInTheDocument();
+    // Linha compacta + detalhe aberto da 1.ª (telemóvel): o nome aparece nos dois.
+    expect((await screen.findAllByText("Canalização")).length).toBeGreaterThan(0);
     expect(screen.getByText(/Secagem/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Validar" }));
     await waitFor(() => expect(obras.validarTarefa).toHaveBeenCalledWith("t3", true, undefined));
+  });
+
+  it("Validar: por obra, filtros e 'Validar todas' (só as que posso)", async () => {
+    auth.funcao = "supervisor";
+    auth.businessUserId = "u-s";
+    const feita = TAREFAS.find((t) => t.estado === "feita")!;
+    vi.mocked(obras.tarefasPorValidar).mockResolvedValueOnce([
+      feita,
+      { ...feita, id: "t5", nome: "Assentamento de loiças", motivo_desvio: null, minutos_reais: 30, minutos_previstos: 60 },
+    ]);
+    em("/validar", <Validar />);
+    expect(await screen.findByRole("button", { name: "Com desvio · 1" })).toBeInTheDocument();
+    expect(screen.getByText("2 de 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Com desvio · 1" }));
+    expect(screen.getByText("1 de 2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Limpar filtros" }));
+    fireEvent.click(screen.getByRole("button", { name: /Validar todas \(2\)/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Validar todas" }));
+    await waitFor(() => expect(obras.validarTarefa).toHaveBeenCalledWith("t5", true));
+    expect(obras.validarTarefa).toHaveBeenCalledWith("t3", true);
   });
 
   it("Validar: quem fez a tarefa não a pode validar", async () => {
@@ -538,6 +559,8 @@ describe("páginas de Obras (fumo)", () => {
     auth.funcao = "supervisor";
     auth.businessUserId = "u-s";
     const { container } = em("/validar", <Validar />);
+    // Os alertas têm o seu separador, para não empurrarem a fila.
+    fireEvent.click(await screen.findByRole("tab", { name: "Alertas · 3" }));
     expect(await screen.findByText("1 tarefa passou do fim previsto")).toBeInTheDocument();
     expect(screen.getByText("1 tarefa não iniciada a tempo")).toBeInTheDocument();
     expect(screen.getByText("1 atraso por avisar ao cliente")).toBeInTheDocument();
