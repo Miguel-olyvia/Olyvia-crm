@@ -33,6 +33,10 @@
 --     data de admissão) só saem a quem gere a equipa (settings.manage);
 --   · o custo/hora só sai a quem tem `operations.costs.view` NESTA organização.
 --
+--  Clientes do CRM (membership role_is_client, sem outra membership ativa)
+--  NÃO são equipa: não aparecem, a não ser que já tenham perfil (e_cliente
+--  = true, para se ver e desativar). Ver db/equipa.sql.
+--
 --  Escreve fora de `ops_*`? NÃO. Idempotente.
 -- ============================================================
 
@@ -93,7 +97,8 @@ RETURNS TABLE (
   ausencia_tipo          text,
   ausencia_inicio        date,
   ausencia_fim           date,
-  ausencia_origem        text       -- 'crm' (agenda) | 'rh'
+  ausencia_origem        text,      -- 'crm' (agenda) | 'rh'
+  e_cliente              boolean    -- só cliente nesta organização (não pode ser da equipa)
 )
 LANGUAGE plpgsql STABLE SECURITY DEFINER
 SET search_path TO 'public'
@@ -115,6 +120,13 @@ DECLARE
   q_aus     text[] := '{}';
   j_aus     text;
   v_sql     text;
+  -- Clientes do CRM (role_is_client) não são equipa: ficam de fora da lista,
+  -- a não ser que já tenham perfil em Operações (para se ver e desativar).
+  v_cli     boolean := EXISTS (SELECT 1 FROM information_schema.columns
+                                WHERE table_schema = 'public' AND table_name = 'anew_memberships'
+                                  AND column_name = 'role_is_client');
+  w_membro  text := '';
+  f_cliente text := 'false';
 BEGIN
   IF p_org IS NULL THEN
     RAISE EXCEPTION 'Falta a organização.';
@@ -244,6 +256,15 @@ BEGIN
     END IF;
   END IF;
 
+  IF v_cli THEN
+    w_membro := $q$ AND (m.role_is_client IS NOT TRUE
+                OR EXISTS (SELECT 1 FROM public.ops_utilizador_perfil p0
+                            WHERE p0.utilizador_id = m.user_id AND p0.organization_id = $1))$q$;
+    f_cliente := $q$NOT EXISTS (SELECT 1 FROM public.anew_memberships m3
+                    WHERE m3.user_id = u.id AND m3.organization_id = $1
+                      AND m3.status = 'active' AND m3.role_is_client IS NOT TRUE)$q$;
+  END IF;
+
   IF cardinality(q_aus) = 0 THEN
     j_aus := 'LEFT JOIN LATERAL (SELECT NULL::text AS tipo, NULL::date AS inicio, '
           || 'NULL::date AS fim, NULL::text AS origem) au ON true';
@@ -288,10 +309,11 @@ BEGIN
       au.tipo,
       au.inicio,
       au.fim,
-      au.origem
+      au.origem,
+      $q$ || f_cliente || $q$
     FROM (SELECT DISTINCT m.user_id
             FROM public.anew_memberships m
-           WHERE m.organization_id = $1 AND m.status = 'active') mm
+           WHERE m.organization_id = $1 AND m.status = 'active'$q$ || w_membro || $q$) mm
     JOIN public.anew_users u ON u.id = mm.user_id
     LEFT JOIN public.ops_utilizador_perfil p
            ON p.utilizador_id = u.id AND p.organization_id = $1

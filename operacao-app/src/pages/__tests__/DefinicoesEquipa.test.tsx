@@ -160,11 +160,11 @@ describe("Definições › Equipa", () => {
     expect(c.getByText("Técnico")).toBeInTheDocument();
   });
 
-  it("separa quem está no Olyvia sem acesso a Operações, e dá-lhe uma função", async () => {
+  it("adiciona quem está no Olyvia sem acesso a Operações, e dá-lhe uma função", async () => {
     abrir();
-    expect(await screen.findByText("Pessoas do Olyvia sem acesso a Operações")).toBeInTheDocument();
-    const nova = within(screen.getByTestId("pessoa-u-n"));
-    fireEvent.click(nova.getByText("Dar função"));
+    fireEvent.click(await screen.findByText("Adicionar pessoa"));
+    expect(screen.getByText("Adicionar pessoa à equipa")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Nuno Novo"));
     expect(await screen.findByText(/Dar acesso a Operações — Nuno Novo/)).toBeInTheDocument();
     fireEvent.change(screen.getByDisplayValue("Técnico"), { target: { value: "supervisor" } });
     fireEvent.click(screen.getByText("Dar acesso"));
@@ -177,6 +177,39 @@ describe("Definições › Equipa", () => {
     });
     // Sem zona nem especialidades, não passa pela regra do planeamento.
     expect(obras.gravarPlaneamentoPessoa).not.toHaveBeenCalled();
+  });
+
+  it("um cliente do CRM nunca aparece para adicionar; se já tinha perfil, vem marcado", async () => {
+    const CLI = pessoa({ utilizador_id: "u-c", nome: "Carla Cliente", e_cliente: true });
+    const CLI_OPS = pessoa({
+      utilizador_id: "u-co", nome: "Abel Antigo", e_cliente: true, em_operacoes: true, funcao: "tecnico", ativo: false,
+    });
+    vi.mocked(equipaCrm.listarEquipaCrm).mockResolvedValue(equipa({ pessoas: [GESTOR, TEC, NOVA, CLI, CLI_OPS] }));
+    abrir();
+    const antigo = within(await screen.findByTestId("pessoa-u-co"));
+    expect(antigo.getByText("Cliente no CRM")).toBeInTheDocument();
+    expect(antigo.queryByText("Editar")).toBeNull();
+    fireEvent.click(screen.getByText("Adicionar pessoa"));
+    expect(screen.getByText("Nuno Novo")).toBeInTheDocument();
+    expect(screen.queryByText("Carla Cliente")).toBeNull();
+  });
+
+  it("mostra quem faz o quê, e os ofícios sem ninguém", async () => {
+    abrir();
+    const canal = within(await screen.findByTestId("oficio-Canalização"));
+    expect(canal.getByText("Tiago")).toBeInTheDocument();
+    const ele = within(screen.getByTestId("oficio-Eletricidade"));
+    expect(ele.getByText("ninguém")).toBeInTheDocument();
+    expect(screen.getByText(/1 ofício sem ninguém/)).toBeInTheDocument();
+  });
+
+  it("convidar pessoa nova manda para os Utilizadores do CRM", async () => {
+    abrir();
+    fireEvent.click(await screen.findByText("Convidar pessoa nova"));
+    expect(screen.getByText("Abrir Utilizadores no CRM").closest("a")).toHaveAttribute(
+      "href",
+      expect.stringMatching(/\/users$/)
+    );
   });
 
   it("a zona-base é um override, e mostra os distritos da agenda", async () => {

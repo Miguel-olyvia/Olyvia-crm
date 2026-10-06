@@ -47,7 +47,8 @@ import {
   Toggle,
   cx,
 } from "../components/ui";
-import { Building, Check, Layers, Plus, User, X } from "../components/icons";
+import { Building, Check, Layers, Plus, Settings, User, X } from "../components/icons";
+import { gravarModulos, lerModulos, type Modulos } from "../lib/modulos";
 import { minutosParaSegundos, segundosParaMinutos } from "../domain/tempo";
 import { ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type TipoTarefa } from "../domain/tipos";
 
@@ -67,7 +68,7 @@ import { ROTULO_TIPO_TAREFA, TIPOS_TAREFA, type TipoTarefa } from "../domain/tip
  * a alguém a dizer "vai aqui".
  */
 
-type Separador = "locais" | "procedimentos" | "equipa";
+type Separador = "locais" | "procedimentos" | "equipa" | "empresa";
 
 export default function Definicoes() {
   const [params, setParams] = useSearchParams();
@@ -98,11 +99,15 @@ export default function Definicoes() {
         <Aba ligado={ver === "equipa"} onClick={() => trocar("equipa")} Icone={User}>
           Equipa
         </Aba>
+        <Aba ligado={ver === "empresa"} onClick={() => trocar("empresa")} Icone={Settings}>
+          O que a empresa usa
+        </Aba>
       </div>
 
       {ver === "locais" && <PainelLocais />}
       {ver === "procedimentos" && <PainelProcedimentos />}
       {ver === "equipa" && <PainelEquipa />}
+      {ver === "empresa" && <PainelEmpresa />}
     </div>
   );
 }
@@ -1194,6 +1199,8 @@ function PainelEquipa() {
   const [estado, setEstado] = useState<Estado>({ carregar: true, erro: null });
   const [recarga, setRecarga] = useState(0);
   const [aEditar, setAEditar] = useState<PessoaEquipa | null>(null);
+  const [aAdicionar, setAAdicionar] = useState(false);
+  const [aConvidar, setAConvidar] = useState(false);
 
   useEffect(() => {
     if (!activeOrgId) return;
@@ -1219,18 +1226,31 @@ function PainelEquipa() {
 
   const { pessoas, rhDisponivel, podeVerCustos: vejoCustos, ligadaAoCrm } = equipa;
   const emOps = pessoas.filter((p) => p.em_operacoes);
-  const fora = pessoas.filter((p) => !p.em_operacoes);
+  // Quem pode entrar: está no Olyvia, ainda não está em Operações e não é cliente.
+  const fora = pessoas.filter((p) => !p.em_operacoes && !p.e_cliente);
   const ativos = emOps.filter((p) => p.ativo);
+  const clientes = emOps.filter((p) => p.e_cliente);
 
   return (
     <>
-      <p className="text-sm text-slate-500">
-        {ativos.length === 0
-          ? "Ainda ninguém em Operações."
-          : `${ativos.length} ${ativos.length === 1 ? "pessoa" : "pessoas"} em Operações, de ${pessoas.length} com acesso ao Olyvia.`}{" "}
-        As pessoas, o papel, a equipa e os distritos vêm do CRM
-        {rhDisponivel ? "; o cargo, o contrato e as ausências vêm do RH" : ""} — mudam-se lá.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <p className="max-w-2xl text-sm text-slate-500">
+          {ativos.length === 0
+            ? "Ainda ninguém em Operações."
+            : `${ativos.length} ${ativos.length === 1 ? "pessoa ativa" : "pessoas ativas"} em Operações.`}{" "}
+          As pessoas, o papel e os distritos vêm do CRM
+          {rhDisponivel ? "; o cargo, o contrato e as ausências vêm do RH" : ""} — mudam-se lá. Os clientes
+          do CRM nunca entram na equipa.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button size="sm" onClick={() => setAAdicionar(true)} disabled={fora.length === 0}>
+            <Plus width={13} height={13} /> Adicionar pessoa
+          </Button>
+          <Button size="sm" variant="secondary" onClick={() => setAConvidar(true)}>
+            Convidar pessoa nova
+          </Button>
+        </div>
+      </div>
 
       {!ligadaAoCrm && (
         <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -1239,7 +1259,16 @@ function PainelEquipa() {
         </p>
       )}
 
-      {emOps.length > 0 && (
+      <OficiosResumo pessoas={ativos.filter((p) => !p.e_cliente)} onEditar={setAEditar} />
+
+      {clientes.length > 0 && (
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800">
+          {clientes.length === 1 ? "1 pessoa com perfil em Operações é só cliente" : `${clientes.length} pessoas com perfil em Operações são só clientes`}{" "}
+          no CRM ({clientes.map((c) => c.nome).join(", ")}). Ficam inativas e não recebem trabalho nem avisos.
+        </p>
+      )}
+
+      {emOps.length > 0 ? (
         <Card className="divide-y divide-slate-100">
           {emOps.map((p) => (
             <EquipaPessoaCartao
@@ -1248,39 +1277,21 @@ function PainelEquipa() {
               eu={p.utilizador_id === businessUserId}
               rhDisponivel={rhDisponivel}
               acao={
-                <Button size="sm" variant="secondary" onClick={() => setAEditar(p)}>
-                  Editar
-                </Button>
+                p.e_cliente ? (
+                  <Badge className="bg-red-50 text-red-700 ring-red-200">Cliente no CRM</Badge>
+                ) : (
+                  <Button size="sm" variant="secondary" onClick={() => setAEditar(p)}>
+                    Editar
+                  </Button>
+                )
               }
             />
           ))}
         </Card>
-      )}
-
-      {fora.length > 0 && (
-        <section className="space-y-2">
-          <div>
-            <h2 className="text-sm font-semibold text-slate-800">Pessoas do Olyvia sem acesso a Operações</h2>
-            <p className="mt-0.5 text-xs text-slate-500">
-              Já existem no Olyvia — não se criam de novo. Dar-lhes uma função é o que lhes abre Operações.
-            </p>
-          </div>
-          <Card className="divide-y divide-slate-100">
-            {fora.map((p) => (
-              <EquipaPessoaCartao
-                key={p.utilizador_id}
-                pessoa={p}
-                eu={p.utilizador_id === businessUserId}
-                rhDisponivel={rhDisponivel}
-                acao={
-                  <Button size="sm" variant="secondary" onClick={() => setAEditar(p)}>
-                    <Plus width={13} height={13} /> Dar função
-                  </Button>
-                }
-              />
-            ))}
-          </Card>
-        </section>
+      ) : (
+        <p className="rounded-lg bg-slate-50 px-3 py-6 text-center text-sm text-slate-500">
+          Ainda ninguém na equipa. Adicione as pessoas que fazem o trabalho no terreno e diga o que cada uma faz.
+        </p>
       )}
 
       {!vejoCustos && (
@@ -1289,6 +1300,19 @@ function PainelEquipa() {
           Não é um erro — é o que essa permissão faz.
         </p>
       )}
+
+      {aAdicionar && (
+        <AdicionarPessoa
+          pessoas={fora}
+          aoFechar={() => setAAdicionar(false)}
+          aoEscolher={(p) => {
+            setAAdicionar(false);
+            setAEditar(p);
+          }}
+        />
+      )}
+
+      {aConvidar && <ConvidarPessoa aoFechar={() => setAConvidar(false)} />}
 
       {aEditar && (
         <FormPerfil
@@ -1300,6 +1324,181 @@ function PainelEquipa() {
         />
       )}
     </>
+  );
+}
+
+/**
+ * Quem faz o quê, num relance: cada ofício com as pessoas que o têm. Um
+ * ofício sem ninguém fica a vermelho — é o que faz a distribuição automática
+ * e o aviso ao marmorista não terem a quem chegar.
+ */
+function OficiosResumo({
+  pessoas,
+  onEditar,
+}: {
+  pessoas: PessoaEquipa[];
+  onEditar: (p: PessoaEquipa) => void;
+}) {
+  const { activeOrgId } = useAuth();
+  const [skills, setSkills] = useState<Skill[]>([]);
+  useEffect(() => {
+    if (!activeOrgId) return;
+    let vivo = true;
+    listarSkills(activeOrgId)
+      .then((k) => { if (vivo) setSkills(k); })
+      .catch(() => undefined);
+    return () => { vivo = false; };
+  }, [activeOrgId]);
+
+  if (skills.length === 0) return null;
+  const vazios = skills.filter((k) => !pessoas.some((p) => p.skills.includes(k.id)));
+
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-slate-800">Quem faz o quê</h2>
+        <p className="text-xs text-slate-500">
+          {vazios.length === 0
+            ? "Todos os ofícios têm alguém."
+            : `${vazios.length} ${vazios.length === 1 ? "ofício sem ninguém" : "ofícios sem ninguém"} — as tarefas desses ofícios não têm a quem ir.`}
+        </p>
+      </div>
+      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {skills.map((k) => {
+          const quem = pessoas.filter((p) => p.skills.includes(k.id));
+          return (
+            <li
+              key={k.id}
+              data-testid={`oficio-${k.nome}`}
+              className={cx(
+                "rounded-lg px-3 py-2 ring-1 ring-inset",
+                quem.length === 0 ? "bg-red-50 ring-red-200" : "bg-white ring-slate-200"
+              )}
+            >
+              <p className={cx("text-xs font-semibold", quem.length === 0 ? "text-red-800" : "text-slate-700")}>
+                {k.nome}
+              </p>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {quem.length === 0 ? (
+                  <span className="text-xs text-red-700">ninguém</span>
+                ) : (
+                  quem.map((p) => (
+                    <button
+                      key={p.utilizador_id}
+                      type="button"
+                      onClick={() => onEditar(p)}
+                      title={`Editar ${p.nome}`}
+                      className="rounded-full bg-brand-50 px-2 py-0.5 text-xs text-brand-800 ring-1 ring-inset ring-brand-200 hover:bg-brand-100"
+                    >
+                      {p.nome.split(" ")[0]}
+                    </button>
+                  ))
+                )}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+/** Escolher alguém que já está no Olyvia (nunca um cliente) para a equipa. */
+function AdicionarPessoa({
+  pessoas,
+  aoFechar,
+  aoEscolher,
+}: {
+  pessoas: PessoaEquipa[];
+  aoFechar: () => void;
+  aoEscolher: (p: PessoaEquipa) => void;
+}) {
+  const [pesquisa, setPesquisa] = useState("");
+  const lista = useMemo(() => {
+    const q = pesquisa.trim().toLowerCase();
+    const xs = q
+      ? pessoas.filter((p) =>
+          [p.nome, p.email, p.papel_crm, p.cargo_crm].some((v) => (v ?? "").toLowerCase().includes(q))
+        )
+      : pessoas;
+    return xs.slice(0, 50);
+  }, [pessoas, pesquisa]);
+
+  return (
+    <Modal title="Adicionar pessoa à equipa" onClose={aoFechar}>
+      <div className="space-y-3">
+        <p className="text-sm text-slate-500">
+          Pessoas que já estão no Olyvia com um papel de colaborador. Os clientes não aparecem.
+        </p>
+        <Input
+          autoFocus
+          placeholder="Pesquisar por nome, email ou papel…"
+          value={pesquisa}
+          onChange={(e) => setPesquisa(e.target.value)}
+          className="w-full"
+        />
+        <ul className="max-h-80 space-y-1 overflow-y-auto">
+          {lista.map((p) => (
+            <li key={p.utilizador_id}>
+              <button
+                type="button"
+                onClick={() => aoEscolher(p)}
+                className="flex w-full items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-medium text-slate-800">{p.nome}</span>
+                  <span className="block truncate text-xs text-slate-400">{p.email}</span>
+                </span>
+                <span className="shrink-0 text-xs text-slate-500">{p.papel_crm ?? ""}</span>
+              </button>
+            </li>
+          ))}
+          {lista.length === 0 && <li className="px-1 text-sm text-slate-400">Ninguém encontrado.</li>}
+        </ul>
+      </div>
+    </Modal>
+  );
+}
+
+const OLYVIA_URL = ((import.meta.env.VITE_OLYVIA_URL as string) || "https://www.olyvia-ai.com").replace(/\/$/, "");
+
+/**
+ * Uma pessoa que ainda não existe no Olyvia cria-se no CRM, pelo caminho
+ * oficial (Utilizadores): é lá que nasce a conta, o convite por email e o
+ * papel. Não se criam contas a partir de Operações.
+ */
+function ConvidarPessoa({ aoFechar }: { aoFechar: () => void }) {
+  return (
+    <Modal
+      title="Convidar pessoa nova"
+      onClose={aoFechar}
+      footer={
+        <>
+          <Button variant="secondary" onClick={aoFechar}>Fechar</Button>
+          <a
+            href={`${OLYVIA_URL}/users`}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg bg-brand px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+          >
+            Abrir Utilizadores no CRM
+          </a>
+        </>
+      }
+    >
+      <ol className="list-decimal space-y-2 pl-5 text-sm text-slate-600">
+        <li>
+          No CRM, em <b>Utilizadores</b>, crie a pessoa (nome, email e telemóvel). Ela recebe o convite por email.
+        </li>
+        <li>
+          Dê-lhe nesta empresa um papel de colaborador — por exemplo <b>Técnico de Operações</b> ou{" "}
+          <b>Supervisor de Operações</b>. Nunca o papel de cliente.
+        </li>
+        <li>
+          Volte aqui, carregue em <b>Adicionar pessoa</b>, escolha-a e marque os ofícios que faz.
+        </li>
+      </ol>
+    </Modal>
   );
 }
 
@@ -1490,6 +1689,128 @@ function FormPerfil({
         {erro && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{erro}</p>}
       </div>
     </Modal>
+  );
+}
+
+/* ═════════════════════════ 4. O que a empresa usa ═════════════════════════ */
+
+type Escolha3 = "auto" | "sim" | "nao";
+const paraEscolha = (v: boolean | null): Escolha3 => (v === null ? "auto" : v ? "sim" : "nao");
+const deEscolha = (e: Escolha3): boolean | null => (e === "auto" ? null : e === "sim");
+
+/**
+ * Manutenção (ordens, planos, locais) e Obras (obras, modelos, orçamentos,
+ * validar). Uma empresa que só faz obras deixa de ver a Manutenção no menu —
+ * e vice-versa. As páginas continuam a abrir pelo endereço.
+ */
+function PainelEmpresa() {
+  const { activeOrgId, funcao } = useAuth();
+  const [m, setM] = useState<Modulos | null>(null);
+  const [man, setMan] = useState<Escolha3>("auto");
+  const [obr, setObr] = useState<Escolha3>("auto");
+  const [aGravar, setAGravar] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; texto: string } | null>(null);
+  const pode = funcao === "admin" || funcao === "gestor";
+
+  useEffect(() => {
+    if (!activeOrgId) return;
+    let vivo = true;
+    lerModulos(activeOrgId).then((x) => {
+      if (!vivo) return;
+      setM(x);
+      setMan(paraEscolha(x.escolhido.manutencao));
+      setObr(paraEscolha(x.escolhido.obras));
+    });
+    return () => { vivo = false; };
+  }, [activeOrgId]);
+
+  if (!m) return <Carregando />;
+
+  const linha = (
+    titulo: string,
+    descricao: string,
+    valor: Escolha3,
+    mudar: (v: Escolha3) => void,
+    efetivo: boolean,
+    existe: boolean
+  ) => (
+    <div className="flex flex-wrap items-start justify-between gap-3 p-4">
+      <div className="min-w-0 max-w-xl">
+        <p className="text-sm font-medium text-slate-800">{titulo}</p>
+        <p className="mt-0.5 text-xs text-slate-500">{descricao}</p>
+        <p className="mt-1 text-xs text-slate-400">
+          Agora: <b className={efetivo ? "text-brand-800" : "text-slate-500"}>{efetivo ? "no menu" : "escondido"}</b>
+          {valor === "auto" && ` — automático (${existe ? "a empresa já tem dados desta área" : "ainda não há dados desta área"})`}
+        </p>
+      </div>
+      <Select
+        value={valor}
+        disabled={!pode}
+        onChange={(e) => mudar(e.target.value as Escolha3)}
+        aria-label={titulo}
+        className="w-48"
+      >
+        <option value="auto">Automático</option>
+        <option value="sim">Sempre no menu</option>
+        <option value="nao">Esconder</option>
+      </Select>
+    </div>
+  );
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-slate-500">
+        O menu mostra só as áreas que a empresa usa. Em automático, decide-se pelo que já existe.
+      </p>
+      <Card className="divide-y divide-slate-100">
+        {linha(
+          "Manutenção",
+          "Ordens de trabalho, planos preventivos e locais/equipamentos — a manutenção de edifícios.",
+          man,
+          setMan,
+          m.manutencao,
+          m.existe.manutencao
+        )}
+        {linha(
+          "Obras",
+          "Obras, modelos de serviço, orçamentos aceites e validação de tarefas — as remodelações.",
+          obr,
+          setObr,
+          m.obras,
+          m.existe.obras
+        )}
+      </Card>
+      {!pode && <p className="text-xs text-slate-400">Só um administrador ou gestor muda isto.</p>}
+      {msg && (
+        <p className={cx("rounded-lg px-3 py-2 text-sm", msg.ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700")}>
+          {msg.texto}
+        </p>
+      )}
+      {pode && (
+        <Button
+          disabled={aGravar || (man === "nao" && obr === "nao")}
+          onClick={async () => {
+            if (!activeOrgId) return;
+            setAGravar(true);
+            setMsg(null);
+            try {
+              const x = await gravarModulos(activeOrgId, deEscolha(man), deEscolha(obr));
+              setM(x);
+              setMsg({ ok: true, texto: "Gravado. O menu já mostra só o que a empresa usa." });
+            } catch (e) {
+              setMsg({ ok: false, texto: e instanceof Error && e.message ? e.message : "Não foi possível gravar." });
+            } finally {
+              setAGravar(false);
+            }
+          }}
+        >
+          {aGravar ? "A gravar…" : "Gravar"}
+        </Button>
+      )}
+      {man === "nao" && obr === "nao" && (
+        <p className="text-xs text-red-700">Tem de ficar pelo menos uma área no menu.</p>
+      )}
+    </div>
   );
 }
 

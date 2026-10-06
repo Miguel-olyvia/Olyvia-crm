@@ -74,6 +74,16 @@ faz com `quotes`, `quote_lines` e `client_contracts`. Detalhe em
 
 ---
 
+## Equipa e menu por empresa (06/10/2026) — feito
+
+Clientes do CRM fora da equipa (trigger na base), ecrã da Equipa com "quem faz
+o quê", adicionar e convidar, menu só com as áreas que a empresa usa, e o
+"entrar como" sem sessões presas. Ver [`equipa.md`](equipa.md). Falta: a
+equipa real da Mudelar (quem faz o quê) e, quando o RH do Miguel entrar,
+ler o cargo de lá.
+
+---
+
 ## Em duas linhas
 
 O ganho maior não está em construir coisas novas. Está em **usar o que o CRM

@@ -25,6 +25,7 @@ import { ObraCapacete, ObraCronometro, ObraModelo, ObraValidar } from "./ObraIco
 import { podePlanear, podeValidar } from "../domain/obras";
 import { EscolherPessoa, FaixaEntrarComo, sairDoEntrarComo, useEntrarComo } from "./EntrarComo";
 import { EVENTO_ALERTAS, alertasDeSupervisao, sincronizarAvisos } from "../lib/obras";
+import { useModulos, type Modulos } from "../lib/modulos";
 
 const OLYVIA_URL = (import.meta.env.VITE_OLYVIA_URL as string) || "https://olyvia-ai.com";
 const CHAVE_PAINEL = "operacao.menu-aberto";
@@ -42,6 +43,8 @@ type Item = {
   Icone: (p: React.SVGProps<SVGSVGElement>) => JSX.Element;
   // Só aparece para quem passa no teste (a base verifica na mesma).
   so?: (funcao: string | null) => boolean;
+  // Só aparece se a empresa usa esta área (Definições → Empresa).
+  modulo?: keyof Pick<Modulos, "manutencao" | "obras">;
 };
 
 // O mesmo desenho do CRM: uma barra de ícones escura à esquerda e, ao lado,
@@ -53,23 +56,23 @@ export const GRUPOS: { titulo: string | null; itens: Item[] }[] = [
     titulo: "Execução",
     itens: [
       { to: "/minhas-tarefas", rotulo: "As minhas tarefas", Icone: ObraCronometro },
-      { to: "/validar", rotulo: "Validar", Icone: ObraValidar, so: podeValidar },
+      { to: "/validar", rotulo: "Validar", Icone: ObraValidar, so: podeValidar, modulo: "obras" },
     ],
   },
   {
     titulo: "Trabalho",
     itens: [
-      { to: "/ordens", rotulo: "Ordens", Icone: List },
-      { to: "/obras", rotulo: "Obras", Icone: ObraCapacete },
-      { to: "/obras/modelos", rotulo: "Modelos", Icone: ObraModelo, so: podePlanear },
-      { to: "/planos", rotulo: "Planos", Icone: Clock },
+      { to: "/ordens", rotulo: "Ordens", Icone: List, modulo: "manutencao" },
+      { to: "/obras", rotulo: "Obras", Icone: ObraCapacete, modulo: "obras" },
+      { to: "/obras/modelos", rotulo: "Modelos", Icone: ObraModelo, so: podePlanear, modulo: "obras" },
+      { to: "/planos", rotulo: "Planos", Icone: Clock, modulo: "manutencao" },
     ],
   },
   {
     titulo: "Dados",
     itens: [
-      { to: "/locais", rotulo: "Locais", Icone: Layers },
-      { to: "/orcamentos", rotulo: "Orçamentos", Icone: Euro },
+      { to: "/locais", rotulo: "Locais", Icone: Layers, modulo: "manutencao" },
+      { to: "/orcamentos", rotulo: "Orçamentos", Icone: Euro, modulo: "obras" },
     ],
   },
   {
@@ -145,7 +148,12 @@ function NavegacaoModulo({
   /** Um número ao lado do destino (ex.: alertas em Validar). 0 = nada. */
   contagens?: Record<string, number>;
 }) {
-  const grupos = GRUPOS.map((g) => ({ ...g, itens: g.itens.filter((i) => !i.so || i.so(funcao)) })).filter(
+  const { activeOrgId } = useAuth();
+  const modulos = useModulos(activeOrgId);
+  const grupos = GRUPOS.map((g) => ({
+    ...g,
+    itens: g.itens.filter((i) => (!i.so || i.so(funcao)) && (!i.modulo || modulos[i.modulo])),
+  })).filter(
     (g) => g.itens.length > 0
   );
   return (

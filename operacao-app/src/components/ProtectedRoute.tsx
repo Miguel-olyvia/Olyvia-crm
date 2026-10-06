@@ -1,8 +1,10 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Spinner } from "./ui";
 import { OperacaoMark } from "./icons";
+import { sairDoEntrarComo, useEntrarComo } from "./EntrarComo";
+import { DURACAO_MAX_MS } from "../lib/entrarComo";
 
 /**
  * Barreira de sessão, em três degraus — e cada degrau diz ao utilizador o que
@@ -15,6 +17,16 @@ import { OperacaoMark } from "./icons";
 export function ProtectedRoute({ children }: { children: ReactNode }) {
   const { loading, session, businessUserId, funcao, perfilCarregado, orgs, activeOrgId } =
     useAuth();
+  const verComo = useEntrarComo();
+
+  // "Entrar como" esquecido: volta sozinho à conta do admin ao fim do tempo
+  // máximo — também quando o ecrã é um bloqueio (sem a faixa do menu).
+  useEffect(() => {
+    if (!verComo) return;
+    const falta = verComo.desde + DURACAO_MAX_MS - Date.now();
+    const id = window.setTimeout(() => void sairDoEntrarComo(), Math.max(0, falta));
+    return () => window.clearTimeout(id);
+  }, [verComo]);
 
   if (loading) {
     return (
@@ -29,6 +41,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   if (!businessUserId) {
     return (
       <Bloqueio
+        verComo={verComo?.nome ?? null}
         titulo="Conta sem perfil"
         texto="Esta conta não está associada a um utilizador do sistema Olyvia. Contacta o administrador."
       />
@@ -52,6 +65,7 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
     const orgAtiva = orgs.find((o) => o.id === activeOrgId);
     return (
       <Bloqueio
+        verComo={verComo?.nome ?? null}
         titulo="Sem acesso a Operações"
         texto={
           orgs.length > 1
@@ -67,7 +81,8 @@ export function ProtectedRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function Bloqueio({ titulo, texto }: { titulo: string; texto: string }) {
+function Bloqueio({ titulo, texto, verComo }: { titulo: string; texto: string; verComo?: string | null }) {
+  const [aVoltar, setAVoltar] = useState(false);
   return (
     <div className="app-canvas flex min-h-screen items-center justify-center p-6">
       <div className="max-w-md space-y-3 text-center">
@@ -76,6 +91,24 @@ function Bloqueio({ titulo, texto }: { titulo: string; texto: string }) {
         </div>
         <h1 className="text-lg font-semibold text-slate-800">{titulo}</h1>
         <p className="text-sm leading-relaxed text-slate-500">{texto}</p>
+        {verComo && (
+          <div className="space-y-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+            <p>
+              Estás a ver a aplicação como <b>{verComo}</b> — é esta pessoa que não tem acesso, não tu.
+            </p>
+            <button
+              type="button"
+              disabled={aVoltar}
+              onClick={() => {
+                setAVoltar(true);
+                void sairDoEntrarComo();
+              }}
+              className="rounded-md bg-amber-950 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-900 disabled:opacity-60"
+            >
+              {aVoltar ? "A voltar…" : "Voltar à minha conta"}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
