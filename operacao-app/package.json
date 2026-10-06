@@ -57,7 +57,8 @@
     "validar-restricao": "node tools/validar-restricao.mjs",
     "validar-stock": "node tools/validar-stock.mjs",
     "validar-equipa": "node tools/validar-equipa.mjs",
-    "validar-margem-previsao": "node tools/validar-margem-previsao.mjs"
+    "validar-margem-previsao": "node tools/validar-margem-previsao.mjs",
+    "validar-capacidade": "node tools/validar-capacidade.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.80.0",

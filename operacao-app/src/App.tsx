@@ -26,6 +26,7 @@ const MinhasTarefas = lazy(() => import("./pages/MinhasTarefas"));
 const Validar = lazy(() => import("./pages/Validar"));
 // Pública: o cliente acompanha a obra por um link privado, sem conta.
 const Acompanhar = lazy(() => import("./pages/Acompanhar"));
+const Capacidade = lazy(() => import("./pages/Capacidade"));
 
 export default function App() {
   return (
@@ -119,6 +120,14 @@ export default function App() {
           element={
             <Suspense fallback={<Spinner label="A carregar os modelos…" />}>
               <ObraModelos />
+            </Suspense>
+          }
+        />
+        <Route
+          path="/capacidade"
+          element={
+            <Suspense fallback={<Spinner label="A calcular a capacidade…" />}>
+              <Capacidade />
             </Suspense>
           }
         />

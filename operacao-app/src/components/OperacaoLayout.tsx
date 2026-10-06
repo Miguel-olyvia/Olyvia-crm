@@ -21,7 +21,7 @@ import {
   OperacaoMark,
   X,
 } from "./icons";
-import { ObraCapacete, ObraCronometro, ObraModelo, ObraValidar } from "./ObraIcones";
+import { ObraCapacete, ObraCapacidade, ObraCronometro, ObraModelo, ObraValidar } from "./ObraIcones";
 import { podePlanear, podeValidar } from "../domain/obras";
 import { EscolherPessoa, FaixaEntrarComo, sairDoEntrarComo, useEntrarComo } from "./EntrarComo";
 import { EVENTO_ALERTAS, alertasDeSupervisao, sincronizarAvisos } from "../lib/obras";
@@ -65,6 +65,7 @@ export const GRUPOS: { titulo: string | null; itens: Item[] }[] = [
       { to: "/ordens", rotulo: "Ordens", Icone: List, modulo: "manutencao" },
       { to: "/obras", rotulo: "Obras", Icone: ObraCapacete, modulo: "obras" },
       { to: "/obras/modelos", rotulo: "Modelos", Icone: ObraModelo, so: podePlanear, modulo: "obras" },
+      { to: "/capacidade", rotulo: "Capacidade", Icone: ObraCapacidade, so: podePlanear, modulo: "obras" },
       { to: "/planos", rotulo: "Planos", Icone: Clock, modulo: "manutencao" },
     ],
   },

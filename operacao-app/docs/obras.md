@@ -235,7 +235,7 @@ As permissões são sempre verificadas **na organização da obra**, com `ops_po
 ## Ordem de aplicação
 
 ```
-… sequência existente … → seguranca.sql → tempos.sql → obras.sql → margem-previsao.sql
+… sequência existente … → seguranca.sql → tempos.sql → obras.sql → margem-previsao.sql → capacidade.sql
 opcional (demo): demo-obras.sql   ·   remover: demo-obras-remover.sql
 ```
 

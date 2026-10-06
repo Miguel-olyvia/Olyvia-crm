@@ -53,6 +53,19 @@ valor:
 
 ---
 
+## Capacidade a partir do comercial (06/10/2026 — feito)
+
+Ecrã **Capacidade**: especialidade × semana, a procura das obras, dos
+contratos sem obra e do comercial (pesado pela probabilidade) contra a
+equipa, com "faltam ~N pessoas" e de onde vem o trabalho. Ver
+[`capacidade.md`](capacidade.md). Falta, para ficar a sério:
+
+1. **Especialidades da equipa real** — sem elas a oferta é zero.
+2. **Probabilidades no CRM** — hoje quase todas nos 50 % por defeito.
+3. **Subempreiteiros como oferta** (quando houver o papel no CRM).
+
+---
+
 ## Ficha do local (pedido de 02/10/2026 — CRM feito, falta Operações)
 
 **O pedido.** No orçamento, o comercial preenche uma ficha técnica do local
