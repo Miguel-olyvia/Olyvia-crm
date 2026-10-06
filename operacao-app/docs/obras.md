@@ -235,7 +235,7 @@ As permissões são sempre verificadas **na organização da obra**, com `ops_po
 ## Ordem de aplicação
 
 ```
-… sequência existente … → seguranca.sql → tempos.sql → obras.sql
+… sequência existente … → seguranca.sql → tempos.sql → obras.sql → margem-previsao.sql
 opcional (demo): demo-obras.sql   ·   remover: demo-obras-remover.sql
 ```
 
@@ -250,6 +250,8 @@ opcional (demo): demo-obras.sql   ·   remover: demo-obras-remover.sql
   desvio justificado), a canalização a correr a 83 % (alerta), uma precedência e um
   extra. Usa o primeiro cliente e as pessoas que já têm perfil em Operações.
 - `db/demo-obras-remover.sql` apaga só a obra de demonstração. O modelo fica.
+- `db/margem-previsao.sql` (margem em tempo real e fim provável) vem depois de
+  `obras.sql`; ver [`margem-previsao.md`](margem-previsao.md).
 
 ## Verificação local (sem tocar no Supabase)
 

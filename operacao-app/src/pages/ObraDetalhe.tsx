@@ -16,6 +16,7 @@ import {
   replanearObra,
   distribuirEquipa,
   gravarDependencias,
+  listarSkills,
   tarefasDaObra,
   type ConflitoObra,
   type ConflitoRpc,
@@ -43,6 +44,8 @@ import { AlertTriangle, ChevronLeft, MapPin, Plus } from "../components/icons";
 import ObraGantt from "../components/ObraGantt";
 import FichaLocal from "../components/FichaLocal";
 import ObraAvisoBancada from "../components/ObraAvisoBancada";
+import ObraMargem from "../components/ObraMargem";
+import ObraPrevisao from "../components/ObraPrevisao";
 import ObraPorqueInicio from "../components/ObraPorqueInicio";
 import { etiquetaServico, nomesCurtos, servicosDistintos } from "../domain/nomesTarefas";
 import ObraTarefaPainel from "../components/ObraTarefaPainel";
@@ -72,7 +75,7 @@ import { data as formatarData } from "../lib/formatar";
  * devolve os choques de agenda.
  */
 
-type Separador = "mapa" | "previsto" | "extras";
+type Separador = "mapa" | "simular" | "previsto" | "extras";
 
 const TRANSICOES: Record<EstadoObra, { para: EstadoObra; rotulo: string; motivo: boolean }[]> = {
   planeada: [
@@ -109,6 +112,14 @@ export default function ObraDetalhe() {
   const [aCarregar, setACarregar] = useState(true);
   const [recarga, setRecarga] = useState(0);
   const [separador, setSeparador] = useState<Separador>("mapa");
+  // As especialidades só fazem falta no "E se…?" — carregam-se aí, fora do arranque.
+  const [skills, setSkills] = useState<Map<string, string> | null>(null);
+  useEffect(() => {
+    if (separador !== "simular" || skills || !activeOrgId) return;
+    listarSkills(activeOrgId)
+      .then((ss) => setSkills(new Map(ss.map((k) => [k.id, k.nome]))))
+      .catch(() => setSkills(new Map()));
+  }, [separador, skills, activeOrgId]);
 
   // ?tarefa=… (vindo de um alerta) abre logo a ficha dessa tarefa.
   const [params] = useSearchParams();
@@ -357,6 +368,7 @@ export default function ObraDetalhe() {
                 </>
               )}
             </p>
+            <ObraPrevisao obraId={obra.id} tarefas={tarefas} modo="resumo" recarga={recarga} />
             {!!obra.n_alertas && (
               <p className="mt-0.5 inline-flex items-center gap-1 text-xs font-medium text-red-700">
                 <AlertTriangle width={11} height={11} /> {obra.n_alertas} alerta{obra.n_alertas === 1 ? "" : "s"}
@@ -404,6 +416,7 @@ export default function ObraDetalhe() {
         plano={{ inicio: obra.inicio_planeado, fim: obra.fim_planeado, orcamentoId: obra.orcamento_id }}
       />
       <ObraAvisoBancada obraId={obra.id} recarga={recarga} />
+      <ObraMargem obraId={obra.id} orgId={obra.organization_id} recarga={recarga} />
 
       {aviso && (
         <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
@@ -452,6 +465,7 @@ export default function ObraDetalhe() {
         {(
           [
             ["mapa", "Mapa de atividades"],
+            ["simular", "E se…?"],
             ["previsto", "Previsto vs real"],
             ["extras", `Trabalhos extra${extras.length ? ` (${extras.length})` : ""}`],
           ] as const
@@ -469,6 +483,19 @@ export default function ObraDetalhe() {
           </button>
         ))}
       </div>
+
+      {separador === "simular" && (
+        <ObraPrevisao
+          obraId={obra.id}
+          tarefas={tarefas}
+          modo="simulador"
+          fases={fases.map((f) => ({ id: f.id, ordem: f.ordem, nome: f.nome }))}
+          tarefasGantt={tarefasGantt}
+          nomes={nomes}
+          skills={skills ?? undefined}
+          recarga={recarga}
+        />
+      )}
 
       {separador === "mapa" && (
         <div className="space-y-3">
