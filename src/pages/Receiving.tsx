@@ -28,6 +28,14 @@
 //   - o cesto por confirmar fica em sessionStorage (por utilizador e empresa)
 //     e é reposto ao voltar ao ecrã; as entradas bloqueadas não, essas vivem
 //     nas pendentes do localStorage.
+//
+// Guia do fornecedor (fatia 2, 20261209100000): opcional, escolhida depois do
+// armazém. Fixa o fornecedor e o âmbito (POs da guia). O id da guia vai no
+// lookup, no dry-run e na receção, e fica gravado no cesto, em "Por enviar" e
+// em cada pendente: o reenvio de uma pendente usa SEMPRE a guia com que foi
+// enviada (o servidor recusa o mesmo request_id com outra guia). Trocar de
+// guia segue a regra do armazém/fornecedor (só com o cesto vazio). Avisos
+// "não consta da guia" / "acima do anunciado" exigem confirmação na entrada.
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
@@ -42,10 +50,17 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { usePermissions } from "@/hooks/usePermissions";
+import { DeliveryNotePicker } from "@/components/receiving/DeliveryNotePicker";
+import { DeliveryNoteDialog } from "@/components/receiving/DeliveryNoteDialog";
+import { DeliveryNoteDetail } from "@/components/receiving/DeliveryNoteDetail";
+import { NOTE_STATUS_LABEL, fetchDeliveryNote, type DeliveryNoteFull } from "@/components/receiving/deliveryNotes";
 import {
   AlertTriangle,
   CheckCircle2,
+  FileText,
   Info,
   Keyboard,
   KeyboardOff,
@@ -81,6 +96,8 @@ interface OpenLine {
   contract_order_number: string | null;
   contract_active: boolean;
   allocation_rank: number | null;
+  /** Só com guia: linha indicada nas linhas da guia (prioridade). */
+  in_delivery_note?: boolean;
 }
 
 interface Candidate {
@@ -93,6 +110,8 @@ interface Candidate {
   uom_code: string | null;
   units_per_uom: number;
   open_lines: OpenLine[];
+  /** Só com guia: anunciado / recebido pela guia (unidades de stock). */
+  delivery_note?: { announced: boolean; announced_units: number; received_units: number };
 }
 
 interface LookupResult {
@@ -101,7 +120,15 @@ interface LookupResult {
   can_receive: boolean;
   candidates: Candidate[];
   warnings: string[];
+  /** Só com guia. */
+  delivery_note?: { id: string; note_number: string; status: string; has_lines: boolean };
 }
+
+/** Avisos da guia que exigem confirmação explícita (decisão 1). */
+const NOTE_CHECK_LABEL: Record<string, string> = {
+  nao_consta_da_guia: "Não consta da guia",
+  acima_do_anunciado: "Acima do anunciado na guia",
+};
 
 interface AllocLine {
   purchase_order_item_id: string;
@@ -136,6 +163,10 @@ interface ReceiveResult {
   units_to_order_total: number;
   units_to_stock_total: number;
   warnings: string[];
+  /** Só com guia. */
+  delivery_note_id?: string;
+  delivery_note_number?: string;
+  delivery_note_checks?: string[];
 }
 
 // ── Estado do ecrã ──
@@ -178,6 +209,11 @@ interface BasketEntry {
    * um reenvio leva exatamente estes dados, não os da entrada.
    */
   sent?: PendingReceipt;
+  /**
+   * Avisos da guia confirmados pelo utilizador para esta pré-visualização
+   * (sig + avisos). Mudar quantidade/linha/guia muda a chave → volta a pedir.
+   */
+  ackKey?: string;
 }
 
 interface ReceivedEntry {
@@ -193,6 +229,9 @@ interface ReceivedEntry {
   contractNumbers: string[];
   replayed: boolean;
   at: Date;
+  /** Guia da receção (nº) e avisos da guia devolvidos pelo servidor. */
+  deliveryNoteNumber?: string | null;
+  noteChecks?: string[];
 }
 
 // Leituras recusadas (não encontradas, erro definitivo, sem linhas em aberto)
@@ -252,6 +291,8 @@ type StoredEntry = Pick<
 interface StoredBasket {
   warehouseId: string;
   supplierId: string;
+  /** Guia do fornecedor do cesto ("" = sem guia; cestos antigos não têm). */
+  deliveryNoteId?: string;
   entries: StoredEntry[];
 }
 
@@ -263,6 +304,9 @@ interface StoredBasket {
 interface UnsentEntry extends StoredEntry {
   warehouseId: string;
   supplierId: string;
+  /** Guia com que foi lida (null/ausente = sem guia). */
+  deliveryNoteId?: string | null;
+  deliveryNoteNumber?: string | null;
   at: string;
 }
 
@@ -276,6 +320,12 @@ interface PendingReceipt {
   orgName: string;
   warehouseId: string;
   supplierId: string;
+  /**
+   * Guia com que foi enviada (null/ausente = sem guia — inclui as pendentes
+   * de antes da fatia 2). O reenvio usa SEMPRE esta, nunca a do ecrã.
+   */
+  deliveryNoteId?: string | null;
+  deliveryNoteNumber?: string | null;
   productId: string;
   uomId: string | null;
   poItemId: string | null;
@@ -319,6 +369,12 @@ function fmtDate(s: string | null | undefined): string {
 }
 
 const entryKey = (productId: string, uomId: string | null) => `${productId}|${uomId ?? ""}`;
+/** Guia guardada ("" = sem guia; dados antigos ou inválidos = sem guia). */
+const dnOf = (x: { deliveryNoteId?: string | null } | null | undefined) =>
+  typeof x?.deliveryNoteId === "string" ? x.deliveryNoteId : "";
+/** Avisos da guia devolvidos pela pré-visualização. */
+const noteChecksOf = (r: Partial<ReceiveResult> | undefined) =>
+  Array.isArray(r?.delivery_note_checks) ? r.delivery_note_checks.filter((c): c is string => typeof c === "string") : [];
 const isLocked = (e: BasketEntry) => !!e.submitting || !!e.requestId;
 const isUncertain = (e: BasketEntry) => !!e.retryable && !!e.requestId;
 
@@ -423,6 +479,7 @@ function readSessionBasket(key: string): StoredBasket | null {
     return {
       warehouseId: typeof v.warehouseId === "string" ? v.warehouseId : "",
       supplierId: typeof v.supplierId === "string" ? v.supplierId : "",
+      deliveryNoteId: dnOf(v),
       entries: v.entries.filter(
         (e): e is StoredEntry => !!e && typeof e.id === "string" && typeof e.productId === "string" && Number(e.quantity) >= 1,
       ),
@@ -508,6 +565,7 @@ const freeEntry = (e: BasketEntry): BasketEntry => ({
   submitError: undefined,
   retryable: false,
   sent: undefined,
+  ackKey: undefined,
 });
 
 /** Não deixa o botão tirar o foco ao campo de leitura (o Enter do leitor ativaria o botão). */
@@ -605,7 +663,14 @@ function summarizeAllocation(a: Allocation, uomCode: string | null) {
 
 function receivedFromResult(
   requestId: string,
-  info: { name: string; sku: string | null; quantity: number; uomCode: string | null; unitsPerUom: number },
+  info: {
+    name: string;
+    sku: string | null;
+    quantity: number;
+    uomCode: string | null;
+    unitsPerUom: number;
+    deliveryNoteNumber?: string | null;
+  },
   result: Partial<ReceiveResult>,
   replayed: boolean,
 ): ReceivedEntry {
@@ -629,6 +694,8 @@ function receivedFromResult(
     contractNumbers: Array.from(contracts),
     replayed,
     at: new Date(),
+    deliveryNoteNumber: result.delivery_note_number ?? info.deliveryNoteNumber ?? null,
+    noteChecks: noteChecksOf(result),
   };
 }
 
@@ -648,6 +715,15 @@ export default function Receiving() {
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [warehouseId, setWarehouseId] = useState("");
   const [supplierId, setSupplierId] = useState("");
+  // Guia do fornecedor ("" = sem guia).
+  const { hasPermission } = usePermissions();
+  const canEditNotes = hasPermission("purchase_orders.receive");
+  const [deliveryNoteId, setDeliveryNoteId] = useState("");
+  const [noteInfo, setNoteInfo] = useState<DeliveryNoteFull | null>(null);
+  const [noteLoadError, setNoteLoadError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [createNoteOpen, setCreateNoteOpen] = useState(false);
+  const [detailNoteId, setDetailNoteId] = useState<string | null>(null);
 
   const [code, setCode] = useState("");
   const [queueSize, setQueueSize] = useState(0);
@@ -678,6 +754,11 @@ export default function Receiving() {
   warehouseRef.current = warehouseId;
   const supplierRef = useRef(supplierId);
   supplierRef.current = supplierId;
+  const deliveryNoteRef = useRef(deliveryNoteId);
+  deliveryNoteRef.current = deliveryNoteId;
+  const noteInfoRef = useRef<DeliveryNoteFull | null>(noteInfo);
+  noteInfoRef.current = noteInfo;
+  const noteSeqRef = useRef(0);
   const orgRef = useRef(orgId);
   orgRef.current = orgId;
   const orgNameRef = useRef(activeCompany?.name ?? "");
@@ -925,6 +1006,8 @@ export default function Receiving() {
         p_purchase_order_item_id: p.poItemId ?? undefined,
         p_code: p.code || undefined,
         p_dry_run: false,
+        // A guia DA PENDENTE (nunca a do ecrã): o servidor recusa o mesmo id com outra guia.
+        p_delivery_note_id: dnOf(p) || undefined,
       });
       if (error) return { err: error };
       return { result: data as unknown as ReceiveResult };
@@ -950,12 +1033,17 @@ export default function Receiving() {
     setAnnouncement("");
     setWarehouseId("");
     setSupplierId("");
+    setDeliveryNoteId("");
+    setPickerOpen(false);
+    setCreateNoteOpen(false);
+    setDetailNoteId(null);
     setWarehouses([]);
     setSuppliers([]);
     // Síncrono: o efeito que repõe o cesto corre a seguir, neste mesmo commit,
-    // e não pode ver o armazém/fornecedor da empresa anterior.
+    // e não pode ver o armazém/fornecedor/guia da empresa anterior.
     warehouseRef.current = "";
     supplierRef.current = "";
+    deliveryNoteRef.current = "";
     optionsRef.current = null;
     if (!orgId) {
       setOptionsLoading(false);
@@ -1021,13 +1109,14 @@ export default function Receiving() {
     writeSessionBasket(key, {
       warehouseId: warehouseRef.current,
       supplierId: supplierRef.current,
+      deliveryNoteId: deliveryNoteRef.current,
       entries: list.filter((e) => !isLocked(e)).map(toStoredEntry),
     });
   }, []);
 
   useEffect(() => {
     saveBasketNow(basket);
-  }, [basket, warehouseId, supplierId, userId, orgId, saveBasketNow]);
+  }, [basket, warehouseId, supplierId, deliveryNoteId, userId, orgId, saveBasketNow]);
 
   useEffect(() => {
     if (!userId || !orgId) return;
@@ -1056,6 +1145,10 @@ export default function Receiving() {
       warehouseRef.current = saved.warehouseId;
       setSupplierId(sup);
       supplierRef.current = sup;
+      // A guia volta com o cesto (o cartão mostra se entretanto foi fechada).
+      const dn = dnOf(saved);
+      setDeliveryNoteId(dn);
+      deliveryNoteRef.current = dn;
     }
     setAnnouncement(`Cesto reposto: ${entries.length} ${entries.length === 1 ? "entrada" : "entradas"}.`);
   }, [userId, orgId]);
@@ -1084,22 +1177,23 @@ export default function Receiving() {
    * outro armazém — vão para "Por enviar", sempre por read-modify-write.
    */
   const returnUnsent = useCallback(
-    (org: string, orgName: string, wh: string, sup: string, list: BasketEntry[]) => {
+    (org: string, orgName: string, wh: string, sup: string, dn: string, dnNumber: string | null, list: BasketEntry[]) => {
       if (list.length === 0) return;
       const freed = list.map(freeEntry);
-      if (mountedRef.current && orgRef.current === org && warehouseRef.current === wh) {
+      if (mountedRef.current && orgRef.current === org && warehouseRef.current === wh && deliveryNoteRef.current === dn) {
         setBasket((prev) => [...prev, ...freed.filter((x) => !prev.some((p) => p.id === x.id))]);
         return;
       }
       const uid = userIdRef.current;
-      const onOtherScreen = mountedRef.current && orgRef.current === org; // mesma empresa, outro armazém
+      const onOtherScreen = mountedRef.current && orgRef.current === org; // mesma empresa, outro armazém/guia
       if (uid && mountedRef.current && !onOtherScreen) {
         const key = basketStorageKey(uid, org);
         const saved = readSessionBasket(key);
-        if (!saved || saved.entries.length === 0 || saved.warehouseId === wh) {
+        if (!saved || saved.entries.length === 0 || (saved.warehouseId === wh && dnOf(saved) === dn)) {
           writeSessionBasket(key, {
             warehouseId: wh,
             supplierId: saved && saved.entries.length > 0 ? saved.supplierId : sup,
+            deliveryNoteId: dn,
             entries: [...(saved?.entries ?? []), ...freed.filter((x) => !saved?.entries.some((s) => s.id === x.id)).map(toStoredEntry)],
           });
           // Se a empresa já foi reposta nesta instância (A→B→A), volta a repor ao regressar.
@@ -1113,7 +1207,14 @@ export default function Receiving() {
       }
       if (uid) {
         const at = new Date().toISOString();
-        const items: UnsentEntry[] = freed.map((e) => ({ ...toStoredEntry(e), warehouseId: wh, supplierId: sup, at }));
+        const items: UnsentEntry[] = freed.map((e) => ({
+          ...toStoredEntry(e),
+          warehouseId: wh,
+          supplierId: sup,
+          deliveryNoteId: dn || null,
+          deliveryNoteNumber: dn ? dnNumber : null,
+          at,
+        }));
         const next = mutateUnsent(unsentStorageKey(uid, org), (cur) => [
           ...cur,
           ...items.filter((x) => !cur.some((c) => c.id === x.id)),
@@ -1136,34 +1237,73 @@ export default function Receiving() {
     [toast],
   );
 
-  /** "Por enviar" → cesto: só com o cesto vazio ou no mesmo armazém e fornecedor. */
-  const restoreUnsent = (id: string) => {
+  /**
+   * "Por enviar" → cesto: só com o cesto vazio ou no mesmo armazém, fornecedor
+   * e guia. Com o cesto vazio o ecrã passa para o armazém/fornecedor/guia da
+   * entrada; se a guia dela já não estiver aberta, a entrada (nada foi
+   * recebido) entra na guia escolhida agora no ecrã, ou sem guia.
+   */
+  const restoreUnsent = async (id: string) => {
     const uid = userIdRef.current;
     const org = orgRef.current;
     if (!uid || !org || submittingRef.current) return;
+    const epoch = orgEpochRef.current;
     const key = unsentStorageKey(uid, org);
     const item = readUnsent(key).find((x) => x.id === id) ?? unsent.find((x) => x.id === id);
     if (!item) return;
-    const empty = basketRef.current.length === 0;
-    if (!empty && (item.warehouseId !== warehouseRef.current || item.supplierId !== supplierRef.current)) {
+    const itemDn = dnOf(item);
+    const sameContext = () =>
+      item.warehouseId === warehouseRef.current && item.supplierId === supplierRef.current && itemDn === deliveryNoteRef.current;
+    if (basketRef.current.length > 0 && !sameContext()) {
       toast({
-        title: "Armazém ou fornecedor diferente",
-        description: "Confirma ou esvazia o cesto primeiro — esta entrada foi lida noutro armazém/fornecedor.",
+        title: "Armazém, fornecedor ou guia diferente",
+        description: "Confirma ou esvazia o cesto primeiro — esta entrada foi lida noutro armazém/fornecedor/guia.",
         variant: "destructive",
       });
       return;
     }
-    if (empty) {
+    if (basketRef.current.length === 0) {
       const opts = optionsRef.current && optionsRef.current.epoch === orgEpochRef.current ? optionsRef.current : null;
       if (opts && !opts.warehouses.some((w) => w.id === item.warehouseId)) {
         toast({ title: "Armazém indisponível", description: "O armazém desta entrada já não existe.", variant: "destructive" });
         return;
       }
-      const sup = !item.supplierId || !opts || opts.suppliers.some((s) => s.id === item.supplierId) ? item.supplierId : "";
-      setWarehouseId(item.warehouseId);
-      warehouseRef.current = item.warehouseId;
-      setSupplierId(sup);
-      supplierRef.current = sup;
+      let sup = !item.supplierId || !opts || opts.suppliers.some((s) => s.id === item.supplierId) ? item.supplierId : "";
+      let dn = itemDn;
+      if (itemDn && itemDn !== deliveryNoteRef.current) {
+        const r = await fetchDeliveryNote(itemDn);
+        if (!isCurrent(epoch, org) || submittingRef.current) return;
+        if (r.error && r.error.code !== "P0002") {
+          toast({
+            title: "Não foi possível verificar a guia",
+            description: "A entrada ficou em \"Por enviar\" — tenta de novo daqui a pouco.",
+            variant: "destructive",
+          });
+          return;
+        }
+        if (!r.note || r.note.status !== "open") {
+          dn = deliveryNoteRef.current;
+          sup = dn ? supplierRef.current : sup;
+          const cur = dn && noteInfoRef.current?.id === dn ? `a guia GR ${noteInfoRef.current.note_number}` : dn ? "a guia escolhida" : "sem guia";
+          toast({
+            title: `A guia ${item.deliveryNoteNumber ? `GR ${item.deliveryNoteNumber} ` : ""}já não está aberta`,
+            description: `A entrada voltou ao cesto com ${cur} (nada tinha sido recebido). Para outra guia, esvazia o cesto e escolhe-a primeiro.`,
+          });
+        }
+      }
+      // Durante a verificação o cesto pode ter recebido leituras.
+      if (basketRef.current.length > 0 && !sameContext()) {
+        toast({ title: "O cesto mudou entretanto", description: "Tenta de novo.", variant: "destructive" });
+        return;
+      }
+      if (basketRef.current.length === 0) {
+        setWarehouseId(item.warehouseId);
+        warehouseRef.current = item.warehouseId;
+        setSupplierId(sup);
+        supplierRef.current = sup;
+        setDeliveryNoteId(dn);
+        deliveryNoteRef.current = dn;
+      }
     }
     const entry = fromStoredEntry(item);
     setBasket((prev) => (prev.some((p) => p.id === entry.id) ? prev : [entry, ...prev]));
@@ -1190,9 +1330,142 @@ export default function Receiving() {
   };
 
   const handleSupplierChange = (id: string) => {
+    if (deliveryNoteRef.current) return; // a guia fixa o fornecedor
     setSupplierId(id);
     setPanel({ kind: "none" });
     setChoices([]);
+    focusScan();
+  };
+
+  // ── Guia do fornecedor ──
+  /** Recarrega o cartão da guia escolhida (estado, anunciado/recebido). */
+  const reloadNote = useCallback(async () => {
+    const id = deliveryNoteRef.current;
+    const seq = ++noteSeqRef.current;
+    if (!id) {
+      setNoteInfo(null);
+      setNoteLoadError(null);
+      return;
+    }
+    const r = await fetchDeliveryNote(id);
+    if (!mountedRef.current || seq !== noteSeqRef.current || deliveryNoteRef.current !== id) return;
+    if (r.note) {
+      setNoteInfo(r.note);
+      setNoteLoadError(null);
+    } else {
+      setNoteLoadError(
+        r.error?.code === "P0002"
+          ? "Guia não encontrada (pode ter sido apagada ou ser de outra empresa)."
+          : r.error?.code
+            ? r.error.message || "Não foi possível carregar a guia."
+            : "Sem ligação ao servidor — não foi possível carregar a guia.",
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    setNoteInfo((cur) => (cur && cur.id === deliveryNoteId ? cur : null));
+    setNoteLoadError(null);
+    void reloadNote();
+  }, [deliveryNoteId, reloadNote]);
+
+  /**
+   * Escolhe a guia (ou nenhuma). Mesma regra do armazém/fornecedor: só com o
+   * cesto vazio e sem receção em curso. A guia fixa o fornecedor.
+   */
+  const selectNote = (n: { id: string; supplier_id: string } | null) => {
+    if (basketRef.current.length > 0 || submittingRef.current) {
+      toast({
+        title: "Cesto por confirmar",
+        description: "Confirma ou esvazia o cesto para mudar de guia.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const id = n?.id ?? "";
+    setDeliveryNoteId(id);
+    deliveryNoteRef.current = id;
+    if (n) {
+      setSupplierId(n.supplier_id);
+      supplierRef.current = n.supplier_id;
+    }
+    setPanel({ kind: "none" });
+    setChoices([]);
+    setPickerOpen(false);
+    focusScan();
+  };
+
+  /** Guia alterada na ficha (gravada, fechada, reaberta…): atualiza o cartão e refaz as pré-visualizações. */
+  const handleNoteChanged = (n: DeliveryNoteFull) => {
+    if (n.id !== deliveryNoteRef.current) return;
+    const before = noteInfoRef.current;
+    setNoteInfo(n);
+    setNoteLoadError(null);
+    if (before && (before.updated_at !== n.updated_at || before.status !== n.status)) {
+      for (const x of basketRef.current) if (!isLocked(x)) recalcPreview(x.id, true);
+    }
+  };
+
+  /** Trabalho local ainda não recebido com uma guia (aviso ao fechar/cancelar). */
+  const localWorkFor = (noteId: string) => ({
+    basket: deliveryNoteRef.current === noteId ? basketRef.current.length : 0,
+    unsent: unsent.filter((u) => dnOf(u) === noteId).length,
+    pending: pending.filter((p) => dnOf(p) === noteId).length,
+  });
+
+  /**
+   * Guia fechada/cancelada a meio: as entradas livres do cesto passam para "Por
+   * enviar" (com a guia delas) para se poder escolher outra guia. A quantidade
+   * é fotografada uma vez e subtraída (como no Confirmar): uma leitura que
+   * chegue entretanto fica no cesto, nunca se perde.
+   */
+  const moveBasketToUnsent = () => {
+    const uid = userIdRef.current;
+    const org = orgRef.current;
+    if (!uid || !org || submittingRef.current) return;
+    let snap: BasketEntry[] | null = null;
+    flushSync(() => {
+      setBasket((prev) => {
+        if (!snap) snap = prev.filter((e) => !isLocked(e));
+        return prev;
+      });
+    });
+    const picked: BasketEntry[] = snap ?? [];
+    if (picked.length === 0) return;
+    const dn = deliveryNoteRef.current;
+    const dnNumber = dn && noteInfoRef.current?.id === dn ? noteInfoRef.current.note_number : null;
+    const at = new Date().toISOString();
+    const items: UnsentEntry[] = picked.map((e) => ({
+      ...toStoredEntry(e),
+      warehouseId: warehouseRef.current,
+      supplierId: supplierRef.current,
+      deliveryNoteId: dn || null,
+      deliveryNoteNumber: dnNumber,
+      at,
+    }));
+    const next = mutateUnsent(unsentStorageKey(uid, org), (cur) => [...cur, ...items.filter((x) => !cur.some((c) => c.id === x.id))]);
+    if (!next) {
+      toast({
+        title: "Não foi possível guardar",
+        description: "O armazenamento do browser não está disponível — as entradas ficaram no cesto.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setUnsent(next);
+    const qty = new Map(picked.map((e) => [e.id, e.quantity]));
+    setBasket((prev) =>
+      prev.flatMap((x) => {
+        const q = qty.get(x.id);
+        if (q === undefined || isLocked(x)) return [x];
+        const rest = x.quantity - q;
+        return rest > 0 ? [freeEntry({ ...x, id: newRequestId(), quantity: rest })] : [];
+      }),
+    );
+    toast({
+      title: "Cesto passado para \"Por enviar\"",
+      description: `${picked.length} ${picked.length === 1 ? "entrada" : "entradas"} — nada foi recebido. Escolhe outra guia e usa "Voltar ao cesto".`,
+    });
     focusScan();
   };
 
@@ -1210,7 +1483,8 @@ export default function Receiving() {
 
   // ── Pré-visualização (dry-run) com debounce ──
   const sigOf = useCallback(
-    (e: BasketEntry) => `${e.quantity}|${e.poItemId ?? ""}|${warehouseRef.current}|${supplierRef.current}`,
+    (e: BasketEntry) =>
+      `${e.quantity}|${e.poItemId ?? ""}|${warehouseRef.current}|${supplierRef.current}|${deliveryNoteRef.current}`,
     [],
   );
 
@@ -1252,9 +1526,14 @@ export default function Receiving() {
           p_purchase_order_item_id: entry.poItemId ?? undefined,
           p_code: entry.code || undefined,
           p_dry_run: true,
+          p_delivery_note_id: deliveryNoteRef.current || undefined,
         });
         if (!error) preview = { sig, status: "ok", result: data as unknown as ReceiveResult };
-        else preview = { sig, status: isTransient(error) ? "transient" : "error", error: errorMessage(error, "preview") };
+        else {
+          preview = { sig, status: isTransient(error) ? "transient" : "error", error: errorMessage(error, "preview") };
+          // Recusa com guia (p.ex. fechada a meio): o cartão da guia mostra o estado atual.
+          if (!isTransient(error) && deliveryNoteRef.current) void reloadNote();
+        }
       } catch (err) {
         preview = { sig, status: "transient", error: errorMessage({ message: String(err) }, "preview") };
       }
@@ -1284,7 +1563,7 @@ export default function Receiving() {
         previewRetries.current.delete(id);
       }
     },
-    [sigOf, updateEntry, recalcPreview, isCurrent],
+    [sigOf, updateEntry, recalcPreview, isCurrent, reloadNote],
   );
 
   useEffect(() => {
@@ -1329,7 +1608,7 @@ export default function Receiving() {
         previewRetries.current.delete(k);
       }
     }
-  }, [basket, warehouseId, supplierId, sigOf, runPreview]);
+  }, [basket, warehouseId, supplierId, deliveryNoteId, sigOf, runPreview]);
 
   useEffect(() => {
     const timers = previewTimers.current;
@@ -1426,17 +1705,23 @@ export default function Receiving() {
       const epoch = orgEpochRef.current;
       const wh = warehouseRef.current;
       const sup = supplierRef.current;
+      const dn = deliveryNoteRef.current;
       if (!wh) return { transient: "Escolhe primeiro o armazém." };
       try {
         const { data, error } = await supabase.rpc("rpc_receiving_lookup", {
           p_warehouse_id: wh,
           p_code: value,
           p_supplier_id: sup || undefined,
+          p_delivery_note_id: dn || undefined,
         });
         if (!isCurrent(epoch, org)) return null;
+        // A guia mudou durante a procura: o âmbito era outro — repete a leitura.
+        if (deliveryNoteRef.current !== dn) return { transient: "A guia mudou entretanto — a leitura vai ser repetida." };
         if (error) {
           if (isTransient(error)) return { transient: errorMessage(error, "lookup") };
           addRejected(value, errorMessage(error, "lookup"));
+          // Guia fechada/cancelada a meio: o cartão da guia passa a mostrá-lo.
+          if (dn) void reloadNote();
           return null;
         }
         const lookup = data as unknown as LookupResult;
@@ -1459,7 +1744,7 @@ export default function Receiving() {
         return { transient: errorMessage({ message: String(err) }, "lookup") };
       }
     },
-    [addCandidate, addRejected, isCurrent],
+    [addCandidate, addRejected, isCurrent, reloadNote],
   );
 
   // A fila e as novas tentativas referem-se mutuamente: a função de enfileirar
@@ -1778,6 +2063,19 @@ export default function Receiving() {
     const p = previewFor(e);
     return !p || p.status === "loading";
   };
+  /** Chave dos avisos da guia desta pré-visualização (null = sem avisos). */
+  const ackKeyOf = (e: BasketEntry): string | null => {
+    const p = previewFor(e);
+    if (!p || p.status !== "ok") return null;
+    const checks = noteChecksOf(p.result);
+    return checks.length > 0 ? `${p.sig}#${checks.join(",")}` : null;
+  };
+  /** Entrada livre com avisos da guia ainda não confirmados (decisão 1: aviso + confirmação). */
+  const needsAck = (e: BasketEntry) => {
+    if (isLocked(e)) return false;
+    const k = ackKeyOf(e);
+    return !!k && e.ackKey !== k;
+  };
 
   const pendingFromEntry = (
     e: BasketEntry,
@@ -1786,6 +2084,8 @@ export default function Receiving() {
     orgName: string,
     wh: string,
     sup: string,
+    dn: string,
+    dnNumber: string | null,
   ): PendingReceipt => ({
     requestId,
     entryId: e.id,
@@ -1793,6 +2093,8 @@ export default function Receiving() {
     orgName,
     warehouseId: wh,
     supplierId: sup,
+    deliveryNoteId: dn || null,
+    deliveryNoteNumber: dn ? dnNumber : null,
     productId: e.productId,
     uomId: e.uomId,
     poItemId: e.poItemId,
@@ -1854,6 +2156,8 @@ export default function Receiving() {
     if (submittingRef.current) return; // duplo clique / duplo toque
     const wh = warehouseRef.current;
     const sup = supplierRef.current;
+    const dn = deliveryNoteRef.current;
+    const dnNumber = dn && noteInfoRef.current?.id === dn ? noteInfoRef.current.note_number : null;
     const org = orgRef.current;
     const orgName = orgNameRef.current;
     const epoch = orgEpochRef.current;
@@ -1905,7 +2209,10 @@ export default function Receiving() {
         setBasket((prev) => {
           if (!snapped) {
             snapped = true;
-            const picked = prev.filter((e) => (!onlyId || e.id === onlyId) && qtyValid(e) && !e.submitting);
+            // Entradas livres com avisos da guia por confirmar não vão (o botão já está bloqueado).
+            const picked = prev.filter(
+              (e) => (!onlyId || e.id === onlyId) && qtyValid(e) && !e.submitting && !needsAck(e),
+            );
             for (const e of picked) ids.set(e.id, e.requestId ?? newRequestId());
             entries = picked.map((e) => ({ ...e, requestId: ids.get(e.id), submitting: true, submitError: undefined }));
           }
@@ -1938,7 +2245,7 @@ export default function Receiving() {
         const prevSentAt = prevPending ? sentAtMs(prevPending) : undefined;
         const p: PendingReceipt = prevPending
           ? { ...prevPending, entryId: e.id, state: "inflight", lastError: undefined, lastSentAt: nowIso }
-          : { ...pendingFromEntry(e, requestId, org, orgName, wh, sup), createdAt: nowIso, lastSentAt: nowIso };
+          : { ...pendingFromEntry(e, requestId, org, orgName, wh, sup, dn, dnNumber), createdAt: nowIso, lastSentAt: nowIso };
         upsertPending(p);
         inflightRef.current.add(requestId);
         let result: Partial<ReceiveResult> | undefined;
@@ -2036,10 +2343,12 @@ export default function Receiving() {
       // Por enviar quando o ciclo parou: as livres voltam ao cesto dessa empresa;
       // as incertas já estão nas pendentes (localStorage) com o mesmo id.
       const unsent = stopAt >= 0 ? entries.slice(stopAt).filter((x) => !isUncertain(x)) : [];
-      if (!isCurrent(epoch, org)) returnUnsent(org, orgName, wh, sup, [...refusedAway, ...unsent]);
+      if (!isCurrent(epoch, org)) returnUnsent(org, orgName, wh, sup, dn, dnNumber, [...refusedAway, ...unsent]);
     }
 
     if (!isCurrent(epoch, org)) return;
+    // Recebido pela guia mudou (ou foi recusada — p.ex. guia fechada a meio).
+    if (dn && (ok > 0 || failed > 0)) void reloadNote();
     if (ok > 0) {
       toast({
         title: ok === 1 ? "Receção registada" : `${ok} receções registadas`,
@@ -2075,6 +2384,34 @@ export default function Receiving() {
       else next.delete(requestId);
       return next;
     });
+
+  /** Pendente recusada (provado: nada recebido) → "Por enviar", sem request_id. */
+  const keepRejectedAsUnsent = (p: PendingReceipt): boolean => {
+    const uid = userIdRef.current;
+    if (!uid) return false;
+    const item: UnsentEntry = {
+      id: newRequestId(),
+      key: entryKey(p.productId, p.uomId),
+      productId: p.productId,
+      name: p.name,
+      sku: p.sku,
+      uomId: p.uomId,
+      uomCode: p.uomCode,
+      unitsPerUom: Number(p.unitsPerUom) || 1,
+      code: p.code,
+      openLines: [],
+      quantity: p.quantity,
+      poItemId: p.poItemId,
+      warehouseId: p.warehouseId,
+      supplierId: p.supplierId,
+      deliveryNoteId: dnOf(p) || null,
+      deliveryNoteNumber: p.deliveryNoteNumber ?? null,
+      at: new Date().toISOString(),
+    };
+    const next = mutateUnsent(unsentStorageKey(uid, p.orgId), (cur) => [...cur, item]);
+    if (next && mountedRef.current && orgRef.current === p.orgId) setUnsent(next);
+    return !!next;
+  };
 
   const resendPending = async (requestId: string) => {
     const p = pendingRef.current.find((x) => x.requestId === requestId);
@@ -2124,8 +2461,16 @@ export default function Receiving() {
       patchPending(requestId, { state: "unknown", lastError: uncertainMessage(err) });
     } else {
       removePending(requestId);
-      toast({ title: "Receção recusada", description: `${p.label}: ${errorMessage(err, "receive")}`, variant: "destructive" });
+      // Recusa provada (nada foi recebido). Com guia, o motivo costuma ser a guia
+      // fechada/cancelada: a leitura fica em "Por enviar" para não se perder.
+      const kept = dnOf(p) ? keepRejectedAsUnsent(p) : false;
+      toast({
+        title: "Receção recusada",
+        description: `${p.label}: ${errorMessage(err, "receive")}${kept ? ' Ficou em "Por enviar" — nada foi recebido.' : ""}`,
+        variant: "destructive",
+      });
     }
+    if (here && dnOf(p) && dnOf(p) === deliveryNoteRef.current) void reloadNote();
     if (here) focusScan();
   };
 
@@ -2219,9 +2564,13 @@ export default function Receiving() {
     basket.length === 0 ||
     basket.some((e) => !qtyValid(e) && !isLocked(e)) ||
     basket.some(hasPreviewError) ||
-    basket.some(isPreviewPending);
+    basket.some(isPreviewPending) ||
+    basket.some(needsAck);
+  const ackPendingCount = basket.filter(needsAck).length;
   const confirmLabel = confirming
     ? "A receber…"
+    : ackPendingCount > 0
+      ? "Confirma os avisos da guia"
     : uncertainCount > 0 && freshCount > 0
       ? `Confirmar (inclui ${uncertainCount} a repetir)`
       : uncertainCount > 0
@@ -2276,6 +2625,7 @@ export default function Receiving() {
                   <p className="break-words font-medium">{p.label}</p>
                   <p className="text-xs text-muted-foreground">
                     Enviada às {timeFmt.format(new Date(p.createdAt))}
+                    {dnOf(p) && ` · guia ${p.deliveryNoteNumber ? `GR ${p.deliveryNoteNumber}` : "do fornecedor"}`}
                     {!here && ` · empresa «${p.orgName}»`}
                   </p>
                   {p.lastError && <p className="break-words text-destructive">{p.lastError}</p>}
@@ -2323,9 +2673,9 @@ export default function Receiving() {
         </Card>
       )}
 
-      {/* Armazém e fornecedor */}
+      {/* Armazém, guia do fornecedor e fornecedor */}
       <Card>
-        <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
+        <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="min-w-0 space-y-1.5">
             <Label htmlFor="receiving-warehouse">Armazém *</Label>
             <NativeSelect
@@ -2339,23 +2689,86 @@ export default function Receiving() {
             />
           </div>
           <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="receiving-supplier">Fornecedor (opcional)</Label>
+            <Label htmlFor="receiving-note">Guia do fornecedor (opcional)</Label>
+            <Button
+              id="receiving-note"
+              type="button"
+              variant="outline"
+              className="h-12 w-full justify-start px-3 text-base font-normal"
+              disabled={selectorsLocked || optionsLoading}
+              onClick={() => setPickerOpen(true)}
+              aria-haspopup="dialog"
+            >
+              <FileText className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 truncate">
+                {deliveryNoteId
+                  ? noteInfo?.id === deliveryNoteId
+                    ? `GR ${noteInfo.note_number}`
+                    : "Guia escolhida"
+                  : "Sem guia"}
+              </span>
+            </Button>
+          </div>
+          <div className="min-w-0 space-y-1.5 sm:col-span-2 lg:col-span-1">
+            <Label htmlFor="receiving-supplier">{deliveryNoteId ? "Fornecedor (da guia)" : "Fornecedor (opcional)"}</Label>
             <NativeSelect
               id="receiving-supplier"
               className="h-12 text-base"
               value={supplierId}
               onValueChange={handleSupplierChange}
-              disabled={selectorsLocked || optionsLoading}
+              disabled={selectorsLocked || optionsLoading || !!deliveryNoteId}
               options={[{ value: "", label: "Todos os fornecedores" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
             />
           </div>
           {selectorsLocked && (
-            <p className="text-sm text-muted-foreground sm:col-span-2">
-              Confirma ou esvazia o cesto para mudar de armazém ou de fornecedor.
+            <p className="text-sm text-muted-foreground sm:col-span-2 lg:col-span-3">
+              Confirma ou esvazia o cesto para mudar de armazém, guia ou fornecedor.
             </p>
           )}
         </CardContent>
       </Card>
+
+      {/* Guia fechada/cancelada a meio (ou não encontrada): nada se perde */}
+      {deliveryNoteId && ((noteInfo?.id === deliveryNoteId && noteInfo.status !== "open") || noteLoadError) && (
+        <Notice tone={noteLoadError ? "warning" : "error"}>
+          <p className="font-medium">
+            {noteLoadError
+              ? noteLoadError
+              : `A guia GR ${noteInfo?.note_number ?? ""} está ${NOTE_STATUS_LABEL[noteInfo?.status ?? "closed"]} — as leituras e receções com esta guia são recusadas.`}
+          </p>
+          <p className="mt-1 text-sm">
+            O cesto, "Por enviar" e as receções por confirmar ficam guardados. Reabre a guia em "Ver guia", ou passa o cesto para
+            "Por enviar" e escolhe outra guia.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11"
+              onMouseDown={keepScanFocus}
+              onClick={() => setDetailNoteId(deliveryNoteId)}
+            >
+              Ver guia
+            </Button>
+            {noteLoadError && (
+              <Button type="button" variant="outline" className="h-11" onMouseDown={keepScanFocus} onClick={() => void reloadNote()}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Tentar de novo
+              </Button>
+            )}
+            {basket.some((e) => !isLocked(e)) && (
+              <Button type="button" variant="outline" className="h-11" disabled={confirming} onMouseDown={keepScanFocus} onClick={moveBasketToUnsent}>
+                Passar o cesto para "Por enviar"
+              </Button>
+            )}
+            {basket.length === 0 && !confirming && (
+              <Button type="button" variant="outline" className="h-11" onMouseDown={keepScanFocus} onClick={() => setPickerOpen(true)}>
+                Escolher outra guia
+              </Button>
+            )}
+          </div>
+        </Notice>
+      )}
 
       {/* Campo de leitura — fixo no topo da área de conteúdo, acima do teclado virtual */}
       <div className="sticky top-0 z-20 -mx-2 rounded-b-lg bg-background/95 px-2 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -2402,6 +2815,46 @@ export default function Receiving() {
             <span className="sr-only sm:not-sr-only">Procurar</span>
           </Button>
         </form>
+        {/* Cartão compacto da guia (junto ao campo de leitura) */}
+        {deliveryNoteId && (
+          <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-sm">
+            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            <p className="min-w-0 flex-1 truncate">
+              {noteInfo?.id === deliveryNoteId ? (
+                <>
+                  <span className="font-medium">GR {noteInfo.note_number}</span>
+                  {noteInfo.status !== "open" && (
+                    <span className="font-medium text-destructive"> ({NOTE_STATUS_LABEL[noteInfo.status]})</span>
+                  )}
+                  {" · "}
+                  {noteInfo.supplier_name ?? "Fornecedor"}
+                  {" · "}
+                  {noteInfo.purchase_orders.length > 0
+                    ? `${noteInfo.purchase_orders.length} ${noteInfo.purchase_orders.length === 1 ? "PO" : "POs"}`
+                    : "todas as POs"}
+                  {noteInfo.summary &&
+                    (noteInfo.summary.has_lines
+                      ? ` · anunciado ${fmt(noteInfo.summary.totals.announced_units)} / recebido ${fmt(noteInfo.summary.totals.received_units)}`
+                      : ` · recebido ${fmt(noteInfo.summary.totals.received_units)}`)}
+                </>
+              ) : noteLoadError ? (
+                <span className="text-destructive">{noteLoadError}</span>
+              ) : (
+                <span className="text-muted-foreground">A carregar guia…</span>
+              )}
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 shrink-0 px-2"
+              onMouseDown={keepScanFocus}
+              onClick={() => setDetailNoteId(deliveryNoteId)}
+            >
+              Ver guia
+            </Button>
+          </div>
+        )}
         {/* Sempre montada: os leitores de ecrã só anunciam mudanças numa região que já existia. */}
         <p className={cn("text-sm text-muted-foreground", lookupBusy && "mt-1")} aria-live="polite">
           {lookupBusy ? `A procurar…${queueSize > 1 ? ` (${queueSize} leituras em fila)` : ""}` : ""}
@@ -2520,7 +2973,13 @@ export default function Receiving() {
                       {u.name} — {fmt(u.quantity)} {unitLabel(u.uomCode, u.unitsPerUom)}
                     </p>
                     <p className="break-words text-xs text-muted-foreground">
-                      {[whName ? `Armazém ${whName}` : null, supName ? `fornecedor ${supName}` : null].filter(Boolean).join(" · ")}
+                      {[
+                        whName ? `Armazém ${whName}` : null,
+                        dnOf(u) ? `guia ${u.deliveryNoteNumber ? `GR ${u.deliveryNoteNumber}` : "do fornecedor"}` : null,
+                        supName ? `fornecedor ${supName}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </p>
                   </div>
                   <Button
@@ -2529,7 +2988,7 @@ export default function Receiving() {
                     className="h-11 shrink-0"
                     disabled={confirming}
                     onMouseDown={keepScanFocus}
-                    onClick={() => restoreUnsent(u.id)}
+                    onClick={() => void restoreUnsent(u.id)}
                   >
                     <RotateCcw className="mr-2 h-4 w-4" />
                     Voltar ao cesto
@@ -2588,11 +3047,18 @@ export default function Receiving() {
               const sentRec = e.requestId
                 ? (pending.find((x) => x.requestId === e.requestId) ?? (e.sent?.requestId === e.requestId ? e.sent : undefined))
                 : undefined;
+              const ackKey = isLocked(e) ? null : ackKeyOf(e);
               return (
               <BasketCard
                 key={e.id}
                 entry={e}
                 preview={previewFor(e)}
+                noteChecks={ackKey ? noteChecksOf(previewFor(e)?.result) : []}
+                acked={!!ackKey && e.ackKey === ackKey}
+                onAck={(v) => {
+                  editEntry(e.id, { ackKey: v && ackKey ? ackKey : undefined });
+                  focusScan();
+                }}
                 busy={confirming}
                 discardBusy={!!e.requestId && pendingBusy.has(e.requestId)}
                 discardWaitMs={sentRec ? DISCARD_MIN_AGE_MS - (nowMs - sentAtMs(sentRec)) : Number.POSITIVE_INFINITY}
@@ -2655,8 +3121,18 @@ export default function Receiving() {
                     {fmt(r.unitsToOrder)} un para EC{r.contractNumbers.length > 0 && ` (${r.contractNumbers.join(", ")})`} ·{" "}
                     {fmt(r.unitsToStock)} un para stock
                   </p>
-                  {r.orderNumbers.length > 0 && (
-                    <p className="break-words text-xs text-muted-foreground">{r.orderNumbers.join(", ")}</p>
+                  {(r.orderNumbers.length > 0 || r.deliveryNoteNumber) && (
+                    <p className="break-words text-xs text-muted-foreground">
+                      {[r.orderNumbers.join(", "), r.deliveryNoteNumber ? `guia GR ${r.deliveryNoteNumber}` : null]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                  )}
+                  {r.noteChecks && r.noteChecks.length > 0 && (
+                    <p className="mt-1 flex items-start gap-1 text-sm text-amber-700 dark:text-amber-400">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                      <span>Recebido com aviso: {r.noteChecks.map((c) => NOTE_CHECK_LABEL[c] ?? c).join("; ")}.</span>
+                    </p>
                   )}
                   {r.replayed && (
                     <p className="mt-1 flex items-start gap-1 text-sm font-medium text-amber-700 dark:text-amber-400">
@@ -2682,6 +3158,8 @@ export default function Receiving() {
             {basket.length === 0
               ? "Cesto vazio"
               : `${basket.length} ${basket.length === 1 ? "entrada" : "entradas"} · ${fmt(basketUnits)} un`}
+            {ackPendingCount > 0 &&
+              ` · ${ackPendingCount === 1 ? "1 aviso da guia" : `${ackPendingCount} avisos da guia`} por confirmar`}
           </p>
           <Button
             type="button"
@@ -2695,6 +3173,68 @@ export default function Receiving() {
           </Button>
         </div>
       </div>
+
+      {/* Guia do fornecedor: escolher, criar, ver (componentes em src/components/receiving) */}
+      <DeliveryNotePicker
+        open={pickerOpen}
+        onOpenChange={(o) => {
+          setPickerOpen(o);
+          if (!o) focusScan();
+        }}
+        orgId={orgId}
+        currentId={deliveryNoteId}
+        canCreate={canEditNotes}
+        onSelect={(n) => selectNote(n)}
+        onCreate={() => {
+          setPickerOpen(false);
+          setCreateNoteOpen(true);
+        }}
+      />
+      {canEditNotes && (
+        <DeliveryNoteDialog
+          open={createNoteOpen}
+          onOpenChange={(o) => {
+            setCreateNoteOpen(o);
+            if (!o) focusScan();
+          }}
+          orgId={orgId}
+          suppliers={suppliers}
+          defaultSupplierId={supplierId || undefined}
+          onSaved={(n) => {
+            if (n.status !== "open") return;
+            if (basketRef.current.length === 0 && !submittingRef.current) {
+              selectNote(n);
+              setNoteInfo(n);
+            }
+            toast({ title: `Guia GR ${n.note_number} registada`, description: n.supplier_name ?? undefined });
+          }}
+          onOpenExisting={(id) => setDetailNoteId(id)}
+        />
+      )}
+      <DeliveryNoteDetail
+        open={!!detailNoteId}
+        onOpenChange={(o) => {
+          if (!o) {
+            setDetailNoteId(null);
+            focusScan();
+          }
+        }}
+        noteId={detailNoteId}
+        orgId={orgId}
+        canEdit={canEditNotes}
+        localWork={localWorkFor}
+        onChanged={handleNoteChanged}
+        onOpenOther={(id) => setDetailNoteId(id)}
+        onUse={
+          detailNoteId && detailNoteId !== deliveryNoteId && basket.length === 0 && !confirming
+            ? (n) => {
+                selectNote(n);
+                setNoteInfo(n);
+                setDetailNoteId(null);
+              }
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -2785,6 +3325,16 @@ function ScanPanelView({ panel, onDismiss }: { panel: ScanPanel; onDismiss: () =
             No cesto: {fmt(panel.quantity)} {unitLabel(c.uom_code, c.units_per_uom)}
           </Notice>
         )}
+        {c.delivery_note && (
+          <p className="text-sm text-muted-foreground">
+            Guia:{" "}
+            {c.delivery_note.announced
+              ? `anunciado ${fmt(c.delivery_note.announced_units)} un · recebido ${fmt(c.delivery_note.received_units)} un`
+              : panel.lookup.delivery_note?.has_lines
+                ? `não anunciado · recebido ${fmt(c.delivery_note.received_units)} un`
+                : `recebido ${fmt(c.delivery_note.received_units)} un`}
+          </p>
+        )}
         {panel.kind === "no_lines" && (
           <Notice tone="warning">Sem encomenda a fornecedor em aberto para este produto nesta unidade — não foi para o cesto.</Notice>
         )}
@@ -2826,6 +3376,7 @@ function OpenLineSummary({ line, uomCode }: { line: OpenLine; uomCode: string | 
           </Badge>
         )}
         {!line.same_unit && <Badge variant="outline">outra unidade</Badge>}
+        {line.in_delivery_note && <Badge variant="secondary">na guia</Badge>}
       </div>
       <p className="text-muted-foreground">
         Em aberto {fmt(line.open_quantity)} {line.units_per_uom > 1 ? `× ${fmt(line.units_per_uom)} un` : uomCode || "un."}
@@ -2841,6 +3392,9 @@ function OpenLineSummary({ line, uomCode }: { line: OpenLine; uomCode: string | 
 function BasketCard({
   entry,
   preview,
+  noteChecks,
+  acked,
+  onAck,
   busy,
   discardBusy,
   discardWaitMs,
@@ -2860,6 +3414,10 @@ function BasketCard({
 }: {
   entry: BasketEntry;
   preview: Preview | undefined;
+  /** Avisos da guia desta pré-visualização (exigem confirmação explícita). */
+  noteChecks: string[];
+  acked: boolean;
+  onAck: (v: boolean) => void;
   busy: boolean;
   discardBusy: boolean;
   /** Tempo até o "Descartar" ficar disponível (≤ 0 = já pode). */
@@ -2886,6 +3444,7 @@ function BasketCard({
   const openTotal = lines.reduce((s, l) => s + Number(l.open_quantity), 0);
   const qtyId = `qty-${entry.id}`;
   const poId = `po-${entry.id}`;
+  const ackId = `ack-${entry.id}`;
 
   return (
     <Card className={cn(entry.submitError && "border-destructive")}>
@@ -2995,6 +3554,7 @@ function BasketCard({
                     value: l.purchase_order_item_id,
                     label: [
                       l.order_number ?? "PO",
+                      l.in_delivery_note ? "na guia" : null,
                       !l.confirmed ? "não confirmada" : null,
                       l.contract_order_number ? `${l.contract_order_number}${l.contract_active ? "" : " (inativa)"}` : "stock",
                       `em aberto ${fmt(l.open_quantity)}`,
@@ -3016,6 +3576,22 @@ function BasketCard({
         {/* Pré-visualização — sem região aria-live por cartão: os anúncios vão
             todos pela região global (announcement), para não se sobreporem. */}
         <PreviewView entry={entry} preview={preview} onRecalc={onRecalc} />
+
+        {/* Avisos da guia (não consta / acima do anunciado): confirmação explícita */}
+        {noteChecks.length > 0 && !locked && (
+          <div className="flex items-start gap-3 rounded-md border border-amber-500/60 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+            <Checkbox
+              id={ackId}
+              className="mt-0.5 h-5 w-5 border-amber-700 dark:border-amber-400"
+              checked={acked}
+              onCheckedChange={(c) => onAck(c === true)}
+            />
+            <Label htmlFor={ackId} className="min-w-0 flex-1 cursor-pointer font-normal leading-snug">
+              <span className="font-medium">{noteChecks.map((c) => NOTE_CHECK_LABEL[c] ?? c).join(" · ")}.</span>{" "}
+              Confirmo que recebo mesmo assim.
+            </Label>
+          </div>
+        )}
 
         {/* Erro do pedido real (anunciado pela região global no fim do Confirmar) */}
         {entry.submitError && (

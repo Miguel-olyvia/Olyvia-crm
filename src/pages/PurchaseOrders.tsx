@@ -392,7 +392,14 @@ const PurchaseOrders = () => {
   // PO aberta no diálogo de detalhe — respostas de outra PO são descartadas.
   const openOrderIdRef = useRef<string | null>(null);
   const [orderReceiptItems, setOrderReceiptItems] = useState<{ orderId: string; items: PurchaseOrderItemWithReceipt[] } | null>(null);
-  const [orderReceipts, setOrderReceipts] = useState<{ orderId: string; rows: PurchaseOrderReceiptRow[]; warehouseNames: Record<string, string> } | null>(null);
+  // deliveryNotes: guias do fornecedor (Fase 2, fatia 2) das receções desta PO e
+  // as ligadas à PO (supplier_delivery_note_orders), por id → nº e estado.
+  const [orderReceipts, setOrderReceipts] = useState<{
+    orderId: string;
+    rows: PurchaseOrderReceiptRow[];
+    warehouseNames: Record<string, string>;
+    deliveryNotes: Record<string, { number: string; status: string }>;
+  } | null>(null);
   const [receiptHistoryOpen, setReceiptHistoryOpen] = useState(false);
   // Reverter receção (por linha) — para encomendas marcadas como recebidas por
   // engano. Liga a rpc_revert_purchase_order_receipt: as linhas escolhidas
@@ -1164,21 +1171,40 @@ const PurchaseOrders = () => {
   // se falhar, a secção simplesmente não aparece. Nomes dos armazéns por id
   // (inclui armazéns já apagados, para o histórico continuar legível).
   const loadOrderReceipts = async (orderId: string) => {
-    const { data, error } = await supabase
-      .from("purchase_order_receipts")
-      .select("*")
-      .eq("purchase_order_id", orderId)
-      .order("received_at", { ascending: false });
+    const [{ data, error }, linkedRes] = await Promise.all([
+      supabase
+        .from("purchase_order_receipts")
+        .select("*")
+        .eq("purchase_order_id", orderId)
+        .order("received_at", { ascending: false }),
+      // Guias do fornecedor ligadas a esta PO (best-effort; RLS: view ou receive).
+      supabase.from("supplier_delivery_note_orders").select("delivery_note_id").eq("purchase_order_id", orderId),
+    ]);
     if (error || !data || openOrderIdRef.current !== orderId) return;
     const warehouseIds = Array.from(new Set(data.map((r) => r.warehouse_id).filter((id): id is string => !!id)));
+    const linkedNoteIds = Array.from(new Set((linkedRes.data || []).map((r) => r.delivery_note_id)));
+    const noteIds = Array.from(new Set([
+      ...data.map((r) => r.delivery_note_id).filter((id): id is string => !!id),
+      ...linkedNoteIds,
+    ]));
     const warehouseNames: Record<string, string> = {};
-    if (warehouseIds.length > 0) {
-      const { data: whs } = await supabase.from("warehouses").select("id, name").in("id", warehouseIds);
-      (whs || []).forEach((w) => { warehouseNames[w.id] = w.name; });
-    }
+    const deliveryNotes: Record<string, { number: string; status: string }> = {};
+    await Promise.all([
+      (async () => {
+        if (warehouseIds.length === 0) return;
+        const { data: whs } = await supabase.from("warehouses").select("id, name").in("id", warehouseIds);
+        (whs || []).forEach((w) => { warehouseNames[w.id] = w.name; });
+      })(),
+      // Nº e estado das guias numa só consulta (em lote).
+      (async () => {
+        if (noteIds.length === 0) return;
+        const { data: notes } = await supabase.from("supplier_delivery_notes").select("id, note_number, status").in("id", noteIds);
+        (notes || []).forEach((n) => { deliveryNotes[n.id] = { number: n.note_number, status: n.status }; });
+      })(),
+    ]);
     // Entretanto pode ter sido aberta outra PO — descarta a resposta.
     if (openOrderIdRef.current !== orderId) return;
-    setOrderReceipts({ orderId, rows: data, warehouseNames });
+    setOrderReceipts({ orderId, rows: data, warehouseNames, deliveryNotes });
   };
 
   const handleEdit = async (order: PurchaseOrder) => {
@@ -3829,6 +3855,18 @@ const PurchaseOrders = () => {
                     );
                   })()}
 
+                  {/* Guias do fornecedor desta PO (ligadas à guia ou com receções
+                      por ela) — só de leitura (Fase 2, fatia 2). */}
+                  {editingId && orderReceipts?.orderId === editingId && Object.keys(orderReceipts.deliveryNotes).length > 0 && (
+                    <p className="border-t pt-4 text-sm">
+                      <span className="font-medium">Guias: </span>
+                      {Object.entries(orderReceipts.deliveryNotes)
+                        .sort(([, a], [, b]) => a.number.localeCompare(b.number, "pt-PT", { numeric: true }))
+                        .map(([, n]) => `GR ${n.number} (${n.status === "open" ? "aberta" : n.status === "closed" ? "fechada" : "cancelada"})`)
+                        .join(", ")}
+                    </p>
+                  )}
+
                   {/* Histórico de receções (purchase_order_receipts, 20261206130000) —
                       só de leitura, colapsável. Receções anteriores à tabela não
                       têm registo aqui. */}
@@ -3838,6 +3876,7 @@ const PurchaseOrders = () => {
                   ) && (() => {
                     const rows = orderReceipts?.orderId === editingId ? orderReceipts.rows : [];
                     const warehouseNames = orderReceipts?.orderId === editingId ? orderReceipts.warehouseNames : {};
+                    const deliveryNotes = orderReceipts?.orderId === editingId ? orderReceipts.deliveryNotes : {};
                     const itemsById = new Map(
                       (orderReceiptItems?.orderId === editingId ? orderReceiptItems.items : []).map((i) => [i.id, i]),
                     );
@@ -3871,6 +3910,7 @@ const PurchaseOrders = () => {
                                     <TableHead className="text-right">Para EC</TableHead>
                                     <TableHead className="text-right">Para stock</TableHead>
                                     <TableHead>Armazém</TableHead>
+                                    <TableHead>Guia</TableHead>
                                     <TableHead>Estado</TableHead>
                                   </TableRow>
                                 </TableHeader>
@@ -3900,6 +3940,9 @@ const PurchaseOrders = () => {
                                           {Number(r.units_to_stock) > 0 ? `${formatQty(r.units_to_stock)} ${baseCode}` : "—"}
                                         </TableCell>
                                         <TableCell className="whitespace-nowrap">{r.warehouse_id ? warehouseNames[r.warehouse_id] || "—" : "—"}</TableCell>
+                                        <TableCell className="whitespace-nowrap">
+                                          {r.delivery_note_id ? (deliveryNotes[r.delivery_note_id] ? `GR ${deliveryNotes[r.delivery_note_id].number}` : "Guia") : "—"}
+                                        </TableCell>
                                         <TableCell>
                                           {r.reverted_at ? (
                                             <span className="text-xs">
