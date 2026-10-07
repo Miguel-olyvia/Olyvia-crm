@@ -26,7 +26,10 @@ export type F31CrmRpc =
   | "rpc_catalog_link_suggestions"
   | "rpc_catalog_link"
   | "rpc_catalog_unlink"
-  | "rpc_catalog_dismiss";
+  | "rpc_catalog_dismiss"
+  // F3.4b — aprovação de preços do fornecedor.
+  | "rpc_price_changes_list"
+  | "rpc_price_changes_decide";
 
 /** Chama uma RPC do CRM da F3.1 (args tipados) e dá forma ao JSON devolvido. */
 export async function callRpc<T, K extends F31CrmRpc = F31CrmRpc>(
@@ -111,6 +114,12 @@ export interface CrmCatalogList {
   offset: number;
   can_link: boolean;
   can_view_pricing: boolean;
+  /**
+   * F3.4b: products.manage_prices. "Usar o preço do catálogo" muda o preço da
+   * ligação e o custo do produto: sem esta permissão rpc_catalog_link recusa
+   * (hint no_price_permission). Ausente = resposta antiga → tratar como false.
+   */
+  can_manage_prices?: boolean;
   items: CrmCatalogItem[];
 }
 
@@ -167,6 +176,46 @@ export interface CatalogLinkResult {
   is_preferred?: boolean;
   codes: { id: string; kind: string; code: string }[];
   warnings: string[];
+  // F3.4b — o que a ligação fez aos preços.
+  item_supplier_price_updated?: boolean;
+  product_cost_updated?: boolean;
+  product_cost_rows?: number;
+  product_cost_reason?: string | null;
+  product_cost_message?: string | null;
+  new_unit_cost?: number | null;
+  units_per_purchase_uom?: number | null;
+}
+
+/** Hint do rpc_catalog_link quando falta products.manage_prices para usar o preço do catálogo. */
+export const NO_PRICE_PERMISSION_HINT = "no_price_permission";
+
+export const isNoPricePermission = (err: RpcError | null | undefined): boolean =>
+  !!err && err.hint === NO_PRICE_PERMISSION_HINT;
+
+/**
+ * Frase sobre os preços depois de ligar (para o toast). null = nada a dizer
+ * (preço do catálogo não usado, ou já estava ligado).
+ */
+export function describeLinkPriceOutcome(result: CatalogLinkResult, currency?: string | null): string | null {
+  if (result.already_linked) return null;
+  if (!result.item_supplier_price_updated && !result.product_cost_updated) return null;
+  if (result.product_cost_updated) {
+    return result.new_unit_cost != null
+      ? `Preço do fornecedor e custo do produto atualizados (custo ${formatMoney(result.new_unit_cost, currency ?? null)}).`
+      : "Preço do fornecedor e custo do produto atualizados.";
+  }
+  return costMessageSentence(result.product_cost_message) ?? "Preço do fornecedor atualizado; o custo do produto não mudou.";
+}
+
+/**
+ * Mensagem do servidor quando o custo do produto não mudou, em frase. As que
+ * não dizem que o preço do fornecedor mudou levam esse prefixo.
+ */
+export function costMessageSentence(message: string | null | undefined): string | null {
+  const m = (message ?? "").trim();
+  if (!m) return null;
+  const sentence = /[.!?]$/.test(m) ? m : `${m}.`;
+  return /preço (deste|do) fornecedor/i.test(m) ? sentence : `Preço do fornecedor atualizado. ${sentence}`;
 }
 
 /** Linha item_suppliers (produto, fornecedor) ainda sem artigo do catálogo. */

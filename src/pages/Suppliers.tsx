@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { z } from "zod";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
@@ -78,6 +78,11 @@ const Suppliers = () => {
   // Ficha em edição: o separador Catálogo usa a empresa/nome gravados.
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
   const [formTab, setFormTab] = useState<"dados" | "catalogo" | "portal">("dados");
+  // Link do sino "Preços do fornecedor por aprovar" (F3.4b): a ficha abre no
+  // separador Catálogo, já em "Preços por aprovar".
+  const [focusPriceChanges, setFocusPriceChanges] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const handledDeepLinkRef = useRef<string | null>(null);
   const { toast } = useToast();
   const { activeCompany, userType, companies, isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
@@ -308,6 +313,7 @@ const Suppliers = () => {
     setEditingId(supplier.id);
     setEditingSupplier(supplier);
     setFormTab("dados");
+    setFocusPriceChanges(false);
     setFormData({
       name: supplier.name,
       code: supplier.code || "",
@@ -347,6 +353,54 @@ const Suppliers = () => {
     
     setOpen(true);
   };
+
+  // /suppliers?open=<id>&tab=portal&prices=pending (link do sino): abre a ficha
+  // do fornecedor; com prices=pending vai para Catálogo → Preços por aprovar
+  // (é lá que está a secção; o separador Portal só gere acessos). Os
+  // parâmetros são limpos para fechar a ficha não a voltar a abrir.
+  const deepLinkSupplierId = searchParams.get("open");
+  const deepLinkTab = searchParams.get("tab");
+  const deepLinkPrices = searchParams.get("prices");
+  const deepLinkStamp = searchParams.get("_t");
+  useEffect(() => {
+    if (!deepLinkSupplierId || permissionsLoading) return;
+    const key = `${deepLinkSupplierId}|${deepLinkTab ?? ""}|${deepLinkPrices ?? ""}|${deepLinkStamp ?? ""}`;
+    if (handledDeepLinkRef.current === key) return;
+    handledDeepLinkRef.current = key;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("suppliers")
+        .select("*")
+        .eq("id", deepLinkSupplierId)
+        .maybeSingle();
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        ["open", "tab", "prices", "_t"].forEach((k) => next.delete(k));
+        return next;
+      }, { replace: true });
+      handledDeepLinkRef.current = null;
+      if (error || !data) {
+        toast({
+          title: "Fornecedor não encontrado",
+          description: error?.message || "O fornecedor do aviso não existe ou não está visível.",
+          variant: "destructive",
+        });
+        return;
+      }
+      await handleEdit(data as Supplier);
+      const wantsPrices = deepLinkPrices === "pending";
+      setFormTab(
+        wantsPrices || deepLinkTab === "catalogo"
+          ? "catalogo"
+          : deepLinkTab === "portal" && canManagePortal
+            ? "portal"
+            : "dados",
+      );
+      setFocusPriceChanges(wantsPrices);
+    })();
+    // handleEdit/toast/canManagePortal: lidos no momento do link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkSupplierId, deepLinkTab, deepLinkPrices, deepLinkStamp, permissionsLoading, setSearchParams]);
 
   const handleDeleteClick = (supplier: Supplier, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -509,6 +563,7 @@ const Suppliers = () => {
   const resetForm = () => {
     setEditingSupplier(null);
     setFormTab("dados");
+    setFocusPriceChanges(false);
     setFormData({
       name: "",
       code: "",
@@ -1394,6 +1449,7 @@ const Suppliers = () => {
                   supplierName={editingSupplier?.name || formData.name}
                   organizationId={editingSupplier?.organization_id ?? null}
                   onOpenPortalTab={canManagePortal ? () => setFormTab("portal") : undefined}
+                  focusPriceChanges={focusPriceChanges}
                 />
               </TabsContent>
             )}

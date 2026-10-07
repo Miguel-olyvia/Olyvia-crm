@@ -17,6 +17,7 @@ import {
   type FreeSupplierRow,
   type LinkSuggestion,
 } from "./types";
+import { describeCatalogPriceEffect, loadLinkPriceContext, type LinkPriceContext } from "./linkPricePreview";
 
 export interface LinkChoice {
   productId: string;
@@ -45,6 +46,12 @@ interface CatalogLinkDialogProps {
   /** Os produtos ligáveis são os da organização do fornecedor (regra da RPC). */
   organizationId: string | null;
   canViewPricing: boolean;
+  /**
+   * products.manage_prices (can_manage_prices de rpc_supplier_catalog_list).
+   * Sem ela a opção "usar o preço do catálogo" fica escondida e liga-se sem
+   * preço (rpc_catalog_link recusaria com no_price_permission).
+   */
+  canManagePrices?: boolean;
   linking: boolean;
   onClose: () => void;
   onConfirm: (choice: LinkChoice) => void;
@@ -66,18 +73,23 @@ export default function CatalogLinkDialog({
   supplierId,
   organizationId,
   canViewPricing,
+  canManagePrices = false,
   linking,
   onClose,
   onConfirm,
   onCreateProduct,
 }: CatalogLinkDialogProps) {
+  // A opção só existe com ver preços E gerir preços; o artigo tem de ter preço.
+  const priceOptionAvailable = canViewPricing && canManagePrices;
   const [selected, setSelected] = useState<{ id: string; name: string; itemSupplierId: string | null } | null>(null);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<ProductHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  // Sem can_view_pricing a opção fica escondida e o preço de compra não é tocado.
-  const [applyPrice, setApplyPrice] = useState(canViewPricing);
+  // Sem a opção disponível o preço de compra não é tocado.
+  const [applyPrice, setApplyPrice] = useState(priceOptionAvailable);
+  // O que "usar o preço do catálogo" faria ao custo do produto escolhido.
+  const [priceCtx, setPriceCtx] = useState<LinkPriceContext | null>(null);
 
   // Linhas item_suppliers livres do produto escolhido (sem linha na sugestão).
   const [freeRows, setFreeRows] = useState<FreeSupplierRow[] | null>(null);
@@ -93,8 +105,8 @@ export default function CatalogLinkDialog({
     setQuery("");
     setHits([]);
     setSearchError(null);
-    setApplyPrice(canViewPricing);
-  }, [item, suggestions, canViewPricing]);
+    setApplyPrice(priceOptionAvailable);
+  }, [item, suggestions, priceOptionAvailable]);
 
   const selectedProductId = selected?.id ?? null;
   const selectedItemSupplierId = selected?.itemSupplierId ?? null;
@@ -124,6 +136,20 @@ export default function CatalogLinkDialog({
     };
   }, [item, selectedProductId, selectedItemSupplierId, supplierId]);
 
+  // Contexto de preços do produto escolhido (ligações, preferencial, custo),
+  // só para o texto da opção. Falhar a leitura = texto genérico.
+  useEffect(() => {
+    setPriceCtx(null);
+    if (!item || !selectedProductId || !priceOptionAvailable || item.base_price == null) return;
+    let cancelled = false;
+    void loadLinkPriceContext(selectedProductId).then((ctx) => {
+      if (!cancelled) setPriceCtx(ctx);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item, selectedProductId, priceOptionAvailable]);
+
   const needsRowChoice = !!freeRows && freeRows.length > 1;
   const chosenRow = freeRows?.find((r) => r.id === chosenRowId) ?? null;
   // Com a resposta das linhas: a unidade é decidida aqui. Sem ela (erro), quem
@@ -131,6 +157,32 @@ export default function CatalogLinkDialog({
   const resolvedUom: { uomId?: string | null } =
     freeRows === null ? {} : freeRows.length === 0 ? { uomId: null } : chosenRow ? { uomId: chosenRow.uom_id } : {};
   const canConfirm = !!selected && !linking && !freeRowsLoading && (!needsRowChoice || !!chosenRow);
+  // Linha item_suppliers que a ligação vai usar: a da sugestão, a escolhida,
+  // nenhuma (cria-se uma) ou desconhecida (undefined).
+  const targetRowId: string | null | undefined = selected?.itemSupplierId
+    ? selected.itemSupplierId
+    : freeRows === null
+      ? undefined
+      : chosenRow
+        ? chosenRow.id
+        : freeRows.length === 0
+          ? null
+          : undefined;
+  const targetUomId: string | null | undefined = selected?.itemSupplierId
+    ? undefined
+    : "uomId" in resolvedUom
+      ? resolvedUom.uomId
+      : undefined;
+  const priceEffect =
+    item && priceOptionAvailable && item.base_price != null
+      ? describeCatalogPriceEffect({
+          basePrice: item.base_price,
+          currency: item.currency,
+          ctx: priceCtx,
+          targetRowId,
+          targetUomId,
+        })
+      : null;
 
   useEffect(() => {
     const term = sanitizeTerm(query);
@@ -335,7 +387,7 @@ export default function CatalogLinkDialog({
             </section>
           )}
 
-          {canViewPricing && (
+          {priceOptionAvailable && (
             <div className="flex items-start gap-2">
               <Checkbox
                 id="catalog-link-apply-price"
@@ -344,11 +396,17 @@ export default function CatalogLinkDialog({
               />
               <Label htmlFor="catalog-link-apply-price" className="text-sm font-normal leading-snug cursor-pointer">
                 Usar o preço do catálogo como preço de compra
+                {priceEffect && <span className="block text-sm">{priceEffect}</span>}
                 <span className="block text-xs text-muted-foreground">
-                  Se desmarcado, uma associação existente mantém o preço; uma nova fica sem preço.
+                  Se desmarcado, nenhum preço muda: uma associação existente mantém o preço; uma nova fica sem preço.
                 </span>
               </Label>
             </div>
+          )}
+          {canViewPricing && !canManagePrices && item?.base_price != null && (
+            <p className="text-xs text-muted-foreground">
+              Sem permissão para gerir preços: a ligação não mexe no preço do fornecedor nem no custo do produto.
+            </p>
           )}
         </div>
 
@@ -366,7 +424,7 @@ export default function CatalogLinkDialog({
                 productName: selected.name,
                 itemSupplierId: selected.itemSupplierId,
                 ...resolvedUom,
-                applyCatalogPrice: canViewPricing && applyPrice,
+                applyCatalogPrice: priceOptionAvailable && applyPrice,
               })
             }
           >

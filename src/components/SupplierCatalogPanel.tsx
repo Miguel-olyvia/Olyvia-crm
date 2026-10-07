@@ -35,6 +35,8 @@ interface SupplierCatalogPanelProps {
   onChanged?: () => void;
   /** Atalho para o separador Portal da ficha (Portal do Fornecedor F3.1). */
   onOpenPortalTab?: () => void;
+  /** Link do sino (F3.4b): abrir em "Preços por aprovar". */
+  focusPriceChanges?: boolean;
 }
 
 const PRODUCTS_PAGE = 1000;
@@ -79,7 +81,7 @@ function describeDbError(error: { message?: string } | null | undefined): string
 // rpc_supplier_catalog_search (SECURITY INVOKER — o RLS de item_suppliers
 // decide o que se vê). Escrita direta em item_suppliers, com as mesmas regras
 // do ItemSuppliersTable (preferido só na primeira ligação do produto).
-export default function SupplierCatalogPanel({ supplierId, supplierName, organizationId, onChanged, onOpenPortalTab }: SupplierCatalogPanelProps) {
+export default function SupplierCatalogPanel({ supplierId, supplierName, organizationId, onChanged, onOpenPortalTab, focusPriceChanges = false }: SupplierCatalogPanelProps) {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
   const canView = hasPermission("suppliers.view_pricing") || hasPermission("products.view_cost");
@@ -367,6 +369,7 @@ export default function SupplierCatalogPanel({ supplierId, supplierName, organiz
         onChanged?.();
       }}
       onOpenPortalTab={onOpenPortalTab}
+      focusPriceChanges={focusPriceChanges}
     />
   );
 

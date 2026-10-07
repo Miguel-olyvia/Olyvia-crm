@@ -16,6 +16,7 @@ import {
   catalogCurrency,
   catalogUnitCost,
   createProductFromCatalog,
+  linkPriceKeepsWrittenCost,
   findTakenSkus,
   loadCreateMeta,
   matchBrand,
@@ -44,6 +45,8 @@ interface CreateProductFromCatalogDialogProps {
   supplierId: string;
   organizationId: string | null;
   canViewPricing: boolean;
+  /** products.manage_prices: sem ela a ligação nunca usa o preço do catálogo. */
+  canManagePrices?: boolean;
   onClose: () => void;
   /** Chamado quando o produto foi criado (ligado ou não). Erros ficam no diálogo. */
   onDone: (
@@ -90,6 +93,7 @@ export default function CreateProductFromCatalogDialog({
   supplierId,
   organizationId,
   canViewPricing,
+  canManagePrices = false,
   onClose,
   onDone,
 }: CreateProductFromCatalogDialogProps) {
@@ -191,7 +195,13 @@ export default function CreateProductFromCatalogDialog({
   );
 
   const isPack = (current?.units_per_pack ?? 0) > 1;
-  const applyPrice = current ? applyCatalogPriceOnLink(current, canViewPricing) : false;
+  const applyPrice = current ? applyCatalogPriceOnLink(current, canViewPricing, canManagePrices) : false;
+  // O preço escrito é o do catálogo? Só então a ligação leva o preço (e grava
+  // o mesmo custo); senão liga sem preço para não substituir o custo escrito.
+  const writtenPurchase = form && canViewPricing ? parseMoneyInput(form.purchasePrice) : null;
+  const linkTakesPrice =
+    applyPrice && !!current && writtenPurchase != null && !Number.isNaN(writtenPurchase)
+    && linkPriceKeepsWrittenCost(current, writtenPurchase);
   const unmatchedUnit = !!current && !!form && !form.uomId && !!current.unit_label && !isPack;
 
   const handleSave = async () => {
@@ -471,6 +481,15 @@ export default function CreateProductFromCatalogDialog({
             {canViewPricing && isPack && (
               <p className="text-xs text-muted-foreground">
                 Artigo vendido em embalagem: a ligação ao fornecedor fica sem preço de compra (o preço do catálogo é da embalagem).
+              </p>
+            )}
+            {canViewPricing && !isPack && current.base_price != null && (
+              <p className="text-xs text-muted-foreground" aria-live="polite">
+                {!canManagePrices
+                  ? "Sem permissão para gerir preços: a ligação ao fornecedor fica sem preço; o custo do produto é o preço de compra acima."
+                  : linkTakesPrice
+                    ? `A ligação ao fornecedor fica com o preço do catálogo (${formatMoney(current.base_price, current.currency)}), igual ao custo do produto.`
+                    : "O preço de compra é diferente do catálogo: a ligação ao fornecedor fica sem preço, para não mudar o custo que escreveste."}
               </p>
             )}
 

@@ -42,6 +42,8 @@ interface BulkCreateProductsDialogProps {
   supplierId: string;
   organizationId: string | null;
   canViewPricing: boolean;
+  /** products.manage_prices: sem ela a ligação nunca usa o preço do catálogo. */
+  canManagePrices?: boolean;
   onClose: () => void;
   /** Fim de uma execução (com pelo menos uma linha tentada). */
   onFinished: (rows: BulkCreateRow[]) => void;
@@ -66,6 +68,7 @@ export default function BulkCreateProductsDialog({
   supplierId,
   organizationId,
   canViewPricing,
+  canManagePrices = false,
   onClose,
   onFinished,
 }: BulkCreateProductsDialogProps) {
@@ -199,13 +202,13 @@ export default function BulkCreateProductsDialog({
         salePrice: null,
         currency: catalogCurrency(row.item),
         vatRate: 23,
-        applyCatalogPrice: applyCatalogPriceOnLink(row.item, canViewPricing),
+        applyCatalogPrice: applyCatalogPriceOnLink(row.item, canViewPricing, canManagePrices),
       });
       if (outcome.status === "linked") {
         update(id, {
           status: "linked",
           productId: outcome.productId,
-          message: (outcome.result.warnings ?? []).join(" ") || null,
+          message: [outcome.priceNotApplied, ...(outcome.result.warnings ?? [])].filter(Boolean).join(" ") || null,
         });
       } else if (outcome.status === "created_not_linked") {
         update(id, { status: "not_linked", productId: outcome.productId, message: outcome.message });
@@ -231,7 +234,13 @@ export default function BulkCreateProductsDialog({
           <DialogTitle>Criar {shownCount} produto(s) a partir do catálogo</DialogTitle>
           <DialogDescription>
             Cada artigo dá origem a um produto novo (estado Ativo, compra e venda), já ligado ao artigo.
-            {canViewPricing ? " O preço de compra é o do catálogo (por unidade)." : ""} Sem preço de venda.
+            {canViewPricing ? " O preço de compra é o do catálogo (por unidade)." : ""}
+            {canViewPricing
+              ? canManagePrices
+                ? " A ligação ao fornecedor fica com o preço do catálogo (exceto embalagens)."
+                : " Sem permissão para gerir preços: a ligação ao fornecedor fica sem preço."
+              : ""}{" "}
+            Sem preço de venda.
             Revê os SKUs sugeridos antes de criar.
           </DialogDescription>
         </DialogHeader>

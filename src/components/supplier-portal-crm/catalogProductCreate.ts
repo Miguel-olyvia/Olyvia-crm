@@ -15,7 +15,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
 import { productSaveErrorMessage } from "@/components/receiving/productCodes";
-import { callRpc, type CatalogLinkResult, type CrmCatalogItem, type RpcError } from "./types";
+import { callRpc, isNoPricePermission, type CatalogLinkResult, type CrmCatalogItem, type RpcError } from "./types";
 
 export const SKU_MAX = 100;
 export const NAME_MAX = 200;
@@ -251,13 +251,34 @@ export function catalogCurrency(item: Pick<CrmCatalogItem, "currency"> | null | 
 }
 
 /**
- * Usar o preço do catálogo na ligação ao fornecedor? Só com can_view_pricing e
- * quando o artigo não é uma embalagem: rpc_catalog_link grava base_price na
- * linha item_suppliers na unidade do produto, e um preço de caixa de 12 numa
- * linha à unidade ficaria 12× acima.
+ * Usar o preço do catálogo na ligação ao fornecedor? Só com can_view_pricing,
+ * com can_manage_prices (F3.4b: rpc_catalog_link exige products.manage_prices
+ * para usar o preço, senão recusa com no_price_permission e o produto ficava
+ * criado sem ligação) e quando o artigo não é uma embalagem: rpc_catalog_link
+ * grava base_price na linha item_suppliers na unidade do produto, e um preço de
+ * caixa de 12 numa linha à unidade ficaria 12× acima.
  */
-export function applyCatalogPriceOnLink(item: Pick<CrmCatalogItem, "units_per_pack"> | null | undefined, canViewPricing: boolean): boolean {
-  return !!item && canViewPricing && !((item.units_per_pack ?? 0) > 1);
+export function applyCatalogPriceOnLink(
+  item: Pick<CrmCatalogItem, "units_per_pack"> | null | undefined,
+  canViewPricing: boolean,
+  canManagePrices = false,
+): boolean {
+  return !!item && canViewPricing && canManagePrices && !((item.units_per_pack ?? 0) > 1);
+}
+
+/**
+ * F3.4b: com o preço do catálogo, a ligação (a primeira do produto novo, logo
+ * a preferencial) também grava o custo do produto = preço do catálogo. Só se
+ * usa quando o preço de compra escrito é esse mesmo valor — senão a ligação
+ * substituía o custo que o utilizador acabou de escrever.
+ */
+export function linkPriceKeepsWrittenCost(
+  item: Pick<CrmCatalogItem, "base_price" | "units_per_pack">,
+  purchasePrice: number | null,
+): boolean {
+  const catalog = catalogUnitCost(item);
+  if (catalog == null || purchasePrice == null || !Number.isFinite(purchasePrice)) return false;
+  return round2(purchasePrice) === catalog;
 }
 
 export interface CreateProductInput {
@@ -280,14 +301,24 @@ export interface CreateProductInput {
   salePrice: number | null;
   currency: CurrencyCode;
   vatRate: number;
-  /** Preço do catálogo na ligação ao fornecedor (ver applyCatalogPriceOnLink). */
+  /**
+   * Preço do catálogo na ligação ao fornecedor (ver applyCatalogPriceOnLink).
+   * Só é enviado se o preço de compra escrito for o do catálogo
+   * (linkPriceKeepsWrittenCost).
+   */
   applyCatalogPrice: boolean;
 }
 
 export type CreateOutcome =
   | { status: "error"; message: string; field?: "sku" | "barcode" }
   | { status: "created_not_linked"; productId: string; message: string }
-  | { status: "linked"; productId: string; result: CatalogLinkResult };
+  | {
+      status: "linked";
+      productId: string;
+      result: CatalogLinkResult;
+      /** Ligou sem o preço do catálogo (sem permissão ou preço escrito diferente). */
+      priceNotApplied?: string;
+    };
 
 /** Mensagem clara para os erros de gravação (SKU/código de barras duplicado). */
 export function createErrorMessage(err: RpcError | null | undefined, sku: string): { message: string; field?: "sku" | "barcode" } {
@@ -362,14 +393,28 @@ export async function createProductFromCatalog(input: CreateProductInput): Promi
   }
   const productId = String(newId);
 
-  const { data: link, error: linkError } = await callRpc<CatalogLinkResult>("rpc_catalog_link", {
-    p_supplier_id: input.supplierId,
-    p_catalog_item_id: input.item.id,
-    p_product_id: productId,
-    // Produto novo: não há linhas item_suppliers, a ligação cria uma na unidade do produto.
-    p_uom_id: input.uomId || undefined,
-    p_apply_catalog_price: input.applyCatalogPrice,
-  });
+  let applyPrice = input.applyCatalogPrice && linkPriceKeepsWrittenCost(input.item, input.purchasePrice);
+  let priceNotApplied: string | undefined =
+    input.applyCatalogPrice && !applyPrice
+      ? "O preço de compra escrito é diferente do catálogo: a ligação ao fornecedor ficou sem preço, para não mudar o custo."
+      : undefined;
+  const link1 = () =>
+    callRpc<CatalogLinkResult>("rpc_catalog_link", {
+      p_supplier_id: input.supplierId,
+      p_catalog_item_id: input.item.id,
+      p_product_id: productId,
+      // Produto novo: não há linhas item_suppliers, a ligação cria uma na unidade do produto.
+      p_uom_id: input.uomId || undefined,
+      p_apply_catalog_price: applyPrice,
+    });
+  let { data: link, error: linkError } = await link1();
+  // Sem products.manage_prices a RPC recusa ANTES de gravar o que quer que
+  // seja: liga-se outra vez sem o preço (o custo já ficou no rpc_create_product).
+  if (linkError && applyPrice && isNoPricePermission(linkError)) {
+    applyPrice = false;
+    priceNotApplied = linkError.message || "Sem permissão para alterar preços: ligado sem o preço do catálogo.";
+    ({ data: link, error: linkError } = await link1());
+  }
   if (linkError || !link) {
     return {
       status: "created_not_linked",
@@ -377,5 +422,5 @@ export async function createProductFromCatalog(input: CreateProductInput): Promi
       message: `Produto criado mas não ficou ligado — liga-o manualmente.${linkError?.message ? ` (${linkError.message})` : ""}`,
     };
   }
-  return { status: "linked", productId, result: link };
+  return priceNotApplied ? { status: "linked", productId, result: link, priceNotApplied } : { status: "linked", productId, result: link };
 }

@@ -16,13 +16,16 @@ import { CheckCheck, EyeOff, Link2, Loader2, PackagePlus, RefreshCw, RotateCcw, 
 import CatalogLinkDialog, { type LinkChoice } from "./CatalogLinkDialog";
 import CreateProductFromCatalogDialog, { type CreatedProductInfo } from "./CreateProductFromCatalogDialog";
 import BulkCreateProductsDialog, { type BulkCreateRow } from "./BulkCreateProductsDialog";
+import SupplierPriceChangesSection from "./SupplierPriceChangesSection";
 import { BULK_CREATE_LIMIT, type CreateOutcome } from "./catalogProductCreate";
 import {
   REASON_LABEL,
   callRpc,
   confidenceOf,
+  describeLinkPriceOutcome,
   fetchFreeSupplierRows,
   formatMoney,
+  isNoPricePermission,
   type CatalogFilter,
   type CatalogLinkResult,
   type CrmCatalogItem,
@@ -38,6 +41,8 @@ interface SupplierPortalCatalogSectionProps {
   onLinksChanged?: () => void;
   /** Atalho para o separador Portal (quando o fornecedor ainda não tem acesso). */
   onOpenPortalTab?: () => void;
+  /** Link do sino (F3.4b): abrir já em "Preços por aprovar". */
+  focusPriceChanges?: boolean;
 }
 
 const PAGE_SIZE = 50;
@@ -56,7 +61,14 @@ const formatUnit = (item: CrmCatalogItem) => {
   return [item.unit_label, item.units_per_pack ? `× ${item.units_per_pack}` : null].filter(Boolean).join(" ");
 };
 
-type LinkOutcome = { ok: boolean; result?: CatalogLinkResult; message?: string; ambiguous?: boolean };
+type LinkOutcome = {
+  ok: boolean;
+  result?: CatalogLinkResult;
+  message?: string;
+  ambiguous?: boolean;
+  /** rpc_catalog_link recusou usar o preço do catálogo (falta products.manage_prices). */
+  noPricePermission?: boolean;
+};
 
 // Catálogo gerido pelo fornecedor no portal (F3.1), visto do CRM: filtro
 // Por ligar / Ligados / Dispensados / Todos (rpc_supplier_catalog_list),
@@ -68,6 +80,7 @@ export default function SupplierPortalCatalogSection({
   organizationId,
   onLinksChanged,
   onOpenPortalTab,
+  focusPriceChanges = false,
 }: SupplierPortalCatalogSectionProps) {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
@@ -270,7 +283,13 @@ export default function SupplierPortalCatalogSection({
       p_uom_id: uomId,
       p_apply_catalog_price: choice.applyCatalogPrice,
     });
-    if (error || !data) return { ok: false, message: error?.message || "Não foi possível ligar o artigo." };
+    if (error || !data) {
+      return {
+        ok: false,
+        message: error?.message || "Não foi possível ligar o artigo.",
+        noPricePermission: isNoPricePermission(error),
+      };
+    }
     return { ok: true, result: data };
   };
 
@@ -291,6 +310,9 @@ export default function SupplierPortalCatalogSection({
     if (!outcome.ok) {
       setRowErrors((prev) => ({ ...prev, [item.id]: outcome.message }));
       toast({ title: "Não foi possível ligar", description: outcome.message, variant: "destructive" });
+      // As permissões mudaram desde que a lista carregou: recarrega
+      // can_manage_prices (o diálogo esconde a opção do preço).
+      if (outcome.noPricePermission) void load();
       return;
     }
     clearRowError(item.id);
@@ -301,8 +323,11 @@ export default function SupplierPortalCatalogSection({
       title: result.already_linked ? "O artigo já estava ligado" : "Artigo ligado",
       description: [
         `${item.supplier_ref} → ${choice.productName}${result.created ? " (nova associação ao fornecedor)" : ""}.`,
+        describeLinkPriceOutcome(result, item.currency),
         ...(result.warnings ?? []),
-      ].join(" "),
+      ]
+        .filter(Boolean)
+        .join(" "),
     });
     await load();
     onLinksChanged?.();
@@ -316,6 +341,11 @@ export default function SupplierPortalCatalogSection({
     const warnings: string[] = [];
     let ok = 0;
     let skipped = 0;
+    let costsUpdated = 0;
+    let pricesOnly = 0;
+    // Usar o preço do catálogo exige ver preços E products.manage_prices
+    // (senão rpc_catalog_link recusa com no_price_permission).
+    const applyPrice = !!list?.can_view_pricing && !!list?.can_manage_prices;
     // Em sequência, para os erros ficarem na linha certa (contrato 3.4).
     for (const item of targets) {
       const top = suggestions[item.id]?.[0];
@@ -324,11 +354,12 @@ export default function SupplierPortalCatalogSection({
         productId: top.product_id,
         productName: top.product_name,
         itemSupplierId: top.item_supplier_id,
-        // Sem can_view_pricing o preço de compra não é tocado.
-        applyCatalogPrice: list?.can_view_pricing ?? false,
+        applyCatalogPrice: applyPrice,
       });
       if (outcome.ok) {
         ok += 1;
+        if (outcome.result?.product_cost_updated) costsUpdated += 1;
+        else if (outcome.result?.item_supplier_price_updated) pricesOnly += 1;
         warnings.push(...(outcome.result?.warnings ?? []).map((w) => `${item.supplier_ref}: ${w}`));
       } else if (outcome.ambiguous) {
         // Várias linhas do produto para este fornecedor: não se adivinha qual.
@@ -349,7 +380,7 @@ export default function SupplierPortalCatalogSection({
     const failed = Object.keys(errors).length - skipped;
     toast({
       title: "Sugestões exatas aceites",
-      description: `${ok} ligado(s)${skipped > 0 ? `, ${skipped} saltado(s) por terem várias ligações (ligar manualmente)` : ""}${failed > 0 ? `, ${failed} com erro (ver na linha)` : ""}.${warnings.length > 0 ? ` Avisos: ${warnings.slice(0, 3).join(" | ")}${warnings.length > 3 ? ` (+${warnings.length - 3})` : ""}` : ""}`,
+      description: `${ok} ligado(s)${applyPrice && ok > 0 ? ` (custo do produto atualizado em ${costsUpdated}${pricesOnly > 0 ? `; só o preço do fornecedor em ${pricesOnly}` : ""})` : ""}${skipped > 0 ? `, ${skipped} saltado(s) por terem várias ligações (ligar manualmente)` : ""}${failed > 0 ? `, ${failed} com erro (ver na linha)` : ""}.${warnings.length > 0 ? ` Avisos: ${warnings.slice(0, 3).join(" | ")}${warnings.length > 3 ? ` (+${warnings.length - 3})` : ""}` : ""}`,
       variant: failed > 0 ? "destructive" : undefined,
     });
     if (ok > 0) {
@@ -397,7 +428,13 @@ export default function SupplierPortalCatalogSection({
     forgetCreated([item.id]);
     toast({
       title: "Produto criado e ligado",
-      description: [`${item.supplier_ref} → ${product.name} (${product.sku}).`, ...(outcome.result.warnings ?? [])].join(" "),
+      description: [
+        `${item.supplier_ref} → ${product.name} (${product.sku}).`,
+        outcome.priceNotApplied ?? describeLinkPriceOutcome(outcome.result, item.currency),
+        ...(outcome.result.warnings ?? []),
+      ]
+        .filter(Boolean)
+        .join(" "),
     });
     await load();
     onLinksChanged?.();
@@ -498,6 +535,19 @@ export default function SupplierPortalCatalogSection({
     </div>
   );
 
+  // Preços por aprovar (F3.4b): também sem conta ativa (pedidos de antes de
+  // revogar o acesso continuam por decidir).
+  const priceChanges = (
+    <SupplierPriceChangesSection
+      supplierId={supplierId}
+      focus={focusPriceChanges}
+      onDecided={() => {
+        void load();
+        onLinksChanged?.();
+      }}
+    />
+  );
+
   if (!list) {
     return (
       <section className="space-y-3 border-t pt-4">
@@ -523,12 +573,14 @@ export default function SupplierPortalCatalogSection({
             </Button>
           )}
         </div>
+        {priceChanges}
       </section>
     );
   }
 
   const canLink = list.can_link;
   const showPrice = list.can_view_pricing;
+  const canManagePrices = !!list.can_manage_prices;
   const items = list.items;
   const canCreate = canLink && canCreateProduct && !!organizationId;
   const showSelection = canCreate && selectableIds.length > 0;
@@ -540,6 +592,8 @@ export default function SupplierPortalCatalogSection({
   return (
     <section className="space-y-3 border-t pt-4" aria-label="Catálogo do fornecedor">
       {header}
+
+      {priceChanges}
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="Filtrar catálogo do fornecedor">
         {FILTERS.map((f) => (
@@ -778,6 +832,7 @@ export default function SupplierPortalCatalogSection({
         supplierId={supplierId}
         organizationId={organizationId}
         canViewPricing={showPrice}
+        canManagePrices={canManagePrices}
         linking={linking}
         onClose={() => setLinkItem(null)}
         onConfirm={handleLink}
@@ -797,6 +852,7 @@ export default function SupplierPortalCatalogSection({
         supplierId={supplierId}
         organizationId={organizationId}
         canViewPricing={showPrice}
+        canManagePrices={canManagePrices}
         onClose={() => setCreateItem(null)}
         onDone={(it, outcome, product) => { void handleProductCreated(it, outcome, product); }}
       />
@@ -806,6 +862,7 @@ export default function SupplierPortalCatalogSection({
         supplierId={supplierId}
         organizationId={organizationId}
         canViewPricing={showPrice}
+        canManagePrices={canManagePrices}
         onClose={() => setBulkCreateItems(null)}
         onFinished={(rows) => { void handleBulkCreated(rows); }}
       />
@@ -852,7 +909,7 @@ export default function SupplierPortalCatalogSection({
             <AlertDialogTitle>Aceitar {exactCandidates.length} sugestão(ões) exata(s)?</AlertDialogTitle>
             <AlertDialogDescription>
               Cada artigo desta página com uma sugestão exata (ref. igual ou código de barras) é ligado ao produto
-              sugerido{showPrice ? ", com o preço do catálogo" : ""}. Os erros ficam indicados na linha do artigo;
+              sugerido{showPrice && canManagePrices ? ", com o preço do catálogo como preço deste fornecedor (e custo do produto, quando é o fornecedor preferencial)" : ""}. Os erros ficam indicados na linha do artigo;
               os produtos com várias associações a este fornecedor são saltados.
             </AlertDialogDescription>
           </AlertDialogHeader>

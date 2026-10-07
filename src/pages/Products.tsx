@@ -15,6 +15,8 @@ import ProductPriceHistoryDialog from "@/components/ProductPriceHistoryDialog";
 import ProductConfigurableOptionsDialog from "@/components/ProductConfigurableOptionsDialog";
 import ProductSuppliersDialog from "@/components/ProductSuppliersDialog";
 import ProductFormPrices, { PriceFormData } from "@/components/ProductFormPrices";
+import PendingSupplierPriceNotice from "@/components/products/PendingSupplierPriceNotice";
+import { syncFormAfterAcceptedPrice, type AcceptedPriceInfo } from "@/components/products/pendingSupplierPrice";
 import ProductFormAttributes, { AttributeFormValue } from "@/components/ProductFormAttributes";
 import { effectivePackQtys, normalizePackQty, unitCostFromPackPrice, validatePackQtyInput } from "@/utils/products/productPacks";
 import { useQueryClient } from "@tanstack/react-query";
@@ -2749,6 +2751,30 @@ export default function Products() {
                     {t('products.form.manageStockHelp')}
                   </p>
                 </div>
+
+                {/* F3.4b: preço do fornecedor por aprovar. Aceitar já grava o custo;
+                    a ficha passa a refletir o gravado (pendingSupplierPrice.ts)
+                    para "Atualizar Produto" não o desfazer. */}
+                {editingProduct && openedPurchase && (
+                  <PendingSupplierPriceNotice
+                    productId={editingProduct.id}
+                    onAccepted={(accepted: AcceptedPriceInfo[], isCurrent: () => boolean) =>
+                      syncFormAfterAcceptedPrice({
+                        productId: editingProduct.id,
+                        currency: priceFormData.currency,
+                        opened: openedPurchase,
+                        formPurchase: priceFormData.purchase,
+                        accepted,
+                        loadPreferredPackPrice: async () => (await loadPreferredPurchasePack(editingProduct.id)).packPrice,
+                        isCurrent,
+                        apply: (prevShown, next) => {
+                          setOpenedPurchase((prev) => (prev ? { ...prev, price: next.displayed, storedUnit: next.storedUnit } : prev));
+                          setPriceFormData((prev) => (prev.purchase === prevShown ? { ...prev, purchase: next.displayed } : prev));
+                        },
+                      })
+                    }
+                  />
+                )}
 
                 <ProductFormPrices
                   prices={priceFormData}
