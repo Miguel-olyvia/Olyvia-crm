@@ -10305,6 +10305,7 @@ export type Database = {
       item_suppliers: {
         Row: {
           business_unit_id: string | null
+          catalog_item_id: string | null
           created_at: string
           created_by: string
           currency: string
@@ -10328,6 +10329,7 @@ export type Database = {
         }
         Insert: {
           business_unit_id?: string | null
+          catalog_item_id?: string | null
           created_at?: string
           created_by: string
           currency?: string
@@ -10351,6 +10353,7 @@ export type Database = {
         }
         Update: {
           business_unit_id?: string | null
+          catalog_item_id?: string | null
           created_at?: string
           created_by?: string
           currency?: string
@@ -10373,6 +10376,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "item_suppliers_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_catalog_items"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "item_suppliers_created_by_fkey"
             columns: ["created_by"]
@@ -22051,6 +22061,335 @@ export type Database = {
         }
         Relationships: []
       }
+      supplier_account_links: {
+        Row: {
+          created_at: string
+          id: string
+          invited_by: string | null
+          organization_id: string
+          revoked_at: string | null
+          revoked_by: string | null
+          status: string
+          supplier_account_id: string
+          supplier_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invited_by?: string | null
+          organization_id: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+          status?: string
+          supplier_account_id: string
+          supplier_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invited_by?: string | null
+          organization_id?: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+          status?: string
+          supplier_account_id?: string
+          supplier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_account_links_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_account_links_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "supplier_account_links_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_account_links_revoked_by_fkey"
+            columns: ["revoked_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_account_links_revoked_by_fkey"
+            columns: ["revoked_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "supplier_account_links_supplier_account_id_fkey"
+            columns: ["supplier_account_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_account_links_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_accounts: {
+        Row: {
+          created_at: string
+          created_by_org_id: string | null
+          display_name: string
+          id: string
+          nif_key: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by_org_id?: string | null
+          display_name: string
+          id?: string
+          nif_key: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by_org_id?: string | null
+          display_name?: string
+          id?: string
+          nif_key?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_accounts_created_by_org_id_fkey"
+            columns: ["created_by_org_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_catalog_dismissals: {
+        Row: {
+          catalog_item_id: string
+          dismissed_at: string
+          dismissed_by: string | null
+          id: string
+          link_id: string
+          organization_id: string
+          reason: string | null
+        }
+        Insert: {
+          catalog_item_id: string
+          dismissed_at?: string
+          dismissed_by?: string | null
+          id?: string
+          link_id: string
+          organization_id: string
+          reason?: string | null
+        }
+        Update: {
+          catalog_item_id?: string
+          dismissed_at?: string
+          dismissed_by?: string | null
+          id?: string
+          link_id?: string
+          organization_id?: string
+          reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_catalog_dismissals_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_catalog_dismissals_dismissed_by_fkey"
+            columns: ["dismissed_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_catalog_dismissals_dismissed_by_fkey"
+            columns: ["dismissed_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "supplier_catalog_dismissals_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_account_links"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_catalog_dismissals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_catalog_imports: {
+        Row: {
+          created_at: string
+          file_name: string | null
+          id: string
+          portal_user_id: string | null
+          summary: Json
+          supplier_account_id: string
+          total_rows: number
+        }
+        Insert: {
+          created_at?: string
+          file_name?: string | null
+          id?: string
+          portal_user_id?: string | null
+          summary?: Json
+          supplier_account_id: string
+          total_rows: number
+        }
+        Update: {
+          created_at?: string
+          file_name?: string | null
+          id?: string
+          portal_user_id?: string | null
+          summary?: Json
+          supplier_account_id?: string
+          total_rows?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_catalog_imports_portal_user_id_fkey"
+            columns: ["portal_user_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_portal_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_catalog_imports_supplier_account_id_fkey"
+            columns: ["supplier_account_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_accounts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_catalog_items: {
+        Row: {
+          barcode: string | null
+          barcode_key: string | null
+          base_price: number | null
+          brand: string | null
+          created_at: string
+          created_by_portal_user: string | null
+          currency: string
+          description: string | null
+          id: string
+          is_active: boolean
+          lead_time_days: number | null
+          moq: number | null
+          name: string
+          ref_key: string | null
+          supplier_account_id: string
+          supplier_ref: string
+          unit_label: string | null
+          units_per_pack: number | null
+          updated_at: string
+          updated_by_portal_user: string | null
+        }
+        Insert: {
+          barcode?: string | null
+          barcode_key?: string | null
+          base_price?: number | null
+          brand?: string | null
+          created_at?: string
+          created_by_portal_user?: string | null
+          currency?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          lead_time_days?: number | null
+          moq?: number | null
+          name: string
+          ref_key?: string | null
+          supplier_account_id: string
+          supplier_ref: string
+          unit_label?: string | null
+          units_per_pack?: number | null
+          updated_at?: string
+          updated_by_portal_user?: string | null
+        }
+        Update: {
+          barcode?: string | null
+          barcode_key?: string | null
+          base_price?: number | null
+          brand?: string | null
+          created_at?: string
+          created_by_portal_user?: string | null
+          currency?: string
+          description?: string | null
+          id?: string
+          is_active?: boolean
+          lead_time_days?: number | null
+          moq?: number | null
+          name?: string
+          ref_key?: string | null
+          supplier_account_id?: string
+          supplier_ref?: string
+          unit_label?: string | null
+          units_per_pack?: number | null
+          updated_at?: string
+          updated_by_portal_user?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_catalog_items_created_by_portal_user_fkey"
+            columns: ["created_by_portal_user"]
+            isOneToOne: false
+            referencedRelation: "supplier_portal_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_catalog_items_supplier_account_id_fkey"
+            columns: ["supplier_account_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_catalog_items_updated_by_portal_user_fkey"
+            columns: ["updated_by_portal_user"]
+            isOneToOne: false
+            referencedRelation: "supplier_portal_users"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       supplier_delivery_note_lines: {
         Row: {
           created_at: string
@@ -22266,6 +22605,169 @@ export type Database = {
             columns: ["supplier_id"]
             isOneToOne: false
             referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      supplier_portal_user_access: {
+        Row: {
+          granted_at: string
+          granted_by: string | null
+          id: string
+          link_id: string
+          organization_id: string
+          portal_user_id: string
+          revoked_at: string | null
+          revoked_by: string | null
+        }
+        Insert: {
+          granted_at?: string
+          granted_by?: string | null
+          id?: string
+          link_id: string
+          organization_id: string
+          portal_user_id: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+        }
+        Update: {
+          granted_at?: string
+          granted_by?: string | null
+          id?: string
+          link_id?: string
+          organization_id?: string
+          portal_user_id?: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_portal_user_access_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_portal_user_access_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "supplier_portal_user_access_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_account_links"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_portal_user_access_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_portal_user_access_portal_user_id_fkey"
+            columns: ["portal_user_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_portal_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_portal_user_access_revoked_by_fkey"
+            columns: ["revoked_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_portal_user_access_revoked_by_fkey"
+            columns: ["revoked_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+        ]
+      }
+      supplier_portal_users: {
+        Row: {
+          auth_user_id: string
+          created_at: string
+          created_by_org_id: string | null
+          email: string
+          first_login: boolean
+          id: string
+          invited_by: string | null
+          last_login_at: string | null
+          name: string | null
+          password_changed_at: string | null
+          role: string
+          status: string
+          supplier_account_id: string
+          updated_at: string
+        }
+        Insert: {
+          auth_user_id: string
+          created_at?: string
+          created_by_org_id?: string | null
+          email: string
+          first_login?: boolean
+          id?: string
+          invited_by?: string | null
+          last_login_at?: string | null
+          name?: string | null
+          password_changed_at?: string | null
+          role?: string
+          status?: string
+          supplier_account_id: string
+          updated_at?: string
+        }
+        Update: {
+          auth_user_id?: string
+          created_at?: string
+          created_by_org_id?: string | null
+          email?: string
+          first_login?: boolean
+          id?: string
+          invited_by?: string | null
+          last_login_at?: string | null
+          name?: string | null
+          password_changed_at?: string | null
+          role?: string
+          status?: string
+          supplier_account_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_portal_users_created_by_org_id_fkey"
+            columns: ["created_by_org_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_portal_users_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_portal_users_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "supplier_portal_users_supplier_account_id_fkey"
+            columns: ["supplier_account_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_accounts"
             referencedColumns: ["id"]
           },
         ]
@@ -24563,6 +25065,7 @@ export type Database = {
         Returns: Record<string, unknown>
       }
       fn_billing_client_role_id: { Args: never; Returns: string }
+      fn_catalog_parse_number: { Args: { p_value: string }; Returns: number }
       fn_channel_revenue_facts: {
         Args: { p_channel_id?: string; p_window_days?: number }
         Returns: {
@@ -24719,6 +25222,7 @@ export type Database = {
         Args: { p_document_type: string; p_organization_id: string }
         Returns: string
       }
+      fn_nif_key: { Args: { p_nif: string }; Returns: string }
       fn_normalize_lead_rule: { Args: { p_rule: Json }; Returns: Json }
       fn_owner_sync_apply: {
         Args: {
@@ -24939,6 +25443,53 @@ export type Database = {
       }
       fn_schedule_item_resolve_lead_id: {
         Args: { p_ref: string }
+        Returns: string
+      }
+      fn_sp_actor: {
+        Args: never
+        Returns: {
+          auth_user_id: string
+          created_at: string
+          created_by_org_id: string | null
+          email: string
+          first_login: boolean
+          id: string
+          invited_by: string | null
+          last_login_at: string | null
+          name: string | null
+          password_changed_at: string | null
+          role: string
+          status: string
+          supplier_account_id: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "supplier_portal_users"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_sp_catalog_clean: {
+        Args: { p_row: Json }
+        Returns: Record<string, unknown>
+      }
+      fn_sp_catalog_diff: {
+        Args: {
+          p_data: Json
+          p_item: Database["public"]["Tables"]["supplier_catalog_items"]["Row"]
+        }
+        Returns: Json
+      }
+      fn_sp_catalog_item_json: {
+        Args: {
+          p_item: Database["public"]["Tables"]["supplier_catalog_items"]["Row"]
+          p_with_price?: boolean
+        }
+        Returns: Json
+      }
+      fn_sp_crm_supplier_org: {
+        Args: { p_permission: string; p_supplier_id: string }
         Returns: string
       }
       fn_uom_get_or_create_pack: {
@@ -26799,6 +27350,37 @@ export type Database = {
           p_notes?: string
           p_purchase_order_id: string
           p_reason: string
+        }
+        Returns: Json
+      }
+      rpc_catalog_dismiss: {
+        Args: {
+          p_catalog_item_ids: string[]
+          p_dismissed?: boolean
+          p_reason?: string
+          p_supplier_id: string
+        }
+        Returns: Json
+      }
+      rpc_catalog_link: {
+        Args: {
+          p_apply_catalog_price?: boolean
+          p_catalog_item_id: string
+          p_product_id: string
+          p_supplier_id: string
+          p_uom_id?: string
+        }
+        Returns: Json
+      }
+      rpc_catalog_link_suggestions: {
+        Args: { p_catalog_item_ids: string[]; p_supplier_id: string }
+        Returns: Json
+      }
+      rpc_catalog_unlink: {
+        Args: {
+          p_catalog_item_id: string
+          p_remove_item_supplier?: boolean
+          p_supplier_id: string
         }
         Returns: Json
       }
@@ -29873,6 +30455,17 @@ export type Database = {
           uom_id: string
         }[]
       }
+      rpc_supplier_catalog_list: {
+        Args: {
+          p_filter?: string
+          p_include_inactive?: boolean
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_supplier_id: string
+        }
+        Returns: Json
+      }
       rpc_supplier_catalog_search: {
         Args: { p_limit?: number; p_query: string; p_supplier_id: string }
         Returns: {
@@ -29895,6 +30488,34 @@ export type Database = {
           uom_code: string
           uom_id: string
         }[]
+      }
+      rpc_supplier_portal_invite_prepare: {
+        Args: {
+          p_caller_auth_uid: string
+          p_check_only?: boolean
+          p_email: string
+          p_name?: string
+          p_organization_id: string
+          p_supplier_id: string
+        }
+        Returns: Json
+      }
+      rpc_supplier_portal_resend_prepare: {
+        Args: {
+          p_caller_auth_uid: string
+          p_organization_id: string
+          p_portal_user_id: string
+          p_supplier_id: string
+        }
+        Returns: Json
+      }
+      rpc_supplier_portal_revoke_access: {
+        Args: { p_portal_user_id?: string; p_supplier_id: string }
+        Returns: Json
+      }
+      rpc_supplier_portal_status: {
+        Args: { p_supplier_id: string }
+        Returns: Json
       }
       rpc_toggle_client_vip: {
         Args: {
@@ -31269,6 +31890,27 @@ export type Database = {
         Args: { p_id: string; p_kind: string }
         Returns: boolean
       }
+      sp_catalog_import: {
+        Args: { p_dry_run?: boolean; p_file_name?: string; p_rows: Json }
+        Returns: Json
+      }
+      sp_catalog_list: {
+        Args: {
+          p_include_inactive?: boolean
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+        }
+        Returns: Json
+      }
+      sp_catalog_set_active: {
+        Args: { p_active: boolean; p_item_ids: string[] }
+        Returns: Json
+      }
+      sp_catalog_upsert_item: { Args: { p_item: Json }; Returns: Json }
+      sp_mark_password_changed: { Args: never; Returns: Json }
+      sp_my_companies: { Args: never; Returns: Json }
+      sp_whoami: { Args: never; Returns: Json }
       stage_reached: {
         Args: {
           p_lead_status: string
