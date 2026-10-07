@@ -26,6 +26,7 @@ import {
 import { Loader2, Save } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { DynamicFormField } from "./DynamicFormField";
+import { LeadPhoneField } from "./LeadPhoneField";
 import {
   createSupabaseLeadDialogFieldDefinitionResolverClient,
   resolveLeadDialogFieldDefinitions,
@@ -779,12 +780,22 @@ export function AnewLeadEditDialog({
               <div className="grid grid-cols-2 gap-4">
                 {GENERAL_FIELDS.map((field) => (
                   <div key={field.key} className="space-y-2">
-                    <Label>{field.label}</Label>
-                    <Input
-                      value={readGeneralField(field.key)}
-                      onChange={(e) => handleGeneralFieldChange(field.key, e.target.value)}
-                      aria-invalid={!!fieldErrors[field.key]}
-                    />
+                    {field.key === "phone" ? (
+                      <LeadPhoneField
+                        label={field.label}
+                        value={readGeneralField(field.key)}
+                        onChange={(val) => handleGeneralFieldChange(field.key, val)}
+                      />
+                    ) : (
+                      <>
+                        <Label>{field.label}</Label>
+                        <Input
+                          value={readGeneralField(field.key)}
+                          onChange={(e) => handleGeneralFieldChange(field.key, e.target.value)}
+                          aria-invalid={!!fieldErrors[field.key]}
+                        />
+                      </>
+                    )}
                     {fieldErrors[field.key] && (
                       <p className="text-xs text-destructive">{fieldErrors[field.key]}</p>
                     )}
