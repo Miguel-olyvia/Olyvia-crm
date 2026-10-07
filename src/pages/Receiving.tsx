@@ -1325,11 +1325,12 @@ export default function Receiving() {
   const [supplierId, setSupplierId] = useState("");
   // Guia do fornecedor ("" = sem guia).
   const { hasPermission } = usePermissions();
-  const canEditNotes = hasPermission("purchase_orders.receive");
-  // Regra de rpc_product_code_learn: (receber E editar inventário) OU editar produtos.
+  // Permissões próprias da receção (migration 20261210130000).
+  const canEditNotes = hasPermission("receiving.manage_delivery_notes");
+  const canDownloadProof = hasPermission("receiving.download_proof");
+  // Regra de rpc_product_code_learn: associar códigos OU editar produtos.
   const canEditProducts = hasPermission("products.edit");
-  const canLearnCodes =
-    canEditProducts || (hasPermission("purchase_orders.receive") && hasPermission("inventory.edit"));
+  const canLearnCodes = canEditProducts || hasPermission("receiving.learn_codes");
   const [deliveryNoteId, setDeliveryNoteId] = useState("");
   const [noteInfo, setNoteInfo] = useState<DeliveryNoteFull | null>(null);
   const [noteLoadError, setNoteLoadError] = useState<string | null>(null);
@@ -4268,6 +4269,7 @@ export default function Receiving() {
         noteId={detailNoteId}
         orgId={orgId}
         canEdit={canEditNotes}
+        canDownloadProof={canDownloadProof}
         localWork={localWorkFor}
         onChanged={handleNoteChanged}
         onOpenOther={(id) => setDetailNoteId(id)}
@@ -4385,7 +4387,7 @@ function ScanPanelView({ panel, onDismiss }: { panel: ScanPanel; onDismiss: () =
           <Notice tone="warning">Sem encomenda a fornecedor em aberto para este produto nesta unidade — não foi para o cesto.</Notice>
         )}
         {panel.kind === "consult" && (
-          <Notice tone="info">Modo consulta: não tens permissão para receber (precisas de receber encomendas e editar inventário).</Notice>
+          <Notice tone="info">Modo consulta: não tens permissão para receber (precisas de receber mercadoria por leitura, receber encomendas e editar inventário).</Notice>
         )}
         <Warnings items={panel.lookup.warnings} />
         {panel.kind === "consult" &&
