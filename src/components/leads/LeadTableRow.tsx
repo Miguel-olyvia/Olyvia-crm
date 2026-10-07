@@ -21,6 +21,7 @@ import { PhoneCallDropdown } from "@/components/shared/PhoneCallDropdown";
 import { format, formatDistanceToNow } from "date-fns";
 import { pt } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { formatInternationalPhone } from "@/lib/phone/splitInternationalPhone";
 import type { ColumnConfig } from "./LeadsTableColumns";
 
 // Deal/Proposal/Quote aggregate for one lead's entity_id, sourced from the
@@ -293,7 +294,7 @@ export const LeadTableRow = memo(function LeadTableRow({
           case "phone":
             return (
               <TableCell key={column.id}>
-                <span className="text-sm">{phone || "-"}</span>
+                <span className="text-sm">{phone ? formatInternationalPhone(phone) : "-"}</span>
               </TableCell>
             );
 
