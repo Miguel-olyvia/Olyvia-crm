@@ -61,6 +61,7 @@ import { LearnCodeDialog } from "@/components/receiving/LearnCodeDialog";
 import {
   describeLearnResult,
   productCodeErrorMessage,
+  productCodeKey,
   removeProductCode,
   type LearnCodeResult,
 } from "@/components/receiving/productCodes";
@@ -267,12 +268,6 @@ interface QueuedScan {
   id: string;
   value: string;
   attempts: number;
-  /**
-   * p_unit_conversion no lookup (só a re-leitura depois de associar um código).
-   * Ausente = chamada igual à das fatias 1/2. A receção (rpc_receive_by_code)
-   * continua SEM a flag — ver onLearned.
-   */
-  unitConversion?: boolean;
 }
 
 interface FailedScan {
@@ -282,7 +277,6 @@ interface FailedScan {
   attempts: number;
   /** Há uma nova tentativa automática agendada. */
   waiting: boolean;
-  unitConversion?: boolean;
 }
 
 /** Leitura recusada de forma definitiva; fica visível até ser dispensada. */
@@ -462,6 +456,72 @@ const contextStorageKey = (userId: string, orgId: string) => `olyvia.receiving.c
 /** Avisa as instâncias montadas de que a lista "Por enviar" mudou (detail = chave). */
 const UNSENT_EVENT = "olyvia-receiving-unsent";
 
+// ── Entradas já recebidas (localStorage, por utilizador e empresa) ──
+// Fecha o caso "cópia cujo original já morreu": A (com cesto) sai do ecrã; é
+// duplicado → B (não abre a Receção); A volta, confirma e fecha (a tranca do
+// tabId fica livre); B abre a Receção, fica com a tranca e reporia o cesto
+// copiado — já recebido. Cada entry.id com receção confirmada pelo servidor
+// (incluindo replay) é gravado aqui ANTES de a entrada sair do cesto/pendentes;
+// a reposição do cesto e do "Por enviar" filtra estes ids (como já filtra os
+// entryId das pendentes). É localStorage: partilhado por todos os separadores
+// da mesma origem, incluindo a cópia. Os entry.id são estáveis entre original
+// e cópia (vêm na sessionStorage copiada; toStoredEntry/fromStoredEntry
+// mantêm-nos). Prazo de 7 dias e no máximo 2000 ids (os mais antigos saem).
+const DONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DONE_MAX = 2000;
+const UNSENT_PREFIX = "olyvia.receiving.unsent.";
+const DONE_PREFIX = "olyvia.receiving.done.";
+const doneStorageKey = (userId: string, orgId: string) => `${DONE_PREFIX}${userId}.${orgId}`;
+
+/** id → instante (ms) em que a receção foi confirmada; sem os expirados. */
+function readDoneMap(key: string): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return {};
+    const v = JSON.parse(raw) as unknown;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const now = Date.now();
+    const out: Record<string, number> = {};
+    for (const [id, ts] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof ts === "number" && Number.isFinite(ts) && now - ts < DONE_TTL_MS) out[id] = ts;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Ids recebidos (não expirados) desta empresa. Vazio se o localStorage não estiver legível. */
+function readDoneIds(userId: string, orgId: string): Set<string> {
+  return new Set(Object.keys(readDoneMap(doneStorageKey(userId, orgId))));
+}
+
+/** Grava ids recebidos (read-modify-write; limpa expirados e corta aos DONE_MAX mais recentes). */
+function markEntriesDone(userId: string | null, orgId: string | null, ids: (string | null | undefined)[]) {
+  if (!userId || !orgId) return;
+  const valid = ids.filter((x): x is string => typeof x === "string" && x !== "");
+  if (valid.length === 0) return;
+  try {
+    const key = doneStorageKey(userId, orgId);
+    const map = readDoneMap(key);
+    const now = Date.now();
+    for (const id of valid) map[id] = now;
+    let entries = Object.entries(map);
+    if (entries.length > DONE_MAX) {
+      entries = entries.sort((a, b) => b[1] - a[1]).slice(0, DONE_MAX);
+    }
+    window.localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    // localStorage indisponível/cheio: fica a proteção das pendentes e da tranca.
+  }
+}
+
+/** Ids recebidos da empresa a que pertence uma chave de "Por enviar". */
+function doneIdsForUnsentKey(unsentKey: string): Set<string> {
+  if (!unsentKey.startsWith(UNSENT_PREFIX)) return new Set();
+  return new Set(Object.keys(readDoneMap(DONE_PREFIX + unsentKey.slice(UNSENT_PREFIX.length))));
+}
+
 function readStorage(key: string): string | null {
   try {
     return window.localStorage.getItem(key);
@@ -572,9 +632,16 @@ function readUnsent(key: string): UnsentEntry[] {
     if (!raw) return [];
     const v = JSON.parse(raw) as unknown;
     if (!Array.isArray(v)) return [];
+    // Entradas já recebidas (registo partilhado): nunca voltam (ver markEntriesDone).
+    const done = doneIdsForUnsentKey(key);
     return v.filter(
       (e): e is UnsentEntry =>
-        !!e && typeof e.id === "string" && typeof e.productId === "string" && typeof e.warehouseId === "string" && Number(e.quantity) >= 1,
+        !!e &&
+        typeof e.id === "string" &&
+        typeof e.productId === "string" &&
+        typeof e.warehouseId === "string" &&
+        Number(e.quantity) >= 1 &&
+        !done.has(e.id),
     );
   } catch {
     return [];
@@ -649,6 +716,12 @@ const TAB_PROBE_MS = 750;
 /** Web Locks: novas tentativas se a tranca estiver presa (documento anterior de um F5 ainda a largar). */
 const TAB_LOCK_RETRIES = 2;
 const TAB_LOCK_RETRY_MS = 300;
+/**
+ * Prazo de segurança para a verificação com Web Locks (normalmente < 1 s). Se
+ * esgotar (API pendurada), desiste da tranca e decide pelo recurso (marca +
+ * BroadcastChannel) — nunca fica preso em "A preparar…". Ver tabLocksAbandoned.
+ */
+const TAB_CHECK_TIMEOUT_MS = 3000;
 const TAB_DATA_PREFIXES = ["olyvia.receiving.basket.", "olyvia.receiving.unsent.", "olyvia.receiving.context."];
 
 interface TabMsg {
@@ -674,8 +747,21 @@ let tabYield: (() => void) | null = null;
 let tabLifecycleBound = false;
 /** Larga a tranca Web Locks presa por esta carga (só o HMR a usa; numa carga normal fica até a página morrer). */
 let tabLockRelease: (() => void) | null = null;
+/** tabId cuja tranca esta carga tem presa (null = nenhuma). */
+let tabLockHeldId: string | null = null;
+/**
+ * O prazo da verificação com Web Locks esgotou e a decisão passou para o
+ * recurso. A partir daí a verificação com trancas (se acordar) não mexe em
+ * nada, e uma tranca concedida tarde só fica presa se for do tabId que o
+ * recurso decidiu como desta carga; qualquer outra é largada logo — nunca há
+ * duas cargas a julgar-se donas do mesmo tabId por causa do atraso. (Não se usa
+ * AbortSignal: a especificação não o permite com ifAvailable.)
+ */
+let tabLocksAbandoned = false;
 
 type TabLockAttempt = "held" | "busy" | "error";
+
+const isDecidedTabId = (id: string) => !!tabState && !tabState.checking && tabState.tabId === id;
 
 function tabLocks(): LockManager | null {
   try {
@@ -699,10 +785,17 @@ function tryHoldTabLock(locks: LockManager, id: string): Promise<TabLockAttempt>
             resolve("busy");
             return undefined;
           }
+          // Concedida depois de o prazo esgotar: só serve se for do tabId já
+          // decidido para esta carga; senão larga-se já (devolver sem Promise).
+          if (tabLocksAbandoned && !isDecidedTabId(id)) {
+            resolve("error");
+            return undefined;
+          }
           return new Promise<void>((release) => {
             // Só um tabId por carga: a tranca de um id anterior deixa de servir.
             const previous = tabLockRelease;
             tabLockRelease = release;
+            tabLockHeldId = id;
             try {
               previous?.();
             } catch {
@@ -768,6 +861,8 @@ import.meta.hot?.dispose(() => {
     // já largada
   }
   tabLockRelease = null;
+  tabLockHeldId = null;
+  tabLocksAbandoned = false;
   tabState = null;
   tabCheckPromise = null;
   tabChannels.forEach((c) => {
@@ -860,10 +955,34 @@ function checkTab(userId: string): Promise<TabCheck> {
   if (tabCheckPromise) return tabCheckPromise;
   const locks = tabLocks();
   const viaLocks: Promise<TabCheck | null> = locks
-    ? checkTabWithLocks(locks).catch(() => null)
+    ? new Promise<TabCheck | null>((resolve) => {
+        let settled = false;
+        // Prazo: ao esgotar, desiste das trancas (síncrono, antes de o recurso
+        // começar) e o recurso decide. O que a verificação com trancas fizer
+        // depois é ignorado (ver os testes de tabLocksAbandoned).
+        const timer = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          tabLocksAbandoned = true;
+          resolve(null);
+        }, TAB_CHECK_TIMEOUT_MS);
+        checkTabWithLocks(locks)
+          .catch(() => null)
+          .then((r) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            resolve(r);
+          });
+      })
     : Promise.resolve(null);
   tabCheckPromise = viaLocks
-    .then((r) => r ?? checkTabFallback(ch))
+    .then(async (r) => {
+      if (r) return r;
+      const fb = await checkTabFallback(ch);
+      if (locks && tabLocksAbandoned) reconcileTabLockAfterTimeout(locks);
+      return fb;
+    })
     // Falha inesperada: sem prova de que é o original — não repõe (lado seguro).
     .catch((): TabCheck => {
       const dropped = clearTabSessionData();
@@ -878,6 +997,27 @@ function checkTab(userId: string): Promise<TabCheck> {
 }
 
 /**
+ * Depois de o recurso decidir (prazo esgotado): larga a tranca de um tabId que
+ * não ficou (ex.: a verificação com trancas chegou a prender um id novo) e tenta,
+ * sem esperar, prender a do tabId decidido — para uma cópia futura desta carga
+ * a encontrar presa. Se as trancas continuarem penduradas, essa cópia também
+ * esgota o prazo e o recurso decide (vê a marca de "vivo" copiada → cópia).
+ */
+function reconcileTabLockAfterTimeout(locks: LockManager) {
+  const id = tabState && !tabState.checking ? tabState.tabId : null;
+  if (tabLockHeldId && tabLockHeldId !== id) {
+    try {
+      tabLockRelease?.();
+    } catch {
+      // já largada
+    }
+    tabLockRelease = null;
+    tabLockHeldId = null;
+  }
+  if (id && tabLockHeldId !== id) void tryHoldTabLock(locks, id);
+}
+
+/**
  * Passa a separador novo com Web Locks: prende a tranca de um tabId novo e só
  * depois o escreve (uma cópia feita a seguir vê o tabId novo já preso).
  */
@@ -888,8 +1028,11 @@ async function becomeNewLocked(locks: LockManager, reason: TabCheck["reason"]): 
     // "busy" com um id aleatório novo não deve acontecer; "error": fica sem
     // tranca — uma cópia desta também cai no recurso e a marca decide.
     if ((await tryHoldTabLock(locks, id)) !== "busy") break;
+    if (tabLocksAbandoned) break;
     id = newRequestId();
   }
+  // Prazo esgotado entretanto: o recurso já decidiu — não mexe em nada.
+  if (tabLocksAbandoned) return { reason, dropped };
   tabState = { tabId: id, checking: false };
   writeTabId(id);
   writeTabAlive(id);
@@ -904,10 +1047,13 @@ async function checkTabWithLocks(locks: LockManager): Promise<TabCheck | null> {
   if (!current) return becomeNewLocked(locks, "ok");
   tabState = { tabId: current, checking: true };
   let attempt = await tryHoldTabLock(locks, current);
-  for (let i = 0; attempt === "busy" && i < TAB_LOCK_RETRIES; i++) {
+  for (let i = 0; attempt === "busy" && i < TAB_LOCK_RETRIES && !tabLocksAbandoned; i++) {
     await waitMs(TAB_LOCK_RETRY_MS);
+    if (tabLocksAbandoned) break;
     attempt = await tryHoldTabLock(locks, current);
   }
+  // Prazo esgotado: o recurso decide (e é dono do tabState) — não mexe em nada.
+  if (tabLocksAbandoned) return null;
   if (attempt === "error") {
     tabState = null;
     return null;
@@ -1255,6 +1401,12 @@ export default function Receiving() {
   const restoredBasketKeyRef = useRef<string | null>(null);
   /** Armazéns/fornecedores carregados para a época indicada (para validar o cesto reposto). */
   const optionsRef = useRef<{ epoch: number; warehouses: Option[]; suppliers: Option[] } | null>(null);
+  /**
+   * Época cuja carga de armazéns/fornecedores TERMINOU (com ou sem erro) e cujo
+   * armazém lembrado/único já foi aplicado. optionsRef fica null se a carga der
+   * erro — por isso o gate das leituras usa esta, senão nunca abriria.
+   */
+  const optionsSettledEpochRef = useRef(-1);
 
   const previewTimers = useRef(new Map<string, number>());
   const previewSeq = useRef(new Map<string, number>());
@@ -1418,6 +1570,8 @@ export default function Receiving() {
    */
   const recoverFromRow = useCallback(
     (p: PendingReceipt, row: ScanRow, notify = true) => {
+      // Registo de recebidas ANTES de largar a pendente (que também protegia o entryId).
+      markEntriesDone(userIdRef.current, p.orgId, [p.entryId]);
       removePending(p.requestId);
       if (mountedRef.current && row.organization_id === orgRef.current) {
         const r = receivedFromResult(p.requestId, p, (row.result ?? {}) as Partial<ReceiveResult>, true);
@@ -1591,6 +1745,8 @@ export default function Receiving() {
         setWarehouseId(nextWh);
         warehouseRef.current = nextWh;
       }
+      // Armazém aplicado (na ref, síncrono): as leituras em fila já podem sair.
+      optionsSettledEpochRef.current = epoch;
       // Fornecedor reposto que já não pertence a esta empresa: volta a "Todos".
       // A guia fixa o fornecedor: sai com ele (e avisa-se, nunca em silêncio).
       const curSup = supplierRef.current;
@@ -1657,7 +1813,11 @@ export default function Receiving() {
     // Por segurança: uma entrada que já originou uma receção pendente nunca volta como livre.
     const pendingEntryIds = new Set(readPending(userId).map((p) => p.entryId).filter(Boolean) as string[]);
     pendingRef.current.forEach((p) => p.entryId && pendingEntryIds.add(p.entryId));
-    const entries = (saved?.entries ?? []).filter((e) => !pendingEntryIds.has(e.id)).map(fromStoredEntry);
+    // Nem uma que já foi recebida (cópia de um separador que entretanto confirmou e fechou).
+    const doneIds = readDoneIds(userId, orgId);
+    const entries = (saved?.entries ?? [])
+      .filter((e) => !pendingEntryIds.has(e.id) && !doneIds.has(e.id))
+      .map(fromStoredEntry);
     if (!saved || entries.length === 0) {
       // Sem cesto para repor: repõe o contexto do ecrã (armazém, fornecedor e
       // GUIA) deste separador. Só se nada tiver sido escolhido entretanto e o
@@ -1821,6 +1981,13 @@ export default function Receiving() {
     const key = unsentStorageKey(uid, org);
     const item = readUnsent(key).find((x) => x.id === id) ?? unsent.find((x) => x.id === id);
     if (!item) return;
+    // A cópia em memória pode estar atrasada: uma entrada já recebida nunca volta ao cesto.
+    if (readDoneIds(uid, org).has(item.id)) {
+      const next = mutateUnsent(key, (cur) => cur.filter((x) => x.id !== id));
+      setUnsent(next ?? ((cur) => cur.filter((x) => x.id !== id)));
+      toast({ title: "Já recebida", description: "Esta entrada já foi recebida noutro separador — não volta ao cesto." });
+      return;
+    }
     const itemDn = dnOf(item);
     const sameContext = () =>
       item.warehouseId === warehouseRef.current && item.supplierId === supplierRef.current && itemDn === deliveryNoteRef.current;
@@ -2303,7 +2470,7 @@ export default function Receiving() {
    * mensagem se falhou de forma passageira (para voltar a tentar).
    */
   const lookupOne = useCallback(
-    async (value: string, unitConversion = false): Promise<{ transient: string } | null> => {
+    async (value: string): Promise<{ transient: string } | null> => {
       const org = orgRef.current;
       const epoch = orgEpochRef.current;
       const wh = warehouseRef.current;
@@ -2316,8 +2483,8 @@ export default function Receiving() {
           p_code: value,
           p_supplier_id: sup || undefined,
           p_delivery_note_id: dn || undefined,
-          // Só na re-leitura depois de associar; nas outras a chamada fica igual.
-          ...(unitConversion ? { p_unit_conversion: true } : {}),
+          // Sem p_unit_conversion: o ecrã não converte de ponta a ponta (a receção
+          // vai sem a flag); com ela só se escondia o aviso das linhas noutra unidade.
         });
         if (!isCurrent(epoch, org)) return null;
         // A guia mudou durante a procura: o âmbito era outro — repete a leitura.
@@ -2362,12 +2529,20 @@ export default function Receiving() {
    * cesto/contexto desta empresa ter sido reposto. Antes disso ficam na fila
    * (por ordem): uma leitura feita nos primeiros instantes depois de um F5 não
    * se mistura com o cesto reposto nem é procurada no armazém/fornecedor/guia
-   * errado.
+   * errado. Também esperam pela carga dos armazéns desta empresa (o armazém
+   * lembrado/único só é aplicado no fim dela): antes disso cairiam todas em
+   * "Escolhe primeiro o armazém". Se, carregadas, não houver armazém, aí sim.
    */
   const scanGateOpen = useCallback(() => {
     const uid = userIdRef.current;
     const org = orgRef.current;
-    return tabCheckedRef.current && !!uid && !!org && restoredBasketKeyRef.current === basketStorageKey(uid, org);
+    return (
+      tabCheckedRef.current &&
+      !!uid &&
+      !!org &&
+      restoredBasketKeyRef.current === basketStorageKey(uid, org) &&
+      optionsSettledEpochRef.current === orgEpochRef.current
+    );
   }, []);
 
   const processQueue = useCallback(async () => {
@@ -2378,7 +2553,7 @@ export default function Receiving() {
         const item = scanQueueRef.current[0];
         const org = orgRef.current;
         const epoch = orgEpochRef.current;
-        const outcome = await lookupOne(item.value, item.unitConversion === true);
+        const outcome = await lookupOne(item.value);
         // Remove por id: a fila pode ter sido limpa (troca de organização) entretanto.
         scanQueueRef.current = scanQueueRef.current.filter((x) => x.id !== item.id);
         setQueueSize(scanQueueRef.current.length);
@@ -2393,7 +2568,6 @@ export default function Receiving() {
               error: outcome.transient,
               attempts,
               waiting: auto,
-              ...(item.unitConversion ? { unitConversion: true } : {}),
             },
           ]);
           if (auto) {
@@ -2402,12 +2576,7 @@ export default function Receiving() {
               scanRetryTimers.current.delete(item.id);
               if (!isCurrent(epoch, org)) return;
               setFailedScans((cur) => cur.filter((x) => x.id !== item.id));
-              enqueueRef.current({
-                id: item.id,
-                value: item.value,
-                attempts,
-                ...(item.unitConversion ? { unitConversion: true } : {}),
-              });
+              enqueueRef.current({ id: item.id, value: item.value, attempts });
             }, delay);
             scanRetryTimers.current.set(item.id, timer);
           }
@@ -2429,10 +2598,10 @@ export default function Receiving() {
   // (este efeito vem depois dos de repor: no mesmo commit, já vê o cesto e o
   // armazém/fornecedor/guia repostos nas refs).
   useEffect(() => {
-    const open = scanGateOpen();
+    const open = scanGateOpen() && !optionsLoading;
     setScanReady(open);
     if (open && scanQueueRef.current.length > 0) void processQueue();
-  }, [userId, orgId, tabChecked, scanGateOpen, processQueue]);
+  }, [userId, orgId, tabChecked, optionsLoading, scanGateOpen, processQueue]);
 
   const enqueueScan = (raw: string) => {
     const value = raw.trim();
@@ -2578,7 +2747,7 @@ export default function Receiving() {
     if (t) window.clearTimeout(t);
     scanRetryTimers.current.delete(id);
     setFailedScans((cur) => cur.filter((x) => x.id !== id));
-    enqueueRef.current({ id: f.id, value: f.value, attempts: 0, ...(f.unitConversion ? { unitConversion: true } : {}) });
+    enqueueRef.current({ id: f.id, value: f.value, attempts: 0 });
     focusScan();
   };
 
@@ -2646,21 +2815,37 @@ export default function Receiving() {
   };
 
   /**
-   * Código associado: a leitura recusada sai da lista e o código é lido de novo
-   * pelo caminho normal (fila → gate → lookup), com p_unit_conversion só nessa
-   * leitura. Se a empresa mudou entretanto, não se repete nada.
+   * Código associado: TODAS as leituras recusadas por "não encontrado" com o
+   * mesmo código (chave como o servidor: productCodeKey — GTIN com zeros à
+   * esquerda, resto sem maiúsculas) saem da lista e são lidas de novo pelo
+   * caminho normal (fila → gate → lookup), uma entrada na fila por leitura —
+   * cada uma era uma unidade lida. Se a empresa mudou entretanto (a lista foi
+   * limpa com a troca), não se repete nada.
    */
   const handleLearned = (r: LearnCodeResult) => {
     const t = learnTarget;
-    if (!t || !learnOpen) return;
-    setRejectedScans((cur) => cur.filter((x) => x.id !== t.scanId));
+    if (!t) return;
     const same = isCurrent(t.epoch, t.org);
-    if (same) enqueueRef.current({ id: newRequestId(), value: t.code, attempts: 0, unitConversion: true });
+    let repeated = 0;
+    if (same) {
+      const key = productCodeKey(t.code);
+      // Lido do estado atual (as leituras são acrescentadas por setRejectedScans
+      // em handlers anteriores, já aplicados quando o diálogo grava).
+      const matching = rejectedScans.filter(
+        (x) => x.id === t.scanId || (x.reason === "not_found" && key !== null && productCodeKey(x.value) === key),
+      );
+      const ids = new Set(matching.map((x) => x.id));
+      setRejectedScans((cur) => cur.filter((x) => !ids.has(x.id)));
+      // Mais antigas primeiro (a lista mostra as mais recentes em cima).
+      const values = matching.length > 0 ? matching.slice().reverse().map((x) => x.value) : [t.code];
+      for (const value of values) enqueueRef.current({ id: newRequestId(), value, attempts: 0 });
+      repeated = values.length;
+    }
     const canUndo = !!r.id && r.learned;
     toast({
       title: r.learned ? "Código associado" : "Código já reconhecido",
       description: same
-        ? `${describeLearnResult(r)} A leitura foi repetida.`
+        ? `${describeLearnResult(r)} ${repeated === 1 ? "A leitura foi repetida." : `As ${repeated} leituras foram repetidas.`}`
         : `${describeLearnResult(r)} A empresa mudou — lê o código de novo.`,
       duration: canUndo ? 15000 : undefined,
       action: canUndo ? (
@@ -3015,6 +3200,9 @@ export default function Receiving() {
         const here = isCurrent(epoch, org);
 
         if (result) {
+          // Registo de recebidas ANTES de a entrada sair das pendentes/cesto: uma
+          // cópia deste separador nunca a repõe (ver markEntriesDone).
+          markEntriesDone(uid, org, [e.id, p.entryId]);
           removePending(requestId);
           ok += 1;
           if (replayed) replayedCount += 1;
@@ -3025,12 +3213,14 @@ export default function Receiving() {
             // Subtrai a quantidade ENVIADA com este id (p.quantity — a fotografia ou
             // a pendente), nunca a quantidade atual da entrada: se a entrada ficou
             // com mais (rebase do updater de bloqueio), o resto fica livre no cesto.
+            // O resto leva um id NOVO: o id antigo já está no registo de recebidas
+            // e o resto (por receber) não pode ser filtrado numa reposição.
             const sentQty = p.quantity;
             setBasket((prev) =>
               prev.flatMap((x) => {
                 if (x.id !== e.id) return [x];
                 const rest = x.quantity - sentQty;
-                return rest > 0 ? [freeEntry({ ...x, quantity: rest })] : [];
+                return rest > 0 ? [freeEntry({ ...x, id: newRequestId(), quantity: rest })] : [];
               }),
             );
             refreshSameProduct(e.productId);
@@ -3188,6 +3378,7 @@ export default function Receiving() {
     }
     const here = isCurrent(epoch, p.orgId);
     if (result) {
+      markEntriesDone(userIdRef.current, p.orgId, [p.entryId]);
       removePending(requestId);
       if (here) {
         setReceived((cur) => [receivedFromResult(requestId, p, result ?? {}, replayed), ...cur.filter((r) => r.id !== requestId)]);
@@ -3273,6 +3464,7 @@ export default function Receiving() {
     const pNow = pendingRef.current.find((x) => x.requestId === requestId) ?? (cur.sent?.requestId === requestId ? cur.sent : undefined);
     if (!pNow || sentAtMs(pNow) !== sentAtMs(p)) return;
     const row = rows.find((r) => r.id === requestId);
+    if (row) markEntriesDone(userIdRef.current, org, [entryId, pNow.entryId]);
     removePending(requestId);
     if (row) {
       const result = (row.result ?? {}) as Partial<ReceiveResult>;
@@ -3281,7 +3473,8 @@ export default function Receiving() {
         prev.flatMap((x) => {
           if (x.id !== entryId || x.requestId !== requestId || x.submitting) return [x];
           const rest = x.quantity - p.quantity;
-          return rest > 0 ? [freeEntry({ ...x, quantity: rest })] : [];
+          // Resto com id novo (o antigo ficou no registo de recebidas).
+          return rest > 0 ? [freeEntry({ ...x, id: newRequestId(), quantity: rest })] : [];
         }),
       );
       refreshSameProduct(p.productId);

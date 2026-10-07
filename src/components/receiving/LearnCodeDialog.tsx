@@ -8,6 +8,10 @@
 //   isso "Associar de novo" depois de uma falha de rede não duplica.
 // - Produto sem unidade: opção "definir a unidade do produto como «un»"
 //   (p_set_product_uom; exige products.edit) — obrigatória para embalagens.
+//   `allowSetUom={false}` (ficha do produto) esconde a opção: o formulário
+//   aberto gravaria por cima a unidade vazia (rpc_update_product). Aí só se
+//   associa na unidade do produto (a RPC aceita p_uom_id NULL sem unidade);
+//   embalagens só depois de definir e gravar a unidade na ficha.
 // - Criar embalagens novas não é deste diálogo (tabela uom, products.manage).
 // - Sem Popover/Command: selects nativos e lista inline (o foco não foge do Dialog).
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -66,6 +70,12 @@ export interface LearnCodeDialogProps {
   fixedProduct?: LearnCodeProduct | null;
   /** products.edit — permite definir a unidade «un» num produto sem unidade. */
   canEditProducts?: boolean;
+  /**
+   * Mostrar a opção "definir a unidade do produto como «un»" (por omissão,
+   * sim). A ficha do produto passa false: o formulário aberto desfaria a
+   * alteração ao gravar.
+   */
+  allowSetUom?: boolean;
   onLearned: (result: LearnCodeResult) => void;
 }
 
@@ -81,6 +91,7 @@ export function LearnCodeDialog({
   suppliers: suppliersProp,
   fixedProduct,
   canEditProducts = false,
+  allowSetUom = true,
   onLearned,
 }: LearnCodeDialogProps) {
   const codeLocked = initialCode.trim() !== "";
@@ -274,7 +285,7 @@ export function LearnCodeDialog({
   const isPack = uomId !== "";
   // Embalagem num produto sem unidade só com «definir un».
   const mustSetUom = !!product && !productHasUom && isPack;
-  const effectiveSetUom = !productHasUom && (setUom || mustSetUom);
+  const effectiveSetUom = allowSetUom && !productHasUom && (setUom || mustSetUom);
 
   const trimmedCode = code.trim();
   const problems: string[] = [];
@@ -282,7 +293,11 @@ export function LearnCodeDialog({
   if (trimmedCode.length > 200) problems.push("Código demasiado longo (máx. 200).");
   if (!product) problems.push("Escolhe o produto.");
   if (kind === "supplier_ref" && !supplierId) problems.push("Escolhe o fornecedor da referência.");
-  if (mustSetUom && !canEditProducts)
+  if (mustSetUom && !allowSetUom)
+    problems.push(
+      "Este produto não tem unidade: define primeiro a unidade do produto no campo Unidade da ficha e grava — depois já podes associar embalagens.",
+    );
+  else if (mustSetUom && !canEditProducts)
     problems.push("Este produto não tem unidade: para associar uma embalagem é preciso definir a unidade «un» (exige permissão para editar produtos).");
   const canSave = problems.length === 0 && !saving;
 
@@ -498,7 +513,16 @@ export function LearnCodeDialog({
             </div>
           )}
 
-          {product && !productHasUom && (
+          {product && !productHasUom && !allowSetUom && (
+            <div className="rounded-md border border-amber-500/60 bg-amber-500/10 p-3">
+              <p className="text-xs text-muted-foreground">
+                O produto não tem unidade. O código fica associado na unidade do produto. Para associar uma embalagem, define
+                primeiro a unidade do produto no campo Unidade da ficha e grava.
+              </p>
+            </div>
+          )}
+
+          {product && !productHasUom && allowSetUom && (
             <div className="space-y-1.5 rounded-md border border-amber-500/60 bg-amber-500/10 p-3">
               <div className="flex min-h-[2.75rem] items-center gap-3">
                 <Checkbox

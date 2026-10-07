@@ -2513,6 +2513,8 @@ export default function Products() {
                     sku={editingProduct.sku}
                     barcode={editingProduct.barcode}
                     canEdit={hasPermission("products.edit")}
+                    currentBarcode={formData.barcode}
+                    onMainBarcodeChange={(next) => setFormData((prev) => ({ ...prev, barcode: next ?? "" }))}
                   />
                 )}
 

@@ -6,7 +6,16 @@
 // 'product_form'); remover → rpc_product_code_remove com motivo (anulação
 // lógica; não reverte receções).
 // Componente autónomo: a única ligação a Products.tsx é o <ProductCodesSection />.
-import { useCallback, useEffect, useState } from "react";
+//
+// Sincronização com o campo "Código de Barras" do formulário aberto
+// (currentBarcode + onMainBarcodeChange, opcionais): DEPENDE da migration que
+// faz rpc_product_code_learn gravar products.barcode quando o produto não tem
+// principal (devolve `main_barcode_set: true`) e rpc_product_code_remove limpá-lo
+// quando o código removido tem a mesma chave (devolve `main_barcode_cleared: true`).
+// Sem esses campos no JSON o campo não é tocado — assim o próximo "Guardar" nunca
+// grava um principal que a BD não tem, nem repõe um que a BD já limpou.
+// Só preenche se o campo estiver vazio e só limpa se a chave for igual.
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +36,7 @@ import {
   describeLearnResult,
   fetchProductCodes,
   productCodeErrorMessage,
+  productCodeKey,
   removeProductCode,
   type ProductCodeRow,
 } from "@/components/receiving/productCodes";
@@ -38,8 +48,16 @@ interface Props {
   sku: string | null;
   /** Código de barras principal gravado (products.barcode). */
   barcode: string | null | undefined;
-  /** products.edit: acrescentar, remover e definir a unidade «un». */
+  /**
+   * products.edit: acrescentar e remover. Aqui NÃO se define a unidade «un»
+   * (allowSetUom={false}): o "Guardar" do formulário aberto gravaria por cima a
+   * unidade do campo (vazia) e desfazia-a.
+   */
   canEdit: boolean;
+  /** Valor atual (não gravado) do campo "Código de Barras" do formulário. */
+  currentBarcode?: string | null;
+  /** Atualiza o campo do formulário quando a RPC gravou/limpou products.barcode. */
+  onMainBarcodeChange?: (next: string | null) => void;
 }
 
 const SOURCE_LABEL: Record<string, string> = {
@@ -53,8 +71,25 @@ const fmtDate = (iso: string) => {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleDateString("pt-PT");
 };
 
-export function ProductCodesSection({ productId, organizationId, productName, sku, barcode, canEdit }: Props) {
+export function ProductCodesSection({
+  productId,
+  organizationId,
+  productName,
+  sku,
+  barcode,
+  canEdit,
+  currentBarcode,
+  onMainBarcodeChange,
+}: Props) {
   const { toast } = useToast();
+  // Valor mais recente do campo (as funções assíncronas abaixo leem-no depois do await).
+  const currentBarcodeRef = useRef(currentBarcode);
+  currentBarcodeRef.current = currentBarcode;
+  // Principal gravado conforme a última resposta da RPC (undefined = usar a prop).
+  const [savedMainOverride, setSavedMainOverride] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    setSavedMainOverride(undefined);
+  }, [productId, barcode]);
   const [rows, setRows] = useState<ProductCodeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -99,11 +134,18 @@ export function ProductCodesSection({ productId, organizationId, productName, sk
           ? `«${toRemove.code}» foi usado em ${n} ${n === 1 ? "leitura" : "leituras"} — essas receções não são revertidas.`
           : `«${toRemove.code}» deixa de ser reconhecido.`,
     });
+    if (data.main_barcode_cleared === true) {
+      setSavedMainOverride(null);
+      const removedKey = productCodeKey(toRemove.code);
+      if (onMainBarcodeChange && removedKey !== null && productCodeKey(currentBarcodeRef.current) === removedKey) {
+        onMainBarcodeChange(null);
+      }
+    }
     setToRemove(null);
     void load();
   };
 
-  const mainBarcode = (barcode ?? "").trim();
+  const mainBarcode = ((savedMainOverride !== undefined ? savedMainOverride : barcode) ?? "").trim();
 
   return (
     <section aria-labelledby="product-codes-title" className="space-y-2 rounded-md border p-3">
@@ -186,8 +228,15 @@ export function ProductCodesSection({ productId, organizationId, productName, sk
         warehouseId={null}
         fixedProduct={{ id: productId, name: productName, sku }}
         canEditProducts={canEdit}
+        allowSetUom={false}
         onLearned={(res) => {
           toast({ title: res.learned ? "Código associado" : "Código já associado", description: describeLearnResult(res) });
+          if (res.learned && res.kind === "barcode" && res.main_barcode_set === true) {
+            setSavedMainOverride(res.code);
+            if (onMainBarcodeChange && (currentBarcodeRef.current ?? "").trim() === "") {
+              onMainBarcodeChange(res.code);
+            }
+          }
           void load();
         }}
       />

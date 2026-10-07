@@ -43,6 +43,12 @@ export interface LearnCodeResult extends ProductCodeSummary {
   product_uom_set: boolean;
   annulled: string[];
   warnings: string[];
+  /**
+   * true = o produto não tinha código principal e a RPC gravou este código de
+   * barras também em products.barcode (migration posterior à fatia 3).
+   * Ausente em BDs sem essa migration → o cliente não mexe no campo da ficha.
+   */
+  main_barcode_set?: boolean;
 }
 
 /** Retorno de rpc_product_code_remove. */
@@ -50,6 +56,11 @@ export interface RemoveCodeResult extends ProductCodeSummary {
   removed: boolean;
   already_removed: boolean;
   scans_using_code: number;
+  /**
+   * true = o código removido era (mesma chave) o principal e a RPC limpou
+   * products.barcode. Ausente em BDs sem essa migration → o cliente não mexe.
+   */
+  main_barcode_cleared?: boolean;
 }
 
 /** Linha de product_codes lida diretamente (RLS: org + products.view ou purchase_orders.receive). */
@@ -89,6 +100,16 @@ export function newCodeRequestId(): string {
 /** Só dígitos com 8–14 → código de barras (EAN/DUN); o resto parece uma referência. */
 export function looksLikeBarcode(code: string): boolean {
   return /^[0-9]{8,14}$/.test(code.trim());
+}
+
+/**
+ * Espelho de fn_product_code_key (BD): btrim; só dígitos 8–14 → lpad 14 com
+ * zeros (GTIN, zeros à esquerda ignorados); resto → minúsculas. Vazio → null.
+ */
+export function productCodeKey(code: string | null | undefined): string | null {
+  const c = (code ?? "").replace(/^ +| +$/g, "");
+  if (c === "") return null;
+  return /^[0-9]{8,14}$/.test(c) ? c.padStart(14, "0") : c.toLowerCase();
 }
 
 export async function learnProductCode(a: LearnCodeArgs): Promise<{ data: LearnCodeResult | null; error: RpcErrorLike | null }> {
