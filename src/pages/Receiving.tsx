@@ -36,7 +36,7 @@
 // enviada (o servidor recusa o mesmo request_id com outra guia). Trocar de
 // guia segue a regra do armazém/fornecedor (só com o cesto vazio). Avisos
 // "não consta da guia" / "acima do anunciado" exigem confirmação na entrada.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -66,8 +66,11 @@ import {
   type LearnCodeResult,
 } from "@/components/receiving/productCodes";
 import { ToastAction } from "@/components/ui/toast";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import type { CameraScannerProps } from "@/components/scanner/CameraScanner";
 import {
   AlertTriangle,
+  Camera,
   CheckCircle2,
   FileText,
   Info,
@@ -83,6 +86,50 @@ import {
   Tag,
   Trash2,
 } from "lucide-react";
+
+/**
+ * Leitor por câmara: carregado só quando é aberto (não pesa no chunk da
+ * receção). Se o chunk não carregar (rede, deploy novo), mostra um aviso em vez
+ * de rebentar a página — o cesto e a fila ficam intactos.
+ */
+function CameraScannerUnavailable({ open, onOpenChange }: CameraScannerProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogTitle>Leitor da câmara indisponível</DialogTitle>
+        <DialogDescription>
+          Não foi possível carregar o leitor da câmara. Verifica a ligação e recarrega a página — o cesto fica guardado.
+        </DialogDescription>
+        <Button type="button" variant="outline" className="h-11" onClick={() => onOpenChange(false)}>
+          Fechar
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Enquanto o chunk do leitor carrega: ecrã inteiro, mas sempre com saída (botão e Escape). */
+function CameraScannerLoading({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (ev: globalThis.KeyboardEvent) => {
+      if (ev.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[600] flex flex-col items-center justify-center gap-4 bg-black/80 p-6 text-sm text-white">
+      <p role="status">A abrir a câmara…</p>
+      <Button type="button" variant="secondary" className="h-11 px-6" onClick={onClose}>
+        Fechar
+      </Button>
+    </div>
+  );
+}
+
+const CameraScanner = lazy(() =>
+  import("@/components/scanner/CameraScanner").catch(() => ({ default: CameraScannerUnavailable })),
+);
 
 // ── Formatos das RPCs (supabase/migrations/20261206160000_rececao_por_codigo.sql) ──
 
@@ -1354,6 +1401,12 @@ export default function Receiving() {
   const [panel, setPanel] = useState<ScanPanel>({ kind: "none" });
   const [choices, setChoices] = useState<PendingChoice[]>([]);
   const [scannerMode, setScannerMode] = useState<boolean>(() => readStorage(KEYBOARD_MODE_KEY) === "1");
+  /** Leitor por câmara: aberto / já carregado uma vez (fica montado para a animação de fecho). */
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraMounted, setCameraMounted] = useState(false);
+  const closeCamera = useCallback(() => setCameraOpen(false), []);
+  /** Anúncio que já existia ao abrir a câmara — o leitor só mostra os seguintes. */
+  const [cameraAnnouncementBase, setCameraAnnouncementBase] = useState<string | null>(null);
 
   const [basket, setBasket] = useState<BasketEntry[]>([]);
   const [received, setReceived] = useState<ReceivedEntry[]>([]);
@@ -2610,6 +2663,22 @@ export default function Receiving() {
     enqueueRef.current({ id: newRequestId(), value, attempts: 0 });
   };
 
+  // ── Leitura pela câmara ──
+  // Cada código lido entra pela MESMA fila que a pistola/teclado (enqueueScan →
+  // fila → scanGateOpen → lookupOne); o leitor não chama RPCs.
+  const openCamera = () => {
+    if (optionsLoading || !warehouseRef.current) return;
+    setCameraAnnouncementBase(announcement);
+    setCameraMounted(true);
+    setCameraOpen(true);
+  };
+
+  // Sem armazém (troca de empresa, recarga das opções): fecha o leitor, como o
+  // campo de leitura fica desativado.
+  useEffect(() => {
+    if (optionsLoading || !warehouseId) setCameraOpen(false);
+  }, [optionsLoading, warehouseId]);
+
   /**
    * Leitor com o foco fora de um campo editável (num botão, no <select> da linha
    * de PO, no corpo da página): apanha a rajada em captura, antes do elemento.
@@ -3764,6 +3833,18 @@ export default function Receiving() {
             <span className="sr-only sm:not-sr-only">Procurar</span>
           </Button>
         </form>
+        <Button
+          type="button"
+          variant="secondary"
+          className="mt-2 h-11 w-full gap-2 text-base sm:w-auto [&_svg]:size-5"
+          disabled={scanDisabled}
+          onClick={openCamera}
+          aria-haspopup="dialog"
+          title={scanDisabled && !optionsLoading ? "Escolhe o armazém primeiro" : undefined}
+        >
+          <Camera aria-hidden />
+          Ler com a câmara
+        </Button>
         {/* Cartão compacto da guia (junto ao campo de leitura) */}
         {deliveryNoteId && (
           <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-sm">
@@ -4203,6 +4284,52 @@ export default function Receiving() {
           setCreateNoteOpen(true);
         }}
       />
+      {cameraMounted && (
+        <Suspense
+          fallback={cameraOpen ? <CameraScannerLoading onClose={closeCamera} /> : null}
+        >
+          <CameraScanner
+            open={cameraOpen}
+            onOpenChange={setCameraOpen}
+            repeatGapMs={1500}
+            onScan={enqueueScan}
+            onCloseAutoFocus={(ev) => {
+              // Como depois de uma leitura: volta ao campo de leitura (no telemóvel em modo teclado não abre o teclado).
+              ev.preventDefault();
+              focusScan();
+            }}
+            status={
+              <>
+                {lookupBusy && (
+                  <p className="text-muted-foreground">
+                    {lookupWaiting
+                      ? `A preparar… (${queueSize} ${queueSize === 1 ? "leitura" : "leituras"} em fila)`
+                      : `A procurar…${queueSize > 1 ? ` (${queueSize} leituras em fila)` : ""}`}
+                  </p>
+                )}
+                {announcement && announcement !== cameraAnnouncementBase && (
+                  <p className="break-words font-medium">{announcement}</p>
+                )}
+                {choices.length > 0 && (
+                  <p className="text-amber-700 dark:text-amber-400">
+                    {choices.length === 1
+                      ? "1 leitura corresponde a vários produtos — fecha a câmara para escolher."
+                      : `${choices.length} leituras correspondem a vários produtos — fecha a câmara para escolher.`}
+                  </p>
+                )}
+                {failedScans.length > 0 && (
+                  <p className="text-destructive">
+                    {failedScans.length === 1 ? "1 leitura com erro" : `${failedScans.length} leituras com erro`}
+                    {failedScans.every((f) => f.waiting)
+                      ? " — vai ser repetida sozinha."
+                      : " — vê os detalhes ao fechar a câmara."}
+                  </p>
+                )}
+              </>
+            }
+          />
+        </Suspense>
+      )}
       {canLearnCodes && (
         <LearnCodeDialog
           open={learnOpen && learnTarget !== null}
