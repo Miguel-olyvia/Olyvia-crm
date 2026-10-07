@@ -39,16 +39,18 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   order: SpOrderDetail;
+  /** Revisão que estava no ecrã quando o diálogo abriu (não a da última leitura). */
+  revision: number;
   onConfirmed: (res: SpConfirmOrderResult) => void;
   onError: (err: unknown) => void;
 }
 
 /**
  * Confirmar a encomenda (sp_confirm_order) com data de entrega prevista e
- * comentário, os dois opcionais. Envia a revisão mostrada no ecrã: se a
- * empresa reenviou entretanto, a RPC responde stale_revision (tratado em onError).
+ * comentário, os dois opcionais. Envia a revisão fixada ao abrir o diálogo: se
+ * a empresa reenviou entretanto, a RPC responde stale_revision (tratado em onError).
  */
-export function SpConfirmOrderDialog({ open, onOpenChange, order, onConfirmed, onError }: Props) {
+export function SpConfirmOrderDialog({ open, onOpenChange, order, revision, onConfirmed, onError }: Props) {
   const [date, setDate] = useState("");
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -84,7 +86,7 @@ export function SpConfirmOrderDialog({ open, onOpenChange, order, onConfirmed, o
     try {
       const res = await spConfirmOrder({
         poId: order.purchase_order_id,
-        revision: order.publication.revision,
+        revision,
         promisedDate: date || null,
         comment: comment.trim() || null,
       });

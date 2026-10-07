@@ -60,6 +60,15 @@ interface Props {
   onOrderStatusChanged?: (orderStatus: string) => void;
   /** Depois de "Aceitar data": expected_delivery passa a esta data no formulário. */
   onExpectedDeliveryAccepted?: (date: string | null) => void;
+  /**
+   * Depois de "Encomendar" com publicação no portal: recarregar a PO e as linhas
+   * da BD, para o formulário (bloqueado) mostrar o que foi realmente enviado.
+   */
+  onPublished?: () => void;
+  /** Formulário com alterações por gravar: "Encomendar" fica desativado. */
+  hasUnsavedChanges?: boolean;
+  /** Formulário só de leitura por outro motivo (recebida/cancelada): o aviso não fala de notas. */
+  formReadOnly?: boolean;
 }
 
 /**
@@ -76,6 +85,9 @@ export function PoSupplierPortalPanel({
   onOrderChanged,
   onOrderStatusChanged,
   onExpectedDeliveryAccepted,
+  onPublished,
+  hasUnsavedChanges = false,
+  formReadOnly = false,
 }: Props) {
   const { toast } = useToast();
   const [status, setStatus] = useState<PoSupplierStatus | null>(null);
@@ -118,6 +130,7 @@ export function PoSupplierPortalPanel({
   const handleSent = (res: PoSendResult) => {
     onOrderStatusChanged?.(res.order_status);
     onOrderChanged?.();
+    if (res.published || res.already_published) onPublished?.();
     void load();
   };
 
@@ -212,7 +225,9 @@ export function PoSupplierPortalPanel({
               supplierName={supplierName}
               variant="button"
               onDone={handleSent}
-              extraWarning="É enviada a encomenda tal como está gravada. Se alterou o formulário, grave primeiro."
+              extraWarning="É enviada a encomenda tal como está gravada."
+              disabled={hasUnsavedChanges}
+              disabledHint="Grava primeiro as alterações para poder encomendar."
             />
           )}
           {status.can_accept_date && (
@@ -330,12 +345,23 @@ export function PoSupplierPortalPanel({
         </div>
       )}
 
-      {active && !status.can_edit_lines && (
-        <p className="text-xs text-muted-foreground">
-          {pub?.status === "confirmed"
-            ? "O fornecedor já confirmou: as linhas, o fornecedor, a data da encomenda e o estado já não podem ser alterados. Para reduzir quantidades use \"Não vou receber\" (Anular resto)."
-            : "Esta encomenda está no portal do fornecedor. Retire-a para alterar linhas, fornecedor, data da encomenda ou estado."}
+      {status.can_send && hasUnsavedChanges && (
+        <p className="text-xs text-amber-700 dark:text-amber-400" role="note">
+          Grava primeiro: há alterações no formulário por gravar e só se encomenda o que está gravado.
         </p>
+      )}
+
+      {/* Único aviso de bloqueio do formulário (o ecrã da encomenda não repete). */}
+      {active && !status.can_edit_lines && (
+        <div
+          className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200"
+          role="note"
+        >
+          {pub?.status === "confirmed"
+            ? "O fornecedor já confirmou esta encomenda no portal: as linhas, o fornecedor, a data da encomenda e o estado já não podem ser alterados. Para reduzir quantidades use \"Não vou receber\" (Anular resto)."
+            : "Esta encomenda está no portal do fornecedor. Retire-a para alterar linhas, fornecedor, data da encomenda ou estado."}
+          {!formReadOnly && " Pode alterar as notas e a entrega prevista."}
+        </div>
       )}
 
       <Dialog open={withdrawOpen} onOpenChange={(o) => !withdrawing && setWithdrawOpen(o)}>

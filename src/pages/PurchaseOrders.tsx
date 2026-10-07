@@ -53,7 +53,12 @@ import { PoSupplierPortalPanel } from "@/components/purchase-orders/PoSupplierPo
 import { PoSendToSupplierButton } from "@/components/purchase-orders/PoSendToSupplierButton";
 import { PoPortalStatusBadge } from "@/components/purchase-orders/PoPortalStatusBadge";
 import { usePoPublications } from "@/components/purchase-orders/usePoPublications";
-import { getPoHint, type PoSupplierStatus } from "@/components/purchase-orders/poSupplierPortalApi";
+import {
+  getPoHint,
+  isPortalFeatureMissing,
+  poSupplierStatus,
+  type PoSupplierStatus,
+} from "@/components/purchase-orders/poSupplierPortalApi";
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
@@ -91,6 +96,41 @@ type PurchaseOrderItem = {
   product_uom_code?: string | null;
   supplier_sku?: string | null;
 };
+
+type PurchaseOrderFormData = {
+  supplier_id: string;
+  order_date: string;
+  expected_delivery: string;
+  status: string;
+  notes: string;
+  supplier_notes: string;
+};
+
+// F3.2: "assinatura" do que se grava (cabeçalho + p_items) para saber se o
+// formulário tem alterações por gravar — "Encomendar" envia o que está na BD.
+const poFormSignature = (form: PurchaseOrderFormData, items: PurchaseOrderItem[]) =>
+  JSON.stringify({
+    supplier_id: form.supplier_id,
+    order_date: form.order_date,
+    expected_delivery: form.expected_delivery || "",
+    status: form.status,
+    notes: form.notes || "",
+    supplier_notes: form.supplier_notes.trim(),
+    items: items.map((i) => [
+      i.item_type,
+      i.product_id || null,
+      i.service_id || null,
+      i.description,
+      i.sku || null,
+      Number(i.quantity),
+      Number(i.unit_price),
+      Number(i.vat_rate),
+      i.selected_attributes || {},
+      i.notes || null,
+      i.uom_id || null,
+      i.supplier_sku || null,
+    ]),
+  });
 
 // Uma ligação item_suppliers do fornecedor escolhido, por unidade/embalagem
 // (rpc_supplier_catalog / rpc_supplier_catalog_search, 20261204205500). O
@@ -493,7 +533,7 @@ const PurchaseOrders = () => {
     editingOrderMeta?.id === editingId &&
     (editingOrderMeta.status === 'received' || editingOrderMeta.status === 'partially_received');
 
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<PurchaseOrderFormData>({
     supplier_id: "",
     order_date: new Date().toISOString().split('T')[0],
     expected_delivery: "",
@@ -501,6 +541,14 @@ const PurchaseOrders = () => {
     notes: "",
     supplier_notes: "",
   });
+  // F3.2: o que está gravado na BD para a PO aberta (preenchido em handleEdit
+  // quando as linhas carregam) — compara-se com o formulário para desativar
+  // "Encomendar" enquanto houver alterações por gravar.
+  const [savedFormSnapshot, setSavedFormSnapshot] = useState<{
+    orderId: string;
+    form: PurchaseOrderFormData;
+    items: PurchaseOrderItem[];
+  } | null>(null);
   // Portal do fornecedor (F3.2): estado lido pelo painel do diálogo. Com
   // publicação ativa, linhas/fornecedor/data da encomenda/estado ficam só de
   // leitura (a RPC recusa com po_published); notas e entrega prevista não.
@@ -516,6 +564,10 @@ const PurchaseOrders = () => {
   const { publications: poPublications } = usePoPublications(activeCompany?.id, orders);
 
   const [orderItems, setOrderItems] = useState<PurchaseOrderItem[]>([]);
+  const hasUnsavedOrderChanges =
+    !!editingId &&
+    savedFormSnapshot?.orderId === editingId &&
+    poFormSignature(formData, orderItems) !== poFormSignature(savedFormSnapshot.form, savedFormSnapshot.items);
   const [showItemsDialog, setShowItemsDialog] = useState(false);
   const [selectedCatalogItems, setSelectedCatalogItems] = useState<string[]>([]);
   const [selectedItemType, setSelectedItemType] = useState<'product' | 'service'>('product');
@@ -1228,9 +1280,12 @@ const PurchaseOrders = () => {
     setOrderReceipts({ orderId, rows: data, warehouseNames, deliveryNotes });
   };
 
-  const handleEdit = async (order: PurchaseOrder) => {
+  const handleEdit = async (order: PurchaseOrder, opts?: { keepPortalStatus?: boolean }) => {
     openOrderIdRef.current = order.id;
-    setPortalStatus(null);
+    // Recarregar a mesma PO (F3.2) mantém o estado do portal — senão o
+    // formulário desbloquear-se-ia até o painel voltar a ler.
+    if (!opts?.keepPortalStatus) setPortalStatus(null);
+    setSavedFormSnapshot(null);
     setEditingId(order.id);
     setEditingOrderMeta({
       id: order.id,
@@ -1239,14 +1294,15 @@ const PurchaseOrders = () => {
       status: order.status,
       hasReceivedLines: false,
     });
-    setFormData({
+    const loadedForm: PurchaseOrderFormData = {
       supplier_id: order.supplier_id,
       order_date: order.order_date,
       expected_delivery: order.expected_delivery || "",
       status: order.status,
       notes: order.notes || "",
       supplier_notes: order.supplier_notes || "",
-    });
+    };
+    setFormData(loadedForm);
 
     // Fase 5.0F: origem via Contrato (source_type/source_id, Fase 5.0C) —
     // best-effort, nunca bloqueia a abertura do diálogo se falhar.
@@ -1324,7 +1380,7 @@ const PurchaseOrders = () => {
         (item) => item.item_type === 'product' && Number(item.received_quantity) > 0,
       );
       setEditingOrderMeta((prev) => (prev && prev.id === order.id ? { ...prev, hasReceivedLines } : prev));
-      setOrderItems((items as unknown as Array<PurchaseOrderItemWithReceipt>).map(item => ({
+      const loadedItems: PurchaseOrderItem[] = (items as unknown as Array<PurchaseOrderItemWithReceipt>).map(item => ({
         id: item.id,
         item_type: item.item_type as 'product' | 'service',
         product_id: item.product_id,
@@ -1345,16 +1401,63 @@ const PurchaseOrders = () => {
         units_per_uom: item.units_per_uom ?? 1,
         product_uom_code: item.products?.uom?.code ?? null,
         supplier_sku: item.supplier_sku,
-      })));
+      }));
+      setOrderItems(loadedItems);
+      if (openOrderIdRef.current === order.id) {
+        setSavedFormSnapshot({ orderId: order.id, form: loadedForm, items: loadedItems });
+      }
     }
-    
+
     setOpen(true);
+  };
+
+  // F3.2: depois de publicar no portal (ou de a gravação ser recusada com
+  // po_published), volta a ler a PO e as linhas da BD pelo mesmo caminho do
+  // handleEdit — o formulário bloqueado mostra o que foi realmente enviado.
+  const reloadEditingOrder = async (orderId: string) => {
+    const { data, error } = await supabase
+      .from("purchase_orders")
+      .select("*, suppliers(name)")
+      .eq("id", orderId)
+      .maybeSingle();
+    // Fechou o diálogo ou abriu outra PO entretanto: não reabrir nada.
+    if (openOrderIdRef.current !== orderId) return;
+    if (error || !data) {
+      toast({
+        title: "Não foi possível recarregar a encomenda",
+        description: "Feche e volte a abrir a encomenda para ver o que está gravado.",
+        variant: "destructive",
+      });
+      return;
+    }
+    await handleEdit(data as unknown as PurchaseOrder, { keepPortalStatus: true });
+  };
+
+  // Mudança feita no servidor pelo painel do portal (estado, data aceite): vai
+  // para o formulário E para o "gravado", senão contaria como alteração por gravar.
+  const applyServerFormPatch = (orderId: string, patch: Partial<PurchaseOrderFormData>) => {
+    setFormData((prev) => ({ ...prev, ...patch }));
+    setSavedFormSnapshot((prev) =>
+      prev && prev.orderId === orderId ? { ...prev, form: { ...prev.form, ...patch } } : prev,
+    );
+  };
+
+  // Estado da publicação para apagar: lido na hora (rpc_po_supplier_status);
+  // o mapa da lista só serve de reserva se a leitura falhar.
+  const readPublicationForDelete = async (id: string): Promise<{ status: string } | null | undefined> => {
+    try {
+      const res = await poSupplierStatus(id);
+      return res.publication;
+    } catch (err) {
+      if (isPortalFeatureMissing(err)) return null;
+      return poPublications.get(id);
+    }
   };
 
   const handleDelete = async (id: string) => {
     // F3.2: uma PO apagada desaparece do portal do fornecedor sem aviso
     // (contrato-f32, risco 3) — pedir para retirar primeiro.
-    const publication = poPublications.get(id);
+    const publication = await readPublicationForDelete(id);
     if (publication && publication.status !== 'withdrawn') {
       if (publication.status !== 'confirmed') {
         toast({
@@ -1867,6 +1970,7 @@ const PurchaseOrders = () => {
       setEditingOrderMeta(null);
       setPendingRevertPreselect(null);
       setPortalStatus(null);
+      setSavedFormSnapshot(null);
       setFormData({
         supplier_id: "",
         order_date: new Date().toISOString().split('T')[0],
@@ -2688,6 +2792,9 @@ const PurchaseOrders = () => {
       // mensagem do servidor já explica o que se pode mudar; atualizar o painel.
       if (getPoHint(error) === 'po_published') {
         setPortalRefreshKey((k) => k + 1);
+        // O formulário passa a mostrar o que está gravado/enviado (as
+        // alterações recusadas perdem-se; a mensagem explica o que se pode mudar).
+        if (editingId) void reloadEditingOrder(editingId);
         toast({
           title: "Encomenda no portal do fornecedor",
           description: error.message,
@@ -3434,21 +3541,16 @@ const PurchaseOrders = () => {
                       onStatusChange={setPortalStatus}
                       onOrderChanged={() => loadData()}
                       onOrderStatusChanged={(status) => {
-                        setFormData((prev) => ({ ...prev, status }));
+                        applyServerFormPatch(editingId, { status });
                         setEditingOrderMeta((prev) => (prev && prev.id === editingId ? { ...prev, status } : prev));
                       }}
                       onExpectedDeliveryAccepted={(date) =>
-                        setFormData((prev) => ({ ...prev, expected_delivery: date || "" }))
+                        applyServerFormPatch(editingId, { expected_delivery: date || "" })
                       }
+                      onPublished={() => void reloadEditingOrder(editingId)}
+                      hasUnsavedChanges={hasUnsavedOrderChanges}
+                      formReadOnly={isOrderReadOnly}
                     />
-                  )}
-
-                  {isPublishedLock && !isOrderReadOnly && (
-                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200" role="note">
-                      {portalStatus?.publication?.status === 'confirmed'
-                        ? 'O fornecedor já confirmou esta encomenda no portal: as linhas, o fornecedor, a data da encomenda e o estado já não podem ser alterados. Para reduzir quantidades use "Não vou receber" (Anular resto). Pode alterar as notas e a entrega prevista.'
-                        : 'Esta encomenda está no portal do fornecedor. Retire-a para alterar linhas, fornecedor, data da encomenda ou estado. Pode alterar as notas e a entrega prevista.'}
-                    </div>
                   )}
 
                   {/* Organization Selection — sem prop disabled; em só de leitura o

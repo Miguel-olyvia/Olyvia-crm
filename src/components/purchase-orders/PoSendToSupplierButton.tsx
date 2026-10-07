@@ -24,13 +24,26 @@ interface Props {
   variant?: "icon" | "button";
   /** Texto extra no diálogo (ex.: alterações por gravar no formulário). */
   extraWarning?: string | null;
+  /** Bloqueia o botão (ex.: formulário com alterações por gravar). */
+  disabled?: boolean;
+  /** Dica do botão bloqueado (title/aria). */
+  disabledHint?: string | null;
 }
 
 /**
  * "Encomendar": rpc_po_send_to_supplier (pending → ordered; com portal, publica
  * e envia email). Quem usa deve mostrar só com purchase_orders.approve.
  */
-export function PoSendToSupplierButton({ orderId, orderNumber, supplierName, onDone, variant = "icon", extraWarning }: Props) {
+export function PoSendToSupplierButton({
+  orderId,
+  orderNumber,
+  supplierName,
+  onDone,
+  variant = "icon",
+  extraWarning,
+  disabled = false,
+  disabledHint,
+}: Props) {
   const { toast } = useToast();
   const showResult = usePoSendToast();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -58,14 +71,21 @@ export function PoSendToSupplierButton({ orderId, orderNumber, supplierName, onD
           variant="ghost"
           size="icon"
           onClick={() => setConfirmOpen(true)}
-          title="Encomendar"
+          title={disabled && disabledHint ? disabledHint : "Encomendar"}
           aria-label={`Encomendar ${orderNumber}`}
-          disabled={sending}
+          disabled={sending || disabled}
         >
           {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
         </Button>
       ) : (
-        <Button type="button" size="sm" onClick={() => setConfirmOpen(true)} disabled={sending} className="gap-2">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => setConfirmOpen(true)}
+          disabled={sending || disabled}
+          title={disabled && disabledHint ? disabledHint : undefined}
+          className="gap-2"
+        >
           {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
           Encomendar
         </Button>

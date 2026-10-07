@@ -41,6 +41,42 @@ function attributesText(line: SpOrderLine): string {
     .join(" · ");
 }
 
+/**
+ * Resumo do que o fornecedor vê ao confirmar: revisão + linhas + totais. Se
+ * mudar com o diálogo aberto (nova leitura do detalhe), o diálogo fecha — nunca
+ * se confirma uma versão diferente da que estava no ecrã.
+ */
+interface ConfirmSnapshot {
+  purchaseOrderId: string;
+  revision: number;
+  contentKey: string;
+}
+
+function orderContentKey(o: SpOrderDetail): string {
+  return JSON.stringify({
+    lines: o.lines.map((l) => [
+      l.id,
+      l.sku,
+      l.supplier_sku,
+      l.description,
+      l.selected_attributes,
+      Number(l.quantity),
+      l.uom_code,
+      Number(l.units_per_uom),
+      Number(l.unit_price),
+      Number(l.vat_rate),
+      Number(l.total),
+    ]),
+    total: Number(o.totals.total),
+    expected_delivery: o.expected_delivery,
+    supplier_notes: o.supplier_notes,
+  });
+}
+
+function snapshotOf(o: SpOrderDetail): ConfirmSnapshot {
+  return { purchaseOrderId: o.purchase_order_id, revision: o.publication.revision, contentKey: orderContentKey(o) };
+}
+
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0">
@@ -57,6 +93,10 @@ export default function SupplierPortalOrderDetail() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // Revisão + conteúdo no momento em que o diálogo abriu: é esta que vai no
+  // sp_confirm_order, não a da última leitura.
+  const [confirmSnapshot, setConfirmSnapshot] = useState<ConfirmSnapshot | null>(null);
+  const [changedWhileConfirming, setChangedWhileConfirming] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const viewedRef = useRef<string | null>(null);
 
@@ -66,7 +106,8 @@ export default function SupplierPortalOrderDetail() {
     queryFn: () => spGetOrder(id),
     enabled: !!accountId && !!id,
     staleTime: 0,
-    refetchOnWindowFocus: true,
+    // Com o diálogo de confirmação aberto não se relê ao voltar à janela.
+    refetchOnWindowFocus: !confirmOpen,
     retry: (count, err) => !isNoSupplierAccess(err) && !isSpNotFound(err) && count < 1,
   });
 
@@ -75,6 +116,28 @@ export default function SupplierPortalOrderDetail() {
   }, [query.error, refresh]);
 
   const order = query.data;
+
+  // Se uma nova leitura trouxer outra revisão ou outro conteúdo com o diálogo
+  // aberto, fecha-se e avisa-se — o fornecedor tem de rever antes de confirmar.
+  useEffect(() => {
+    if (!confirmOpen || !confirmSnapshot || !order) return;
+    if (order.purchase_order_id !== confirmSnapshot.purchaseOrderId) return;
+    const now = snapshotOf(order);
+    if (now.revision === confirmSnapshot.revision && now.contentKey === confirmSnapshot.contentKey) return;
+    setConfirmOpen(false);
+    setConfirmSnapshot(null);
+    setChangedWhileConfirming(true);
+    toast({
+      title: "A encomenda foi alterada",
+      description: "A empresa alterou a encomenda. Reveja-a antes de confirmar.",
+    });
+  }, [confirmOpen, confirmSnapshot, order, toast]);
+
+  const openConfirm = (o: SpOrderDetail) => {
+    setConfirmSnapshot(snapshotOf(o));
+    setChangedWhileConfirming(false);
+    setConfirmOpen(true);
+  };
 
   // Marcar como vista depois de o detalhe abrir bem (uma vez por encomenda e
   // revisão). O erro é ignorado (contrato 2.3).
@@ -198,13 +261,23 @@ export default function SupplierPortalOrderDetail() {
             {downloading ? "A gerar PDF…" : "Descarregar PDF"}
           </Button>
           {order.can_confirm && (
-            <Button className="h-11 gap-2" onClick={() => setConfirmOpen(true)}>
+            <Button className="h-11 gap-2" onClick={() => openConfirm(order)}>
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
               Confirmar encomenda
             </Button>
           )}
         </div>
       </div>
+
+      {changedWhileConfirming && !isConfirmed && (
+        <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:bg-amber-500/10 dark:text-amber-100 dark:border-amber-500/30">
+          <Info className="h-4 w-4 !text-amber-700 dark:!text-amber-300" />
+          <AlertTitle>A encomenda foi alterada</AlertTitle>
+          <AlertDescription>
+            A empresa alterou a encomenda enquanto a confirmava. Reveja as linhas abaixo antes de confirmar.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {pub.revision > 1 && !isConfirmed && (
         <Alert>
@@ -386,11 +459,12 @@ export default function SupplierPortalOrderDetail() {
         </CardContent>
       </Card>
 
-      {order.can_confirm && (
+      {order.can_confirm && confirmSnapshot && confirmSnapshot.purchaseOrderId === order.purchase_order_id && (
         <SpConfirmOrderDialog
           open={confirmOpen}
           onOpenChange={setConfirmOpen}
           order={order}
+          revision={confirmSnapshot.revision}
           onConfirmed={(res) => {
             toast({
               title: res.already_confirmed ? "Encomenda já estava confirmada" : "Encomenda confirmada",
@@ -417,7 +491,9 @@ export default function SupplierPortalOrderDetail() {
               variant: hint === "stale_revision" ? "default" : "destructive",
             });
             if (hint === "stale_revision" || hint === "order_closed" || hint === "not_found") {
+              if (hint === "stale_revision") setChangedWhileConfirming(true);
               setConfirmOpen(false);
+              setConfirmSnapshot(null);
               void reload();
             }
           }}
