@@ -28,7 +28,15 @@
 //   - o cesto por confirmar fica em sessionStorage (por utilizador e empresa)
 //     e é reposto ao voltar ao ecrã; as entradas bloqueadas não, essas vivem
 //     nas pendentes do localStorage.
-import { useCallback, useEffect, useRef, useState } from "react";
+//
+// Guia do fornecedor (fatia 2, 20261209100000): opcional, escolhida depois do
+// armazém. Fixa o fornecedor e o âmbito (POs da guia). O id da guia vai no
+// lookup, no dry-run e na receção, e fica gravado no cesto, em "Por enviar" e
+// em cada pendente: o reenvio de uma pendente usa SEMPRE a guia com que foi
+// enviada (o servidor recusa o mesmo request_id com outra guia). Trocar de
+// guia segue a regra do armazém/fornecedor (só com o cesto vazio). Avisos
+// "não consta da guia" / "acima do anunciado" exigem confirmação na entrada.
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -42,10 +50,29 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { NativeSelect } from "@/components/ui/native-select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import { usePermissions } from "@/hooks/usePermissions";
+import { DeliveryNotePicker } from "@/components/receiving/DeliveryNotePicker";
+import { DeliveryNoteDialog } from "@/components/receiving/DeliveryNoteDialog";
+import { DeliveryNoteDetail } from "@/components/receiving/DeliveryNoteDetail";
+import { NOTE_STATUS_LABEL, fetchDeliveryNote, noteLabel, type DeliveryNoteFull } from "@/components/receiving/deliveryNotes";
+import { LearnCodeDialog } from "@/components/receiving/LearnCodeDialog";
+import {
+  describeLearnResult,
+  productCodeErrorMessage,
+  productCodeKey,
+  removeProductCode,
+  type LearnCodeResult,
+} from "@/components/receiving/productCodes";
+import { ToastAction } from "@/components/ui/toast";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
+import type { CameraScannerProps } from "@/components/scanner/CameraScanner";
 import {
   AlertTriangle,
+  Camera,
   CheckCircle2,
+  FileText,
   Info,
   Keyboard,
   KeyboardOff,
@@ -56,8 +83,53 @@ import {
   RotateCcw,
   ScanBarcode,
   Search,
+  Tag,
   Trash2,
 } from "lucide-react";
+
+/**
+ * Leitor por câmara: carregado só quando é aberto (não pesa no chunk da
+ * receção). Se o chunk não carregar (rede, deploy novo), mostra um aviso em vez
+ * de rebentar a página — o cesto e a fila ficam intactos.
+ */
+function CameraScannerUnavailable({ open, onOpenChange }: CameraScannerProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogTitle>Leitor da câmara indisponível</DialogTitle>
+        <DialogDescription>
+          Não foi possível carregar o leitor da câmara. Verifica a ligação e recarrega a página — o cesto fica guardado.
+        </DialogDescription>
+        <Button type="button" variant="outline" className="h-11" onClick={() => onOpenChange(false)}>
+          Fechar
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** Enquanto o chunk do leitor carrega: ecrã inteiro, mas sempre com saída (botão e Escape). */
+function CameraScannerLoading({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (ev: globalThis.KeyboardEvent) => {
+      if (ev.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[600] flex flex-col items-center justify-center gap-4 bg-black/80 p-6 text-sm text-white">
+      <p role="status">A abrir a câmara…</p>
+      <Button type="button" variant="secondary" className="h-11 px-6" onClick={onClose}>
+        Fechar
+      </Button>
+    </div>
+  );
+}
+
+const CameraScanner = lazy(() =>
+  import("@/components/scanner/CameraScanner").catch(() => ({ default: CameraScannerUnavailable })),
+);
 
 // ── Formatos das RPCs (supabase/migrations/20261206160000_rececao_por_codigo.sql) ──
 
@@ -81,6 +153,8 @@ interface OpenLine {
   contract_order_number: string | null;
   contract_active: boolean;
   allocation_rank: number | null;
+  /** Só com guia: linha indicada nas linhas da guia (prioridade). */
+  in_delivery_note?: boolean;
 }
 
 interface Candidate {
@@ -93,6 +167,8 @@ interface Candidate {
   uom_code: string | null;
   units_per_uom: number;
   open_lines: OpenLine[];
+  /** Só com guia: anunciado / recebido pela guia (unidades de stock). */
+  delivery_note?: { announced: boolean; announced_units: number; received_units: number };
 }
 
 interface LookupResult {
@@ -101,7 +177,15 @@ interface LookupResult {
   can_receive: boolean;
   candidates: Candidate[];
   warnings: string[];
+  /** Só com guia. */
+  delivery_note?: { id: string; note_number: string; status: string; has_lines: boolean };
 }
+
+/** Avisos da guia que exigem confirmação explícita (decisão 1). */
+const NOTE_CHECK_LABEL: Record<string, string> = {
+  nao_consta_da_guia: "Não consta da guia",
+  acima_do_anunciado: "Acima do anunciado na guia",
+};
 
 interface AllocLine {
   purchase_order_item_id: string;
@@ -136,6 +220,10 @@ interface ReceiveResult {
   units_to_order_total: number;
   units_to_stock_total: number;
   warnings: string[];
+  /** Só com guia. */
+  delivery_note_id?: string;
+  delivery_note_number?: string;
+  delivery_note_checks?: string[];
 }
 
 // ── Estado do ecrã ──
@@ -178,6 +266,11 @@ interface BasketEntry {
    * um reenvio leva exatamente estes dados, não os da entrada.
    */
   sent?: PendingReceipt;
+  /**
+   * Avisos da guia confirmados pelo utilizador para esta pré-visualização
+   * (sig + avisos). Mudar quantidade/linha/guia muda a chave → volta a pedir.
+   */
+  ackKey?: string;
 }
 
 interface ReceivedEntry {
@@ -193,6 +286,11 @@ interface ReceivedEntry {
   contractNumbers: string[];
   replayed: boolean;
   at: Date;
+  /** Guia da receção (nº) e avisos da guia devolvidos pelo servidor. */
+  deliveryNoteNumber?: string | null;
+  /** Recebida COM guia (o servidor devolveu delivery_note_id, ou a pendente tinha guia). */
+  withNote: boolean;
+  noteChecks?: string[];
 }
 
 // Leituras recusadas (não encontradas, erro definitivo, sem linhas em aberto)
@@ -234,6 +332,17 @@ interface RejectedScan {
   value: string;
   message: string;
   at: Date;
+  /** 'not_found' = o lookup não encontrou o código (permite "Associar a um produto"). Opcional. */
+  reason?: "not_found";
+}
+
+/** Leitura recusada a associar (diálogo aberto); não persiste. */
+interface LearnTarget {
+  scanId: string;
+  code: string;
+  /** Época/empresa em que o diálogo abriu (a re-leitura só entra se ainda for a mesma). */
+  epoch: number;
+  org: string;
 }
 
 /** Linha de receiving_scans (RLS: só as da organização do utilizador). */
@@ -252,6 +361,8 @@ type StoredEntry = Pick<
 interface StoredBasket {
   warehouseId: string;
   supplierId: string;
+  /** Guia do fornecedor do cesto ("" = sem guia; cestos antigos não têm). */
+  deliveryNoteId?: string;
   entries: StoredEntry[];
 }
 
@@ -263,6 +374,9 @@ interface StoredBasket {
 interface UnsentEntry extends StoredEntry {
   warehouseId: string;
   supplierId: string;
+  /** Guia com que foi lida (null/ausente = sem guia). */
+  deliveryNoteId?: string | null;
+  deliveryNoteNumber?: string | null;
   at: string;
 }
 
@@ -276,6 +390,12 @@ interface PendingReceipt {
   orgName: string;
   warehouseId: string;
   supplierId: string;
+  /**
+   * Guia com que foi enviada (null/ausente = sem guia — inclui as pendentes
+   * de antes da fatia 2). O reenvio usa SEMPRE esta, nunca a do ecrã.
+   */
+  deliveryNoteId?: string | null;
+  deliveryNoteNumber?: string | null;
   productId: string;
   uomId: string | null;
   poItemId: string | null;
@@ -319,6 +439,12 @@ function fmtDate(s: string | null | undefined): string {
 }
 
 const entryKey = (productId: string, uomId: string | null) => `${productId}|${uomId ?? ""}`;
+/** Guia guardada ("" = sem guia; dados antigos ou inválidos = sem guia). */
+const dnOf = (x: { deliveryNoteId?: string | null } | null | undefined) =>
+  typeof x?.deliveryNoteId === "string" ? x.deliveryNoteId : "";
+/** Avisos da guia devolvidos pela pré-visualização. */
+const noteChecksOf = (r: Partial<ReceiveResult> | undefined) =>
+  Array.isArray(r?.delivery_note_checks) ? r.delivery_note_checks.filter((c): c is string => typeof c === "string") : [];
 const isLocked = (e: BasketEntry) => !!e.submitting || !!e.requestId;
 const isUncertain = (e: BasketEntry) => !!e.retryable && !!e.requestId;
 
@@ -366,8 +492,82 @@ const KEYBOARD_MODE_KEY = "olyvia.receiving.scannerMode";
 const pendingStorageKey = (userId: string) => `olyvia.receiving.pending.${userId}`;
 const basketStorageKey = (userId: string, orgId: string) => `olyvia.receiving.basket.${userId}.${orgId}`;
 const unsentStorageKey = (userId: string, orgId: string) => `olyvia.receiving.unsent.${userId}.${orgId}`;
+/**
+ * Armazém/fornecedor/guia escolhidos no ecrã, por separador (sessionStorage),
+ * utilizador e empresa — mesmo com o cesto vazio. Sem isto, um novo
+ * carregamento do ecrã (sair e voltar, F5, "Recarregar" depois de uma
+ * atualização) repunha o armazém lembrado mas deixava a guia e o fornecedor
+ * em branco, e a receção seguinte ia SEM guia sem ninguém dar por isso.
+ */
+const contextStorageKey = (userId: string, orgId: string) => `olyvia.receiving.context.${userId}.${orgId}`;
 /** Avisa as instâncias montadas de que a lista "Por enviar" mudou (detail = chave). */
 const UNSENT_EVENT = "olyvia-receiving-unsent";
+
+// ── Entradas já recebidas (localStorage, por utilizador e empresa) ──
+// Fecha o caso "cópia cujo original já morreu": A (com cesto) sai do ecrã; é
+// duplicado → B (não abre a Receção); A volta, confirma e fecha (a tranca do
+// tabId fica livre); B abre a Receção, fica com a tranca e reporia o cesto
+// copiado — já recebido. Cada entry.id com receção confirmada pelo servidor
+// (incluindo replay) é gravado aqui ANTES de a entrada sair do cesto/pendentes;
+// a reposição do cesto e do "Por enviar" filtra estes ids (como já filtra os
+// entryId das pendentes). É localStorage: partilhado por todos os separadores
+// da mesma origem, incluindo a cópia. Os entry.id são estáveis entre original
+// e cópia (vêm na sessionStorage copiada; toStoredEntry/fromStoredEntry
+// mantêm-nos). Prazo de 7 dias e no máximo 2000 ids (os mais antigos saem).
+const DONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DONE_MAX = 2000;
+const UNSENT_PREFIX = "olyvia.receiving.unsent.";
+const DONE_PREFIX = "olyvia.receiving.done.";
+const doneStorageKey = (userId: string, orgId: string) => `${DONE_PREFIX}${userId}.${orgId}`;
+
+/** id → instante (ms) em que a receção foi confirmada; sem os expirados. */
+function readDoneMap(key: string): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return {};
+    const v = JSON.parse(raw) as unknown;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const now = Date.now();
+    const out: Record<string, number> = {};
+    for (const [id, ts] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof ts === "number" && Number.isFinite(ts) && now - ts < DONE_TTL_MS) out[id] = ts;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Ids recebidos (não expirados) desta empresa. Vazio se o localStorage não estiver legível. */
+function readDoneIds(userId: string, orgId: string): Set<string> {
+  return new Set(Object.keys(readDoneMap(doneStorageKey(userId, orgId))));
+}
+
+/** Grava ids recebidos (read-modify-write; limpa expirados e corta aos DONE_MAX mais recentes). */
+function markEntriesDone(userId: string | null, orgId: string | null, ids: (string | null | undefined)[]) {
+  if (!userId || !orgId) return;
+  const valid = ids.filter((x): x is string => typeof x === "string" && x !== "");
+  if (valid.length === 0) return;
+  try {
+    const key = doneStorageKey(userId, orgId);
+    const map = readDoneMap(key);
+    const now = Date.now();
+    for (const id of valid) map[id] = now;
+    let entries = Object.entries(map);
+    if (entries.length > DONE_MAX) {
+      entries = entries.sort((a, b) => b[1] - a[1]).slice(0, DONE_MAX);
+    }
+    window.localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    // localStorage indisponível/cheio: fica a proteção das pendentes e da tranca.
+  }
+}
+
+/** Ids recebidos da empresa a que pertence uma chave de "Por enviar". */
+function doneIdsForUnsentKey(unsentKey: string): Set<string> {
+  if (!unsentKey.startsWith(UNSENT_PREFIX)) return new Set();
+  return new Set(Object.keys(readDoneMap(DONE_PREFIX + unsentKey.slice(UNSENT_PREFIX.length))));
+}
 
 function readStorage(key: string): string | null {
   try {
@@ -423,6 +623,7 @@ function readSessionBasket(key: string): StoredBasket | null {
     return {
       warehouseId: typeof v.warehouseId === "string" ? v.warehouseId : "",
       supplierId: typeof v.supplierId === "string" ? v.supplierId : "",
+      deliveryNoteId: dnOf(v),
       entries: v.entries.filter(
         (e): e is StoredEntry => !!e && typeof e.id === "string" && typeof e.productId === "string" && Number(e.quantity) >= 1,
       ),
@@ -441,15 +642,53 @@ function writeSessionBasket(key: string, value: StoredBasket | null) {
   }
 }
 
+interface StoredContext {
+  warehouseId: string;
+  supplierId: string;
+  deliveryNoteId: string;
+}
+
+function readSessionContext(key: string): StoredContext | null {
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<StoredContext> | null;
+    if (!v || typeof v !== "object") return null;
+    return {
+      warehouseId: typeof v.warehouseId === "string" ? v.warehouseId : "",
+      supplierId: typeof v.supplierId === "string" ? v.supplierId : "",
+      deliveryNoteId: typeof v.deliveryNoteId === "string" ? v.deliveryNoteId : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionContext(key: string, value: StoredContext) {
+  try {
+    if (!value.warehouseId && !value.supplierId && !value.deliveryNoteId) window.sessionStorage.removeItem(key);
+    else window.sessionStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // sessionStorage indisponível: o contexto só vive em memória.
+  }
+}
+
 function readUnsent(key: string): UnsentEntry[] {
   try {
     const raw = window.sessionStorage.getItem(key);
     if (!raw) return [];
     const v = JSON.parse(raw) as unknown;
     if (!Array.isArray(v)) return [];
+    // Entradas já recebidas (registo partilhado): nunca voltam (ver markEntriesDone).
+    const done = doneIdsForUnsentKey(key);
     return v.filter(
       (e): e is UnsentEntry =>
-        !!e && typeof e.id === "string" && typeof e.productId === "string" && typeof e.warehouseId === "string" && Number(e.quantity) >= 1,
+        !!e &&
+        typeof e.id === "string" &&
+        typeof e.productId === "string" &&
+        typeof e.warehouseId === "string" &&
+        Number(e.quantity) >= 1 &&
+        !done.has(e.id),
     );
   } catch {
     return [];
@@ -471,6 +710,477 @@ function mutateUnsent(key: string, op: (list: UnsentEntry[]) => UnsentEntry[]): 
   } catch {
     return null;
   }
+}
+
+// ── Separador duplicado ──
+// "Duplicar separador" (Chrome/Edge) copia a sessionStorage: o separador novo
+// reporia o mesmo cesto, "Por enviar" e contexto, e confirmar nos dois recebia
+// a mercadoria duas vezes (request_ids diferentes). Cada separador guarda um
+// tabId na sessionStorage; cada carga da página tem um id de instância próprio.
+//
+// Garantia principal — Web Locks (navigator.locks): a carga que fica com os
+// dados prende a tranca `olyvia.receiving.tab.<tabId>` até a página morrer. Uma
+// carga nova com o mesmo tabId pede-a com ifAvailable: se a obtém, é o dono (F5,
+// crash/"continuar onde parou", Ctrl+Shift+T, separador descartado — a carga
+// antiga já não existe); se não, tenta outra vez (o documento anterior de um F5
+// pode ainda não a ter largado) e, se continuar presa, é cópia (o original está
+// vivo, mesmo congelado ou noutra rota): tabId novo, prende a tranca do tabId
+// novo antes de o escrever e apaga as chaves copiadas. A tranca é exclusiva no
+// browser: nunca há dois donos do mesmo tabId. Com Web Locks a marca de "vivo"
+// não decide nada (só serve ao recurso abaixo). O Chrome não guarda em bfcache
+// páginas com trancas presas; se outro browser guardar, a tranca continua presa
+// e a página continua dona — nada aqui depende de a página ir ou não para o bfcache.
+//
+// Recurso, sem Web Locks: a carga pergunta (BroadcastChannel por utilizador) se outra
+// instância viva tem o mesmo tabId. Se sim, este é a cópia: tabId novo e as
+// chaves copiadas são apagadas (o original fica com elas). F5 no mesmo
+// separador: a instância antiga já morreu, ninguém responde, repõe normalmente.
+// Sem BroadcastChannel não há como distinguir cópia de F5: com tabId já
+// existente não se repõe (apaga-se) e avisa-se — perder um cesto por receber é
+// recuperável; receber duas vezes não.
+// Original congelado (poupança de energia) ou ocupado não responde a tempo:
+// por isso o separador que fica com os dados deixa também uma marca de "vivo"
+// na sessionStorage (posta ao verificar e em pageshow, retirada em pagehide).
+// F5: o pagehide retira-a, a carga nova não a vê. Cópia: a marca vem copiada →
+// é cópia sem perguntar (lado seguro). Separador descartado pelo Chrome
+// (document.wasDiscarded) não correu o pagehide: ignora a marca e pergunta.
+// A troca de mensagens fica para quando não há marca (ex.: o original ainda
+// não tinha aberto a receção nesta carga).
+// Estado ao nível do módulo (uma vez por carga): StrictMode e sair/voltar ao
+// ecrã reutilizam a mesma verificação (a tranca é pedida uma só vez e não é
+// largada ao desmontar o ecrã), e a instância continua a responder
+// depois de o ecrã desmontar (enquanto a página não recarregar).
+
+const TAB_ID_KEY = "olyvia.receiving.tabId";
+/** Marca de "separador vivo": guarda o tabId de quem tem os dados nesta sessionStorage. */
+const TAB_ALIVE_KEY = "olyvia.receiving.tabAlive";
+/**
+ * Espera pela resposta do separador original (chega em poucos ms; folga para
+ * páginas ocupadas). Atrasa a reposição; as leituras feitas entretanto ficam em
+ * fila e só são processadas depois de repor (ver scanGateOpen).
+ */
+const TAB_PROBE_MS = 750;
+/** Web Locks: novas tentativas se a tranca estiver presa (documento anterior de um F5 ainda a largar). */
+const TAB_LOCK_RETRIES = 2;
+const TAB_LOCK_RETRY_MS = 300;
+/**
+ * Prazo de segurança para a verificação com Web Locks (normalmente < 1 s). Se
+ * esgotar (API pendurada), desiste da tranca e decide pelo recurso (marca +
+ * BroadcastChannel) — nunca fica preso em "A preparar…". Ver tabLocksAbandoned.
+ */
+const TAB_CHECK_TIMEOUT_MS = 3000;
+const TAB_DATA_PREFIXES = ["olyvia.receiving.basket.", "olyvia.receiving.unsent.", "olyvia.receiving.context."];
+
+interface TabMsg {
+  t: "ping" | "pong";
+  tab: string;
+  from: string;
+  to?: string;
+}
+interface TabCheck {
+  reason: "ok" | "duplicate" | "unsupported";
+  /** Havia cesto/"Por enviar" copiado que não foi reposto. */
+  dropped: boolean;
+}
+
+/** Id desta carga da página (não vai para a sessionStorage). */
+const tabInstanceId = newRequestId();
+let tabState: { tabId: string; checking: boolean } | null = null;
+let tabCheckPromise: Promise<TabCheck> | null = null;
+let tabNoticeShown = false;
+const tabChannels = new Map<string, BroadcastChannel>();
+/** Durante a espera: passa já esta carga a cópia (desempate com outra do mesmo tabId). */
+let tabYield: (() => void) | null = null;
+let tabLifecycleBound = false;
+/** Larga a tranca Web Locks presa por esta carga (só o HMR a usa; numa carga normal fica até a página morrer). */
+let tabLockRelease: (() => void) | null = null;
+/** tabId cuja tranca esta carga tem presa (null = nenhuma). */
+let tabLockHeldId: string | null = null;
+/**
+ * O prazo da verificação com Web Locks esgotou e a decisão passou para o
+ * recurso. A partir daí a verificação com trancas (se acordar) não mexe em
+ * nada, e uma tranca concedida tarde só fica presa se for do tabId que o
+ * recurso decidiu como desta carga; qualquer outra é largada logo — nunca há
+ * duas cargas a julgar-se donas do mesmo tabId por causa do atraso. (Não se usa
+ * AbortSignal: a especificação não o permite com ifAvailable.)
+ */
+let tabLocksAbandoned = false;
+
+type TabLockAttempt = "held" | "busy" | "error";
+
+const isDecidedTabId = (id: string) => !!tabState && !tabState.checking && tabState.tabId === id;
+
+function tabLocks(): LockManager | null {
+  try {
+    const locks = (navigator as Navigator & { locks?: LockManager }).locks;
+    return locks && typeof locks.request === "function" ? locks : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tenta prender (sem esperar) a tranca do tabId. Se a obtém, segura-a com uma
+ * Promise que só resolve no HMR — numa carga normal, até a página morrer.
+ */
+function tryHoldTabLock(locks: LockManager, id: string): Promise<TabLockAttempt> {
+  return new Promise<TabLockAttempt>((resolve) => {
+    try {
+      locks
+        .request(`olyvia.receiving.tab.${id}`, { ifAvailable: true }, (lock) => {
+          if (!lock) {
+            resolve("busy");
+            return undefined;
+          }
+          // Concedida depois de o prazo esgotar: só serve se for do tabId já
+          // decidido para esta carga; senão larga-se já (devolver sem Promise).
+          if (tabLocksAbandoned && !isDecidedTabId(id)) {
+            resolve("error");
+            return undefined;
+          }
+          return new Promise<void>((release) => {
+            // Só um tabId por carga: a tranca de um id anterior deixa de servir.
+            const previous = tabLockRelease;
+            tabLockRelease = release;
+            tabLockHeldId = id;
+            try {
+              previous?.();
+            } catch {
+              // já largada
+            }
+            resolve("held");
+          });
+        })
+        .catch(() => resolve("error"));
+    } catch {
+      resolve("error");
+    }
+  });
+}
+
+const waitMs = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+
+function readTabAlive(): string | null {
+  try {
+    return window.sessionStorage.getItem(TAB_ALIVE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeTabAlive(id: string) {
+  try {
+    window.sessionStorage.setItem(TAB_ALIVE_KEY, id);
+  } catch {
+    // sessionStorage indisponível: fica só a troca de mensagens.
+  }
+}
+
+function clearTabAlive() {
+  try {
+    window.sessionStorage.removeItem(TAB_ALIVE_KEY);
+  } catch {
+    // idem
+  }
+}
+
+// F5/fechar/sair (incl. para o bfcache): a página deixa de estar viva.
+const onTabPageHide = () => clearTabAlive();
+// Volta do bfcache (persisted) com o estado intacto: volta a marcar-se.
+const onTabPageShow = () => {
+  if (tabState) writeTabAlive(tabState.tabId);
+};
+
+function bindTabLifecycle() {
+  if (tabLifecycleBound) return;
+  tabLifecycleBound = true;
+  window.addEventListener("pagehide", onTabPageHide);
+  window.addEventListener("pageshow", onTabPageShow);
+}
+
+// Só dev: o HMR volta a correr o módulo com outro id de instância. O canal, a
+// marca e a tranca da versão antiga fariam a nova passar a cópia e apagar o
+// cesto: larga-se a tranca (a nova volta a pedi-la, com as novas tentativas).
+import.meta.hot?.dispose(() => {
+  try {
+    tabLockRelease?.();
+  } catch {
+    // já largada
+  }
+  tabLockRelease = null;
+  tabLockHeldId = null;
+  tabLocksAbandoned = false;
+  tabState = null;
+  tabCheckPromise = null;
+  tabChannels.forEach((c) => {
+    try {
+      c.close();
+    } catch {
+      // já fechado
+    }
+  });
+  tabChannels.clear();
+  tabYield = null;
+  window.removeEventListener("pagehide", onTabPageHide);
+  window.removeEventListener("pageshow", onTabPageShow);
+  clearTabAlive();
+});
+
+function readTabId(): string | null {
+  try {
+    return window.sessionStorage.getItem(TAB_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeTabId(id: string) {
+  try {
+    window.sessionStorage.setItem(TAB_ID_KEY, id);
+  } catch {
+    // sessionStorage indisponível: também não há nada para repor.
+  }
+}
+
+/** Apaga cesto/"Por enviar"/contexto desta sessionStorage. Devolve se havia cesto ou "Por enviar". */
+function clearTabSessionData(): boolean {
+  try {
+    const ss = window.sessionStorage;
+    const keys: string[] = [];
+    for (let i = 0; i < ss.length; i++) {
+      const k = ss.key(i);
+      if (k && TAB_DATA_PREFIXES.some((p) => k.startsWith(p))) keys.push(k);
+    }
+    keys.forEach((k) => ss.removeItem(k));
+    return keys.some((k) => !k.startsWith("olyvia.receiving.context."));
+  } catch {
+    return false;
+  }
+}
+
+/** Canal do utilizador; abre-o e passa a responder a quem perguntar pelo tabId deste separador. */
+function tabChannel(userId: string): BroadcastChannel | null {
+  const existing = tabChannels.get(userId);
+  if (existing) return existing;
+  if (typeof BroadcastChannel === "undefined") return null;
+  let ch: BroadcastChannel;
+  try {
+    ch = new BroadcastChannel(`olyvia.receiving.tabs.${userId}`);
+  } catch {
+    return null;
+  }
+  ch.addEventListener("message", (ev: MessageEvent) => {
+    const m = ev.data as Partial<TabMsg> | null;
+    if (!m || m.t !== "ping" || typeof m.tab !== "string" || typeof m.from !== "string") return;
+    if (m.from === tabInstanceId || !tabState || m.tab !== tabState.tabId) return;
+    // Duas cargas com o mesmo tabId a verificar ao mesmo tempo: decide já, sem
+    // depender de cada uma ter recebido o pedido da outra (uma pode ter nascido
+    // depois do pedido da outra). Id menor responde (a outra passa a cópia); id
+    // maior passa ela própria a cópia. Em qualquer ordem, só uma fica com os dados.
+    if (tabState.checking && !(tabInstanceId < m.from)) {
+      tabYield?.();
+      return;
+    }
+    try {
+      ch.postMessage({ t: "pong", tab: m.tab, from: tabInstanceId, to: m.from } satisfies TabMsg);
+    } catch {
+      // canal fechado: nada a fazer
+    }
+  });
+  tabChannels.set(userId, ch);
+  return ch;
+}
+
+/**
+ * Verificação do separador (uma por carga). Resolve depois de decidir; se este
+ * separador for uma cópia, as chaves copiadas já foram apagadas.
+ */
+function checkTab(userId: string): Promise<TabCheck> {
+  // O canal responde também com Web Locks (um separador sem tranca a funcionar
+  // cai no recurso e pergunta por aqui).
+  const ch = tabChannel(userId);
+  if (tabCheckPromise) return tabCheckPromise;
+  const locks = tabLocks();
+  const viaLocks: Promise<TabCheck | null> = locks
+    ? new Promise<TabCheck | null>((resolve) => {
+        let settled = false;
+        // Prazo: ao esgotar, desiste das trancas (síncrono, antes de o recurso
+        // começar) e o recurso decide. O que a verificação com trancas fizer
+        // depois é ignorado (ver os testes de tabLocksAbandoned).
+        const timer = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          tabLocksAbandoned = true;
+          resolve(null);
+        }, TAB_CHECK_TIMEOUT_MS);
+        checkTabWithLocks(locks)
+          .catch(() => null)
+          .then((r) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            resolve(r);
+          });
+      })
+    : Promise.resolve(null);
+  tabCheckPromise = viaLocks
+    .then(async (r) => {
+      if (r) return r;
+      const fb = await checkTabFallback(ch);
+      if (locks && tabLocksAbandoned) reconcileTabLockAfterTimeout(locks);
+      return fb;
+    })
+    // Falha inesperada: sem prova de que é o original — não repõe (lado seguro).
+    .catch((): TabCheck => {
+      const dropped = clearTabSessionData();
+      const id = newRequestId();
+      tabState = { tabId: id, checking: false };
+      writeTabId(id);
+      writeTabAlive(id);
+      if (locks) void tryHoldTabLock(locks, id);
+      return { reason: "unsupported", dropped };
+    });
+  return tabCheckPromise;
+}
+
+/**
+ * Depois de o recurso decidir (prazo esgotado): larga a tranca de um tabId que
+ * não ficou (ex.: a verificação com trancas chegou a prender um id novo) e tenta,
+ * sem esperar, prender a do tabId decidido — para uma cópia futura desta carga
+ * a encontrar presa. Se as trancas continuarem penduradas, essa cópia também
+ * esgota o prazo e o recurso decide (vê a marca de "vivo" copiada → cópia).
+ */
+function reconcileTabLockAfterTimeout(locks: LockManager) {
+  const id = tabState && !tabState.checking ? tabState.tabId : null;
+  if (tabLockHeldId && tabLockHeldId !== id) {
+    try {
+      tabLockRelease?.();
+    } catch {
+      // já largada
+    }
+    tabLockRelease = null;
+    tabLockHeldId = null;
+  }
+  if (id && tabLockHeldId !== id) void tryHoldTabLock(locks, id);
+}
+
+/**
+ * Passa a separador novo com Web Locks: prende a tranca de um tabId novo e só
+ * depois o escreve (uma cópia feita a seguir vê o tabId novo já preso).
+ */
+async function becomeNewLocked(locks: LockManager, reason: TabCheck["reason"]): Promise<TabCheck> {
+  const dropped = reason === "ok" ? false : clearTabSessionData();
+  let id = newRequestId();
+  for (let i = 0; i < 3; i++) {
+    // "busy" com um id aleatório novo não deve acontecer; "error": fica sem
+    // tranca — uma cópia desta também cai no recurso e a marca decide.
+    if ((await tryHoldTabLock(locks, id)) !== "busy") break;
+    if (tabLocksAbandoned) break;
+    id = newRequestId();
+  }
+  // Prazo esgotado entretanto: o recurso já decidiu — não mexe em nada.
+  if (tabLocksAbandoned) return { reason, dropped };
+  tabState = { tabId: id, checking: false };
+  writeTabId(id);
+  writeTabAlive(id);
+  return { reason, dropped };
+}
+
+/** Verificação com Web Locks. null = a API falhou: usa-se o recurso. */
+async function checkTabWithLocks(locks: LockManager): Promise<TabCheck | null> {
+  bindTabLifecycle();
+  const current = readTabId();
+  // Separador sem tabId: carga nova (ou dados de antes desta versão) — repõe.
+  if (!current) return becomeNewLocked(locks, "ok");
+  tabState = { tabId: current, checking: true };
+  let attempt = await tryHoldTabLock(locks, current);
+  for (let i = 0; attempt === "busy" && i < TAB_LOCK_RETRIES && !tabLocksAbandoned; i++) {
+    await waitMs(TAB_LOCK_RETRY_MS);
+    if (tabLocksAbandoned) break;
+    attempt = await tryHoldTabLock(locks, current);
+  }
+  // Prazo esgotado: o recurso decide (e é dono do tabState) — não mexe em nada.
+  if (tabLocksAbandoned) return null;
+  if (attempt === "error") {
+    tabState = null;
+    return null;
+  }
+  if (attempt === "held") {
+    tabState = { tabId: current, checking: false };
+    writeTabAlive(current);
+    return { reason: "ok", dropped: false };
+  }
+  // Presa por outra carga viva com o mesmo tabId: esta é a cópia.
+  return becomeNewLocked(locks, "duplicate");
+}
+
+/** Recurso sem Web Locks: marca de "vivo" + BroadcastChannel com desempate simétrico. */
+function checkTabFallback(ch: BroadcastChannel | null): Promise<TabCheck> {
+  return new Promise<TabCheck>((resolve) => {
+    const current = readTabId();
+    const alive = readTabAlive();
+    const discarded = (document as Document & { wasDiscarded?: boolean }).wasDiscarded === true;
+    bindTabLifecycle();
+    const becomeNew = (reason: TabCheck["reason"]) => {
+      const dropped = reason === "ok" ? false : clearTabSessionData();
+      tabState = { tabId: newRequestId(), checking: false };
+      writeTabId(tabState.tabId);
+      // Fica com os (seus) dados: marca-se, para uma cópia desta também ser detetada.
+      writeTabAlive(tabState.tabId);
+      resolve({ reason, dropped });
+    };
+    // Separador sem tabId: carga nova (ou dados de antes desta versão) — repõe.
+    if (!current) {
+      becomeNew("ok");
+      return;
+    }
+    // Marca copiada de um separador vivo (o F5 retira-a no pagehide): é cópia,
+    // mesmo que o original esteja congelado e não responda.
+    if (alive === current && !discarded) {
+      becomeNew("duplicate");
+      return;
+    }
+    if (!ch) {
+      becomeNew("unsupported");
+      return;
+    }
+    tabState = { tabId: current, checking: true };
+    // Já durante a espera: uma cópia feita agora vê a marca e não repõe.
+    writeTabAlive(current);
+    let done = false;
+    let timer = 0;
+    const onMsg = (ev: MessageEvent) => {
+      const m = ev.data as Partial<TabMsg> | null;
+      if (m && m.t === "pong" && m.tab === current && m.to === tabInstanceId) finish(true);
+    };
+    const finish = (duplicate: boolean) => {
+      if (done) return;
+      done = true;
+      tabYield = null;
+      window.clearTimeout(timer);
+      ch.removeEventListener("message", onMsg);
+      if (duplicate) {
+        becomeNew("duplicate");
+      } else {
+        tabState = { tabId: current, checking: false };
+        writeTabAlive(current);
+        resolve({ reason: "ok", dropped: false });
+      }
+    };
+    tabYield = () => finish(true);
+    ch.addEventListener("message", onMsg);
+    timer = window.setTimeout(() => finish(false), TAB_PROBE_MS);
+    try {
+      ch.postMessage({ t: "ping", tab: current, from: tabInstanceId } satisfies TabMsg);
+    } catch {
+      // Não deu para perguntar: não há prova de que é o original.
+      done = true;
+      tabYield = null;
+      window.clearTimeout(timer);
+      ch.removeEventListener("message", onMsg);
+      becomeNew("unsupported");
+    }
+  });
 }
 
 const toStoredEntry = (e: BasketEntry): StoredEntry => ({
@@ -508,6 +1218,7 @@ const freeEntry = (e: BasketEntry): BasketEntry => ({
   submitError: undefined,
   retryable: false,
   sent: undefined,
+  ackKey: undefined,
 });
 
 /** Não deixa o botão tirar o foco ao campo de leitura (o Enter do leitor ativaria o botão). */
@@ -605,7 +1316,15 @@ function summarizeAllocation(a: Allocation, uomCode: string | null) {
 
 function receivedFromResult(
   requestId: string,
-  info: { name: string; sku: string | null; quantity: number; uomCode: string | null; unitsPerUom: number },
+  info: {
+    name: string;
+    sku: string | null;
+    quantity: number;
+    uomCode: string | null;
+    unitsPerUom: number;
+    deliveryNoteId?: string | null;
+    deliveryNoteNumber?: string | null;
+  },
   result: Partial<ReceiveResult>,
   replayed: boolean,
 ): ReceivedEntry {
@@ -629,6 +1348,9 @@ function receivedFromResult(
     contractNumbers: Array.from(contracts),
     replayed,
     at: new Date(),
+    deliveryNoteNumber: result.delivery_note_number ?? info.deliveryNoteNumber ?? null,
+    withNote: typeof result.delivery_note_id === "string" ? true : !!dnOf(info),
+    noteChecks: noteChecksOf(result),
   };
 }
 
@@ -648,16 +1370,43 @@ export default function Receiving() {
   const [optionsLoading, setOptionsLoading] = useState(false);
   const [warehouseId, setWarehouseId] = useState("");
   const [supplierId, setSupplierId] = useState("");
+  // Guia do fornecedor ("" = sem guia).
+  const { hasPermission } = usePermissions();
+  // Permissões próprias da receção (migration 20261210130000).
+  const canEditNotes = hasPermission("receiving.manage_delivery_notes");
+  const canDownloadProof = hasPermission("receiving.download_proof");
+  // Regra de rpc_product_code_learn: associar códigos OU editar produtos.
+  const canEditProducts = hasPermission("products.edit");
+  const canLearnCodes = canEditProducts || hasPermission("receiving.learn_codes");
+  const [deliveryNoteId, setDeliveryNoteId] = useState("");
+  const [noteInfo, setNoteInfo] = useState<DeliveryNoteFull | null>(null);
+  const [noteLoadError, setNoteLoadError] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [createNoteOpen, setCreateNoteOpen] = useState(false);
+  const [detailNoteId, setDetailNoteId] = useState<string | null>(null);
+  /** "Voltar ao cesto" que mudaria a guia do ecrã: pede confirmação (dn = guia com que entraria). */
+  const [unsentConfirm, setUnsentConfirm] = useState<{ id: string; dn: string; message: string } | null>(null);
 
   const [code, setCode] = useState("");
   const [queueSize, setQueueSize] = useState(0);
   const [failedScans, setFailedScans] = useState<FailedScan[]>([]);
   const [rejectedScans, setRejectedScans] = useState<RejectedScan[]>([]);
+  const [learnTarget, setLearnTarget] = useState<LearnTarget | null>(null);
+  /** Separado do alvo: ao fechar, o código fica visível durante a animação. */
+  const [learnOpen, setLearnOpen] = useState(false);
+  /** Desfazer em curso (por id do código): um clique de cada vez. */
+  const undoingCodesRef = useRef(new Set<string>());
   /** Texto para leitores de ecrã (região aria-live sempre montada). */
   const [announcement, setAnnouncement] = useState("");
   const [panel, setPanel] = useState<ScanPanel>({ kind: "none" });
   const [choices, setChoices] = useState<PendingChoice[]>([]);
   const [scannerMode, setScannerMode] = useState<boolean>(() => readStorage(KEYBOARD_MODE_KEY) === "1");
+  /** Leitor por câmara: aberto / já carregado uma vez (fica montado para a animação de fecho). */
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraMounted, setCameraMounted] = useState(false);
+  const closeCamera = useCallback(() => setCameraOpen(false), []);
+  /** Anúncio que já existia ao abrir a câmara — o leitor só mostra os seguintes. */
+  const [cameraAnnouncementBase, setCameraAnnouncementBase] = useState<string | null>(null);
 
   const [basket, setBasket] = useState<BasketEntry[]>([]);
   const [received, setReceived] = useState<ReceivedEntry[]>([]);
@@ -667,6 +1416,10 @@ export default function Receiving() {
   const [pending, setPending] = useState<PendingReceipt[]>([]);
   const [pendingBusy, setPendingBusy] = useState<Set<string>>(() => new Set());
   const [pendingChecked, setPendingChecked] = useState(false);
+  /** Verificação de separador duplicado concluída: só depois se repõe cesto/"Por enviar"/contexto. */
+  const [tabChecked, setTabChecked] = useState(false);
+  /** Leituras liberadas (verificação feita e cesto da empresa ativa reposto); só para o texto "A preparar…". */
+  const [scanReady, setScanReady] = useState(false);
   /** Relógio para o "Descartar" (só depois de DISCARD_MIN_AGE_MS desde o último envio). */
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -678,6 +1431,11 @@ export default function Receiving() {
   warehouseRef.current = warehouseId;
   const supplierRef = useRef(supplierId);
   supplierRef.current = supplierId;
+  const deliveryNoteRef = useRef(deliveryNoteId);
+  deliveryNoteRef.current = deliveryNoteId;
+  const noteInfoRef = useRef<DeliveryNoteFull | null>(noteInfo);
+  noteInfoRef.current = noteInfo;
+  const noteSeqRef = useRef(0);
   const orgRef = useRef(orgId);
   orgRef.current = orgId;
   const orgNameRef = useRef(activeCompany?.name ?? "");
@@ -686,6 +1444,8 @@ export default function Receiving() {
   scannerModeRef.current = scannerMode;
   const userIdRef = useRef<string | null>(userId);
   userIdRef.current = userId;
+  const tabCheckedRef = useRef(tabChecked);
+  tabCheckedRef.current = tabChecked;
   /**
    * Época da empresa ativa: sobe a cada troca. Respostas e ciclos comparam a
    * época capturada (A→B→A não é "a mesma empresa" para um pedido de antes).
@@ -695,6 +1455,12 @@ export default function Receiving() {
   const restoredBasketKeyRef = useRef<string | null>(null);
   /** Armazéns/fornecedores carregados para a época indicada (para validar o cesto reposto). */
   const optionsRef = useRef<{ epoch: number; warehouses: Option[]; suppliers: Option[] } | null>(null);
+  /**
+   * Época cuja carga de armazéns/fornecedores TERMINOU (com ou sem erro) e cujo
+   * armazém lembrado/único já foi aplicado. optionsRef fica null se a carga der
+   * erro — por isso o gate das leituras usa esta, senão nunca abriria.
+   */
+  const optionsSettledEpochRef = useRef(-1);
 
   const previewTimers = useRef(new Map<string, number>());
   const previewSeq = useRef(new Map<string, number>());
@@ -709,6 +1475,8 @@ export default function Receiving() {
   /** request_ids com pedido real em curso nesta instância. */
   const inflightRef = useRef(new Set<string>());
   const qtyEditRef = useRef<QtyEditState | null>(null);
+  /** "Voltar ao cesto" em curso (a verificação da guia é assíncrona): uma de cada vez. */
+  const restoringRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -798,6 +1566,31 @@ export default function Receiving() {
     })();
   }, [ensureUserId, mutatePending]);
 
+  // Separador duplicado: nada da sessionStorage é reposto (nem gravado) antes
+  // de esta verificação terminar — os efeitos de repor esperam por tabChecked
+  // e os de gravar só correm depois de repor.
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    void checkTab(userId).then((r) => {
+      if (!alive || !mountedRef.current) return;
+      if (r.dropped && !tabNoticeShown) {
+        tabNoticeShown = true;
+        toast({
+          title: r.reason === "duplicate" ? "Separador duplicado" : "Cesto anterior não reposto",
+          description:
+            r.reason === "duplicate"
+              ? "O cesto e o «Por enviar» ficam só no separador original, para não se receber duas vezes."
+              : "Este browser não permite confirmar que o separador não é uma cópia — o cesto e o «Por enviar» anteriores não foram repostos. Volta a ler o que faltar receber.",
+        });
+      }
+      setTabChecked(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [userId, toast]);
+
   // Outro separador mexeu nas pendentes: sincroniza a cópia em memória e o ecrã.
   useEffect(() => {
     if (!userId) return;
@@ -831,6 +1624,8 @@ export default function Receiving() {
    */
   const recoverFromRow = useCallback(
     (p: PendingReceipt, row: ScanRow, notify = true) => {
+      // Registo de recebidas ANTES de largar a pendente (que também protegia o entryId).
+      markEntriesDone(userIdRef.current, p.orgId, [p.entryId]);
       removePending(p.requestId);
       if (mountedRef.current && row.organization_id === orgRef.current) {
         const r = receivedFromResult(p.requestId, p, (row.result ?? {}) as Partial<ReceiveResult>, true);
@@ -925,6 +1720,8 @@ export default function Receiving() {
         p_purchase_order_item_id: p.poItemId ?? undefined,
         p_code: p.code || undefined,
         p_dry_run: false,
+        // A guia DA PENDENTE (nunca a do ecrã): o servidor recusa o mesmo id com outra guia.
+        p_delivery_note_id: dnOf(p) || undefined,
       });
       if (error) return { err: error };
       return { result: data as unknown as ReceiveResult };
@@ -947,15 +1744,22 @@ export default function Receiving() {
     scanRetryTimers.current.clear();
     setFailedScans([]);
     setRejectedScans([]);
+    setLearnTarget(null);
+    setLearnOpen(false);
     setAnnouncement("");
     setWarehouseId("");
     setSupplierId("");
+    setDeliveryNoteId("");
+    setPickerOpen(false);
+    setCreateNoteOpen(false);
+    setDetailNoteId(null);
     setWarehouses([]);
     setSuppliers([]);
     // Síncrono: o efeito que repõe o cesto corre a seguir, neste mesmo commit,
-    // e não pode ver o armazém/fornecedor da empresa anterior.
+    // e não pode ver o armazém/fornecedor/guia da empresa anterior.
     warehouseRef.current = "";
     supplierRef.current = "";
+    deliveryNoteRef.current = "";
     optionsRef.current = null;
     if (!orgId) {
       setOptionsLoading(false);
@@ -995,11 +1799,22 @@ export default function Receiving() {
         setWarehouseId(nextWh);
         warehouseRef.current = nextWh;
       }
+      // Armazém aplicado (na ref, síncrono): as leituras em fila já podem sair.
+      optionsSettledEpochRef.current = epoch;
       // Fornecedor reposto que já não pertence a esta empresa: volta a "Todos".
+      // A guia fixa o fornecedor: sai com ele (e avisa-se, nunca em silêncio).
       const curSup = supplierRef.current;
       if (curSup && !supRes.error && !sups.some((s) => s.id === curSup)) {
+        const hadNote = !!deliveryNoteRef.current;
         setSupplierId("");
         supplierRef.current = "";
+        setDeliveryNoteId("");
+        deliveryNoteRef.current = "";
+        if (hadNote) {
+          const basketNote = basketRef.current.length > 0 ? " As entradas do cesto ficam sem guia." : "";
+          setAnnouncement(`Fornecedor indisponível — a guia foi retirada.${basketNote}`);
+          toast({ title: "Fornecedor indisponível", description: `A guia foi retirada.${basketNote}` });
+        }
       }
       focusScan();
     })();
@@ -1021,26 +1836,65 @@ export default function Receiving() {
     writeSessionBasket(key, {
       warehouseId: warehouseRef.current,
       supplierId: supplierRef.current,
+      deliveryNoteId: deliveryNoteRef.current,
       entries: list.filter((e) => !isLocked(e)).map(toStoredEntry),
     });
   }, []);
 
   useEffect(() => {
     saveBasketNow(basket);
-  }, [basket, warehouseId, supplierId, userId, orgId, saveBasketNow]);
+  }, [basket, warehouseId, supplierId, deliveryNoteId, userId, orgId, saveBasketNow]);
 
+  // Contexto do ecrã (armazém/fornecedor/guia), mesmo com o cesto vazio. Só
+  // depois de reposto nesta instância (mesma regra do cesto: nunca grava na
+  // chave da empresa nova com os valores da anterior).
   useEffect(() => {
     if (!userId || !orgId) return;
+    if (restoredBasketKeyRef.current !== basketStorageKey(userId, orgId)) return;
+    writeSessionContext(contextStorageKey(userId, orgId), {
+      warehouseId: warehouseRef.current,
+      supplierId: supplierRef.current,
+      deliveryNoteId: deliveryNoteRef.current,
+    });
+  }, [warehouseId, supplierId, deliveryNoteId, userId, orgId]);
+
+  useEffect(() => {
+    if (!userId || !orgId || !tabChecked) return;
     const key = basketStorageKey(userId, orgId);
     if (restoredBasketKeyRef.current === key) return;
     restoredBasketKeyRef.current = key;
     const saved = readSessionBasket(key);
-    if (!saved || saved.entries.length === 0) return;
     // Por segurança: uma entrada que já originou uma receção pendente nunca volta como livre.
     const pendingEntryIds = new Set(readPending(userId).map((p) => p.entryId).filter(Boolean) as string[]);
     pendingRef.current.forEach((p) => p.entryId && pendingEntryIds.add(p.entryId));
-    const entries = saved.entries.filter((e) => !pendingEntryIds.has(e.id)).map(fromStoredEntry);
-    if (entries.length === 0) return;
+    // Nem uma que já foi recebida (cópia de um separador que entretanto confirmou e fechou).
+    const doneIds = readDoneIds(userId, orgId);
+    const entries = (saved?.entries ?? [])
+      .filter((e) => !pendingEntryIds.has(e.id) && !doneIds.has(e.id))
+      .map(fromStoredEntry);
+    if (!saved || entries.length === 0) {
+      // Sem cesto para repor: repõe o contexto do ecrã (armazém, fornecedor e
+      // GUIA) deste separador. Só se nada tiver sido escolhido entretanto e o
+      // cesto estiver vazio; ids de outra empresa não entram (as opções, se já
+      // carregadas, validam-nos; se não, a carga valida-os quando chegar).
+      const ctx = readSessionContext(contextStorageKey(userId, orgId));
+      if (!ctx || basketRef.current.length > 0 || submittingRef.current) return;
+      if (deliveryNoteRef.current || supplierRef.current) return;
+      const opts0 = optionsRef.current && optionsRef.current.epoch === orgEpochRef.current ? optionsRef.current : null;
+      if (ctx.warehouseId && (!opts0 || opts0.warehouses.some((w) => w.id === ctx.warehouseId))) {
+        setWarehouseId(ctx.warehouseId);
+        warehouseRef.current = ctx.warehouseId;
+      }
+      const sup0 = ctx.supplierId && (!opts0 || opts0.suppliers.some((x) => x.id === ctx.supplierId)) ? ctx.supplierId : "";
+      // A guia fixa o fornecedor: sem o fornecedor dela, não se repõe a guia.
+      const dn0 = ctx.deliveryNoteId && sup0 ? ctx.deliveryNoteId : "";
+      setSupplierId(sup0);
+      supplierRef.current = sup0;
+      setDeliveryNoteId(dn0);
+      deliveryNoteRef.current = dn0;
+      if (dn0) setAnnouncement("Guia do fornecedor reposta.");
+      return;
+    }
     setBasket((prev) => [...prev, ...entries.filter((x) => !prev.some((p) => p.id === x.id))]);
     // O cesto volta com o armazém e o fornecedor com que foi gravado. Se ainda
     // não houver nada no cesto, sobrepõe-se ao armazém escolhido entretanto
@@ -1056,14 +1910,20 @@ export default function Receiving() {
       warehouseRef.current = saved.warehouseId;
       setSupplierId(sup);
       supplierRef.current = sup;
+      // A guia volta com o cesto (o cartão mostra se entretanto foi fechada).
+      // A guia fixa o fornecedor: sem o fornecedor dela, não se repõe a guia.
+      const dn = sup ? dnOf(saved) : "";
+      setDeliveryNoteId(dn);
+      deliveryNoteRef.current = dn;
     }
     setAnnouncement(`Cesto reposto: ${entries.length} ${entries.length === 1 ? "entrada" : "entradas"}.`);
-  }, [userId, orgId]);
+  }, [userId, orgId, tabChecked]);
 
   // "Por enviar" da empresa ativa: carrega ao entrar/trocar e acompanha o que
-  // outra instância (ex.: a antiga, já desmontada) lá escrever.
+  // outra instância (ex.: a antiga, já desmontada) lá escrever. Só depois da
+  // verificação de separador duplicado (a cópia não pode mostrar o do original).
   useEffect(() => {
-    if (!userId || !orgId) return;
+    if (!userId || !orgId || !tabChecked) return;
     const key = unsentStorageKey(userId, orgId);
     setUnsent(readUnsent(key));
     const onChange = (ev: Event) => {
@@ -1072,7 +1932,7 @@ export default function Receiving() {
     };
     window.addEventListener(UNSENT_EVENT, onChange);
     return () => window.removeEventListener(UNSENT_EVENT, onChange);
-  }, [userId, orgId]);
+  }, [userId, orgId, tabChecked]);
 
   /**
    * Entradas que ficaram por enviar quando o ciclo parou (troca de empresa ou
@@ -1084,22 +1944,23 @@ export default function Receiving() {
    * outro armazém — vão para "Por enviar", sempre por read-modify-write.
    */
   const returnUnsent = useCallback(
-    (org: string, orgName: string, wh: string, sup: string, list: BasketEntry[]) => {
+    (org: string, orgName: string, wh: string, sup: string, dn: string, dnNumber: string | null, list: BasketEntry[]) => {
       if (list.length === 0) return;
       const freed = list.map(freeEntry);
-      if (mountedRef.current && orgRef.current === org && warehouseRef.current === wh) {
+      if (mountedRef.current && orgRef.current === org && warehouseRef.current === wh && deliveryNoteRef.current === dn) {
         setBasket((prev) => [...prev, ...freed.filter((x) => !prev.some((p) => p.id === x.id))]);
         return;
       }
       const uid = userIdRef.current;
-      const onOtherScreen = mountedRef.current && orgRef.current === org; // mesma empresa, outro armazém
+      const onOtherScreen = mountedRef.current && orgRef.current === org; // mesma empresa, outro armazém/guia
       if (uid && mountedRef.current && !onOtherScreen) {
         const key = basketStorageKey(uid, org);
         const saved = readSessionBasket(key);
-        if (!saved || saved.entries.length === 0 || saved.warehouseId === wh) {
+        if (!saved || saved.entries.length === 0 || (saved.warehouseId === wh && dnOf(saved) === dn)) {
           writeSessionBasket(key, {
             warehouseId: wh,
             supplierId: saved && saved.entries.length > 0 ? saved.supplierId : sup,
+            deliveryNoteId: dn,
             entries: [...(saved?.entries ?? []), ...freed.filter((x) => !saved?.entries.some((s) => s.id === x.id)).map(toStoredEntry)],
           });
           // Se a empresa já foi reposta nesta instância (A→B→A), volta a repor ao regressar.
@@ -1113,7 +1974,14 @@ export default function Receiving() {
       }
       if (uid) {
         const at = new Date().toISOString();
-        const items: UnsentEntry[] = freed.map((e) => ({ ...toStoredEntry(e), warehouseId: wh, supplierId: sup, at }));
+        const items: UnsentEntry[] = freed.map((e) => ({
+          ...toStoredEntry(e),
+          warehouseId: wh,
+          supplierId: sup,
+          deliveryNoteId: dn || null,
+          deliveryNoteNumber: dn ? dnNumber : null,
+          at,
+        }));
         const next = mutateUnsent(unsentStorageKey(uid, org), (cur) => [
           ...cur,
           ...items.filter((x) => !cur.some((c) => c.id === x.id)),
@@ -1136,34 +2004,125 @@ export default function Receiving() {
     [toast],
   );
 
-  /** "Por enviar" → cesto: só com o cesto vazio ou no mesmo armazém e fornecedor. */
-  const restoreUnsent = (id: string) => {
+  /**
+   * "Por enviar" → cesto: só com o cesto vazio ou no mesmo armazém, fornecedor
+   * e guia. Com o cesto vazio o ecrã passa para o armazém/fornecedor/guia da
+   * entrada; se a guia dela já não estiver aberta, a entrada (nada foi
+   * recebido) entra na guia escolhida agora no ecrã, ou sem guia.
+   */
+  const restoreUnsent = async (id: string, confirmedDn?: string) => {
+    if (restoringRef.current) return; // dois toques seguidos: só uma reposição de cada vez
+    restoringRef.current = true;
+    try {
+      await restoreUnsentInner(id, confirmedDn);
+    } finally {
+      restoringRef.current = false;
+    }
+  };
+
+  /**
+   * Corpo de restoreUnsent. Se a entrada for pôr o ecrã noutra guia (a dela,
+   * ou — se a dela já não estiver aberta — ficar na do ecrã / sem guia), pede
+   * confirmação primeiro: confirmedDn é a guia aceite; se entretanto mudou,
+   * volta a perguntar.
+   */
+  const restoreUnsentInner = async (id: string, confirmedDn?: string) => {
     const uid = userIdRef.current;
     const org = orgRef.current;
     if (!uid || !org || submittingRef.current) return;
+    setUnsentConfirm(null);
+    const epoch = orgEpochRef.current;
     const key = unsentStorageKey(uid, org);
     const item = readUnsent(key).find((x) => x.id === id) ?? unsent.find((x) => x.id === id);
     if (!item) return;
-    const empty = basketRef.current.length === 0;
-    if (!empty && (item.warehouseId !== warehouseRef.current || item.supplierId !== supplierRef.current)) {
+    // A cópia em memória pode estar atrasada: uma entrada já recebida nunca volta ao cesto.
+    if (readDoneIds(uid, org).has(item.id)) {
+      const next = mutateUnsent(key, (cur) => cur.filter((x) => x.id !== id));
+      setUnsent(next ?? ((cur) => cur.filter((x) => x.id !== id)));
+      toast({ title: "Já recebida", description: "Esta entrada já foi recebida noutro separador — não volta ao cesto." });
+      return;
+    }
+    const itemDn = dnOf(item);
+    const sameContext = () =>
+      item.warehouseId === warehouseRef.current && item.supplierId === supplierRef.current && itemDn === deliveryNoteRef.current;
+    if (basketRef.current.length > 0 && !sameContext()) {
       toast({
-        title: "Armazém ou fornecedor diferente",
-        description: "Confirma ou esvazia o cesto primeiro — esta entrada foi lida noutro armazém/fornecedor.",
+        title: "Armazém, fornecedor ou guia diferente",
+        description: "Confirma ou esvazia o cesto primeiro — esta entrada foi lida noutro armazém/fornecedor/guia.",
         variant: "destructive",
       });
       return;
     }
-    if (empty) {
+    if (basketRef.current.length === 0) {
       const opts = optionsRef.current && optionsRef.current.epoch === orgEpochRef.current ? optionsRef.current : null;
       if (opts && !opts.warehouses.some((w) => w.id === item.warehouseId)) {
         toast({ title: "Armazém indisponível", description: "O armazém desta entrada já não existe.", variant: "destructive" });
         return;
       }
-      const sup = !item.supplierId || !opts || opts.suppliers.some((s) => s.id === item.supplierId) ? item.supplierId : "";
-      setWarehouseId(item.warehouseId);
-      warehouseRef.current = item.warehouseId;
-      setSupplierId(sup);
-      supplierRef.current = sup;
+      let sup = !item.supplierId || !opts || opts.suppliers.some((s) => s.id === item.supplierId) ? item.supplierId : "";
+      // A guia fixa o fornecedor: sem o fornecedor dela, a guia da entrada não
+      // volta — fica a guia do ecrã (se houver fornecedor no ecrã) ou nenhuma.
+      const supGone = !!itemDn && !sup;
+      let dn = itemDn;
+      let itemNoteOpen = true;
+      if (supGone) {
+        // Fica o fornecedor do ecrã (não se limpa) e a guia do ecrã, se houver;
+        // a guia da entrada não volta.
+        sup = supplierRef.current;
+        dn = sup ? deliveryNoteRef.current : "";
+      } else if (itemDn && itemDn !== deliveryNoteRef.current) {
+        const r = await fetchDeliveryNote(itemDn);
+        if (!isCurrent(epoch, org) || submittingRef.current) return;
+        if (r.error && r.error.code !== "P0002") {
+          toast({
+            title: "Não foi possível verificar a guia",
+            description: "A entrada ficou em \"Por enviar\" — tenta de novo daqui a pouco.",
+            variant: "destructive",
+          });
+          return;
+        }
+        if (!r.note || r.note.status !== "open") {
+          itemNoteOpen = false;
+          dn = deliveryNoteRef.current;
+          sup = dn ? supplierRef.current : sup;
+        }
+      }
+      // A guia do ecrã vai mudar, ou a entrada vai entrar noutra guia que não a
+      // dela: nunca em silêncio — pede confirmação (decisão do utilizador).
+      if (dn !== deliveryNoteRef.current || dn !== itemDn) {
+        if (confirmedDn === undefined || confirmedDn !== dn) {
+          const curDn = deliveryNoteRef.current;
+          const curLabel = curDn
+            ? `a guia ${noteInfoRef.current?.id === curDn ? noteLabel(noteInfoRef.current.note_number) : "escolhida"}`
+            : "sem guia";
+          const itemLabel = itemDn ? `a guia ${item.deliveryNoteNumber ? noteLabel(item.deliveryNoteNumber) : "do fornecedor"}` : "sem guia";
+          const dnLabel = dn && dn === curDn ? curLabel : "sem guia";
+          const supName = sup ? suppliers.find((s) => s.id === sup)?.name : undefined;
+          const keepLabel = sup
+            ? `com o fornecedor ${supName ? `«${supName}»` : "escolhido no ecrã"} e ${dnLabel}`
+            : `sem fornecedor e ${dnLabel}`;
+          const message = supGone
+            ? `Esta entrada foi lida com ${itemLabel}, de um fornecedor que já não está disponível. Volta ao cesto ${keepLabel}?`
+            : !itemNoteOpen
+            ? `Esta entrada foi lida com ${itemLabel}, que já não está aberta. Volta ao cesto com ${curLabel} (nada tinha sido recebido)?`
+            : `Esta entrada foi lida com ${itemLabel}. O ecrã passa de ${curLabel} para ${itemLabel} — as leituras seguintes também. Continuar?`;
+          setUnsentConfirm({ id, dn, message });
+          return;
+        }
+      }
+      // Durante a verificação o cesto pode ter recebido leituras.
+      if (basketRef.current.length > 0 && !sameContext()) {
+        toast({ title: "O cesto mudou entretanto", description: "Tenta de novo.", variant: "destructive" });
+        return;
+      }
+      if (basketRef.current.length === 0) {
+        setWarehouseId(item.warehouseId);
+        warehouseRef.current = item.warehouseId;
+        setSupplierId(sup);
+        supplierRef.current = sup;
+        setDeliveryNoteId(dn);
+        deliveryNoteRef.current = dn;
+      }
     }
     const entry = fromStoredEntry(item);
     setBasket((prev) => (prev.some((p) => p.id === entry.id) ? prev : [entry, ...prev]));
@@ -1173,6 +2132,7 @@ export default function Receiving() {
   };
 
   const dismissUnsent = (id: string) => {
+    setUnsentConfirm((cur) => (cur?.id === id ? null : cur));
     const uid = userIdRef.current;
     const org = orgRef.current;
     if (!uid || !org) return;
@@ -1190,9 +2150,143 @@ export default function Receiving() {
   };
 
   const handleSupplierChange = (id: string) => {
+    if (deliveryNoteRef.current) return; // a guia fixa o fornecedor
     setSupplierId(id);
     setPanel({ kind: "none" });
     setChoices([]);
+    focusScan();
+  };
+
+  // ── Guia do fornecedor ──
+  /** Recarrega o cartão da guia escolhida (estado, anunciado/recebido). */
+  const reloadNote = useCallback(async () => {
+    const id = deliveryNoteRef.current;
+    const seq = ++noteSeqRef.current;
+    if (!id) {
+      setNoteInfo(null);
+      setNoteLoadError(null);
+      return;
+    }
+    const r = await fetchDeliveryNote(id);
+    if (!mountedRef.current || seq !== noteSeqRef.current || deliveryNoteRef.current !== id) return;
+    if (r.note) {
+      setNoteInfo(r.note);
+      setNoteLoadError(null);
+    } else {
+      setNoteLoadError(
+        r.error?.code === "P0002"
+          ? "Guia não encontrada (pode ter sido apagada ou ser de outra empresa)."
+          : r.error?.code
+            ? r.error.message || "Não foi possível carregar a guia."
+            : "Sem ligação ao servidor — não foi possível carregar a guia.",
+      );
+    }
+  }, []);
+
+  useEffect(() => {
+    setNoteInfo((cur) => (cur && cur.id === deliveryNoteId ? cur : null));
+    setNoteLoadError(null);
+    void reloadNote();
+  }, [deliveryNoteId, reloadNote]);
+
+  /**
+   * Escolhe a guia (ou nenhuma). Mesma regra do armazém/fornecedor: só com o
+   * cesto vazio e sem receção em curso. A guia fixa o fornecedor.
+   */
+  const selectNote = (n: { id: string; supplier_id: string } | null) => {
+    if (basketRef.current.length > 0 || submittingRef.current) {
+      toast({
+        title: "Cesto por confirmar",
+        description: "Confirma ou esvazia o cesto para mudar de guia.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const id = n?.id ?? "";
+    setDeliveryNoteId(id);
+    deliveryNoteRef.current = id;
+    setUnsentConfirm(null);
+    if (n) {
+      setSupplierId(n.supplier_id);
+      supplierRef.current = n.supplier_id;
+    }
+    setPanel({ kind: "none" });
+    setChoices([]);
+    setPickerOpen(false);
+    focusScan();
+  };
+
+  /** Guia alterada na ficha (gravada, fechada, reaberta…): atualiza o cartão e refaz as pré-visualizações. */
+  const handleNoteChanged = (n: DeliveryNoteFull) => {
+    if (n.id !== deliveryNoteRef.current) return;
+    const before = noteInfoRef.current;
+    setNoteInfo(n);
+    setNoteLoadError(null);
+    if (before && (before.updated_at !== n.updated_at || before.status !== n.status)) {
+      for (const x of basketRef.current) if (!isLocked(x)) recalcPreview(x.id, true);
+    }
+  };
+
+  /** Trabalho local ainda não recebido com uma guia (aviso ao fechar/cancelar). */
+  const localWorkFor = (noteId: string) => ({
+    basket: deliveryNoteRef.current === noteId ? basketRef.current.length : 0,
+    unsent: unsent.filter((u) => dnOf(u) === noteId).length,
+    pending: pending.filter((p) => dnOf(p) === noteId).length,
+  });
+
+  /**
+   * Guia fechada/cancelada a meio: as entradas livres do cesto passam para "Por
+   * enviar" (com a guia delas) para se poder escolher outra guia. A quantidade
+   * é fotografada uma vez e subtraída (como no Confirmar): uma leitura que
+   * chegue entretanto fica no cesto, nunca se perde.
+   */
+  const moveBasketToUnsent = () => {
+    const uid = userIdRef.current;
+    const org = orgRef.current;
+    if (!uid || !org || submittingRef.current) return;
+    let snap: BasketEntry[] | null = null;
+    flushSync(() => {
+      setBasket((prev) => {
+        if (!snap) snap = prev.filter((e) => !isLocked(e));
+        return prev;
+      });
+    });
+    const picked: BasketEntry[] = snap ?? [];
+    if (picked.length === 0) return;
+    const dn = deliveryNoteRef.current;
+    const dnNumber = dn && noteInfoRef.current?.id === dn ? noteInfoRef.current.note_number : null;
+    const at = new Date().toISOString();
+    const items: UnsentEntry[] = picked.map((e) => ({
+      ...toStoredEntry(e),
+      warehouseId: warehouseRef.current,
+      supplierId: supplierRef.current,
+      deliveryNoteId: dn || null,
+      deliveryNoteNumber: dnNumber,
+      at,
+    }));
+    const next = mutateUnsent(unsentStorageKey(uid, org), (cur) => [...cur, ...items.filter((x) => !cur.some((c) => c.id === x.id))]);
+    if (!next) {
+      toast({
+        title: "Não foi possível guardar",
+        description: "O armazenamento do browser não está disponível — as entradas ficaram no cesto.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setUnsent(next);
+    const qty = new Map(picked.map((e) => [e.id, e.quantity]));
+    setBasket((prev) =>
+      prev.flatMap((x) => {
+        const q = qty.get(x.id);
+        if (q === undefined || isLocked(x)) return [x];
+        const rest = x.quantity - q;
+        return rest > 0 ? [freeEntry({ ...x, id: newRequestId(), quantity: rest })] : [];
+      }),
+    );
+    toast({
+      title: "Cesto passado para \"Por enviar\"",
+      description: `${picked.length} ${picked.length === 1 ? "entrada" : "entradas"} — nada foi recebido. Escolhe outra guia e usa "Voltar ao cesto".`,
+    });
     focusScan();
   };
 
@@ -1210,7 +2304,8 @@ export default function Receiving() {
 
   // ── Pré-visualização (dry-run) com debounce ──
   const sigOf = useCallback(
-    (e: BasketEntry) => `${e.quantity}|${e.poItemId ?? ""}|${warehouseRef.current}|${supplierRef.current}`,
+    (e: BasketEntry) =>
+      `${e.quantity}|${e.poItemId ?? ""}|${warehouseRef.current}|${supplierRef.current}|${deliveryNoteRef.current}`,
     [],
   );
 
@@ -1252,9 +2347,14 @@ export default function Receiving() {
           p_purchase_order_item_id: entry.poItemId ?? undefined,
           p_code: entry.code || undefined,
           p_dry_run: true,
+          p_delivery_note_id: deliveryNoteRef.current || undefined,
         });
         if (!error) preview = { sig, status: "ok", result: data as unknown as ReceiveResult };
-        else preview = { sig, status: isTransient(error) ? "transient" : "error", error: errorMessage(error, "preview") };
+        else {
+          preview = { sig, status: isTransient(error) ? "transient" : "error", error: errorMessage(error, "preview") };
+          // Recusa com guia (p.ex. fechada a meio): o cartão da guia mostra o estado atual.
+          if (!isTransient(error) && deliveryNoteRef.current) void reloadNote();
+        }
       } catch (err) {
         preview = { sig, status: "transient", error: errorMessage({ message: String(err) }, "preview") };
       }
@@ -1279,12 +2379,15 @@ export default function Receiving() {
             }
           }, PREVIEW_RETRY_MS);
           previewRetries.current.set(id, { sig, n: n + 1, timer });
+        } else {
+          // Tentativas automáticas esgotadas (n > PREVIEW_AUTO_RETRIES): o botão pede "Recalcular".
+          previewRetries.current.set(id, { sig, n: n + 1 });
         }
       } else {
         previewRetries.current.delete(id);
       }
     },
-    [sigOf, updateEntry, recalcPreview, isCurrent],
+    [sigOf, updateEntry, recalcPreview, isCurrent, reloadNote],
   );
 
   useEffect(() => {
@@ -1329,7 +2432,7 @@ export default function Receiving() {
         previewRetries.current.delete(k);
       }
     }
-  }, [basket, warehouseId, supplierId, sigOf, runPreview]);
+  }, [basket, warehouseId, supplierId, deliveryNoteId, sigOf, runPreview]);
 
   useEffect(() => {
     const timers = previewTimers.current;
@@ -1348,8 +2451,8 @@ export default function Receiving() {
 
   // ── Leitura ──
   /** Leitura recusada de forma definitiva: fica na lista até ser dispensada. */
-  const addRejected = useCallback((value: string, message: string) => {
-    setRejectedScans((cur) => [{ id: newRequestId(), value, message, at: new Date() }, ...cur]);
+  const addRejected = useCallback((value: string, message: string, reason?: RejectedScan["reason"]) => {
+    setRejectedScans((cur) => [{ id: newRequestId(), value, message, at: new Date(), ...(reason ? { reason } : {}) }, ...cur]);
     setAnnouncement(`«${value}»: ${message}`);
   }, []);
 
@@ -1426,17 +2529,25 @@ export default function Receiving() {
       const epoch = orgEpochRef.current;
       const wh = warehouseRef.current;
       const sup = supplierRef.current;
+      const dn = deliveryNoteRef.current;
       if (!wh) return { transient: "Escolhe primeiro o armazém." };
       try {
         const { data, error } = await supabase.rpc("rpc_receiving_lookup", {
           p_warehouse_id: wh,
           p_code: value,
           p_supplier_id: sup || undefined,
+          p_delivery_note_id: dn || undefined,
+          // Sem p_unit_conversion: o ecrã não converte de ponta a ponta (a receção
+          // vai sem a flag); com ela só se escondia o aviso das linhas noutra unidade.
         });
         if (!isCurrent(epoch, org)) return null;
+        // A guia mudou durante a procura: o âmbito era outro — repete a leitura.
+        if (deliveryNoteRef.current !== dn) return { transient: "A guia mudou entretanto — a leitura vai ser repetida." };
         if (error) {
           if (isTransient(error)) return { transient: errorMessage(error, "lookup") };
           addRejected(value, errorMessage(error, "lookup"));
+          // Guia fechada/cancelada a meio: o cartão da guia passa a mostrá-lo.
+          if (dn) void reloadNote();
           return null;
         }
         const lookup = data as unknown as LookupResult;
@@ -1446,6 +2557,7 @@ export default function Receiving() {
           addRejected(
             lookup.code || value,
             ["Código não encontrado.", ...lookup.warnings].join(" "),
+            "not_found",
           );
         } else if (lookup.candidates.length > 1) {
           // Fica numa lista própria: uma leitura seguinte não a apaga.
@@ -1459,18 +2571,39 @@ export default function Receiving() {
         return { transient: errorMessage({ message: String(err) }, "lookup") };
       }
     },
-    [addCandidate, addRejected, isCurrent],
+    [addCandidate, addRejected, isCurrent, reloadNote],
   );
 
   // A fila e as novas tentativas referem-se mutuamente: a função de enfileirar
   // vive numa ref para o temporizador a encontrar sempre atualizada.
   const enqueueRef = useRef<(item: QueuedScan) => void>(() => {});
 
+  /**
+   * As leituras só são processadas depois da verificação de separador e de o
+   * cesto/contexto desta empresa ter sido reposto. Antes disso ficam na fila
+   * (por ordem): uma leitura feita nos primeiros instantes depois de um F5 não
+   * se mistura com o cesto reposto nem é procurada no armazém/fornecedor/guia
+   * errado. Também esperam pela carga dos armazéns desta empresa (o armazém
+   * lembrado/único só é aplicado no fim dela): antes disso cairiam todas em
+   * "Escolhe primeiro o armazém". Se, carregadas, não houver armazém, aí sim.
+   */
+  const scanGateOpen = useCallback(() => {
+    const uid = userIdRef.current;
+    const org = orgRef.current;
+    return (
+      tabCheckedRef.current &&
+      !!uid &&
+      !!org &&
+      restoredBasketKeyRef.current === basketStorageKey(uid, org) &&
+      optionsSettledEpochRef.current === orgEpochRef.current
+    );
+  }, []);
+
   const processQueue = useCallback(async () => {
-    if (processingRef.current) return;
+    if (processingRef.current || !scanGateOpen()) return;
     processingRef.current = true;
     try {
-      while (scanQueueRef.current.length > 0 && mountedRef.current) {
+      while (scanQueueRef.current.length > 0 && mountedRef.current && scanGateOpen()) {
         const item = scanQueueRef.current[0];
         const org = orgRef.current;
         const epoch = orgEpochRef.current;
@@ -1483,7 +2616,13 @@ export default function Receiving() {
           const auto = attempts < SCAN_AUTO_RETRIES && !!warehouseRef.current;
           setFailedScans((cur) => [
             ...cur.filter((x) => x.id !== item.id),
-            { id: item.id, value: item.value, error: outcome.transient, attempts, waiting: auto },
+            {
+              id: item.id,
+              value: item.value,
+              error: outcome.transient,
+              attempts,
+              waiting: auto,
+            },
           ]);
           if (auto) {
             const delay = SCAN_RETRY_BASE_MS * 2 ** (attempts - 1);
@@ -1501,7 +2640,7 @@ export default function Receiving() {
       processingRef.current = false;
       focusScan();
     }
-  }, [lookupOne, focusScan, isCurrent]);
+  }, [lookupOne, focusScan, isCurrent, scanGateOpen]);
 
   enqueueRef.current = (item: QueuedScan) => {
     scanQueueRef.current = [...scanQueueRef.current, item];
@@ -1509,11 +2648,36 @@ export default function Receiving() {
     void processQueue();
   };
 
+  // Liberta as leituras em fila assim que a verificação e a reposição terminam
+  // (este efeito vem depois dos de repor: no mesmo commit, já vê o cesto e o
+  // armazém/fornecedor/guia repostos nas refs).
+  useEffect(() => {
+    const open = scanGateOpen() && !optionsLoading;
+    setScanReady(open);
+    if (open && scanQueueRef.current.length > 0) void processQueue();
+  }, [userId, orgId, tabChecked, optionsLoading, scanGateOpen, processQueue]);
+
   const enqueueScan = (raw: string) => {
     const value = raw.trim();
     if (!value) return;
     enqueueRef.current({ id: newRequestId(), value, attempts: 0 });
   };
+
+  // ── Leitura pela câmara ──
+  // Cada código lido entra pela MESMA fila que a pistola/teclado (enqueueScan →
+  // fila → scanGateOpen → lookupOne); o leitor não chama RPCs.
+  const openCamera = () => {
+    if (optionsLoading || !warehouseRef.current) return;
+    setCameraAnnouncementBase(announcement);
+    setCameraMounted(true);
+    setCameraOpen(true);
+  };
+
+  // Sem armazém (troca de empresa, recarga das opções): fecha o leitor, como o
+  // campo de leitura fica desativado.
+  useEffect(() => {
+    if (optionsLoading || !warehouseId) setCameraOpen(false);
+  }, [optionsLoading, warehouseId]);
 
   /**
    * Leitor com o foco fora de um campo editável (num botão, no <select> da linha
@@ -1679,6 +2843,89 @@ export default function Receiving() {
     focusScan();
   };
 
+  // ── Associar um código não encontrado a um produto (Fase 2 — fatia 3) ──
+  const openLearn = (r: RejectedScan) => {
+    const org = orgRef.current;
+    if (!org || !warehouseRef.current) return;
+    setLearnTarget({ scanId: r.id, code: r.value, epoch: orgEpochRef.current, org });
+    setLearnOpen(true);
+  };
+
+  /** Desfaz a associação (anulação lógica). Não mexe no cesto nem reverte receções. */
+  const undoLearned = async (r: LearnCodeResult) => {
+    const id = r.id;
+    if (!id || undoingCodesRef.current.has(id)) return;
+    undoingCodesRef.current.add(id);
+    try {
+      const { data, error } = await removeProductCode(id, "Desfeito na receção");
+      if (!mountedRef.current) return;
+      if (error || !data) {
+        toast({
+          title: "Não foi possível desfazer a associação",
+          description: productCodeErrorMessage(error ?? { code: "XX000", message: "Resposta vazia do servidor." }),
+          variant: "destructive",
+        });
+        return;
+      }
+      const n = Number(data.scans_using_code) || 0;
+      toast({
+        title: data.already_removed ? "A associação já tinha sido desfeita" : "Associação desfeita",
+        description: [
+          `«${data.code}» deixa de ser reconhecido como ${data.product_name ? `«${data.product_name}»` : "o produto"}.`,
+          n > 0
+            ? `${n} ${n === 1 ? "leitura usou" : "leituras usaram"} este código — as receções feitas não são revertidas.`
+            : "As receções feitas não são revertidas.",
+          "Retira do cesto se não for este o produto.",
+        ].join(" "),
+        duration: 15000,
+      });
+    } finally {
+      undoingCodesRef.current.delete(id);
+    }
+  };
+
+  /**
+   * Código associado: TODAS as leituras recusadas por "não encontrado" com o
+   * mesmo código (chave como o servidor: productCodeKey — GTIN com zeros à
+   * esquerda, resto sem maiúsculas) saem da lista e são lidas de novo pelo
+   * caminho normal (fila → gate → lookup), uma entrada na fila por leitura —
+   * cada uma era uma unidade lida. Se a empresa mudou entretanto (a lista foi
+   * limpa com a troca), não se repete nada.
+   */
+  const handleLearned = (r: LearnCodeResult) => {
+    const t = learnTarget;
+    if (!t) return;
+    const same = isCurrent(t.epoch, t.org);
+    let repeated = 0;
+    if (same) {
+      const key = productCodeKey(t.code);
+      // Lido do estado atual (as leituras são acrescentadas por setRejectedScans
+      // em handlers anteriores, já aplicados quando o diálogo grava).
+      const matching = rejectedScans.filter(
+        (x) => x.id === t.scanId || (x.reason === "not_found" && key !== null && productCodeKey(x.value) === key),
+      );
+      const ids = new Set(matching.map((x) => x.id));
+      setRejectedScans((cur) => cur.filter((x) => !ids.has(x.id)));
+      // Mais antigas primeiro (a lista mostra as mais recentes em cima).
+      const values = matching.length > 0 ? matching.slice().reverse().map((x) => x.value) : [t.code];
+      for (const value of values) enqueueRef.current({ id: newRequestId(), value, attempts: 0 });
+      repeated = values.length;
+    }
+    const canUndo = !!r.id && r.learned;
+    toast({
+      title: r.learned ? "Código associado" : "Código já reconhecido",
+      description: same
+        ? `${describeLearnResult(r)} ${repeated === 1 ? "A leitura foi repetida." : `As ${repeated} leituras foram repetidas.`}`
+        : `${describeLearnResult(r)} A empresa mudou — lê o código de novo.`,
+      duration: canUndo ? 15000 : undefined,
+      action: canUndo ? (
+        <ToastAction altText="Desfazer a associação do código" className="h-11 px-4" onClick={() => void undoLearned(r)}>
+          Desfazer
+        </ToastAction>
+      ) : undefined,
+    });
+  };
+
   // ── Edição do cesto ──
   /**
    * Alteração feita pelo utilizador: nunca se aplica a uma entrada bloqueada (a
@@ -1776,7 +3023,36 @@ export default function Receiving() {
   const isPreviewPending = (e: BasketEntry) => {
     if (isLocked(e) || !qtyValid(e)) return false;
     const p = previewFor(e);
-    return !p || p.status === "loading";
+    // Com guia, só uma pré-visualização "ok" deixa confirmar: a transient não
+    // mostrou os avisos da guia (não consta / acima do anunciado).
+    return !p || p.status === "loading" || (!!deliveryNoteRef.current && p.status === "transient");
+  };
+  /**
+   * A pré-visualização desta entrada foi feita com a guia `dn`? Além da
+   * assinatura (que já inclui a guia), confirma pela resposta do servidor:
+   * com guia ele devolve delivery_note_id, sem guia não. As bloqueadas
+   * (reenvio) vão com a guia da pendente e não entram nesta regra.
+   */
+  const previewMatchesNote = (e: BasketEntry, dn: string) => {
+    if (isLocked(e)) return true;
+    const p = previewFor(e);
+    if (!p) return false;
+    if (p.status === "ok") return (typeof p.result?.delivery_note_id === "string" ? p.result.delivery_note_id : "") === dn;
+    if (p.status === "transient") return !dn;
+    return false;
+  };
+  /** Chave dos avisos da guia desta pré-visualização (null = sem avisos). */
+  const ackKeyOf = (e: BasketEntry): string | null => {
+    const p = previewFor(e);
+    if (!p || p.status !== "ok") return null;
+    const checks = noteChecksOf(p.result);
+    return checks.length > 0 ? `${p.sig}#${checks.join(",")}` : null;
+  };
+  /** Entrada livre com avisos da guia ainda não confirmados (decisão 1: aviso + confirmação). */
+  const needsAck = (e: BasketEntry) => {
+    if (isLocked(e)) return false;
+    const k = ackKeyOf(e);
+    return !!k && e.ackKey !== k;
   };
 
   const pendingFromEntry = (
@@ -1786,6 +3062,8 @@ export default function Receiving() {
     orgName: string,
     wh: string,
     sup: string,
+    dn: string,
+    dnNumber: string | null,
   ): PendingReceipt => ({
     requestId,
     entryId: e.id,
@@ -1793,6 +3071,8 @@ export default function Receiving() {
     orgName,
     warehouseId: wh,
     supplierId: sup,
+    deliveryNoteId: dn || null,
+    deliveryNoteNumber: dn ? dnNumber : null,
     productId: e.productId,
     uomId: e.uomId,
     poItemId: e.poItemId,
@@ -1854,6 +3134,8 @@ export default function Receiving() {
     if (submittingRef.current) return; // duplo clique / duplo toque
     const wh = warehouseRef.current;
     const sup = supplierRef.current;
+    const dn = deliveryNoteRef.current;
+    const dnNumber = dn && noteInfoRef.current?.id === dn ? noteInfoRef.current.note_number : null;
     const org = orgRef.current;
     const orgName = orgNameRef.current;
     const epoch = orgEpochRef.current;
@@ -1901,11 +3183,21 @@ export default function Receiving() {
       // pendente) e o resto fica livre. Depois disto, uma leitura ou "+" vai para
       // outra entrada — nunca soma à que vai ser enviada.
       let snapped = false;
+      /** Entradas cuja pré-visualização não foi feita com a guia atual: não vão — recalcula-se. */
+      const stale: string[] = [];
       flushSync(() => {
         setBasket((prev) => {
           if (!snapped) {
             snapped = true;
-            const picked = prev.filter((e) => (!onlyId || e.id === onlyId) && qtyValid(e) && !e.submitting);
+            // Entradas livres com avisos da guia por confirmar não vão (o botão já está bloqueado).
+            const picked = prev.filter((e) => {
+              if (!((!onlyId || e.id === onlyId) && qtyValid(e) && !e.submitting && !needsAck(e))) return false;
+              if (!previewMatchesNote(e, dn)) {
+                stale.push(e.id);
+                return false;
+              }
+              return true;
+            });
             for (const e of picked) ids.set(e.id, e.requestId ?? newRequestId());
             entries = picked.map((e) => ({ ...e, requestId: ids.get(e.id), submitting: true, submitError: undefined }));
           }
@@ -1915,6 +3207,16 @@ export default function Receiving() {
           );
         });
       });
+      if (stale.length > 0) {
+        for (const id of stale) recalcPreview(id, true);
+        toast({
+          title: stale.length === 1 ? "1 entrada não foi enviada" : `${stale.length} entradas não foram enviadas`,
+          description: `A pré-visualização não corresponde à guia atual (${
+            dn ? (noteInfoRef.current?.id === dn ? noteLabel(noteInfoRef.current.note_number) : "guia escolhida") : "sem guia"
+          }). Estou a recalcular — revê e confirma de novo.`,
+          variant: "destructive",
+        });
+      }
       if (entries.length === 0) return;
       // O cesto da sessão deixa já de ter as bloqueadas (F5 a seguir não as repõe como livres).
       saveBasketNow(basketRef.current);
@@ -1938,7 +3240,7 @@ export default function Receiving() {
         const prevSentAt = prevPending ? sentAtMs(prevPending) : undefined;
         const p: PendingReceipt = prevPending
           ? { ...prevPending, entryId: e.id, state: "inflight", lastError: undefined, lastSentAt: nowIso }
-          : { ...pendingFromEntry(e, requestId, org, orgName, wh, sup), createdAt: nowIso, lastSentAt: nowIso };
+          : { ...pendingFromEntry(e, requestId, org, orgName, wh, sup, dn, dnNumber), createdAt: nowIso, lastSentAt: nowIso };
         upsertPending(p);
         inflightRef.current.add(requestId);
         let result: Partial<ReceiveResult> | undefined;
@@ -1968,6 +3270,9 @@ export default function Receiving() {
         const here = isCurrent(epoch, org);
 
         if (result) {
+          // Registo de recebidas ANTES de a entrada sair das pendentes/cesto: uma
+          // cópia deste separador nunca a repõe (ver markEntriesDone).
+          markEntriesDone(uid, org, [e.id, p.entryId]);
           removePending(requestId);
           ok += 1;
           if (replayed) replayedCount += 1;
@@ -1978,12 +3283,14 @@ export default function Receiving() {
             // Subtrai a quantidade ENVIADA com este id (p.quantity — a fotografia ou
             // a pendente), nunca a quantidade atual da entrada: se a entrada ficou
             // com mais (rebase do updater de bloqueio), o resto fica livre no cesto.
+            // O resto leva um id NOVO: o id antigo já está no registo de recebidas
+            // e o resto (por receber) não pode ser filtrado numa reposição.
             const sentQty = p.quantity;
             setBasket((prev) =>
               prev.flatMap((x) => {
                 if (x.id !== e.id) return [x];
                 const rest = x.quantity - sentQty;
-                return rest > 0 ? [freeEntry({ ...x, quantity: rest })] : [];
+                return rest > 0 ? [freeEntry({ ...x, id: newRequestId(), quantity: rest })] : [];
               }),
             );
             refreshSameProduct(e.productId);
@@ -2036,10 +3343,12 @@ export default function Receiving() {
       // Por enviar quando o ciclo parou: as livres voltam ao cesto dessa empresa;
       // as incertas já estão nas pendentes (localStorage) com o mesmo id.
       const unsent = stopAt >= 0 ? entries.slice(stopAt).filter((x) => !isUncertain(x)) : [];
-      if (!isCurrent(epoch, org)) returnUnsent(org, orgName, wh, sup, [...refusedAway, ...unsent]);
+      if (!isCurrent(epoch, org)) returnUnsent(org, orgName, wh, sup, dn, dnNumber, [...refusedAway, ...unsent]);
     }
 
     if (!isCurrent(epoch, org)) return;
+    // Recebido pela guia mudou (ou foi recusada — p.ex. guia fechada a meio).
+    if (dn && (ok > 0 || failed > 0)) void reloadNote();
     if (ok > 0) {
       toast({
         title: ok === 1 ? "Receção registada" : `${ok} receções registadas`,
@@ -2076,6 +3385,34 @@ export default function Receiving() {
       return next;
     });
 
+  /** Pendente recusada (provado: nada recebido) → "Por enviar", sem request_id. */
+  const keepRejectedAsUnsent = (p: PendingReceipt): boolean => {
+    const uid = userIdRef.current;
+    if (!uid) return false;
+    const item: UnsentEntry = {
+      id: newRequestId(),
+      key: entryKey(p.productId, p.uomId),
+      productId: p.productId,
+      name: p.name,
+      sku: p.sku,
+      uomId: p.uomId,
+      uomCode: p.uomCode,
+      unitsPerUom: Number(p.unitsPerUom) || 1,
+      code: p.code,
+      openLines: [],
+      quantity: p.quantity,
+      poItemId: p.poItemId,
+      warehouseId: p.warehouseId,
+      supplierId: p.supplierId,
+      deliveryNoteId: dnOf(p) || null,
+      deliveryNoteNumber: p.deliveryNoteNumber ?? null,
+      at: new Date().toISOString(),
+    };
+    const next = mutateUnsent(unsentStorageKey(uid, p.orgId), (cur) => [...cur, item]);
+    if (next && mountedRef.current && orgRef.current === p.orgId) setUnsent(next);
+    return !!next;
+  };
+
   const resendPending = async (requestId: string) => {
     const p = pendingRef.current.find((x) => x.requestId === requestId);
     if (!p || p.orgId !== orgRef.current || inflightRef.current.has(requestId)) return;
@@ -2111,6 +3448,7 @@ export default function Receiving() {
     }
     const here = isCurrent(epoch, p.orgId);
     if (result) {
+      markEntriesDone(userIdRef.current, p.orgId, [p.entryId]);
       removePending(requestId);
       if (here) {
         setReceived((cur) => [receivedFromResult(requestId, p, result ?? {}, replayed), ...cur.filter((r) => r.id !== requestId)]);
@@ -2124,8 +3462,16 @@ export default function Receiving() {
       patchPending(requestId, { state: "unknown", lastError: uncertainMessage(err) });
     } else {
       removePending(requestId);
-      toast({ title: "Receção recusada", description: `${p.label}: ${errorMessage(err, "receive")}`, variant: "destructive" });
+      // Recusa provada (nada foi recebido). Com guia, o motivo costuma ser a guia
+      // fechada/cancelada: a leitura fica em "Por enviar" para não se perder.
+      const kept = dnOf(p) ? keepRejectedAsUnsent(p) : false;
+      toast({
+        title: "Receção recusada",
+        description: `${p.label}: ${errorMessage(err, "receive")}${kept ? ' Ficou em "Por enviar" — nada foi recebido.' : ""}`,
+        variant: "destructive",
+      });
     }
+    if (here && dnOf(p) && dnOf(p) === deliveryNoteRef.current) void reloadNote();
     if (here) focusScan();
   };
 
@@ -2188,6 +3534,7 @@ export default function Receiving() {
     const pNow = pendingRef.current.find((x) => x.requestId === requestId) ?? (cur.sent?.requestId === requestId ? cur.sent : undefined);
     if (!pNow || sentAtMs(pNow) !== sentAtMs(p)) return;
     const row = rows.find((r) => r.id === requestId);
+    if (row) markEntriesDone(userIdRef.current, org, [entryId, pNow.entryId]);
     removePending(requestId);
     if (row) {
       const result = (row.result ?? {}) as Partial<ReceiveResult>;
@@ -2196,7 +3543,8 @@ export default function Receiving() {
         prev.flatMap((x) => {
           if (x.id !== entryId || x.requestId !== requestId || x.submitting) return [x];
           const rest = x.quantity - p.quantity;
-          return rest > 0 ? [freeEntry({ ...x, quantity: rest })] : [];
+          // Resto com id novo (o antigo ficou no registo de recebidas).
+          return rest > 0 ? [freeEntry({ ...x, id: newRequestId(), quantity: rest })] : [];
         }),
       );
       refreshSameProduct(p.productId);
@@ -2219,9 +3567,26 @@ export default function Receiving() {
     basket.length === 0 ||
     basket.some((e) => !qtyValid(e) && !isLocked(e)) ||
     basket.some(hasPreviewError) ||
-    basket.some(isPreviewPending);
+    basket.some(isPreviewPending) ||
+    basket.some(needsAck);
+  const ackPendingCount = basket.filter(needsAck).length;
+  // Com guia, uma pré-visualização sem ligação ("transient") bloqueia o Confirmar
+  // (ver isPreviewPending): diz porquê, para o botão não parecer preso.
+  const noteOffline = basket.filter(
+    (e) => !isLocked(e) && qtyValid(e) && !!deliveryNoteRef.current && previewFor(e)?.status === "transient",
+  );
+  const noteOfflineGaveUp = noteOffline.some((e) => {
+    const r = previewRetries.current.get(e.id);
+    return !!r && r.sig === previewFor(e)?.sig && r.n > PREVIEW_AUTO_RETRIES;
+  });
   const confirmLabel = confirming
     ? "A receber…"
+    : ackPendingCount > 0
+      ? "Confirma os avisos da guia"
+    : noteOffline.length > 0
+      ? noteOfflineGaveUp
+        ? "Sem ligação — carrega em Recalcular"
+        : "Sem ligação — a tentar de novo…"
     : uncertainCount > 0 && freshCount > 0
       ? `Confirmar (inclui ${uncertainCount} a repetir)`
       : uncertainCount > 0
@@ -2229,6 +3594,8 @@ export default function Receiving() {
         : "Confirmar receção";
   const basketUnits = basket.reduce((s, e) => s + e.quantity * e.unitsPerUom, 0);
   const lookupBusy = queueSize > 0;
+  /** Leituras à espera da verificação de separador / reposição do cesto. */
+  const lookupWaiting = lookupBusy && !scanReady;
 
   // ── Render ──
   if (companyLoading) {
@@ -2276,6 +3643,7 @@ export default function Receiving() {
                   <p className="break-words font-medium">{p.label}</p>
                   <p className="text-xs text-muted-foreground">
                     Enviada às {timeFmt.format(new Date(p.createdAt))}
+                    {dnOf(p) ? ` · com guia ${p.deliveryNoteNumber ? noteLabel(p.deliveryNoteNumber) : "do fornecedor"}` : " · sem guia"}
                     {!here && ` · empresa «${p.orgName}»`}
                   </p>
                   {p.lastError && <p className="break-words text-destructive">{p.lastError}</p>}
@@ -2323,9 +3691,9 @@ export default function Receiving() {
         </Card>
       )}
 
-      {/* Armazém e fornecedor */}
+      {/* Armazém, guia do fornecedor e fornecedor */}
       <Card>
-        <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2">
+        <CardContent className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
           <div className="min-w-0 space-y-1.5">
             <Label htmlFor="receiving-warehouse">Armazém *</Label>
             <NativeSelect
@@ -2339,23 +3707,86 @@ export default function Receiving() {
             />
           </div>
           <div className="min-w-0 space-y-1.5">
-            <Label htmlFor="receiving-supplier">Fornecedor (opcional)</Label>
+            <Label htmlFor="receiving-note">Guia do fornecedor (opcional)</Label>
+            <Button
+              id="receiving-note"
+              type="button"
+              variant="outline"
+              className="h-12 w-full justify-start px-3 text-base font-normal"
+              disabled={selectorsLocked || optionsLoading}
+              onClick={() => setPickerOpen(true)}
+              aria-haspopup="dialog"
+            >
+              <FileText className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+              <span className="min-w-0 truncate">
+                {deliveryNoteId
+                  ? noteInfo?.id === deliveryNoteId
+                    ? noteLabel(noteInfo.note_number)
+                    : "Guia escolhida"
+                  : "Sem guia"}
+              </span>
+            </Button>
+          </div>
+          <div className="min-w-0 space-y-1.5 sm:col-span-2 lg:col-span-1">
+            <Label htmlFor="receiving-supplier">{deliveryNoteId ? "Fornecedor (da guia)" : "Fornecedor (opcional)"}</Label>
             <NativeSelect
               id="receiving-supplier"
               className="h-12 text-base"
               value={supplierId}
               onValueChange={handleSupplierChange}
-              disabled={selectorsLocked || optionsLoading}
+              disabled={selectorsLocked || optionsLoading || !!deliveryNoteId}
               options={[{ value: "", label: "Todos os fornecedores" }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]}
             />
           </div>
           {selectorsLocked && (
-            <p className="text-sm text-muted-foreground sm:col-span-2">
-              Confirma ou esvazia o cesto para mudar de armazém ou de fornecedor.
+            <p className="text-sm text-muted-foreground sm:col-span-2 lg:col-span-3">
+              Confirma ou esvazia o cesto para mudar de armazém, guia ou fornecedor.
             </p>
           )}
         </CardContent>
       </Card>
+
+      {/* Guia fechada/cancelada a meio (ou não encontrada): nada se perde */}
+      {deliveryNoteId && ((noteInfo?.id === deliveryNoteId && noteInfo.status !== "open") || noteLoadError) && (
+        <Notice tone={noteLoadError ? "warning" : "error"}>
+          <p className="font-medium">
+            {noteLoadError
+              ? noteLoadError
+              : `A guia ${noteLabel(noteInfo?.note_number)} está ${NOTE_STATUS_LABEL[noteInfo?.status ?? "closed"]} — as leituras e receções com esta guia são recusadas.`}
+          </p>
+          <p className="mt-1 text-sm">
+            O cesto, "Por enviar" e as receções por confirmar ficam guardados. Reabre a guia em "Ver guia", ou passa o cesto para
+            "Por enviar" e escolhe outra guia.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="h-11"
+              onMouseDown={keepScanFocus}
+              onClick={() => setDetailNoteId(deliveryNoteId)}
+            >
+              Ver guia
+            </Button>
+            {noteLoadError && (
+              <Button type="button" variant="outline" className="h-11" onMouseDown={keepScanFocus} onClick={() => void reloadNote()}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Tentar de novo
+              </Button>
+            )}
+            {basket.some((e) => !isLocked(e)) && (
+              <Button type="button" variant="outline" className="h-11" disabled={confirming} onMouseDown={keepScanFocus} onClick={moveBasketToUnsent}>
+                Passar o cesto para "Por enviar"
+              </Button>
+            )}
+            {basket.length === 0 && !confirming && (
+              <Button type="button" variant="outline" className="h-11" onMouseDown={keepScanFocus} onClick={() => setPickerOpen(true)}>
+                Escolher outra guia
+              </Button>
+            )}
+          </div>
+        </Notice>
+      )}
 
       {/* Campo de leitura — fixo no topo da área de conteúdo, acima do teclado virtual */}
       <div className="sticky top-0 z-20 -mx-2 rounded-b-lg bg-background/95 px-2 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
@@ -2402,9 +3833,65 @@ export default function Receiving() {
             <span className="sr-only sm:not-sr-only">Procurar</span>
           </Button>
         </form>
+        <Button
+          type="button"
+          variant="secondary"
+          className="mt-2 h-11 w-full gap-2 text-base sm:w-auto [&_svg]:size-5"
+          disabled={scanDisabled}
+          onClick={openCamera}
+          aria-haspopup="dialog"
+          title={scanDisabled && !optionsLoading ? "Escolhe o armazém primeiro" : undefined}
+        >
+          <Camera aria-hidden />
+          Ler com a câmara
+        </Button>
+        {/* Cartão compacto da guia (junto ao campo de leitura) */}
+        {deliveryNoteId && (
+          <div className="mt-2 flex items-center gap-2 rounded-md border bg-muted/40 px-3 py-1.5 text-sm">
+            <FileText className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+            <p className="min-w-0 flex-1 truncate">
+              {noteInfo?.id === deliveryNoteId ? (
+                <>
+                  <span className="font-medium">{noteLabel(noteInfo.note_number)}</span>
+                  {noteInfo.status !== "open" && (
+                    <span className="font-medium text-destructive"> ({NOTE_STATUS_LABEL[noteInfo.status]})</span>
+                  )}
+                  {" · "}
+                  {noteInfo.supplier_name ?? "Fornecedor"}
+                  {" · "}
+                  {noteInfo.purchase_orders.length > 0
+                    ? `${noteInfo.purchase_orders.length} ${noteInfo.purchase_orders.length === 1 ? "PO" : "POs"}`
+                    : "todas as POs"}
+                  {noteInfo.summary &&
+                    (noteInfo.summary.has_lines
+                      ? ` · anunciado ${fmt(noteInfo.summary.totals.announced_units)} / recebido ${fmt(noteInfo.summary.totals.received_units)}`
+                      : ` · recebido ${fmt(noteInfo.summary.totals.received_units)}`)}
+                </>
+              ) : noteLoadError ? (
+                <span className="text-destructive">{noteLoadError}</span>
+              ) : (
+                <span className="text-muted-foreground">A carregar guia…</span>
+              )}
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-9 shrink-0 px-2"
+              onMouseDown={keepScanFocus}
+              onClick={() => setDetailNoteId(deliveryNoteId)}
+            >
+              Ver guia
+            </Button>
+          </div>
+        )}
         {/* Sempre montada: os leitores de ecrã só anunciam mudanças numa região que já existia. */}
         <p className={cn("text-sm text-muted-foreground", lookupBusy && "mt-1")} aria-live="polite">
-          {lookupBusy ? `A procurar…${queueSize > 1 ? ` (${queueSize} leituras em fila)` : ""}` : ""}
+          {lookupWaiting
+            ? `A preparar… (${queueSize} ${queueSize === 1 ? "leitura" : "leituras"} em fila)`
+            : lookupBusy
+              ? `A procurar…${queueSize > 1 ? ` (${queueSize} leituras em fila)` : ""}`
+              : ""}
         </p>
       </div>
 
@@ -2439,6 +3926,18 @@ export default function Receiving() {
                   <p className="break-words text-destructive">{r.message}</p>
                   <p className="text-xs text-muted-foreground">{timeFmt.format(r.at)}</p>
                 </div>
+                {r.reason === "not_found" && canLearnCodes && !!warehouseId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 shrink-0"
+                    onMouseDown={keepScanFocus}
+                    onClick={() => openLearn(r)}
+                  >
+                    <Tag className="mr-2 h-4 w-4" aria-hidden />
+                    Associar a um produto
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="ghost"
@@ -2520,7 +4019,13 @@ export default function Receiving() {
                       {u.name} — {fmt(u.quantity)} {unitLabel(u.uomCode, u.unitsPerUom)}
                     </p>
                     <p className="break-words text-xs text-muted-foreground">
-                      {[whName ? `Armazém ${whName}` : null, supName ? `fornecedor ${supName}` : null].filter(Boolean).join(" · ")}
+                      {[
+                        whName ? `Armazém ${whName}` : null,
+                        dnOf(u) ? `com guia ${u.deliveryNoteNumber ? noteLabel(u.deliveryNoteNumber) : "do fornecedor"}` : "sem guia",
+                        supName ? `fornecedor ${supName}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" · ")}
                     </p>
                   </div>
                   <Button
@@ -2529,7 +4034,7 @@ export default function Receiving() {
                     className="h-11 shrink-0"
                     disabled={confirming}
                     onMouseDown={keepScanFocus}
-                    onClick={() => restoreUnsent(u.id)}
+                    onClick={() => void restoreUnsent(u.id)}
                   >
                     <RotateCcw className="mr-2 h-4 w-4" />
                     Voltar ao cesto
@@ -2544,6 +4049,36 @@ export default function Receiving() {
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
+                  {unsentConfirm?.id === u.id && (
+                    <div className="w-full">
+                      <Notice tone="warning">
+                        <p>{unsentConfirm.message}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            className="h-11"
+                            disabled={confirming}
+                            onMouseDown={keepScanFocus}
+                            onClick={() => void restoreUnsent(u.id, unsentConfirm.dn)}
+                          >
+                            Sim, voltar ao cesto
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-11"
+                            onMouseDown={keepScanFocus}
+                            onClick={() => {
+                              setUnsentConfirm(null);
+                              focusScan();
+                            }}
+                          >
+                            Não
+                          </Button>
+                        </div>
+                      </Notice>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -2577,6 +4112,13 @@ export default function Receiving() {
           <h2 id="receiving-basket-title" className="text-lg font-semibold">
             Cesto {basket.length > 0 && <span className="text-muted-foreground">({basket.length})</span>}
           </h2>
+          {basket.length > 0 && (
+            <p className="text-sm text-muted-foreground">
+              {deliveryNoteId
+                ? `Leituras com a guia ${noteInfo?.id === deliveryNoteId ? noteLabel(noteInfo.note_number) : "escolhida"}.`
+                : "Leituras sem guia do fornecedor."}
+            </p>
+          )}
           {basket.length === 0 ? (
             <Card>
               <CardContent className="p-6 text-center text-muted-foreground">
@@ -2588,11 +4130,18 @@ export default function Receiving() {
               const sentRec = e.requestId
                 ? (pending.find((x) => x.requestId === e.requestId) ?? (e.sent?.requestId === e.requestId ? e.sent : undefined))
                 : undefined;
+              const ackKey = isLocked(e) ? null : ackKeyOf(e);
               return (
               <BasketCard
                 key={e.id}
                 entry={e}
                 preview={previewFor(e)}
+                noteChecks={ackKey ? noteChecksOf(previewFor(e)?.result) : []}
+                acked={!!ackKey && e.ackKey === ackKey}
+                onAck={(v) => {
+                  editEntry(e.id, { ackKey: v && ackKey ? ackKey : undefined });
+                  focusScan();
+                }}
                 busy={confirming}
                 discardBusy={!!e.requestId && pendingBusy.has(e.requestId)}
                 discardWaitMs={sentRec ? DISCARD_MIN_AGE_MS - (nowMs - sentAtMs(sentRec)) : Number.POSITIVE_INFINITY}
@@ -2655,8 +4204,19 @@ export default function Receiving() {
                     {fmt(r.unitsToOrder)} un para EC{r.contractNumbers.length > 0 && ` (${r.contractNumbers.join(", ")})`} ·{" "}
                     {fmt(r.unitsToStock)} un para stock
                   </p>
-                  {r.orderNumbers.length > 0 && (
-                    <p className="break-words text-xs text-muted-foreground">{r.orderNumbers.join(", ")}</p>
+                  <p className="break-words text-xs text-muted-foreground">
+                    {[
+                      r.orderNumbers.join(", "),
+                      r.withNote ? `com guia ${r.deliveryNoteNumber ? noteLabel(r.deliveryNoteNumber) : "do fornecedor"}` : "sem guia",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                  {r.noteChecks && r.noteChecks.length > 0 && (
+                    <p className="mt-1 flex items-start gap-1 text-sm text-amber-700 dark:text-amber-400">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                      <span>Recebido com aviso: {r.noteChecks.map((c) => NOTE_CHECK_LABEL[c] ?? c).join("; ")}.</span>
+                    </p>
                   )}
                   {r.replayed && (
                     <p className="mt-1 flex items-start gap-1 text-sm font-medium text-amber-700 dark:text-amber-400">
@@ -2682,6 +4242,8 @@ export default function Receiving() {
             {basket.length === 0
               ? "Cesto vazio"
               : `${basket.length} ${basket.length === 1 ? "entrada" : "entradas"} · ${fmt(basketUnits)} un`}
+            {ackPendingCount > 0 &&
+              ` · ${ackPendingCount === 1 ? "1 aviso da guia" : `${ackPendingCount} avisos da guia`} por confirmar`}
           </p>
           <Button
             type="button"
@@ -2695,6 +4257,159 @@ export default function Receiving() {
           </Button>
         </div>
       </div>
+
+      {/* Guia do fornecedor: escolher, criar, ver (componentes em src/components/receiving) */}
+      <DeliveryNotePicker
+        open={pickerOpen}
+        onOpenChange={(o) => {
+          setPickerOpen(o);
+          if (!o) focusScan();
+        }}
+        orgId={orgId}
+        currentId={deliveryNoteId}
+        canCreate={canEditNotes}
+        onSelect={(n) => selectNote(n)}
+        onCreate={() => {
+          // Uma guia nova só pode ser escolhida com o cesto vazio: não se abre
+          // o diálogo para depois a gravar sem a escolher.
+          if (basketRef.current.length > 0 || submittingRef.current) {
+            toast({
+              title: "Cesto por confirmar",
+              description: "Confirma ou esvazia o cesto antes de criar uma guia nova — com leituras no cesto a guia não muda.",
+              variant: "destructive",
+            });
+            return;
+          }
+          setPickerOpen(false);
+          setCreateNoteOpen(true);
+        }}
+      />
+      {cameraMounted && (
+        <Suspense
+          fallback={cameraOpen ? <CameraScannerLoading onClose={closeCamera} /> : null}
+        >
+          <CameraScanner
+            open={cameraOpen}
+            onOpenChange={setCameraOpen}
+            repeatGapMs={1500}
+            onScan={enqueueScan}
+            onCloseAutoFocus={(ev) => {
+              // Como depois de uma leitura: volta ao campo de leitura (no telemóvel em modo teclado não abre o teclado).
+              ev.preventDefault();
+              focusScan();
+            }}
+            status={
+              <>
+                {lookupBusy && (
+                  <p className="text-muted-foreground">
+                    {lookupWaiting
+                      ? `A preparar… (${queueSize} ${queueSize === 1 ? "leitura" : "leituras"} em fila)`
+                      : `A procurar…${queueSize > 1 ? ` (${queueSize} leituras em fila)` : ""}`}
+                  </p>
+                )}
+                {announcement && announcement !== cameraAnnouncementBase && (
+                  <p className="break-words font-medium">{announcement}</p>
+                )}
+                {choices.length > 0 && (
+                  <p className="text-amber-700 dark:text-amber-400">
+                    {choices.length === 1
+                      ? "1 leitura corresponde a vários produtos — fecha a câmara para escolher."
+                      : `${choices.length} leituras correspondem a vários produtos — fecha a câmara para escolher.`}
+                  </p>
+                )}
+                {failedScans.length > 0 && (
+                  <p className="text-destructive">
+                    {failedScans.length === 1 ? "1 leitura com erro" : `${failedScans.length} leituras com erro`}
+                    {failedScans.every((f) => f.waiting)
+                      ? " — vai ser repetida sozinha."
+                      : " — vê os detalhes ao fechar a câmara."}
+                  </p>
+                )}
+              </>
+            }
+          />
+        </Suspense>
+      )}
+      {canLearnCodes && (
+        <LearnCodeDialog
+          open={learnOpen && learnTarget !== null}
+          onOpenChange={(o) => {
+            if (!o) {
+              setLearnOpen(false);
+              focusScan();
+            }
+          }}
+          code={learnTarget?.code ?? ""}
+          organizationId={orgId}
+          warehouseId={warehouseId || null}
+          supplierId={supplierId || (deliveryNoteId && noteInfo?.id === deliveryNoteId ? noteInfo.supplier_id : null)}
+          suppliers={suppliers}
+          canEditProducts={canEditProducts}
+          onLearned={handleLearned}
+        />
+      )}
+      {canEditNotes && (
+        <DeliveryNoteDialog
+          open={createNoteOpen}
+          onOpenChange={(o) => {
+            setCreateNoteOpen(o);
+            if (!o) focusScan();
+          }}
+          orgId={orgId}
+          suppliers={suppliers}
+          defaultSupplierId={supplierId || undefined}
+          onSaved={(n) => {
+            if (n.status !== "open") {
+              toast({
+                title: `Guia ${noteLabel(n.note_number)} gravada mas NÃO escolhida`,
+                description: `Está ${NOTE_STATUS_LABEL[n.status] ?? n.status} — não pode receber.`,
+                variant: "destructive",
+              });
+              return;
+            }
+            if (basketRef.current.length === 0 && !submittingRef.current) {
+              selectNote(n);
+              setNoteInfo(n);
+              toast({ title: `Guia ${noteLabel(n.note_number)} registada e escolhida`, description: n.supplier_name ?? undefined });
+              return;
+            }
+            const cur = deliveryNoteRef.current;
+            toast({
+              title: `Guia ${noteLabel(n.note_number)} gravada mas NÃO escolhida`,
+              description: `Há leituras no cesto (ou uma receção em curso), que continuam ${
+                cur ? `com ${noteInfoRef.current?.id === cur ? noteLabel(noteInfoRef.current.note_number) : "a guia escolhida"}` : "SEM guia"
+              }. Confirma ou esvazia o cesto e escolhe a guia na lista.`,
+              variant: "destructive",
+            });
+          }}
+          onOpenExisting={(id) => setDetailNoteId(id)}
+        />
+      )}
+      <DeliveryNoteDetail
+        open={!!detailNoteId}
+        onOpenChange={(o) => {
+          if (!o) {
+            setDetailNoteId(null);
+            focusScan();
+          }
+        }}
+        noteId={detailNoteId}
+        orgId={orgId}
+        canEdit={canEditNotes}
+        canDownloadProof={canDownloadProof}
+        localWork={localWorkFor}
+        onChanged={handleNoteChanged}
+        onOpenOther={(id) => setDetailNoteId(id)}
+        onUse={
+          detailNoteId && detailNoteId !== deliveryNoteId && basket.length === 0 && !confirming
+            ? (n) => {
+                selectNote(n);
+                setNoteInfo(n);
+                setDetailNoteId(null);
+              }
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -2785,11 +4500,21 @@ function ScanPanelView({ panel, onDismiss }: { panel: ScanPanel; onDismiss: () =
             No cesto: {fmt(panel.quantity)} {unitLabel(c.uom_code, c.units_per_uom)}
           </Notice>
         )}
+        {c.delivery_note && (
+          <p className="text-sm text-muted-foreground">
+            Guia:{" "}
+            {c.delivery_note.announced
+              ? `anunciado ${fmt(c.delivery_note.announced_units)} un · recebido ${fmt(c.delivery_note.received_units)} un`
+              : panel.lookup.delivery_note?.has_lines
+                ? `não anunciado · recebido ${fmt(c.delivery_note.received_units)} un`
+                : `recebido ${fmt(c.delivery_note.received_units)} un`}
+          </p>
+        )}
         {panel.kind === "no_lines" && (
           <Notice tone="warning">Sem encomenda a fornecedor em aberto para este produto nesta unidade — não foi para o cesto.</Notice>
         )}
         {panel.kind === "consult" && (
-          <Notice tone="info">Modo consulta: não tens permissão para receber (precisas de receber encomendas e editar inventário).</Notice>
+          <Notice tone="info">Modo consulta: não tens permissão para receber (precisas de receber mercadoria por leitura, receber encomendas e editar inventário).</Notice>
         )}
         <Warnings items={panel.lookup.warnings} />
         {panel.kind === "consult" &&
@@ -2826,6 +4551,7 @@ function OpenLineSummary({ line, uomCode }: { line: OpenLine; uomCode: string | 
           </Badge>
         )}
         {!line.same_unit && <Badge variant="outline">outra unidade</Badge>}
+        {line.in_delivery_note && <Badge variant="secondary">na guia</Badge>}
       </div>
       <p className="text-muted-foreground">
         Em aberto {fmt(line.open_quantity)} {line.units_per_uom > 1 ? `× ${fmt(line.units_per_uom)} un` : uomCode || "un."}
@@ -2841,6 +4567,9 @@ function OpenLineSummary({ line, uomCode }: { line: OpenLine; uomCode: string | 
 function BasketCard({
   entry,
   preview,
+  noteChecks,
+  acked,
+  onAck,
   busy,
   discardBusy,
   discardWaitMs,
@@ -2860,6 +4589,10 @@ function BasketCard({
 }: {
   entry: BasketEntry;
   preview: Preview | undefined;
+  /** Avisos da guia desta pré-visualização (exigem confirmação explícita). */
+  noteChecks: string[];
+  acked: boolean;
+  onAck: (v: boolean) => void;
   busy: boolean;
   discardBusy: boolean;
   /** Tempo até o "Descartar" ficar disponível (≤ 0 = já pode). */
@@ -2886,6 +4619,7 @@ function BasketCard({
   const openTotal = lines.reduce((s, l) => s + Number(l.open_quantity), 0);
   const qtyId = `qty-${entry.id}`;
   const poId = `po-${entry.id}`;
+  const ackId = `ack-${entry.id}`;
 
   return (
     <Card className={cn(entry.submitError && "border-destructive")}>
@@ -2995,6 +4729,7 @@ function BasketCard({
                     value: l.purchase_order_item_id,
                     label: [
                       l.order_number ?? "PO",
+                      l.in_delivery_note ? "na guia" : null,
                       !l.confirmed ? "não confirmada" : null,
                       l.contract_order_number ? `${l.contract_order_number}${l.contract_active ? "" : " (inativa)"}` : "stock",
                       `em aberto ${fmt(l.open_quantity)}`,
@@ -3016,6 +4751,22 @@ function BasketCard({
         {/* Pré-visualização — sem região aria-live por cartão: os anúncios vão
             todos pela região global (announcement), para não se sobreporem. */}
         <PreviewView entry={entry} preview={preview} onRecalc={onRecalc} />
+
+        {/* Avisos da guia (não consta / acima do anunciado): confirmação explícita */}
+        {noteChecks.length > 0 && !locked && (
+          <div className="flex items-start gap-3 rounded-md border border-amber-500/60 bg-amber-500/10 p-3 text-sm text-amber-800 dark:text-amber-300">
+            <Checkbox
+              id={ackId}
+              className="mt-0.5 h-5 w-5 border-amber-700 dark:border-amber-400"
+              checked={acked}
+              onCheckedChange={(c) => onAck(c === true)}
+            />
+            <Label htmlFor={ackId} className="min-w-0 flex-1 cursor-pointer font-normal leading-snug">
+              <span className="font-medium">{noteChecks.map((c) => NOTE_CHECK_LABEL[c] ?? c).join(" · ")}.</span>{" "}
+              Confirmo que recebo mesmo assim.
+            </Label>
+          </div>
+        )}
 
         {/* Erro do pedido real (anunciado pela região global no fim do Confirmar) */}
         {entry.submitError && (

@@ -253,8 +253,8 @@ const App = () => (
                       <Route path="/stocks" element={<ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
                       <Route path="/warehouses" element={<ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />
                       <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
-                      {/* Receção por código (Fase 2): entra quem pode receber OU consultar encomendas — mesma regra de rpc_receiving_lookup. Receber exige purchase_orders.receive + inventory.edit, verificado pelo servidor (can_receive / rpc_receive_by_code); sem isso o ecrã fica em modo consulta. */}
-                      <Route path="/receiving" element={<ProtectedRoute permissions={["purchase_orders.receive", "purchase_orders.view"]}><Receiving /></ProtectedRoute>} />
+                      {/* Receção por código (Fase 2): permissão própria receiving.view (categoria 'receiving'). O servidor exige ainda purchase_orders.view OU .receive para consultar (rpc_receiving_lookup) e receiving.receive + purchase_orders.receive + inventory.edit para receber (can_receive / rpc_receive_by_code); sem isso o ecrã fica em modo consulta. */}
+                      <Route path="/receiving" element={<ProtectedRoute permission="receiving.view"><Receiving /></ProtectedRoute>} />
                       {/* Permissão própria client_orders.view — o armazém vê as encomendas sem precisar de ver contratos. Mesma verificação dos RPCs (rpc_list_client_order_documents/rpc_get_client_order_document). */}
                       <Route path="/client-orders" element={<ProtectedRoute permission="client_orders.view"><ClientOrders /></ProtectedRoute>} />
                       {/* Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/inventory.edit controlam ações DENTRO da página (contar/resolver/finalizar), não o acesso à rota. */}
