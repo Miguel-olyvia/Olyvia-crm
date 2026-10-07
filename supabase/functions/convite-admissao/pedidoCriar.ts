@@ -5,6 +5,13 @@
  * Modulo puro (sem Deno, sem rede) para ser testavel no vitest.
  */
 
+import {
+  ADDITIONAL_ALLOWED_ORIGINS,
+  LOCAL_DEV_ORIGIN_PATTERN,
+  PRODUCTION_ORIGIN,
+  VERCEL_PREVIEW_ORIGIN_PATTERN,
+} from "../_shared/cors.ts";
+
 export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** RFC 5321: um endereco nao passa dos 254 caracteres. */
@@ -45,6 +52,29 @@ export function resolverBaseUrl(bruto: string | null | undefined): string | null
   const valor = (bruto ?? "").trim().replace(/\/+$/, "");
   if (!/^https?:\/\/[^\s/]+/i.test(valor)) return null;
   return valor;
+}
+
+/**
+ * O endereco de onde o RH pediu o convite, quando e um dos permitidos (a mesma
+ * lista ANCORADA que o CORS destas funcoes usa: producao, previews desta equipa
+ * e loopback local). Assim o link sai sempre com o endereco da aplicacao onde
+ * o RH esta, e nao com o segredo APP_BASE_URL, que so serve de reserva.
+ * `null` quando falta ou nao e permitido: nunca se reflecte um endereco
+ * arbitrario, porque o link vai por email a uma pessoa.
+ */
+export function origemPermitida(
+  origem: string | null | undefined,
+  explicita?: string | null,
+): string | null {
+  const valor = (origem ?? "").trim().replace(/\/+$/, "");
+  if (!valor) return null;
+  const permitida =
+    valor === PRODUCTION_ORIGIN ||
+    ADDITIONAL_ALLOWED_ORIGINS.includes(valor) ||
+    (!!explicita && valor === explicita.trim().replace(/\/+$/, "")) ||
+    VERCEL_PREVIEW_ORIGIN_PATTERN.test(valor) ||
+    LOCAL_DEV_ORIGIN_PATTERN.test(valor);
+  return permitida ? valor : null;
 }
 
 export function linkDoConvite(baseUrl: string, token: string): string {

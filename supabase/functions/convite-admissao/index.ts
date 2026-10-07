@@ -50,6 +50,7 @@ import {
   lerResultadoCriar,
   linkDoConvite,
   linkParaOCriador,
+  origemPermitida,
   resolverBaseUrl,
   sanearEmailErro,
   validarPedidoCriar,
@@ -175,9 +176,15 @@ Deno.serve(async (req: Request): Promise<Response> => {
 
       // O URL base e obrigatorio ANTES de criar seja o que for: sem ele o link
       // (que so se mostra uma vez) sairia relativo e o convite ficava perdido.
-      const baseUrl = resolverBaseUrl(Deno.env.get("APP_BASE_URL"));
+      // O endereco e o de onde o RH esta (se for um dos permitidos); o segredo
+      // APP_BASE_URL so serve de reserva. Antes saia sempre o do segredo, e num
+      // ambiente de testes isso dava links para localhost.
+      const baseUrl = resolverBaseUrl(
+        origemPermitida(req.headers.get("origin"), Deno.env.get("ALLOWED_ORIGIN")) ??
+          Deno.env.get("APP_BASE_URL"),
+      );
       if (!baseUrl) {
-        captureError(new Error("convite-admissao: APP_BASE_URL em falta ou invalido"));
+        captureError(new Error("convite-admissao: sem origem permitida e APP_BASE_URL em falta ou invalido"));
         return responder({ error: "erro_inesperado" }, 500);
       }
 
