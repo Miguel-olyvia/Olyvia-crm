@@ -241,9 +241,10 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
 
   // Procura de produtos para linhas à mão (nome, SKU ou código de barras).
   useEffect(() => {
-    // Fora do termo tudo o que tem significado na sintaxe do .or() do PostgREST
-    // (vírgula, parênteses, aspas, dois pontos, ponto) ou do ilike (%, *, \).
-    const q = productQuery.trim().replace(/[,()%*\\":.]/g, " ").replace(/\s+/g, " ").trim();
+    // Fora do termo o que parte a sintaxe do .or() mesmo entre aspas (vírgula,
+    // parênteses, aspas) ou é curinga do ilike (%, *, \). O ponto e os dois
+    // pontos ficam ("Tubo 1.5", "AB.12"): o valor vai entre aspas duplas.
+    const q = productQuery.trim().replace(/[,()%*\\"]/g, " ").replace(/\s+/g, " ").trim();
     if (!open || !orgId || q.length < 2) {
       setProductHits([]);
       setProductSearching(false);
@@ -252,6 +253,9 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
     }
     const seq = ++searchSeq.current;
     setProductSearching(true);
+    // Valor entre aspas duplas no .or() (PostgREST): '.' e ':' deixam de ser
+    // separadores. '"' e '\' já foram tirados; o escape fica por segurança.
+    const pat = `"%${q.replace(/["\\]/g, "\\$&")}%"`;
     const t = window.setTimeout(async () => {
       try {
         const { data, error: searchErr } = await supabase
@@ -260,7 +264,7 @@ export function DeliveryNoteDialog({ open, onOpenChange, orgId, suppliers = [], 
           .eq("organization_id", orgId)
           .is("deleted_at", null)
           .eq("is_deleted", false)
-          .or(`name.ilike.%${q}%,sku.ilike.%${q}%,barcode.ilike.%${q}%`)
+          .or(`name.ilike.${pat},sku.ilike.${pat},barcode.ilike.${pat}`)
           .order("name")
           .limit(20);
         if (seq !== searchSeq.current) return;

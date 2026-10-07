@@ -57,6 +57,15 @@ import { DeliveryNotePicker } from "@/components/receiving/DeliveryNotePicker";
 import { DeliveryNoteDialog } from "@/components/receiving/DeliveryNoteDialog";
 import { DeliveryNoteDetail } from "@/components/receiving/DeliveryNoteDetail";
 import { NOTE_STATUS_LABEL, fetchDeliveryNote, noteLabel, type DeliveryNoteFull } from "@/components/receiving/deliveryNotes";
+import { LearnCodeDialog } from "@/components/receiving/LearnCodeDialog";
+import {
+  describeLearnResult,
+  productCodeErrorMessage,
+  productCodeKey,
+  removeProductCode,
+  type LearnCodeResult,
+} from "@/components/receiving/productCodes";
+import { ToastAction } from "@/components/ui/toast";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -71,6 +80,7 @@ import {
   RotateCcw,
   ScanBarcode,
   Search,
+  Tag,
   Trash2,
 } from "lucide-react";
 
@@ -275,6 +285,17 @@ interface RejectedScan {
   value: string;
   message: string;
   at: Date;
+  /** 'not_found' = o lookup não encontrou o código (permite "Associar a um produto"). Opcional. */
+  reason?: "not_found";
+}
+
+/** Leitura recusada a associar (diálogo aberto); não persiste. */
+interface LearnTarget {
+  scanId: string;
+  code: string;
+  /** Época/empresa em que o diálogo abriu (a re-leitura só entra se ainda for a mesma). */
+  epoch: number;
+  org: string;
 }
 
 /** Linha de receiving_scans (RLS: só as da organização do utilizador). */
@@ -435,6 +456,72 @@ const contextStorageKey = (userId: string, orgId: string) => `olyvia.receiving.c
 /** Avisa as instâncias montadas de que a lista "Por enviar" mudou (detail = chave). */
 const UNSENT_EVENT = "olyvia-receiving-unsent";
 
+// ── Entradas já recebidas (localStorage, por utilizador e empresa) ──
+// Fecha o caso "cópia cujo original já morreu": A (com cesto) sai do ecrã; é
+// duplicado → B (não abre a Receção); A volta, confirma e fecha (a tranca do
+// tabId fica livre); B abre a Receção, fica com a tranca e reporia o cesto
+// copiado — já recebido. Cada entry.id com receção confirmada pelo servidor
+// (incluindo replay) é gravado aqui ANTES de a entrada sair do cesto/pendentes;
+// a reposição do cesto e do "Por enviar" filtra estes ids (como já filtra os
+// entryId das pendentes). É localStorage: partilhado por todos os separadores
+// da mesma origem, incluindo a cópia. Os entry.id são estáveis entre original
+// e cópia (vêm na sessionStorage copiada; toStoredEntry/fromStoredEntry
+// mantêm-nos). Prazo de 7 dias e no máximo 2000 ids (os mais antigos saem).
+const DONE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const DONE_MAX = 2000;
+const UNSENT_PREFIX = "olyvia.receiving.unsent.";
+const DONE_PREFIX = "olyvia.receiving.done.";
+const doneStorageKey = (userId: string, orgId: string) => `${DONE_PREFIX}${userId}.${orgId}`;
+
+/** id → instante (ms) em que a receção foi confirmada; sem os expirados. */
+function readDoneMap(key: string): Record<string, number> {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return {};
+    const v = JSON.parse(raw) as unknown;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return {};
+    const now = Date.now();
+    const out: Record<string, number> = {};
+    for (const [id, ts] of Object.entries(v as Record<string, unknown>)) {
+      if (typeof ts === "number" && Number.isFinite(ts) && now - ts < DONE_TTL_MS) out[id] = ts;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+/** Ids recebidos (não expirados) desta empresa. Vazio se o localStorage não estiver legível. */
+function readDoneIds(userId: string, orgId: string): Set<string> {
+  return new Set(Object.keys(readDoneMap(doneStorageKey(userId, orgId))));
+}
+
+/** Grava ids recebidos (read-modify-write; limpa expirados e corta aos DONE_MAX mais recentes). */
+function markEntriesDone(userId: string | null, orgId: string | null, ids: (string | null | undefined)[]) {
+  if (!userId || !orgId) return;
+  const valid = ids.filter((x): x is string => typeof x === "string" && x !== "");
+  if (valid.length === 0) return;
+  try {
+    const key = doneStorageKey(userId, orgId);
+    const map = readDoneMap(key);
+    const now = Date.now();
+    for (const id of valid) map[id] = now;
+    let entries = Object.entries(map);
+    if (entries.length > DONE_MAX) {
+      entries = entries.sort((a, b) => b[1] - a[1]).slice(0, DONE_MAX);
+    }
+    window.localStorage.setItem(key, JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    // localStorage indisponível/cheio: fica a proteção das pendentes e da tranca.
+  }
+}
+
+/** Ids recebidos da empresa a que pertence uma chave de "Por enviar". */
+function doneIdsForUnsentKey(unsentKey: string): Set<string> {
+  if (!unsentKey.startsWith(UNSENT_PREFIX)) return new Set();
+  return new Set(Object.keys(readDoneMap(DONE_PREFIX + unsentKey.slice(UNSENT_PREFIX.length))));
+}
+
 function readStorage(key: string): string | null {
   try {
     return window.localStorage.getItem(key);
@@ -545,9 +632,16 @@ function readUnsent(key: string): UnsentEntry[] {
     if (!raw) return [];
     const v = JSON.parse(raw) as unknown;
     if (!Array.isArray(v)) return [];
+    // Entradas já recebidas (registo partilhado): nunca voltam (ver markEntriesDone).
+    const done = doneIdsForUnsentKey(key);
     return v.filter(
       (e): e is UnsentEntry =>
-        !!e && typeof e.id === "string" && typeof e.productId === "string" && typeof e.warehouseId === "string" && Number(e.quantity) >= 1,
+        !!e &&
+        typeof e.id === "string" &&
+        typeof e.productId === "string" &&
+        typeof e.warehouseId === "string" &&
+        Number(e.quantity) >= 1 &&
+        !done.has(e.id),
     );
   } catch {
     return [];
@@ -569,6 +663,477 @@ function mutateUnsent(key: string, op: (list: UnsentEntry[]) => UnsentEntry[]): 
   } catch {
     return null;
   }
+}
+
+// ── Separador duplicado ──
+// "Duplicar separador" (Chrome/Edge) copia a sessionStorage: o separador novo
+// reporia o mesmo cesto, "Por enviar" e contexto, e confirmar nos dois recebia
+// a mercadoria duas vezes (request_ids diferentes). Cada separador guarda um
+// tabId na sessionStorage; cada carga da página tem um id de instância próprio.
+//
+// Garantia principal — Web Locks (navigator.locks): a carga que fica com os
+// dados prende a tranca `olyvia.receiving.tab.<tabId>` até a página morrer. Uma
+// carga nova com o mesmo tabId pede-a com ifAvailable: se a obtém, é o dono (F5,
+// crash/"continuar onde parou", Ctrl+Shift+T, separador descartado — a carga
+// antiga já não existe); se não, tenta outra vez (o documento anterior de um F5
+// pode ainda não a ter largado) e, se continuar presa, é cópia (o original está
+// vivo, mesmo congelado ou noutra rota): tabId novo, prende a tranca do tabId
+// novo antes de o escrever e apaga as chaves copiadas. A tranca é exclusiva no
+// browser: nunca há dois donos do mesmo tabId. Com Web Locks a marca de "vivo"
+// não decide nada (só serve ao recurso abaixo). O Chrome não guarda em bfcache
+// páginas com trancas presas; se outro browser guardar, a tranca continua presa
+// e a página continua dona — nada aqui depende de a página ir ou não para o bfcache.
+//
+// Recurso, sem Web Locks: a carga pergunta (BroadcastChannel por utilizador) se outra
+// instância viva tem o mesmo tabId. Se sim, este é a cópia: tabId novo e as
+// chaves copiadas são apagadas (o original fica com elas). F5 no mesmo
+// separador: a instância antiga já morreu, ninguém responde, repõe normalmente.
+// Sem BroadcastChannel não há como distinguir cópia de F5: com tabId já
+// existente não se repõe (apaga-se) e avisa-se — perder um cesto por receber é
+// recuperável; receber duas vezes não.
+// Original congelado (poupança de energia) ou ocupado não responde a tempo:
+// por isso o separador que fica com os dados deixa também uma marca de "vivo"
+// na sessionStorage (posta ao verificar e em pageshow, retirada em pagehide).
+// F5: o pagehide retira-a, a carga nova não a vê. Cópia: a marca vem copiada →
+// é cópia sem perguntar (lado seguro). Separador descartado pelo Chrome
+// (document.wasDiscarded) não correu o pagehide: ignora a marca e pergunta.
+// A troca de mensagens fica para quando não há marca (ex.: o original ainda
+// não tinha aberto a receção nesta carga).
+// Estado ao nível do módulo (uma vez por carga): StrictMode e sair/voltar ao
+// ecrã reutilizam a mesma verificação (a tranca é pedida uma só vez e não é
+// largada ao desmontar o ecrã), e a instância continua a responder
+// depois de o ecrã desmontar (enquanto a página não recarregar).
+
+const TAB_ID_KEY = "olyvia.receiving.tabId";
+/** Marca de "separador vivo": guarda o tabId de quem tem os dados nesta sessionStorage. */
+const TAB_ALIVE_KEY = "olyvia.receiving.tabAlive";
+/**
+ * Espera pela resposta do separador original (chega em poucos ms; folga para
+ * páginas ocupadas). Atrasa a reposição; as leituras feitas entretanto ficam em
+ * fila e só são processadas depois de repor (ver scanGateOpen).
+ */
+const TAB_PROBE_MS = 750;
+/** Web Locks: novas tentativas se a tranca estiver presa (documento anterior de um F5 ainda a largar). */
+const TAB_LOCK_RETRIES = 2;
+const TAB_LOCK_RETRY_MS = 300;
+/**
+ * Prazo de segurança para a verificação com Web Locks (normalmente < 1 s). Se
+ * esgotar (API pendurada), desiste da tranca e decide pelo recurso (marca +
+ * BroadcastChannel) — nunca fica preso em "A preparar…". Ver tabLocksAbandoned.
+ */
+const TAB_CHECK_TIMEOUT_MS = 3000;
+const TAB_DATA_PREFIXES = ["olyvia.receiving.basket.", "olyvia.receiving.unsent.", "olyvia.receiving.context."];
+
+interface TabMsg {
+  t: "ping" | "pong";
+  tab: string;
+  from: string;
+  to?: string;
+}
+interface TabCheck {
+  reason: "ok" | "duplicate" | "unsupported";
+  /** Havia cesto/"Por enviar" copiado que não foi reposto. */
+  dropped: boolean;
+}
+
+/** Id desta carga da página (não vai para a sessionStorage). */
+const tabInstanceId = newRequestId();
+let tabState: { tabId: string; checking: boolean } | null = null;
+let tabCheckPromise: Promise<TabCheck> | null = null;
+let tabNoticeShown = false;
+const tabChannels = new Map<string, BroadcastChannel>();
+/** Durante a espera: passa já esta carga a cópia (desempate com outra do mesmo tabId). */
+let tabYield: (() => void) | null = null;
+let tabLifecycleBound = false;
+/** Larga a tranca Web Locks presa por esta carga (só o HMR a usa; numa carga normal fica até a página morrer). */
+let tabLockRelease: (() => void) | null = null;
+/** tabId cuja tranca esta carga tem presa (null = nenhuma). */
+let tabLockHeldId: string | null = null;
+/**
+ * O prazo da verificação com Web Locks esgotou e a decisão passou para o
+ * recurso. A partir daí a verificação com trancas (se acordar) não mexe em
+ * nada, e uma tranca concedida tarde só fica presa se for do tabId que o
+ * recurso decidiu como desta carga; qualquer outra é largada logo — nunca há
+ * duas cargas a julgar-se donas do mesmo tabId por causa do atraso. (Não se usa
+ * AbortSignal: a especificação não o permite com ifAvailable.)
+ */
+let tabLocksAbandoned = false;
+
+type TabLockAttempt = "held" | "busy" | "error";
+
+const isDecidedTabId = (id: string) => !!tabState && !tabState.checking && tabState.tabId === id;
+
+function tabLocks(): LockManager | null {
+  try {
+    const locks = (navigator as Navigator & { locks?: LockManager }).locks;
+    return locks && typeof locks.request === "function" ? locks : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Tenta prender (sem esperar) a tranca do tabId. Se a obtém, segura-a com uma
+ * Promise que só resolve no HMR — numa carga normal, até a página morrer.
+ */
+function tryHoldTabLock(locks: LockManager, id: string): Promise<TabLockAttempt> {
+  return new Promise<TabLockAttempt>((resolve) => {
+    try {
+      locks
+        .request(`olyvia.receiving.tab.${id}`, { ifAvailable: true }, (lock) => {
+          if (!lock) {
+            resolve("busy");
+            return undefined;
+          }
+          // Concedida depois de o prazo esgotar: só serve se for do tabId já
+          // decidido para esta carga; senão larga-se já (devolver sem Promise).
+          if (tabLocksAbandoned && !isDecidedTabId(id)) {
+            resolve("error");
+            return undefined;
+          }
+          return new Promise<void>((release) => {
+            // Só um tabId por carga: a tranca de um id anterior deixa de servir.
+            const previous = tabLockRelease;
+            tabLockRelease = release;
+            tabLockHeldId = id;
+            try {
+              previous?.();
+            } catch {
+              // já largada
+            }
+            resolve("held");
+          });
+        })
+        .catch(() => resolve("error"));
+    } catch {
+      resolve("error");
+    }
+  });
+}
+
+const waitMs = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
+
+function readTabAlive(): string | null {
+  try {
+    return window.sessionStorage.getItem(TAB_ALIVE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeTabAlive(id: string) {
+  try {
+    window.sessionStorage.setItem(TAB_ALIVE_KEY, id);
+  } catch {
+    // sessionStorage indisponível: fica só a troca de mensagens.
+  }
+}
+
+function clearTabAlive() {
+  try {
+    window.sessionStorage.removeItem(TAB_ALIVE_KEY);
+  } catch {
+    // idem
+  }
+}
+
+// F5/fechar/sair (incl. para o bfcache): a página deixa de estar viva.
+const onTabPageHide = () => clearTabAlive();
+// Volta do bfcache (persisted) com o estado intacto: volta a marcar-se.
+const onTabPageShow = () => {
+  if (tabState) writeTabAlive(tabState.tabId);
+};
+
+function bindTabLifecycle() {
+  if (tabLifecycleBound) return;
+  tabLifecycleBound = true;
+  window.addEventListener("pagehide", onTabPageHide);
+  window.addEventListener("pageshow", onTabPageShow);
+}
+
+// Só dev: o HMR volta a correr o módulo com outro id de instância. O canal, a
+// marca e a tranca da versão antiga fariam a nova passar a cópia e apagar o
+// cesto: larga-se a tranca (a nova volta a pedi-la, com as novas tentativas).
+import.meta.hot?.dispose(() => {
+  try {
+    tabLockRelease?.();
+  } catch {
+    // já largada
+  }
+  tabLockRelease = null;
+  tabLockHeldId = null;
+  tabLocksAbandoned = false;
+  tabState = null;
+  tabCheckPromise = null;
+  tabChannels.forEach((c) => {
+    try {
+      c.close();
+    } catch {
+      // já fechado
+    }
+  });
+  tabChannels.clear();
+  tabYield = null;
+  window.removeEventListener("pagehide", onTabPageHide);
+  window.removeEventListener("pageshow", onTabPageShow);
+  clearTabAlive();
+});
+
+function readTabId(): string | null {
+  try {
+    return window.sessionStorage.getItem(TAB_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeTabId(id: string) {
+  try {
+    window.sessionStorage.setItem(TAB_ID_KEY, id);
+  } catch {
+    // sessionStorage indisponível: também não há nada para repor.
+  }
+}
+
+/** Apaga cesto/"Por enviar"/contexto desta sessionStorage. Devolve se havia cesto ou "Por enviar". */
+function clearTabSessionData(): boolean {
+  try {
+    const ss = window.sessionStorage;
+    const keys: string[] = [];
+    for (let i = 0; i < ss.length; i++) {
+      const k = ss.key(i);
+      if (k && TAB_DATA_PREFIXES.some((p) => k.startsWith(p))) keys.push(k);
+    }
+    keys.forEach((k) => ss.removeItem(k));
+    return keys.some((k) => !k.startsWith("olyvia.receiving.context."));
+  } catch {
+    return false;
+  }
+}
+
+/** Canal do utilizador; abre-o e passa a responder a quem perguntar pelo tabId deste separador. */
+function tabChannel(userId: string): BroadcastChannel | null {
+  const existing = tabChannels.get(userId);
+  if (existing) return existing;
+  if (typeof BroadcastChannel === "undefined") return null;
+  let ch: BroadcastChannel;
+  try {
+    ch = new BroadcastChannel(`olyvia.receiving.tabs.${userId}`);
+  } catch {
+    return null;
+  }
+  ch.addEventListener("message", (ev: MessageEvent) => {
+    const m = ev.data as Partial<TabMsg> | null;
+    if (!m || m.t !== "ping" || typeof m.tab !== "string" || typeof m.from !== "string") return;
+    if (m.from === tabInstanceId || !tabState || m.tab !== tabState.tabId) return;
+    // Duas cargas com o mesmo tabId a verificar ao mesmo tempo: decide já, sem
+    // depender de cada uma ter recebido o pedido da outra (uma pode ter nascido
+    // depois do pedido da outra). Id menor responde (a outra passa a cópia); id
+    // maior passa ela própria a cópia. Em qualquer ordem, só uma fica com os dados.
+    if (tabState.checking && !(tabInstanceId < m.from)) {
+      tabYield?.();
+      return;
+    }
+    try {
+      ch.postMessage({ t: "pong", tab: m.tab, from: tabInstanceId, to: m.from } satisfies TabMsg);
+    } catch {
+      // canal fechado: nada a fazer
+    }
+  });
+  tabChannels.set(userId, ch);
+  return ch;
+}
+
+/**
+ * Verificação do separador (uma por carga). Resolve depois de decidir; se este
+ * separador for uma cópia, as chaves copiadas já foram apagadas.
+ */
+function checkTab(userId: string): Promise<TabCheck> {
+  // O canal responde também com Web Locks (um separador sem tranca a funcionar
+  // cai no recurso e pergunta por aqui).
+  const ch = tabChannel(userId);
+  if (tabCheckPromise) return tabCheckPromise;
+  const locks = tabLocks();
+  const viaLocks: Promise<TabCheck | null> = locks
+    ? new Promise<TabCheck | null>((resolve) => {
+        let settled = false;
+        // Prazo: ao esgotar, desiste das trancas (síncrono, antes de o recurso
+        // começar) e o recurso decide. O que a verificação com trancas fizer
+        // depois é ignorado (ver os testes de tabLocksAbandoned).
+        const timer = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          tabLocksAbandoned = true;
+          resolve(null);
+        }, TAB_CHECK_TIMEOUT_MS);
+        checkTabWithLocks(locks)
+          .catch(() => null)
+          .then((r) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            resolve(r);
+          });
+      })
+    : Promise.resolve(null);
+  tabCheckPromise = viaLocks
+    .then(async (r) => {
+      if (r) return r;
+      const fb = await checkTabFallback(ch);
+      if (locks && tabLocksAbandoned) reconcileTabLockAfterTimeout(locks);
+      return fb;
+    })
+    // Falha inesperada: sem prova de que é o original — não repõe (lado seguro).
+    .catch((): TabCheck => {
+      const dropped = clearTabSessionData();
+      const id = newRequestId();
+      tabState = { tabId: id, checking: false };
+      writeTabId(id);
+      writeTabAlive(id);
+      if (locks) void tryHoldTabLock(locks, id);
+      return { reason: "unsupported", dropped };
+    });
+  return tabCheckPromise;
+}
+
+/**
+ * Depois de o recurso decidir (prazo esgotado): larga a tranca de um tabId que
+ * não ficou (ex.: a verificação com trancas chegou a prender um id novo) e tenta,
+ * sem esperar, prender a do tabId decidido — para uma cópia futura desta carga
+ * a encontrar presa. Se as trancas continuarem penduradas, essa cópia também
+ * esgota o prazo e o recurso decide (vê a marca de "vivo" copiada → cópia).
+ */
+function reconcileTabLockAfterTimeout(locks: LockManager) {
+  const id = tabState && !tabState.checking ? tabState.tabId : null;
+  if (tabLockHeldId && tabLockHeldId !== id) {
+    try {
+      tabLockRelease?.();
+    } catch {
+      // já largada
+    }
+    tabLockRelease = null;
+    tabLockHeldId = null;
+  }
+  if (id && tabLockHeldId !== id) void tryHoldTabLock(locks, id);
+}
+
+/**
+ * Passa a separador novo com Web Locks: prende a tranca de um tabId novo e só
+ * depois o escreve (uma cópia feita a seguir vê o tabId novo já preso).
+ */
+async function becomeNewLocked(locks: LockManager, reason: TabCheck["reason"]): Promise<TabCheck> {
+  const dropped = reason === "ok" ? false : clearTabSessionData();
+  let id = newRequestId();
+  for (let i = 0; i < 3; i++) {
+    // "busy" com um id aleatório novo não deve acontecer; "error": fica sem
+    // tranca — uma cópia desta também cai no recurso e a marca decide.
+    if ((await tryHoldTabLock(locks, id)) !== "busy") break;
+    if (tabLocksAbandoned) break;
+    id = newRequestId();
+  }
+  // Prazo esgotado entretanto: o recurso já decidiu — não mexe em nada.
+  if (tabLocksAbandoned) return { reason, dropped };
+  tabState = { tabId: id, checking: false };
+  writeTabId(id);
+  writeTabAlive(id);
+  return { reason, dropped };
+}
+
+/** Verificação com Web Locks. null = a API falhou: usa-se o recurso. */
+async function checkTabWithLocks(locks: LockManager): Promise<TabCheck | null> {
+  bindTabLifecycle();
+  const current = readTabId();
+  // Separador sem tabId: carga nova (ou dados de antes desta versão) — repõe.
+  if (!current) return becomeNewLocked(locks, "ok");
+  tabState = { tabId: current, checking: true };
+  let attempt = await tryHoldTabLock(locks, current);
+  for (let i = 0; attempt === "busy" && i < TAB_LOCK_RETRIES && !tabLocksAbandoned; i++) {
+    await waitMs(TAB_LOCK_RETRY_MS);
+    if (tabLocksAbandoned) break;
+    attempt = await tryHoldTabLock(locks, current);
+  }
+  // Prazo esgotado: o recurso decide (e é dono do tabState) — não mexe em nada.
+  if (tabLocksAbandoned) return null;
+  if (attempt === "error") {
+    tabState = null;
+    return null;
+  }
+  if (attempt === "held") {
+    tabState = { tabId: current, checking: false };
+    writeTabAlive(current);
+    return { reason: "ok", dropped: false };
+  }
+  // Presa por outra carga viva com o mesmo tabId: esta é a cópia.
+  return becomeNewLocked(locks, "duplicate");
+}
+
+/** Recurso sem Web Locks: marca de "vivo" + BroadcastChannel com desempate simétrico. */
+function checkTabFallback(ch: BroadcastChannel | null): Promise<TabCheck> {
+  return new Promise<TabCheck>((resolve) => {
+    const current = readTabId();
+    const alive = readTabAlive();
+    const discarded = (document as Document & { wasDiscarded?: boolean }).wasDiscarded === true;
+    bindTabLifecycle();
+    const becomeNew = (reason: TabCheck["reason"]) => {
+      const dropped = reason === "ok" ? false : clearTabSessionData();
+      tabState = { tabId: newRequestId(), checking: false };
+      writeTabId(tabState.tabId);
+      // Fica com os (seus) dados: marca-se, para uma cópia desta também ser detetada.
+      writeTabAlive(tabState.tabId);
+      resolve({ reason, dropped });
+    };
+    // Separador sem tabId: carga nova (ou dados de antes desta versão) — repõe.
+    if (!current) {
+      becomeNew("ok");
+      return;
+    }
+    // Marca copiada de um separador vivo (o F5 retira-a no pagehide): é cópia,
+    // mesmo que o original esteja congelado e não responda.
+    if (alive === current && !discarded) {
+      becomeNew("duplicate");
+      return;
+    }
+    if (!ch) {
+      becomeNew("unsupported");
+      return;
+    }
+    tabState = { tabId: current, checking: true };
+    // Já durante a espera: uma cópia feita agora vê a marca e não repõe.
+    writeTabAlive(current);
+    let done = false;
+    let timer = 0;
+    const onMsg = (ev: MessageEvent) => {
+      const m = ev.data as Partial<TabMsg> | null;
+      if (m && m.t === "pong" && m.tab === current && m.to === tabInstanceId) finish(true);
+    };
+    const finish = (duplicate: boolean) => {
+      if (done) return;
+      done = true;
+      tabYield = null;
+      window.clearTimeout(timer);
+      ch.removeEventListener("message", onMsg);
+      if (duplicate) {
+        becomeNew("duplicate");
+      } else {
+        tabState = { tabId: current, checking: false };
+        writeTabAlive(current);
+        resolve({ reason: "ok", dropped: false });
+      }
+    };
+    tabYield = () => finish(true);
+    ch.addEventListener("message", onMsg);
+    timer = window.setTimeout(() => finish(false), TAB_PROBE_MS);
+    try {
+      ch.postMessage({ t: "ping", tab: current, from: tabInstanceId } satisfies TabMsg);
+    } catch {
+      // Não deu para perguntar: não há prova de que é o original.
+      done = true;
+      tabYield = null;
+      window.clearTimeout(timer);
+      ch.removeEventListener("message", onMsg);
+      becomeNew("unsupported");
+    }
+  });
 }
 
 const toStoredEntry = (e: BasketEntry): StoredEntry => ({
@@ -761,6 +1326,10 @@ export default function Receiving() {
   // Guia do fornecedor ("" = sem guia).
   const { hasPermission } = usePermissions();
   const canEditNotes = hasPermission("purchase_orders.receive");
+  // Regra de rpc_product_code_learn: (receber E editar inventário) OU editar produtos.
+  const canEditProducts = hasPermission("products.edit");
+  const canLearnCodes =
+    canEditProducts || (hasPermission("purchase_orders.receive") && hasPermission("inventory.edit"));
   const [deliveryNoteId, setDeliveryNoteId] = useState("");
   const [noteInfo, setNoteInfo] = useState<DeliveryNoteFull | null>(null);
   const [noteLoadError, setNoteLoadError] = useState<string | null>(null);
@@ -774,6 +1343,11 @@ export default function Receiving() {
   const [queueSize, setQueueSize] = useState(0);
   const [failedScans, setFailedScans] = useState<FailedScan[]>([]);
   const [rejectedScans, setRejectedScans] = useState<RejectedScan[]>([]);
+  const [learnTarget, setLearnTarget] = useState<LearnTarget | null>(null);
+  /** Separado do alvo: ao fechar, o código fica visível durante a animação. */
+  const [learnOpen, setLearnOpen] = useState(false);
+  /** Desfazer em curso (por id do código): um clique de cada vez. */
+  const undoingCodesRef = useRef(new Set<string>());
   /** Texto para leitores de ecrã (região aria-live sempre montada). */
   const [announcement, setAnnouncement] = useState("");
   const [panel, setPanel] = useState<ScanPanel>({ kind: "none" });
@@ -788,6 +1362,10 @@ export default function Receiving() {
   const [pending, setPending] = useState<PendingReceipt[]>([]);
   const [pendingBusy, setPendingBusy] = useState<Set<string>>(() => new Set());
   const [pendingChecked, setPendingChecked] = useState(false);
+  /** Verificação de separador duplicado concluída: só depois se repõe cesto/"Por enviar"/contexto. */
+  const [tabChecked, setTabChecked] = useState(false);
+  /** Leituras liberadas (verificação feita e cesto da empresa ativa reposto); só para o texto "A preparar…". */
+  const [scanReady, setScanReady] = useState(false);
   /** Relógio para o "Descartar" (só depois de DISCARD_MIN_AGE_MS desde o último envio). */
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -812,6 +1390,8 @@ export default function Receiving() {
   scannerModeRef.current = scannerMode;
   const userIdRef = useRef<string | null>(userId);
   userIdRef.current = userId;
+  const tabCheckedRef = useRef(tabChecked);
+  tabCheckedRef.current = tabChecked;
   /**
    * Época da empresa ativa: sobe a cada troca. Respostas e ciclos comparam a
    * época capturada (A→B→A não é "a mesma empresa" para um pedido de antes).
@@ -821,6 +1401,12 @@ export default function Receiving() {
   const restoredBasketKeyRef = useRef<string | null>(null);
   /** Armazéns/fornecedores carregados para a época indicada (para validar o cesto reposto). */
   const optionsRef = useRef<{ epoch: number; warehouses: Option[]; suppliers: Option[] } | null>(null);
+  /**
+   * Época cuja carga de armazéns/fornecedores TERMINOU (com ou sem erro) e cujo
+   * armazém lembrado/único já foi aplicado. optionsRef fica null se a carga der
+   * erro — por isso o gate das leituras usa esta, senão nunca abriria.
+   */
+  const optionsSettledEpochRef = useRef(-1);
 
   const previewTimers = useRef(new Map<string, number>());
   const previewSeq = useRef(new Map<string, number>());
@@ -926,6 +1512,31 @@ export default function Receiving() {
     })();
   }, [ensureUserId, mutatePending]);
 
+  // Separador duplicado: nada da sessionStorage é reposto (nem gravado) antes
+  // de esta verificação terminar — os efeitos de repor esperam por tabChecked
+  // e os de gravar só correm depois de repor.
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    void checkTab(userId).then((r) => {
+      if (!alive || !mountedRef.current) return;
+      if (r.dropped && !tabNoticeShown) {
+        tabNoticeShown = true;
+        toast({
+          title: r.reason === "duplicate" ? "Separador duplicado" : "Cesto anterior não reposto",
+          description:
+            r.reason === "duplicate"
+              ? "O cesto e o «Por enviar» ficam só no separador original, para não se receber duas vezes."
+              : "Este browser não permite confirmar que o separador não é uma cópia — o cesto e o «Por enviar» anteriores não foram repostos. Volta a ler o que faltar receber.",
+        });
+      }
+      setTabChecked(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [userId, toast]);
+
   // Outro separador mexeu nas pendentes: sincroniza a cópia em memória e o ecrã.
   useEffect(() => {
     if (!userId) return;
@@ -959,6 +1570,8 @@ export default function Receiving() {
    */
   const recoverFromRow = useCallback(
     (p: PendingReceipt, row: ScanRow, notify = true) => {
+      // Registo de recebidas ANTES de largar a pendente (que também protegia o entryId).
+      markEntriesDone(userIdRef.current, p.orgId, [p.entryId]);
       removePending(p.requestId);
       if (mountedRef.current && row.organization_id === orgRef.current) {
         const r = receivedFromResult(p.requestId, p, (row.result ?? {}) as Partial<ReceiveResult>, true);
@@ -1077,6 +1690,8 @@ export default function Receiving() {
     scanRetryTimers.current.clear();
     setFailedScans([]);
     setRejectedScans([]);
+    setLearnTarget(null);
+    setLearnOpen(false);
     setAnnouncement("");
     setWarehouseId("");
     setSupplierId("");
@@ -1130,11 +1745,22 @@ export default function Receiving() {
         setWarehouseId(nextWh);
         warehouseRef.current = nextWh;
       }
+      // Armazém aplicado (na ref, síncrono): as leituras em fila já podem sair.
+      optionsSettledEpochRef.current = epoch;
       // Fornecedor reposto que já não pertence a esta empresa: volta a "Todos".
+      // A guia fixa o fornecedor: sai com ele (e avisa-se, nunca em silêncio).
       const curSup = supplierRef.current;
       if (curSup && !supRes.error && !sups.some((s) => s.id === curSup)) {
+        const hadNote = !!deliveryNoteRef.current;
         setSupplierId("");
         supplierRef.current = "";
+        setDeliveryNoteId("");
+        deliveryNoteRef.current = "";
+        if (hadNote) {
+          const basketNote = basketRef.current.length > 0 ? " As entradas do cesto ficam sem guia." : "";
+          setAnnouncement(`Fornecedor indisponível — a guia foi retirada.${basketNote}`);
+          toast({ title: "Fornecedor indisponível", description: `A guia foi retirada.${basketNote}` });
+        }
       }
       focusScan();
     })();
@@ -1179,7 +1805,7 @@ export default function Receiving() {
   }, [warehouseId, supplierId, deliveryNoteId, userId, orgId]);
 
   useEffect(() => {
-    if (!userId || !orgId) return;
+    if (!userId || !orgId || !tabChecked) return;
     const key = basketStorageKey(userId, orgId);
     if (restoredBasketKeyRef.current === key) return;
     restoredBasketKeyRef.current = key;
@@ -1187,7 +1813,11 @@ export default function Receiving() {
     // Por segurança: uma entrada que já originou uma receção pendente nunca volta como livre.
     const pendingEntryIds = new Set(readPending(userId).map((p) => p.entryId).filter(Boolean) as string[]);
     pendingRef.current.forEach((p) => p.entryId && pendingEntryIds.add(p.entryId));
-    const entries = (saved?.entries ?? []).filter((e) => !pendingEntryIds.has(e.id)).map(fromStoredEntry);
+    // Nem uma que já foi recebida (cópia de um separador que entretanto confirmou e fechou).
+    const doneIds = readDoneIds(userId, orgId);
+    const entries = (saved?.entries ?? [])
+      .filter((e) => !pendingEntryIds.has(e.id) && !doneIds.has(e.id))
+      .map(fromStoredEntry);
     if (!saved || entries.length === 0) {
       // Sem cesto para repor: repõe o contexto do ecrã (armazém, fornecedor e
       // GUIA) deste separador. Só se nada tiver sido escolhido entretanto e o
@@ -1227,17 +1857,19 @@ export default function Receiving() {
       setSupplierId(sup);
       supplierRef.current = sup;
       // A guia volta com o cesto (o cartão mostra se entretanto foi fechada).
-      const dn = dnOf(saved);
+      // A guia fixa o fornecedor: sem o fornecedor dela, não se repõe a guia.
+      const dn = sup ? dnOf(saved) : "";
       setDeliveryNoteId(dn);
       deliveryNoteRef.current = dn;
     }
     setAnnouncement(`Cesto reposto: ${entries.length} ${entries.length === 1 ? "entrada" : "entradas"}.`);
-  }, [userId, orgId]);
+  }, [userId, orgId, tabChecked]);
 
   // "Por enviar" da empresa ativa: carrega ao entrar/trocar e acompanha o que
-  // outra instância (ex.: a antiga, já desmontada) lá escrever.
+  // outra instância (ex.: a antiga, já desmontada) lá escrever. Só depois da
+  // verificação de separador duplicado (a cópia não pode mostrar o do original).
   useEffect(() => {
-    if (!userId || !orgId) return;
+    if (!userId || !orgId || !tabChecked) return;
     const key = unsentStorageKey(userId, orgId);
     setUnsent(readUnsent(key));
     const onChange = (ev: Event) => {
@@ -1246,7 +1878,7 @@ export default function Receiving() {
     };
     window.addEventListener(UNSENT_EVENT, onChange);
     return () => window.removeEventListener(UNSENT_EVENT, onChange);
-  }, [userId, orgId]);
+  }, [userId, orgId, tabChecked]);
 
   /**
    * Entradas que ficaram por enviar quando o ciclo parou (troca de empresa ou
@@ -1349,6 +1981,13 @@ export default function Receiving() {
     const key = unsentStorageKey(uid, org);
     const item = readUnsent(key).find((x) => x.id === id) ?? unsent.find((x) => x.id === id);
     if (!item) return;
+    // A cópia em memória pode estar atrasada: uma entrada já recebida nunca volta ao cesto.
+    if (readDoneIds(uid, org).has(item.id)) {
+      const next = mutateUnsent(key, (cur) => cur.filter((x) => x.id !== id));
+      setUnsent(next ?? ((cur) => cur.filter((x) => x.id !== id)));
+      toast({ title: "Já recebida", description: "Esta entrada já foi recebida noutro separador — não volta ao cesto." });
+      return;
+    }
     const itemDn = dnOf(item);
     const sameContext = () =>
       item.warehouseId === warehouseRef.current && item.supplierId === supplierRef.current && itemDn === deliveryNoteRef.current;
@@ -1367,9 +2006,17 @@ export default function Receiving() {
         return;
       }
       let sup = !item.supplierId || !opts || opts.suppliers.some((s) => s.id === item.supplierId) ? item.supplierId : "";
+      // A guia fixa o fornecedor: sem o fornecedor dela, a guia da entrada não
+      // volta — fica a guia do ecrã (se houver fornecedor no ecrã) ou nenhuma.
+      const supGone = !!itemDn && !sup;
       let dn = itemDn;
       let itemNoteOpen = true;
-      if (itemDn && itemDn !== deliveryNoteRef.current) {
+      if (supGone) {
+        // Fica o fornecedor do ecrã (não se limpa) e a guia do ecrã, se houver;
+        // a guia da entrada não volta.
+        sup = supplierRef.current;
+        dn = sup ? deliveryNoteRef.current : "";
+      } else if (itemDn && itemDn !== deliveryNoteRef.current) {
         const r = await fetchDeliveryNote(itemDn);
         if (!isCurrent(epoch, org) || submittingRef.current) return;
         if (r.error && r.error.code !== "P0002") {
@@ -1395,7 +2042,14 @@ export default function Receiving() {
             ? `a guia ${noteInfoRef.current?.id === curDn ? noteLabel(noteInfoRef.current.note_number) : "escolhida"}`
             : "sem guia";
           const itemLabel = itemDn ? `a guia ${item.deliveryNoteNumber ? noteLabel(item.deliveryNoteNumber) : "do fornecedor"}` : "sem guia";
-          const message = !itemNoteOpen
+          const dnLabel = dn && dn === curDn ? curLabel : "sem guia";
+          const supName = sup ? suppliers.find((s) => s.id === sup)?.name : undefined;
+          const keepLabel = sup
+            ? `com o fornecedor ${supName ? `«${supName}»` : "escolhido no ecrã"} e ${dnLabel}`
+            : `sem fornecedor e ${dnLabel}`;
+          const message = supGone
+            ? `Esta entrada foi lida com ${itemLabel}, de um fornecedor que já não está disponível. Volta ao cesto ${keepLabel}?`
+            : !itemNoteOpen
             ? `Esta entrada foi lida com ${itemLabel}, que já não está aberta. Volta ao cesto com ${curLabel} (nada tinha sido recebido)?`
             : `Esta entrada foi lida com ${itemLabel}. O ecrã passa de ${curLabel} para ${itemLabel} — as leituras seguintes também. Continuar?`;
           setUnsentConfirm({ id, dn, message });
@@ -1671,6 +2325,9 @@ export default function Receiving() {
             }
           }, PREVIEW_RETRY_MS);
           previewRetries.current.set(id, { sig, n: n + 1, timer });
+        } else {
+          // Tentativas automáticas esgotadas (n > PREVIEW_AUTO_RETRIES): o botão pede "Recalcular".
+          previewRetries.current.set(id, { sig, n: n + 1 });
         }
       } else {
         previewRetries.current.delete(id);
@@ -1740,8 +2397,8 @@ export default function Receiving() {
 
   // ── Leitura ──
   /** Leitura recusada de forma definitiva: fica na lista até ser dispensada. */
-  const addRejected = useCallback((value: string, message: string) => {
-    setRejectedScans((cur) => [{ id: newRequestId(), value, message, at: new Date() }, ...cur]);
+  const addRejected = useCallback((value: string, message: string, reason?: RejectedScan["reason"]) => {
+    setRejectedScans((cur) => [{ id: newRequestId(), value, message, at: new Date(), ...(reason ? { reason } : {}) }, ...cur]);
     setAnnouncement(`«${value}»: ${message}`);
   }, []);
 
@@ -1826,6 +2483,8 @@ export default function Receiving() {
           p_code: value,
           p_supplier_id: sup || undefined,
           p_delivery_note_id: dn || undefined,
+          // Sem p_unit_conversion: o ecrã não converte de ponta a ponta (a receção
+          // vai sem a flag); com ela só se escondia o aviso das linhas noutra unidade.
         });
         if (!isCurrent(epoch, org)) return null;
         // A guia mudou durante a procura: o âmbito era outro — repete a leitura.
@@ -1844,6 +2503,7 @@ export default function Receiving() {
           addRejected(
             lookup.code || value,
             ["Código não encontrado.", ...lookup.warnings].join(" "),
+            "not_found",
           );
         } else if (lookup.candidates.length > 1) {
           // Fica numa lista própria: uma leitura seguinte não a apaga.
@@ -1864,11 +2524,32 @@ export default function Receiving() {
   // vive numa ref para o temporizador a encontrar sempre atualizada.
   const enqueueRef = useRef<(item: QueuedScan) => void>(() => {});
 
+  /**
+   * As leituras só são processadas depois da verificação de separador e de o
+   * cesto/contexto desta empresa ter sido reposto. Antes disso ficam na fila
+   * (por ordem): uma leitura feita nos primeiros instantes depois de um F5 não
+   * se mistura com o cesto reposto nem é procurada no armazém/fornecedor/guia
+   * errado. Também esperam pela carga dos armazéns desta empresa (o armazém
+   * lembrado/único só é aplicado no fim dela): antes disso cairiam todas em
+   * "Escolhe primeiro o armazém". Se, carregadas, não houver armazém, aí sim.
+   */
+  const scanGateOpen = useCallback(() => {
+    const uid = userIdRef.current;
+    const org = orgRef.current;
+    return (
+      tabCheckedRef.current &&
+      !!uid &&
+      !!org &&
+      restoredBasketKeyRef.current === basketStorageKey(uid, org) &&
+      optionsSettledEpochRef.current === orgEpochRef.current
+    );
+  }, []);
+
   const processQueue = useCallback(async () => {
-    if (processingRef.current) return;
+    if (processingRef.current || !scanGateOpen()) return;
     processingRef.current = true;
     try {
-      while (scanQueueRef.current.length > 0 && mountedRef.current) {
+      while (scanQueueRef.current.length > 0 && mountedRef.current && scanGateOpen()) {
         const item = scanQueueRef.current[0];
         const org = orgRef.current;
         const epoch = orgEpochRef.current;
@@ -1881,7 +2562,13 @@ export default function Receiving() {
           const auto = attempts < SCAN_AUTO_RETRIES && !!warehouseRef.current;
           setFailedScans((cur) => [
             ...cur.filter((x) => x.id !== item.id),
-            { id: item.id, value: item.value, error: outcome.transient, attempts, waiting: auto },
+            {
+              id: item.id,
+              value: item.value,
+              error: outcome.transient,
+              attempts,
+              waiting: auto,
+            },
           ]);
           if (auto) {
             const delay = SCAN_RETRY_BASE_MS * 2 ** (attempts - 1);
@@ -1899,13 +2586,22 @@ export default function Receiving() {
       processingRef.current = false;
       focusScan();
     }
-  }, [lookupOne, focusScan, isCurrent]);
+  }, [lookupOne, focusScan, isCurrent, scanGateOpen]);
 
   enqueueRef.current = (item: QueuedScan) => {
     scanQueueRef.current = [...scanQueueRef.current, item];
     setQueueSize(scanQueueRef.current.length);
     void processQueue();
   };
+
+  // Liberta as leituras em fila assim que a verificação e a reposição terminam
+  // (este efeito vem depois dos de repor: no mesmo commit, já vê o cesto e o
+  // armazém/fornecedor/guia repostos nas refs).
+  useEffect(() => {
+    const open = scanGateOpen() && !optionsLoading;
+    setScanReady(open);
+    if (open && scanQueueRef.current.length > 0) void processQueue();
+  }, [userId, orgId, tabChecked, optionsLoading, scanGateOpen, processQueue]);
 
   const enqueueScan = (raw: string) => {
     const value = raw.trim();
@@ -2075,6 +2771,89 @@ export default function Receiving() {
     setChoices((prev) => prev.filter((x) => x.id !== choiceId));
     addCandidate(lookup, c);
     focusScan();
+  };
+
+  // ── Associar um código não encontrado a um produto (Fase 2 — fatia 3) ──
+  const openLearn = (r: RejectedScan) => {
+    const org = orgRef.current;
+    if (!org || !warehouseRef.current) return;
+    setLearnTarget({ scanId: r.id, code: r.value, epoch: orgEpochRef.current, org });
+    setLearnOpen(true);
+  };
+
+  /** Desfaz a associação (anulação lógica). Não mexe no cesto nem reverte receções. */
+  const undoLearned = async (r: LearnCodeResult) => {
+    const id = r.id;
+    if (!id || undoingCodesRef.current.has(id)) return;
+    undoingCodesRef.current.add(id);
+    try {
+      const { data, error } = await removeProductCode(id, "Desfeito na receção");
+      if (!mountedRef.current) return;
+      if (error || !data) {
+        toast({
+          title: "Não foi possível desfazer a associação",
+          description: productCodeErrorMessage(error ?? { code: "XX000", message: "Resposta vazia do servidor." }),
+          variant: "destructive",
+        });
+        return;
+      }
+      const n = Number(data.scans_using_code) || 0;
+      toast({
+        title: data.already_removed ? "A associação já tinha sido desfeita" : "Associação desfeita",
+        description: [
+          `«${data.code}» deixa de ser reconhecido como ${data.product_name ? `«${data.product_name}»` : "o produto"}.`,
+          n > 0
+            ? `${n} ${n === 1 ? "leitura usou" : "leituras usaram"} este código — as receções feitas não são revertidas.`
+            : "As receções feitas não são revertidas.",
+          "Retira do cesto se não for este o produto.",
+        ].join(" "),
+        duration: 15000,
+      });
+    } finally {
+      undoingCodesRef.current.delete(id);
+    }
+  };
+
+  /**
+   * Código associado: TODAS as leituras recusadas por "não encontrado" com o
+   * mesmo código (chave como o servidor: productCodeKey — GTIN com zeros à
+   * esquerda, resto sem maiúsculas) saem da lista e são lidas de novo pelo
+   * caminho normal (fila → gate → lookup), uma entrada na fila por leitura —
+   * cada uma era uma unidade lida. Se a empresa mudou entretanto (a lista foi
+   * limpa com a troca), não se repete nada.
+   */
+  const handleLearned = (r: LearnCodeResult) => {
+    const t = learnTarget;
+    if (!t) return;
+    const same = isCurrent(t.epoch, t.org);
+    let repeated = 0;
+    if (same) {
+      const key = productCodeKey(t.code);
+      // Lido do estado atual (as leituras são acrescentadas por setRejectedScans
+      // em handlers anteriores, já aplicados quando o diálogo grava).
+      const matching = rejectedScans.filter(
+        (x) => x.id === t.scanId || (x.reason === "not_found" && key !== null && productCodeKey(x.value) === key),
+      );
+      const ids = new Set(matching.map((x) => x.id));
+      setRejectedScans((cur) => cur.filter((x) => !ids.has(x.id)));
+      // Mais antigas primeiro (a lista mostra as mais recentes em cima).
+      const values = matching.length > 0 ? matching.slice().reverse().map((x) => x.value) : [t.code];
+      for (const value of values) enqueueRef.current({ id: newRequestId(), value, attempts: 0 });
+      repeated = values.length;
+    }
+    const canUndo = !!r.id && r.learned;
+    toast({
+      title: r.learned ? "Código associado" : "Código já reconhecido",
+      description: same
+        ? `${describeLearnResult(r)} ${repeated === 1 ? "A leitura foi repetida." : `As ${repeated} leituras foram repetidas.`}`
+        : `${describeLearnResult(r)} A empresa mudou — lê o código de novo.`,
+      duration: canUndo ? 15000 : undefined,
+      action: canUndo ? (
+        <ToastAction altText="Desfazer a associação do código" className="h-11 px-4" onClick={() => void undoLearned(r)}>
+          Desfazer
+        </ToastAction>
+      ) : undefined,
+    });
   };
 
   // ── Edição do cesto ──
@@ -2421,6 +3200,9 @@ export default function Receiving() {
         const here = isCurrent(epoch, org);
 
         if (result) {
+          // Registo de recebidas ANTES de a entrada sair das pendentes/cesto: uma
+          // cópia deste separador nunca a repõe (ver markEntriesDone).
+          markEntriesDone(uid, org, [e.id, p.entryId]);
           removePending(requestId);
           ok += 1;
           if (replayed) replayedCount += 1;
@@ -2431,12 +3213,14 @@ export default function Receiving() {
             // Subtrai a quantidade ENVIADA com este id (p.quantity — a fotografia ou
             // a pendente), nunca a quantidade atual da entrada: se a entrada ficou
             // com mais (rebase do updater de bloqueio), o resto fica livre no cesto.
+            // O resto leva um id NOVO: o id antigo já está no registo de recebidas
+            // e o resto (por receber) não pode ser filtrado numa reposição.
             const sentQty = p.quantity;
             setBasket((prev) =>
               prev.flatMap((x) => {
                 if (x.id !== e.id) return [x];
                 const rest = x.quantity - sentQty;
-                return rest > 0 ? [freeEntry({ ...x, quantity: rest })] : [];
+                return rest > 0 ? [freeEntry({ ...x, id: newRequestId(), quantity: rest })] : [];
               }),
             );
             refreshSameProduct(e.productId);
@@ -2594,6 +3378,7 @@ export default function Receiving() {
     }
     const here = isCurrent(epoch, p.orgId);
     if (result) {
+      markEntriesDone(userIdRef.current, p.orgId, [p.entryId]);
       removePending(requestId);
       if (here) {
         setReceived((cur) => [receivedFromResult(requestId, p, result ?? {}, replayed), ...cur.filter((r) => r.id !== requestId)]);
@@ -2679,6 +3464,7 @@ export default function Receiving() {
     const pNow = pendingRef.current.find((x) => x.requestId === requestId) ?? (cur.sent?.requestId === requestId ? cur.sent : undefined);
     if (!pNow || sentAtMs(pNow) !== sentAtMs(p)) return;
     const row = rows.find((r) => r.id === requestId);
+    if (row) markEntriesDone(userIdRef.current, org, [entryId, pNow.entryId]);
     removePending(requestId);
     if (row) {
       const result = (row.result ?? {}) as Partial<ReceiveResult>;
@@ -2687,7 +3473,8 @@ export default function Receiving() {
         prev.flatMap((x) => {
           if (x.id !== entryId || x.requestId !== requestId || x.submitting) return [x];
           const rest = x.quantity - p.quantity;
-          return rest > 0 ? [freeEntry({ ...x, quantity: rest })] : [];
+          // Resto com id novo (o antigo ficou no registo de recebidas).
+          return rest > 0 ? [freeEntry({ ...x, id: newRequestId(), quantity: rest })] : [];
         }),
       );
       refreshSameProduct(p.productId);
@@ -2713,10 +3500,23 @@ export default function Receiving() {
     basket.some(isPreviewPending) ||
     basket.some(needsAck);
   const ackPendingCount = basket.filter(needsAck).length;
+  // Com guia, uma pré-visualização sem ligação ("transient") bloqueia o Confirmar
+  // (ver isPreviewPending): diz porquê, para o botão não parecer preso.
+  const noteOffline = basket.filter(
+    (e) => !isLocked(e) && qtyValid(e) && !!deliveryNoteRef.current && previewFor(e)?.status === "transient",
+  );
+  const noteOfflineGaveUp = noteOffline.some((e) => {
+    const r = previewRetries.current.get(e.id);
+    return !!r && r.sig === previewFor(e)?.sig && r.n > PREVIEW_AUTO_RETRIES;
+  });
   const confirmLabel = confirming
     ? "A receber…"
     : ackPendingCount > 0
       ? "Confirma os avisos da guia"
+    : noteOffline.length > 0
+      ? noteOfflineGaveUp
+        ? "Sem ligação — carrega em Recalcular"
+        : "Sem ligação — a tentar de novo…"
     : uncertainCount > 0 && freshCount > 0
       ? `Confirmar (inclui ${uncertainCount} a repetir)`
       : uncertainCount > 0
@@ -2724,6 +3524,8 @@ export default function Receiving() {
         : "Confirmar receção";
   const basketUnits = basket.reduce((s, e) => s + e.quantity * e.unitsPerUom, 0);
   const lookupBusy = queueSize > 0;
+  /** Leituras à espera da verificação de separador / reposição do cesto. */
+  const lookupWaiting = lookupBusy && !scanReady;
 
   // ── Render ──
   if (companyLoading) {
@@ -3003,7 +3805,11 @@ export default function Receiving() {
         )}
         {/* Sempre montada: os leitores de ecrã só anunciam mudanças numa região que já existia. */}
         <p className={cn("text-sm text-muted-foreground", lookupBusy && "mt-1")} aria-live="polite">
-          {lookupBusy ? `A procurar…${queueSize > 1 ? ` (${queueSize} leituras em fila)` : ""}` : ""}
+          {lookupWaiting
+            ? `A preparar… (${queueSize} ${queueSize === 1 ? "leitura" : "leituras"} em fila)`
+            : lookupBusy
+              ? `A procurar…${queueSize > 1 ? ` (${queueSize} leituras em fila)` : ""}`
+              : ""}
         </p>
       </div>
 
@@ -3038,6 +3844,18 @@ export default function Receiving() {
                   <p className="break-words text-destructive">{r.message}</p>
                   <p className="text-xs text-muted-foreground">{timeFmt.format(r.at)}</p>
                 </div>
+                {r.reason === "not_found" && canLearnCodes && !!warehouseId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 shrink-0"
+                    onMouseDown={keepScanFocus}
+                    onClick={() => openLearn(r)}
+                  >
+                    <Tag className="mr-2 h-4 w-4" aria-hidden />
+                    Associar a um produto
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="ghost"
@@ -3384,6 +4202,24 @@ export default function Receiving() {
           setCreateNoteOpen(true);
         }}
       />
+      {canLearnCodes && (
+        <LearnCodeDialog
+          open={learnOpen && learnTarget !== null}
+          onOpenChange={(o) => {
+            if (!o) {
+              setLearnOpen(false);
+              focusScan();
+            }
+          }}
+          code={learnTarget?.code ?? ""}
+          organizationId={orgId}
+          warehouseId={warehouseId || null}
+          supplierId={supplierId || (deliveryNoteId && noteInfo?.id === deliveryNoteId ? noteInfo.supplier_id : null)}
+          suppliers={suppliers}
+          canEditProducts={canEditProducts}
+          onLearned={handleLearned}
+        />
+      )}
       {canEditNotes && (
         <DeliveryNoteDialog
           open={createNoteOpen}

@@ -16418,6 +16418,89 @@ export type Database = {
           },
         ]
       }
+      product_codes: {
+        Row: {
+          code: string
+          code_key: string | null
+          context: Json
+          created_at: string
+          created_by: string | null
+          delete_reason: string | null
+          deleted_at: string | null
+          deleted_by: string | null
+          id: string
+          kind: string
+          organization_id: string
+          product_id: string
+          source: string
+          supplier_id: string | null
+          uom_id: string | null
+        }
+        Insert: {
+          code: string
+          code_key?: string | null
+          context?: Json
+          created_at?: string
+          created_by?: string | null
+          delete_reason?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
+          id: string
+          kind: string
+          organization_id: string
+          product_id: string
+          source: string
+          supplier_id?: string | null
+          uom_id?: string | null
+        }
+        Update: {
+          code?: string
+          code_key?: string | null
+          context?: Json
+          created_at?: string
+          created_by?: string | null
+          delete_reason?: string | null
+          deleted_at?: string | null
+          deleted_by?: string | null
+          id?: string
+          kind?: string
+          organization_id?: string
+          product_id?: string
+          source?: string
+          supplier_id?: string | null
+          uom_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_codes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_codes_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_codes_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_codes_uom_id_fkey"
+            columns: ["uom_id"]
+            isOneToOne: false
+            referencedRelation: "uom"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_config_blocks: {
         Row: {
           created_at: string
@@ -24761,6 +24844,7 @@ export type Database = {
         }
         Returns: Json
       }
+      fn_product_code_key: { Args: { p_code: string }; Returns: string }
       fn_proposals_persist_relations: {
         Args: {
           p_actor: string
@@ -29245,6 +29329,23 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_product_code_learn: {
+        Args: {
+          p_code: string
+          p_id: string
+          p_kind: string
+          p_product_id: string
+          p_set_product_uom?: boolean
+          p_supplier_id?: string
+          p_uom_id?: string
+          p_warehouse_id: string
+        }
+        Returns: Json
+      }
+      rpc_product_code_remove: {
+        Args: { p_id: string; p_reason: string }
+        Returns: Json
+      }
       rpc_reassign_client_contract: {
         Args: { p_id: string; p_new_owner_id: string }
         Returns: string
@@ -29268,6 +29369,7 @@ export type Database = {
           p_quantity: number
           p_request_id: string
           p_supplier_id?: string
+          p_unit_conversion?: boolean
           p_uom_id?: string
           p_warehouse_id: string
         }
@@ -29295,6 +29397,7 @@ export type Database = {
           p_code: string
           p_delivery_note_id?: string
           p_supplier_id?: string
+          p_unit_conversion?: boolean
           p_warehouse_id: string
         }
         Returns: Json

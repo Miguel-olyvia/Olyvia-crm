@@ -152,13 +152,16 @@ export function fmtDay(s: string | null | undefined): string {
 
 /**
  * Rótulo do nº da guia: "GR 123", mas sem duplicar quando o nº já começa por
- * "GR" (ex.: "GR-teste-2" → "GR-teste-2", não "GR GR-teste-2"). Único sítio
- * onde se decide o prefixo (picker, botão, cartão, ficha, encomendas, avisos).
+ * "GR" seguido de separador (espaço - _ / .) ou dígito (ex.: "GR-teste-2",
+ * "GR123", "GR 5", "GR/2024/1", "GR.123" ficam como estão). Outros nºs
+ * começados por "GR" levam o prefixo ("GRP-2024/1" → "GR GRP-2024/1").
+ * Único sítio onde se decide o prefixo (picker, botão, cartão, ficha,
+ * encomendas, avisos).
  */
 export function noteLabel(number: string | null | undefined): string {
   const n = (number ?? "").trim();
   if (!n) return "Guia";
-  return /^gr/i.test(n) ? n : `GR ${n}`;
+  return /^gr(?:[\s\-_/.]|\d)/i.test(n) ? n : `GR ${n}`;
 }
 
 /** Data de hoje (local) em 'YYYY-MM-DD' para um <input type="date">. */
