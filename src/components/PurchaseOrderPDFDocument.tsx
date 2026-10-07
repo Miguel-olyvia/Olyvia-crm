@@ -275,6 +275,7 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
     const statusConfig: Record<string, { bg: string; color: string; text: string }> = {
       pending: { bg: '#fef3c7', color: '#92400e', text: 'Pendente' },
       ordered: { bg: '#dbeafe', color: '#1e40af', text: 'Encomendado' },
+      partially_received: { bg: '#e0e7ff', color: '#3730a3', text: 'Parcialmente recebida' },
       received: { bg: '#d1fae5', color: '#065f46', text: 'Recebido' },
       cancelled: { bg: '#fee2e2', color: '#991b1b', text: 'Cancelado' },
     };

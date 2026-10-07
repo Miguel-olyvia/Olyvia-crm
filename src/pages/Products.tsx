@@ -15,6 +15,8 @@ import ProductPriceHistoryDialog from "@/components/ProductPriceHistoryDialog";
 import ProductConfigurableOptionsDialog from "@/components/ProductConfigurableOptionsDialog";
 import ProductSuppliersDialog from "@/components/ProductSuppliersDialog";
 import ProductFormPrices, { PriceFormData } from "@/components/ProductFormPrices";
+import PendingSupplierPriceNotice from "@/components/products/PendingSupplierPriceNotice";
+import { syncFormAfterAcceptedPrice, type AcceptedPriceInfo } from "@/components/products/pendingSupplierPrice";
 import ProductFormAttributes, { AttributeFormValue } from "@/components/ProductFormAttributes";
 import { exportProductsToCSV, parseProductsCSV, downloadProductsTemplate } from "@/utils/productsExportImport";
 import { PermissionGate } from "@/components/PermissionGate";
@@ -259,6 +261,10 @@ export default function Products() {
     vat_rate: 23,
     uom_id: ''
   });
+  // F3.4b: custo de compra (product_prices purchase) com que a ficha abriu.
+  // Aceitar um preço do fornecedor atualiza-o, para o aviso saber se o campo
+  // "Preço de Compra" foi mexido (só se o não foi é que passa ao valor aceite).
+  const [openedPurchaseUnit, setOpenedPurchaseUnit] = useState<number | null>(null);
 
   const [attributeFormData, setAttributeFormData] = useState<AttributeFormValue[]>([]);
 
@@ -1097,6 +1103,7 @@ export default function Products() {
         if (p.vat_rate !== null) loadedPrices.vat_rate = p.vat_rate;
       });
       setPriceFormData(loadedPrices);
+      setOpenedPurchaseUnit(loadedPrices.purchase);
 
       // Set attributes
       const loadedAttributes: AttributeFormValue[] = (attributesRes.data || []).map((av: any) => ({
@@ -1164,6 +1171,7 @@ export default function Products() {
 
   const resetForm = () => {
     setEditingProduct(null);
+    setOpenedPurchaseUnit(null);
     setFormData({
       sku: "",
       name: "",
@@ -2445,6 +2453,31 @@ export default function Products() {
                     {t('products.form.manageStockHelp')}
                   </p>
                 </div>
+
+                {/* F3.4b: preço do fornecedor por aprovar. Aceitar já grava o custo;
+                    o campo "Preço de Compra" passa ao valor gravado se não foi
+                    mexido, para "Atualizar Produto" não desfazer o custo aceite.
+                    Sem packs em main: compra sempre à unidade (qty 1). */}
+                {editingProduct && openedPurchaseUnit !== null && (
+                  <PendingSupplierPriceNotice
+                    productId={editingProduct.id}
+                    onAccepted={(accepted: AcceptedPriceInfo[], isCurrent: () => boolean) =>
+                      syncFormAfterAcceptedPrice({
+                        productId: editingProduct.id,
+                        currency: priceFormData.currency,
+                        opened: { price: openedPurchaseUnit, qty: 1, uomId: null, storedUnit: openedPurchaseUnit },
+                        formPurchase: priceFormData.purchase,
+                        accepted,
+                        loadPreferredPackPrice: async () => null,
+                        isCurrent,
+                        apply: (prevShown, next) => {
+                          setOpenedPurchaseUnit((prev) => (prev !== null ? next.storedUnit : prev));
+                          setPriceFormData((prev) => (prev.purchase === prevShown ? { ...prev, purchase: next.displayed } : prev));
+                        },
+                      })
+                    }
+                  />
+                )}
 
                 <ProductFormPrices prices={priceFormData} onChange={setPriceFormData} />
 
