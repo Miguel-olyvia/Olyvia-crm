@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Check, Loader2, Search } from "lucide-react";
+import { Check, Loader2, PackagePlus, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   REASON_LABEL,
@@ -48,6 +48,8 @@ interface CatalogLinkDialogProps {
   linking: boolean;
   onClose: () => void;
   onConfirm: (choice: LinkChoice) => void;
+  /** Alternativa "o produto não existe": abre a criação a partir do artigo. Ausente = sem permissão. */
+  onCreateProduct?: () => void;
 }
 
 const SEARCH_LIMIT = 30;
@@ -67,6 +69,7 @@ export default function CatalogLinkDialog({
   linking,
   onClose,
   onConfirm,
+  onCreateProduct,
 }: CatalogLinkDialogProps) {
   const [selected, setSelected] = useState<{ id: string; name: string; itemSupplierId: string | null } | null>(null);
   const [query, setQuery] = useState("");
@@ -275,6 +278,21 @@ export default function CatalogLinkDialog({
               </div>
             )}
           </section>
+
+          {onCreateProduct && (
+            <section
+              className="rounded-md border border-dashed p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+              aria-labelledby="catalog-link-create"
+            >
+              <div>
+                <h4 id="catalog-link-create" className="text-sm font-medium">Não existe nos nossos produtos?</h4>
+                <p className="text-xs text-muted-foreground">Cria um produto novo com os dados deste artigo, já ligado a ele.</p>
+              </div>
+              <Button type="button" variant="outline" size="sm" onClick={onCreateProduct} disabled={linking}>
+                <PackagePlus className="w-4 h-4 mr-1" /> Não existe — criar produto
+              </Button>
+            </section>
+          )}
 
           {freeRowsLoading && (
             <p className="text-xs text-muted-foreground flex items-center gap-1">

@@ -12,8 +12,11 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CheckCheck, EyeOff, Link2, Loader2, RefreshCw, RotateCcw, Search, Unlink } from "lucide-react";
+import { CheckCheck, EyeOff, Link2, Loader2, PackagePlus, RefreshCw, RotateCcw, Search, Unlink } from "lucide-react";
 import CatalogLinkDialog, { type LinkChoice } from "./CatalogLinkDialog";
+import CreateProductFromCatalogDialog, { type CreatedProductInfo } from "./CreateProductFromCatalogDialog";
+import BulkCreateProductsDialog, { type BulkCreateRow } from "./BulkCreateProductsDialog";
+import { BULK_CREATE_LIMIT, type CreateOutcome } from "./catalogProductCreate";
 import {
   REASON_LABEL,
   callRpc,
@@ -69,6 +72,9 @@ export default function SupplierPortalCatalogSection({
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
   const canSuggest = hasPermission("products.view");
+  // Criar produto a partir do artigo: products.create (como o botão de
+  // Products.tsx e o controlo em rpc_create_product) + can_link (products.edit).
+  const canCreateProduct = hasPermission("products.create");
 
   const [filter, setFilter] = useState<CatalogFilter>("unlinked");
   const [query, setQuery] = useState("");
@@ -91,6 +97,12 @@ export default function SupplierPortalCatalogSection({
   const [unlinkItem, setUnlinkItem] = useState<CrmCatalogItem | null>(null);
   const [removeItemSupplier, setRemoveItemSupplier] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
+
+  const [createItem, setCreateItem] = useState<CrmCatalogItem | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkCreateItems, setBulkCreateItems] = useState<CrmCatalogItem[] | null>(null);
+  // Produtos criados aqui cuja ligação falhou: ficam como 1.ª sugestão do artigo.
+  const [createdPending, setCreatedPending] = useState<Record<string, LinkSuggestion>>({});
 
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkRunning, setBulkRunning] = useState(false);
@@ -171,6 +183,49 @@ export default function SupplierPortalCatalogSection({
     return () => { cancelled = true; };
   }, [list, pendingIds, canSuggest, supplierId]);
 
+  // Sugestões da RPC + o produto criado aqui (se a ligação falhou), à frente.
+  const effectiveSuggestions = useMemo(() => {
+    const keys = Object.keys(createdPending);
+    if (keys.length === 0) return suggestions;
+    const merged: Record<string, LinkSuggestion[]> = { ...suggestions };
+    keys.forEach((id) => {
+      const created = createdPending[id];
+      merged[id] = [created, ...(suggestions[id] ?? []).filter((s) => s.product_id !== created.product_id)];
+    });
+    return merged;
+  }, [suggestions, createdPending]);
+
+  // Seleção para criar em lote: só artigos ativos por ligar da página visível.
+  // Os que já têm um produto criado aqui (ligação falhada) ficam de fora, para
+  // não se criar um segundo produto para o mesmo artigo.
+  const selectableIds = useMemo(
+    () =>
+      (list?.items ?? [])
+        .filter((i) => !i.is_linked && !i.is_dismissed && i.is_active && !createdPending[i.id])
+        .map((i) => i.id),
+    [list, createdPending],
+  );
+
+  useEffect(() => {
+    // Nova página/filtro/recarga: larga o que já não está visível por ligar.
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const next = new Set([...prev].filter((id) => selectableIds.includes(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [selectableIds]);
+
+  const toggleSelected = (id: string, on: boolean) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (on && next.size < BULK_CREATE_LIMIT) next.add(id);
+      else if (!on) next.delete(id);
+      return next;
+    });
+
+  const toggleAllSelected = (on: boolean) =>
+    setSelectedIds(on ? new Set(selectableIds.slice(0, BULK_CREATE_LIMIT)) : new Set());
+
   const exactCandidates = useMemo(
     () => (list?.items ?? []).filter((i) => pendingIds.includes(i.id) && suggestions[i.id]?.[0]?.exact),
     [list, pendingIds, suggestions],
@@ -239,6 +294,7 @@ export default function SupplierPortalCatalogSection({
       return;
     }
     clearRowError(item.id);
+    forgetCreated([item.id]);
     setLinkItem(null);
     const { result } = outcome;
     toast({
@@ -297,6 +353,84 @@ export default function SupplierPortalCatalogSection({
       variant: failed > 0 ? "destructive" : undefined,
     });
     if (ok > 0) {
+      await load();
+      onLinksChanged?.();
+    }
+  };
+
+  const createdSuggestion = (product: CreatedProductInfo): LinkSuggestion => ({
+    product_id: product.productId,
+    product_name: product.name,
+    product_sku: product.sku,
+    product_barcode: product.barcode,
+    reason: "created",
+    score: 1,
+    exact: false,
+    item_supplier_id: null,
+  });
+
+  const forgetCreated = (ids: string[]) =>
+    setCreatedPending((prev) => {
+      if (!ids.some((id) => id in prev)) return prev;
+      const next = { ...prev };
+      ids.forEach((id) => { delete next[id]; });
+      return next;
+    });
+
+  const handleProductCreated = async (
+    item: CrmCatalogItem,
+    outcome: Exclude<CreateOutcome, { status: "error" }>,
+    product: CreatedProductInfo,
+  ) => {
+    setCreateItem(null);
+    if (outcome.status === "created_not_linked") {
+      setCreatedPending((prev) => ({ ...prev, [item.id]: createdSuggestion(product) }));
+      setRowErrors((prev) => ({ ...prev, [item.id]: outcome.message }));
+      toast({
+        title: "Produto criado mas não ficou ligado",
+        description: `«${product.name}» (${product.sku}) foi criado. Liga-o manualmente: está como sugestão no artigo ${item.supplier_ref}.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    clearRowError(item.id);
+    forgetCreated([item.id]);
+    toast({
+      title: "Produto criado e ligado",
+      description: [`${item.supplier_ref} → ${product.name} (${product.sku}).`, ...(outcome.result.warnings ?? [])].join(" "),
+    });
+    await load();
+    onLinksChanged?.();
+  };
+
+  const handleBulkCreated = async (rows: BulkCreateRow[]) => {
+    const linkedIds: string[] = [];
+    const errors: Record<string, string> = {};
+    const pending: Record<string, LinkSuggestion> = {};
+    rows.forEach((r) => {
+      if (r.status === "linked") {
+        linkedIds.push(r.item.id);
+      } else if (r.status === "not_linked" && r.productId) {
+        errors[r.item.id] = r.message ?? "Produto criado mas não ficou ligado — liga-o manualmente.";
+        pending[r.item.id] = createdSuggestion({
+          productId: r.productId,
+          name: r.item.name,
+          sku: r.sku.trim(),
+          barcode: r.item.barcode,
+        });
+      } else if (r.status === "error") {
+        errors[r.item.id] = r.message ?? "Não foi possível criar o produto.";
+      }
+    });
+    forgetCreated(linkedIds);
+    if (Object.keys(pending).length > 0) setCreatedPending((prev) => ({ ...prev, ...pending }));
+    setRowErrors((prev) => {
+      const next = { ...prev };
+      rows.forEach((r) => { delete next[r.item.id]; });
+      return { ...next, ...errors };
+    });
+    setSelectedIds(new Set());
+    if (linkedIds.length > 0) {
       await load();
       onLinksChanged?.();
     }
@@ -396,7 +530,11 @@ export default function SupplierPortalCatalogSection({
   const canLink = list.can_link;
   const showPrice = list.can_view_pricing;
   const items = list.items;
-  const from = list.total === 0 ? 0 : list.offset + 1;
+  const canCreate = canLink && canCreateProduct && !!organizationId;
+  const showSelection = canCreate && selectableIds.length > 0;
+  const allSelected = showSelection && selectableIds.every((id) => selectedIds.has(id));
+  const someSelected = selectedIds.size > 0 && !allSelected;
+  const from =list.total === 0 ? 0 : list.offset + 1;
   const to = list.offset + items.length;
 
   return (
@@ -430,11 +568,24 @@ export default function SupplierPortalCatalogSection({
             aria-label="Pesquisar no catálogo do fornecedor"
           />
         </div>
-        {canLink && canSuggest && exactCandidates.length > 0 && (
-          <Button type="button" variant="outline" size="sm" onClick={() => setBulkOpen(true)} disabled={bulkRunning}>
-            <CheckCheck className="w-4 h-4 mr-1" /> Aceitar sugestões exatas ({exactCandidates.length})
-          </Button>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {canCreate && selectedIds.size > 0 && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setBulkCreateItems(items.filter((i) => selectedIds.has(i.id)))}
+              disabled={bulkRunning}
+            >
+              <PackagePlus className="w-4 h-4 mr-1" /> Criar produtos selecionados ({selectedIds.size})
+            </Button>
+          )}
+          {canLink && canSuggest && exactCandidates.length > 0 && (
+            <Button type="button" variant="outline" size="sm" onClick={() => setBulkOpen(true)} disabled={bulkRunning}>
+              <CheckCheck className="w-4 h-4 mr-1" /> Aceitar sugestões exatas ({exactCandidates.length})
+            </Button>
+          )}
+        </div>
       </div>
 
       {!canSuggest && pendingIds.length > 0 && (
@@ -453,6 +604,15 @@ export default function SupplierPortalCatalogSection({
           <Table>
             <TableHeader>
               <TableRow>
+                {showSelection && (
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allSelected ? true : someSelected ? "indeterminate" : false}
+                      onCheckedChange={(v) => toggleAllSelected(v === true)}
+                      aria-label="Selecionar todos os artigos por ligar desta página"
+                    />
+                  </TableHead>
+                )}
                 <TableHead>Ref. fornecedor</TableHead>
                 <TableHead>Artigo</TableHead>
                 <TableHead>Unidade</TableHead>
@@ -463,12 +623,23 @@ export default function SupplierPortalCatalogSection({
             </TableHeader>
             <TableBody>
               {items.map((item) => {
-                const sugg = suggestions[item.id] ?? [];
+                const sugg = effectiveSuggestions[item.id] ?? [];
                 const top = sugg[0];
                 const pending = !item.is_linked && !item.is_dismissed;
                 const busy = busyId === item.id;
                 return (
                   <TableRow key={item.id} className={item.is_active ? "" : "opacity-60"}>
+                    {showSelection && (
+                      <TableCell className="align-top">
+                        {selectableIds.includes(item.id) && (
+                          <Checkbox
+                            checked={selectedIds.has(item.id)}
+                            onCheckedChange={(v) => toggleSelected(item.id, v === true)}
+                            aria-label={`Selecionar ${item.supplier_ref} para criar produto`}
+                          />
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell className="font-mono text-xs align-top">{item.supplier_ref}</TableCell>
                     <TableCell className="align-top">
                       <div className="font-medium">{item.name}</div>
@@ -523,6 +694,18 @@ export default function SupplierPortalCatalogSection({
                               <Button type="button" size="sm" onClick={() => setLinkItem(item)} disabled={busy || bulkRunning}>
                                 <Link2 className="w-4 h-4 mr-1" /> Ligar
                               </Button>
+                              {canCreate && !createdPending[item.id] && (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => setCreateItem(item)}
+                                  disabled={busy || bulkRunning}
+                                  title="O artigo não existe nos nossos produtos: criar o produto já ligado"
+                                >
+                                  <PackagePlus className="w-4 h-4 mr-1" /> Criar produto
+                                </Button>
+                              )}
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -591,13 +774,40 @@ export default function SupplierPortalCatalogSection({
 
       <CatalogLinkDialog
         item={linkItem}
-        suggestions={linkItem ? suggestions[linkItem.id] ?? NO_SUGGESTIONS : NO_SUGGESTIONS}
+        suggestions={linkItem ? effectiveSuggestions[linkItem.id] ?? NO_SUGGESTIONS : NO_SUGGESTIONS}
         supplierId={supplierId}
         organizationId={organizationId}
         canViewPricing={showPrice}
         linking={linking}
         onClose={() => setLinkItem(null)}
         onConfirm={handleLink}
+        onCreateProduct={
+          canCreate && linkItem && !linkItem.is_linked && !createdPending[linkItem.id]
+            ? () => {
+                const it = linkItem;
+                setLinkItem(null);
+                setCreateItem(it);
+              }
+            : undefined
+        }
+      />
+
+      <CreateProductFromCatalogDialog
+        item={createItem}
+        supplierId={supplierId}
+        organizationId={organizationId}
+        canViewPricing={showPrice}
+        onClose={() => setCreateItem(null)}
+        onDone={(it, outcome, product) => { void handleProductCreated(it, outcome, product); }}
+      />
+
+      <BulkCreateProductsDialog
+        items={bulkCreateItems}
+        supplierId={supplierId}
+        organizationId={organizationId}
+        canViewPricing={showPrice}
+        onClose={() => setBulkCreateItems(null)}
+        onFinished={(rows) => { void handleBulkCreated(rows); }}
       />
 
       <AlertDialog open={!!unlinkItem} onOpenChange={(v) => { if (!v && !unlinking) setUnlinkItem(null); }}>

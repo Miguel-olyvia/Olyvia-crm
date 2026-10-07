@@ -116,7 +116,11 @@ export interface CrmCatalogList {
 
 // ─── 3.4 rpc_catalog_link_suggestions ──────────────────────────────────────
 
-export type SuggestionReason = "supplier_sku" | "supplier_ref_code" | "barcode" | "name";
+/**
+ * "created" não vem da RPC: é o produto criado a partir do artigo cuja ligação
+ * falhou (fica como sugestão para ligar manualmente).
+ */
+export type SuggestionReason = "supplier_sku" | "supplier_ref_code" | "barcode" | "name" | "created";
 
 export interface LinkSuggestion {
   product_id: string;
@@ -138,14 +142,17 @@ export const REASON_LABEL: Record<SuggestionReason, string> = {
   supplier_ref_code: "Ref. igual",
   barcode: "Código de barras",
   name: "Nome semelhante",
+  created: "Criado a partir deste artigo",
 };
 
 /** Nível de confiança apresentado ao operador. */
-export function confidenceOf(s: Pick<LinkSuggestion, "score" | "exact">): {
+export function confidenceOf(s: Pick<LinkSuggestion, "score" | "exact"> & { reason?: SuggestionReason }): {
   label: string;
   variant: "default" | "secondary" | "outline";
 } {
   if (s.exact) return { label: "Exata", variant: "default" };
+  // Sugestão local (produto criado aqui a partir do artigo).
+  if (s.reason === "created") return { label: "Produto novo", variant: "secondary" };
   if (s.score >= 0.7) return { label: `Alta · ${Math.round(s.score * 100)}%`, variant: "secondary" };
   if (s.score >= 0.5) return { label: `Média · ${Math.round(s.score * 100)}%`, variant: "outline" };
   return { label: `Baixa · ${Math.round(s.score * 100)}%`, variant: "outline" };
