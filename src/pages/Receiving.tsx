@@ -571,6 +571,164 @@ function mutateUnsent(key: string, op: (list: UnsentEntry[]) => UnsentEntry[]): 
   }
 }
 
+// ── Separador duplicado ──
+// "Duplicar separador" (Chrome/Edge) copia a sessionStorage: o separador novo
+// reporia o mesmo cesto, "Por enviar" e contexto, e confirmar nos dois recebia
+// a mercadoria duas vezes (request_ids diferentes). Cada separador guarda um
+// tabId na sessionStorage; cada carga da página tem um id de instância próprio.
+// Antes de repor, a carga pergunta (BroadcastChannel por utilizador) se outra
+// instância viva tem o mesmo tabId. Se sim, este é a cópia: tabId novo e as
+// chaves copiadas são apagadas (o original fica com elas). F5 no mesmo
+// separador: a instância antiga já morreu, ninguém responde, repõe normalmente.
+// Sem BroadcastChannel não há como distinguir cópia de F5: com tabId já
+// existente não se repõe (apaga-se) e avisa-se — perder um cesto por receber é
+// recuperável; receber duas vezes não.
+// Estado ao nível do módulo (uma vez por carga): StrictMode e sair/voltar ao
+// ecrã reutilizam a mesma verificação, e a instância continua a responder
+// depois de o ecrã desmontar (enquanto a página não recarregar).
+
+const TAB_ID_KEY = "olyvia.receiving.tabId";
+/** Espera pela resposta do separador original (a resposta chega em poucos ms). */
+const TAB_PROBE_MS = 250;
+const TAB_DATA_PREFIXES = ["olyvia.receiving.basket.", "olyvia.receiving.unsent.", "olyvia.receiving.context."];
+
+interface TabMsg {
+  t: "ping" | "pong";
+  tab: string;
+  from: string;
+  to?: string;
+}
+interface TabCheck {
+  reason: "ok" | "duplicate" | "unsupported";
+  /** Havia cesto/"Por enviar" copiado que não foi reposto. */
+  dropped: boolean;
+}
+
+/** Id desta carga da página (não vai para a sessionStorage). */
+const tabInstanceId = newRequestId();
+let tabState: { tabId: string; checking: boolean } | null = null;
+let tabCheckPromise: Promise<TabCheck> | null = null;
+let tabNoticeShown = false;
+const tabChannels = new Map<string, BroadcastChannel>();
+
+function readTabId(): string | null {
+  try {
+    return window.sessionStorage.getItem(TAB_ID_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeTabId(id: string) {
+  try {
+    window.sessionStorage.setItem(TAB_ID_KEY, id);
+  } catch {
+    // sessionStorage indisponível: também não há nada para repor.
+  }
+}
+
+/** Apaga cesto/"Por enviar"/contexto desta sessionStorage. Devolve se havia cesto ou "Por enviar". */
+function clearTabSessionData(): boolean {
+  try {
+    const ss = window.sessionStorage;
+    const keys: string[] = [];
+    for (let i = 0; i < ss.length; i++) {
+      const k = ss.key(i);
+      if (k && TAB_DATA_PREFIXES.some((p) => k.startsWith(p))) keys.push(k);
+    }
+    keys.forEach((k) => ss.removeItem(k));
+    return keys.some((k) => !k.startsWith("olyvia.receiving.context."));
+  } catch {
+    return false;
+  }
+}
+
+/** Canal do utilizador; abre-o e passa a responder a quem perguntar pelo tabId deste separador. */
+function tabChannel(userId: string): BroadcastChannel | null {
+  const existing = tabChannels.get(userId);
+  if (existing) return existing;
+  if (typeof BroadcastChannel === "undefined") return null;
+  let ch: BroadcastChannel;
+  try {
+    ch = new BroadcastChannel(`olyvia.receiving.tabs.${userId}`);
+  } catch {
+    return null;
+  }
+  ch.addEventListener("message", (ev: MessageEvent) => {
+    const m = ev.data as Partial<TabMsg> | null;
+    if (!m || m.t !== "ping" || typeof m.tab !== "string" || typeof m.from !== "string") return;
+    if (m.from === tabInstanceId || !tabState || m.tab !== tabState.tabId) return;
+    // Duas cargas com o mesmo tabId a verificar ao mesmo tempo: só responde a
+    // de id menor, para exatamente uma ficar com os dados.
+    if (tabState.checking && !(tabInstanceId < m.from)) return;
+    try {
+      ch.postMessage({ t: "pong", tab: m.tab, from: tabInstanceId, to: m.from } satisfies TabMsg);
+    } catch {
+      // canal fechado: nada a fazer
+    }
+  });
+  tabChannels.set(userId, ch);
+  return ch;
+}
+
+/**
+ * Verificação do separador (uma por carga). Resolve depois de decidir; se este
+ * separador for uma cópia, as chaves copiadas já foram apagadas.
+ */
+function checkTab(userId: string): Promise<TabCheck> {
+  const ch = tabChannel(userId);
+  if (tabCheckPromise) return tabCheckPromise;
+  tabCheckPromise = new Promise<TabCheck>((resolve) => {
+    const current = readTabId();
+    const becomeNew = (reason: TabCheck["reason"]) => {
+      const dropped = reason === "ok" ? false : clearTabSessionData();
+      tabState = { tabId: newRequestId(), checking: false };
+      writeTabId(tabState.tabId);
+      resolve({ reason, dropped });
+    };
+    // Separador sem tabId: carga nova (ou dados de antes desta versão) — repõe.
+    if (!current) {
+      becomeNew("ok");
+      return;
+    }
+    if (!ch) {
+      becomeNew("unsupported");
+      return;
+    }
+    tabState = { tabId: current, checking: true };
+    let done = false;
+    let timer = 0;
+    const onMsg = (ev: MessageEvent) => {
+      const m = ev.data as Partial<TabMsg> | null;
+      if (m && m.t === "pong" && m.tab === current && m.to === tabInstanceId) finish(true);
+    };
+    const finish = (duplicate: boolean) => {
+      if (done) return;
+      done = true;
+      window.clearTimeout(timer);
+      ch.removeEventListener("message", onMsg);
+      if (duplicate) {
+        becomeNew("duplicate");
+      } else {
+        tabState = { tabId: current, checking: false };
+        resolve({ reason: "ok", dropped: false });
+      }
+    };
+    ch.addEventListener("message", onMsg);
+    timer = window.setTimeout(() => finish(false), TAB_PROBE_MS);
+    try {
+      ch.postMessage({ t: "ping", tab: current, from: tabInstanceId } satisfies TabMsg);
+    } catch {
+      // Não deu para perguntar: não há prova de que é o original.
+      done = true;
+      window.clearTimeout(timer);
+      ch.removeEventListener("message", onMsg);
+      becomeNew("unsupported");
+    }
+  });
+  return tabCheckPromise;
+}
+
 const toStoredEntry = (e: BasketEntry): StoredEntry => ({
   id: e.id,
   key: e.key,
@@ -788,6 +946,8 @@ export default function Receiving() {
   const [pending, setPending] = useState<PendingReceipt[]>([]);
   const [pendingBusy, setPendingBusy] = useState<Set<string>>(() => new Set());
   const [pendingChecked, setPendingChecked] = useState(false);
+  /** Verificação de separador duplicado concluída: só depois se repõe cesto/"Por enviar"/contexto. */
+  const [tabChecked, setTabChecked] = useState(false);
   /** Relógio para o "Descartar" (só depois de DISCARD_MIN_AGE_MS desde o último envio). */
   const [nowMs, setNowMs] = useState(() => Date.now());
 
@@ -925,6 +1085,31 @@ export default function Receiving() {
       ]);
     })();
   }, [ensureUserId, mutatePending]);
+
+  // Separador duplicado: nada da sessionStorage é reposto (nem gravado) antes
+  // de esta verificação terminar — os efeitos de repor esperam por tabChecked
+  // e os de gravar só correm depois de repor.
+  useEffect(() => {
+    if (!userId) return;
+    let alive = true;
+    void checkTab(userId).then((r) => {
+      if (!alive || !mountedRef.current) return;
+      if (r.dropped && !tabNoticeShown) {
+        tabNoticeShown = true;
+        toast({
+          title: r.reason === "duplicate" ? "Separador duplicado" : "Cesto anterior não reposto",
+          description:
+            r.reason === "duplicate"
+              ? "O cesto e o «Por enviar» ficam só no separador original, para não se receber duas vezes."
+              : "Este browser não permite confirmar que o separador não é uma cópia — o cesto e o «Por enviar» anteriores não foram repostos. Volta a ler o que faltar receber.",
+        });
+      }
+      setTabChecked(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [userId, toast]);
 
   // Outro separador mexeu nas pendentes: sincroniza a cópia em memória e o ecrã.
   useEffect(() => {
@@ -1131,10 +1316,13 @@ export default function Receiving() {
         warehouseRef.current = nextWh;
       }
       // Fornecedor reposto que já não pertence a esta empresa: volta a "Todos".
+      // A guia fixa o fornecedor: sai com ele.
       const curSup = supplierRef.current;
       if (curSup && !supRes.error && !sups.some((s) => s.id === curSup)) {
         setSupplierId("");
         supplierRef.current = "";
+        setDeliveryNoteId("");
+        deliveryNoteRef.current = "";
       }
       focusScan();
     })();
@@ -1179,7 +1367,7 @@ export default function Receiving() {
   }, [warehouseId, supplierId, deliveryNoteId, userId, orgId]);
 
   useEffect(() => {
-    if (!userId || !orgId) return;
+    if (!userId || !orgId || !tabChecked) return;
     const key = basketStorageKey(userId, orgId);
     if (restoredBasketKeyRef.current === key) return;
     restoredBasketKeyRef.current = key;
@@ -1227,17 +1415,19 @@ export default function Receiving() {
       setSupplierId(sup);
       supplierRef.current = sup;
       // A guia volta com o cesto (o cartão mostra se entretanto foi fechada).
-      const dn = dnOf(saved);
+      // A guia fixa o fornecedor: sem o fornecedor dela, não se repõe a guia.
+      const dn = sup ? dnOf(saved) : "";
       setDeliveryNoteId(dn);
       deliveryNoteRef.current = dn;
     }
     setAnnouncement(`Cesto reposto: ${entries.length} ${entries.length === 1 ? "entrada" : "entradas"}.`);
-  }, [userId, orgId]);
+  }, [userId, orgId, tabChecked]);
 
   // "Por enviar" da empresa ativa: carrega ao entrar/trocar e acompanha o que
-  // outra instância (ex.: a antiga, já desmontada) lá escrever.
+  // outra instância (ex.: a antiga, já desmontada) lá escrever. Só depois da
+  // verificação de separador duplicado (a cópia não pode mostrar o do original).
   useEffect(() => {
-    if (!userId || !orgId) return;
+    if (!userId || !orgId || !tabChecked) return;
     const key = unsentStorageKey(userId, orgId);
     setUnsent(readUnsent(key));
     const onChange = (ev: Event) => {
@@ -1246,7 +1436,7 @@ export default function Receiving() {
     };
     window.addEventListener(UNSENT_EVENT, onChange);
     return () => window.removeEventListener(UNSENT_EVENT, onChange);
-  }, [userId, orgId]);
+  }, [userId, orgId, tabChecked]);
 
   /**
    * Entradas que ficaram por enviar quando o ciclo parou (troca de empresa ou
@@ -1671,6 +1861,9 @@ export default function Receiving() {
             }
           }, PREVIEW_RETRY_MS);
           previewRetries.current.set(id, { sig, n: n + 1, timer });
+        } else {
+          // Tentativas automáticas esgotadas (n > PREVIEW_AUTO_RETRIES): o botão pede "Recalcular".
+          previewRetries.current.set(id, { sig, n: n + 1 });
         }
       } else {
         previewRetries.current.delete(id);
@@ -2713,10 +2906,23 @@ export default function Receiving() {
     basket.some(isPreviewPending) ||
     basket.some(needsAck);
   const ackPendingCount = basket.filter(needsAck).length;
+  // Com guia, uma pré-visualização sem ligação ("transient") bloqueia o Confirmar
+  // (ver isPreviewPending): diz porquê, para o botão não parecer preso.
+  const noteOffline = basket.filter(
+    (e) => !isLocked(e) && qtyValid(e) && !!deliveryNoteRef.current && previewFor(e)?.status === "transient",
+  );
+  const noteOfflineGaveUp = noteOffline.some((e) => {
+    const r = previewRetries.current.get(e.id);
+    return !!r && r.sig === previewFor(e)?.sig && r.n > PREVIEW_AUTO_RETRIES;
+  });
   const confirmLabel = confirming
     ? "A receber…"
     : ackPendingCount > 0
       ? "Confirma os avisos da guia"
+    : noteOffline.length > 0
+      ? noteOfflineGaveUp
+        ? "Sem ligação — carrega em Recalcular"
+        : "Sem ligação — a tentar de novo…"
     : uncertainCount > 0 && freshCount > 0
       ? `Confirmar (inclui ${uncertainCount} a repetir)`
       : uncertainCount > 0
