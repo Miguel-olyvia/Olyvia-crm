@@ -101,15 +101,28 @@ export default function CreateProductFromCatalogDialog({
   const [saving, setSaving] = useState(false);
   const [skuTaken, setSkuTaken] = useState(false);
 
-  // Abrir com um artigo: carrega unidades/marcas/categorias e pré-preenche.
-  useEffect(() => {
-    if (!item) {
+  // Cópia do artigo tirada ao abrir. Ao fechar, o pai passa item=null mas o
+  // Radix mantém o conteúdo montado durante a animação de saída (e o form só
+  // seria limpo no efeito seguinte): o render nunca pode depender do item vivo.
+  const [shownItem, setShownItem] = useState<CrmCatalogItem | null>(item);
+  const [prevItem, setPrevItem] = useState<CrmCatalogItem | null>(item);
+  if (item !== prevItem) {
+    setPrevItem(item);
+    if (item) {
+      // Abrir (ou reabrir, mesmo que seja o mesmo artigo): começa limpo.
+      setShownItem(item);
       setForm(null);
       setErrors({});
       setSkuTaken(false);
-      return;
     }
-    if (!organizationId) return;
+  }
+  const current = item ?? shownItem;
+
+  // Abrir com um artigo: carrega unidades/marcas/categorias e pré-preenche.
+  // Ao fechar não se limpa nada (o conteúdo ainda está a desaparecer); a
+  // reposição é feita acima, ao abrir.
+  useEffect(() => {
+    if (!item || !organizationId) return;
     let cancelled = false;
     (async () => {
       setPreparing(true);
@@ -150,7 +163,8 @@ export default function CreateProductFromCatalogDialog({
   // Verificação do SKU enquanto se escreve (a gravação volta a verificar).
   const currentSku = form?.sku.trim() ?? "";
   useEffect(() => {
-    if (!item || !organizationId || !currentSku) {
+    if (!item) return;
+    if (!organizationId || !currentSku) {
       setSkuTaken(false);
       return;
     }
@@ -176,12 +190,13 @@ export default function CreateProductFromCatalogDialog({
     [meta, form?.categoryId],
   );
 
-  const isPack = (item?.units_per_pack ?? 0) > 1;
-  const applyPrice = item ? applyCatalogPriceOnLink(item, canViewPricing) : false;
-  const unmatchedUnit = !!item && !!form && !form.uomId && !!item.unit_label && !isPack;
+  const isPack = (current?.units_per_pack ?? 0) > 1;
+  const applyPrice = current ? applyCatalogPriceOnLink(current, canViewPricing) : false;
+  const unmatchedUnit = !!current && !!form && !form.uomId && !!current.unit_label && !isPack;
 
   const handleSave = async () => {
-    if (!item || !form || !organizationId) return;
+    // Só grava com o diálogo aberto (item vivo), mas usa a cópia tirada ao abrir.
+    if (!item || !current || !form || !organizationId) return;
     const next: typeof errors = {};
     const skuErr = validateSku(form.sku);
     if (skuErr) next.sku = skuErr;
@@ -205,7 +220,7 @@ export default function CreateProductFromCatalogDialog({
     const outcome = await createProductFromCatalog({
       organizationId,
       supplierId,
-      item,
+      item: current,
       sku: form.sku,
       name: form.name,
       description: form.description,
@@ -218,7 +233,7 @@ export default function CreateProductFromCatalogDialog({
       productType: form.productType,
       purchasePrice: purchase,
       salePrice: sale,
-      currency: catalogCurrency(item),
+      currency: catalogCurrency(current),
       vatRate: vat ?? 23,
       applyCatalogPrice: applyPrice,
     });
@@ -228,7 +243,7 @@ export default function CreateProductFromCatalogDialog({
       if (outcome.field === "sku") setSkuTaken(true);
       return;
     }
-    onDone(item, outcome, {
+    onDone(current, outcome, {
       productId: outcome.productId,
       name: form.name.trim(),
       sku: form.sku.trim(),
@@ -252,11 +267,11 @@ export default function CreateProductFromCatalogDialog({
         <DialogHeader>
           <DialogTitle>Criar produto a partir do catálogo</DialogTitle>
           <DialogDescription>
-            {item && (
+            {current && (
               <>
-                <span className="font-mono">{item.supplier_ref}</span> — {item.name}
-                {canViewPricing && item.base_price != null ? ` · ${formatMoney(item.base_price, item.currency)}` : ""}
-                {isPack ? ` · ${item.unit_label ?? "embalagem"} de ${item.units_per_pack}` : ""}
+                <span className="font-mono">{current.supplier_ref}</span> — {current.name}
+                {canViewPricing && current.base_price != null ? ` · ${formatMoney(current.base_price, current.currency)}` : ""}
+                {isPack ? ` · ${current.unit_label ?? "embalagem"} de ${current.units_per_pack}` : ""}
                 . O produto é criado e fica logo ligado a este artigo.
               </>
             )}
@@ -265,7 +280,7 @@ export default function CreateProductFromCatalogDialog({
 
         {!organizationId ? (
           <p className="text-sm text-destructive">O fornecedor não tem empresa definida — não é possível criar produtos.</p>
-        ) : preparing || !form ? (
+        ) : preparing || !form || !current ? (
           <div className="flex justify-center py-8"><Loader2 className="w-5 h-5 animate-spin" aria-label="A preparar" /></div>
         ) : (
           <form
@@ -347,8 +362,8 @@ export default function CreateProductFromCatalogDialog({
                   onValueChange={(v) => set("brandId", v)}
                   options={[{ value: "", label: "Sem marca" }, ...(meta?.brands ?? []).map((b) => ({ value: b.id, label: b.name }))]}
                 />
-                {item?.brand && !form.brandId && (
-                  <p className="text-xs text-muted-foreground">Marca do catálogo «{item.brand}» sem correspondência nas marcas da empresa.</p>
+                {current.brand && !form.brandId && (
+                  <p className="text-xs text-muted-foreground">Marca do catálogo «{current.brand}» sem correspondência nas marcas da empresa.</p>
                 )}
               </div>
               <div className="space-y-1.5">
@@ -356,11 +371,11 @@ export default function CreateProductFromCatalogDialog({
                 <NativeSelect id="cpfc-uom" value={form.uomId} onValueChange={(v) => set("uomId", v)} options={uomOptions} />
                 {isPack ? (
                   <p className="text-xs text-muted-foreground">
-                    O fornecedor vende em {item?.unit_label ?? "embalagem"} de {item?.units_per_pack}: o produto conta-se à unidade.
+                    O fornecedor vende em {current.unit_label ?? "embalagem"} de {current.units_per_pack}: o produto conta-se à unidade.
                     A embalagem pode ser configurada depois na ficha do produto.
                   </p>
                 ) : unmatchedUnit ? (
-                  <p className="text-xs text-muted-foreground">Unidade do catálogo «{item?.unit_label}» sem correspondência.</p>
+                  <p className="text-xs text-muted-foreground">Unidade do catálogo «{current.unit_label}» sem correspondência.</p>
                 ) : null}
               </div>
             </div>
@@ -411,7 +426,7 @@ export default function CreateProductFromCatalogDialog({
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {canViewPricing && (
                 <div className="space-y-1.5">
-                  <Label htmlFor="cpfc-purchase">Preço de compra ({catalogCurrency(item!)})</Label>
+                  <Label htmlFor="cpfc-purchase">Preço de compra ({catalogCurrency(current)})</Label>
                   <Input
                     id="cpfc-purchase"
                     inputMode="decimal"

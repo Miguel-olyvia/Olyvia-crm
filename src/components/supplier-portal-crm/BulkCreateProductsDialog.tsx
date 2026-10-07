@@ -76,14 +76,23 @@ export default function BulkCreateProductsDialog({
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
 
-  useEffect(() => {
-    if (!items || !organizationId) {
+  // Ao fechar (items=null) o Radix ainda mostra o conteúdo durante a animação
+  // de saída: nada é limpo nem lido de `items` aí. A reposição é feita ao abrir.
+  const [prevItems, setPrevItems] = useState<CrmCatalogItem[] | null>(items);
+  const [shownCount, setShownCount] = useState(items?.length ?? 0);
+  if (items !== prevItems) {
+    setPrevItems(items);
+    if (items) {
+      setShownCount(items.length);
       setRows([]);
       setSkuErrors({});
       setPrepareError(null);
       setProgress({ done: 0, total: 0 });
-      return;
     }
+  }
+
+  useEffect(() => {
+    if (!items || !organizationId) return;
     let cancelled = false;
     (async () => {
       setPreparing(true);
@@ -219,7 +228,7 @@ export default function BulkCreateProductsDialog({
     <Dialog open={!!items} onOpenChange={(v) => { if (!v && !running) onClose(); }}>
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Criar {items?.length ?? 0} produto(s) a partir do catálogo</DialogTitle>
+          <DialogTitle>Criar {shownCount} produto(s) a partir do catálogo</DialogTitle>
           <DialogDescription>
             Cada artigo dá origem a um produto novo (estado Ativo, compra e venda), já ligado ao artigo.
             {canViewPricing ? " O preço de compra é o do catálogo (por unidade)." : ""} Sem preço de venda.

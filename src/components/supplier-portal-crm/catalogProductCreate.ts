@@ -238,15 +238,15 @@ const round2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
  * Custo unitário do produto a partir do preço do catálogo. Com units_per_pack
  * > 1 o preço é o da embalagem: divide-se (como unitCostFromPackPrice).
  */
-export function catalogUnitCost(item: Pick<CrmCatalogItem, "base_price" | "units_per_pack">): number | null {
-  if (item.base_price == null) return null;
+export function catalogUnitCost(item: Pick<CrmCatalogItem, "base_price" | "units_per_pack"> | null | undefined): number | null {
+  if (!item || item.base_price == null) return null;
   const n = Number(item.units_per_pack ?? 0);
   return n > 1 ? round2(Number(item.base_price) / n) : round2(Number(item.base_price));
 }
 
 /** Moeda do catálogo se for uma das da BD; senão EUR. */
-export function catalogCurrency(item: Pick<CrmCatalogItem, "currency">): CurrencyCode {
-  const c = (item.currency ?? "").toUpperCase() as CurrencyCode;
+export function catalogCurrency(item: Pick<CrmCatalogItem, "currency"> | null | undefined): CurrencyCode {
+  const c = (item?.currency ?? "").toUpperCase() as CurrencyCode;
   return CURRENCIES.includes(c) ? c : "EUR";
 }
 
@@ -256,8 +256,8 @@ export function catalogCurrency(item: Pick<CrmCatalogItem, "currency">): Currenc
  * linha item_suppliers na unidade do produto, e um preço de caixa de 12 numa
  * linha à unidade ficaria 12× acima.
  */
-export function applyCatalogPriceOnLink(item: Pick<CrmCatalogItem, "units_per_pack">, canViewPricing: boolean): boolean {
-  return canViewPricing && !((item.units_per_pack ?? 0) > 1);
+export function applyCatalogPriceOnLink(item: Pick<CrmCatalogItem, "units_per_pack"> | null | undefined, canViewPricing: boolean): boolean {
+  return !!item && canViewPricing && !((item.units_per_pack ?? 0) > 1);
 }
 
 export interface CreateProductInput {
