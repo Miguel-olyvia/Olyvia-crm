@@ -112,7 +112,7 @@ type ErrorKind = "insecure" | "unsupported" | "permission" | "notfound" | "busy"
  * como "vários códigos" (o zxing só devolve um por frame e pode alternar). A
  * leitura fica bloqueada até a mira ficar vazia durante este tempo.
  */
-const AIM_CONFLICT_MS = 400;
+const AIM_CONFLICT_MS = 250;
 
 const NATIVE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code", "data_matrix", "itf"];
 const NATIVE_INTERVAL_MS = 120;
@@ -326,6 +326,8 @@ async function startZxing(
       failures += 1;
       if (failures > ZXING_MAX_RESTARTS) {
         generation += 1; // invalida este ciclo
+        stopped = true; // nem o resize/orientationchange volta a arrancar o zxing
+        controls?.stop();
         onFatal(err);
         return;
       }
