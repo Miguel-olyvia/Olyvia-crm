@@ -24,6 +24,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
+import { ProductCodesSection } from "@/components/products/ProductCodesSection";
+import { productSaveErrorMessage } from "@/components/receiving/productCodes";
 
 const productSchema = z.object({
   sku: z.string().trim().min(1, "O SKU é obrigatório.").max(100, "O SKU deve ter menos de 100 caracteres."),
@@ -1247,9 +1249,11 @@ export default function Products() {
     } catch (error: any) {
       toast({
         title: editingProduct ? t('products.toast.updateError') : t('products.toast.createError'),
+        // 23505 do código de barras: a mensagem do servidor já diz qual o
+        // produto; productSaveErrorMessage só troca o texto em bruto do índice.
         description: purchasePackClearedFirst
-          ? `${error.message} A compra na ligação ao fornecedor já tinha passado à unidade e ficou assim — volte a indicar o pack.`
-          : error.message,
+          ? `${productSaveErrorMessage(error) || error.message} A compra na ligação ao fornecedor já tinha passado à unidade e ficou assim — volte a indicar o pack.`
+          : productSaveErrorMessage(error) || error.message,
         variant: "destructive",
       });
     }
@@ -2500,6 +2504,17 @@ export default function Products() {
                     {fieldErrors.barcode && <p className="text-sm text-destructive">{fieldErrors.barcode}</p>}
                   </div>
                 </div>
+
+                {editingProduct && (
+                  <ProductCodesSection
+                    productId={editingProduct.id}
+                    organizationId={editingProduct.organization_id ?? activeCompany?.id ?? null}
+                    productName={editingProduct.name}
+                    sku={editingProduct.sku}
+                    barcode={editingProduct.barcode}
+                    canEdit={hasPermission("products.edit")}
+                  />
+                )}
 
                 <div className="space-y-2">
                   <Label htmlFor="name">{t('products.form.name')}</Label>

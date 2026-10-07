@@ -57,6 +57,14 @@ import { DeliveryNotePicker } from "@/components/receiving/DeliveryNotePicker";
 import { DeliveryNoteDialog } from "@/components/receiving/DeliveryNoteDialog";
 import { DeliveryNoteDetail } from "@/components/receiving/DeliveryNoteDetail";
 import { NOTE_STATUS_LABEL, fetchDeliveryNote, noteLabel, type DeliveryNoteFull } from "@/components/receiving/deliveryNotes";
+import { LearnCodeDialog } from "@/components/receiving/LearnCodeDialog";
+import {
+  describeLearnResult,
+  productCodeErrorMessage,
+  removeProductCode,
+  type LearnCodeResult,
+} from "@/components/receiving/productCodes";
+import { ToastAction } from "@/components/ui/toast";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -71,6 +79,7 @@ import {
   RotateCcw,
   ScanBarcode,
   Search,
+  Tag,
   Trash2,
 } from "lucide-react";
 
@@ -258,6 +267,12 @@ interface QueuedScan {
   id: string;
   value: string;
   attempts: number;
+  /**
+   * p_unit_conversion no lookup (só a re-leitura depois de associar um código).
+   * Ausente = chamada igual à das fatias 1/2. A receção (rpc_receive_by_code)
+   * continua SEM a flag — ver onLearned.
+   */
+  unitConversion?: boolean;
 }
 
 interface FailedScan {
@@ -267,6 +282,7 @@ interface FailedScan {
   attempts: number;
   /** Há uma nova tentativa automática agendada. */
   waiting: boolean;
+  unitConversion?: boolean;
 }
 
 /** Leitura recusada de forma definitiva; fica visível até ser dispensada. */
@@ -275,6 +291,17 @@ interface RejectedScan {
   value: string;
   message: string;
   at: Date;
+  /** 'not_found' = o lookup não encontrou o código (permite "Associar a um produto"). Opcional. */
+  reason?: "not_found";
+}
+
+/** Leitura recusada a associar (diálogo aberto); não persiste. */
+interface LearnTarget {
+  scanId: string;
+  code: string;
+  /** Época/empresa em que o diálogo abriu (a re-leitura só entra se ainda for a mesma). */
+  epoch: number;
+  org: string;
 }
 
 /** Linha de receiving_scans (RLS: só as da organização do utilizador). */
@@ -1153,6 +1180,10 @@ export default function Receiving() {
   // Guia do fornecedor ("" = sem guia).
   const { hasPermission } = usePermissions();
   const canEditNotes = hasPermission("purchase_orders.receive");
+  // Regra de rpc_product_code_learn: (receber E editar inventário) OU editar produtos.
+  const canEditProducts = hasPermission("products.edit");
+  const canLearnCodes =
+    canEditProducts || (hasPermission("purchase_orders.receive") && hasPermission("inventory.edit"));
   const [deliveryNoteId, setDeliveryNoteId] = useState("");
   const [noteInfo, setNoteInfo] = useState<DeliveryNoteFull | null>(null);
   const [noteLoadError, setNoteLoadError] = useState<string | null>(null);
@@ -1166,6 +1197,11 @@ export default function Receiving() {
   const [queueSize, setQueueSize] = useState(0);
   const [failedScans, setFailedScans] = useState<FailedScan[]>([]);
   const [rejectedScans, setRejectedScans] = useState<RejectedScan[]>([]);
+  const [learnTarget, setLearnTarget] = useState<LearnTarget | null>(null);
+  /** Separado do alvo: ao fechar, o código fica visível durante a animação. */
+  const [learnOpen, setLearnOpen] = useState(false);
+  /** Desfazer em curso (por id do código): um clique de cada vez. */
+  const undoingCodesRef = useRef(new Set<string>());
   /** Texto para leitores de ecrã (região aria-live sempre montada). */
   const [announcement, setAnnouncement] = useState("");
   const [panel, setPanel] = useState<ScanPanel>({ kind: "none" });
@@ -1500,6 +1536,8 @@ export default function Receiving() {
     scanRetryTimers.current.clear();
     setFailedScans([]);
     setRejectedScans([]);
+    setLearnTarget(null);
+    setLearnOpen(false);
     setAnnouncement("");
     setWarehouseId("");
     setSupplierId("");
@@ -2192,8 +2230,8 @@ export default function Receiving() {
 
   // ── Leitura ──
   /** Leitura recusada de forma definitiva: fica na lista até ser dispensada. */
-  const addRejected = useCallback((value: string, message: string) => {
-    setRejectedScans((cur) => [{ id: newRequestId(), value, message, at: new Date() }, ...cur]);
+  const addRejected = useCallback((value: string, message: string, reason?: RejectedScan["reason"]) => {
+    setRejectedScans((cur) => [{ id: newRequestId(), value, message, at: new Date(), ...(reason ? { reason } : {}) }, ...cur]);
     setAnnouncement(`«${value}»: ${message}`);
   }, []);
 
@@ -2265,7 +2303,7 @@ export default function Receiving() {
    * mensagem se falhou de forma passageira (para voltar a tentar).
    */
   const lookupOne = useCallback(
-    async (value: string): Promise<{ transient: string } | null> => {
+    async (value: string, unitConversion = false): Promise<{ transient: string } | null> => {
       const org = orgRef.current;
       const epoch = orgEpochRef.current;
       const wh = warehouseRef.current;
@@ -2278,6 +2316,8 @@ export default function Receiving() {
           p_code: value,
           p_supplier_id: sup || undefined,
           p_delivery_note_id: dn || undefined,
+          // Só na re-leitura depois de associar; nas outras a chamada fica igual.
+          ...(unitConversion ? { p_unit_conversion: true } : {}),
         });
         if (!isCurrent(epoch, org)) return null;
         // A guia mudou durante a procura: o âmbito era outro — repete a leitura.
@@ -2296,6 +2336,7 @@ export default function Receiving() {
           addRejected(
             lookup.code || value,
             ["Código não encontrado.", ...lookup.warnings].join(" "),
+            "not_found",
           );
         } else if (lookup.candidates.length > 1) {
           // Fica numa lista própria: uma leitura seguinte não a apaga.
@@ -2337,7 +2378,7 @@ export default function Receiving() {
         const item = scanQueueRef.current[0];
         const org = orgRef.current;
         const epoch = orgEpochRef.current;
-        const outcome = await lookupOne(item.value);
+        const outcome = await lookupOne(item.value, item.unitConversion === true);
         // Remove por id: a fila pode ter sido limpa (troca de organização) entretanto.
         scanQueueRef.current = scanQueueRef.current.filter((x) => x.id !== item.id);
         setQueueSize(scanQueueRef.current.length);
@@ -2346,7 +2387,14 @@ export default function Receiving() {
           const auto = attempts < SCAN_AUTO_RETRIES && !!warehouseRef.current;
           setFailedScans((cur) => [
             ...cur.filter((x) => x.id !== item.id),
-            { id: item.id, value: item.value, error: outcome.transient, attempts, waiting: auto },
+            {
+              id: item.id,
+              value: item.value,
+              error: outcome.transient,
+              attempts,
+              waiting: auto,
+              ...(item.unitConversion ? { unitConversion: true } : {}),
+            },
           ]);
           if (auto) {
             const delay = SCAN_RETRY_BASE_MS * 2 ** (attempts - 1);
@@ -2354,7 +2402,12 @@ export default function Receiving() {
               scanRetryTimers.current.delete(item.id);
               if (!isCurrent(epoch, org)) return;
               setFailedScans((cur) => cur.filter((x) => x.id !== item.id));
-              enqueueRef.current({ id: item.id, value: item.value, attempts });
+              enqueueRef.current({
+                id: item.id,
+                value: item.value,
+                attempts,
+                ...(item.unitConversion ? { unitConversion: true } : {}),
+              });
             }, delay);
             scanRetryTimers.current.set(item.id, timer);
           }
@@ -2525,7 +2578,7 @@ export default function Receiving() {
     if (t) window.clearTimeout(t);
     scanRetryTimers.current.delete(id);
     setFailedScans((cur) => cur.filter((x) => x.id !== id));
-    enqueueRef.current({ id: f.id, value: f.value, attempts: 0 });
+    enqueueRef.current({ id: f.id, value: f.value, attempts: 0, ...(f.unitConversion ? { unitConversion: true } : {}) });
     focusScan();
   };
 
@@ -2549,6 +2602,73 @@ export default function Receiving() {
     setChoices((prev) => prev.filter((x) => x.id !== choiceId));
     addCandidate(lookup, c);
     focusScan();
+  };
+
+  // ── Associar um código não encontrado a um produto (Fase 2 — fatia 3) ──
+  const openLearn = (r: RejectedScan) => {
+    const org = orgRef.current;
+    if (!org || !warehouseRef.current) return;
+    setLearnTarget({ scanId: r.id, code: r.value, epoch: orgEpochRef.current, org });
+    setLearnOpen(true);
+  };
+
+  /** Desfaz a associação (anulação lógica). Não mexe no cesto nem reverte receções. */
+  const undoLearned = async (r: LearnCodeResult) => {
+    const id = r.id;
+    if (!id || undoingCodesRef.current.has(id)) return;
+    undoingCodesRef.current.add(id);
+    try {
+      const { data, error } = await removeProductCode(id, "Desfeito na receção");
+      if (!mountedRef.current) return;
+      if (error || !data) {
+        toast({
+          title: "Não foi possível desfazer a associação",
+          description: productCodeErrorMessage(error ?? { code: "XX000", message: "Resposta vazia do servidor." }),
+          variant: "destructive",
+        });
+        return;
+      }
+      const n = Number(data.scans_using_code) || 0;
+      toast({
+        title: data.already_removed ? "A associação já tinha sido desfeita" : "Associação desfeita",
+        description: [
+          `«${data.code}» deixa de ser reconhecido como ${data.product_name ? `«${data.product_name}»` : "o produto"}.`,
+          n > 0
+            ? `${n} ${n === 1 ? "leitura usou" : "leituras usaram"} este código — as receções feitas não são revertidas.`
+            : "As receções feitas não são revertidas.",
+          "Retira do cesto se não for este o produto.",
+        ].join(" "),
+        duration: 15000,
+      });
+    } finally {
+      undoingCodesRef.current.delete(id);
+    }
+  };
+
+  /**
+   * Código associado: a leitura recusada sai da lista e o código é lido de novo
+   * pelo caminho normal (fila → gate → lookup), com p_unit_conversion só nessa
+   * leitura. Se a empresa mudou entretanto, não se repete nada.
+   */
+  const handleLearned = (r: LearnCodeResult) => {
+    const t = learnTarget;
+    if (!t || !learnOpen) return;
+    setRejectedScans((cur) => cur.filter((x) => x.id !== t.scanId));
+    const same = isCurrent(t.epoch, t.org);
+    if (same) enqueueRef.current({ id: newRequestId(), value: t.code, attempts: 0, unitConversion: true });
+    const canUndo = !!r.id && r.learned;
+    toast({
+      title: r.learned ? "Código associado" : "Código já reconhecido",
+      description: same
+        ? `${describeLearnResult(r)} A leitura foi repetida.`
+        : `${describeLearnResult(r)} A empresa mudou — lê o código de novo.`,
+      duration: canUndo ? 15000 : undefined,
+      action: canUndo ? (
+        <ToastAction altText="Desfazer a associação do código" className="h-11 px-4" onClick={() => void undoLearned(r)}>
+          Desfazer
+        </ToastAction>
+      ) : undefined,
+    });
   };
 
   // ── Edição do cesto ──
@@ -3531,6 +3651,18 @@ export default function Receiving() {
                   <p className="break-words text-destructive">{r.message}</p>
                   <p className="text-xs text-muted-foreground">{timeFmt.format(r.at)}</p>
                 </div>
+                {r.reason === "not_found" && canLearnCodes && !!warehouseId && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-11 shrink-0"
+                    onMouseDown={keepScanFocus}
+                    onClick={() => openLearn(r)}
+                  >
+                    <Tag className="mr-2 h-4 w-4" aria-hidden />
+                    Associar a um produto
+                  </Button>
+                )}
                 <Button
                   type="button"
                   variant="ghost"
@@ -3877,6 +4009,24 @@ export default function Receiving() {
           setCreateNoteOpen(true);
         }}
       />
+      {canLearnCodes && (
+        <LearnCodeDialog
+          open={learnOpen && learnTarget !== null}
+          onOpenChange={(o) => {
+            if (!o) {
+              setLearnOpen(false);
+              focusScan();
+            }
+          }}
+          code={learnTarget?.code ?? ""}
+          organizationId={orgId}
+          warehouseId={warehouseId || null}
+          supplierId={supplierId || (deliveryNoteId && noteInfo?.id === deliveryNoteId ? noteInfo.supplier_id : null)}
+          suppliers={suppliers}
+          canEditProducts={canEditProducts}
+          onLearned={handleLearned}
+        />
+      )}
       {canEditNotes && (
         <DeliveryNoteDialog
           open={createNoteOpen}
