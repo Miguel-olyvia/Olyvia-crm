@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAccessKind } from "@/hooks/useClientRole";
+import { clientSupplierHome, fetchAccessKind, getClientSupplierSurface } from "@/hooks/useClientRole";
 import { getSessionContext } from "@/lib/auth/sessionContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -85,8 +85,19 @@ const Auth = () => {
   useEffect(() => {
     const redirectByRole = async (userId: string) => {
       const kind = await fetchAccessKind(userId);
+      if (kind === "supplier_only") {
+        // Conta do portal do fornecedor (sem anew_users): nunca vai para o CRM.
+        navigate("/supplier-portal");
+        return;
+      }
       if (kind === "client_only") {
         navigate("/client-portal");
+        return;
+      }
+      if (kind === "client_supplier") {
+        // Cliente que é também fornecedor: escolha guardada ou ecrã de escolha.
+        // Nunca vai para o CRM.
+        navigate(clientSupplierHome(getClientSupplierSurface(userId)));
         return;
       }
       if (kind === "hybrid") {

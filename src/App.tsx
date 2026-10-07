@@ -10,7 +10,7 @@ import { PermissionsProvider } from "@/contexts/PermissionsContext";
 import { SidebarExpandProvider } from "@/contexts/SidebarContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { ClientRouteGuard, CrmRouteGuard } from "@/components/ClientRouteGuard";
+import { ClientRouteGuard, CrmRouteGuard, SupplierRouteGuard } from "@/components/ClientRouteGuard";
 import { LayoutRoute } from "@/components/Layout";
 
 // Critical routes loaded eagerly
@@ -139,6 +139,12 @@ const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalPropos
 const ClientPortalContracts = lazy(() => import("./pages/ClientPortalContracts"));
 const ClientPortalContractDetail = lazy(() => import("./pages/ClientPortalContractDetail"));
 const ClientPortalDocuments = lazy(() => import("./pages/ClientPortalDocuments"));
+// Portal do Fornecedor (F3.1): contexto sp_whoami + layout montados uma vez.
+const SupplierPortalShell = lazy(() => import("./components/supplier-portal/SupplierPortalLayout"));
+const SupplierPortal = lazy(() => import("./pages/SupplierPortal"));
+const SupplierPortalCatalog = lazy(() => import("./pages/SupplierPortalCatalog"));
+const SupplierPortalOrders = lazy(() => import("./pages/SupplierPortalOrders"));
+const SupplierPortalOrderDetail = lazy(() => import("./pages/SupplierPortalOrderDetail"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -202,6 +208,16 @@ const App = () => (
                       <Route path="/client-portal/contracts" element={<ClientPortalContracts />} />
                       <Route path="/client-portal/contracts/:id" element={<ClientPortalContractDetail />} />
                       <Route path="/client-portal/documents" element={<ClientPortalDocuments />} />
+                    </Route>
+                  </Route>
+
+                  {/* Portal do Fornecedor — só contas supplier_only (sem anew_users); só RPCs sp_* */}
+                  <Route element={<SupplierRouteGuard />}>
+                    <Route element={<SupplierPortalShell />}>
+                      <Route path="/supplier-portal" element={<SupplierPortal />} />
+                      <Route path="/supplier-portal/catalog" element={<SupplierPortalCatalog />} />
+                      <Route path="/supplier-portal/orders" element={<SupplierPortalOrders />} />
+                      <Route path="/supplier-portal/orders/:id" element={<SupplierPortalOrderDetail />} />
                     </Route>
                   </Route>
 
