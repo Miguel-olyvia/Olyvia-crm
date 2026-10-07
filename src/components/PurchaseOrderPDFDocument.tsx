@@ -337,12 +337,13 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
           )}
         </View>
 
-        {/* Notes Section */}
-        {order.notes && (
+        {/* Notas para o fornecedor. As notas internas (order.notes: VD/EC, texto
+            da equipa) NUNCA saem no PDF, que é enviado ao fornecedor. */}
+        {order.supplier_notes && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>NOTAS</Text>
+            <Text style={styles.sectionTitle}>OBSERVAÇÕES</Text>
             <View style={{ padding: 8, backgroundColor: '#f9fafb', borderRadius: 4 }}>
-              <Text style={{ fontSize: 9, color: '#374151', lineHeight: 1.4 }}>{order.notes}</Text>
+              <Text style={{ fontSize: 9, color: '#374151', lineHeight: 1.4 }}>{order.supplier_notes}</Text>
             </View>
           </View>
         )}
