@@ -22929,6 +22929,189 @@ export type Database = {
           },
         ]
       }
+      supplier_price_change_requests: {
+        Row: {
+          batch_id: string
+          catalog_item_id: string
+          catalog_new_price: number
+          catalog_old_price: number | null
+          created_at: string
+          currency: string
+          decided_at: string | null
+          decided_by: string | null
+          decision_note: string | null
+          id: string
+          item_supplier_id: string
+          link_id: string
+          new_price: number
+          old_currency: string | null
+          old_price: number | null
+          old_unit_label: string | null
+          old_units_per_pack: number | null
+          organization_id: string
+          product_id: string | null
+          requested_at: string
+          requested_by_portal_user: string | null
+          result: Json | null
+          status: string
+          superseded_at: string | null
+          superseded_batch_id: string | null
+          superseded_by: string | null
+          supplier_id: string
+          unit_changed: boolean
+          unit_label: string | null
+          units_per_pack: number | null
+          uom_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          batch_id: string
+          catalog_item_id: string
+          catalog_new_price: number
+          catalog_old_price?: number | null
+          created_at?: string
+          currency: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          id?: string
+          item_supplier_id: string
+          link_id: string
+          new_price: number
+          old_currency?: string | null
+          old_price?: number | null
+          old_unit_label?: string | null
+          old_units_per_pack?: number | null
+          organization_id: string
+          product_id?: string | null
+          requested_at?: string
+          requested_by_portal_user?: string | null
+          result?: Json | null
+          status?: string
+          superseded_at?: string | null
+          superseded_batch_id?: string | null
+          superseded_by?: string | null
+          supplier_id: string
+          unit_changed?: boolean
+          unit_label?: string | null
+          units_per_pack?: number | null
+          uom_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          batch_id?: string
+          catalog_item_id?: string
+          catalog_new_price?: number
+          catalog_old_price?: number | null
+          created_at?: string
+          currency?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          decision_note?: string | null
+          id?: string
+          item_supplier_id?: string
+          link_id?: string
+          new_price?: number
+          old_currency?: string | null
+          old_price?: number | null
+          old_unit_label?: string | null
+          old_units_per_pack?: number | null
+          organization_id?: string
+          product_id?: string | null
+          requested_at?: string
+          requested_by_portal_user?: string | null
+          result?: Json | null
+          status?: string
+          superseded_at?: string | null
+          superseded_batch_id?: string | null
+          superseded_by?: string | null
+          supplier_id?: string
+          unit_changed?: boolean
+          unit_label?: string | null
+          units_per_pack?: number | null
+          uom_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_price_change_requests_catalog_item_id_fkey"
+            columns: ["catalog_item_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_catalog_items"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_item_supplier_id_fkey"
+            columns: ["item_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "item_suppliers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_item_supplier_id_fkey"
+            columns: ["item_supplier_id"]
+            isOneToOne: false
+            referencedRelation: "item_suppliers_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_account_links"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_requested_by_portal_user_fkey"
+            columns: ["requested_by_portal_user"]
+            isOneToOne: false
+            referencedRelation: "supplier_portal_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_superseded_by_fkey"
+            columns: ["superseded_by"]
+            isOneToOne: false
+            referencedRelation: "supplier_price_change_requests"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_price_change_requests_supplier_id_fkey"
+            columns: ["supplier_id"]
+            isOneToOne: false
+            referencedRelation: "suppliers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       suppliers: {
         Row: {
           address: string | null
@@ -25221,6 +25404,16 @@ export type Database = {
         }
         Returns: Record<string, unknown>
       }
+      fn_apply_product_cost_from_supplier: {
+        Args: {
+          p_actor: string
+          p_currency: string
+          p_item_supplier_id: string
+          p_new_price: number
+          p_organization_id: string
+        }
+        Returns: Json
+      }
       fn_billing_client_role_id: { Args: never; Returns: string }
       fn_catalog_parse_number: { Args: { p_value: string }; Returns: number }
       fn_channel_revenue_facts: {
@@ -25545,6 +25738,15 @@ export type Database = {
           p_ids: string[]
           p_po: Database["public"]["Tables"]["purchase_orders"]["Row"]
           p_reason: string
+        }
+        Returns: Json
+      }
+      fn_price_change_cost_plan: {
+        Args: {
+          p_currency: string
+          p_item_supplier_id: string
+          p_new_price: number
+          p_organization_id: string
         }
         Returns: Json
       }
@@ -30183,6 +30385,26 @@ export type Database = {
           p_lines?: Json
           p_purchase_order_id: string
           p_warehouse_id?: string
+        }
+        Returns: Json
+      }
+      rpc_price_changes_decide: {
+        Args: {
+          p_accept_unit_change?: boolean
+          p_approve: boolean
+          p_ids: string[]
+          p_note?: string
+        }
+        Returns: Json
+      }
+      rpc_price_changes_list: {
+        Args: {
+          p_limit?: number
+          p_offset?: number
+          p_organization_id?: string
+          p_product_id?: string
+          p_status?: string
+          p_supplier_id?: string
         }
         Returns: Json
       }
