@@ -583,13 +583,26 @@ function mutateUnsent(key: string, op: (list: UnsentEntry[]) => UnsentEntry[]): 
 // Sem BroadcastChannel não há como distinguir cópia de F5: com tabId já
 // existente não se repõe (apaga-se) e avisa-se — perder um cesto por receber é
 // recuperável; receber duas vezes não.
+// Original congelado (poupança de energia) ou ocupado não responde a tempo:
+// por isso o separador que fica com os dados deixa também uma marca de "vivo"
+// na sessionStorage (posta ao verificar e em pageshow, retirada em pagehide).
+// F5: o pagehide retira-a, a carga nova não a vê. Cópia: a marca vem copiada →
+// é cópia sem perguntar (lado seguro). Separador descartado pelo Chrome
+// (document.wasDiscarded) não correu o pagehide: ignora a marca e pergunta.
+// A troca de mensagens fica para quando não há marca (ex.: o original ainda
+// não tinha aberto a receção nesta carga).
 // Estado ao nível do módulo (uma vez por carga): StrictMode e sair/voltar ao
 // ecrã reutilizam a mesma verificação, e a instância continua a responder
 // depois de o ecrã desmontar (enquanto a página não recarregar).
 
 const TAB_ID_KEY = "olyvia.receiving.tabId";
-/** Espera pela resposta do separador original (a resposta chega em poucos ms). */
-const TAB_PROBE_MS = 250;
+/** Marca de "separador vivo": guarda o tabId de quem tem os dados nesta sessionStorage. */
+const TAB_ALIVE_KEY = "olyvia.receiving.tabAlive";
+/**
+ * Espera pela resposta do separador original (chega em poucos ms; folga para
+ * páginas ocupadas). Só atrasa a reposição — as leituras não esperam por ela.
+ */
+const TAB_PROBE_MS = 750;
 const TAB_DATA_PREFIXES = ["olyvia.receiving.basket.", "olyvia.receiving.unsent.", "olyvia.receiving.context."];
 
 interface TabMsg {
@@ -610,6 +623,64 @@ let tabState: { tabId: string; checking: boolean } | null = null;
 let tabCheckPromise: Promise<TabCheck> | null = null;
 let tabNoticeShown = false;
 const tabChannels = new Map<string, BroadcastChannel>();
+/** Durante a espera: passa já esta carga a cópia (desempate com outra do mesmo tabId). */
+let tabYield: (() => void) | null = null;
+let tabLifecycleBound = false;
+
+function readTabAlive(): string | null {
+  try {
+    return window.sessionStorage.getItem(TAB_ALIVE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeTabAlive(id: string) {
+  try {
+    window.sessionStorage.setItem(TAB_ALIVE_KEY, id);
+  } catch {
+    // sessionStorage indisponível: fica só a troca de mensagens.
+  }
+}
+
+function clearTabAlive() {
+  try {
+    window.sessionStorage.removeItem(TAB_ALIVE_KEY);
+  } catch {
+    // idem
+  }
+}
+
+// F5/fechar/sair (incl. para o bfcache): a página deixa de estar viva.
+const onTabPageHide = () => clearTabAlive();
+// Volta do bfcache (persisted) com o estado intacto: volta a marcar-se.
+const onTabPageShow = () => {
+  if (tabState) writeTabAlive(tabState.tabId);
+};
+
+function bindTabLifecycle() {
+  if (tabLifecycleBound) return;
+  tabLifecycleBound = true;
+  window.addEventListener("pagehide", onTabPageHide);
+  window.addEventListener("pageshow", onTabPageShow);
+}
+
+// Só dev: o HMR volta a correr o módulo com outro id de instância. O canal e a
+// marca da versão antiga fariam a nova passar a cópia e apagar o cesto.
+import.meta.hot?.dispose(() => {
+  tabChannels.forEach((c) => {
+    try {
+      c.close();
+    } catch {
+      // já fechado
+    }
+  });
+  tabChannels.clear();
+  tabYield = null;
+  window.removeEventListener("pagehide", onTabPageHide);
+  window.removeEventListener("pageshow", onTabPageShow);
+  clearTabAlive();
+});
 
 function readTabId(): string | null {
   try {
@@ -658,9 +729,14 @@ function tabChannel(userId: string): BroadcastChannel | null {
     const m = ev.data as Partial<TabMsg> | null;
     if (!m || m.t !== "ping" || typeof m.tab !== "string" || typeof m.from !== "string") return;
     if (m.from === tabInstanceId || !tabState || m.tab !== tabState.tabId) return;
-    // Duas cargas com o mesmo tabId a verificar ao mesmo tempo: só responde a
-    // de id menor, para exatamente uma ficar com os dados.
-    if (tabState.checking && !(tabInstanceId < m.from)) return;
+    // Duas cargas com o mesmo tabId a verificar ao mesmo tempo: decide já, sem
+    // depender de cada uma ter recebido o pedido da outra (uma pode ter nascido
+    // depois do pedido da outra). Id menor responde (a outra passa a cópia); id
+    // maior passa ela própria a cópia. Em qualquer ordem, só uma fica com os dados.
+    if (tabState.checking && !(tabInstanceId < m.from)) {
+      tabYield?.();
+      return;
+    }
     try {
       ch.postMessage({ t: "pong", tab: m.tab, from: tabInstanceId, to: m.from } satisfies TabMsg);
     } catch {
@@ -680,10 +756,15 @@ function checkTab(userId: string): Promise<TabCheck> {
   if (tabCheckPromise) return tabCheckPromise;
   tabCheckPromise = new Promise<TabCheck>((resolve) => {
     const current = readTabId();
+    const alive = readTabAlive();
+    const discarded = (document as Document & { wasDiscarded?: boolean }).wasDiscarded === true;
+    bindTabLifecycle();
     const becomeNew = (reason: TabCheck["reason"]) => {
       const dropped = reason === "ok" ? false : clearTabSessionData();
       tabState = { tabId: newRequestId(), checking: false };
       writeTabId(tabState.tabId);
+      // Fica com os (seus) dados: marca-se, para uma cópia desta também ser detetada.
+      writeTabAlive(tabState.tabId);
       resolve({ reason, dropped });
     };
     // Separador sem tabId: carga nova (ou dados de antes desta versão) — repõe.
@@ -691,11 +772,19 @@ function checkTab(userId: string): Promise<TabCheck> {
       becomeNew("ok");
       return;
     }
+    // Marca copiada de um separador vivo (o F5 retira-a no pagehide): é cópia,
+    // mesmo que o original esteja congelado e não responda.
+    if (alive === current && !discarded) {
+      becomeNew("duplicate");
+      return;
+    }
     if (!ch) {
       becomeNew("unsupported");
       return;
     }
     tabState = { tabId: current, checking: true };
+    // Já durante a espera: uma cópia feita agora vê a marca e não repõe.
+    writeTabAlive(current);
     let done = false;
     let timer = 0;
     const onMsg = (ev: MessageEvent) => {
@@ -705,15 +794,18 @@ function checkTab(userId: string): Promise<TabCheck> {
     const finish = (duplicate: boolean) => {
       if (done) return;
       done = true;
+      tabYield = null;
       window.clearTimeout(timer);
       ch.removeEventListener("message", onMsg);
       if (duplicate) {
         becomeNew("duplicate");
       } else {
         tabState = { tabId: current, checking: false };
+        writeTabAlive(current);
         resolve({ reason: "ok", dropped: false });
       }
     };
+    tabYield = () => finish(true);
     ch.addEventListener("message", onMsg);
     timer = window.setTimeout(() => finish(false), TAB_PROBE_MS);
     try {
@@ -721,6 +813,7 @@ function checkTab(userId: string): Promise<TabCheck> {
     } catch {
       // Não deu para perguntar: não há prova de que é o original.
       done = true;
+      tabYield = null;
       window.clearTimeout(timer);
       ch.removeEventListener("message", onMsg);
       becomeNew("unsupported");
@@ -1316,13 +1409,18 @@ export default function Receiving() {
         warehouseRef.current = nextWh;
       }
       // Fornecedor reposto que já não pertence a esta empresa: volta a "Todos".
-      // A guia fixa o fornecedor: sai com ele.
+      // A guia fixa o fornecedor: sai com ele (e avisa-se, nunca em silêncio).
       const curSup = supplierRef.current;
       if (curSup && !supRes.error && !sups.some((s) => s.id === curSup)) {
+        const hadNote = !!deliveryNoteRef.current;
         setSupplierId("");
         supplierRef.current = "";
         setDeliveryNoteId("");
         deliveryNoteRef.current = "";
+        if (hadNote) {
+          setAnnouncement("Fornecedor indisponível — a guia foi retirada.");
+          toast({ title: "Fornecedor indisponível", description: "A guia foi retirada." });
+        }
       }
       focusScan();
     })();
@@ -1557,9 +1655,15 @@ export default function Receiving() {
         return;
       }
       let sup = !item.supplierId || !opts || opts.suppliers.some((s) => s.id === item.supplierId) ? item.supplierId : "";
+      // A guia fixa o fornecedor: sem o fornecedor dela, a guia da entrada não
+      // volta — fica a guia do ecrã (se houver fornecedor no ecrã) ou nenhuma.
+      const supGone = !!itemDn && !sup;
       let dn = itemDn;
       let itemNoteOpen = true;
-      if (itemDn && itemDn !== deliveryNoteRef.current) {
+      if (supGone) {
+        dn = supplierRef.current ? deliveryNoteRef.current : "";
+        sup = dn ? supplierRef.current : "";
+      } else if (itemDn && itemDn !== deliveryNoteRef.current) {
         const r = await fetchDeliveryNote(itemDn);
         if (!isCurrent(epoch, org) || submittingRef.current) return;
         if (r.error && r.error.code !== "P0002") {
@@ -1585,7 +1689,10 @@ export default function Receiving() {
             ? `a guia ${noteInfoRef.current?.id === curDn ? noteLabel(noteInfoRef.current.note_number) : "escolhida"}`
             : "sem guia";
           const itemLabel = itemDn ? `a guia ${item.deliveryNoteNumber ? noteLabel(item.deliveryNoteNumber) : "do fornecedor"}` : "sem guia";
-          const message = !itemNoteOpen
+          const dnLabel = dn && dn === curDn ? curLabel : "sem guia";
+          const message = supGone
+            ? `Esta entrada foi lida com ${itemLabel}, de um fornecedor que já não está disponível. Volta ao cesto com ${dnLabel}?`
+            : !itemNoteOpen
             ? `Esta entrada foi lida com ${itemLabel}, que já não está aberta. Volta ao cesto com ${curLabel} (nada tinha sido recebido)?`
             : `Esta entrada foi lida com ${itemLabel}. O ecrã passa de ${curLabel} para ${itemLabel} — as leituras seguintes também. Continuar?`;
           setUnsentConfirm({ id, dn, message });
