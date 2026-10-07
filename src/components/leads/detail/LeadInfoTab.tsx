@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { supabase } from "@/integrations/supabase/client";
+import { formatInternationalPhone } from "@/lib/phone/splitInternationalPhone";
 
 interface LeadInfoTabProps {
   lead: any;
@@ -79,7 +80,7 @@ export function LeadInfoTab({
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Telefone</p>
-            <p className="text-sm font-medium text-primary">{leadPhone || "—"}</p>
+            <p className="text-sm font-medium text-primary">{leadPhone ? formatInternationalPhone(leadPhone) : "—"}</p>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Morada</p>

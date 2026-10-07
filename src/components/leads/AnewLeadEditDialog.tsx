@@ -27,6 +27,7 @@ import { Loader2, Save } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { DynamicFormField } from "./DynamicFormField";
 import { LeadPhoneField } from "./LeadPhoneField";
+import { normalizeLegacyPhonePrefix } from "@/lib/phone/splitInternationalPhone";
 import {
   createSupabaseLeadDialogFieldDefinitionResolverClient,
   resolveLeadDialogFieldDefinitions,
@@ -381,8 +382,11 @@ export function AnewLeadEditDialog({
       // campanha, para as duas nunca divergirem. NAO toca em form_submissions
       // (a submissao original vive noutra tabela e mantem-se).
       for (const generalKey of GENERAL_FIELD_KEYS) {
-        const canonical = readGeneralField(generalKey, updatedFieldValues);
-        if (canonical === "" || canonical === null || canonical === undefined) continue;
+        const rawCanonical = readGeneralField(generalKey, updatedFieldValues);
+        if (rawCanonical === "" || rawCanonical === null || rawCanonical === undefined) continue;
+        // Telefones antigos com "00" (ex.: "0045 41736520") passam a "+45...",
+        // o formato que o seletor de indicativo mostra e que o resto guarda.
+        const canonical = generalKey === "phone" ? normalizeLegacyPhonePrefix(rawCanonical) : rawCanonical;
         updatedFieldValues[generalKey] = canonical;
         const mappedKey = generalKeyToFormKey[generalKey];
         if (mappedKey) updatedFieldValues[mappedKey] = canonical;

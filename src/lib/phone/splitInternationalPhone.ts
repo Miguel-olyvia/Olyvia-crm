@@ -40,6 +40,23 @@ export function splitInternationalPhone(raw: unknown): SplitPhone {
   return { dialCode: digits.length === 9 ? DEFAULT_DIAL_CODE : "", digits };
 }
 
+/**
+ * Troca o prefixo antigo "00" por "+" e tira espaços ("0045 41736520" ->
+ * "+4541736520"). Qualquer outro valor fica exatamente como está.
+ */
+export function normalizeLegacyPhonePrefix(raw: string): string {
+  const compact = raw.replace(/[\s().-]/g, "");
+  return compact.startsWith("00") && compact.length > 2 ? `+${compact.slice(2)}` : raw;
+}
+
+/** Para mostrar: "+4541736520" -> "+45 41736520". Sem indicativo reconhecido, devolve o valor como está. */
+export function formatInternationalPhone(raw: string): string {
+  const normalized = normalizeLegacyPhonePrefix(raw);
+  if (!normalized.startsWith("+")) return raw;
+  const { dialCode, digits } = splitInternationalPhone(normalized);
+  return dialCode && digits ? `${dialCode} ${digits}` : raw;
+}
+
 /** Junta indicativo e dígitos no formato guardado ("+351912345678"). */
 export function joinInternationalPhone(dialCode: string, digits: string): string {
   const onlyDigits = digits.replace(/\D/g, "");
