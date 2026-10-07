@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowLeftRight, Building2, Home, LogOut, Package, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Building2, ClipboardList, Home, LogOut, Package, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useClientSupplierSwitch } from "@/hooks/useClientRole";
 import { Button } from "@/components/ui/button";
@@ -8,10 +8,12 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { cn } from "@/lib/utils";
 import { SupplierPortalProvider, useSupplierPortal } from "@/contexts/SupplierPortalContext";
 import { SupplierFirstLoginModal } from "@/components/supplier-portal/SupplierFirstLoginModal";
+import { useSpOrdersToConfirm } from "@/components/supplier-portal/useSpOrdersToConfirm";
 
 const NAV_ITEMS = [
-  { label: "Início", icon: Home, path: "/supplier-portal", end: true },
-  { label: "Catálogo", icon: Package, path: "/supplier-portal/catalog", end: false },
+  { label: "Início", icon: Home, path: "/supplier-portal", end: true, badge: false },
+  { label: "Encomendas", icon: ClipboardList, path: "/supplier-portal/orders", end: false, badge: true },
+  { label: "Catálogo", icon: Package, path: "/supplier-portal/catalog", end: false, badge: false },
 ];
 
 function FullScreenLoader() {
@@ -108,6 +110,7 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
   const { loading, loadError, active, account, user, companies, firstLogin, markPasswordChanged, refresh } =
     useSupplierPortal();
   const logout = useLogout();
+  const { count: toConfirm } = useSpOrdersToConfirm();
 
   if (loading) return <FullScreenLoader />;
   if (loadError) return <LoadErrorScreen onRetry={() => void refresh()} />;
@@ -171,6 +174,14 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
             >
               <item.icon className="h-4 w-4" aria-hidden="true" />
               {item.label}
+              {item.badge && !!toConfirm && toConfirm > 0 && (
+                <span
+                  className="ml-0.5 inline-flex min-w-5 h-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground"
+                  aria-label={`${toConfirm} por confirmar`}
+                >
+                  {toConfirm > 99 ? "99+" : toConfirm}
+                </span>
+              )}
             </NavLink>
           ))}
         </div>

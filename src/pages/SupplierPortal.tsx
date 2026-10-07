@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Building2, Info, Package } from "lucide-react";
+import { ArrowRight, Building2, ClipboardList, Info, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useSupplierPortal } from "@/contexts/SupplierPortalContext";
 import { isNoSupplierAccess, spCatalogList } from "@/lib/supplierPortal/spRpc";
+import { useSpOrdersToConfirm } from "@/components/supplier-portal/useSpOrdersToConfirm";
 
-/** Portal do Fornecedor — início: boas-vindas, empresas com acesso e atalho para o catálogo. */
+/** Portal do Fornecedor — início: boas-vindas, encomendas por confirmar, empresas com acesso e atalho para o catálogo. */
 export default function SupplierPortal() {
   const { user, account, companies, companiesError, canManageCatalog, refresh } = useSupplierPortal();
+  const { count: toConfirm, isError: toConfirmError } = useSpOrdersToConfirm();
   const [activeItems, setActiveItems] = useState<number | null>(null);
   const [countError, setCountError] = useState(false);
 
@@ -42,9 +44,36 @@ export default function SupplierPortal() {
         </h1>
         <p className="text-sm text-muted-foreground">
           Portal do Fornecedor de <span className="font-medium text-foreground">{account?.display_name}</span>. Aqui
-          mantém o seu catálogo atualizado para as empresas com quem trabalha.
+          recebe e confirma as encomendas e mantém o seu catálogo atualizado para as empresas com quem trabalha.
         </p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <ClipboardList className="h-4 w-4 text-primary" aria-hidden="true" />
+            Encomendas
+          </CardTitle>
+          <CardDescription>
+            {toConfirm === null && !toConfirmError && "A contar encomendas…"}
+            {toConfirmError && "Não foi possível contar as encomendas."}
+            {toConfirm !== null &&
+              (toConfirm === 0
+                ? "Não tem encomendas por confirmar."
+                : toConfirm === 1
+                  ? "1 encomenda por confirmar"
+                  : `${toConfirm.toLocaleString("pt-PT")} encomendas por confirmar`)}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild className="h-11 w-full sm:w-auto gap-2" variant={toConfirm ? "default" : "outline"}>
+            <Link to={toConfirm ? "/supplier-portal/orders?estado=to_confirm" : "/supplier-portal/orders"}>
+              {toConfirm ? "Ver encomendas por confirmar" : "Ver encomendas"}
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">

@@ -143,6 +143,8 @@ const ClientPortalDocuments = lazy(() => import("./pages/ClientPortalDocuments")
 const SupplierPortalShell = lazy(() => import("./components/supplier-portal/SupplierPortalLayout"));
 const SupplierPortal = lazy(() => import("./pages/SupplierPortal"));
 const SupplierPortalCatalog = lazy(() => import("./pages/SupplierPortalCatalog"));
+const SupplierPortalOrders = lazy(() => import("./pages/SupplierPortalOrders"));
+const SupplierPortalOrderDetail = lazy(() => import("./pages/SupplierPortalOrderDetail"));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -214,6 +216,8 @@ const App = () => (
                     <Route element={<SupplierPortalShell />}>
                       <Route path="/supplier-portal" element={<SupplierPortal />} />
                       <Route path="/supplier-portal/catalog" element={<SupplierPortalCatalog />} />
+                      <Route path="/supplier-portal/orders" element={<SupplierPortalOrders />} />
+                      <Route path="/supplier-portal/orders/:id" element={<SupplierPortalOrderDetail />} />
                     </Route>
                   </Route>
 

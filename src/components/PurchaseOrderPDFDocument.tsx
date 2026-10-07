@@ -275,6 +275,7 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
     const statusConfig: Record<string, { bg: string; color: string; text: string }> = {
       pending: { bg: '#fef3c7', color: '#92400e', text: 'Pendente' },
       ordered: { bg: '#dbeafe', color: '#1e40af', text: 'Encomendado' },
+      partially_received: { bg: '#e0e7ff', color: '#3730a3', text: 'Parcialmente recebida' },
       received: { bg: '#d1fae5', color: '#065f46', text: 'Recebido' },
       cancelled: { bg: '#fee2e2', color: '#991b1b', text: 'Cancelado' },
     };
@@ -337,12 +338,13 @@ export const PurchaseOrderPDFDocument = ({ order, company, supplier, items, user
           )}
         </View>
 
-        {/* Notes Section */}
-        {order.notes && (
+        {/* Notas para o fornecedor (F3.2). NUNCA order.notes: é texto interno
+            (VD/EC) e não pode sair no PDF enviado ao fornecedor. */}
+        {order.supplier_notes && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>NOTAS</Text>
+            <Text style={styles.sectionTitle}>OBSERVAÇÕES</Text>
             <View style={{ padding: 8, backgroundColor: '#f9fafb', borderRadius: 4 }}>
-              <Text style={{ fontSize: 9, color: '#374151', lineHeight: 1.4 }}>{order.notes}</Text>
+              <Text style={{ fontSize: 9, color: '#374151', lineHeight: 1.4 }}>{order.supplier_notes}</Text>
             </View>
           </View>
         )}

@@ -121,6 +121,114 @@ export interface SpUpsertResult {
   item: SpCatalogItem;
 }
 
+// ─── Encomendas (F3.2, contrato-f32 secção 2) ───────────────────────────────
+// Conteúdo dos retornos Json de sp_list_orders / sp_get_order /
+// sp_mark_order_viewed / sp_confirm_order.
+
+export type SpOrderStatus = "pending" | "ordered" | "partially_received" | "received" | "cancelled";
+export type SpPublicationStatus = "sent" | "viewed" | "confirmed";
+export type SpOrderFilter = "all" | "to_confirm" | "confirmed" | "open" | "received" | "cancelled";
+
+export interface SpOrderListItem {
+  purchase_order_id: string;
+  order_number: string;
+  organization: { id: string; name: string; logo_url: string | null };
+  order_date: string;
+  expected_delivery: string | null;
+  order_status: SpOrderStatus;
+  publication_status: SpPublicationStatus;
+  revision: number;
+  sent_at: string;
+  viewed_at: string | null;
+  confirmed_at: string | null;
+  promised_date: string | null;
+  lines: number;
+  subtotal: number;
+  vat_total: number;
+  total: number;
+  currency: string;
+  can_confirm: boolean;
+}
+
+export type SpOrderCounts = Record<SpOrderFilter, number>;
+
+export interface SpOrderListResult {
+  total: number;
+  limit: number;
+  offset: number;
+  counts: SpOrderCounts;
+  items: SpOrderListItem[];
+}
+
+export interface SpOrderLine {
+  id: string;
+  item_type: "product" | "service";
+  description: string | null;
+  sku: string | null;
+  supplier_sku: string | null;
+  uom_code: string | null;
+  base_uom_code: string | null;
+  units_per_uom: number | null;
+  quantity: number;
+  unit_price: number;
+  vat_rate: number;
+  vat_amount: number;
+  subtotal: number;
+  total: number;
+  received_quantity: number;
+  selected_attributes: Record<string, { label?: string; value?: string; unit?: string } | null>;
+}
+
+export interface SpOrderDetail {
+  purchase_order_id: string;
+  order_number: string;
+  order_date: string;
+  expected_delivery: string | null;
+  order_status: SpOrderStatus;
+  supplier_notes: string | null;
+  currency: string;
+  publication: {
+    status: SpPublicationStatus;
+    revision: number;
+    sent_at: string;
+    viewed_at: string | null;
+    confirmed_at: string | null;
+    confirmed_by_name: string | null;
+    promised_date: string | null;
+    supplier_comment: string | null;
+    promised_date_accepted: boolean;
+  };
+  can_confirm: boolean;
+  company: {
+    organization_id: string;
+    name: string;
+    nif: string | null;
+    address: string | null;
+    phone: string | null;
+    logo_url: string | null;
+  };
+  supplier: { name: string | null; tax_id: string | null; email: string | null; phone: string | null };
+  sent_by: { name: string | null; email: string | null; phone: string | null } | null;
+  lines: SpOrderLine[];
+  totals: { subtotal: number; vat_total: number; total: number };
+}
+
+export interface SpMarkViewedResult {
+  purchase_order_id: string;
+  viewed_at: string;
+  first_view: boolean;
+}
+
+export interface SpConfirmOrderResult {
+  purchase_order_id: string;
+  revision: number;
+  publication_status: "confirmed";
+  confirmed_at: string;
+  promised_date: string | null;
+  supplier_comment: string | null;
+  already_confirmed: boolean;
+}
+
 // ─── Erros ──────────────────────────────────────────────────────────────────
 
 export type SpErrorHint =
@@ -129,7 +237,9 @@ export type SpErrorHint =
   | "not_found"
   | "validation"
   | "too_many_rows"
-  | "conflict";
+  | "conflict"
+  | "stale_revision"
+  | "order_closed";
 
 export class SupplierPortalRpcError extends Error {
   readonly code: string | null;
@@ -175,6 +285,10 @@ export function spErrorMessage(err: unknown): string {
       return raw || "Já existe um artigo com esta referência.";
     case "validation":
       return raw || "Dados inválidos.";
+    case "stale_revision":
+      return "A empresa atualizou esta encomenda entretanto. Reveja os dados atualizados e confirme de novo.";
+    case "order_closed":
+      return raw || "Esta encomenda já foi recebida ou cancelada: já não pode ser confirmada.";
     default:
       break;
   }
@@ -267,4 +381,72 @@ export async function spCatalogUpsertItem(item: SpCatalogRowInput & { id?: strin
 export async function spCatalogSetActive(itemIds: string[], active: boolean): Promise<{ updated: number }> {
   const args: SpFunctions["sp_catalog_set_active"]["Args"] = { p_item_ids: itemIds, p_active: active };
   return unwrap<{ updated: number }>(await supabase.rpc("sp_catalog_set_active", args));
+}
+
+// ─── Encomendas (F3.2) ──────────────────────────────────────────────────────
+// Argumentos: tipos gerados. Retornos (Json): tipos locais acima (contrato
+// F3.2, secção 2; migration 20261211130000_portal_fornecedor_f32_encomendas.sql).
+
+/** Erro "não encontrada" (inexistente, retirada, de outra empresa ou sem acesso). */
+export function isSpNotFound(err: unknown): boolean {
+  return getSpHint(err) === "not_found";
+}
+
+export async function spListOrders(params: {
+  orgId?: string | null;
+  status?: SpOrderFilter | null;
+  search?: string | null;
+  limit?: number;
+  offset?: number;
+}): Promise<SpOrderListResult> {
+  const search = params.search?.trim();
+  const args: SpFunctions["sp_list_orders"]["Args"] = {
+    p_limit: params.limit ?? 50,
+    p_offset: params.offset ?? 0,
+    ...(params.orgId ? { p_org_id: params.orgId } : {}),
+    ...(params.status && params.status !== "all" ? { p_status: params.status } : {}),
+    ...(search ? { p_search: search } : {}),
+  };
+  const data = unwrap<SpOrderListResult | null>(await supabase.rpc("sp_list_orders", args));
+  return {
+    total: data?.total ?? 0,
+    limit: data?.limit ?? (params.limit ?? 50),
+    offset: data?.offset ?? (params.offset ?? 0),
+    counts: {
+      all: data?.counts?.all ?? 0,
+      to_confirm: data?.counts?.to_confirm ?? 0,
+      confirmed: data?.counts?.confirmed ?? 0,
+      open: data?.counts?.open ?? 0,
+      received: data?.counts?.received ?? 0,
+      cancelled: data?.counts?.cancelled ?? 0,
+    },
+    items: Array.isArray(data?.items) ? data.items : [],
+  };
+}
+
+export async function spGetOrder(poId: string): Promise<SpOrderDetail> {
+  const args: SpFunctions["sp_get_order"]["Args"] = { p_po_id: poId };
+  return unwrap<SpOrderDetail>(await supabase.rpc("sp_get_order", args));
+}
+
+/** Marca como vista (só muda da 1.ª vez). O erro pode ser ignorado (contrato 2.3). */
+export async function spMarkOrderViewed(poId: string): Promise<SpMarkViewedResult> {
+  const args: SpFunctions["sp_mark_order_viewed"]["Args"] = { p_po_id: poId };
+  return unwrap<SpMarkViewedResult>(await supabase.rpc("sp_mark_order_viewed", args));
+}
+
+export async function spConfirmOrder(params: {
+  poId: string;
+  revision: number;
+  promisedDate?: string | null;
+  comment?: string | null;
+}): Promise<SpConfirmOrderResult> {
+  const comment = params.comment?.trim();
+  const args: SpFunctions["sp_confirm_order"]["Args"] = {
+    p_po_id: params.poId,
+    p_revision: params.revision,
+    ...(params.promisedDate ? { p_promised_date: params.promisedDate } : {}),
+    ...(comment ? { p_comment: comment } : {}),
+  };
+  return unwrap<SpConfirmOrderResult>(await supabase.rpc("sp_confirm_order", args));
 }

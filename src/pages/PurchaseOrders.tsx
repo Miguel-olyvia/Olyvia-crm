@@ -48,6 +48,12 @@ import { purchaseOrderSchema } from "@/lib/validations";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { integerQtyMessage, isValidQtyFor, requiresIntegerQty, roundToIntegerQty } from "@/utils/quotes/integerQty";
 import { noteLabel } from "@/components/receiving/deliveryNotes";
+// Portal do fornecedor F3.2 (encomendas): componentes à parte para facilitar levar para main.
+import { PoSupplierPortalPanel } from "@/components/purchase-orders/PoSupplierPortalPanel";
+import { PoSendToSupplierButton } from "@/components/purchase-orders/PoSendToSupplierButton";
+import { PoPortalStatusBadge } from "@/components/purchase-orders/PoPortalStatusBadge";
+import { usePoPublications } from "@/components/purchase-orders/usePoPublications";
+import { getPoHint, type PoSupplierStatus } from "@/components/purchase-orders/poSupplierPortalApi";
 
 type PurchaseOrder = Database["public"]["Tables"]["purchase_orders"]["Row"] & {
   suppliers: { name: string } | null;
@@ -493,7 +499,21 @@ const PurchaseOrders = () => {
     expected_delivery: "",
     status: "pending",
     notes: "",
+    supplier_notes: "",
   });
+  // Portal do fornecedor (F3.2): estado lido pelo painel do diálogo. Com
+  // publicação ativa, linhas/fornecedor/data da encomenda/estado ficam só de
+  // leitura (a RPC recusa com po_published); notas e entrega prevista não.
+  const [portalStatus, setPortalStatus] = useState<PoSupplierStatus | null>(null);
+  const [portalRefreshKey, setPortalRefreshKey] = useState(0);
+  const isPublishedLock =
+    !!editingId &&
+    portalStatus?.purchase_order_id === editingId &&
+    !!portalStatus.publication &&
+    portalStatus.publication.status !== 'withdrawn';
+  const isStructureLocked = isOrderReadOnly || isPublishedLock;
+  // Etiqueta "No portal · …" na lista: leitura à parte (volta a ler quando a lista recarrega).
+  const { publications: poPublications } = usePoPublications(activeCompany?.id, orders);
 
   const [orderItems, setOrderItems] = useState<PurchaseOrderItem[]>([]);
   const [showItemsDialog, setShowItemsDialog] = useState(false);
@@ -1210,6 +1230,7 @@ const PurchaseOrders = () => {
 
   const handleEdit = async (order: PurchaseOrder) => {
     openOrderIdRef.current = order.id;
+    setPortalStatus(null);
     setEditingId(order.id);
     setEditingOrderMeta({
       id: order.id,
@@ -1224,6 +1245,7 @@ const PurchaseOrders = () => {
       expected_delivery: order.expected_delivery || "",
       status: order.status,
       notes: order.notes || "",
+      supplier_notes: order.supplier_notes || "",
     });
 
     // Fase 5.0F: origem via Contrato (source_type/source_id, Fase 5.0C) —
@@ -1311,7 +1333,9 @@ const PurchaseOrders = () => {
         sku: item.sku,
         quantity: item.quantity,
         unit_price: item.unit_price,
-        vat_rate: item.vat_rate || 23,
+        // ?? (não ||): uma linha a 0% de IVA tem de voltar a 0, senão gravar uma
+        // PO publicada no portal dá po_published (linhas "diferentes"), F3.2.
+        vat_rate: item.vat_rate ?? 23,
         vat_amount: item.vat_amount || 0,
         total_price: item.total_price,
         selected_attributes: item.selected_attributes as Record<string, string> || {},
@@ -1328,6 +1352,20 @@ const PurchaseOrders = () => {
   };
 
   const handleDelete = async (id: string) => {
+    // F3.2: uma PO apagada desaparece do portal do fornecedor sem aviso
+    // (contrato-f32, risco 3) — pedir para retirar primeiro.
+    const publication = poPublications.get(id);
+    if (publication && publication.status !== 'withdrawn') {
+      if (publication.status !== 'confirmed') {
+        toast({
+          title: "Encomenda no portal do fornecedor",
+          description: "Retire-a primeiro do portal (abra a encomenda → Retirar do portal) e depois apague-a.",
+          variant: "destructive",
+        });
+        return;
+      }
+      if (!confirm("O fornecedor já confirmou esta encomenda no portal. Se a apagar, deixa de a ver sem qualquer aviso. Apagar mesmo assim?")) return;
+    }
     if (!confirm(t('purchaseOrders.delete.confirm'))) return;
 
     try {
@@ -1828,12 +1866,14 @@ const PurchaseOrders = () => {
       setEditingId(null);
       setEditingOrderMeta(null);
       setPendingRevertPreselect(null);
+      setPortalStatus(null);
       setFormData({
         supplier_id: "",
         order_date: new Date().toISOString().split('T')[0],
         expected_delivery: "",
         status: "pending",
         notes: "",
+        supplier_notes: "",
       });
       setFieldErrors({});
       setOrderItems([]);
@@ -2567,6 +2607,8 @@ const PurchaseOrders = () => {
         status: formData.status,
         total_value: total,
         notes: formData.notes || null,
+        // F3.2: notas PARA O FORNECEDOR (PDF + portal); "" limpa.
+        supplier_notes: formData.supplier_notes.trim() || null,
         // Ligação manual a uma Encomenda Cliente (20261115200000) — só
         // relevante na criação; rpc_update_purchase_order ignora estas 2
         // chaves de propósito (nunca reescreve a ligação numa edição).
@@ -2629,17 +2671,30 @@ const PurchaseOrders = () => {
 
       setOpen(false);
       setEditingId(null);
+      setPortalStatus(null);
       setFormData({
         supplier_id: "",
         order_date: new Date().toISOString().split('T')[0],
         expected_delivery: "",
         status: "pending",
         notes: "",
+        supplier_notes: "",
       });
       setFieldErrors({});
       setOrderItems([]);
       loadData();
     } catch (error: any) {
+      // F3.2: a encomenda está (ou passou a estar) no portal do fornecedor — a
+      // mensagem do servidor já explica o que se pode mudar; atualizar o painel.
+      if (getPoHint(error) === 'po_published') {
+        setPortalRefreshKey((k) => k + 1);
+        toast({
+          title: "Encomenda no portal do fornecedor",
+          description: error.message,
+          variant: "destructive",
+        });
+        return;
+      }
       captureFlowError(error, "purchase-order-lifecycle");
       toast({
         title: editingId ? t('purchaseOrders.toast.updateError') : t('purchaseOrders.toast.createError'),
@@ -3080,6 +3135,7 @@ const PurchaseOrders = () => {
         <Badge className={`whitespace-nowrap ${getStatusColor(order.status)}`}>
           {getStatusLabel(order.status)}
         </Badge>
+        <PoPortalStatusBadge publication={poPublications.get(order.id)} />
       </TableCell>
       <TableCell className="font-semibold whitespace-nowrap">€{order.total_value.toFixed(2)}</TableCell>
       <TableCell className={`text-right ${stickyActionsClass(!showSupplier)}`}>
@@ -3099,6 +3155,15 @@ const PurchaseOrders = () => {
               <Button variant="ghost" size="icon" onClick={() => handleGeneratePDF(order.id)} title="Gerar PDF">
                 <FileDown className="w-4 h-4" />
               </Button>
+              {/* F3.2: "Encomendar" (pending → ordered; com portal, publica e envia email). */}
+              {order.status === 'pending' && hasPermission('purchase_orders.approve') && (
+                <PoSendToSupplierButton
+                  orderId={order.id}
+                  orderNumber={order.order_number}
+                  supplierName={order.suppliers?.name}
+                  onDone={() => loadData()}
+                />
+              )}
               {(order.status === 'pending' || order.status === 'ordered' || order.status === 'partially_received') && (
                 // Mesmas permissões que rpc_receive_purchase_order_lines exige (a receção dá entrada de stock).
                 <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
@@ -3358,11 +3423,39 @@ const PurchaseOrders = () => {
                     </div>
                   )}
 
+                  {/* F3.2: portal do fornecedor — estado, Encomendar, Aceitar data, Retirar. */}
+                  {editingId && editingOrderMeta?.id === editingId && (
+                    <PoSupplierPortalPanel
+                      key={editingId}
+                      orderId={editingId}
+                      orderNumber={editingOrderMeta.orderNumber}
+                      supplierName={editingOrderMeta.supplierName}
+                      refreshKey={portalRefreshKey}
+                      onStatusChange={setPortalStatus}
+                      onOrderChanged={() => loadData()}
+                      onOrderStatusChanged={(status) => {
+                        setFormData((prev) => ({ ...prev, status }));
+                        setEditingOrderMeta((prev) => (prev && prev.id === editingId ? { ...prev, status } : prev));
+                      }}
+                      onExpectedDeliveryAccepted={(date) =>
+                        setFormData((prev) => ({ ...prev, expected_delivery: date || "" }))
+                      }
+                    />
+                  )}
+
+                  {isPublishedLock && !isOrderReadOnly && (
+                    <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200" role="note">
+                      {portalStatus?.publication?.status === 'confirmed'
+                        ? 'O fornecedor já confirmou esta encomenda no portal: as linhas, o fornecedor, a data da encomenda e o estado já não podem ser alterados. Para reduzir quantidades use "Não vou receber" (Anular resto). Pode alterar as notas e a entrega prevista.'
+                        : 'Esta encomenda está no portal do fornecedor. Retire-a para alterar linhas, fornecedor, data da encomenda ou estado. Pode alterar as notas e a entrega prevista.'}
+                    </div>
+                  )}
+
                   {/* Organization Selection — sem prop disabled; em só de leitura o
                       fieldset desativa os controlos e bloqueia o rato. */}
                   <fieldset
-                    disabled={isOrderReadOnly}
-                    className={cn("min-w-0", isOrderReadOnly && "pointer-events-none opacity-70")}
+                    disabled={isStructureLocked}
+                    className={cn("min-w-0", isStructureLocked && "pointer-events-none opacity-70")}
                   >
                     <OrganizationFormSection
                       value={organizationSelection}
@@ -3427,7 +3520,7 @@ const PurchaseOrders = () => {
                             variant="outline"
                             role="combobox"
                             aria-expanded={supplierPickerOpen}
-                            disabled={isOrderReadOnly}
+                            disabled={isStructureLocked}
                             className={cn("w-full justify-between font-normal", !formData.supplier_id && "text-muted-foreground", fieldErrors.supplier_id && "border-destructive")}
                           >
                             <span className="truncate">
@@ -3478,7 +3571,7 @@ const PurchaseOrders = () => {
                         value={formData.order_date}
                         onChange={(e) => setFormData({ ...formData, order_date: e.target.value })}
                         required
-                        disabled={isOrderReadOnly}
+                        disabled={isStructureLocked}
                         className={fieldErrors.order_date ? "border-destructive" : ""}
                       />
                       {fieldErrors.order_date && <p className="text-xs text-destructive">{fieldErrors.order_date}</p>}
@@ -3495,19 +3588,18 @@ const PurchaseOrders = () => {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="status">{t('purchaseOrders.form.status')} *</Label>
-                      <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })} disabled={isOrderReadOnly}>
+                      <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })} disabled={isStructureLocked}>
                         <SelectTrigger>
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="pending">{t('purchaseOrders.status.pending')}</SelectItem>
-                          {/* Passar a "ordered" (aprovar a encomenda) requer purchase_orders.approve.
-                              Continua visível se já for o valor atual (ex.: a reabrir uma encomenda
-                              já aprovada por quem entretanto perdeu a permissão), só fica indisponível
-                              para escolher de novo a partir de outro estado sem a permissão. Isto é só
-                              UX — o backend rejeita na mesma quem contornar isto. */}
-                          {(hasPermission('purchase_orders.approve') || formData.status === 'ordered') && (
-                            <SelectItem value="ordered">{t('purchaseOrders.status.ordered')}</SelectItem>
+                          {/* F3.2 (contrato-f32 5.2.2): "Encomendado" deixa de ser uma
+                              escolha aqui — passa só pelo botão "Encomendar", que também
+                              publica no portal do fornecedor. Continua visível (desativado)
+                              quando a encomenda já está encomendada, para mostrar o estado. */}
+                          {editingOrderMeta?.id === editingId && editingOrderMeta?.status === 'ordered' && (
+                            <SelectItem value="ordered" disabled>{t('purchaseOrders.status.ordered')}</SelectItem>
                           )}
                           {/* "received" já não é uma opção genérica aqui — passa pelo botão
                               dedicado "Marcar como recebida" na lista (Fase 4C), que pede o
@@ -3531,29 +3623,49 @@ const PurchaseOrders = () => {
                           <SelectItem value="cancelled">{t('purchaseOrders.status.cancelled')}</SelectItem>
                         </SelectContent>
                       </Select>
-                      {!isOrderReadOnly && !hasPermission('purchase_orders.approve') && formData.status !== 'ordered' && (
+                      {!isStructureLocked && formData.status === 'pending' && (
                         <p className="text-xs text-muted-foreground">
-                          Sem permissão para aprovar encomendas (mudar para "{t('purchaseOrders.status.ordered')}").
+                          {hasPermission('purchase_orders.approve')
+                            ? 'Para encomendar, grave e use o botão "Encomendar".'
+                            : `Sem permissão para encomendar (passar a "${t('purchaseOrders.status.ordered')}").`}
                         </p>
                       )}
                     </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="notes">{t('purchaseOrders.form.notes')}</Label>
-                    <Textarea
-                      id="notes"
-                      value={formData.notes}
-                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                      rows={3}
-                      disabled={isOrderReadOnly}
-                    />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="notes">Notas internas (não vão para o fornecedor)</Label>
+                      <Textarea
+                        id="notes"
+                        value={formData.notes}
+                        onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                        rows={3}
+                        disabled={isOrderReadOnly}
+                      />
+                    </div>
+                    {/* F3.2: supplier_notes — impressas no PDF e mostradas no portal. */}
+                    <div className="space-y-2">
+                      <Label htmlFor="supplier_notes">Notas para o fornecedor</Label>
+                      <Textarea
+                        id="supplier_notes"
+                        value={formData.supplier_notes}
+                        onChange={(e) => setFormData({ ...formData, supplier_notes: e.target.value.slice(0, 2000) })}
+                        rows={3}
+                        maxLength={2000}
+                        disabled={isOrderReadOnly}
+                        aria-describedby="supplier_notes_help"
+                      />
+                      <p id="supplier_notes_help" className="text-xs text-muted-foreground">
+                        Aparece no PDF e no portal do fornecedor. {formData.supplier_notes.length}/2000
+                      </p>
+                    </div>
                   </div>
 
                   <div className="border-t pt-4">
                     <div className="flex justify-between items-center mb-4">
                       <h3 className="text-lg font-semibold">{t('purchaseOrders.form.orderItems')}</h3>
-                      {!isOrderReadOnly && (
+                      {!isStructureLocked && (
                       <div className="flex gap-2">
                         {/* Pesquisa no catálogo do fornecedor (rpc_supplier_catalog_search):
                             SKU, ref. do fornecedor, código de barras ou nome. Cada
@@ -3682,7 +3794,7 @@ const PurchaseOrders = () => {
                                        type="number"
                                        value={item.quantity}
                                        onChange={(e) => handleItemChange(index, 'quantity', e.target.value)}
-                                       disabled={isOrderReadOnly}
+                                       disabled={isStructureLocked}
                                        className="w-20"
                                        min="0"
                                        step={itemRequiresIntegerQty(item) ? "1" : "0.01"}
@@ -3699,7 +3811,7 @@ const PurchaseOrders = () => {
                                        <Select
                                          value={currentLink?.item_supplier_id ?? ""}
                                          onValueChange={(value) => handleChangeLineUom(index, value)}
-                                         disabled={isOrderReadOnly}
+                                         disabled={isStructureLocked}
                                        >
                                          <SelectTrigger className="h-9 w-32" aria-label="Unidade da linha">
                                            <SelectValue placeholder={uomLabel || "—"} />
@@ -3723,7 +3835,7 @@ const PurchaseOrders = () => {
                                        type="number"
                                        value={item.unit_price}
                                        onChange={(e) => handleItemChange(index, 'unit_price', e.target.value)}
-                                       disabled={isOrderReadOnly}
+                                       disabled={isStructureLocked}
                                        className="w-24"
                                        min="0"
                                        step="0.01"
@@ -3733,7 +3845,7 @@ const PurchaseOrders = () => {
                                    <TableCell className="font-semibold">€{item.total_price.toFixed(2)}</TableCell>
                                    <TableCell>
                                      <div className="flex gap-1">
-                                        {!isOrderReadOnly && item.item_type === 'product' && item.product_id && (
+                                        {!isStructureLocked && item.item_type === 'product' && item.product_id && (
                                          <Button
                                            type="button"
                                            variant="ghost"
@@ -3749,7 +3861,7 @@ const PurchaseOrders = () => {
                                            <Tag className="w-4 h-4" />
                                          </Button>
                                        )}
-                                       {!isOrderReadOnly && (
+                                       {!isStructureLocked && (
                                        <Button
                                          type="button"
                                          variant="ghost"
