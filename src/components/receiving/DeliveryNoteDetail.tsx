@@ -2,7 +2,7 @@
 // (ok / falta / excesso / não anunciado / não encomendado), receções feitas
 // pela guia, histórico e ações (editar, fechar, reabrir, cancelar).
 //
-// Ações só para quem pode receber (purchase_orders.receive); quem só pode
+// Ações só para quem gere guias (receiving.manage_delivery_notes); quem só pode
 // consultar vê a ficha sem botões. Fechar exige nota se houver divergências;
 // reabrir e cancelar exigem motivo. Fechar/reabrir/cancelar repetidos são
 // idempotentes no servidor (changed=false), por isso "tentar de novo" depois
@@ -45,8 +45,13 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   noteId: string | null;
   orgId: string | null;
-  /** purchase_orders.receive: editar, fechar, reabrir, cancelar. */
+  /** receiving.manage_delivery_notes: editar, fechar, reabrir, cancelar. */
   canEdit: boolean;
+  /**
+   * receiving.download_proof: botão "Descarregar PDF" (só no frontend).
+   * Default true até o Receiving passar o valor da permissão.
+   */
+  canDownloadProof?: boolean;
   /** Trabalho local ainda por enviar com esta guia (aviso ao fechar/cancelar). */
   localWork?: (noteId: string) => DeliveryNoteLocalWork;
   /** Guia alterada (gravada, fechada, reaberta, cancelada) ou recarregada. */
@@ -70,7 +75,7 @@ const STATUS_TONE: Record<DeliveryNoteProductStatus, string> = {
 
 const HISTORY_LABEL: Record<string, string> = { close: "Fechada", reopen: "Reaberta", cancel: "Cancelada" };
 
-export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit, localWork, onChanged, onOpenOther, onUse }: Props) {
+export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit, canDownloadProof = true, localWork, onChanged, onOpenOther, onUse }: Props) {
   const [note, setNote] = useState<DeliveryNoteFull | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -422,7 +427,7 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Atualizar
               </Button>
-              {note.status !== "cancelled" && (
+              {canDownloadProof && note.status !== "cancelled" && (
                 <Button type="button" variant="outline" className="h-11" onClick={() => void downloadProof()} disabled={downloading}>
                   <FileDown className="mr-2 h-4 w-4" aria-hidden />
                   {downloading ? "A gerar…" : "Descarregar PDF"}

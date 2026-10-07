@@ -244,8 +244,8 @@ export const menuSections: MenuSection[] = [
       { to: "/suppliers", icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view" },
       { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses" },
       { to: "/purchase-orders", icon: ShoppingCart, labelKey: "sidebar.purchaseOrders" },
-      // Receção por código: mesma regra da rota (receber OU consultar encomendas).
-      { to: "/receiving", icon: ScanBarcode, labelKey: "sidebar.receiving", permissions: ["purchase_orders.receive", "purchase_orders.view"] },
+      // Receção por código: mesma regra da rota (permissão própria receiving.view).
+      { to: "/receiving", icon: ScanBarcode, labelKey: "sidebar.receiving", permissions: ["receiving.view"] },
       { to: "/stocks", icon: BarChart3, labelKey: "sidebar.stocks" },
       // Permissão própria (client_orders.view): quem trabalha no armazém vê as
       // encomendas de cliente sem precisar de acesso aos contratos. Os RPCs das

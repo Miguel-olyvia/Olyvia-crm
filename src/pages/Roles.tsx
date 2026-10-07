@@ -228,7 +228,7 @@ export default function Roles() {
     'leads', 'contacts', 'clients',
     'deals', 'proposals', 'quotes', 'quote_templates', 'direct_sales', 'contracts', 'client_contracts',
     'marketing', 'forms',
-    'suppliers', 'warehouses', 'purchase_orders', 'stocks', 'inventory', 'client_orders',
+    'suppliers', 'warehouses', 'purchase_orders', 'receiving', 'stocks', 'inventory', 'client_orders',
     'scheduling',
     'users', 'roles',
     'settings', 'smtp', 'email_templates',
@@ -267,6 +267,7 @@ export default function Roles() {
     suppliers: 'Fornecedores',
     warehouses: 'Armazéns',
     purchase_orders: 'Encomendas',
+    receiving: 'Receção no armazém',
     stocks: 'Stocks',
     inventory: 'Acesso a Stock',
     client_orders: 'Encomendas Clientes',
@@ -343,7 +344,7 @@ export default function Roles() {
         { label: 'Formulários', categories: ['forms'] },
       ],
     },
-    { label: 'Inventário', categories: ['suppliers', 'warehouses', 'purchase_orders', 'stocks', 'inventory', 'client_orders'] },
+    { label: 'Inventário', categories: ['suppliers', 'warehouses', 'purchase_orders', 'receiving', 'stocks', 'inventory', 'client_orders'] },
     {
       label: 'Agendamentos',
       categories: [],
@@ -405,6 +406,11 @@ export default function Roles() {
       manage_permissions: { label: 'Gerir Permissões', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' },
       export: { label: 'Exportar', className: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300' },
       import: { label: 'Importar', className: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300' },
+      // Receção no armazém (receive também serve purchase_orders.receive)
+      receive: { label: 'Receber', className: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' },
+      manage_delivery_notes: { label: 'Guias', className: 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300' },
+      learn_codes: { label: 'Códigos', className: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300' },
+      download_proof: { label: 'PDF', className: 'bg-teal-100 text-teal-700 dark:bg-teal-900 dark:text-teal-300' },
     };
     return badgeMap[suffix] || { label: suffix.charAt(0).toUpperCase() + suffix.slice(1).replace(/_/g, ' '), className: '' };
   };
