@@ -85,6 +85,11 @@ const Auth = () => {
   useEffect(() => {
     const redirectByRole = async (userId: string) => {
       const kind = await fetchAccessKind(userId);
+      if (kind === "supplier_only") {
+        // Conta do portal do fornecedor (sem anew_users): nunca vai para o CRM.
+        navigate("/supplier-portal");
+        return;
+      }
       if (kind === "client_only") {
         navigate("/client-portal");
         return;

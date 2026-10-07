@@ -4,7 +4,10 @@ import { toast } from "@/hooks/use-toast";
 import { identifyUser, resetAnalytics } from "@/lib/analytics/posthog";
 
 // Cache user type per company to reduce queries
-const userTypeCache = new Map<string, { tipo: string; roleName: string; timestamp: number }>();
+// `noProfile`: get_user_context respondeu SEM erro e com business_user_id nulo
+// (conta sem anew_users, p.ex. portal do fornecedor). Um erro da RPC NÃO conta
+// como noProfile — esse caso mantém o comportamento de sempre.
+const userTypeCache = new Map<string, { tipo: string; roleName: string; noProfile?: boolean; timestamp: number }>();
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 interface Company {
@@ -134,11 +137,11 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   // per-org filter over get_user_context()'s direct-membership list cannot
   // see that relationship and silently falls back to the user's unrelated
   // globally-highest role for any company reached only via hierarchy.
-  const determineUserType = useCallback(async (_authUserId: string): Promise<{ tipo: string; roleName: string }> => {
+  const determineUserType = useCallback(async (_authUserId: string): Promise<{ tipo: string; roleName: string; noProfile?: boolean }> => {
     const cacheKey = _authUserId;
     const cached = userTypeCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-      return { tipo: cached.tipo, roleName: cached.roleName };
+      return { tipo: cached.tipo, roleName: cached.roleName, noProfile: cached.noProfile };
     }
 
     const { data: rawCtx, error } = await (supabase as any).rpc("get_user_context");
@@ -151,7 +154,7 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
     const ctx = rawCtx as UserContextRpc;
 
     if (!ctx.business_user_id) {
-      const result = { tipo: "", roleName: "" };
+      const result = { tipo: "", roleName: "", noProfile: true };
       userTypeCache.set(cacheKey, { ...result, timestamp: Date.now() });
       return result;
     }
@@ -248,6 +251,22 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
       const initialResult = await determineUserType(session.user.id);
       if (requestVersion !== requestVersionRef.current) return;
+
+      // Conta sem anew_users (portal do fornecedor, ou conta sem perfil):
+      // get_user_work_orgs() daria "unauthorized" e um toast de erro a cada
+      // carregamento. Não tem organizações — termina sem chamar a RPC.
+      // Só entra aqui quando get_user_context respondeu sem erro com
+      // business_user_id nulo; utilizadores do CRM e clientes têm sempre perfil.
+      if (initialResult.noProfile) {
+        rolesByOrgIdRef.current = new Map();
+        setCompanies([]);
+        setActiveCompanyState(null);
+        setUserType("");
+        setUserRoleName("");
+        loadedUserIdRef.current = session.user.id;
+        initialLoadDoneRef.current = true;
+        return;
+      }
 
       // get_user_work_orgs() is the single source of truth for which orgs are
       // selectable: is_work_org = true AND status = 'active' (system_admin

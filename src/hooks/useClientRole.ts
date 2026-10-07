@@ -6,8 +6,20 @@ import {
   clearSessionContext,
   type SessionContext,
 } from "@/lib/auth/sessionContext";
+import { spWhoami } from "@/lib/supplierPortal/spRpc";
 
-export type ClientAccessKind = "loading" | "anonymous" | "client_only" | "crm_user" | "hybrid" | "no_profile";
+export type ClientAccessKind =
+  | "loading"
+  | "anonymous"
+  | "client_only"
+  | "crm_user"
+  | "hybrid"
+  | "no_profile"
+  // Portal do Fornecedor (F3.1): conta Auth SEM anew_users que sp_whoami
+  // reconhece como utilizador do portal do fornecedor. Nunca entra no CRM nem
+  // no portal do cliente (o gatilho trg_anew_users_00_block_supplier_accounts
+  // impede que estas contas recebam um anew_users).
+  | "supplier_only";
 export type { SessionContext };
 
 // Portal vs CRM is decided by presence/absence of the `client` role.
@@ -22,7 +34,8 @@ export type { SessionContext };
  * data is treated conservatively, matching the previous inline behaviour.
  *
  * - no auth id            → "anonymous"
- * - no anew_users profile → "no_profile"
+ * - no anew_users profile → "supplier_only" if sp_whoami says is_supplier,
+ *                            otherwise "no_profile"
  * - profile, no memberships → "crm_user" (self-registration onboarding)
  * - only `client` role    → "client_only"
  * - `client` + other role → "hybrid"
@@ -37,7 +50,15 @@ export async function fetchAccessKind(authUserId: string | null | undefined): Pr
     .eq("auth_user_id", authUserId)
     .maybeSingle();
 
-  if (!anewUser?.id) return "no_profile";
+  if (!anewUser?.id) {
+    // Só contas SEM anew_users chegam aqui: utilizadores do CRM e clientes do
+    // portal têm sempre perfil e nunca são classificados como fornecedor.
+    // sp_whoami nunca dá erro (devolve { is_supplier: false } para qualquer
+    // outra conta); se a chamada falhar, mantém-se o "no_profile" de sempre.
+    // spWhoami devolve { is_supplier: false } em qualquer falha.
+    const whoami = await spWhoami();
+    return whoami.is_supplier === true ? "supplier_only" : "no_profile";
+  }
 
   const { data: memberships } = await supabase
     .from("anew_memberships")
@@ -206,6 +227,9 @@ export function useClientRole() {
   const needsContextChoice = accessKind === "hybrid" && chosenContext === null;
   const portalAllowed = accessKind === "client_only" || (accessKind === "hybrid" && chosenContext === "portal");
   const crmAllowed = accessKind === "crm_user" || (accessKind === "hybrid" && chosenContext === "crm");
+  // Portal do Fornecedor: exclusivo de supplier_only (activeContext fica null,
+  // portalAllowed/crmAllowed ficam false).
+  const supplierAllowed = accessKind === "supplier_only";
 
   const chooseContext = (ctx: SessionContext) => {
     if (userId) setSessionContext(userId, ctx);
@@ -228,6 +252,7 @@ export function useClientRole() {
     needsContextChoice,
     portalAllowed,
     crmAllowed,
+    supplierAllowed,
     chooseContext,
     switchContext,
   };

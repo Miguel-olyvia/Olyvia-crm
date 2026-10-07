@@ -35,6 +35,8 @@ export function ClientRouteGuard({ children }: { children?: ReactNode }) {
 
   if (loading) return <LoadingScreen />;
   if (accessKind === "anonymous") return <Navigate to="/auth" replace />;
+  // Conta do portal do fornecedor: nunca entra no portal do cliente.
+  if (accessKind === "supplier_only") return <Navigate to="/supplier-portal" replace />;
   if (accessKind === "no_profile") return <NoProfileScreen />;
   if (needsContextChoice) return <Navigate to="/escolher-acesso" replace />;
   if (!portalAllowed) return <Navigate to="/dashboard" replace />;
@@ -53,12 +55,33 @@ export function CrmRouteGuard({ children }: { children?: ReactNode }) {
 
   if (loading) return <LoadingScreen />;
   if (accessKind === "anonymous") return <Navigate to="/auth" replace />;
+  // Conta do portal do fornecedor: nunca entra no CRM (nem no onboarding).
+  if (accessKind === "supplier_only") return <Navigate to="/supplier-portal" replace />;
   if (accessKind === "no_profile") return <NoProfileScreen />;
   if (needsContextChoice) return <Navigate to="/escolher-acesso" replace />;
 
   if (!crmAllowed) {
     return <Navigate to={portalAllowed ? "/client-portal" : "/auth"} replace />;
   }
+
+  return <>{children ?? <Outlet />}</>;
+}
+
+/**
+ * Layout route — wraps all supplier portal routes (/supplier-portal/*).
+ * Entry is allowed ONLY to supplier_only accounts (no anew_users, recognised
+ * by sp_whoami). Internal users and portal clients are sent to their own
+ * surface; they never see the supplier portal.
+ */
+export function SupplierRouteGuard({ children }: { children?: ReactNode }) {
+  const { accessKind, supplierAllowed, needsContextChoice, loading } = useClientRole();
+
+  if (loading) return <LoadingScreen />;
+  if (accessKind === "anonymous") return <Navigate to="/auth" replace />;
+  if (accessKind === "no_profile") return <NoProfileScreen />;
+  if (accessKind === "client_only") return <Navigate to="/client-portal" replace />;
+  if (needsContextChoice) return <Navigate to="/escolher-acesso" replace />;
+  if (!supplierAllowed) return <Navigate to="/home" replace />;
 
   return <>{children ?? <Outlet />}</>;
 }

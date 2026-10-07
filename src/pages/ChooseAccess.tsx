@@ -24,6 +24,11 @@ export default function ChooseAccess() {
       navigate("/auth", { replace: true });
       return;
     }
+    // Conta do portal do fornecedor: tem uma só superfície.
+    if (accessKind === "supplier_only") {
+      navigate("/supplier-portal", { replace: true });
+      return;
+    }
     // Not a hybrid needing a choice → send them where they belong.
     if (!needsContextChoice && accessKind !== "no_profile") {
       navigate(activeContext === "portal" ? "/client-portal" : "/home", { replace: true });

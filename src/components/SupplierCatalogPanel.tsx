@@ -24,6 +24,7 @@ import {
   type CatalogUomRef,
   type SupplierCatalogRow,
 } from "@/utils/supplierCatalogExportImport";
+import SupplierPortalCatalogSection from "@/components/supplier-portal-crm/SupplierPortalCatalogSection";
 
 interface SupplierCatalogPanelProps {
   supplierId: string;
@@ -32,6 +33,8 @@ interface SupplierCatalogPanelProps {
   // ligações novas ficam com esta organization_id (como no ItemSuppliersTable).
   organizationId: string | null;
   onChanged?: () => void;
+  /** Atalho para o separador Portal da ficha (Portal do Fornecedor F3.1). */
+  onOpenPortalTab?: () => void;
 }
 
 const PRODUCTS_PAGE = 1000;
@@ -76,7 +79,7 @@ function describeDbError(error: { message?: string } | null | undefined): string
 // rpc_supplier_catalog_search (SECURITY INVOKER — o RLS de item_suppliers
 // decide o que se vê). Escrita direta em item_suppliers, com as mesmas regras
 // do ItemSuppliersTable (preferido só na primeira ligação do produto).
-export default function SupplierCatalogPanel({ supplierId, supplierName, organizationId, onChanged }: SupplierCatalogPanelProps) {
+export default function SupplierCatalogPanel({ supplierId, supplierName, organizationId, onChanged, onOpenPortalTab }: SupplierCatalogPanelProps) {
   const { toast } = useToast();
   const { hasPermission } = usePermissions();
   const canView = hasPermission("suppliers.view_pricing") || hasPermission("products.view_cost");
@@ -353,11 +356,28 @@ export default function SupplierCatalogPanel({ supplierId, supplierName, organiz
     if (failedCount === 0) setImportLines(null);
   };
 
+  // Catálogo gerido pelo fornecedor no portal (F3.1). Só exige suppliers.view
+  // (os preços vêm a null sem permissão), por isso aparece mesmo sem canView.
+  const portalCatalog = (
+    <SupplierPortalCatalogSection
+      supplierId={supplierId}
+      organizationId={organizationId}
+      onLinksChanged={() => {
+        if (canView) void loadCatalog();
+        onChanged?.();
+      }}
+      onOpenPortalTab={onOpenPortalTab}
+    />
+  );
+
   if (!canView) {
     return (
-      <p className="text-sm text-muted-foreground py-6 text-center">
-        Sem permissão para ver os preços de compra — o catálogo não está disponível.
-      </p>
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground py-6 text-center">
+          Sem permissão para ver os preços de compra — o catálogo não está disponível.
+        </p>
+        {portalCatalog}
+      </div>
     );
   }
 
@@ -488,6 +508,8 @@ export default function SupplierCatalogPanel({ supplierId, supplierName, organiz
       {searchRows && searchRows.length >= 200 && (
         <p className="text-xs text-muted-foreground">A mostrar os primeiros 200 resultados — refine a pesquisa.</p>
       )}
+
+      {portalCatalog}
 
       {/* Pré-visualização do import: nada é gravado até confirmar. */}
       <Dialog open={!!importLines} onOpenChange={(v) => { if (!v && !applying) setImportLines(null); }}>

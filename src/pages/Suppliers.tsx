@@ -30,6 +30,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
 import SupplierCatalogDialog from "@/components/SupplierCatalogDialog";
 import SupplierCatalogPanel from "@/components/SupplierCatalogPanel";
+import SupplierPortalTab from "@/components/supplier-portal-crm/SupplierPortalTab";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SupplierSlaReportDialog from "@/components/SupplierSlaReportDialog";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
@@ -76,12 +77,14 @@ const Suppliers = () => {
   const [editingId, setEditingId] = useState<string | null>(null);
   // Ficha em edição: o separador Catálogo usa a empresa/nome gravados.
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
-  const [formTab, setFormTab] = useState<"dados" | "catalogo">("dados");
+  const [formTab, setFormTab] = useState<"dados" | "catalogo" | "portal">("dados");
   const { toast } = useToast();
   const { activeCompany, userType, companies, isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
+  // Portal do Fornecedor (F3.1): separador só para quem gere os acessos.
+  const canManagePortal = hasPermission("suppliers.portal_manage");
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -486,9 +489,16 @@ const Suppliers = () => {
       if (duplicateCode) {
         setFieldErrors((prev) => ({ ...prev, code: duplicateMessage }));
       }
+      // Gatilho do portal do fornecedor: com o portal ativo não se muda o NIF
+      // nem a empresa. A mensagem da BD já vem em português.
+      const portalLinkActive = error?.hint === "portal_link_active";
+      const portalMessage = error?.message || "Este fornecedor tem acesso ao portal ativo: desligue o portal antes de mudar o NIF";
+      if (portalLinkActive) {
+        setFieldErrors((prev) => ({ ...prev, tax_id: portalMessage }));
+      }
       toast({
         title: editingId ? t("suppliers.toast.updateError") : t("suppliers.toast.createError"),
-        description: duplicateCode ? duplicateMessage : error.message,
+        description: duplicateCode ? duplicateMessage : portalLinkActive ? portalMessage : error.message,
         variant: "destructive",
       });
     }
@@ -1193,15 +1203,16 @@ const Suppliers = () => {
             resetForm();
           }
         }}>
-          <DialogContent className={`${editingId && formTab === "catalogo" ? "max-w-5xl" : "max-w-3xl"} max-h-[90vh] overflow-y-auto`}>
+          <DialogContent className={`${editingId && formTab === "catalogo" ? "max-w-5xl" : editingId && formTab === "portal" ? "max-w-4xl" : "max-w-3xl"} max-h-[90vh] overflow-y-auto`}>
             <DialogHeader>
               <DialogTitle>{editingId ? t("suppliers.editSupplier") : t("suppliers.newSupplier")}</DialogTitle>
             </DialogHeader>
-            <Tabs value={editingId ? formTab : "dados"} onValueChange={(v) => setFormTab(v as "dados" | "catalogo")}>
+            <Tabs value={editingId ? formTab : "dados"} onValueChange={(v) => setFormTab(v as "dados" | "catalogo" | "portal")}>
             {editingId && (
               <TabsList className="mb-2">
                 <TabsTrigger value="dados">Dados</TabsTrigger>
                 <TabsTrigger value="catalogo">Catálogo</TabsTrigger>
+                {canManagePortal && <TabsTrigger value="portal">Portal</TabsTrigger>}
               </TabsList>
             )}
             <TabsContent value="dados" className="mt-0">
@@ -1377,6 +1388,18 @@ const Suppliers = () => {
                   supplierId={editingId}
                   supplierName={editingSupplier?.name || formData.name}
                   organizationId={editingSupplier?.organization_id ?? null}
+                  onOpenPortalTab={canManagePortal ? () => setFormTab("portal") : undefined}
+                />
+              </TabsContent>
+            )}
+            {editingId && canManagePortal && (
+              <TabsContent value="portal" className="mt-0">
+                <SupplierPortalTab
+                  supplierId={editingId}
+                  supplierName={editingSupplier?.name || formData.name}
+                  organizationId={editingSupplier?.organization_id ?? activeCompany?.id ?? null}
+                  defaultEmail={editingSupplier?.email ?? null}
+                  defaultName={editingSupplier?.contact_person ?? null}
                 />
               </TabsContent>
             )}
