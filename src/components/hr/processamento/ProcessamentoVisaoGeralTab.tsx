@@ -122,7 +122,7 @@ const AVISO_CHAVE: Record<AvisoProcessamento, string> = {
   sem_retribuicao: "hr.vencimento.visaoGeral.avisoSemRetribuicao",
   periodicidade_nao_convertivel: "hr.vencimento.visaoGeral.avisoPeriodicidadeNaoConvertivel",
   duodecimos_por_decidir: "hr.vencimento.visaoGeral.avisoDuodecimosPorDecidir",
-  sem_regra_subsidio: "hr.vencimento.visaoGeral.avisoSemRegraSubsidio",
+  sem_subsidio_pessoa: "hr.vencimento.visaoGeral.avisoSemSubsidioPessoa",
   sem_horas_planeadas_no_mes: "hr.vencimento.visaoGeral.avisoSemHorasPlaneadasNoMes",
 };
 
@@ -241,7 +241,6 @@ export function ProcessamentoVisaoGeralTab() {
           : null,
         codigos: codigosActivos,
         lancamentos: lancamentosDaPessoa,
-        regraSubsidio: { valorDiario: regrasSubsidioHook.regra.valorDiario },
       });
 
       mapa.set(pessoa.id, {

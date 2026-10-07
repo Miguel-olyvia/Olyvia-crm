@@ -623,16 +623,16 @@ export interface HrCodigoProcessamento {
 }
 
 /**
- * `hr_regras_subsidio_alimentacao` (20261201200000). A REGRA de elegibilidade
- * do subsidio de alimentacao da organizacao -- distinta de
- * `PessoaRetribuicao.subsidio_alimentacao`, que e a EXCEPCAO por pessoa.
- * Uma linha por organizacao.
+ * `hr_regras_subsidio_alimentacao` (20261201200000). A regra da organizacao
+ * para o subsidio de alimentacao: SO `minutos_minimos_dia` (tempo minimo
+ * trabalhado num dia para ter direito ao subsidio desse dia). O valor e o modo
+ * sao por pessoa (`PessoaRetribuicao.subsidio_alimentacao` e `_modo`); as
+ * colunas `valor_diario` e `modo` da tabela estao obsoletas (20261210170000)
+ * e por isso nao fazem parte deste tipo. Uma linha por organizacao.
  */
 export interface HrRegraSubsidioAlimentacao {
   id: string;
   organization_id: string;
-  valor_diario: number;
-  modo: SubsidioAlimentacaoModo;
   minutos_minimos_dia: number;
   created_at: string;
   updated_at: string;

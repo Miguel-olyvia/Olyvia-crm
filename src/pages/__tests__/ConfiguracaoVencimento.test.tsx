@@ -84,7 +84,7 @@ vi.mock("@/hooks/useCodigosProcessamento", () => ({
 }));
 
 const gravarRegra = vi.fn(async () => {});
-let regra = { valorDiario: 0, modo: "dinheiro" as const, minutosMinimosDia: 1 };
+let regra = { minutosMinimosDia: 1 };
 vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
   useRegrasSubsidioAlimentacao: () => ({
     regra,
@@ -111,7 +111,7 @@ describe("ConfiguracaoVencimento", () => {
     definirActivoCodigo.mockClear();
     gravarRegra.mockClear();
     codigos = [CODIGO_A, CODIGO_PROPRIO];
-    regra = { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 };
+    regra = { minutosMinimosDia: 1 };
   });
 
   it("sem nenhuma das duas permissoes de leitura mostra o cartao de sem acesso", async () => {
@@ -338,14 +338,24 @@ describe("ConfiguracaoVencimento", () => {
     await renderPagina();
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Subsídio de alimentação" }), { button: 0 });
-    await waitFor(() => expect(screen.getByLabelText("Valor diário")).toBeTruthy());
-    fireEvent.change(screen.getByLabelText("Valor diário"), { target: { value: "7.63" } });
+    await waitFor(() => expect(screen.getByLabelText("Minutos mínimos por dia")).toBeTruthy());
     fireEvent.change(screen.getByLabelText("Minutos mínimos por dia"), { target: { value: "60" } });
     fireEvent.click(screen.getByText("Guardar"));
 
-    await waitFor(() =>
-      expect(gravarRegra).toHaveBeenCalledWith({ valorDiario: 7.63, modo: "dinheiro", minutosMinimosDia: 60 }),
-    );
+    await waitFor(() => expect(gravarRegra).toHaveBeenCalledWith({ minutosMinimosDia: 60 }));
+  });
+
+  it("a seccao do subsidio so tem o tempo minimo: sem valor diario nem modo (esses sao por pessoa)", async () => {
+    hasPermission.mockReturnValue(true);
+
+    await renderPagina();
+
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Subsídio de alimentação" }), { button: 0 });
+    await waitFor(() => expect(screen.getByLabelText("Minutos mínimos por dia")).toBeTruthy());
+    expect(screen.queryByLabelText("Valor diário")).toBeNull();
+    expect(screen.queryByLabelText("Modo de pagamento")).toBeNull();
+    // Unico seletor da seccao: o da unidade (Minutos/Horas).
+    expect(screen.getAllByRole("combobox")).toHaveLength(1);
   });
 
   describe("selector de unidade do campo minimos_minutos_dia", () => {
@@ -355,16 +365,15 @@ describe("ConfiguracaoVencimento", () => {
 
     async function abrirAbaSubsidio() {
       fireEvent.mouseDown(screen.getByRole("tab", { name: "Subsídio de alimentação" }), { button: 0 });
-      await waitFor(() => expect(screen.getByLabelText("Valor diário")).toBeTruthy());
+      await waitFor(() => expect(screen.getByLabelText("Minutos mínimos por dia")).toBeTruthy());
     }
 
-    /** O selector de "modo" (Dinheiro/Cartão) e o primeiro combobox da aba;
-     *  o de unidade (Minutos/Horas) e o segundo. Abre-o e escolhe a opcao
+    /** O selector de unidade (Minutos/Horas) e o unico combobox da aba. Abre-o e escolhe a opcao
      *  pedida por teclado -- mesmo padrao de
      *  `WorkflowAutomationRules.options.test.tsx`, porque o Radix Select no
      *  jsdom nao reage de forma fiavel a clique/mouseDown num item da lista. */
     async function escolherUnidade(label: "Minutos" | "Horas") {
-      const combo = screen.getAllByRole("combobox")[1];
+      const combo = screen.getAllByRole("combobox")[0];
       fireEvent.keyDown(combo, { key: "Enter" });
       const listbox = await screen.findByRole("listbox");
       const opcao = within(listbox).getByRole("option", { name: label });
@@ -378,7 +387,7 @@ describe("ConfiguracaoVencimento", () => {
       await abrirAbaSubsidio();
 
       expect(screen.getByLabelText("Minutos mínimos por dia")).toBeTruthy();
-      expect(screen.getAllByRole("combobox")[1].textContent).toContain("Minutos");
+      expect(screen.getAllByRole("combobox")[0].textContent).toContain("Minutos");
     });
 
     it("escolher Horas e escrever 5 grava 300 minutos", async () => {
@@ -389,12 +398,9 @@ describe("ConfiguracaoVencimento", () => {
 
       await waitFor(() => expect(screen.getByLabelText("Horas mínimas por dia")).toBeTruthy());
       fireEvent.change(screen.getByLabelText("Horas mínimas por dia"), { target: { value: "5" } });
-      fireEvent.change(screen.getByLabelText("Valor diário"), { target: { value: "7.63" } });
       fireEvent.click(screen.getByText("Guardar"));
 
-      await waitFor(() =>
-        expect(gravarRegra).toHaveBeenCalledWith({ valorDiario: 7.63, modo: "dinheiro", minutosMinimosDia: 300 }),
-      );
+      await waitFor(() => expect(gravarRegra).toHaveBeenCalledWith({ minutosMinimosDia: 300 }));
     });
 
     it("escolher Minutos e escrever 300 grava 300 minutos", async () => {
@@ -402,16 +408,13 @@ describe("ConfiguracaoVencimento", () => {
       await abrirAbaSubsidio();
 
       fireEvent.change(screen.getByLabelText("Minutos mínimos por dia"), { target: { value: "300" } });
-      fireEvent.change(screen.getByLabelText("Valor diário"), { target: { value: "7.63" } });
       fireEvent.click(screen.getByText("Guardar"));
 
-      await waitFor(() =>
-        expect(gravarRegra).toHaveBeenCalledWith({ valorDiario: 7.63, modo: "dinheiro", minutosMinimosDia: 300 }),
-      );
+      await waitFor(() => expect(gravarRegra).toHaveBeenCalledWith({ minutosMinimosDia: 300 }));
     });
 
     it("trocar de unidade converte o valor mostrado sem perder precisao (90 minutos -> 1.5 horas)", async () => {
-      regra = { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 90 };
+      regra = { minutosMinimosDia: 90 };
       await renderPagina();
       await abrirAbaSubsidio();
 

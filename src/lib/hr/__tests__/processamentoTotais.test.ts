@@ -48,7 +48,6 @@ function entradaBase(
     retribuicao: null,
     codigos: [],
     lancamentos: [],
-    regraSubsidio: null,
     ...overrides,
   };
 }
@@ -125,9 +124,12 @@ describe("calcularProcessamentoPessoa", () => {
       for (const planeadoMinutos of [0, -60]) {
         const resultado = calcularProcessamentoPessoa(
           entradaBase({
-            retribuicao: retribuicao({ valorBase: 1300, periodicidade: "mensal" }),
+            retribuicao: retribuicao({
+              valorBase: 1300,
+              periodicidade: "mensal",
+              subsidioAlimentacaoPessoa: 6,
+            }),
             totais: totaisBase({ planeadoMinutos, realizadoMinutos: 0, minutosExtraNormal: 120 }),
-            regraSubsidio: { valorDiario: 6 },
             diasElegiveisSubsidio: 10,
             lancamentos: [lancamento({ id: "l1", valor: 20 })],
             codigos: [
@@ -152,9 +154,12 @@ describe("calcularProcessamentoPessoa", () => {
     it("retribuicao a zero da valorHoraReal 0, sem Infinity nem NaN em lado nenhum do resultado", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
-          retribuicao: retribuicao({ valorBase: 0, periodicidade: "mensal" }),
+          retribuicao: retribuicao({
+            valorBase: 0,
+            periodicidade: "mensal",
+            subsidioAlimentacaoPessoa: 6,
+          }),
           totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9000 }),
-          regraSubsidio: { valorDiario: 6 },
           diasElegiveisSubsidio: 5,
         }),
       );
@@ -353,9 +358,13 @@ describe("calcularProcessamentoPessoa", () => {
     it("hora sem horas planeadas no mes: baseMes 0, sem valorHoraReal, mas subsidio e lancamentos continuam a contar", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
-          retribuicao: retribuicao({ valorBase: 5.4, periodicidade: "hora", duodecimosPct: 0 }),
+          retribuicao: retribuicao({
+            valorBase: 5.4,
+            periodicidade: "hora",
+            duodecimosPct: 0,
+            subsidioAlimentacaoPessoa: 6,
+          }),
           totais: totaisBase({ planeadoMinutos: 0 }),
-          regraSubsidio: { valorDiario: 6 },
           diasElegiveisSubsidio: 10,
           lancamentos: [lancamento({ id: "l1", valor: 20 })],
         }),
@@ -622,38 +631,45 @@ describe("calcularProcessamentoPessoa", () => {
   });
 
   describe("subsidio de alimentacao", () => {
-    it("excepcao da pessoa ganha a regra da organizacao", () => {
+    it("usa o valor diario da pessoa vezes os dias elegiveis, sem aviso", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ subsidioAlimentacaoPessoa: 10 }),
-          regraSubsidio: { valorDiario: 6 },
           diasElegiveisSubsidio: 20,
         }),
       );
       expect(resultado.subsidioAlimentacao).toBe(200);
+      expect(resultado.avisos).not.toContain("sem_subsidio_pessoa");
     });
 
-    it("sem excepcao usa a regra da organizacao", () => {
+    it("sem subsidio da pessoa da 0 com aviso", () => {
       const resultado = calcularProcessamentoPessoa(
         entradaBase({
           retribuicao: retribuicao({ subsidioAlimentacaoPessoa: null }),
-          regraSubsidio: { valorDiario: 6 },
-          diasElegiveisSubsidio: 20,
-        }),
-      );
-      expect(resultado.subsidioAlimentacao).toBe(120);
-    });
-
-    it("sem nenhuma das duas da 0 com aviso", () => {
-      const resultado = calcularProcessamentoPessoa(
-        entradaBase({
-          retribuicao: retribuicao({ subsidioAlimentacaoPessoa: null }),
-          regraSubsidio: null,
           diasElegiveisSubsidio: 20,
         }),
       );
       expect(resultado.subsidioAlimentacao).toBe(0);
-      expect(resultado.avisos).toContain("sem_regra_subsidio");
+      expect(resultado.avisos).toContain("sem_subsidio_pessoa");
+    });
+
+    it("subsidio da pessoa a 0 e um valor definido: da 0 sem aviso", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({
+          retribuicao: retribuicao({ subsidioAlimentacaoPessoa: 0 }),
+          diasElegiveisSubsidio: 20,
+        }),
+      );
+      expect(resultado.subsidioAlimentacao).toBe(0);
+      expect(resultado.avisos).not.toContain("sem_subsidio_pessoa");
+    });
+
+    it("sem retribuicao nenhuma tambem da 0 com aviso", () => {
+      const resultado = calcularProcessamentoPessoa(
+        entradaBase({ retribuicao: null, diasElegiveisSubsidio: 20 }),
+      );
+      expect(resultado.subsidioAlimentacao).toBe(0);
+      expect(resultado.avisos).toContain("sem_subsidio_pessoa");
     });
   });
 
@@ -729,7 +745,6 @@ describe("calcularProcessamentoPessoa", () => {
       entradaBase({
         retribuicao: null,
         totais: totaisBase({ planeadoMinutos: 9600, realizadoMinutos: 9000 }),
-        regraSubsidio: { valorDiario: 6 },
         diasElegiveisSubsidio: 20,
         lancamentos: [lancamento({ id: "l1", valor: 15 })],
       }),
@@ -741,7 +756,9 @@ describe("calcularProcessamentoPessoa", () => {
 
     // O que nao depende da retribuicao continua a calcular-se.
     expect(resultado.descontoFaltas).toBe(0); // valorHoraReal null -> nunca null-propagar, fica 0
-    expect(resultado.subsidioAlimentacao).toBe(120);
+    // Sem retribuicao nao ha subsidio da pessoa: 0 com aviso.
+    expect(resultado.subsidioAlimentacao).toBe(0);
+    expect(resultado.avisos).toContain("sem_subsidio_pessoa");
     expect(resultado.lancamentosPontuais).toBe(15);
     expect(resultado.avisos).toContain("sem_retribuicao");
   });

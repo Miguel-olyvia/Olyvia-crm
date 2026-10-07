@@ -38,7 +38,7 @@ vi.mock("@/hooks/useCodigosProcessamento", () => ({
 
 vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
   useRegrasSubsidioAlimentacao: () => ({
-    regra: { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 },
+    regra: { minutosMinimosDia: 1 },
     temRegraGravada: false,
     isLoading: false,
     isFetched: true,

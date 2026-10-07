@@ -31,7 +31,7 @@ export interface RetribuicaoParaCalculo {
   valorBase: number;
   periodicidade: Periodicidade;
   duodecimosPct: 0 | 50 | 100 | null;
-  /** Excepcao por pessoa -- ganha a regra da organizacao quando preenchida. */
+  /** Valor diario do subsidio, so por pessoa; `null` = sem subsidio definido. */
   subsidioAlimentacaoPessoa: number | null;
 }
 
@@ -66,14 +66,13 @@ export interface EntradaProcessamentoPessoa {
   codigos: readonly HrCodigoProcessamento[];
   /** Os lancamentos do periodo, da pessoa. */
   lancamentos: readonly HrProcessamentoLancamento[];
-  regraSubsidio: { valorDiario: number } | null;
 }
 
 export type AvisoProcessamento =
   | "sem_retribuicao"
   | "periodicidade_nao_convertivel"
   | "duodecimos_por_decidir"
-  | "sem_regra_subsidio"
+  | "sem_subsidio_pessoa"
   | "sem_horas_planeadas_no_mes";
 
 export interface LinhaCodigoAplicado {
@@ -285,15 +284,20 @@ function calcularLinhasAutomaticas(
   return linhas;
 }
 
+/**
+ * O valor do subsidio de alimentacao e SO da pessoa
+ * (`pessoas_retribuicoes.subsidio_alimentacao`): a organizacao nao tem valor
+ * por omissao, so o tempo minimo por dia que da direito a ele. Sem valor
+ * definido (`null`, ou sem retribuicao) o subsidio e 0 e fica o aviso.
+ */
 function calcularSubsidioAlimentacao(
   retribuicao: RetribuicaoParaCalculo | null,
-  regraSubsidio: { valorDiario: number } | null,
   diasElegiveisSubsidio: number,
   avisos: AvisoProcessamento[],
 ): number {
-  const valorDia = retribuicao?.subsidioAlimentacaoPessoa ?? regraSubsidio?.valorDiario ?? null;
+  const valorDia = retribuicao?.subsidioAlimentacaoPessoa ?? null;
   if (valorDia === null) {
-    avisos.push("sem_regra_subsidio");
+    avisos.push("sem_subsidio_pessoa");
     return 0;
   }
   return diasElegiveisSubsidio * valorDia;
@@ -367,7 +371,6 @@ export function calcularProcessamentoPessoa(
 
   const subsidioAlimentacao = calcularSubsidioAlimentacao(
     entrada.retribuicao,
-    entrada.regraSubsidio,
     entrada.diasElegiveisSubsidio,
     avisos,
   );

@@ -56,7 +56,6 @@ import type {
   HrCodigoProcessamentoModoCalculo,
   HrCodigoProcessamentoOrigemAutomatica,
 } from "@/types/hr";
-import type { SubsidioAlimentacaoModo } from "@/types/hr";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { Ban, Loader2, Pencil, Plus, RotateCcw, Tag } from "lucide-react";
@@ -508,7 +507,6 @@ function SeccaoCodigosProcessamento({ podeGerir }: { podeGerir: boolean }) {
   );
 }
 
-const MODOS_SUBSIDIO: readonly SubsidioAlimentacaoModo[] = ["dinheiro", "cartao"];
 
 type UnidadeMinutosMinimos = "minutos" | "horas";
 const UNIDADES_MINUTOS_MINIMOS: readonly UnidadeMinutosMinimos[] = ["minutos", "horas"];
@@ -541,8 +539,6 @@ function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
   const { t } = useTranslation();
   const { regra, isLoading, isSaving, gravar } = useRegrasSubsidioAlimentacao();
 
-  const [valorDiario, setValorDiario] = useState<string>("");
-  const [modo, setModo] = useState<SubsidioAlimentacaoModo>("dinheiro");
   const [minutosMinimosDia, setMinutosMinimosDia] = useState<string>("");
   const [unidadeMinutosMinimos, setUnidadeMinutosMinimos] = useState<UnidadeMinutosMinimos>("minutos");
 
@@ -553,8 +549,6 @@ function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
   // base e sempre em minutos, a unidade e so uma conveniencia de escrita.
   useEffect(() => {
     if (isLoading) return;
-    setValorDiario(String(regra.valorDiario));
-    setModo(regra.modo);
     setUnidadeMinutosMinimos("minutos");
     setMinutosMinimosDia(String(regra.minutosMinimosDia));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -572,12 +566,10 @@ function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
   };
 
   const submeter = async () => {
-    const valor = Number(valorDiario);
     const minutos = paraMinutos(minutosMinimosDia, unidadeMinutosMinimos);
-    if (!Number.isFinite(valor) || valor < 0) return;
     if (!Number.isInteger(minutos) || minutos <= 0) return;
     try {
-      await gravar({ valorDiario: valor, modo, minutosMinimosDia: minutos });
+      await gravar({ minutosMinimosDia: minutos });
       toast.success(t("hr.vencimento.subsidio.guardarSucesso"));
     } catch (erro) {
       toast.error(await getFriendlyErrorMessage(erro));
@@ -597,38 +589,7 @@ function SeccaoSubsidioAlimentacao({ podeGerir }: { podeGerir: boolean }) {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="subsidio-valor-diario">{t("hr.vencimento.subsidio.campoValorDiario")}</Label>
-                <Input
-                  id="subsidio-valor-diario"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={valorDiario}
-                  disabled={!podeGerir}
-                  onChange={(e) => setValorDiario(e.target.value)}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="subsidio-modo">{t("hr.vencimento.subsidio.campoModo")}</Label>
-                <Select
-                  value={modo}
-                  onValueChange={(v) => setModo(v as SubsidioAlimentacaoModo)}
-                  disabled={!podeGerir}
-                >
-                  <SelectTrigger id="subsidio-modo">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MODOS_SUBSIDIO.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {t(`hr.vencimento.subsidio.modo.${m}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="grid grid-cols-1 gap-4 sm:max-w-md">
               <div className="space-y-2">
                 <Label htmlFor="subsidio-minutos-minimos">
                   {t(

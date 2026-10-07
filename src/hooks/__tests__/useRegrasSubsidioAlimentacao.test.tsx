@@ -1,6 +1,7 @@
 /**
- * `useRegrasSubsidioAlimentacao`: le a regra da organizacao activa (ou a
- * omissao, se ainda nao houver linha) e grava por upsert. `hrFrom`/
+ * `useRegrasSubsidioAlimentacao`: le o tempo minimo por dia da organizacao
+ * activa (ou a omissao, se ainda nao houver linha) e grava por upsert. O valor
+ * e o modo do subsidio sao por pessoa e nao passam por aqui. `hrFrom`/
  * `resolveCurrentBusinessUserId` simulados. Nada toca em base nenhuma.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -46,6 +47,7 @@ import { useRegrasSubsidioAlimentacao } from "@/hooks/useRegrasSubsidioAlimentac
 const REGRA_GRAVADA = {
   id: "r1",
   organization_id: ORG_ID,
+  // Colunas obsoletas: ainda existem na tabela, mas o hook ignora-as.
   valor_diario: 7.63,
   modo: "cartao",
   minutos_minimos_dia: 60,
@@ -67,21 +69,21 @@ beforeEach(() => {
 });
 
 describe("useRegrasSubsidioAlimentacao", () => {
-  it("sem linha gravada, devolve a omissao (dinheiro, 1 minuto, valor 0)", async () => {
+  it("sem linha gravada, devolve a omissao (1 minuto)", async () => {
     const { result } = renderHook(() => useRegrasSubsidioAlimentacao(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.temRegraGravada).toBe(false);
-    expect(result.current.regra).toEqual({ valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 });
+    expect(result.current.regra).toEqual({ minutosMinimosDia: 1 });
   });
 
-  it("com linha gravada, devolve os valores dessa linha", async () => {
+  it("com linha gravada, devolve so o tempo minimo (ignora valor_diario e modo)", async () => {
     respostaRegra = { data: REGRA_GRAVADA, error: null };
     const { result } = renderHook(() => useRegrasSubsidioAlimentacao(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.temRegraGravada).toBe(true);
-    expect(result.current.regra).toEqual({ valorDiario: 7.63, modo: "cartao", minutosMinimosDia: 60 });
+    expect(result.current.regra).toEqual({ minutosMinimosDia: 60 });
   });
 
   it("um erro de permissao na leitura devolve a omissao, sem lancar", async () => {
@@ -93,18 +95,16 @@ describe("useRegrasSubsidioAlimentacao", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("gravar faz upsert por organization_id, com created_by/updated_by do id de negocio", async () => {
+  it("gravar faz upsert por organization_id so com o tempo minimo, sem valor_diario nem modo", async () => {
     const { result } = renderHook(() => useRegrasSubsidioAlimentacao(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    await result.current.gravar({ valorDiario: 7.63, modo: "cartao", minutosMinimosDia: 60 });
+    await result.current.gravar({ minutosMinimosDia: 60 });
 
     expect(chamadasUpsert).toHaveLength(1);
     expect(chamadasUpsert[0].onConflict).toBe("organization_id");
-    expect(chamadasUpsert[0].payload).toMatchObject({
+    expect(chamadasUpsert[0].payload).toEqual({
       organization_id: ORG_ID,
-      valor_diario: 7.63,
-      modo: "cartao",
       minutos_minimos_dia: 60,
       created_by: "business-user-1",
       updated_by: "business-user-1",
@@ -116,8 +116,6 @@ describe("useRegrasSubsidioAlimentacao", () => {
     const { result } = renderHook(() => useRegrasSubsidioAlimentacao(), { wrapper });
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    await expect(
-      result.current.gravar({ valorDiario: 5, modo: "dinheiro", minutosMinimosDia: 1 }),
-    ).rejects.toBeTruthy();
+    await expect(result.current.gravar({ minutosMinimosDia: 1 })).rejects.toBeTruthy();
   });
 });

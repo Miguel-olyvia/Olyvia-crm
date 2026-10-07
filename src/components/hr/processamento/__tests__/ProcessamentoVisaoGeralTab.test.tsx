@@ -59,7 +59,7 @@ vi.mock("@/hooks/useRetribuicoesVigentesDaOrganizacao", async () => {
   };
 });
 
-let regraSubsidioMock = { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 };
+let regraSubsidioMock = { minutosMinimosDia: 1 };
 vi.mock("@/hooks/useRegrasSubsidioAlimentacao", () => ({
   useRegrasSubsidioAlimentacao: () => ({
     regra: regraSubsidioMock,
@@ -169,7 +169,7 @@ beforeEach(() => {
   retribuicoesRecusado = false;
   totaisPorPessoaMock = {};
   diasPorPessoaMock = {};
-  regraSubsidioMock = { valorDiario: 0, modo: "dinheiro", minutosMinimosDia: 1 };
+  regraSubsidioMock = { minutosMinimosDia: 1 };
   abrirMock.mockClear();
   fecharMock.mockClear();
   criarMock.mockClear();
@@ -496,9 +496,10 @@ describe("ProcessamentoVisaoGeralTab", () => {
     expect(within(dialogo).getByText(correspondeA1200)).toBeInTheDocument();
   });
 
-  it("com regra de subsidio e dias elegiveis, o detalhe deixa de mostrar o subsidio a 0 EUR", async () => {
+  it("com subsidio da pessoa e dias elegiveis, o detalhe deixa de mostrar o subsidio a 0 EUR", async () => {
     periodoActual = PERIODO_ABERTO;
-    regraSubsidioMock = { valorDiario: 6, modo: "dinheiro", minutosMinimosDia: 300 };
+    // A organizacao so define o tempo minimo por dia; o valor vem da pessoa.
+    regraSubsidioMock = { minutosMinimosDia: 300 };
     retribuicoesPorPessoa = new Map([
       [
         "pessoa-1",
@@ -508,7 +509,7 @@ describe("ProcessamentoVisaoGeralTab", () => {
             valor_base: 1200,
             periodicidade: "mensal",
             duodecimos_pct: 0,
-            subsidio_alimentacao: null,
+            subsidio_alimentacao: 6,
             valido_de: "2026-01-01",
             valido_ate: null,
           },

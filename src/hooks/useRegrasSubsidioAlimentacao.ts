@@ -1,40 +1,34 @@
 /**
- * A regra de elegibilidade do subsidio de alimentacao da organizacao activa
+ * A regra do subsidio de alimentacao da organizacao activa
  * (`hr_regras_subsidio_alimentacao`, 20261201200000) -- uma linha por
  * organizacao, upsert por `organization_id`. Segue o padrao de
  * `useConfiguracaoObrigatoriosAdmissao.ts` / `useDocumentSettings.ts`.
  *
- * A DISTINCAO QUE ESTE HOOK NAO APAGA
- * ---------------------------------------
- * Isto e a REGRA POR OMISSAO da empresa (`valor_diario`, `modo`,
- * `minutos_minimos_dia`). Nao e o mesmo sitio que `subsidio_alimentacao` em
- * `pessoas_retribuicoes` (via `usePessoaRetribuicao`), que continua a ser a
- * EXCEPCAO negociada por pessoa. Este hook nunca le nem escreve
+ * A UNICA REGRA DA ORGANIZACAO E O TEMPO MINIMO POR DIA
+ * ------------------------------------------------------
+ * So `minutos_minimos_dia` e lido e gravado aqui: quantos minutos e preciso
+ * trabalhar num dia para ter direito ao subsidio desse dia. O VALOR e o MODO
+ * (dinheiro/cartao) do subsidio sao por pessoa
+ * (`pessoas_retribuicoes.subsidio_alimentacao` e `_modo`, via
+ * `usePessoaRetribuicao`). As colunas `valor_diario` e `modo` desta tabela
+ * ficam obsoletas e ignoradas (ver 20261210170000); o upsert nao as toca, por
+ * isso a linha mantem os defaults. Este hook nunca le nem escreve
  * `pessoas_retribuicoes`.
- *
- * SO CONFIGURACAO -- SEM CALCULO NENHUM
- * -----------------------------------------
- * Nenhuma ligacao a assiduidade ou a faltas ainda. Fica para depois.
  */
 import { useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { hrFrom, isPermissionError } from "@/lib/hr/hrDb";
 import { useCompany } from "@/contexts/CompanyContext";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
-import type { HrRegraSubsidioAlimentacao, SubsidioAlimentacaoModo } from "@/types/hr";
+import type { HrRegraSubsidioAlimentacao } from "@/types/hr";
 
-const COLUNAS =
-  "id, organization_id, valor_diario, modo, minutos_minimos_dia, created_at, updated_at";
+const COLUNAS = "id, organization_id, minutos_minimos_dia, created_at, updated_at";
 
 export interface RegraSubsidioAlimentacaoPatch {
-  valorDiario: number;
-  modo: SubsidioAlimentacaoModo;
   minutosMinimosDia: number;
 }
 
 const REGRA_OMISSAO: RegraSubsidioAlimentacaoPatch = {
-  valorDiario: 0,
-  modo: "dinheiro",
   minutosMinimosDia: 1,
 };
 
@@ -65,9 +59,7 @@ export function useRegrasSubsidioAlimentacao() {
    *  utilizador submeter o formulario. */
   const regra: RegraSubsidioAlimentacaoPatch = useMemo(
     () =>
-      data
-        ? { valorDiario: data.valor_diario, modo: data.modo, minutosMinimosDia: data.minutos_minimos_dia }
-        : REGRA_OMISSAO,
+      data ? { minutosMinimosDia: data.minutos_minimos_dia } : REGRA_OMISSAO,
     [data],
   );
 
@@ -78,8 +70,6 @@ export function useRegrasSubsidioAlimentacao() {
       const { error: erro } = await hrFrom("hr_regras_subsidio_alimentacao").upsert(
         {
           organization_id: orgId,
-          valor_diario: patch.valorDiario,
-          modo: patch.modo,
           minutos_minimos_dia: patch.minutosMinimosDia,
           created_by: businessUserId,
           updated_by: businessUserId,
