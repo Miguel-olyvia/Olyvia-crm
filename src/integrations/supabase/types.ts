@@ -18430,6 +18430,7 @@ export type Database = {
           source_type: string | null
           status: string
           supplier_id: string | null
+          supplier_notes: string | null
           total_value: number
           updated_at: string
         }
@@ -18450,6 +18451,7 @@ export type Database = {
           source_type?: string | null
           status?: string
           supplier_id?: string | null
+          supplier_notes?: string | null
           total_value?: number
           updated_at?: string
         }
@@ -18470,6 +18472,7 @@ export type Database = {
           source_type?: string | null
           status?: string
           supplier_id?: string | null
+          supplier_notes?: string | null
           total_value?: number
           updated_at?: string
         }
@@ -22609,6 +22612,160 @@ export type Database = {
           },
         ]
       }
+      supplier_po_publications: {
+        Row: {
+          confirmed_at: string | null
+          confirmed_by: string | null
+          created_at: string
+          link_id: string
+          organization_id: string
+          promised_date: string | null
+          promised_date_accepted_at: string | null
+          promised_date_accepted_by: string | null
+          purchase_order_id: string
+          revision: number
+          sent_at: string
+          sent_by: string | null
+          status: string
+          supplier_comment: string | null
+          updated_at: string
+          viewed_at: string | null
+          viewed_by: string | null
+          withdraw_reason: string | null
+          withdrawn_at: string | null
+          withdrawn_by: string | null
+        }
+        Insert: {
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string
+          link_id: string
+          organization_id: string
+          promised_date?: string | null
+          promised_date_accepted_at?: string | null
+          promised_date_accepted_by?: string | null
+          purchase_order_id: string
+          revision?: number
+          sent_at?: string
+          sent_by?: string | null
+          status?: string
+          supplier_comment?: string | null
+          updated_at?: string
+          viewed_at?: string | null
+          viewed_by?: string | null
+          withdraw_reason?: string | null
+          withdrawn_at?: string | null
+          withdrawn_by?: string | null
+        }
+        Update: {
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          created_at?: string
+          link_id?: string
+          organization_id?: string
+          promised_date?: string | null
+          promised_date_accepted_at?: string | null
+          promised_date_accepted_by?: string | null
+          purchase_order_id?: string
+          revision?: number
+          sent_at?: string
+          sent_by?: string | null
+          status?: string
+          supplier_comment?: string | null
+          updated_at?: string
+          viewed_at?: string | null
+          viewed_by?: string | null
+          withdraw_reason?: string | null
+          withdrawn_at?: string | null
+          withdrawn_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "supplier_po_publications_confirmed_by_fkey"
+            columns: ["confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "supplier_portal_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
+            referencedRelation: "supplier_account_links"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "anew_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_promised_date_accepted_by_fkey"
+            columns: ["promised_date_accepted_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_promised_date_accepted_by_fkey"
+            columns: ["promised_date_accepted_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: true
+            referencedRelation: "ops_v_compra_linha"
+            referencedColumns: ["compra_id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_purchase_order_id_fkey"
+            columns: ["purchase_order_id"]
+            isOneToOne: true
+            referencedRelation: "purchase_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_sent_by_fkey"
+            columns: ["sent_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_sent_by_fkey"
+            columns: ["sent_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_viewed_by_fkey"
+            columns: ["viewed_by"]
+            isOneToOne: false
+            referencedRelation: "supplier_portal_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_withdrawn_by_fkey"
+            columns: ["withdrawn_by"]
+            isOneToOne: false
+            referencedRelation: "anew_users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "supplier_po_publications_withdrawn_by_fkey"
+            columns: ["withdrawn_by"]
+            isOneToOne: false
+            referencedRelation: "ops_v_pessoas"
+            referencedColumns: ["utilizador_id"]
+          },
+        ]
+      }
       supplier_portal_user_access: {
         Row: {
           granted_at: string
@@ -25313,6 +25470,7 @@ export type Database = {
           source_type: string | null
           status: string
           supplier_id: string | null
+          supplier_notes: string | null
           total_value: number
           updated_at: string
         }
@@ -25326,6 +25484,47 @@ export type Database = {
       fn_po_cancel_remainder_status: {
         Args: { p_fallback_status: string; p_purchase_order_id: string }
         Returns: string
+      }
+      fn_po_crm_load: {
+        Args: { p_lock: boolean; p_permission: string; p_po_id: string }
+        Returns: {
+          actual_delivery_date: string | null
+          business_unit_id: string | null
+          created_at: string
+          created_by: string
+          deleted_at: string | null
+          deleted_by: string | null
+          expected_delivery: string | null
+          id: string
+          notes: string | null
+          order_date: string
+          order_number: string
+          organization_id: string
+          source_id: string | null
+          source_type: string | null
+          status: string
+          supplier_id: string | null
+          supplier_notes: string | null
+          total_value: number
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "purchase_orders"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_po_has_active_publication: {
+        Args: { p_po_id: string }
+        Returns: boolean
+      }
+      fn_po_notify_supplier_confirmed: {
+        Args: {
+          p_po: Database["public"]["Tables"]["purchase_orders"]["Row"]
+          p_pub: Database["public"]["Tables"]["supplier_po_publications"]["Row"]
+        }
+        Returns: number
       }
       fn_po_receipt_allocation: {
         Args: { p_purchase_order_item_id: string; p_units: number }
@@ -25491,6 +25690,65 @@ export type Database = {
       fn_sp_crm_supplier_org: {
         Args: { p_permission: string; p_supplier_id: string }
         Returns: string
+      }
+      fn_sp_html_escape: { Args: { p_text: string }; Returns: string }
+      fn_sp_orders_visible: {
+        Args: { p_like: string; p_org_id: string; p_portal_user_id: string }
+        Returns: {
+          confirmed_at: string
+          expected_delivery: string
+          order_date: string
+          order_number: string
+          order_status: string
+          org_logo: string
+          org_name: string
+          organization_id: string
+          promised_date: string
+          pub_status: string
+          purchase_order_id: string
+          revision: number
+          sent_at: string
+          viewed_at: string
+        }[]
+      }
+      fn_sp_po_lines_json: { Args: { p_po_id: string }; Returns: Json }
+      fn_sp_po_publication: {
+        Args: { p_po_id: string; p_portal_user_id: string }
+        Returns: {
+          confirmed_at: string | null
+          confirmed_by: string | null
+          created_at: string
+          link_id: string
+          organization_id: string
+          promised_date: string | null
+          promised_date_accepted_at: string | null
+          promised_date_accepted_by: string | null
+          purchase_order_id: string
+          revision: number
+          sent_at: string
+          sent_by: string | null
+          status: string
+          supplier_comment: string | null
+          updated_at: string
+          viewed_at: string | null
+          viewed_by: string | null
+          withdraw_reason: string | null
+          withdrawn_at: string | null
+          withdrawn_by: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "supplier_po_publications"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      fn_sp_po_queue_email: {
+        Args: {
+          p_po: Database["public"]["Tables"]["purchase_orders"]["Row"]
+          p_pub: Database["public"]["Tables"]["supplier_po_publications"]["Row"]
+        }
+        Returns: number
       }
       fn_uom_get_or_create_pack: {
         Args: {
@@ -28351,6 +28609,7 @@ export type Database = {
           source_type: string | null
           status: string
           supplier_id: string | null
+          supplier_notes: string | null
           total_value: number
           updated_at: string
         }
@@ -29900,12 +30159,19 @@ export type Database = {
         }
         Returns: Json
       }
+      rpc_po_accept_promised_date: { Args: { p_po_id: string }; Returns: Json }
       rpc_po_receipt_release_to_stock: {
         Args: {
           p_item_ids: string[]
           p_reason?: string
           p_warehouse_id: string
         }
+        Returns: Json
+      }
+      rpc_po_send_to_supplier: { Args: { p_po_id: string }; Returns: Json }
+      rpc_po_supplier_status: { Args: { p_po_id: string }; Returns: Json }
+      rpc_po_withdraw_from_supplier: {
+        Args: { p_po_id: string; p_reason?: string }
         Returns: Json
       }
       rpc_preview_diagnostic_suggestions: {
@@ -31346,6 +31612,7 @@ export type Database = {
           source_type: string | null
           status: string
           supplier_id: string | null
+          supplier_notes: string | null
           total_value: number
           updated_at: string
         }
@@ -31908,6 +32175,27 @@ export type Database = {
         Returns: Json
       }
       sp_catalog_upsert_item: { Args: { p_item: Json }; Returns: Json }
+      sp_confirm_order: {
+        Args: {
+          p_comment?: string
+          p_po_id: string
+          p_promised_date?: string
+          p_revision: number
+        }
+        Returns: Json
+      }
+      sp_get_order: { Args: { p_po_id: string }; Returns: Json }
+      sp_list_orders: {
+        Args: {
+          p_limit?: number
+          p_offset?: number
+          p_org_id?: string
+          p_search?: string
+          p_status?: string
+        }
+        Returns: Json
+      }
+      sp_mark_order_viewed: { Args: { p_po_id: string }; Returns: Json }
       sp_mark_password_changed: { Args: never; Returns: Json }
       sp_my_companies: { Args: never; Returns: Json }
       sp_whoami: { Args: never; Returns: Json }
