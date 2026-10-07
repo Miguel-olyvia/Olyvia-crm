@@ -19,6 +19,10 @@
  *   `repeatCooldownMs` depois de aceite e enquanto continuar à vista da câmara
  *   (tem de sair do enquadramento pelo menos `repeatGapMs`). Sem isto, um
  *   código parado à frente da câmara somava uma leitura a cada segundo e meio.
+ * - Só conta o código cujo centro está dentro da mira desenhada (convertida para
+ *   coordenadas do frame, com object-fit: cover). Com dois códigos diferentes
+ *   dentro da mira (ex.: EAN-13 + Code128 da ref. do fornecedor na mesma caixa)
+ *   nenhum conta e aparece "Aponta só a um código" — antes somava 2.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -32,6 +36,10 @@ export interface CameraScannerLabels {
   title: string;
   description: string;
   hint: string;
+  /** Legenda por baixo da mira. */
+  aimCaption: string;
+  /** Mais do que um código diferente dentro da mira — nenhum é aceite. */
+  multipleCodes: string;
   close: string;
   retry: string;
   starting: string;
@@ -48,13 +56,16 @@ export interface CameraScannerLabels {
   errorPermission: string;
   errorNotFound: string;
   errorBusy: string;
+  errorInterrupted: string;
   errorGeneric: string;
 }
 
 const DEFAULT_LABELS: CameraScannerLabels = {
   title: "Ler com a câmara",
   description: "Aponta a câmara traseira ao código de barras ou QR. Cada código lido é enviado de imediato.",
-  hint: "Aponta ao código de barras — um de cada vez.",
+  hint: "Põe um só código dentro do retângulo — o que fica fora não é lido.",
+  aimCaption: "Só é lido o código dentro do retângulo",
+  multipleCodes: "Aponta só a um código — há mais do que um dentro do retângulo.",
   close: "Fechar",
   retry: "Tentar de novo",
   starting: "A abrir a câmara…",
@@ -72,6 +83,7 @@ const DEFAULT_LABELS: CameraScannerLabels = {
   errorPermission: "Sem acesso à câmara. Permite o acesso à câmara nas definições do browser e tenta de novo.",
   errorNotFound: "Não foi encontrada nenhuma câmara neste dispositivo.",
   errorBusy: "A câmara está a ser usada por outra aplicação. Fecha essa aplicação e tenta de novo.",
+  errorInterrupted: "A câmara foi interrompida.",
   errorGeneric: "Não foi possível iniciar a câmara.",
 };
 
@@ -93,7 +105,14 @@ export interface CameraScannerProps {
   onCloseAutoFocus?: (event: Event) => void;
 }
 
-type ErrorKind = "insecure" | "unsupported" | "permission" | "notfound" | "busy" | "generic";
+type ErrorKind = "insecure" | "unsupported" | "permission" | "notfound" | "busy" | "interrupted" | "generic";
+
+/**
+ * Dois códigos diferentes dentro da mira com menos do que isto entre eles contam
+ * como "vários códigos" (o zxing só devolve um por frame e pode alternar). A
+ * leitura fica bloqueada até a mira ficar vazia durante este tempo.
+ */
+const AIM_CONFLICT_MS = 400;
 
 const NATIVE_FORMATS = ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "qr_code", "data_matrix", "itf"];
 const NATIVE_INTERVAL_MS = 120;
@@ -106,6 +125,7 @@ const SOUND_STORAGE_KEY = "olyvia.cameraScanner.sound";
 interface DetectedBarcodeLike {
   rawValue: string;
   boundingBox?: DOMRectReadOnly;
+  cornerPoints?: ReadonlyArray<{ x: number; y: number }>;
 }
 interface BarcodeDetectorLike {
   detect(source: CanvasImageSource): Promise<DetectedBarcodeLike[]>;
@@ -138,33 +158,130 @@ function getNativeDetector(): Promise<BarcodeDetectorLike | null> {
   return nativeDetectorPromise.then((d) => (nativeBroken ? null : d));
 }
 
-/** Com vários códigos à vista, fica o mais perto do centro (onde está a mira). */
-function pickCentered(found: DetectedBarcodeLike[], video: HTMLVideoElement): string | null {
-  const valid = found.filter((b) => b.rawValue);
-  if (valid.length === 0) return null;
-  if (valid.length === 1) return valid[0].rawValue;
-  const cx = video.videoWidth / 2;
-  const cy = video.videoHeight / 2;
-  let best = valid[0];
-  let bestDist = Number.POSITIVE_INFINITY;
-  for (const b of valid) {
-    const box = b.boundingBox;
-    if (!box) continue;
-    const d = (box.x + box.width / 2 - cx) ** 2 + (box.y + box.height / 2 - cy) ** 2;
-    if (d < bestDist) {
-      bestDist = d;
-      best = b;
-    }
+/** Retângulo em píxeis do frame do vídeo (videoWidth × videoHeight). */
+interface FrameRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+interface Point {
+  x: number;
+  y: number;
+}
+/** Um código lido num frame e o seu centro em píxeis do frame (null = motor não deu geometria). */
+interface FrameHit {
+  code: string;
+  center: Point | null;
+}
+
+/** Proporções e limites da mira desenhada (h-[38%] max-h-56 w-[82%] max-w-sm) — só para o recurso sem medição. */
+const AIM_W_FRACTION = 0.82;
+const AIM_H_FRACTION = 0.38;
+const AIM_MAX_W_PX = 384;
+const AIM_MAX_H_PX = 224;
+
+/**
+ * Converte a mira desenhada no ecrã para coordenadas do frame do vídeo.
+ *
+ * O <video> usa object-fit: cover — o frame (vw × vh) é escalado por
+ * s = max(W / vw, H / vh) para cobrir a caixa W × H do elemento e centrado, por
+ * isso sobra (W − vw·s)/2 ≤ 0 à esquerda e (H − vh·s)/2 ≤ 0 em cima (partes do
+ * frame cortadas fora do ecrã). Um ponto (ex, ey) do elemento corresponde ao
+ * ponto ((ex − ox)/s, (ey − oy)/s) do frame. Usa o retângulo real da mira
+ * (getBoundingClientRect) para bater certo com o que o operador vê; sem ele,
+ * recalcula-o com as mesmas regras do CSS.
+ */
+function computeAimRect(video: HTMLVideoElement, aimEl: HTMLElement | null): FrameRect | null {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh) return null;
+  const el = video.getBoundingClientRect();
+  if (el.width <= 0 || el.height <= 0) {
+    // Elemento sem caixa (a abrir/escondido): mira central nas mesmas proporções do frame.
+    const w = vw * AIM_W_FRACTION;
+    const h = vh * AIM_H_FRACTION;
+    return { x: (vw - w) / 2, y: (vh - h) / 2, width: w, height: h };
   }
-  return best.rawValue;
+  let left: number;
+  let top: number;
+  let width: number;
+  let height: number;
+  const measured = aimEl?.getBoundingClientRect();
+  if (measured && measured.width > 0 && measured.height > 0) {
+    left = measured.left - el.left;
+    top = measured.top - el.top;
+    width = measured.width;
+    height = measured.height;
+  } else {
+    width = Math.min(el.width * AIM_W_FRACTION, AIM_MAX_W_PX);
+    height = Math.min(el.height * AIM_H_FRACTION, AIM_MAX_H_PX);
+    left = (el.width - width) / 2;
+    top = (el.height - height) / 2;
+  }
+  const s = Math.max(el.width / vw, el.height / vh);
+  const ox = (el.width - vw * s) / 2;
+  const oy = (el.height - vh * s) / 2;
+  const x0 = Math.max(0, (left - ox) / s);
+  const y0 = Math.max(0, (top - oy) / s);
+  const x1 = Math.min(vw, (left + width - ox) / s);
+  const y1 = Math.min(vh, (top + height - oy) / s);
+  if (x1 <= x0 || y1 <= y0) return null;
+  return { x: x0, y: y0, width: x1 - x0, height: y1 - y0 };
+}
+
+/**
+ * Códigos (distintos) com o centro dentro da mira. Sem geometria do motor só se
+ * aceita se for o único código do frame (não há como ver onde está).
+ */
+function codesInAim(hits: FrameHit[], aim: FrameRect | null): string[] {
+  const valid = hits.filter((h) => h.code.trim());
+  const out = new Set<string>();
+  for (const h of valid) {
+    const c = h.center;
+    const inside = c
+      ? !!aim && c.x >= aim.x && c.x <= aim.x + aim.width && c.y >= aim.y && c.y <= aim.y + aim.height
+      : valid.length === 1;
+    if (inside) out.add(h.code.trim());
+  }
+  return [...out];
+}
+
+function nativeCenter(b: DetectedBarcodeLike): Point | null {
+  const box = b.boundingBox;
+  if (box && box.width > 0 && box.height > 0) return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const pts = b.cornerPoints;
+  if (pts && pts.length > 0) {
+    return {
+      x: pts.reduce((sum, p) => sum + p.x, 0) / pts.length,
+      y: pts.reduce((sum, p) => sum + p.y, 0) / pts.length,
+    };
+  }
+  return null;
 }
 
 type StopFn = () => void;
+type FrameFn = (codesInsideAim: string[]) => void;
+type AimFn = () => FrameRect | null;
 
+/** Reinícios do zxing seguidos (sem nenhum frame são pelo meio) antes de desistir. */
+const ZXING_MAX_RESTARTS = 3;
+const ZXING_RESTART_DELAY_MS = 250;
+const ORIENTATION_CHECK_MS = 600;
+
+/**
+ * zxing sobre o <video>. A biblioteca cria o canvas com o tamanho do vídeo no
+ * arranque e desenha o frame 1:1 — ao rodar o telemóvel (videoWidth/Height
+ * trocam) passa a ler um frame cortado, por isso reinicia a leitura quando as
+ * dimensões mudam. Erros que param o ciclo interno (tudo o que não seja
+ * NotFound/Checksum/Format) também reiniciam, até ZXING_MAX_RESTARTS.
+ */
 async function startZxing(
   video: HTMLVideoElement,
-  onCode: (code: string) => void,
+  onFrame: FrameFn,
+  getAim: AimFn,
   isCancelled: () => boolean,
+  onFatal: (err: unknown) => void,
 ): Promise<StopFn> {
   const [{ BrowserMultiFormatReader }, lib] = await Promise.all([import("@zxing/browser"), import("@zxing/library")]);
   const F = lib.BarcodeFormat;
@@ -178,33 +295,120 @@ async function startZxing(
   // da câmara continua a ser "visto" a cada ~100 ms, por isso o filtro de
   // repetição (repeatGapMs) reconhece-o como o mesmo e não o volta a contar.
   const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100, delayBetweenScanSuccess: 100 });
-  const controls: IScannerControls = await reader.decodeFromVideoElement(video, (result, error) => {
-    if (isCancelled()) return;
-    if (result) {
-      onCode(result.getText());
-      return;
+
+  let stopped = false;
+  let controls: IScannerControls | null = null;
+  let generation = 0;
+  let failures = 0;
+  let startedW = 0;
+  let startedH = 0;
+  let restartTimer: number | undefined;
+  let orientationTimer: number | undefined;
+  const dead = () => stopped || isCancelled();
+
+  const scheduleRestart = () => {
+    if (restartTimer !== undefined) window.clearTimeout(restartTimer);
+    restartTimer = window.setTimeout(() => {
+      restartTimer = undefined;
+      if (!dead()) void run();
+    }, ZXING_RESTART_DELAY_MS);
+  };
+
+  const run = async () => {
+    const myGen = ++generation;
+    controls?.stop();
+    controls = null;
+    if (dead()) return;
+    startedW = video.videoWidth;
+    startedH = video.videoHeight;
+    const fail = (err: unknown) => {
+      if (dead() || myGen !== generation) return;
+      failures += 1;
+      if (failures > ZXING_MAX_RESTARTS) {
+        generation += 1; // invalida este ciclo
+        onFatal(err);
+        return;
+      }
+      console.debug(`[CameraScanner] zxing parou — a reiniciar (${failures}/${ZXING_MAX_RESTARTS})`, err);
+      scheduleRestart();
+    };
+    try {
+      const c = await reader.decodeFromVideoElement(video, (result, error) => {
+        if (dead() || myGen !== generation) return;
+        if (result) {
+          failures = 0;
+          const pts = (result.getResultPoints() ?? []).filter((p) => p != null);
+          const center =
+            pts.length > 0
+              ? {
+                  x: pts.reduce((sum, p) => sum + p.getX(), 0) / pts.length,
+                  y: pts.reduce((sum, p) => sum + p.getY(), 0) / pts.length,
+                }
+              : null;
+          onFrame(codesInAim([{ code: result.getText(), center }], getAim()));
+          return;
+        }
+        // NotFoundException acontece em quase todos os frames sem código — normal.
+        if (!error || error instanceof lib.NotFoundException) {
+          failures = 0;
+          onFrame([]);
+          return;
+        }
+        // Frame ilegível / checksum: transitórios, o ciclo continua sozinho.
+        if (error instanceof lib.ChecksumException || error instanceof lib.FormatException) return;
+        // Qualquer outro erro pára o ciclo interno do zxing.
+        fail(error);
+      });
+      if (dead() || myGen !== generation) {
+        c.stop();
+        return;
+      }
+      controls = c;
+    } catch (err) {
+      fail(err);
     }
-    // NotFoundException acontece em quase todos os frames sem código — normal.
-    // Outros erros (frame ilegível, checksum) são transitórios: ignorar.
-    if (error && !(error instanceof lib.NotFoundException)) {
-      console.debug("[CameraScanner] zxing decode error", error);
-    }
-  });
-  return () => controls.stop();
+  };
+
+  const onResize = () => {
+    if (dead() || !video.videoWidth || !video.videoHeight) return;
+    if (video.videoWidth !== startedW || video.videoHeight !== startedH) scheduleRestart();
+  };
+  // Recurso: alguns browsers não disparam "resize" no <video> ao rodar.
+  const onOrientation = () => {
+    if (orientationTimer !== undefined) window.clearTimeout(orientationTimer);
+    orientationTimer = window.setTimeout(onResize, ORIENTATION_CHECK_MS);
+  };
+  video.addEventListener("resize", onResize);
+  window.addEventListener("orientationchange", onOrientation);
+
+  await run();
+
+  return () => {
+    stopped = true;
+    generation += 1;
+    video.removeEventListener("resize", onResize);
+    window.removeEventListener("orientationchange", onOrientation);
+    if (restartTimer !== undefined) window.clearTimeout(restartTimer);
+    if (orientationTimer !== undefined) window.clearTimeout(orientationTimer);
+    controls?.stop();
+    controls = null;
+  };
 }
 
 /**
  * Arranca a descodificação sobre um <video> já a reproduzir. Devolve a função
- * que a pára. `onFatal` é chamado se não houver motor de leitura possível.
+ * que a pára. `onFrame` recebe, por frame analisado, os códigos com o centro
+ * dentro da mira. `onFatal` é chamado se não houver motor de leitura possível.
  */
 async function startDecoder(
   video: HTMLVideoElement,
-  onCode: (code: string) => void,
+  onFrame: FrameFn,
+  getAim: AimFn,
   isCancelled: () => boolean,
   onFatal: (err: unknown) => void,
 ): Promise<StopFn> {
   const native = await getNativeDetector();
-  if (!native) return startZxing(video, onCode, isCancelled);
+  if (!native) return startZxing(video, onFrame, getAim, isCancelled, onFatal);
 
   let stopped = false;
   let timer: number | undefined;
@@ -219,8 +423,12 @@ async function startDecoder(
         const found = await native.detect(video);
         if (dead()) return;
         consecutiveErrors = 0;
-        const code = pickCentered(found, video);
-        if (code) onCode(code);
+        onFrame(
+          codesInAim(
+            found.map((b) => ({ code: b.rawValue ?? "", center: nativeCenter(b) })),
+            getAim(),
+          ),
+        );
       } catch (err) {
         if (dead()) return;
         consecutiveErrors += 1;
@@ -228,7 +436,7 @@ async function startDecoder(
           console.debug("[CameraScanner] BarcodeDetector falhou — a passar para zxing", err);
           nativeBroken = true;
           try {
-            const stop = await startZxing(video, onCode, isCancelled);
+            const stop = await startZxing(video, onFrame, getAim, isCancelled, onFatal);
             if (dead()) stop();
             else fallbackStop = stop;
           } catch (zxErr) {
@@ -299,6 +507,8 @@ export function CameraScanner({
   const labels: CameraScannerLabels = { ...DEFAULT_LABELS, ...labelsOverride };
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  /** Retângulo da mira desenhado — medido a cada frame para filtrar os códigos. */
+  const aimRef = useRef<HTMLDivElement | null>(null);
   const trackRef = useRef<MediaStreamTrack | null>(null);
   const [error, setError] = useState<ErrorKind | null>(null);
   const [starting, setStarting] = useState(false);
@@ -313,6 +523,7 @@ export function CameraScanner({
   const [lastCode, setLastCode] = useState<string | null>(null);
   const [readCount, setReadCount] = useState(0);
   const [flashing, setFlashing] = useState(false);
+  const [multipleInAim, setMultipleInAim] = useState(false);
 
   // Callbacks em refs: a stream não reinicia quando o pai volta a renderizar.
   const onScanRef = useRef(onScan);
@@ -323,6 +534,9 @@ export function CameraScanner({
   optsRef.current = { continuous, repeatCooldownMs, repeatGapMs, soundOn };
 
   const seenRef = useRef(new Map<string, { acceptedAt: number; seenAt: number }>());
+  /** Estado da mira entre frames: bloqueio por vários códigos e último código visto dentro dela. */
+  const aimStateRef = useRef({ locked: false, lastInAimAt: 0, lastCode: null as string | null, lastCodeAt: 0 });
+  const multipleInAimRef = useRef(false);
   const flashTimerRef = useRef<number | undefined>(undefined);
   const audioRef = useRef<AudioContext | null>(null);
 
@@ -401,17 +615,69 @@ export function CameraScanner({
     [beep],
   );
 
+  const showMultiple = useCallback((value: boolean) => {
+    if (multipleInAimRef.current === value) return;
+    multipleInAimRef.current = value;
+    setMultipleInAim(value);
+  }, []);
+
+  /**
+   * Um frame analisado: `inAim` são os códigos (distintos) com o centro dentro da
+   * mira. Vários → nenhum conta e a leitura fica bloqueada até a mira ficar vazia
+   * (AIM_CONFLICT_MS); um → segue para o filtro de repetição.
+   */
+  const handleFrame = useCallback(
+    (inAim: string[]) => {
+      const codes = [...new Set(inAim.map((c) => c.trim()).filter(Boolean))];
+      const now = performance.now();
+      const st = aimStateRef.current;
+      if (codes.length === 0) {
+        if (st.locked && now - st.lastInAimAt >= AIM_CONFLICT_MS) {
+          st.locked = false;
+          st.lastCode = null;
+          showMultiple(false);
+        }
+        return;
+      }
+      st.lastInAimAt = now;
+      const single = codes.length === 1 ? codes[0] : null;
+      // zxing só devolve um código por frame: dois diferentes muito seguidos = vários à vista.
+      const conflict =
+        single === null || (st.lastCode !== null && st.lastCode !== single && now - st.lastCodeAt < AIM_CONFLICT_MS);
+      if (single !== null) {
+        st.lastCode = single;
+        st.lastCodeAt = now;
+      }
+      if (conflict) {
+        st.locked = true;
+        showMultiple(true);
+      }
+      if (st.locked || single === null) {
+        // Continuam "à vista": não podem contar como nova leitura logo a seguir.
+        for (const c of codes) {
+          const prev = seenRef.current.get(c);
+          if (prev) prev.seenAt = now;
+        }
+        return;
+      }
+      handleDetected(single);
+    },
+    [handleDetected, showMultiple],
+  );
+
   // Nova sessão a cada abertura.
   useEffect(() => {
     if (!open) return;
     seenRef.current.clear();
+    aimStateRef.current = { locked: false, lastInAimAt: 0, lastCode: null, lastCodeAt: 0 };
+    showMultiple(false);
     setLastCode(null);
     setReadCount(0);
     setFlashing(false);
     // Android Chrome aceita criar o áudio logo (o clique que abriu o leitor conta
     // como ativação); no iOS fica suspenso até ao primeiro toque no leitor.
     ensureAudio();
-  }, [open, ensureAudio]);
+  }, [open, ensureAudio, showMultiple]);
 
   // Separador escondido / página a sair → pausa (pára a stream); visível → retoma.
   useEffect(() => {
@@ -441,7 +707,19 @@ export function CameraScanner({
     let stopDecoder: StopFn | null = null;
     /** <video> a que a stream foi ligada (a ref pode já estar a null na limpeza). */
     let attachedEl: HTMLVideoElement | null = null;
+    let endedTrack: MediaStreamTrack | null = null;
+    let interrupted = false;
     const isCancelled = () => cancelled;
+    /** A câmara parou sem sermos nós (outra app, cabo/driver, o sistema): erro com "Tentar de novo". */
+    const onTrackEnded = () => {
+      if (cancelled) return;
+      interrupted = true;
+      console.warn("[CameraScanner] a câmara foi interrompida");
+      stopDecoder?.();
+      stopDecoder = null;
+      setStarting(false);
+      setError("interrupted");
+    };
     setTorchSupported(false);
     setTorchOn(false);
 
@@ -472,6 +750,10 @@ export function CameraScanner({
         }
         const track = stream.getVideoTracks()[0] ?? null;
         trackRef.current = track;
+        if (track) {
+          track.addEventListener("ended", onTrackEnded);
+          endedTrack = track;
+        }
 
         const el = videoRef.current;
         if (!el) throw new Error("video element missing");
@@ -506,18 +788,26 @@ export function CameraScanner({
         }
         if (cancelled) return;
 
-        const stop = await startDecoder(el, handleDetected, isCancelled, (fatal) => {
-          console.warn("[CameraScanner] sem motor de leitura", fatal);
-          if (!cancelled) setError("generic");
-        });
-        if (cancelled) {
+        const stop = await startDecoder(
+          el,
+          handleFrame,
+          () => computeAimRect(el, aimRef.current),
+          isCancelled,
+          (fatal) => {
+            console.warn("[CameraScanner] sem motor de leitura", fatal);
+            if (cancelled) return;
+            setStarting(false);
+            setError("generic");
+          },
+        );
+        if (cancelled || interrupted) {
           stop();
           return;
         }
         stopDecoder = stop;
         setStarting(false);
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || interrupted) return;
         console.warn("[CameraScanner] falha ao iniciar a câmara", err);
         stopTracks(stream);
         stream = null;
@@ -537,6 +827,8 @@ export function CameraScanner({
 
     return () => {
       cancelled = true;
+      endedTrack?.removeEventListener("ended", onTrackEnded);
+      endedTrack = null;
       stopDecoder?.();
       stopDecoder = null;
       stopTracks(stream);
@@ -553,7 +845,7 @@ export function CameraScanner({
         el.srcObject = null;
       }
     };
-  }, [open, paused, deviceId, retryKey, handleDetected]);
+  }, [open, paused, deviceId, retryKey, handleFrame]);
 
   // Limpeza final (desmontar): temporizador e áudio.
   useEffect(
@@ -609,9 +901,11 @@ export function CameraScanner({
             ? labels.errorNotFound
             : error === "busy"
               ? labels.errorBusy
-              : error === "generic"
-                ? labels.errorGeneric
-                : null;
+              : error === "interrupted"
+                ? labels.errorInterrupted
+                : error === "generic"
+                  ? labels.errorGeneric
+                  : null;
   const canRetry = error !== null && error !== "insecure" && error !== "unsupported";
   const live = !error && !starting && !paused;
 
@@ -653,12 +947,28 @@ export function CameraScanner({
           {/* Mira */}
           {!error && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden>
+              {/* Medido em computeAimRect: só os códigos com o centro aqui dentro contam. */}
               <div
+                ref={aimRef}
                 className={cn(
-                  "h-[38%] max-h-56 w-[82%] max-w-sm rounded-lg border-2 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] transition-colors duration-150",
-                  flashing ? "border-green-400 bg-green-400/15" : "border-white/80",
+                  "relative h-[38%] max-h-56 w-[82%] max-w-sm rounded-lg border-2 shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] transition-colors duration-150",
+                  flashing
+                    ? "border-green-400 bg-green-400/15"
+                    : multipleInAim
+                      ? "border-amber-400"
+                      : "border-white/80",
                 )}
-              />
+              >
+                {/* Legenda fora do fluxo: não desloca a mira do centro. */}
+                <p
+                  className={cn(
+                    "absolute left-1/2 top-full mt-2 w-max max-w-[min(20rem,90vw)] -translate-x-1/2 rounded-md px-2 py-1 text-center text-xs font-medium",
+                    multipleInAim ? "bg-amber-400 text-black" : "bg-black/60 text-white",
+                  )}
+                >
+                  {multipleInAim ? labels.multipleCodes : labels.aimCaption}
+                </p>
+              </div>
             </div>
           )}
 
@@ -743,6 +1053,9 @@ export function CameraScanner({
               </p>
             ) : (
               <p className="text-sm text-muted-foreground">{labels.hint}</p>
+            )}
+            {multipleInAim && live && (
+              <p className="text-sm font-medium text-amber-700 dark:text-amber-400">{labels.multipleCodes}</p>
             )}
           </div>
           <p className="text-sm text-muted-foreground">{labels.readCount(readCount)}</p>

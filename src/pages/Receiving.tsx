@@ -108,6 +108,25 @@ function CameraScannerUnavailable({ open, onOpenChange }: CameraScannerProps) {
   );
 }
 
+/** Enquanto o chunk do leitor carrega: ecrã inteiro, mas sempre com saída (botão e Escape). */
+function CameraScannerLoading({ onClose }: { onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (ev: globalThis.KeyboardEvent) => {
+      if (ev.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <div className="fixed inset-0 z-[600] flex flex-col items-center justify-center gap-4 bg-black/80 p-6 text-sm text-white">
+      <p role="status">A abrir a câmara…</p>
+      <Button type="button" variant="secondary" className="h-11 px-6" onClick={onClose}>
+        Fechar
+      </Button>
+    </div>
+  );
+}
+
 const CameraScanner = lazy(() =>
   import("@/components/scanner/CameraScanner").catch(() => ({ default: CameraScannerUnavailable })),
 );
@@ -1385,6 +1404,7 @@ export default function Receiving() {
   /** Leitor por câmara: aberto / já carregado uma vez (fica montado para a animação de fecho). */
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraMounted, setCameraMounted] = useState(false);
+  const closeCamera = useCallback(() => setCameraOpen(false), []);
   /** Anúncio que já existia ao abrir a câmara — o leitor só mostra os seguintes. */
   const [cameraAnnouncementBase, setCameraAnnouncementBase] = useState<string | null>(null);
 
@@ -4266,17 +4286,12 @@ export default function Receiving() {
       />
       {cameraMounted && (
         <Suspense
-          fallback={
-            cameraOpen ? (
-              <div className="fixed inset-0 z-[600] flex items-center justify-center bg-black/80 text-sm text-white" role="status">
-                A abrir a câmara…
-              </div>
-            ) : null
-          }
+          fallback={cameraOpen ? <CameraScannerLoading onClose={closeCamera} /> : null}
         >
           <CameraScanner
             open={cameraOpen}
             onOpenChange={setCameraOpen}
+            repeatGapMs={1500}
             onScan={enqueueScan}
             onCloseAutoFocus={(ev) => {
               // Como depois de uma leitura: volta ao campo de leitura (no telemóvel em modo teclado não abre o teclado).
