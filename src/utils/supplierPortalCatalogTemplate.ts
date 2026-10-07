@@ -168,7 +168,16 @@ export interface ParsedSupplierCatalogFile {
   fileName: string;
   headers: string[];
   /** Linhas de dados não vazias; rowNumber = nº da linha na folha (1-based). */
-  rows: { rowNumber: number; cells: string[] }[];
+  rows: {
+    rowNumber: number;
+    cells: string[];
+    /**
+     * Texto para colunas de código (barcode, supplier_ref): numa célula
+     * numérica com formato só de dígitos (p.ex. "0000000000000") usa o texto
+     * formatado, para não perder os zeros à esquerda. CSV = igual a `cells`.
+     */
+    codeCells: string[];
+  }[];
   /** Coluna do ficheiro → campo sugerido (null = ignorar). */
   autoMapping: (SpCatalogField | null)[];
 }
@@ -266,6 +275,8 @@ export async function readSupplierCatalogFile(file: File): Promise<ParsedSupplie
 
   const buffer = await file.arrayBuffer();
   let matrix: unknown[][];
+  // Texto formatado das células (cell.w), só para Excel.
+  let formattedMatrix: unknown[][] | null = null;
   let firstRowNumber = 1;
 
   if (isCsv) {
@@ -281,7 +292,19 @@ export async function readSupplierCatalogFile(file: File): Promise<ParsedSupplie
     if (!sheet || !sheet["!ref"]) throw new Error("O ficheiro não tem dados na primeira folha.");
     firstRowNumber = XLSX.utils.decode_range(sheet["!ref"]).s.r + 1;
     matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true, blankrows: true }) as unknown[][];
+    formattedMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false, blankrows: true }) as unknown[][];
   }
+
+  // Só se aceita o texto formatado quando é só dígitos: o formato "Geral" do
+  // Excel mostra EAN longos em notação científica (5,60123E+12), e aí o valor
+  // bruto é o correto.
+  const codeCellText = (rawValue: unknown, formatted: unknown): string => {
+    if (typeof rawValue === "number" && typeof formatted === "string") {
+      const w = formatted.trim();
+      if (/^\d+$/.test(w)) return w;
+    }
+    return cellToText(rawValue);
+  };
 
   const isEmptyRow = (r: unknown[] | undefined) => !Array.isArray(r) || r.every((c) => cellToText(c) === "");
   const headerIdx = matrix.findIndex((r) => !isEmptyRow(r));
@@ -295,7 +318,11 @@ export async function readSupplierCatalogFile(file: File): Promise<ParsedSupplie
     const raw = matrix[i];
     if (isEmptyRow(raw)) continue;
     const cells = Array.from({ length: width }, (_, c) => cellToText((raw as unknown[])[c]));
-    rows.push({ rowNumber: firstRowNumber + i, cells });
+    const fmt = formattedMatrix?.[i];
+    const codeCells = fmt
+      ? Array.from({ length: width }, (_, c) => codeCellText((raw as unknown[])[c], (fmt as unknown[])[c]))
+      : cells;
+    rows.push({ rowNumber: firstRowNumber + i, cells, codeCells });
     if (rows.length > SUPPLIER_CATALOG_MAX_ROWS) {
       throw new Error(
         `O ficheiro tem mais de ${SUPPLIER_CATALOG_MAX_ROWS} linhas de artigos. Divida-o em ficheiros mais pequenos.`,
@@ -323,6 +350,9 @@ export async function readSupplierCatalogFile(file: File): Promise<ParsedSupplie
  * 2.5) e `_row` com o nº da linha na folha. Linhas sem nenhum valor nas
  * colunas mapeadas são saltadas.
  */
+// Códigos: zeros à esquerda contam (ver codeCells).
+const CODE_FIELDS = new Set<SpCatalogField>(["barcode", "supplier_ref"]);
+
 export function buildSupplierCatalogImportRows(
   parsed: ParsedSupplierCatalogFile,
   mapping: (SpCatalogField | null)[],
@@ -336,7 +366,7 @@ export function buildSupplierCatalogImportRows(
     if (mapped.every((m) => (r.cells[m.index] ?? "") === "")) continue;
     const row: SpCatalogRowInput = { _row: r.rowNumber };
     for (const m of mapped) {
-      const value = r.cells[m.index] ?? "";
+      const value = (CODE_FIELDS.has(m.field) ? r.codeCells[m.index] : r.cells[m.index]) ?? "";
       if (value === "" && OMIT_WHEN_EMPTY.has(m.field)) continue;
       row[m.field] = value;
     }

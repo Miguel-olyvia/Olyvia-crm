@@ -1,7 +1,8 @@
 import { Suspense, type ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { Building2, Home, LogOut, Package } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Building2, Home, LogOut, Package, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { useClientSupplierSwitch } from "@/hooks/useClientRole";
 import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { cn } from "@/lib/utils";
@@ -30,6 +31,29 @@ function useLogout() {
   };
 }
 
+/**
+ * Só para contas client_supplier (cliente do portal que é também fornecedor):
+ * guarda a escolha e passa para o Portal do Cliente. Não aparece para mais
+ * nenhum tipo de conta.
+ */
+function SwitchToClientPortalButton({ className, compact }: { className?: string; compact?: boolean }) {
+  const navigate = useNavigate();
+  const { available, switchTo } = useClientSupplierSwitch();
+  if (!available) return null;
+  return (
+    <Button
+      variant="outline"
+      onClick={() => navigate(switchTo("portal"))}
+      className={cn("h-11 min-w-11 gap-1.5", className)}
+      aria-label="Mudar para Portal do Cliente"
+      title="Mudar para Portal do Cliente"
+    >
+      <ArrowLeftRight className="h-4 w-4" aria-hidden="true" />
+      <span className={cn("text-sm", compact && "hidden md:inline")}>Mudar para Portal do Cliente</span>
+    </Button>
+  );
+}
+
 function NoActiveAccessScreen({ email }: { email: string | null }) {
   const logout = useLogout();
   return (
@@ -43,6 +67,34 @@ function NoActiveAccessScreen({ email }: { email: string | null }) {
           A sua conta não tem nenhum acesso ativo ao portal. Contacte a empresa que o convidou.
         </p>
         {email && <p className="text-xs text-muted-foreground break-all">Sessão iniciada como {email}</p>}
+        <SwitchToClientPortalButton className="w-full" />
+        <Button className="w-full h-11 gap-2" variant="outline" onClick={() => void logout()}>
+          <LogOut className="h-4 w-4" aria-hidden="true" />
+          Sair
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** sp_whoami falhou (rede/JWT): não se sabe se há acesso — nunca "Sem acesso ativo". */
+function LoadErrorScreen({ onRetry }: { onRetry: () => void }) {
+  const logout = useLogout();
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="w-full max-w-sm text-center space-y-4" role="alert">
+        <div className="mx-auto h-12 w-12 rounded-full bg-muted flex items-center justify-center">
+          <AlertTriangle className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
+        </div>
+        <h1 className="text-lg font-semibold text-foreground">Não foi possível carregar o portal</h1>
+        <p className="text-sm text-muted-foreground">
+          Verifique a ligação à internet e tente de novo.
+        </p>
+        <Button className="w-full h-11 gap-2" onClick={onRetry}>
+          <RefreshCw className="h-4 w-4" aria-hidden="true" />
+          Tentar de novo
+        </Button>
+        <SwitchToClientPortalButton className="w-full" />
         <Button className="w-full h-11 gap-2" variant="outline" onClick={() => void logout()}>
           <LogOut className="h-4 w-4" aria-hidden="true" />
           Sair
@@ -53,10 +105,12 @@ function NoActiveAccessScreen({ email }: { email: string | null }) {
 }
 
 export function SupplierPortalLayout({ children }: { children: ReactNode }) {
-  const { loading, active, account, user, companies, firstLogin, markPasswordChanged } = useSupplierPortal();
+  const { loading, loadError, active, account, user, companies, firstLogin, markPasswordChanged, refresh } =
+    useSupplierPortal();
   const logout = useLogout();
 
   if (loading) return <FullScreenLoader />;
+  if (loadError) return <LoadErrorScreen onRetry={() => void refresh()} />;
   if (!active || !account) return <NoActiveAccessScreen email={user?.email ?? null} />;
 
   const userLabel = user?.name || user?.email || "";
@@ -86,6 +140,7 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
               {user?.role === "owner" ? "Utilizador principal" : "Consulta"}
             </p>
           </div>
+          <SwitchToClientPortalButton compact />
           <Button
             variant="outline"
             onClick={() => void logout()}

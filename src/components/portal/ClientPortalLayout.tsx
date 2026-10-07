@@ -2,7 +2,8 @@ import { ReactNode, useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { LogOut, FileText, ScrollText, FolderOpen, Home } from "lucide-react";
+import { LogOut, FileText, ScrollText, FolderOpen, Home, ArrowLeftRight } from "lucide-react";
+import { useClientSupplierSwitch } from "@/hooks/useClientRole";
 import { cn } from "@/lib/utils";
 import { FirstLoginModal } from "@/components/portal/FirstLoginModal";
 import { PortalCompanySwitcher } from "@/components/portal/PortalCompanySwitcher";
@@ -58,6 +59,8 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   // empresas do grupo. Ver src/contexts/PortalCompanyContext.tsx.
   const { activeOrg, portalOrgs, hasMultiple, isLoading: orgsLoading } = usePortalCompany();
   const queryClient = useQueryClient();
+  // Só contas client_supplier (cliente que é também fornecedor) veem o botão.
+  const supplierSwitch = useClientSupplierSwitch();
   const [userName, setUserName] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [showFirstLogin, setShowFirstLogin] = useState(false);
@@ -251,6 +254,19 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
             </div>
           </div>
           <div className="w-px h-6 bg-border mx-1 hidden sm:block" />
+          {supplierSwitch.available && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(supplierSwitch.switchTo("supplier"))}
+              className="gap-1.5 min-h-[24px] min-w-[24px]"
+              aria-label="Mudar para Portal do Fornecedor"
+              title="Mudar para Portal do Fornecedor"
+            >
+              <ArrowLeftRight className="h-3.5 w-3.5" aria-hidden="true" />
+              <span className="hidden md:inline text-xs">Mudar para Portal do Fornecedor</span>
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"

@@ -494,7 +494,9 @@ const Suppliers = () => {
       const portalLinkActive = error?.hint === "portal_link_active";
       const portalMessage = error?.message || "Este fornecedor tem acesso ao portal ativo: desligue o portal antes de mudar o NIF";
       if (portalLinkActive) {
-        setFieldErrors((prev) => ({ ...prev, tax_id: portalMessage }));
+        // A BD tem duas mensagens com o mesmo hint: mudança de empresa ou de NIF.
+        const aboutCompany = /empresa/i.test(String(error?.message || ""));
+        setFieldErrors((prev) => ({ ...prev, [aboutCompany ? "organization_id" : "tax_id"]: portalMessage }));
       }
       toast({
         title: editingId ? t("suppliers.toast.updateError") : t("suppliers.toast.createError"),
@@ -1224,6 +1226,9 @@ const Suppliers = () => {
                 showSecondaryCompanies={false}
                 multiSelectCompanies={true}
               />
+              {fieldErrors.organization_id && (
+                <p className="text-sm text-destructive" role="alert">{fieldErrors.organization_id}</p>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="col-span-2 space-y-2">

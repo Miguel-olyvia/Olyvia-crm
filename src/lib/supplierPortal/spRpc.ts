@@ -200,11 +200,22 @@ function unwrap<T>({ data, error }: { data: Json | null; error: { message: strin
   return data as unknown as T;
 }
 
-/** Nunca dá erro no servidor; em falha de rede devolve { is_supplier: false }. */
+/**
+ * Variante que LANÇA em falha (rede, JWT, servidor): para quem tem de
+ * distinguir "sem acesso" (resposta com sucesso) de "não foi possível saber".
+ */
+export async function spWhoamiStrict(): Promise<SpWhoami> {
+  const data = unwrap<SpWhoami | null>(await supabase.rpc("sp_whoami"));
+  return data && typeof data === "object" ? data : { is_supplier: false };
+}
+
+/**
+ * Tolerante (guards): em qualquer falha devolve { is_supplier: false }.
+ * Não usar para decidir "sem acesso ativo" — ver spWhoamiStrict.
+ */
 export async function spWhoami(): Promise<SpWhoami> {
   try {
-    const data = unwrap<SpWhoami | null>(await supabase.rpc("sp_whoami"));
-    return data && typeof data === "object" ? data : { is_supplier: false };
+    return await spWhoamiStrict();
   } catch {
     return { is_supplier: false };
   }

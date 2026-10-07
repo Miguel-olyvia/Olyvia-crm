@@ -18,6 +18,7 @@ import {
   REASON_LABEL,
   callRpc,
   confidenceOf,
+  fetchFreeSupplierRows,
   formatMoney,
   type CatalogFilter,
   type CatalogLinkResult,
@@ -37,6 +38,8 @@ interface SupplierPortalCatalogSectionProps {
 }
 
 const PAGE_SIZE = 50;
+// Referência estável: um [] novo a cada render reiniciava a escolha no diálogo.
+const NO_SUGGESTIONS: LinkSuggestion[] = [];
 
 const FILTERS: { value: CatalogFilter; label: string }[] = [
   { value: "unlinked", label: "Por ligar" },
@@ -50,7 +53,7 @@ const formatUnit = (item: CrmCatalogItem) => {
   return [item.unit_label, item.units_per_pack ? `× ${item.units_per_pack}` : null].filter(Boolean).join(" ");
 };
 
-type LinkOutcome = { ok: boolean; result?: CatalogLinkResult; message?: string };
+type LinkOutcome = { ok: boolean; result?: CatalogLinkResult; message?: string; ambiguous?: boolean };
 
 // Catálogo gerido pelo fornecedor no portal (F3.1), visto do CRM: filtro
 // Por ligar / Ligados / Dispensados / Todos (rpc_supplier_catalog_list),
@@ -125,6 +128,15 @@ export default function SupplierPortalCatalogSection({
     load();
   }, [load]);
 
+  // Ligar/dispensar o último artigo de uma página > 1 deixa-a vazia: recua.
+  useEffect(() => {
+    // Só sobre a resposta da página pedida (list.offset === offset), senão
+    // recuava outra vez antes de a página anterior chegar.
+    if (list && list.items.length === 0 && list.offset > 0 && list.offset === offset) {
+      setOffset(Math.max(0, offset - PAGE_SIZE));
+    }
+  }, [list, offset]);
+
   // Sugestões em lote para os artigos visíveis que estão por ligar.
   const pendingIds = useMemo(
     () => (list?.items ?? []).filter((i) => !i.is_linked && !i.is_dismissed && i.is_active).map((i) => i.id),
@@ -170,9 +182,12 @@ export default function SupplierPortalCatalogSection({
     setRowErrors({});
   };
 
-  // A sugestão "supplier_sku" reaproveita uma linha item_suppliers existente;
-  // a RPC procura-a por (produto, fornecedor, unidade), por isso a unidade
-  // tem de ser a dessa linha.
+  // A RPC procura a linha item_suppliers a reaproveitar por (produto,
+  // fornecedor, unidade), por isso a unidade tem de ser a dessa linha:
+  // - sugestão "supplier_sku": a linha vem na sugestão;
+  // - escolha no diálogo entre várias linhas: vem em choice.uomId;
+  // - restantes (barcode/nome, pesquisa, lote): uma só linha livre → a unidade
+  //   dela; várias → ambíguo (o diálogo pede para escolher, o lote salta).
   const linkOne = async (item: CrmCatalogItem, choice: LinkChoice): Promise<LinkOutcome> => {
     let uomId: string | null = null;
     if (choice.itemSupplierId) {
@@ -183,6 +198,15 @@ export default function SupplierPortalCatalogSection({
         .maybeSingle();
       if (error) return { ok: false, message: error.message };
       uomId = data?.uom_id ?? null;
+    } else if (choice.uomId !== undefined) {
+      uomId = choice.uomId;
+    } else {
+      const { rows, error } = await fetchFreeSupplierRows(choice.productId, supplierId);
+      if (error) return { ok: false, message: error };
+      if (rows.length > 1) {
+        return { ok: false, ambiguous: true, message: "Várias ligações deste produto a este fornecedor — liga manualmente." };
+      }
+      uomId = rows[0]?.uom_id ?? null;
     }
     const { data, error } = await callRpc<CatalogLinkResult>("rpc_catalog_link", {
       p_supplier_id: supplierId,
@@ -235,6 +259,7 @@ export default function SupplierPortalCatalogSection({
     const errors: Record<string, string> = {};
     const warnings: string[] = [];
     let ok = 0;
+    let skipped = 0;
     // Em sequência, para os erros ficarem na linha certa (contrato 3.4).
     for (const item of targets) {
       const top = suggestions[item.id]?.[0];
@@ -243,11 +268,16 @@ export default function SupplierPortalCatalogSection({
         productId: top.product_id,
         productName: top.product_name,
         itemSupplierId: top.item_supplier_id,
-        applyCatalogPrice: true,
+        // Sem can_view_pricing o preço de compra não é tocado.
+        applyCatalogPrice: list?.can_view_pricing ?? false,
       });
       if (outcome.ok) {
         ok += 1;
         warnings.push(...(outcome.result?.warnings ?? []).map((w) => `${item.supplier_ref}: ${w}`));
+      } else if (outcome.ambiguous) {
+        // Várias linhas do produto para este fornecedor: não se adivinha qual.
+        skipped += 1;
+        errors[item.id] = outcome.message ?? "Várias ligações — liga manualmente.";
       } else {
         errors[item.id] = outcome.message ?? "Erro ao ligar.";
       }
@@ -260,10 +290,10 @@ export default function SupplierPortalCatalogSection({
       targets.forEach((t) => { delete next[t.id]; });
       return { ...next, ...errors };
     });
-    const failed = Object.keys(errors).length;
+    const failed = Object.keys(errors).length - skipped;
     toast({
       title: "Sugestões exatas aceites",
-      description: `${ok} ligado(s)${failed > 0 ? `, ${failed} com erro (ver na linha)` : ""}.${warnings.length > 0 ? ` Avisos: ${warnings.slice(0, 3).join(" | ")}${warnings.length > 3 ? ` (+${warnings.length - 3})` : ""}` : ""}`,
+      description: `${ok} ligado(s)${skipped > 0 ? `, ${skipped} saltado(s) por terem várias ligações (ligar manualmente)` : ""}${failed > 0 ? `, ${failed} com erro (ver na linha)` : ""}.${warnings.length > 0 ? ` Avisos: ${warnings.slice(0, 3).join(" | ")}${warnings.length > 3 ? ` (+${warnings.length - 3})` : ""}` : ""}`,
       variant: failed > 0 ? "destructive" : undefined,
     });
     if (ok > 0) {
@@ -533,7 +563,7 @@ export default function SupplierPortalCatalogSection({
         </div>
       )}
 
-      {list.total > PAGE_SIZE && (
+      {(list.total > PAGE_SIZE || list.offset > 0) && (
         <div className="flex items-center justify-between text-sm text-muted-foreground">
           <span>{from}–{to} de {list.total}</span>
           <div className="flex gap-2">
@@ -561,7 +591,8 @@ export default function SupplierPortalCatalogSection({
 
       <CatalogLinkDialog
         item={linkItem}
-        suggestions={linkItem ? suggestions[linkItem.id] ?? [] : []}
+        suggestions={linkItem ? suggestions[linkItem.id] ?? NO_SUGGESTIONS : NO_SUGGESTIONS}
+        supplierId={supplierId}
         organizationId={organizationId}
         canViewPricing={showPrice}
         linking={linking}
@@ -611,7 +642,8 @@ export default function SupplierPortalCatalogSection({
             <AlertDialogTitle>Aceitar {exactCandidates.length} sugestão(ões) exata(s)?</AlertDialogTitle>
             <AlertDialogDescription>
               Cada artigo desta página com uma sugestão exata (ref. igual ou código de barras) é ligado ao produto
-              sugerido, com o preço do catálogo. Os erros ficam indicados na linha do artigo.
+              sugerido{showPrice ? ", com o preço do catálogo" : ""}. Os erros ficam indicados na linha do artigo;
+              os produtos com várias associações a este fornecedor são saltados.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {bulkRunning && (

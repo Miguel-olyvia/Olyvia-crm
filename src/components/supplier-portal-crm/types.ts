@@ -162,6 +162,49 @@ export interface CatalogLinkResult {
   warnings: string[];
 }
 
+/** Linha item_suppliers (produto, fornecedor) ainda sem artigo do catálogo. */
+export interface FreeSupplierRow {
+  id: string;
+  uom_id: string | null;
+  uom_code: string | null;
+  supplier_sku: string | null;
+  purchase_price: number | null;
+  currency: string | null;
+}
+
+/**
+ * Linhas item_suppliers do produto para este fornecedor (RLS) que a ligação
+ * pode reaproveitar. rpc_catalog_link procura por (produto, fornecedor,
+ * unidade): sem a unidade certa cria uma segunda linha. As que já estão
+ * ligadas a outro artigo do catálogo ficam de fora (a RPC recusa-as).
+ */
+export async function fetchFreeSupplierRows(
+  productId: string,
+  supplierId: string,
+): Promise<{ rows: FreeSupplierRow[]; error: string | null }> {
+  const { data, error } = await supabase
+    .from("item_suppliers")
+    .select("id, uom_id, supplier_sku, purchase_price, currency, catalog_item_id, uom:uom_id(code)")
+    .eq("product_id", productId)
+    .eq("supplier_id", supplierId)
+    .is("deleted_at", null)
+    .is("catalog_item_id", null)
+    .order("created_at");
+  if (error) return { rows: [], error: error.message };
+  const rows = (data ?? []).map((r) => {
+    const uom = r.uom as { code: string } | { code: string }[] | null;
+    return {
+      id: r.id,
+      uom_id: r.uom_id,
+      uom_code: (Array.isArray(uom) ? uom[0]?.code : uom?.code) ?? null,
+      supplier_sku: r.supplier_sku,
+      purchase_price: r.purchase_price,
+      currency: r.currency,
+    };
+  });
+  return { rows, error: null };
+}
+
 // ─── 6. Edge function create-supplier-portal-access ────────────────────────
 
 export interface PortalAccessResponse {

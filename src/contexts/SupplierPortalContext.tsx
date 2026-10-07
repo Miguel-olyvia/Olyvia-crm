@@ -3,8 +3,9 @@ import { supabase } from "@/integrations/supabase/client";
 import {
   isNoSupplierAccess,
   spMyCompanies,
-  spWhoami,
+  spWhoamiStrict,
   type SpCompany,
+  type SpWhoami,
   type SpWhoamiAccount,
   type SpWhoamiUser,
 } from "@/lib/supplierPortal/spRpc";
@@ -18,6 +19,8 @@ import {
  */
 interface SupplierPortalContextValue {
   loading: boolean;
+  /** sp_whoami falhou (rede/JWT/servidor): não se sabe se há acesso. */
+  loadError: boolean;
   /** Utilizador do portal ativo, com conta ativa e pelo menos um acesso ativo. */
   active: boolean;
   firstLogin: boolean;
@@ -36,6 +39,7 @@ const SupplierPortalContext = createContext<SupplierPortalContextValue | undefin
 
 interface State {
   loading: boolean;
+  loadError: boolean;
   active: boolean;
   firstLogin: boolean;
   canManageCatalog: boolean;
@@ -47,6 +51,7 @@ interface State {
 
 const INITIAL: State = {
   loading: true,
+  loadError: false,
   active: false,
   firstLogin: false,
   canManageCatalog: false,
@@ -63,7 +68,19 @@ export function SupplierPortalProvider({ children }: { children: ReactNode }) {
 
   const load = useCallback(async () => {
     const requestId = ++requestRef.current;
-    const whoami = await spWhoami();
+    // "Tentar de novo" a partir do ecrã de erro volta ao loader; um refresh
+    // normal (páginas) mantém o ecrã enquanto recarrega.
+    setState((s) => (s.loadError ? INITIAL : s));
+    let whoami: SpWhoami;
+    try {
+      whoami = await spWhoamiStrict();
+    } catch {
+      // Rede/JWT/servidor: não se sabe se tem acesso → erro com "Tentar de novo",
+      // nunca "Sem acesso ativo".
+      if (requestId !== requestRef.current) return;
+      setState({ ...INITIAL, loading: false, loadError: true });
+      return;
+    }
     if (requestId !== requestRef.current) return;
 
     if (!whoami.is_supplier || !whoami.active || !whoami.account) {
@@ -85,6 +102,7 @@ export function SupplierPortalProvider({ children }: { children: ReactNode }) {
 
     setState({
       loading: false,
+      loadError: false,
       active,
       firstLogin: whoami.first_login,
       canManageCatalog: active && whoami.can_manage_catalog,
@@ -97,17 +115,14 @@ export function SupplierPortalProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    void supabase.auth.getUser().then(({ data: { user } }) => {
-      if (cancelled) return;
-      loadedForUserRef.current = user?.id ?? null;
-      void load();
-    });
-
-    // Outra conta na mesma aba (sair/entrar) → recarregar. Re-emissões do
-    // mesmo utilizador (foco no separador, refresh do token) são ignoradas.
+    // Só onAuthStateChange: o INITIAL_SESSION faz a primeira carga (antes havia
+    // também um getUser() em paralelo e a carga corria duas vezes). Outra conta
+    // na mesma aba (sair/entrar) → recarregar; re-emissões do mesmo utilizador
+    // (foco no separador, refresh do token) são ignoradas. A carga sai do
+    // callback (setTimeout) para não chamar o supabase dentro do lock de auth.
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       const uid = session?.user?.id ?? null;
-      if (event === "SIGNED_OUT") {
+      if (event === "SIGNED_OUT" || (event === "INITIAL_SESSION" && !uid)) {
         loadedForUserRef.current = null;
         requestRef.current += 1;
         setState({ ...INITIAL, loading: false });
@@ -116,12 +131,16 @@ export function SupplierPortalProvider({ children }: { children: ReactNode }) {
       if (uid && uid !== loadedForUserRef.current) {
         loadedForUserRef.current = uid;
         setState(INITIAL);
-        void load();
+        setTimeout(() => {
+          if (!cancelled) void load();
+        }, 0);
       }
     });
 
     return () => {
       cancelled = true;
+      // StrictMode volta a subscrever: o INITIAL_SESSION seguinte tem de carregar.
+      loadedForUserRef.current = null;
       subscription.unsubscribe();
     };
   }, [load]);

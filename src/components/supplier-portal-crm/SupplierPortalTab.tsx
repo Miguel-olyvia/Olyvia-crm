@@ -368,12 +368,6 @@ export default function SupplierPortalTab({
         </div>
       )}
 
-      {!canManage && (
-        <p className="text-xs text-muted-foreground">
-          Só quem tem a permissão "Gerir acesso dos fornecedores ao portal" pode enviar, reenviar ou revogar acessos.
-        </p>
-      )}
-
       {/* Convite */}
       <Dialog open={inviteOpen} onOpenChange={(v) => { if (!sending) setInviteOpen(v); }}>
         <DialogContent className="max-w-md">

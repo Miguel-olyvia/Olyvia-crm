@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -50,8 +50,20 @@ const ResetPassword = () => {
   // Link do convite/reposição com token_hash (portal do fornecedor): enquanto
   // o verifyOtp corre mostra-se um carregamento em vez de "Link inválido".
   const [verifyingToken, setVerifyingToken] = useState(() => readTokenHashParams() !== null);
+  // Link com token_hash aberto num browser com outra sessão: confirmar antes.
+  const [sessionConflict, setSessionConflict] = useState<{ tokenHash: string; email: string } | null>(null);
   const navigate = useNavigate();
   const { toast } = useToast();
+
+  const runTokenVerification = useCallback((tokenHash: string, isCancelled: () => boolean) => {
+    void verifyTokenHashOnce(tokenHash).then((ok) => {
+      // O token é de uso único: limpa-se o URL para um refresh não o reenviar.
+      window.history.replaceState(window.history.state, "", window.location.pathname);
+      if (isCancelled()) return;
+      if (ok) setIsRecovery(true);
+      setVerifyingToken(false);
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,22 +81,47 @@ const ResetPassword = () => {
 
     // ?token_hash=…&type=recovery|invite (contrato F3.1, 1.2 passo 3). O
     // cliente usa PKCE e não trata este formato sozinho: verifica-se aqui.
+    // Se já houver uma sessão neste browser, o verifyOtp substitui-a: pede-se
+    // confirmação antes (não se sabe de quem é o link sem o consumir).
     const tokenParams = readTokenHashParams();
     if (tokenParams) {
-      void verifyTokenHashOnce(tokenParams.tokenHash).then((ok) => {
-        // O token é de uso único: limpa-se o URL para um refresh não o reenviar.
-        window.history.replaceState(window.history.state, "", window.location.pathname);
-        if (cancelled) return;
-        if (ok) setIsRecovery(true);
-        setVerifyingToken(false);
-      });
+      const { tokenHash } = tokenParams;
+      if (tokenVerifications.has(tokenHash)) {
+        // Já confirmado/em curso (2.ª passagem do StrictMode): só aguardar.
+        runTokenVerification(tokenHash, () => cancelled);
+      } else {
+        void supabase.auth.getSession().then(({ data: { session } }) => {
+          if (cancelled) return;
+          if (session?.user) {
+            setSessionConflict({ tokenHash, email: session.user.email ?? "outra conta" });
+            setVerifyingToken(false);
+            return;
+          }
+          runTokenVerification(tokenHash, () => cancelled);
+        });
+      }
     }
 
     return () => {
       cancelled = true;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [runTokenVerification]);
+
+  const handleConfirmSessionSwitch = async () => {
+    if (!sessionConflict) return;
+    const { tokenHash } = sessionConflict;
+    setSessionConflict(null);
+    setVerifyingToken(true);
+    // Só esta aba/browser: as outras sessões do utilizador ficam intactas.
+    await supabase.auth.signOut({ scope: "local" }).catch(() => undefined);
+    runTokenVerification(tokenHash, () => false);
+  };
+
+  const handleCancelSessionSwitch = () => {
+    setSessionConflict(null);
+    navigate("/", { replace: true });
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -147,6 +184,31 @@ const ResetPassword = () => {
       setLoading(false);
     }
   };
+
+  if (sessionConflict) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary/10 via-background to-accent/10">
+        <Card className="w-full max-w-md mx-4">
+          <CardHeader className="flex flex-col items-center">
+            <img src={olyviaIcon} alt="Olyvia" className="h-16 w-16 mb-4" />
+            <CardTitle className="text-xl font-bold text-center">Terminar a sessão atual?</CardTitle>
+            <CardDescription className="text-center break-words">
+              Este link vai terminar a sessão de <span className="font-medium text-foreground">{sessionConflict.email}</span> neste
+              browser. Continuar?
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            <Button className="w-full h-11" onClick={() => void handleConfirmSessionSwitch()}>
+              Continuar
+            </Button>
+            <Button className="w-full h-11" variant="outline" onClick={handleCancelSessionSwitch}>
+              Cancelar
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (!isRecovery && verifyingToken) {
     return (

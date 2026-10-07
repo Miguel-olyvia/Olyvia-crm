@@ -11,8 +11,10 @@ import { cn } from "@/lib/utils";
 import {
   REASON_LABEL,
   confidenceOf,
+  fetchFreeSupplierRows,
   formatMoney,
   type CrmCatalogItem,
+  type FreeSupplierRow,
   type LinkSuggestion,
 } from "./types";
 
@@ -21,6 +23,11 @@ export interface LinkChoice {
   productName: string;
   /** Linha item_suppliers que a sugestão "supplier_sku" vai reutilizar. */
   itemSupplierId: string | null;
+  /**
+   * Unidade da linha item_suppliers escolhida no diálogo (quando o produto
+   * tem várias linhas livres deste fornecedor). Ausente = quem liga resolve.
+   */
+  uomId?: string | null;
   applyCatalogPrice: boolean;
 }
 
@@ -34,6 +41,7 @@ interface ProductHit {
 interface CatalogLinkDialogProps {
   item: CrmCatalogItem | null;
   suggestions: LinkSuggestion[];
+  supplierId: string;
   /** Os produtos ligáveis são os da organização do fornecedor (regra da RPC). */
   organizationId: string | null;
   canViewPricing: boolean;
@@ -53,6 +61,7 @@ const sanitizeTerm = (raw: string) => raw.replace(/[,()*%\\"']/g, " ").trim().sl
 export default function CatalogLinkDialog({
   item,
   suggestions,
+  supplierId,
   organizationId,
   canViewPricing,
   linking,
@@ -64,7 +73,14 @@ export default function CatalogLinkDialog({
   const [hits, setHits] = useState<ProductHit[]>([]);
   const [searching, setSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
-  const [applyPrice, setApplyPrice] = useState(true);
+  // Sem can_view_pricing a opção fica escondida e o preço de compra não é tocado.
+  const [applyPrice, setApplyPrice] = useState(canViewPricing);
+
+  // Linhas item_suppliers livres do produto escolhido (sem linha na sugestão).
+  const [freeRows, setFreeRows] = useState<FreeSupplierRow[] | null>(null);
+  const [freeRowsLoading, setFreeRowsLoading] = useState(false);
+  const [freeRowsError, setFreeRowsError] = useState<string | null>(null);
+  const [chosenRowId, setChosenRowId] = useState<string | null>(null);
 
   // Reabrir com outro artigo: repõe a escolha na melhor sugestão.
   useEffect(() => {
@@ -74,8 +90,44 @@ export default function CatalogLinkDialog({
     setQuery("");
     setHits([]);
     setSearchError(null);
-    setApplyPrice(true);
-  }, [item, suggestions]);
+    setApplyPrice(canViewPricing);
+  }, [item, suggestions, canViewPricing]);
+
+  const selectedProductId = selected?.id ?? null;
+  const selectedItemSupplierId = selected?.itemSupplierId ?? null;
+
+  useEffect(() => {
+    setFreeRows(null);
+    setFreeRowsError(null);
+    setChosenRowId(null);
+    if (!item || !selectedProductId || selectedItemSupplierId) {
+      setFreeRowsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setFreeRowsLoading(true);
+    void fetchFreeSupplierRows(selectedProductId, supplierId).then(({ rows, error }) => {
+      if (cancelled) return;
+      setFreeRowsLoading(false);
+      if (error) {
+        setFreeRowsError(error);
+        return;
+      }
+      setFreeRows(rows);
+      if (rows.length === 1) setChosenRowId(rows[0].id);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [item, selectedProductId, selectedItemSupplierId, supplierId]);
+
+  const needsRowChoice = !!freeRows && freeRows.length > 1;
+  const chosenRow = freeRows?.find((r) => r.id === chosenRowId) ?? null;
+  // Com a resposta das linhas: a unidade é decidida aqui. Sem ela (erro), quem
+  // liga volta a ler e salta se for ambíguo.
+  const resolvedUom: { uomId?: string | null } =
+    freeRows === null ? {} : freeRows.length === 0 ? { uomId: null } : chosenRow ? { uomId: chosenRow.uom_id } : {};
+  const canConfirm = !!selected && !linking && !freeRowsLoading && (!needsRowChoice || !!chosenRow);
 
   useEffect(() => {
     const term = sanitizeTerm(query);
@@ -224,19 +276,62 @@ export default function CatalogLinkDialog({
             )}
           </section>
 
-          <div className="flex items-start gap-2">
-            <Checkbox
-              id="catalog-link-apply-price"
-              checked={applyPrice}
-              onCheckedChange={(v) => setApplyPrice(!!v)}
-            />
-            <Label htmlFor="catalog-link-apply-price" className="text-sm font-normal leading-snug cursor-pointer">
-              Usar o preço do catálogo como preço de compra
-              <span className="block text-xs text-muted-foreground">
-                Se desmarcado, uma associação existente mantém o preço; uma nova fica sem preço.
-              </span>
-            </Label>
-          </div>
+          {freeRowsLoading && (
+            <p className="text-xs text-muted-foreground flex items-center gap-1">
+              <Loader2 className="w-3 h-3 animate-spin" /> A verificar as associações do produto a este fornecedor...
+            </p>
+          )}
+          {freeRowsError && (
+            <p className="text-xs text-destructive">Não foi possível ler as associações do produto: {freeRowsError}</p>
+          )}
+          {needsRowChoice && freeRows && (
+            <section className="space-y-2" aria-labelledby="catalog-link-rows">
+              <h4 id="catalog-link-rows" className="text-sm font-medium">Associação a reaproveitar</h4>
+              <p className="text-xs text-muted-foreground">
+                Este produto tem várias associações a este fornecedor. Escolhe a que fica ligada ao artigo do catálogo.
+              </p>
+              <div className="space-y-1.5" role="radiogroup" aria-label="Associações do produto a este fornecedor">
+                {freeRows.map((r) => {
+                  const active = chosenRowId === r.id;
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      className={optionClass(active)}
+                      onClick={() => setChosenRowId(r.id)}
+                    >
+                      <Check className={cn("w-4 h-4 mt-0.5 shrink-0", active ? "opacity-100 text-primary" : "opacity-0")} />
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-medium">Unidade: {r.uom_code ?? "sem unidade"}</span>
+                        <span className="block text-xs text-muted-foreground">
+                          {r.supplier_sku ? `Ref. ${r.supplier_sku}` : "Sem ref."}
+                          {canViewPricing && r.purchase_price != null ? ` · ${formatMoney(r.purchase_price, r.currency)}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {canViewPricing && (
+            <div className="flex items-start gap-2">
+              <Checkbox
+                id="catalog-link-apply-price"
+                checked={applyPrice}
+                onCheckedChange={(v) => setApplyPrice(!!v)}
+              />
+              <Label htmlFor="catalog-link-apply-price" className="text-sm font-normal leading-snug cursor-pointer">
+                Usar o preço do catálogo como preço de compra
+                <span className="block text-xs text-muted-foreground">
+                  Se desmarcado, uma associação existente mantém o preço; uma nova fica sem preço.
+                </span>
+              </Label>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -245,14 +340,15 @@ export default function CatalogLinkDialog({
           </Button>
           <Button
             type="button"
-            disabled={!selected || linking}
+            disabled={!canConfirm}
             onClick={() =>
               selected &&
               onConfirm({
                 productId: selected.id,
                 productName: selected.name,
                 itemSupplierId: selected.itemSupplierId,
-                applyCatalogPrice: applyPrice,
+                ...resolvedUom,
+                applyCatalogPrice: canViewPricing && applyPrice,
               })
             }
           >
