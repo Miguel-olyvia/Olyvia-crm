@@ -6,6 +6,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { LeadPhoneField } from "./LeadPhoneField";
+import { isPhoneField } from "@/lib/phone/isPhoneField";
 
 interface FieldDefinition {
   id: string;
@@ -19,13 +20,6 @@ interface FieldDefinition {
   display_style?: string;
   contact_field_mapping?: string | null;
 }
-
-const PHONE_KEY_PATTERN = /(phone|telefone|telemovel|telemóvel)/i;
-
-const isPhoneField = (field: FieldDefinition): boolean =>
-  field.field_type === 'phone' ||
-  field.contact_field_mapping === 'phone' ||
-  (field.field_type === 'text' && PHONE_KEY_PATTERN.test(field.field_key));
 
 interface DynamicFormFieldProps {
   field: FieldDefinition;
