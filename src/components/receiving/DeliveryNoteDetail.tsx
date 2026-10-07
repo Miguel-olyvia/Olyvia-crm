@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Ban, CheckCircle2, Lock, Pencil, RefreshCw, Unlock } from "lucide-react";
+import { AlertTriangle, Ban, CheckCircle2, FileDown, Lock, Pencil, RefreshCw, Unlock } from "lucide-react";
 import { DeliveryNoteDialog } from "./DeliveryNoteDialog";
 import {
   FULLSCREEN_DIALOG_CLASS,
@@ -79,6 +79,7 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const busyRef = useRef(false);
   const seqRef = useRef(0);
   const onChangedRef = useRef(onChanged);
@@ -157,6 +158,22 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
     setActionError(
       err?.code ? noteErrorMessage(err) : "Sem ligação ao servidor — não sei se ficou feito. Tenta de novo (repetir não faz nada a dobrar).",
     );
+  };
+
+  // Comprovativo de receção (PDF). Import dinâmico: o @react-pdf/renderer não
+  // pode entrar no chunk do ecrã de receção (pesa e só é preciso aqui).
+  const downloadProof = async () => {
+    if (!note || downloading) return;
+    setDownloading(true);
+    setActionError(null);
+    try {
+      const { downloadReceiptProof } = await import("@/utils/generateReceiptProofPdf");
+      await downloadReceiptProof(note.id);
+    } catch (ex) {
+      setActionError(ex instanceof Error && ex.message ? ex.message : "Não foi possível gerar o PDF — tenta de novo.");
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const summary = note?.summary ?? null;
@@ -405,6 +422,12 @@ export function DeliveryNoteDetail({ open, onOpenChange, noteId, orgId, canEdit,
                 <RefreshCw className="mr-2 h-4 w-4" />
                 Atualizar
               </Button>
+              {note.status !== "cancelled" && (
+                <Button type="button" variant="outline" className="h-11" onClick={() => void downloadProof()} disabled={downloading}>
+                  <FileDown className="mr-2 h-4 w-4" aria-hidden />
+                  {downloading ? "A gerar…" : "Descarregar PDF"}
+                </Button>
+              )}
               {onUse && note.status === "open" && (
                 <Button type="button" variant="secondary" className="h-11" onClick={() => onUse(note)}>
                   <CheckCircle2 className="mr-2 h-4 w-4" />
