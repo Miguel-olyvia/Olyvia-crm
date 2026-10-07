@@ -3,20 +3,29 @@
  *
  * "Enviar acesso ao portal" na ficha do fornecedor (CRM).
  *
- * Diferenças deliberadas em relação a create-client-portal-access:
- *   • NUNCA há password temporária e NUNCA se devolve uma password ou um link
- *     ao operador. O fornecedor recebe por email um link para definir a
- *     password (generateLink "recovery" → token_hash → /reset-password).
- *     A conta é global por NIF (pode ser usada por várias empresas); um
+ * Credenciais (como no Portal do Cliente):
+ *   • Conta nova → password TEMPORÁRIA forte (crypto) enviada por email ao
+ *     fornecedor; no 1.º acesso o portal obriga a definir uma nova
+ *     (SupplierFirstLoginModal, sp_whoami.first_login →
+ *     sp_mark_password_changed). A password NUNCA é devolvida ao operador nem
+ *     escrita em logs/Sentry. Não há links de reposição (generateLink).
+ *   • Só a RPC decide quando se pode pôr uma password temporária
+ *     (may_set_temp_password): conta de fornecedor criada pelo convite, ainda
+ *     sem password definida. Conta de fornecedor já com password, ou conta que
+ *     também é cliente do Portal do Cliente (account_kind = 'client_existing',
+ *     "um cliente pode ser fornecedor também") → NUNCA se mexe na password;
+ *     o email só avisa para entrar com o mesmo email e password.
+ *   • A conta é global por NIF (pode ser usada por várias empresas); um
  *     operador de uma empresa não pode tomar conta dela.
  *   • A conta Auth é criada com user_metadata.admin_created = 'true': o
  *     gatilho handle_new_user não cria anew_users nem anew_entities. Leva
  *     também app_metadata.supplier_portal = true (só o servidor o escreve):
- *     a RPC só aproveita uma conta Auth ainda sem utilizador do portal se
- *     tiver essa marca e nunca tiver iniciado sessão — uma conta registada
- *     por terceiros com o mesmo email é recusada (email_not_allowed). Não há
- *     anew_memberships, não há "lazy-create" de perfil, não se muda o email
- *     de uma conta existente.
+ *     a RPC só aproveita uma conta Auth sem perfil e ainda sem utilizador do
+ *     portal se tiver essa marca e nunca tiver iniciado sessão — uma conta
+ *     registada por terceiros com o mesmo email é recusada
+ *     (email_not_allowed). Utilizadores internos (qualquer membership ativa
+ *     não-cliente) são sempre recusados. Não há anew_memberships, não há
+ *     "lazy-create" de perfil, não se muda o email de uma conta existente.
  *   • Todo o trabalho na BD é feito numa RPC atómica service_role
  *     (rpc_supplier_portal_invite_prepare / _resend_prepare), que volta a
  *     verificar quem chama (org visível + suppliers.portal_manage).
@@ -75,6 +84,32 @@ const HINT_STATUS: Record<string, number> = {
   auth_user_missing: 500,
 };
 
+/**
+ * Password temporária forte: 16 caracteres de um alfabeto sem ambíguos
+ * (sem 0/O, 1/l/I), com pelo menos uma maiúscula, uma minúscula e um dígito.
+ * crypto.getRandomValues com rejeição (sem enviesamento do módulo).
+ * NUNCA registar o valor (logs, Sentry, resposta ao operador).
+ */
+function generateTempPassword(length = 16): string {
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const lower = "abcdefghijkmnpqrstuvwxyz";
+  const digits = "23456789";
+  const all = upper + lower + digits;
+  const pick = (alphabet: string): string => {
+    const limit = 256 - (256 % alphabet.length);
+    const buf = new Uint8Array(1);
+    for (;;) {
+      crypto.getRandomValues(buf);
+      if (buf[0] < limit) return alphabet[buf[0] % alphabet.length];
+    }
+  };
+  for (;;) {
+    let pw = "";
+    for (let i = 0; i < length; i++) pw += pick(all);
+    if (/[A-Z]/.test(pw) && /[a-z]/.test(pw) && /[2-9]/.test(pw)) return pw;
+  }
+}
+
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
@@ -85,10 +120,11 @@ function escapeHtml(str: string): string {
 }
 
 /**
- * Base dos links enviados ao fornecedor. NUNCA vem do pedido (nem do corpo,
- * nem do cabeçalho Origin, que qualquer cliente fora do browser escolhe): o
- * link leva um token de sessão e um domínio controlado por terceiros
- * permitiria capturá-lo. Só configuração do servidor: APP_URL (se for uma
+ * Base do link de entrada enviado ao fornecedor. NUNCA vem do pedido (nem do
+ * corpo, nem do cabeçalho Origin, que qualquer cliente fora do browser
+ * escolhe): o email leva uma password temporária e um domínio controlado por
+ * terceiros permitiria capturá-la (phishing com o nome da empresa). Só
+ * configuração do servidor: APP_URL (se for uma
  * origem https válida) ou a origem de produção. SITE_URL não é usado: neste
  * projeto não aponta para o domínio da app.
  */
@@ -172,6 +208,9 @@ serve(async (req: Request) => {
 
   // Conta criada neste pedido (para desfazer se a preparação falhar).
   let createdAuthUserId: string | null = null;
+  // Password com que ESTE pedido criou a conta (só em memória).
+  let createdAuthUserPassword: string | null = null;
+  let createdAuthUserIdForPassword: string | null = null;
   // deno-lint-ignore no-explicit-any
   let supabase: any = null;
 
@@ -261,7 +300,7 @@ serve(async (req: Request) => {
       });
       if (checkErr) return rpcErrorResponse(checkErr, corsHeaders);
 
-      // 2. Conta Auth sem password conhecida e sem perfil do CRM.
+      // 2. Conta Auth com password temporária e sem perfil do CRM.
       //    Uma só tentativa (sem withRetryResult): repetir um createUser que
       //    pode ter sido aplicado do lado do Auth dava "already registered"
       //    e perdia-se o id da conta criada por este pedido.
@@ -269,8 +308,10 @@ serve(async (req: Request) => {
       //    a RPC exige para aproveitar uma conta Auth ainda sem utilizador do
       //    portal.
       if (!check?.auth_user_exists) {
+        const tempPassword = generateTempPassword();
         const { data: created, error: createErr } = await supabase.auth.admin.createUser({
           email: targetEmail,
+          password: tempPassword,
           email_confirm: true,
           app_metadata: { supplier_portal: true },
           user_metadata: { admin_created: "true", supplier_portal: true, full_name: input.name ?? null },
@@ -293,6 +334,8 @@ serve(async (req: Request) => {
           }
         } else {
           createdAuthUserId = created.user.id;
+          createdAuthUserIdForPassword = created.user.id;
+          createdAuthUserPassword = tempPassword;
         }
       }
 
@@ -333,63 +376,28 @@ serve(async (req: Request) => {
     }
 
     const email: string = String(prep.email);
-    // Sempre do servidor (APP_URL/produção) — também o link /auth do aviso
-    // a quem já tem password.
+    // Sempre do servidor (APP_URL/produção).
     const baseUrl = resolveAppBaseUrl();
+    const loginUrl = `${baseUrl}/auth`;
     const orgName: string = prep.organization_name || "a empresa";
     const safeOrgName = escapeHtml(orgName);
     const safeName = escapeHtml(String(prep.user_name || ""));
+    const safeLoginUrl = escapeHtml(loginUrl);
+    const safeEmail = escapeHtml(email);
 
-    // Convite a quem já definiu a password: só avisa (sem link de reposição).
-    // Reenviar: manda sempre um link novo, só para o email do utilizador.
-    const sendSetPasswordLink = input.action === "resend" || !prep.password_set;
-
-    let link = `${baseUrl}/auth`;
-    if (sendSetPasswordLink) {
-      const { data: gen, error: genErr } = await supabase.auth.admin.generateLink({ type: "recovery", email });
-      const hashed = gen?.properties?.hashed_token;
-      if (genErr || !hashed) {
-        console.error("[create-supplier-portal-access] generateLink falhou:", genErr?.message);
-        throw new Error("Não foi possível gerar o link de acesso.");
-      }
-      if (gen.user?.id && prep.auth_user_id && gen.user.id !== prep.auth_user_id) {
-        throw new Error("A conta de acesso não corresponde ao utilizador do portal.");
-      }
-      link = `${baseUrl}/reset-password?token_hash=${encodeURIComponent(hashed)}&type=recovery`;
-    }
-    const safeLink = escapeHtml(link);
-
-    const subject = sendSetPasswordLink
-      ? `Acesso ao Portal do Fornecedor — ${orgName}`
-      : `${orgName} deu-lhe acesso no Portal do Fornecedor`;
-    const inner = sendSetPasswordLink
-      ? `
-        <h2 style="color: #333;">Ol&aacute;${safeName ? `, ${safeName}` : ""}!</h2>
-        <p><strong>${safeOrgName}</strong> convidou-o para o Portal do Fornecedor da Olyvia,
-        onde pode gerir o seu cat&aacute;logo de artigos.</p>
-        <p>Para entrar, defina a sua password no bot&atilde;o abaixo:</p>
-        <p style="margin: 24px 0;">
-          <a href="${safeLink}" style="background: #2563eb; color: #fff; padding: 12px 20px; border-radius: 6px; text-decoration: none; display: inline-block;">Definir password</a>
-        </p>
-        <p style="color: #666; font-size: 14px;">O link s&oacute; pode ser usado uma vez e expira ao fim de pouco tempo.
-        Se expirar, pe&ccedil;a a ${safeOrgName} que lhe envie um novo.</p>
-        <p style="color: #666; font-size: 13px;">Depois de definir a password, entre sempre em
-        <a href="${escapeHtml(baseUrl)}/auth" style="color: #2563eb;">${escapeHtml(baseUrl)}/auth</a> com o email ${escapeHtml(email)}.</p>`
-      : `
-        <h2 style="color: #333;">Ol&aacute;${safeName ? `, ${safeName}` : ""}!</h2>
-        <p><strong>${safeOrgName}</strong> deu-lhe acesso no Portal do Fornecedor da Olyvia.</p>
-        <p>Entre com o email e a password que j&aacute; usa no portal:
-        <a href="${safeLink}" style="color: #2563eb;">${safeLink}</a></p>
-        <p style="color: #666; font-size: 14px;">Se n&atilde;o se lembra da password, use "Esqueci-me da password" no ecr&atilde; de entrada.</p>`;
-
-    // ── Email (SMTP da organização / de quem envia) ──────────────────────
+    // ── SMTP (da organização / de quem envia) ────────────────────────────
+    // Resolvido ANTES de mexer na password: sem SMTP não se troca a password
+    // de ninguém (o reenviar não invalida a password temporária anterior sem
+    // entregar uma nova). Uma conta criada agora fica com uma password que
+    // ninguém conhece — "Reenviar" depois de configurar o SMTP gera outra.
     const resolvedSmtp = await resolveSmtpForAuthenticatedUser(supabase, {
       authUserId: caller.id,
       organizationId: input.organization_id,
     });
-    const okMessage = input.action === "invite" ? "Convite enviado" : "Link reenviado";
+    const okMessage = input.action === "invite" ? "Convite enviado" : "Acesso reenviado";
 
     if (!resolvedSmtp) {
+      createdAuthUserPassword = null;
       console.warn("[create-supplier-portal-access] sem SMTP", { organization_id: input.organization_id });
       return json(200, {
         success: true,
@@ -399,10 +407,67 @@ serve(async (req: Request) => {
       }, corsHeaders);
     }
 
+    // ── Password temporária ──────────────────────────────────────────────
+    // Só quando a RPC o autoriza (may_set_temp_password): conta de fornecedor
+    // criada pelo convite que ainda não definiu a sua password. Nunca numa
+    // conta que já a definiu nem numa conta que também é cliente
+    // (account_kind = 'client_existing') — essas recebem só o aviso.
+    // Convite: se foi ESTE pedido a criar a conta, a password é a da criação;
+    // senão (conta órfã de um convite anterior que falhou, ou corrida entre
+    // dois pedidos) define-se uma nova. Reenviar: nova password temporária.
+    let tempPassword: string | null = null;
+    if (prep.may_set_temp_password === true && prep.account_kind === "supplier" && prep.auth_user_id) {
+      if (
+        input.action === "invite" &&
+        createdAuthUserPassword &&
+        createdAuthUserIdForPassword === prep.auth_user_id
+      ) {
+        tempPassword = createdAuthUserPassword;
+      } else {
+        const newPassword = generateTempPassword();
+        const { error: pwErr } = await supabase.auth.admin.updateUserById(String(prep.auth_user_id), {
+          password: newPassword,
+        });
+        if (pwErr) {
+          // Só a mensagem do Auth — nunca a password.
+          console.error("[create-supplier-portal-access] definir password temporária falhou:", pwErr.message);
+          throw new Error("Não foi possível definir a password temporária.");
+        }
+        tempPassword = newPassword;
+      }
+    }
+    createdAuthUserPassword = null;
+
+    const subject = tempPassword
+      ? `Acesso ao Portal do Fornecedor — ${orgName}`
+      : `${orgName} deu-lhe acesso no Portal do Fornecedor`;
+    const inner = tempPassword
+      ? `
+        <h2 style="color: #333;">Ol&aacute;${safeName ? `, ${safeName}` : ""}!</h2>
+        <p><strong>${safeOrgName}</strong> deu-lhe acesso ao Portal do Fornecedor da Olyvia,
+        onde pode gerir o seu cat&aacute;logo de artigos.</p>
+        <p>Entre em <a href="${safeLoginUrl}" style="color: #2563eb;">${safeLoginUrl}</a> com:</p>
+        <table style="margin: 16px 0; border-collapse: collapse;">
+          <tr><td style="padding: 4px 12px 4px 0; color: #666;">Email</td><td style="padding: 4px 0;"><strong>${safeEmail}</strong></td></tr>
+          <tr><td style="padding: 4px 12px 4px 0; color: #666;">Password tempor&aacute;ria</td><td style="padding: 4px 0; font-family: monospace; font-size: 16px;"><strong>${escapeHtml(tempPassword)}</strong></td></tr>
+        </table>
+        <p>No primeiro acesso vai ser pedido para definir uma nova password.</p>
+        <p style="color: #666; font-size: 14px;">N&atilde;o partilhe esta password. Se o acesso n&atilde;o funcionar,
+        pe&ccedil;a a ${safeOrgName} que lhe reenvie o acesso.</p>`
+      : `
+        <h2 style="color: #333;">Ol&aacute;${safeName ? `, ${safeName}` : ""}!</h2>
+        <p>Passou a ter acesso ao Portal do Fornecedor da <strong>${safeOrgName}</strong>.</p>
+        <p>Entre em <a href="${safeLoginUrl}" style="color: #2563eb;">${safeLoginUrl}</a> com o mesmo email
+        (${safeEmail}) e a mesma password que j&aacute; usa${prep.account_kind === "client_existing" ? " no Portal do Cliente" : ""}.</p>
+        <p style="color: #666; font-size: 14px;">Se n&atilde;o se lembrar da password, use "Esqueceu a password?" no ecr&atilde; de entrada.</p>`;
+
+    // ── Email ────────────────────────────────────────────────────────────
     try {
       await sendEmailViaSMTP(resolvedSmtp.smtp, { to: email, subject, html: emailLayout(inner, safeOrgName) });
     } catch (smtpErr) {
-      const safe = sanitizeSmtpError(smtpErr);
+      let safe = sanitizeSmtpError(smtpErr);
+      // Defesa extra: a password temporária nunca sai em logs nem na resposta.
+      if (tempPassword) safe = safe.split(tempPassword).join("[redacted]");
       console.error("[create-supplier-portal-access] envio SMTP falhou", { ...resolvedSmtp.metadata, error: safe });
       return json(200, {
         success: true,
