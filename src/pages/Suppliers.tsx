@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { z } from "zod";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { withAuditContext } from "@/utils/auditContext";
@@ -29,6 +29,9 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
 import { OrganizationFormSection, OrganizationSelection } from "@/components/OrganizationFormSection";
 import SupplierCatalogDialog from "@/components/SupplierCatalogDialog";
+import SupplierPortalTab from "@/components/supplier-portal-crm/SupplierPortalTab";
+import SupplierPortalCatalogSection from "@/components/supplier-portal-crm/SupplierPortalCatalogSection";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SupplierSlaReportDialog from "@/components/SupplierSlaReportDialog";
 import { downloadStandardXlsx } from "@/lib/exports/xlsxExport";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -71,11 +74,21 @@ const Suppliers = () => {
   const [open, setOpen] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Ficha em edição: o separador Portal usa a empresa/nome gravados.
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [formTab, setFormTab] = useState<"dados" | "portal">("dados");
+  // Link do sino "Preços do fornecedor por aprovar" (F3.4b): a ficha abre no
+  // separador Portal do fornecedor, já em "Preços por aprovar".
+  const [focusPriceChanges, setFocusPriceChanges] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const handledDeepLinkRef = useRef<string | null>(null);
   const { toast } = useToast();
   const { activeCompany, userType, companies, isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { hasPermission, loading: permissionsLoading } = usePermissions();
+  // Portal do Fornecedor (F3.1): gerir acessos só com esta permissão.
+  const canManagePortal = hasPermission("suppliers.portal_manage");
 
   // Filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -296,6 +309,9 @@ const Suppliers = () => {
 
   const handleEdit = async (supplier: Supplier) => {
     setEditingId(supplier.id);
+    setEditingSupplier(supplier);
+    setFormTab("dados");
+    setFocusPriceChanges(false);
     setFormData({
       name: supplier.name,
       contact_person: (supplier as any).contact_person || "",
@@ -334,6 +350,51 @@ const Suppliers = () => {
     
     setOpen(true);
   };
+
+  // /suppliers?open=<id>&tab=portal&prices=pending (link do sino): abre a ficha
+  // do fornecedor; com tab=portal|catalogo ou prices=pending vai para o
+  // separador "Portal do fornecedor" (é lá que está o catálogo e a secção
+  // "Preços por aprovar"). Os parâmetros são limpos para fechar a ficha não a
+  // voltar a abrir.
+  const deepLinkSupplierId = searchParams.get("open");
+  const deepLinkTab = searchParams.get("tab");
+  const deepLinkPrices = searchParams.get("prices");
+  const deepLinkStamp = searchParams.get("_t");
+  useEffect(() => {
+    if (!deepLinkSupplierId || permissionsLoading) return;
+    const key = `${deepLinkSupplierId}|${deepLinkTab ?? ""}|${deepLinkPrices ?? ""}|${deepLinkStamp ?? ""}`;
+    if (handledDeepLinkRef.current === key) return;
+    handledDeepLinkRef.current = key;
+    void (async () => {
+      const { data, error } = await supabase
+        .from("suppliers")
+        .select("*")
+        .eq("id", deepLinkSupplierId)
+        .maybeSingle();
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        ["open", "tab", "prices", "_t"].forEach((k) => next.delete(k));
+        return next;
+      }, { replace: true });
+      handledDeepLinkRef.current = null;
+      if (error || !data) {
+        toast({
+          title: "Fornecedor não encontrado",
+          description: error?.message || "O fornecedor do aviso não existe ou não está visível.",
+          variant: "destructive",
+        });
+        return;
+      }
+      await handleEdit(data as Supplier);
+      const wantsPrices = deepLinkPrices === "pending";
+      setFormTab(
+        wantsPrices || deepLinkTab === "portal" || deepLinkTab === "catalogo" ? "portal" : "dados",
+      );
+      setFocusPriceChanges(wantsPrices);
+    })();
+    // handleEdit/toast: lidos no momento do link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkSupplierId, deepLinkTab, deepLinkPrices, deepLinkStamp, permissionsLoading, setSearchParams]);
 
   const handleDeleteClick = (supplier: Supplier, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -468,15 +529,27 @@ const Suppliers = () => {
       setHasMore(true);
       loadSuppliers(0, true);
     } catch (error: any) {
+      // Gatilho do portal do fornecedor: com o portal ativo não se muda o NIF
+      // nem a empresa. A mensagem da BD já vem em português.
+      const portalLinkActive = error?.hint === "portal_link_active";
+      const portalMessage = error?.message || "Este fornecedor tem acesso ao portal ativo: desligue o portal antes de mudar o NIF";
+      if (portalLinkActive) {
+        // A BD tem duas mensagens com o mesmo hint: mudança de empresa ou de NIF.
+        const aboutCompany = /empresa/i.test(String(error?.message || ""));
+        setFieldErrors((prev) => ({ ...prev, [aboutCompany ? "organization_id" : "tax_id"]: portalMessage }));
+      }
       toast({
         title: editingId ? t("suppliers.toast.updateError") : t("suppliers.toast.createError"),
-        description: error.message,
+        description: portalLinkActive ? portalMessage : error.message,
         variant: "destructive",
       });
     }
   };
 
   const resetForm = () => {
+    setEditingSupplier(null);
+    setFormTab("dados");
+    setFocusPriceChanges(false);
     setFormData({
       name: "",
       contact_person: "",
@@ -1168,10 +1241,18 @@ const Suppliers = () => {
             resetForm();
           }
         }}>
-          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className={`${editingId && formTab === "portal" ? "max-w-4xl" : "max-w-3xl"} max-h-[90vh] overflow-y-auto`}>
             <DialogHeader>
               <DialogTitle>{editingId ? t("suppliers.editSupplier") : t("suppliers.newSupplier")}</DialogTitle>
             </DialogHeader>
+            <Tabs value={editingId ? formTab : "dados"} onValueChange={(v) => setFormTab(v as "dados" | "portal")}>
+            {editingId && (
+              <TabsList className="mb-2">
+                <TabsTrigger value="dados">Dados</TabsTrigger>
+                <TabsTrigger value="portal">Portal do fornecedor</TabsTrigger>
+              </TabsList>
+            )}
+            <TabsContent value="dados" className="mt-0">
             <form onSubmit={handleSubmit} className="space-y-4">
               {/* Organization Selection */}
               <OrganizationFormSection
@@ -1180,6 +1261,9 @@ const Suppliers = () => {
                 showSecondaryCompanies={false}
                 multiSelectCompanies={true}
               />
+              {fieldErrors.organization_id && (
+                <p className="text-sm text-destructive" role="alert">{fieldErrors.organization_id}</p>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="col-span-2 space-y-2">
@@ -1324,6 +1408,30 @@ const Suppliers = () => {
                 <Button type="submit">{editingId ? t("suppliers.form.update") : t("suppliers.form.create")}</Button>
               </DialogFooter>
             </form>
+            </TabsContent>
+            {editingId && (
+              <TabsContent value="portal" className="mt-0 space-y-6">
+                {canManagePortal ? (
+                  <SupplierPortalTab
+                    supplierId={editingId}
+                    supplierName={editingSupplier?.name || formData.name}
+                    organizationId={editingSupplier?.organization_id ?? activeCompany?.id ?? null}
+                    defaultEmail={editingSupplier?.email ?? null}
+                    defaultName={editingSupplier?.contact_person ?? null}
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Sem permissão para gerir o acesso deste fornecedor ao portal.
+                  </p>
+                )}
+                <SupplierPortalCatalogSection
+                  supplierId={editingId}
+                  organizationId={editingSupplier?.organization_id ?? null}
+                  focusPriceChanges={focusPriceChanges}
+                />
+              </TabsContent>
+            )}
+            </Tabs>
           </DialogContent>
         </Dialog>
 
