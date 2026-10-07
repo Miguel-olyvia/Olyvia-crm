@@ -16,10 +16,10 @@ import type { ProblemaCampo } from "@/lib/hr/novaPessoa";
 import type { CandidatoDuplicado } from "@/hooks/usePessoaDuplicados";
 
 interface PessoaFormAvisosProps {
-  /** Campos que a organizacao pos no convite e que o formulario nao tem (modo "RH, agora"). */
-  camposForaDoFormulario: readonly string[];
-  /** O aviso dos campos fora do formulario so aparece no passo 1 ou no resumo. */
-  mostrarForaDoFormulario: boolean;
+  /** Campos que a configuracao da admissao pede e que ficam por preencher: pendencia na ficha. */
+  camposPendentes: readonly string[];
+  /** O aviso das pendencias so aparece no ultimo passo ou no resumo. */
+  mostrarPendentes: boolean;
   mostrarResumo: boolean;
   problemas: readonly ProblemaCampo[];
   /** Quantos problemas tem o horario variavel (so contam no resumo). */
@@ -33,13 +33,21 @@ interface PessoaFormAvisosProps {
   onAbrirFichaExistente: (pessoaId: string) => void;
   duplicadosSemAcesso: boolean;
   duplicadosDemasiadasTentativas: boolean;
-  /** "RH, agora" e a configuracao da admissao falhou a carregar. */
+  /**
+   * O RH preenche (sem convite) e a configuracao da admissao falhou a carregar:
+   * nao se sabe que campos sao obrigatorios nem quais ficam pendentes.
+   */
   configuracaoNaoCarregada: boolean;
+  /**
+   * O RH preenche (sem convite) e a base recusou ler a configuracao por
+   * permissao: nao ha obrigatorios a aplicar, e di-se (nao e uma falha).
+   */
+  configuracaoSemAcesso: boolean;
 }
 
 export function PessoaFormAvisos({
-  camposForaDoFormulario,
-  mostrarForaDoFormulario,
+  camposPendentes,
+  mostrarPendentes,
   mostrarResumo,
   problemas,
   problemasHorario,
@@ -53,13 +61,14 @@ export function PessoaFormAvisos({
   duplicadosSemAcesso,
   duplicadosDemasiadasTentativas,
   configuracaoNaoCarregada,
+  configuracaoSemAcesso,
 }: PessoaFormAvisosProps) {
   const { t } = useTranslation();
 
   return (
     <>
-      {/* A configuracao nao chegou: nao se sabe que campos ficam como
-          pendencia, e a ficha pode sair incompleta sem ninguem o dizer. */}
+      {/* A configuracao nao chegou: nao se sabe que campos sao obrigatorios nem
+          que campos ficam pendencia, e a ficha pode sair incompleta sem ninguem o dizer. */}
       {configuracaoNaoCarregada && (
         <div
           role="alert"
@@ -70,7 +79,13 @@ export function PessoaFormAvisos({
         </div>
       )}
 
-      {camposForaDoFormulario.length > 0 && mostrarForaDoFormulario && (
+      {configuracaoSemAcesso && (
+        <p role="note" className="rounded-md border p-3 text-sm text-muted-foreground">
+          {t("hr.form.configuracaoSemAcesso")}
+        </p>
+      )}
+
+      {camposPendentes.length > 0 && mostrarPendentes && (
         <div
           role="note"
           className="space-y-1 rounded-md border border-amber-400/50 bg-amber-50/50 p-3 dark:bg-amber-950/20"
@@ -79,7 +94,7 @@ export function PessoaFormAvisos({
             {t("hr.form.camposFicamPendencia")}
           </p>
           <ul className="flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-            {camposForaDoFormulario.map((codigo) => (
+            {camposPendentes.map((codigo) => (
               <li key={codigo}>{rotuloDeCampoAdmissao(t, codigo)}</li>
             ))}
           </ul>
@@ -87,7 +102,10 @@ export function PessoaFormAvisos({
       )}
 
       {mostrarResumo && (problemas.length > 0 || problemasHorario > 0) && (
-        <div className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3">
+        <div
+          role="alert"
+          className="space-y-2 rounded-md border border-destructive/40 bg-destructive/5 p-3"
+        >
           <p className="text-sm font-medium text-destructive">
             {t("hr.form.resumoProblemas").replace("{n}", String(problemas.length + problemasHorario))}
           </p>

@@ -274,6 +274,18 @@ export default function PessoaDetail() {
     [hasPermission],
   );
 
+  // Quem pode ANEXAR, SUBSTITUIR e REMOVER cada tipo (o servidor repete a
+  // decisao): cartao = editar identificacao; comprovativo = editar dados
+  // bancarios; fotografia = editar dados pessoais.
+  const permissoesEscritaAnexos = useMemo(
+    () => ({
+      identificacaoEdit: hasPermission("hr.pessoas.identificacao.edit"),
+      bancariosEdit: hasPermission("hr.pessoas.bancarios.edit"),
+      pessoaisEdit: hasPermission("hr.pessoas.pessoais.edit"),
+    }),
+    [hasPermission],
+  );
+
   // `null` quando quem olha nao pode ver vinculos -- nao se inventa "Sem
   // contrato" para quem simplesmente nao tem a permissao de o ler.
   const estadoContratoDerivado = podeVerVinculos
@@ -707,6 +719,8 @@ export default function PessoaDetail() {
             organizationId={pessoa.organization_id}
             souAPessoa={minhaPessoaId === pessoa.id && hasPermission("hr.pessoas.view.own")}
             permissoes={permissoesAnexos}
+            permissoesEscrita={permissoesEscritaAnexos}
+            onFotografiaAlterada={() => void ficha.refresh()}
           />
           <PessoaDocumentosTab
             pessoaId={pessoa.id}

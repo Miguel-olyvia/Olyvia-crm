@@ -25,16 +25,31 @@ import {
   horarioVazio,
   minutosDe,
 } from "@/lib/hr/horario";
-import { bicValido, contaValida, normalizarBic, normalizarConta } from "@/lib/hr/conta";
 import {
   problemasDosNumerosDoContrato,
   type CampoNumericoContrato,
 } from "@/lib/hr/contrato";
 import { horasImplausiveis } from "@/lib/hr/horas";
-import { nifValido, nissValido } from "@/lib/hr/identificadoresPt";
-import type { ConfiguracaoCampo } from "@/lib/hr/admissaoObrigatorios";
-import { problemasDeObrigatoriosDaConfiguracao } from "@/lib/hr/novaPessoaAdmissao";
+import {
+  DETALHES_EXTRA_VAZIOS,
+  cartaConducaoDoRascunho,
+  contaDoRascunho,
+  dadosPessoaisExtra,
+  fardamentoDoRascunho,
+  EMAIL,
+  problemasDeFormatoDosPessoais,
+  temCartaConducao,
+  temDadosPessoaisExtra,
+  texto,
+  type ContaDoPayload,
+  type RascunhoDetalhesExtra,
+} from "@/lib/hr/novaPessoaDetalhes";
+import {
+  problemasDeObrigatoriosDaConfiguracao,
+  type CodigosIndisponiveis,
+} from "@/lib/hr/novaPessoaAdmissao";
 import { dataDeHoje, dataDoPeriodoExperimental } from "@/lib/hr/novaPessoaDatas";
+import type { ConfiguracaoCampo } from "@/lib/hr/admissaoObrigatorios";
 import { numeroDe } from "@/lib/hr/numeros";
 import { getLocalizedFallback } from "@/utils/friendlyError";
 import {
@@ -67,22 +82,7 @@ export const SECCOES: readonly SeccaoId[] = [
   "acesso",
 ];
 
-/**
- * Quem preenche os dados pessoais desta ficha:
- *  - `convite`: a propria pessoa, por convite. O formulario so exige nome,
- *    apelido e o e-mail pessoal (o destino do convite), e abre o envio do
- *    convite logo a seguir a criar;
- *  - `rh`: o RH, agora. Aplica-se a configuracao da organizacao: os campos da
- *    pessoa que estao na posicao `convite` passam a ser exigidos aqui.
- */
-export type QuemPreenche = "convite" | "rh";
-
 export interface RascunhoGeral {
-  /**
-   * UI, nao dados: decide que campos se exigem e se o convite se abre a
-   * seguir. Nunca vai para a base.
-   */
-  quem_preenche: QuemPreenche;
   primeiro_nome: string;
   apelido: string;
   /** O futuro identificador de entrada, se se vier a autenticar por aqui. */
@@ -98,7 +98,7 @@ export interface RascunhoGeral {
   conta_id: string;
 }
 
-export interface RascunhoPessoais {
+export interface RascunhoPessoais extends RascunhoDetalhesExtra {
   data_nascimento: string;
   ocultar_aniversario: boolean;
   genero: Genero | "";
@@ -206,7 +206,6 @@ export function rascunhoInicial(): RascunhoPessoa {
     geral: {
       // Por omissao a propria pessoa preenche, por convite: e o fluxo da
       // admissao. O RH que tem os dados a frente escolhe "O RH, agora".
-      quem_preenche: "convite",
       primeiro_nome: "",
       apelido: "",
       email_trabalho: "",
@@ -240,6 +239,7 @@ export function rascunhoInicial(): RascunhoPessoa {
       emergencia_nome: "",
       emergencia_relacao: "",
       emergencia_telefone: "",
+      ...DETALHES_EXTRA_VAZIOS,
     },
     laborais: {
       cargo_id: "",
@@ -290,7 +290,6 @@ export interface ProblemaCampo {
   mensagemKey: string;
 }
 
-const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Onde vive, NESTE formulario, cada numero validado por `lib/hr/contrato`. */
 const CAMPOS_NUMERICOS_DO_CONTRATO: Record<
@@ -320,18 +319,30 @@ const CAMPOS_NUMERICOS_DO_CONTRATO: Record<
  * semanal abaixo das horas contratadas) so aqui, porque so aqui existem todos
  * os valores ao mesmo tempo.
  *
- * OBRIGATORIEDADE, POR QUEM PREENCHE
- * ----------------------------------
- * `quem_preenche = 'convite'`: so primeiro nome, apelido e o e-mail pessoal
- * (o destino do convite). `quem_preenche = 'rh'`: alem dos nomes, tudo o que a
- * configuracao da organizacao poe na posicao `convite` -- se a configuracao
- * ainda nao chegou (ou quem preenche nao a pode ler) nao se inventa nada: so
- * os nomes. Os campos so do RH (data de admissao, cargo, tipo de contrato) nao
- * bloqueiam a criacao; ver `avisosDoRascunho`.
+ * O QUE BLOQUEIA
+ * --------------
+ * Sempre: os nomes (e o cargo, desde o fluxo 2). A enviar convite
+ * (`comConvite`): tambem o e-mail pessoal -- o destino do convite --, e mais
+ * nada: os obrigatorios ficam para a pessoa preencher. Sem convite (o RH
+ * preenche): os campos que a configuracao da organizacao poe na posicao
+ * `convite` e que o utilizador pode escrever (`indisponiveis` -- a seccao
+ * bancaria sem permissao -- ficam de fora). Se a configuracao ainda nao chegou
+ * nao se inventa nada: so os nomes. As posicoes `ficha` e `opcional` e os campos
+ * so do RH (data de admissao, tipo de contrato) nunca bloqueiam; ver
+ * `avisosDoRascunho` e `camposPorPreencherNaFicha`.
  */
 export function problemasDoRascunho(
   rascunho: RascunhoPessoa,
-  config?: readonly ConfiguracaoCampo[] | null,
+  {
+    comConvite = false,
+    config,
+    indisponiveis,
+  }: {
+    /** A criacao leva o envio do convite: exige o e-mail pessoal e nao os obrigatorios. */
+    comConvite?: boolean;
+    config?: readonly ConfiguracaoCampo[] | null;
+    indisponiveis?: CodigosIndisponiveis;
+  } = {},
 ): ProblemaCampo[] {
   const problemas: ProblemaCampo[] = [];
   const { geral, pessoais, contrato } = rascunho;
@@ -360,57 +371,8 @@ export function problemasDoRascunho(
       mensagemKey: "hr.form.erroEmail",
     });
   }
-  if (pessoais.email_pessoal.trim() !== "" && !EMAIL.test(pessoais.email_pessoal.trim())) {
-    problemas.push({
-      seccao: "pessoais",
-      campoId: "hr-novo-email-pessoal",
-      rotuloKey: "hr.campos.emailPessoal",
-      mensagemKey: "hr.form.erroEmail",
-    });
-  }
-  // NIF e NISS: formato E digito de controlo -- a mesma regra que a base aplica
-  // (`hr_nif_valido` / `hr_niss_valido`). Um numero com o digito errado e quase
-  // sempre uma gralha e, gravado, ficava a bloquear a admissao.
-  if (pessoais.nif.trim() !== "" && !nifValido(pessoais.nif)) {
-    problemas.push({
-      seccao: "pessoais",
-      campoId: "hr-novo-nif",
-      rotuloKey: "hr.campos.nif",
-      mensagemKey: "hr.form.erroNif",
-    });
-  }
-  if (pessoais.niss.trim() !== "" && !nissValido(pessoais.niss)) {
-    problemas.push({
-      seccao: "pessoais",
-      campoId: "hr-novo-niss",
-      rotuloKey: "hr.campos.niss",
-      mensagemKey: "hr.form.erroNiss",
-    });
-  }
-  if (
-    pessoais.conta_numero.trim() !== "" &&
-    !contaValida(pessoais.conta_formato, pessoais.conta_numero)
-  ) {
-    problemas.push({
-      seccao: "pessoais",
-      campoId: "hr-novo-conta-numero",
-      rotuloKey: "hr.campos.numeroConta",
-      // A mensagem distingue os dois ramos porque o remedio e diferente: num
-      // IBAN falha o digito de controlo, nos outros o proprio formato.
-      mensagemKey:
-        pessoais.conta_formato === "iban" ? "hr.form.erroIban" : "hr.form.erroConta",
-    });
-  }
-  if (pessoais.conta_bic.trim() !== "" && !bicValido(pessoais.conta_bic)) {
-    problemas.push({
-      seccao: "pessoais",
-      campoId: "hr-novo-conta-bic",
-      rotuloKey: "hr.campos.swift",
-      mensagemKey: "hr.form.erroBic",
-    });
-  }
-  // -- Obrigatoriedade, conforme quem preenche -------------------------------
-  if (geral.quem_preenche === "convite") {
+  problemas.push(...problemasDeFormatoDosPessoais(pessoais));
+  if (comConvite) {
     // O convite vai para o e-mail pessoal: sem ele nao ha para onde o enviar.
     if (pessoais.email_pessoal.trim() === "") {
       problemas.push({
@@ -421,17 +383,7 @@ export function problemasDoRascunho(
       });
     }
   } else if (config) {
-    problemas.push(...problemasDeObrigatoriosDaConfiguracao(pessoais, config));
-  }
-
-  const dependentes = numeroDe(pessoais.dependentes);
-  if (pessoais.dependentes.trim() !== "" && (dependentes === null || dependentes < 0)) {
-    problemas.push({
-      seccao: "pessoais",
-      campoId: "hr-novo-dependentes",
-      rotuloKey: "hr.campos.dependentes",
-      mensagemKey: "hr.form.erroNumero",
-    });
+    problemas.push(...problemasDeObrigatoriosDaConfiguracao(pessoais, config, indisponiveis));
   }
 
   // -- Cargo (obrigatorio, fluxo 2) e subsidio ------------------------------
@@ -542,11 +494,7 @@ export function avisosDoRascunho(rascunho: RascunhoPessoa): ProblemaCampo[] {
 export function seccaoPreenchida(rascunho: RascunhoPessoa, seccao: SeccaoId): boolean {
   switch (seccao) {
     case "geral":
-      // `quem_preenche` nasce preenchido e nao conta: e uma escolha de UI, nao
-      // um dado da pessoa.
-      return Object.entries(rascunho.geral).some(
-        ([chave, valor]) => chave !== "quem_preenche" && String(valor).trim() !== "",
-      );
+      return Object.values(rascunho.geral).some((valor) => String(valor).trim() !== "");
     case "pessoais":
       return Object.entries(rascunho.pessoais).some(([chave, valor]) => {
         if (chave === "ocultar_aniversario") return valor === true;
@@ -606,12 +554,17 @@ export interface NovaPessoaPayload {
    * Vai por `rpc_hr_definir_conta`, nunca por insert: a tabela tem a escrita
    * revogada. Como o NISS, pode falhar sozinha -- e a ficha fica criada.
    */
-  conta: { formato: FormatoConta; numero: string; swift: string | null } | null;
+  conta: ContaDoPayload | null;
   /**
    * O BIC escrito SEM numero de conta. Vai por `rpc_hr_definir_bic`, que grava
    * so o BIC; com numero, o BIC viaja dentro de `conta.swift`.
    */
   bicSozinho: string | null;
+  /**
+   * `pessoas_fardamento`, satelite proprio (gate `hr.pessoas.laborais.edit`).
+   * `null` quando nao ha nenhum tamanho.
+   */
+  fardamento: Record<string, unknown> | null;
   emergencia: Record<string, unknown> | null;
   vinculo: Record<string, unknown> | null;
   /**
@@ -635,11 +588,6 @@ export interface NovaPessoaPayload {
    * anuncia como falhado o que ninguem tentou.
    */
   contaALigar: string | null;
-}
-
-function texto(valor: string): string | null {
-  const limpo = valor.trim();
-  return limpo === "" ? null : limpo;
 }
 
 export function payloadDoRascunho(
@@ -675,13 +623,17 @@ export function payloadDoRascunho(
     pessoais.estado_civil !== "" ||
     texto(pessoais.dependentes) !== null ||
     texto(pessoais.telefone_pessoal) !== null ||
+    temDadosPessoaisExtra(pessoais) ||
     pessoais.ocultar_aniversario;
 
   const temIdentificacao =
     pessoais.tipo_documento !== "" ||
     texto(pessoais.numero_documento) !== null ||
     texto(pessoais.validade_documento) !== null ||
-    texto(pessoais.nif) !== null;
+    texto(pessoais.nif) !== null ||
+    temCartaConducao(pessoais);
+
+  const { conta, bicSozinho } = contaDoRascunho(pessoais);
 
   const experimentalDias = contrato.tem_periodo_experimental
     ? numeroDe(contrato.periodo_experimental_dias)
@@ -723,6 +675,7 @@ export function payloadDoRascunho(
           estado_civil: pessoais.estado_civil === "" ? null : pessoais.estado_civil,
           dependentes: numeroDe(pessoais.dependentes),
           telefone_pessoal: texto(pessoais.telefone_pessoal),
+          ...dadosPessoaisExtra(pessoais),
         }
       : null,
     identificacao: temIdentificacao
@@ -732,6 +685,7 @@ export function payloadDoRascunho(
           validade_documento: texto(pessoais.validade_documento),
           // Sem espacos: `nifValido` aceita "123 456 789", a coluna nao.
           nif: texto(pessoais.nif.replace(/\s+/g, "")),
+          ...cartaConducaoDoRascunho(pessoais),
         }
       : null,
     niss: texto(pessoais.niss.replace(/\s+/g, "")),
@@ -748,18 +702,9 @@ export function payloadDoRascunho(
             is_principal: true,
           }
         : null,
-    conta:
-      normalizarConta(pessoais.conta_numero) !== ""
-        ? {
-            formato: pessoais.conta_formato,
-            numero: normalizarConta(pessoais.conta_numero),
-            swift: normalizarBic(pessoais.conta_bic) || null,
-          }
-        : null,
-    bicSozinho:
-      normalizarConta(pessoais.conta_numero) === ""
-        ? normalizarBic(pessoais.conta_bic) || null
-        : null,
+    conta,
+    bicSozinho,
+    fardamento: fardamentoDoRascunho(pessoais),
     emergencia:
       texto(pessoais.emergencia_nome) !== null && texto(pessoais.emergencia_telefone) !== null
         ? {
@@ -820,5 +765,5 @@ export function payloadDoRascunho(
 export { minutosDe };
 
 /** Reexportados: moram em `novaPessoaAdmissao.ts` e `novaPessoaDatas.ts` (este ficheiro passava das 800 linhas). */
-export { camposDoConviteForaDoFormulario, codigosObrigatoriosDoFormulario } from "@/lib/hr/novaPessoaAdmissao";
+export { camposPorPreencherNaFicha, codigosObrigatoriosDoFormulario } from "@/lib/hr/novaPessoaAdmissao";
 export { dataDeHoje, dataDoPeriodoExperimental, dataFimPorDuracaoMeses } from "@/lib/hr/novaPessoaDatas";

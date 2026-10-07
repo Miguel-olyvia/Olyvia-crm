@@ -9,6 +9,8 @@ import { describe, expect, it } from "vitest";
 import {
   BUCKET_FINAL,
   BUCKET_QUARENTENA,
+  copiarParaFinal,
+  lerObjecto,
   listarAnexosDoConvite,
   tratarAccaoAnexo,
   type ClienteAnexos,
@@ -70,7 +72,7 @@ function criarFalso(opcoes: Opcoes = {}) {
   };
   const chamadas: Array<{ fn: string; args: Record<string, unknown> }> = [];
   const remocoes: Array<{ bucket: string; caminho: string }> = [];
-  const uploads: Array<{ bucket: string; caminho: string; contentType: string; upsert: boolean }> = [];
+  const uploads: Array<{ bucket: string; caminho: string; contentType: string; upsert: boolean; cacheControl?: string }> = [];
   const assinados: Array<{ bucket: string; caminho: string; upsert?: boolean }> = [];
 
   const svc: ClienteAnexos = {
@@ -93,7 +95,7 @@ function criarFalso(opcoes: Opcoes = {}) {
           return { data: { arrayBuffer: async () => bytes.slice().buffer as ArrayBuffer }, error: null };
         },
         upload: async (caminho, corpo, o) => {
-          uploads.push({ bucket, caminho, contentType: o.contentType, upsert: o.upsert });
+          uploads.push({ bucket, caminho, contentType: o.contentType, upsert: o.upsert, cacheControl: o.cacheControl });
           if (opcoes.falharUploadFinal && bucket === BUCKET_FINAL) return { data: null, error: { message: "boom" } };
           // upsert false: um objecto que ja existe recusa-se, como no Storage verdadeiro
           if (!o.upsert && buckets[bucket].has(caminho)) return { data: null, error: { message: "The resource already exists" } };
@@ -254,7 +256,9 @@ describe("anexo_confirmar", () => {
       ok: true,
       anexo: { id: ANEXO, tipo: "cartao_cidadao", nome_original: "cc.pdf", tamanho_bytes: PDF.length, mime_type: "application/pdf" },
     });
-    expect(f.uploads).toEqual([{ bucket: BUCKET_FINAL, caminho: CAMINHO_FINAL_PDF, contentType: "application/pdf", upsert: false }]);
+    expect(f.uploads).toEqual([
+      { bucket: BUCKET_FINAL, caminho: CAMINHO_FINAL_PDF, contentType: "application/pdf", upsert: false, cacheControl: "0" },
+    ]);
     expect(f.buckets[BUCKET_FINAL].has(CAMINHO_FINAL_PDF)).toBe(true);
     expect(f.buckets[BUCKET_QUARENTENA].has(CAMINHO_QUARENTENA)).toBe(false);
 
@@ -648,5 +652,60 @@ describe("despacho", () => {
     });
     expect(r).toEqual({ status: 500, body: { error: "erro_inesperado" } });
     expect(erros).toHaveLength(1);
+  });
+});
+
+describe("lerObjecto e copiarParaFinal registam as falhas do Storage", () => {
+  const bucket = (download: () => Promise<{ data: unknown; error: unknown }>, upload?: () => Promise<{ data: unknown; error: unknown }>) =>
+    ({
+      createSignedUploadUrl: async () => ({ data: null, error: null }),
+      download,
+      upload: upload ?? (async () => ({ data: {}, error: null })),
+      remove: async () => ({ data: [], error: null }),
+    }) as unknown as Parameters<typeof lerObjecto>[0];
+
+  it("objecto em falta (nao chegou nada): null e nada registado", async () => {
+    const erros: unknown[] = [];
+    const b = bucket(async () => ({ data: null, error: { message: "Object not found", statusCode: "404" } }));
+    expect(await lerObjecto(b, "x/y.pdf", (e) => erros.push(e))).toBeNull();
+    expect(erros).toHaveLength(0);
+  });
+
+  it("falha do Storage: null e o erro registado", async () => {
+    const erros: unknown[] = [];
+    const erro = { message: "Internal Server Error", statusCode: "500" };
+    const b = bucket(async () => ({ data: null, error: erro }));
+    expect(await lerObjecto(b, "x/y.pdf", (e) => erros.push(e))).toBeNull();
+    expect(erros).toEqual([erro]);
+  });
+
+  it("sem registarErro continua a devolver null sem rebentar", async () => {
+    const b = bucket(async () => ({ data: null, error: { message: "boom" } }));
+    expect(await lerObjecto(b, "x/y.pdf")).toBeNull();
+  });
+
+  it("copiarParaFinal grava com cacheControl 0 e upsert false", async () => {
+    const chamadas: unknown[] = [];
+    const b = bucket(
+      async () => ({ data: null, error: null }),
+      async () => ({ data: {}, error: null }),
+    );
+    const original = b.upload.bind(b);
+    b.upload = (c, corpo, o) => {
+      chamadas.push(o);
+      return original(c, corpo, o);
+    };
+    expect(await copiarParaFinal(b, "o/p/a.pdf", new Uint8Array([1]), "application/pdf", "h")).toBe(true);
+    expect(chamadas).toEqual([{ contentType: "application/pdf", upsert: false, cacheControl: "0" }]);
+  });
+
+  it("copiarParaFinal: o upload falha e a releitura tambem falha por erro do Storage: ambas registadas", async () => {
+    const erros: unknown[] = [];
+    const b = bucket(
+      async () => ({ data: null, error: { message: "Internal Server Error" } }),
+      async () => ({ data: null, error: { message: "boom" } }),
+    );
+    expect(await copiarParaFinal(b, "o/p/a.pdf", new Uint8Array([1]), "application/pdf", "h", (e) => erros.push(e))).toBe(false);
+    expect(erros).toHaveLength(2);
   });
 });

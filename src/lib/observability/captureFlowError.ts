@@ -170,10 +170,12 @@ export type BusinessFlow =
   // - `hr-convite-anexos`: o ecra publico do convite (sem sessao).
   // - `hr-pessoa-anexos-carregar`: a lista de anexos na ficha do RH.
   // - `hr-anexo-obter-url`: o URL assinado de um anexo (`hr-anexo-url`).
+  // - `hr-anexo-rh`: o RH anexa, substitui ou remove um ficheiro (`hr-anexo-rh`).
   // - `hr-pessoa-fotografia`: o URL da fotografia do cabecalho da ficha.
   | "hr-convite-anexos"
   | "hr-pessoa-anexos-carregar"
   | "hr-anexo-obter-url"
+  | "hr-anexo-rh"
   | "hr-pessoa-fotografia"
   // Periodo de processamento salarial (`hr_periodos_processamento`,
   // 20261201220000) -- ciclo de vida abrir/fechar. Mesma razao das outras

@@ -62,6 +62,9 @@ export interface SeccaoFalhada {
     | "niss"
     | "morada"
     | "bancarios"
+    // Os tamanhos de farda (`pessoas_fardamento`): satelite proprio, com a sua
+    // permissao (`hr.pessoas.laborais.edit`). Falhar isto NAO desfaz a ficha.
+    | "fardamento"
     | "emergencia"
     | "vinculo"
     // A versao inicial de horas contratadas (`pessoas_vinculos_horas`),
@@ -367,13 +370,18 @@ export function usePessoas() {
       // a escrita revogada a `authenticated` e tres politicas restritivas a
       // false (20261120070000). O unico caminho e a RPC, depois de a pessoa
       // existir -- e como o NISS, pode falhar sozinha sem levar a ficha atras.
-      if (payload.conta) {
+      const conta = payload.conta;
+      if (conta) {
         await gravar("bancarios", async () =>
           hrRpc("rpc_hr_definir_conta", {
             p_pessoa_id: pessoaId,
-            p_formato: payload.conta!.formato,
-            p_conta: payload.conta!.numero,
-            p_swift: payload.conta!.swift,
+            p_formato: conta.formato,
+            p_conta: conta.numero,
+            // So seguem com conta: a RPC exige o numero e e ela que grava
+            // titular e banco (a agencia nao se pede neste formulario).
+            p_titular: conta.titular,
+            p_banco: conta.banco,
+            p_swift: conta.swift,
           }),
         );
       }
@@ -385,6 +393,14 @@ export function usePessoas() {
             p_pessoa_id: pessoaId,
             p_bic: payload.bicSozinho,
           }),
+        );
+      }
+      // Os tamanhos de farda tem satelite proprio (gate `hr.pessoas.laborais.edit`,
+      // nao `pessoais.edit`). So se escreve havendo algum tamanho; uma falha
+      // (por exemplo, sem essa permissao) nao desfaz a ficha nem os outros satelites.
+      if (payload.fardamento) {
+        await gravar("fardamento", () =>
+          hrFrom("pessoas_fardamento").insert({ ...base, ...payload.fardamento }),
         );
       }
       if (payload.emergencia) {

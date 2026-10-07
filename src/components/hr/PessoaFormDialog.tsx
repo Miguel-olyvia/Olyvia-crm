@@ -12,10 +12,16 @@
  * do passo 2), e quem abre o assistente so para escrever o contrato tem de
  * chegar ao passo 4 num clique -- senao deixa de usar o assistente.
  *
- * O QUE E OBRIGATORIO: primeiro nome e apelido. Nada mais, em nenhum passo --
- * sao os unicos NOT NULL de conteudo em `pessoas`. "Criar ficha" fica activo a
- * partir do momento em que os dois estao preenchidos, esteja-se no passo que
- * se estiver. VAZIO NUNCA E ERRO; MALFORMADO E SEMPRE ERRO.
+ * TODOS OS CAMPOS, SEMPRE. O formulario tem tudo o que o convite de admissao
+ * tem; nao ha "modos". O convite e uma ACCAO (interruptor "enviar convite").
+ *
+ * O QUE E OBRIGATORIO: primeiro nome, apelido e cargo. "Criar ficha" fica activo
+ * a partir do momento em que os nomes estao preenchidos, esteja-se no passo que
+ * se estiver. Sem convite (o RH preenche) tambem os campos que a configuracao da
+ * admissao poe na posicao `convite` -- se e obrigatorio, e obrigatorio. A enviar
+ * convite so se exige o e-mail pessoal: a pessoa preenche o resto. Os campos de
+ * posicao `ficha` ou `opcional` nunca bloqueiam. VAZIO NUNCA E ERRO FORA DISTO;
+ * MALFORMADO E SEMPRE ERRO.
  *
  * A ENTIDADE LEGAL NAO SE ESCOLHE: e a da organizacao activa, e aparece como
  * texto fixo no cabecalho para nao parecer omissao. "Grupo de colaboradores"
@@ -23,29 +29,16 @@
  */
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AlertTriangle, Check, CircleDot, Loader2, Minus } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { AlertTriangle, Check, CircleDot, Minus } from "lucide-react";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useLocaisTrabalho } from "@/hooks/useLocaisTrabalho";
@@ -54,8 +47,13 @@ import { useContasLigaveis } from "@/hooks/useContasLigaveis";
 import { useCargos } from "@/hooks/useCargos";
 import { usePessoaDuplicados } from "@/hooks/usePessoaDuplicados";
 import { useAdmissaoPosicoesCampos } from "@/hooks/useAdmissaoPosicoesCampos";
+import { useAnexosNovaPessoa } from "@/hooks/useAnexosNovaPessoa";
 import { EnviarConviteDialog } from "@/components/hr/EnviarConviteDialog";
+import { AnexosNovaPessoa } from "@/components/hr/anexos/AnexosNovaPessoa";
 import { PessoaFormAvisos } from "@/components/hr/PessoaFormAvisos";
+import { PessoaFormDescartar } from "@/components/hr/PessoaFormDescartar";
+import { PessoaFormPassos } from "@/components/hr/PessoaFormPassos";
+import { PessoaFormRodape } from "@/components/hr/PessoaFormRodape";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
@@ -64,7 +62,7 @@ import { formatarSalario, periodoDoCargoEm } from "@/lib/hr/cargosPeriodos";
 import { dataDeHoje } from "@/lib/hr/novaPessoaDatas";
 import {
   SECCOES,
-  camposDoConviteForaDoFormulario,
+  camposPorPreencherNaFicha,
   codigosObrigatoriosDoFormulario,
   payloadDoRascunho,
   problemasDoRascunho,
@@ -81,6 +79,8 @@ import {
   type CamposPreenchiveis,
 } from "@/lib/hr/preenchimentoPorConta";
 import { CamposTocadosProvider } from "@/components/hr/form/Campos";
+import { codigosIndisponiveis } from "@/lib/hr/novaPessoaAdmissao";
+import { focarQuandoExistir } from "@/lib/hr/focarCampo";
 import { SeccaoConfiguracoesGerais } from "@/components/hr/form/SeccaoConfiguracoesGerais";
 import { SeccaoContrato } from "@/components/hr/form/SeccaoContrato";
 import { SeccaoDetalhesPessoais } from "@/components/hr/form/SeccaoDetalhesPessoais";
@@ -120,16 +120,24 @@ export function PessoaFormDialog({
   const cargosActivos = useMemo(() => cargos.filter((c) => c.activo), [cargos]);
 
   const [rascunho, setRascunho] = useState<RascunhoPessoa>(() => rascunhoInicial());
+  /** Ficheiros escolhidos (em memoria): so seguem depois de a ficha ser criada. */
+  const anexosNovos = useAnexosNovaPessoa();
   const [seccao, setSeccao] = useState<SeccaoId>("geral");
   const [aCriar, setACriar] = useState(false);
+  /**
+   * UI, nao dados: a ficha cria-se e o convite de admissao abre a seguir, para a
+   * PESSOA preencher o resto. Ligado, so se exige o e-mail pessoal e os
+   * obrigatorios deixam de bloquear; desligado, o RH preenche e os obrigatorios
+   * da configuracao bloqueiam. Nunca vai para a base.
+   */
+  const [enviarConvite, setEnviarConvite] = useState(false);
   const [mostrarResumo, setMostrarResumo] = useState(false);
-  /** Campos de que a pessoa ja saiu. Enquanto um campo nao esta aqui, o seu
-   * erro de formato fica calado -- ninguem quer ver "tem de ter nove digitos"
-   * ao terceiro digito do NIF. */
+  /** O atalho do resumo: o campo a focar (o bloco recolhido que o tem abre-se). */
+  const [focoPedido, setFocoPedido] = useState<{ campoId: string; n: number } | null>(null);
+  /** Campos de que a pessoa ja saiu: ate la o erro de formato fica calado. */
   const [tocados, setTocados] = useState<ReadonlySet<string>>(() => new Set());
   const [aConfirmarDescarte, setAConfirmarDescarte] = useState(false);
-  /** O que a conta escolhida escreveu em cada campo, por `campoId`. E o que
-   * distingue um palpite de uma escrita a mao -- ver preenchimentoPorConta.ts. */
+  /** O que a conta escolhida escreveu em cada campo (distingue palpite de escrita a mao). */
   const [autoPreenchido, setAutoPreenchido] = useState<Record<string, string>>({});
   const [avisosConta, setAvisosConta] = useState<AvisoPreenchimento[]>([]);
   /**
@@ -161,8 +169,7 @@ export function PessoaFormDialog({
     verificar: verificarDuplicados,
     limpar: limparDuplicados,
   } = usePessoaDuplicados();
-  /** So se pede confirmacao explicita quando ha SO sinais (nenhum travao). Um
-   * travao nunca se confirma: bloqueia, e ponto. */
+  /** So se confirma quando ha SO sinais; um travao nunca se confirma. */
   const [confirmouSinal, setConfirmouSinal] = useState(false);
 
   /** Campos cuja alteracao pode mudar o resultado da verificacao de
@@ -330,32 +337,55 @@ export function PessoaFormDialog({
   ]);
   const podeVerPapeis = hasPermission("roles.view");
 
+  // Sem `hr.pessoas.bancarios.edit` a seccao do banco fica desactivada, e sem
+  // `hr.pessoas.laborais.edit` (RLS de `pessoas_fardamento`) os tamanhos de farda:
+  // nao se exige o que nao se pode escrever, e fica como pendencia na ficha.
+  const podeEditarBancarios = hasPermission("hr.pessoas.bancarios.edit");
+  const podeEditarFardamento = hasPermission("hr.pessoas.laborais.edit");
+  const podeEditarIdentificacao = hasPermission("hr.pessoas.identificacao.edit");
+  const indisponiveis = useMemo(
+    () => codigosIndisponiveis({ bancarios: podeEditarBancarios, laborais: podeEditarFardamento }),
+    [podeEditarBancarios, podeEditarFardamento],
+  );
+  // Sem `hr.pessoas.convite.enviar` o interruptor fica desactivado e o formulario
+  // segue o regime sem convite (o RH preenche).
+  const podeEnviarConvite = hasPermission("hr.pessoas.convite.enviar");
+  const comConvite = enviarConvite && podeEnviarConvite;
   const problemas = useMemo(
-    () => problemasDoRascunho(rascunho, configuracaoAdmissao),
-    [rascunho, configuracaoAdmissao],
+    () =>
+      problemasDoRascunho(rascunho, {
+        comConvite,
+        config: configuracaoAdmissao,
+        indisponiveis,
+      }),
+    [rascunho, comConvite, configuracaoAdmissao, indisponiveis],
   );
-  const quemPreenche = rascunho.geral.quem_preenche;
+  // A enviar convite so o e-mail pessoal e obrigatorio (o destino do convite);
+  // o asterisco e o `aria-required` acompanham-no.
   const obrigatoriosDaPessoa = useMemo(
-    () => codigosObrigatoriosDoFormulario(quemPreenche, configuracaoAdmissao),
-    [quemPreenche, configuracaoAdmissao],
+    () =>
+      comConvite
+        ? new Set(["email_pessoal"])
+        : codigosObrigatoriosDoFormulario(false, configuracaoAdmissao, indisponiveis),
+    [comConvite, configuracaoAdmissao, indisponiveis],
   );
-  /** O RH preenche agora, mas o formulario nao tem estes campos: a ficha fica
-   * com eles como pendencia, e di-se aqui para ninguem achar o contrario. */
-  const camposForaDoFormulario = useMemo(
-    () => (quemPreenche === "rh" ? camposDoConviteForaDoFormulario(configuracaoAdmissao) : []),
-    [quemPreenche, configuracaoAdmissao],
+  /** O que a configuracao pede e fica por preencher sem bloquear: pendencia na
+   * ficha, dita aqui para ninguem achar o contrario. */
+  const camposPendentes = useMemo(
+    () => camposPorPreencherNaFicha(configuracaoAdmissao, rascunho.pessoais, indisponiveis),
+    [configuracaoAdmissao, rascunho.pessoais, indisponiveis],
   );
   /**
-   * "RH, agora" sem saber a configuracao: `campos = null` NAO e "sem
+   * Sem convite e sem saber a configuracao: `campos = null` NAO e "sem
    * configuracao" -- os campos que a organizacao pos no convite deixariam de
    * ser exigidos e deixaria de aparecer o aviso do que fica como pendencia.
    * Enquanto carrega, o botao espera; depois de carregar, sem configuracao e
    * sem a base a ter recusado por permissao (falha de leitura, ou a leitura
    * nunca correu), o aviso e persistente (a ficha pode sair incompleta e di-se).
    */
-  const aEsperarConfiguracao = quemPreenche === "rh" && configuracaoACarregar;
+  const aEsperarConfiguracao = !comConvite && configuracaoACarregar;
   const configuracaoNaoCarregada =
-    quemPreenche === "rh" &&
+    !comConvite &&
     configuracaoAdmissao === null &&
     !configuracaoACarregar &&
     !configuracaoSemAcesso;
@@ -395,9 +425,12 @@ export function PessoaFormDialog({
     setAvisosConta([]);
     limparDuplicados();
     setConfirmouSinal(false);
+    setEnviarConvite(false);
+    setFocoPedido(null);
+    anexosNovos.limpar();
   };
 
-  const temDados = SECCOES.some((id) => seccaoPreenchida(rascunho, id));
+  const temDados = SECCOES.some((id) => seccaoPreenchida(rascunho, id)) || anexosNovos.temFicheiros;
 
   /** Fechar com dados preenchidos pede confirmacao: um Escape distraido nao
    * pode apagar cinco seccoes em silencio. Vazio fecha logo. */
@@ -432,6 +465,33 @@ export function PessoaFormDialog({
   const temDuplicadoTravao = duplicadosTravao.length > 0;
   const precisaConfirmarSinal = !temDuplicadoTravao && duplicadosSinal.length > 0 && !confirmouSinal;
 
+  /** Porque Criar esta desactivado (so a ordem em que se resolve): o rodape di-lo. */
+  const motivoCriarDesactivado = aCriar
+    ? null
+    : !temNomes
+      ? t("hr.form.criarMotivo.nomes")
+      : aEsperarConfiguracao
+        ? t("hr.form.criarMotivo.configuracao")
+        : temDuplicadoTravao
+          ? t("hr.form.criarMotivo.duplicado")
+          : precisaConfirmarSinal
+            ? t("hr.form.criarMotivo.sinal")
+            : null;
+
+  /**
+   * O atalho do resumo: muda de passo, pede o foco (o bloco recolhido que tem o
+   * campo abre-se) e foca quando o campo ja existe no DOM. Um campo
+   * desactivado ou que nao apareca nao fica com foco silencioso: o foco vai
+   * para o painel do passo.
+   */
+  const irParaProblema = (problema: { seccao: SeccaoId; campoId: string }) => {
+    setSeccao(problema.seccao);
+    setFocoPedido((anterior) => ({ campoId: problema.campoId, n: (anterior?.n ?? 0) + 1 }));
+    focarQuandoExistir(problema.campoId, () =>
+      document.getElementById(`hr-novo-painel-${problema.seccao}`)?.focus(),
+    );
+  };
+
   const criar = async () => {
     if (problemas.length > 0 || problemasHorario.length > 0) {
       setMostrarResumo(true);
@@ -447,9 +507,11 @@ export function PessoaFormDialog({
         cargos.find((c) => c.id === rascunho.laborais.cargo_id)?.nome ?? null,
       );
       const { id, falhas } = await onCriar(payload);
+      // Os anexos seguem depois de a ficha existir; nunca desfazem a ficha.
+      const falhasAnexos = await anexosNovos.enviar(id);
 
       const pendenciaDeAcesso = falhas.find((falha) => falha.seccao === "acesso");
-      const falhasReais = falhas.filter((falha) => falha.seccao !== "acesso");
+      const falhasReais = [...falhas.filter((falha) => falha.seccao !== "acesso"), ...falhasAnexos];
 
       if (falhasReais.length === 0) {
         toast.success(t("hr.sucesso.criada"));
@@ -466,24 +528,15 @@ export function PessoaFormDialog({
         toast.warning(t("hr.acesso.convitePendente"));
       }
 
-      // "A pessoa, por convite": abre o envio do convite para a ficha que
-      // acabou de nascer, com o e-mail pessoal escrito aqui. Sem e-mail (nao
-      // devia acontecer: o formulario exige-o neste modo) segue-se para a ficha.
+      // "Enviar convite": abre o envio do convite para a ficha que acabou de
+      // nascer, com o e-mail pessoal escrito aqui. Sem e-mail (nao devia
+      // acontecer: o formulario exige-o com convite) segue-se para a ficha.
       const emailDoConvite = payload.nucleo.email_pessoal;
-      const querConvite = rascunho.geral.quem_preenche === "convite";
-      const podeEnviarConvite = hasPermission("hr.pessoas.convite.enviar");
-      const abreConvite = querConvite && emailDoConvite !== null && podeEnviarConvite;
-      // Quem escolheu "A pessoa, por convite" e nao pode abri-lo nao fica a
-      // espera de um e-mail que nunca sai: diz-se que o convite NAO foi aberto.
-      if (querConvite && !abreConvite) {
-        toast.warning(
-          t(
-            podeEnviarConvite
-              ? "hr.form.conviteNaoAberto.semEmail"
-              : "hr.form.conviteNaoAberto.semPermissao",
-          ),
-        );
-      }
+      // Sem a permissao o interruptor nem se liga (`comConvite`). Quem escolheu
+      // enviar e nao tem e-mail para onde o enviar nao fica a espera de um
+      // convite que nunca sai: diz-se que o convite NAO foi aberto.
+      const abreConvite = comConvite && emailDoConvite !== null;
+      if (comConvite && !abreConvite) toast.warning(t("hr.form.conviteNaoAberto.semEmail"));
 
       limpar();
       onOpenChange(false);
@@ -546,34 +599,12 @@ export function PessoaFormDialog({
         <div className="grid max-h-[70vh] grid-cols-1 sm:grid-cols-[15rem_1fr]">
           {/* A lista de passos e a navegacao. Cada entrada anuncia o seu estado
               em TEXTO: o ponto de aviso nao pode ser so cor. */}
-          <div
-            role="tablist"
-            aria-label={t("hr.form.listaPassos")}
-            aria-orientation="vertical"
-            className="hidden border-r p-3 sm:block"
-          >
-            {SECCOES.map((id, i) => (
-              <button
-                key={id}
-                type="button"
-                role="tab"
-                aria-selected={id === seccao}
-                aria-controls={`hr-novo-painel-${id}`}
-                id={`hr-novo-passo-${id}`}
-                onClick={() => setSeccao(id)}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm",
-                  id === seccao ? "bg-muted font-medium" : "hover:bg-muted/60",
-                )}
-              >
-                {iconeDoEstado(id)}
-                <span className="flex-1">
-                  {i + 1}. {t(`hr.form.seccoes.${id}`)}
-                </span>
-                <span className="sr-only">{estadoTextoDaSeccao(id)}</span>
-              </button>
-            ))}
-          </div>
+          <PessoaFormPassos
+            seccao={seccao}
+            onSeleccionar={setSeccao}
+            icone={iconeDoEstado}
+            estadoTexto={estadoTextoDaSeccao}
+          />
 
           <ScrollArea className="max-h-[70vh]">
             <CamposTocadosProvider onTocar={tocar} rotuloObrigatorio={t("hr.campos.obrigatorio")}>
@@ -581,7 +612,8 @@ export function PessoaFormDialog({
                 role="tabpanel"
                 id={`hr-novo-painel-${seccao}`}
                 aria-labelledby={`hr-novo-passo-${seccao}`}
-                className="space-y-4 p-5"
+                tabIndex={-1}
+                className="space-y-4 p-5 outline-none"
               >
                 <div aria-live="polite" className="sr-only">
                   {t("hr.form.a11yPasso")
@@ -591,15 +623,12 @@ export function PessoaFormDialog({
                 </div>
 
                 <PessoaFormAvisos
-                  camposForaDoFormulario={camposForaDoFormulario}
-                  mostrarForaDoFormulario={seccao === "geral" || mostrarResumo}
+                  camposPendentes={camposPendentes}
+                  mostrarPendentes={seccao === "acesso" || mostrarResumo}
                   mostrarResumo={mostrarResumo}
                   problemas={problemas}
                   problemasHorario={problemasHorario.length}
-                  onIrParaProblema={(problema) => {
-                    setSeccao(problema.seccao);
-                    requestAnimationFrame(() => document.getElementById(problema.campoId)?.focus());
-                  }}
+                  onIrParaProblema={irParaProblema}
                   duplicadosTravao={duplicadosTravao}
                   duplicadosSinal={duplicadosSinal}
                   temDuplicadoTravao={temDuplicadoTravao}
@@ -609,6 +638,7 @@ export function PessoaFormDialog({
                   duplicadosSemAcesso={duplicadosSemAcesso}
                   duplicadosDemasiadasTentativas={duplicadosDemasiadasTentativas}
                   configuracaoNaoCarregada={configuracaoNaoCarregada}
+                  configuracaoSemAcesso={!comConvite && configuracaoSemAcesso}
                 />
 
                 {seccao === "geral" && (
@@ -635,6 +665,10 @@ export function PessoaFormDialog({
                     valor={rascunho.pessoais}
                     erroDe={erroDe}
                     obrigatorios={obrigatoriosDaPessoa}
+                    podeEditarBancarios={podeEditarBancarios}
+                    podeEditarFardamento={podeEditarFardamento}
+                    podeEditarIdentificacao={podeEditarIdentificacao}
+                    focoPedido={focoPedido}
                     onPatch={(patch) =>
                       setRascunho((anterior) => ({
                         ...anterior,
@@ -708,57 +742,29 @@ export function PessoaFormDialog({
           </ScrollArea>
         </div>
 
-        <DialogFooter className="flex-row items-center justify-between gap-2 border-t p-4">
-          <Button
-            variant="ghost"
-            onClick={tentarFechar}
-            disabled={aCriar}
-            className="mr-auto"
-          >
-            {t("common.cancel")}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={indice === 0 || aCriar}
-            onClick={() => setSeccao(SECCOES[Math.max(0, indice - 1)])}
-          >
-            {t("common.previous")}
-          </Button>
-          <Button
-            variant="outline"
-            disabled={indice === SECCOES.length - 1 || aCriar}
-            onClick={() => setSeccao(SECCOES[Math.min(SECCOES.length - 1, indice + 1)])}
-          >
-            {t("common.next")}
-          </Button>
-          {/* Activo a partir dos dois nomes, em QUALQUER passo: quem tem uma
-              admissao as pressas nunca ve um bloqueio. */}
-          <Button
-            onClick={criar}
-            disabled={
-              aCriar || !temNomes || temDuplicadoTravao || precisaConfirmarSinal || aEsperarConfiguracao
-            }
-          >
-            {aCriar && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-            {t("hr.form.criarFicha")}
-          </Button>
-        </DialogFooter>
+        <AnexosNovaPessoa estado={anexosNovos} desactivado={aCriar} />
+
+        <PessoaFormRodape
+          enviarConvite={enviarConvite}
+          onEnviarConvite={setEnviarConvite}
+          podeEnviarConvite={podeEnviarConvite}
+          motivoCriarDesactivado={motivoCriarDesactivado}
+          aCriar={aCriar}
+          primeiroPasso={indice === 0}
+          ultimoPasso={indice === SECCOES.length - 1}
+          criarDesactivado={aCriar || motivoCriarDesactivado !== null}
+          onCancelar={tentarFechar}
+          onAnterior={() => setSeccao(SECCOES[Math.max(0, indice - 1)])}
+          onSeguinte={() => setSeccao(SECCOES[Math.min(SECCOES.length - 1, indice + 1)])}
+          onCriar={criar}
+        />
       </DialogContent>
 
-      <AlertDialog open={aConfirmarDescarte} onOpenChange={setAConfirmarDescarte}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("hr.form.descartar.titulo")}</AlertDialogTitle>
-            <AlertDialogDescription>{t("hr.form.descartar.descricao")}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("hr.form.descartar.continuar")}</AlertDialogCancel>
-            <AlertDialogAction onClick={descartar}>
-              {t("hr.form.descartar.confirmar")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <PessoaFormDescartar
+        open={aConfirmarDescarte}
+        onOpenChange={setAConfirmarDescarte}
+        onDescartar={descartar}
+      />
 
       {/* O envio do convite da ficha acabada de criar. Fica fora do conteudo do
           assistente (que ja fechou e limpou o rascunho): e a sua propria raiz

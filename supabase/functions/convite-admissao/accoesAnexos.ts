@@ -78,7 +78,7 @@ export interface BucketAnexos {
   upload(
     caminho: string,
     corpo: Uint8Array,
-    opcoes: { contentType: string; upsert: boolean },
+    opcoes: { contentType: string; upsert: boolean; cacheControl?: string },
   ): PromiseLike<ResultadoStorage>;
   remove(caminhos: string[]): PromiseLike<ResultadoStorage>;
 }
@@ -135,7 +135,7 @@ function respostaDeMotivo(motivo: string, registarErro?: RegistarErro): Resposta
  * lancar, se trouxer `error` (Storage ou base) OU se a RPC recusar em jsonb
  * (`{erro}`): uma recusa de negocio nao e um sucesso. Regista sempre, sem texto.
  */
-async function tentar(operacao: () => PromiseLike<unknown>, registarErro?: RegistarErro): Promise<boolean> {
+export async function tentar(operacao: () => PromiseLike<unknown>, registarErro?: RegistarErro): Promise<boolean> {
   try {
     const r = (await operacao()) as { data?: unknown; error?: unknown } | null;
     if (r?.error) {
@@ -153,7 +153,7 @@ async function tentar(operacao: () => PromiseLike<unknown>, registarErro?: Regis
   }
 }
 
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return toHex(await crypto.subtle.digest("SHA-256", bytes));
 }
 
@@ -259,8 +259,20 @@ function descartar(
   );
 }
 
-/** Descarrega um objecto (o que o browser enviou para a quarentena, p. ex.); `null` se nao ha nada. */
-async function lerObjecto(
+/** O erro do Storage diz que o objecto nao existe (nao chegou nada), e nao que o Storage falhou? */
+function eObjectoEmFalta(erroDownload: unknown): boolean {
+  const e = comoObjecto(erroDownload);
+  if (!e) return false;
+  const estado = String(e.statusCode ?? e.status ?? "");
+  return estado === "404" || (typeof e.message === "string" && /not.?found/i.test(e.message));
+}
+
+/**
+ * Descarrega um objecto (o que o browser enviou para a quarentena, p. ex.);
+ * `null` se nao ha nada OU se o Storage falhou. So a segunda fica registada
+ * (o erro, nunca o conteudo): "nao chegou nada" e um resultado normal.
+ */
+export async function lerObjecto(
   quarentena: BucketAnexos,
   caminho: string,
   registarErro?: RegistarErro,
@@ -268,6 +280,7 @@ async function lerObjecto(
   try {
     const { data: blob, error: erroDownload } = await quarentena.download(caminho);
     if (!erroDownload && blob) return new Uint8Array(await blob.arrayBuffer());
+    if (erroDownload && !eObjectoEmFalta(erroDownload)) registarErro?.(erroDownload);
   } catch (e) {
     registarErro?.(e);
   }
@@ -280,7 +293,7 @@ async function lerObjecto(
  * conteudo (uma tentativa anterior morreu entre a copia e a ligacao), conta como
  * sucesso: repetir a confirmacao nao pode ficar presa para sempre.
  */
-async function copiarParaFinal(
+export async function copiarParaFinal(
   final: BucketAnexos,
   caminhoFinal: string,
   bytes: Uint8Array,
@@ -288,10 +301,16 @@ async function copiarParaFinal(
   hash: string,
   registarErro?: RegistarErro,
 ): Promise<boolean> {
-  if (await tentar(() => final.upload(caminhoFinal, bytes, { contentType: mime, upsert: false }), registarErro)) {
+  // cacheControl "0": o documento de identificacao nao fica em caches intermedias.
+  if (
+    await tentar(
+      () => final.upload(caminhoFinal, bytes, { contentType: mime, upsert: false, cacheControl: "0" }),
+      registarErro,
+    )
+  ) {
     return true;
   }
-  const existente = await lerObjecto(final, caminhoFinal);
+  const existente = await lerObjecto(final, caminhoFinal, registarErro);
   return existente !== null && (await sha256Hex(existente)) === hash;
 }
 
@@ -435,7 +454,7 @@ interface AlvoDeRemocao {
 }
 
 /** Os objectos que a base diz existirem agora (o da linha e a copia da quarentena), sem repetidos. */
-function alvosDoDescarte(data: unknown): AlvoDeRemocao[] {
+export function alvosDoDescarte(data: unknown): AlvoDeRemocao[] {
   const r = comoObjecto(data);
   const alvos = new Map<string, AlvoDeRemocao>();
   const acrescentar = (bucket: unknown, caminho: unknown) => {

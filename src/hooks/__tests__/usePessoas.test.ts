@@ -211,6 +211,7 @@ function payloadMinimo(overrides: Partial<NovaPessoaPayload> = {}): NovaPessoaPa
     morada: null,
     conta: null,
     bicSozinho: null,
+    fardamento: null,
     emergencia: null,
     vinculo: null,
     horasVinculo: null,
@@ -356,7 +357,13 @@ describe("usePessoas", () => {
     await act(async () => {
       await result.current.criarPessoa(
         payloadMinimo({
-          conta: { formato: "iban", numero: "PT50000201231234567890154", swift: "CGDIPTPL" },
+          conta: {
+            formato: "iban",
+            numero: "PT50000201231234567890154",
+            swift: "CGDIPTPL",
+            titular: null,
+            banco: null,
+          },
         }),
       );
     });
@@ -366,9 +373,126 @@ describe("usePessoas", () => {
       p_pessoa_id: "pessoa-nova",
       p_formato: "iban",
       p_conta: "PT50000201231234567890154",
+      p_titular: null,
+      p_banco: null,
       p_swift: "CGDIPTPL",
     });
     expect(chamadasRpc.find((c) => c.fn === "rpc_hr_definir_bic")).toBeUndefined();
+  });
+
+  it("o titular e o banco seguem em rpc_hr_definir_conta como p_titular e p_banco", async () => {
+    const { result } = renderHook(() => usePessoas());
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.criarPessoa(
+        payloadMinimo({
+          conta: {
+            formato: "iban",
+            numero: "PT50000201231234567890154",
+            swift: null,
+            titular: "Ana Alves",
+            banco: "Caixa Geral de Depositos",
+          },
+        }),
+      );
+    });
+
+    expect(chamadasRpc.find((c) => c.fn === "rpc_hr_definir_conta")?.args).toEqual({
+      p_pessoa_id: "pessoa-nova",
+      p_formato: "iban",
+      p_conta: "PT50000201231234567890154",
+      p_titular: "Ana Alves",
+      p_banco: "Caixa Geral de Depositos",
+      p_swift: null,
+    });
+  });
+
+  describe("fardamento (satelite novo)", () => {
+    const FARDAMENTO = {
+      tamanho_cima: "m",
+      tamanho_cima_detalhe: null,
+      tamanho_baixo: "outro",
+      tamanho_baixo_detalhe: "62",
+      tamanho_calcado: "42",
+      tamanho_calcado_detalhe: null,
+    };
+
+    it("insere em pessoas_fardamento com a base do satelite (pessoa, organizacao e autor)", async () => {
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await act(async () => {
+        await result.current.criarPessoa(payloadMinimo({ fardamento: FARDAMENTO }));
+      });
+
+      expect(inserts.pessoas_fardamento).toEqual([
+        {
+          pessoa_id: "pessoa-nova",
+          organization_id: ORG_ACTIVA,
+          created_by: "autor-1",
+          updated_by: "autor-1",
+          ...FARDAMENTO,
+        },
+      ]);
+    });
+
+    it("sem fardamento no payload, nao toca na tabela", async () => {
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      await act(async () => {
+        await result.current.criarPessoa(payloadMinimo());
+      });
+
+      expect(inserts.pessoas_fardamento ?? []).toHaveLength(0);
+      expect(ordem.filter((o) => o.includes("fardamento"))).toEqual([]);
+    });
+
+    it("se falhar, a ficha fica criada, os outros satelites seguem e a falha volta em 'fardamento'", async () => {
+      falharInsert = { pessoas_fardamento: { message: "boom", code: "23514" } };
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+      await act(async () => {
+        resultado = await result.current.criarPessoa(
+          payloadMinimo({
+            fardamento: FARDAMENTO,
+            morada: { tipo: "residencia", linha1: "Rua Teste", is_principal: true },
+            emergencia: { nome: "Rui Alves", telefone: "+351912345678" },
+            vinculo: { tipo_contrato: "sem_termo", data_inicio: "2026-01-01" },
+          }),
+        );
+      });
+
+      expect(resultado?.id).toBe("pessoa-nova");
+      expect(resultado?.falhas.map((f) => f.seccao)).toEqual(["fardamento"]);
+      // O fardamento e gravado ANTES da emergencia e do vinculo: o que prova que a
+      // falha nao levou nada atras e que o resto seguiu e o que se grava depois.
+      expect(inserts.pessoas_contactos_emergencia).toHaveLength(1);
+      expect(inserts.pessoas_vinculos).toHaveLength(1);
+      expect(ordem.indexOf("insert:pessoas_fardamento")).toBeLessThan(
+        ordem.indexOf("insert:pessoas_contactos_emergencia"),
+      );
+    });
+
+    it("sem permissao (RLS), a falha de fardamento nao desfaz a ficha", async () => {
+      falharInsert = {
+        pessoas_fardamento: { message: "permission denied", code: "42501" },
+      };
+      const { result } = renderHook(() => usePessoas());
+      await waitFor(() => expect(result.current.loading).toBe(false));
+
+      let resultado: Awaited<ReturnType<typeof result.current.criarPessoa>> | undefined;
+      await act(async () => {
+        resultado = await result.current.criarPessoa(payloadMinimo({ fardamento: FARDAMENTO }));
+      });
+
+      expect(resultado?.id).toBe("pessoa-nova");
+      expect(resultado?.falhas).toHaveLength(1);
+      expect(resultado?.falhas[0].seccao).toBe("fardamento");
+    });
   });
 
   it("so com BIC (sem conta), chama rpc_hr_definir_bic e nunca rpc_hr_definir_conta", async () => {

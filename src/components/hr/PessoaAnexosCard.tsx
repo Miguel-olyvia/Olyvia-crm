@@ -1,18 +1,25 @@
 /**
- * Os anexos da admissao na ficha da pessoa: cartao de cidadao, comprovativo de
- * IBAN e fotografia que a pessoa enviou pelo convite.
+ * Os anexos da pessoa na ficha: cartao de cidadao, comprovativo de IBAN e
+ * fotografia -- os que a pessoa enviou pelo convite e os que o RH anexa,
+ * substitui e remove aqui.
  *
  * A LISTA E UMA COISA, O CONTEUDO E OUTRA
  * ----------------------------------------
  * A lista (tipo, nome, tamanho, data) e visivel a quem ve a ficha -- e o que a
  * RLS de `pessoas_anexos` deixa ler. Abrir o ficheiro e que e gated: cada tipo
  * tem a sua permissao (`podeAbrirAnexo`) e o servidor (`hr-anexo-url`) repete a
- * decisao e audita o cartao e o comprovativo. Aqui o botao "Abrir" so aparece
- * a quem o servidor vai deixar abrir; os outros leem o texto de sem permissao.
+ * decisao e audita o cartao e o comprovativo. Aqui o botao so aparece a quem o
+ * servidor vai deixar abrir; os outros leem o texto de sem permissao.
  *
- * O URL assinado nunca se guarda: cada abertura pede um novo. O separador abre
- * em branco DENTRO do clique (para o bloqueador de janelas o aceitar) e so
- * depois recebe o endereco, sem `opener`.
+ * - O cartao de cidadao e o comprovativo de IBAN VEEM-SE numa janela por cima
+ *   desta pagina (`VisualizadorAnexoSensivel`), com registo, marca de agua e
+ *   fecho automatico. A fotografia mostra-se em miniatura e abre-se como sempre.
+ * - ESCREVER (anexar, substituir, remover) e uma permissao POR TIPO
+ *   (`permissoesEscrita`): so esconde o que o servidor ia recusar.
+ *
+ * O URL assinado nunca se guarda: cada abertura pede um novo. A fotografia abre
+ * num separador em branco aberto DENTRO do clique (para o bloqueador de janelas
+ * o aceitar) e so depois recebe o endereco, sem `opener`.
  *
  * Este cartao e IRMAO do separador de documentos, nao filho: esse separador
  * devolve "sem acesso" a quem nao tem permissoes de documentos, o que
@@ -20,12 +27,19 @@
  */
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LinhaTipoAnexo, type AccoesLinhaAnexo } from "@/components/hr/anexos/LinhaTipoAnexo";
+import { VisualizadorAnexoSensivel } from "@/components/hr/anexos/VisualizadorAnexoSensivel";
 import { useTranslation } from "@/hooks/useTranslation";
 import { usePessoaAnexos } from "@/hooks/usePessoaAnexos";
-import { podeAbrirAnexo, type PermissoesAnexos } from "@/lib/hr/anexosAdmissao";
-import { formatarTamanho } from "@/lib/hr/conviteAnexos";
+import type { PermissoesAnexos } from "@/lib/hr/anexosAdmissao";
+import {
+  podeAnexarTipo,
+  verificarLimitesDeContagem,
+  type PermissoesEscritaAnexos,
+  type TipoAnexoRh,
+} from "@/lib/hr/anexosRh";
+import { TIPOS_ANEXO_CONVITE, contarPorTipo } from "@/lib/hr/conviteAnexos";
 import type { IdiomaConvite } from "@/lib/hr/conviteAdmissaoEcra";
 import type { PessoaAnexo } from "@/types/hr";
 
@@ -35,6 +49,10 @@ interface PessoaAnexosCardProps {
   /** Quem olha e a propria pessoa (`useMinhaPessoa`). */
   souAPessoa: boolean;
   permissoes: PermissoesAnexos;
+  /** Quem pode anexar, substituir e remover cada tipo; sem isto o cartao so le. */
+  permissoesEscrita?: PermissoesEscritaAnexos;
+  /** A fotografia mudou (anexada, substituida ou removida): a ficha refaz o avatar. */
+  onFotografiaAlterada?: () => void;
 }
 
 export function PessoaAnexosCard({
@@ -42,11 +60,15 @@ export function PessoaAnexosCard({
   organizationId,
   souAPessoa,
   permissoes,
+  permissoesEscrita,
+  onFotografiaAlterada,
 }: PessoaAnexosCardProps) {
   const { t, language } = useTranslation();
-  const { anexos, loading, recusado, obterUrl } = usePessoaAnexos(pessoaId, organizationId);
+  const estado = usePessoaAnexos(pessoaId, organizationId);
+  const { anexos, loading, recusado, obterUrl } = estado;
   const [aAbrir, setAAbrir] = useState<string | null>(null);
   const [erroAbrir, setErroAbrir] = useState(false);
+  const [aVer, setAVer] = useState<PessoaAnexo | null>(null);
 
   if (recusado) return null;
 
@@ -82,6 +104,24 @@ export function PessoaAnexosCard({
     souAPessoa ||
     (permissoes.pessoasView && permissoes.identificacaoReveal && permissoes.bancariosEdit);
 
+  const contagem = contarPorTipo(anexos);
+  const algumaEscrita = TIPOS_ANEXO_CONVITE.some((tipo) => podeAnexarTipo(tipo, permissoesEscrita));
+  const mostrarLista = anexos.length > 0 || algumaEscrita || Object.keys(estado.envios).length > 0;
+
+  const accoes: AccoesLinhaAnexo = {
+    aoVer: setAVer,
+    aoAbrir: (anexo) => void abrir(anexo),
+    aAbrir,
+    anexar: estado.anexar,
+    substituir: estado.substituir,
+    remover: estado.remover,
+    descartarEnvio: estado.descartarEnvio,
+    limparErroRemocao: estado.limparErroRemocao,
+    aoFotografiaAlterada: onFotografiaAlterada,
+  };
+
+  const cabeMais = (tipo: TipoAnexoRh) => verificarLimitesDeContagem(tipo, contagem) === null;
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -93,55 +133,36 @@ export function PessoaAnexosCard({
             <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
             <span className="sr-only">{t("common.loading")}</span>
           </div>
-        ) : anexos.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            {t(podeVerTodosOsTipos ? "hr.anexos.vazio" : "hr.anexos.vazioRestrito")}
-          </p>
         ) : (
-          <ul className="divide-y">
-            {anexos.map((anexo) => {
-              const podeAbrir = podeAbrirAnexo(anexo.tipo, permissoes, souAPessoa);
-              return (
-              <li key={anexo.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 text-sm">
-                <span className="w-44 shrink-0 font-medium">
-                  {t(`hr.anexos.tipo.${anexo.tipo}`)}
-                </span>
-                {/* O nome e texto livre da pessoa (pode ser "CC 12345678.pdf"):
-                    so a quem pode abrir o tipo. */}
-                {podeAbrir && (
-                  <>
-                    <span className="min-w-0 flex-1 truncate">{anexo.nome_original}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {formatarTamanho(anexo.tamanho_bytes ?? 0, idioma)}
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {t("hr.anexos.promovidoEm", { data: dataDe(anexo.promovido_em) })}
-                    </span>
-                  </>
-                )}
-                {podeAbrir ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={aAbrir !== null}
-                    aria-label={`${t("hr.anexos.abrir")}: ${anexo.nome_original}`}
-                    onClick={() => void abrir(anexo)}
-                  >
-                    {aAbrir === anexo.id && (
-                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" aria-hidden="true" />
-                    )}
-                    {t("hr.anexos.abrir")}
-                  </Button>
-                ) : (
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {t("hr.anexos.semPermissao")}
-                  </span>
-                )}
-              </li>
-              );
-            })}
-          </ul>
+          <>
+            {anexos.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                {t(podeVerTodosOsTipos ? "hr.anexos.vazio" : "hr.anexos.vazioRestrito")}
+              </p>
+            )}
+            {mostrarLista && (
+              <ul className="divide-y">
+                {TIPOS_ANEXO_CONVITE.map((tipo) => (
+                  <LinhaTipoAnexo
+                    key={tipo}
+                    tipo={tipo}
+                    anexos={anexos.filter((a) => a.tipo === tipo)}
+                    permissoes={permissoes}
+                    souAPessoa={souAPessoa}
+                    podeEscrever={podeAnexarTipo(tipo, permissoesEscrita)}
+                    cabeMais={cabeMais(tipo)}
+                    envios={Object.entries(estado.envios).filter(([, e]) => e.tipo === tipo)}
+                    aRemover={estado.aRemover}
+                    errosRemocao={estado.errosRemocao}
+                    codigoErroLimite={estado.erroLimite?.tipo === tipo ? estado.erroLimite.codigo : null}
+                    idioma={idioma}
+                    dataDe={dataDe}
+                    accoes={accoes}
+                  />
+                ))}
+              </ul>
+            )}
+          </>
         )}
         {!loading && !podeVerTodosOsTipos && anexos.length > 0 && (
           <p className="text-xs text-muted-foreground">{t("hr.anexos.notaRestrita")}</p>
@@ -152,6 +173,14 @@ export function PessoaAnexosCard({
           </p>
         )}
       </CardContent>
+
+      <VisualizadorAnexoSensivel
+        anexoId={aVer?.id ?? null}
+        nomeFicheiro={aVer?.nome_original ?? ""}
+        rotuloTipo={aVer ? t(`hr.anexos.tipo.${aVer.tipo}`) : ""}
+        obterUrl={obterUrl}
+        aoFechar={() => setAVer(null)}
+      />
     </Card>
   );
 }

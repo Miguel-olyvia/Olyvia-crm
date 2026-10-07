@@ -59,9 +59,6 @@ const CHAVES_LADO_RH: readonly string[] = [
   "hr.convite.erro.validadeInvalida",
   "hr.convite.erro.inesperado",
   // Formulario interno
-  "hr.form.quemPreenche",
-  "hr.form.quemPreenche.convite",
-  "hr.form.quemPreenche.rh",
   "hr.form.camposFicamPendencia",
   "hr.form.avisoCampoRhPendente",
 ];

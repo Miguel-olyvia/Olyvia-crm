@@ -46,7 +46,7 @@ describe("a separacao de novaPessoa.ts nao partiu os importadores", () => {
     expect(nova.dataDeHoje).toBe(datas.dataDeHoje);
     expect(nova.dataDoPeriodoExperimental).toBe(datas.dataDoPeriodoExperimental);
     expect(nova.dataFimPorDuracaoMeses).toBe(datas.dataFimPorDuracaoMeses);
-    expect(nova.camposDoConviteForaDoFormulario).toBe(admissao.camposDoConviteForaDoFormulario);
+    expect(nova.camposPorPreencherNaFicha).toBe(admissao.camposPorPreencherNaFicha);
     expect(nova.codigosObrigatoriosDoFormulario).toBe(admissao.codigosObrigatoriosDoFormulario);
   });
 });

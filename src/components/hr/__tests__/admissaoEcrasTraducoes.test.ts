@@ -28,11 +28,8 @@ const CHAVES: readonly string[] = [
   // Pendencias com codigo desconhecido
   "hr.pendencias.campo.desconhecido",
   // Formulario de criar pessoa
-  "hr.form.conviteNaoAberto.semPermissao",
   "hr.form.conviteNaoAberto.semEmail",
   "hr.form.configuracaoNaoCarregada",
-  "hr.form.quemPreenche.ajudaConvite",
-  "hr.form.quemPreenche.ajudaRh",
   // Reutilizadas pelos ecras acima (o convite publico, o cartao, a configuracao)
   "common.loading",
   "common.retry",

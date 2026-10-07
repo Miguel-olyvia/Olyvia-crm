@@ -17,7 +17,7 @@ import { linhasParaGravar } from "@/lib/hr/horario";
 import type { ConfiguracaoCampo } from "@/lib/hr/admissaoObrigatorios";
 import {
   avisosDoRascunho,
-  camposDoConviteForaDoFormulario,
+  camposPorPreencherNaFicha,
   codigosObrigatoriosDoFormulario,
   dataDoPeriodoExperimental,
   payloadDoRascunho,
@@ -43,7 +43,6 @@ function rascunhoInicial() {
 describe("rascunho de nova pessoa", () => {
   it("so exige nomes e cargo (sem configuracao a que recorrer)", () => {
     const vazio = rascunhoInicialBase();
-    vazio.geral.quem_preenche = "rh";
     const problemas = problemasDoRascunho(vazio);
     expect(problemas.map((p) => p.campoId).sort()).toEqual([
       "hr-novo-apelido",
@@ -52,7 +51,6 @@ describe("rascunho de nova pessoa", () => {
     ]);
 
     const comNomes = rascunhoInicial();
-    comNomes.geral.quem_preenche = "rh";
     comNomes.geral.primeiro_nome = "Ana";
     comNomes.geral.apelido = "Silva";
     expect(problemasDoRascunho(comNomes)).toHaveLength(0);
@@ -60,7 +58,6 @@ describe("rascunho de nova pessoa", () => {
 
   it("vazio nao e erro, malformado e", () => {
     const rascunho = rascunhoInicial();
-    rascunho.geral.quem_preenche = "rh";
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
     expect(problemasDoRascunho(rascunho)).toHaveLength(0);
@@ -73,7 +70,6 @@ describe("rascunho de nova pessoa", () => {
 
   it("apanha a incoerencia entre passos: termo antes do inicio, maximo abaixo do contratado", () => {
     const rascunho = rascunhoInicial();
-    rascunho.geral.quem_preenche = "rh";
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
     rascunho.contrato.data_inicio = "2026-03-01";
@@ -147,7 +143,6 @@ describe("rascunho de nova pessoa", () => {
 
   it("as horas sao validadas na unidade escolhida, nao no numero cru", () => {
     const rascunho = rascunhoInicial();
-    rascunho.geral.quem_preenche = "rh";
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
 
@@ -166,7 +161,6 @@ describe("rascunho de nova pessoa", () => {
 
   it("avisa da unidade trocada sem bloquear a gravacao", () => {
     const rascunho = rascunhoInicial();
-    rascunho.geral.quem_preenche = "rh";
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
     // Os campos so do RH preenchidos: senao ha tambem o aviso de pendencia.
@@ -188,7 +182,6 @@ describe("rascunho de nova pessoa", () => {
 
   it("a conta bancaria sai a parte, e o formato manda na validacao", () => {
     const rascunho = rascunhoInicial();
-    rascunho.geral.quem_preenche = "rh";
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
 
@@ -208,6 +201,8 @@ describe("rascunho de nova pessoa", () => {
       formato: "clabe",
       numero: "PT51000201231234567890154",
       swift: null,
+      titular: null,
+      banco: null,
     });
     expect(JSON.stringify(payload.dadosPessoais)).not.toContain("PT51");
   });
@@ -215,7 +210,6 @@ describe("rascunho de nova pessoa", () => {
   describe("BIC", () => {
     function rascunhoComNomes() {
       const rascunho = rascunhoInicial();
-      rascunho.geral.quem_preenche = "rh";
       rascunho.geral.primeiro_nome = "Ana";
       rascunho.geral.apelido = "Silva";
       return rascunho;
@@ -274,6 +268,8 @@ describe("rascunho de nova pessoa", () => {
         formato: "iban",
         numero: IBAN_BOM,
         swift: "CGDIPTPL",
+        titular: null,
+        banco: null,
       });
 
       rascunho.pessoais.conta_bic = "";
@@ -339,9 +335,8 @@ describe("rascunho de nova pessoa", () => {
     expect(seccaoPreenchida(rascunho, "pessoais")).toBe(true);
   });
 
-  it("a escolha de quem preenche nao conta como seccao preenchida", () => {
-    // `quem_preenche` nasce preenchido: se contasse, "Informacoes gerais"
-    // aparecia com visto e fechar o assistente pedia confirmacao sem nada escrito.
+  it("nenhuma escolha de UI conta como seccao preenchida: vazio e vazio", () => {
+    // Fechar o assistente sem nada escrito nao pede confirmacao.
     expect(seccaoPreenchida(rascunhoInicial(), "geral")).toBe(false);
   });
 });
@@ -357,111 +352,173 @@ function linha(codigo: string, posicao: "convite" | "ficha" | "opcional" | "rh" 
   };
 }
 
-function comNomes(quem: "convite" | "rh") {
+function comNomes() {
   const r = rascunhoInicial();
-  r.geral.quem_preenche = quem;
   r.geral.primeiro_nome = "Ana";
   r.geral.apelido = "Silva";
   return r;
 }
 
-describe("quem preenche os dados pessoais", () => {
-  it("por omissao e a pessoa, por convite", () => {
-    expect(rascunhoInicial().geral.quem_preenche).toBe("convite");
+describe("o que bloqueia a criacao da ficha", () => {
+  it("sem configuracao so exige nome, apelido (e cargo)", () => {
+    expect(problemasDoRascunho(comNomes())).toHaveLength(0);
+    expect(problemasDoRascunho(comNomes(), { config: null })).toHaveLength(0);
+    expect(problemasDoRascunho(comNomes(), { config: undefined })).toHaveLength(0);
   });
 
-  it("por convite so exige nome, apelido e o e-mail pessoal, mesmo com configuracao", () => {
-    const rascunho = comNomes("convite");
-    const config = [linha("telefone_pessoal"), linha("nif"), linha("data_nascimento")];
+  it("sem convite (o RH preenche), um obrigatorio da configuracao em falta RECUSA a criacao", () => {
+    const config = [linha("telefone_pessoal", "convite"), linha("linha1", "convite")];
+    const problemas = problemasDoRascunho(comNomes(), { config });
+    expect(problemas.map((p) => p.campoId).sort()).toEqual([
+      "hr-novo-morada-linha1",
+      "hr-novo-telefone-pessoal",
+    ]);
+    expect(problemas.every((p) => p.mensagemKey === "hr.form.erroObrigatorio")).toBe(true);
 
-    const problemas = problemasDoRascunho(rascunho, config);
-    expect(problemas.map((p) => p.campoId)).toEqual(["hr-novo-email-pessoal"]);
-    expect(problemas[0].mensagemKey).toBe("hr.form.erroObrigatorio");
-
-    rascunho.pessoais.email_pessoal = "ana@exemplo.pt";
-    expect(problemasDoRascunho(rascunho, config)).toHaveLength(0);
+    const preenchido = comNomes();
+    preenchido.pessoais.telefone_pessoal = "912345678";
+    preenchido.pessoais.morada_linha1 = "Rua A";
+    expect(problemasDoRascunho(preenchido, { config })).toHaveLength(0);
   });
 
-  it("por convite um e-mail mal escrito e erro de formato, nao de obrigatoriedade", () => {
-    const rascunho = comNomes("convite");
-    rascunho.pessoais.email_pessoal = "isto-nao-e-email";
-    expect(problemasDoRascunho(rascunho).map((p) => p.mensagemKey)).toEqual(["hr.form.erroEmail"]);
-  });
-
-  it("pelo RH exige os campos de posicao convite que o formulario tem", () => {
-    const rascunho = comNomes("rh");
+  it("as posicoes ficha e opcional nunca bloqueiam, nem os campos so do RH", () => {
     const config = [
-      linha("telefone_pessoal", "convite"),
-      linha("data_nascimento", "ficha"),
+      linha("telefone_pessoal", "ficha"),
       linha("genero", "opcional"),
-      linha("linha1", "convite"),
+      linha("cargo", "rh"),
+    ];
+    expect(problemasDoRascunho(comNomes(), { config })).toHaveLength(0);
+  });
+
+  it("sem convite respeita as condicoes: validade so sem cartao de cidadao, NIF ou NISS basta um, conjuge so com casado", () => {
+    const config = [
+      linha("validade_documento"),
+      linha("nif"),
+      linha("niss"),
+      linha("conjuge_situacao_profissional"),
     ];
 
-    const campos = problemasDoRascunho(rascunho, config).map((p) => p.campoId).sort();
-    // So os de posicao `convite`: `ficha` e `opcional` nunca bloqueiam.
-    expect(campos).toEqual(["hr-novo-morada-linha1", "hr-novo-telefone-pessoal"]);
-  });
-
-  it("pelo RH respeita as condicoes: validade so sem cartao de cidadao, NIF ou NISS basta um", () => {
-    const config = [linha("validade_documento"), linha("nif"), linha("niss")];
-
-    const cartao = comNomes("rh");
+    const cartao = comNomes();
     cartao.pessoais.tipo_documento = "cartao_cidadao";
     cartao.pessoais.niss = "12345678902";
-    expect(problemasDoRascunho(cartao, config)).toHaveLength(0);
+    expect(problemasDoRascunho(cartao, { config })).toHaveLength(0);
 
-    const passaporte = comNomes("rh");
+    const passaporte = comNomes();
     passaporte.pessoais.tipo_documento = "passaporte";
     passaporte.pessoais.nif = "123456789";
-    expect(problemasDoRascunho(passaporte, config).map((p) => p.campoId)).toEqual([
+    expect(problemasDoRascunho(passaporte, { config }).map((p) => p.campoId)).toEqual([
       "hr-novo-validade-documento",
     ]);
 
-    // Nenhum dos dois: os dois ficam em falta.
-    const nenhum = comNomes("rh");
-    expect(problemasDoRascunho(nenhum, config).map((p) => p.campoId).sort()).toEqual([
+    const casado = comNomes();
+    casado.pessoais.estado_civil = "casado";
+    casado.pessoais.niss = "12345678902";
+    expect(problemasDoRascunho(casado, { config }).map((p) => p.campoId).sort()).toEqual([
+      "hr-novo-conjuge-situacao",
+    ]);
+
+    expect(problemasDoRascunho(comNomes(), { config }).map((p) => p.campoId).sort()).toEqual([
       "hr-novo-nif",
       "hr-novo-niss",
     ]);
   });
 
-  it("pelo RH, dependentes a 0 e resposta", () => {
-    const rascunho = comNomes("rh");
+  it("dependentes a 0 e resposta", () => {
+    const rascunho = comNomes();
     rascunho.pessoais.dependentes = "0";
-    expect(problemasDoRascunho(rascunho, [linha("dependentes")])).toHaveLength(0);
+    expect(problemasDoRascunho(rascunho, { config: [linha("dependentes")] })).toHaveLength(0);
   });
 
-  it("pelo RH sem configuracao so exige os nomes", () => {
-    expect(problemasDoRascunho(comNomes("rh"), null)).toHaveLength(0);
-    expect(problemasDoRascunho(comNomes("rh"), undefined)).toHaveLength(0);
+  it("COM convite so exige o e-mail pessoal, mesmo com a configuracao a pedir tudo", () => {
+    const rascunho = comNomes();
+    const config = [linha("telefone_pessoal"), linha("nif"), linha("data_nascimento")];
+
+    const problemas = problemasDoRascunho(rascunho, { comConvite: true, config });
+    expect(problemas.map((p) => p.campoId)).toEqual(["hr-novo-email-pessoal"]);
+    expect(problemas[0].mensagemKey).toBe("hr.form.erroObrigatorio");
+
+    rascunho.pessoais.email_pessoal = "ana@exemplo.pt";
+    expect(problemasDoRascunho(rascunho, { comConvite: true, config })).toHaveLength(0);
   });
 
-  it("lista os campos que o formulario nao tem e que ficam pendencia na ficha", () => {
-    const config = [
-      linha("telefone_pessoal"), // tem campo
-      linha("naturalidade_concelho"), // sem campo, convite
-      linha("tamanho_cima", "ficha"), // sem campo, ficha
-      linha("conta_banco", "opcional"), // sem campo mas opcional: nao e pendencia
-      linha("cargo", "rh"), // do RH: nao e da pessoa
-    ];
-    expect(camposDoConviteForaDoFormulario(config)).toEqual([
-      "naturalidade_concelho",
-      "tamanho_cima",
+  it("sem convite o e-mail pessoal so e exigido se a configuracao o pedir", () => {
+    expect(problemasDoRascunho(comNomes())).toHaveLength(0);
+    expect(
+      problemasDoRascunho(comNomes(), { config: [linha("email_pessoal")] }).map((p) => p.campoId),
+    ).toEqual(["hr-novo-email-pessoal"]);
+  });
+
+  it("um e-mail so com espacos conta como vazio quando se envia convite", () => {
+    const rascunho = comNomes();
+    rascunho.pessoais.email_pessoal = "   ";
+    expect(problemasDoRascunho(rascunho)).toHaveLength(0);
+    expect(problemasDoRascunho(rascunho, { comConvite: true }).map((p) => p.mensagemKey)).toEqual([
+      "hr.form.erroObrigatorio",
     ]);
-    expect(camposDoConviteForaDoFormulario(null)).toEqual([]);
   });
 
-  it("os obrigatorios do ecra seguem o modo", () => {
+  it("um e-mail mal escrito e erro de formato, com ou sem convite", () => {
+    const rascunho = comNomes();
+    rascunho.pessoais.email_pessoal = "isto-nao-e-email";
+    expect(problemasDoRascunho(rascunho).map((p) => p.mensagemKey)).toEqual(["hr.form.erroEmail"]);
+    expect(problemasDoRascunho(rascunho, { comConvite: true }).map((p) => p.mensagemKey)).toEqual([
+      "hr.form.erroEmail",
+    ]);
+  });
+
+  it("os asteriscos seguem a accao: sem convite os da posicao convite, com convite nenhum", () => {
     const config = [linha("telefone_pessoal"), linha("naturalidade_concelho"), linha("genero", "ficha")];
-    expect([...codigosObrigatoriosDoFormulario("convite", config)]).toEqual(["email_pessoal"]);
-    expect([...codigosObrigatoriosDoFormulario("rh", config)]).toEqual(["telefone_pessoal"]);
-    expect(codigosObrigatoriosDoFormulario("rh", null).size).toBe(0);
+    expect([...codigosObrigatoriosDoFormulario(false, config)].sort()).toEqual([
+      "naturalidade_concelho",
+      "telefone_pessoal",
+    ]);
+    expect(codigosObrigatoriosDoFormulario(true, config).size).toBe(0);
+    expect(codigosObrigatoriosDoFormulario(false, null).size).toBe(0);
+  });
+});
+
+describe("pendencias da ficha (o que nao bloqueia e fica por preencher)", () => {
+  it("lista o que esta em posicao ficha e vazio; opcional, preenchidos e do RH nunca", () => {
+    const rascunho = comNomes();
+    rascunho.pessoais.telefone_pessoal = "912345678";
+    const config = [
+      linha("telefone_pessoal", "ficha"), // preenchido
+      linha("data_nascimento", "ficha"), // vazio: pendencia
+      linha("genero", "opcional"), // opcional: nunca
+      linha("linha1", "convite"), // convite: bloqueia, nao e pendencia
+      linha("cargo", "rh"), // do RH
+    ];
+    expect(camposPorPreencherNaFicha(config, rascunho.pessoais)).toEqual(["data_nascimento"]);
+  });
+
+  it("respeita as condicoes da posicao ficha", () => {
+    const config = [linha("validade_documento", "ficha"), linha("conjuge_situacao_profissional", "ficha")];
+    const cartao = comNomes();
+    cartao.pessoais.tipo_documento = "cartao_cidadao";
+    expect(camposPorPreencherNaFicha(config, cartao.pessoais)).toEqual([]);
+    const passaporte = comNomes();
+    passaporte.pessoais.tipo_documento = "passaporte";
+    passaporte.pessoais.estado_civil = "uniao_de_facto";
+    expect(camposPorPreencherNaFicha(config, passaporte.pessoais)).toEqual([
+      "validade_documento",
+      "conjuge_situacao_profissional",
+    ]);
+  });
+
+  it("um codigo que o formulario nao conhece fica sempre pendente, em qualquer posicao pedida", () => {
+    const config = [linha("campo_futuro", "ficha"), linha("outro_futuro", "convite")];
+    expect(camposPorPreencherNaFicha(config, comNomes().pessoais)).toEqual(["campo_futuro", "outro_futuro"]);
+  });
+
+  it("sem configuracao nao se inventa nada", () => {
+    expect(camposPorPreencherNaFicha(null, comNomes().pessoais)).toEqual([]);
+    expect(camposPorPreencherNaFicha(undefined, comNomes().pessoais)).toEqual([]);
   });
 });
 
 describe("NIF e NISS com digito de controlo", () => {
   it("recusa o NIF e o NISS com o digito errado, aceita os validos", () => {
-    const rascunho = comNomes("rh");
+    const rascunho = comNomes();
     rascunho.pessoais.nif = "123456788";
     rascunho.pessoais.niss = "12345678901";
     expect(problemasDoRascunho(rascunho).map((p) => p.mensagemKey).sort()).toEqual([
@@ -475,7 +532,7 @@ describe("NIF e NISS com digito de controlo", () => {
   });
 
   it("o payload leva o NIF e o NISS sem espacos", () => {
-    const rascunho = comNomes("rh");
+    const rascunho = comNomes();
     rascunho.pessoais.nif = "123 456 789";
     rascunho.pessoais.niss = "123 4567 8902";
     const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
@@ -486,7 +543,7 @@ describe("NIF e NISS com digito de controlo", () => {
 
 describe("campos so do RH", () => {
   it("nao bloqueiam a criacao mas avisam que ficam pendencia (o cargo ja nao e um deles)", () => {
-    const rascunho = comNomes("rh");
+    const rascunho = comNomes();
     expect(problemasDoRascunho(rascunho)).toHaveLength(0);
     const avisos = avisosDoRascunho(rascunho);
     expect(avisos.map((a) => a.campoId).sort()).toEqual([
@@ -522,7 +579,6 @@ describe("o cargo e obrigatorio (fluxo 2)", () => {
 
   it("e obrigatorio tambem por convite", () => {
     const rascunho = rascunhoInicialBase();
-    rascunho.geral.quem_preenche = "convite";
     rascunho.geral.primeiro_nome = "Ana";
     rascunho.geral.apelido = "Silva";
     rascunho.pessoais.email_pessoal = "ana@exemplo.pt";
@@ -530,19 +586,19 @@ describe("o cargo e obrigatorio (fluxo 2)", () => {
   });
 
   it("o nucleo leva cargo_id e o nome do cargo escolhido como texto", () => {
-    const rascunho = comNomes("rh");
+    const rascunho = comNomes();
     const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, "Operador");
     expect(payload.nucleo).toMatchObject({ cargo_id: CARGO_ID, cargo: "Operador" });
   });
 
   it("com cargo_id mas sem o nome do catalogo FALHA com erro claro: pessoas.cargo nunca fica null sem aviso", () => {
-    expect(() => payloadDoRascunho(comNomes("rh"), linhasParaGravar, false)).toThrow(getLocalizedFallback("hr.form.cargoObrigatorio"));
-    expect(() => payloadDoRascunho(comNomes("rh"), linhasParaGravar, false, null)).toThrow(getLocalizedFallback("hr.form.cargoObrigatorio"));
-    expect(() => payloadDoRascunho(comNomes("rh"), linhasParaGravar, false, "   ")).toThrow(getLocalizedFallback("hr.form.cargoObrigatorio"));
+    expect(() => payloadDoRascunho(comNomes(), linhasParaGravar, false)).toThrow(getLocalizedFallback("hr.form.cargoObrigatorio"));
+    expect(() => payloadDoRascunho(comNomes(), linhasParaGravar, false, null)).toThrow(getLocalizedFallback("hr.form.cargoObrigatorio"));
+    expect(() => payloadDoRascunho(comNomes(), linhasParaGravar, false, "   ")).toThrow(getLocalizedFallback("hr.form.cargoObrigatorio"));
   });
 
   it("sem cargo_id (problema bloqueante, tratado antes) nao ha nome a exigir", () => {
-    const sem = comNomes("rh");
+    const sem = comNomes();
     sem.laborais.cargo_id = "";
     const payload = payloadDoRascunho(sem, linhasParaGravar, false);
     expect(payload.nucleo.cargo_id).toBe("");
@@ -550,7 +606,7 @@ describe("o cargo e obrigatorio (fluxo 2)", () => {
   });
 
   it("numeros em hexadecimal ou notacao cientifica nao passam para o payload (0x10, 1e3)", () => {
-    const rascunho = comNomes("rh");
+    const rascunho = comNomes();
     rascunho.pessoais.dependentes = "0x10";
     rascunho.contrato.horas_trabalho = "1e3";
     const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
@@ -568,12 +624,12 @@ describe("o valor base ja nao vem do contrato (fluxo 2)", () => {
   });
 
   it("sem subsidio nem duodecimos escolhidos nao ha parte da pessoa", () => {
-    const payload = payloadDoRascunho(comNomes("rh"), linhasParaGravar, false, NOME_CARGO);
+    const payload = payloadDoRascunho(comNomes(), linhasParaGravar, false, NOME_CARGO);
     expect(payload.retribuicao).toBeNull();
   });
 
   it("com subsidio, os duodecimos propoem 50 por omissao", () => {
-    const rascunho = comNomes("rh");
+    const rascunho = comNomes();
     rascunho.contrato.subsidio = "6,5";
     rascunho.contrato.subsidio_modo = "cartao";
     const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
@@ -586,14 +642,14 @@ describe("o valor base ja nao vem do contrato (fluxo 2)", () => {
   });
 
   it("os duodecimos escolhidos a mao prevalecem sobre a proposta", () => {
-    const rascunho = comNomes("rh");
+    const rascunho = comNomes();
     rascunho.contrato.duodecimos_pct = "0";
     const payload = payloadDoRascunho(rascunho, linhasParaGravar, false, NOME_CARGO);
     expect(payload.retribuicao).toEqual({ subsidio: null, subsidioModo: null, duodecimosPct: 0 });
   });
 
   it("um subsidio negativo ou ilegivel e erro de formato no campo do subsidio", () => {
-    const rascunho = comNomes("rh");
+    const rascunho = comNomes();
     rascunho.contrato.subsidio = "-1";
     expect(problemasDoRascunho(rascunho).map((p) => p.campoId)).toEqual(["hr-novo-subsidio"]);
     rascunho.contrato.subsidio = "abc";

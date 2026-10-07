@@ -161,6 +161,15 @@ describe("sanitizarNomeOriginal", () => {
     expect(sanitizarNomeOriginal("x\u007fy\u0085z\u2028w.png")).toBe("xyzw.png");
   });
 
+  it("tira os controlos bidireccionais e de largura zero (nome que se disfarca de outra extensao)", () => {
+    // U+202E (RLO) inverte a leitura: "fdp.exe" apareceria como "exe.pdf"
+    expect(sanitizarNomeOriginal("cc\u202Efdp.exe")).toBe("ccfdp.exe");
+    expect(sanitizarNomeOriginal("a\u202Ab\u202Bc\u202Cd\u202De.pdf")).toBe("abcde.pdf");
+    expect(sanitizarNomeOriginal("a\u2066b\u2067c\u2068d\u2069e.pdf")).toBe("abcde.pdf");
+    expect(sanitizarNomeOriginal("a\u200Bb\u200Cc\u200Dd\uFEFFe.pdf")).toBe("abcde.pdf");
+    expect(sanitizarNomeOriginal("\u202E\u200B\uFEFF")).toBe("ficheiro");
+  });
+
   it("corta aos 200 caracteres", () => {
     const longo = `${"a".repeat(300)}.pdf`;
     const r = sanitizarNomeOriginal(longo);

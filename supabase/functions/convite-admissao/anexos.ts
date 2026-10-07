@@ -70,14 +70,16 @@ function codigoDemasiadoGrande(tipo: TipoAnexo): CodigoAnexo {
 
 /**
  * So o nome base: sem pastas (barras directas ou invertidas), sem caracteres
- * de controlo, no maximo 200 caracteres; vazio (ou so pontos) vira "ficheiro".
+ * de controlo, sem controlos bidireccionais (U+202A a U+202E, U+2066 a U+2069:
+ * um RLO faz "fdp.exe" ler-se "exe.pdf") nem de largura zero (U+200B a U+200D,
+ * U+FEFF), no maximo 200 caracteres; vazio (ou so pontos) vira "ficheiro".
  */
 export function sanitizarNomeOriginal(nome: unknown): string {
   if (typeof nome !== "string") return NOME_POR_OMISSAO;
   const base = nome.split(/[\\/]/).pop() ?? "";
   const limpo = base
     // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, "")
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200d\u2028\u2029\u202a-\u202e\u2066-\u2069\ufeff]/g, "")
     .trim();
   if (limpo === "" || /^\.+$/.test(limpo)) return NOME_POR_OMISSAO;
   return Array.from(limpo).slice(0, TAMANHO_MAX_NOME).join("");

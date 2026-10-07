@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { codigoDeErroEdge } from "@/lib/hr/errosAdmissao";
+import { enviarParaQuarentena } from "@/lib/hr/envioQuarentena";
 import {
   contarPorTipo,
   validarFicheiroLocal,
@@ -33,7 +34,6 @@ import {
 } from "@/lib/hr/conviteAnexos";
 
 const FUNCAO = "convite-admissao";
-const BUCKET_QUARENTENA = "hr-documentos-quarantine";
 const ORIGEM_REGISTO = "hr-convite-anexos";
 const CODIGO_FALHA_ENVIO = "anexo_falha_envio";
 
@@ -90,50 +90,6 @@ async function chamarEdge(body: Record<string, unknown>): Promise<RespostaEdge> 
   } catch {
     return { ok: false, data: {}, codigo: null };
   }
-}
-
-/**
- * O PUT para o URL assinado da quarentena, por XMLHttpRequest (e o unico que
- * da progresso). Replica o `uploadToSignedUrl` do storage-js: FormData com o
- * `cacheControl` e o ficheiro na chave vazia. Resolve `true` so com 2xx.
- */
-function enviarParaQuarentena(
-  caminho: string,
-  uploadToken: string,
-  file: File,
-  aoProgredir: (percentagem: number) => void,
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    const base = String(import.meta.env.VITE_SUPABASE_URL ?? "").replace(/\/+$/, "");
-    const chave = String(import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ?? "");
-    if (!base) {
-      resolve(false);
-      return;
-    }
-    try {
-      const segmentos = caminho.split("/").map(encodeURIComponent).join("/");
-      const url = `${base}/storage/v1/object/upload/sign/${BUCKET_QUARENTENA}/${segmentos}?token=${encodeURIComponent(uploadToken)}`;
-      const xhr = new XMLHttpRequest();
-      xhr.open("PUT", url);
-      xhr.setRequestHeader("apikey", chave);
-      xhr.setRequestHeader("x-upsert", "false");
-      xhr.upload.onprogress = (evento) => {
-        if (evento.lengthComputable && evento.total > 0) {
-          aoProgredir(Math.min(100, Math.round((evento.loaded / evento.total) * 100)));
-        }
-      };
-      xhr.onload = () => resolve(xhr.status >= 200 && xhr.status < 300);
-      xhr.onerror = () => resolve(false);
-      xhr.onabort = () => resolve(false);
-      xhr.ontimeout = () => resolve(false);
-      const corpo = new FormData();
-      corpo.append("cacheControl", "3600");
-      corpo.append("", file);
-      xhr.send(corpo);
-    } catch {
-      resolve(false);
-    }
-  });
 }
 
 /**
