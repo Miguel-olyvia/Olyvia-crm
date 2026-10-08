@@ -1,6 +1,6 @@
 import { Suspense, type ReactNode } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { AlertTriangle, ArrowLeftRight, Building2, ClipboardList, Home, LogOut, Package, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeftRight, Building2, ClipboardList, Home, IdCard, LogOut, Package, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useClientSupplierSwitch } from "@/hooks/useClientRole";
 import { Button } from "@/components/ui/button";
@@ -8,12 +8,14 @@ import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { cn } from "@/lib/utils";
 import { SupplierPortalProvider, useSupplierPortal } from "@/contexts/SupplierPortalContext";
 import { SupplierFirstLoginModal } from "@/components/supplier-portal/SupplierFirstLoginModal";
+import { SupplierConfirmDataModal } from "@/components/supplier-portal/SupplierConfirmDataModal";
 import { useSpOrdersToConfirm } from "@/components/supplier-portal/useSpOrdersToConfirm";
 
 const NAV_ITEMS = [
   { label: "Início", icon: Home, path: "/supplier-portal", end: true, badge: false },
   { label: "Encomendas", icon: ClipboardList, path: "/supplier-portal/orders", end: false, badge: true },
   { label: "Catálogo", icon: Package, path: "/supplier-portal/catalog", end: false, badge: false },
+  { label: "Os meus dados", icon: IdCard, path: "/supplier-portal/profile", end: false, badge: false },
 ];
 
 function FullScreenLoader() {
@@ -107,7 +109,7 @@ function LoadErrorScreen({ onRetry }: { onRetry: () => void }) {
 }
 
 export function SupplierPortalLayout({ children }: { children: ReactNode }) {
-  const { loading, loadError, active, account, user, companies, firstLogin, markPasswordChanged, refresh } =
+  const { loading, loadError, active, account, user, companies, firstLogin, profileConfirmed, markPasswordChanged, refresh } =
     useSupplierPortal();
   const logout = useLogout();
   const { count: toConfirm } = useSpOrdersToConfirm();
@@ -196,6 +198,8 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
       </footer>
 
       <SupplierFirstLoginModal open={firstLogin} onDone={markPasswordChanged} />
+      {/* Só depois da password: um passo de cada vez. */}
+      <SupplierConfirmDataModal open={!firstLogin && !profileConfirmed} />
     </div>
   );
 }

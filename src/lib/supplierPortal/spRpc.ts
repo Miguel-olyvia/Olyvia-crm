@@ -38,6 +38,13 @@ export type SpWhoami =
       active: boolean;
       first_login: boolean;
       can_manage_catalog: boolean;
+      /** Também é cliente do portal (conta client_supplier). */
+      also_client?: boolean;
+      /**
+       * Dados da empresa confirmados pelo fornecedor (passo obrigatório depois
+       * da password). `undefined` = BD ainda sem a migration → tratar como true.
+       */
+      profile_confirmed?: boolean;
       user: SpWhoamiUser;
       account: SpWhoamiAccount | null;
     };
@@ -229,6 +236,41 @@ export interface SpConfirmOrderResult {
   already_confirmed: boolean;
 }
 
+// ─── Dados do fornecedor (os meus dados) ───────────────────────────────────
+// sp_get_my_supplier_data / sp_update_my_supplier_data ainda não estão nos
+// tipos gerados: argumentos e retornos descritos aqui.
+
+/** Campos da ficha do fornecedor que o próprio vê/edita (tax_id só leitura). */
+export interface SpSupplierData {
+  name: string | null;
+  contact_person: string | null;
+  email: string | null;
+  phone: string | null;
+  phone_country_code: string | null;
+  tax_id: string | null;
+  address: string | null;
+  city: string | null;
+  postal_code: string | null;
+  country: string | null;
+  website: string | null;
+}
+
+/** O que se envia em sp_update_my_supplier_data (sem NIF). */
+export type SpSupplierDataInput = Omit<SpSupplierData, "tax_id">;
+
+export interface SpMySupplierData {
+  can_edit: boolean;
+  confirmed_at: string | null;
+  data: SpSupplierData;
+  companies: { organization_id: string; name: string }[];
+}
+
+export interface SpUpdateMySupplierDataResult {
+  ok: true;
+  updated_count: number;
+  confirmed_at: string;
+}
+
 // ─── Erros ──────────────────────────────────────────────────────────────────
 
 export type SpErrorHint =
@@ -245,13 +287,19 @@ export class SupplierPortalRpcError extends Error {
   readonly code: string | null;
   readonly hint: string | null;
   readonly details: string | null;
+  /** Mensagens próprias da chamada, por hint (sobrepõem-se às genéricas de spErrorMessage). */
+  readonly hintMessages: Partial<Record<SpErrorHint, string>>;
 
-  constructor(raw: { message?: string; code?: string; hint?: string; details?: string } | null | undefined) {
+  constructor(
+    raw: { message?: string; code?: string; hint?: string; details?: string } | null | undefined,
+    hintMessages: Partial<Record<SpErrorHint, string>> = {},
+  ) {
     super(raw?.message || "Erro desconhecido");
     this.name = "SupplierPortalRpcError";
     this.code = raw?.code ?? null;
     this.hint = raw?.hint ?? null;
     this.details = raw?.details ?? null;
+    this.hintMessages = hintMessages;
   }
 }
 
@@ -271,6 +319,9 @@ export function spErrorMessage(err: unknown): string {
   const hint = getSpHint(err);
   const raw = err instanceof Error ? err.message : "";
   const code = err instanceof SupplierPortalRpcError ? err.code : null;
+
+  const own = err instanceof SupplierPortalRpcError && hint ? err.hintMessages[hint as SpErrorHint] : undefined;
+  if (own) return own;
 
   switch (hint) {
     case "no_supplier_access":
@@ -309,8 +360,11 @@ export function spErrorMessage(err: unknown): string {
 // ─── Chamadas ───────────────────────────────────────────────────────────────
 
 /** Converte o resultado de supabase.rpc: erro → SupplierPortalRpcError; Json → tipo local. */
-function unwrap<T>({ data, error }: { data: Json | null; error: { message: string; code?: string; hint?: string; details?: string } | null }): T {
-  if (error) throw new SupplierPortalRpcError(error);
+function unwrap<T>(
+  { data, error }: { data: Json | null; error: { message: string; code?: string; hint?: string; details?: string } | null },
+  hintMessages?: Partial<Record<SpErrorHint, string>>,
+): T {
+  if (error) throw new SupplierPortalRpcError(error, hintMessages);
   return data as unknown as T;
 }
 
@@ -449,4 +503,65 @@ export async function spConfirmOrder(params: {
     ...(comment ? { p_comment: comment } : {}),
   };
   return unwrap<SpConfirmOrderResult>(await supabase.rpc("sp_confirm_order", args));
+}
+
+// ─── Dados do fornecedor ────────────────────────────────────────────────────
+
+type RpcResponse = {
+  data: Json | null;
+  error: { message: string; code?: string; hint?: string; details?: string } | null;
+};
+
+/** RPCs ainda fora dos tipos gerados (não regenerar types.ts só por isto). */
+function untypedRpc(fn: string, args?: Record<string, unknown>): PromiseLike<RpcResponse> {
+  const rpc = supabase.rpc as unknown as (fn: string, args?: Record<string, unknown>) => PromiseLike<RpcResponse>;
+  return rpc.call(supabase, fn, args);
+}
+
+/** A função ainda não existe na BD (migration por aplicar). */
+export function isSpFunctionMissing(err: unknown): boolean {
+  if (!(err instanceof SupplierPortalRpcError)) return false;
+  return err.code === "PGRST202" || err.code === "42883";
+}
+
+/** not_owner nestas RPCs não é sobre o catálogo: mensagem própria. */
+const SUPPLIER_DATA_HINT_MESSAGES: Partial<Record<SpErrorHint, string>> = {
+  not_owner: "Só o responsável principal da conta pode fazer esta alteração.",
+};
+
+export async function spGetMySupplierData(): Promise<SpMySupplierData> {
+  const raw = unwrap<Partial<SpMySupplierData> | null>(
+    await untypedRpc("sp_get_my_supplier_data"),
+    SUPPLIER_DATA_HINT_MESSAGES,
+  );
+  const d = (raw?.data ?? {}) as Partial<SpSupplierData>;
+  return {
+    can_edit: !!raw?.can_edit,
+    confirmed_at: raw?.confirmed_at ?? null,
+    data: {
+      name: d.name ?? null,
+      contact_person: d.contact_person ?? null,
+      email: d.email ?? null,
+      phone: d.phone ?? null,
+      phone_country_code: d.phone_country_code ?? null,
+      tax_id: d.tax_id ?? null,
+      address: d.address ?? null,
+      city: d.city ?? null,
+      postal_code: d.postal_code ?? null,
+      country: d.country ?? null,
+      website: d.website ?? null,
+    },
+    companies: Array.isArray(raw?.companies) ? raw.companies : [],
+  };
+}
+
+/**
+ * Envia só as chaves alteradas: o servidor grava cada chave presente em todas
+ * as fichas do fornecedor. {} = sem alterações, só marca a confirmação.
+ */
+export async function spUpdateMySupplierData(data: Partial<SpSupplierDataInput>): Promise<SpUpdateMySupplierDataResult> {
+  return unwrap<SpUpdateMySupplierDataResult>(
+    await untypedRpc("sp_update_my_supplier_data", { p_data: data }),
+    SUPPLIER_DATA_HINT_MESSAGES,
+  );
 }

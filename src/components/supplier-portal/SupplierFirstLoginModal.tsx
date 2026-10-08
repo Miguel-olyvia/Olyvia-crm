@@ -1,11 +1,12 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { Eye, EyeOff, LogOut, ShieldCheck } from "lucide-react";
 import { passwordResetSchema } from "@/lib/validations";
 import { spMarkPasswordChanged } from "@/lib/supplierPortal/spRpc";
 
@@ -26,6 +27,18 @@ export function SupplierFirstLoginModal({ open, onDone }: SupplierFirstLoginModa
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
+  const navigate = useNavigate();
+  const [signingOut, setSigningOut] = useState(false);
+
+  // Saída para não ficar preso se o servidor recusar ou falhar sempre (igual ao "Sair" do layout).
+  const logout = async () => {
+    setSigningOut(true);
+    try {
+      await supabase.auth.signOut();
+    } finally {
+      navigate("/auth", { replace: true });
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -125,6 +138,19 @@ export function SupplierFirstLoginModal({ open, onDone }: SupplierFirstLoginModa
             {loading ? "A guardar..." : "Definir password e entrar"}
           </Button>
         </form>
+
+        <div className="flex justify-center border-t pt-3">
+          <Button
+            type="button"
+            variant="ghost"
+            className="h-11 min-w-11 gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+            onClick={() => void logout()}
+            disabled={signingOut || loading}
+          >
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+            Sair
+          </Button>
+        </div>
       </DialogContent>
     </Dialog>
   );

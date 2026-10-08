@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { z } from "zod";
+import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { AlertTriangle, Loader2, Mail, RefreshCw, Send, Unplug, UserX } from "lucide-react";
+import { AlertTriangle, Loader2, Mail, RefreshCw, Send, UserCheck, Unplug, UserX } from "lucide-react";
 import {
   callRpc,
   describeAccessError,
@@ -32,6 +33,13 @@ interface SupplierPortalTabProps {
   defaultEmail?: string | null;
   defaultName?: string | null;
 }
+
+/** dd/mm/aaaa hh:mm */
+const formatDataHora = (iso: string): string => {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "-";
+  return d.toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }).replace(",", "");
+};
 
 const emailSchema = z.string().trim().email("Email inválido.").max(255);
 
@@ -94,6 +102,30 @@ export default function SupplierPortalTab({
   useEffect(() => {
     load();
   }, [load]);
+
+  // Quando o fornecedor atualizou os dados no portal (supplier_account_links.
+  // supplier_data_updated_at). select('*') de propósito: se a coluna ainda não
+  // existir na BD o pedido não rebenta, simplesmente não vem.
+  const linkId = status?.link_id ?? null;
+  const [supplierDataUpdatedAt, setSupplierDataUpdatedAt] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setSupplierDataUpdatedAt(null);
+    if (!linkId) return;
+    void supabase
+      .from("supplier_account_links")
+      .select("*")
+      .eq("id", linkId)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (cancelled || !data) return;
+        const value = (data as Record<string, unknown>).supplier_data_updated_at;
+        setSupplierDataUpdatedAt(typeof value === "string" && value ? value : null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [linkId, status]);
 
   const canManage = !!status?.can_manage;
   const nifValid = !!status?.nif_valid;
@@ -266,6 +298,13 @@ export default function SupplierPortalTab({
           )}
         </div>
       </div>
+
+      {supplierDataUpdatedAt && (
+        <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+          <UserCheck className="w-4 h-4 text-primary" aria-hidden="true" />
+          Dados atualizados pelo fornecedor em {formatDataHora(supplierDataUpdatedAt)}
+        </p>
+      )}
 
       {!nifValid && (
         <Alert variant="destructive">
