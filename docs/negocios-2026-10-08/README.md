@@ -153,3 +153,16 @@ O botão do próximo passo muda com a fase:
 | 9 | Inventário: materiais da obra | O que há, o que falta, encomenda ao fornecedor |
 | 10 | Operações: plano gerado | Tarefas e técnicos do RH atribuídos |
 | 11 | Negócio: fase Obra | Estado da obra e previsto contra real |
+
+## 8. Maquetas (08/10/2026)
+
+As 12 screens estão desenhadas numa página publicada: https://claude.ai/artifact/N8srtZpvVdBaZdu8bVaE6s (privada; partilha-se pelo menu *Partilhar* da página).
+
+- **Fonte:** `ecras.src.html`.
+- **Montar** (a partir de `D:\Olyvia\Olyvia-crm`): `node docs/reuniao-2026-10-06/gerar.cjs docs/negocios-2026-10-08/ecras.src.html docs/negocios-2026-10-08/ecras.html`.
+- **Caso de exemplo:** a casa de banho da Ana Martins (3.606,12 €, margem de 31,9%).
+
+Decisões de desenho tomadas nas maquetas, para validar:
+- Criar um negócio ("Novo negócio") faz-se num cartão na coluna Lead, sem modal.
+- Não há entrada "Financeiro" no menu. O financeiro trabalha no seu **Hoje** e na fase Financeiro de cada negócio.
+- O Inventário tem uma vista nova, **Materiais por obra**.

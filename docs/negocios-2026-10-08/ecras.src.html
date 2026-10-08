@@ -1,0 +1,1103 @@
+<meta charset="utf-8">
+<title>Negócios da Lead à Obra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Source+Sans+3:wght@400;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: as screens de Negócios pela ordem do fluxo (Lead → Contacto → Visita → Negócio → Financeiro → Obra), cada uma com notas numeradas. Marca BMLAR escura, maquetas no estilo da app, tema único por escolha. */
+:root{
+  color-scheme: dark;
+  --bg:#0E0E0E; --card:#181818; --card2:#1F1E1C; --line:#2F2F2F;
+  --bone:#F5F0E8; --soft:#D8D2C8; --muted:#A8A39A; --dim:#6E6A64;
+  --oly:#A07BF2; --mud:#81CEBA; --coral:#E84F70; --amber:#E9B44C; --pink:#E9306B;
+  --f-display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body:"Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --f-mono:"JetBrains Mono", ui-monospace, Consolas, monospace;
+  --s1:.6rem; --s2:1.15rem; --s3:1.85rem; --s4:3rem; --s5:5.5rem; --s6:8rem;
+  /* maquetas: o estilo da app */
+  --ui-bg:#FFFFFF; --ui-soft:#F7F7F8; --ui-soft2:#EFEEF2; --ui-fg:#1C1B20; --ui-mut:#6B6873; --ui-line:#E6E4EA;
+  --ui-pri:#6A4FC0; --ui-pri-soft:#EFEBF8; --ui-side:#1F1E24; --ui-side2:#2E2C35; --ui-side-fg:#B9B5C2;
+  --ui-ok:#15803D; --ui-ok-bg:#E3F5E9; --ui-warn:#B45309; --ui-warn-bg:#FDF0DC; --ui-bad:#C2263B; --ui-bad-bg:#FCE4E8;
+  --ui-font:ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+*{box-sizing:border-box}
+html{background:var(--bg);scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--bone);font:400 1.06rem/1.6 var(--f-body);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:clamp(16px,4vw,40px)}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.08}
+h2{font-size:clamp(1.9rem,4.4vw,3rem);font-weight:800;letter-spacing:-.025em}
+h3{font-size:clamp(1.35rem,2.6vw,1.75rem);font-weight:800;letter-spacing:-.015em}
+p{margin:0;max-width:64ch}
+b{color:var(--bone)}
+.eyebrow{font:500 .74rem/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.lead{color:var(--muted);font-size:1.15rem;max-width:60ch}
+.note{color:var(--muted);font-size:.97rem;line-height:1.55;max-width:70ch}
+.note b{color:var(--bone)}
+.note a{color:var(--mud)}
+a{color:var(--oly)}
+:focus-visible{outline:2px solid var(--oly);outline-offset:3px}
+section{padding-block:var(--s5)}
+.head{display:grid;gap:var(--s2)}
+
+/* HERO */
+.hero{position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0;background:url("{{AZULEJO}}") center/420px repeat;opacity:.13;filter:grayscale(1) contrast(1.2)}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(14,14,14,.5) 0%,var(--bg) 94%)}
+.hero .wrap{position:relative;z-index:1;padding-block:clamp(2.5rem,7vw,5rem) clamp(2rem,5vw,3.5rem);display:grid;gap:var(--s3)}
+.brand{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+.brand img{height:34px;width:auto}
+.brand .sep{width:1px;height:28px;background:var(--line)}
+.hero h1{font-size:clamp(2.5rem,7.4vw,5.4rem);font-weight:800;letter-spacing:-.04em;max-width:15ch}
+.hero h1 em{font-style:normal;color:var(--mud)}
+.hero .lead{font-size:clamp(1.1rem,2vw,1.3rem);color:#CFC9BF;max-width:58ch}
+.meta{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s3);font:500 .78rem/1.4 var(--f-mono);color:var(--dim)}
+
+/* PERCURSO FIXO */
+.trail{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-block:1px solid var(--line)}
+.trail .wrap{display:flex;align-items:center;gap:var(--s2);padding-block:.6rem;overflow-x:auto;scrollbar-width:none}
+.trail .wrap::-webkit-scrollbar{display:none}
+.trail .who{font:500 .7rem/1.2 var(--f-mono);color:var(--dim);letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
+.trail ol{list-style:none;margin:0;padding:0;display:flex;gap:2px;flex:1;min-width:0}
+.trail li{flex:1 1 0;min-width:68px}
+.trail a{display:grid;gap:.3rem;text-decoration:none;color:var(--dim);font:600 .78rem/1.1 var(--f-body);padding:.2rem .1rem;white-space:nowrap}
+.trail a::before{content:"";height:3px;border-radius:99px;background:var(--line);transition:background .25s}
+.trail a.done{color:var(--muted)}
+.trail a.done::before{background:color-mix(in srgb,var(--mud) 45%,var(--line))}
+.trail a.on{color:var(--bone)}
+.trail a.on::before{background:var(--mud)}
+
+/* PRÓLOGO */
+.nums{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--s3)}
+.num{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:var(--s4) var(--s3);display:grid;gap:var(--s2);align-content:start;min-width:0}
+.num > .eyebrow{color:var(--bone);font-size:.78rem}
+.num .vs{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:var(--s2);align-items:start}
+.num .side{display:grid;gap:.45rem;min-width:0}
+.num .side i{font:500 .68rem/1 var(--f-mono);font-style:normal;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.num .side b{font:800 clamp(3.2rem,8vw,5.4rem)/.9 var(--f-display);letter-spacing:-.05em;font-variant-numeric:tabular-nums;white-space:nowrap}
+.num .side b small{font-size:.36em;font-weight:700;letter-spacing:-.01em;margin-left:.12em}
+.num .side span{font-size:.95rem;line-height:1.4;color:var(--muted)}
+.num .was b{color:var(--coral)}
+.num .now b{color:var(--mud)}
+.num .now i{color:var(--mud)}
+.num .arr{font:800 2rem/1 var(--f-display);color:var(--dim);padding-top:1.6rem}
+@media (max-width:860px){.nums{grid-template-columns:1fr}}
+@media (max-width:420px){.num .vs{grid-template-columns:1fr}.num .arr{padding-top:0;transform:rotate(90deg);justify-self:start}}
+@media (max-width:760px){.nums{grid-template-columns:1fr}}
+.quote{border-left:3px solid var(--mud);padding:.2rem 0 .2rem var(--s3);display:grid;gap:.5rem}
+.quote q{font:700 clamp(1.25rem,2.6vw,1.65rem)/1.3 var(--f-display);quotes:"«" "»";max-width:44ch}
+.quote cite{font:500 .74rem var(--f-mono);font-style:normal;color:var(--dim);letter-spacing:.06em}
+
+/* A IDEIA */
+.idea{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border:1px solid color-mix(in srgb,var(--mud) 40%,var(--line));border-radius:12px;overflow:hidden}
+.idea > div{padding:var(--s4) var(--s3);display:grid;gap:.9rem;align-content:start;border-right:1px solid var(--line);min-width:0;position:relative}
+.idea > div:last-child{border-right:0;background:color-mix(in srgb,var(--mud) 10%,transparent)}
+.idea .k{font:500 .72rem/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--mud)}
+.idea b{font:800 1.3rem/1.2 var(--f-display);letter-spacing:-.01em}
+.idea p{color:var(--muted);font-size:.97rem}
+@media (max-width:820px){.idea{grid-template-columns:1fr}.idea > div{border-right:0;border-bottom:1px solid var(--line)}.idea > div:last-child{border-bottom:0}}
+
+/* ATOS E PASSOS */
+.act{padding-block:var(--s6) var(--s4);border-top:1px solid var(--line)}
+.act .wrap{display:grid;gap:var(--s3)}
+.act .roman{font:800 clamp(3.5rem,10vw,7rem)/.8 var(--f-display);letter-spacing:-.05em;color:transparent;-webkit-text-stroke:1.5px var(--line)}
+.story{position:relative}
+.beat{padding-block:var(--s5) var(--s6);scroll-margin-top:4.5rem}
+.beat .wrap{display:grid;gap:var(--s4)}
+.beat .txt{display:grid;grid-template-columns:7.5rem minmax(0,1fr);gap:var(--s1) var(--s3);align-items:start}
+.beat .when{display:grid;gap:.3rem;padding-top:.35rem}
+.beat .when span{font:500 .72rem/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--mud)}
+.beat .when i{font:500 .72rem/1.3 var(--f-mono);font-style:normal;color:var(--dim)}
+.beat .say{display:grid;gap:1.1rem;min-width:0}
+.beat .say p{color:var(--soft);font-size:1.08rem}
+.swap{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.2rem}
+.swap span{font:500 .74rem/1.25 var(--f-mono);padding:.35rem .55rem;border-radius:4px;background:color-mix(in srgb,var(--mud) 15%,transparent);color:var(--mud)}
+.swap span.was{background:color-mix(in srgb,var(--coral) 15%,transparent);color:#F3A2B4;text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--coral) 60%,transparent)}
+@media (max-width:700px){.beat .txt{grid-template-columns:1fr}.beat .when{grid-auto-flow:column;justify-content:start;gap:var(--s2);padding-top:0}}
+.notes{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--s3) var(--s4)}
+.notes li{display:grid;grid-template-columns:1.6rem minmax(0,1fr);gap:.8rem;color:var(--muted);font-size:.95rem;line-height:1.45}
+.notes li b{color:var(--bone);font-weight:600}
+@media (max-width:820px){.notes{grid-template-columns:1fr}}
+.mk{display:inline-grid;place-items:center;width:1.45rem;height:1.45rem;border-radius:50%;background:var(--mud);color:#0E1F1A;font:700 .74rem/1 var(--f-body);font-style:normal;flex:none;box-shadow:0 0 0 3px rgba(129,206,186,.25);vertical-align:middle}
+.app .mk,.phone .mk{width:19px;height:19px;font-size:11px}
+.loopback{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;border:1px dashed color-mix(in srgb,var(--mud) 55%,var(--line));border-radius:10px;padding:var(--s2) var(--s3);color:var(--soft)}
+.loopback a{font-weight:600;color:var(--mud);text-decoration:none}
+.loopback a:hover{text-decoration:underline}
+
+/* MOLDURA DA APP */
+.app{font-family:var(--ui-font);color:var(--ui-fg);background:var(--ui-bg);border-radius:12px;overflow:hidden;border:1px solid #3A3442;box-shadow:0 24px 60px rgba(0,0,0,.5);font-size:13.5px;line-height:1.45}
+.app b{color:inherit}
+.app .bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#F1F0F3;border-bottom:1px solid var(--ui-line)}
+.app .bar i{width:10px;height:10px;border-radius:50%;background:#D6D3DC}
+.app .bar .url{margin-left:10px;flex:1;min-width:0;background:#fff;border:1px solid var(--ui-line);border-radius:6px;padding:3px 10px;color:var(--ui-mut);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app .body{display:grid;grid-template-columns:168px minmax(0,1fr)}
+.app.nosb .body{grid-template-columns:minmax(0,1fr)}
+.app .side{background:var(--ui-side);color:var(--ui-side-fg);padding:20px 12px;display:flex;flex-direction:column;gap:4px}
+.app .side .logo{font-weight:800;font-size:16px;letter-spacing:-.02em;margin:0 8px 12px;color:#fff}
+.app .side .logo em{font-style:normal;color:#B7A6E8}
+.app .side .logo span{font-weight:500;font-size:11px;color:var(--ui-side-fg);margin-left:4px}
+.app .side a{display:flex;justify-content:space-between;align-items:center;padding:7px 9px;border-radius:7px;color:var(--ui-side-fg);text-decoration:none;font-weight:500}
+.app .side a.on{background:var(--ui-side2);color:#fff;box-shadow:inset 3px 0 0 #B7A6E8}
+.app .side a small{font-size:11px;background:#46434F;color:#fff;border-radius:99px;padding:0 6px}
+.app .side a.sub{padding-left:22px;font-size:12.5px}
+.app .side .spacer{flex:1;min-height:18px}
+.app .main{padding:26px 28px;display:grid;gap:20px;align-content:start;min-width:0;background:var(--ui-soft)}
+.u-row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.u-h1{font-size:19px;font-weight:700;letter-spacing:-.01em}
+.u-sub{color:var(--ui-mut);font-size:12.5px}
+.u-card{background:#fff;border:1px solid var(--ui-line);border-radius:12px;padding:18px 20px;display:grid;gap:12px;min-width:0;align-content:start}
+.u-card h4{margin:0;font-size:13.5px;font-weight:700;display:flex;justify-content:space-between;gap:8px;align-items:center}
+.u-card h4 span{font-weight:500;color:var(--ui-mut);font-size:12px}
+.u-grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
+.u-grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px}
+.u-side{display:grid;grid-template-columns:minmax(0,1fr) 248px;gap:20px;align-items:start}
+.u-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:600;font-size:12.5px;padding:7px 12px;border-radius:8px;background:var(--ui-pri);color:#fff;white-space:nowrap}
+.u-btn.sec{background:#fff;color:var(--ui-fg);border:1px solid var(--ui-line)}
+.u-btn.big{font-size:14px;padding:10px 14px}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap}
+.pill.ok{background:var(--ui-ok-bg);color:var(--ui-ok)} .pill.warn{background:var(--ui-warn-bg);color:var(--ui-warn)} .pill.bad{background:var(--ui-bad-bg);color:var(--ui-bad)} .pill.pri{background:var(--ui-pri-soft);color:var(--ui-pri)} .pill.mut{background:var(--ui-soft2);color:var(--ui-mut)}
+.u-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding-top:12px;border-top:1px solid var(--ui-line)}
+.u-item:first-of-type{border-top:0;padding-top:0}
+.u-item small{display:block;color:var(--ui-mut);font-size:12px}
+.u-item.me{background:#F8F7FB;margin-inline:-8px;padding-inline:8px;border-radius:8px;box-shadow:inset 0 0 0 1px #DCD4F0}
+.u-tw{overflow-x:auto;border:1px solid var(--ui-line);border-radius:10px;background:#fff}
+.u-t{border-collapse:collapse;width:100%;min-width:500px;font-size:13px;color:var(--ui-fg);font-family:var(--ui-font)}
+.u-t th{font-size:11.5px;font-weight:600;color:var(--ui-mut);text-align:left;padding:10px 13px;background:var(--ui-soft);border-bottom:1px solid var(--ui-line);white-space:nowrap}
+.u-t td{padding:11px 13px;border-bottom:1px solid var(--ui-line);vertical-align:middle}
+.u-t td:first-child{font-weight:600}
+.u-t tr:last-child td{border-bottom:0}
+.u-t .n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.u-t tr.sum td{font-weight:700;background:var(--ui-soft)}
+.u-t tr.hl td{background:#FFF4F6}
+.u-t td small{display:block;color:var(--ui-mut);font-size:11.5px;font-weight:400}
+.fld{display:inline-flex;align-items:center;gap:4px;border:1px solid #C9BEE6;background:#F8F7FB;border-radius:6px;padding:2px 7px;font-weight:600;color:var(--ui-pri);font-variant-numeric:tabular-nums;white-space:nowrap}
+.fld.y{border-color:#F2C46B;background:#FFF8E6;color:#8A5A00}
+.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;font-size:13px;align-items:baseline}
+.kv span{color:var(--ui-mut);min-width:0} .kv b{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap} .kv b.wrap{white-space:normal}
+.kv .tot{border-top:1px solid var(--ui-line);padding-top:6px;color:var(--ui-fg);font-weight:700}
+.meter{height:8px;border-radius:99px;background:var(--ui-soft2);position:relative}
+.meter i{position:absolute;inset:0 auto 0 0;border-radius:99px}
+.meter b{position:absolute;top:-4px;width:2px;height:16px;background:var(--ui-fg)}
+.tlm{display:grid;gap:2px}
+.tlm div{display:grid;grid-template-columns:14px minmax(0,1fr);gap:10px;align-items:start;padding:6px 0;color:var(--ui-mut)}
+.tlm i{width:10px;height:10px;border-radius:50%;margin-top:4px;border:2px solid #C6C3CC;background:#fff}
+.tlm .d{color:var(--ui-fg)} .tlm .d i{background:var(--ui-ok);border-color:var(--ui-ok)}
+.tlm .c{color:var(--ui-fg);font-weight:700} .tlm .c i{border-color:var(--ui-pri);box-shadow:0 0 0 3px var(--ui-pri-soft)}
+.tlm small{display:block;font-size:11.5px;color:var(--ui-mut);font-weight:400}
+.nextbox{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center;border:1px solid #DCD4F0;background:linear-gradient(90deg,#F3F0FA,#FAF9FC);border-radius:12px;padding:18px 20px}
+.nextbox > div{display:grid;gap:2px;min-width:0;flex:1 1 280px}
+.nextbox small{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ui-pri);font-weight:700}
+.nextbox b{font-size:16px}
+.chk{display:grid;gap:12px}
+.chk div{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px;align-items:start}
+.chk i{width:16px;height:16px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:10px;font-weight:800;color:#fff;background:var(--ui-ok);margin-top:1px}
+.chk i.w{background:#E5A23A} .chk i.x{background:var(--ui-bad)}
+.chk small{display:block;color:var(--ui-mut)}
+.bars{display:grid;gap:14px}
+.bars .b{display:grid;grid-template-columns:100px minmax(0,1fr) 112px;gap:10px;align-items:center;font-size:12.5px}
+.bars .b span{color:var(--ui-mut)}
+.bars .b .tr{display:grid;gap:3px}
+.bars .b .tr i{display:block;height:7px;border-radius:99px}
+.bars .b .tr i.o{background:#C9BEE6}
+.bars .b .tr i.r{background:var(--ui-pri)}
+.bars .b .tr i.r.over{background:#E5A23A}
+.bars .b em{font-style:normal;text-align:right;font-variant-numeric:tabular-nums}
+.bars .b em small{display:block;color:var(--ui-mut);font-size:11px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--ui-mut)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips span{border:1px solid var(--ui-line);background:#fff;border-radius:99px;padding:5px 10px;font-weight:600;font-size:12px}
+.chips span.on{border-color:var(--ui-pri);background:var(--ui-pri-soft);color:var(--ui-pri)}
+.steps5{display:flex;gap:6px;align-items:center;font-size:12px;color:var(--ui-mut)}
+.steps5 i{width:22px;height:4px;border-radius:99px;background:var(--ui-line)} .steps5 i.on{background:var(--ui-pri)}
+.sectors{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.sectors div{border:1px solid var(--ui-line);background:#fff;border-radius:10px;padding:10px;display:grid;gap:3px}
+.sectors div.on{border:2px solid var(--ui-pri);background:#F8F7FB}
+.sectors small{color:var(--ui-mut);font-size:11.5px}
+.trace{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:20px;align-items:start}
+.src{display:grid;gap:14px}
+.src .u-card{grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:4px 12px}
+.src .u-card h4{grid-column:1/-1}
+.src .val{font-size:18px;font-weight:800;color:var(--ui-pri);font-variant-numeric:tabular-nums;white-space:nowrap}
+.lock{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--ui-mut);background:var(--ui-soft2);border-radius:6px;padding:2px 7px}
+.sumline{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;justify-content:center;background:#fff;border:1px solid var(--ui-line);border-radius:12px;padding:12px 14px;font-variant-numeric:tabular-nums;font-size:14px}
+.sumline span{color:var(--ui-mut);font-size:12px}
+.sumline b.res{background:var(--ui-pri);color:#fff;border-radius:7px;padding:3px 9px}
+
+/* antes */
+.before{position:relative;background:var(--ui-soft);padding:18px;min-height:340px}
+.before .ghost{display:grid;gap:7px;opacity:.5}
+.before .ghost div{height:22px;border-radius:6px;background:#E6E4EA}
+.before .dlg{position:absolute;inset:26px 5% 18px 5%;background:#fff;border-radius:12px;box-shadow:0 10px 40px rgba(30,11,65,.35);padding:16px;display:grid;gap:12px;align-content:start}
+.before .tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--ui-line);padding-bottom:8px}
+.before .tabs span{font-size:12px;padding:4px 8px;border-radius:6px;color:var(--ui-mut);background:var(--ui-soft)}
+.before .tabs span.on{background:var(--ui-pri-soft);color:var(--ui-pri);font-weight:700}
+.before .path{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--ui-mut)}
+.before .path span{border:1px solid var(--ui-line);border-radius:6px;padding:3px 7px;background:var(--ui-soft)}
+.before .dlg2{position:absolute;right:9%;bottom:16px;width:42%;background:#fff;border-radius:10px;border:1px solid var(--ui-line);box-shadow:0 10px 30px rgba(30,11,65,.35);padding:12px;display:grid;gap:6px;font-size:12.5px}
+
+/* telemóvel */
+.phone-wrap{display:grid;grid-template-columns:310px minmax(0,1fr);gap:var(--s4);align-items:center}
+.phone{width:310px;max-width:100%;border-radius:40px;padding:12px;background:#0B0A10;border:1px solid #3A3442;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.phone .scr{border-radius:30px;overflow:hidden;background:var(--ui-soft);font-family:var(--ui-font);color:var(--ui-fg);font-size:13px;line-height:1.4}
+.phone b{color:inherit}
+.phone .top{background:var(--ui-side);color:#fff;padding:16px 16px 12px;display:grid;gap:2px}
+.phone .top small{color:var(--ui-side-fg);font-size:11.5px}
+.phone .pb{padding:14px;display:grid;gap:14px}
+.phone .sec{background:#fff;border:1px solid var(--ui-line);border-radius:12px;padding:14px;display:grid;gap:11px}
+.phone .sec h5{margin:0;font-size:12.5px;display:flex;justify-content:space-between;align-items:center}
+.phone .sec h5 span{color:var(--ui-ok);font-weight:600}
+.phone .m{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.phone .m span{color:var(--ui-mut)}
+.phone .ph{display:grid;grid-template-columns:repeat(4,1fr);gap:5px}
+.phone .ph i{aspect-ratio:1;max-width:100%;border-radius:7px;background:linear-gradient(135deg,#DAD6E2,#BDB8C8)}
+.phone .ph i.add{background:#fff;border:1px dashed #BDB8C8;display:grid;place-items:center;font-style:normal;color:var(--ui-pri);font-weight:800}
+.seg{display:flex;border:1px solid var(--ui-line);border-radius:8px;overflow:hidden;min-width:108px}
+.seg span{flex:1;text-align:center;padding:4px 8px;font-size:12px;color:var(--ui-mut)}
+.seg span.on{background:var(--ui-pri);color:#fff;font-weight:600}
+.phone-wrap .notes{grid-template-columns:1fr}
+
+@media (max-width:900px){
+  .app .body{grid-template-columns:minmax(0,1fr)} .app .side{display:none}
+  .u-side,.u-grid3,.u-grid2,.trace{grid-template-columns:minmax(0,1fr)}
+  .sectors{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .phone-wrap{grid-template-columns:minmax(0,1fr);justify-items:center}
+  .bars .b{grid-template-columns:80px minmax(0,1fr) 96px}
+}
+
+/* SETORES */
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table.dark{border-collapse:collapse;width:100%;min-width:620px;font-size:.96rem}
+table.dark th,table.dark td{text-align:left;padding:.7rem 1rem;border-bottom:1px solid var(--line);vertical-align:top}
+table.dark th{font:500 .72rem/1.2 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--card)}
+table.dark td{color:var(--soft)}
+table.dark td:first-child{color:var(--muted);font-weight:600}
+table.dark tr:last-child td{border-bottom:0}
+
+/* PLANO */
+.road{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:0;border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.road > div{padding:var(--s4) var(--s2);border-right:1px solid var(--line);display:grid;gap:.8rem;align-content:start;min-width:0;background:var(--card)}
+.road > div:last-child{border-right:0}
+.road .n{font:800 2.2rem/1 var(--f-display);color:var(--oly);letter-spacing:-.04em}
+.road .d{font:500 .72rem/1.2 var(--f-mono);color:var(--dim)}
+.road b{font:700 1.02rem/1.25 var(--f-display)}
+.road p{color:var(--muted);font-size:.9rem;line-height:1.45}
+.road .see{display:flex;flex-wrap:wrap;gap:.3rem}
+.road .see a{font:500 .7rem/1 var(--f-mono);color:var(--mud);text-decoration:none;border:1px solid color-mix(in srgb,var(--mud) 40%,var(--line));border-radius:4px;padding:.3rem .4rem}
+.road .see a:hover{background:color-mix(in srgb,var(--mud) 14%,transparent)}
+.road .done{background:color-mix(in srgb,var(--mud) 10%,var(--card))}
+.road .done .n{color:var(--mud)}
+@media (max-width:980px){.road{grid-template-columns:repeat(2,minmax(0,1fr))}.road > div{border-bottom:1px solid var(--line)}}
+@media (max-width:560px){.road{grid-template-columns:1fr}.road > div{border-right:0}}
+.total{display:flex;flex-wrap:wrap;gap:var(--s1) var(--s3);align-items:baseline;color:var(--muted);font-size:.95rem}
+.total b{font:800 1.6rem var(--f-display)}
+
+/* DECISÕES */
+.decs{display:grid;gap:0;border-top:1px solid var(--line)}
+.dec{display:grid;grid-template-columns:2.4rem minmax(0,1fr) minmax(0,1.1fr);gap:var(--s2) var(--s3);padding-block:var(--s3);border-bottom:1px solid var(--line);align-items:baseline}
+.dec .i{font:800 1.2rem/1 var(--f-display);color:var(--dim)}
+.dec .q{font:700 1.08rem/1.3 var(--f-display)}
+.dec .r{color:var(--muted);font-size:.96rem}
+.dec .r b{color:var(--mud);font-weight:600}
+.dec.hot .i{color:var(--amber)}
+@media (max-width:760px){.dec{grid-template-columns:2rem minmax(0,1fr)}.dec .r{grid-column:2}}
+.ask{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s2)}
+.ask div{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:var(--s3) var(--s2);color:var(--soft);font-size:.95rem;min-width:0}
+@media (max-width:820px){.ask{grid-template-columns:1fr 1fr}}
+@media (max-width:480px){.ask{grid-template-columns:1fr}}
+
+/* BASE DE DADOS */
+.dbmap{display:grid;gap:.55rem}
+.dbrow{display:grid;grid-template-columns:minmax(0,15rem) minmax(0,1fr) minmax(0,11rem);gap:var(--s2);align-items:center}
+.dbrow .lb{font-weight:600;color:var(--soft);font-size:.95rem;min-width:0}
+.dbrow .lb small{display:block;font:500 .7rem/1.3 var(--f-mono);color:var(--dim)}
+.dbrow .bar{display:flex;height:22px;border-radius:5px;overflow:hidden;background:transparent}
+.dbrow .bar i{display:block;height:100%;flex:none}
+.dbrow .bar i.ok{background:color-mix(in srgb,var(--bone) 55%,var(--bg))}
+.dbrow .bar i.low{background:var(--amber)}
+.dbrow .bar i.zero{background:var(--coral)}
+.dbrow .bar i.trash{background:repeating-linear-gradient(135deg,var(--coral) 0 6px,color-mix(in srgb,var(--coral) 45%,var(--bg)) 6px 12px)}
+.dbrow .bar b{font:700 .8rem/22px var(--f-mono);color:var(--bone);padding-left:.5rem;white-space:nowrap}
+.dbrow .todo{font:500 .76rem/1.3 var(--f-mono);color:var(--mud)}
+.dbrow .todo.keep{color:var(--muted)}
+.dbrow .todo.cut{color:#F3A2B4}
+.dblegend{display:flex;flex-wrap:wrap;gap:.4rem 1.4rem;font-size:.85rem;color:var(--muted)}
+.dblegend i{display:inline-block;width:12px;height:12px;border-radius:3px;margin-right:.45rem;vertical-align:-1px}
+@media (max-width:760px){.dbrow{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.dbrow .bar{grid-column:1/-1;order:3}}
+
+.core{display:grid;gap:var(--s2)}
+.lane2{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:var(--s2);align-items:stretch}
+.lane2 > span{font:500 .72rem/1.35 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--dim);padding-top:1.1rem}
+.lane2 .blocks2{display:flex;flex-wrap:wrap;gap:var(--s2);align-items:stretch}
+.blk2{flex:1 1 13rem;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:var(--s3) var(--s3) var(--s2);display:grid;gap:.6rem;align-content:start;min-width:0;position:relative}
+.blk2 h4{margin:0;font:800 1.25rem/1.1 var(--f-display);letter-spacing:-.01em;color:var(--bone)}
+.blk2 p{color:var(--muted);font-size:.93rem;line-height:1.45}
+.blk2 .ht{display:flex;flex-wrap:wrap;gap:.35rem .8rem;font:500 .74rem/1.3 var(--f-mono);border-top:1px solid var(--line);padding-top:.7rem;margin-top:.2rem}
+.blk2 .ht span{color:#F3A2B4}
+.blk2 .ht em{font-style:normal;color:var(--mud)}
+.blk2.new{border-color:color-mix(in srgb,var(--mud) 50%,var(--line));background:color-mix(in srgb,var(--mud) 7%,var(--card))}
+.blk2.new h4::after{content:"novo";font:600 .62rem/1 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:#0E1F1A;background:var(--mud);border-radius:3px;padding:.2rem .35rem;margin-left:.6rem;vertical-align:middle}
+.arrow2{align-self:center;color:var(--dim);font:700 1.3rem var(--f-display)}
+@media (max-width:760px){.lane2{grid-template-columns:1fr}.lane2 > span{padding-top:0}.arrow2{display:none}}
+
+.strata{display:grid;gap:0;border-radius:14px;overflow:hidden;border:1px solid var(--line)}
+.stratum{display:grid;grid-template-columns:14rem minmax(0,1fr);gap:var(--s3);padding:var(--s3);align-items:start}
+.stratum + .stratum{border-top:1px solid var(--line)}
+.stratum .who{display:grid;gap:.4rem}
+.stratum .who b{font:800 1.2rem/1.15 var(--f-display)}
+.stratum .who small{font:500 .72rem/1.35 var(--f-mono);color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
+.stratum .what{display:flex;flex-wrap:wrap;gap:.45rem}
+.stratum .what span{font-size:.9rem;padding:.4rem .65rem;border-radius:6px;background:color-mix(in srgb,var(--bone) 7%,transparent);border:1px solid var(--line);color:var(--soft)}
+.stratum.s3{background:color-mix(in srgb,var(--oly) 6%,var(--bg))}
+.stratum.s3 .who b{color:var(--oly)}
+.stratum.s2{background:color-mix(in srgb,var(--mud) 7%,var(--bg))}
+.stratum.s2 .who b{color:var(--mud)}
+.stratum.s1{background:var(--card)}
+.stratum.s1 .what span{border-color:color-mix(in srgb,var(--bone) 25%,var(--line));color:var(--bone);font-weight:600}
+@media (max-width:760px){.stratum{grid-template-columns:1fr;gap:var(--s2)}}
+
+table.dark.sectors2 td{font-size:.93rem}
+table.dark.sectors2 td:first-child{color:var(--bone)}
+table.dark.sectors2 td small{display:block;color:var(--dim);font:500 .72rem/1.35 var(--f-mono);margin-top:.2rem}
+table.dark.sectors2 th:first-child{width:11rem}
+
+.steps4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--s2);counter-reset:st}
+.steps4 > div{border-top:2px solid var(--mud);padding-top:var(--s2);display:grid;gap:.5rem;align-content:start;min-width:0}
+.steps4 b{font:700 1.05rem/1.25 var(--f-display)}
+.steps4 b::before{counter-increment:st;content:counter(st) " · ";color:var(--mud)}
+.steps4 p{color:var(--muted);font-size:.93rem}
+@media (max-width:860px){.steps4{grid-template-columns:1fr 1fr}}
+@media (max-width:480px){.steps4{grid-template-columns:1fr}}
+
+.tdets{display:grid;gap:.6rem}
+.tdet{border:1px solid var(--line);border-radius:12px;background:var(--card)}
+.tdet summary{cursor:pointer;list-style:none;display:grid;grid-template-columns:minmax(0,11rem) minmax(0,1fr) auto;gap:.3rem 1.2rem;align-items:baseline;padding:1rem 1.2rem}
+.tdet summary::-webkit-details-marker{display:none}
+.tdet summary::after{content:"+";font:700 1.2rem/1 var(--f-display);color:var(--mud);grid-column:3;grid-row:1}
+.tdet[open] summary::after{content:"−"}
+.tdet summary b{font:800 1.1rem/1.2 var(--f-display)}
+.tdet summary span{color:var(--soft)}
+.tdet summary small{grid-column:1/-1;font:500 .72rem/1.4 var(--f-mono);color:var(--dim)}
+.tdet > .note,.tdet > .tbl{margin:0 1.2rem 1.2rem}
+.tdet summary:focus-visible{outline:2px solid var(--mud);outline-offset:-2px;border-radius:12px}
+table.dark.tmap{min-width:560px}
+table.dark.tmap td{font-size:.9rem;vertical-align:baseline}
+table.dark.tmap td code{font:500 .8rem var(--f-mono);color:var(--bone);background:none;padding:0}
+table.dark.tmap td.n,table.dark.tmap th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.tag2{font:600 .82rem/1.4 var(--f-body)}
+.tag2 em{font-style:normal;font-weight:400;color:var(--muted)}
+.tag2.f{color:var(--mud)} .tag2.j{color:var(--amber)} .tag2.s{color:#F3A2B4} .tag2.c{color:var(--oly)} .tag2.m{color:#8FB8E8} .tag2.x{color:var(--muted)} .tag2.n{color:var(--mud)}
+.tlegend{display:flex;flex-wrap:wrap;gap:.4rem 1.2rem}
+.tlegend .tag2{border:1px solid var(--line);border-radius:5px;padding:.2rem .5rem}
+@media (max-width:640px){.tdet summary{grid-template-columns:minmax(0,1fr) auto}.tdet summary span{grid-column:1}}
+
+/* MAPA DA PROPOSTA */
+.mapa{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.mapa a{display:grid;grid-template-columns:2.2rem minmax(0,1fr);gap:.2rem .7rem;padding:1rem 1.1rem;text-decoration:none;color:var(--bone);border-right:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--card)}
+.mapa a:nth-child(3n){border-right:0}
+.mapa a:hover{background:color-mix(in srgb,var(--mud) 8%,var(--card))}
+.mapa a i{font:800 1.4rem/1 var(--f-display);font-style:normal;color:var(--mud);grid-row:span 2}
+.mapa a b{font:700 1rem/1.25 var(--f-display)}
+.mapa a span{color:var(--muted);font-size:.88rem;line-height:1.4}
+.mapa a.anx i{color:var(--dim)}
+@media (max-width:860px){.mapa{grid-template-columns:1fr 1fr}.mapa a:nth-child(3n){border-right:1px solid var(--line)}.mapa a:nth-child(2n){border-right:0}}
+@media (max-width:520px){.mapa{grid-template-columns:1fr}.mapa a{border-right:0}}
+.steps-in{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;font:500 .78rem/1 var(--f-mono);color:var(--muted)}
+.steps-in a{color:var(--mud);text-decoration:none;border:1px solid color-mix(in srgb,var(--mud) 40%,var(--line));border-radius:5px;padding:.35rem .5rem}
+
+footer{border-top:1px solid var(--line);padding-block:var(--s4)}
+footer .wrap{display:flex;justify-content:space-between;gap:var(--s3);flex-wrap:wrap;align-items:center;color:var(--dim);font-size:.85rem}
+footer span{max-width:80ch}
+footer img{height:26px;width:auto;opacity:.8}
+.divider{border:0;border-top:1px solid var(--line);margin:0}
+@media (prefers-reduced-motion:no-preference){.hero h1{animation:rise .7s ease-out both}.hero .lead{animation:rise .7s .12s ease-out both}}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@keyframes rise{from{transform:translateY(10px);opacity:.4}to{transform:none;opacity:1}}
+
+/* FLUXO: HOJE CONTRA NOVO */
+.chains{display:grid;gap:var(--s2)}
+.chain{display:grid;grid-template-columns:6.5rem minmax(0,1fr);gap:var(--s1) var(--s3);align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:var(--s3)}
+.chain > i{font:500 .72rem/1.3 var(--f-mono);font-style:normal;letter-spacing:.12em;text-transform:uppercase}
+.chain.was > i{color:#F3A2B4} .chain.now > i{color:var(--mud)}
+.chain ol{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:.5rem .4rem;align-items:stretch}
+.chain li{display:flex;align-items:center;gap:.4rem}
+.chain li + li::before{content:"→";color:var(--dim);font-weight:700}
+.chain li span{display:grid;gap:.1rem;padding:.5rem .75rem;border-radius:8px;border:1px solid var(--line);background:var(--card2)}
+.chain li b{font:700 .98rem/1.2 var(--f-display)}
+.chain li small{font-size:.8rem;line-height:1.3;color:var(--muted)}
+.chain.was li span{border-color:color-mix(in srgb,var(--coral) 45%,var(--line))}
+.chain.now li span{border-color:color-mix(in srgb,var(--mud) 45%,var(--line))}
+.chain .sum{grid-column:2;font:500 .76rem/1.4 var(--f-mono);color:var(--dim)}
+.chain.now .sum{color:var(--mud)}
+@media (max-width:640px){.chain{grid-template-columns:1fr}.chain .sum{grid-column:1}}
+
+.flow2{position:relative;display:grid;gap:var(--s2)}
+.flow2::before{content:"";position:absolute;left:50%;top:3.2rem;bottom:2rem;width:2px;transform:translateX(-50%);background:linear-gradient(180deg,color-mix(in srgb,var(--coral) 35%,var(--line)),color-mix(in srgb,var(--mud) 60%,var(--line)))}
+.fhd,.fr{display:grid;grid-template-columns:minmax(0,1fr) 8rem minmax(0,1fr);align-items:stretch}
+.fhd span{font:500 .72rem/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;padding:.2rem .2rem 0}
+.fhd .o{color:#F3A2B4;text-align:right} .fhd .n{color:var(--mud);grid-column:3}
+.fr .mid{display:grid;justify-items:center;align-content:center;gap:.45rem;position:relative;z-index:1;text-align:center}
+.fr .mid i{width:2.7rem;height:2.7rem;border-radius:50%;background:var(--bg);border:2px solid var(--mud);display:grid;place-items:center;font:800 1.1rem/1 var(--f-display);font-style:normal;color:var(--mud)}
+.fr .mid b{font:700 .95rem/1.2 var(--f-display);background:var(--bg);padding:.15rem .35rem;border-radius:4px}
+.fc{position:relative;border-radius:16px;padding:1.4rem 1.5rem;display:grid;grid-template-columns:6.2rem minmax(0,1fr);gap:1.2rem;align-items:center;min-width:0}
+.fc .fig{display:grid;gap:.35rem;align-content:center}
+.fc .fig b{font:800 2.9rem/.9 var(--f-display);letter-spacing:-.05em;white-space:nowrap}
+.fc .fig small{font:500 .66rem/1.3 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--dim)}
+.fc .tx{display:grid;gap:.4rem;min-width:0}
+.fc h4{margin:0;font:700 1.06rem/1.3 var(--f-display);letter-spacing:-.01em}
+.fc p{font-size:.92rem;line-height:1.45;color:var(--muted)}
+.fc .tag{display:none}
+.fc.o{background:var(--card);border:1px solid var(--line)}
+.fc.o .fig b{color:var(--coral)} .fc.o h4{color:var(--soft)}
+.fc.n{background:linear-gradient(135deg,color-mix(in srgb,var(--mud) 13%,var(--card)),var(--card) 70%);border:1px solid color-mix(in srgb,var(--mud) 45%,var(--line));box-shadow:0 12px 34px rgba(0,0,0,.35)}
+.fc.n .fig b{color:var(--mud)} .fc.n .fig small{color:color-mix(in srgb,var(--mud) 70%,var(--muted))}
+.fc.o::after,.fc.n::before{content:"";position:absolute;top:50%;width:1.3rem;height:2px;background:var(--line)}
+.fc.o::after{right:-1.3rem;background:color-mix(in srgb,var(--coral) 35%,var(--line))}
+.fc.n::before{left:-1.3rem;background:color-mix(in srgb,var(--mud) 60%,var(--line))}
+.fsum{display:flex;justify-content:center;flex-wrap:wrap;gap:.5rem 1.5rem;margin-top:var(--s1);font:500 .78rem/1.4 var(--f-mono);color:var(--muted)}
+.fsum b{color:var(--mud);font-weight:500}
+@media (max-width:820px){
+  .flow2::before,.fhd{display:none}
+  .fr{grid-template-columns:1fr;gap:.6rem;padding-top:var(--s2)}
+  .fr .mid{grid-row:1;display:flex;justify-content:flex-start;gap:.7rem}
+  .fr .mid i{width:2.2rem;height:2.2rem;font-size:.95rem}
+  .fc{grid-template-columns:4.8rem minmax(0,1fr);gap:1rem;padding:1.15rem}
+  .fc .fig b{font-size:2.2rem}
+  .fc.o::after,.fc.n::before{display:none}
+  .fc .tag{display:block;font:500 .66rem/1 var(--f-mono);letter-spacing:.14em;text-transform:uppercase;margin-bottom:.15rem}
+  .fc.o .tag{color:#F3A2B4} .fc.n .tag{color:var(--mud)}
+}
+
+.screens{display:grid;gap:var(--s4)}
+.screen{display:grid;gap:var(--s2)}
+.screen > .cap{display:flex;gap:var(--s2);align-items:baseline;flex-wrap:wrap}
+.screen > .cap i{font:500 .72rem/1 var(--f-mono);font-style:normal;letter-spacing:.12em;text-transform:uppercase}
+.screen.was > .cap i{color:#F3A2B4} .screen.now > .cap i{color:var(--mud)}
+.screen > .cap b{font:700 1.15rem/1.3 var(--f-display)}
+
+/* NOVO: screens de Negócios */
+.sc{padding-block:var(--s5);border-top:1px solid var(--line);scroll-margin-top:1rem}
+.sc .wrap{display:grid;gap:var(--s3)}
+.sc .hd{display:grid;grid-template-columns:5.5rem minmax(0,1fr);gap:var(--s1) var(--s3);align-items:start}
+.sc .hd .no{font:800 2.6rem/.9 var(--f-display);letter-spacing:-.04em;color:var(--oly)}
+.sc .hd .no small{display:block;font:500 .68rem/1.3 var(--f-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-top:.5rem}
+.sc .hd > div{display:grid;gap:.6rem;min-width:0}
+.sc .hd p{color:var(--soft);max-width:68ch}
+@media (max-width:700px){.sc .hd{grid-template-columns:1fr}}
+.fz{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.fz > div{padding:var(--s3) var(--s2);border-right:1px solid var(--line);background:var(--card);display:grid;gap:.45rem;align-content:start;min-width:0}
+.fz > div:last-child{border-right:0}
+.fz i{font:800 1.5rem/1 var(--f-display);font-style:normal;color:var(--mud)}
+.fz b{font:700 1.05rem/1.2 var(--f-display)}
+.fz span{color:var(--muted);font-size:.88rem;line-height:1.4}
+.fz small{font:500 .68rem/1.3 var(--f-mono);color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
+.fz .tr{background:color-mix(in srgb,var(--amber) 10%,var(--card))}
+.fz .tr i{color:var(--amber)}
+@media (max-width:900px){.fz{grid-template-columns:repeat(2,minmax(0,1fr))}.fz > div{border-bottom:1px solid var(--line)}}
+.trig{display:flex;gap:var(--s2);align-items:flex-start;border:1px dashed color-mix(in srgb,var(--amber) 55%,var(--line));border-radius:12px;padding:var(--s2) var(--s3);color:var(--soft);font-size:.98rem}
+.trig b{color:var(--amber)}
+
+.menus{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:var(--s3);align-items:start}
+.msb{border-radius:12px;background:var(--ui-side);color:var(--ui-side-fg);font-family:var(--ui-font);font-size:12.5px;padding:16px 12px;display:grid;gap:2px;border:1px solid #3A3442;align-content:start}
+.msb .t{font:500 .7rem/1 var(--f-mono);letter-spacing:.12em;text-transform:uppercase;margin:0 8px 10px;color:#F3A2B4}
+.msb.now .t{color:var(--mud)}
+.msb .g{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.msb .s{display:grid;gap:1px;align-content:start}
+.msb .s > b{color:#fff;font-size:12px;padding:4px 8px}
+.msb .s > span{padding:2px 8px 2px 16px;color:#8F8A99;text-decoration:line-through;text-decoration-color:#6E6A74}
+.msb .s > span.keep{text-decoration:none;color:var(--ui-side-fg)}
+.msb a{display:grid;gap:2px;padding:9px 10px;border-radius:8px;color:#fff;text-decoration:none;font-weight:600;font-size:14px}
+.msb a small{font-weight:400;font-size:11.5px;color:var(--ui-side-fg);line-height:1.35}
+.msb a.on{background:var(--ui-side2);box-shadow:inset 3px 0 0 #B7A6E8}
+.msb hr{border:0;border-top:1px solid #34323B;margin:8px 4px}
+@media (max-width:820px){.menus{grid-template-columns:minmax(0,1fr)}}
+
+.app .side a.nw{color:#fff}
+.phz{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px}
+.phz span{border-top:4px solid var(--ui-line);padding-top:6px;font-size:11.5px;color:var(--ui-mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.phz span.d{border-color:#C9BEE6;color:var(--ui-fg)}
+.phz span.on{border-color:var(--ui-pri);color:var(--ui-pri);font-weight:700}
+.dhead{background:#fff;border:1px solid var(--ui-line);border-radius:12px;padding:16px 18px;display:grid;gap:14px}
+.fsec{background:#fff;border:1px solid var(--ui-line);border-radius:12px;display:grid;min-width:0}
+.fsec > header{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 16px;font-weight:700;flex-wrap:wrap}
+.fsec > header span{font-weight:500;color:var(--ui-mut);font-size:12px}
+.fsec > div{padding:0 16px 16px;display:grid;gap:12px;min-width:0}
+.fsec.cur{border-color:#C9BEE6;box-shadow:0 0 0 3px var(--ui-pri-soft)}
+.fsec.off{background:var(--ui-soft);border-style:dashed}
+.fsec.off > header{color:var(--ui-mut);font-weight:600}
+.fsec.dn > header::before{content:"✓";color:var(--ui-ok)}
+.fsec.dn > header{justify-content:flex-start}
+.fsec.dn > header span{margin-left:auto}
+.stack{display:grid;gap:10px;min-width:0;align-content:start}
+.form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.inp{display:grid;gap:3px;font-size:11.5px;color:var(--ui-mut);min-width:0}
+.inp b{font-weight:500;font-size:13px;color:var(--ui-fg);border:1px solid var(--ui-line);border-radius:7px;padding:6px 9px;background:#fff;min-height:31px}
+.inp b.on{border-color:var(--ui-pri);box-shadow:0 0 0 3px var(--ui-pri-soft)}
+
+.kb{display:grid;grid-template-columns:repeat(6,minmax(176px,1fr));gap:10px;overflow-x:auto;padding-bottom:4px}
+.kb .col{background:var(--ui-soft2);border-radius:10px;padding:10px;display:grid;gap:8px;align-content:start}
+.kb .col h5{margin:0 2px 2px;font-size:12px;display:flex;justify-content:space-between;color:var(--ui-fg)}
+.kb .col h5 span{color:var(--ui-mut);font-weight:500}
+.kc{background:#fff;border:1px solid var(--ui-line);border-radius:9px;padding:9px 10px;display:grid;gap:3px;font-size:12.5px}
+.kc small{color:var(--ui-mut);font-size:11.5px}
+.kc .nx{font-size:11.5px;color:var(--ui-pri);font-weight:600}
+.kc .nx.late{color:var(--ui-bad)}
+.kc.me{border-color:var(--ui-pri);box-shadow:0 0 0 3px var(--ui-pri-soft)}
+.kc.new{border:1.5px dashed var(--ui-pri);gap:7px}
+.kc.new .inp b{padding:5px 8px;min-height:28px}
+
+.al{display:grid;gap:8px}
+.al > div{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 12px;border-radius:9px;border:1px solid var(--ui-line);background:#fff}
+.al > div.x{border-color:#F3B9C2;background:#FFF6F7}
+.al > div.w{border-color:#F2D6A6;background:#FFFBF2}
+.al > div > i{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:11px;font-weight:800;color:#fff;margin-top:1px}
+.al .x > i{background:var(--ui-bad)} .al .w > i{background:#E5A23A} .al .o > i{background:var(--ui-ok)}
+.al small{display:block;color:var(--ui-mut);font-size:12px}
+.al .u-btn{font-size:12px;padding:5px 10px}
+
+.gw{overflow-x:auto}
+.gantt{display:grid;grid-template-columns:170px repeat(5,minmax(0,1fr));font-size:12px;border:1px solid var(--ui-line);border-radius:10px;overflow:hidden;background:#fff;min-width:600px}
+.gantt > div{padding:7px 9px;border-bottom:1px solid var(--ui-line);min-width:0}
+.gantt .h{background:var(--ui-soft);color:var(--ui-mut);font-weight:600;font-size:11.5px}
+.gantt .t{font-weight:600}
+.gantt .t small{display:block;font-weight:400;color:var(--ui-mut);font-size:11px}
+.gantt .gb{display:flex;align-items:center}
+.gantt .gb i{display:block;border-radius:5px;background:#C9BEE6;width:100%;font-style:normal;font-size:11px;color:var(--ui-fg);padding:3px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gantt .gb i.warn{background:#F7D9A8}
+.gantt .span2{grid-column:span 2}
+.who{display:inline-flex;align-items:center;gap:6px}
+.who i{width:22px;height:22px;border-radius:50%;background:var(--ui-pri-soft);color:var(--ui-pri);display:grid;place-items:center;font-style:normal;font-weight:700;font-size:10.5px}
+.decs.wide .dec{grid-template-columns:2.4rem minmax(0,1fr) minmax(0,1.1fr)}
+@media (max-width:700px){.dec{grid-template-columns:2rem minmax(0,1fr)}.dec .r{grid-column:2}}
+</style>
+
+<header class="hero">
+  <div class="wrap">
+    <div class="brand">
+      <img src="{{OLYVIA}}" alt="Olyvia">
+      <span class="sep" aria-hidden="true"></span>
+      <img src="{{BMLAR}}" alt="BMLAR Group">
+    </div>
+    <span class="eyebrow">Reestruturação · Negócios · 08/10/2026</span>
+    <h1>Da lead à obra, <em>numa só página.</em></h1>
+    <p class="lead">As screens de Negócios, pela ordem do fluxo. O CRM e a Aquisição passam a ser uma só entrada no menu. Cada pedido tem uma página que atravessa seis fases, e o recibo põe o Inventário e as Obras a trabalhar sozinhos.</p>
+    <div class="meta">
+      <span>Base: docs/negocios-2026-10-08/README.md</span>
+      <span>Dados de exemplo: a casa de banho da Ana Martins, o mesmo caso das páginas anteriores</span>
+    </div>
+  </div>
+</header>
+
+<section style="padding-block:var(--s4)">
+  <div class="wrap" style="display:grid;gap:var(--s3)">
+    <div class="head"><span class="eyebrow">As seis fases</span><h2>Lead → Contacto → Visita → Negócio → Financeiro → Obra</h2><p class="note">A fase avança pelos factos: quando a visita é marcada, quando o contrato é assinado, quando o pagamento é validado. Ninguém a arrasta à mão.</p></div>
+    <div class="fz">
+      <div><i>1</i><b>Lead</b><span>Entra o pedido. Só são precisos o nome e o contacto.</span><small>Comercial · automático</small></div>
+      <div><i>2</i><b>Contacto</b><span>Qualificar o pedido e marcar a visita.</span><small>Comercial</small></div>
+      <div><i>3</i><b>Visita</b><span>Levantamento do local e das necessidades, no telemóvel.</span><small>Comercial · técnico</small></div>
+      <div><i>4</i><b>Negócio</b><span>Orçamento com os custos do Catálogo, depois a proposta e o contrato.</span><small>Comercial</small></div>
+      <div class="tr"><i>5</i><b>Financeiro</b><span>Fatura para o portal; o pagamento validado emite o recibo.</span><small>Financeiro</small></div>
+      <div><i>6</i><b>Obra</b><span>O plano, os técnicos e os materiais. No fim, o previsto contra o real.</span><small>Operações</small></div>
+    </div>
+    <div class="trig"><span aria-hidden="true">⚡</span><span><b>O recibo dispara duas coisas ao mesmo tempo.</b> O Inventário confirma os materiais e cria a encomenda ao fornecedor, se faltar algo. As Obras geram o plano com os técnicos do RH.</span></div>
+  </div>
+</section>
+
+<section style="padding-block:0 var(--s4)">
+  <div class="wrap" style="display:grid;gap:var(--s2)">
+    <span class="eyebrow">As screens</span>
+    <nav class="mapa" aria-label="Screens">
+      <a href="#s1"><i>1</i><b>Menu</b><span>De 13 secções a 8 entradas.</span></a>
+      <a href="#s2"><i>2</i><b>Lista de negócios</b><span>Colunas por fase e o "Novo negócio" na própria lista.</span></a>
+      <a href="#s3"><i>3</i><b>Negócio: Contacto</b><span>A página, a barra das fases e o próximo passo.</span></a>
+      <a href="#s4"><i>4</i><b>Visita no telemóvel</b><span>O local, as necessidades, as medidas e as fotos.</span></a>
+      <a href="#s5"><i>5</i><b>Negócio: orçamento</b><span>O custo vem do Catálogo, com a margem real em cada linha.</span></a>
+      <a href="#s6"><i>6</i><b>Verificar antes de enviar</b><span>Bloqueios, avisos e a aprovação da chefia.</span></a>
+      <a href="#s7"><i>7</i><b>Catálogo: ficha do serviço</b><span>De onde vem o custo: a receita do serviço.</span></a>
+      <a href="#s8"><i>8</i><b>Negócio: Financeiro</b><span>A fatura, "Validar pagamento" e o recibo.</span></a>
+      <a href="#s9"><i>9</i><b>Hoje do Financeiro</b><span>Faturas por emitir e pagamentos por validar.</span></a>
+      <a href="#s10"><i>10</i><b>Inventário: materiais da obra</b><span>O que há, o que falta e a encomenda ao fornecedor.</span></a>
+      <a href="#s11"><i>11</i><b>Operações: plano gerado</b><span>As tarefas e os técnicos do RH.</span></a>
+      <a href="#s12"><i>12</i><b>Negócio: Obra</b><span>O estado da obra e o previsto contra o real.</span></a>
+    </nav>
+  </div>
+</section>
+
+<!-- 1 MENU -->
+<section class="sc" id="s1"><div class="wrap">
+  <div class="hd"><div class="no">1<small>Menu</small></div><div><h2>O menu passa de 13 secções a 8 entradas.</h2><p>As páginas riscadas não desaparecem: passam a viver dentro de outra entrada. Leads, Pedidos de Proposta, Propostas, Orçamentos, Venda Direta e Contratos passam a ser fases e secções de um negócio.</p></div></div>
+  <div class="menus">
+    <div class="msb" role="img" aria-label="Menu atual, com as secções e as páginas que se juntam">
+      <span class="t">Hoje</span>
+      <div class="g">
+        <div class="s"><b>Painel · Atividades</b><span>Painel</span><span>Atividades</span></div>
+        <div class="s"><b>CRM</b><span>Leads</span><span>Submissões Pendentes</span><span>Clientes</span></div>
+        <div class="s"><b>Aquisição</b><span>Pedidos de Proposta</span><span>Propostas</span><span>Orçamentos</span><span>Venda Direta</span><span>Contratos</span><span>Ajuda &amp; FAQs</span></div>
+        <div class="s"><b>Organizações</b><span>Organizações</span><span>Organograma</span><span>Flow Builder</span><span>Ajuda</span></div>
+        <div class="s"><b>Produtos</b><span>Produtos</span><span>Bundles</span><span>Marcas</span><span>Categorias</span><span>Subcategorias</span><span>Atributos</span><span>Unidades de Medida</span></div>
+        <div class="s"><b>Serviços</b><span>Serviços</span><span>Categorias</span><span>Subcategorias</span><span>Taxas de Serviço</span></div>
+        <div class="s"><b>Marketing</b><span>Campanhas</span><span>Origens</span><span>Formulários</span></div>
+        <div class="s"><b>Inventário</b><span class="keep">Fornecedores</span><span class="keep">Armazéns</span><span class="keep">Encomendas a Fornecedores</span><span class="keep">Stocks</span><span class="keep">Encomendas Clientes</span><span class="keep">Contagem de Inventário</span></div>
+        <div class="s"><b>Utilizadores</b><span>Utilizadores</span><span>Funções</span><span>Auditoria de Exportações</span></div>
+        <div class="s"><b>Definições</b><span>Definições</span><span>Email SMTP</span><span>Templates de Email</span><span>Falhas de Envio</span><span>Lixo</span></div>
+        <div class="s"><b>Operações</b><span class="keep">Operações</span></div>
+        <div class="s"><b>Plataforma</b><span>Acesso de Suporte</span><span>Registo de Autenticações</span><span>Eliminação de Dados</span></div>
+      </div>
+    </div>
+    <div class="msb now" role="img" aria-label="Menu novo com oito entradas">
+      <span class="t">Novo</span>
+      <a>Hoje<small>Painel, Atividades, Agenda. O que cada um tem para fazer</small></a>
+      <a class="on">Negócios<small>Leads, Submissões, Pedidos de Proposta, Propostas, Orçamentos, Venda Direta, Contratos</small></a>
+      <a>Clientes<small>Clientes, Contactos, empresas clientes</small></a>
+      <a>Operações<small>Obras, sem alterações nesta fase</small></a>
+      <a>Inventário<small>Fica, com uma vista nova: materiais por obra</small></a>
+      <a>Catálogo e custos<small>Produtos e Serviços, com a receita, o custo e o preço</small></a>
+      <a>Marketing<small>Campanhas, com a origem e o formulário lá dentro</small></a>
+      <hr>
+      <a>Definições<small>Utilizadores, Funções, Email, Modelos, Organograma, Flow Builder, Lixo</small></a>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>A Plataforma</b> só aparece ao admin da Olyvia.</span></li>
+    <li><i class="mk">2</i><span><b>As páginas de Ajuda</b> passam a um botão "?" no canto de cada página.</span></li>
+    <li><i class="mk">3</i><span><b>Não há entrada "Financeiro".</b> O financeiro trabalha no seu Hoje e na fase Financeiro de cada negócio (screen 9).</span></li>
+  </ol>
+</div></section>
+
+<!-- 2 LISTA -->
+<section class="sc" id="s2"><div class="wrap">
+  <div class="hd"><div class="no">2<small>Lista</small></div><div><h2>Negócios: uma coluna por fase, e o negócio novo cria-se na própria lista.</h2><p>Substitui as listas de Leads, Pedidos de Proposta, Propostas, Orçamentos, Venda Direta e Contratos. "Novo negócio" abre um cartão na coluna Lead, só com o nome e o contacto, sem modal.</p></div></div>
+  <div class="app" role="img" aria-label="Lista de negócios em seis colunas, uma por fase, com um cartão novo a ser criado na coluna Lead">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/negocios</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a>Hoje</a><a class="on">Negócios</a><a>Clientes</a><a>Operações</a><a>Inventário</a><a>Catálogo e custos</a><a>Marketing</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="u-row"><div><div class="u-h1">Negócios</div><div class="u-sub">23 abertos · 41.870 € em proposta</div></div><div class="u-row"><span class="u-btn sec">Ver em lista</span><span class="u-btn">+ Novo negócio <i class="mk">1</i></span></div></div>
+        <div class="chips"><span class="on">Os meus</span><span>Todos</span><span>Casa de banho</span><span>Cozinha</span><span>Com atraso · 3</span><span>Pesquisar…</span></div>
+        <div class="kb">
+          <div class="col"><h5>Lead <span>4</span></h5>
+            <div class="kc new"><div class="inp">Nome<b class="on">Joana Reis</b></div><div class="inp">Telefone ou email<b>912 345 678</b></div><div class="u-row"><span class="u-sub">Origem: telefone</span><span class="u-btn" style="padding:4px 9px;font-size:11.5px">Criar</span></div></div>
+            <div class="kc"><b>Pedro Lopes</b><small>Pavimento da sala · site</small><span class="nx late">Ligar · há 2 dias <i class="mk">2</i></span></div>
+            <div class="kc"><b>Rita Sousa</b><small>Cozinha · campanha de outono</small><span class="nx">Ligar hoje</span></div>
+          </div>
+          <div class="col"><h5>Contacto <span>3</span></h5>
+            <div class="kc"><b>Manuel Costa</b><small>WC social · Cascais</small><span class="nx">Marcar visita</span></div>
+            <div class="kc"><b>Condomínio Av. Brasil</b><small>Manutenção · 12 frações</small><span class="nx">Voltar a ligar 10/10</span></div>
+          </div>
+          <div class="col"><h5>Visita <span>2</span></h5>
+            <div class="kc"><b>Luísa Freitas</b><small>Cozinha · Oeiras</small><span class="nx">Visita 09/10 10:00</span></div>
+            <div class="kc"><b>Hugo Matos</b><small>WC suite · Lisboa</small><span class="nx">Fechar levantamento</span></div>
+          </div>
+          <div class="col"><h5>Negócio <span>5</span></h5>
+            <div class="kc"><b>Carla Nunes</b><small>Cozinha · 8.940 €</small><span class="nx">Proposta enviada há 3 dias</span></div>
+            <div class="kc"><b>Sérgio Pinto</b><small>WC · 4.120 € · venda direta</small><span class="nx">Aguarda aceitação</span></div>
+          </div>
+          <div class="col"><h5>Financeiro <span>2</span></h5>
+            <div class="kc me"><b>Ana Martins</b><small>WC suite · 3.606,12 €</small><span class="nx">Validar pagamento <i class="mk">3</i></span></div>
+            <div class="kc"><b>Tiago Almeida</b><small>Cozinha · 11.300 €</small><span class="nx">Emitir fatura</span></div>
+          </div>
+          <div class="col"><h5>Obra <span>7</span></h5>
+            <div class="kc"><b>Marta Lima</b><small>WC · em curso · dia 3 de 5</small><span class="nx">Previsto 32 h · real 19 h</span></div>
+            <div class="kc"><b>Paulo Reis</b><small>Cozinha · começa 13/10</small><span class="nx">Materiais encomendados</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>"Novo negócio" pede só o nome e o contacto.</b> O cartão abre na coluna Lead, e o resto preenche-se depois, na página.</span></li>
+    <li><i class="mk">2</i><span><b>Cada cartão mostra a próxima ação,</b> a vermelho quando está atrasada.</span></li>
+    <li><i class="mk">3</i><span><b>Os cartões não se arrastam.</b> Um clique abre o negócio, e a fase muda quando acontece o facto: visita marcada, contrato assinado, pagamento validado.</span></li>
+  </ol>
+</div></section>
+
+<!-- 3 NEGÓCIO: CONTACTO -->
+<section class="sc" id="s3"><div class="wrap">
+  <div class="hd"><div class="no">3<small>Contacto</small></div><div><h2>A página do negócio: o próximo passo em cima, uma secção por fase e o histórico ao lado.</h2><p>Substitui o modal da lead com 12 separadores. A secção da fase atual vem aberta. As que já passaram ficam fechadas com um ✓ e as futuras ficam a cinzento.</p></div></div>
+  <div class="app" role="img" aria-label="Página do negócio da Ana Martins na fase Contacto, com a barra das fases, o próximo passo e o histórico">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/negocios/1043</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a>Hoje</a><a class="on">Negócios</a><a>Clientes</a><a>Operações</a><a>Inventário</a><a>Catálogo e custos</a><a>Marketing</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="dhead">
+          <div class="u-row"><div><div class="u-h1">Remodelação WC suite · Sintra</div><div class="u-sub">Ana Martins · 912 000 111 · linha: Casa de banho · comercial: Rúben</div></div><span class="u-btn sec">Marcar perdido</span></div>
+          <div class="phz"><span class="d">Lead</span><span class="on">Contacto</span><span>Visita</span><span>Negócio</span><span>Financeiro</span><span>Obra</span></div>
+        </div>
+        <div class="nextbox"><div><small>Próximo passo <i class="mk">1</i></small><b>Marcar a visita</b><span class="u-sub">O Rúben tem quinta às 10:00 livre em Sintra.</span></div><span class="u-btn big">Marcar visita</span></div>
+        <div class="u-side">
+          <div class="stack">
+            <div class="fsec dn"><header>Pedido <span>site · 30/09 21:40</span></header></div>
+            <div class="fsec cur"><header>Contacto <span>em curso</span></header><div>
+              <div class="form"><div class="inp">Resultado da chamada<b>Atendeu · interessada</b></div><div class="inp">Serviço<b>Casa de banho · WC suite</b></div><div class="inp">Orçamento do cliente<b>3.000 a 4.000 €</b></div><div class="inp">Prazo<b>Antes do Natal</b></div></div>
+              <div class="inp">Nota<b>Quer trocar a banheira por base de duche. 3.º andar sem elevador.</b></div>
+              <span class="u-sub">Grava sozinho ao sair do campo. <i class="mk">2</i></span>
+            </div></div>
+            <div class="fsec off"><header>Visita <span>quando for marcada</span></header></div>
+            <div class="fsec off"><header>Negócio <span>orçamento, proposta e contrato</span></header></div>
+            <div class="fsec off"><header>Financeiro <span>fatura e recibo</span></header></div>
+            <div class="fsec off"><header>Obra</header></div>
+          </div>
+          <div class="stack">
+            <div class="u-card"><h4>Cliente</h4><div class="kv"><span>Nome</span><b>Ana Martins</b><span>Telefone</span><b>912 000 111</b><span>Morada</span><b class="wrap">Rua das Flores 12, Sintra</b><span>Outros negócios</span><b>0</b></div></div>
+            <div class="u-card"><h4>Histórico <i class="mk">3</i></h4><div class="tlm">
+              <div class="c"><i></i><span>Chamada · 3 min<small>hoje 09:12 · Rúben</small></span></div>
+              <div class="d"><i></i><span>Passou a Contacto<small>hoje 09:12 · sozinho</small></span></div>
+              <div class="d"><i></i><span>Pedido pelo site<small>30/09 21:40</small></span></div>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>O botão muda com a fase:</b> Contactar, Marcar visita, Fechar levantamento, Criar orçamento, Enviar proposta, Emitir fatura, Validar pagamento, Abrir obra.</span></li>
+    <li><i class="mk">2</i><span><b>Edita-se no próprio campo.</b> Não há botão "Editar" nem modal. Só há modal para perder, anular ou apagar.</span></li>
+    <li><i class="mk">3</i><span><b>O histórico guarda tudo:</b> chamadas, emails, notas e mudanças de fase, com quem e quando.</span></li>
+  </ol>
+</div></section>
+
+<!-- 4 VISITA -->
+<section class="sc" id="s4"><div class="wrap">
+  <div class="hd"><div class="no">4<small>Visita</small></div><div><h2>A visita faz-se no telemóvel, e o que se mede vai direto para o orçamento.</h2><p>As perguntas vêm da linha de serviço (casa de banho, cozinha…) e o admin da empresa pode mudá-las. Ao fechar o levantamento, o negócio passa à fase Negócio e o orçamento nasce com as medidas.</p></div></div>
+  <div class="phone-wrap">
+    <div class="phone" role="img" aria-label="Levantamento da visita no telemóvel: local, necessidades, medidas e fotos">
+      <div class="scr">
+        <div class="top"><b>Visita · WC suite</b><small>Ana Martins · Rua das Flores 12, Sintra · 10:02</small></div>
+        <div class="pb">
+          <div class="sec"><h5>Local <span>✓</span></h5>
+            <div class="m"><span>Andar</span><b>3.º, sem elevador</b></div>
+            <div class="m"><span>Estacionar</span><div class="seg"><span>Fácil</span><span class="on">Difícil</span></div></div>
+            <div class="m"><span>Cortar água e luz</span><div class="seg"><span class="on">Sim</span><span>Não</span></div></div>
+          </div>
+          <div class="sec"><h5>Necessidades <span>✓</span></h5>
+            <div class="chips"><span class="on">Base de duche</span><span class="on">Sanita suspensa</span><span>Banheira</span><span class="on">Móvel 80 cm</span></div>
+          </div>
+          <div class="sec"><h5>Medidas <i class="mk">1</i></h5>
+            <div class="m"><span>Pavimento</span><span class="fld">6 m²</span></div>
+            <div class="m"><span>Paredes</span><span class="fld">18 m²</span></div>
+            <div class="m"><span>Pontos de água</span><span class="fld">3</span></div>
+            <div class="m"><span>Peças</span><span class="fld">4</span></div>
+          </div>
+          <div class="sec"><h5>Fotos <span>8</span></h5><div class="ph"><i></i><i></i><i></i><i class="add">+</i></div></div>
+          <span class="u-btn big">Fechar levantamento <i class="mk">2</i></span>
+        </div>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><i class="mk">1</i><span><b>Cada medida liga a um serviço do Catálogo:</b> os m² de pavimento vão para a demolição e o pavimento, e os pontos de água para a canalização.</span></li>
+      <li><i class="mk">2</i><span><b>"Fechar levantamento"</b> passa o negócio à fase Negócio e cria o orçamento a partir do modelo da linha de serviço.</span></li>
+      <li><i class="mk">3</i><span><b>Funciona sem rede.</b> Grava no telemóvel e envia quando houver ligação.</span></li>
+    </ol>
+  </div>
+</div></section>
+
+<!-- 5 ORÇAMENTO -->
+<section class="sc" id="s5"><div class="wrap">
+  <div class="hd"><div class="no">5<small>Negócio</small></div><div><h2>O orçamento vai buscar os custos ao Catálogo e mostra a margem real em cada linha.</h2><p>Só se escreve a medida, que já vem da visita. O custo de cada linha calcula-se pela receita do serviço: a mão de obra pelo custo médio por hora do técnico, mais os equipamentos e os consumíveis. A margem conta sobre o preço.</p></div></div>
+  <div class="app" role="img" aria-label="Fase Negócio: orçamento com custo, preço e margem por linha, e painel de margem total">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/negocios/1043#negocio</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a>Hoje</a><a class="on">Negócios</a><a>Clientes</a><a>Operações</a><a>Inventário</a><a>Catálogo e custos</a><a>Marketing</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="dhead">
+          <div class="u-row"><div><div class="u-h1">Remodelação WC suite · Sintra</div><div class="u-sub">Ana Martins · Casa de banho · Rúben</div></div><span class="pill pri">3.606,12 € · margem 31,9%</span></div>
+          <div class="phz"><span class="d">Lead</span><span class="d">Contacto</span><span class="d">Visita</span><span class="on">Negócio</span><span>Financeiro</span><span>Obra</span></div>
+        </div>
+        <div class="fsec cur"><header>Orçamento v1 <span>modelo "WC com base de duche" · medidas da visita de 02/10</span></header><div>
+          <div class="u-side">
+            <div class="u-tw"><table class="u-t">
+              <thead><tr><th>Serviço</th><th>Medida <i class="mk">1</i></th><th class="n">Custo <i class="mk">2</i></th><th class="n">Preço</th><th class="n">Margem</th></tr></thead>
+              <tbody>
+                <tr><td>Demolição e entulho<small>16,56 €/m² do Catálogo</small></td><td><span class="fld">6 m²</span></td><td class="n">99,36</td><td class="n">152,86</td><td class="n"><span class="pill ok">35,0%</span></td></tr>
+                <tr><td>Canalização<small>≈ 68,93 €/ponto</small></td><td><span class="fld">3 pt</span></td><td class="n">206,80</td><td class="n">318,15</td><td class="n"><span class="pill ok">35,0%</span></td></tr>
+                <tr class="hl"><td>Revestimento de parede <i class="mk">3</i><small>tabela 26,00 €/m² · sugerido 36,24 €</small></td><td><span class="fld">18 m²</span></td><td class="n">423,97</td><td class="n">468,00</td><td class="n"><span class="pill bad">9,4%</span></td></tr>
+                <tr><td>Pavimento cerâmico<small>26,21 €/m²</small></td><td><span class="fld">6 m²</span></td><td class="n">157,26</td><td class="n">241,94</td><td class="n"><span class="pill ok">35,0%</span></td></tr>
+                <tr><td>Montagem de louças<small>41,79 €/peça</small></td><td><span class="fld">4 pç</span></td><td class="n">167,16</td><td class="n">257,17</td><td class="n"><span class="pill ok">35,0%</span></td></tr>
+                <tr><td>Materiais<small>cerâmico, louças, base, torneiras</small></td><td><span class="u-sub">do modelo</span></td><td class="n">1.400,00</td><td class="n">2.168,00</td><td class="n"><span class="pill ok">35,4%</span></td></tr>
+                <tr class="sum"><td>Total sem IVA</td><td>37,8 h</td><td class="n">2.454,55</td><td class="n">3.606,12</td><td class="n">31,9%</td></tr>
+              </tbody>
+            </table></div>
+            <div class="u-card"><h4>Margem <span class="pill warn">31,9%</span></h4>
+              <div class="meter"><i style="width:63.8%;background:#E5A23A"></i><b style="left:56%" title="mínimo 28%"></b><b style="left:70%" title="alvo 35%"></b></div>
+              <div class="u-sub">mínimo 28% · alvo 35% (exemplo, configurável)</div>
+              <div class="kv"><span>Mão de obra</span><b>750,90 €</b><span>Equipamentos</span><b>11,48 €</b><span>Consumíveis</span><b>100,90 €</b><span>Estrutura</span><b>191,27 €</b><span>Materiais</span><b>1.400,00 €</b><span class="tot">Custo total</span><b class="tot">2.454,55 €</b><span class="tot">Lucro previsto</span><b class="tot">1.151,57 €</b></div>
+              <span class="u-btn">Verificar e enviar proposta</span>
+            </div>
+          </div>
+        </div></div>
+        <div class="fsec off"><header>Proposta <span>depois de verificada</span></header></div>
+        <div class="fsec off"><header>Contrato <span>na venda direta não há</span></header></div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>Só a medida se escreve</b>, e já vem da visita.</span></li>
+    <li><i class="mk">2</i><span><b>O custo vem do Catálogo</b> (screen 7). A linha guarda uma cópia do cálculo, para que o orçamento enviado não mude quando o Catálogo for atualizado.</span></li>
+    <li><i class="mk">3</i><span><b>A linha com margem baixa salta à vista,</b> com o preço que repõe a margem-alvo ao lado.</span></li>
+  </ol>
+</div></section>
+
+<!-- 6 VERIFICAR -->
+<section class="sc" id="s6"><div class="wrap">
+  <div class="hd"><div class="no">6<small>Negócio</small></div><div><h2>Antes de passar a proposta, a Olyvia verifica e diz o que falta.</h2><p>"Verificar e enviar proposta" abre esta lista na própria página, sem modal. Os bloqueios têm de ser resolvidos ou aprovados pela chefia. Os avisos ficam registados no histórico.</p></div></div>
+  <div class="app" role="img" aria-label="Verificação do orçamento antes de enviar: um bloqueio de margem, dois avisos e as verificações que passaram">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/negocios/1043#verificar</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a>Hoje</a><a class="on">Negócios</a><a>Clientes</a><a>Operações</a><a>Inventário</a><a>Catálogo e custos</a><a>Marketing</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="u-row"><div><div class="u-h1">Verificar antes de enviar</div><div class="u-sub">Orçamento v1 · WC suite · Ana Martins</div></div><span class="pill bad">1 bloqueio · 2 avisos</span></div>
+        <div class="u-side">
+          <div class="al">
+            <div class="x"><i>!</i><span><b>Margem abaixo do mínimo no revestimento <i class="mk">1</i></b><small>9,4% nesta linha, com um mínimo de 28%. O preço de tabela (26,00 €/m²) mal cobre o custo do Catálogo.</small></span><span class="u-btn">Usar 36,24 €/m²</span></div>
+            <div class="w"><i>!</i><span><b>Um técnico sem custo/hora <i class="mk">3</i></b><small>O ladrilhador ainda não tem custo/hora. Foi usado o médio do perfil (25,00 €/h).</small></span><span class="u-btn sec">Abrir perfil</span></div>
+            <div class="w"><i>!</i><span><b>Preço desatualizado</b><small>O cimento-cola tem o preço de há 8 meses.</small></span><span class="u-btn sec">Atualizar</span></div>
+            <div class="o"><i>✓</i><span><b>Nenhuma linha abaixo do custo</b></span><span></span></div>
+            <div class="o"><i>✓</i><span><b>Todas as linhas têm custo</b><small>6 de 6 com receita no Catálogo</small></span><span></span></div>
+            <div class="o"><i>✓</i><span><b>Sem desconto</b></span><span></span></div>
+          </div>
+          <div class="u-card"><h4>Se usar o preço sugerido</h4>
+            <div class="kv"><span>Preço</span><b>3.790,44 €</b><span>Custo</span><b>2.454,55 €</b><span class="tot">Margem</span><b class="tot">35,2%</b></div>
+            <span class="u-btn">Corrigir e enviar</span>
+            <span class="u-btn sec">Pedir aprovação à chefia <i class="mk">2</i></span>
+            <span class="u-sub">Para enviar com 9,4% nesta linha é preciso aprovação. Fica registado quem aprovou.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>Bloqueia:</b> o preço abaixo do custo e a margem abaixo do mínimo. A margem mínima configura-se por empresa e por linha de serviço.</span></li>
+    <li><i class="mk">2</i><span><b>A chefia pode aprovar uma exceção.</b> Em aberto: se a margem abaixo do mínimo bloqueia sempre ou se basta a aprovação.</span></li>
+    <li><i class="mk">3</i><span><b>Avisa sem bloquear:</b> uma linha sem custo, um técnico sem custo/hora, um desconto que come a margem e preços desatualizados.</span></li>
+  </ol>
+</div></section>
+
+<!-- 7 CATÁLOGO -->
+<section class="sc" id="s7"><div class="wrap">
+  <div class="hd"><div class="no">7<small>Catálogo</small></div><div><h2>A ficha do serviço tem a receita: é daqui que o orçamento tira o custo.</h2><p>Preenche-se uma vez por serviço. As 11 páginas de Produtos e Serviços passam a uma: cada item é um produto ou um serviço, numa só árvore de categorias, e as marcas, os atributos e as unidades passam a campos da ficha.</p></div></div>
+  <div class="app" role="img" aria-label="Ficha do serviço Demolição no Catálogo, com a receita por metro quadrado e as origens do custo">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/catalogo/servicos/demolicao</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a>Hoje</a><a>Negócios</a><a>Clientes</a><a>Operações</a><a>Inventário</a><a class="on">Catálogo e custos</a><a class="sub nw">Serviços</a><a class="sub">Produtos</a><a class="sub">Custos</a><a>Marketing</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="u-row"><div><div class="u-h1">Demolição e remoção de entulho</div><div class="u-sub">Serviço · Casa de banho › Preparação · medida: m² de pavimento</div></div><span class="pill pri">16,56 €/m² de custo</span></div>
+        <div class="trace">
+          <div class="u-card"><h4>Receita por m² <i class="mk">1</i> <span>as mesmas tarefas do plano da obra</span></h4>
+            <div class="u-tw"><table class="u-t" style="min-width:0"><thead><tr><th>Tarefa</th><th>Perfil</th><th class="n">min/m²</th></tr></thead><tbody>
+              <tr><td>Proteger e isolar</td><td>Servente</td><td class="n">5</td></tr>
+              <tr><td>Demolir pavimento</td><td>Demolição</td><td class="n">18</td></tr>
+              <tr><td>Remover entulho</td><td>Servente</td><td class="n">7</td></tr>
+              <tr class="sum"><td>Total</td><td></td><td class="n">30 = 0,5 h</td></tr>
+            </tbody></table></div>
+            <div class="kv"><span>Equipamento: martelo demolidor</span><b>0,5 h/m²</b><span>Consumíveis: sacos de entulho · discos</span><b>1 · 0,1 por m²</b></div>
+          </div>
+          <div class="src">
+            <div class="u-card"><h4>Mão de obra <i class="mk">2</i> <span>Custos › Perfis</span></h4><span class="u-sub">custo médio por hora do técnico, com todos os encargos · exemplo <span class="lock">salários: só administração</span></span><span class="val"><span class="fld y">25,00 €/h</span></span></div>
+            <div class="u-card"><h4>Equipamento <span>Custos › Equipamentos</span></h4><span class="u-sub">martelo: 1.000 € ÷ 1.500 h de vida</span><span class="val">0,67 €/h</span></div>
+            <div class="u-card"><h4>Estrutura <i class="mk">3</i> <span>Custos › Estrutura</span></h4><span class="u-sub">renda, viaturas, escritório ÷ horas produtivas</span><span class="val">5,06 €/h</span></div>
+          </div>
+        </div>
+        <div class="sumline"><b>12,50</b><span>mão de obra</span>+<b>0,33</b><span>equipamento</span>+<b>1,20</b><span>consumíveis</span>+<b>2,53</b><span>estrutura</span>=<b>16,56 €/m²</b><span>× 6 m² da visita =</span><b class="res">99,36 €</b></div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>Uma receita por serviço,</b> lida pelo orçamento e pela obra. A obra devolve o real e afina a receita.</span></li>
+    <li><i class="mk">2</i><span><b>O custo médio por hora do técnico</b> vem do RH, com todos os encargos. Só a administração vê os salários.</span></li>
+    <li><i class="mk">3</i><span><b>A estrutura no custo está em aberto.</b> Pelo método BMG fica dentro da margem; somá-la aqui sem baixar a margem cobra-a duas vezes.</span></li>
+  </ol>
+</div></section>
+
+<!-- 8 FINANCEIRO -->
+<section class="sc" id="s8"><div class="wrap">
+  <div class="hd"><div class="no">8<small>Financeiro</small></div><div><h2>O financeiro emite a fatura e valida o pagamento, e o recibo põe a obra em marcha.</h2><p>A fatura vai para o portal do cliente. Por agora, o pagamento é uma validação interna: quando o dinheiro entra, o financeiro carrega em "Validar pagamento" e o recibo é emitido sozinho. Quando o portal aceitar pagamentos, este passo faz-se sozinho.</p></div></div>
+  <div class="app" role="img" aria-label="Fase Financeiro do negócio: fatura emitida e enviada ao portal, botão Validar pagamento e o que acontece a seguir">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/negocios/1043#financeiro</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a>Hoje</a><a class="on">Negócios</a><a>Clientes</a><a>Operações</a><a>Inventário</a><a>Catálogo e custos</a><a>Marketing</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="dhead">
+          <div class="u-row"><div><div class="u-h1">Remodelação WC suite · Sintra</div><div class="u-sub">Ana Martins · contrato assinado a 07/10</div></div><span class="pill pri">3.606,12 € + IVA</span></div>
+          <div class="phz"><span class="d">Lead</span><span class="d">Contacto</span><span class="d">Visita</span><span class="d">Negócio</span><span class="on">Financeiro</span><span>Obra</span></div>
+        </div>
+        <div class="nextbox"><div><small>Próximo passo · Financeiro</small><b>Validar o pagamento da fatura FT 2026/418</b><span class="u-sub">Confirmar que o valor entrou na conta. O recibo é emitido ao validar.</span></div><span class="u-btn big">Validar pagamento <i class="mk">1</i></span></div>
+        <div class="u-side">
+          <div class="stack">
+            <div class="fsec dn"><header>Negócio <span>proposta aceite · contrato assinado 07/10</span></header></div>
+            <div class="fsec cur"><header>Financeiro <span>em curso</span></header><div>
+              <div class="u-tw"><table class="u-t" style="min-width:420px"><thead><tr><th>Documento</th><th>Estado</th><th class="n">Valor s/ IVA</th></tr></thead><tbody>
+                <tr><td>Fatura FT 2026/418<small>emitida 07/10 · enviada ao portal do cliente <i class="mk">2</i></small></td><td><span class="pill warn">Por pagar</span></td><td class="n">3.606,12</td></tr>
+                <tr><td>Recibo<small>emitido ao validar o pagamento</small></td><td><span class="pill mut">Ainda não</span></td><td class="n"></td></tr>
+              </tbody></table></div>
+            </div></div>
+            <div class="fsec off"><header>Obra <span>depois do recibo</span></header></div>
+          </div>
+          <div class="u-card"><h4>Ao emitir o recibo <i class="mk">3</i></h4>
+            <div class="chk">
+              <div><i class="w">1</i><span><b>Inventário</b><small>confirma os materiais e os equipamentos e cria a encomenda ao fornecedor, se faltar algo</small></span></div>
+              <div><i class="w">2</i><span><b>Operações</b><small>gera o plano da obra a partir do contrato, com os técnicos disponíveis do RH</small></span></div>
+              <div><i class="w">3</i><span><b>Cliente</b><small>recebe o recibo no portal</small></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>Só o papel Financeiro vê este botão.</b> Fica registado quem validou e quando.</span></li>
+    <li><i class="mk">2</i><span><b>A fatura vai para o portal do cliente.</b> No futuro, o cliente paga lá e a validação passa a ser automática.</span></li>
+    <li><i class="mk">3</i><span><b>O recibo é o gatilho.</b> Em aberto: se houver pagamentos em tranches, o gatilho é o primeiro recibo?</span></li>
+  </ol>
+</div></section>
+
+<!-- 9 HOJE FINANCEIRO -->
+<section class="sc" id="s9"><div class="wrap">
+  <div class="hd"><div class="no">9<small>Financeiro</small></div><div><h2>O financeiro não precisa de uma área nova: o Hoje dele mostra o que tem para fazer.</h2><p>É o mesmo ecrã Hoje de toda a gente, filtrado pelo papel. Para o financeiro, mostra as faturas por emitir e os pagamentos por validar, com o botão da ação em cada linha.</p></div></div>
+  <div class="app" role="img" aria-label="Ecrã Hoje do financeiro com faturas por emitir e pagamentos por validar">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/hoje</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a class="on">Hoje</a><a>Negócios</a><a>Clientes</a><a>Operações</a><a>Inventário</a><a>Catálogo e custos</a><a>Marketing</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="u-row"><div><div class="u-h1">Bom dia, Sandra</div><div class="u-sub">Financeiro · quinta, 08/10</div></div><span class="pill warn">4 por tratar</span></div>
+        <div class="u-grid2">
+          <div class="u-card"><h4>Pagamentos por validar <span>faturas no portal</span></h4>
+            <div class="u-item me"><div>Ana Martins · WC suite<small>FT 2026/418 · 3.606,12 € · emitida 07/10</small></div><span class="u-btn">Validar <i class="mk">1</i></span></div>
+            <div class="u-item"><div>Carlos Duarte · Cozinha<small>FT 2026/411 · 9.870,00 € · vence amanhã</small></div><span class="u-btn sec">Validar</span></div>
+            <div class="u-item"><div>Condomínio Rua Direita<small>FT 2026/402 · 1.250,00 € · vencida há 5 dias</small></div><span class="pill bad">Vencida</span></div>
+          </div>
+          <div class="u-card"><h4>Faturas por emitir <span>contratos assinados</span></h4>
+            <div class="u-item"><div>Tiago Almeida · Cozinha<small>contrato assinado 08/10 · 11.300,00 €</small></div><span class="u-btn">Emitir <i class="mk">2</i></span></div>
+          </div>
+        </div>
+        <div class="u-card"><h4>Esta semana</h4><div class="kv"><span>Recibos emitidos</span><b>6</b><span>Valor recebido</span><b>28.410,00 €</b><span>Obras postas em marcha</span><b>6</b></div></div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>Validar aqui</b> faz o mesmo que na página do negócio, sem abrir mais nada.</span></li>
+    <li><i class="mk">2</i><span><b>"Emitir" gera a fatura a partir do contrato,</b> ou da proposta na venda direta. Em aberto: emite-se na Olyvia ou num programa externo (PHC, Moloni…)?</span></li>
+    <li><i class="mk">3</i><span><b>A mesma ideia serve o armazém e as obras:</b> cada papel vê no Hoje o que lhe cabe.</span></li>
+  </ol>
+</div></section>
+
+<!-- 10 INVENTÁRIO -->
+<section class="sc" id="s10"><div class="wrap">
+  <div class="hd"><div class="no">10<small>Inventário</small></div><div><h2>Depois do recibo, o Inventário compara o que a obra precisa com o que há.</h2><p>A lista vem do orçamento: os materiais das linhas e os equipamentos das receitas dos serviços. O que falta já vem numa encomenda ao fornecedor, pronta a confirmar.</p></div></div>
+  <div class="app" role="img" aria-label="Inventário: materiais e equipamentos da obra da Ana Martins, com o que há, o que falta e a encomenda ao fornecedor">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/inventario/obras/1043</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a>Hoje</a><a>Negócios</a><a>Clientes</a><a>Operações</a><a class="on">Inventário</a><a class="sub nw">Materiais por obra</a><a class="sub">Stocks</a><a class="sub">Encomendas</a><a class="sub">Fornecedores</a><a>Catálogo e custos</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="u-row"><div><div class="u-h1">Materiais · WC suite · Ana Martins</div><div class="u-sub">Recibo emitido 08/10 · obra prevista para 13/10</div></div><span class="pill warn">3 em falta</span></div>
+        <div class="u-tw"><table class="u-t">
+          <thead><tr><th>Material ou equipamento</th><th class="n">Precisa</th><th class="n">Há</th><th>Estado <i class="mk">2</i></th></tr></thead>
+          <tbody>
+            <tr class="hl"><td>Cerâmico de parede 30×60<small>18 m² + 10% de quebras</small></td><td class="n">20 m²</td><td class="n">12 m²</td><td><span class="pill bad">Faltam 8 m²</span></td></tr>
+            <tr class="hl"><td>Pavimento cerâmico 60×60<small>6 m² + 10% de quebras</small></td><td class="n">7 m²</td><td class="n">0</td><td><span class="pill bad">Faltam 7 m²</span></td></tr>
+            <tr class="hl"><td>Sanita suspensa com estrutura</td><td class="n">1</td><td class="n">0</td><td><span class="pill bad">Falta 1</span></td></tr>
+            <tr><td>Base de duche 80×120</td><td class="n">1</td><td class="n">1</td><td><span class="pill ok">Reservado</span></td></tr>
+            <tr><td>Cimento-cola · sacos de 25 kg</td><td class="n">6</td><td class="n">40</td><td><span class="pill ok">Reservado</span></td></tr>
+            <tr><td>Martelo demolidor<small>equipamento</small></td><td class="n">3 h</td><td class="n">livre 13/10</td><td><span class="pill ok">Reservado</span></td></tr>
+          </tbody>
+        </table></div>
+        <div class="nextbox"><div><small>Encomenda ao fornecedor <i class="mk">1</i></small><b>EF 2026/77 · Cerâmica do Centro (exemplo) · 3 linhas</b><span class="u-sub">Entrega pedida até 12/10, um dia antes da obra.</span></div><div class="u-row"><span class="u-btn sec">Rever</span><span class="u-btn big">Confirmar encomenda</span></div></div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>A encomenda vem preenchida</b> com o fornecedor habitual de cada material. Em aberto: é enviada sozinha ou espera por quem a confirme?</span></li>
+    <li><i class="mk">2</i><span><b>O que há fica reservado</b> para esta obra, para não ser gasto noutra.</span></li>
+    <li><i class="mk">3</i><span><b>Quando a encomenda chega,</b> o estado passa a "Reservado" e as Operações ficam a saber que podem começar.</span></li>
+  </ol>
+</div></section>
+
+<!-- 11 OPERAÇÕES -->
+<section class="sc" id="s11"><div class="wrap">
+  <div class="hd"><div class="no">11<small>Operações</small></div><div><h2>As Operações recebem o contrato e o plano já vem feito, com os técnicos do RH.</h2><p>As tarefas vêm das receitas dos serviços vendidos, as mesmas que deram o custo. A Olyvia cruza com o RH (competências e disponibilidade) e propõe quem faz o quê e quando. Os conflitos aparecem marcados.</p></div></div>
+  <div class="app" role="img" aria-label="Plano da obra gerado com as tarefas por dia e os técnicos atribuídos, com um conflito de férias assinalado">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/operacao/obras/1043/plano</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a>Hoje</a><a>Negócios</a><a>Clientes</a><a class="on">Operações</a><a>Inventário</a><a>Catálogo e custos</a><a>Marketing</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="u-row"><div><div class="u-h1">Plano · WC suite · Ana Martins</div><div class="u-sub">Gerado do contrato a 08/10 · 4 fases · 19 tarefas · 37,8 h de equipa</div></div><div class="u-row"><span class="pill warn">1 conflito</span><span class="u-btn">Aprovar plano</span></div></div>
+        <div class="gw"><div class="gantt">
+          <div class="h">Fase</div><div class="h">seg 13</div><div class="h">ter 14</div><div class="h">qua 15</div><div class="h">qui 16</div><div class="h">sex 17</div>
+          <div class="t">Demolição<small>3 h · servente e demolição</small></div><div class="gb"><i>João · Rui</i></div><div></div><div></div><div></div><div></div>
+          <div class="t">Canalização<small>6,2 h · canalizador</small></div><div></div><div class="gb"><i>Marco</i></div><div></div><div></div><div></div>
+          <div class="t">Revestimento e pavimento <i class="mk">2</i><small>16,3 h · ladrilhador</small></div><div></div><div></div><div class="gb span2"><i class="warn">Sérgio · de férias a 16/10</i></div><div></div>
+          <div class="t">Louças e acabamentos<small>12,3 h · canalizador</small></div><div></div><div></div><div></div><div></div><div class="gb"><i>Marco</i></div>
+        </div></div>
+        <div class="u-grid2">
+          <div class="u-card"><h4>Equipa proposta <i class="mk">1</i> <span>do RH</span></h4>
+            <div class="u-item"><div><span class="who"><i>JS</i>João Silva</span><small>Servente · livre na segunda</small></div><span class="pill ok">Disponível</span></div>
+            <div class="u-item"><div><span class="who"><i>MA</i>Marco Antunes</span><small>Canalizador · livre na terça e na sexta</small></div><span class="pill ok">Disponível</span></div>
+            <div class="u-item"><div><span class="who"><i>SF</i>Sérgio Faria</span><small>Ladrilhador · férias a 16/10</small></div><span class="pill warn">Conflito</span></div>
+          </div>
+          <div class="u-card"><h4>Resolver o conflito</h4>
+            <div class="al">
+              <div class="w"><i>!</i><span><b>Trocar por Hugo Neves</b><small>Ladrilhador · livre quarta e quinta · mesmo custo/hora</small></span><span class="u-btn">Trocar</span></div>
+              <div class="o"><i>→</i><span><b>Ou adiar o revestimento</b><small>O Sérgio volta a 19/10 · a obra acaba a 21/10</small></span><span class="u-btn sec">Adiar</span></div>
+            </div>
+            <span class="u-sub">Materiais: 3 em encomenda, com entrega até 12/10 <i class="mk">3</i></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>O cruzamento com o RH</b> usa as competências e a disponibilidade, incluindo as férias e as outras obras. Em aberto: o que mais conta?</span></li>
+    <li><i class="mk">2</i><span><b>Os conflitos vêm com soluções:</b> trocar o técnico ou adiar a tarefa, com o efeito na data de fim.</span></li>
+    <li><i class="mk">3</i><span><b>O plano só arranca com os materiais garantidos.</b> A linha do Inventário mostra-o.</span></li>
+  </ol>
+</div></section>
+
+<!-- 12 NEGÓCIO: OBRA -->
+<section class="sc" id="s12"><div class="wrap">
+  <div class="hd"><div class="no">12<small>Obra</small></div><div><h2>No negócio, a fase Obra mostra o estado e, no fim, a margem real.</h2><p>O comercial não precisa de ir às Operações para saber como está a obra. Quando acaba, o previsto contra o real corrige a receita dos serviços no Catálogo, e o orçamento seguinte sai mais certo.</p></div></div>
+  <div class="app" role="img" aria-label="Fase Obra do negócio: obra concluída com o previsto contra o real e a margem real">
+    <div class="bar"><i></i><i></i><i></i><span class="url">olyvia-ai.com/negocios/1043#obra</span></div>
+    <div class="body">
+      <div class="side"><div class="logo">oly<em>v</em>ia</div><a>Hoje</a><a class="on">Negócios</a><a>Clientes</a><a>Operações</a><a>Inventário</a><a>Catálogo e custos</a><a>Marketing</a><span class="spacer"></span><a>Definições</a></div>
+      <div class="main">
+        <div class="dhead">
+          <div class="u-row"><div><div class="u-h1">Remodelação WC suite · Sintra</div><div class="u-sub">Ana Martins · obra concluída a 18/10, um dia depois do previsto</div></div><div class="u-row"><span class="pill warn">margem real 29,9%</span><span class="pill mut">orçada 31,9%</span></div></div>
+          <div class="phz"><span class="d">Lead</span><span class="d">Contacto</span><span class="d">Visita</span><span class="d">Negócio</span><span class="d">Financeiro</span><span class="on">Obra</span></div>
+        </div>
+        <div class="u-side">
+          <div class="u-card"><h4>Previsto contra real <i class="mk">1</i> <span>horas de equipa</span></h4>
+            <div class="bars">
+              <div class="b"><span>Demolição</span><div class="tr"><i class="o" style="width:15%"></i><i class="r" style="width:14%"></i></div><em>2,8 h<small>prev. 3,0</small></em></div>
+              <div class="b"><span>Canalização</span><div class="tr"><i class="o" style="width:31%"></i><i class="r" style="width:30%"></i></div><em>6,0 h<small>prev. 6,2</small></em></div>
+              <div class="b"><span>Revestimento</span><div class="tr"><i class="o" style="width:81%"></i><i class="r over" style="width:100%"></i></div><em>20,1 h<small>prev. 16,3</small></em></div>
+              <div class="b"><span>Louças</span><div class="tr"><i class="o" style="width:61%"></i><i class="r over" style="width:63%"></i></div><em>12,6 h<small>prev. 12,3</small></em></div>
+            </div>
+            <div class="legend"><span><i style="background:#C9BEE6"></i>previsto</span><span><i style="background:var(--ui-pri)"></i>real</span><span><i style="background:#E5A23A"></i>acima do previsto</span></div>
+          </div>
+          <div class="u-card"><h4>O que se aprende <i class="mk">2</i></h4>
+            <div class="kv"><span>Horas previstas</span><b>37,8 h</b><span>Horas reais</span><b>41,5 h</b><span class="tot">Margem real</span><b class="tot">29,9%</b></div>
+            <span class="u-sub">O revestimento levou mais 23% do que a receita prevê. Proposta: subir de 0,9 para 1,1 h/m² no Catálogo.</span>
+            <span class="u-btn">Atualizar a receita</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <ol class="notes">
+    <li><i class="mk">1</i><span><b>O real vem das Operações:</b> as horas registadas pelos técnicos e os materiais gastos.</span></li>
+    <li><i class="mk">2</i><span><b>A Olyvia propõe corrigir a receita,</b> mas só muda com a confirmação de quem gere o Catálogo.</span></li>
+    <li><i class="mk">3</i><span><b>O negócio fecha aqui.</b> O cliente fica em Clientes, com o histórico, pronto para o próximo pedido.</span></li>
+  </ol>
+</div></section>
+
+<section style="padding-block:var(--s4) var(--s5);border-top:1px solid var(--line)">
+  <div class="wrap" style="display:grid;gap:var(--s2)">
+    <span class="eyebrow">Em aberto</span>
+    <div class="decs">
+      <div class="dec"><span class="i">1</span><span class="q">A fatura emite-se na Olyvia ou num programa externo?</span><span class="r">PHC, Moloni… Muda a screen 9 e o botão "Emitir".</span></div>
+      <div class="dec"><span class="i">2</span><span class="q">Há pagamentos em tranches?</span><span class="r">Se houver, o gatilho para o Inventário e para as Obras é o primeiro recibo?</span></div>
+      <div class="dec"><span class="i">3</span><span class="q">Qual é a margem mínima, e quem aprova abaixo dela?</span><span class="r">Por empresa e por linha de serviço. Bloqueia sempre, ou basta a aprovação da chefia?</span></div>
+      <div class="dec"><span class="i">4</span><span class="q">A encomenda ao fornecedor é automática?</span><span class="r">Ou fica à espera de quem a confirme (screen 10)?</span></div>
+      <div class="dec"><span class="i">5</span><span class="q">O que conta no cruzamento com o RH?</span><span class="r">A disponibilidade, as competências, ou as duas?</span></div>
+      <div class="dec"><span class="i">6</span><span class="q">A estrutura entra no custo?</span><span class="r">Pelo método BMG fica dentro da margem. Somá-la sem baixar a margem cobra-a duas vezes.</span></div>
+    </div>
+  </div>
+</section>
