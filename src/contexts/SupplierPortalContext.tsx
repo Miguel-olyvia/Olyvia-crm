@@ -24,6 +24,11 @@ interface SupplierPortalContextValue {
   /** Utilizador do portal ativo, com conta ativa e pelo menos um acesso ativo. */
   active: boolean;
   firstLogin: boolean;
+  /**
+   * Dados da empresa já confirmados (passo obrigatório depois da password).
+   * Sempre true para utilizadores de consulta e enquanto a BD não devolver o campo.
+   */
+  profileConfirmed: boolean;
   canManageCatalog: boolean;
   user: SpWhoamiUser | null;
   account: SpWhoamiAccount | null;
@@ -33,6 +38,8 @@ interface SupplierPortalContextValue {
   refresh: () => Promise<void>;
   /** Depois de definir a password no modal de primeiro acesso. */
   markPasswordChanged: () => void;
+  /** Depois de gravar os dados no passo "Confirme os seus dados". */
+  markProfileConfirmed: () => void;
 }
 
 const SupplierPortalContext = createContext<SupplierPortalContextValue | undefined>(undefined);
@@ -42,6 +49,7 @@ interface State {
   loadError: boolean;
   active: boolean;
   firstLogin: boolean;
+  profileConfirmed: boolean;
   canManageCatalog: boolean;
   user: SpWhoamiUser | null;
   account: SpWhoamiAccount | null;
@@ -54,6 +62,7 @@ const INITIAL: State = {
   loadError: false,
   active: false,
   firstLogin: false,
+  profileConfirmed: true,
   canManageCatalog: false,
   user: null,
   account: null,
@@ -105,6 +114,8 @@ export function SupplierPortalProvider({ children }: { children: ReactNode }) {
       loadError: false,
       active,
       firstLogin: whoami.first_login,
+      // undefined = migration ainda não aplicada → não bloquear o portal.
+      profileConfirmed: whoami.profile_confirmed !== false,
       canManageCatalog: active && whoami.can_manage_catalog,
       user: whoami.user,
       account: active ? whoami.account : null,
@@ -149,9 +160,13 @@ export function SupplierPortalProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, firstLogin: false }));
   }, []);
 
+  const markProfileConfirmed = useCallback(() => {
+    setState((s) => ({ ...s, profileConfirmed: true }));
+  }, []);
+
   const value = useMemo<SupplierPortalContextValue>(
-    () => ({ ...state, refresh: load, markPasswordChanged }),
-    [state, load, markPasswordChanged],
+    () => ({ ...state, refresh: load, markPasswordChanged, markProfileConfirmed }),
+    [state, load, markPasswordChanged, markProfileConfirmed],
   );
 
   return <SupplierPortalContext.Provider value={value}>{children}</SupplierPortalContext.Provider>;
