@@ -33,7 +33,7 @@ A coluna da esquerda usa os nomes atuais do menu, no formato Secção › Págin
 
 ## 3. As fases do negócio
 
-**Lead → Contacto → Visita → Proposta → Financeiro → Obra**
+**Lead → Contacto → Visita → Negócio → Financeiro → Obra**
 
 A fase avança pelos factos (por exemplo, quando a visita é marcada ou o contrato é assinado). Não se arrasta à mão.
 
@@ -42,11 +42,11 @@ A fase avança pelos factos (por exemplo, quando a visita é marcada ou o contra
 | 1 | **Lead** | Comercial / automático | Entra o pedido: formulário, campanha ou registo à mão. Só são precisos o nome e o contacto | O comercial fala com o cliente |
 | 2 | **Contacto** | Comercial | Qualifica o pedido e marca a visita | A visita fica marcada |
 | 3 | **Visita** | Comercial / técnico | No telemóvel, faz o levantamento do local e das necessidades: ficha do local, medidas, fotos | O levantamento fica fechado |
-| 4 | **Proposta** | Comercial | As medidas da visita criam o **orçamento**, que vai buscar os custos ao Catálogo, mostra a margem real e dá alertas. Depois vêm a **proposta** e o **contrato**. Na **venda direta** só há proposta | O contrato é assinado, ou a proposta é aceite na venda direta |
+| 4 | **Negócio** | Comercial | As medidas da visita criam o **orçamento**, que vai buscar os custos ao Catálogo, mostra a margem real e dá alertas. Depois vêm a **proposta** e o **contrato**. Na **venda direta** só há proposta | O contrato é assinado, ou a proposta é aceite na venda direta |
 | 5 | **Financeiro** | Departamento financeiro | Emite a **fatura**, que vai para o portal do cliente. Quando a fatura é paga, valida o pagamento e o **recibo** é emitido | O recibo é emitido |
 | 6 | **Obra** | Operações | Executa o plano com os técnicos e os materiais. No fim compara o previsto com o real | A obra é concluída |
 
-### Fase 4 em detalhe: o orçamento vai buscar os custos ao Catálogo
+### Fase 4 em detalhe (Negócio): o orçamento vai buscar os custos ao Catálogo
 
 O orçamento usa a atualização do **Catálogo e custos** que já estava planeada (proposta de 06/10, etapas 2 e 3 do `plano-execucao.md`).
 
@@ -64,7 +64,7 @@ O orçamento usa a atualização do **Catálogo e custos** que já estava planea
 3. Em cada linha e no total aparecem o **preço**, o **custo** e a **margem real**. Exemplo: WC suite com preço de 3.606,12 €, custo de 2.454,55 € e margem de 31,9%.
 4. A linha guarda uma cópia do cálculo, para que o orçamento enviado não mude quando o Catálogo for atualizado.
 
-**Alertas antes de passar a proposta.** O botão "Enviar proposta" verifica primeiro:
+**Alertas antes de enviar a proposta.** O botão "Enviar proposta" verifica primeiro:
 
 | Alerta | Exemplo | Efeito |
 |---|---|---|
@@ -90,7 +90,7 @@ O orçamento usa a atualização do **Catálogo e custos** que já estava planea
 
 ### Lista
 - Um botão **"Novo negócio"**, que pede só o nome e o contacto.
-- Colunas por fase: Lead · Contacto · Visita · Proposta · Financeiro · Obra.
+- Colunas por fase: Lead · Contacto · Visita · Negócio · Financeiro · Obra.
 - Cada cartão mostra o cliente, o serviço, o valor e a próxima ação.
 - Um clique abre o negócio.
 
@@ -99,7 +99,7 @@ O orçamento usa a atualização do **Catálogo e custos** que já estava planea
 - **No meio, de cima para baixo:** uma secção por fase:
   - Pedido;
   - Visita;
-  - Proposta, com o orçamento, a proposta e o contrato;
+  - Negócio, com o orçamento, a proposta e o contrato;
   - Financeiro, com a fatura e o recibo;
   - Obra, com uma ligação para Operações.
   - A secção da fase atual vem aberta; as futuras aparecem a cinzento.
@@ -112,7 +112,7 @@ O botão do próximo passo muda com a fase:
 | Lead | Contactar |
 | Contacto | Marcar visita |
 | Visita | Fechar levantamento |
-| Proposta | Criar orçamento → Enviar proposta → Enviar contrato |
+| Negócio | Criar orçamento → Enviar proposta → Enviar contrato |
 | Financeiro | Emitir fatura → Validar pagamento |
 | Obra | Abrir obra |
 
@@ -145,7 +145,7 @@ O botão do próximo passo muda com a fase:
 | 3 | Negócios: criar | Só nome e contacto |
 | 4 | Negócio: página, fase Lead/Contacto | Cabeçalho, barra das fases, histórico |
 | 5 | Negócio: Visita no telemóvel | Ficha do local, necessidades, medidas, fotos |
-| 6 | Negócio: Proposta | Orçamento a partir das medidas, com o custo vindo do Catálogo e a margem real por linha; proposta e contrato; variante de venda direta |
+| 6 | Negócio: fase Negócio | Orçamento a partir das medidas, com o custo vindo do Catálogo e a margem real por linha; proposta e contrato; variante de venda direta |
 | 6a | Orçamento: verificar antes de enviar | A lista de alertas (bloqueios e avisos) e o pedido de aprovação da chefia |
 | 6b | Catálogo: ficha do serviço | A receita do serviço: medida, mão de obra (custo médio por hora do técnico), equipamentos, consumíveis, custo e preço |
 | 7 | Negócio: Financeiro | Fatura emitida, enviada ao portal, "Validar pagamento", recibo |
