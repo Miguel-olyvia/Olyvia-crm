@@ -42,6 +42,13 @@ docs/
 # ...menos os do modulo de Operacoes, que fazem parte dele e sao ligados
 # a partir do operacao-app/README.md.
 !operacao-app/docs/
+# ...e menos o pacote da reunião de administração de 06/10/2026. O git não
+# desce a uma pasta já excluída, por isso a raiz docs/ é reaberta e o conteúdo
+# dela excluído a seguir; só assim a negação da subpasta chega a ser avaliada.
+!/docs/
+/docs/*
+!/docs/administracao-2026-10-06/
+!/docs/negocios-2026-10-08/
 ficheiros/
 
 .env
