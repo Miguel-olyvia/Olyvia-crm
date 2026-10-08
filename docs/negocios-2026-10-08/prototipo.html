@@ -1,0 +1,860 @@
+<title>Olyvia Negócios Protótipo</title>
+<style>
+/* Layout: a app como se estivesse no ar. Menu escuro à esquerda, barra de cima com o papel de quem está a usar, conteúdo claro. Um só tema por escolha (é o aspeto da app). */
+:root{
+  color-scheme: light;
+  --bg:#F6F5F8; --card:#FFFFFF; --soft:#F7F7F8; --soft2:#EFEEF2; --fg:#1C1B20; --mut:#6B6873; --line:#E6E4EA;
+  --pri:#6A4FC0; --pri-2:#5A40AE; --pri-soft:#EFEBF8; --pri-line:#C9BEE6;
+  --side:#1F1E24; --side2:#2E2C35; --side-fg:#B9B5C2; --side-hi:#B7A6E8;
+  --ok:#15803D; --ok-bg:#E3F5E9; --warn:#B45309; --warn-bg:#FDF0DC; --amber:#E5A23A; --bad:#C2263B; --bad-bg:#FCE4E8;
+  --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--fg);font:13.5px/1.45 var(--font);-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--pri);outline-offset:2px}
+.shell{display:grid;grid-template-columns:212px minmax(0,1fr);height:100%}
+.side{background:var(--side);color:var(--side-fg);padding:18px 12px;display:flex;flex-direction:column;gap:3px;overflow-y:auto}
+.logo{font-weight:800;font-size:18px;letter-spacing:-.02em;margin:0 8px 16px;color:#fff}
+.logo em{font-style:normal;color:var(--side-hi)}
+.side button{all:unset;display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border-radius:8px;color:var(--side-fg);font-weight:500;cursor:pointer}
+.side button:hover{background:#28262E;color:#fff}
+.side button.on{background:var(--side2);color:#fff;box-shadow:inset 3px 0 0 var(--side-hi)}
+.side button:focus-visible{outline:2px solid var(--side-hi)}
+.side button small{font-size:11px;background:#4B3F78;color:#fff;border-radius:99px;padding:0 7px;min-width:20px;text-align:center}
+.side .sp{flex:1;min-height:16px}
+.side .proto{font-size:11px;color:#8C8796;margin:10px 8px 0;line-height:1.4}
+.right{display:grid;grid-template-rows:auto minmax(0,1fr);min-width:0;height:100%}
+.top{display:flex;align-items:center;gap:12px;padding:10px 24px;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+.top .search{flex:1 1 220px;min-width:0;max-width:420px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:var(--soft)}
+.top .who{display:flex;align-items:center;gap:8px;margin-left:auto}
+.top .who label{font-size:12px;color:var(--mut)}
+.top select{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#fff}
+.av{width:28px;height:28px;border-radius:50%;background:var(--pri-soft);color:var(--pri);display:grid;place-items:center;font-weight:700;font-size:11.5px;flex:none}
+main{overflow-y:auto;padding:24px 28px 60px;display:grid;gap:18px;align-content:start;min-width:0}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.h1{font-size:20px;font-weight:700;letter-spacing:-.01em;margin:0}
+.sub{color:var(--mut);font-size:12.5px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:12px;min-width:0;align-content:start}
+.card h3{margin:0;font-size:13.5px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.card h3 span{font-weight:500;color:var(--mut);font-size:12px}
+.g2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.g3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.withside{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:16px;align-items:start}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;font-weight:600;font-size:12.5px;padding:7px 12px;border-radius:8px;background:var(--pri);color:#fff;border:1px solid var(--pri);cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--pri-2)}
+.btn.sec{background:#fff;color:var(--fg);border-color:var(--line)}
+.btn.sec:hover{background:var(--soft)}
+.btn.big{font-size:14px;padding:10px 16px}
+.btn.sm{font-size:11.5px;padding:4px 9px}
+.btn.bad{background:var(--bad);border-color:var(--bad)}
+.btn[disabled]{background:var(--soft2);border-color:var(--line);color:var(--mut);cursor:not-allowed}
+.link{all:unset;color:var(--pri);font-weight:600;cursor:pointer}
+.link:hover{text-decoration:underline}
+.pill{display:inline-block;font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:99px;white-space:nowrap}
+.pill.ok{background:var(--ok-bg);color:var(--ok)} .pill.warn{background:var(--warn-bg);color:var(--warn)} .pill.bad{background:var(--bad-bg);color:var(--bad)} .pill.pri{background:var(--pri-soft);color:var(--pri)} .pill.mut{background:var(--soft2);color:var(--mut)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:99px;padding:5px 11px;font-weight:600;font-size:12px;cursor:pointer}
+.chip.on{border-color:var(--pri);background:var(--pri-soft);color:var(--pri)}
+.kv{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:7px 14px;font-size:13px;align-items:baseline}
+.kv span{color:var(--mut);min-width:0} .kv b{font-variant-numeric:tabular-nums;text-align:right}
+.kv .tot{border-top:1px solid var(--line);padding-top:6px;color:var(--fg);font-weight:700}
+.empty{color:var(--mut);font-size:12.5px;padding:6px 0}
+.item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;padding-top:11px;border-top:1px solid var(--line)}
+.item:first-of-type{border-top:0;padding-top:0}
+.item small{display:block;color:var(--mut);font-size:12px}
+.item .t{cursor:pointer}
+.item .t:hover b{color:var(--pri)}
+/* campos */
+.f{display:grid;gap:3px;font-size:11.5px;color:var(--mut);min-width:0}
+.f input,.f select,.f textarea{border:1px solid var(--line);border-radius:7px;padding:6px 9px;background:#fff;font-size:13px;width:100%;min-width:0}
+.f input:focus,.f select:focus,.f textarea:focus{outline:none;border-color:var(--pri);box-shadow:0 0 0 3px var(--pri-soft)}
+.f input[readonly]{background:var(--soft);color:var(--mut)}
+.form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.form4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.num{width:84px!important;text-align:right;font-variant-numeric:tabular-nums}
+.err{color:var(--bad);font-size:12px}
+/* tabela */
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:#fff}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font-size:11.5px;font-weight:600;color:var(--mut);text-align:left;padding:9px 12px;background:var(--soft);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:middle}
+tr:last-child td{border-bottom:0}
+td small{display:block;color:var(--mut);font-size:11.5px}
+.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tr.sum td{font-weight:700;background:var(--soft)}
+tr.hl td{background:#FFF5F7}
+td input{border:1px solid var(--pri-line);background:#F8F7FB;border-radius:6px;padding:3px 6px;width:70px;text-align:right;font-weight:600;color:var(--pri);font-variant-numeric:tabular-nums}
+td input:focus{outline:none;box-shadow:0 0 0 3px var(--pri-soft)}
+td input[readonly]{border-color:var(--line);background:var(--soft);color:var(--fg)}
+/* negócios: quadro */
+.kb{display:grid;grid-template-columns:repeat(6,minmax(168px,1fr));gap:10px;overflow-x:auto;padding-bottom:6px;align-items:start}
+.col{background:var(--soft2);border-radius:10px;padding:10px;display:grid;gap:8px;align-content:start;min-height:120px}
+.col h4{margin:0 2px 2px;font-size:12px;display:flex;justify-content:space-between}
+.col h4 span{color:var(--mut);font-weight:500}
+.kc{all:unset;box-sizing:border-box;background:#fff;border:1px solid var(--line);border-radius:9px;padding:9px 10px;display:grid;gap:3px;font-size:12.5px;cursor:pointer}
+.kc:hover{border-color:var(--pri-line)}
+.kc small{color:var(--mut);font-size:11.5px}
+.kc .nx{font-size:11.5px;color:var(--pri);font-weight:600}
+.kc .nx.late{color:var(--bad)}
+.kc .nx.wait{color:var(--mut)}
+.kc.flash{animation:flash 1.6s ease-out}
+@keyframes flash{from{box-shadow:0 0 0 4px var(--pri-line)}to{box-shadow:0 0 0 0 transparent}}
+.newc{background:#fff;border:1.5px dashed var(--pri);border-radius:9px;padding:10px;display:grid;gap:7px}
+/* página do negócio */
+.dhead{background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px 18px;display:grid;gap:14px}
+.back{all:unset;color:var(--mut);font-size:12.5px;cursor:pointer}
+.back:hover{color:var(--pri)}
+.phz{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:5px}
+.phz button{all:unset;cursor:pointer;border-top:4px solid var(--line);padding-top:6px;font-size:11.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.phz button.d{border-color:var(--pri-line);color:var(--fg)}
+.phz button.on{border-color:var(--pri);color:var(--pri);font-weight:700}
+.next{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center;border:1px solid #DCD4F0;background:linear-gradient(90deg,#F3F0FA,#FAF9FC);border-radius:12px;padding:16px 18px}
+.next > div{display:grid;gap:2px;min-width:0;flex:1 1 280px}
+.next small{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--pri);font-weight:700}
+.next b{font-size:16px}
+.next.done{background:var(--ok-bg);border-color:#BFE3CB}
+.next.done small{color:var(--ok)}
+.stack{display:grid;gap:10px;min-width:0;align-content:start}
+.sec{background:#fff;border:1px solid var(--line);border-radius:12px;display:grid;min-width:0;scroll-margin-top:12px}
+.sec > header{display:flex;align-items:center;gap:8px;padding:12px 16px;font-weight:700;flex-wrap:wrap}
+.sec > header .r{margin-left:auto;font-weight:500;color:var(--mut);font-size:12px}
+.sec > .in{padding:0 16px 16px;display:grid;gap:12px;min-width:0}
+.sec.cur{border-color:var(--pri-line);box-shadow:0 0 0 3px var(--pri-soft)}
+.sec.off{background:var(--soft);border-style:dashed}
+.sec.off > header{color:var(--mut);font-weight:600}
+.sec .ck{color:var(--ok)}
+.sec.pulse{animation:flash 1.6s ease-out}
+.slots{display:flex;flex-wrap:wrap;gap:6px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{all:unset;padding:5px 10px;font-size:12px;color:var(--mut);cursor:pointer}
+.seg button.on{background:var(--pri);color:#fff;font-weight:600}
+.tl{display:grid;gap:2px}
+.tl div{display:grid;grid-template-columns:14px minmax(0,1fr);gap:10px;align-items:start;padding:5px 0;font-size:12.5px}
+.tl i{width:10px;height:10px;border-radius:50%;margin-top:4px;background:var(--ok)}
+.tl i.a{background:var(--pri)} .tl i.w{background:var(--amber)} .tl i.x{background:var(--bad)}
+.tl small{display:block;font-size:11.5px;color:var(--mut)}
+.meter{height:8px;border-radius:99px;background:var(--soft2);position:relative}
+.meter i{position:absolute;inset:0 auto 0 0;border-radius:99px}
+.meter b{position:absolute;top:-4px;width:2px;height:16px;background:var(--fg)}
+.al{display:grid;gap:8px}
+.al > div{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:10px;align-items:start;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:#fff}
+.al > div.x{border-color:#F3B9C2;background:#FFF6F7}
+.al > div.w{border-color:#F2D6A6;background:#FFFBF2}
+.al > div > i{width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:11px;font-weight:800;color:#fff;margin-top:1px;background:var(--ok)}
+.al .x > i{background:var(--bad)} .al .w > i{background:var(--amber)}
+.al small{display:block;color:var(--mut);font-size:12px}
+.al .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.note{font-size:12px;color:var(--mut);background:var(--soft);border-radius:8px;padding:8px 10px}
+.lock{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--mut);background:var(--soft2);border-radius:6px;padding:2px 7px}
+.trig{display:grid;gap:10px}
+.trig > div{display:grid;grid-template-columns:22px minmax(0,1fr);gap:8px;align-items:start}
+.trig i{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;font-style:normal;font-size:11px;font-weight:800;color:#fff;background:var(--soft2);color:var(--mut)}
+.trig i.on{background:var(--ok);color:#fff}
+.trig small{display:block;color:var(--mut)}
+/* gantt */
+.gw{overflow-x:auto}
+.gantt{display:grid;font-size:12px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#fff}
+.gantt > div{padding:7px 9px;border-bottom:1px solid var(--line);min-width:0}
+.gantt .h{background:var(--soft);color:var(--mut);font-weight:600;font-size:11.5px;white-space:nowrap}
+.gantt .t{font-weight:600}
+.gantt .t small{display:block;font-weight:400;color:var(--mut);font-size:11px}
+.gantt .gb{display:flex;align-items:center}
+.gantt .gb i{display:block;border-radius:5px;background:var(--pri-line);width:100%;font-style:normal;font-size:11px;padding:3px 7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gantt .gb i.warn{background:#F7D9A8}
+.gantt .gb i.done{background:#BFE3CB}
+.bars{display:grid;gap:12px}
+.bars .b{display:grid;grid-template-columns:130px minmax(0,1fr) 92px;gap:10px;align-items:center;font-size:12.5px}
+.bars .b span{color:var(--mut)}
+.bars .tr{display:grid;gap:3px}
+.bars .tr i{display:block;height:7px;border-radius:99px;background:var(--pri-line)}
+.bars .tr i.r{background:var(--pri)} .bars .tr i.r.over{background:var(--amber)}
+.bars em{font-style:normal;text-align:right;font-variant-numeric:tabular-nums}
+.bars em small{display:block;color:var(--mut);font-size:11px}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11.5px;color:var(--mut)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.kpi{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px;display:grid;gap:2px}
+.kpi b{font-size:20px;font-variant-numeric:tabular-nums}
+.kpi span{color:var(--mut);font-size:12px}
+.banner{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px dashed var(--pri-line);background:#FBFAFE;border-radius:10px;padding:10px 14px;font-size:12.5px;color:var(--mut)}
+.banner b{color:var(--fg)}
+/* avisos */
+.toasts{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));display:grid;gap:8px;z-index:50;max-width:min(380px,calc(100vw - 32px))}
+.toast{background:#1F1E24;color:#fff;border-radius:10px;padding:11px 14px;box-shadow:0 10px 30px rgba(20,10,40,.3);display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;align-items:start;font-size:13px;animation:tin .25s ease-out}
+.toast i{font-style:normal;width:18px;height:18px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:800;background:var(--side-hi);color:#1F1E24;margin-top:1px}
+.toast.ok i{background:#7FD3A0} .toast.auto i{background:var(--amber)} .toast.bad i{background:#F08A9B}
+.toast small{display:block;color:#C9C5D2;font-size:12px}
+.toast button{all:unset;color:var(--side-hi);font-weight:700;cursor:pointer;font-size:12.5px}
+@keyframes tin{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+.confirm{display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:var(--bad-bg);border:1px solid #F3B9C2;border-radius:10px;padding:10px 12px;font-size:12.5px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+@media (max-width:980px){.withside,.g3{grid-template-columns:minmax(0,1fr)}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:820px){
+  .shell{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+  .side{flex-direction:row;overflow-x:auto;padding:8px 12px;gap:2px;align-items:center}
+  .logo{margin:0 10px 0 4px;font-size:16px}
+  .side button{white-space:nowrap;padding:6px 9px}
+  .side .sp,.side .proto{display:none}
+  main{padding:16px 16px 60px}
+  .top{padding:8px 16px}
+  .g2,.form,.form4{grid-template-columns:minmax(0,1fr)}
+  .phz button{font-size:10.5px}
+}
+</style>
+
+<div class="shell">
+  <nav class="side" id="side" aria-label="Menu"></nav>
+  <div class="right">
+    <div class="top">
+      <input class="search" id="q" type="search" placeholder="Procurar negócio, cliente ou telefone" aria-label="Procurar">
+      <div class="who"><label for="role">A ver como</label><select id="role"></select><span class="av" id="av">RB</span></div>
+    </div>
+    <main id="main"></main>
+  </div>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+/* ------------------------------------------------------------------ dados */
+const ESTR = 5.06; // €/h de estrutura (exemplo)
+const ROLES = {
+  comercial:{n:'Rúben · Comercial',av:'RB'},
+  direcao:{n:'Direção',av:'DI'},
+  financeiro:{n:'Sandra · Financeiro',av:'SA'},
+  armazem:{n:'Nuno · Armazém',av:'NU'},
+  operacoes:{n:'Filipe · Operações',av:'FI'}
+};
+const FASES = ['Lead','Contacto','Visita','Negócio','Financeiro','Obra'];
+const SVC0 = {
+  demol:{n:'Demolição e entulho',un:'m²',h:.5,eh:25,eq:.33,cons:1.20,preco:25.48,perfil:'Servente · demolição'},
+  canal:{n:'Canalização',un:'pt',h:2,eh:25,eq:.34,cons:8.47,preco:106.05,perfil:'Canalizador'},
+  revest:{n:'Revestimento de parede',un:'m²',h:.75,eh:25,eq:0,cons:1.01,preco:26.00,perfil:'Ladrilhador',semCusto:true,stale:'O cimento-cola tem o preço de há 8 meses.'},
+  pav:{n:'Pavimento cerâmico',un:'m²',h:.85,eh:25,eq:0,cons:.66,preco:40.32,perfil:'Ladrilhador'},
+  loucas:{n:'Montagem de louças',un:'pç',h:1.35,eh:25,eq:0,cons:1.21,preco:64.29,perfil:'Canalizador'},
+  moveis:{n:'Montagem de móveis',un:'mód',h:2.5,eh:25,eq:0,cons:2,preco:118.70,perfil:'Montador'}
+};
+const LINHAS = {
+  wc:{n:'Casa de banho',modelo:'WC com base de duche',nec:['Base de duche','Sanita suspensa','Banheira','Móvel 80 cm'],
+      mat:{d:'cerâmico, louças, base, torneiras',custo:1400,preco:2168},
+      map:[['demol','pav'],['canal','pts'],['revest','par'],['pav','pav'],['loucas','pcs']],
+      med:{pav:'Pavimento (m²)',par:'Paredes (m²)',pts:'Pontos de água',pcs:'Peças'},
+      mats:[['Cerâmico de parede 30×60','m²',m=>Math.ceil(m.par*1.1),'cp'],['Pavimento cerâmico 60×60','m²',m=>Math.ceil(m.pav*1.1),'pv'],['Sanita suspensa com estrutura','un',()=>1,'san'],['Base de duche 80×120','un',()=>1,'base'],['Cimento-cola · saco 25 kg','sacos',m=>Math.ceil((m.par+m.pav)/4),'cim']]},
+  coz:{n:'Cozinha',modelo:'Cozinha linear',nec:['Bancada em pedra','Ilha','Eletrodomésticos','Mudar canalização'],
+      mat:{d:'móveis, bancada, torneira',custo:3800,preco:5890},
+      map:[['demol','pav'],['canal','pts'],['revest','par'],['pav','pav'],['moveis','pcs']],
+      med:{pav:'Pavimento (m²)',par:'Paredes (m²)',pts:'Pontos de água',pcs:'Módulos'},
+      mats:[['Cerâmico de parede 30×60','m²',m=>Math.ceil(m.par*1.1),'cp'],['Pavimento cerâmico 60×60','m²',m=>Math.ceil(m.pav*1.1),'pv'],['Conjunto de móveis de cozinha','un',()=>1,'mov'],['Bancada em pedra','un',()=>1,'banc'],['Cimento-cola · saco 25 kg','sacos',m=>Math.ceil((m.par+m.pav)/4),'cim']]}
+};
+const TECS = [
+  {id:'js',n:'João Silva',sk:'Servente · demolição',ferias:[]},
+  {id:'ra',n:'Rui Alves',sk:'Servente · demolição',ferias:[]},
+  {id:'ma',n:'Marco Antunes',sk:'Canalizador',ferias:[]},
+  {id:'sf',n:'Sérgio Faria',sk:'Ladrilhador',ferias:[3]},
+  {id:'hn',n:'Hugo Neves',sk:'Ladrilhador',ferias:[]},
+  {id:'pm',n:'Paulo Mota',sk:'Montador',ferias:[]}
+];
+const REAL = {demol:.93,canal:.97,revest:1.23,pav:1.05,loucas:.96,moveis:1.02};
+const DIAS = ['seg 13/10','ter 14/10','qua 15/10','qui 16/10','sex 17/10','seg 20/10','ter 21/10','qua 22/10','qui 23/10','sex 24/10'];
+const SLOTS = ['qui 15/10 · 10:00','qui 15/10 · 15:00','sex 16/10 · 09:30'];
+
+function novoDeal(o){
+  return Object.assign({
+    id:0,nome:'',tel:'',linha:'wc',servico:'',local:'',origem:'site',quando:'',dono:'comercial',fase:0,perdido:false,
+    contacto:{res:'',orc:'',prazo:'',nota:''},
+    visita:{slot:'',andar:'',estac:'Fácil',nec:[],med:{pav:0,par:0,pts:0,pcs:0},fotos:0,fechada:false},
+    orc:null,fin:{fatura:null,pago:false,recibo:null},obra:{plano:null,enc:null,mats:null,real:null,aprendido:false},
+    hist:[]
+  },o);
+}
+function seed(){
+  const S = {
+    v:3, role:'comercial', view:'negocios', deal:null, op:null, filtro:'meus', novo:null, confirmPerda:null,
+    cfg:{min:28,alvo:35,estrutura:true},
+    svc:JSON.parse(JSON.stringify(SVC0)),
+    stock:{cp:12,pv:0,san:0,base:3,cim:40,mov:0,banc:2},
+    seq:1046, ft:418, ef:77, rc:301,
+    clientes:[
+      {nome:'Tiago Almeida',tel:'913 220 410',local:'Cozinha · Almada',desde:'08/10',deal:1027},
+      {nome:'Marta Lima',tel:'916 004 552',local:'WC · Odivelas',desde:'01/10',deal:1022}
+    ],
+    deals:[]
+  };
+  const D = (o)=>S.deals.push(novoDeal(o));
+  D({id:1043,nome:'Ana Martins',tel:'912 000 111',linha:'wc',servico:'Remodelação WC suite',local:'Rua das Flores 12, Sintra',origem:'site',quando:'30/09 21:40',
+     pedido:'Quero remodelar a casa de banho da suite.',hist:[{t:'Pedido pelo site',q:'30/09 21:40',k:'a'}]});
+  D({id:1044,nome:'Pedro Lopes',tel:'927 118 300',linha:'wc',servico:'WC social',local:'Amadora',origem:'site',quando:'06/10 18:02',atraso:true,
+     pedido:'Trocar a banheira por duche.',hist:[{t:'Pedido pelo site',q:'06/10 18:02',k:'a'}]});
+  D({id:1045,nome:'Rita Sousa',tel:'934 500 812',linha:'coz',servico:'Cozinha nova',local:'Loures',origem:'campanha de outono',quando:'08/10 08:15',
+     pedido:'Cozinha nova, com bancada em pedra.',hist:[{t:'Pedido pela campanha de outono',q:'08/10 08:15',k:'a'}]});
+  D({id:1038,nome:'Manuel Costa',tel:'918 330 991',linha:'wc',servico:'WC social',local:'Cascais',origem:'telefone',quando:'03/10',fase:1,
+     contacto:{res:'Atendeu · interessado',orc:'até 3.000 €',prazo:'Novembro',nota:''},hist:[{t:'Chamada · 4 min',q:'05/10 11:20',k:'a'},{t:'Pedido por telefone',q:'03/10',k:'a'}]});
+  D({id:1036,nome:'Luísa Freitas',tel:'962 774 105',linha:'coz',servico:'Cozinha',local:'Oeiras',origem:'site',quando:'01/10',fase:2,
+     visita:{slot:'qui 15/10 · 10:00',andar:'R/C',estac:'Fácil',nec:['Bancada em pedra'],med:{pav:0,par:0,pts:0,pcs:0},fotos:0,fechada:false},
+     hist:[{t:'Visita marcada para qui 15/10 · 10:00',q:'02/10',k:'a'}]});
+  D({id:1035,nome:'Hugo Matos',tel:'915 662 030',linha:'wc',servico:'WC suite',local:'Lisboa',origem:'recomendação',quando:'28/09',fase:2,
+     visita:{slot:'ter 06/10 · 15:00',andar:'2.º com elevador',estac:'Difícil',nec:['Base de duche','Móvel 80 cm'],med:{pav:5,par:16,pts:3,pcs:3},fotos:6,fechada:false},
+     hist:[{t:'Visita feita',q:'06/10 15:00',k:'a'}]});
+  D({id:1031,nome:'Carla Nunes',tel:'938 101 777',linha:'coz',servico:'Cozinha',local:'Setúbal',origem:'site',quando:'22/09',fase:3,
+     visita:{slot:'',andar:'1.º',estac:'Fácil',nec:['Bancada em pedra'],med:{pav:9,par:14,pts:2,pcs:9},fotos:10,fechada:true},hist:[]});
+  D({id:1030,nome:'Sérgio Pinto',tel:'919 440 222',linha:'wc',servico:'WC',local:'Barreiro',origem:'telefone',quando:'25/09',fase:3,
+     visita:{slot:'',andar:'3.º',estac:'Fácil',nec:['Base de duche'],med:{pav:4,par:14,pts:3,pcs:3},fotos:5,fechada:true},hist:[]});
+  D({id:1027,nome:'Tiago Almeida',tel:'913 220 410',linha:'coz',servico:'Cozinha',local:'Almada',origem:'site',quando:'15/09',fase:4,
+     visita:{slot:'',andar:'4.º',estac:'Difícil',nec:['Ilha'],med:{pav:12,par:18,pts:2,pcs:12},fotos:12,fechada:true},hist:[]});
+  D({id:1022,nome:'Marta Lima',tel:'916 004 552',linha:'wc',servico:'WC',local:'Odivelas',origem:'site',quando:'10/09',fase:5,
+     visita:{slot:'',andar:'1.º',estac:'Fácil',nec:['Base de duche'],med:{pav:4,par:15,pts:3,pcs:4},fotos:8,fechada:true},hist:[]});
+  // orçamentos dos negócios já adiantados
+  for (const d of S.deals) if (d.fase>=3) d.orc = criarOrc(d, S);
+  const by = id => S.deals.find(d=>d.id===id);
+  Object.assign(by(1031).orc,{verif:true,enviada:'05/10'}); by(1031).hist.push({t:'Proposta enviada ao portal',q:'05/10',k:'a'});
+  Object.assign(by(1030).orc,{verif:true,enviada:'07/10',vendaDireta:true}); by(1030).hist.push({t:'Proposta enviada · venda direta',q:'07/10',k:'a'});
+  Object.assign(by(1027).orc,{verif:true,enviada:'01/10',aceite:'03/10',contrato:'assinado'}); by(1027).hist.push({t:'Contrato assinado · cliente criado',q:'08/10',k:'a'});
+  const m = by(1022); Object.assign(m.orc,{verif:true,enviada:'15/09',aceite:'17/09',contrato:'assinado'});
+  m.fin={fatura:{n:'FT 2026/391',q:'18/09'},pago:true,recibo:{n:'RC 2026/288',q:'22/09'}};
+  m.obra.plano = gerarPlano(m, S); m.obra.plano.tasks.forEach(t=>{ if(t.tec==='sf') t.tec='hn'; });
+  m.obra.plano.estado='em curso'; m.obra.plano.dia=2; m.obra.enc={estado:'recebida',n:'EF 2026/71',linhas:[]};
+  m.obra.mats = calcMats(m, S, true);
+  m.hist.push({t:'Obra em curso · dia 3 de 5',q:'hoje',k:'a'});
+  return S;
+}
+
+/* ------------------------------------------------------------------ cálculo */
+const r2 = x => Math.round(x*100)/100;
+function eur(x){ const s=(Math.round(x*100)/100).toFixed(2).split('.'); return s[0].replace(/\B(?=(\d{3})+(?!\d))/g,'.')+','+s[1]; }
+const pct = x => (x*100).toFixed(1).replace('.',',')+'%';
+const nfmt = x => String(r2(x)).replace('.',',');
+function custoUn(s, S){ return s.h*s.eh + s.eq + s.cons + (S.cfg.estrutura ? s.h*ESTR : 0); }
+function criarOrc(d, S){
+  const L = LINHAS[d.linha], m = d.visita.med, linhas=[];
+  for (const [sid,k] of L.map){ const s=S.svc[sid]; if(!(m[k]>0)) continue; linhas.push({t:'svc',sid,q:m[k],cu:r2(custoUn(s,S)),pu:s.preco}); }
+  linhas.push({t:'mat',d:L.mat.d,custo:L.mat.custo,preco:L.mat.preco});
+  return {modelo:L.modelo,linhas,desconto:0,vendaDireta:false,verif:false,aprov:null,enviada:null,aceite:null,contrato:null,avisosVistos:{}};
+}
+function linhaCalc(l, S){
+  if (l.t==='mat') return {custo:l.custo,preco:l.preco,h:0};
+  const s=S.svc[l.sid]; return {custo:l.cu*l.q,preco:l.pu*l.q,h:s.h*l.q,s};
+}
+function tot(d, S){
+  let c=0,p=0,h=0; for (const l of d.orc.linhas){ const x=linhaCalc(l,S); c+=x.custo; p+=x.preco; h+=x.h; }
+  const pf=p*(1-(d.orc.desconto||0)/100);
+  return {custo:c,preco:p,pf,h,m:pf>0?(pf-c)/pf:0};
+}
+function partes(d, S){ // custo separado por tipo
+  const o={mo:0,eq:0,cons:0,estr:0,mat:0};
+  for (const l of d.orc.linhas){ if(l.t==='mat'){o.mat+=l.custo;continue;} const s=S.svc[l.sid];
+    o.mo+=s.h*s.eh*l.q; o.eq+=s.eq*l.q; o.cons+=s.cons*l.q; if(S.cfg.estrutura) o.estr+=s.h*ESTR*l.q; }
+  return o;
+}
+function alertas(d, S){
+  const A=[], min=S.cfg.min/100, alvo=S.cfg.alvo/100, o=d.orc, vistos=o.avisosVistos||{};
+  o.linhas.forEach((l,i)=>{
+    if(l.t!=='svc') return; const s=S.svc[l.sid], x=linhaCalc(l,S), m=x.preco>0?(x.preco-x.custo)/x.preco:0;
+    if (x.preco < x.custo) A.push({k:'x',fix:true,t:`Preço abaixo do custo em ${s.n}`,d:`${eur(l.pu)} €/${s.un} não cobre o custo de ${eur(l.cu)} €/${s.un}. Não se envia assim.`,i,sug:r2(l.cu/(1-alvo)),aprov:false});
+    else if (m < min) A.push({k:'x',fix:true,t:`Margem abaixo do mínimo em ${s.n}`,d:`${pct(m)} nesta linha, com um mínimo de ${S.cfg.min}%. O preço de tabela (${eur(l.pu)} €/${s.un}) mal cobre o custo do Catálogo.`,i,sug:r2(l.cu/(1-alvo)),aprov:true});
+    if (s.semCusto && !vistos['sc'+l.sid]) A.push({k:'w',t:`Técnico sem custo/hora (${s.perfil.toLowerCase()})`,d:`Foi usado o custo médio do perfil (${eur(s.eh)} €/h). Define-se no Catálogo.`,go:'catalogo',key:'sc'+l.sid});
+    if (s.stale && !vistos['st'+l.sid]) A.push({k:'w',t:'Preço desatualizado',d:s.stale,key:'st'+l.sid});
+  });
+  const T=tot(d,S);
+  if (o.desconto>0 && T.m<min) A.push({k:'x',t:`O desconto de ${nfmt(o.desconto)}% deixa a margem em ${pct(T.m)}`,d:`Abaixo do mínimo de ${S.cfg.min}%. Baixe o desconto ou peça aprovação.`,aprov:true});
+  else if (T.m<min && !A.some(a=>a.k==='x')) A.push({k:'x',t:`Margem total de ${pct(T.m)}`,d:`Abaixo do mínimo de ${S.cfg.min}%.`,aprov:true});
+  return A;
+}
+function bloqueado(d,S){ const A=alertas(d,S).filter(a=>a.k==='x'); if(!A.length) return false; if(d.orc.aprov==='ok' && A.every(a=>a.aprov)) return false; return true; }
+function calcMats(d, S, jaReservado){
+  const L=LINHAS[d.linha], m=d.visita.med;
+  return L.mats.map(([n,un,f,k])=>{ const q=f(m); const ha=jaReservado?q:Math.min(q,S.stock[k]||0); return {n,un,k,q,res:ha,falta:q-ha}; });
+}
+function gerarPlano(d, S){
+  const L=LINHAS[d.linha], h=sid=>{ const l=d.orc.linhas.find(x=>x.sid===sid); return l?S.svc[sid].h*l.q:0; };
+  const mont = d.linha==='wc'?'loucas':'moveis';
+  const T=[
+    {nome:'Demolição',svcs:['demol'],dia:0,dur:1,sk:'Servente · demolição'},
+    {nome:'Canalização',svcs:['canal'],dia:1,dur:1,sk:'Canalizador'},
+    {nome:'Revestimento e pavimento',svcs:['revest','pav'],dia:2,dur:2,sk:'Ladrilhador'},
+    {nome:d.linha==='wc'?'Louças e acabamentos':'Móveis e acabamentos',svcs:[mont],dia:4,dur:1,sk:mont==='loucas'?'Canalizador':'Montador'}
+  ].filter(t=>t.svcs.some(s=>h(s)>0));
+  for (const t of T){ t.h=r2(t.svcs.reduce((a,s)=>a+h(s),0)); const tec=TECS.find(x=>x.sk===t.sk); t.tec=tec?tec.id:null; }
+  return {tasks:T,estado:'por aprovar',dia:0};
+}
+function conflitos(p){
+  const C=[]; for (const t of p.tasks){ const tec=TECS.find(x=>x.id===t.tec); if(!tec) continue;
+    for (let k=t.dia;k<t.dia+t.dur;k++) if (tec.ferias.includes(k)) { C.push({t,tec,dia:k}); break; } }
+  return C;
+}
+function realObra(d,S){
+  const fac = sid => REAL[sid]||1; let extra=0; const tasks=d.obra.plano.tasks.map(t=>{
+    let hr=0; for (const sid of t.svcs){ const l=d.orc.linhas.find(x=>x.sid===sid); if(!l) continue; const s=S.svc[sid]; const hp=s.h*l.q, h2=hp*fac(sid); hr+=h2; extra+=(h2-hp)*(s.eh+(S.cfg.estrutura?ESTR:0)); }
+    return {nome:t.nome,prev:t.h,real:r2(hr)}; });
+  const T=tot(d,S); const custoReal=T.custo+extra;
+  return {tasks,custoReal,m:(T.pf-custoReal)/T.pf};
+}
+
+/* ------------------------------------------------------------------ estado */
+const KEY='olyvia-prototipo-negocios';
+let S;
+function load(){ try{ const j=JSON.parse(localStorage.getItem(KEY)); if(j && j.v===3) return j; }catch(e){} return seed(); }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+S = load();
+const deal = id => S.deals.find(d=>d.id===+id);
+const agora = () => { const t=new Date(); return 'hoje '+String(t.getHours()).padStart(2,'0')+':'+String(t.getMinutes()).padStart(2,'0'); };
+function log(d,t,k){ d.hist.unshift({t,q:agora(),k:k||'a'}); }
+function fase(d,n){ d.fase=n; log(d,'Passou a '+FASES[n]+' · sozinho','a'); }
+
+/* ------------------------------------------------------------------ avisos */
+function toast(msg, sub, kind, act){
+  const el=document.createElement('div'); el.className='toast '+(kind||''); el.setAttribute('role','status');
+  el.innerHTML=`<i>${kind==='ok'?'✓':kind==='auto'?'⚡':kind==='bad'?'!':'i'}</i><div>${msg}${sub?`<small>${sub}</small>`:''}</div>${act?`<button>${act.label}</button>`:'<span></span>'}`;
+  if (act) el.querySelector('button').onclick=()=>{ act.fn(); el.remove(); };
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=>el.remove(), act?8000:5200);
+}
+
+/* ------------------------------------------------------------------ próximo passo */
+function proximo(d){
+  if (d.perdido) return {t:'Negócio perdido',who:null};
+  const o=d.orc;
+  switch(d.fase){
+    case 0: return {t:'Registar a chamada',sub:'Ligar ao cliente e anotar o resultado.',btn:'Registar chamada',act:'contactar',who:'comercial'};
+    case 1: return {t:'Marcar a visita',sub:'Escolher uma vaga na agenda do comercial.',btn:'Marcar visita',act:'marcarVisita',who:'comercial'};
+    case 2: return {t:'Fechar o levantamento',sub:'Confirmar o local, as necessidades e as medidas.',btn:'Fechar levantamento',act:'fecharVisita',who:'comercial'};
+    case 3:
+      if (!o.enviada){
+        if (!o.verif) return {t:'Verificar e enviar a proposta',sub:'A Olyvia verifica as margens e os custos antes de enviar.',btn:'Verificar',act:'verificar',who:'comercial'};
+        if (bloqueado(d,S)) return o.aprov==='pedida'
+          ? {t:'À espera da aprovação da Direção',sub:'Pedido de exceção à margem mínima.',who:'direcao',wait:true}
+          : {t:'Resolver os bloqueios',sub:'Corrigir o preço ou pedir aprovação à Direção.',btn:'Ver bloqueios',act:'irVerif',who:'comercial'};
+        return {t:'Enviar a proposta',sub:o.vendaDireta?'Venda direta: a proposta aceite dispensa o contrato.':'Vai para o portal do cliente.',btn:'Enviar proposta',act:'enviar',who:'comercial'};
+      }
+      if (!o.aceite) return {t:'À espera do cliente',sub:'Proposta no portal desde '+o.enviada+'.',who:'cliente',wait:true,sim:'aceitar'};
+      if (!o.vendaDireta && o.contrato!=='assinado') return o.contrato==='enviado'
+        ? {t:'À espera da assinatura do contrato',sub:'Contrato no portal do cliente.',who:'cliente',wait:true,sim:'assinar'}
+        : {t:'Enviar o contrato',sub:'Gerado a partir da proposta aceite.',btn:'Enviar contrato',act:'enviarContrato',who:'comercial'};
+      return {t:'—'};
+    case 4:
+      if (!d.fin.fatura) return {t:'Emitir a fatura',sub:'Vai para o portal do cliente.',btn:'Emitir fatura',act:'emitir',who:'financeiro'};
+      return {t:'Validar o pagamento',sub:`Confirmar que o valor da ${d.fin.fatura.n} entrou na conta. O recibo é emitido ao validar.`,btn:'Validar pagamento',act:'validar',who:'financeiro'};
+    case 5: {
+      const p=d.obra.plano, e=d.obra.enc;
+      if (p.estado==='por aprovar') return {t:conflitos(p).length?'Operações: resolver um conflito e aprovar o plano':'Operações: aprovar o plano',sub:'Plano gerado a partir do contrato.',btn:'Abrir plano',act:'abrirPlano',who:'operacoes'};
+      if (e && e.estado==='por confirmar') return {t:'Armazém: confirmar a encomenda ao fornecedor',sub:e.n+' · faltam materiais.',btn:'Abrir Inventário',act:'abrirInv',who:'armazem'};
+      if (e && e.estado==='encomendada') return {t:'Armazém: receber a encomenda',sub:e.n+' · entrega pedida até 12/10.',btn:'Abrir Inventário',act:'abrirInv',who:'armazem'};
+      if (p.estado==='aprovado') return {t:'Operações: arrancar a obra',sub:'Plano aprovado e materiais garantidos.',btn:'Abrir plano',act:'abrirPlano',who:'operacoes'};
+      if (p.estado==='em curso') return {t:'Obra em curso',sub:'As Operações registam o fim da obra.',btn:'Abrir plano',act:'abrirPlano',who:'operacoes'};
+      if (!d.obra.aprendido) return {t:'Rever a margem real',sub:'A obra acabou. Comparar o previsto com o real.',btn:'Ver resultado',act:'irObra',who:'comercial'};
+      return {t:'Negócio fechado',sub:'O cliente fica em Clientes, com o histórico.',done:true};
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ ações */
+const A = {
+  nav(v){ S.view=v; S.deal=null; S.op=null; S.confirmPerda=null; },
+  abrir(id){ S.view='negocio'; S.deal=+id; S.confirmPerda=null; },
+  role(r){ S.role=r; },
+  filtro(f){ S.filtro=f; },
+  novo(){ S.view='negocios'; S.novo={nome:'',tel:'',linha:'wc',err:''}; setTimeout(()=>{ const el=document.getElementById('nv-nome'); if(el) el.focus(); },30); },
+  novoCancel(){ S.novo=null; },
+  novoCriar(){
+    const n=S.novo; n.nome=(document.getElementById('nv-nome').value||'').trim(); n.tel=(document.getElementById('nv-tel').value||'').trim(); n.linha=document.getElementById('nv-linha').value;
+    if (!n.nome || !n.tel){ n.err='Falta '+(!n.nome?'o nome':'o telefone ou o email')+'.'; return; }
+    const id=S.seq++; S.deals.unshift(novoDeal({id,nome:n.nome,tel:n.tel,linha:n.linha,servico:LINHAS[n.linha].n,local:'',origem:'à mão',quando:agora(),pedido:'',hist:[{t:'Negócio criado à mão',q:agora(),k:'a'}],fresh:true}));
+    S.novo=null; toast('Negócio criado',n.nome+' · fase Lead','ok',{label:'Abrir',fn:()=>{A.abrir(id);render();}});
+  },
+  contactar(id){ const d=deal(id); if(!d.contacto.res) d.contacto.res='Atendeu · interessado'; log(d,'Chamada registada · '+d.contacto.res); fase(d,1); toast('Chamada registada','Passou a Contacto','ok'); },
+  marcarVisita(id,slot){ const d=deal(id); d.visita.slot=slot||SLOTS[0]; log(d,'Visita marcada para '+d.visita.slot); fase(d,2); toast('Visita marcada',d.visita.slot+' · fica na agenda do Rúben','ok'); },
+  fecharVisita(id){
+    const d=deal(id), m=d.visita.med, L=LINHAS[d.linha]; const falta=Object.keys(L.med).filter(k=>!(m[k]>0));
+    if (falta.length){ toast('Faltam medidas',falta.map(k=>L.med[k]).join(', '),'bad'); S.pulse='sec-2'; return; }
+    d.visita.fechada=true; log(d,'Levantamento fechado'); d.orc=criarOrc(d,S); fase(d,3);
+    toast('Orçamento criado com as medidas da visita',`Modelo "${L.modelo}" · custos do Catálogo`,'auto');
+  },
+  verificar(id){ const d=deal(id); d.orc.verif=true; S.pulse='verif'; const A2=alertas(d,S); log(d,'Orçamento verificado · '+(A2.filter(a=>a.k==='x').length)+' bloqueio(s), '+(A2.filter(a=>a.k==='w').length)+' aviso(s)', A2.some(a=>a.k==='x')?'x':'a'); },
+  irVerif(){ S.pulse='verif'; setTimeout(()=>{ const el=document.getElementById('verif'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); },30); },
+  sugerido(id,i,v){ const d=deal(id); d.orc.linhas[i].pu=+v; d.orc.aprov=null; log(d,'Preço corrigido para '+eur(+v)+' €'); toast('Preço corrigido','A margem da linha volta ao alvo de '+S.cfg.alvo+'%','ok'); },
+  vistoAviso(id,key){ const d=deal(id); d.orc.avisosVistos[key]=true; log(d,'Aviso visto: '+key.slice(2),'w'); },
+  pedirAprov(id){ const d=deal(id); d.orc.aprov='pedida'; log(d,'Pedida aprovação à Direção','w'); toast('Pedido enviado à Direção','Aparece no Hoje da Direção. Mude de papel em cima para aprovar.','',{label:'Ver como Direção',fn:()=>{S.role='direcao';S.view='hoje';render();}}); },
+  aprovar(id){ const d=deal(id); d.orc.aprov='ok'; log(d,'Exceção aprovada pela Direção'); toast('Exceção aprovada',d.nome+' · o comercial já pode enviar','ok'); },
+  recusarAprov(id){ const d=deal(id); d.orc.aprov=null; log(d,'Exceção recusada pela Direção','x'); toast('Exceção recusada','O comercial tem de corrigir o preço','bad'); },
+  enviar(id){ const d=deal(id); const A2=alertas(d,S).filter(a=>a.k==='w'); d.orc.enviada='hoje'; log(d,'Proposta enviada ao portal do cliente'+(A2.length?' · '+A2.length+' aviso(s) registados':'')); toast('Proposta enviada','Está no portal do cliente','ok'); },
+  aceitar(id){ const d=deal(id); d.orc.aceite='hoje'; log(d,'O cliente aceitou a proposta no portal');
+    if (d.orc.vendaDireta){ criarCliente(d); fase(d,4); toast('Venda direta aceite','Cliente criado · passou a Financeiro','auto'); }
+    else toast('O cliente aceitou a proposta','Falta enviar o contrato','ok'); },
+  recusar(id){ const d=deal(id); d.perdido=true; log(d,'O cliente recusou a proposta','x'); toast('Negócio perdido',d.nome,'bad',{label:'Anular',fn:()=>{d.perdido=false;render();}}); },
+  enviarContrato(id){ const d=deal(id); d.orc.contrato='enviado'; log(d,'Contrato enviado para assinatura'); toast('Contrato enviado','Gerado a partir da proposta aceite','ok'); },
+  assinar(id){ const d=deal(id); d.orc.contrato='assinado'; log(d,'Contrato assinado pelo cliente'); criarCliente(d); fase(d,4); toast('Contrato assinado','Cliente criado sozinho · passou a Financeiro','auto'); },
+  emitir(id){ const d=deal(id); d.fin.fatura={n:'FT 2026/'+(S.ft++),q:'hoje'}; log(d,d.fin.fatura.n+' emitida e enviada ao portal do cliente'); toast(d.fin.fatura.n+' emitida','Enviada ao portal do cliente','ok'); },
+  validar(id){
+    const d=deal(id); d.fin.pago=true; d.fin.recibo={n:'RC 2026/'+(S.rc++),q:'hoje'}; log(d,'Pagamento validado · '+d.fin.recibo.n+' emitido');
+    // gatilhos do recibo
+    const mats=calcMats(d,S,false); mats.forEach(x=>{ S.stock[x.k]=(S.stock[x.k]||0)-x.res; }); d.obra.mats=mats;
+    const falta=mats.filter(x=>x.falta>0);
+    d.obra.enc = falta.length ? {n:'EF 2026/'+(S.ef++),estado:'por confirmar',forn:'Cerâmica do Centro (exemplo)',linhas:falta.map(x=>({n:x.n,q:x.falta,un:x.un}))} : null;
+    d.obra.plano=gerarPlano(d,S); fase(d,5);
+    log(d,'Inventário: '+(falta.length?falta.length+' material(ais) em falta · '+d.obra.enc.n+' por confirmar':'tudo em stock e reservado'),falta.length?'w':'a');
+    log(d,'Operações: plano gerado com '+d.obra.plano.tasks.length+' fases'+(conflitos(d.obra.plano).length?' · 1 conflito':''),conflitos(d.obra.plano).length?'w':'a');
+    toast('Recibo '+d.fin.recibo.n+' emitido','Passou a Obra','ok');
+    setTimeout(()=>toast('Inventário','Materiais reservados'+(falta.length?' · encomenda '+d.obra.enc.n+' criada':''),'auto'),500);
+    setTimeout(()=>toast('Operações','Plano da obra gerado com os técnicos do RH','auto'),1000);
+  },
+  abrirPlano(id){ S.view='operacoes'; S.op=+id; S.deal=null; },
+  abrirInv(){ S.view='inventario'; S.deal=null; },
+  irObra(){ setTimeout(()=>{ const el=document.getElementById('sec-5'); if(el) el.scrollIntoView({behavior:'smooth'}); },30); },
+  trocar(id,ti){ const d=deal(id); const t=d.obra.plano.tasks[ti]; const old=TECS.find(x=>x.id===t.tec); const alt=TECS.find(x=>x.sk===t.sk && x.id!==t.tec && !x.ferias.some(k=>k>=t.dia&&k<t.dia+t.dur)); if(!alt) return; t.tec=alt.id; log(d,`Plano: ${t.nome} passa de ${old.n} para ${alt.n}`); toast('Técnico trocado',`${t.nome} · ${alt.n}`,'ok'); },
+  adiar(id,ti){ const d=deal(id), p=d.obra.plano; const t=p.tasks[ti]; const tec=TECS.find(x=>x.id===t.tec); let nd=t.dia; while(tec.ferias.some(k=>k>=nd&&k<nd+t.dur)) nd++; nd=Math.max(nd,5); const shift=nd-t.dia; p.tasks.slice(ti).forEach(x=>x.dia+=shift); log(d,`Plano: ${t.nome} adiado para ${DIAS[t.dia]}`); toast('Fase adiada','A obra acaba a '+DIAS[Math.max(...p.tasks.map(x=>x.dia+x.dur-1))],'ok'); },
+  aprovarPlano(id){ const d=deal(id); if(conflitos(d.obra.plano).length){ toast('Há um conflito por resolver','Troque o técnico ou adie a fase','bad'); return; } d.obra.plano.estado='aprovado'; log(d,'Plano aprovado pelas Operações'); toast('Plano aprovado','Os técnicos recebem as tarefas na app','ok'); },
+  arrancar(id){ const d=deal(id); const e=d.obra.enc; if(e && e.estado!=='recebida'){ toast('Ainda faltam materiais',e.n+' · '+e.estado,'bad'); return; } d.obra.plano.estado='em curso'; log(d,'Obra arrancou'); toast('Obra em curso','Os técnicos registam as horas na app','ok'); },
+  fimObra(id){ const d=deal(id); d.obra.plano.estado='concluída'; d.obra.real=realObra(d,S); log(d,'Obra concluída · margem real '+pct(d.obra.real.m),'a'); toast('Obra concluída','Margem real '+pct(d.obra.real.m)+' · o comercial vê o resultado no negócio','ok',{label:'Ver negócio',fn:()=>{A.abrir(id);render();A.irObra();}}); },
+  aprender(id){ const d=deal(id); const s=S.svc.revest; const old=s.h; s.h=r2(s.h*REAL.revest); d.obra.aprendido=true; log(d,`Receita do revestimento atualizada: ${nfmt(old)} → ${nfmt(s.h)} h/m²`); toast('Receita atualizada no Catálogo',`Revestimento: ${nfmt(old)} → ${nfmt(s.h)} h/m². Os próximos orçamentos já usam este valor.`,'ok'); },
+  confirmarEnc(id){ const d=deal(id); d.obra.enc.estado='encomendada'; log(d,'Encomenda '+d.obra.enc.n+' confirmada pelo armazém'); toast('Encomenda enviada ao fornecedor',d.obra.enc.n+' · '+d.obra.enc.forn,'ok'); },
+  receberEnc(id){ const d=deal(id); d.obra.enc.estado='recebida'; d.obra.mats.forEach(x=>{x.res=x.q;x.falta=0;}); log(d,'Encomenda '+d.obra.enc.n+' recebida · materiais reservados'); toast('Encomenda recebida','As Operações já podem arrancar','auto'); },
+  perder(id){ S.confirmPerda=+id; },
+  perderSim(id){ const d=deal(id); d.perdido=true; S.confirmPerda=null; log(d,'Marcado como perdido','x'); toast('Negócio perdido',d.nome,'bad',{label:'Anular',fn:()=>{d.perdido=false;log(d,'Perda anulada');render();}}); S.view='negocios'; S.deal=null; },
+  perderNao(){ S.confirmPerda=null; },
+  nec(id,v){ const d=deal(id); const a=d.visita.nec; const i=a.indexOf(v); i>=0?a.splice(i,1):a.push(v); },
+  estac(id,v){ deal(id).visita.estac=v; },
+  foto(id){ deal(id).visita.fotos++; },
+  recalc(id,i){ const d=deal(id), l=d.orc.linhas[i]; l.cu=r2(custoUn(S.svc[l.sid],S)); d.orc.aprov=null; toast('Custo atualizado com o Catálogo','','ok'); },
+  reset(){ try{localStorage.removeItem(KEY);}catch(e){} S=seed(); toast('Demonstração reposta','Todos os negócios voltaram ao início','ok'); }
+};
+function criarCliente(d){ if(!S.clientes.some(c=>c.deal===d.id)) S.clientes.unshift({nome:d.nome,tel:d.tel,local:LINHAS[d.linha].n+(d.local?' · '+d.local:''),desde:'hoje',deal:d.id}); log(d,'Cliente criado em Clientes'); }
+
+/* campos que se editam no sítio */
+function setField(el){
+  const f=el.dataset.f, id=el.dataset.id, v=el.type==='checkbox'?el.checked:el.value, num=parseFloat(String(v).replace(',','.'));
+  const d=id?deal(id):null;
+  switch(f){
+    case 'ct': d.contacto[el.dataset.k]=v; break;
+    case 'vis': d.visita[el.dataset.k]=v; break;
+    case 'med': d.visita.med[el.dataset.k]=isNaN(num)?0:num; break;
+    case 'lq': if(!isNaN(num)&&num>=0){ d.orc.linhas[+el.dataset.i].q=num; d.orc.aprov=null; } break;
+    case 'lp': if(!isNaN(num)&&num>=0){ d.orc.linhas[+el.dataset.i].pu=num; d.orc.aprov=null; } break;
+    case 'desc': d.orc.desconto=isNaN(num)?0:Math.max(0,Math.min(50,num)); d.orc.aprov=null; break;
+    case 'vd': d.orc.vendaDireta=v; log(d,v?'Marcado como venda direta (sem contrato)':'Deixou de ser venda direta'); break;
+    case 'svc': { const s=S.svc[el.dataset.s]; if(!isNaN(num)&&num>=0){ s[el.dataset.k]=num; if(el.dataset.k==='eh') s.semCusto=false; if(el.dataset.k==='cons') s.stale=null; toast('Catálogo atualizado',s.n+' · custo '+eur(custoUn(s,S))+' €/'+s.un,'ok'); } break; }
+    case 'cfg': if(el.type==='checkbox') S.cfg[el.dataset.k]=v; else if(!isNaN(num)) S.cfg[el.dataset.k]=num; break;
+  }
+  if (d) { d.fresh=false; }
+  save(); render();
+}
+
+/* ------------------------------------------------------------------ desenho */
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const B = (label,act,args,cls,dis) => `<button class="btn ${cls||''}" data-a="${act}" ${args!=null?`data-x='${esc(JSON.stringify(args))}'`:''} ${dis?'disabled':''}>${label}</button>`;
+function aberto(){ return S.deals.filter(d=>!d.perdido); }
+function minhas(role){ // o que cada papel tem para fazer
+  const L=[];
+  for (const d of aberto()){
+    const p=proximo(d); if(!p) continue;
+    if (role==='direcao' && d.fase===3 && d.orc && d.orc.aprov==='pedida') L.push({d,p:{t:'Aprovar exceção à margem',sub:pct(tot(d,S).m)+' de margem · mínimo '+S.cfg.min+'%'},dir:true});
+    else if (p.who===role && !p.wait && !p.done) L.push({d,p});
+  }
+  return L;
+}
+function sideHTML(){
+  const n=minhas(S.role).length;
+  const it=[['hoje','Hoje',n],['negocios','Negócios'],['clientes','Clientes'],['operacoes','Operações'],['inventario','Inventário'],['catalogo','Catálogo e custos'],['marketing','Marketing']];
+  const cur = S.view==='negocio'?'negocios':S.view;
+  return `<div class="logo">oly<em>v</em>ia</div>`+
+    it.map(([v,l,c])=>`<button class="${cur===v?'on':''}" data-a="nav" data-x='"${v}"'>${l}${c?`<small>${c}</small>`:''}</button>`).join('')+
+    `<span class="sp"></span><button class="${cur==='definicoes'?'on':''}" data-a="nav" data-x='"definicoes"'>Definições</button>
+     <p class="proto">Protótipo com dados de exemplo. Nada é gravado na Olyvia.</p>`;
+}
+
+function viewHoje(){
+  const r=S.role, L=minhas(r);
+  const nome={comercial:'Rúben',direcao:'Direção',financeiro:'Sandra',armazem:'Nuno',operacoes:'Filipe'}[r];
+  const items = L.length ? L.map(({d,p,dir})=>`<div class="item"><div class="t" data-a="abrir" data-x="${d.id}"><b>${esc(d.nome)} · ${esc(d.servico)}</b><small>${esc(p.t)}${p.sub?' · '+esc(p.sub):''}</small></div>
+      ${dir?`<div class="row">${B('Recusar','recusarAprov',d.id,'sec sm')}${B('Aprovar','aprovar',d.id,'sm')}</div>`
+          :p.btn?B(p.btn,p.act,d.id,'sm'):''}</div>`).join('') : `<p class="empty">Nada por tratar. Mude de papel em cima para ver o trabalho dos outros.</p>`;
+  const ab=aberto(); const emProp=ab.filter(d=>d.fase===3&&d.orc); const val=emProp.reduce((a,d)=>a+tot(d,S).pf,0);
+  const mm=emProp.length?emProp.reduce((a,d)=>a+tot(d,S).m,0)/emProp.length:0;
+  const kpis=`<div class="kpis"><div class="kpi"><span>Negócios abertos</span><b>${ab.length}</b></div><div class="kpi"><span>Em fase Negócio</span><b>${eur(val)} €</b></div><div class="kpi"><span>Margem média prevista</span><b>${pct(mm)}</b></div><div class="kpi"><span>Obras em curso</span><b>${ab.filter(d=>d.fase===5&&d.obra.plano&&d.obra.plano.estado==='em curso').length}</b></div></div>`;
+  return `<div class="row"><div><h1 class="h1">Bom dia, ${nome}</h1><div class="sub">${ROLES[r].n} · quinta, 08/10</div></div>${L.length?`<span class="pill warn">${L.length} por tratar</span>`:'<span class="pill ok">Tudo em dia</span>'}</div>
+  ${r==='direcao'?kpis:''}
+  <div class="banner"><b>Como experimentar:</b> abra a <button class="link" data-a="abrir" data-x="1043">Ana Martins</button> e siga o botão do próximo passo. Alguns passos são de outros papéis: mude em "A ver como", no canto de cima.</div>
+  <div class="card"><h3>O que tenho para fazer <span>${L.length}</span></h3>${items}</div>`;
+}
+
+function viewNegocios(){
+  const q=(document.getElementById('q').value||'').toLowerCase();
+  const f=S.filtro;
+  let ds=aberto().filter(d=>!q || (d.nome+' '+d.tel+' '+d.servico+' '+d.local).toLowerCase().includes(q));
+  if (f==='meus') ds=ds.filter(d=>d.dono==='comercial');
+  if (f==='wc') ds=ds.filter(d=>d.linha==='wc'); if (f==='coz') ds=ds.filter(d=>d.linha==='coz');
+  if (f==='atraso') ds=ds.filter(d=>d.atraso);
+  const totalProp=aberto().filter(d=>d.fase===3&&d.orc).reduce((a,d)=>a+tot(d,S).pf,0);
+  const cols=FASES.map((fn,i)=>{
+    const cards=ds.filter(d=>d.fase===i).map(d=>{ const p=proximo(d);
+      const val=d.orc?` · ${eur(tot(d,S).pf)} €`:''; const vd=d.orc&&d.orc.vendaDireta?' · venda direta':'';
+      const cls=d.atraso&&d.fase===0?'late':p.wait?'wait':'';
+      return `<button class="kc ${d.fresh?'flash':''}" data-a="abrir" data-x="${d.id}"><b>${esc(d.nome)}</b><small>${esc(d.servico)}${d.local?' · '+esc(d.local.split(',').pop().trim()):''}${val}${vd}</small><span class="nx ${cls}">${esc(p.t)}${d.atraso&&d.fase===0?' · há 2 dias':''}</span></button>`; }).join('');
+    const nv = i===0 && S.novo ? `<div class="newc"><div class="f"><label for="nv-nome">Nome</label><input id="nv-nome" value="${esc(S.novo.nome)}" autocomplete="off"></div>
+        <div class="f"><label for="nv-tel">Telefone ou email</label><input id="nv-tel" value="${esc(S.novo.tel)}" autocomplete="off"></div>
+        <div class="f"><label for="nv-linha">Linha de serviço</label><select id="nv-linha"><option value="wc">Casa de banho</option><option value="coz">Cozinha</option></select></div>
+        ${S.novo.err?`<span class="err">${esc(S.novo.err)}</span>`:''}
+        <div class="row">${B('Cancelar','novoCancel',null,'sec sm')}${B('Criar','novoCriar',null,'sm')}</div></div>` : '';
+    return `<div class="col"><h4>${fn} <span>${ds.filter(d=>d.fase===i).length}</span></h4>${nv}${cards||(nv?'':'<span class="empty">Sem negócios</span>')}</div>`;
+  }).join('');
+  const chip=(k,l)=>`<button class="chip ${f===k?'on':''}" data-a="filtro" data-x='"${k}"'>${l}</button>`;
+  return `<div class="row"><div><h1 class="h1">Negócios</h1><div class="sub">${aberto().length} abertos · ${eur(totalProp)} € em fase Negócio</div></div>${B('+ Novo negócio','novo')}</div>
+  <div class="chips">${chip('meus','Os meus')}${chip('todos','Todos')}${chip('wc','Casa de banho')}${chip('coz','Cozinha')}${chip('atraso','Com atraso')}</div>
+  <div class="banner"><b>Como experimentar:</b> abra a <button class="link" data-a="abrir" data-x="1043">Ana Martins</button> e siga o botão do próximo passo, da lead à obra. Alguns passos são de outros papéis: mude em "A ver como", no canto de cima.</div>
+  <div class="kb">${cols}</div>
+  <p class="sub">Os cartões não se arrastam: a fase muda quando acontece o facto (chamada registada, visita marcada, contrato assinado, pagamento validado).</p>`;
+}
+
+function secao(d,i,titulo,dir,corpo){
+  const st = d.fase>i?'dn':d.fase===i?'cur':'off';
+  const pulse = S.pulse==='sec-'+i?' pulse':'';
+  return `<section class="sec ${st==='cur'?'cur':st==='off'?'off':''}${pulse}" id="sec-${i}"><header>${st==='dn'?'<span class="ck">✓</span>':''}${titulo}<span class="r">${dir||''}</span></header>${st==='off'?'':`<div class="in">${corpo}</div>`}</section>`;
+}
+function viewNegocio(){
+  const d=deal(S.deal); if(!d) return viewNegocios();
+  const p=proximo(d), L=LINHAS[d.linha], r=S.role, o=d.orc;
+  const meu = p.who && (p.who===r);
+  let nextBtn='';
+  if (p.btn) nextBtn = meu ? B(p.btn,p.act,d.id,'big') : `<div style="display:grid;gap:4px;justify-items:end">${B(p.btn,p.act,d.id,'big',true)}<button class="link" data-a="role" data-x='"${p.who}"'>Mudar para ${ROLES[p.who].n}</button></div>`;
+  if (p.sim) nextBtn = `<div class="row"><span class="sub">Simular o cliente:</span>${p.sim==='aceitar'?B('Recusou','recusar',d.id,'sec')+B('Aceitou','aceitar',d.id):B('Assinou','assinar',d.id)}</div>`;
+  if (p.wait && p.who==='direcao') nextBtn = `<button class="link" data-a="role" data-x='"direcao"'>Mudar para Direção</button>`;
+  const T = o?tot(d,S):null;
+
+  // 0 pedido
+  const s0 = secao(d,0,'Pedido',`${esc(d.origem)} · ${esc(d.quando)}`,
+    `<div class="kv"><span>Pedido</span><b style="text-align:right;font-weight:500">${esc(d.pedido||'—')}</b><span>Linha de serviço</span><b>${L.n}</b></div>`);
+  // 1 contacto
+  const ct=d.contacto, ro=d.fase>1;
+  const fld=(k,l,ph)=>`<div class="f"><label for="ct-${k}-${d.id}">${l}</label><input id="ct-${k}-${d.id}" data-f="ct" data-id="${d.id}" data-k="${k}" value="${esc(ct[k])}" placeholder="${ph||''}" ${ro?'readonly':''}></div>`;
+  const slots = d.fase===1 ? `<div class="f">Vagas do Rúben em ${esc((d.local||'').split(',').pop()||'—')}<div class="slots">${SLOTS.map(s=>`<button class="chip" data-a="marcarVisita" data-x='[${d.id},"${s}"]'>${s}</button>`).join('')}</div></div>` : '';
+  const s1 = secao(d,1,'Contacto',d.fase>1&&d.visita.slot?'visita marcada':d.fase===1?'em curso':'',
+    `<div class="form">${fld('res','Resultado da chamada','Atendeu · interessado')}${fld('orc','Orçamento do cliente','3.000 a 4.000 €')}${fld('prazo','Prazo','Antes do Natal')}${fld('nota','Nota','')}</div>${slots}${d.fase===1?'<span class="sub">Grava sozinho ao sair do campo.</span>':''}`);
+  // 2 visita
+  const v=d.visita, vro=v.fechada;
+  const med=Object.entries(L.med).map(([k,l])=>`<div class="f"><label for="med-${k}-${d.id}">${l}</label><input id="med-${k}-${d.id}" class="num" type="number" min="0" step="0.5" data-f="med" data-id="${d.id}" data-k="${k}" value="${v.med[k]||''}" ${vro?'readonly':''}></div>`).join('');
+  const s2 = secao(d,2,'Visita',v.slot?esc(v.slot):'',
+    `<div class="form"><div class="f"><label for="vis-andar-${d.id}">Andar e acesso</label><input id="vis-andar-${d.id}" data-f="vis" data-id="${d.id}" data-k="andar" value="${esc(v.andar)}" placeholder="3.º, sem elevador" ${vro?'readonly':''}></div>
+      <div class="f">Estacionamento<div class="seg">${['Fácil','Difícil'].map(x=>`<button class="${v.estac===x?'on':''}" ${vro?'disabled':`data-a="estac" data-x='[${d.id},"${x}"]'`}>${x}</button>`).join('')}</div></div></div>
+     <div class="f">Necessidades<div class="chips">${L.nec.map(x=>`<button class="chip ${v.nec.includes(x)?'on':''}" ${vro?'disabled':`data-a="nec" data-x='[${d.id},"${x}"]'`}>${x}</button>`).join('')}</div></div>
+     <div class="form4">${med}</div>
+     <div class="row"><span class="sub">${v.fotos} fotos${vro?'':' · no telemóvel tira-se com a câmara'}</span>${vro?'':B('+ Foto','foto',d.id,'sec sm')}</div>
+     ${vro?'':'<span class="sub">Cada medida liga a um serviço do Catálogo. Ao fechar, o orçamento nasce com estas medidas.</span>'}`);
+  // 3 negócio
+  let c3='';
+  if (o){
+    const locked=!!o.enviada;
+    const rows=o.linhas.map((l,i)=>{ const x=linhaCalc(l,S); const m=x.preco>0?(x.preco-x.custo)/x.preco:0;
+      const cls=m<S.cfg.min/100?'bad':m<S.cfg.alvo/100-0.005?'warn':'ok';
+      if (l.t==='mat') return `<tr><td>Materiais<small>${esc(l.d)} · do modelo</small></td><td class="sub">—</td><td class="n">${eur(x.custo)}</td><td class="n">${eur(x.preco)}</td><td class="n"><span class="pill ${cls}">${pct(m)}</span></td></tr>`;
+      const s=x.s, novo=r2(custoUn(s,S)); const mud=!locked && Math.abs(novo-l.cu)>0.004;
+      return `<tr class="${cls==='bad'?'hl':''}"><td>${s.n}<small>custo ${eur(l.cu)} €/${s.un} do Catálogo${mud?` · <button class="link" data-a="recalc" data-x='[${d.id},${i}]'>Catálogo mudou: usar ${eur(novo)}</button>`:''}</small></td>
+        <td><input id="lq-${d.id}-${i}" aria-label="Medida" data-f="lq" data-id="${d.id}" data-i="${i}" value="${nfmt(l.q)}" ${locked?'readonly':''}> ${s.un}</td>
+        <td class="n">${eur(x.custo)}</td><td class="n"><input id="lp-${d.id}-${i}" aria-label="Preço unitário" data-f="lp" data-id="${d.id}" data-i="${i}" value="${eur(l.pu)}" ${locked?'readonly':''}><small>${eur(x.preco)} €</small></td>
+        <td class="n"><span class="pill ${cls}">${pct(m)}</span></td></tr>`; }).join('');
+    const pt=partes(d,S), mw=Math.max(0,Math.min(1,T.m/0.5));
+    const mcls=T.m<S.cfg.min/100?'bad':T.m<S.cfg.alvo/100-0.005?'warn':'ok';
+    let verif='';
+    if (o.verif && !locked){
+      const AL=alertas(d,S);
+      const ok=['Nenhuma linha abaixo do custo','Todas as linhas têm custo no Catálogo'].filter((t,i)=>!AL.some(a=>i===0?a.t.startsWith('Preço abaixo'):false));
+      verif=`<div class="card ${S.pulse==='verif'?'sec pulse':''}" id="verif" style="border-color:var(--pri-line)"><h3>Verificar antes de enviar <span>${AL.filter(a=>a.k==='x').length} bloqueio(s) · ${AL.filter(a=>a.k==='w').length} aviso(s)</span></h3>
+        <div class="al">${AL.map(a=>`<div class="${a.k}"><i>!</i><span><b>${esc(a.t)}</b><small>${esc(a.d)}</small></span><span class="acts">
+          ${a.sug?B('Usar '+eur(a.sug)+' €','sugerido',[d.id,a.i,a.sug],'sm'):''}${a.go?B('Abrir Catálogo','nav',a.go,'sec sm'):''}${a.key?B('Visto','vistoAviso',[d.id,a.key],'sec sm'):''}</span></div>`).join('')}
+          ${ok.map(t=>`<div class="o"><i>✓</i><span><b>${t}</b></span><span></span></div>`).join('')}</div>
+        ${bloqueado(d,S)&&AL.filter(a=>a.k==='x').every(a=>a.aprov)?(o.aprov==='pedida'?`<div class="note">Pedido de aprovação enviado à Direção. Fica registado quem aprovou.</div>`:`<div class="row"><span class="sub">Quer mesmo enviar assim? É preciso aprovação.</span>${B('Pedir aprovação à Direção','pedirAprov',d.id,'sec sm')}</div>`):''}
+        ${o.aprov==='ok'?'<div class="note" style="background:var(--ok-bg);color:var(--ok)">Exceção aprovada pela Direção.</div>':''}
+      </div>`;
+    }
+    const estado = locked ? `<div class="kv"><span>Proposta</span><b>enviada ${esc(o.enviada)}${o.aceite?' · aceite '+esc(o.aceite):''}</b>${o.vendaDireta?'<span>Contrato</span><b>venda direta, não há</b>':`<span>Contrato</span><b>${o.contrato==='assinado'?'assinado':o.contrato==='enviado'?'enviado, à espera da assinatura':'por enviar'}</b>`}</div>` : '';
+    c3 = `<div class="row"><span class="sub">Orçamento v1 · modelo "${esc(o.modelo)}" · medidas da visita</span>
+        <label class="row" style="gap:6px;font-size:12.5px"><input type="checkbox" id="vd-${d.id}" data-f="vd" data-id="${d.id}" ${o.vendaDireta?'checked':''} ${locked?'disabled':''}> Venda direta (sem contrato)</label></div>
+      <div class="withside"><div class="stack"><div class="tw"><table style="min-width:560px"><thead><tr><th>Serviço</th><th>Medida</th><th class="n">Custo</th><th class="n">Preço/un.</th><th class="n">Margem</th></tr></thead><tbody>${rows}
+        <tr><td colspan="3">Desconto</td><td class="n"><input id="desc-${d.id}" aria-label="Desconto em percentagem" data-f="desc" data-id="${d.id}" value="${nfmt(o.desconto)}" ${locked?'readonly':''}> %</td><td></td></tr>
+        <tr class="sum"><td>Total sem IVA</td><td>${nfmt(T.h)} h</td><td class="n">${eur(T.custo)}</td><td class="n">${eur(T.pf)}</td><td class="n">${pct(T.m)}</td></tr></tbody></table></div>${verif}${estado}</div>
+      <div class="card"><h3>Margem <span class="pill ${mcls}">${pct(T.m)}</span></h3>
+        <div class="meter"><i style="width:${mw*100}%;background:${mcls==='ok'?'var(--ok)':mcls==='warn'?'var(--amber)':'var(--bad)'}"></i><b style="left:${S.cfg.min*2}%" title="mínimo"></b><b style="left:${S.cfg.alvo*2}%" title="alvo"></b></div>
+        <div class="sub">mínimo ${S.cfg.min}% · alvo ${S.cfg.alvo}% · em Definições</div>
+        <div class="kv"><span>Mão de obra</span><b>${eur(pt.mo)} €</b><span>Equipamentos</span><b>${eur(pt.eq)} €</b><span>Consumíveis</span><b>${eur(pt.cons)} €</b>${S.cfg.estrutura?`<span>Estrutura</span><b>${eur(pt.estr)} €</b>`:''}<span>Materiais</span><b>${eur(pt.mat)} €</b><span class="tot">Custo total</span><b class="tot">${eur(T.custo)} €</b><span class="tot">Lucro previsto</span><b class="tot">${eur(T.pf-T.custo)} €</b></div>
+      </div></div>`;
+  }
+  const s3 = secao(d,3,'Negócio',o?(o.enviada?'proposta enviada':'orçamento, proposta e contrato'):'orçamento, proposta e contrato',c3);
+  // 4 financeiro
+  const fi=d.fin;
+  const c4 = `<div class="withside"><div class="tw"><table><thead><tr><th>Documento</th><th>Estado</th><th class="n">Valor s/ IVA</th></tr></thead><tbody>
+      <tr><td>${fi.fatura?esc(fi.fatura.n):'Fatura'}<small>${fi.fatura?'emitida '+esc(fi.fatura.q)+' · enviada ao portal do cliente':'por emitir · só o Financeiro emite'}</small></td><td>${fi.pago?'<span class="pill ok">Paga</span>':fi.fatura?'<span class="pill warn">Por pagar</span>':'<span class="pill mut">Por emitir</span>'}</td><td class="n">${T?eur(T.pf):''}</td></tr>
+      <tr><td>${fi.recibo?esc(fi.recibo.n):'Recibo'}<small>${fi.recibo?'emitido '+esc(fi.recibo.q):'emitido ao validar o pagamento'}</small></td><td>${fi.recibo?'<span class="pill ok">Emitido</span>':'<span class="pill mut">Ainda não</span>'}</td><td class="n"></td></tr></tbody></table></div>
+    <div class="card"><h3>Ao emitir o recibo</h3><div class="trig">
+      <div><i class="${fi.recibo?'on':''}">1</i><span><b>Inventário</b><small>confirma os materiais e cria a encomenda ao fornecedor, se faltar algo</small></span></div>
+      <div><i class="${fi.recibo?'on':''}">2</i><span><b>Operações</b><small>gera o plano da obra com os técnicos do RH</small></span></div>
+      <div><i class="${fi.recibo?'on':''}">3</i><span><b>Cliente</b><small>recebe o recibo no portal</small></span></div></div>
+      <span class="sub">Por agora a validação é interna. Quando o portal aceitar pagamentos, passa a ser automática.</span></div></div>`;
+  const s4 = secao(d,4,'Financeiro','fatura e recibo',c4);
+  // 5 obra
+  let c5='';
+  if (d.fase===5){
+    const pl=d.obra.plano, e=d.obra.enc;
+    const est={'por aprovar':'warn','aprovado':'pri','em curso':'pri','concluída':'ok'}[pl.estado];
+    c5 = `<div class="g2"><div class="card"><h3>Plano da obra <span class="pill ${est}">${pl.estado}</span></h3><div class="kv"><span>Fases</span><b>${pl.tasks.length}</b><span>Horas previstas</span><b>${nfmt(pl.tasks.reduce((a,t)=>a+t.h,0))} h</b><span>Conflitos</span><b>${conflitos(pl).length}</b></div>${B('Abrir nas Operações','abrirPlano',d.id,'sec sm')}</div>
+      <div class="card"><h3>Materiais <span class="pill ${!e||e.estado==='recebida'?'ok':'warn'}">${!e?'em stock':e.estado==='recebida'?'reservados':e.n+' · '+e.estado}</span></h3><div class="kv">${(d.obra.mats||[]).slice(0,4).map(x=>`<span>${esc(x.n)}</span><b>${x.falta>0?'faltam '+nfmt(x.falta)+' '+x.un:'✓ '+nfmt(x.q)+' '+x.un}</b>`).join('')}</div>${B('Abrir no Inventário','abrirInv',d.id,'sec sm')}</div></div>`;
+    if (d.obra.real){
+      const R=d.obra.real, mx=Math.max(...R.tasks.map(t=>Math.max(t.prev,t.real)));
+      c5 += `<div class="withside"><div class="card"><h3>Previsto contra real <span>horas de equipa</span></h3><div class="bars">${R.tasks.map(t=>`<div class="b"><span>${esc(t.nome)}</span><div class="tr"><i style="width:${t.prev/mx*100}%"></i><i class="r ${t.real>t.prev*1.05?'over':''}" style="width:${t.real/mx*100}%"></i></div><em>${nfmt(t.real)} h<small>prev. ${nfmt(t.prev)}</small></em></div>`).join('')}</div>
+        <div class="legend"><span><i style="background:var(--pri-line)"></i>previsto</span><span><i style="background:var(--pri)"></i>real</span><span><i style="background:var(--amber)"></i>acima do previsto</span></div></div>
+        <div class="card"><h3>O que se aprende</h3><div class="kv"><span>Custo previsto</span><b>${eur(T.custo)} €</b><span>Custo real</span><b>${eur(R.custoReal)} €</b><span class="tot">Margem orçada</span><b class="tot">${pct(T.m)}</b><span class="tot">Margem real</span><b class="tot">${pct(R.m)}</b></div>
+        ${d.obra.aprendido?'<span class="pill ok">Receita do revestimento atualizada</span>':`<span class="sub">O revestimento levou mais 23% do que a receita prevê. Proposta: subir de ${nfmt(S.svc.revest.h)} para ${nfmt(r2(S.svc.revest.h*REAL.revest))} h/m² no Catálogo.</span>${B('Atualizar a receita','aprender',d.id,'sm')}`}</div></div>`;
+    }
+  }
+  const s5 = secao(d,5,'Obra',d.fase===5?d.obra.plano.estado:'',c5);
+
+  const hist=d.hist.map(h=>`<div><i class="${h.k==='x'?'x':h.k==='w'?'w':h.t.startsWith('Passou')?'a':''}"></i><span>${esc(h.t)}<small>${esc(h.q)}</small></span></div>`).join('');
+  const cli=S.clientes.find(c=>c.deal===d.id);
+  const perda = S.confirmPerda===d.id ? `<div class="confirm"><b>Marcar como perdido?</b><span>Sai do quadro, mas fica no histórico.</span>${B('Cancelar','perderNao',null,'sec sm')}${B('Marcar perdido','perderSim',d.id,'bad sm')}</div>` : '';
+  return `<button class="back" data-a="nav" data-x='"negocios"'>← Negócios</button>
+  <div class="dhead"><div class="row"><div><h1 class="h1">${esc(d.servico)}${d.local?' · '+esc(d.local.split(',').pop().trim()):''}</h1><div class="sub">${esc(d.nome)} · ${esc(d.tel)} · linha: ${L.n} · comercial: Rúben</div></div>
+    <div class="row">${T?`<span class="pill pri">${eur(T.pf)} € · margem ${pct(T.m)}</span>`:''}${d.fase<4&&!d.perdido?B('Marcar perdido','perder',d.id,'sec sm'):''}</div></div>
+    ${perda}
+    <div class="phz">${FASES.map((f,i)=>`<button class="${d.fase>i?'d':d.fase===i?'on':''}" data-a="scroll" data-x="${i}">${f}</button>`).join('')}</div></div>
+  <div class="next ${p.done?'done':''}"><div><small>${p.done?'Concluído':'Próximo passo'}${p.who&&p.who!=='cliente'&&!p.done?' · '+ROLES[p.who].n.split('·').pop().trim():''}</small><b>${esc(p.t)}</b><span class="sub">${esc(p.sub||'')}</span></div>${nextBtn}</div>
+  <div class="withside"><div class="stack">${s0}${s1}${s2}${s3}${s4}${s5}</div>
+    <div class="stack"><div class="card"><h3>Cliente ${cli?'<span class="pill ok">em Clientes</span>':''}</h3><div class="kv"><span>Nome</span><b>${esc(d.nome)}</b><span>Telefone</span><b>${esc(d.tel)}</b><span>Morada</span><b style="font-weight:500">${esc(d.local||'—')}</b><span>Origem</span><b style="font-weight:500">${esc(d.origem)}</b></div></div>
+    <div class="card"><h3>Histórico <span>${d.hist.length}</span></h3><div class="tl">${hist}</div></div></div></div>`;
+}
+
+function viewOperacoes(){
+  const obras=aberto().filter(d=>d.fase===5);
+  if (S.op){
+    const d=deal(S.op), p=d.obra.plano, C=conflitos(p), nd=Math.max(5,...p.tasks.map(t=>t.dia+t.dur));
+    const cols=`170px repeat(${nd},minmax(74px,1fr))`;
+    const rows=p.tasks.map((t,ti)=>{ const tec=TECS.find(x=>x.id===t.tec); const c=C.find(x=>x.t===t);
+      let cells=''; for(let k=0;k<nd;k++){ if(k===t.dia) { cells+=`<div class="gb" style="grid-column:span ${t.dur}"><i class="${c?'warn':p.estado==='concluída'||(p.estado==='em curso'&&k<p.dia)?'done':''}">${esc(tec?tec.n.split(' ')[0]:'?')}${c?' · de férias '+DIAS[c.dia].split(' ')[1]:''}</i></div>`; k+=t.dur-1; } else cells+='<div></div>'; }
+      return `<div class="t">${esc(t.nome)}<small>${nfmt(t.h)} h · ${esc(t.sk.toLowerCase())}</small></div>${cells}`; }).join('');
+    const eq=[...new Set(p.tasks.map(t=>t.tec))].map(id=>{ const t=TECS.find(x=>x.id===id); const c=C.find(x=>x.tec.id===id);
+      return `<div class="item"><div><b>${t.n}</b><small>${t.sk}${t.ferias.length?' · férias '+t.ferias.map(k=>DIAS[k].split(' ')[1]).join(', '):''}</small></div>${c?'<span class="pill warn">Conflito</span>':'<span class="pill ok">Disponível</span>'}</div>`; }).join('');
+    const resolve = C.map(c=>{ const ti=p.tasks.indexOf(c.t); const alt=TECS.find(x=>x.sk===c.t.sk&&x.id!==c.tec.id&&!x.ferias.some(k=>k>=c.t.dia&&k<c.t.dia+c.t.dur));
+      return `<div class="al">${alt?`<div class="w"><i>!</i><span><b>Trocar por ${alt.n}</b><small>${alt.sk} · livre nesses dias · mesmo custo/hora</small></span><span class="acts">${B('Trocar','trocar',[d.id,ti],'sm')}</span></div>`:''}
+        <div><i>→</i><span><b>Ou adiar ${esc(c.t.nome.toLowerCase())}</b><small>${c.tec.n.split(' ')[0]} volta depois das férias · a obra acaba mais tarde</small></span><span class="acts">${B('Adiar','adiar',[d.id,ti],'sec sm')}</span></div></div>`; }).join('');
+    const e=d.obra.enc; const matsOk=!e||e.estado==='recebida';
+    let acao='';
+    if (p.estado==='por aprovar') acao=B('Aprovar plano','aprovarPlano',d.id,C.length?'sec':'');
+    else if (p.estado==='aprovado') acao=B('Arrancar obra','arrancar',d.id,matsOk?'':'sec');
+    else if (p.estado==='em curso') acao=B('Registar fim da obra (simular)','fimObra',d.id);
+    const pode = S.role==='operacoes';
+    return `<button class="back" data-a="nav" data-x='"operacoes"'>← Operações</button>
+    <div class="row"><div><h1 class="h1">Plano · ${esc(d.servico)} · ${esc(d.nome)}</h1><div class="sub">Gerado do contrato · ${p.tasks.length} fases · ${nfmt(p.tasks.reduce((a,t)=>a+t.h,0))} h de equipa · tarefas das receitas do Catálogo</div></div>
+      <div class="row">${C.length?'<span class="pill warn">'+C.length+' conflito</span>':''}<span class="pill ${p.estado==='concluída'?'ok':'pri'}">${p.estado}</span>${pode?acao:(acao?`<button class="link" data-a="role" data-x='"operacoes"'>Mudar para Operações</button>`:'')}</div></div>
+    <div class="gw"><div class="gantt" style="grid-template-columns:${cols};min-width:${170+nd*74}px"><div class="h">Fase</div>${Array.from({length:nd},(_,k)=>`<div class="h">${DIAS[k]}</div>`).join('')}${rows}</div></div>
+    <div class="g2"><div class="card"><h3>Equipa proposta <span>do RH: competências e disponibilidade</span></h3>${eq}</div>
+      <div class="card"><h3>${C.length?'Resolver o conflito':'Materiais'}</h3>${C.length?resolve:''}<span class="sub">Materiais: ${!e?'tudo em stock, reservado':e.estado==='recebida'?'encomenda recebida, tudo reservado ✓':e.n+' '+e.estado+' · o armazém trata no Inventário'}</span>${!matsOk&&p.estado==='aprovado'?'<span class="err">A obra só arranca com os materiais garantidos.</span>':''}</div></div>`;
+  }
+  const rows=obras.map(d=>{ const p=d.obra.plano; return `<tr><td><button class="link" data-a="abrirPlano" data-x="${d.id}">${esc(d.nome)}</button><small>${esc(d.servico)} · ${esc(d.local)}</small></td><td><span class="pill ${p.estado==='concluída'?'ok':p.estado==='por aprovar'?'warn':'pri'}">${p.estado}</span></td><td>${conflitos(p).length?'<span class="pill warn">1 conflito</span>':'—'}</td><td class="n">${nfmt(p.tasks.reduce((a,t)=>a+t.h,0))} h</td></tr>`; }).join('');
+  return `<div><h1 class="h1">Operações</h1><div class="sub">As obras chegam aqui sozinhas quando o Financeiro emite o recibo.</div></div>
+    <div class="tw"><table><thead><tr><th>Obra</th><th>Plano</th><th>Conflitos</th><th class="n">Horas previstas</th></tr></thead><tbody>${rows||'<tr><td colspan="4" class="empty">Sem obras. Valide um pagamento no Financeiro para gerar uma.</td></tr>'}</tbody></table></div>`;
+}
+
+function viewInventario(){
+  const obras=aberto().filter(d=>d.fase===5&&d.obra.mats);
+  const pode=S.role==='armazem';
+  const cards=obras.map(d=>{ const e=d.obra.enc;
+    const rows=d.obra.mats.map(x=>`<tr class="${x.falta>0?'hl':''}"><td>${esc(x.n)}</td><td class="n">${nfmt(x.q)} ${x.un}</td><td class="n">${nfmt(x.res)} ${x.un}</td><td>${x.falta>0?`<span class="pill bad">Faltam ${nfmt(x.falta)} ${x.un}</span>`:'<span class="pill ok">Reservado</span>'}</td></tr>`).join('');
+    let act='';
+    if (e && e.estado==='por confirmar') act = pode?B('Confirmar encomenda','confirmarEnc',d.id):`<button class="link" data-a="role" data-x='"armazem"'>Mudar para Armazém</button>`;
+    if (e && e.estado==='encomendada') act = pode?B('Marcar como recebida (simular)','receberEnc',d.id):`<button class="link" data-a="role" data-x='"armazem"'>Mudar para Armazém</button>`;
+    return `<div class="card"><h3>${esc(d.nome)} · ${esc(d.servico)} <span>${e?esc(e.n)+' · '+e.estado:'tudo em stock'}</span></h3>
+      <div class="tw"><table style="min-width:520px"><thead><tr><th>Material</th><th class="n">Precisa</th><th class="n">Reservado</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table></div>
+      ${e&&e.estado!=='recebida'?`<div class="next"><div><small>Encomenda ao fornecedor</small><b>${esc(e.n)} · ${esc(e.forn)} · ${e.linhas.length} linha(s)</b><span class="sub">${e.linhas.map(l=>nfmt(l.q)+' '+l.un+' '+l.n.toLowerCase()).join(' · ')} · entrega pedida até 12/10</span></div>${act}</div>`:''}</div>`; }).join('');
+  const nomes={cp:'Cerâmico de parede 30×60 (m²)',pv:'Pavimento cerâmico 60×60 (m²)',san:'Sanita suspensa com estrutura',base:'Base de duche 80×120',cim:'Cimento-cola · saco 25 kg',mov:'Conjunto de móveis de cozinha',banc:'Bancada em pedra'};
+  return `<div><h1 class="h1">Inventário · materiais por obra</h1><div class="sub">A lista vem do orçamento de cada obra. Aparece aqui quando o Financeiro emite o recibo.</div></div>
+    ${cards||'<p class="empty">Ainda não há obras com materiais. Valide um pagamento no Financeiro.</p>'}
+    <div class="card"><h3>Stock livre <span>exemplo</span></h3><div class="kv">${Object.entries(S.stock).map(([k,v])=>`<span>${nomes[k]}</span><b>${nfmt(Math.max(0,v))}</b>`).join('')}</div></div>`;
+}
+
+function viewCatalogo(){
+  const rows=Object.entries(S.svc).map(([k,s])=>{ const c=custoUn(s,S), m=(s.preco-c)/s.preco; const cls=m<S.cfg.min/100?'bad':m<S.cfg.alvo/100-0.005?'warn':'ok';
+    const inp=(f,v)=>`<input id="svc-${k}-${f}" aria-label="${f}" data-f="svc" data-s="${k}" data-k="${f}" value="${nfmt(v)}">`;
+    return `<tr class="${cls==='bad'?'hl':''}"><td>${s.n}<small>${s.perfil}${s.semCusto?' · <span style="color:var(--warn)">técnico sem custo/hora, usa o médio</span>':''}${s.stale?' · <span style="color:var(--warn)">preço de consumível antigo</span>':''}</small></td><td>${s.un}</td>
+      <td class="n">${inp('h',s.h)}</td><td class="n">${inp('eh',s.eh)}</td><td class="n">${eur(s.eq)}</td><td class="n">${inp('cons',s.cons)}</td>${S.cfg.estrutura?`<td class="n">${eur(s.h*ESTR)}</td>`:''}<td class="n"><b>${eur(c)}</b></td><td class="n">${inp('preco',s.preco)}</td><td class="n"><span class="pill ${cls}">${pct(m)}</span></td></tr>`; }).join('');
+  return `<div class="row"><div><h1 class="h1">Catálogo e custos · serviços</h1><div class="sub">A receita de cada serviço por unidade de medida. É daqui que o orçamento tira o custo.</div></div><span class="lock">salários: só a Direção vê</span></div>
+    <div class="banner"><b>Experimente:</b> mude as horas ou o custo/hora de um serviço. Os orçamentos ainda não enviados mostram "Catálogo mudou"; os enviados guardam a cópia do cálculo.</div>
+    <div class="tw"><table style="min-width:900px"><thead><tr><th>Serviço</th><th>Medida</th><th class="n">Horas/un.</th><th class="n">€/h técnico</th><th class="n">Equip. €/un.</th><th class="n">Consum. €/un.</th>${S.cfg.estrutura?'<th class="n">Estrutura €/un.</th>':''}<th class="n">Custo/un.</th><th class="n">Preço/un.</th><th class="n">Margem</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <p class="sub">Custo por unidade = horas × €/h do técnico + equipamento + consumíveis${S.cfg.estrutura?' + horas × '+eur(ESTR)+' €/h de estrutura':''}. Todos os valores são de exemplo.</p>`;
+}
+
+function viewClientes(){
+  return `<div><h1 class="h1">Clientes</h1><div class="sub">O cliente é criado sozinho quando o contrato é assinado ou a venda direta é aceite.</div></div>
+    <div class="tw"><table><thead><tr><th>Cliente</th><th>Telefone</th><th>Desde</th><th>Negócio</th></tr></thead><tbody>${S.clientes.map(c=>`<tr><td>${esc(c.nome)}<small>${esc(c.local)}</small></td><td>${esc(c.tel)}</td><td>${esc(c.desde)}</td><td><button class="link" data-a="abrir" data-x="${c.deal}">#${c.deal}</button></td></tr>`).join('')}</tbody></table></div>`;
+}
+function viewMarketing(){
+  const C=[['Campanha de outono','Meta Ads · formulário "Cozinha nova"',14,3],['Site · pedido de orçamento','Formulário do site',31,9],['Recomendações','À mão',6,2]];
+  return `<div><h1 class="h1">Marketing · campanhas</h1><div class="sub">A origem e o formulário vivem dentro de cada campanha. Fora do âmbito deste protótipo.</div></div>
+    <div class="tw"><table><thead><tr><th>Campanha</th><th class="n">Leads</th><th class="n">Ganhos</th></tr></thead><tbody>${C.map(c=>`<tr><td>${c[0]}<small>${c[1]}</small></td><td class="n">${c[2]}</td><td class="n">${c[3]}</td></tr>`).join('')}</tbody></table></div>`;
+}
+function viewDefinicoes(){
+  return `<div><h1 class="h1">Definições</h1><div class="sub">Neste protótipo só estão as regras que mexem no orçamento.</div></div>
+    <div class="g2"><div class="card"><h3>Margens <span>por empresa e linha de serviço</span></h3>
+      <div class="form"><div class="f"><label for="cfg-min">Margem mínima (%)</label><input id="cfg-min" type="number" data-f="cfg" data-k="min" value="${S.cfg.min}"></div><div class="f"><label for="cfg-alvo">Margem-alvo (%)</label><input id="cfg-alvo" type="number" data-f="cfg" data-k="alvo" value="${S.cfg.alvo}"></div></div>
+      <span class="sub">Abaixo do mínimo, a proposta só sai com aprovação da Direção. O preço sugerido repõe a margem-alvo.</span></div>
+      <div class="card"><h3>Estrutura no custo <span>decisão em aberto</span></h3>
+      <label class="row" style="justify-content:flex-start;gap:8px"><input type="checkbox" id="cfg-estr" data-f="cfg" data-k="estrutura" ${S.cfg.estrutura?'checked':''}> Somar ${eur(ESTR)} €/h de estrutura ao custo de cada serviço</label>
+      <span class="sub">Pelo método BMG, a estrutura fica dentro da margem. Somá-la ao custo sem baixar a margem cobra-a duas vezes. Ligue e desligue para ver o efeito nos orçamentos.</span></div></div>
+    <div class="card"><h3>Demonstração</h3><span class="sub">Os passos que der ficam guardados neste browser. Para recomeçar do zero:</span><div>${B('Repor a demonstração','reset',null,'sec')}</div></div>`;
+}
+
+function render(){
+  document.getElementById('side').innerHTML=sideHTML();
+  const rs=document.getElementById('role'); if(!rs.options.length) rs.innerHTML=Object.entries(ROLES).map(([k,v])=>`<option value="${k}">${v.n}</option>`).join('');
+  rs.value=S.role; document.getElementById('av').textContent=ROLES[S.role].av;
+  const V={hoje:viewHoje,negocios:viewNegocios,negocio:viewNegocio,operacoes:viewOperacoes,inventario:viewInventario,catalogo:viewCatalogo,clientes:viewClientes,marketing:viewMarketing,definicoes:viewDefinicoes};
+  const m=document.getElementById('main'); m.innerHTML=(V[S.view]||viewNegocios)();
+  if (S.pulse){ const el=document.getElementById(S.pulse); if(el&&S.pulse!=='verif') el.scrollIntoView({behavior:'smooth',block:'start'}); S.pulse=null; }
+  S.deals.forEach(d=>d.fresh=false);
+}
+
+document.addEventListener('click',e=>{
+  const b=e.target.closest('[data-a]'); if(!b||b.disabled) return;
+  const a=b.dataset.a; let x=b.dataset.x; x = x!=null?JSON.parse(x):undefined;
+  if (a==='scroll'){ const el=document.getElementById('sec-'+x); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); return; }
+  const fn=A[a]; if(!fn) return;
+  const prevView=S.view; Array.isArray(x)?fn(...x):fn(x); save(); render();
+  if (S.view!==prevView) document.getElementById('main').scrollTop=0;
+});
+document.addEventListener('change',e=>{
+  const el=e.target;
+  if (el.id==='role'){ A.role(el.value); save(); render(); return; }
+  if (el.dataset && el.dataset.f) setField(el);
+});
+document.addEventListener('keydown',e=>{
+  if (e.key==='Enter' && e.target.matches('[data-f]')) e.target.blur();
+  if (e.key==='Enter' && (e.target.id==='nv-nome'||e.target.id==='nv-tel')){ A.novoCriar(); save(); render(); }
+  if (e.key==='Escape' && S.novo){ S.novo=null; render(); }
+});
+document.getElementById('q').addEventListener('input',()=>{ if(S.view!=='negocios'){ S.view='negocios'; S.deal=null; } render(); });
+
+render();
+
+/* auto-teste: abrir com #teste percorre o fluxo da Ana e escreve o resultado */
+if (location.hash==='#teste'){
+  const out=[]; const ok=(c,m)=>out.push((c?'OK  ':'FALHA ')+m);
+  try{
+    S=seed(); const id=1043, d=()=>deal(id);
+    A.contactar(id); ok(d().fase===1,'contacto');
+    A.marcarVisita(id); ok(d().fase===2,'visita marcada');
+    A.fecharVisita(id); ok(d().fase===2,'não fecha sem medidas');
+    Object.assign(d().visita.med,{pav:6,par:18,pts:3,pcs:4}); A.fecharVisita(id); ok(d().fase===3,'levantamento fechado');
+    let T=tot(d(),S); ok(Math.abs(T.custo-2454.55)<0.6 && Math.abs(T.pf-3606.12)<0.6,'custo '+eur(T.custo)+' preço '+eur(T.pf)+' margem '+pct(T.m));
+    A.verificar(id); ok(bloqueado(d(),S),'bloqueia a margem do revestimento');
+    const al=alertas(d(),S).find(a=>a.sug); A.sugerido(id,al.i,al.sug); T=tot(d(),S); ok(!bloqueado(d(),S),'preço sugerido desbloqueia · margem '+pct(T.m));
+    A.enviar(id); A.aceitar(id); A.enviarContrato(id); A.assinar(id); ok(d().fase===4 && S.clientes.some(c=>c.deal===id),'contrato assinado, cliente criado');
+    A.emitir(id); A.validar(id); ok(d().fase===5 && d().obra.plano && d().obra.mats,'recibo dispara inventário e plano · '+(d().obra.enc?d().obra.enc.linhas.length+' linhas encomendadas':'sem encomenda'));
+    ok(conflitos(d().obra.plano).length===1,'conflito de férias detetado');
+    A.trocar(id,2); ok(conflitos(d().obra.plano).length===0,'conflito resolvido');
+    A.aprovarPlano(id); A.confirmarEnc(id); A.receberEnc(id); A.arrancar(id); ok(d().obra.plano.estado==='em curso','obra arrancou');
+    A.fimObra(id); ok(d().obra.real && d().obra.real.m<T.m,'margem real '+pct(d().obra.real.m)+' abaixo da orçada');
+    A.aprender(id); ok(S.svc.revest.h>0.75,'receita atualizada para '+S.svc.revest.h);
+    // os outros ecrãs desenham sem erro
+    for (const v of ['hoje','negocios','operacoes','inventario','catalogo','clientes','marketing','definicoes']){ S.view=v; render(); }
+    for (const dd of S.deals){ S.view='negocio'; S.deal=dd.id; render(); }
+    for (const r of Object.keys(ROLES)){ S.role=r; S.view='hoje'; render(); }
+    ok(true,'todos os ecrãs desenham');
+  }catch(err){ out.push('ERRO '+err.message+' '+err.stack); }
+  const pre=document.createElement('pre'); pre.id='teste'; pre.textContent=out.join('\n'); document.body.appendChild(pre);
+}
+</script>

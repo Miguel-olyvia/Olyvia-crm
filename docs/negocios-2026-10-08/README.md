@@ -166,3 +166,12 @@ Decisões de desenho tomadas nas maquetas, para validar:
 - Criar um negócio ("Novo negócio") faz-se num cartão na coluna Lead, sem modal.
 - Não há entrada "Financeiro" no menu. O financeiro trabalha no seu **Hoje** e na fase Financeiro de cada negócio.
 - O Inventário tem uma vista nova, **Materiais por obra**.
+
+## 9. Protótipo interativo (08/10/2026)
+
+O protótipo é a app a funcionar no browser, com dados de exemplo: https://claude.ai/artifact/Y79ptTXmKWMyRSPwxWDyX6 (privado).
+
+- **Fonte:** `prototipo.html`, um só ficheiro, sem montagem.
+- **O que se pode fazer:** levar a Ana Martins da Lead à Obra, trocando de papel em "A ver como" (Comercial, Direção, Financeiro, Armazém, Operações).
+- **Auto-teste:** abrir `prototipo.html#teste` percorre o fluxo todo e escreve o resultado no fim da página.
+- **Gravação:** guarda o estado no browser de quem o usa. "Repor a demonstração" está em Definições.
