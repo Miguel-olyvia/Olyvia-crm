@@ -1,0 +1,569 @@
+// Protótipo de Negócios (08/10/2026): dados de exemplo e regras.
+// Nada daqui lê ou escreve na base de dados; o estado vive no browser.
+// É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
+
+export const ESTR = 5.06; // €/h de estrutura (exemplo)
+
+export type Papel = "comercial" | "direcao" | "financeiro" | "armazem" | "operacoes";
+export const PAPEIS: Record<Papel, { n: string; av: string; nome: string }> = {
+  comercial: { n: "Rúben · Comercial", av: "RB", nome: "Rúben" },
+  direcao: { n: "Direção", av: "DI", nome: "Direção" },
+  financeiro: { n: "Sandra · Financeiro", av: "SA", nome: "Sandra" },
+  armazem: { n: "Nuno · Armazém", av: "NU", nome: "Nuno" },
+  operacoes: { n: "Filipe · Operações", av: "FI", nome: "Filipe" },
+};
+
+export const FASES = ["Lead", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"];
+
+export type SvcId = "demol" | "canal" | "revest" | "pav" | "loucas" | "moveis";
+export interface Servico {
+  n: string;
+  un: string;
+  h: number;
+  eh: number;
+  eq: number;
+  cons: number;
+  preco: number;
+  perfil: string;
+  semCusto?: boolean;
+  stale?: string | null;
+}
+
+const SVC0: Record<SvcId, Servico> = {
+  demol: { n: "Demolição e entulho", un: "m²", h: 0.5, eh: 25, eq: 0.33, cons: 1.2, preco: 25.48, perfil: "Servente · demolição" },
+  canal: { n: "Canalização", un: "pt", h: 2, eh: 25, eq: 0.34, cons: 8.47, preco: 106.05, perfil: "Canalizador" },
+  revest: { n: "Revestimento de parede", un: "m²", h: 0.75, eh: 25, eq: 0, cons: 1.01, preco: 26.0, perfil: "Ladrilhador", semCusto: true, stale: "O cimento-cola tem o preço de há 8 meses." },
+  pav: { n: "Pavimento cerâmico", un: "m²", h: 0.85, eh: 25, eq: 0, cons: 0.66, preco: 40.32, perfil: "Ladrilhador" },
+  loucas: { n: "Montagem de louças", un: "pç", h: 1.35, eh: 25, eq: 0, cons: 1.21, preco: 64.29, perfil: "Canalizador" },
+  moveis: { n: "Montagem de móveis", un: "mód", h: 2.5, eh: 25, eq: 0, cons: 2, preco: 118.7, perfil: "Montador" },
+};
+
+export type MedKey = "pav" | "par" | "pts" | "pcs";
+export type Medidas = Record<MedKey, number>;
+export type StockKey = "cp" | "pv" | "san" | "base" | "cim" | "mov" | "banc";
+export type LinhaId = "wc" | "coz";
+
+interface LinhaServico {
+  n: string;
+  modelo: string;
+  nec: string[];
+  mat: { d: string; custo: number; preco: number };
+  map: [SvcId, MedKey][];
+  med: Partial<Record<MedKey, string>>;
+  mats: [string, string, (m: Medidas) => number, StockKey][];
+}
+
+export const LINHAS: Record<LinhaId, LinhaServico> = {
+  wc: {
+    n: "Casa de banho", modelo: "WC com base de duche", nec: ["Base de duche", "Sanita suspensa", "Banheira", "Móvel 80 cm"],
+    mat: { d: "cerâmico, louças, base, torneiras", custo: 1400, preco: 2168 },
+    map: [["demol", "pav"], ["canal", "pts"], ["revest", "par"], ["pav", "pav"], ["loucas", "pcs"]],
+    med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Peças" },
+    mats: [
+      ["Cerâmico de parede 30×60", "m²", (m) => Math.ceil(m.par * 1.1), "cp"],
+      ["Pavimento cerâmico 60×60", "m²", (m) => Math.ceil(m.pav * 1.1), "pv"],
+      ["Sanita suspensa com estrutura", "un", () => 1, "san"],
+      ["Base de duche 80×120", "un", () => 1, "base"],
+      ["Cimento-cola · saco 25 kg", "sacos", (m) => Math.ceil((m.par + m.pav) / 4), "cim"],
+    ],
+  },
+  coz: {
+    n: "Cozinha", modelo: "Cozinha linear", nec: ["Bancada em pedra", "Ilha", "Eletrodomésticos", "Mudar canalização"],
+    mat: { d: "móveis, bancada, torneira", custo: 3800, preco: 5890 },
+    map: [["demol", "pav"], ["canal", "pts"], ["revest", "par"], ["pav", "pav"], ["moveis", "pcs"]],
+    med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Módulos" },
+    mats: [
+      ["Cerâmico de parede 30×60", "m²", (m) => Math.ceil(m.par * 1.1), "cp"],
+      ["Pavimento cerâmico 60×60", "m²", (m) => Math.ceil(m.pav * 1.1), "pv"],
+      ["Conjunto de móveis de cozinha", "un", () => 1, "mov"],
+      ["Bancada em pedra", "un", () => 1, "banc"],
+      ["Cimento-cola · saco 25 kg", "sacos", (m) => Math.ceil((m.par + m.pav) / 4), "cim"],
+    ],
+  },
+};
+
+export interface Tecnico { id: string; n: string; sk: string; ferias: number[] }
+export const TECS: Tecnico[] = [
+  { id: "js", n: "João Silva", sk: "Servente · demolição", ferias: [] },
+  { id: "ra", n: "Rui Alves", sk: "Servente · demolição", ferias: [] },
+  { id: "ma", n: "Marco Antunes", sk: "Canalizador", ferias: [] },
+  { id: "sf", n: "Sérgio Faria", sk: "Ladrilhador", ferias: [3] },
+  { id: "hn", n: "Hugo Neves", sk: "Ladrilhador", ferias: [] },
+  { id: "pm", n: "Paulo Mota", sk: "Montador", ferias: [] },
+];
+const REAL: Record<SvcId, number> = { demol: 0.93, canal: 0.97, revest: 1.23, pav: 1.05, loucas: 0.96, moveis: 1.02 };
+export const DIAS = ["seg 13/10", "ter 14/10", "qua 15/10", "qui 16/10", "sex 17/10", "seg 20/10", "ter 21/10", "qua 22/10", "qui 23/10", "sex 24/10"];
+export const SLOTS = ["qui 15/10 · 10:00", "qui 15/10 · 15:00", "sex 16/10 · 09:30"];
+
+export type LinhaOrc =
+  | { t: "svc"; sid: SvcId; q: number; cu: number; pu: number }
+  | { t: "mat"; d: string; custo: number; preco: number };
+
+export interface Orcamento {
+  modelo: string;
+  linhas: LinhaOrc[];
+  desconto: number;
+  vendaDireta: boolean;
+  verif: boolean;
+  aprov: null | "pedida" | "ok";
+  enviada: string | null;
+  aceite: string | null;
+  contrato: null | "enviado" | "assinado";
+  avisosVistos: Record<string, boolean>;
+}
+export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number; sk: string; h: number; tec: string | null }
+export interface Plano { tasks: Tarefa[]; estado: "por aprovar" | "aprovado" | "em curso" | "concluída"; dia: number }
+export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
+export interface Encomenda { n: string; estado: "por confirmar" | "encomendada" | "recebida"; forn?: string; linhas: { n: string; q: number; un: string }[] }
+export interface Real { tasks: { nome: string; prev: number; real: number }[]; custoReal: number; m: number }
+export interface Evento { t: string; q: string; k: "a" | "w" | "x" }
+
+export interface Negocio {
+  id: number;
+  nome: string;
+  tel: string;
+  linha: LinhaId;
+  servico: string;
+  local: string;
+  origem: string;
+  quando: string;
+  dono: Papel;
+  fase: number;
+  perdido: boolean;
+  atraso?: boolean;
+  pedido?: string;
+  fresh?: boolean;
+  contacto: { res: string; orc: string; prazo: string; nota: string };
+  visita: { slot: string; andar: string; estac: string; nec: string[]; med: Medidas; fotos: number; fechada: boolean };
+  orc: Orcamento | null;
+  fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null };
+  obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean };
+  hist: Evento[];
+}
+
+export type Vista = "hoje" | "negocios" | "negocio" | "clientes" | "operacoes" | "inventario" | "catalogo" | "marketing" | "definicoes";
+
+export interface Estado {
+  v: number;
+  role: Papel;
+  view: Vista;
+  deal: number | null;
+  op: number | null;
+  filtro: string;
+  novo: { nome: string; tel: string; linha: LinhaId; err: string } | null;
+  confirmPerda: number | null;
+  pulse?: string | null;
+  cfg: { min: number; alvo: number; estrutura: boolean };
+  svc: Record<SvcId, Servico>;
+  stock: Record<StockKey, number>;
+  seq: number;
+  ft: number;
+  ef: number;
+  rc: number;
+  clientes: { nome: string; tel: string; local: string; desde: string; deal: number }[];
+  deals: Negocio[];
+}
+
+type NovoNegocio = Partial<Negocio> & Pick<Negocio, "id" | "nome" | "tel" | "linha">;
+function novoDeal(o: NovoNegocio): Negocio {
+  return {
+    servico: "", local: "", origem: "site", quando: "", dono: "comercial", fase: 0, perdido: false,
+    contacto: { res: "", orc: "", prazo: "", nota: "" },
+    visita: { slot: "", andar: "", estac: "Fácil", nec: [], med: { pav: 0, par: 0, pts: 0, pcs: 0 }, fotos: 0, fechada: false },
+    orc: null, fin: { fatura: null, pago: false, recibo: null }, obra: { plano: null, enc: null, mats: null, real: null, aprendido: false },
+    hist: [],
+    ...o,
+  };
+}
+
+export const VERSAO = 3;
+
+export function seed(): Estado {
+  const S: Estado = {
+    v: VERSAO, role: "comercial", view: "negocios", deal: null, op: null, filtro: "meus", novo: null, confirmPerda: null,
+    cfg: { min: 28, alvo: 35, estrutura: true },
+    svc: structuredClone(SVC0),
+    stock: { cp: 12, pv: 0, san: 0, base: 3, cim: 40, mov: 0, banc: 2 },
+    seq: 1046, ft: 418, ef: 77, rc: 301,
+    clientes: [
+      { nome: "Tiago Almeida", tel: "913 220 410", local: "Cozinha · Almada", desde: "08/10", deal: 1027 },
+      { nome: "Marta Lima", tel: "916 004 552", local: "WC · Odivelas", desde: "01/10", deal: 1022 },
+    ],
+    deals: [],
+  };
+  const D = (o: NovoNegocio) => S.deals.push(novoDeal(o));
+  D({ id: 1043, nome: "Ana Martins", tel: "912 000 111", linha: "wc", servico: "Remodelação WC suite", local: "Rua das Flores 12, Sintra", origem: "site", quando: "30/09 21:40",
+    pedido: "Quero remodelar a casa de banho da suite.", hist: [{ t: "Pedido pelo site", q: "30/09 21:40", k: "a" }] });
+  D({ id: 1044, nome: "Pedro Lopes", tel: "927 118 300", linha: "wc", servico: "WC social", local: "Amadora", origem: "site", quando: "06/10 18:02", atraso: true,
+    pedido: "Trocar a banheira por duche.", hist: [{ t: "Pedido pelo site", q: "06/10 18:02", k: "a" }] });
+  D({ id: 1045, nome: "Rita Sousa", tel: "934 500 812", linha: "coz", servico: "Cozinha nova", local: "Loures", origem: "campanha de outono", quando: "08/10 08:15",
+    pedido: "Cozinha nova, com bancada em pedra.", hist: [{ t: "Pedido pela campanha de outono", q: "08/10 08:15", k: "a" }] });
+  D({ id: 1038, nome: "Manuel Costa", tel: "918 330 991", linha: "wc", servico: "WC social", local: "Cascais", origem: "telefone", quando: "03/10", fase: 1,
+    contacto: { res: "Atendeu · interessado", orc: "até 3.000 €", prazo: "Novembro", nota: "" }, hist: [{ t: "Chamada · 4 min", q: "05/10 11:20", k: "a" }, { t: "Pedido por telefone", q: "03/10", k: "a" }] });
+  D({ id: 1036, nome: "Luísa Freitas", tel: "962 774 105", linha: "coz", servico: "Cozinha", local: "Oeiras", origem: "site", quando: "01/10", fase: 2,
+    visita: { slot: "qui 15/10 · 10:00", andar: "R/C", estac: "Fácil", nec: ["Bancada em pedra"], med: { pav: 0, par: 0, pts: 0, pcs: 0 }, fotos: 0, fechada: false },
+    hist: [{ t: "Visita marcada para qui 15/10 · 10:00", q: "02/10", k: "a" }] });
+  D({ id: 1035, nome: "Hugo Matos", tel: "915 662 030", linha: "wc", servico: "WC suite", local: "Lisboa", origem: "recomendação", quando: "28/09", fase: 2,
+    visita: { slot: "ter 06/10 · 15:00", andar: "2.º com elevador", estac: "Difícil", nec: ["Base de duche", "Móvel 80 cm"], med: { pav: 5, par: 16, pts: 3, pcs: 3 }, fotos: 6, fechada: false },
+    hist: [{ t: "Visita feita", q: "06/10 15:00", k: "a" }] });
+  D({ id: 1031, nome: "Carla Nunes", tel: "938 101 777", linha: "coz", servico: "Cozinha", local: "Setúbal", origem: "site", quando: "22/09", fase: 3,
+    visita: { slot: "", andar: "1.º", estac: "Fácil", nec: ["Bancada em pedra"], med: { pav: 9, par: 14, pts: 2, pcs: 9 }, fotos: 10, fechada: true }, hist: [] });
+  D({ id: 1030, nome: "Sérgio Pinto", tel: "919 440 222", linha: "wc", servico: "WC", local: "Barreiro", origem: "telefone", quando: "25/09", fase: 3,
+    visita: { slot: "", andar: "3.º", estac: "Fácil", nec: ["Base de duche"], med: { pav: 4, par: 14, pts: 3, pcs: 3 }, fotos: 5, fechada: true }, hist: [] });
+  D({ id: 1027, nome: "Tiago Almeida", tel: "913 220 410", linha: "coz", servico: "Cozinha", local: "Almada", origem: "site", quando: "15/09", fase: 4,
+    visita: { slot: "", andar: "4.º", estac: "Difícil", nec: ["Ilha"], med: { pav: 12, par: 18, pts: 2, pcs: 12 }, fotos: 12, fechada: true }, hist: [] });
+  D({ id: 1022, nome: "Marta Lima", tel: "916 004 552", linha: "wc", servico: "WC", local: "Odivelas", origem: "site", quando: "10/09", fase: 5,
+    visita: { slot: "", andar: "1.º", estac: "Fácil", nec: ["Base de duche"], med: { pav: 4, par: 15, pts: 3, pcs: 4 }, fotos: 8, fechada: true }, hist: [] });
+  for (const d of S.deals) if (d.fase >= 3) d.orc = criarOrc(d, S);
+  const by = (id: number) => S.deals.find((d) => d.id === id)!;
+  Object.assign(by(1031).orc!, { verif: true, enviada: "05/10" });
+  by(1031).hist.push({ t: "Proposta enviada ao portal", q: "05/10", k: "a" });
+  Object.assign(by(1030).orc!, { verif: true, enviada: "07/10", vendaDireta: true });
+  by(1030).hist.push({ t: "Proposta enviada · venda direta", q: "07/10", k: "a" });
+  Object.assign(by(1027).orc!, { verif: true, enviada: "01/10", aceite: "03/10", contrato: "assinado" });
+  by(1027).hist.push({ t: "Contrato assinado · cliente criado", q: "08/10", k: "a" });
+  const m = by(1022);
+  Object.assign(m.orc!, { verif: true, enviada: "15/09", aceite: "17/09", contrato: "assinado" });
+  m.fin = { fatura: { n: "FT 2026/391", q: "18/09" }, pago: true, recibo: { n: "RC 2026/288", q: "22/09" } };
+  m.obra.plano = gerarPlano(m, S);
+  m.obra.plano.tasks.forEach((t) => { if (t.tec === "sf") t.tec = "hn"; });
+  m.obra.plano.estado = "em curso";
+  m.obra.plano.dia = 2;
+  m.obra.enc = { estado: "recebida", n: "EF 2026/71", linhas: [] };
+  m.obra.mats = calcMats(m, S, true);
+  m.hist.push({ t: "Obra em curso · dia 3 de 5", q: "hoje", k: "a" });
+  return S;
+}
+
+/* ------------------------------------------------------------------ cálculo */
+export const r2 = (x: number) => Math.round(x * 100) / 100;
+export function eur(x: number): string {
+  const s = (Math.round(x * 100) / 100).toFixed(2).split(".");
+  return s[0].replace(/\B(?=(\d{3})+(?!\d))/g, ".") + "," + s[1];
+}
+export const pct = (x: number) => (x * 100).toFixed(1).replace(".", ",") + "%";
+export const nfmt = (x: number) => String(r2(x)).replace(".", ",");
+
+export function custoUn(s: Servico, S: Estado): number {
+  return s.h * s.eh + s.eq + s.cons + (S.cfg.estrutura ? s.h * ESTR : 0);
+}
+export function criarOrc(d: Negocio, S: Estado): Orcamento {
+  const L = LINHAS[d.linha], m = d.visita.med, linhas: LinhaOrc[] = [];
+  for (const [sid, k] of L.map) {
+    const s = S.svc[sid];
+    if (!(m[k] > 0)) continue;
+    linhas.push({ t: "svc", sid, q: m[k], cu: r2(custoUn(s, S)), pu: s.preco });
+  }
+  linhas.push({ t: "mat", d: L.mat.d, custo: L.mat.custo, preco: L.mat.preco });
+  return { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
+}
+export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: number; h: number; s?: Servico } {
+  if (l.t === "mat") return { custo: l.custo, preco: l.preco, h: 0 };
+  const s = S.svc[l.sid];
+  return { custo: l.cu * l.q, preco: l.pu * l.q, h: s.h * l.q, s };
+}
+export function tot(d: Negocio, S: Estado) {
+  let c = 0, p = 0, h = 0;
+  for (const l of d.orc!.linhas) { const x = linhaCalc(l, S); c += x.custo; p += x.preco; h += x.h; }
+  const pf = p * (1 - (d.orc!.desconto || 0) / 100);
+  return { custo: c, preco: p, pf, h, m: pf > 0 ? (pf - c) / pf : 0 };
+}
+export function partes(d: Negocio, S: Estado) {
+  const o = { mo: 0, eq: 0, cons: 0, estr: 0, mat: 0 };
+  for (const l of d.orc!.linhas) {
+    if (l.t === "mat") { o.mat += l.custo; continue; }
+    const s = S.svc[l.sid];
+    o.mo += s.h * s.eh * l.q; o.eq += s.eq * l.q; o.cons += s.cons * l.q;
+    if (S.cfg.estrutura) o.estr += s.h * ESTR * l.q;
+  }
+  return o;
+}
+
+export interface Alerta { k: "x" | "w"; t: string; d: string; fix?: boolean; i?: number; sug?: number; aprov?: boolean; go?: Vista; key?: string }
+export function alertas(d: Negocio, S: Estado): Alerta[] {
+  const A: Alerta[] = [], min = S.cfg.min / 100, alvo = S.cfg.alvo / 100, o = d.orc!, vistos = o.avisosVistos || {};
+  o.linhas.forEach((l, i) => {
+    if (l.t !== "svc") return;
+    const s = S.svc[l.sid], x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
+    if (x.preco < x.custo) A.push({ k: "x", fix: true, t: `Preço abaixo do custo em ${s.n}`, d: `${eur(l.pu)} €/${s.un} não cobre o custo de ${eur(l.cu)} €/${s.un}. Não se envia assim.`, i, sug: r2(l.cu / (1 - alvo)), aprov: false });
+    else if (m < min) A.push({ k: "x", fix: true, t: `Margem abaixo do mínimo em ${s.n}`, d: `${pct(m)} nesta linha, com um mínimo de ${S.cfg.min}%. O preço de tabela (${eur(l.pu)} €/${s.un}) mal cobre o custo do Catálogo.`, i, sug: r2(l.cu / (1 - alvo)), aprov: true });
+    if (s.semCusto && !vistos["sc" + l.sid]) A.push({ k: "w", t: `Técnico sem custo/hora (${s.perfil.toLowerCase()})`, d: `Foi usado o custo médio do perfil (${eur(s.eh)} €/h). Define-se no Catálogo.`, go: "catalogo", key: "sc" + l.sid });
+    if (s.stale && !vistos["st" + l.sid]) A.push({ k: "w", t: "Preço desatualizado", d: s.stale, key: "st" + l.sid });
+  });
+  const T = tot(d, S);
+  if (o.desconto > 0 && T.m < min) A.push({ k: "x", t: `O desconto de ${nfmt(o.desconto)}% deixa a margem em ${pct(T.m)}`, d: `Abaixo do mínimo de ${S.cfg.min}%. Baixe o desconto ou peça aprovação.`, aprov: true });
+  else if (T.m < min && !A.some((a) => a.k === "x")) A.push({ k: "x", t: `Margem total de ${pct(T.m)}`, d: `Abaixo do mínimo de ${S.cfg.min}%.`, aprov: true });
+  return A;
+}
+export function bloqueado(d: Negocio, S: Estado): boolean {
+  const A = alertas(d, S).filter((a) => a.k === "x");
+  if (!A.length) return false;
+  if (d.orc!.aprov === "ok" && A.every((a) => a.aprov)) return false;
+  return true;
+}
+export function calcMats(d: Negocio, S: Estado, jaReservado: boolean): MatObra[] {
+  const L = LINHAS[d.linha], m = d.visita.med;
+  return L.mats.map(([n, un, f, k]) => {
+    const q = f(m);
+    const ha = jaReservado ? q : Math.min(q, S.stock[k] || 0);
+    return { n, un, k, q, res: ha, falta: q - ha };
+  });
+}
+export function gerarPlano(d: Negocio, S: Estado): Plano {
+  const h = (sid: SvcId) => {
+    const l = d.orc!.linhas.find((x) => x.t === "svc" && x.sid === sid);
+    return l && l.t === "svc" ? S.svc[sid].h * l.q : 0;
+  };
+  const mont: SvcId = d.linha === "wc" ? "loucas" : "moveis";
+  const T: Tarefa[] = [
+    { nome: "Demolição", svcs: ["demol"] as SvcId[], dia: 0, dur: 1, sk: "Servente · demolição" },
+    { nome: "Canalização", svcs: ["canal"] as SvcId[], dia: 1, dur: 1, sk: "Canalizador" },
+    { nome: "Revestimento e pavimento", svcs: ["revest", "pav"] as SvcId[], dia: 2, dur: 2, sk: "Ladrilhador" },
+    { nome: d.linha === "wc" ? "Louças e acabamentos" : "Móveis e acabamentos", svcs: [mont], dia: 4, dur: 1, sk: mont === "loucas" ? "Canalizador" : "Montador" },
+  ]
+    .filter((t) => t.svcs.some((s) => h(s) > 0))
+    .map((t) => {
+      const tec = TECS.find((x) => x.sk === t.sk);
+      return { ...t, h: r2(t.svcs.reduce((a, s) => a + h(s), 0)), tec: tec ? tec.id : null };
+    });
+  return { tasks: T, estado: "por aprovar", dia: 0 };
+}
+export function conflitos(p: Plano) {
+  const C: { t: Tarefa; tec: Tecnico; dia: number }[] = [];
+  for (const t of p.tasks) {
+    const tec = TECS.find((x) => x.id === t.tec);
+    if (!tec) continue;
+    for (let k = t.dia; k < t.dia + t.dur; k++) if (tec.ferias.includes(k)) { C.push({ t, tec, dia: k }); break; }
+  }
+  return C;
+}
+export function realObra(d: Negocio, S: Estado): Real {
+  let extra = 0;
+  const tasks = d.obra.plano!.tasks.map((t) => {
+    let hr = 0;
+    for (const sid of t.svcs) {
+      const l = d.orc!.linhas.find((x) => x.t === "svc" && x.sid === sid);
+      if (!l || l.t !== "svc") continue;
+      const s = S.svc[sid];
+      const hp = s.h * l.q, h2 = hp * (REAL[sid] || 1);
+      hr += h2;
+      extra += (h2 - hp) * (s.eh + (S.cfg.estrutura ? ESTR : 0));
+    }
+    return { nome: t.nome, prev: t.h, real: r2(hr) };
+  });
+  const T = tot(d, S);
+  const custoReal = T.custo + extra;
+  return { tasks, custoReal, m: (T.pf - custoReal) / T.pf };
+}
+export const fatorReal = (sid: SvcId) => REAL[sid];
+
+/* ------------------------------------------------------------------ próximo passo */
+export interface Proximo {
+  t: string;
+  sub?: string;
+  btn?: string;
+  act?: string;
+  who?: Papel | "cliente" | null;
+  wait?: boolean;
+  sim?: "aceitar" | "assinar";
+  done?: boolean;
+}
+export function proximo(d: Negocio, S: Estado): Proximo {
+  if (d.perdido) return { t: "Negócio perdido", who: null };
+  const o = d.orc;
+  switch (d.fase) {
+    case 0: return { t: "Registar a chamada", sub: "Ligar ao cliente e anotar o resultado.", btn: "Registar chamada", act: "contactar", who: "comercial" };
+    case 1: return { t: "Marcar a visita", sub: "Escolher uma vaga na agenda do comercial.", btn: "Marcar visita", act: "marcarVisita", who: "comercial" };
+    case 2: return { t: "Fechar o levantamento", sub: "Confirmar o local, as necessidades e as medidas.", btn: "Fechar levantamento", act: "fecharVisita", who: "comercial" };
+    case 3:
+      if (!o!.enviada) {
+        if (!o!.verif) return { t: "Verificar e enviar a proposta", sub: "A Olyvia verifica as margens e os custos antes de enviar.", btn: "Verificar", act: "verificar", who: "comercial" };
+        if (bloqueado(d, S))
+          return o!.aprov === "pedida"
+            ? { t: "À espera da aprovação da Direção", sub: "Pedido de exceção à margem mínima.", who: "direcao", wait: true }
+            : { t: "Resolver os bloqueios", sub: "Corrigir o preço ou pedir aprovação à Direção.", btn: "Ver bloqueios", act: "irVerif", who: "comercial" };
+        return { t: "Enviar a proposta", sub: o!.vendaDireta ? "Venda direta: a proposta aceite dispensa o contrato." : "Vai para o portal do cliente.", btn: "Enviar proposta", act: "enviar", who: "comercial" };
+      }
+      if (!o!.aceite) return { t: "À espera do cliente", sub: "Proposta no portal desde " + o!.enviada + ".", who: "cliente", wait: true, sim: "aceitar" };
+      if (!o!.vendaDireta && o!.contrato !== "assinado")
+        return o!.contrato === "enviado"
+          ? { t: "À espera da assinatura do contrato", sub: "Contrato no portal do cliente.", who: "cliente", wait: true, sim: "assinar" }
+          : { t: "Enviar o contrato", sub: "Gerado a partir da proposta aceite.", btn: "Enviar contrato", act: "enviarContrato", who: "comercial" };
+      return { t: "—" };
+    case 4:
+      if (!d.fin.fatura) return { t: "Emitir a fatura", sub: "Vai para o portal do cliente.", btn: "Emitir fatura", act: "emitir", who: "financeiro" };
+      return { t: "Validar o pagamento", sub: `Confirmar que o valor da ${d.fin.fatura.n} entrou na conta. O recibo é emitido ao validar.`, btn: "Validar pagamento", act: "validar", who: "financeiro" };
+    case 5: {
+      const p = d.obra.plano!, e = d.obra.enc;
+      if (p.estado === "por aprovar") return { t: conflitos(p).length ? "Operações: resolver um conflito e aprovar o plano" : "Operações: aprovar o plano", sub: "Plano gerado a partir do contrato.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
+      if (e && e.estado === "por confirmar") return { t: "Armazém: confirmar a encomenda ao fornecedor", sub: e.n + " · faltam materiais.", btn: "Abrir Inventário", act: "abrirInv", who: "armazem" };
+      if (e && e.estado === "encomendada") return { t: "Armazém: receber a encomenda", sub: e.n + " · entrega pedida até 12/10.", btn: "Abrir Inventário", act: "abrirInv", who: "armazem" };
+      if (p.estado === "aprovado") return { t: "Operações: arrancar a obra", sub: "Plano aprovado e materiais garantidos.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
+      if (p.estado === "em curso") return { t: "Obra em curso", sub: "As Operações registam o fim da obra.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
+      if (!d.obra.aprendido) return { t: "Rever a margem real", sub: "A obra acabou. Comparar o previsto com o real.", btn: "Ver resultado", act: "irObra", who: "comercial" };
+      return { t: "Negócio fechado", sub: "O cliente fica em Clientes, com o histórico.", done: true };
+    }
+  }
+  return { t: "—" };
+}
+
+export const aberto = (S: Estado) => S.deals.filter((d) => !d.perdido);
+
+export function minhas(S: Estado, role: Papel) {
+  const L: { d: Negocio; p: Proximo; dir?: boolean }[] = [];
+  for (const d of aberto(S)) {
+    const p = proximo(d, S);
+    if (role === "direcao" && d.fase === 3 && d.orc && d.orc.aprov === "pedida")
+      L.push({ d, p: { t: "Aprovar exceção à margem", sub: pct(tot(d, S).m) + " de margem · mínimo " + S.cfg.min + "%" }, dir: true });
+    else if (p.who === role && !p.wait && !p.done) L.push({ d, p });
+  }
+  return L;
+}
+
+/* ------------------------------------------------------------------ ações */
+export type TipoAviso = "ok" | "auto" | "bad" | "";
+export interface Aviso { msg: string; sub?: string; kind?: TipoAviso; act?: { label: string; fn: () => void }; atraso?: number }
+export type Avisar = (a: Aviso) => void;
+
+const agora = () => {
+  const t = new Date();
+  return "hoje " + String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
+};
+function log(d: Negocio, t: string, k: Evento["k"] = "a") { d.hist.unshift({ t, q: agora(), k }); }
+function fase(d: Negocio, n: number) { d.fase = n; log(d, "Passou a " + FASES[n] + " · sozinho"); }
+function criarCliente(S: Estado, d: Negocio) {
+  if (!S.clientes.some((c) => c.deal === d.id)) S.clientes.unshift({ nome: d.nome, tel: d.tel, local: LINHAS[d.linha].n + (d.local ? " · " + d.local : ""), desde: "hoje", deal: d.id });
+  log(d, "Cliente criado em Clientes");
+}
+
+// Cada ação muda o estado no sítio. `run` (no ecrã) repõe o desenho a seguir.
+export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) {
+  const deal = (id: number) => S.deals.find((d) => d.id === id)!;
+  const A = {
+    nav(v: Vista) { S.view = v; S.deal = null; S.op = null; S.confirmPerda = null; },
+    abrir(id: number) { S.view = "negocio"; S.deal = id; S.confirmPerda = null; },
+    role(r: Papel) { S.role = r; },
+    filtro(f: string) { S.filtro = f; },
+    novo() { S.view = "negocios"; S.novo = { nome: "", tel: "", linha: "wc", err: "" }; },
+    novoCancel() { S.novo = null; },
+    novoCriar(nome: string, tel: string, linha: LinhaId) {
+      const n = S.novo!;
+      n.nome = nome.trim(); n.tel = tel.trim(); n.linha = linha;
+      if (!n.nome || !n.tel) { n.err = "Falta " + (!n.nome ? "o nome" : "o telefone ou o email") + "."; return; }
+      const id = S.seq++;
+      S.deals.unshift(novoDeal({ id, nome: n.nome, tel: n.tel, linha: n.linha, servico: LINHAS[n.linha].n, local: "", origem: "à mão", quando: agora(), pedido: "", hist: [{ t: "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
+      S.novo = null;
+      avisar({ msg: "Negócio criado", sub: n.nome + " · fase Lead", kind: "ok", act: { label: "Abrir", fn: () => run(() => A.abrir(id)) } });
+    },
+    contactar(id: number) { const d = deal(id); if (!d.contacto.res) d.contacto.res = "Atendeu · interessado"; log(d, "Chamada registada · " + d.contacto.res); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
+    marcarVisita(id: number, slot?: string) { const d = deal(id); d.visita.slot = slot || SLOTS[0]; log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda do Rúben", kind: "ok" }); },
+    fecharVisita(id: number) {
+      const d = deal(id), m = d.visita.med, L = LINHAS[d.linha];
+      const falta = (Object.keys(L.med) as MedKey[]).filter((k) => !(m[k] > 0));
+      if (falta.length) { avisar({ msg: "Faltam medidas", sub: falta.map((k) => L.med[k]).join(", "), kind: "bad" }); S.pulse = "sec-2"; return; }
+      d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S); fase(d, 3);
+      avisar({ msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
+    },
+    verificar(id: number) {
+      const d = deal(id); d.orc!.verif = true; S.pulse = "verif";
+      const A2 = alertas(d, S);
+      log(d, "Orçamento verificado · " + A2.filter((a) => a.k === "x").length + " bloqueio(s), " + A2.filter((a) => a.k === "w").length + " aviso(s)", A2.some((a) => a.k === "x") ? "x" : "a");
+    },
+    irVerif() { S.pulse = "verif"; },
+    sugerido(id: number, i: number, v: number) { const d = deal(id); const l = d.orc!.linhas[i]; if (l.t === "svc") l.pu = v; d.orc!.aprov = null; log(d, "Preço corrigido para " + eur(v) + " €"); avisar({ msg: "Preço corrigido", sub: "A margem da linha volta ao alvo de " + S.cfg.alvo + "%", kind: "ok" }); },
+    vistoAviso(id: number, key: string) { const d = deal(id); d.orc!.avisosVistos[key] = true; log(d, "Aviso visto: " + key.slice(2), "w"); },
+    pedirAprov(id: number) {
+      const d = deal(id); d.orc!.aprov = "pedida"; log(d, "Pedida aprovação à Direção", "w");
+      avisar({ msg: "Pedido enviado à Direção", sub: "Aparece no Hoje da Direção. Mude de papel em cima para aprovar.", kind: "", act: { label: "Ver como Direção", fn: () => run(() => { S.role = "direcao"; S.view = "hoje"; S.deal = null; }) } });
+    },
+    aprovar(id: number) { const d = deal(id); d.orc!.aprov = "ok"; log(d, "Exceção aprovada pela Direção"); avisar({ msg: "Exceção aprovada", sub: d.nome + " · o comercial já pode enviar", kind: "ok" }); },
+    recusarAprov(id: number) { const d = deal(id); d.orc!.aprov = null; log(d, "Exceção recusada pela Direção", "x"); avisar({ msg: "Exceção recusada", sub: "O comercial tem de corrigir o preço", kind: "bad" }); },
+    enviar(id: number) {
+      const d = deal(id); const A2 = alertas(d, S).filter((a) => a.k === "w"); d.orc!.enviada = "hoje";
+      log(d, "Proposta enviada ao portal do cliente" + (A2.length ? " · " + A2.length + " aviso(s) registados" : ""));
+      avisar({ msg: "Proposta enviada", sub: "Está no portal do cliente", kind: "ok" });
+    },
+    aceitar(id: number) {
+      const d = deal(id); d.orc!.aceite = "hoje"; log(d, "O cliente aceitou a proposta no portal");
+      if (d.orc!.vendaDireta) { criarCliente(S, d); fase(d, 4); avisar({ msg: "Venda direta aceite", sub: "Cliente criado · passou a Financeiro", kind: "auto" }); }
+      else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta enviar o contrato", kind: "ok" });
+    },
+    recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; }) } }); },
+    enviarContrato(id: number) { const d = deal(id); d.orc!.contrato = "enviado"; log(d, "Contrato enviado para assinatura"); avisar({ msg: "Contrato enviado", sub: "Gerado a partir da proposta aceite", kind: "ok" }); },
+    assinar(id: number) { const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d); fase(d, 4); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); },
+    emitir(id: number) { const d = deal(id); d.fin.fatura = { n: "FT 2026/" + S.ft++, q: "hoje" }; log(d, d.fin.fatura.n + " emitida e enviada ao portal do cliente"); avisar({ msg: d.fin.fatura.n + " emitida", sub: "Enviada ao portal do cliente", kind: "ok" }); },
+    validar(id: number) {
+      const d = deal(id); d.fin.pago = true; d.fin.recibo = { n: "RC 2026/" + S.rc++, q: "hoje" };
+      log(d, "Pagamento validado · " + d.fin.recibo.n + " emitido");
+      // o recibo dispara o Inventário e as Operações
+      const mats = calcMats(d, S, false);
+      mats.forEach((x) => { S.stock[x.k] = (S.stock[x.k] || 0) - x.res; });
+      d.obra.mats = mats;
+      const falta = mats.filter((x) => x.falta > 0);
+      d.obra.enc = falta.length ? { n: "EF 2026/" + S.ef++, estado: "por confirmar", forn: "Cerâmica do Centro (exemplo)", linhas: falta.map((x) => ({ n: x.n, q: x.falta, un: x.un })) } : null;
+      d.obra.plano = gerarPlano(d, S); fase(d, 5);
+      log(d, "Inventário: " + (falta.length ? falta.length + " material(ais) em falta · " + d.obra.enc!.n + " por confirmar" : "tudo em stock e reservado"), falta.length ? "w" : "a");
+      const nc = conflitos(d.obra.plano).length;
+      log(d, "Operações: plano gerado com " + d.obra.plano.tasks.length + " fases" + (nc ? " · 1 conflito" : ""), nc ? "w" : "a");
+      avisar({ msg: "Recibo " + d.fin.recibo.n + " emitido", sub: "Passou a Obra", kind: "ok" });
+      avisar({ msg: "Inventário", sub: "Materiais reservados" + (falta.length ? " · encomenda " + d.obra.enc!.n + " criada" : ""), kind: "auto", atraso: 500 });
+      avisar({ msg: "Operações", sub: "Plano da obra gerado com os técnicos do RH", kind: "auto", atraso: 1000 });
+    },
+    abrirPlano(id: number) { S.view = "operacoes"; S.op = id; S.deal = null; },
+    abrirInv() { S.view = "inventario"; S.deal = null; },
+    irObra() { S.pulse = "sec-5"; },
+    trocar(id: number, ti: number) {
+      const d = deal(id); const t = d.obra.plano!.tasks[ti];
+      const old = TECS.find((x) => x.id === t.tec)!;
+      const alt = TECS.find((x) => x.sk === t.sk && x.id !== t.tec && !x.ferias.some((k) => k >= t.dia && k < t.dia + t.dur));
+      if (!alt) return;
+      t.tec = alt.id; log(d, `Plano: ${t.nome} passa de ${old.n} para ${alt.n}`); avisar({ msg: "Técnico trocado", sub: `${t.nome} · ${alt.n}`, kind: "ok" });
+    },
+    adiar(id: number, ti: number) {
+      const d = deal(id), p = d.obra.plano!; const t = p.tasks[ti]; const tec = TECS.find((x) => x.id === t.tec)!;
+      let nd = t.dia;
+      while (tec.ferias.some((k) => k >= nd && k < nd + t.dur)) nd++;
+      nd = Math.max(nd, 5);
+      const shift = nd - t.dia;
+      p.tasks.slice(ti).forEach((x) => (x.dia += shift));
+      log(d, `Plano: ${t.nome} adiado para ${DIAS[t.dia]}`);
+      avisar({ msg: "Fase adiada", sub: "A obra acaba a " + DIAS[Math.max(...p.tasks.map((x) => x.dia + x.dur - 1))], kind: "ok" });
+    },
+    aprovarPlano(id: number) {
+      const d = deal(id);
+      if (conflitos(d.obra.plano!).length) { avisar({ msg: "Há um conflito por resolver", sub: "Troque o técnico ou adie a fase", kind: "bad" }); return; }
+      d.obra.plano!.estado = "aprovado"; log(d, "Plano aprovado pelas Operações"); avisar({ msg: "Plano aprovado", sub: "Os técnicos recebem as tarefas na app", kind: "ok" });
+    },
+    arrancar(id: number) {
+      const d = deal(id); const e = d.obra.enc;
+      if (e && e.estado !== "recebida") { avisar({ msg: "Ainda faltam materiais", sub: e.n + " · " + e.estado, kind: "bad" }); return; }
+      d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
+    },
+    fimObra(id: number) {
+      const d = deal(id); d.obra.plano!.estado = "concluída"; d.obra.real = realObra(d, S);
+      log(d, "Obra concluída · margem real " + pct(d.obra.real.m));
+      avisar({ msg: "Obra concluída", sub: "Margem real " + pct(d.obra.real.m) + " · o comercial vê o resultado no negócio", kind: "ok", act: { label: "Ver negócio", fn: () => run(() => { A.abrir(id); A.irObra(); }) } });
+    },
+    aprender(id: number) {
+      const d = deal(id); const s = S.svc.revest; const old = s.h; s.h = r2(s.h * REAL.revest); d.obra.aprendido = true;
+      log(d, `Receita do revestimento atualizada: ${nfmt(old)} → ${nfmt(s.h)} h/m²`);
+      avisar({ msg: "Receita atualizada no Catálogo", sub: `Revestimento: ${nfmt(old)} → ${nfmt(s.h)} h/m². Os próximos orçamentos já usam este valor.`, kind: "ok" });
+    },
+    confirmarEnc(id: number) { const d = deal(id); d.obra.enc!.estado = "encomendada"; log(d, "Encomenda " + d.obra.enc!.n + " confirmada pelo armazém"); avisar({ msg: "Encomenda enviada ao fornecedor", sub: d.obra.enc!.n + " · " + d.obra.enc!.forn, kind: "ok" }); },
+    receberEnc(id: number) { const d = deal(id); d.obra.enc!.estado = "recebida"; d.obra.mats!.forEach((x) => { x.res = x.q; x.falta = 0; }); log(d, "Encomenda " + d.obra.enc!.n + " recebida · materiais reservados"); avisar({ msg: "Encomenda recebida", sub: "As Operações já podem arrancar", kind: "auto" }); },
+    vendaDireta(id: number, v: boolean) { const d = deal(id); d.orc!.vendaDireta = v; log(d, v ? "Marcado como venda direta (sem contrato)" : "Deixou de ser venda direta"); },
+    perder(id: number) { S.confirmPerda = id; },
+    perderSim(id: number) {
+      const d = deal(id); d.perdido = true; S.confirmPerda = null; log(d, "Marcado como perdido", "x");
+      avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; log(d, "Perda anulada"); }) } });
+      S.view = "negocios"; S.deal = null;
+    },
+    perderNao() { S.confirmPerda = null; },
+    nec(id: number, v: string) { const a = deal(id).visita.nec; const i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); },
+    estac(id: number, v: string) { deal(id).visita.estac = v; },
+    foto(id: number) { deal(id).visita.fotos++; },
+    recalc(id: number, i: number) { const d = deal(id), l = d.orc!.linhas[i]; if (l.t === "svc") l.cu = r2(custoUn(S.svc[l.sid], S)); d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" }); },
+  };
+  return A;
+}
+export type Acoes = ReturnType<typeof acoes>;

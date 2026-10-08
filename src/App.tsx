@@ -133,6 +133,7 @@ const AuthAuditLog = lazy(() => import("./pages/AuthAuditLog"));
 const DataErasureRequests = lazy(() => import("./pages/DataErasureRequests"));
 const BookingManage = lazy(() => import("./pages/BookingManage"));
 const BookingConfirm = lazy(() => import("./pages/BookingConfirm"));
+const PrototipoNegocios = lazy(() => import("./pages/prototipo-negocios/PrototipoNegocios"));
 const ClientPortal = lazy(() => import("./pages/ClientPortal"));
 const ClientPortalProposals = lazy(() => import("./pages/ClientPortalProposals"));
 const ClientPortalProposalDetail = lazy(() => import("./pages/ClientPortalProposalDetail"));
@@ -199,6 +200,8 @@ const App = () => (
                   <Route path="/booking/manage" element={<BookingManage />} />
                   <Route path="/booking/cancel" element={<BookingManage />} />
                   <Route path="/booking/confirm" element={<BookingConfirm />} />
+                  {/* Protótipo de Negócios (08/10/2026): dados de exemplo, sem sessão nem base de dados */}
+                  <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
 
                   {/* Client portal — guard + layout mount once for all portal routes */}
                   <Route element={<ClientRouteGuard />}>
