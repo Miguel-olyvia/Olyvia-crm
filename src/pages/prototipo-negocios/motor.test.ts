@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { acoes, alertas, bloqueado, conflitos, seed, tot } from "./motor";
+import { acoes, alertas, bloqueado, conflitos, protecoesSugeridas, seed, tot } from "./motor";
 
 // O fluxo da Ana Martins, da lead à obra (era o #teste do prototipo.html).
 describe("protótipo de Negócios", () => {
@@ -71,5 +71,23 @@ describe("protótipo de Negócios", () => {
     A.pedirAprov(id);
     A.aprovar(id);
     expect(bloqueado(d, S)).toBe(false);
+  });
+
+  it("os campos das fases: serviços da visita no orçamento e o que vem preenchido", () => {
+    const S = seed();
+    const A = acoes(S, () => {}, (fn) => fn());
+    const id = 1035; // Hugo Matos, na Visita
+    const d = S.deals.find((x) => x.id === id)!;
+    expect(d.f.tem_elevador).toBe("Sim");
+    A.campo(id, "diag_portas_proteger", "2");
+    A.servico(id, "demol"); // o cliente já tirou o azulejo
+    A.extra(id, "eletr", 4);
+    A.fecharVisita(id);
+    const sids = d.orc!.linhas.flatMap((l) => (l.t === "svc" ? [l.sid] : []));
+    expect(sids).not.toContain("demol");
+    expect(sids).toContain("eletr");
+    expect(d.f.validade).toBe("30");
+    expect(protecoesSugeridas(d.f)).toContain("plástico nas 2 portas");
+    expect(protecoesSugeridas(d.f)).toContain("elevador");
   });
 });

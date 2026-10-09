@@ -7,6 +7,10 @@ import {
   aberto, acoes, alertas, bloqueado, conflitos, custoUn, eur, fatorReal, linhaCalc, minhas, nfmt, partes, pct, proximo, r2, seed, tot,
   type Aviso, type Estado, type LinhaId, type MedKey, type Negocio, type Papel, type SvcId, type Vista,
 } from "./motor";
+import {
+  AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PAPEL_ROT, PROPOSTA,
+  contagem, visivel, type Def, type Grupo,
+} from "./campos";
 
 const CHAVE = "olyvia-prototipo-negocios";
 
@@ -309,6 +313,132 @@ function Secao({ S, d, i, titulo, dir, children }: { S: Estado; d: Negocio; i: n
   );
 }
 
+/* ------------------------------------------------------------------ campos das fases */
+// Fase atual: campos abertos. Fases feitas: fechados num "ver os campos".
+function Fecha({ aberta, n, children }: { aberta?: boolean; n: string; children: ReactNode }) {
+  if (aberta) return <>{children}</>;
+  return <details className="fxd"><summary>Ver os campos · {n}</summary><div className="fxin">{children}</div></details>;
+}
+
+function mostra(c: Def, v: string): string {
+  if (!v) return "—";
+  if (c.t === "data") { const [y, m, dd] = v.split("-"); return dd ? `${dd}/${m}/${y}` : v; }
+  if (c.t === "numero") return v.replace(".", ",") + (c.un ? " " + c.un : "");
+  return v;
+}
+
+type FxProps = { d: Negocio; A: Ctx["A"]; run: Ctx["run"]; ro: boolean };
+
+function Ficha({ grupos, ...p }: FxProps & { grupos: Grupo[] }) {
+  return (
+    <>
+      {grupos.map((g, gi) => {
+        const c = contagem([g], p.d.f);
+        return (
+          <div className="fx" key={g.titulo || gi}>
+            {g.titulo && <h4>{g.titulo}<span>{c.f} de {c.n}</span></h4>}
+            {g.nota && <p className="sub">{g.nota}</p>}
+            <div className="form3">{g.campos.filter((x) => visivel(x, p.d.f)).map((x) => <CampoFicha key={x.k} c={x} {...p} />)}</div>
+          </div>
+        );
+      })}
+    </>
+  );
+}
+
+function CampoFicha({ c, d, A, run, ro }: FxProps & { c: Def }) {
+  const val = d.f[c.k] || "";
+  const id = `fx-${c.k}-${d.id}`;
+  const set = (x: string) => run(() => A.campo(d.id, c.k, x));
+  const tag = c.papel ? <i className={"tg " + c.papel} title={PAPEL_ROT[c.papel]} aria-label={PAPEL_ROT[c.papel]} /> : null;
+  const cls = "f" + (c.t === "texto_longo" ? " full" : "");
+  if (ro) return <div className={cls}><span>{c.l}{tag}</span><b className="vv">{mostra(c, val)}</b></div>;
+  if (c.t === "sim_nao" || c.t === "escolha") {
+    const op = c.t === "sim_nao" ? ["Sim", "Não"] : c.op!;
+    if (op.length <= 3 && op.join("").length <= 28) return (
+      <div className={cls}>
+        <span>{c.l}{tag}</span>
+        <div className="seg" role="group" aria-label={c.l}>
+          {op.map((x) => <button key={x} className={val === x ? "on" : ""} aria-pressed={val === x} onClick={() => set(val === x ? "" : x)}>{x}</button>)}
+        </div>
+        {c.ajuda && <small className="aj">{c.ajuda}</small>}
+      </div>
+    );
+    return (
+      <div className={cls}>
+        <label htmlFor={id}>{c.l}{tag}</label>
+        <select id={id} value={val} onChange={(e) => set(e.target.value)}><option value="">—</option>{op.map((x) => <option key={x}>{x}</option>)}</select>
+        {c.ajuda && <small className="aj">{c.ajuda}</small>}
+      </div>
+    );
+  }
+  let ctl: ReactNode;
+  if (c.t === "numero") ctl = <span className="un"><Campo id={id} type="number" min="0" step="any" value={val} onCommit={set} />{c.un && <em>{c.un}</em>}</span>;
+  else if (c.t === "data") ctl = <input id={id} type="date" value={val} onChange={(e) => set(e.target.value)} />;
+  else if (c.t === "texto_longo") ctl = <textarea key={id + val} id={id} rows={2} defaultValue={val} placeholder={c.ph} onBlur={(e) => { if (e.target.value !== val) set(e.target.value); }} />;
+  else ctl = <Campo id={id} value={val} placeholder={c.ph} onCommit={set} />;
+  return <div className={cls}><label htmlFor={id}>{c.l}{tag}</label>{ctl}{c.ajuda && <small className="aj">{c.ajuda}</small>}</div>;
+}
+
+function Legenda() {
+  return <div className="legend">{(Object.keys(PAPEL_ROT) as (keyof typeof PAPEL_ROT)[]).map((k) => <span key={k}><i className={"tg " + k} />{PAPEL_ROT[k]}</span>)}</div>;
+}
+
+// Os serviços que vão para o orçamento, tirados da visita.
+function orcLinhas(d: Negocio, S: Estado): SvcId[] {
+  const L = LINHAS[d.linha], v = d.visita;
+  return [
+    ...L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).map(([sid]) => sid),
+    ...L.extras.filter((sid) => (v.extra[sid] || 0) > 0 && !!S.svc[sid]),
+  ];
+}
+
+// Necessidades: os serviços do Catálogo que a obra leva, com a quantidade.
+function Necessidades({ S, A, go, run, d }: Ctx & { d: Negocio }) {
+  const L = LINHAS[d.linha], v = d.visita, ro = v.fechada;
+  const sugestao = (sid: SvcId) => sid === "eletr" ? Number(d.f.diag_pontos_eletricos) || 2 : v.med.pav || 1;
+  let total = 0;
+  const linha = (sid: SvcId, q: number, on: boolean, origem: ReactNode, toggle: () => void, extra: boolean) => {
+    const s = S.svc[sid];
+    if (on) total += q * s.preco;
+    return (
+      <tr key={sid} className={on ? "" : "offr"}>
+        <td style={{ width: 34 }}><button className={"tick " + (on ? "on" : "")} aria-pressed={on} aria-label={s.n} disabled={ro} onClick={toggle}>✓</button></td>
+        <td>{s.n}<small>{s.perfil} · {nfmt(s.h)} h/{s.un} na receita</small></td>
+        <td>{extra && on && !ro
+          ? <><Campo id={`ex-${sid}-${d.id}`} ariaLabel={"Quantidade de " + s.n} value={nfmt(q)} onCommit={(x) => run(() => { const n = numero(x); A.extra(d.id, sid, isNaN(n) ? 0 : Math.max(0, n)); })} /> {s.un}</>
+          : on ? <>{nfmt(q)} {s.un}</> : <span className="sub">—</span>}
+          <small>{origem}</small></td>
+        <td className="n">{eur(s.preco)} €/{s.un}</td>
+        <td className="n">{on ? eur(q * s.preco) + " €" : ""}</td>
+      </tr>
+    );
+  };
+  const rows = [
+    ...L.map.map(([sid, k]) => {
+      const q = v.med[k] || 0, on = q > 0 && !v.off.includes(sid);
+      return linha(sid, q, on, q > 0 ? "das medidas · " + L.med[k]!.replace(/ \(.*\)/, "").toLowerCase() : "falta a medida", () => run(() => A.servico(d.id, sid)), false);
+    }),
+    ...L.extras.map((sid) => {
+      const q = v.extra[sid] || 0;
+      return linha(sid, q, q > 0, "juntado na visita", () => run(() => A.extra(d.id, sid, q > 0 ? 0 : sugestao(sid))), true);
+    }),
+  ];
+  return (
+    <div className="fx">
+      <h4>Necessidades · serviços do Catálogo <span>{orcLinhas(d, S).length} serviços · {eur(total)} € a preço de tabela</span></h4>
+      <div className="tw"><table style={{ minWidth: 560 }}>
+        <thead><tr><th /><th>Serviço</th><th>Quantidade</th><th className="n">Preço de tabela</th><th className="n">Total</th></tr></thead>
+        <tbody>{rows}</tbody>
+      </table></div>
+      <div className="row">
+        <span className="sub">Cada serviço traz a sua receita do Catálogo: mão de obra, equipamentos e consumíveis. Os materiais (louças, cerâmico) entram pelo modelo "{L.modelo}".</span>
+        <Btn cls="sec sm" onClick={go(() => A.nav("catalogo"))}>Abrir Catálogo</Btn>
+      </div>
+    </div>
+  );
+}
+
 function PaginaNegocio(ctx: Ctx) {
   const { S, A, go, run } = ctx;
   const d = S.deals.find((x) => x.id === S.deal)!;
@@ -335,14 +465,11 @@ function PaginaNegocio(ctx: Ctx) {
   );
   if (p.wait && p.who === "direcao") nextBtn = <button className="link" onClick={go(() => A.role("direcao"))}>Mudar para Direção</button>;
 
-  const ct = d.contacto, ro = d.fase > 1;
-  const fld = (k: keyof Negocio["contacto"], l: string, ph = "") => (
-    <div className="f" key={k}>
-      <label htmlFor={`ct-${k}-${d.id}`}>{l}</label>
-      <Campo id={`ct-${k}-${d.id}`} value={ct[k]} placeholder={ph} readOnly={ro} onCommit={(v) => run(() => { ct[k] = v; })} />
-    </div>
-  );
   const v = d.visita, vro = v.fechada;
+  const fx = { d, A, run };
+  const conta = (gs: Grupo[]) => { const c = contagem(gs, d.f); return `${c.f} de ${c.n} campos`; };
+  const VISITA = [EXTERIOR, INTERIOR, AREA, ESCOLHAS];
+  const contrato = o && o.vendaDireta ? [] : PROPOSTA.slice(1);
   const cli = S.clientes.find((c) => c.deal === d.id);
 
   return (
@@ -380,50 +507,74 @@ function PaginaNegocio(ctx: Ctx) {
       </div>
       <div className="withside">
         <div className="stack">
-          <Secao S={S} d={d} i={0} titulo="Pedido" dir={`${d.origem} · ${d.quando}`}>
-            <div className="kv"><span>Pedido</span><b style={{ textAlign: "right", fontWeight: 500 }}>{d.pedido || "—"}</b><span>Linha de serviço</span><b>{L.n}</b></div>
+          <Secao S={S} d={d} i={0} titulo="Lead" dir={`${d.origem} · ${d.quando} · ${conta(LEAD)}`}>
+            <Fecha aberta={d.fase <= 1} n={conta(LEAD)}>
+              <div className="fx">
+                <h4>Quem pede</h4>
+                <div className="form3">
+                  <div className="f"><label htmlFor={`ld-nome-${d.id}`}>Nome</label><Campo id={`ld-nome-${d.id}`} value={d.nome} readOnly={d.fase > 1} onCommit={(x) => run(() => { if (x.trim()) d.nome = x.trim(); })} /></div>
+                  <div className="f"><label htmlFor={`ld-tel-${d.id}`}>Telefone</label><Campo id={`ld-tel-${d.id}`} value={d.tel} readOnly={d.fase > 1} onCommit={(x) => run(() => { if (x.trim()) d.tel = x.trim(); })} /></div>
+                  <div className="f"><span>Linha de serviço</span><b className="vv">{L.n}</b></div>
+                </div>
+              </div>
+              <Ficha {...fx} grupos={LEAD} ro={d.fase > 1} />
+            </Fecha>
           </Secao>
-          <Secao S={S} d={d} i={1} titulo="Contacto" dir={d.fase > 1 && v.slot ? "visita marcada" : d.fase === 1 ? "em curso" : ""}>
-            <div className="form">{fld("res", "Resultado da chamada", "Atendeu · interessado")}{fld("orc", "Orçamento do cliente", "3.000 a 4.000 €")}{fld("prazo", "Prazo", "Antes do Natal")}{fld("nota", "Nota")}</div>
+          <Secao S={S} d={d} i={1} titulo="Contacto" dir={(d.fase > 1 && v.slot ? "visita marcada · " : d.fase === 1 ? "em curso · " : "") + conta(CONTACTO)}>
+            <Fecha aberta={d.fase === 1} n={conta(CONTACTO)}>
+              <Ficha {...fx} grupos={CONTACTO} ro={d.fase > 1} />
+            </Fecha>
             {d.fase === 1 && (
-              <div className="f">Vagas do Rúben em {(d.local || "").split(",").pop() || "—"}
+              <div className="f">Vagas do Rúben em {d.f.localidade || (d.local || "").split(",").pop() || "—"}
                 <div className="slots">{SLOTS.map((s) => <button key={s} className="chip" onClick={go(() => A.marcarVisita(d.id, s))}>{s}</button>)}</div>
               </div>
             )}
-            {d.fase === 1 && <span className="sub">Grava sozinho ao sair do campo.</span>}
+            {d.fase === 1 && <span className="sub">Grava sozinho ao sair do campo. Os campos são todos opcionais por agora.</span>}
           </Secao>
-          <Secao S={S} d={d} i={2} titulo="Visita" dir={v.slot}>
-            <div className="form">
-              <div className="f">
-                <label htmlFor={`vis-andar-${d.id}`}>Andar e acesso</label>
-                <Campo id={`vis-andar-${d.id}`} value={v.andar} placeholder="3.º, sem elevador" readOnly={vro} onCommit={(x) => run(() => { v.andar = x; })} />
-              </div>
-              <div className="f">Estacionamento
-                <div className="seg">{["Fácil", "Difícil"].map((x) => <button key={x} className={v.estac === x ? "on" : ""} disabled={vro} onClick={go(() => A.estac(d.id, x))}>{x}</button>)}</div>
-              </div>
-            </div>
-            <div className="f">Necessidades
-              <div className="chips">{L.nec.map((x) => <button key={x} className={"chip " + (v.nec.includes(x) ? "on" : "")} disabled={vro} onClick={go(() => A.nec(d.id, x))}>{x}</button>)}</div>
-            </div>
-            <div className="form4">
-              {(Object.entries(L.med) as [MedKey, string][]).map(([k, l]) => (
-                <div className="f" key={k}>
-                  <label htmlFor={`med-${k}-${d.id}`}>{l}</label>
-                  <Campo id={`med-${k}-${d.id}`} className="num" type="number" min="0" step="0.5" value={v.med[k] || ""} readOnly={vro}
-                    onCommit={(x) => run(() => { const n = numero(x); v.med[k] = isNaN(n) ? 0 : n; })} />
+          <Secao S={S} d={d} i={2} titulo="Visita" dir={(v.slot ? v.slot + " · " : "") + conta(VISITA)}>
+            <Fecha aberta={!vro} n={conta(VISITA) + " · " + (orcLinhas(d, S).length) + " serviços"}>
+              <Legenda />
+              <Ficha {...fx} grupos={[EXTERIOR, INTERIOR]} ro={vro} />
+              <Ficha {...fx} grupos={[AREA]} ro={vro} />
+              <div className="fx">
+                <h4>Medidas da área <span>dão as quantidades dos serviços</span></h4>
+                <div className="form4">
+                  {(Object.entries(L.med) as [MedKey, string][]).map(([k, l]) => (
+                    <div className="f" key={k}>
+                      <label htmlFor={`med-${k}-${d.id}`}>{l}</label>
+                      <Campo id={`med-${k}-${d.id}`} className="num" type="number" min="0" step="0.5" value={v.med[k] || ""} readOnly={vro}
+                        onCommit={(x) => run(() => { const n = numero(x); v.med[k] = isNaN(n) ? 0 : n; })} />
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-            <div className="row">
-              <span className="sub">{v.fotos} fotos{vro ? "" : " · no telemóvel tira-se com a câmara"}</span>
-              {!vro && <Btn cls="sec sm" onClick={go(() => A.foto(d.id))}>+ Foto</Btn>}
-            </div>
-            {!vro && <span className="sub">Cada medida liga a um serviço do Catálogo. Ao fechar, o orçamento nasce com estas medidas.</span>}
+              </div>
+              <Necessidades {...ctx} d={d} />
+              <div className="fx">
+                <h4>Equipamentos pedidos</h4>
+                <div className="chips">{L.nec.map((x) => <button key={x} className={"chip " + (v.nec.includes(x) ? "on" : "")} disabled={vro} onClick={go(() => A.nec(d.id, x))}>{x}</button>)}</div>
+              </div>
+              <Ficha {...fx} grupos={[ESCOLHAS]} ro={vro} />
+              <div className="fx">
+                <h4>Fotografias</h4>
+                <div className="row">
+                  <span className="sub">{v.fotos} fotos da área{vro ? "" : " · no telemóvel tira-se com a câmara, antes de sentar com o cliente"}</span>
+                  {!vro && <Btn cls="sec sm" onClick={go(() => A.foto(d.id))}>+ Foto</Btn>}
+                </div>
+                <Ficha {...fx} grupos={[{ titulo: "", campos: [{ k: "diag_cliente_recusou_fotos", l: "O cliente não quis fotografias", t: "sim_nao" }] }]} ro={vro} />
+              </div>
+            </Fecha>
+            {!vro && d.fase === 2 && <span className="sub">Ao fechar o levantamento, o orçamento nasce com estes serviços e quantidades, e os custos vêm do Catálogo.</span>}
           </Secao>
           <Secao S={S} d={d} i={3} titulo="Negócio" dir={o ? (o.enviada ? "proposta enviada" : "orçamento, proposta e contrato") : "orçamento, proposta e contrato"}>
             {o && <Orcamento {...ctx} d={d} />}
+            {o && (
+              <Fecha aberta={d.fase === 3} n={conta([PROPOSTA[0], ...contrato])}>
+                <Ficha {...fx} grupos={[PROPOSTA[0]]} ro={!!o.enviada} />
+                <Ficha {...fx} grupos={contrato} ro={!!o.contrato} />
+              </Fecha>
+            )}
           </Secao>
-          <Secao S={S} d={d} i={4} titulo="Financeiro" dir="fatura e recibo">
+          <Secao S={S} d={d} i={4} titulo="Financeiro" dir={"fatura e recibo · " + conta(FINANCEIRO)}>
             <div className="withside">
               <div className="tw"><table><thead><tr><th>Documento</th><th>Estado</th><th className="n">Valor s/ IVA</th></tr></thead><tbody>
                 <tr>
@@ -447,9 +598,17 @@ function PaginaNegocio(ctx: Ctx) {
                 <span className="sub">Por agora a validação é interna. Quando o portal aceitar pagamentos, passa a ser automática.</span>
               </div>
             </div>
+            <Fecha aberta={d.fase === 4} n={conta(FINANCEIRO)}>
+              <Ficha {...fx} grupos={FINANCEIRO} ro={d.fase !== 4} />
+            </Fecha>
           </Secao>
-          <Secao S={S} d={d} i={5} titulo="Obra" dir={d.fase === 5 ? d.obra.plano!.estado : ""}>
+          <Secao S={S} d={d} i={5} titulo="Obra" dir={d.fase === 5 ? d.obra.plano!.estado + " · " + conta(OBRA) : ""}>
             {d.fase === 5 && <ObraResumo {...ctx} d={d} />}
+            {d.fase === 5 && (
+              <Fecha aberta n={conta(OBRA)}>
+                <Ficha {...fx} grupos={OBRA} ro={false} />
+              </Fecha>
+            )}
           </Secao>
         </div>
         <div className="stack">
@@ -457,7 +616,11 @@ function PaginaNegocio(ctx: Ctx) {
             <h3>Cliente {cli && <span className="pill ok">em Clientes</span>}</h3>
             <div className="kv">
               <span>Nome</span><b>{d.nome}</b><span>Telefone</span><b>{d.tel}</b>
-              <span>Morada</span><b style={{ fontWeight: 500 }}>{d.local || "—"}</b><span>Origem</span><b style={{ fontWeight: 500 }}>{d.origem}</b>
+              {d.f.email && <><span>Email</span><b style={{ fontWeight: 500 }}>{d.f.email}</b></>}
+              <span>Morada da obra</span><b style={{ fontWeight: 500 }}>{d.f.morada ? `${d.f.morada}, ${d.f.localidade || ""}` : d.local || "—"}</b>
+              {d.f.imovel && <><span>Imóvel</span><b style={{ fontWeight: 500 }}>{d.f.imovel}{d.f.tipologia ? " " + d.f.tipologia : ""}</b></>}
+              <span>Origem</span><b style={{ fontWeight: 500 }}>{d.f.origem || d.origem}</b>
+              {d.f.pref && <><span>Contactar por</span><b style={{ fontWeight: 500 }}>{d.f.pref}{d.f.hora ? " · " + d.f.hora.toLowerCase() : ""}</b></>}
             </div>
           </div>
           <div className="card">

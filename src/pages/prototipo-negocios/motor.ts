@@ -15,7 +15,7 @@ export const PAPEIS: Record<Papel, { n: string; av: string; nome: string }> = {
 
 export const FASES = ["Lead", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"];
 
-export type SvcId = "demol" | "canal" | "revest" | "pav" | "loucas" | "moveis";
+export type SvcId = "demol" | "canal" | "revest" | "pav" | "loucas" | "moveis" | "eletr" | "teto" | "pint";
 export interface Servico {
   n: string;
   un: string;
@@ -36,6 +36,9 @@ const SVC0: Record<SvcId, Servico> = {
   pav: { n: "Pavimento cerâmico", un: "m²", h: 0.85, eh: 25, eq: 0, cons: 0.66, preco: 40.32, perfil: "Ladrilhador" },
   loucas: { n: "Montagem de louças", un: "pç", h: 1.35, eh: 25, eq: 0, cons: 1.21, preco: 64.29, perfil: "Canalizador" },
   moveis: { n: "Montagem de móveis", un: "mód", h: 2.5, eh: 25, eq: 0, cons: 2, preco: 118.7, perfil: "Montador" },
+  eletr: { n: "Pontos elétricos", un: "pt", h: 1.5, eh: 25, eq: 0.2, cons: 6, preco: 78, perfil: "Eletricista" },
+  teto: { n: "Teto falso em pladur", un: "m²", h: 0.9, eh: 25, eq: 0.3, cons: 9.8, preco: 58, perfil: "Montador" },
+  pint: { n: "Pintura de tetos e paredes", un: "m²", h: 0.3, eh: 25, eq: 0, cons: 2.1, preco: 17.5, perfil: "Pintor" },
 };
 
 export type MedKey = "pav" | "par" | "pts" | "pcs";
@@ -49,6 +52,8 @@ interface LinhaServico {
   nec: string[];
   mat: { d: string; custo: number; preco: number };
   map: [SvcId, MedKey][];
+  /** Serviços do Catálogo que se podem juntar na visita, com quantidade à mão. */
+  extras: SvcId[];
   med: Partial<Record<MedKey, string>>;
   mats: [string, string, (m: Medidas) => number, StockKey][];
 }
@@ -58,6 +63,7 @@ export const LINHAS: Record<LinhaId, LinhaServico> = {
     n: "Casa de banho", modelo: "WC com base de duche", nec: ["Base de duche", "Sanita suspensa", "Banheira", "Móvel 80 cm"],
     mat: { d: "cerâmico, louças, base, torneiras", custo: 1400, preco: 2168 },
     map: [["demol", "pav"], ["canal", "pts"], ["revest", "par"], ["pav", "pav"], ["loucas", "pcs"]],
+    extras: ["eletr", "teto", "pint"],
     med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Peças" },
     mats: [
       ["Cerâmico de parede 30×60", "m²", (m) => Math.ceil(m.par * 1.1), "cp"],
@@ -71,6 +77,7 @@ export const LINHAS: Record<LinhaId, LinhaServico> = {
     n: "Cozinha", modelo: "Cozinha linear", nec: ["Bancada em pedra", "Ilha", "Eletrodomésticos", "Mudar canalização"],
     mat: { d: "móveis, bancada, torneira", custo: 3800, preco: 5890 },
     map: [["demol", "pav"], ["canal", "pts"], ["revest", "par"], ["pav", "pav"], ["moveis", "pcs"]],
+    extras: ["eletr", "pint", "teto"],
     med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Módulos" },
     mats: [
       ["Cerâmico de parede 30×60", "m²", (m) => Math.ceil(m.par * 1.1), "cp"],
@@ -91,7 +98,7 @@ export const TECS: Tecnico[] = [
   { id: "hn", n: "Hugo Neves", sk: "Ladrilhador", ferias: [] },
   { id: "pm", n: "Paulo Mota", sk: "Montador", ferias: [] },
 ];
-const REAL: Record<SvcId, number> = { demol: 0.93, canal: 0.97, revest: 1.23, pav: 1.05, loucas: 0.96, moveis: 1.02 };
+const REAL: Record<SvcId, number> = { demol: 0.93, canal: 0.97, revest: 1.23, pav: 1.05, loucas: 0.96, moveis: 1.02, eletr: 1, teto: 1.04, pint: 0.98 };
 export const DIAS = ["seg 13/10", "ter 14/10", "qua 15/10", "qui 16/10", "sex 17/10", "seg 20/10", "ter 21/10", "qua 22/10", "qui 23/10", "sex 24/10"];
 export const SLOTS = ["qui 15/10 · 10:00", "qui 15/10 · 15:00", "sex 16/10 · 09:30"];
 
@@ -131,10 +138,11 @@ export interface Negocio {
   fase: number;
   perdido: boolean;
   atraso?: boolean;
-  pedido?: string;
   fresh?: boolean;
-  contacto: { res: string; orc: string; prazo: string; nota: string };
-  visita: { slot: string; andar: string; estac: string; nec: string[]; med: Medidas; fotos: number; fechada: boolean };
+  /** Valores dos campos de todas as fases (chaves em campos.ts). */
+  f: Record<string, string>;
+  /** off: serviços das medidas que o cliente não quer; extra: serviços juntados à mão, com quantidade. */
+  visita: { slot: string; nec: string[]; med: Medidas; off: SvcId[]; extra: Partial<Record<SvcId, number>>; fotos: number; fechada: boolean };
   orc: Orcamento | null;
   fin: { fatura: { n: string; q: string } | null; pago: boolean; recibo: { n: string; q: string } | null };
   obra: { plano: Plano | null; enc: Encomenda | null; mats: MatObra[] | null; real: Real | null; aprendido: boolean };
@@ -168,15 +176,15 @@ type NovoNegocio = Partial<Negocio> & Pick<Negocio, "id" | "nome" | "tel" | "lin
 function novoDeal(o: NovoNegocio): Negocio {
   return {
     servico: "", local: "", origem: "site", quando: "", dono: "comercial", fase: 0, perdido: false,
-    contacto: { res: "", orc: "", prazo: "", nota: "" },
-    visita: { slot: "", andar: "", estac: "Fácil", nec: [], med: { pav: 0, par: 0, pts: 0, pcs: 0 }, fotos: 0, fechada: false },
+    f: {},
+    visita: { slot: "", nec: [], med: { pav: 0, par: 0, pts: 0, pcs: 0 }, off: [], extra: {}, fotos: 0, fechada: false },
     orc: null, fin: { fatura: null, pago: false, recibo: null }, obra: { plano: null, enc: null, mats: null, real: null, aprendido: false },
     hist: [],
     ...o,
   };
 }
 
-export const VERSAO = 3;
+export const VERSAO = 4;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -193,27 +201,29 @@ export function seed(): Estado {
   };
   const D = (o: NovoNegocio) => S.deals.push(novoDeal(o));
   D({ id: 1043, nome: "Ana Martins", tel: "912 000 111", linha: "wc", servico: "Remodelação WC suite", local: "Rua das Flores 12, Sintra", origem: "site", quando: "30/09 21:40",
-    pedido: "Quero remodelar a casa de banho da suite.", hist: [{ t: "Pedido pelo site", q: "30/09 21:40", k: "a" }] });
+    f: { pedido: "Quero remodelar a casa de banho da suite." }, hist: [{ t: "Pedido pelo site", q: "30/09 21:40", k: "a" }] });
   D({ id: 1044, nome: "Pedro Lopes", tel: "927 118 300", linha: "wc", servico: "WC social", local: "Amadora", origem: "site", quando: "06/10 18:02", atraso: true,
-    pedido: "Trocar a banheira por duche.", hist: [{ t: "Pedido pelo site", q: "06/10 18:02", k: "a" }] });
+    f: { pedido: "Trocar a banheira por duche." }, hist: [{ t: "Pedido pelo site", q: "06/10 18:02", k: "a" }] });
   D({ id: 1045, nome: "Rita Sousa", tel: "934 500 812", linha: "coz", servico: "Cozinha nova", local: "Loures", origem: "campanha de outono", quando: "08/10 08:15",
-    pedido: "Cozinha nova, com bancada em pedra.", hist: [{ t: "Pedido pela campanha de outono", q: "08/10 08:15", k: "a" }] });
+    f: { pedido: "Cozinha nova, com bancada em pedra." }, hist: [{ t: "Pedido pela campanha de outono", q: "08/10 08:15", k: "a" }] });
   D({ id: 1038, nome: "Manuel Costa", tel: "918 330 991", linha: "wc", servico: "WC social", local: "Cascais", origem: "telefone", quando: "03/10", fase: 1,
-    contacto: { res: "Atendeu · interessado", orc: "até 3.000 €", prazo: "Novembro", nota: "" }, hist: [{ t: "Chamada · 4 min", q: "05/10 11:20", k: "a" }, { t: "Pedido por telefone", q: "03/10", k: "a" }] });
+    f: { resultado: "Atendeu · interessado", orc_cliente: "Até 3.000 €", prazo: "1 a 3 meses" }, hist: [{ t: "Chamada · 4 min", q: "05/10 11:20", k: "a" }, { t: "Pedido por telefone", q: "03/10", k: "a" }] });
   D({ id: 1036, nome: "Luísa Freitas", tel: "962 774 105", linha: "coz", servico: "Cozinha", local: "Oeiras", origem: "site", quando: "01/10", fase: 2,
-    visita: { slot: "qui 15/10 · 10:00", andar: "R/C", estac: "Fácil", nec: ["Bancada em pedra"], med: { pav: 0, par: 0, pts: 0, pcs: 0 }, fotos: 0, fechada: false },
+    visita: { slot: "qui 15/10 · 10:00", nec: ["Bancada em pedra"], med: { pav: 0, par: 0, pts: 0, pcs: 0 }, off: [], extra: {}, fotos: 0, fechada: false },
     hist: [{ t: "Visita marcada para qui 15/10 · 10:00", q: "02/10", k: "a" }] });
   D({ id: 1035, nome: "Hugo Matos", tel: "915 662 030", linha: "wc", servico: "WC suite", local: "Lisboa", origem: "recomendação", quando: "28/09", fase: 2,
-    visita: { slot: "ter 06/10 · 15:00", andar: "2.º com elevador", estac: "Difícil", nec: ["Base de duche", "Móvel 80 cm"], med: { pav: 5, par: 16, pts: 3, pcs: 3 }, fotos: 6, fechada: false },
+    visita: { slot: "ter 06/10 · 15:00", nec: ["Base de duche", "Móvel 80 cm"], med: { pav: 5, par: 16, pts: 3, pcs: 3 }, off: [], extra: {}, fotos: 6, fechada: false },
     hist: [{ t: "Visita feita", q: "06/10 15:00", k: "a" }] });
   D({ id: 1031, nome: "Carla Nunes", tel: "938 101 777", linha: "coz", servico: "Cozinha", local: "Setúbal", origem: "site", quando: "22/09", fase: 3,
-    visita: { slot: "", andar: "1.º", estac: "Fácil", nec: ["Bancada em pedra"], med: { pav: 9, par: 14, pts: 2, pcs: 9 }, fotos: 10, fechada: true }, hist: [] });
+    visita: { slot: "", nec: ["Bancada em pedra"], med: { pav: 9, par: 14, pts: 2, pcs: 9 }, off: [], extra: {}, fotos: 10, fechada: true }, hist: [] });
   D({ id: 1030, nome: "Sérgio Pinto", tel: "919 440 222", linha: "wc", servico: "WC", local: "Barreiro", origem: "telefone", quando: "25/09", fase: 3,
-    visita: { slot: "", andar: "3.º", estac: "Fácil", nec: ["Base de duche"], med: { pav: 4, par: 14, pts: 3, pcs: 3 }, fotos: 5, fechada: true }, hist: [] });
+    visita: { slot: "", nec: ["Base de duche"], med: { pav: 4, par: 14, pts: 3, pcs: 3 }, off: [], extra: {}, fotos: 5, fechada: true }, hist: [] });
   D({ id: 1027, nome: "Tiago Almeida", tel: "913 220 410", linha: "coz", servico: "Cozinha", local: "Almada", origem: "site", quando: "15/09", fase: 4,
-    visita: { slot: "", andar: "4.º", estac: "Difícil", nec: ["Ilha"], med: { pav: 12, par: 18, pts: 2, pcs: 12 }, fotos: 12, fechada: true }, hist: [] });
+    visita: { slot: "", nec: ["Ilha"], med: { pav: 12, par: 18, pts: 2, pcs: 12 }, off: [], extra: {}, fotos: 12, fechada: true }, hist: [] });
   D({ id: 1022, nome: "Marta Lima", tel: "916 004 552", linha: "wc", servico: "WC", local: "Odivelas", origem: "site", quando: "10/09", fase: 5,
-    visita: { slot: "", andar: "1.º", estac: "Fácil", nec: ["Base de duche"], med: { pav: 4, par: 15, pts: 3, pcs: 4 }, fotos: 8, fechada: true }, hist: [] });
+    visita: { slot: "", nec: ["Base de duche"], med: { pav: 4, par: 15, pts: 3, pcs: 4 }, off: [], extra: {}, fotos: 8, fechada: true }, hist: [] });
+  for (const d of S.deals) d.f = { ...exemplo(d), ...d.f };
+  Object.assign(by0(S, 1035).f, { andar: "2", tem_elevador: "Sim", n_elevadores: "1", estacionamento: "Pago", zona_estacionamento: "Vermelha" });
   for (const d of S.deals) if (d.fase >= 3) d.orc = criarOrc(d, S);
   const by = (id: number) => S.deals.find((d) => d.id === id)!;
   Object.assign(by(1031).orc!, { verif: true, enviada: "05/10" });
@@ -231,8 +241,50 @@ export function seed(): Estado {
   m.obra.plano.dia = 2;
   m.obra.enc = { estado: "recebida", n: "EF 2026/71", linhas: [] };
   m.obra.mats = calcMats(m, S, true);
+  m.f.valor_recebido = String(r2(tot(m, S).pf));
   m.hist.push({ t: "Obra em curso · dia 3 de 5", q: "hoje", k: "a" });
   return S;
+}
+
+const by0 = (S: Estado, id: number) => S.deals.find((d) => d.id === id)!;
+
+// Valores de exemplo das fases por onde o negócio já passou.
+function exemplo(d: Negocio): Record<string, string> {
+  const loc = d.local.split(",").pop()!.trim();
+  const mail = d.nome.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ /g, ".") + "@exemplo.pt";
+  const origem = d.origem.startsWith("campanha") ? "Campanha" : d.origem === "recomendação" ? "Recomendação" : d.origem === "telefone" ? "Telefone" : "Site";
+  const f: Record<string, string> = {
+    email: mail, pref: "Telefone", hora: "Fim do dia", idioma: "Português", origem, rgpd: "Sim", tipo_cliente: "Particular", concelho: loc,
+  };
+  if (origem === "Campanha") f.campanha = "Campanha de outono · Meta Ads";
+  if (d.fase >= 1) Object.assign(f, {
+    resultado: "Atendeu · interessado", tentativas: "1", imovel: "Apartamento", posse: "Proprietário", decisor: "Com a família",
+    orc_cliente: d.linha === "coz" ? "6.000 a 10.000 €" : "3.000 a 6.000 €", prazo: "1 a 3 meses", outros_orc: "Sim",
+    morada: "Rua de exemplo, 10", cp: "2700-000", localidade: loc, fracao: "1.º Dto.", duracao: "1 h 30",
+  });
+  if (d.fase >= 2) Object.assign(f, {
+    acesso: "Fácil", estacionamento: "Não pago", tem_elevador: "Não", n_andares: "4", andar: "1", n_fracoes_por_andar: "2",
+    tipologia: "T3", area_util_m2: "110", n_casas_banho: "2", diag_tipo_area: d.linha === "coz" ? "Cozinha" : "Casa de banho",
+    diag_intervencao_tipo: "Remodelação total",
+  });
+  if (d.fase >= 3) Object.assign(f, {
+    n_divisoes: "6", ano_construcao: "1988", pavimento: "Flutuante", eletrica: "Antiga", quadro_diferencial: "Sim", canalizacao: "Ferro", gas: "Canalizado",
+    amianto: "Não", habitada_durante_obra: "Sim", animais: "Não", diag_pe_direito_m: "2.6", diag_altura_revestimento: "Ao teto", diag_pontos_eletricos: "4",
+    diag_gas: "Não há", diag_toalheiro: "Sim", diag_janela: "Sim", diag_local_cortes: "Varanda", diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio",
+    diag_portas_proteger: "3", gama: "Média", materiais_cliente: "Não",
+    validade: "30", prazo_exec: "8", pagamento: "50% + 50% no fim", iva: "23%", garantia: "2",
+    modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben",
+  });
+  if (d.fase >= 4) Object.assign(f, {
+    nome_fiscal: d.nome, nif_fat: "2" + String(d.id).padStart(8, "0"), morada_fiscal_igual: "Sim", email_fat: mail,
+    serie: "FT 2026", tranche: "1.ª (adjudicação)", vencimento: "15 dias", metodo: "Transferência",
+  });
+  if (d.fase >= 5) Object.assign(f, {
+    data_pag: "2026-09-22", conta: "Banco B · conta obras", comprovativo: "TRF 0922-118",
+    responsavel: "Filipe", inicio: "2026-10-06", horario: "Dias úteis 8h–17h", chaves: "Chave entregue", contacto_local: d.nome + " · " + d.tel,
+    condominio: "Sim", contentor: "Não", protecoes: "Cartão canelado no caminho (12 m), plástico nas 3 portas, proteção do elevador.",
+  });
+  return f;
 }
 
 /* ------------------------------------------------------------------ cálculo */
@@ -251,8 +303,12 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
   const L = LINHAS[d.linha], m = d.visita.med, linhas: LinhaOrc[] = [];
   for (const [sid, k] of L.map) {
     const s = S.svc[sid];
-    if (!(m[k] > 0)) continue;
+    if (!(m[k] > 0) || d.visita.off.includes(sid)) continue;
     linhas.push({ t: "svc", sid, q: m[k], cu: r2(custoUn(s, S)), pu: s.preco });
+  }
+  for (const sid of L.extras) {
+    const q = d.visita.extra[sid] || 0;
+    if (q > 0) linhas.push({ t: "svc", sid, q, cu: r2(custoUn(S.svc[sid], S)), pu: S.svc[sid].preco });
   }
   linhas.push({ t: "mat", d: L.mat.d, custo: L.mat.custo, preco: L.mat.preco });
   return { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
@@ -317,9 +373,9 @@ export function gerarPlano(d: Negocio, S: Estado): Plano {
   const mont: SvcId = d.linha === "wc" ? "loucas" : "moveis";
   const T: Tarefa[] = [
     { nome: "Demolição", svcs: ["demol"] as SvcId[], dia: 0, dur: 1, sk: "Servente · demolição" },
-    { nome: "Canalização", svcs: ["canal"] as SvcId[], dia: 1, dur: 1, sk: "Canalizador" },
+    { nome: d.visita.extra.eletr ? "Canalização e eletricidade" : "Canalização", svcs: ["canal", "eletr"] as SvcId[], dia: 1, dur: 1, sk: "Canalizador" },
     { nome: "Revestimento e pavimento", svcs: ["revest", "pav"] as SvcId[], dia: 2, dur: 2, sk: "Ladrilhador" },
-    { nome: d.linha === "wc" ? "Louças e acabamentos" : "Móveis e acabamentos", svcs: [mont], dia: 4, dur: 1, sk: mont === "loucas" ? "Canalizador" : "Montador" },
+    { nome: d.linha === "wc" ? "Louças e acabamentos" : "Móveis e acabamentos", svcs: [mont, "teto", "pint"] as SvcId[], dia: 4, dur: 1, sk: mont === "loucas" ? "Canalizador" : "Montador" },
   ]
     .filter((t) => t.svcs.some((s) => h(s) > 0))
     .map((t) => {
@@ -430,7 +486,36 @@ const agora = () => {
   return "hoje " + String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
 };
 function log(d: Negocio, t: string, k: Evento["k"] = "a") { d.hist.unshift({ t, q: agora(), k }); }
-function fase(d: Negocio, n: number) { d.fase = n; log(d, "Passou a " + FASES[n] + " · sozinho"); }
+function fase(d: Negocio, n: number) { d.fase = n; preencher(d, n); log(d, "Passou a " + FASES[n] + " · sozinho"); }
+
+const hojeISO = () => new Date().toISOString().slice(0, 10);
+
+// Proteções sugeridas a partir da ficha do local e da área (como em sugestaoFichaLocal.ts).
+export function protecoesSugeridas(f: Record<string, string>): string {
+  const p: string[] = [];
+  const caminho = f.diag_distancia_entrada?.startsWith("Longa") ? 20 : f.diag_distancia_entrada?.startsWith("Média") ? 12 : 5;
+  p.push(`Cartão canelado no caminho (${caminho} m)`);
+  if (Number(f.diag_portas_proteger) > 0) p.push(`plástico nas ${f.diag_portas_proteger} portas`);
+  if (f.tem_elevador === "Sim") p.push("proteção do elevador");
+  if (f.diag_mobilada === "Muito") p.push("cobrir os móveis no caminho");
+  if (f.diag_local_cortes === "Na própria área") p.push("aspiração nos cortes");
+  if (f.estacionamento === "Pago") p.push("parquímetro previsto na logística");
+  return p.join(", ") + ".";
+}
+
+// O que já se sabe ao entrar numa fase vem preenchido; o que lá estiver não se toca.
+function preencher(d: Negocio, n: number) {
+  const f = d.f, def = (o: Record<string, string>) => { for (const k in o) if (!f[k] && o[k]) f[k] = o[k]; };
+  if (n === 3) {
+    const h = d.orc ? d.orc.linhas.reduce((a, l) => a + (l.t === "svc" ? (SVC0[l.sid]?.h || 0) * l.q : 0), 0) : 0;
+    def({ validade: "30", prazo_exec: String(Math.max(3, Math.ceil(h / 7))), garantia: "2", iva: "23%", pagamento: "50% + 50% no fim",
+      modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben" });
+  }
+  if (n === 4) def({ nome_fiscal: d.nome, nif_fat: f.nif || "", morada_fiscal_igual: "Sim", email_fat: f.email || "", serie: "FT 2026",
+    tranche: f.pagamento === "100% na adjudicação" ? "Única" : "1.ª (adjudicação)", vencimento: "15 dias", metodo: "Transferência" });
+  if (n === 5) def({ data_pag: hojeISO(), responsavel: "Filipe", horario: "Dias úteis 8h–17h", chaves: f.habitada_durante_obra === "Sim" ? "O cliente abre" : "Chave entregue",
+    contacto_local: d.nome + " · " + d.tel, contentor: "Não", protecoes: protecoesSugeridas(f) });
+}
 function criarCliente(S: Estado, d: Negocio) {
   if (!S.clientes.some((c) => c.deal === d.id)) S.clientes.unshift({ nome: d.nome, tel: d.tel, local: LINHAS[d.linha].n + (d.local ? " · " + d.local : ""), desde: "hoje", deal: d.id });
   log(d, "Cliente criado em Clientes");
@@ -451,11 +536,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       n.nome = nome.trim(); n.tel = tel.trim(); n.linha = linha;
       if (!n.nome || !n.tel) { n.err = "Falta " + (!n.nome ? "o nome" : "o telefone ou o email") + "."; return; }
       const id = S.seq++;
-      S.deals.unshift(novoDeal({ id, nome: n.nome, tel: n.tel, linha: n.linha, servico: LINHAS[n.linha].n, local: "", origem: "à mão", quando: agora(), pedido: "", hist: [{ t: "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
+      S.deals.unshift(novoDeal({ id, nome: n.nome, tel: n.tel, linha: n.linha, servico: LINHAS[n.linha].n, local: "", origem: "à mão", quando: agora(), f: { origem: "Telefone" }, hist: [{ t: "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
       S.novo = null;
       avisar({ msg: "Negócio criado", sub: n.nome + " · fase Lead", kind: "ok", act: { label: "Abrir", fn: () => run(() => A.abrir(id)) } });
     },
-    contactar(id: number) { const d = deal(id); if (!d.contacto.res) d.contacto.res = "Atendeu · interessado"; log(d, "Chamada registada · " + d.contacto.res); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
+    contactar(id: number) { const d = deal(id); if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
     marcarVisita(id: number, slot?: string) { const d = deal(id); d.visita.slot = slot || SLOTS[0]; log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda do Rúben", kind: "ok" }); },
     fecharVisita(id: number) {
       const d = deal(id), m = d.visita.med, L = LINHAS[d.linha];
@@ -494,6 +579,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     emitir(id: number) { const d = deal(id); d.fin.fatura = { n: "FT 2026/" + S.ft++, q: "hoje" }; log(d, d.fin.fatura.n + " emitida e enviada ao portal do cliente"); avisar({ msg: d.fin.fatura.n + " emitida", sub: "Enviada ao portal do cliente", kind: "ok" }); },
     validar(id: number) {
       const d = deal(id); d.fin.pago = true; d.fin.recibo = { n: "RC 2026/" + S.rc++, q: "hoje" };
+      if (!d.f.valor_recebido) d.f.valor_recebido = String(r2(tot(d, S).pf));
       log(d, "Pagamento validado · " + d.fin.recibo.n + " emitido");
       // o recibo dispara o Inventário e as Operações
       const mats = calcMats(d, S, false);
@@ -560,7 +646,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     perderNao() { S.confirmPerda = null; },
     nec(id: number, v: string) { const a = deal(id).visita.nec; const i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); },
-    estac(id: number, v: string) { deal(id).visita.estac = v; },
+    campo(id: number, k: string, v: string) { deal(id).f[k] = v; },
+    servico(id: number, sid: SvcId) { const a = deal(id).visita.off; const i = a.indexOf(sid); if (i >= 0) a.splice(i, 1); else a.push(sid); },
+    extra(id: number, sid: SvcId, q: number) { deal(id).visita.extra[sid] = q; },
     foto(id: number) { deal(id).visita.fotos++; },
     recalc(id: number, i: number) { const d = deal(id), l = d.orc!.linhas[i]; if (l.t === "svc") l.cu = r2(custoUn(S.svc[l.sid], S)); d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" }); },
   };
