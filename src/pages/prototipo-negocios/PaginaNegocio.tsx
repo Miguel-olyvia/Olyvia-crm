@@ -15,6 +15,7 @@ import {
 } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, emFalta, type Grupo } from "./campos";
 import { UsarLocalizacao } from "./Localizacao";
+import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
 import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
 import { Btn, Campo, fazer, numero, type Ctx } from "./pecas";
 
@@ -282,8 +283,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
           </div>
         </div>
       ) },
-      { id: "nec", titulo: "Necessidades · serviços do Catálogo", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed,
-        resumo: orcLinhas(d, S).map((sid) => S.svc[sid].n), corpo: simples ? <NecessidadesSimples {...ctx} d={d} /> : <div className="pg"><Necessidades {...ctx} d={d} /></div> },
+      { id: "nec", titulo: "Serviços necessários", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed,
+        resumo: orcLinhas(d, S).map((sid) => S.svc[sid].n), corpo: <ServicosCatalogo {...ctx} d={d} simples={simples} /> },
       { ...g(ESCOLHAS, Sparkles), corpo: (
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -463,105 +464,6 @@ function Documentos({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           <div><i className={d.fin.recibo ? "on" : ""}>3</i><span><b>Cliente</b><small>recebe o recibo no portal</small></span></div>
         </div>
         <span className="sub">Por agora a validação é interna. Quando o portal aceitar pagamentos, passa a ser automática.</span>
-      </div>
-    </div>
-  );
-}
-
-// Os serviços que vão para o orçamento, tirados da visita.
-function orcLinhas(d: Negocio, S: Estado): SvcId[] {
-  const L = LINHAS[d.linha], v = d.visita;
-  return [
-    ...L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).map(([sid]) => sid),
-    ...L.extras.filter((sid) => (v.extra[sid] || 0) > 0 && !!S.svc[sid]),
-  ];
-}
-
-// Necessidades na proposta simples: uma lista, uma caixa por serviço.
-function NecessidadesSimples({ S, A, run, d }: Ctx & { d: Negocio }) {
-  const L = LINHAS[d.linha], v = d.visita, ro = v.fechada;
-  const sugestao = (sid: SvcId) => sid === "eletr" ? Number(d.f.diag_pontos_eletricos) || 2 : v.med.pav || 1;
-  let total = 0;
-  const linhas = [
-    ...L.map.map(([sid, k]) => { const q = v.med[k] || 0; return { sid, q, on: q > 0 && !v.off.includes(sid), extra: false, de: q > 0 ? "das medidas" : "falta a medida" }; }),
-    ...L.extras.map((sid) => { const q = v.extra[sid] || 0; return { sid, q, on: q > 0, extra: true, de: "a pedido do cliente" }; }),
-  ];
-  return (
-    <div className="max-w-2xl">
-      <p className="text-[15px] text-muted-foreground">Marque o que a obra leva. As quantidades vêm das medidas; os custos vêm do Catálogo.</p>
-      {aValidar(d, "nec") && !orcLinhas(d, S).length && <p className="mt-2 text-[15px] font-medium text-destructive">Marque pelo menos um serviço.</p>}
-      <ul className="mt-4 divide-y divide-border border-y border-border">
-        {linhas.map(({ sid, q, on, extra, de }) => {
-          const s = S.svc[sid];
-          if (on) total += q * s.preco;
-          const id = `nec-${sid}-${d.id}`;
-          return (
-            <li key={sid} className="flex min-h-16 flex-wrap items-center gap-x-4 gap-y-2 py-3">
-              <input id={id} type="checkbox" checked={on} disabled={ro || (!extra && !(q > 0))} className="h-5 w-5 shrink-0 accent-[hsl(var(--primary))]"
-                onChange={() => run(() => (extra ? A.extra(d.id, sid, on ? 0 : sugestao(sid)) : A.servico(d.id, sid)))} />
-              <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
-                <span className={cn("block text-base", on ? "text-foreground" : "text-muted-foreground")}>{s.n}</span>
-                <span className="block text-sm text-muted-foreground">{on ? `${nfmt(q)} ${s.un} · ${de}` : de === "falta a medida" ? de : "não incluído"}</span>
-              </label>
-              {extra && on && !ro && (
-                <span className="flex items-center gap-2">
-                  <label htmlFor={id + "-q"} className="sr-only">Quantidade de {s.n}</label>
-                  <input id={id + "-q"} key={id + q} type="number" min="0" step="any" defaultValue={q} className="h-10 w-24 rounded-lg border border-input bg-card px-3 text-right text-[15px]"
-                    onBlur={(e) => { const n = numero(e.target.value); if (!isNaN(n) && n !== q) run(() => A.extra(d.id, sid, Math.max(0, n))); }} />
-                  <span className="text-[15px] text-muted-foreground">{s.un}</span>
-                </span>
-              )}
-              <span className="w-24 text-right text-[15px] tabular-nums">{on ? eur(q * s.preco) + " €" : ""}</span>
-            </li>
-          );
-        })}
-      </ul>
-      <p className="mt-4 flex justify-between text-base"><span className="text-muted-foreground">Mão de obra, a preço de tabela</span><span className="font-semibold tabular-nums">{eur(total)} €</span></p>
-    </div>
-  );
-}
-
-// Necessidades: os serviços do Catálogo que a obra leva, com a quantidade.
-function Necessidades({ S, A, go, run, d }: Ctx & { d: Negocio }) {
-  const L = LINHAS[d.linha], v = d.visita, ro = v.fechada;
-  const sugestao = (sid: SvcId) => sid === "eletr" ? Number(d.f.diag_pontos_eletricos) || 2 : v.med.pav || 1;
-  let total = 0;
-  const linha = (sid: SvcId, q: number, on: boolean, origem: ReactNode, toggle: () => void, extra: boolean) => {
-    const s = S.svc[sid];
-    if (on) total += q * s.preco;
-    return (
-      <tr key={sid} className={on ? "" : "offr"}>
-        <td style={{ width: 34 }}><button className={"tick " + (on ? "on" : "")} aria-pressed={on} aria-label={s.n} disabled={ro} onClick={toggle}>✓</button></td>
-        <td>{s.n}<small>{s.perfil} · {nfmt(s.h)} h/{s.un} na receita</small></td>
-        <td>{extra && on && !ro
-          ? <><Campo id={`ex-${sid}-${d.id}`} ariaLabel={"Quantidade de " + s.n} value={nfmt(q)} onCommit={(x) => run(() => { const n = numero(x); A.extra(d.id, sid, isNaN(n) ? 0 : Math.max(0, n)); })} /> {s.un}</>
-          : on ? <>{nfmt(q)} {s.un}</> : <span className="sub">—</span>}
-          <small>{origem}</small></td>
-        <td className="n">{eur(s.preco)} €/{s.un}</td>
-        <td className="n">{on ? eur(q * s.preco) + " €" : ""}</td>
-      </tr>
-    );
-  };
-  const rows = [
-    ...L.map.map(([sid, k]) => {
-      const q = v.med[k] || 0, on = q > 0 && !v.off.includes(sid);
-      return linha(sid, q, on, q > 0 ? "das medidas · " + L.med[k]!.replace(/ \(.*\)/, "").toLowerCase() : "falta a medida", () => run(() => A.servico(d.id, sid)), false);
-    }),
-    ...L.extras.map((sid) => {
-      const q = v.extra[sid] || 0;
-      return linha(sid, q, q > 0, "juntado na visita", () => run(() => A.extra(d.id, sid, q > 0 ? 0 : sugestao(sid))), true);
-    }),
-  ];
-  return (
-    <div className="fx" style={{ borderTop: 0, paddingTop: 0 }}>
-      <p className="sub"><b>{orcLinhas(d, S).length} serviços</b> · {eur(total)} € a preço de tabela, sem materiais</p>
-      <div className="tw"><table style={{ minWidth: 560 }}>
-        <thead><tr><th /><th>Serviço</th><th>Quantidade</th><th className="n">Preço de tabela</th><th className="n">Total</th></tr></thead>
-        <tbody>{rows}</tbody>
-      </table></div>
-      <div className="row">
-        <span className="sub">Cada serviço traz a sua receita do Catálogo: mão de obra, equipamentos e consumíveis. Os materiais (louças, cerâmico) entram pelo modelo "{L.modelo}".</span>
-        <Btn cls="sec sm" onClick={go(() => A.nav("catalogo"))}>Abrir Catálogo</Btn>
       </div>
     </div>
   );

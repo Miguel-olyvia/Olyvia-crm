@@ -102,11 +102,15 @@ describe("protótipo de Negócios", () => {
     A.campo(id, "diag_portas_proteger", "2");
     A.servico(id, "demol"); // o cliente já tirou o azulejo
     A.extra(id, "eletr", 4);
+    A.extra(id, "c2", 2); // do Catálogo real: "Supressão de ponto de água"
     preencher(d, [EXTERIOR, INTERIOR, AREA, ESCOLHAS]);
     A.fecharVisita(id);
     const sids = d.orc!.linhas.flatMap((l) => (l.t === "svc" ? [l.sid] : []));
     expect(sids).not.toContain("demol");
     expect(sids).toContain("eletr");
+    expect(sids).toContain("c2");
+    expect(S.svc.c2.n).toBe("Supressão de ponto de água");
+    expect(S.svc.c2.preco).toBeGreaterThan(0);
     expect(d.f.validade).toBe("30");
     expect(protecoesSugeridas(d.f)).toContain("plástico nas 2 portas");
     expect(protecoesSugeridas(d.f)).toContain("elevador");

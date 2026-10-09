@@ -2,6 +2,7 @@
 // Nada daqui lê ou escreve na base de dados; o estado vive no browser.
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
+import { CATALOGO } from "./catalogo";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
@@ -17,7 +18,8 @@ export const PAPEIS: Record<Papel, { n: string; av: string; nome: string }> = {
 
 export const FASES = ["Lead", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"];
 
-export type SvcId = "demol" | "canal" | "revest" | "pav" | "loucas" | "moveis" | "eletr" | "teto" | "pint";
+/** Os do pacote têm nome curto (demol, canal…); os do Catálogo têm o id do Catálogo (c1, c2…). */
+export type SvcId = string;
 export interface Servico {
   n: string;
   un: string;
@@ -31,7 +33,7 @@ export interface Servico {
   stale?: string | null;
 }
 
-const SVC0: Record<SvcId, Servico> = {
+const SVC0: Record<string, Servico> = {
   demol: { n: "Demolição e entulho", un: "m²", h: 0.5, eh: 25, eq: 0.33, cons: 1.2, preco: 25.48, perfil: "Servente · demolição" },
   canal: { n: "Canalização", un: "pt", h: 2, eh: 25, eq: 0.34, cons: 8.47, preco: 106.05, perfil: "Canalizador" },
   revest: { n: "Revestimento de parede", un: "m²", h: 0.75, eh: 25, eq: 0, cons: 1.01, preco: 26.0, perfil: "Ladrilhador", semCusto: true, stale: "O cimento-cola tem o preço de há 8 meses." },
@@ -54,8 +56,6 @@ interface LinhaServico {
   nec: string[];
   mat: { d: string; custo: number; preco: number };
   map: [SvcId, MedKey][];
-  /** Serviços do Catálogo que se podem juntar na visita, com quantidade à mão. */
-  extras: SvcId[];
   med: Partial<Record<MedKey, string>>;
   mats: [string, string, (m: Medidas) => number, StockKey][];
 }
@@ -65,7 +65,6 @@ export const LINHAS: Record<LinhaId, LinhaServico> = {
     n: "Casa de banho", modelo: "WC com base de duche", nec: ["Base de duche", "Sanita suspensa", "Banheira", "Móvel 80 cm"],
     mat: { d: "cerâmico, louças, base, torneiras", custo: 1400, preco: 2168 },
     map: [["demol", "pav"], ["canal", "pts"], ["revest", "par"], ["pav", "pav"], ["loucas", "pcs"]],
-    extras: ["eletr", "teto", "pint"],
     med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Peças" },
     mats: [
       ["Cerâmico de parede 30×60", "m²", (m) => Math.ceil(m.par * 1.1), "cp"],
@@ -79,7 +78,6 @@ export const LINHAS: Record<LinhaId, LinhaServico> = {
     n: "Cozinha", modelo: "Cozinha linear", nec: ["Bancada em pedra", "Ilha", "Eletrodomésticos", "Mudar canalização"],
     mat: { d: "móveis, bancada, torneira", custo: 3800, preco: 5890 },
     map: [["demol", "pav"], ["canal", "pts"], ["revest", "par"], ["pav", "pav"], ["moveis", "pcs"]],
-    extras: ["eletr", "pint", "teto"],
     med: { pav: "Pavimento (m²)", par: "Paredes (m²)", pts: "Pontos de água", pcs: "Módulos" },
     mats: [
       ["Cerâmico de parede 30×60", "m²", (m) => Math.ceil(m.par * 1.1), "cp"],
@@ -100,7 +98,7 @@ export const TECS: Tecnico[] = [
   { id: "hn", n: "Hugo Neves", sk: "Ladrilhador", ferias: [] },
   { id: "pm", n: "Paulo Mota", sk: "Montador", ferias: [] },
 ];
-const REAL: Record<SvcId, number> = { demol: 0.93, canal: 0.97, revest: 1.23, pav: 1.05, loucas: 0.96, moveis: 1.02, eletr: 1, teto: 1.04, pint: 0.98 };
+const REAL: Record<string, number> = { demol: 0.93, canal: 0.97, revest: 1.23, pav: 1.05, loucas: 0.96, moveis: 1.02, eletr: 1, teto: 1.04, pint: 0.98 };
 export const DIAS = ["seg 13/10", "ter 14/10", "qua 15/10", "qui 16/10", "sex 17/10", "seg 20/10", "ter 21/10", "qua 22/10", "qui 23/10", "sex 24/10"];
 export const SLOTS = ["qui 15/10 · 10:00", "qui 15/10 · 15:00", "sex 16/10 · 09:30"];
 
@@ -312,9 +310,10 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
     if (!(m[k] > 0) || d.visita.off.includes(sid)) continue;
     linhas.push({ t: "svc", sid, q: m[k], cu: r2(custoUn(s, S)), pu: s.preco });
   }
-  for (const sid of L.extras) {
-    const q = d.visita.extra[sid] || 0;
-    if (q > 0) linhas.push({ t: "svc", sid, q, cu: r2(custoUn(S.svc[sid], S)), pu: S.svc[sid].preco });
+  // os juntados do Catálogo, pela ordem em que foram juntados
+  for (const [sid, q] of Object.entries(d.visita.extra)) {
+    const sv = garantirServico(S, sid);
+    if (sv && (q || 0) > 0) linhas.push({ t: "svc", sid, q: q!, cu: r2(custoUn(sv, S)), pu: sv.preco });
   }
   linhas.push({ t: "mat", d: L.mat.d, custo: L.mat.custo, preco: L.mat.preco });
   return { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
@@ -383,6 +382,11 @@ export function gerarPlano(d: Negocio, S: Estado): Plano {
     { nome: "Revestimento e pavimento", svcs: ["revest", "pav"] as SvcId[], dia: 2, dur: 2, sk: "Ladrilhador" },
     { nome: d.linha === "wc" ? "Louças e acabamentos" : "Móveis e acabamentos", svcs: [mont, "teto", "pint"] as SvcId[], dia: 4, dur: 1, sk: mont === "loucas" ? "Canalizador" : "Montador" },
   ]
+    .map((t, i) => {
+      const of: Record<string, number> = { "Demolições": 0, "Canalização": 1, "Gás (ITG)": 1, "Eletricidade": 1, "Revestimentos": 2, "Carpintaria": 3, "Pintura": 3 };
+      const mais = Object.keys(d.visita.extra).filter((sid) => !t.svcs.includes(sid) && of[S.svc[sid]?.perfil] === i);
+      return { ...t, svcs: [...t.svcs, ...mais] };
+    })
     .filter((t) => t.svcs.some((s) => h(s) > 0))
     .map((t) => {
       const tec = TECS.find((x) => x.sk === t.sk);
@@ -417,7 +421,18 @@ export function realObra(d: Negocio, S: Estado): Real {
   const custoReal = T.custo + extra;
   return { tasks, custoReal, m: (T.pf - custoReal) / T.pf };
 }
-export const fatorReal = (sid: SvcId) => REAL[sid];
+export const fatorReal = (sid: SvcId) => REAL[sid] ?? 1;
+
+/** Um serviço do Catálogo passa a existir em S.svc quando se junta pela primeira vez. */
+export function garantirServico(S: Estado, sid: SvcId): Servico | null {
+  if (S.svc[sid]) return S.svc[sid];
+  const c = CATALOGO.find((x) => x.id === sid);
+  if (!c) return null;
+  const h = r2(c.hu + c.hf / Math.max(1, c.qm)); // as horas fixas repartidas pela quantidade habitual
+  const custo = h * (25 + ESTR);
+  S.svc[sid] = { n: c.n, un: c.un, h, eh: 25, eq: 0, cons: 0, preco: r2(custo / (1 - 0.35)), perfil: c.cat };
+  return S.svc[sid];
+}
 
 /* ------------------------------------------------------------------ próximo passo */
 export interface Proximo {
@@ -549,7 +564,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
     const semMedida = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0));
     if (semMedida.length) x.push({ id: "medidas", t: "Medidas: " + semMedida.map((k) => L.med[k]).join(", ") });
-    const servicos = L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).length + L.extras.filter((sid) => (v.extra[sid] || 0) > 0).length;
+    const servicos = L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).length + Object.values(v.extra).filter((q) => (q || 0) > 0).length;
     if (!servicos) x.push({ id: "nec", t: "Pelo menos um serviço" });
     if (!(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") x.push({ id: "fotos", t: "Fotografias (ou marcar que o cliente não quis)" });
     return x;
@@ -694,7 +709,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       log(d, `Morada preenchida pela localização do dispositivo (± ${Math.round(precisao)} m)`);
     },
     servico(id: number, sid: SvcId) { const a = deal(id).visita.off; const i = a.indexOf(sid); if (i >= 0) a.splice(i, 1); else a.push(sid); },
-    extra(id: number, sid: SvcId, q: number) { deal(id).visita.extra[sid] = q; },
+    extra(id: number, sid: SvcId, q: number) {
+      const d = deal(id);
+      if (q > 0) { garantirServico(S, sid); d.visita.extra[sid] = q; } else delete d.visita.extra[sid];
+    },
     foto(id: number) { deal(id).visita.fotos++; },
     recalc(id: number, i: number) { const d = deal(id), l = d.orc!.linhas[i]; if (l.t === "svc") l.cu = r2(custoUn(S.svc[l.sid], S)); d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" }); },
   };
