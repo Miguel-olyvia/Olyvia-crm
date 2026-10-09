@@ -89,6 +89,16 @@ export function NegocioSimples(ctx: Ctx) {
           Fase {d.fase + 1} de 6: <span className="font-semibold text-foreground">{FASES[d.fase]}</span>
           {d.fase < 5 && <> · depois: {FASES[d.fase + 1]}</>}
         </p>
+        {d.fase > 0 && (
+          <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden" aria-label="Fases feitas">
+            {FASES.slice(0, d.fase).map((f, i) => (
+              <button key={f} type="button" onClick={() => setVer(ver === i ? null : i)} aria-pressed={ver === i}
+                className={cn("inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm", ver === i ? "border-foreground bg-foreground text-background" : "border-input text-foreground")}>
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />{f}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)_240px]">
@@ -188,7 +198,7 @@ type Lat = (passos: Passo[], ativo: number, setAtivo: (i: number) => void) => Re
 
 function Lateral({ d, passos, ativo, setAtivo, verFase, vendo }: { d: Negocio; passos: Passo[]; ativo: number; setAtivo: (i: number) => void; verFase: (i: number | null) => void; vendo?: number }) {
   return (
-    <nav aria-label="Passos desta fase" className="lg:sticky lg:top-6">
+    <nav aria-label="Passos desta fase" className="hidden lg:sticky lg:top-6 lg:block">
       {passos.length > 0 && (
         <>
           <h2 className="px-3 text-sm font-medium text-muted-foreground">{FASES[d.fase]}</h2>
@@ -237,7 +247,9 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
   const { S } = ctx;
   const p = proximo(d, S), meu = !!p.who && p.who === S.role;
   const passos = passosDaFase(ctx, d, true);
-  const primeiro = Math.max(0, passos.findIndex((x) => !completo(x)));
+  // abre no primeiro passo por fazer; se está tudo feito, abre logo no passo do negócio
+  const idx = passos.findIndex((x) => !completo(x));
+  const primeiro = idx === -1 ? passos.length : idx;
   const [ativo, setAtivo] = useState(primeiro);
   const titulo = useRef<HTMLHeadingElement>(null);
   const montado = useRef(false);
@@ -284,6 +296,22 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
     <>
       {lateral(passos, ativo, setAtivo)}
       <section className="min-w-0" aria-labelledby="passo-titulo">
+        {/* Telemóvel: os passos numa linha (a lista completa fica no computador) */}
+        <ol className="-mx-4 mb-6 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden" aria-label="Passos desta fase">
+          {passos.map((x, i) => (
+            <li key={x.id}>
+              <button type="button" onClick={() => setAtivo(i)} aria-current={i === ativo ? "step" : undefined} aria-label={curto(x)}
+                className={cn("flex h-9 min-w-9 items-center justify-center whitespace-nowrap rounded-full border px-3 text-sm transition-colors",
+                  x.falta ? "border-destructive text-destructive" : i === ativo ? "border-foreground bg-foreground text-background" : completo(x) ? "border-primary bg-primary text-primary-foreground" : "border-input text-muted-foreground")}>
+                {i === ativo ? curto(x) : completo(x) && !x.falta ? <Check className="h-4 w-4" aria-hidden="true" /> : i + 1}
+              </button>
+            </li>
+          ))}
+          {temBotaoFase(ctx, d) && (
+            <li><button type="button" onClick={() => setAtivo(passos.length)} aria-current={fim ? "step" : undefined}
+              className={cn("flex h-9 items-center rounded-full border px-3 text-sm", fim ? "border-foreground bg-foreground text-background" : "border-input text-muted-foreground")}>Fim</button></li>
+          )}
+        </ol>
         <div key={ativo} className="animate-in fade-in-0 slide-in-from-right-3 duration-300">
           {!fim && atual ? (
             <>
@@ -307,16 +335,22 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
         </div>
 
         {/* Um só botão primário: Continuar, ou o passo do negócio no fim */}
-        <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-6">
-          <Button variant="ghost" size="lg" disabled={ativo === 0} onClick={() => setAtivo(Math.max(0, ativo - 1))}>Anterior</Button>
+        <div className="mt-10 flex flex-col-reverse gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center justify-between gap-3 sm:justify-start">
+            <Button variant="ghost" size="lg" disabled={ativo === 0} onClick={() => setAtivo(Math.max(0, ativo - 1))}>Anterior</Button>
+            {!fim && temBotaoFase(ctx, d) && meu && p.btn && (
+              <button type="button" className="min-h-11 px-2 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:hidden"
+                onClick={() => setAtivo(passos.length)}>Ir para o fim</button>
+            )}
+          </div>
           {fim
-            ? (temBotaoFase(ctx, d) ? <BotaoFase ctx={ctx} d={d} /> : null)
-            : <div className="flex flex-wrap items-center gap-3">
+            ? (temBotaoFase(ctx, d) ? <div className="[&_button]:w-full sm:[&_button]:w-auto"><BotaoFase ctx={ctx} d={d} /></div> : null)
+            : <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
               {temBotaoFase(ctx, d) && meu && p.btn && (
-                <button type="button" className="min-h-11 px-2 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                <button type="button" className="hidden min-h-11 px-2 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:block"
                   onClick={() => setAtivo(passos.length)}>Ir para "{p.btn}"</button>
               )}
-              <Button size="lg" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>
+              <Button size="lg" className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>
             </div>}
         </div>
       </section>

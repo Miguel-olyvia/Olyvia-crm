@@ -2,7 +2,7 @@
 // screens a funcionar com dados de exemplo. Rota pública, fora do CRM: não usa a sessão nem a base de dados.
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import {
-  Bell, Building, Building2, ChevronDown, Handshake, LayoutTemplate, Megaphone, Package, Search, Settings, ShoppingCart, Sparkles, Sun, Wrench, type LucideIcon,
+  Bell, Building, Building2, ChevronDown, Handshake, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Wrench, type LucideIcon,
 } from "lucide-react";
 import mascote from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
@@ -41,6 +41,7 @@ export default function PrototipoNegocios() {
   const [, redesenhar] = useReducer((x: number) => x + 1, 0);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [q, setQ] = useState("");
+  const [mais, setMais] = useState(false); // telemóvel: o menu "Mais"
   const mainRef = useRef<HTMLElement>(null);
   const tid = useRef(0);
 
@@ -205,13 +206,36 @@ export default function PrototipoNegocios() {
               {antigo && !listaNova ? <div className="pg page mx-auto w-full max-w-7xl px-4 pb-10 pt-6 sm:px-8">{corpo}</div> : corpo}
             </div>
           </main>
+          {mais && (
+            <div className="fixed inset-0 z-40 bg-foreground/20 md:hidden animate-in fade-in-0" onClick={() => setMais(false)}>
+              <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-16 rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
+                onClick={(e) => e.stopPropagation()}>
+                <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
+                  {[itens[2], itens[5], itens[6]].map(([v, l, Ic, c]) => item(v, l, Ic, c))}
+                  {item("definicoes", "Definições", Settings)}
+                </nav>
+                <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
+                  className="mt-3 flex min-h-11 w-full items-center justify-between gap-3 border-t border-border px-3 pt-3 text-left text-[15px]">
+                  Leitura fácil
+                  <span className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", S.leitura ? "bg-primary" : "bg-input")}>
+                    <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", S.leitura ? "left-[22px]" : "left-0.5")} />
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-stretch justify-around border-t border-border bg-card md:hidden" aria-label="Menu">
-            {itens.slice(0, 5).map(([v, l, Ic]) => (
-              <button key={v} type="button" onClick={go(() => A.nav(v))} aria-current={cur === v ? "page" : undefined}
-                className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
+            {[itens[0], itens[1], itens[3], itens[4]].map(([v, l, Ic, c]) => (
+              <button key={v} type="button" onClick={go(() => { setMais(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
+                className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
+                {c ? <span className="absolute right-[calc(50%-20px)] top-2 h-2 w-2 rounded-full bg-primary" aria-label={c + " por fazer"} /> : null}
               </button>
             ))}
+            <button type="button" onClick={() => setMais(!mais)} aria-expanded={mais}
+              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || ["clientes", "catalogo", "marketing", "definicoes"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
+              <MoreHorizontal className="h-5 w-5" aria-hidden="true" />Mais
+            </button>
           </nav>
         </div>
         {toastsEl}

@@ -70,10 +70,10 @@ export function NegociosSimples({ S, A, go, run, q, setQ }: Ctx) {
           <input type="search" placeholder="Procurar nome, telefone ou serviço" value={q} onChange={(e) => setQ?.(e.target.value)}
             className="h-11 w-full rounded-lg border border-input bg-card pl-10 pr-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
         </label>
-        <div className="flex flex-wrap gap-2" role="group" aria-label="Mostrar">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] sm:mx-0 sm:flex-wrap sm:px-0 [&::-webkit-scrollbar]:hidden" role="group" aria-label="Mostrar">
           {FILTROS.map(([k, l]) => (
             <button key={k} type="button" aria-pressed={f === k} onClick={go(() => A.filtro(k))}
-              className={cn("min-h-10 rounded-full border px-4 text-[15px] transition-colors", f === k ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40")}>
+              className={cn("min-h-10 shrink-0 rounded-full border px-4 text-[15px] transition-colors", f === k ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40")}>
               {l}
             </button>
           ))}
@@ -82,7 +82,7 @@ export function NegociosSimples({ S, A, go, run, q, setQ }: Ctx) {
 
       {/* Telemóvel: escolhe-se a fase */}
       <div className="mt-6 lg:hidden">
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-2" role="tablist" aria-label="Fase">
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="Fase">
           {FASES.map((fn, i) => (
             <button key={fn} type="button" role="tab" aria-selected={faseMovel === i} onClick={() => setFaseMovel(i)}
               className={cn("min-h-10 shrink-0 rounded-lg px-3 text-[15px]", faseMovel === i ? "bg-foreground text-background" : "bg-muted text-foreground")}>
