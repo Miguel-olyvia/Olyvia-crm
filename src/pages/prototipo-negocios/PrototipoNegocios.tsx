@@ -15,6 +15,7 @@ import {
 import { Hoje } from "./Hoje";
 import { HojeSimples } from "./HojeSimples";
 import { NegocioSimples } from "./NegocioSimples";
+import { NegociosSimples } from "./NegociosSimples";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 
@@ -88,7 +89,7 @@ export default function PrototipoNegocios() {
     avisar({ msg: "Demonstração reposta", sub: "Todos os negócios voltaram ao início", kind: "ok" });
   });
 
-  const ctx: Ctx = { S, A, run, go, q, repor };
+  const ctx: Ctx = { S, A, run, go, q, setQ, repor };
   const simples = (S.aspeto ?? "simples") === "simples";
 
   // A letra da proposta simples: Lexend, desenhada para facilitar a leitura (inclui quem tem dislexia).
@@ -102,14 +103,14 @@ export default function PrototipoNegocios() {
   let corpo: ReactNode;
   switch (S.view) {
     case "hoje": corpo = simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
-    case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : <Negocios {...ctx} />; break;
+    case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : simples ? <NegociosSimples {...ctx} /> : <Negocios {...ctx} />; break;
     case "operacoes": corpo = <Operacoes {...ctx} />; break;
     case "inventario": corpo = <Inventario {...ctx} />; break;
     case "catalogo": corpo = <Catalogo {...ctx} />; break;
     case "clientes": corpo = <Clientes {...ctx} />; break;
     case "marketing": corpo = <Marketing />; break;
     case "definicoes": corpo = <Definicoes {...ctx} />; break;
-    default: corpo = <Negocios {...ctx} />;
+    default: corpo = simples ? <NegociosSimples {...ctx} /> : <Negocios {...ctx} />;
   }
 
   const n = minhas(S, S.role).length;
@@ -161,6 +162,7 @@ export default function PrototipoNegocios() {
         </select>
       </label>
     );
+    const listaNova = S.view === "negocios" || (S.view === "negocio" && !S.deals.some((d) => d.id === S.deal)) || !["operacoes", "inventario", "catalogo", "clientes", "marketing", "definicoes"].includes(S.view);
     return (
       <div className={cn("pn calma fixed inset-0 flex bg-background text-foreground", S.leitura && "leitura")}>
         <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card px-3 py-5 md:flex">
@@ -197,17 +199,8 @@ export default function PrototipoNegocios() {
           </header>
           <main ref={mainRef} className="min-h-0 flex-1 overflow-auto pb-16 md:pb-0">
             <div key={S.view + ":" + (S.deal || "")} className="animate-in fade-in-0 duration-200">
-              {S.view === "negocios" || (S.view === "negocio" && !S.deals.some((d) => d.id === S.deal)) ? (
-                <div className="mx-auto w-full max-w-7xl px-4 pt-6 sm:px-8 sm:pt-10">
-                  <label className="relative block max-w-md">
-                    <span className="sr-only">Procurar</span>
-                    <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                    <input type="search" placeholder="Procurar negócio, cliente ou telefone" value={q} onChange={(e) => setQ(e.target.value)}
-                      className="h-11 w-full rounded-lg border border-input bg-card pl-10 pr-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
-                  </label>
-                </div>
-              ) : null}
-              {antigo ? <div className="pg page mx-auto w-full max-w-7xl px-4 pb-10 pt-6 sm:px-8">{corpo}</div> : corpo}
+
+              {antigo && !listaNova ? <div className="pg page mx-auto w-full max-w-7xl px-4 pb-10 pt-6 sm:px-8">{corpo}</div> : corpo}
             </div>
           </main>
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-stretch justify-around border-t border-border bg-card md:hidden" aria-label="Menu">

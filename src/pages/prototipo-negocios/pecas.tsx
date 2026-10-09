@@ -8,6 +8,7 @@ export interface Ctx {
   run: (fn: () => void) => void;
   go: (fn: () => void) => () => void;
   q: string;
+  setQ?: (v: string) => void;
   repor: () => void;
 }
 

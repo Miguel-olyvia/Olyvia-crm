@@ -16,6 +16,8 @@ import {
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, emFalta, type Grupo } from "./campos";
 import { UsarLocalizacao } from "./Localizacao";
 import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
+import { OrcamentoSimples } from "./OrcamentoSimples";
+import { DocumentosSimples, ObraSimples } from "./FasesSimples";
 import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
 import { Btn, Campo, fazer, numero, type Ctx } from "./pecas";
 
@@ -322,19 +324,19 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   } else if (d.fase === 3 && o) {
     passos = [
       { id: "orc", titulo: "Orçamento", icone: FileText, feito: !!o.enviada || (o.verif && !bloqueado(d, S)), resumo: [eur(tot(d, S).pf) + " €", "margem " + pct(tot(d, S).m)],
-        corpo: <div className="pg estreito"><Orcamento {...ctx} d={d} /></div> },
+        corpo: simples ? <OrcamentoSimples {...ctx} d={d} /> : <div className="pg estreito"><Orcamento {...ctx} d={d} /></div> },
       g(PROPOSTA[0], FileSignature, !!o.enviada),
       ...(o.vendaDireta ? [] : [g(PROPOSTA[1], FileSignature, !!o.contrato)]),
     ];
   } else if (d.fase === 4) {
     passos = [
-      { id: "docs", titulo: "Fatura e recibo", icone: Euro, feito: !!d.fin.recibo, resumo: [d.fin.fatura?.n || "fatura por emitir"], corpo: <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div> },
+      { id: "docs", titulo: "Fatura e recibo", icone: Euro, feito: !!d.fin.recibo, resumo: [d.fin.fatura?.n || "fatura por emitir"], corpo: simples ? <DocumentosSimples {...ctx} d={d} /> : <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div> },
       ...FINANCEIRO.map((gr) => g(gr, Euro)),
     ];
   } else if (d.fase === 5) {
     passos = [
       { id: "obra", titulo: "Plano, materiais e resultado", icone: Hammer, feito: d.obra.plano?.estado === "concluída", resumo: [d.obra.plano?.estado || ""],
-        corpo: <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
+        corpo: simples ? <ObraSimples {...ctx} d={d} /> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
       g(OBRA[0], Hammer), g(OBRA[1], Check),
     ];
   }

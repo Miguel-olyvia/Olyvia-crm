@@ -8,7 +8,9 @@ import { cn } from "@/lib/utils";
 import { FASES, LINHAS, PAPEIS, eur, pct, proximo, tot, type Negocio } from "./motor";
 import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, type Grupo } from "./campos";
 import { Campos, type Passo } from "./CamposFase";
-import { BotaoFase, Documentos, Orcamento, passosDaFase, temBotaoFase } from "./PaginaNegocio";
+import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
+import { OrcamentoSimples } from "./OrcamentoSimples";
+import { DocumentosSimples } from "./FasesSimples";
 import { ServicosCatalogo } from "./ServicosCatalogo";
 import { nfmt, type MedKey } from "./motor";
 import type { Ctx } from "./pecas";
@@ -27,6 +29,18 @@ export function NegocioSimples(ctx: Ctx) {
   const d = S.deals.find((x) => x.id === S.deal)!;
   const T = d.orc ? tot(d, S) : null;
   const [ver, setVer] = useState<number | null>(null); // uma fase já feita, só para ler
+  // ao passar de fase: uma frase curta a dizer o que acabou e o que vem, que desaparece sozinha
+  const faseAntes = useRef(d.fase);
+  const [acabou, setAcabou] = useState<number | null>(null);
+  useEffect(() => {
+    if (d.fase > faseAntes.current) {
+      setAcabou(faseAntes.current); setVer(null);
+      const t = setTimeout(() => setAcabou(null), 5000);
+      faseAntes.current = d.fase;
+      return () => clearTimeout(t);
+    }
+    faseAntes.current = d.fase;
+  }, [d.fase]);
   const local = d.f.localidade || d.local.split(",").pop()!.trim();
 
   return (
@@ -54,6 +68,13 @@ export function NegocioSimples(ctx: Ctx) {
           <p className="flex-1 text-[15px]">Marcar como perdido? Sai do quadro, mas fica no histórico.</p>
           <Button variant="outline" onClick={go(() => A.perderNao())}>Cancelar</Button>
           <Button variant="destructive" onClick={go(() => A.perderSim(d.id))}>Marcar como perdido</Button>
+        </div>
+      )}
+
+      {acabou !== null && (
+        <div role="status" className="mt-6 flex items-center gap-3 rounded-xl border border-success/30 bg-success/[0.08] px-4 py-3 text-[15px] animate-in fade-in-0 slide-in-from-top-2 duration-500">
+          <span className="grid h-8 w-8 place-items-center rounded-full bg-success text-white animate-in zoom-in-50 duration-500"><Check className="h-4 w-4" aria-hidden="true" /></span>
+          <span><b className="font-semibold">{FASES[acabou]} concluída.</b> Agora: {FASES[d.fase]}.</span>
         </div>
       )}
 
@@ -91,8 +112,8 @@ export function NegocioSimples(ctx: Ctx) {
                   </div>
                 )}
                 {ver === 2 && <div><h3 className="mb-3 text-base font-semibold">Serviços necessários</h3><ServicosCatalogo {...ctx} d={d} simples /></div>}
-                {ver === 3 && d.orc && <div><h3 className="mb-3 text-base font-semibold">Orçamento</h3><div className="pg estreito"><Orcamento {...ctx} d={d} /></div></div>}
-                {ver === 4 && <div><h3 className="mb-3 text-base font-semibold">Fatura e recibo</h3><div className="pg estreito"><Documentos ctx={ctx} d={d} /></div></div>}
+                {ver === 3 && d.orc && <div><h3 className="mb-3 text-base font-semibold">Orçamento</h3><OrcamentoSimples {...ctx} d={d} /></div>}
+                {ver === 4 && <div><h3 className="mb-3 text-base font-semibold">Fatura e recibo</h3><DocumentosSimples {...ctx} d={d} /></div>}
                 {(ver === 3 && d.orc?.vendaDireta ? PROPOSTA.slice(0, 1) : GRUPOS_FASE[ver]).map((g) => (
                   <div key={g.titulo}>
                     <h3 className="mb-3 text-base font-semibold">{g.titulo}</h3>
@@ -130,7 +151,8 @@ export function NegocioSimples(ctx: Ctx) {
 
 // Quanto falta neste passo, em perguntas e em tempo (≈ 6 s por resposta com botões).
 function tempo(p: Passo): string {
-  const f = p.conta ? p.conta.n - p.conta.f : completo(p) ? 0 : 1;
+  if (!p.conta) return completo(p) ? "feito" : "por fazer";
+  const f = p.conta.n - p.conta.f;
   if (f <= 0) return "completo";
   const min = Math.ceil((f * 6) / 60);
   return `falta${f > 1 ? "m" : ""} ${f} ${f === 1 ? "resposta" : "respostas"} · ${min <= 1 ? "menos de 1 minuto" : `cerca de ${min} minutos`}`;
@@ -221,6 +243,13 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
   const montado = useRef(false);
 
   // tentou passar de fase com campos em falta: vai para o primeiro passo com falta e põe o cursor no campo
+  // "Verificar" e "Ver bloqueios": abre o orçamento na parte "Antes de enviar"
+  useEffect(() => {
+    if (S.pulse !== "verif") return;
+    const i = passos.findIndex((x) => x.id === "orc");
+    if (i >= 0 && i !== ativo) setAtivo(i);
+    setTimeout(() => document.getElementById("verif")?.scrollIntoView({ behavior: "smooth", block: "start" }), 350);
+  });
   useEffect(() => {
     if (S.pulse !== "falta") return;
     const i = passos.findIndex((x) => (x.falta || 0) > 0);
@@ -269,7 +298,7 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
             <>
               <p className="text-sm text-muted-foreground">{FASES[d.fase]}</p>
               <h2 id="passo-titulo" ref={titulo} tabIndex={-1} className="mt-1 text-2xl font-semibold tracking-tight outline-none">
-                {p.done ? "Negócio fechado" : p.wait ? p.t : "Está tudo. " + p.t + "."}
+                {p.done ? "Negócio fechado" : p.wait || !passos.every(completo) ? p.t : "Está tudo. " + p.t + "."}
               </h2>
               {p.sub && <p className="mt-2 text-base text-muted-foreground">{p.sub}</p>}
               {quem && <p className="mt-2 text-base text-muted-foreground">Este passo é de {quem}.</p>}
