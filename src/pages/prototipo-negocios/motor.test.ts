@@ -7,7 +7,7 @@ function preencher(d: Negocio, gs: Grupo[]) {
   for (let i = 0; i < 5; i++) {
     const f = emFalta(gs, d.f);
     if (!f.length) return;
-    for (const c of f) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" ? "1" : c.t === "data" ? "2026-10-20" : "x";
+    for (const c of f) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-10-20" : "x";
   }
 }
 
@@ -111,7 +111,7 @@ describe("protótipo de Negócios", () => {
     expect(sids).toContain("c2");
     expect(S.svc.c2.n).toBe("Supressão de ponto de água");
     expect(S.svc.c2.preco).toBeGreaterThan(0);
-    expect(d.f.validade).toBe("30");
+    expect(d.f.validade).toBe("30 dias");
     expect(protecoesSugeridas(d.f)).toContain("plástico nas 2 portas");
     expect(protecoesSugeridas(d.f)).toContain("elevador");
   });
@@ -132,5 +132,24 @@ describe("protótipo de Negócios", () => {
     A.marcarVisita(id);
     expect(d.fase).toBe(2);
     expect(d.valida).toBeNull();
+  });
+
+  it("o exemplo completo tem tudo preenchido, e as respostas sugerem outras", () => {
+    const S = seed();
+    const A = acoes(S, () => {}, (fn) => fn());
+    const j = S.deals.find((x) => x.id === 1050)!;
+    expect(j.fase).toBe(5);
+    expect(emFalta([...LEAD, ...CONTACTO, EXTERIOR, INTERIOR, AREA, ESCOLHAS, ...PROPOSTA, ...FINANCEIRO, ...OBRA], j.f)).toEqual([]);
+    expect(j.obra.real).toBeTruthy();
+
+    const d = S.deals.find((x) => x.id === 1036)!; // Luísa Freitas, na Visita
+    delete d.f.area_util_m2; delete d.f.n_casas_banho;
+    A.campo(d.id, "tipologia", "T2");
+    expect(d.f.area_util_m2).toBe("80");
+    expect(d.sug?.area_util_m2).toBe(true);
+    A.campo(d.id, "area_util_m2", "75"); // mexido: deixa de ser sugestão
+    expect(d.sug?.area_util_m2).toBeUndefined();
+    A.campo(d.id, "fracao", "R/C Dto.");
+    expect(d.f.andar).toBe("1"); // já tinha valor: a sugestão não o apaga
   });
 });

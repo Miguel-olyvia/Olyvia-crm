@@ -2,13 +2,15 @@
 // Uma coisa de cada vez: o passo atual ocupa o ecrã, os outros ficam numa
 // lista à esquerda. Um só botão primário. Texto a 15–16 px, contraste AA.
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check } from "lucide-react";
+import { ArrowLeft, Check, Square, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES, LINHAS, PAPEIS, eur, pct, proximo, tot, type Negocio } from "./motor";
 import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, type Grupo } from "./campos";
 import { Campos, type Passo } from "./CamposFase";
-import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
+import { BotaoFase, Documentos, Orcamento, passosDaFase, temBotaoFase } from "./PaginaNegocio";
+import { ServicosCatalogo } from "./ServicosCatalogo";
+import { nfmt, type MedKey } from "./motor";
 import type { Ctx } from "./pecas";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -79,6 +81,18 @@ export function NegocioSimples(ctx: Ctx) {
               <p className="text-sm text-muted-foreground">Fase feita · só leitura</p>
               <h2 id="fase-lida" className="mt-1 text-2xl font-semibold">{FASES[ver]}</h2>
               <div className="mt-6 space-y-8">
+                {ver === 2 && (
+                  <div>
+                    <h3 className="mb-3 text-base font-semibold">Medidas e fotografias</h3>
+                    <p className="text-[15px]">
+                      {(Object.entries(LINHAS[d.linha].med) as [MedKey, string][]).map(([k, l]) => `${l} ${nfmt(d.visita.med[k] || 0)}`).join(" · ")} · {d.visita.fotos} fotos
+                    </p>
+                    {d.visita.nec.length > 0 && <p className="mt-1 text-[15px] text-muted-foreground">Equipamentos pedidos: {d.visita.nec.join(", ")}</p>}
+                  </div>
+                )}
+                {ver === 2 && <div><h3 className="mb-3 text-base font-semibold">Serviços necessários</h3><ServicosCatalogo {...ctx} d={d} simples /></div>}
+                {ver === 3 && d.orc && <div><h3 className="mb-3 text-base font-semibold">Orçamento</h3><div className="pg estreito"><Orcamento {...ctx} d={d} /></div></div>}
+                {ver === 4 && <div><h3 className="mb-3 text-base font-semibold">Fatura e recibo</h3><div className="pg estreito"><Documentos ctx={ctx} d={d} /></div></div>}
                 {(ver === 3 && d.orc?.vendaDireta ? PROPOSTA.slice(0, 1) : GRUPOS_FASE[ver]).map((g) => (
                   <div key={g.titulo}>
                     <h3 className="mb-3 text-base font-semibold">{g.titulo}</h3>
@@ -111,6 +125,40 @@ export function NegocioSimples(ctx: Ctx) {
         </aside>
       </div>
     </div>
+  );
+}
+
+// Quanto falta neste passo, em perguntas e em tempo (≈ 6 s por resposta com botões).
+function tempo(p: Passo): string {
+  const f = p.conta ? p.conta.n - p.conta.f : completo(p) ? 0 : 1;
+  if (f <= 0) return "completo";
+  const min = Math.ceil((f * 6) / 60);
+  return `falta${f > 1 ? "m" : ""} ${f} ${f === 1 ? "resposta" : "respostas"} · ${min <= 1 ? "menos de 1 minuto" : `cerca de ${min} minutos`}`;
+}
+
+// Ler o passo em voz alta (ajuda quem tem dislexia): o título e as perguntas, com o que já está respondido.
+function Ouvir() {
+  const [a, setA] = useState(false);
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
+  const falar = () => {
+    const sy = window.speechSynthesis;
+    if (a) { sy.cancel(); setA(false); return; }
+    const titulo = document.getElementById("passo-titulo")?.textContent || "";
+    const linhas = [...document.querySelectorAll<HTMLElement>('#passo-corpo [id$="-rot"]')].map((el) => {
+      const linha = el.closest(".grid");
+      const escolhido = linha?.querySelector('[aria-pressed="true"]')?.textContent || (linha?.querySelector("input,textarea") as HTMLInputElement | null)?.value || linha?.querySelector("output")?.textContent || "";
+      return el.textContent + (escolhido && escolhido !== "—" ? ": " + escolhido : ": por responder");
+    });
+    const u = new SpeechSynthesisUtterance([titulo, ...linhas].join(". "));
+    u.lang = "pt-PT"; u.rate = 0.95;
+    u.onend = () => setA(false);
+    sy.cancel(); sy.speak(u); setA(true);
+  };
+  return (
+    <button type="button" onClick={falar} aria-pressed={a}
+      className="inline-flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+      {a ? <Square className="h-4 w-4" aria-hidden="true" /> : <Volume2 className="h-4 w-4" aria-hidden="true" />}{a ? "Parar" : "Ouvir"}
+    </button>
   );
 }
 
@@ -210,9 +258,12 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
         <div key={ativo} className="animate-in fade-in-0 slide-in-from-right-3 duration-300">
           {!fim && atual ? (
             <>
-              <p className="text-sm text-muted-foreground">Passo {ativo + 1} de {passos.length}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm text-muted-foreground">Passo {ativo + 1} de {passos.length} · {tempo(atual)}</p>
+                <Ouvir />
+              </div>
               <h2 id="passo-titulo" ref={titulo} tabIndex={-1} className="mt-1 text-2xl font-semibold tracking-tight outline-none">{curto(atual)}</h2>
-              <div className="mt-6">{atual.corpo}</div>
+              <div id="passo-corpo" className="mt-6">{atual.corpo}</div>
             </>
           ) : (
             <>

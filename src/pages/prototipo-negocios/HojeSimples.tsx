@@ -29,6 +29,9 @@ export function HojeSimples({ S, A, go }: Ctx) {
       <p className="text-[15px] text-muted-foreground first-letter:uppercase">{format(agora, "EEEE, d 'de' MMMM", { locale: pt })}</p>
       <h1 className="mt-1 text-3xl font-semibold tracking-tight text-foreground">{saudacao(agora.getHours())}, {PAPEIS[r].nome}</h1>
       <p className="mt-2 text-lg text-muted-foreground">{frase}</p>
+      <button type="button" onClick={go(() => A.abrir(1050))} className="mt-3 min-h-10 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+        Ver um exemplo com tudo preenchido (Joana Ribeiro, obra concluída)
+      </button>
       {r === "direcao" && (
         <p className="mt-2 text-[15px] text-muted-foreground">
           {ab.length} negócios abertos · {eur(emNeg.reduce((a, d) => a + tot(d, S).pf, 0))} € em proposta · margem média {pct(emNeg.length ? emNeg.reduce((a, d) => a + tot(d, S).m, 0) / emNeg.length : 0)}

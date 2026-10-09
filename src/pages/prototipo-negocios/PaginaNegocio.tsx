@@ -440,7 +440,7 @@ function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 }
 
 /* ------------------------------------------------------------------ peças da fase */
-function Documentos({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+export function Documentos({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const T = d.orc ? tot(d, ctx.S) : null;
   return (
     <div className="withside">
@@ -469,7 +469,7 @@ function Documentos({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   );
 }
 
-function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
+export function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
   const o = d.orc!, T = tot(d, S), locked = !!o.enviada;
   const pt = partes(d, S), mw = Math.max(0, Math.min(1, T.m / 0.5));
   const mcls = T.m < S.cfg.min / 100 ? "bad" : T.m < S.cfg.alvo / 100 - 0.005 ? "warn" : "ok";

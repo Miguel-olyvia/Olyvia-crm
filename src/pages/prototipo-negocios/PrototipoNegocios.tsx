@@ -90,6 +90,15 @@ export default function PrototipoNegocios() {
 
   const ctx: Ctx = { S, A, run, go, q, repor };
   const simples = (S.aspeto ?? "simples") === "simples";
+
+  // A letra da proposta simples: Lexend, desenhada para facilitar a leitura (inclui quem tem dislexia).
+  useEffect(() => {
+    if (document.getElementById("pn-lexend")) return;
+    const l = document.createElement("link");
+    l.id = "pn-lexend"; l.rel = "stylesheet";
+    l.href = "https://fonts.googleapis.com/css2?family=Lexend:wght@400;500;600&display=swap";
+    document.head.appendChild(l);
+  }, []);
   let corpo: ReactNode;
   switch (S.view) {
     case "hoje": corpo = simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
@@ -153,7 +162,7 @@ export default function PrototipoNegocios() {
       </label>
     );
     return (
-      <div className="pn calma fixed inset-0 flex bg-background text-foreground">
+      <div className={cn("pn calma fixed inset-0 flex bg-background text-foreground", S.leitura && "leitura")}>
         <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card px-3 py-5 md:flex">
           <div className="flex items-center gap-2.5 px-3 pb-6">
             <img src={mascote} alt="" className="h-8 w-8 object-contain" />
@@ -163,6 +172,13 @@ export default function PrototipoNegocios() {
           <div className="mt-auto flex flex-col gap-4 px-0 pt-6">
             {item("definicoes", "Definições", Settings)}
             <div className="px-3">{papel}</div>
+            <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
+              className="mx-3 flex min-h-11 items-center justify-between gap-3 rounded-lg text-left text-[15px] text-foreground">
+              <span>Leitura fácil<span className="block text-sm text-muted-foreground">letra maior, mais espaço</span></span>
+              <span className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", S.leitura ? "bg-primary" : "bg-input")}>
+                <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all", S.leitura ? "left-[22px]" : "left-0.5")} />
+              </span>
+            </button>
             <div className="space-y-1 px-3 text-sm text-muted-foreground">
               <p>Protótipo com dados de exemplo.</p>
               <button type="button" onClick={go(() => A.aspeto("atual"))} className="text-left font-medium text-primary underline-offset-4 hover:underline">Comparar com o aspeto atual</button>

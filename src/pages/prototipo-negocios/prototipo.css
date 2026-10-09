@@ -269,3 +269,15 @@
 
 .calma [tabindex="-1"]:focus{outline:none}
 .calma .pg table{font-size:15px}
+
+/* Letra da proposta simples (Lexend) e leitura fácil (dislexia).
+   Segue as recomendações da British Dyslexia Association: letra sem serifa e
+   maior, mais espaço entre letras, palavras e linhas, fundo creme em vez de
+   branco puro, texto alinhado à esquerda e sem itálicos. */
+.calma{font-family:"Lexend",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.calma button,.calma input,.calma select,.calma textarea{font-family:inherit}
+.leitura{--background:42 45% 96%;--card:40 50% 99%;--muted:40 22% 92%;--border:38 14% 84%;--foreground:224 22% 16%}
+.leitura main{zoom:1.1}
+.leitura main *{letter-spacing:.02em;word-spacing:.1em}
+.leitura main p,.leitura main li,.leitura main label{line-height:1.7}
+.leitura em,.leitura i{font-style:normal}

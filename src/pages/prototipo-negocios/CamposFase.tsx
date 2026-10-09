@@ -1,8 +1,8 @@
 // Os campos de uma fase, com o aspeto da Olyvia: um passo de cada vez.
 // O passo aberto mostra os campos e acende o próximo por preencher; quando
 // os campos do passo ficam todos preenchidos, abre sozinho o passo seguinte.
-import { useEffect, useRef, type ReactNode } from "react";
-import { AlertCircle, Check, ChevronDown, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { AlertCircle, Check, ChevronDown, Minus, Plus, Sparkles, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PAPEL_ROT, contagem, obrigatorio, visivel, type Def, type Grupo, type Papel } from "./campos";
 import type { Negocio } from "./motor";
@@ -35,7 +35,8 @@ export function Legenda() {
 export function mostra(c: Def, v: string): string {
   if (!v) return "—";
   if (c.t === "data") { const [y, m, dd] = v.split("-"); return dd ? `${dd}/${m}/${y}` : v; }
-  if (c.t === "numero") return v.replace(".", ",") + (c.un ? " " + c.un : "");
+  if (c.t === "contador" && v === "0" && c.zero) return c.zero;
+  if (c.t === "numero" || c.t === "contador") return v.replace(".", ",") + (c.un ? " " + c.un : "");
   return v;
 }
 
@@ -70,12 +71,19 @@ export function Campos({ grupo, d, A, run, ro, simples, cols = 3 }: FxProps & { 
       <div className="space-y-8">
         {blocos.map(([b, cs]) => {
           const ob = cs.filter(obrigatorio), feitos = ob.filter((c) => d.f[c.k]).length;
+          const sug = cs.filter((c) => d.sug?.[c.k] && d.f[c.k]).map((c) => c.k);
           return (
             <section key={b || "_"} aria-label={b || undefined}>
               {b && (
                 <div className="mb-1 flex items-baseline justify-between gap-3">
                   <h3 className="text-base font-semibold text-foreground">{b}</h3>
                   {ob.length > 0 && <span className={cn("text-sm tabular-nums", feitos === ob.length ? "text-success" : "text-muted-foreground")}>{feitos === ob.length ? "Completo" : `${feitos} de ${ob.length}`}</span>}
+                </div>
+              )}
+              {sug.length > 0 && (
+                <div className="mb-1 mt-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-muted/60 px-3 py-2 text-sm animate-in fade-in-0">
+                  <span className="inline-flex items-center gap-1.5 text-muted-foreground"><Sparkles className="h-4 w-4" aria-hidden="true" />A Olyvia preencheu {sug.length} {sug.length === 1 ? "resposta" : "respostas"} a partir de outras. Veja se estão certas.</span>
+                  <button type="button" onClick={() => run(() => A.confirmar(d.id, sug))} className="min-h-9 rounded-lg px-2 font-medium text-primary underline-offset-4 hover:underline">Estão certas</button>
                 </div>
               )}
               <div className="divide-y divide-border border-y border-border">{cs.map(campo)}</div>
@@ -106,7 +114,7 @@ function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: De
   }, [seguinte, ro, c.t, c.k, d.id]);
   const id = `fx-${c.k}-${d.id}`;
   const set = (x: string) => run(() => A.campo(d.id, c.k, x));
-  if (simples) return <CampoSimples c={c} val={val} id={id} set={set} ro={ro} erro={erro} seguinte={seguinte} />;
+  if (simples) return <CampoSimples c={c} val={val} id={id} set={set} ro={ro} erro={erro} seguinte={seguinte} sugerido={!!d.sug?.[c.k]} />;
   const largo = c.t === "texto_longo";
   const caixa = cn(
     "relative grid content-start gap-1.5 rounded-xl transition-all duration-300 animate-in fade-in-0",
@@ -115,7 +123,7 @@ function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: De
     erro && "rounded-lg bg-destructive/[0.05] ring-2 ring-destructive/60 ring-offset-[6px] ring-offset-card",
   );
   const rotulo = (
-    <span className="flex items-center text-xs font-medium text-muted-foreground">
+    <span id={id + "-rot"} className="flex items-center text-xs font-medium text-muted-foreground">
       {c.l}<Marca papel={c.papel} />
       {erro && <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-semibold text-destructive"><AlertCircle className="h-3.5 w-3.5" />Falta preencher</span>}
       {seguinte && !erro && <span className="ml-auto rounded-full bg-primary px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-primary-foreground animate-in zoom-in-50">a seguir</span>}
@@ -123,6 +131,7 @@ function CampoT({ c, d, A, run, ro, simples, seguinte, erro }: FxProps & { c: De
   );
   if (ro) return <div className={caixa}>{rotulo}<span className="text-sm font-medium text-foreground">{mostra(c, val)}</span></div>;
 
+  if (c.t === "contador") return <div className={caixa}>{rotulo}<Contador c={c} val={val} set={set} rot={id + "-rot"} erro={erro} /></div>;
   let ctl: ReactNode;
   let botoes = false;
   if (c.t === "sim_nao" || c.t === "escolha") {
@@ -285,7 +294,7 @@ export function Assistente({ passos, ativo, setAtivo, fim }: { passos: Passo[]; 
 /* ------------------------------------------------------------------ proposta simples */
 // Cada pergunta é uma linha: a pergunta à esquerda e a resposta à direita.
 // No telemóvel, a resposta passa para baixo da pergunta.
-function CampoSimples({ c, val, id, set, ro, erro, seguinte }: { c: Def; val: string; id: string; set: (x: string) => void; ro?: boolean; erro?: boolean; seguinte?: boolean }) {
+function CampoSimples({ c, val, id, set, ro, erro, seguinte, sugerido }: { c: Def; val: string; id: string; set: (x: string) => void; ro?: boolean; erro?: boolean; seguinte?: boolean; sugerido?: boolean }) {
   if (ro) return (
     <div className="grid gap-0.5">
       <span className="text-sm text-muted-foreground">{c.l}</span>
@@ -295,32 +304,24 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte }: { c: Def; val: st
   const rot = id + "-rot", desc = [c.ajuda ? id + "-ajuda" : "", erro ? id + "-erro" : ""].filter(Boolean).join(" ") || undefined;
   const borda = erro ? "border-destructive ring-1 ring-destructive/40" : "";
   let ctl: ReactNode;
-  let largo = false, comLabel = true;
+  // largo: a resposta vai para baixo da pergunta (muitas opções ou texto longo)
+  let largo = false, comLabel = false;
   if (c.t === "sim_nao" || c.t === "escolha") {
+    // escolher é mais rápido do que escrever: botões sempre, nunca uma lista que abre
     const op = c.t === "sim_nao" ? ["Sim", "Não"] : c.op!;
-    comLabel = !(op.length <= 3 && op.join("").length <= 34);
-    ctl = !comLabel ? (
-      <div role="group" aria-labelledby={rot} aria-describedby={desc} className="flex flex-wrap gap-2 sm:justify-end">
-        {op.map((x) => (
-          <button key={x} type="button" aria-pressed={val === x} onClick={() => set(val === x ? "" : x)}
-            className={cn("min-h-11 min-w-16 rounded-lg border px-4 text-[15px] transition-colors duration-150",
-              val === x ? "border-primary bg-primary text-primary-foreground" : cn("bg-card text-foreground hover:border-foreground/40", erro ? "border-destructive" : "border-input"))}>
-            {x}
-          </button>
-        ))}
-      </div>
-    ) : (
-      <select id={id} value={val} onChange={(e) => set(e.target.value)} aria-invalid={erro || undefined} aria-describedby={desc} className={cn(INPUT_G, "sm:w-64", borda)}>
-        <option value="">Escolher…</option>{op.map((x) => <option key={x}>{x}</option>)}
-      </select>
-    );
+    largo = op.length > 3 || op.join("").length > 34;
+    ctl = <Botoes op={op} val={val} set={set} rot={rot} desc={desc} erro={erro} largo={largo} />;
+  } else if (c.t === "contador") {
+    ctl = <Contador c={c} val={val} set={set} rot={rot} desc={desc} erro={erro} />;
+  } else if (c.t === "data") {
+    ctl = <DataRapida c={c} id={id} val={val} set={set} rot={rot} desc={desc} erro={erro} />;
   } else {
+    comLabel = true;
     const comum = {
       id, placeholder: c.ph, "aria-describedby": desc, "aria-invalid": erro || undefined,
       onBlur: (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => { if (e.target.value !== val) set(e.target.value); },
     };
-    if (c.t === "data") ctl = <input id={id} type="date" value={val} onChange={(e) => set(e.target.value)} aria-invalid={erro || undefined} aria-describedby={desc} className={cn(INPUT_G, "sm:w-52", borda)} />;
-    else if (c.t === "texto_longo") { largo = true; ctl = <textarea key={id + val} rows={3} defaultValue={val} className={cn(INPUT_G, "h-auto resize-y py-2.5", borda)} {...comum} />; }
+    if (c.t === "texto_longo") { largo = true; ctl = <textarea key={id + val} rows={3} defaultValue={val} className={cn(INPUT_G, "h-auto resize-y py-2.5", borda)} {...comum} />; }
     else ctl = (
       <span className="flex items-center gap-3 sm:justify-end">
         <input key={id + val} type={c.t === "numero" ? "number" : "text"} inputMode={c.t === "numero" ? "decimal" : undefined} min={c.t === "numero" ? 0 : undefined} step="any"
@@ -338,10 +339,77 @@ function CampoSimples({ c, val, id, set, ro, erro, seguinte }: { c: Def; val: st
         <Rot id={rot} {...(Rot === "label" ? { htmlFor: id } : {})} className="text-[15px] font-medium text-foreground">
           {c.l}{!obrigatorio(c) && <span className="font-normal text-muted-foreground"> (opcional)</span>}
         </Rot>
+        {sugerido && <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 align-middle text-xs text-muted-foreground" title="Preenchido pela Olyvia a partir de outras respostas. Confirme ou mude."><Sparkles className="h-3 w-3" aria-hidden="true" />Sugerido</span>}
         {c.ajuda && <p id={id + "-ajuda"} className="mt-0.5 text-sm text-muted-foreground">{c.ajuda}</p>}
         {erro && <p id={id + "-erro"} className="mt-1 flex items-center gap-1.5 text-sm font-medium text-destructive animate-in fade-in-0"><AlertCircle className="h-4 w-4" aria-hidden="true" />Falta preencher</p>}
       </div>
       {ctl}
+    </div>
+  );
+}
+
+type Ctl = { val: string; set: (x: string) => void; rot: string; desc?: string; erro?: boolean };
+
+function Botoes({ op, val, set, rot, desc, erro, largo }: Ctl & { op: string[]; largo?: boolean }) {
+  return (
+    <div role="group" aria-labelledby={rot} aria-describedby={desc} className={cn("flex flex-wrap gap-2", !largo && "sm:justify-end")}>
+      {op.map((x) => (
+        <button key={x} type="button" aria-pressed={val === x} aria-invalid={erro || undefined} onClick={() => set(val === x ? "" : x)}
+          className={cn("min-h-11 min-w-14 rounded-lg border px-4 text-[15px] transition-colors duration-150",
+            val === x ? "border-primary bg-primary text-primary-foreground" : cn("bg-card text-foreground hover:border-foreground/40", erro ? "border-destructive" : "border-input"))}>
+          {x}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Contar sem escrever: − e +. O primeiro + dá 1; o primeiro − dá o mínimo (ex.: andar 0 = R/C).
+function Contador({ c, val, set, rot, desc, erro }: Ctl & { c: Def }) {
+  const min = c.min ?? 0, max = c.max ?? 99;
+  const n = val === "" ? null : Number(val);
+  const txt = n === null ? "—" : n === 0 && c.zero ? c.zero : String(n);
+  const btn = "grid h-11 w-11 place-items-center rounded-lg text-xl text-foreground transition-colors hover:bg-muted disabled:opacity-30";
+  return (
+    <div className="flex items-center gap-3 sm:justify-end">
+      <div role="group" aria-labelledby={rot} aria-describedby={desc}
+        className={cn("inline-flex items-center rounded-lg border bg-card p-0.5", erro ? "border-destructive" : "border-input")}>
+        <button type="button" className={btn} aria-label="Menos" disabled={n !== null && n <= min} onClick={() => set(String(n === null ? min : Math.max(min, n - 1)))}><Minus className="h-4 w-4" /></button>
+        <output aria-live="polite" className="w-14 text-center text-[17px] font-medium tabular-nums">{txt}</output>
+        <button type="button" className={btn} aria-label="Mais" disabled={n !== null && n >= max} onClick={() => set(String(n === null ? Math.max(min, 1) : Math.min(max, n + 1)))}><Plus className="h-4 w-4" /></button>
+      </div>
+      {c.un && <span className="text-[15px] text-muted-foreground">{c.un}</span>}
+    </div>
+  );
+}
+
+// Datas: os dias mais usados num toque; outra data só quando é preciso.
+const iso = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+function DataRapida({ c, id, val, set, rot, desc, erro }: Ctl & { c: Def; id: string }) {
+  const hoje = new Date();
+  const dia = (n: number) => { const x = new Date(hoje); x.setDate(x.getDate() + n); return iso(x); };
+  const passado = ["data_pag", "vistoria"].includes(c.k);
+  const op: [string, string][] = passado
+    ? [["Hoje", dia(0)], ["Ontem", dia(-1)], ["Há 2 dias", dia(-2)]]
+    : [["Hoje", dia(0)], ["Amanhã", dia(1)], ["Daqui a 1 semana", dia(7)]];
+  const [outra, setOutra] = useState(!!val && !op.some(([, v]) => v === val));
+  return (
+    <div className="grid gap-2 sm:justify-items-end">
+      <div role="group" aria-labelledby={rot} aria-describedby={desc} className="flex flex-wrap gap-2 sm:justify-end">
+        {op.map(([l, v]) => (
+          <button key={l} type="button" aria-pressed={val === v && !outra} onClick={() => { setOutra(false); set(val === v ? "" : v); }}
+            className={cn("min-h-11 rounded-lg border px-4 text-[15px] transition-colors",
+              val === v && !outra ? "border-primary bg-primary text-primary-foreground" : cn("bg-card hover:border-foreground/40", erro ? "border-destructive" : "border-input"))}>
+            {l}
+          </button>
+        ))}
+        <button type="button" aria-pressed={outra} onClick={() => setOutra(!outra)}
+          className={cn("min-h-11 rounded-lg border px-4 text-[15px] transition-colors", outra ? "border-primary text-primary" : "border-input bg-card hover:border-foreground/40")}>
+          Outra data
+        </button>
+      </div>
+      {outra && <input id={id} type="date" value={val} onChange={(e) => set(e.target.value)} aria-labelledby={rot} className={cn(INPUT_G, "w-52 animate-in fade-in-0")} />}
+      {val && <span className="text-sm text-muted-foreground">{mostra(c, val)}</span>}
     </div>
   );
 }

@@ -143,6 +143,8 @@ export interface Negocio {
   f: Record<string, string>;
   /** Tentou passar de fase com campos em falta: o ecrã marca os campos destes grupos. */
   valida?: { fase: number; grupos: string[] } | null;
+  /** Campos preenchidos pela Olyvia (sugestões): o ecrã marca-os até alguém os confirmar ou mudar. */
+  sug?: Record<string, true>;
   /** off: serviços das medidas que o cliente não quer; extra: serviços juntados à mão, com quantidade. */
   visita: { slot: string; nec: string[]; med: Medidas; off: SvcId[]; extra: Partial<Record<SvcId, number>>; fotos: number; fechada: boolean };
   orc: Orcamento | null;
@@ -166,6 +168,8 @@ export interface Estado {
   cfg: { min: number; alvo: number; estrutura: boolean };
   /** "simples": a proposta de 09/10 com menos ruído; "atual": o aspeto de hoje da Olyvia, para comparar. */
   aspeto?: "simples" | "atual";
+  /** Leitura fácil (dislexia): letra maior, mais espaço, fundo creme. */
+  leitura?: boolean;
   svc: Record<SvcId, Servico>;
   stock: Record<StockKey, number>;
   seq: number;
@@ -188,7 +192,7 @@ function novoDeal(o: NovoNegocio): Negocio {
   };
 }
 
-export const VERSAO = 4;
+export const VERSAO = 5;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -226,6 +230,13 @@ export function seed(): Estado {
     visita: { slot: "", nec: ["Ilha"], med: { pav: 12, par: 18, pts: 2, pcs: 12 }, off: [], extra: {}, fotos: 12, fechada: true }, hist: [] });
   D({ id: 1022, nome: "Marta Lima", tel: "916 004 552", linha: "wc", servico: "WC", local: "Odivelas", origem: "site", quando: "10/09", fase: 5,
     visita: { slot: "", nec: ["Base de duche"], med: { pav: 4, par: 15, pts: 3, pcs: 4 }, off: [], extra: {}, fotos: 8, fechada: true }, hist: [] });
+  // O exemplo com tudo preenchido, da lead à obra concluída (para ver o layout inteiro)
+  D({ id: 1050, nome: "Joana Ribeiro", tel: "916 480 213", linha: "wc", servico: "Remodelação WC principal", local: "Rua Morais Soares 112, Lisboa",
+    origem: "recomendação", quando: "12/09 10:15", fase: 5,
+    visita: { slot: "", nec: ["Base de duche", "Sanita suspensa", "Móvel 80 cm"], med: { pav: 5, par: 20, pts: 4, pcs: 4 }, off: [],
+      extra: { c28: 1, c3: 1, c14: 1, c19: 1 }, fotos: 9, fechada: true },
+    f: EXEMPLO_COMPLETO,
+    hist: [] });
   for (const d of S.deals) d.f = { ...exemplo(d), ...d.f };
   Object.assign(by0(S, 1035).f, { andar: "2", tem_elevador: "Sim", n_elevadores: "1", estacionamento: "Pago", zona_estacionamento: "Vermelha" });
   for (const d of S.deals) if (d.fase >= 3) d.orc = criarOrc(d, S);
@@ -236,6 +247,33 @@ export function seed(): Estado {
   by(1030).hist.push({ t: "Proposta enviada · venda direta", q: "07/10", k: "a" });
   Object.assign(by(1027).orc!, { verif: true, enviada: "01/10", aceite: "03/10", contrato: "assinado" });
   by(1027).hist.push({ t: "Contrato assinado · cliente criado", q: "08/10", k: "a" });
+  {
+    const j = by(1050);
+    Object.assign(j.orc!, { verif: true, enviada: "19/09", aceite: "21/09", contrato: "assinado" });
+    j.fin = { fatura: { n: "FT 2026/380", q: "22/09" }, pago: true, recibo: { n: "RC 2026/270", q: "24/09" } };
+    j.f.valor_recebido = String(r2(tot(j, S).pf));
+    j.f.protecoes = protecoesSugeridas(j.f);
+    j.obra.plano = gerarPlano(j, S);
+    j.obra.plano.tasks.forEach((t) => { if (t.tec === "sf") t.tec = "hn"; });
+    j.obra.plano.estado = "concluída";
+    j.obra.enc = { estado: "recebida", n: "EF 2026/70", linhas: [] };
+    j.obra.mats = calcMats(j, S, true);
+    j.obra.real = realObra(j, S);
+    j.hist = [
+      { t: "Obra concluída · margem real " + pct(j.obra.real.m), q: "08/10", k: "a" },
+      { t: "Vistoria final e auto de receção assinado", q: "08/10", k: "a" },
+      { t: "Obra arrancou", q: "29/09", k: "a" },
+      { t: "Pagamento validado · RC 2026/270 emitido", q: "24/09", k: "a" },
+      { t: "FT 2026/380 emitida e enviada ao portal do cliente", q: "22/09", k: "a" },
+      { t: "Contrato assinado pelo cliente · cliente criado", q: "21/09", k: "a" },
+      { t: "Proposta enviada ao portal do cliente", q: "19/09", k: "a" },
+      { t: "Levantamento fechado · 9 fotos", q: "17/09", k: "a" },
+      { t: "Visita feita", q: "17/09 10:00", k: "a" },
+      { t: "Chamada registada · Atendeu · interessado", q: "12/09 15:20", k: "a" },
+      { t: "Pedido por recomendação", q: "12/09 10:15", k: "a" },
+    ];
+    S.clientes.unshift({ nome: j.nome, tel: j.tel, local: "Casa de banho · Lisboa", desde: "21/09", deal: j.id });
+  }
   const m = by(1022);
   Object.assign(m.orc!, { verif: true, enviada: "15/09", aceite: "17/09", contrato: "assinado" });
   m.fin = { fatura: { n: "FT 2026/391", q: "18/09" }, pago: true, recibo: { n: "RC 2026/288", q: "22/09" } };
@@ -251,6 +289,44 @@ export function seed(): Estado {
 }
 
 const by0 = (S: Estado, id: number) => S.deals.find((d) => d.id === id)!;
+
+// Todos os campos de todas as fases, preenchidos à mão, como um negócio real acabado.
+const EXEMPLO_COMPLETO: Record<string, string> = {
+  // Lead
+  email: "joana.ribeiro@exemplo.pt", pref: "WhatsApp", hora: "Manhã", idioma: "Português", origem: "Recomendação", recomendou: "Marta Lima (cliente)",
+  rgpd: "Sim", tipo_cliente: "Particular", nif: "123456789", concelho: "Lisboa",
+  pedido: "Remodelar a casa de banho principal: tirar a banheira e pôr base de duche, com móvel suspenso.",
+  // Contacto
+  resultado: "Atendeu · interessado", tentativas: "2", imovel: "Apartamento", posse: "Proprietário", decisor: "O próprio",
+  orc_cliente: "3.000 a 6.000 €", prazo: "1 a 3 meses", outros_orc: "Não",
+  morada: "Rua Morais Soares 112", cp: "1900-345", localidade: "Lisboa", fracao: "3.º Esq.",
+  duracao: "1 h 30", presentes: "O casal", nota_visita: "Estacionar na rua de trás. O prédio tem porteiro até às 18h.",
+  // Visita · exterior
+  acesso: "Fácil", estacionamento: "Pago", zona_estacionamento: "Amarela", tem_elevador: "Sim", n_elevadores: "1", n_andares: "6", andar: "3", n_fracoes_por_andar: "2",
+  // Visita · interior
+  tipologia: "T3", area_util_m2: "105", n_divisoes: "4", n_casas_banho: "2", ano_construcao: "1950 a 1970", pavimento: "Madeira", eletrica: "Antiga",
+  quadro_diferencial: "Não", canalizacao: "Ferro", gas: "Canalizado", amianto: "Não sei", habitada_durante_obra: "Sim", animais: "Sim",
+  notas_interior: "Há um gato: manter a porta da cozinha fechada durante a obra.",
+  // Visita · área
+  diag_tipo_area: "Casa de banho", diag_intervencao_tipo: "Remodelação total", diag_pe_direito_m: "2,7 m", diag_altura_revestimento: "Ao teto",
+  diag_pontos_eletricos: "5", diag_gas: "Não há", diag_toalheiro: "Sim", diag_janela: "Sim", diag_local_cortes: "Varanda",
+  diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio", diag_portas_proteger: "3",
+  diag_demolir_descricao: "Banheira, azulejo das paredes até ao teto e pavimento.",
+  // Visita · escolhas
+  gama: "Média", materiais_cliente: "Não", cor_estilo: "Branco mate e madeira clara", diag_cliente_recusou_fotos: "Não",
+  // Negócio
+  validade: "30 dias", prazo_exec: "8", inicio_prev: "2026-09-29", pagamento: "50% + 50% no fim", iva: "23%", garantia: "2 anos",
+  notas_cliente: "Inclui a remoção do entulho e a limpeza final.",
+  modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben", multa: "Não",
+  // Financeiro
+  nome_fiscal: "Joana Ribeiro", nif_fat: "123456789", morada_fiscal_igual: "Sim", email_fat: "joana.ribeiro@exemplo.pt",
+  serie: "FT 2026", tranche: "1.ª (adjudicação)", vencimento: "15 dias", metodo: "Transferência",
+  data_pag: "2026-09-24", conta: "Banco B · conta obras", comprovativo: "TRF 0924-551",
+  // Obra
+  responsavel: "Filipe", inicio: "2026-09-29", horario: "Dias úteis 8h–17h", chaves: "O cliente abre", contacto_local: "Joana Ribeiro · 916 480 213",
+  condominio: "Sim", contentor: "Não",
+  vistoria: "2026-10-08", auto_rececao: "Sim", satisfacao: "5", notas_fecho: "Silicone da base de duche retocado no dia da vistoria.",
+};
 
 // Valores de exemplo das fases por onde o negócio já passou.
 function exemplo(d: Negocio): Record<string, string> {
@@ -272,11 +348,11 @@ function exemplo(d: Negocio): Record<string, string> {
     diag_intervencao_tipo: "Remodelação total",
   });
   if (d.fase >= 3) Object.assign(f, {
-    n_divisoes: "6", ano_construcao: "1988", pavimento: "Flutuante", eletrica: "Antiga", quadro_diferencial: "Sim", canalizacao: "Ferro", gas: "Canalizado",
-    amianto: "Não", habitada_durante_obra: "Sim", animais: "Não", diag_pe_direito_m: "2.6", diag_altura_revestimento: "Ao teto", diag_pontos_eletricos: "4",
+    n_divisoes: "6", ano_construcao: "1970 a 1990", pavimento: "Flutuante", eletrica: "Antiga", quadro_diferencial: "Sim", canalizacao: "Ferro", gas: "Canalizado",
+    amianto: "Não", habitada_durante_obra: "Sim", animais: "Não", diag_pe_direito_m: "2,6 m", diag_altura_revestimento: "Ao teto", diag_pontos_eletricos: "4",
     diag_gas: "Não há", diag_toalheiro: "Sim", diag_janela: "Sim", diag_local_cortes: "Varanda", diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio",
     diag_portas_proteger: "3", gama: "Média", materiais_cliente: "Não",
-    validade: "30", prazo_exec: "8", pagamento: "50% + 50% no fim", iva: "23%", garantia: "2",
+    validade: "30 dias", prazo_exec: "8", pagamento: "50% + 50% no fim", iva: "23%", garantia: "2 anos",
     modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben",
   });
   if (d.fase >= 4) Object.assign(f, {
@@ -511,6 +587,31 @@ function fase(d: Negocio, n: number) { d.fase = n; d.valida = null; preencher(d,
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
+/** Preenche só o que está vazio e marca como sugestão da Olyvia. */
+function sugerir(d: Negocio, o: Record<string, string>) {
+  for (const k in o) if (!d.f[k] && o[k]) { d.f[k] = o[k]; (d.sug ??= {})[k] = true; }
+}
+
+// Uma resposta que dá outra: o que se sabe por dedução vem preenchido (como sugestão).
+const AREA_TIPO: Record<string, [string, string, string]> = {
+  T0: ["35", "1", "1"], T1: ["55", "2", "1"], T2: ["80", "3", "1"], T3: ["110", "4", "2"], T4: ["140", "5", "2"], "T5+": ["180", "6", "3"],
+};
+export function derivar(d: Negocio, k: string) {
+  const f = d.f, v = f[k] || "";
+  if (k === "tipologia" && AREA_TIPO[v]) { const [a, dv, wc] = AREA_TIPO[v]; sugerir(d, { area_util_m2: a, n_divisoes: dv, n_casas_banho: wc }); }
+  if (k === "tem_elevador" && v === "Sim") sugerir(d, { n_elevadores: "1" });
+  if (k === "gas" && v === "Sem gás") sugerir(d, { diag_gas: "Não há" });
+  if (k === "localidade" && v) sugerir(d, { concelho: v });
+  if (k === "fracao" && v) {
+    const m = /^\s*(\d+)/.exec(v);
+    const andar = /r\/?c|rés/i.test(v) ? "0" : m ? m[1] : "";
+    if (andar) sugerir(d, { andar });
+  }
+  if (k === "pagamento") sugerir(d, { tranche: v === "100% na adjudicação" ? "Única" : "1.ª (adjudicação)" });
+  if (k === "diag_tipo_area" && v === "Cozinha") sugerir(d, { diag_toalheiro: "Não" });
+  if (k === "habitada_durante_obra" && v) sugerir(d, { chaves: v === "Sim" ? "O cliente abre" : "Chave entregue" });
+}
+
 // Proteções sugeridas a partir da ficha do local e da área (como em sugestaoFichaLocal.ts).
 export function protecoesSugeridas(f: Record<string, string>): string {
   const p: string[] = [];
@@ -526,14 +627,20 @@ export function protecoesSugeridas(f: Record<string, string>): string {
 
 // O que já se sabe ao entrar numa fase vem preenchido; o que lá estiver não se toca.
 function preencher(d: Negocio, n: number) {
-  const f = d.f, def = (o: Record<string, string>) => { for (const k in o) if (!f[k] && o[k]) f[k] = o[k]; };
+  const f = d.f, def = (o: Record<string, string>) => sugerir(d, o);
   if (n === 1 && d.local.includes(",")) {
     const [rua, ...resto] = d.local.split(",");
     def({ morada: rua.trim(), localidade: resto.join(",").trim() });
   }
+  if (n === 2) {
+    def({ diag_tipo_area: d.linha === "coz" ? "Cozinha" : "Casa de banho", diag_intervencao_tipo: "Remodelação total" });
+    if (d.linha === "wc") def({ diag_altura_revestimento: "Ao teto" });
+    if (d.linha === "coz") def({ diag_toalheiro: "Não" });
+    derivar(d, "fracao"); derivar(d, "localidade");
+  }
   if (n === 3) {
     const h = d.orc ? d.orc.linhas.reduce((a, l) => a + (l.t === "svc" ? (SVC0[l.sid]?.h || 0) * l.q : 0), 0) : 0;
-    def({ validade: "30", prazo_exec: String(Math.max(3, Math.ceil(h / 7))), garantia: "2", iva: "23%", pagamento: "50% + 50% no fim",
+    def({ validade: "30 dias", prazo_exec: String(Math.max(3, Math.ceil(h / 7))), garantia: "2 anos", iva: "23%", pagamento: "50% + 50% no fim",
       modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben" });
   }
   if (n === 4) def({ nome_fiscal: d.nome, nif_fat: f.nif || "", morada_fiscal_igual: "Sim", email_fat: f.email || "", serie: "FT 2026",
@@ -575,6 +682,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     abrir(id: number) { S.view = "negocio"; S.deal = id; S.confirmPerda = null; },
     role(r: Papel) { S.role = r; },
     aspeto(v: "simples" | "atual") { S.aspeto = v; },
+    leitura(v: boolean) { S.leitura = v; },
     filtro(f: string) { S.filtro = f; },
     novo() { S.view = "negocios"; S.novo = { nome: "", tel: "", linha: "wc", err: "" }; },
     novoCancel() { S.novo = null; },
@@ -698,12 +806,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     perderNao() { S.confirmPerda = null; },
     nec(id: number, v: string) { const a = deal(id).visita.nec; const i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); },
-    campo(id: number, k: string, v: string) { deal(id).f[k] = v; },
+    campo(id: number, k: string, v: string) {
+      const d = deal(id); d.f[k] = v;
+      if (d.sug) delete d.sug[k]; // mexido por alguém: deixa de ser sugestão
+      derivar(d, k);
+    },
+    confirmar(id: number, ks: string[]) { const d = deal(id); if (d.sug) for (const k of ks) delete d.sug[k]; },
     localizacao(id: number, m: { morada: string; cp: string; localidade: string; concelho: string }, lat: number, lon: number, precisao: number) {
       const d = deal(id), f = d.f;
+      if (d.sug) for (const k of ["morada", "cp", "localidade"]) delete d.sug[k];
       if (m.morada) f.morada = m.morada;
       if (m.cp) f.cp = m.cp;
-      if (m.localidade) f.localidade = m.localidade;
+      if (m.localidade) { f.localidade = m.localidade; derivar(d, "localidade"); }
       if (m.concelho && !f.concelho) f.concelho = m.concelho;
       f.gps = `${lat.toFixed(6)},${lon.toFixed(6)}`; f.gps_precisao = String(Math.round(precisao));
       log(d, `Morada preenchida pela localização do dispositivo (± ${Math.round(precisao)} m)`);
