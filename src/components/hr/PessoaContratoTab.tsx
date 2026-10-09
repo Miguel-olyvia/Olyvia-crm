@@ -38,6 +38,17 @@
  * mesmo `onGuardarVinculo` que ja existia. Terminar sem `data_fim` bloqueia-se
  * no cliente -- a mesma perda que a migration de backfill recusa fazer.
  *
+ * ESTE FICHEIRO FOI PARTIDO (tinha mais de 1100 linhas, o limite e 800): os
+ * tres grupos de campos, os atalhos de documentos e os dois cartoes de
+ * historico vivem em `components/hr/contrato/`. Aqui ficam o rascunho, a
+ * validacao e o `gravar()`.
+ *
+ * O MODELO DO CONTRATO sao o "Tipo de contrato" (sem termo, termo certo, termo
+ * incerto, duracao muito curta, temporario) e o "Regime contratual"
+ * (individual ou coletivo, `regime_contratual`). "Tempo parcial" ja nao e um
+ * tipo: e o "Tipo de trabalho". A DURACAO EM MESES (termo certo) recalcula a
+ * data de fim ao mudar o inicio ou os meses -- `useFimDoContratoPorMeses`.
+ *
  * AS HORAS DE TRABALHO SO SE EDITAM AQUI AO CRIAR O CONTRATO (20261130120000,
  * corrigido 20261213)
  * -------------------------------------------------------------------
@@ -75,65 +86,32 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { FilePlus2, FileSignature, FileText, Loader2 } from "lucide-react";
+import { FileText, Loader2 } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { toast } from "@/lib/toast";
-import { usePessoaDocumentos } from "@/hooks/usePessoaDocumentos";
+import { type OpcaoVinculoDocumento } from "@/components/hr/AnexarContratoAssinadoDialog";
+import { CamposTocadosProvider } from "@/components/hr/form/Campos";
+import { ContratoAtalhosDocumentos } from "@/components/hr/contrato/ContratoAtalhosDocumentos";
+import { ContratoGrupoContrato } from "@/components/hr/contrato/ContratoGrupoContrato";
+import { ContratoGrupoDatas } from "@/components/hr/contrato/ContratoGrupoDatas";
+import { ContratoGrupoTempoTrabalho } from "@/components/hr/contrato/ContratoGrupoTempoTrabalho";
+import { ContratosAnterioresCard } from "@/components/hr/contrato/ContratosAnterioresCard";
+import { FimContratoCard } from "@/components/hr/fimContrato/FimContratoCard";
+import { HistoricoAlteracoesCard } from "@/components/hr/contrato/HistoricoAlteracoesCard";
 import {
-  AnexarContratoAssinadoDialog,
-  type OpcaoVinculoDocumento,
-} from "@/components/hr/AnexarContratoAssinadoDialog";
-import { InserirDocumentoDialog } from "@/components/hr/InserirDocumentoDialog";
-import {
-  CamposTocadosProvider,
-  CampoSelect,
-  CampoTexto,
-} from "@/components/hr/form/Campos";
-import {
-  problemasDosNumerosDoContrato,
-  regimeAoMudarTipoContrato,
-  regimeContradizTipoContrato,
-  type CampoNumericoContrato,
-} from "@/lib/hr/contrato";
-import { equivalenteParaMostrar, horasImplausiveis } from "@/lib/hr/horas";
-import { somarDias } from "@/lib/hr/ausencias";
-import { sugerirPeriodoExperimentalDias } from "@/lib/hr/periodoExperimental";
+  CAMPOS_NUMERICOS,
+  numeroOuNull,
+  rascunhoDe,
+  textoOuNull,
+  type DefinirCampo,
+  type RascunhoVinculo,
+} from "@/components/hr/contrato/rascunhoVinculo";
+import { useExperimentalDoContrato } from "@/components/hr/contrato/useExperimentalDoContrato";
+import { useFimDoContratoPorMeses } from "@/hooks/useFimDoContratoPorMeses";
+import { problemasDosNumerosDoContrato } from "@/lib/hr/contrato";
 import { PessoaVinculoHorasCard } from "@/components/hr/PessoaVinculoHorasCard";
 import { PessoaRetribuicaoCard } from "@/components/hr/PessoaRetribuicaoCard";
-import {
-  CATEGORIAS_FUNCAO,
-  DIAS_SEMANA,
-  ESTADOS_VINCULO,
-  HORAS_FREQUENCIAS,
-  PERIODICIDADES,
-  POLITICAS_FERIADOS,
-  REGIMES_TRABALHO,
-  TIPOS_CONTRATO,
-  TIPOS_TRABALHO,
-  type CategoriaFuncao,
-  type DiaSemana,
-  type EstadoVinculo,
-  type HorasFrequencia,
-  type Periodicidade,
-  type PeriodoExperimentalOrigem,
-  type PessoaRetribuicao,
-  type PessoaVinculo,
-  type PoliticaFeriados,
-  type RegimeTrabalho,
-  type TipoContrato,
-  type TipoTrabalho,
-} from "@/types/hr";
+import type { PessoaRetribuicao, PessoaVinculo, TipoTrabalho } from "@/types/hr";
 import type { HrCargo } from "@/hooks/useCargos";
 import type { HrCargoPeriodo } from "@/lib/hr/cargosPeriodos";
 
@@ -168,6 +146,8 @@ interface PessoaContratoTabProps {
   periodosError?: boolean;
   /** Depois de definir ou corrigir a retribuicao: o pai recarrega a ficha. */
   onRetribuicaoMudou?: () => void;
+  /** Depois de renovar, terminar ou mudar a excepcao de fim de contrato: o pai recarrega a ficha. */
+  onContratoMudou?: () => void;
   /**
    * `hr.pessoas.vinculos.horas.corrigir`: CORRIGIR uma versao ja decorrida de
    * `pessoas_vinculos_horas` e permissao a parte, mais perigosa que ALTERAR
@@ -191,110 +171,6 @@ interface PessoaContratoTabProps {
   ) => Promise<string | null>;
 }
 
-type Rascunho = {
-  tipo_contrato: TipoContrato;
-  regime: RegimeTrabalho;
-  estado: EstadoVinculo;
-  /**
-   * UI, nao dados: se o regime foi escolhido A MAO nesta sessao de edicao. E o
-   * que a base nao consegue saber (`regime` e NOT NULL DEFAULT 'tempo_inteiro')
-   * e o que decide se o regime pode seguir o tipo de contrato. Nao e gravado.
-   */
-  regime_manual: boolean;
-  data_inicio: string;
-  data_fim: string;
-  motivo_termo: string;
-  periodo_experimental_dias: string;
-  periodo_experimental_ate: string;
-  /** `null` = ainda ninguem escolheu; alimenta so a sugestao de periodo experimental. */
-  categoria_funcao: CategoriaFuncao | null;
-  /** `null` = contrato anterior a esta funcionalidade, ou nunca gravado. */
-  periodo_experimental_origem: PeriodoExperimentalOrigem | null;
-  tipo_trabalho: string;
-  /** A quantidade, na unidade de `horas_frequencia`. Nao necessariamente semanal. */
-  horas_periodo: string;
-  horas_frequencia: HorasFrequencia;
-  tempo_trabalho_pct: string;
-  politica_feriados: PoliticaFeriados;
-  horas_anuais_maximas: string;
-  horas_semanais_maximas: string;
-  dias_uteis: DiaSemana[];
-  // -- Admissao, 20261124080000 ---------------------------------------------
-  categoria_profissional: string;
-  /** "" = por decidir (`null` na base); nao e o mesmo que um booleano falso. */
-  renovavel: "" | "sim" | "nao";
-  isencao_horario: boolean;
-  formacao_inicio: string;
-  formacao_fim: string;
-};
-
-/** Um contrato "tem periodo experimental" se algum dos dois campos vier
- *  preenchido. Nao ha coluna que o diga -- e derivado, e e de proposito: uma
- *  coluna booleana podia contradizer os valores ao lado dela. */
-function temAlgumExperimental(rascunho: Rascunho): boolean {
-  return (
-    rascunho.periodo_experimental_dias.trim() !== "" ||
-    rascunho.periodo_experimental_ate.trim() !== ""
-  );
-}
-
-function rascunhoDe(vinculo: PessoaVinculo | null): Rascunho {
-  return {
-    tipo_contrato: vinculo?.tipo_contrato ?? "sem_termo",
-    regime: vinculo?.regime ?? "tempo_inteiro",
-    estado: vinculo?.estado ?? "activo",
-    regime_manual: false,
-    data_inicio: vinculo?.data_inicio ?? "",
-    data_fim: vinculo?.data_fim ?? "",
-    motivo_termo: vinculo?.motivo_termo ?? "",
-    periodo_experimental_dias:
-      vinculo?.periodo_experimental_dias == null ? "" : String(vinculo.periodo_experimental_dias),
-    periodo_experimental_ate: vinculo?.periodo_experimental_ate ?? "",
-    categoria_funcao: vinculo?.categoria_funcao ?? null,
-    periodo_experimental_origem: vinculo?.periodo_experimental_origem ?? null,
-    tipo_trabalho: vinculo?.tipo_trabalho ?? "",
-    horas_periodo: vinculo?.horas_periodo == null ? "" : String(vinculo.horas_periodo),
-    horas_frequencia: vinculo?.horas_frequencia ?? "semanal",
-    tempo_trabalho_pct:
-      vinculo?.tempo_trabalho_pct == null ? "" : String(vinculo.tempo_trabalho_pct),
-    politica_feriados: vinculo?.politica_feriados ?? "nao_laboral",
-    horas_anuais_maximas:
-      vinculo?.horas_anuais_maximas == null ? "" : String(vinculo.horas_anuais_maximas),
-    horas_semanais_maximas:
-      vinculo?.horas_semanais_maximas == null ? "" : String(vinculo.horas_semanais_maximas),
-    dias_uteis: vinculo?.dias_uteis ?? [],
-    categoria_profissional: vinculo?.categoria_profissional ?? "",
-    renovavel: vinculo?.renovavel === null || vinculo?.renovavel === undefined
-      ? ""
-      : vinculo.renovavel
-        ? "sim"
-        : "nao",
-    isencao_horario: vinculo?.isencao_horario ?? false,
-    formacao_inicio: vinculo?.formacao_inicio ?? "",
-    formacao_fim: vinculo?.formacao_fim ?? "",
-  };
-}
-
-/** Onde vive, NESTE ecra, cada numero validado por `lib/hr/contrato`. */
-const CAMPOS_NUMERICOS: Record<CampoNumericoContrato, string> = {
-  horas: "hr-contrato-horas-periodo",
-  maximoSemanal: "hr-contrato-horas-semanais-maximas",
-  maximoAnual: "hr-contrato-horas-anuais-maximas",
-  fte: "hr-contrato-tempo-trabalho-pct",
-  experimental: "hr-contrato-periodo-experimental-dias",
-};
-
-function numeroOuNull(valor: string): number | null {
-  const limpo = valor.trim().replace(",", ".");
-  if (limpo === "") return null;
-  const n = Number(limpo);
-  return Number.isFinite(n) ? n : null;
-}
-
-function textoOuNull(valor: string): string | null {
-  return valor.trim() === "" ? null : valor.trim();
-}
-
 export function PessoaContratoTab({
   pessoaId,
   organizationId,
@@ -308,6 +184,7 @@ export function PessoaContratoTab({
   periodosLoading,
   periodosError,
   onRetribuicaoMudou,
+  onContratoMudou,
   podeCorrigirHoras,
   podeAnexarContratoAssinado,
   vinculosOpcoesDocumento,
@@ -315,20 +192,8 @@ export function PessoaContratoTab({
   onGuardarVinculo,
 }: PessoaContratoTabProps) {
   const { t } = useTranslation();
-  // Instancia PROPRIA de usePessoaDocumentos, so para o atalho de "Anexar
-  // contrato ja assinado" -- o mesmo padrao que `PessoaVinculoHorasCard` ja
-  // usa para ler `documentos` a partir deste separador. `podeVerModelos:
-  // false` -- este caminho nunca passa por um modelo, por isso nunca precisa
-  // da lista de modelos.
-  const dadosDocumentos = usePessoaDocumentos(pessoaId, false);
-  const [aAnexarContrato, setAAnexarContrato] = useState(false);
-  // Aditamento: mesma permissao e mesma instancia de usePessoaDocumentos do
-  // atalho acima -- so ficheiro anexado, sem modelo, pela mesma razao ja
-  // documentada para "Anexar contrato ja assinado" (este caminho nunca passa
-  // por modelo, por isso `dadosDocumentos` nasceu com `podeVerModelos: false`).
-  const [aCriarAditamento, setACriarAditamento] = useState(false);
   // "Em vigor" e activo OU suspenso, e NAO so activo. Um contrato suspenso
-  // continua a ser a relacao laboral vigente -- esta parada, nao acabada.
+  // continua a ser a relacao laboral vigente -- esta parado, nao acabado.
   //
   // Procurar so por `activo` tinha uma consequencia que nao e cosmetica: no
   // instante em que alguem marcasse um contrato como suspenso, ele caia para
@@ -349,89 +214,26 @@ export function PessoaContratoTab({
   /**
    * Sem vinculo em vigor: o cartao esta em modo "Novo contrato", e e o UNICO
    * momento em que `horas_periodo`/`horas_frequencia` se escrevem aqui -- ver
-   * o comentario junto aos dois campos, mais abaixo, e `usePessoa.saveVinculo`.
+   * `ContratoGrupoTempoTrabalho` e `usePessoa.saveVinculo`.
    */
   const criandoContrato = activo === null;
 
-  const [rascunho, setRascunho] = useState<Rascunho>(() => rascunhoDe(activo));
+  const [rascunho, setRascunho] = useState<RascunhoVinculo>(() => rascunhoDe(activo));
   useEffect(() => {
     setRascunho(rascunhoDe(activo));
   }, [activo]);
 
-  /**
-   * Ha contratos sem periodo experimental nenhum, e a maioria dos que se criam
-   * a mao sao esses. Dois campos sempre a vista, sempre vazios, leem-se como
-   * coisa por preencher e nao como coisa que nao se aplica.
-   *
-   * O interruptor NAO e um dado novo na base: e a leitura de haver ou nao
-   * valores. Comeca ligado se o contrato ja tiver algum dos dois -- senao
-   * abrir um contrato existente escondia o que la esta.
-   */
-  const [temExperimental, setTemExperimental] = useState(
-    () => temAlgumExperimental(rascunhoDe(activo)),
-  );
-  useEffect(() => {
-    setTemExperimental(temAlgumExperimental(rascunhoDe(activo)));
-  }, [activo]);
+  const experimental = useExperimentalDoContrato(rascunho, setRascunho, activo);
 
-  /** Desligar limpa os dois campos: e a unica leitura honesta de "nao tem". */
-  const alternarExperimental = (ligado: boolean) => {
-    setTemExperimental(ligado);
-    if (!ligado) {
-      setRascunho((anterior) => ({
-        ...anterior,
-        periodo_experimental_dias: "",
-        periodo_experimental_ate: "",
-        periodo_experimental_origem: null,
-      }));
-    }
-  };
-
-  /**
-   * Preenche os dois campos com o numero legal, calculado por
-   * `lib/hr/periodoExperimental.ts` -- NUNCA escreve sozinho: so corre quando
-   * quem edita clica em "Sugerir". Marca a origem como "sugerido"; se depois
-   * disso alguem tocar em qualquer um dos dois campos a mao, `definirCampoExperimental`
-   * volta a marcar "manual".
-   */
-  const sugestaoExperimental = useMemo(
-    () =>
-      rascunho.categoria_funcao
-        ? sugerirPeriodoExperimentalDias({
-            tipoContrato: rascunho.tipo_contrato,
-            categoriaFuncao: rascunho.categoria_funcao,
-            dataInicio: rascunho.data_inicio || null,
-            dataFim: rascunho.data_fim || null,
-          })
-        : null,
-    [rascunho.categoria_funcao, rascunho.tipo_contrato, rascunho.data_inicio, rascunho.data_fim],
-  );
-
-  const aceitarSugestaoExperimental = () => {
-    if (!sugestaoExperimental) return;
-    setTemExperimental(true);
-    setRascunho((anterior) => ({
-      ...anterior,
-      periodo_experimental_dias: String(sugestaoExperimental.dias),
-      periodo_experimental_ate: anterior.data_inicio
-        ? somarDias(anterior.data_inicio, sugestaoExperimental.dias)
-        : anterior.periodo_experimental_ate,
-      periodo_experimental_origem: "sugerido",
-    }));
-  };
-
-  /** Os dois campos do periodo experimental passam por aqui: qualquer edicao
-   *  a mao desfaz a marca de "sugerido" -- ela so vale enquanto o valor for
-   *  exactamente o que a sugestao calculou. */
-  const definirCampoExperimental = (
-    campo: "periodo_experimental_dias" | "periodo_experimental_ate",
-    valor: string,
-  ) =>
-    setRascunho((anterior) => ({
-      ...anterior,
-      [campo]: valor,
-      periodo_experimental_origem: "manual",
-    }));
+  // Termo certo: a data de fim acompanha o inicio e os meses (a vespera do dia
+  // correspondente). Escrever a data a mao acerta os meses -- ver o grupo das datas.
+  useFimDoContratoPorMeses({
+    tipoContrato: rascunho.tipo_contrato,
+    inicioEfectivo: rascunho.data_inicio,
+    duracaoMeses: rascunho.duracao_meses,
+    dataFim: rascunho.data_fim,
+    onDataFim: (data_fim) => setRascunho((anterior) => ({ ...anterior, data_fim })),
+  });
 
   /** Campos de que se saiu: o erro de formato so aparece depois disso. */
   const [tocados, setTocados] = useState<ReadonlySet<string>>(() => new Set());
@@ -443,23 +245,11 @@ export function PessoaContratoTab({
   }, []);
   /** Ao submeter mostram-se todos, mesmo os campos em que ninguem entrou. */
   const [mostrarTodos, setMostrarTodos] = useState(false);
+  /** Muda a cada gravacao feita: o historico de alteracoes recarrega. */
+  const [versaoHistorico, setVersaoHistorico] = useState(0);
 
-  const definir = <K extends keyof Rascunho>(campo: K, valor: Rascunho[K]) =>
+  const definir: DefinirCampo = (campo, valor) =>
     setRascunho((anterior) => ({ ...anterior, [campo]: valor }));
-
-  /**
-   * "Tempo parcial" e tipo de contrato E regime: escolher o tipo leva o regime
-   * atras, a menos que ele ja tenha sido escolhido a mao -- ai fica como esta e
-   * o aviso encarrega-se do resto. Ver `lib/hr/contrato`.
-   */
-  const escolherTipoContrato = (tipo: TipoContrato) =>
-    setRascunho((anterior) => ({
-      ...anterior,
-      tipo_contrato: tipo,
-      regime: regimeAoMudarTipoContrato(tipo, anterior.regime, anterior.regime_manual),
-    }));
-
-  const regimeContradiz = regimeContradizTipoContrato(rascunho.tipo_contrato, rascunho.regime);
 
   const problemasNumericos = useMemo(
     () =>
@@ -482,14 +272,6 @@ export function PessoaContratoTab({
     if (!mostrarTodos && !tocados.has(campoId)) return null;
     return t(problema.mensagemKey);
   };
-
-  const horasNumero = Number(rascunho.horas_periodo.replace(",", "."));
-  const horasLegiveis = rascunho.horas_periodo.trim() !== "" && Number.isFinite(horasNumero);
-  const equivalente = horasLegiveis
-    ? equivalenteParaMostrar(horasNumero, rascunho.horas_frequencia)
-    : null;
-  const horasSuspeitas =
-    horasLegiveis && horasImplausiveis(horasNumero, rascunho.horas_frequencia);
 
   const gravar = async () => {
     if (rascunho.data_inicio.trim() === "") {
@@ -522,6 +304,7 @@ export function PessoaContratoTab({
     const erro = await onGuardarVinculo(activo?.id ?? null, {
       tipo_contrato: rascunho.tipo_contrato,
       regime: rascunho.regime,
+      regime_contratual: rascunho.regime_contratual,
       estado: rascunho.estado,
       data_inicio: rascunho.data_inicio,
       data_fim: textoOuNull(rascunho.data_fim),
@@ -529,7 +312,9 @@ export function PessoaContratoTab({
       periodo_experimental_dias: numeroOuNull(rascunho.periodo_experimental_dias),
       periodo_experimental_ate: textoOuNull(rascunho.periodo_experimental_ate),
       categoria_funcao: rascunho.categoria_funcao,
-      periodo_experimental_origem: temExperimental ? rascunho.periodo_experimental_origem : null,
+      periodo_experimental_origem: experimental.temExperimental
+        ? rascunho.periodo_experimental_origem
+        : null,
       tipo_trabalho:
         rascunho.tipo_trabalho === "" ? null : (rascunho.tipo_trabalho as TipoTrabalho),
       // horas_periodo/horas_frequencia SO vao aqui ao CRIAR o primeiro
@@ -563,6 +348,7 @@ export function PessoaContratoTab({
       toast.error(erro);
       return;
     }
+    setVersaoHistorico((v) => v + 1);
     toast.success(t("hr.sucesso.guardado"));
   };
 
@@ -584,440 +370,41 @@ export function PessoaContratoTab({
                 {t("hr.estadoVinculo.activo")}
               </Badge>
             )}
-            {/* Mesmo atalho, mesmo texto, mesmo icone que "Anexar contrato ja
-                assinado" em Documentos -- ver o cabecalho deste ficheiro. */}
-            {podeAnexarContratoAssinado && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setAAnexarContrato(true)}
-              >
-                <FileSignature className="mr-2 h-4 w-4" />
-                {t("hr.documentos.anexarContratoAssinado")}
-              </Button>
-            )}
-            {podeAnexarContratoAssinado && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setACriarAditamento(true)}
-              >
-                <FilePlus2 className="mr-2 h-4 w-4" />
-                {t("hr.contrato.criarAditamento")}
-              </Button>
-            )}
+            <ContratoAtalhosDocumentos
+              pessoaId={pessoaId}
+              organizationId={organizationId}
+              podeAnexarContratoAssinado={podeAnexarContratoAssinado}
+              vinculosOpcoesDocumento={vinculosOpcoesDocumento}
+            />
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
           <CamposTocadosProvider onTocar={tocar}>
-          {/* Grupo 1 -- O contrato: o que se assina e sob que categoria.
-              Continua o MESMO cartao e o MESMO botao de gravar que os outros
-              dois grupos -- so o titulo separa, para nao parecer que se
-              grava cada bloco em separado. */}
-          <div className="space-y-3">
-            <h3 id="hr-contrato-grupo-contrato" className="text-sm font-medium">
-              {t("hr.form.seccoes.vinculo")}
-            </h3>
-            <div
-              className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
-              aria-labelledby="hr-contrato-grupo-contrato"
-            >
-              <CampoSelect
-                id="hr-contrato-tipo"
-                label={t("hr.contrato.tipoContrato")}
-                valor={rascunho.tipo_contrato}
-                disabled={!podeEditar}
-                opcoes={TIPOS_CONTRATO.map((tipo) => ({
-                  value: tipo,
-                  label: t(`hr.tipoContrato.${tipo}`),
-                }))}
-                onChange={(v) => escolherTipoContrato(v as TipoContrato)}
-              />
-              {/* Categoria do IRCT, texto livre -- NAO e `categoria_funcao`. Ver
-                  o comentario do tipo em `types/hr.ts`. */}
-              <CampoTexto
-                id="hr-contrato-categoria-profissional"
-                label={t("hr.contrato.categoriaProfissional")}
-                ajuda={t("hr.contrato.ajudaCategoriaProfissional")}
-                valor={rascunho.categoria_profissional}
-                disabled={!podeEditar}
-                onChange={(v) => definir("categoria_profissional", v)}
-              />
-              {/* So alimenta a sugestao de periodo experimental -- ver o cabecalho
-                  deste ficheiro e `lib/hr/periodoExperimental.ts`. Nao vem de
-                  `pessoas.cargo`, que e texto livre. */}
-              <CampoSelect
-                id="hr-contrato-categoria-funcao"
-                label={t("hr.contrato.categoriaFuncao")}
-                ajuda={t("hr.contrato.ajudaCategoriaFuncao")}
-                valor={rascunho.categoria_funcao ?? ""}
-                vazioLabel={t("hr.campos.semValor")}
-                disabled={!podeEditar}
-                opcoes={CATEGORIAS_FUNCAO.map((categoria) => ({
-                  value: categoria,
-                  label: t(`hr.categoriaFuncao.${categoria}`),
-                }))}
-                onChange={(v) =>
-                  definir("categoria_funcao", (v || null) as CategoriaFuncao | null)
-                }
-              />
-              <CampoSelect
-                id="hr-contrato-estado"
-                label={t("hr.contrato.estado")}
-                valor={rascunho.estado}
-                disabled={!podeEditar}
-                opcoes={ESTADOS_VINCULO.map((estado) => ({
-                  value: estado,
-                  label: t(`hr.estadoVinculo.${estado}`),
-                }))}
-                onChange={(v) => definir("estado", v as EstadoVinculo)}
-              />
-              <CampoSelect
-                id="hr-contrato-renovavel"
-                label={t("hr.contrato.renovavel")}
-                valor={rascunho.renovavel}
-                vazioLabel={t("hr.campos.porDecidir")}
-                disabled={!podeEditar}
-                opcoes={[
-                  { value: "sim", label: t("common.yes") },
-                  { value: "nao", label: t("common.no") },
-                ]}
-                onChange={(v) => definir("renovavel", v as "" | "sim" | "nao")}
-              />
-            </div>
-          </div>
-
-          {/* Grupo 2 -- Datas e prazos: quando comeca, quando acaba, e o que
-              lhe da forma entretanto (periodo experimental, formacao). */}
-          <div className="space-y-3">
-            <h3 id="hr-contrato-grupo-datas" className="text-sm font-medium">
-              {t("hr.contrato.datasPrazos")}
-            </h3>
-            <div
-              className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
-              aria-labelledby="hr-contrato-grupo-datas"
-            >
-              <CampoTexto
-                id="hr-contrato-data-inicio"
-                label={t("hr.contrato.dataInicio")}
-                tipo="date"
-                valor={rascunho.data_inicio}
-                disabled={!podeEditar}
-                onChange={(v) => definir("data_inicio", v)}
-              />
-              <CampoTexto
-                id="hr-contrato-data-fim"
-                label={t("hr.contrato.dataFim")}
-                tipo="date"
-                valor={rascunho.data_fim}
-                disabled={!podeEditar}
-                onChange={(v) => definir("data_fim", v)}
-              />
-              <CampoTexto
-                id="hr-contrato-motivo-termo"
-                label={t("hr.contrato.motivoTermo")}
-                valor={rascunho.motivo_termo}
-                disabled={!podeEditar}
-                onChange={(v) => definir("motivo_termo", v)}
-              />
-              {/* O interruptor ocupa uma celula da grelha; os dois campos so
-                  aparecem depois dele, e so quando ha mesmo periodo. */}
-              <div className="flex items-center gap-2 self-end pb-2">
-                {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um
-                    <button>, e o nome acessivel de um botao NAO vem de uma
-                    <label for>. Sem isto o interruptor chega a quem usa leitor
-                    de ecra sem nome nenhum. */}
-                <Switch
-                  id="hr-contrato-tem-experimental"
-                  aria-labelledby="hr-contrato-tem-experimental-rotulo"
-                  checked={temExperimental}
-                  disabled={!podeEditar}
-                  onCheckedChange={alternarExperimental}
-                />
-                <Label
-                  id="hr-contrato-tem-experimental-rotulo"
-                  htmlFor="hr-contrato-tem-experimental"
-                  className="font-normal"
-                >
-                  {t("hr.contrato.temExperimental")}
-                </Label>
-              </div>
-              {temExperimental && (
-                <>
-                  <div className="space-y-1.5">
-                    <CampoTexto
-                      id="hr-contrato-periodo-experimental-dias"
-                      label={t("hr.contrato.periodoExperimentalDias")}
-                      erro={erroDe("hr-contrato-periodo-experimental-dias")}
-                      tipo="number"
-                      min={0}
-                      max={1095}
-                      valor={rascunho.periodo_experimental_dias}
-                      disabled={!podeEditar}
-                      onChange={(v) => definirCampoExperimental("periodo_experimental_dias", v)}
-                    />
-                    {/* A sugestao NUNCA se escreve sozinha -- so aparece o botao,
-                        e so quando ha um numero legal para o tipo de contrato e a
-                        categoria escolhidos. Ver `lib/hr/periodoExperimental.ts`. */}
-                    {podeEditar && sugestaoExperimental && (
-                      <Button
-                        type="button"
-                        variant="link"
-                        size="sm"
-                        className="h-auto p-0 text-xs"
-                        onClick={aceitarSugestaoExperimental}
-                      >
-                        {t("hr.contrato.sugerirPeriodoExperimental", {
-                          dias: String(sugestaoExperimental.dias),
-                        })}
-                      </Button>
-                    )}
-                    {rascunho.periodo_experimental_origem === "sugerido" && (
-                      <p className="text-xs text-muted-foreground" role="status">
-                        {t("hr.contrato.periodoExperimentalSugerido")}
-                      </p>
-                    )}
-                  </div>
-                  <CampoTexto
-                    id="hr-contrato-periodo-experimental-ate"
-                    label={t("hr.contrato.periodoExperimentalAte")}
-                    ajuda={t("hr.contrato.ajudaExperimentalDuasColunas")}
-                    tipo="date"
-                    valor={rascunho.periodo_experimental_ate}
-                    disabled={!podeEditar}
-                    onChange={(v) => definirCampoExperimental("periodo_experimental_ate", v)}
-                  />
-                </>
-              )}
-              <CampoTexto
-                id="hr-contrato-formacao-inicio"
-                label={t("hr.contrato.formacaoInicio")}
-                tipo="date"
-                valor={rascunho.formacao_inicio}
-                disabled={!podeEditar}
-                onChange={(v) => definir("formacao_inicio", v)}
-              />
-              <CampoTexto
-                id="hr-contrato-formacao-fim"
-                label={t("hr.contrato.formacaoFim")}
-                erro={
-                  rascunho.formacao_fim.trim() !== "" &&
-                  rascunho.formacao_inicio.trim() !== "" &&
-                  rascunho.formacao_fim < rascunho.formacao_inicio
-                    ? t("hr.contrato.erroFormacaoFimAntesInicio")
-                    : null
-                }
-                tipo="date"
-                valor={rascunho.formacao_fim}
-                disabled={!podeEditar}
-                onChange={(v) => definir("formacao_fim", v)}
-              />
-            </div>
-          </div>
-
-          {/* Grupo 3 -- Tempo de trabalho: regime, modalidade e tudo o que
-              mede a jornada. A chave desta legenda ja existia -- e a mesma
-              usada no assistente de admissao, em `SeccaoContrato.tsx`. */}
-          <div className="space-y-3">
-            <h3 id="hr-contrato-grupo-tempo" className="text-sm font-medium">
-              {t("hr.contrato.tempoTrabalho")}
-            </h3>
-            <div
-              className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3"
-              aria-labelledby="hr-contrato-grupo-tempo"
-            >
-              {/* `regime` na base; "Tipo de trabalho" no ecra. Ver cabecalho. */}
-              <div className="space-y-1.5">
-                <CampoSelect
-                  id="hr-contrato-regime"
-                  label={t("hr.contrato.regime")}
-                  ajuda={t("hr.contrato.ajudaRegime")}
-                  valor={rascunho.regime}
-                  disabled={!podeEditar}
-                  opcoes={REGIMES_TRABALHO.map((regime) => ({
-                    value: regime,
-                    label: t(`hr.regime.${regime}`),
-                  }))}
-                  onChange={(v) =>
-                    setRascunho((anterior) => ({
-                      ...anterior,
-                      regime: v as RegimeTrabalho,
-                      regime_manual: true,
-                    }))
-                  }
-                />
-                {regimeContradiz && (
-                  <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
-                    {t("hr.form.avisoRegimeContradizTipoContrato")}
-                  </p>
-                )}
-              </div>
-              {/* `tipo_trabalho` na base; "Modalidade" no ecra. Ver cabecalho. */}
-              <CampoSelect
-                id="hr-contrato-tipo-trabalho"
-                label={t("hr.contrato.tipoTrabalho")}
-                ajuda={t("hr.contrato.ajudaTipoTrabalho")}
-                valor={rascunho.tipo_trabalho}
-                vazioLabel={t("hr.campos.semValor")}
-                disabled={!podeEditar}
-                opcoes={TIPOS_TRABALHO.map((tipo) => ({
-                  value: tipo,
-                  label: t(`hr.tipoTrabalho.${tipo}`),
-                }))}
-                onChange={(v) => definir("tipo_trabalho", v)}
-              />
-              {/* So-leitura desde 20261130120000, MAS SO AO EDITAR um vinculo
-                  ja existente: as duas colunas sao derivadas de
-                  `pessoas_vinculos_horas`, e alteram-se depois no cartao
-                  "Horas contratadas", mais abaixo -- esse cartao serve para
-                  ALTERAR ou CORRIGIR uma versao que ja existe, e precisa de
-                  data de efeito e (para corrigir) de aditamento assinado.
-                  AO CRIAR o primeiro contrato (`criandoContrato`) nao ha
-                  nada para esse cartao alterar ainda -- um vinculo novo
-                  nascia sem horas nenhumas se este campo ficasse bloqueado
-                  aqui tambem. Por isso o campo volta a ser editavel so
-                  nesse caso; `onGuardarVinculo` grava a primeira versao em
-                  `pessoas_vinculos_horas` a partir do que aqui for escrito
-                  (ver `usePessoa.saveVinculo`). */}
-              <CampoTexto
-                id="hr-contrato-horas-periodo"
-                label={t("hr.contrato.horasTrabalho")}
-                ajuda={
-                  criandoContrato
-                    ? t("hr.contrato.ajudaHorasNovoContrato")
-                    : equivalente
-                      ? // As duas frases juntas, de proposito: mostrar so o
-                        // equivalente ("Equivale a 40h/semana") sem dizer ONDE
-                        // se muda deixava a pessoa sem saber que ha um sitio
-                        // para isso -- e como um contrato ja existente quase
-                        // sempre tem um equivalente calculavel, a frase de
-                        // "altera-se abaixo" nunca aparecia sozinha na pratica.
-                        `${t("hr.contrato.ajudaEquivalenteSemanal", { horas: equivalente })} ${t("hr.contrato.ajudaHorasDerivadas")}`
-                      : t("hr.contrato.ajudaHorasDerivadas")
-                }
-                tipo="number"
-                valor={rascunho.horas_periodo}
-                disabled={!criandoContrato || !podeEditar}
-                onChange={(v) => definir("horas_periodo", v)}
-                erro={erroDe(CAMPOS_NUMERICOS.horas)}
-              />
-              <CampoSelect
-                id="hr-contrato-horas-frequencia"
-                label={t("hr.contrato.horasFrequencia")}
-                valor={rascunho.horas_frequencia}
-                ajuda={criandoContrato ? undefined : t("hr.contrato.ajudaHorasDerivadas")}
-                disabled={!criandoContrato || !podeEditar}
-                opcoes={HORAS_FREQUENCIAS.map((f) => ({
-                  value: f,
-                  label: t(`hr.horasFrequencia.${f}`),
-                }))}
-                onChange={(v) => definir("horas_frequencia", v as HorasFrequencia)}
-              />
-              {horasSuspeitas && (
-                <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
-                  {t("hr.form.avisoHorasImplausiveis", { horas: equivalente ?? "" })}
-                </p>
-              )}
-              <CampoTexto
-                id="hr-contrato-tempo-trabalho-pct"
-                label={t("hr.contrato.tempoTrabalhoPct")}
-                ajuda={t("hr.contrato.ajudaFteFixo")}
-                tipo="number"
-                valor="100"
-                disabled
-                onChange={() => {}}
-              />
-              <CampoSelect
-                id="hr-contrato-politica-feriados"
-                label={t("hr.contrato.politicaFeriados")}
-                valor={rascunho.politica_feriados}
-                disabled={!podeEditar}
-                opcoes={POLITICAS_FERIADOS.map((p) => ({
-                  value: p,
-                  label: t(`hr.politicaFeriados.${p}`),
-                }))}
-                onChange={(v) => definir("politica_feriados", v as PoliticaFeriados)}
-              />
-              <CampoTexto
-                id="hr-contrato-horas-anuais-maximas"
-                label={t("hr.contrato.horasAnuaisMaximas")}
-                erro={erroDe("hr-contrato-horas-anuais-maximas")}
-                tipo="number"
-                min={0}
-                max={4000}
-                valor={rascunho.horas_anuais_maximas}
-                disabled={!podeEditar}
-                onChange={(v) => definir("horas_anuais_maximas", v)}
-              />
-              <CampoTexto
-                id="hr-contrato-horas-semanais-maximas"
-                label={t("hr.contrato.horasSemanaisMaximas")}
-                erro={erroDe("hr-contrato-horas-semanais-maximas")}
-                tipo="number"
-                min={0}
-                max={80}
-                step="0.5"
-                valor={rascunho.horas_semanais_maximas}
-                disabled={!podeEditar}
-                onChange={(v) => definir("horas_semanais_maximas", v)}
-              />
-              <div className="flex items-center gap-2 self-end pb-2">
-                {/* `aria-labelledby` e nao so `htmlFor`: o Switch do Radix e um
-                    <button>, e o nome acessivel de um botao NAO vem de uma
-                    <label for>. */}
-                <Switch
-                  id="hr-contrato-isencao-horario"
-                  aria-labelledby="hr-contrato-isencao-horario-rotulo"
-                  checked={rascunho.isencao_horario}
-                  disabled={!podeEditar}
-                  onCheckedChange={(v) => definir("isencao_horario", v)}
-                />
-                <Label
-                  id="hr-contrato-isencao-horario-rotulo"
-                  htmlFor="hr-contrato-isencao-horario"
-                  className="font-normal"
-                >
-                  {t("hr.contrato.isencaoHorario")}
-                </Label>
-              </div>
-            </div>
-
-            <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">{t("hr.contrato.diasUteis")}</legend>
-              <div className="flex flex-wrap gap-3">
-                {DIAS_SEMANA.map((dia) => {
-                  const id = `hr-contrato-dia-util-${dia}`;
-                  return (
-                    <div key={dia} className="flex items-center gap-1.5">
-                      <Checkbox
-                        id={id}
-                        checked={rascunho.dias_uteis.includes(dia)}
-                        disabled={!podeEditar}
-                        onCheckedChange={(marcado) =>
-                          definir(
-                            "dias_uteis",
-                            marcado === true
-                              ? [...rascunho.dias_uteis, dia]
-                              : rascunho.dias_uteis.filter((outro) => outro !== dia),
-                          )
-                        }
-                      />
-                      <Label htmlFor={id} className="text-sm font-normal">
-                        {t(`hr.dias.${dia}`)}
-                      </Label>
-                    </div>
-                  );
-                })}
-              </div>
-            </fieldset>
-          </div>
-
-          {podeEditar && (
-            <Button size="sm" onClick={gravar} disabled={saving}>
-              {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              {activo ? t("employees.form.update") : t("employees.form.create")}
-            </Button>
-          )}
+            <ContratoGrupoContrato rascunho={rascunho} definir={definir} podeEditar={podeEditar} />
+            <ContratoGrupoDatas
+              rascunho={rascunho}
+              definir={definir}
+              podeEditar={podeEditar}
+              temExperimental={experimental.temExperimental}
+              onAlternarExperimental={experimental.alternar}
+              sugestaoExperimental={experimental.sugestao}
+              onAceitarSugestao={experimental.aceitarSugestao}
+              onDefinirCampoExperimental={experimental.definirCampo}
+              erroDe={erroDe}
+            />
+            <ContratoGrupoTempoTrabalho
+              rascunho={rascunho}
+              definir={definir}
+              podeEditar={podeEditar}
+              criandoContrato={criandoContrato}
+              erroDe={erroDe}
+            />
+            {podeEditar && (
+              <Button size="sm" onClick={gravar} disabled={saving}>
+                {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                {activo ? t("employees.form.update") : t("employees.form.create")}
+              </Button>
+            )}
           </CamposTocadosProvider>
         </CardContent>
       </Card>
@@ -1045,68 +432,16 @@ export function PessoaContratoTab({
         podeCorrigir={podeCorrigirHoras}
       />
 
-      {historico.length > 0 && (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">{t("hr.contrato.historico")}</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("hr.contrato.tipoContrato")}</TableHead>
-                    <TableHead>{t("hr.contrato.dataInicio")}</TableHead>
-                    <TableHead>{t("hr.contrato.dataFim")}</TableHead>
-                    <TableHead>{t("hr.contrato.estado")}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {historico.map((vinculo) => (
-                    <TableRow key={vinculo.id}>
-                      <TableCell>{t(`hr.tipoContrato.${vinculo.tipo_contrato}`)}</TableCell>
-                      <TableCell className="tabular-nums">{vinculo.data_inicio}</TableCell>
-                      <TableCell className="tabular-nums">{vinculo.data_fim ?? "—"}</TableCell>
-                      <TableCell>{t(`hr.estadoVinculo.${vinculo.estado}`)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <FimContratoCard
+        organizationId={organizationId}
+        vinculo={activo}
+        podeEditar={podeEditar}
+        onMudou={onContratoMudou}
+      />
 
-      {podeAnexarContratoAssinado && (
-        <AnexarContratoAssinadoDialog
-          open={aAnexarContrato}
-          onOpenChange={setAAnexarContrato}
-          pessoaId={pessoaId}
-          organizationId={organizationId}
-          vinculosOpcoes={vinculosOpcoesDocumento}
-          criarPorUpload={dadosDocumentos.criarPorUpload}
-          anexarFicheiro={dadosDocumentos.anexarFicheiro}
-          saving={dadosDocumentos.saving}
-        />
-      )}
+      <ContratosAnterioresCard historico={historico} />
 
-      {podeAnexarContratoAssinado && (
-        <InserirDocumentoDialog
-          open={aCriarAditamento}
-          onOpenChange={setACriarAditamento}
-          pessoaId={pessoaId}
-          organizationId={organizationId}
-          vinculosOpcoes={vinculosOpcoesDocumento}
-          modelos={dadosDocumentos.modelos}
-          podeEmitir={false}
-          podeCriarPorUpload={podeAnexarContratoAssinado}
-          tipoInicial="adenda"
-          emitir={dadosDocumentos.emitir}
-          criarPorUpload={dadosDocumentos.criarPorUpload}
-          anexarFicheiro={dadosDocumentos.anexarFicheiro}
-          saving={dadosDocumentos.saving}
-        />
-      )}
+      <HistoricoAlteracoesCard key={versaoHistorico} pessoaId={pessoaId} />
     </div>
   );
 }

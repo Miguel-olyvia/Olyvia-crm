@@ -65,6 +65,7 @@ import type {
   Genero,
   HorasFrequencia,
   PoliticaFeriados,
+  RegimeContratual,
   RegimeTrabalho,
   SubsidioAlimentacaoModo,
   TipoContrato,
@@ -146,22 +147,18 @@ export interface RascunhoLaborais {
 
 export interface RascunhoContrato {
   tipo_contrato: TipoContrato | "";
+  /** "Tipo de trabalho" no ecra: tempo integral ou parcial. */
   regime: RegimeTrabalho;
-  /**
-   * UI, nao dados: `regime` nasce a `tempo_inteiro` e por isso nao se distingue
-   * de uma escolha. Este sinalizador guarda o que a base nao consegue guardar
-   * -- se o regime foi escolhido A MAO -- para o ecra saber quando pode deixa-lo
-   * seguir o tipo de contrato e quando tem de se limitar a avisar. Nunca vai
-   * para a base: o payload de escrita enumera os campos um a um.
-   */
-  regime_manual: boolean;
+  /** "Regime contratual": individual (omissao) ou colectivo. Sem campos extra. */
+  regime_contratual: RegimeContratual;
   data_inicio: string;
   data_fim: string;
   /**
-   * UI, nao dados: so alimenta o calculo automatico de `data_fim` quando o
-   * tipo de contrato tem termo (certo ou incerto), o mesmo padrao de
-   * `dataDoPeriodoExperimental` -- a base nunca deriva uma data da outra por
-   * trigger, so o ecra, e so uma vez. Nunca vai para a base.
+   * UI, nao dados: so existe no termo certo e alimenta o calculo de
+   * `data_fim` (a vespera do dia correspondente, ver `dataFimPorDuracaoMeses`).
+   * Recalcula-se ao mudar o inicio ou os meses; escrever a data a mao
+   * recalcula os meses (vazio se nenhuma duracao a produz). A base nunca
+   * deriva uma data da outra por trigger, so o ecra. Nunca vai para a base.
    */
   duracao_meses: string;
   tem_periodo_experimental: boolean;
@@ -251,7 +248,7 @@ export function rascunhoInicial(): RascunhoPessoa {
     contrato: {
       tipo_contrato: "",
       regime: "tempo_inteiro",
-      regime_manual: false,
+      regime_contratual: "individual",
       data_inicio: "",
       data_fim: "",
       duracao_meses: "",
@@ -718,6 +715,7 @@ export function payloadDoRascunho(
       ? {
           tipo_contrato: contrato.tipo_contrato === "" ? "sem_termo" : contrato.tipo_contrato,
           regime: contrato.regime,
+          regime_contratual: contrato.regime_contratual,
           // horas_periodo/horas_frequencia NAO vao aqui desde 20261130180000:
           // sao DERIVADOS de pessoas_vinculos_horas por trigger, e o INSERT
           // directo e recusado (HR010). Ver `horasVinculo`, abaixo.
@@ -766,4 +764,4 @@ export { minutosDe };
 
 /** Reexportados: moram em `novaPessoaAdmissao.ts` e `novaPessoaDatas.ts` (este ficheiro passava das 800 linhas). */
 export { camposPorPreencherNaFicha, codigosObrigatoriosDoFormulario } from "@/lib/hr/novaPessoaAdmissao";
-export { dataDeHoje, dataDoPeriodoExperimental, dataFimPorDuracaoMeses } from "@/lib/hr/novaPessoaDatas";
+export { dataDeHoje, dataDoPeriodoExperimental, dataFimPorDuracaoMeses, mesesExactos } from "@/lib/hr/novaPessoaDatas";

@@ -25,7 +25,7 @@
  */
 import { equivalenteSemanal, TECTO_SEMANAL_EQUIVALENTE } from "@/lib/hr/horas";
 import { numeroDe } from "@/lib/hr/numeros";
-import type { HorasFrequencia, RegimeTrabalho, TipoContrato } from "@/types/hr";
+import { TIPOS_CONTRATO, type HorasFrequencia, type TipoContrato } from "@/types/hr";
 
 export type CampoNumericoContrato =
   | "horas"
@@ -111,49 +111,24 @@ export function problemasDosNumerosDoContrato(
   return problemas;
 }
 
-// -- Tipo de contrato "tempo parcial" vs. regime -----------------------------
+// -- O modelo do contrato: tipo, regime contratual e duracao -----------------
 
 /**
- * "Tempo parcial" e ao mesmo tempo um TIPO DE CONTRATO (decisao do utilizador,
- * 20261120200000) e um dos dois valores de `regime`, o "Tipo de trabalho". Os
- * dois campos podem por isso contradizer-se: tipo `tempo_parcial` com regime
- * `tempo_inteiro`.
- *
- * A base NAO impede a contradicao, e a migration explica porque: `regime` e
- * NOT NULL DEFAULT 'tempo_inteiro' e a base nao distingue um regime ESCOLHIDO
- * de um que veio por omissao -- um CHECK cruzado recusaria justamente o caso
- * mais comum, escolher "Tempo parcial" e nao mexer no regime. Resolve-se no
- * caminho de ESCRITA, e o ecra sabe o que a base nao sabe: se alguem mexeu no
- * regime a mao.
- *
- * A regra, em tres partes:
- *   1. o regime SEGUE para `tempo_parcial` quando o tipo passa a tempo parcial
- *      -- mas so enquanto ninguem lhe tiver tocado;
- *   2. um regime escolhido A MAO nao se sobrepoe, nunca: em vez de silenciar a
- *      escolha mostra-se o aviso de `regimeContradizTipoContrato`;
- *   3. so segue para a frente. Sair de `tempo_parcial` para outro tipo NAO
- *      repoe `tempo_inteiro`: nao ha contradicao nenhuma num contrato sem termo
- *      a tempo parcial, e desfazer o valor seria mexer sozinho num campo que ja
- *      nao esta em causa.
+ * Os tipos de contrato a mostrar no selector: a lista oferecida
+ * (`TIPOS_CONTRATO`) e, se o contrato que se esta a ver tiver um tipo que ja
+ * nao se oferece (`estagio`, `prestacao_servicos` em contratos antigos), esse tambem -- senao o selector mostrava outro valor ou nenhum, e
+ * o proximo Gravar mudava o tipo sem ninguem o ter escolhido.
  */
-export function regimeAoMudarTipoContrato(
-  tipoContrato: TipoContrato | "",
-  regimeActual: RegimeTrabalho,
-  regimeEscolhidoAMao: boolean,
-): RegimeTrabalho {
-  if (tipoContrato !== "tempo_parcial") return regimeActual;
-  if (regimeEscolhidoAMao) return regimeActual;
-  return "tempo_parcial";
+export function tiposContratoParaMostrar(actual: TipoContrato | ""): readonly TipoContrato[] {
+  if (actual === "" || TIPOS_CONTRATO.includes(actual)) return TIPOS_CONTRATO;
+  return [...TIPOS_CONTRATO, actual];
 }
 
 /**
- * O que se mostra junto ao regime: o tipo de contrato diz tempo parcial e o
- * regime diz outra coisa. Acontece quando a escolha do regime foi deliberada, e
- * tambem em fichas gravadas antes desta regra existir.
+ * A duracao em meses so se pergunta no termo certo. O termo incerto nao tem
+ * duracao em meses (acaba quando acaba a causa), o sem termo nao acaba, e a
+ * duracao muito curta conta-se em dias.
  */
-export function regimeContradizTipoContrato(
-  tipoContrato: TipoContrato | "",
-  regime: RegimeTrabalho,
-): boolean {
-  return tipoContrato === "tempo_parcial" && regime !== "tempo_parcial";
+export function tipoTemDuracaoEmMeses(tipoContrato: TipoContrato | ""): boolean {
+  return tipoContrato === "termo_certo";
 }

@@ -23,12 +23,12 @@
  * ---------------------------------------------
  * A tabela legal cobre sem_termo, termo_certo/temporario, termo_incerto e
  * estagio -- `prestacao_servicos` nao tem periodo experimental de todo.
- * `tempo_parcial` (o sexto tipo, que e regime e nao natureza do contrato) e
- * `duracao_muito_curta` nao correspondem a nenhuma categoria do diploma:
+ * `duracao_muito_curta` nao corresponde a nenhuma categoria do diploma:
  * inventar um numero para eles seria apresentar como lei o que e suposicao.
  * Devolve-se `null`, e o ecra fica com os dois campos so preenchiveis a mao --
  * o que ja acontecia antes desta funcao existir.
  */
+import { dataFimPorDuracaoMeses } from "@/lib/hr/novaPessoaDatas";
 import type { CategoriaFuncao, TipoContrato } from "@/types/hr";
 
 export interface SugestaoPeriodoExperimental {
@@ -49,20 +49,17 @@ const LIMIAR_MESES_TERMO = 6;
 const DIAS_TERMO_INCERTO = 30;
 const DIAS_ESTAGIO = 30;
 
-const MS_POR_DIA = 24 * 60 * 60 * 1000;
-
-function dataDeIso(iso: string): Date {
-  return new Date(`${iso}T12:00:00Z`);
-}
-
 /**
- * `true` quando o intervalo [inicio, fim] cobre pelo menos `meses` meses
- * completos. Usa a diferenca de dias a dividir por 30 como aproximacao de
- * "mes" -- suficiente para uma sugestao, nunca para um calculo de direito.
+ * `true` quando o contrato dura pelo menos `meses` meses completos, com a MESMA
+ * regra com que o ecra calcula a data de fim por meses (`dataFimPorDuracaoMeses`,
+ * a vespera do dia correspondente): um contrato de 6 meses a partir de 01/03
+ * acaba a 31/08, e essa data ja conta como "6 meses". Datas invalidas contam
+ * como "menos de" -- e so uma sugestao.
  */
 function duracaoAoMenos(dataInicio: string, dataFim: string, meses: number): boolean {
-  const dias = (dataDeIso(dataFim).getTime() - dataDeIso(dataInicio).getTime()) / MS_POR_DIA;
-  return dias >= meses * 30;
+  const fimMinimo = dataFimPorDuracaoMeses(dataInicio, meses);
+  // Datas ISO (AAAA-MM-DD) comparam-se bem como texto.
+  return fimMinimo !== null && dataFim >= fimMinimo;
 }
 
 export interface ParametrosSugestaoPeriodoExperimental {
@@ -76,7 +73,7 @@ export interface ParametrosSugestaoPeriodoExperimental {
 /**
  * A sugestao legal, ou `null` quando o tipo de contrato nao tem periodo
  * experimental (`prestacao_servicos`) ou nao corresponde a nenhuma categoria
- * do diploma (`tempo_parcial`, `duracao_muito_curta`) ou quando falta a data
+ * do diploma (`duracao_muito_curta`) ou quando falta a data
  * de fim de um contrato a termo (nao ha como saber se chega aos 6 meses).
  *
  * NUNCA lanca e NUNCA escreve nada -- e uma leitura pura. Quem chama decide o
@@ -107,6 +104,6 @@ export function sugerirPeriodoExperimentalDias(
     return { dias: DIAS_ESTAGIO, motivoKey: "hr.periodoExperimental.motivoEstagio" };
   }
 
-  // prestacao_servicos, tempo_parcial, duracao_muito_curta: sem sugestao.
+  // prestacao_servicos, duracao_muito_curta: sem sugestao.
   return null;
 }

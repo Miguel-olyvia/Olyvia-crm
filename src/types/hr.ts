@@ -76,9 +76,9 @@ export type TamanhoCalcas = TamanhoFardamento | "34" | "36" | "38" | "40" | "42"
  * oferecem, que deixou de os propor. Encolher o dominio tornaria ilegais linhas
  * que ja estivessem gravadas.
  *
- * `tempo_parcial` e o SEXTO tipo, pedido e confirmado pelo utilizador. Repete a
- * palavra de `RegimeTrabalho` mas e outra coluna: aqui e a natureza do
- * contrato, la e quanto se trabalha.
+ * `tempo_parcial` JA NAO e um tipo (20261210300000): e `RegimeTrabalho`, o
+ * "Tipo de trabalho". As linhas que o tinham passaram a `sem_termo` com
+ * regime `tempo_parcial`.
  */
 export type TipoContrato =
   | "sem_termo"
@@ -87,9 +87,15 @@ export type TipoContrato =
   | "duracao_muito_curta"
   | "estagio"
   | "prestacao_servicos"
-  | "temporario"
-  | "tempo_parcial";
+  | "temporario";
 export type RegimeTrabalho = "tempo_inteiro" | "tempo_parcial";
+/**
+ * Dominio de `pessoas_vinculos.regime_contratual`: o contrato rege-se pelo
+ * acordo entre as partes (individual) ou por uma convencao colectiva
+ * (coletivo). NAO e `RegimeTrabalho` (tempo integral/parcial, que o ecra chama
+ * "Tipo de trabalho"). Sem campos extra obrigatorios.
+ */
+export type RegimeContratual = "individual" | "coletivo";
 export type EstadoVinculo = "activo" | "suspenso" | "terminado" | "futuro";
 
 /**
@@ -235,21 +241,22 @@ export const ESTADOS_VINCULO: readonly EstadoVinculo[] = [
   "terminado",
 ];
 /**
- * Os SEIS tipos que os ecras OFERECEM, nesta ordem -- a que o utilizador
- * escreveu e confirmou.
+ * Os CINCO tipos que os ecras OFERECEM, nesta ordem.
  *
- * Nao e o dominio da base: `estagio` e `prestacao_servicos` continuam legais
- * e leem-se sem problema; simplesmente nao se propoem. Devolve-los e
- * acrescentar uma linha aqui, nao uma migration.
+ * Nao e o dominio da base: `estagio` e `prestacao_servicos` continuam legais e
+ * leem-se sem problema (contratos antigos); simplesmente nao se propoem.
+ * "Tempo parcial" saiu porque e a resposta a outra pergunta -- `RegimeTrabalho`,
+ * o "Tipo de trabalho" -- e nao um tipo de contrato.
  */
 export const TIPOS_CONTRATO: readonly TipoContrato[] = [
-  "termo_certo",
   "sem_termo",
+  "termo_certo",
   "termo_incerto",
   "duracao_muito_curta",
   "temporario",
-  "tempo_parcial",
 ];
+/** Individual primeiro: e o valor por omissao da coluna. */
+export const REGIMES_CONTRATUAIS: readonly RegimeContratual[] = ["individual", "coletivo"];
 export const REGIMES_TRABALHO: readonly RegimeTrabalho[] = ["tempo_inteiro", "tempo_parcial"];
 export const CATEGORIAS_FUNCAO: readonly CategoriaFuncao[] = [
   "geral",
@@ -464,6 +471,11 @@ export interface PessoaVinculo {
   organization_id: string;
   tipo_contrato: TipoContrato;
   regime: RegimeTrabalho;
+  /**
+   * `individual` ou `coletivo`; NOT NULL DEFAULT 'individual' na base. E o
+   * "Regime contratual" do ecra -- nao o `regime` acima ("Tipo de trabalho").
+   */
+  regime_contratual: RegimeContratual;
   /**
    * A QUANTIDADE de horas, na unidade de `horas_frequencia` -- e nao
    * necessariamente por semana. Chamava-se `horas_semanais` ate

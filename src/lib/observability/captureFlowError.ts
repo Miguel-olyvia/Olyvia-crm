@@ -134,6 +134,17 @@ export type BusinessFlow =
   // a escrita falhada perde uma alteracao ou uma correccao de historico.
   | "hr-vinculo-horas-load"
   | "hr-vinculo-horas-write"
+  // Historico de alteracoes ao contrato (`pessoas_vinculos_alteracoes`): a
+  // leitura falhada deixa o cartao vazio como se nada tivesse mudado.
+  | "hr-vinculo-alteracoes-load"
+  // Motor de fim de contrato (20261210320000..370000): regras da organizacao,
+  // excepcao por contrato, renovar/terminar, indicacoes do responsavel e lista
+  // "Contratos a terminar". A leitura falhada esconde um fim de contrato que
+  // vem ai; a escrita falhada perde uma decisao do RH ou uma indicacao da chefia.
+  | "hr-regras-fim-contrato-load"
+  | "hr-regras-fim-contrato-write"
+  | "hr-contrato-fim-load"
+  | "hr-contrato-fim-write"
   // Retribuicao versionada (`pessoas_retribuicoes`, 20261120060000, ALTERAR/
   // CORRIGIR desde 20261201040000). Mesma razao das horas contratadas.
   | "hr-retribuicao-load"

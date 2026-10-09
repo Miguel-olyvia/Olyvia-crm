@@ -122,6 +122,7 @@ const AssiduidadeOrganizacao = lazy(() => import("./pages/AssiduidadeOrganizacao
 const AssiduidadeEAusencias = lazy(() => import("./pages/AssiduidadeEAusencias"));
 const RhCentros = lazy(() => import("./pages/RhCentros"));
 const ConfiguracaoAdmissao = lazy(() => import("./pages/ConfiguracaoAdmissao"));
+const ConfiguracaoRegrasFimContrato = lazy(() => import("./pages/ConfiguracaoRegrasFimContrato"));
 const ConfiguracaoModelosDocumentos = lazy(() => import("./pages/ConfiguracaoModelosDocumentos"));
 const Vencimento = lazy(() => import("./pages/Vencimento"));
 const OrgTemplates = lazy(() => import("./pages/OrgTemplates"));
@@ -321,6 +322,9 @@ const App = () => (
                           hr.admissao.obrigatorios.gerir -- nao atribuida a
                           nenhum papel por omissao. */}
                       <Route path="/rh/admissao/configuracao" element={<ProtectedRoute permission="hr.admissao.obrigatorios.gerir"><ConfiguracaoAdmissao /></ProtectedRoute>} />
+                      {/* Regras de fim de contrato da organizacao (20261210320000): so quem tem
+                          hr.contratos.regras.gerir. Cada contrato pode ter depois a sua excepcao. */}
+                      <Route path="/rh/contratos/configuracao" element={<ProtectedRoute permission="hr.contratos.regras.gerir"><ConfiguracaoRegrasFimContrato /></ProtectedRoute>} />
                       <Route path="/rh/cargos" element={<Navigate to="/rh/pessoas?tab=funcoes" replace />} />
                       <Route path="/rh/documentos/modelos" element={<ProtectedRoute permission="hr.pessoas.documentos.modelos.view"><ConfiguracaoModelosDocumentos /></ProtectedRoute>} />
                       <Route path="/rh/documentos/clausulas" element={<Navigate to="/rh/documentos/modelos" replace />} />

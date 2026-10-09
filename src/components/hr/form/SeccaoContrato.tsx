@@ -16,10 +16,16 @@
  * migration 20261120140000 tem um COMMENT a avisar que as duas colunas sao
  * ortogonais (ha tempo parcial em remoto), porque foram confundidas uma vez.
  *
- * "Tempo parcial" e tambem um dos seis TIPOS DE CONTRATO, e por isso os dois
- * campos podem contradizer-se. Ao escolher esse tipo, o regime segue -- excepto
- * se a pessoa ja o tiver escolhido a mao, caso em que a escolha dela fica e
- * aparece um aviso. A regra vive em `lib/hr/contrato`, com a justificacao.
+ * O MODELO DO CONTRATO sao duas perguntas (`CamposModeloContrato`): o "Tipo de
+ * contrato" (sem termo, termo certo, termo incerto, duracao muito curta,
+ * temporario) e o "Regime contratual" (individual ou coletivo). "Tempo
+ * parcial" ja nao e um tipo de contrato: e o "Tipo de trabalho" acima.
+ *
+ * A DURACAO EM MESES so existe no termo certo. Mudar o inicio (ou a admissao,
+ * que serve de inicio enquanto este esta vazio) ou os meses recalcula a data
+ * de fim -- a vespera do dia correspondente, 31/01 + 1 mes = 28/02 --, e
+ * escrever a data a mao acerta os meses (ou esvazia-os se nenhuma duracao a
+ * produz). Ver `useFimDoContratoPorMeses`.
  *
  * O VALOR BASE NAO SE ESCREVE AQUI (fluxo 2): vem do cargo escolhido no passo 3.
  * Mostra-se em leitura ("Salario base do cargo: X"). O subsidio e os duodecimos
@@ -39,17 +45,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CampoInterruptor, CampoSelect, CampoTexto } from "@/components/hr/form/Campos";
+import { CamposModeloContrato } from "@/components/hr/contrato/CamposModeloContrato";
 import { HorarioEditor } from "@/components/hr/HorarioEditor";
+import { mesesDaDataFim, useFimDoContratoPorMeses } from "@/hooks/useFimDoContratoPorMeses";
 import { type HorarioRascunho } from "@/lib/hr/horario";
 import {
   dataDoPeriodoExperimental,
-  dataFimPorDuracaoMeses,
   type RascunhoContrato,
 } from "@/lib/hr/novaPessoa";
-import {
-  regimeAoMudarTipoContrato,
-  regimeContradizTipoContrato,
-} from "@/lib/hr/contrato";
+import { MESES_MAXIMOS_CONTRATO } from "@/lib/hr/novaPessoaDatas";
+import { tipoTemDuracaoEmMeses } from "@/lib/hr/contrato";
 import {
   equivalenteParaMostrar,
   horasContratadasSemanaisReais,
@@ -61,7 +66,6 @@ import {
   HORAS_FREQUENCIAS,
   POLITICAS_FERIADOS,
   REGIMES_TRABALHO,
-  TIPOS_CONTRATO,
   TIPOS_TRABALHO,
   type DiaSemana,
   type HorasFrequencia,
@@ -69,7 +73,6 @@ import {
   type SubsidioAlimentacaoModo,
   type PoliticaFeriados,
   type RegimeTrabalho,
-  type TipoContrato,
   type TipoTrabalho,
 } from "@/types/hr";
 
@@ -129,26 +132,17 @@ export function SeccaoContrato({
     valor.dias_uteis,
   );
 
-  /**
-   * So aparece quando a pessoa escolheu o regime A MAO e ele contradiz o tipo:
-   * quando ninguem lhe tocou, o regime ja seguiu o tipo e nao ha nada a avisar.
-   */
-  const regimeContradiz = regimeContradizTipoContrato(valor.tipo_contrato, valor.regime);
+  // A duracao em meses so existe no termo certo; nos outros tipos a data de fim
+  // escreve-se a mao (ou nao existe, no sem termo).
+  const temMeses = tipoTemDuracaoEmMeses(valor.tipo_contrato);
 
-  // A duracao so faz sentido num contrato com termo -- sem termo nao tem data
-  // de fim nenhuma a calcular. Mesmo padrao do periodo experimental: so
-  // deriva enquanto a duracao estiver preenchida, nunca por trigger na base.
-  const temTermo = valor.tipo_contrato === "termo_certo" || valor.tipo_contrato === "termo_incerto";
-
-  const definirDuracaoMeses = (v: string) => {
-    const patch: Partial<RascunhoContrato> = { duracao_meses: v };
-    const meses = Number(v.replace(",", "."));
-    if (v.trim() !== "" && Number.isFinite(meses)) {
-      const dataFimCalculada = dataFimPorDuracaoMeses(inicioEfectivo, meses);
-      if (dataFimCalculada) patch.data_fim = dataFimCalculada;
-    }
-    onPatch(patch);
-  };
+  useFimDoContratoPorMeses({
+    tipoContrato: valor.tipo_contrato,
+    inicioEfectivo,
+    duracaoMeses: valor.duracao_meses,
+    dataFim: valor.data_fim,
+    onDataFim: (data_fim) => onPatch({ data_fim }),
+  });
 
   const alternarDiaUtil = (dia: DiaSemana, marcado: boolean) =>
     onPatch({
@@ -160,44 +154,35 @@ export function SeccaoContrato({
   return (
     <div className="space-y-5">
       <div className="grid gap-4 sm:grid-cols-2">
-        <CampoSelect
-          id="hr-novo-tipo-contrato"
-          label={t("hr.contrato.tipoContrato")}
-          recomendado
-          ajuda={valor.tipo_contrato === "" ? t("hr.form.avisoCampoRhPendente") : undefined}
-          valor={valor.tipo_contrato}
-          vazioLabel={t("hr.campos.semValor")}
-          opcoes={TIPOS_CONTRATO.map((tipo) => ({
-            value: tipo,
-            label: t(`hr.tipoContrato.${tipo}`),
-          }))}
-          onChange={(v) => {
-            const tipo = v as TipoContrato | "";
+        <CamposModeloContrato
+          idTipo="hr-novo-tipo-contrato"
+          idRegimeContratual="hr-novo-regime-contratual"
+          tipoContrato={valor.tipo_contrato}
+          regimeContratual={valor.regime_contratual}
+          tipoRecomendado
+          tipoPodeFicarVazio
+          ajudaTipo={valor.tipo_contrato === "" ? t("hr.form.avisoCampoRhPendente") : undefined}
+          onTipoContrato={(tipo) =>
             onPatch({
               tipo_contrato: tipo,
-              regime: regimeAoMudarTipoContrato(tipo, valor.regime, valor.regime_manual),
-            });
-          }}
+              // Os meses so valem no termo certo: ao sair dele esvaziam-se.
+              ...(tipoTemDuracaoEmMeses(tipo) ? {} : { duracao_meses: "" }),
+            })
+          }
+          onRegimeContratual={(regime_contratual) => onPatch({ regime_contratual })}
         />
         {/* `regime` na base; "Tipo de trabalho" no ecra. Ver cabecalho. */}
-        <div className="space-y-1.5">
-          <CampoSelect
-            id="hr-novo-regime"
-            label={t("hr.contrato.regime")}
-            ajuda={t("hr.contrato.ajudaRegime")}
-            valor={valor.regime}
-            opcoes={REGIMES_TRABALHO.map((regime) => ({
-              value: regime,
-              label: t(`hr.regime.${regime}`),
-            }))}
-            onChange={(v) => onPatch({ regime: v as RegimeTrabalho, regime_manual: true })}
-          />
-          {regimeContradiz && (
-            <p className="text-xs text-amber-600 dark:text-amber-500" role="status">
-              {t("hr.form.avisoRegimeContradizTipoContrato")}
-            </p>
-          )}
-        </div>
+        <CampoSelect
+          id="hr-novo-regime"
+          label={t("hr.contrato.regime")}
+          ajuda={t("hr.contrato.ajudaRegime")}
+          valor={valor.regime}
+          opcoes={REGIMES_TRABALHO.map((regime) => ({
+            value: regime,
+            label: t(`hr.regime.${regime}`),
+          }))}
+          onChange={(v) => onPatch({ regime: v as RegimeTrabalho })}
+        />
         <CampoTexto
           id="hr-novo-data-inicio"
           label={t("hr.contrato.dataInicio")}
@@ -212,23 +197,29 @@ export function SeccaoContrato({
           tipo="date"
           valor={valor.data_fim}
           erro={erroDe("hr-novo-data-fim")}
-          ajuda={temTermo ? t("hr.contrato.ajudaDataFimPorDuracao") : undefined}
-          onChange={(v) => onPatch({ data_fim: v })}
+          ajuda={temMeses ? t("hr.contrato.ajudaDataFimPorDuracao") : undefined}
+          onChange={(v) =>
+            onPatch({
+              data_fim: v,
+              // Escrever a data a mao acerta os meses (vazio se nenhuma duracao a produz).
+              ...(temMeses ? { duracao_meses: mesesDaDataFim(inicioEfectivo, v) } : {}),
+            })
+          }
         />
-        {/* So para contratos com termo -- sem termo nao ha data de fim a
-            calcular. Preencher a duracao substitui a data de fim; quem
-            preferir escrever a data directamente continua a poder, o campo
-            acima nunca fica bloqueado. */}
-        {temTermo && (
+        {/* So no termo certo. Mudar os meses (ou o inicio) recalcula a data de
+            fim; quem preferir escrever a data directamente continua a poder,
+            o campo acima nunca fica bloqueado. */}
+        {temMeses && (
           <CampoTexto
             id="hr-novo-duracao-meses"
             label={t("hr.contrato.duracaoMeses")}
             ajuda={t("hr.contrato.ajudaDuracaoMeses")}
             tipo="number"
-            min={0}
-            max={120}
+            min={1}
+            max={MESES_MAXIMOS_CONTRATO}
+            step="1"
             valor={valor.duracao_meses}
-            onChange={definirDuracaoMeses}
+            onChange={(v) => onPatch({ duracao_meses: v })}
           />
         )}
       </div>

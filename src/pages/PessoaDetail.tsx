@@ -659,6 +659,7 @@ export default function PessoaDetail() {
               periodosLoading={cargosPorChegar}
               periodosError={periodosError}
               onRetribuicaoMudou={() => void fichaRecarregar()}
+              onContratoMudou={() => void fichaRecarregar()}
               podeCorrigirHoras={podeCorrigirHorasVinculo}
               podeAnexarContratoAssinado={permissoesDocumentos.emitir}
               vinculosOpcoesDocumento={vinculosOpcoesDocumento}

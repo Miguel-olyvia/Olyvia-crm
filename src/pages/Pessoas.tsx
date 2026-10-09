@@ -1,7 +1,8 @@
 /**
  * A lista de pessoas -- o ecra "Organizacao" do modulo de RH.
  *
- * Tres sub-separadores: Pessoas, Organograma e Funcoes.
+ * Quatro sub-separadores: Pessoas, Organograma, Funcoes e (com `hr.pessoas.vinculos.view`)
+ * Contratos a terminar -- a lista do RH dos contratos com prazo cujo fim vem ai.
  *
  * "Atividade" e "Equipas" NAO existem: nao foram pedidos e foram retirados.
  * Organograma e Funcoes deixaram de ser estados vazios -- o primeiro desenha a
@@ -42,8 +43,9 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { IdCard, Network, Plus, Search, Settings, UserMinus, UserPlus, Users } from "lucide-react";
+import { CalendarClock, IdCard, Network, Plus, Search, Settings, UserMinus, UserPlus, Users } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
+import { ContratosATerminarTab } from "@/components/hr/fimContrato/ContratosATerminarTab";
 import { PessoaFormDialog } from "@/components/hr/PessoaFormDialog";
 import { PessoasFuncoesTab } from "@/components/hr/PessoasFuncoesTab";
 import { PessoasOrganogramaTab } from "@/components/hr/PessoasOrganogramaTab";
@@ -58,6 +60,8 @@ const SUBTABS = [
   { value: "pessoas", labelKey: "hr.subtabs.pessoas", icon: Users },
   { value: "organograma", labelKey: "hr.subtabs.organograma", icon: Network },
   { value: "funcoes", labelKey: "hr.subtabs.funcoes", icon: IdCard },
+  // So com hr.pessoas.vinculos.view: a lista de contratos a terminar le contratos.
+  { value: "contratos", labelKey: "hr.subtabs.contratos", icon: CalendarClock },
 ] as const;
 
 function EstadoAcessoBadge({ pessoa }: { pessoa: PessoaListItem }) {
@@ -86,6 +90,8 @@ export default function Pessoas() {
   // para a rota em vez de abrir em dialog -- mantem o link partilhavel e
   // nao duplica o ecra existente.
   const podeGerirAdmissaoObrigatorios = hasPermission("hr.admissao.obrigatorios.gerir");
+  // Regras de fim de contrato da organizacao: ecra proprio, atras desta permissao.
+  const podeGerirRegrasFimContrato = hasPermission("hr.contratos.regras.gerir");
 
   const { pessoas, stats, loading, error, criarPessoa } = usePessoas();
   // Lista so para leitura (nomeDoLocal, abaixo): uma pessoa cujo local actual
@@ -153,6 +159,16 @@ export default function Pessoas() {
               {t("sidebar.hrAdmissaoConfig")}
             </Button>
           )}
+          {podeGerirRegrasFimContrato && (
+            <Button
+              variant="outline"
+              onClick={() => navigate("/rh/contratos/configuracao")}
+              className="gap-2"
+            >
+              <Settings className="h-4 w-4" />
+              {t("hr.fimContrato.config.botao")}
+            </Button>
+          )}
           {canCreate && (
             <Button onClick={() => setDialogoAberto(true)} className="gap-2">
               <Plus className="h-4 w-4" />
@@ -164,7 +180,7 @@ export default function Pessoas() {
 
       <Tabs value={activeTab} onValueChange={mudarTab} className="space-y-4">
         <TabsList>
-          {SUBTABS.map(({ value, labelKey, icon: Icon }) => (
+          {SUBTABS.filter(({ value }) => value !== "contratos" || podeVerVinculos).map(({ value, labelKey, icon: Icon }) => (
             <TabsTrigger key={value} value={value} className="gap-2">
               <Icon className="h-4 w-4" />
               {t(labelKey)}
@@ -293,6 +309,12 @@ export default function Pessoas() {
         <TabsContent value="funcoes">
           <PessoasFuncoesTab pessoas={pessoas} loading={loading} />
         </TabsContent>
+
+        {podeVerVinculos && (
+          <TabsContent value="contratos">
+            <ContratosATerminarTab organizationId={activeCompany.id} />
+          </TabsContent>
+        )}
       </Tabs>
 
       {canCreate && (

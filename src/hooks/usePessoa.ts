@@ -103,7 +103,11 @@ const COLUNAS_VINCULO =
   // Documentos e periodo experimental sugerido, 20261123040000.
   "categoria_funcao, periodo_experimental_origem, " +
   // Admissao, 20261124080000.
-  "categoria_profissional, renovavel, isencao_horario, formacao_inicio, formacao_fim";
+  "categoria_profissional, renovavel, isencao_horario, formacao_inicio, formacao_fim, " +
+  // Regime contratual (individual | coletivo). A migration que cria a coluna
+  // tem de entrar JUNTO com este codigo: pedir uma coluna que ainda nao existe
+  // faz falhar TODAS as leituras de pessoas_vinculos.
+  "regime_contratual";
 
 const COLUNAS_RETRIBUICAO =
   "id, pessoa_id, organization_id, vinculo_id, valor_base, moeda, periodicidade, " +

@@ -32,6 +32,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useNotifications, type Notification } from "@/hooks/useNotifications";
 import { useCompany } from "@/contexts/CompanyContext";
+import { ContratosDaEquipaDialog } from "@/components/hr/fimContrato/ContratosDaEquipaDialog";
 import { appendTimestamp, getNotificationRoute, notificationPriorityDotColors, sortNotificationsByPriority } from "@/lib/notifications/notificationPresentation";
 
 import { useTranslation } from "@/hooks/useTranslation";
@@ -87,6 +88,10 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
     organizationId: string | null;
   };
   const [messageDialog, setMessageDialog] = useState<Notification | null>(null);
+  // Aviso de fim de contrato SEM ligacao (o que recebe o responsavel directo, que
+  // nao ve a ficha): abre a janela de indicacao em vez de navegar. A organizacao
+  // e a da notificacao. O RH recebe a mesma notificacao COM ligacao a ficha.
+  const [contratosEquipaOrgId, setContratosEquipaOrgId] = useState<string | null>(null);
   const [replyContact, setReplyContact] = useState<ReplyContact | null>(null);
   const [emailReplyOpen, setEmailReplyOpen] = useState(false);
   const [whatsAppReplyOpen, setWhatsAppReplyOpen] = useState(false);
@@ -261,6 +266,12 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
     if (notification.type === "client_question") {
       setMessageDialog(notification);
       await markAsRead(notification.id);
+      return;
+    }
+    if (notification.type === "hr_contrato_fim" && !notification.link) {
+      await markAsRead(notification.id);
+      setNotificationsOpen(false);
+      setContratosEquipaOrgId(notification.organization_id ?? activeCompany?.id ?? null);
       return;
     }
     await markAsRead(notification.id);
@@ -549,6 +560,14 @@ export function TopHeader({ userName, userRole }: TopHeaderProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ContratosDaEquipaDialog
+        open={contratosEquipaOrgId !== null}
+        onOpenChange={(aberto) => {
+          if (!aberto) setContratosEquipaOrgId(null);
+        }}
+        organizationId={contratosEquipaOrgId}
+      />
 
       {/* Reply via Email — uses the same dialogs as the document modules */}
       {replyContact?.docType === "proposal" && replyContact.docId && (
