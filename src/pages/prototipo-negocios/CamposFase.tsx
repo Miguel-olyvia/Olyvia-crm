@@ -11,6 +11,10 @@ import type { Ctx } from "./pecas";
 export const INPUT =
   "h-9 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-primary focus:ring-2 focus:ring-primary/20";
 
+/** Campo da proposta simples: maior, com mais contraste. */
+export const INPUT_G =
+  "h-11 w-full min-w-0 rounded-lg border border-input bg-card px-3.5 text-[15px] text-foreground outline-none transition placeholder:text-muted-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
+
 const COR_PAPEL: Record<Papel, string> = { plano: "bg-primary", sugestoes: "bg-warning", orcamento: "bg-success", fatura: "bg-info" };
 
 export function Marca({ papel }: { papel?: Papel }) {
@@ -35,7 +39,7 @@ export function mostra(c: Def, v: string): string {
   return v;
 }
 
-type FxProps = { d: Negocio; A: Ctx["A"]; run: Ctx["run"]; ro?: boolean };
+type FxProps = { d: Negocio; A: Ctx["A"]; run: Ctx["run"]; ro?: boolean; simples?: boolean };
 
 /** O primeiro campo visível e vazio de um grupo: é o que acende. */
 export function proximoVazio(g: Grupo, f: Record<string, string>): string | null {
@@ -43,18 +47,18 @@ export function proximoVazio(g: Grupo, f: Record<string, string>): string | null
   return c ? c.k : null;
 }
 
-export function Campos({ grupo, d, A, run, ro, cols = 3 }: FxProps & { grupo: Grupo; cols?: 2 | 3 }) {
+export function Campos({ grupo, d, A, run, ro, simples, cols = 3 }: FxProps & { grupo: Grupo; cols?: 2 | 3 }) {
   const seguinte = ro ? null : proximoVazio(grupo, d.f);
   return (
-    <div className={cn("grid gap-x-4 gap-y-3", cols === 3 ? "sm:grid-cols-2 xl:grid-cols-3" : "sm:grid-cols-2")}>
+    <div className={cn(simples ? (ro ? "grid gap-x-8 gap-y-4 sm:grid-cols-2" : "grid max-w-xl gap-6") : cn("grid gap-x-4 gap-y-3", cols === 3 ? "sm:grid-cols-2 xl:grid-cols-3" : "sm:grid-cols-2"))}>
       {grupo.campos.filter((c) => visivel(c, d.f)).map((c) => (
-        <CampoT key={c.k} c={c} d={d} A={A} run={run} ro={ro} seguinte={c.k === seguinte} />
+        <CampoT key={c.k} c={c} d={d} A={A} run={run} ro={ro} simples={simples} seguinte={c.k === seguinte} />
       ))}
     </div>
   );
 }
 
-function CampoT({ c, d, A, run, ro, seguinte }: FxProps & { c: Def; seguinte: boolean }) {
+function CampoT({ c, d, A, run, ro, simples, seguinte }: FxProps & { c: Def; seguinte: boolean }) {
   const val = d.f[c.k] || "";
   // o cursor vai sozinho para o próximo campo de escrever, se ninguém estiver a escrever noutro
   useEffect(() => {
@@ -68,6 +72,7 @@ function CampoT({ c, d, A, run, ro, seguinte }: FxProps & { c: Def; seguinte: bo
   }, [seguinte, ro, c.t, c.k, d.id]);
   const id = `fx-${c.k}-${d.id}`;
   const set = (x: string) => run(() => A.campo(d.id, c.k, x));
+  if (simples) return <CampoSimples c={c} val={val} id={id} set={set} ro={ro} />;
   const largo = c.t === "texto_longo";
   const caixa = cn(
     "relative grid content-start gap-1.5 rounded-xl transition-all duration-300 animate-in fade-in-0",
@@ -234,6 +239,66 @@ export function Assistente({ passos, ativo, setAtivo, fim }: { passos: Passo[]; 
         );
       })}
       {ativo >= passos.length && <div className="animate-in fade-in-0 slide-in-from-bottom-3 duration-500">{fim}</div>}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ proposta simples */
+// Rótulo por cima, em texto normal; escolhas como botões grandes; sem pontos de cor.
+function CampoSimples({ c, val, id, set, ro }: { c: Def; val: string; id: string; set: (x: string) => void; ro?: boolean }) {
+  const ajuda = c.ajuda && <p className="text-sm text-muted-foreground" id={id + "-ajuda"}>{c.ajuda}</p>;
+  if (ro) return (
+    <div className="grid gap-0.5">
+      <span className="text-sm text-muted-foreground">{c.l}</span>
+      <span className="text-[15px] font-medium text-foreground">{mostra(c, val)}</span>
+    </div>
+  );
+  if (c.t === "sim_nao" || c.t === "escolha") {
+    const op = c.t === "sim_nao" ? ["Sim", "Não"] : c.op!;
+    if (op.length <= 5) return (
+      <fieldset className="grid gap-2">
+        <legend className="mb-2 text-sm font-medium text-foreground">{c.l}</legend>
+        <div className="flex flex-wrap gap-2">
+          {op.map((x) => (
+            <button key={x} type="button" aria-pressed={val === x} onClick={() => set(val === x ? "" : x)}
+              className={cn("min-h-11 rounded-lg border px-4 text-[15px] transition-colors duration-150",
+                val === x ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-foreground hover:border-foreground/40")}>
+              {x}
+            </button>
+          ))}
+        </div>
+        {ajuda}
+      </fieldset>
+    );
+    return (
+      <div className="grid gap-2">
+        <label htmlFor={id} className="text-sm font-medium text-foreground">{c.l}</label>
+        <select id={id} value={val} onChange={(e) => set(e.target.value)} className={INPUT_G} aria-describedby={c.ajuda ? id + "-ajuda" : undefined}>
+          <option value="">Escolher…</option>{op.map((x) => <option key={x}>{x}</option>)}
+        </select>
+        {ajuda}
+      </div>
+    );
+  }
+  const comum = {
+    id, placeholder: c.ph, "aria-describedby": c.ajuda ? id + "-ajuda" : undefined,
+    onBlur: (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement>) => { if (e.target.value !== val) set(e.target.value); },
+  };
+  let ctl: ReactNode;
+  if (c.t === "data") ctl = <input id={id} type="date" value={val} onChange={(e) => set(e.target.value)} className={INPUT_G} />;
+  else if (c.t === "texto_longo") ctl = <textarea key={id + val} rows={3} defaultValue={val} className={cn(INPUT_G, "h-auto resize-y py-2.5")} {...comum} />;
+  else ctl = (
+    <span className="flex items-center gap-3">
+      <input key={id + val} type={c.t === "numero" ? "number" : "text"} inputMode={c.t === "numero" ? "decimal" : undefined} min={c.t === "numero" ? 0 : undefined} step="any"
+        defaultValue={val} className={cn(INPUT_G, c.t === "numero" && "max-w-40")} {...comum}
+        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
+      {c.un && <span className="text-[15px] text-muted-foreground">{c.un}</span>}
+    </span>
+  );
+  return (
+    <div className="grid gap-2">
+      <label htmlFor={id} className="text-sm font-medium text-foreground">{c.l}</label>
+      {ctl}{ajuda}
     </div>
   );
 }

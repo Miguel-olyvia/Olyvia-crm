@@ -14,7 +14,7 @@ import {
   type Estado, type MedKey, type Negocio, type Papel, type SvcId,
 } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, type Grupo } from "./campos";
-import { Assistente, Campos, INPUT, Legenda, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
+import { Assistente, Campos, INPUT, INPUT_G, Legenda, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
 import { Btn, Campo, fazer, numero, type Ctx } from "./pecas";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -204,21 +204,23 @@ function FaseFeita({ ctx, d, i, aberta, alternar }: { ctx: Ctx; d: Negocio; i: n
 }
 
 /* ------------------------------------------------------------------ a fase atual */
-function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+/** Os passos da fase atual. `simples` desenha os campos maiores, numa coluna (proposta de 09/10). */
+export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   const { S, A, run, go } = ctx;
-  const p = proximo(d, S), r = S.role, o = d.orc, L = LINHAS[d.linha], v = d.visita;
-  const fx = { d, A, run };
-  const meu = !!p.who && p.who === r;
+  const o = d.orc, L = LINHAS[d.linha], v = d.visita;
+  const fx = { d, A, run, simples };
+  const INP = simples ? INPUT_G : INPUT;
+  const ROT = simples ? "grid gap-2 text-sm font-medium text-foreground" : "grid gap-1.5 text-xs font-medium text-muted-foreground";
   const g = (gr: Grupo, ic: LucideIcon, ro = false) => passoDeGrupo(gr, ic, <Campos grupo={gr} {...fx} ro={ro} />, d.f);
 
   let passos: Passo[] = [];
   if (d.fase === 0) {
     passos = [
       { id: "quem", titulo: "Quem pede", icone: User, conta: { f: 2, n: 2 }, resumo: [d.nome, d.tel, L.n], corpo: (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INPUT} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>
-          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INPUT} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
-          <div className="grid gap-1.5 text-xs font-medium text-muted-foreground">Linha de serviço<span className="pt-1.5 text-sm font-medium text-foreground">{L.n}</span></div>
+        <div className={simples ? "grid max-w-xl gap-5" : "grid gap-3 sm:grid-cols-3"}>
+          <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>
+          <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
+          <div className={ROT}>Linha de serviço<span className="pt-1.5 text-sm font-medium text-foreground">{L.n}</span></div>
         </div>
       ) },
       g(LEAD[0], Phone), g(LEAD[1], Target), g(LEAD[2], ClipboardList),
@@ -244,16 +246,16 @@ function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     const medOk = (Object.keys(L.med) as MedKey[]).filter((k) => v.med[k] > 0).length;
     const nMed = Object.keys(L.med).length;
     passos = [
-      { ...g(EXTERIOR, Building2), corpo: <><p className="text-xs text-muted-foreground">{EXTERIOR.nota}</p><Campos grupo={EXTERIOR} {...fx} /></> },
+      { ...g(EXTERIOR, Building2), corpo: <><p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>{EXTERIOR.nota}</p><Campos grupo={EXTERIOR} {...fx} /></> },
       g(INTERIOR, Home), g(AREA, Wrench),
       { id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: (Object.entries(L.med) as [MedKey, string][]).filter(([k]) => v.med[k] > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(v.med[k])}`), corpo: (
         <div className="space-y-2">
-          <p className="text-xs text-muted-foreground">As medidas dão as quantidades dos serviços. São as únicas obrigatórias para fechar o levantamento.</p>
-          <div className="grid gap-3 sm:grid-cols-4">
+          <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>As medidas dão as quantidades dos serviços. São as únicas obrigatórias para fechar o levantamento.</p>
+          <div className={simples ? "grid max-w-xl gap-5 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-4"}>
             {(Object.entries(L.med) as [MedKey, string][]).map(([k, l]) => (
-              <label key={k} className={cn("grid gap-1.5 rounded-xl text-xs font-medium text-muted-foreground transition-all", !(v.med[k] > 0) && (Object.keys(L.med) as MedKey[]).find((x) => !(v.med[x] > 0)) === k && "rounded-lg bg-primary/[0.04] ring-2 ring-primary/40 ring-offset-[6px] ring-offset-card")}>
+              <label key={k} className={cn(simples ? ROT : "grid gap-1.5 rounded-xl text-xs font-medium text-muted-foreground transition-all", !simples && !(v.med[k] > 0) && (Object.keys(L.med) as MedKey[]).find((x) => !(v.med[x] > 0)) === k && "rounded-lg bg-primary/[0.04] ring-2 ring-primary/40 ring-offset-[6px] ring-offset-card")}>
                 {l}
-                <input key={k + v.med[k]} type="number" min="0" step="0.5" defaultValue={v.med[k] || ""} className={INPUT} id={`med-${k}-${d.id}`}
+                <input key={k + v.med[k]} type="number" min="0" step="0.5" defaultValue={v.med[k] || ""} className={INP} id={`med-${k}-${d.id}`}
                   onBlur={(e) => { const n = numero(e.target.value); if ((isNaN(n) ? 0 : n) !== v.med[k]) run(() => { v.med[k] = isNaN(n) ? 0 : n; }); }}
                   onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
               </label>
@@ -262,7 +264,7 @@ function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </div>
       ) },
       { id: "nec", titulo: "Necessidades · serviços do Catálogo", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed,
-        resumo: orcLinhas(d, S).map((sid) => S.svc[sid].n), corpo: <div className="pg"><Necessidades {...ctx} d={d} /></div> },
+        resumo: orcLinhas(d, S).map((sid) => S.svc[sid].n), corpo: simples ? <NecessidadesSimples {...ctx} d={d} /> : <div className="pg"><Necessidades {...ctx} d={d} /></div> },
       { ...g(ESCOLHAS, Sparkles), corpo: (
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -313,7 +315,38 @@ function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       g(OBRA[0], Hammer), g(OBRA[1], Check),
     ];
   }
+  return passos;
+}
 
+/** O botão do próximo passo do negócio (ou o simulador do cliente). */
+export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default" }) {
+  const { S, A, go } = ctx;
+  const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  if (p.btn) return meu
+    ? <Button size={tamanho} onClick={go(() => fazer(A, p.act!, d.id))}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
+    : (
+      <div className="grid justify-items-start gap-1 sm:justify-items-end">
+        <Button size={tamanho} disabled>{p.btn}</Button>
+        <button type="button" className="text-sm font-medium text-primary underline-offset-4 hover:underline" onClick={go(() => A.role(p.who as Papel))}>Mudar para {PAPEIS[p.who as Papel].n}</button>
+      </div>
+    );
+  if (p.sim) return (
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-sm text-muted-foreground">Simular o cliente:</span>
+      {p.sim === "aceitar"
+        ? <><Button variant="outline" size={tamanho} onClick={go(() => A.recusar(d.id))}>Recusou</Button><Button size={tamanho} onClick={go(() => A.aceitar(d.id))}>Aceitou</Button></>
+        : <Button size={tamanho} onClick={go(() => A.assinar(d.id))}>Assinou</Button>}
+    </div>
+  );
+  if (p.wait && p.who === "direcao") return <Button variant="outline" size={tamanho} onClick={go(() => A.role("direcao"))}>Mudar para Direção</Button>;
+  return null;
+}
+export const temBotaoFase = (ctx: Ctx, d: Negocio) => { const p = proximo(d, ctx.S); return !!(p.btn || p.sim || (p.wait && p.who === "direcao")); };
+
+function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const { S } = ctx;
+  const p = proximo(d, S), meu = !!p.who && p.who === S.role;
+  const passos = passosDaFase(ctx, d);
   const primeiro = Math.max(0, passos.findIndex((x) => (x.conta ? x.conta.f < x.conta.n : !x.feito)));
   const [ativo, setAtivo] = useState(primeiro);
   // "Faltam medidas": abre o passo das medidas (o ecrã faz o scroll até lá)
@@ -324,21 +357,7 @@ function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const feitos = passos.reduce((a, x) => a + (x.conta ? x.conta.f : x.feito ? 1 : 0), 0);
   const Ic = ICONE_FASE[d.fase];
 
-  const botao = p.btn ? (
-    meu
-      ? <Button size="lg" onClick={go(() => fazer(A, p.act!, d.id))} className="shadow-[var(--shadow-md)]">{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
-      : <div className="grid justify-items-end gap-1">
-        <Button size="lg" disabled>{p.btn}</Button>
-        <button type="button" className="text-xs font-semibold text-primary hover:underline" onClick={go(() => A.role(p.who as Papel))}>Mudar para {PAPEIS[p.who as Papel].n}</button>
-      </div>
-  ) : p.sim ? (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="text-xs text-muted-foreground">Simular o cliente:</span>
-      {p.sim === "aceitar"
-        ? <><Button variant="outline" onClick={go(() => A.recusar(d.id))}>Recusou</Button><Button onClick={go(() => A.aceitar(d.id))}>Aceitou</Button></>
-        : <Button onClick={go(() => A.assinar(d.id))}>Assinou</Button>}
-    </div>
-  ) : p.wait && p.who === "direcao" ? <Button variant="outline" onClick={go(() => A.role("direcao"))}>Mudar para Direção</Button> : null;
+  const botao = temBotaoFase(ctx, d) ? <BotaoFase ctx={ctx} d={d} /> : null;
 
   return (
     <section className="overflow-hidden rounded-2xl border border-primary/30 bg-card shadow-[var(--shadow-md)] animate-in fade-in-0 slide-in-from-bottom-6 duration-700">
@@ -422,6 +441,49 @@ function orcLinhas(d: Negocio, S: Estado): SvcId[] {
     ...L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).map(([sid]) => sid),
     ...L.extras.filter((sid) => (v.extra[sid] || 0) > 0 && !!S.svc[sid]),
   ];
+}
+
+// Necessidades na proposta simples: uma lista, uma caixa por serviço.
+function NecessidadesSimples({ S, A, run, d }: Ctx & { d: Negocio }) {
+  const L = LINHAS[d.linha], v = d.visita, ro = v.fechada;
+  const sugestao = (sid: SvcId) => sid === "eletr" ? Number(d.f.diag_pontos_eletricos) || 2 : v.med.pav || 1;
+  let total = 0;
+  const linhas = [
+    ...L.map.map(([sid, k]) => { const q = v.med[k] || 0; return { sid, q, on: q > 0 && !v.off.includes(sid), extra: false, de: q > 0 ? "das medidas" : "falta a medida" }; }),
+    ...L.extras.map((sid) => { const q = v.extra[sid] || 0; return { sid, q, on: q > 0, extra: true, de: "a pedido do cliente" }; }),
+  ];
+  return (
+    <div className="max-w-2xl">
+      <p className="text-[15px] text-muted-foreground">Marque o que a obra leva. As quantidades vêm das medidas; os custos vêm do Catálogo.</p>
+      <ul className="mt-4 divide-y divide-border border-y border-border">
+        {linhas.map(({ sid, q, on, extra, de }) => {
+          const s = S.svc[sid];
+          if (on) total += q * s.preco;
+          const id = `nec-${sid}-${d.id}`;
+          return (
+            <li key={sid} className="flex min-h-16 flex-wrap items-center gap-x-4 gap-y-2 py-3">
+              <input id={id} type="checkbox" checked={on} disabled={ro || (!extra && !(q > 0))} className="h-5 w-5 shrink-0 accent-[hsl(var(--primary))]"
+                onChange={() => run(() => (extra ? A.extra(d.id, sid, on ? 0 : sugestao(sid)) : A.servico(d.id, sid)))} />
+              <label htmlFor={id} className="min-w-0 flex-1 cursor-pointer">
+                <span className={cn("block text-base", on ? "text-foreground" : "text-muted-foreground")}>{s.n}</span>
+                <span className="block text-sm text-muted-foreground">{on ? `${nfmt(q)} ${s.un} · ${de}` : de === "falta a medida" ? de : "não incluído"}</span>
+              </label>
+              {extra && on && !ro && (
+                <span className="flex items-center gap-2">
+                  <label htmlFor={id + "-q"} className="sr-only">Quantidade de {s.n}</label>
+                  <input id={id + "-q"} key={id + q} type="number" min="0" step="any" defaultValue={q} className="h-10 w-24 rounded-lg border border-input bg-card px-3 text-right text-[15px]"
+                    onBlur={(e) => { const n = numero(e.target.value); if (!isNaN(n) && n !== q) run(() => A.extra(d.id, sid, Math.max(0, n))); }} />
+                  <span className="text-[15px] text-muted-foreground">{s.un}</span>
+                </span>
+              )}
+              <span className="w-24 text-right text-[15px] tabular-nums">{on ? eur(q * s.preco) + " €" : ""}</span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-4 flex justify-between text-base"><span className="text-muted-foreground">Mão de obra, a preço de tabela</span><span className="font-semibold tabular-nums">{eur(total)} €</span></p>
+    </div>
+  );
 }
 
 // Necessidades: os serviços do Catálogo que a obra leva, com a quantidade.

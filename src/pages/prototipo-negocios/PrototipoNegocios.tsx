@@ -2,7 +2,7 @@
 // screens a funcionar com dados de exemplo. Rota pública, fora do CRM: não usa a sessão nem a base de dados.
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import {
-  Bell, Building, Building2, ChevronDown, Handshake, LayoutTemplate, Megaphone, Package, Search, Settings, ShoppingCart, Sun, Wrench, type LucideIcon,
+  Bell, Building, Building2, ChevronDown, Handshake, LayoutTemplate, Megaphone, Package, Search, Settings, ShoppingCart, Sparkles, Sun, Wrench, type LucideIcon,
 } from "lucide-react";
 import mascote from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,8 @@ import {
   type Aviso, type Estado, type LinhaId, type Papel, type SvcId, type Vista,
 } from "./motor";
 import { Hoje } from "./Hoje";
+import { HojeSimples } from "./HojeSimples";
+import { NegocioSimples } from "./NegocioSimples";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 
@@ -87,10 +89,11 @@ export default function PrototipoNegocios() {
   });
 
   const ctx: Ctx = { S, A, run, go, q, repor };
+  const simples = (S.aspeto ?? "simples") === "simples";
   let corpo: ReactNode;
   switch (S.view) {
-    case "hoje": corpo = <Hoje {...ctx} />; break;
-    case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? <PaginaNegocio {...ctx} /> : <Negocios {...ctx} />; break;
+    case "hoje": corpo = simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
+    case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : <Negocios {...ctx} />; break;
     case "operacoes": corpo = <Operacoes {...ctx} />; break;
     case "inventario": corpo = <Inventario {...ctx} />; break;
     case "catalogo": corpo = <Catalogo {...ctx} />; break;
@@ -118,6 +121,93 @@ export default function PrototipoNegocios() {
     </button>
   );
 
+  const toastsEl = (
+    <div className="toasts" aria-live="polite">
+      {toasts.map((t) => (
+        <div key={t.id} className={"toast " + (t.kind || "")} role="status">
+          <i>{t.kind === "ok" ? "✓" : t.kind === "auto" ? "⚡" : t.kind === "bad" ? "!" : "i"}</i>
+          <div>{t.msg}{t.sub ? <small>{t.sub}</small> : null}</div>
+          {t.act ? <button onClick={() => { t.act!.fn(); setToasts((x) => x.filter((y) => y.id !== t.id)); }}>{t.act.label}</button> : <span />}
+        </div>
+      ))}
+    </div>
+  );
+
+  if (simples) {
+    const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
+      <button key={v} type="button" onClick={go(() => A.nav(v))} aria-current={cur === v ? "page" : undefined}
+        className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
+          cur === v ? "bg-primary/10 font-semibold text-primary" : "text-foreground/80 hover:bg-muted hover:text-foreground")}>
+        <Ic className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+        <span className="flex-1">{l}</span>
+        {c ? <span className="text-sm tabular-nums text-muted-foreground" aria-label={c + " por fazer"}>{c}</span> : null}
+      </button>
+    );
+    const papel = (
+      <label className="grid gap-1.5 text-sm text-muted-foreground">
+        A ver como
+        <select value={S.role} onChange={(e) => run(() => A.role(e.target.value as Papel))}
+          className="h-11 rounded-lg border border-input bg-card px-3 text-[15px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
+          {(Object.keys(PAPEIS) as Papel[]).map((k) => <option key={k} value={k}>{PAPEIS[k].n}</option>)}
+        </select>
+      </label>
+    );
+    return (
+      <div className="pn calma fixed inset-0 flex bg-background text-foreground">
+        <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card px-3 py-5 md:flex">
+          <div className="flex items-center gap-2.5 px-3 pb-6">
+            <img src={mascote} alt="" className="h-8 w-8 object-contain" />
+            <span className="text-lg font-semibold tracking-tight">Olyvia</span>
+          </div>
+          <nav className="flex flex-col gap-0.5" aria-label="Menu">{itens.map(([v, l, Ic, c]) => item(v, l, Ic, c))}</nav>
+          <div className="mt-auto flex flex-col gap-4 px-0 pt-6">
+            {item("definicoes", "Definições", Settings)}
+            <div className="px-3">{papel}</div>
+            <div className="space-y-1 px-3 text-sm text-muted-foreground">
+              <p>Protótipo com dados de exemplo.</p>
+              <button type="button" onClick={go(() => A.aspeto("atual"))} className="text-left font-medium text-primary underline-offset-4 hover:underline">Comparar com o aspeto atual</button>
+            </div>
+          </div>
+        </aside>
+
+        <div className="flex min-w-0 flex-1 flex-col">
+          <header className="flex h-14 shrink-0 items-center gap-3 border-b border-border bg-card px-4 md:hidden">
+            <img src={mascote} alt="" className="h-7 w-7 object-contain" />
+            <span className="flex-1 text-base font-semibold">Olyvia</span>
+            <select value={S.role} aria-label="A ver como" onChange={(e) => run(() => A.role(e.target.value as Papel))}
+              className="h-10 max-w-[170px] rounded-lg border border-input bg-card px-2 text-[15px]">
+              {(Object.keys(PAPEIS) as Papel[]).map((k) => <option key={k} value={k}>{PAPEIS[k].n}</option>)}
+            </select>
+          </header>
+          <main ref={mainRef} className="min-h-0 flex-1 overflow-auto pb-16 md:pb-0">
+            <div key={S.view + ":" + (S.deal || "")} className="animate-in fade-in-0 duration-200">
+              {S.view === "negocios" || (S.view === "negocio" && !S.deals.some((d) => d.id === S.deal)) ? (
+                <div className="mx-auto w-full max-w-7xl px-4 pt-6 sm:px-8 sm:pt-10">
+                  <label className="relative block max-w-md">
+                    <span className="sr-only">Procurar</span>
+                    <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                    <input type="search" placeholder="Procurar negócio, cliente ou telefone" value={q} onChange={(e) => setQ(e.target.value)}
+                      className="h-11 w-full rounded-lg border border-input bg-card pl-10 pr-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
+                  </label>
+                </div>
+              ) : null}
+              {antigo ? <div className="pg page mx-auto w-full max-w-7xl px-4 pb-10 pt-6 sm:px-8">{corpo}</div> : corpo}
+            </div>
+          </main>
+          <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-stretch justify-around border-t border-border bg-card md:hidden" aria-label="Menu">
+            {itens.slice(0, 5).map(([v, l, Ic]) => (
+              <button key={v} type="button" onClick={go(() => A.nav(v))} aria-current={cur === v ? "page" : undefined}
+                className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
+                <Ic className="h-5 w-5" aria-hidden="true" />{l}
+              </button>
+            ))}
+          </nav>
+        </div>
+        {toastsEl}
+      </div>
+    );
+  }
+
   return (
     <div className="pn fixed inset-0 bg-background text-foreground">
       {/* Barra de ícones, como a da Olyvia */}
@@ -127,6 +217,11 @@ export default function PrototipoNegocios() {
         </div>
         <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Menu">{itens.map(([v, l, Ic, c]) => icone(v, l, Ic, c))}</nav>
         <div className="flex flex-col gap-1 border-t border-sidebar-border p-2">
+          <button type="button" onClick={go(() => A.aspeto("simples"))} aria-label="Ver a proposta simples"
+            className="group relative flex w-full items-center justify-center rounded-xl p-3 text-sidebar-foreground/80 transition hover:bg-sidebar-accent hover:text-sidebar-foreground">
+            <Sparkles className="h-5 w-5" />
+            <span className="pointer-events-none absolute left-full ml-3 whitespace-nowrap rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100">Ver a proposta simples</span>
+          </button>
           {icone("definicoes", "Definições", Settings)}
           <a href="/prototipo/maquetas.html" target="_blank" rel="noreferrer" aria-label="Maquetas das 12 screens"
             className="group relative flex items-center justify-center rounded-xl p-3 text-sidebar-foreground/80 transition hover:bg-sidebar-accent hover:text-sidebar-foreground">
@@ -180,15 +275,7 @@ export default function PrototipoNegocios() {
         ))}
       </nav>
 
-      <div className="toasts" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className={"toast " + (t.kind || "")} role="status">
-            <i>{t.kind === "ok" ? "✓" : t.kind === "auto" ? "⚡" : t.kind === "bad" ? "!" : "i"}</i>
-            <div>{t.msg}{t.sub ? <small>{t.sub}</small> : null}</div>
-            {t.act ? <button onClick={() => { t.act!.fn(); setToasts((x) => x.filter((y) => y.id !== t.id)); }}>{t.act.label}</button> : <span />}
-          </div>
-        ))}
-      </div>
+      {toastsEl}
     </div>
   );
 }

@@ -162,6 +162,8 @@ export interface Estado {
   confirmPerda: number | null;
   pulse?: string | null;
   cfg: { min: number; alvo: number; estrutura: boolean };
+  /** "simples": a proposta de 09/10 com menos ruído; "atual": o aspeto de hoje da Olyvia, para comparar. */
+  aspeto?: "simples" | "atual";
   svc: Record<SvcId, Servico>;
   stock: Record<StockKey, number>;
   seq: number;
@@ -532,6 +534,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     nav(v: Vista) { S.view = v; S.deal = null; S.op = null; S.confirmPerda = null; },
     abrir(id: number) { S.view = "negocio"; S.deal = id; S.confirmPerda = null; },
     role(r: Papel) { S.role = r; },
+    aspeto(v: "simples" | "atual") { S.aspeto = v; },
     filtro(f: string) { S.filtro = f; },
     novo() { S.view = "negocios"; S.novo = { nome: "", tel: "", linha: "wc", err: "" }; },
     novoCancel() { S.novo = null; },

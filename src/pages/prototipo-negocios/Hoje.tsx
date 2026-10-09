@@ -14,7 +14,7 @@ import { fazer, type Ctx } from "./pecas";
 interface Compromisso { id: string; hora: string; dia?: string; titulo: string; quem: string; onde?: string; acao: string; d: Negocio; atrasado?: boolean }
 
 // A agenda de cada papel, tirada dos negócios.
-function agenda(S: Estado, r: Papel): Compromisso[] {
+export function agenda(S: Estado, r: Papel): Compromisso[] {
   const L: Compromisso[] = [];
   for (const d of aberto(S)) {
     const loc = d.f.localidade || d.local.split(",").pop()!.trim();

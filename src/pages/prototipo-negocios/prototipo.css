@@ -229,3 +229,43 @@
 .pg .kc:hover{transform:translateY(-2px);box-shadow:var(--shadow-md)}
 .pg .btn{border-radius:10px}
 .pg .h1{font-size:24px;letter-spacing:-.02em}
+
+/* ------------------------------------------------------------------
+   Proposta simples (09/10): menos ruído, mais contraste.
+   Os tokens da app são redefinidos aqui, por isso os componentes
+   (Button, etc.) e os ecrãs antigos (.pg) mudam com eles.
+   Contraste: texto secundário ~7:1 e primário ~6:1 sobre branco.
+------------------------------------------------------------------ */
+.calma{
+  --background:220 20% 98%; --foreground:224 28% 12%;
+  --card:0 0% 100%; --card-foreground:224 28% 12%; --popover:0 0% 100%; --popover-foreground:224 28% 12%;
+  --primary:256 56% 48%; --primary-foreground:0 0% 100%;
+  --secondary:220 14% 95%; --secondary-foreground:224 28% 12%;
+  --muted:220 16% 95%; --muted-foreground:220 10% 34%;
+  --accent:220 16% 93%; --accent-foreground:224 28% 12%;
+  --destructive:0 68% 44%; --destructive-foreground:0 0% 100%;
+  --border:220 14% 88%; --input:220 12% 78%; --ring:256 56% 48%;
+  --success:152 62% 30%; --warning:32 92% 38%; --info:210 70% 40%;
+  --sidebar-background:224 28% 16%;
+  --shadow-sm:0 1px 2px rgb(16 24 40 / .06); --shadow-md:0 2px 8px rgb(16 24 40 / .08); --shadow-lg:0 8px 24px rgb(16 24 40 / .1);
+  font-size:16px; line-height:1.5;
+}
+.calma :focus-visible{outline:2px solid hsl(var(--primary));outline-offset:2px}
+/* os ecrãs antigos dentro da proposta: letra maior, menos cor */
+.calma .pg{font-size:15px}
+.calma .pg .sub,.calma .pg .f,.calma .pg td small,.calma .pg .kc small{font-size:14px}
+.calma .pg .col{background:transparent;border:1px solid hsl(var(--border));padding:12px}
+.calma .pg .col h4{font-size:14px}
+.calma .pg .kc{box-shadow:none;padding:12px}
+.calma .pg .kc .nx{font-size:14px}
+.calma .pg .chip{font-size:14px;padding:8px 14px;font-weight:500}
+.calma .pg .pill{font-size:13px}
+.calma .pg .banner{display:none}
+.calma .pg th{font-size:13px}
+.calma .pg td input{font-size:14px;padding:6px 8px}
+.calma .pg .card h3{font-size:15px}
+.calma .pg .btn{font-size:14px;padding:9px 14px}
+.calma .pg .btn.sm{font-size:13px;padding:6px 10px}
+
+.calma [tabindex="-1"]:focus{outline:none}
+.calma .pg table{font-size:15px}
