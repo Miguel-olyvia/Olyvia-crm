@@ -44,6 +44,8 @@ import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { ProposalPortalPreview } from "@/components/proposals/ProposalPortalPreview";
 import { resolveLineDetails, type LineResolution } from "@/utils/quoteCostResolver";
 import { getDisplayAttributes } from "@/utils/lineAttributes";
+import { computeLineVatBuckets, aggregateQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
+import { round2 } from "@/utils/quotes/inlineQuoteVatCalculation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -149,6 +151,22 @@ const splitQuoteIntoDisplayGroups = (quote: QuoteItem): QuoteSectionGroup[] => {
       total,
     };
   });
+};
+
+// IVA por taxa com a mesma conta do PDF (bundles repartidos por componente:
+// material a 23%, mão de obra a 6%); o desconto global reduz a base de cada linha.
+const groupVatByRate = (lines: QuoteLine[], discountFactor = 1): [number, number][] => {
+  const byRate = new Map<number, number>();
+  lines.forEach((line) => {
+    const lineBase = (line.total_sem_iva || 0) * discountFactor;
+    computeLineVatBuckets(line, lineBase).forEach(({ rate, vat }) => {
+      byRate.set(rate, (byRate.get(rate) || 0) + vat);
+    });
+  });
+  return Array.from(byRate.entries())
+    .map(([rate, vat]) => [rate, round2(vat)] as [number, number])
+    .filter(([, vat]) => vat !== 0)
+    .sort((a, b) => a[0] - b[0]);
 };
 
 interface Client {
@@ -753,31 +771,81 @@ export function ProposalDetailsDialog({
                                 </tbody>
                               </table>
                               {/* Quote subtotals */}
-                              <div className="border-t bg-muted/30 p-2 text-xs space-y-1">
-                                <div className="flex justify-end gap-6">
-                                  <span className="text-muted-foreground">Subtotal</span>
-                                  <span>{formatCurrency(group.subtotal)}</span>
-                                </div>
-                                {!hasMultipleSections && (quote.desconto_global_percent ?? 0) > 0 && (
-                                  <div className="flex justify-end gap-6 text-orange-600 dark:text-orange-400">
-                                    <span>Desconto global ({quote.desconto_global_percent}%)</span>
-                                    <span>-{formatCurrency(group.subtotal * (quote.desconto_global_percent ?? 0) / 100)}</span>
+                              {(() => {
+                                const discountFactor = !hasMultipleSections && (quote.desconto_global_percent ?? 0) > 0
+                                  ? 1 - (quote.desconto_global_percent ?? 0) / 100
+                                  : 1;
+                                const vatRates = groupVatByRate(group.lines, discountFactor);
+                                const groupVat = vatRates.reduce((sum, [, vat]) => sum + vat, 0);
+                                const groupTotal = round2(group.subtotal * discountFactor) + groupVat;
+                                return (
+                                  <div className="border-t bg-muted/30 p-2 text-xs space-y-1">
+                                    <div className="flex justify-end gap-6">
+                                      <span className="text-muted-foreground">Subtotal</span>
+                                      <span>{formatCurrency(group.subtotal)}</span>
+                                    </div>
+                                    {discountFactor < 1 && (
+                                      <div className="flex justify-end gap-6 text-orange-600 dark:text-orange-400">
+                                        <span>Desconto global ({quote.desconto_global_percent}%)</span>
+                                        <span>-{formatCurrency(group.subtotal * (quote.desconto_global_percent ?? 0) / 100)}</span>
+                                      </div>
+                                    )}
+                                    {vatRates.map(([rate, vat]) => (
+                                      <div key={rate} className="flex justify-end gap-6">
+                                        <span className="text-muted-foreground">IVA ({rate}%)</span>
+                                        <span>{formatCurrency(vat)}</span>
+                                      </div>
+                                    ))}
+                                    <div className="flex justify-end gap-6 font-semibold">
+                                      <span>Total</span>
+                                      <span>{formatCurrency(groupTotal)}</span>
+                                    </div>
                                   </div>
-                                )}
-                                <div className="flex justify-end gap-6">
-                                  <span className="text-muted-foreground">IVA</span>
-                                  <span>{formatCurrency(
-                                    (!hasMultipleSections && (quote.desconto_global_percent ?? 0) > 0)
-                                      ? (quote.total ?? 0) - group.subtotal * (1 - (quote.desconto_global_percent ?? 0) / 100)
-                                      : group.vat
-                                  )}</span>
-                                </div>
-                              </div>
+                                );
+                              })()}
                             </div>
                           )}
                         </div>
                       )})}
                     </div>
+
+                    {/* Proposal totals — por orçamento (não por secção), como no PDF */}
+                    {(() => {
+                      const quotesWithLines = quotes.filter((q) => (q.quote_lines || []).length > 0);
+                      if (quotesWithLines.length === 0) return null;
+                      const totals = aggregateQuoteTotals(quotesWithLines.map((q) => ({
+                        lines: q.quote_lines || [],
+                        descontoPercent: q.desconto_global_percent ?? 0,
+                      })));
+                      const subtotal = totals.subtotalWithFees;
+                      const vatRates = totals.vatBreakdown.map((b) => [b.rate, b.vat] as [number, number]);
+                      const vatTotal = totals.totalIva;
+                      return (
+                        <div className="flex justify-end pt-2 border-t">
+                          <div className="w-72 space-y-1.5 text-sm">
+                            <div className="flex justify-between font-medium">
+                              <span>Subtotal (sem IVA)</span>
+                              <span>{formatCurrency(subtotal)}</span>
+                            </div>
+                            {vatRates.map(([rate, vat]) => (
+                              <div key={rate} className="flex justify-between">
+                                <span className="text-muted-foreground">IVA {rate}%</span>
+                                <span>{formatCurrency(vat)}</span>
+                              </div>
+                            ))}
+                            <div className="flex justify-between">
+                              <span className="text-muted-foreground">IVA Total</span>
+                              <span>{formatCurrency(vatTotal)}</span>
+                            </div>
+                            <Separator />
+                            <div className="flex justify-between font-bold">
+                              <span>Total Geral (c/ IVA)</span>
+                              <span className="text-green-600 dark:text-green-400">{formatCurrency(subtotal + vatTotal)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
