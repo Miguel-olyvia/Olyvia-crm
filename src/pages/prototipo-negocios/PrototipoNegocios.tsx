@@ -18,6 +18,7 @@ import { NegocioSimples } from "./NegocioSimples";
 import { NegociosSimples } from "./NegociosSimples";
 import { InventarioSimples, OperacoesSimples } from "./OperacoesSimples";
 import { CatalogoSimples, ClientesSimples, DefinicoesSimples, MarketingSimples } from "./OutrosSimples";
+import { CamposEditor } from "./CamposEditor";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 
@@ -113,6 +114,7 @@ export default function PrototipoNegocios() {
     case "clientes": corpo = simples ? <ClientesSimples {...ctx} /> : <Clientes {...ctx} />; break;
     case "marketing": corpo = simples ? <MarketingSimples /> : <Marketing />; break;
     case "definicoes": corpo = simples ? <DefinicoesSimples {...ctx} /> : <Definicoes {...ctx} />; break;
+    case "campos": corpo = <CamposEditor {...ctx} />; break;
     default: corpo = simples ? <NegociosSimples {...ctx} /> : <Negocios {...ctx} />;
   }
 

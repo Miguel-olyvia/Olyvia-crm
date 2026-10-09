@@ -1,6 +1,6 @@
 // Catálogo, Clientes, Marketing e Definições na proposta simples.
 import { useMemo, useState } from "react";
-import { ArrowRight, ChevronDown, Minus, Plus, Search } from "lucide-react";
+import { ArrowRight, ChevronDown, Minus, Plus, Search, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CATALOGO, OFICIOS, normal } from "./catalogo";
@@ -173,6 +173,16 @@ export function DefinicoesSimples({ S, A, go, run, repor }: Ctx) {
     <div className="mx-auto w-full max-w-2xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
       <h1 className="text-3xl font-semibold tracking-tight">Definições</h1>
       <p className="mt-2 text-lg text-muted-foreground">Só as regras que mexem no orçamento e no aspeto deste protótipo.</p>
+
+      <button type="button" onClick={go(() => A.nav("campos"))}
+        className="mt-8 flex w-full items-center gap-4 rounded-2xl border border-primary/30 bg-card p-5 text-left shadow-[var(--shadow-sm)] transition-colors hover:border-primary">
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-100 text-violet-700" aria-hidden="true"><SlidersHorizontal className="h-5 w-5" /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-base font-semibold">Campos e formulários</span>
+          <span className="block text-[15px] text-muted-foreground">O que se pergunta em cada fase, à medida do seu setor: nomes, opções, obrigatórios e campos novos.</span>
+        </span>
+        <ArrowRight className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+      </button>
 
       <h2 className="mt-10 text-lg font-semibold">Margens</h2>
       <div className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">

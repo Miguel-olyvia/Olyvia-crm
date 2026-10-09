@@ -3,7 +3,7 @@
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
 import { CATALOGO } from "./catalogo";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, grupoVisita, type Grupo } from "./campos";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
 
@@ -155,7 +155,7 @@ export interface Negocio {
   hist: Evento[];
 }
 
-export type Vista = "hoje" | "negocios" | "negocio" | "clientes" | "operacoes" | "inventario" | "catalogo" | "marketing" | "definicoes";
+export type Vista = "hoje" | "negocios" | "negocio" | "clientes" | "operacoes" | "inventario" | "catalogo" | "marketing" | "definicoes" | "campos";
 
 export interface Estado {
   v: number;
@@ -172,6 +172,9 @@ export interface Estado {
   aspeto?: "simples" | "atual";
   /** Leitura fácil (dislexia): letra maior, mais espaço, fundo creme. */
   leitura?: boolean;
+  /** Os campos à medida da empresa (editor de campos) e o modelo de setor de onde partiu. */
+  campos?: CfgCampos;
+  setor?: string;
   svc: Record<SvcId, Servico>;
   stock: Record<StockKey, number>;
   seq: number;
@@ -691,7 +694,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
 
   // Não se passa de fase sem os campos obrigatórios. Se faltar algo, abre o
   // negócio, marca os campos e diz quantos faltam.
-  const portao = (d: Negocio, gs: Grupo[], extra: { id: string; t: string }[] = []) => {
+  const portao = (d: Negocio, gs0: Grupo[], extra: { id: string; t: string }[] = []) => {
+    // os campos como a empresa os definiu (nomes, obrigatórios, escondidos, campos novos)
+    const gs = gs0.map((g) => efetivo(S.campos, g)).filter((g) => !g.oculto);
     const faltam = [...emFalta(gs, d.f).map((c) => c.l), ...extra.map((x) => x.t)];
     if (!faltam.length) { d.valida = null; return true; }
     d.valida = { fase: d.fase, grupos: [...gs.map((g) => g.titulo), ...extra.map((x) => x.id)] };

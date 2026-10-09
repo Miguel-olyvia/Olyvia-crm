@@ -2,7 +2,7 @@
 // O passo aberto mostra os campos e acende o próximo por preencher; quando
 // os campos do passo ficam todos preenchidos, abre sozinho o passo seguinte.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, Building2, Car, Check, ChevronDown, HardHat, Home, Minus, Plug, Plus, Ruler, ShieldAlert, Sparkles, Zap, type LucideIcon } from "lucide-react";
+import { AlertCircle, Building2, Car, Check, ChevronDown, HardHat, Home, LayoutList, Minus, Plug, Plus, Ruler, ShieldAlert, Sparkles, Sun, Wind, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PAPEL_ROT, contagem, obrigatorio, visivel, type Def, type Grupo, type Papel } from "./campos";
 import type { Negocio } from "./motor";
@@ -54,7 +54,9 @@ const BLOCO: Record<string, [LucideIcon, string]> = {
   "A casa": [Home, "bg-amber-100 text-amber-800"], "Instalações": [Zap, "bg-yellow-100 text-yellow-800"],
   "Durante a obra": [ShieldAlert, "bg-rose-100 text-rose-700"], "A divisão": [Ruler, "bg-violet-100 text-violet-700"],
   "Instalações da divisão": [Plug, "bg-teal-100 text-teal-700"], "Trabalho e proteções": [HardHat, "bg-orange-100 text-orange-700"],
+  "Telhado": [Sun, "bg-amber-100 text-amber-800"], "Consumo": [Zap, "bg-yellow-100 text-yellow-800"], "Unidade exterior": [Wind, "bg-sky-100 text-sky-700"],
 };
+const BLOCO_GERAL: [LucideIcon, string] = [LayoutList, "bg-slate-100 text-slate-700"];
 
 /** Está a validar este grupo (tentou passar de fase com campos em falta)? */
 export const aValidar = (d: Negocio, id: string) => !!d.valida && d.valida.fase === d.fase && d.valida.grupos.includes(id);
@@ -84,7 +86,7 @@ export function Campos({ grupo, d, A, run, ro, simples, cols = 3, plano }: FxPro
             <section key={b || "_"} aria-label={b || undefined}>
               {b && (
                 <div className="mb-3 flex items-center gap-3">
-                  {BLOCO[b] && <Chip icone={BLOCO[b][0]} cor={BLOCO[b][1]} />}
+                  <Chip icone={(BLOCO[b] || BLOCO_GERAL)[0]} cor={(BLOCO[b] || BLOCO_GERAL)[1]} />
                   <h3 className="flex-1 text-base font-semibold text-foreground">{b}</h3>
                   {ob.length > 0 && <span className={cn("text-sm tabular-nums", feitos === ob.length ? "text-success" : "text-muted-foreground")}>{feitos === ob.length ? "Completo" : `${feitos} de ${ob.length}`}</span>}
                 </div>
@@ -203,6 +205,8 @@ export interface Passo {
   /** Campos preenchidos e total; sem campos, o passo conta como feito quando `feito`. */
   conta?: { f: number; n: number };
   feito?: boolean;
+  /** O nome do passo foi dado pela empresa (não se troca por um nome curto). */
+  personalizado?: boolean;
   /** Campos em falta, depois de tentar passar de fase. */
   falta?: number;
   resumo: string[];
@@ -210,7 +214,7 @@ export interface Passo {
 }
 
 export const passoDeGrupo = (g: Grupo, icone: LucideIcon, corpo: ReactNode, f: Record<string, string>): Passo => ({
-  id: g.titulo, titulo: g.titulo, icone, conta: contagem([g], f), resumo: resumoGrupos([g], f), corpo,
+  id: g.titulo, titulo: g.nome || g.titulo, personalizado: !!g.nome, icone, conta: contagem([g], f), resumo: resumoGrupos([g], f), corpo,
 });
 
 const completo = (p: Passo) => (p.conta ? p.conta.f >= p.conta.n : !!p.feito);

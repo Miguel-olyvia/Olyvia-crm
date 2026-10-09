@@ -13,7 +13,7 @@ import {
   alertas, bloqueado, conflitos, custoUn, eur, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot,
   type Estado, type MedKey, type Negocio, type Papel, type SvcId,
 } from "./motor";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, emFalta, grupoVisita, type Grupo } from "./campos";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, efetivo, emFalta, grupoVisita, type Grupo } from "./campos";
 import { VisitasLista } from "./Visitas";
 import { UsarLocalizacao } from "./Localizacao";
 import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
@@ -217,7 +217,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   const fx = { d, A, run, simples };
   const INP = simples ? INPUT_G : INPUT;
   const ROT = simples ? "grid gap-2 text-sm font-medium text-foreground" : "grid gap-1.5 text-xs font-medium text-muted-foreground";
-  const g = (gr: Grupo, ic: LucideIcon, ro = false) => passoDeGrupo(gr, ic, <Campos grupo={gr} {...fx} ro={ro} />, d.f);
+  // os grupos como a empresa os definiu no editor de campos
+  const E = (gr: Grupo) => efetivo(S.campos, gr);
+  const g = (gr: Grupo, ic: LucideIcon, ro = false) => { const e = E(gr); return passoDeGrupo(e, ic, <Campos grupo={e} {...fx} ro={ro} />, d.f); };
 
   let passos: Passo[] = [];
   if (d.fase === 0) {
@@ -237,7 +239,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       { ...g(CONTACTO[2], MapPin), corpo: (
         <div className="space-y-4">
           <UsarLocalizacao ctx={ctx} d={d} texto="Estou no local: usar a localização" />
-          <Campos grupo={CONTACTO[2]} {...fx} />
+          <Campos grupo={E(CONTACTO[2])} {...fx} />
         </div>
       ) },
       g(CONTACTO[3], CalendarClock),
@@ -270,7 +272,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
             <p className={simples ? "mt-0.5 text-base font-medium" : "text-sm font-medium"}>{d.f.morada ? `${d.f.morada}${d.f.cp ? ", " + d.f.cp : ""} ${d.f.localidade || ""}` : "Ainda sem morada"}</p>
             <div className="mt-3"><UsarLocalizacao ctx={ctx} d={d} texto="Estou no local: confirmar pela localização" /></div>
           </div>
-          <Campos grupo={EXTERIOR} {...fx} />
+          <Campos grupo={E(EXTERIOR)} {...fx} />
         </div>
       ) },
       g(INTERIOR, Home), g(AREA, Wrench),
@@ -306,7 +308,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
               ))}
             </div>
           </div>
-          <Campos grupo={ESCOLHAS} {...fx} />
+          <Campos grupo={E(ESCOLHAS)} {...fx} />
         </div>
       ) },
       { id: "fotos", titulo: "Fotografias", icone: Camera, feito: v.fotos > 0 || d.f.diag_cliente_recusou_fotos === "Sim", resumo: [v.fotos + " fotos"], corpo: (
@@ -333,7 +335,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         corpo: simples ? <OrcamentoSimples {...ctx} d={d} /> : <div className="pg estreito"><Orcamento {...ctx} d={d} /></div> },
       simples ? { ...g(PROPOSTA[0], FileSignature, !!o.enviada), corpo: (
         <div className="space-y-10">
-          <Campos grupo={PROPOSTA[0]} {...fx} ro={!!o.enviada} />
+          <Campos grupo={E(PROPOSTA[0])} {...fx} ro={!!o.enviada} />
           <Partilhar ctx={ctx} d={d} tipo="proposta" estado={o.aceite ? `aceite ${o.aceite}` : o.enviada ? `enviada ${o.enviada} · à espera do cliente` : "ainda não enviada"}>
             <PropostaDoc S={S} d={d} />
           </Partilhar>
@@ -341,7 +343,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       ) } : g(PROPOSTA[0], FileSignature, !!o.enviada),
       ...(o.vendaDireta ? [] : [simples ? { ...g(PROPOSTA[1], FileSignature, !!o.contrato), corpo: (
         <div className="space-y-10">
-          <Campos grupo={PROPOSTA[1]} {...fx} ro={!!o.contrato} />
+          <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
           <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : o.aceite ? "pronto a enviar" : "depois de a proposta ser aceite"}>
             <ContratoDoc S={S} d={d} />
           </Partilhar>
@@ -360,11 +362,13 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
       g(OBRA[0], Hammer), g(OBRA[1], Check),
     ];
   }
+  // os grupos que a empresa escondeu não aparecem
+  passos = passos.filter((ps) => { const gr = [...LEAD, ...CONTACTO, EXTERIOR, INTERIOR, AREA, ESCOLHAS, ...PROPOSTA, ...FINANCEIRO, ...OBRA].find((x) => x.titulo === ps.id); return !gr || !E(gr).oculto; });
   // depois de tentar passar de fase: quantos campos faltam em cada passo
   const TODOS: Grupo[] = [...LEAD, ...CONTACTO, EXTERIOR, INTERIOR, AREA, ESCOLHAS, ...PROPOSTA, ...FINANCEIRO, ...OBRA];
   for (const ps of passos) {
     const gr = TODOS.find((x) => x.titulo === ps.id);
-    if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta([gr], d.f).length;
+    if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta([E(gr)], d.f).length;
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0)).length;
     if (ps.id === "nec" && aValidar(d, "nec") && !orcLinhas(d, S).length) ps.falta = 1;

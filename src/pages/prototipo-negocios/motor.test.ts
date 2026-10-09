@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { acoes, alertas, bloqueado, conflitos, protecoesSugeridas, seed, tot, type Negocio } from "./motor";
 import { totais } from "./DocsCliente";
+import { SETORES } from "./setores";
 import { RECEITAS, amortUn, consUn, custoAnoTecnico } from "./receitas";
-import { grupoVisita, AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
+import { efetivo, grupoVisita, AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
 
 // Preenche os obrigatórios que faltam (os condicionais podem aparecer depois de preencher outros).
 function preencher(d: Negocio, gs: Grupo[]) {
@@ -183,5 +184,25 @@ describe("protótipo de Negócios", () => {
     expect(T.ivaMo).toBeCloseTo(T.mo * 0.06, 2);
     expect(T.ivaMat).toBeCloseTo(T.mat * 0.23, 2);
     expect(T.total).toBeCloseTo(T.mo * 1.06 + T.mat * 1.23, 2);
+  });
+
+  it("cada empresa ajusta os campos: modelo de setor, campos novos e escondidos", () => {
+    const S = seed();
+    const A = acoes(S, () => {}, (fn) => fn());
+    S.campos = structuredClone(SETORES.find((x) => x.id === "solar")!.cfg);
+    expect(efetivo(S.campos, AREA).oculto).toBe(true);
+    const ext = efetivo(S.campos, EXTERIOR);
+    expect(ext.nome).toBe("O telhado");
+    expect(ext.campos.some((c) => c.k === "sol_telhado")).toBe(true);
+    expect(ext.campos.some((c) => c.k === "andar")).toBe(false);
+    // um negócio na Visita não passa sem os campos novos do setor
+    const d = S.deals.find((x) => x.id === 1035)!;
+    preencher(d, [INTERIOR, AREA, ESCOLHAS]);
+    A.fecharVisita(d.id);
+    expect(d.fase).toBe(2);
+    expect(emFalta([ext], d.f).map((c) => c.k)).toContain("sol_telhado");
+    preencher(d, [efetivo(S.campos, EXTERIOR), efetivo(S.campos, INTERIOR), efetivo(S.campos, ESCOLHAS)]);
+    A.fecharVisita(d.id);
+    expect(d.fase).toBe(3);
   });
 });

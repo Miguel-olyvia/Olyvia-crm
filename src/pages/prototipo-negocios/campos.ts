@@ -23,10 +23,14 @@ export interface Def {
   min?: number;
   max?: number;
   zero?: string;
+  /** Escolhido pela empresa no editor de campos (ganha à regra por defeito). */
+  obrigatorio?: boolean;
+  /** Campo criado pela empresa (pode apagar-se; os de sistema só se escondem). */
+  novo?: boolean;
   /** Sub-bloco dentro do grupo, com título próprio (para partir os formulários longos). */
   bloco?: string;
 }
-export interface Grupo { titulo: string; nota?: string; campos: Def[] }
+export interface Grupo { titulo: string; nota?: string; campos: Def[]; /** o nome que a empresa lhe deu */ nome?: string; oculto?: boolean }
 
 const SNS = ["Sim", "Não", "Não sei"];
 
@@ -257,7 +261,7 @@ export const PAPEL_ROT: Record<Papel, string> = {
 export const visivel = (c: Def, v: Record<string, string>) => !c.se || c.se.v.includes(v[c.se.k] || "");
 
 /** Obrigatório para passar de fase: tudo, menos o texto livre e o que está marcado como opcional. */
-export const obrigatorio = (c: Def) => !c.opcional && c.t !== "texto_longo";
+export const obrigatorio = (c: Def) => c.obrigatorio ?? (!c.opcional && c.t !== "texto_longo");
 
 /** Campos obrigatórios preenchidos e total (os condicionais só contam quando aparecem). */
 export function contagem(gs: Grupo[], v: Record<string, string>) {
@@ -296,4 +300,51 @@ export function grupoVisita(n: number): Grupo {
     titulo: `Visita ${n}`,
     campos: VISITA_BASE.map((c) => ({ ...c, k: p(c.k), se: c.se ? { k: p(c.se.k), v: c.se.v } : undefined })),
   };
+}
+
+/* ------------------------------------------------------------------ campos à medida da empresa */
+// Cada empresa ajusta os grupos de campos sem programar: nome, ordem, obrigatório,
+// opções, esconder, e campos novos. O que se guarda são só os ajustes; o grupo
+// de base continua a vir daqui, e o "titulo" é a chave estável (validação, etc.).
+export interface AjusteGrupo {
+  nome?: string;
+  oculto?: boolean;
+  ordem?: string[];
+  ocultos?: string[];
+  obrig?: Record<string, boolean>;
+  rotulos?: Record<string, string>;
+  opcoes?: Record<string, string[]>;
+  novos?: Def[];
+}
+export type CfgCampos = Record<string, AjusteGrupo>;
+
+/** Todos os campos de um grupo com os ajustes, incluindo os escondidos (para o editor). */
+export function camposAjustados(cfg: CfgCampos | undefined, g: Grupo): (Def & { escondido: boolean })[] {
+  const a = cfg?.[g.titulo] || {};
+  const todos = [...g.campos, ...(a.novos || [])];
+  const ordem = a.ordem || [];
+  const pos = (k: string) => { const i = ordem.indexOf(k); return i === -1 ? 1000 + todos.findIndex((c) => c.k === k) : i; };
+  return [...todos].sort((x, y) => pos(x.k) - pos(y.k)).map((c) => ({
+    ...c,
+    l: a.rotulos?.[c.k] ?? c.l,
+    op: a.opcoes?.[c.k] ?? c.op,
+    obrigatorio: a.obrig?.[c.k] ?? c.obrigatorio,
+    escondido: !!a.ocultos?.includes(c.k),
+  }));
+}
+
+/** O grupo como a empresa o usa: com os nomes, a ordem e os obrigatórios dela, sem os escondidos. */
+export function efetivo(cfg: CfgCampos | undefined, g: Grupo): Grupo {
+  const a = cfg?.[g.titulo];
+  if (!a) return g;
+  return { ...g, nome: a.nome || g.nome, oculto: a.oculto, campos: camposAjustados(cfg, g).filter((c) => !c.escondido).map(({ escondido: _e, ...c }) => c) };
+}
+export const nomeGrupo = (g: Grupo) => g.nome || g.titulo;
+
+/** Uma chave nova a partir do nome ("Tem garagem?" → "c_tem_garagem"), sem repetir. */
+export function chaveLivre(rotulo: string, usadas: string[]): string {
+  const base = "c_" + rotulo.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 30);
+  let k = base, i = 2;
+  while (usadas.includes(k)) k = `${base}_${i++}`;
+  return k;
 }
