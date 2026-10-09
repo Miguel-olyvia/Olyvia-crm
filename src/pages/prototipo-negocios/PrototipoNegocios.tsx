@@ -1,16 +1,20 @@
-// Protótipo de Negócios (08/10/2026): as 12 screens a funcionar com dados de
-// exemplo. Rota pública, fora do CRM: não usa a sessão nem a base de dados.
+// Protótipo de Negócios (08/10/2026, com o aspeto da Olyvia desde 09/10): as 12
+// screens a funcionar com dados de exemplo. Rota pública, fora do CRM: não usa a sessão nem a base de dados.
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
+import {
+  Bell, Building, Building2, ChevronDown, Handshake, LayoutTemplate, Megaphone, Package, Search, Settings, ShoppingCart, Sun, Wrench, type LucideIcon,
+} from "lucide-react";
+import mascote from "@/assets/olyvia-mascot.png";
+import { cn } from "@/lib/utils";
 import "./prototipo.css";
 import {
-  ESTR, FASES, LINHAS, PAPEIS, SLOTS, TECS, DIAS, VERSAO,
-  aberto, acoes, alertas, bloqueado, conflitos, custoUn, eur, fatorReal, linhaCalc, minhas, nfmt, partes, pct, proximo, r2, seed, tot,
-  type Aviso, type Estado, type LinhaId, type MedKey, type Negocio, type Papel, type SvcId, type Vista,
+  ESTR, FASES, LINHAS, PAPEIS, TECS, DIAS, VERSAO,
+  aberto, acoes, conflitos, custoUn, eur, minhas, nfmt, pct, proximo, seed, tot,
+  type Aviso, type Estado, type LinhaId, type Papel, type SvcId, type Vista,
 } from "./motor";
-import {
-  AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PAPEL_ROT, PROPOSTA,
-  contagem, visivel, type Def, type Grupo,
-} from "./campos";
+import { Hoje } from "./Hoje";
+import { PaginaNegocio } from "./PaginaNegocio";
+import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 
 const CHAVE = "olyvia-prototipo-negocios";
 
@@ -97,42 +101,85 @@ export default function PrototipoNegocios() {
   }
 
   const n = minhas(S, S.role).length;
-  const itens: [Vista, string, number?][] = [["hoje", "Hoje", n], ["negocios", "Negócios"], ["clientes", "Clientes"], ["operacoes", "Operações"], ["inventario", "Inventário"], ["catalogo", "Catálogo e custos"], ["marketing", "Marketing"]];
+  const itens: [Vista, string, LucideIcon, number?][] = [
+    ["hoje", "Hoje", Sun, n], ["negocios", "Negócios", Handshake], ["clientes", "Clientes", Building], ["operacoes", "Operações", Wrench],
+    ["inventario", "Inventário", ShoppingCart], ["catalogo", "Catálogo e custos", Package], ["marketing", "Marketing", Megaphone],
+  ];
   const cur = S.view === "negocio" ? "negocios" : S.view;
+  const antigo = !(S.view === "hoje" || (S.view === "negocio" && S.deals.some((d) => d.id === S.deal)));
+
+  const icone = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (
+    <button key={v} type="button" onClick={go(() => A.nav(v))} aria-label={l} aria-current={cur === v ? "page" : undefined}
+      className={cn("group relative flex w-full items-center justify-center rounded-xl p-3 transition-all duration-200",
+        cur === v ? "bg-primary text-primary-foreground shadow-md" : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground")}>
+      <Ic className="h-5 w-5" />
+      {c ? <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground">{c}</span> : null}
+      <span className="pointer-events-none absolute left-full ml-3 whitespace-nowrap rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100">{l}</span>
+    </button>
+  );
 
   return (
-    <div className="pn">
-      <div className="shell">
-        <nav className="side" aria-label="Menu">
-          <div className="logo">oly<em>v</em>ia</div>
-          {itens.map(([v, l, c]) => (
-            <button key={v} className={cur === v ? "on" : ""} onClick={go(() => A.nav(v))}>
-              {l}{c ? <small>{c}</small> : null}
-            </button>
-          ))}
-          <span className="sp" />
-          <button className={cur === "definicoes" ? "on" : ""} onClick={go(() => A.nav("definicoes"))}>Definições</button>
-          <a className="maq" href="/prototipo/maquetas.html" target="_blank" rel="noreferrer">Maquetas das 12 screens ↗</a>
-          <p className="proto">Protótipo com dados de exemplo. Nada é gravado na Olyvia.</p>
-        </nav>
-        <div className="right">
-          <div className="top">
-            <input
-              className="search" type="search" placeholder="Procurar negócio, cliente ou telefone" aria-label="Procurar"
-              value={q}
-              onChange={(e) => { setQ(e.target.value); if (S.view !== "negocios") run(() => { S.view = "negocios"; S.deal = null; }); }}
-            />
-            <div className="who">
-              <label htmlFor="pn-role">A ver como</label>
-              <select id="pn-role" value={S.role} onChange={(e) => run(() => A.role(e.target.value as Papel))}>
-                {(Object.keys(PAPEIS) as Papel[]).map((k) => <option key={k} value={k}>{PAPEIS[k].n}</option>)}
-              </select>
-              <span className="av">{PAPEIS[S.role].av}</span>
-            </div>
-          </div>
-          <main ref={mainRef}>{corpo}</main>
+    <div className="pn fixed inset-0 bg-background text-foreground">
+      {/* Barra de ícones, como a da Olyvia */}
+      <aside className="fixed left-0 top-0 z-[60] hidden h-screen w-16 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground shadow-lg md:flex">
+        <div className="flex shrink-0 items-center justify-center border-b border-sidebar-border px-2 py-2">
+          <img src={mascote} alt="Olyvia" className="h-10 w-10 object-contain" />
         </div>
-      </div>
+        <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Menu">{itens.map(([v, l, Ic, c]) => icone(v, l, Ic, c))}</nav>
+        <div className="flex flex-col gap-1 border-t border-sidebar-border p-2">
+          {icone("definicoes", "Definições", Settings)}
+          <a href="/prototipo/maquetas.html" target="_blank" rel="noreferrer" aria-label="Maquetas das 12 screens"
+            className="group relative flex items-center justify-center rounded-xl p-3 text-sidebar-foreground/80 transition hover:bg-sidebar-accent hover:text-sidebar-foreground">
+            <LayoutTemplate className="h-5 w-5" />
+            <span className="pointer-events-none absolute left-full ml-3 whitespace-nowrap rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100">Maquetas das 12 screens</span>
+          </a>
+        </div>
+      </aside>
+
+      {/* Cabeçalho escuro, como o da Olyvia */}
+      <header className="fixed left-0 right-0 top-0 z-50 flex h-14 items-center justify-between gap-3 border-b border-sidebar-border bg-sidebar px-3 text-sidebar-foreground sm:px-4 md:left-16">
+        <div className="flex min-w-0 items-center gap-2">
+          <img src={mascote} alt="" className="h-8 w-8 object-contain md:hidden" />
+          <span className="hidden items-center gap-2 rounded-lg bg-sidebar-accent px-3 py-1.5 text-sm font-medium sm:inline-flex"><Building2 className="h-4 w-4" />Mudelar<ChevronDown className="h-3.5 w-3.5 opacity-60" /></span>
+          <span className="hidden rounded-full bg-accent/90 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent-foreground lg:inline">Protótipo · dados de exemplo</span>
+        </div>
+        <div className="relative max-w-xl flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-sidebar-foreground/70" />
+          <input type="search" placeholder="Procurar negócio, cliente ou telefone" aria-label="Procurar" value={q}
+            onChange={(e) => { setQ(e.target.value); if (S.view !== "negocios") run(() => { S.view = "negocios"; S.deal = null; }); }}
+            className="h-9 w-full rounded-md border-none bg-sidebar-accent pl-10 pr-3 text-sm text-sidebar-foreground outline-none placeholder:text-sidebar-foreground/50 focus-visible:ring-1 focus-visible:ring-sidebar-ring" />
+        </div>
+        <div className="flex items-center gap-2">
+          <label htmlFor="pn-role" className="hidden text-xs text-sidebar-foreground/70 lg:inline">A ver como</label>
+          <select id="pn-role" value={S.role} onChange={(e) => run(() => A.role(e.target.value as Papel))}
+            className="h-9 max-w-[150px] rounded-md border-none bg-sidebar-accent px-2 text-sm text-sidebar-foreground outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring sm:max-w-none">
+            {(Object.keys(PAPEIS) as Papel[]).map((k) => <option key={k} value={k} className="text-foreground">{PAPEIS[k].n}</option>)}
+          </select>
+          <button type="button" onClick={go(() => A.nav("hoje"))} aria-label="Alertas" className="relative hidden rounded-md p-2 transition hover:bg-sidebar-accent sm:block">
+            <Bell className="h-5 w-5" />
+            {n > 0 && <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">{n}</span>}
+          </button>
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-primary to-accent text-[11px] font-bold text-white">{PAPEIS[S.role].av}</span>
+        </div>
+      </header>
+
+      <main ref={mainRef} className="fixed bottom-14 left-0 right-0 top-14 overflow-auto bg-background md:bottom-0 md:left-16">
+        <div key={S.view + ":" + (S.deal || "")} className="animate-in fade-in-0 duration-300">
+          {antigo ? <div className="pg page mx-auto w-full max-w-7xl px-4 pb-10 pt-6 sm:px-6">{corpo}</div> : corpo}
+        </div>
+      </main>
+
+      {/* No telemóvel, os ícones vão para baixo */}
+      <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-14 items-center justify-around border-t border-sidebar-border bg-sidebar px-1 md:hidden" aria-label="Menu">
+        {itens.slice(0, 5).map(([v, l, Ic, c]) => (
+          <button key={v} type="button" onClick={go(() => A.nav(v))} aria-label={l}
+            className={cn("relative grid place-items-center rounded-xl p-2.5 transition", cur === v ? "bg-primary text-primary-foreground" : "text-sidebar-foreground/80")}>
+            <Ic className="h-5 w-5" />
+            {c ? <span className="absolute -right-0.5 -top-0.5 grid h-4 min-w-4 place-items-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground">{c}</span> : null}
+          </button>
+        ))}
+      </nav>
+
       <div className="toasts" aria-live="polite">
         {toasts.map((t) => (
           <div key={t.id} className={"toast " + (t.kind || "")} role="status">
@@ -144,88 +191,6 @@ export default function PrototipoNegocios() {
       </div>
     </div>
   );
-}
-
-interface Ctx {
-  S: Estado;
-  A: ReturnType<typeof acoes>;
-  run: (fn: () => void) => void;
-  go: (fn: () => void) => () => void;
-  q: string;
-  repor: () => void;
-}
-
-/* ------------------------------------------------------------------ peças */
-function Btn({ children, onClick, cls = "", disabled }: { children: ReactNode; onClick?: () => void; cls?: string; disabled?: boolean }) {
-  return <button className={"btn " + cls} onClick={onClick} disabled={disabled}>{children}</button>;
-}
-
-// Campo que grava ao sair (ou com Enter), como o "change" do protótipo.
-function Campo({ id, value, onCommit, readOnly, placeholder, className, type, ariaLabel, min, step }: {
-  id: string; value: string | number; onCommit: (v: string) => void; readOnly?: boolean; placeholder?: string; className?: string; type?: string; ariaLabel?: string; min?: string; step?: string;
-}) {
-  return (
-    <input
-      key={id + ":" + value}
-      id={id} defaultValue={value} readOnly={readOnly} placeholder={placeholder} className={className} type={type} aria-label={ariaLabel} min={min} step={step}
-      onBlur={(e) => { if (!readOnly && e.target.value !== String(value)) onCommit(e.target.value); }}
-      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
-    />
-  );
-}
-const numero = (v: string) => parseFloat(String(v).replace(",", "."));
-
-function Banner({ A, go, texto }: { A: Ctx["A"]; go: Ctx["go"]; texto: string }) {
-  return (
-    <div className="banner">
-      <b>Como experimentar:</b> abra a <button className="link" onClick={go(() => A.abrir(1043))}>Ana Martins</button> {texto}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ Hoje */
-function Hoje({ S, A, go }: Ctx) {
-  const r = S.role, L = minhas(S, r);
-  const ab = aberto(S);
-  const emProp = ab.filter((d) => d.fase === 3 && d.orc);
-  const val = emProp.reduce((a, d) => a + tot(d, S).pf, 0);
-  const mm = emProp.length ? emProp.reduce((a, d) => a + tot(d, S).m, 0) / emProp.length : 0;
-  return (
-    <>
-      <div className="row">
-        <div><h1 className="h1">Bom dia, {PAPEIS[r].nome}</h1><div className="sub">{PAPEIS[r].n} · quinta, 08/10</div></div>
-        {L.length ? <span className="pill warn">{L.length} por tratar</span> : <span className="pill ok">Tudo em dia</span>}
-      </div>
-      {r === "direcao" && (
-        <div className="kpis">
-          <div className="kpi"><span>Negócios abertos</span><b>{ab.length}</b></div>
-          <div className="kpi"><span>Em fase Negócio</span><b>{eur(val)} €</b></div>
-          <div className="kpi"><span>Margem média prevista</span><b>{pct(mm)}</b></div>
-          <div className="kpi"><span>Obras em curso</span><b>{ab.filter((d) => d.fase === 5 && d.obra.plano && d.obra.plano.estado === "em curso").length}</b></div>
-        </div>
-      )}
-      <Banner A={A} go={go} texto={'e siga o botão do próximo passo. Alguns passos são de outros papéis: mude em "A ver como", no canto de cima.'} />
-      <div className="card">
-        <h3>O que tenho para fazer <span>{L.length}</span></h3>
-        {L.length ? L.map(({ d, p, dir }) => (
-          <div className="item" key={d.id}>
-            <div className="t" onClick={go(() => A.abrir(d.id))}>
-              <b>{d.nome} · {d.servico}</b><small>{p.t}{p.sub ? " · " + p.sub : ""}</small>
-            </div>
-            {dir ? (
-              <div className="row"><Btn cls="sec sm" onClick={go(() => A.recusarAprov(d.id))}>Recusar</Btn><Btn cls="sm" onClick={go(() => A.aprovar(d.id))}>Aprovar</Btn></div>
-            ) : p.btn ? <Btn cls="sm" onClick={go(() => fazer(A, p.act!, d.id))}>{p.btn}</Btn> : null}
-          </div>
-        )) : <p className="empty">Nada por tratar. Mude de papel em cima para ver o trabalho dos outros.</p>}
-      </div>
-    </>
-  );
-}
-
-// Os botões de "próximo passo" chamam a ação pelo nome.
-function fazer(A: Ctx["A"], act: string, id: number) {
-  const f = (A as unknown as Record<string, (id: number) => void>)[act];
-  if (f) f(id);
 }
 
 /* ------------------------------------------------------------------ Negócios */
@@ -298,503 +263,6 @@ function NovoCartao({ S, A, run }: Pick<Ctx, "S" | "A" | "run">) {
       {S.novo!.err && <span className="err">{S.novo!.err}</span>}
       <div className="row"><Btn cls="sec sm" onClick={() => run(() => A.novoCancel())}>Cancelar</Btn><Btn cls="sm" onClick={criar}>Criar</Btn></div>
     </div>
-  );
-}
-
-/* ------------------------------------------------------------------ página do negócio */
-function Secao({ S, d, i, titulo, dir, children }: { S: Estado; d: Negocio; i: number; titulo: string; dir?: string; children?: ReactNode }) {
-  const st = d.fase > i ? "dn" : d.fase === i ? "cur" : "off";
-  const pulse = S.pulse === "sec-" + i ? " pulse" : "";
-  return (
-    <section className={"sec " + (st === "cur" ? "cur" : st === "off" ? "off" : "") + pulse} id={"sec-" + i}>
-      <header>{st === "dn" && <span className="ck">✓</span>}{titulo}<span className="r">{dir || ""}</span></header>
-      {st !== "off" && <div className="in">{children}</div>}
-    </section>
-  );
-}
-
-/* ------------------------------------------------------------------ campos das fases */
-// Fase atual: campos abertos. Fases feitas: fechados num "ver os campos".
-function Fecha({ aberta, n, children }: { aberta?: boolean; n: string; children: ReactNode }) {
-  if (aberta) return <>{children}</>;
-  return <details className="fxd"><summary>Ver os campos · {n}</summary><div className="fxin">{children}</div></details>;
-}
-
-function mostra(c: Def, v: string): string {
-  if (!v) return "—";
-  if (c.t === "data") { const [y, m, dd] = v.split("-"); return dd ? `${dd}/${m}/${y}` : v; }
-  if (c.t === "numero") return v.replace(".", ",") + (c.un ? " " + c.un : "");
-  return v;
-}
-
-type FxProps = { d: Negocio; A: Ctx["A"]; run: Ctx["run"]; ro: boolean };
-
-function Ficha({ grupos, ...p }: FxProps & { grupos: Grupo[] }) {
-  return (
-    <>
-      {grupos.map((g, gi) => {
-        const c = contagem([g], p.d.f);
-        return (
-          <div className="fx" key={g.titulo || gi}>
-            {g.titulo && <h4>{g.titulo}<span>{c.f} de {c.n}</span></h4>}
-            {g.nota && <p className="sub">{g.nota}</p>}
-            <div className="form3">{g.campos.filter((x) => visivel(x, p.d.f)).map((x) => <CampoFicha key={x.k} c={x} {...p} />)}</div>
-          </div>
-        );
-      })}
-    </>
-  );
-}
-
-function CampoFicha({ c, d, A, run, ro }: FxProps & { c: Def }) {
-  const val = d.f[c.k] || "";
-  const id = `fx-${c.k}-${d.id}`;
-  const set = (x: string) => run(() => A.campo(d.id, c.k, x));
-  const tag = c.papel ? <i className={"tg " + c.papel} title={PAPEL_ROT[c.papel]} aria-label={PAPEL_ROT[c.papel]} /> : null;
-  const cls = "f" + (c.t === "texto_longo" ? " full" : "");
-  if (ro) return <div className={cls}><span>{c.l}{tag}</span><b className="vv">{mostra(c, val)}</b></div>;
-  if (c.t === "sim_nao" || c.t === "escolha") {
-    const op = c.t === "sim_nao" ? ["Sim", "Não"] : c.op!;
-    if (op.length <= 3 && op.join("").length <= 28) return (
-      <div className={cls}>
-        <span>{c.l}{tag}</span>
-        <div className="seg" role="group" aria-label={c.l}>
-          {op.map((x) => <button key={x} className={val === x ? "on" : ""} aria-pressed={val === x} onClick={() => set(val === x ? "" : x)}>{x}</button>)}
-        </div>
-        {c.ajuda && <small className="aj">{c.ajuda}</small>}
-      </div>
-    );
-    return (
-      <div className={cls}>
-        <label htmlFor={id}>{c.l}{tag}</label>
-        <select id={id} value={val} onChange={(e) => set(e.target.value)}><option value="">—</option>{op.map((x) => <option key={x}>{x}</option>)}</select>
-        {c.ajuda && <small className="aj">{c.ajuda}</small>}
-      </div>
-    );
-  }
-  let ctl: ReactNode;
-  if (c.t === "numero") ctl = <span className="un"><Campo id={id} type="number" min="0" step="any" value={val} onCommit={set} />{c.un && <em>{c.un}</em>}</span>;
-  else if (c.t === "data") ctl = <input id={id} type="date" value={val} onChange={(e) => set(e.target.value)} />;
-  else if (c.t === "texto_longo") ctl = <textarea key={id + val} id={id} rows={2} defaultValue={val} placeholder={c.ph} onBlur={(e) => { if (e.target.value !== val) set(e.target.value); }} />;
-  else ctl = <Campo id={id} value={val} placeholder={c.ph} onCommit={set} />;
-  return <div className={cls}><label htmlFor={id}>{c.l}{tag}</label>{ctl}{c.ajuda && <small className="aj">{c.ajuda}</small>}</div>;
-}
-
-function Legenda() {
-  return <div className="legend">{(Object.keys(PAPEL_ROT) as (keyof typeof PAPEL_ROT)[]).map((k) => <span key={k}><i className={"tg " + k} />{PAPEL_ROT[k]}</span>)}</div>;
-}
-
-// Os serviços que vão para o orçamento, tirados da visita.
-function orcLinhas(d: Negocio, S: Estado): SvcId[] {
-  const L = LINHAS[d.linha], v = d.visita;
-  return [
-    ...L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).map(([sid]) => sid),
-    ...L.extras.filter((sid) => (v.extra[sid] || 0) > 0 && !!S.svc[sid]),
-  ];
-}
-
-// Necessidades: os serviços do Catálogo que a obra leva, com a quantidade.
-function Necessidades({ S, A, go, run, d }: Ctx & { d: Negocio }) {
-  const L = LINHAS[d.linha], v = d.visita, ro = v.fechada;
-  const sugestao = (sid: SvcId) => sid === "eletr" ? Number(d.f.diag_pontos_eletricos) || 2 : v.med.pav || 1;
-  let total = 0;
-  const linha = (sid: SvcId, q: number, on: boolean, origem: ReactNode, toggle: () => void, extra: boolean) => {
-    const s = S.svc[sid];
-    if (on) total += q * s.preco;
-    return (
-      <tr key={sid} className={on ? "" : "offr"}>
-        <td style={{ width: 34 }}><button className={"tick " + (on ? "on" : "")} aria-pressed={on} aria-label={s.n} disabled={ro} onClick={toggle}>✓</button></td>
-        <td>{s.n}<small>{s.perfil} · {nfmt(s.h)} h/{s.un} na receita</small></td>
-        <td>{extra && on && !ro
-          ? <><Campo id={`ex-${sid}-${d.id}`} ariaLabel={"Quantidade de " + s.n} value={nfmt(q)} onCommit={(x) => run(() => { const n = numero(x); A.extra(d.id, sid, isNaN(n) ? 0 : Math.max(0, n)); })} /> {s.un}</>
-          : on ? <>{nfmt(q)} {s.un}</> : <span className="sub">—</span>}
-          <small>{origem}</small></td>
-        <td className="n">{eur(s.preco)} €/{s.un}</td>
-        <td className="n">{on ? eur(q * s.preco) + " €" : ""}</td>
-      </tr>
-    );
-  };
-  const rows = [
-    ...L.map.map(([sid, k]) => {
-      const q = v.med[k] || 0, on = q > 0 && !v.off.includes(sid);
-      return linha(sid, q, on, q > 0 ? "das medidas · " + L.med[k]!.replace(/ \(.*\)/, "").toLowerCase() : "falta a medida", () => run(() => A.servico(d.id, sid)), false);
-    }),
-    ...L.extras.map((sid) => {
-      const q = v.extra[sid] || 0;
-      return linha(sid, q, q > 0, "juntado na visita", () => run(() => A.extra(d.id, sid, q > 0 ? 0 : sugestao(sid))), true);
-    }),
-  ];
-  return (
-    <div className="fx">
-      <h4>Necessidades · serviços do Catálogo <span>{orcLinhas(d, S).length} serviços · {eur(total)} € a preço de tabela</span></h4>
-      <div className="tw"><table style={{ minWidth: 560 }}>
-        <thead><tr><th /><th>Serviço</th><th>Quantidade</th><th className="n">Preço de tabela</th><th className="n">Total</th></tr></thead>
-        <tbody>{rows}</tbody>
-      </table></div>
-      <div className="row">
-        <span className="sub">Cada serviço traz a sua receita do Catálogo: mão de obra, equipamentos e consumíveis. Os materiais (louças, cerâmico) entram pelo modelo "{L.modelo}".</span>
-        <Btn cls="sec sm" onClick={go(() => A.nav("catalogo"))}>Abrir Catálogo</Btn>
-      </div>
-    </div>
-  );
-}
-
-function PaginaNegocio(ctx: Ctx) {
-  const { S, A, go, run } = ctx;
-  const d = S.deals.find((x) => x.id === S.deal)!;
-  const p = proximo(d, S), L = LINHAS[d.linha], r = S.role, o = d.orc;
-  const meu = !!p.who && p.who === r;
-  const T = o ? tot(d, S) : null;
-
-  let nextBtn: ReactNode = null;
-  if (p.btn) nextBtn = meu
-    ? <Btn cls="big" onClick={go(() => fazer(A, p.act!, d.id))}>{p.btn}</Btn>
-    : (
-      <div style={{ display: "grid", gap: 4, justifyItems: "end" }}>
-        <Btn cls="big" disabled>{p.btn}</Btn>
-        <button className="link" onClick={go(() => A.role(p.who as Papel))}>Mudar para {PAPEIS[p.who as Papel].n}</button>
-      </div>
-    );
-  if (p.sim) nextBtn = (
-    <div className="row">
-      <span className="sub">Simular o cliente:</span>
-      {p.sim === "aceitar"
-        ? <><Btn cls="sec" onClick={go(() => A.recusar(d.id))}>Recusou</Btn><Btn onClick={go(() => A.aceitar(d.id))}>Aceitou</Btn></>
-        : <Btn onClick={go(() => A.assinar(d.id))}>Assinou</Btn>}
-    </div>
-  );
-  if (p.wait && p.who === "direcao") nextBtn = <button className="link" onClick={go(() => A.role("direcao"))}>Mudar para Direção</button>;
-
-  const v = d.visita, vro = v.fechada;
-  const fx = { d, A, run };
-  const conta = (gs: Grupo[]) => { const c = contagem(gs, d.f); return `${c.f} de ${c.n} campos`; };
-  const VISITA = [EXTERIOR, INTERIOR, AREA, ESCOLHAS];
-  const contrato = o && o.vendaDireta ? [] : PROPOSTA.slice(1);
-  const cli = S.clientes.find((c) => c.deal === d.id);
-
-  return (
-    <>
-      <button className="back" onClick={go(() => A.nav("negocios"))}>← Negócios</button>
-      <div className="dhead">
-        <div className="row">
-          <div>
-            <h1 className="h1">{d.servico}{d.local ? " · " + d.local.split(",").pop()!.trim() : ""}</h1>
-            <div className="sub">{d.nome} · {d.tel} · linha: {L.n} · comercial: Rúben</div>
-          </div>
-          <div className="row">
-            {T && <span className="pill pri">{eur(T.pf)} € · margem {pct(T.m)}</span>}
-            {d.fase < 4 && !d.perdido && <Btn cls="sec sm" onClick={go(() => A.perder(d.id))}>Marcar perdido</Btn>}
-          </div>
-        </div>
-        {S.confirmPerda === d.id && (
-          <div className="confirm">
-            <b>Marcar como perdido?</b><span>Sai do quadro, mas fica no histórico.</span>
-            <Btn cls="sec sm" onClick={go(() => A.perderNao())}>Cancelar</Btn><Btn cls="bad sm" onClick={go(() => A.perderSim(d.id))}>Marcar perdido</Btn>
-          </div>
-        )}
-        <div className="phz">
-          {FASES.map((f, i) => (
-            <button key={f} className={d.fase > i ? "d" : d.fase === i ? "on" : ""} onClick={() => document.getElementById("sec-" + i)?.scrollIntoView({ behavior: "smooth", block: "start" })}>{f}</button>
-          ))}
-        </div>
-      </div>
-      <div className={"next " + (p.done ? "done" : "")}>
-        <div>
-          <small>{p.done ? "Concluído" : "Próximo passo"}{p.who && p.who !== "cliente" && !p.done ? " · " + PAPEIS[p.who].n.split("·").pop()!.trim() : ""}</small>
-          <b>{p.t}</b><span className="sub">{p.sub || ""}</span>
-        </div>
-        {nextBtn}
-      </div>
-      <div className="withside">
-        <div className="stack">
-          <Secao S={S} d={d} i={0} titulo="Lead" dir={`${d.origem} · ${d.quando} · ${conta(LEAD)}`}>
-            <Fecha aberta={d.fase <= 1} n={conta(LEAD)}>
-              <div className="fx">
-                <h4>Quem pede</h4>
-                <div className="form3">
-                  <div className="f"><label htmlFor={`ld-nome-${d.id}`}>Nome</label><Campo id={`ld-nome-${d.id}`} value={d.nome} readOnly={d.fase > 1} onCommit={(x) => run(() => { if (x.trim()) d.nome = x.trim(); })} /></div>
-                  <div className="f"><label htmlFor={`ld-tel-${d.id}`}>Telefone</label><Campo id={`ld-tel-${d.id}`} value={d.tel} readOnly={d.fase > 1} onCommit={(x) => run(() => { if (x.trim()) d.tel = x.trim(); })} /></div>
-                  <div className="f"><span>Linha de serviço</span><b className="vv">{L.n}</b></div>
-                </div>
-              </div>
-              <Ficha {...fx} grupos={LEAD} ro={d.fase > 1} />
-            </Fecha>
-          </Secao>
-          <Secao S={S} d={d} i={1} titulo="Contacto" dir={(d.fase > 1 && v.slot ? "visita marcada · " : d.fase === 1 ? "em curso · " : "") + conta(CONTACTO)}>
-            <Fecha aberta={d.fase === 1} n={conta(CONTACTO)}>
-              <Ficha {...fx} grupos={CONTACTO} ro={d.fase > 1} />
-            </Fecha>
-            {d.fase === 1 && (
-              <div className="f">Vagas do Rúben em {d.f.localidade || (d.local || "").split(",").pop() || "—"}
-                <div className="slots">{SLOTS.map((s) => <button key={s} className="chip" onClick={go(() => A.marcarVisita(d.id, s))}>{s}</button>)}</div>
-              </div>
-            )}
-            {d.fase === 1 && <span className="sub">Grava sozinho ao sair do campo. Os campos são todos opcionais por agora.</span>}
-          </Secao>
-          <Secao S={S} d={d} i={2} titulo="Visita" dir={(v.slot ? v.slot + " · " : "") + conta(VISITA)}>
-            <Fecha aberta={!vro} n={conta(VISITA) + " · " + (orcLinhas(d, S).length) + " serviços"}>
-              <Legenda />
-              <Ficha {...fx} grupos={[EXTERIOR, INTERIOR]} ro={vro} />
-              <Ficha {...fx} grupos={[AREA]} ro={vro} />
-              <div className="fx">
-                <h4>Medidas da área <span>dão as quantidades dos serviços</span></h4>
-                <div className="form4">
-                  {(Object.entries(L.med) as [MedKey, string][]).map(([k, l]) => (
-                    <div className="f" key={k}>
-                      <label htmlFor={`med-${k}-${d.id}`}>{l}</label>
-                      <Campo id={`med-${k}-${d.id}`} className="num" type="number" min="0" step="0.5" value={v.med[k] || ""} readOnly={vro}
-                        onCommit={(x) => run(() => { const n = numero(x); v.med[k] = isNaN(n) ? 0 : n; })} />
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <Necessidades {...ctx} d={d} />
-              <div className="fx">
-                <h4>Equipamentos pedidos</h4>
-                <div className="chips">{L.nec.map((x) => <button key={x} className={"chip " + (v.nec.includes(x) ? "on" : "")} disabled={vro} onClick={go(() => A.nec(d.id, x))}>{x}</button>)}</div>
-              </div>
-              <Ficha {...fx} grupos={[ESCOLHAS]} ro={vro} />
-              <div className="fx">
-                <h4>Fotografias</h4>
-                <div className="row">
-                  <span className="sub">{v.fotos} fotos da área{vro ? "" : " · no telemóvel tira-se com a câmara, antes de sentar com o cliente"}</span>
-                  {!vro && <Btn cls="sec sm" onClick={go(() => A.foto(d.id))}>+ Foto</Btn>}
-                </div>
-                <Ficha {...fx} grupos={[{ titulo: "", campos: [{ k: "diag_cliente_recusou_fotos", l: "O cliente não quis fotografias", t: "sim_nao" }] }]} ro={vro} />
-              </div>
-            </Fecha>
-            {!vro && d.fase === 2 && <span className="sub">Ao fechar o levantamento, o orçamento nasce com estes serviços e quantidades, e os custos vêm do Catálogo.</span>}
-          </Secao>
-          <Secao S={S} d={d} i={3} titulo="Negócio" dir={o ? (o.enviada ? "proposta enviada" : "orçamento, proposta e contrato") : "orçamento, proposta e contrato"}>
-            {o && <Orcamento {...ctx} d={d} />}
-            {o && (
-              <Fecha aberta={d.fase === 3} n={conta([PROPOSTA[0], ...contrato])}>
-                <Ficha {...fx} grupos={[PROPOSTA[0]]} ro={!!o.enviada} />
-                <Ficha {...fx} grupos={contrato} ro={!!o.contrato} />
-              </Fecha>
-            )}
-          </Secao>
-          <Secao S={S} d={d} i={4} titulo="Financeiro" dir={"fatura e recibo · " + conta(FINANCEIRO)}>
-            <div className="withside">
-              <div className="tw"><table><thead><tr><th>Documento</th><th>Estado</th><th className="n">Valor s/ IVA</th></tr></thead><tbody>
-                <tr>
-                  <td>{d.fin.fatura ? d.fin.fatura.n : "Fatura"}<small>{d.fin.fatura ? "emitida " + d.fin.fatura.q + " · enviada ao portal do cliente" : "por emitir · só o Financeiro emite"}</small></td>
-                  <td>{d.fin.pago ? <span className="pill ok">Paga</span> : d.fin.fatura ? <span className="pill warn">Por pagar</span> : <span className="pill mut">Por emitir</span>}</td>
-                  <td className="n">{T ? eur(T.pf) : ""}</td>
-                </tr>
-                <tr>
-                  <td>{d.fin.recibo ? d.fin.recibo.n : "Recibo"}<small>{d.fin.recibo ? "emitido " + d.fin.recibo.q : "emitido ao validar o pagamento"}</small></td>
-                  <td>{d.fin.recibo ? <span className="pill ok">Emitido</span> : <span className="pill mut">Ainda não</span>}</td>
-                  <td className="n" />
-                </tr>
-              </tbody></table></div>
-              <div className="card">
-                <h3>Ao emitir o recibo</h3>
-                <div className="trig">
-                  <div><i className={d.fin.recibo ? "on" : ""}>1</i><span><b>Inventário</b><small>confirma os materiais e cria a encomenda ao fornecedor, se faltar algo</small></span></div>
-                  <div><i className={d.fin.recibo ? "on" : ""}>2</i><span><b>Operações</b><small>gera o plano da obra com os técnicos do RH</small></span></div>
-                  <div><i className={d.fin.recibo ? "on" : ""}>3</i><span><b>Cliente</b><small>recebe o recibo no portal</small></span></div>
-                </div>
-                <span className="sub">Por agora a validação é interna. Quando o portal aceitar pagamentos, passa a ser automática.</span>
-              </div>
-            </div>
-            <Fecha aberta={d.fase === 4} n={conta(FINANCEIRO)}>
-              <Ficha {...fx} grupos={FINANCEIRO} ro={d.fase !== 4} />
-            </Fecha>
-          </Secao>
-          <Secao S={S} d={d} i={5} titulo="Obra" dir={d.fase === 5 ? d.obra.plano!.estado + " · " + conta(OBRA) : ""}>
-            {d.fase === 5 && <ObraResumo {...ctx} d={d} />}
-            {d.fase === 5 && (
-              <Fecha aberta n={conta(OBRA)}>
-                <Ficha {...fx} grupos={OBRA} ro={false} />
-              </Fecha>
-            )}
-          </Secao>
-        </div>
-        <div className="stack">
-          <div className="card">
-            <h3>Cliente {cli && <span className="pill ok">em Clientes</span>}</h3>
-            <div className="kv">
-              <span>Nome</span><b>{d.nome}</b><span>Telefone</span><b>{d.tel}</b>
-              {d.f.email && <><span>Email</span><b style={{ fontWeight: 500 }}>{d.f.email}</b></>}
-              <span>Morada da obra</span><b style={{ fontWeight: 500 }}>{d.f.morada ? `${d.f.morada}, ${d.f.localidade || ""}` : d.local || "—"}</b>
-              {d.f.imovel && <><span>Imóvel</span><b style={{ fontWeight: 500 }}>{d.f.imovel}{d.f.tipologia ? " " + d.f.tipologia : ""}</b></>}
-              <span>Origem</span><b style={{ fontWeight: 500 }}>{d.f.origem || d.origem}</b>
-              {d.f.pref && <><span>Contactar por</span><b style={{ fontWeight: 500 }}>{d.f.pref}{d.f.hora ? " · " + d.f.hora.toLowerCase() : ""}</b></>}
-            </div>
-          </div>
-          <div className="card">
-            <h3>Histórico <span>{d.hist.length}</span></h3>
-            <div className="tl">
-              {d.hist.map((h, i) => (
-                <div key={i}><i className={h.k === "x" ? "x" : h.k === "w" ? "w" : h.t.startsWith("Passou") ? "a" : ""} /><span>{h.t}<small>{h.q}</small></span></div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function Orcamento({ S, A, go, run, d }: Ctx & { d: Negocio }) {
-  const o = d.orc!, T = tot(d, S), locked = !!o.enviada;
-  const pt = partes(d, S), mw = Math.max(0, Math.min(1, T.m / 0.5));
-  const mcls = T.m < S.cfg.min / 100 ? "bad" : T.m < S.cfg.alvo / 100 - 0.005 ? "warn" : "ok";
-  const mudou = () => { d.orc!.aprov = null; d.fresh = false; };
-  const AL = o.verif && !locked ? alertas(d, S) : [];
-  const nX = AL.filter((a) => a.k === "x").length, nW = AL.filter((a) => a.k === "w").length;
-  const okLinhas = ["Nenhuma linha abaixo do custo", "Todas as linhas têm custo no Catálogo"].filter((_, i) => !AL.some((a) => (i === 0 ? a.t.startsWith("Preço abaixo") : false)));
-
-  return (
-    <>
-      <div className="row">
-        <span className="sub">Orçamento v1 · modelo "{o.modelo}" · medidas da visita</span>
-        <label className="row" style={{ gap: 6, fontSize: 12.5 }}>
-          <input type="checkbox" checked={o.vendaDireta} disabled={locked}
-            onChange={(e) => { const val = e.target.checked; run(() => A.vendaDireta(d.id, val)); }} />
-          {" "}Venda direta (sem contrato)
-        </label>
-      </div>
-      <div className="withside">
-        <div className="stack">
-          <div className="tw"><table style={{ minWidth: 560 }}>
-            <thead><tr><th>Serviço</th><th>Medida</th><th className="n">Custo</th><th className="n">Preço/un.</th><th className="n">Margem</th></tr></thead>
-            <tbody>
-              {o.linhas.map((l, i) => {
-                const x = linhaCalc(l, S);
-                const m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
-                const cls = m < S.cfg.min / 100 ? "bad" : m < S.cfg.alvo / 100 - 0.005 ? "warn" : "ok";
-                if (l.t === "mat") return (
-                  <tr key={i}><td>Materiais<small>{l.d} · do modelo</small></td><td className="sub">—</td><td className="n">{eur(x.custo)}</td><td className="n">{eur(x.preco)}</td><td className="n"><span className={"pill " + cls}>{pct(m)}</span></td></tr>
-                );
-                const s = x.s!, novo = r2(custoUn(s, S));
-                const mud = !locked && Math.abs(novo - l.cu) > 0.004;
-                return (
-                  <tr key={i} className={cls === "bad" ? "hl" : ""}>
-                    <td>{s.n}<small>custo {eur(l.cu)} €/{s.un} do Catálogo{mud && <> · <button className="link" onClick={go(() => A.recalc(d.id, i))}>Catálogo mudou: usar {eur(novo)}</button></>}</small></td>
-                    <td><Campo id={`lq-${d.id}-${i}`} ariaLabel="Medida" value={nfmt(l.q)} readOnly={locked} onCommit={(v) => run(() => { const n = numero(v); if (!isNaN(n) && n >= 0) { l.q = n; mudou(); } })} /> {s.un}</td>
-                    <td className="n">{eur(x.custo)}</td>
-                    <td className="n"><Campo id={`lp-${d.id}-${i}`} ariaLabel="Preço unitário" value={eur(l.pu)} readOnly={locked}
-                      onCommit={(v) => run(() => { const n = numero(v.replace(/\./g, "")); if (!isNaN(n) && n >= 0) { l.pu = n; mudou(); } })} /><small>{eur(x.preco)} €</small></td>
-                    <td className="n"><span className={"pill " + cls}>{pct(m)}</span></td>
-                  </tr>
-                );
-              })}
-              <tr>
-                <td colSpan={3}>Desconto</td>
-                <td className="n"><Campo id={`desc-${d.id}`} ariaLabel="Desconto em percentagem" value={nfmt(o.desconto)} readOnly={locked}
-                  onCommit={(v) => run(() => { const n = numero(v); o.desconto = isNaN(n) ? 0 : Math.max(0, Math.min(50, n)); mudou(); })} /> %</td>
-                <td />
-              </tr>
-              <tr className="sum"><td>Total sem IVA</td><td>{nfmt(T.h)} h</td><td className="n">{eur(T.custo)}</td><td className="n">{eur(T.pf)}</td><td className="n">{pct(T.m)}</td></tr>
-            </tbody>
-          </table></div>
-          {o.verif && !locked && (
-            <div className={"card " + (S.pulse === "verif" ? "sec pulse" : "")} id="verif" style={{ borderColor: "var(--pri-line)" }}>
-              <h3>Verificar antes de enviar <span>{nX} bloqueio(s) · {nW} aviso(s)</span></h3>
-              <div className="al">
-                {AL.map((a, k) => (
-                  <div key={k} className={a.k}>
-                    <i>!</i><span><b>{a.t}</b><small>{a.d}</small></span>
-                    <span className="acts">
-                      {a.sug != null && <Btn cls="sm" onClick={go(() => A.sugerido(d.id, a.i!, a.sug!))}>Usar {eur(a.sug)} €</Btn>}
-                      {a.go && <Btn cls="sec sm" onClick={go(() => A.nav(a.go!))}>Abrir Catálogo</Btn>}
-                      {a.key && <Btn cls="sec sm" onClick={go(() => A.vistoAviso(d.id, a.key!))}>Visto</Btn>}
-                    </span>
-                  </div>
-                ))}
-                {okLinhas.map((t) => <div key={t} className="o"><i>✓</i><span><b>{t}</b></span><span /></div>)}
-              </div>
-              {bloqueado(d, S) && AL.filter((a) => a.k === "x").every((a) => a.aprov) && (
-                o.aprov === "pedida"
-                  ? <div className="note">Pedido de aprovação enviado à Direção. Fica registado quem aprovou.</div>
-                  : <div className="row"><span className="sub">Quer mesmo enviar assim? É preciso aprovação.</span><Btn cls="sec sm" onClick={go(() => A.pedirAprov(d.id))}>Pedir aprovação à Direção</Btn></div>
-              )}
-              {o.aprov === "ok" && <div className="note" style={{ background: "var(--ok-bg)", color: "var(--ok)" }}>Exceção aprovada pela Direção.</div>}
-            </div>
-          )}
-          {locked && (
-            <div className="kv">
-              <span>Proposta</span><b>enviada {o.enviada}{o.aceite ? " · aceite " + o.aceite : ""}</b>
-              {o.vendaDireta
-                ? <><span>Contrato</span><b>venda direta, não há</b></>
-                : <><span>Contrato</span><b>{o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "enviado, à espera da assinatura" : "por enviar"}</b></>}
-            </div>
-          )}
-        </div>
-        <div className="card">
-          <h3>Margem <span className={"pill " + mcls}>{pct(T.m)}</span></h3>
-          <div className="meter">
-            <i style={{ width: mw * 100 + "%", background: mcls === "ok" ? "var(--ok)" : mcls === "warn" ? "var(--amber)" : "var(--bad)" }} />
-            <b style={{ left: S.cfg.min * 2 + "%" }} title="mínimo" /><b style={{ left: S.cfg.alvo * 2 + "%" }} title="alvo" />
-          </div>
-          <div className="sub">mínimo {S.cfg.min}% · alvo {S.cfg.alvo}% · em Definições</div>
-          <div className="kv">
-            <span>Mão de obra</span><b>{eur(pt.mo)} €</b><span>Equipamentos</span><b>{eur(pt.eq)} €</b><span>Consumíveis</span><b>{eur(pt.cons)} €</b>
-            {S.cfg.estrutura && <><span>Estrutura</span><b>{eur(pt.estr)} €</b></>}
-            <span>Materiais</span><b>{eur(pt.mat)} €</b>
-            <span className="tot">Custo total</span><b className="tot">{eur(T.custo)} €</b>
-            <span className="tot">Lucro previsto</span><b className="tot">{eur(T.pf - T.custo)} €</b>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
-function ObraResumo({ S, A, go, d }: Ctx & { d: Negocio }) {
-  const pl = d.obra.plano!, e = d.obra.enc, T = tot(d, S);
-  const est = { "por aprovar": "warn", aprovado: "pri", "em curso": "pri", "concluída": "ok" }[pl.estado];
-  const R = d.obra.real;
-  const mx = R ? Math.max(...R.tasks.map((t) => Math.max(t.prev, t.real))) : 1;
-  return (
-    <>
-      <div className="g2">
-        <div className="card">
-          <h3>Plano da obra <span className={"pill " + est}>{pl.estado}</span></h3>
-          <div className="kv"><span>Fases</span><b>{pl.tasks.length}</b><span>Horas previstas</span><b>{nfmt(pl.tasks.reduce((a, t) => a + t.h, 0))} h</b><span>Conflitos</span><b>{conflitos(pl).length}</b></div>
-          <Btn cls="sec sm" onClick={go(() => A.abrirPlano(d.id))}>Abrir nas Operações</Btn>
-        </div>
-        <div className="card">
-          <h3>Materiais <span className={"pill " + (!e || e.estado === "recebida" ? "ok" : "warn")}>{!e ? "em stock" : e.estado === "recebida" ? "reservados" : e.n + " · " + e.estado}</span></h3>
-          <div className="kv">
-            {(d.obra.mats || []).slice(0, 4).map((x) => <Fragment key={x.n}><span>{x.n}</span><b>{x.falta > 0 ? "faltam " + nfmt(x.falta) + " " + x.un : "✓ " + nfmt(x.q) + " " + x.un}</b></Fragment>)}
-          </div>
-          <Btn cls="sec sm" onClick={go(() => A.abrirInv())}>Abrir no Inventário</Btn>
-        </div>
-      </div>
-      {R && (
-        <div className="withside">
-          <div className="card">
-            <h3>Previsto contra real <span>horas de equipa</span></h3>
-            <div className="bars">
-              {R.tasks.map((t) => (
-                <div className="b" key={t.nome}>
-                  <span>{t.nome}</span>
-                  <div className="tr"><i style={{ width: (t.prev / mx) * 100 + "%" }} /><i className={"r " + (t.real > t.prev * 1.05 ? "over" : "")} style={{ width: (t.real / mx) * 100 + "%" }} /></div>
-                  <em>{nfmt(t.real)} h<small>prev. {nfmt(t.prev)}</small></em>
-                </div>
-              ))}
-            </div>
-            <div className="legend"><span><i style={{ background: "var(--pri-line)" }} />previsto</span><span><i style={{ background: "var(--pri)" }} />real</span><span><i style={{ background: "var(--amber)" }} />acima do previsto</span></div>
-          </div>
-          <div className="card">
-            <h3>O que se aprende</h3>
-            <div className="kv">
-              <span>Custo previsto</span><b>{eur(T.custo)} €</b><span>Custo real</span><b>{eur(R.custoReal)} €</b>
-              <span className="tot">Margem orçada</span><b className="tot">{pct(T.m)}</b><span className="tot">Margem real</span><b className="tot">{pct(R.m)}</b>
-            </div>
-            {d.obra.aprendido
-              ? <span className="pill ok">Receita do revestimento atualizada</span>
-              : <>
-                <span className="sub">O revestimento levou mais 23% do que a receita prevê. Proposta: subir de {nfmt(S.svc.revest.h)} para {nfmt(r2(S.svc.revest.h * fatorReal("revest")))} h/m² no Catálogo.</span>
-                <Btn cls="sm" onClick={go(() => A.aprender(d.id))}>Atualizar a receita</Btn>
-              </>}
-          </div>
-        </div>
-      )}
-    </>
   );
 }
 

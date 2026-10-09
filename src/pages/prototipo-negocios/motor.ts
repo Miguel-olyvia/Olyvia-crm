@@ -506,6 +506,10 @@ export function protecoesSugeridas(f: Record<string, string>): string {
 // O que já se sabe ao entrar numa fase vem preenchido; o que lá estiver não se toca.
 function preencher(d: Negocio, n: number) {
   const f = d.f, def = (o: Record<string, string>) => { for (const k in o) if (!f[k] && o[k]) f[k] = o[k]; };
+  if (n === 1 && d.local.includes(",")) {
+    const [rua, ...resto] = d.local.split(",");
+    def({ morada: rua.trim(), localidade: resto.join(",").trim() });
+  }
   if (n === 3) {
     const h = d.orc ? d.orc.linhas.reduce((a, l) => a + (l.t === "svc" ? (SVC0[l.sid]?.h || 0) * l.q : 0), 0) : 0;
     def({ validade: "30", prazo_exec: String(Math.max(3, Math.ceil(h / 7))), garantia: "2", iva: "23%", pagamento: "50% + 50% no fim",
@@ -545,7 +549,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     fecharVisita(id: number) {
       const d = deal(id), m = d.visita.med, L = LINHAS[d.linha];
       const falta = (Object.keys(L.med) as MedKey[]).filter((k) => !(m[k] > 0));
-      if (falta.length) { avisar({ msg: "Faltam medidas", sub: falta.map((k) => L.med[k]).join(", "), kind: "bad" }); S.pulse = "sec-2"; return; }
+      if (falta.length) { avisar({ msg: "Faltam medidas", sub: falta.map((k) => L.med[k]).join(", "), kind: "bad" }); S.pulse = "medidas"; return; }
       d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S); fase(d, 3);
       avisar({ msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
     },
