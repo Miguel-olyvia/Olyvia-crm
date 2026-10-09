@@ -17,6 +17,10 @@ export interface Def {
   ph?: string;
   papel?: Papel;
   se?: { k: string; v: string[] };
+  /** Por defeito tudo é obrigatório para passar de fase, menos o texto livre (notas). */
+  opcional?: boolean;
+  /** Sub-bloco dentro do grupo, com título próprio (para partir os formulários longos). */
+  bloco?: string;
 }
 export interface Grupo { titulo: string; nota?: string; campos: Def[] }
 
@@ -45,7 +49,7 @@ export const LEAD: Grupo[] = [
     titulo: "Pedido",
     campos: [
       { k: "tipo_cliente", l: "Tipo de cliente", t: "escolha", op: ["Particular", "Empresa", "Condomínio"] },
-      { k: "nif", l: "NIF", t: "texto", ph: "Opcional nesta fase" },
+      { k: "nif", l: "NIF", t: "texto", opcional: true, ajuda: "Pede-se na fatura, se ainda não o tiver." },
       { k: "concelho", l: "Concelho", t: "texto" },
       { k: "pedido", l: "O que o cliente pediu", t: "texto_longo" },
     ],
@@ -97,35 +101,35 @@ export const EXTERIOR: Grupo = {
   titulo: "Local · exterior (edifício e acessos)",
   nota: "O comercial pode pré-preencher a partir da morada, antes da visita.",
   campos: [
-    { k: "acesso", l: "Acesso", t: "escolha", op: ["Fácil", "Difícil"], papel: "plano" },
-    { k: "impacto_percent", l: "Impacto", t: "numero", un: "%", ajuda: "Só com acesso difícil.", papel: "orcamento", se: { k: "acesso", v: ["Difícil"] } },
-    { k: "estacionamento", l: "Estacionamento", t: "escolha", op: ["Pago", "Não pago", "Sem estacionamento"], papel: "sugestoes" },
-    { k: "zona_estacionamento", l: "Zona de estacionamento", t: "escolha", op: ["Verde", "Amarela", "Vermelha"], papel: "sugestoes", se: { k: "estacionamento", v: ["Pago"] } },
-    { k: "tem_elevador", l: "Tem elevador", t: "sim_nao", papel: "plano" },
-    { k: "n_elevadores", l: "Nº de elevadores", t: "numero", se: { k: "tem_elevador", v: ["Sim"] } },
-    { k: "n_andares", l: "Nº de andares do prédio", t: "numero" },
-    { k: "andar", l: "Andar da fração", t: "numero", papel: "plano" },
-    { k: "n_fracoes_por_andar", l: "Frações por andar", t: "numero" },
+    { k: "acesso", bloco: "Acesso e estacionamento", l: "Acesso", t: "escolha", op: ["Fácil", "Difícil"], papel: "plano" },
+    { k: "impacto_percent", bloco: "Acesso e estacionamento", l: "Impacto", t: "numero", un: "%", ajuda: "Só com acesso difícil.", papel: "orcamento", se: { k: "acesso", v: ["Difícil"] } },
+    { k: "estacionamento", bloco: "Acesso e estacionamento", l: "Estacionamento", t: "escolha", op: ["Pago", "Não pago", "Sem estacionamento"], papel: "sugestoes" },
+    { k: "zona_estacionamento", bloco: "Acesso e estacionamento", l: "Zona de estacionamento", t: "escolha", op: ["Verde", "Amarela", "Vermelha"], papel: "sugestoes", se: { k: "estacionamento", v: ["Pago"] } },
+    { k: "tem_elevador", bloco: "O prédio", l: "Tem elevador", t: "sim_nao", papel: "plano" },
+    { k: "n_elevadores", bloco: "O prédio", l: "Nº de elevadores", t: "numero", se: { k: "tem_elevador", v: ["Sim"] } },
+    { k: "n_andares", bloco: "O prédio", l: "Nº de andares do prédio", t: "numero" },
+    { k: "andar", bloco: "O prédio", l: "Andar da fração", t: "numero", papel: "plano" },
+    { k: "n_fracoes_por_andar", bloco: "O prédio", l: "Frações por andar", t: "numero" },
   ],
 };
 
 export const INTERIOR: Grupo = {
   titulo: "Local · interior",
   campos: [
-    { k: "tipologia", l: "Tipologia", t: "escolha", op: ["T0", "T1", "T2", "T3", "T4", "T5+"] },
-    { k: "area_util_m2", l: "Área útil", t: "numero", un: "m²" },
-    { k: "n_divisoes", l: "Divisões", t: "numero" },
-    { k: "n_casas_banho", l: "Casas de banho", t: "numero" },
-    { k: "ano_construcao", l: "Ano de construção", t: "numero" },
-    { k: "pavimento", l: "Pavimento da casa", t: "escolha", op: ["Cerâmico", "Madeira", "Flutuante", "Vinílico", "Outro"], papel: "sugestoes" },
-    { k: "eletrica", l: "Instalação elétrica", t: "escolha", op: ["Antiga", "Renovada"] },
-    { k: "quadro_diferencial", l: "Quadro com diferencial", t: "sim_nao" },
-    { k: "canalizacao", l: "Canalização", t: "escolha", op: ["Ferro", "PVC", "Multicamada", "Cobre", "Misto", "Não sei"] },
-    { k: "gas", l: "Gás", t: "escolha", op: ["Canalizado", "Garrafa", "Sem gás"], papel: "plano" },
-    { k: "amianto", l: "Amianto", t: "escolha", op: SNS, papel: "sugestoes" },
-    { k: "habitada_durante_obra", l: "Habitada durante a obra", t: "sim_nao", papel: "plano" },
-    { k: "animais", l: "Animais", t: "sim_nao", papel: "sugestoes" },
-    { k: "notas_interior", l: "Notas do interior", t: "texto_longo" },
+    { k: "tipologia", bloco: "A casa", l: "Tipologia", t: "escolha", op: ["T0", "T1", "T2", "T3", "T4", "T5+"] },
+    { k: "area_util_m2", bloco: "A casa", l: "Área útil", t: "numero", un: "m²" },
+    { k: "n_divisoes", bloco: "A casa", l: "Divisões", t: "numero" },
+    { k: "n_casas_banho", bloco: "A casa", l: "Casas de banho", t: "numero" },
+    { k: "ano_construcao", bloco: "A casa", l: "Ano de construção", t: "numero" },
+    { k: "pavimento", bloco: "A casa", l: "Pavimento da casa", t: "escolha", op: ["Cerâmico", "Madeira", "Flutuante", "Vinílico", "Outro"], papel: "sugestoes" },
+    { k: "eletrica", bloco: "Instalações", l: "Instalação elétrica", t: "escolha", op: ["Antiga", "Renovada"] },
+    { k: "quadro_diferencial", bloco: "Instalações", l: "Quadro com diferencial", t: "sim_nao" },
+    { k: "canalizacao", bloco: "Instalações", l: "Canalização", t: "escolha", op: ["Ferro", "PVC", "Multicamada", "Cobre", "Misto", "Não sei"] },
+    { k: "gas", bloco: "Instalações", l: "Gás", t: "escolha", op: ["Canalizado", "Garrafa", "Sem gás"], papel: "plano" },
+    { k: "amianto", bloco: "Durante a obra", l: "Amianto", t: "escolha", op: SNS, papel: "sugestoes" },
+    { k: "habitada_durante_obra", bloco: "Durante a obra", l: "Habitada durante a obra", t: "sim_nao", papel: "plano" },
+    { k: "animais", bloco: "Durante a obra", l: "Animais", t: "sim_nao", papel: "sugestoes" },
+    { k: "notas_interior", bloco: "Durante a obra", l: "Notas do interior", t: "texto_longo" },
   ],
 };
 
@@ -133,19 +137,19 @@ export const INTERIOR: Grupo = {
 export const AREA: Grupo = {
   titulo: "Área de intervenção",
   campos: [
-    { k: "diag_tipo_area", l: "Divisão", t: "escolha", op: ["Casa de banho", "Cozinha", "Outra"], papel: "plano" },
-    { k: "diag_intervencao_tipo", l: "Intervenção", t: "escolha", op: ["Remodelação total", "Remodelação parcial", "Só substituir"], papel: "plano" },
-    { k: "diag_pe_direito_m", l: "Pé-direito", t: "numero", un: "m", papel: "plano" },
-    { k: "diag_altura_revestimento", l: "Revestimento de parede até", t: "escolha", op: ["20 cm", "60 cm", "120 cm", "Ao teto"], papel: "plano" },
-    { k: "diag_pontos_eletricos", l: "Pontos elétricos", t: "numero", papel: "plano" },
-    { k: "diag_gas", l: "Gás na área", t: "escolha", op: ["Não há", "Manter", "Anular", "Instalar"], papel: "plano" },
-    { k: "diag_toalheiro", l: "Toalheiro elétrico", t: "sim_nao", papel: "plano" },
-    { k: "diag_janela", l: "Janela na área", t: "sim_nao", ajuda: "Sem janela, os trabalhos com pó são mais lentos.", papel: "plano" },
-    { k: "diag_local_cortes", l: "Onde se fazem os cortes", t: "escolha", op: ["Na própria área", "Varanda", "Fora (garagem, rua)"], papel: "plano" },
-    { k: "diag_distancia_entrada", l: "Da entrada até à área", t: "escolha", op: ["Curta (até 5 m)", "Média (5–15 m)", "Longa (+15 m)"], papel: "sugestoes" },
-    { k: "diag_mobilada", l: "Casa mobilada no caminho", t: "escolha", op: ["Pouco", "Médio", "Muito"], papel: "sugestoes" },
-    { k: "diag_portas_proteger", l: "Portas a proteger", t: "numero", papel: "sugestoes" },
-    { k: "diag_demolir_descricao", l: "O que se demole", t: "texto_longo", ph: "Banheira, azulejo das paredes, pavimento" },
+    { k: "diag_tipo_area", bloco: "A divisão", l: "Divisão", t: "escolha", op: ["Casa de banho", "Cozinha", "Outra"], papel: "plano" },
+    { k: "diag_intervencao_tipo", bloco: "A divisão", l: "Intervenção", t: "escolha", op: ["Remodelação total", "Remodelação parcial", "Só substituir"], papel: "plano" },
+    { k: "diag_pe_direito_m", bloco: "A divisão", l: "Pé-direito", t: "numero", un: "m", papel: "plano" },
+    { k: "diag_altura_revestimento", bloco: "A divisão", l: "Revestimento de parede até", t: "escolha", op: ["20 cm", "60 cm", "120 cm", "Ao teto"], papel: "plano" },
+    { k: "diag_pontos_eletricos", bloco: "Instalações da divisão", l: "Pontos elétricos", t: "numero", papel: "plano" },
+    { k: "diag_gas", bloco: "Instalações da divisão", l: "Gás na área", t: "escolha", op: ["Não há", "Manter", "Anular", "Instalar"], papel: "plano" },
+    { k: "diag_toalheiro", bloco: "Instalações da divisão", l: "Toalheiro elétrico", t: "sim_nao", papel: "plano" },
+    { k: "diag_janela", bloco: "Instalações da divisão", l: "Janela na área", t: "sim_nao", ajuda: "Sem janela, os trabalhos com pó são mais lentos.", papel: "plano" },
+    { k: "diag_local_cortes", bloco: "Trabalho e proteções", l: "Onde se fazem os cortes", t: "escolha", op: ["Na própria área", "Varanda", "Fora (garagem, rua)"], papel: "plano" },
+    { k: "diag_distancia_entrada", bloco: "Trabalho e proteções", l: "Da entrada até à área", t: "escolha", op: ["Curta (até 5 m)", "Média (5–15 m)", "Longa (+15 m)"], papel: "sugestoes" },
+    { k: "diag_mobilada", bloco: "Trabalho e proteções", l: "Casa mobilada no caminho", t: "escolha", op: ["Pouco", "Médio", "Muito"], papel: "sugestoes" },
+    { k: "diag_portas_proteger", bloco: "Trabalho e proteções", l: "Portas a proteger", t: "numero", papel: "sugestoes" },
+    { k: "diag_demolir_descricao", bloco: "Trabalho e proteções", l: "O que se demole", t: "texto_longo", ph: "Banheira, azulejo das paredes, pavimento" },
   ],
 };
 
@@ -154,7 +158,7 @@ export const ESCOLHAS: Grupo = {
   campos: [
     { k: "gama", l: "Gama", t: "escolha", op: ["Económica", "Média", "Alta"], papel: "orcamento" },
     { k: "materiais_cliente", l: "O cliente fornece materiais", t: "sim_nao", papel: "orcamento" },
-    { k: "cor_estilo", l: "Cores e estilo", t: "texto", ph: "Branco, madeira clara" },
+    { k: "cor_estilo", l: "Cores e estilo", t: "texto", ph: "Branco, madeira clara", opcional: true },
   ],
 };
 
@@ -249,8 +253,19 @@ export const PAPEL_ROT: Record<Papel, string> = {
 
 export const visivel = (c: Def, v: Record<string, string>) => !c.se || c.se.v.includes(v[c.se.k] || "");
 
+/** Obrigatório para passar de fase: tudo, menos o texto livre e o que está marcado como opcional. */
+export const obrigatorio = (c: Def) => !c.opcional && c.t !== "texto_longo";
+
+/** Campos obrigatórios preenchidos e total (os condicionais só contam quando aparecem). */
 export function contagem(gs: Grupo[], v: Record<string, string>) {
   let n = 0, f = 0;
-  for (const g of gs) for (const c of g.campos) if (visivel(c, v)) { n++; if (v[c.k]) f++; }
+  for (const g of gs) for (const c of g.campos) if (visivel(c, v) && obrigatorio(c)) { n++; if (v[c.k]) f++; }
   return { n, f };
+}
+
+/** Os campos obrigatórios que ainda estão vazios. */
+export function emFalta(gs: Grupo[], v: Record<string, string>): Def[] {
+  const r: Def[] = [];
+  for (const g of gs) for (const c of g.campos) if (visivel(c, v) && obrigatorio(c) && !v[c.k]) r.push(c);
+  return r;
 }

@@ -68,7 +68,7 @@ export function NegocioSimples(ctx: Ctx) {
         </p>
       </div>
 
-      <div className="mt-8 grid items-start gap-10 lg:grid-cols-[220px_minmax(0,1fr)] 2xl:grid-cols-[220px_minmax(0,1fr)_240px]">
+      <div className="mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)_240px]">
         {ver === null
           ? <FaseSimples key={d.id + ":" + d.fase} ctx={ctx} d={d} lateral={(passos, ativo, setAtivo) => (
             <Lateral d={d} passos={passos} ativo={ativo} setAtivo={setAtivo} verFase={setVer} />
@@ -131,10 +131,11 @@ function Lateral({ d, passos, ativo, setAtivo, verFase, vendo }: { d: Negocio; p
                     className={cn("flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-[15px] transition-colors",
                       i === ativo ? "bg-muted font-semibold text-foreground" : "text-foreground/80 hover:bg-muted/60")}>
                     <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded-full border text-[11px]",
-                      ok ? "border-primary bg-primary text-primary-foreground" : i === ativo ? "border-foreground" : "border-input")}>
-                      {ok && <Check className="h-3 w-3" aria-hidden="true" />}
+                      p.falta ? "border-destructive bg-destructive text-destructive-foreground" : ok ? "border-primary bg-primary text-primary-foreground" : i === ativo ? "border-foreground" : "border-input")}>
+                      {p.falta ? "!" : ok && <Check className="h-3 w-3" aria-hidden="true" />}
                     </span>
                     <span className="min-w-0 flex-1">{curto(p)}</span>
+                    {!!p.falta && <span className="text-sm font-medium text-destructive">falta{p.falta > 1 ? "m" : ""} {p.falta}</span>}
                     {ok && <span className="sr-only">(feito)</span>}
                   </button>
                 </li>
@@ -171,9 +172,12 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
   const titulo = useRef<HTMLHeadingElement>(null);
   const montado = useRef(false);
 
-  // "Faltam medidas": vai para o passo das medidas
+  // tentou passar de fase com campos em falta: vai para o primeiro passo com falta e põe o cursor no campo
   useEffect(() => {
-    if (S.pulse === "medidas") { const i = passos.findIndex((x) => x.id === "medidas"); if (i >= 0 && i !== ativo) setAtivo(i); }
+    if (S.pulse !== "falta") return;
+    const i = passos.findIndex((x) => (x.falta || 0) > 0);
+    if (i >= 0 && i !== ativo) setAtivo(i);
+    setTimeout(() => (document.querySelector('[aria-invalid="true"]') as HTMLElement | null)?.focus(), 450);
   });
 
   // um passo completo passa sozinho ao seguinte

@@ -25,7 +25,7 @@
   ],
   "headers": [
     {
-      "source": "/((?!form$|form/|lead-form/|campaign/|booking/).*)",
+      "source": "/((?!form$|form/|lead-form/|campaign/|booking/|prototipo/).*)",
       "headers": [
         {
           "key": "Content-Security-Policy",
@@ -50,6 +50,35 @@
         {
           "key": "Permissions-Policy",
           "value": "camera=(self), microphone=(), geolocation=()"
+        }
+      ]
+    },
+    {
+      "source": "/prototipo/:path*",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://www.googletagmanager.com https://connect.facebook.net https://snap.licdn.com https://analytics.tiktok.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https:; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https://nominatim.openstreetmap.org https://*.supabase.co https://*.supabase.net wss://*.supabase.co wss://*.supabase.net https://www.google-analytics.com https://stats.g.doubleclick.net https://*.ingest.de.sentry.io https://*.ingest.sentry.io; frame-src 'none'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=31536000; includeSubDomains; preload"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(self), microphone=(), geolocation=(self)"
         }
       ]
     },

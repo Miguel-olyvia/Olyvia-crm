@@ -2,6 +2,8 @@
 // Nada daqui lê ou escreve na base de dados; o estado vive no browser.
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
+
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
 
 export type Papel = "comercial" | "direcao" | "financeiro" | "armazem" | "operacoes";
@@ -141,6 +143,8 @@ export interface Negocio {
   fresh?: boolean;
   /** Valores dos campos de todas as fases (chaves em campos.ts). */
   f: Record<string, string>;
+  /** Tentou passar de fase com campos em falta: o ecrã marca os campos destes grupos. */
+  valida?: { fase: number; grupos: string[] } | null;
   /** off: serviços das medidas que o cliente não quer; extra: serviços juntados à mão, com quantidade. */
   visita: { slot: string; nec: string[]; med: Medidas; off: SvcId[]; extra: Partial<Record<SvcId, number>>; fotos: number; fechada: boolean };
   orc: Orcamento | null;
@@ -488,7 +492,7 @@ const agora = () => {
   return "hoje " + String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
 };
 function log(d: Negocio, t: string, k: Evento["k"] = "a") { d.hist.unshift({ t, q: agora(), k }); }
-function fase(d: Negocio, n: number) { d.fase = n; preencher(d, n); log(d, "Passou a " + FASES[n] + " · sozinho"); }
+function fase(d: Negocio, n: number) { d.fase = n; d.valida = null; preencher(d, n); log(d, "Passou a " + FASES[n] + " · sozinho"); }
 
 const hojeISO = () => new Date().toISOString().slice(0, 10);
 
@@ -530,6 +534,27 @@ function criarCliente(S: Estado, d: Negocio) {
 // Cada ação muda o estado no sítio. `run` (no ecrã) repõe o desenho a seguir.
 export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) {
   const deal = (id: number) => S.deals.find((d) => d.id === id)!;
+
+  // Não se passa de fase sem os campos obrigatórios. Se faltar algo, abre o
+  // negócio, marca os campos e diz quantos faltam.
+  const portao = (d: Negocio, gs: Grupo[], extra: { id: string; t: string }[] = []) => {
+    const faltam = [...emFalta(gs, d.f).map((c) => c.l), ...extra.map((x) => x.t)];
+    if (!faltam.length) { d.valida = null; return true; }
+    d.valida = { fase: d.fase, grupos: [...gs.map((g) => g.titulo), ...extra.map((x) => x.id)] };
+    S.view = "negocio"; S.deal = d.id; S.confirmPerda = null; S.pulse = "falta";
+    avisar({ msg: faltam.length === 1 ? "Falta preencher 1 campo" : `Falta preencher ${faltam.length} campos`, sub: faltam.slice(0, 4).join(", ") + (faltam.length > 4 ? "…" : ""), kind: "bad" });
+    return false;
+  };
+  const extrasVisita = (d: Negocio) => {
+    const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
+    const semMedida = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0));
+    if (semMedida.length) x.push({ id: "medidas", t: "Medidas: " + semMedida.map((k) => L.med[k]).join(", ") });
+    const servicos = L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).length + L.extras.filter((sid) => (v.extra[sid] || 0) > 0).length;
+    if (!servicos) x.push({ id: "nec", t: "Pelo menos um serviço" });
+    if (!(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") x.push({ id: "fotos", t: "Fotografias (ou marcar que o cliente não quis)" });
+    return x;
+  };
+
   const A = {
     nav(v: Vista) { S.view = v; S.deal = null; S.op = null; S.confirmPerda = null; },
     abrir(id: number) { S.view = "negocio"; S.deal = id; S.confirmPerda = null; },
@@ -547,12 +572,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       S.novo = null;
       avisar({ msg: "Negócio criado", sub: n.nome + " · fase Lead", kind: "ok", act: { label: "Abrir", fn: () => run(() => A.abrir(id)) } });
     },
-    contactar(id: number) { const d = deal(id); if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
-    marcarVisita(id: number, slot?: string) { const d = deal(id); d.visita.slot = slot || SLOTS[0]; log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda do Rúben", kind: "ok" }); },
+    contactar(id: number) { const d = deal(id); if (!portao(d, LEAD)) return; if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
+    marcarVisita(id: number, slot?: string) { const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0]; log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda do Rúben", kind: "ok" }); },
     fecharVisita(id: number) {
-      const d = deal(id), m = d.visita.med, L = LINHAS[d.linha];
-      const falta = (Object.keys(L.med) as MedKey[]).filter((k) => !(m[k] > 0));
-      if (falta.length) { avisar({ msg: "Faltam medidas", sub: falta.map((k) => L.med[k]).join(", "), kind: "bad" }); S.pulse = "medidas"; return; }
+      const d = deal(id), L = LINHAS[d.linha];
+      if (!portao(d, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], extrasVisita(d))) return;
       d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S); fase(d, 3);
       avisar({ msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
     },
@@ -571,7 +595,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     aprovar(id: number) { const d = deal(id); d.orc!.aprov = "ok"; log(d, "Exceção aprovada pela Direção"); avisar({ msg: "Exceção aprovada", sub: d.nome + " · o comercial já pode enviar", kind: "ok" }); },
     recusarAprov(id: number) { const d = deal(id); d.orc!.aprov = null; log(d, "Exceção recusada pela Direção", "x"); avisar({ msg: "Exceção recusada", sub: "O comercial tem de corrigir o preço", kind: "bad" }); },
     enviar(id: number) {
-      const d = deal(id); const A2 = alertas(d, S).filter((a) => a.k === "w"); d.orc!.enviada = "hoje";
+      const d = deal(id); if (!portao(d, [PROPOSTA[0]])) return;
+      const A2 = alertas(d, S).filter((a) => a.k === "w"); d.orc!.enviada = "hoje";
       log(d, "Proposta enviada ao portal do cliente" + (A2.length ? " · " + A2.length + " aviso(s) registados" : ""));
       avisar({ msg: "Proposta enviada", sub: "Está no portal do cliente", kind: "ok" });
     },
@@ -581,12 +606,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       else avisar({ msg: "O cliente aceitou a proposta", sub: "Falta enviar o contrato", kind: "ok" });
     },
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { d.perdido = false; }) } }); },
-    enviarContrato(id: number) { const d = deal(id); d.orc!.contrato = "enviado"; log(d, "Contrato enviado para assinatura"); avisar({ msg: "Contrato enviado", sub: "Gerado a partir da proposta aceite", kind: "ok" }); },
+    enviarContrato(id: number) { const d = deal(id); if (!portao(d, [PROPOSTA[1]])) return; d.orc!.contrato = "enviado"; log(d, "Contrato enviado para assinatura"); avisar({ msg: "Contrato enviado", sub: "Gerado a partir da proposta aceite", kind: "ok" }); },
     assinar(id: number) { const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d); fase(d, 4); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); },
-    emitir(id: number) { const d = deal(id); d.fin.fatura = { n: "FT 2026/" + S.ft++, q: "hoje" }; log(d, d.fin.fatura.n + " emitida e enviada ao portal do cliente"); avisar({ msg: d.fin.fatura.n + " emitida", sub: "Enviada ao portal do cliente", kind: "ok" }); },
+    emitir(id: number) { const d = deal(id); if (!portao(d, [FINANCEIRO[0], FINANCEIRO[1]])) return; d.fin.fatura = { n: "FT 2026/" + S.ft++, q: "hoje" }; log(d, d.fin.fatura.n + " emitida e enviada ao portal do cliente"); avisar({ msg: d.fin.fatura.n + " emitida", sub: "Enviada ao portal do cliente", kind: "ok" }); },
     validar(id: number) {
-      const d = deal(id); d.fin.pago = true; d.fin.recibo = { n: "RC 2026/" + S.rc++, q: "hoje" };
+      const d = deal(id);
       if (!d.f.valor_recebido) d.f.valor_recebido = String(r2(tot(d, S).pf));
+      if (!d.f.data_pag) d.f.data_pag = new Date().toISOString().slice(0, 10);
+      if (!portao(d, [FINANCEIRO[2]])) return;
+      d.fin.pago = true; d.fin.recibo = { n: "RC 2026/" + S.rc++, q: "hoje" };
       log(d, "Pagamento validado · " + d.fin.recibo.n + " emitido");
       // o recibo dispara o Inventário e as Operações
       const mats = calcMats(d, S, false);
@@ -629,11 +657,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     arrancar(id: number) {
       const d = deal(id); const e = d.obra.enc;
+      if (!portao(d, [OBRA[0]])) return;
       if (e && e.estado !== "recebida") { avisar({ msg: "Ainda faltam materiais", sub: e.n + " · " + e.estado, kind: "bad" }); return; }
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
     },
     fimObra(id: number) {
-      const d = deal(id); d.obra.plano!.estado = "concluída"; d.obra.real = realObra(d, S);
+      const d = deal(id); if (!portao(d, [OBRA[1]])) return;
+      d.obra.plano!.estado = "concluída"; d.obra.real = realObra(d, S);
       log(d, "Obra concluída · margem real " + pct(d.obra.real.m));
       avisar({ msg: "Obra concluída", sub: "Margem real " + pct(d.obra.real.m) + " · o comercial vê o resultado no negócio", kind: "ok", act: { label: "Ver negócio", fn: () => run(() => { A.abrir(id); A.irObra(); }) } });
     },
@@ -654,6 +684,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     perderNao() { S.confirmPerda = null; },
     nec(id: number, v: string) { const a = deal(id).visita.nec; const i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); },
     campo(id: number, k: string, v: string) { deal(id).f[k] = v; },
+    localizacao(id: number, m: { morada: string; cp: string; localidade: string; concelho: string }, lat: number, lon: number, precisao: number) {
+      const d = deal(id), f = d.f;
+      if (m.morada) f.morada = m.morada;
+      if (m.cp) f.cp = m.cp;
+      if (m.localidade) f.localidade = m.localidade;
+      if (m.concelho && !f.concelho) f.concelho = m.concelho;
+      f.gps = `${lat.toFixed(6)},${lon.toFixed(6)}`; f.gps_precisao = String(Math.round(precisao));
+      log(d, `Morada preenchida pela localização do dispositivo (± ${Math.round(precisao)} m)`);
+    },
     servico(id: number, sid: SvcId) { const a = deal(id).visita.off; const i = a.indexOf(sid); if (i >= 0) a.splice(i, 1); else a.push(sid); },
     extra(id: number, sid: SvcId, q: number) { deal(id).visita.extra[sid] = q; },
     foto(id: number) { deal(id).visita.fotos++; },

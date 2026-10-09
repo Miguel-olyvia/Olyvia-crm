@@ -13,8 +13,9 @@ import {
   alertas, bloqueado, conflitos, custoUn, eur, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot,
   type Estado, type MedKey, type Negocio, type Papel, type SvcId,
 } from "./motor";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, type Grupo } from "./campos";
-import { Assistente, Campos, INPUT, INPUT_G, Legenda, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, emFalta, type Grupo } from "./campos";
+import { UsarLocalizacao } from "./Localizacao";
+import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
 import { Btn, Campo, fazer, numero, type Ctx } from "./pecas";
 
 const ICONE_FASE: LucideIcon[] = [Target, Phone, Ruler, FileSignature, Euro, Hammer];
@@ -227,7 +228,14 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     ];
   } else if (d.fase === 1) {
     passos = [
-      g(CONTACTO[0], Phone), g(CONTACTO[1], Sparkles), g(CONTACTO[2], MapPin), g(CONTACTO[3], CalendarClock),
+      g(CONTACTO[0], Phone), g(CONTACTO[1], Sparkles),
+      { ...g(CONTACTO[2], MapPin), corpo: (
+        <div className="space-y-4">
+          <UsarLocalizacao ctx={ctx} d={d} texto="Estou no local: usar a localização" />
+          <Campos grupo={CONTACTO[2]} {...fx} />
+        </div>
+      ) },
+      g(CONTACTO[3], CalendarClock),
       { id: "vaga", titulo: "Marcar a visita", icone: CalendarClock, feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Vagas do Rúben em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Escolher uma marca a visita e passa à fase Visita.</p>
@@ -246,16 +254,27 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
     const medOk = (Object.keys(L.med) as MedKey[]).filter((k) => v.med[k] > 0).length;
     const nMed = Object.keys(L.med).length;
     passos = [
-      { ...g(EXTERIOR, Building2), corpo: <><p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>{EXTERIOR.nota}</p><Campos grupo={EXTERIOR} {...fx} /></> },
+      { ...g(EXTERIOR, Building2), corpo: (
+        <div className="space-y-6">
+          <div className={cn("rounded-xl border border-border p-4", simples ? "bg-muted/40" : "bg-muted/30")}>
+            <p className={simples ? "text-sm text-muted-foreground" : "text-xs text-muted-foreground"}>Morada da obra</p>
+            <p className={simples ? "mt-0.5 text-base font-medium" : "text-sm font-medium"}>{d.f.morada ? `${d.f.morada}${d.f.cp ? ", " + d.f.cp : ""} ${d.f.localidade || ""}` : "Ainda sem morada"}</p>
+            <div className="mt-3"><UsarLocalizacao ctx={ctx} d={d} texto="Estou no local: confirmar pela localização" /></div>
+          </div>
+          <Campos grupo={EXTERIOR} {...fx} />
+        </div>
+      ) },
       g(INTERIOR, Home), g(AREA, Wrench),
       { id: "medidas", titulo: "Medidas da área", icone: Ruler, conta: { f: medOk, n: nMed }, resumo: (Object.entries(L.med) as [MedKey, string][]).filter(([k]) => v.med[k] > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(v.med[k])}`), corpo: (
         <div className="space-y-2">
-          <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>As medidas dão as quantidades dos serviços. São as únicas obrigatórias para fechar o levantamento.</p>
+          <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>As medidas dão as quantidades dos serviços. Todas são precisas para fechar o levantamento.</p>
           <div className={simples ? "grid max-w-xl gap-5 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-4"}>
             {(Object.entries(L.med) as [MedKey, string][]).map(([k, l]) => (
               <label key={k} className={cn(simples ? ROT : "grid gap-1.5 rounded-xl text-xs font-medium text-muted-foreground transition-all", !simples && !(v.med[k] > 0) && (Object.keys(L.med) as MedKey[]).find((x) => !(v.med[x] > 0)) === k && "rounded-lg bg-primary/[0.04] ring-2 ring-primary/40 ring-offset-[6px] ring-offset-card")}>
                 {l}
-                <input key={k + v.med[k]} type="number" min="0" step="0.5" defaultValue={v.med[k] || ""} className={INP} id={`med-${k}-${d.id}`}
+                <input key={k + v.med[k]} type="number" min="0" step="0.5" defaultValue={v.med[k] || ""} id={`med-${k}-${d.id}`}
+                  className={cn(INP, aValidar(d, "medidas") && !(v.med[k] > 0) && "border-destructive ring-1 ring-destructive/40")}
+                  aria-invalid={(aValidar(d, "medidas") && !(v.med[k] > 0)) || undefined}
                   onBlur={(e) => { const n = numero(e.target.value); if ((isNaN(n) ? 0 : n) !== v.med[k]) run(() => { v.med[k] = isNaN(n) ? 0 : n; }); }}
                   onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
               </label>
@@ -292,7 +311,10 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
             <span className="text-sm text-muted-foreground">{v.fotos} fotos da área · no telemóvel tira-se com a câmara, antes de sentar com o cliente</span>
             <Button variant="outline" size="sm" onClick={go(() => A.foto(d.id))}><Camera className="mr-1.5 h-4 w-4" />Tirar foto</Button>
           </div>
-          <Campos grupo={{ titulo: "", campos: [{ k: "diag_cliente_recusou_fotos", l: "O cliente não quis fotografias", t: "sim_nao" }] }} {...fx} />
+          {aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim" && (
+            <p className="text-[15px] font-medium text-destructive">Tire pelo menos uma fotografia, ou marque que o cliente não quis.</p>
+          )}
+          <Campos grupo={{ titulo: "", campos: [{ k: "diag_cliente_recusou_fotos", l: "O cliente não quis fotografias", t: "sim_nao", opcional: true }] }} {...fx} />
         </div>
       ) },
     ];
@@ -314,6 +336,15 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
         corpo: <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
       g(OBRA[0], Hammer), g(OBRA[1], Check),
     ];
+  }
+  // depois de tentar passar de fase: quantos campos faltam em cada passo
+  const TODOS: Grupo[] = [...LEAD, ...CONTACTO, EXTERIOR, INTERIOR, AREA, ESCOLHAS, ...PROPOSTA, ...FINANCEIRO, ...OBRA];
+  for (const ps of passos) {
+    const gr = TODOS.find((x) => x.titulo === ps.id);
+    if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta([gr], d.f).length;
+    if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0)).length;
+    if (ps.id === "nec" && aValidar(d, "nec") && !orcLinhas(d, S).length) ps.falta = 1;
+    if (ps.id === "fotos" && aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") ps.falta = 1;
   }
   return passos;
 }
@@ -349,9 +380,12 @@ function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const passos = passosDaFase(ctx, d);
   const primeiro = Math.max(0, passos.findIndex((x) => (x.conta ? x.conta.f < x.conta.n : !x.feito)));
   const [ativo, setAtivo] = useState(primeiro);
-  // "Faltam medidas": abre o passo das medidas (o ecrã faz o scroll até lá)
+  // tentou passar de fase com campos em falta: abre o primeiro passo com falta e põe o cursor no campo
   useEffect(() => {
-    if (S.pulse === "medidas") { const i = passos.findIndex((x) => x.id === "medidas"); if (i >= 0 && i !== ativo) setAtivo(i); }
+    if (S.pulse !== "falta") return;
+    const i = passos.findIndex((x) => (x.falta || 0) > 0);
+    if (i >= 0 && i !== ativo) setAtivo(i);
+    setTimeout(() => (document.querySelector('[aria-invalid="true"]') as HTMLElement | null)?.focus(), 450);
   });
   const total = passos.reduce((a, x) => a + (x.conta ? x.conta.n : 1), 0);
   const feitos = passos.reduce((a, x) => a + (x.conta ? x.conta.f : x.feito ? 1 : 0), 0);
@@ -455,6 +489,7 @@ function NecessidadesSimples({ S, A, run, d }: Ctx & { d: Negocio }) {
   return (
     <div className="max-w-2xl">
       <p className="text-[15px] text-muted-foreground">Marque o que a obra leva. As quantidades vêm das medidas; os custos vêm do Catálogo.</p>
+      {aValidar(d, "nec") && !orcLinhas(d, S).length && <p className="mt-2 text-[15px] font-medium text-destructive">Marque pelo menos um serviço.</p>}
       <ul className="mt-4 divide-y divide-border border-y border-border">
         {linhas.map(({ sid, q, on, extra, de }) => {
           const s = S.svc[sid];
