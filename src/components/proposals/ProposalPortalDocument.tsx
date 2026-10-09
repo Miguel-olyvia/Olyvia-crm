@@ -14,7 +14,7 @@ import type { ProposalPortalCommercial } from "@/components/proposals/proposalPo
 import { formatCurrency } from "@/lib/utils";
 import { cooldownLabel } from "@/hooks/useCooldown";
 import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
-import { computeQuoteTotals, computeLineVatAmount } from "@/utils/quotes/computeQuoteTotals";
+import { computeQuoteTotals, computeLineVatAmount, aggregateQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
 
 /**
  * Total c/IVA de uma linha, calculado como o PDF o calcula: num bundle o IVA é
@@ -302,8 +302,6 @@ export function ProposalPortalDocument({
                       )}
                       {sectionEntries.map(([sectionName, items], sectionIdx) => {
                         const sectionSubtotal = items.reduce((sum, item) => sum + (item.total_sem_iva || 0), 0);
-                        const sectionTotalComIva = items.reduce((sum, item) => sum + lineTotalComIva(item), 0);
-                        const sectionIva = sectionTotalComIva - sectionSubtotal;
                         const sectionKey = `${quote.id}::${sectionName}`;
                         const isSectionSelected = selectedSectionKeys.has(sectionKey);
     
@@ -374,15 +372,11 @@ export function ProposalPortalDocument({
                               <div className="space-y-1 border-t pt-3 text-sm">
                                 {(() => {
                                   const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
-                                  const discountFactor = 1 - globalDiscount / 100;
                                   const discountAmount = sectionSubtotal * globalDiscount / 100;
-                                  const discountedSubtotal = sectionSubtotal * discountFactor;
-                                  // `?? 23`, not `|| 23`: a line legitimately taxed at
-                                  // 0% (e.g. auto-liquidação) must stay at 0%, not get
-                                  // silently overridden by the 23% default.
-                                  const adjustedTotal = items.reduce((sum: number, item: any) =>
-                                    sum + (item.total_sem_iva || 0) * discountFactor * (1 + Number(item.iva_percent ?? 23) / 100), 0);
-                                  const adjustedIva = adjustedTotal - discountedSubtotal;
+                                  // IVA por taxa com a conta do PDF (bundles repartidos por
+                                  // componente); o desconto global reduz a base de cada linha.
+                                  const sectionTotals = computeQuoteTotals(items, [], globalDiscount);
+                                  const adjustedTotal = sectionTotals.total;
                                   return (
                                     <>
                                       <div className="flex justify-between">
@@ -395,13 +389,15 @@ export function ProposalPortalDocument({
                                           <span>-{formatCurrency(discountAmount)}</span>
                                         </div>
                                       )}
-                                      <div className="flex justify-between">
-                                        <span className="text-muted-foreground">IVA</span>
-                                        <span>{formatCurrency(globalDiscount > 0 ? adjustedIva : sectionIva)}</span>
-                                      </div>
+                                      {sectionTotals.vatBreakdown.map((b) => (
+                                        <div key={b.rate} className="flex justify-between">
+                                          <span className="text-muted-foreground">IVA ({b.rate}%)</span>
+                                          <span>{formatCurrency(b.vat)}</span>
+                                        </div>
+                                      ))}
                                       <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
                                         <span>Total</span>
-                                        <span style={{ color: primaryColor }}>{formatCurrency(globalDiscount > 0 ? adjustedTotal : sectionTotalComIva)}</span>
+                                        <span style={{ color: primaryColor }}>{formatCurrency(adjustedTotal)}</span>
                                       </div>
                                     </>
                                   );
@@ -444,10 +440,18 @@ export function ProposalPortalDocument({
                                     <span>-{formatCurrency(totals.discountValue)}</span>
                                   </div>
                                 )}
-                                <div className="flex justify-between">
-                                  <span className="text-muted-foreground">IVA</span>
-                                  <span>{formatCurrency(totals.totalIva)}</span>
-                                </div>
+                                {totals.vatBreakdown.map((b) => (
+                                  <div key={b.rate} className="flex justify-between">
+                                    <span className="text-muted-foreground">IVA ({b.rate}%)</span>
+                                    <span>{formatCurrency(b.vat)}</span>
+                                  </div>
+                                ))}
+                                {totals.roundedFeeVatBreakdown.map((f, i) => (
+                                  <div key={`fee-${i}`} className="flex justify-between">
+                                    <span className="text-muted-foreground">IVA ({f.rate}%) — {f.name}</span>
+                                    <span>{formatCurrency(f.vat)}</span>
+                                  </div>
+                                ))}
                               </div>
                             );
                           })()}
@@ -580,10 +584,18 @@ export function ProposalPortalDocument({
                                   <span>-{formatCurrency(totals.discountValue)}</span>
                                 </div>
                               )}
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">IVA</span>
-                                <span>{formatCurrency(totals.totalIva)}</span>
-                              </div>
+                              {totals.vatBreakdown.map((b) => (
+                                <div key={b.rate} className="flex justify-between">
+                                  <span className="text-muted-foreground">IVA ({b.rate}%)</span>
+                                  <span>{formatCurrency(b.vat)}</span>
+                                </div>
+                              ))}
+                              {totals.roundedFeeVatBreakdown.map((f, i) => (
+                                <div key={`fee-${i}`} className="flex justify-between">
+                                  <span className="text-muted-foreground">IVA ({f.rate}%) — {f.name}</span>
+                                  <span>{formatCurrency(f.vat)}</span>
+                                </div>
+                              ))}
                               <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
                                 <span>Total</span>
                                 <span style={{ color: primaryColor }}>{formatCurrency(total)}</span>
@@ -611,6 +623,55 @@ export function ProposalPortalDocument({
                   </Card>
                 );
               })}
+
+              {(() => {
+                // Totais da proposta com o IVA discriminado por taxa, como no PDF.
+                // Mesma regra do cartão do topo: havendo orçamentos aceites só esses
+                // contam; antes de qualquer decisão, todos os não rejeitados.
+                const hasAcceptedQuote = quotes.some((q: any) => q?.estado === "aceite");
+                const valueQuotes = quotes.filter((q: any) =>
+                  (hasAcceptedQuote ? q?.estado === "aceite" : q?.estado !== "rejeitado")
+                  && (quoteLines[q.id] || []).length > 0
+                );
+                if (valueQuotes.length === 0) return null;
+                const totals = aggregateQuoteTotals(valueQuotes.map((q: any) => ({
+                  lines: quoteLines[q.id] || [],
+                  fees: quoteFees[q.id] || [],
+                  descontoPercent: Number(q.desconto_global_percent) || 0,
+                })));
+                return (
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="ml-auto max-w-sm space-y-1 text-sm">
+                        <div className="flex justify-between font-medium">
+                          <span>Subtotal (sem IVA)</span>
+                          <span>{formatCurrency(totals.subtotalWithFees)}</span>
+                        </div>
+                        {totals.vatBreakdown.map((b) => (
+                          <div key={b.rate} className="flex justify-between">
+                            <span className="text-muted-foreground">IVA {b.rate}%</span>
+                            <span>{formatCurrency(b.vat)}</span>
+                          </div>
+                        ))}
+                        {totals.feeVatBreakdown.map((f, i) => (
+                          <div key={`fee-${i}`} className="flex justify-between">
+                            <span className="text-muted-foreground">IVA {f.rate}% ({f.name})</span>
+                            <span>{formatCurrency(f.vat)}</span>
+                          </div>
+                        ))}
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">IVA Total</span>
+                          <span>{formatCurrency(totals.totalIva)}</span>
+                        </div>
+                        <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
+                          <span>Total Geral (c/ IVA)</span>
+                          <span style={{ color: primaryColor }}>{formatCurrency(totals.total)}</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
             </div>
           )
   );
