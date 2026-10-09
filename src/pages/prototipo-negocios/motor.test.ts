@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { acoes, alertas, bloqueado, conflitos, protecoesSugeridas, seed, tot, type Negocio } from "./motor";
 import { RECEITAS, amortUn, consUn, custoAnoTecnico } from "./receitas";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
+import { grupoVisita, AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
 
 // Preenche os obrigatórios que faltam (os condicionais podem aparecer depois de preencher outros).
 function preencher(d: Negocio, gs: Grupo[]) {
@@ -28,6 +28,13 @@ describe("protótipo de Negócios", () => {
     expect(d().fase).toBe(2);
     preencher(d(), [EXTERIOR, INTERIOR, AREA, ESCOLHAS]);
     d().visita.fotos = 2;
+    expect(d().vis).toEqual([1]); // marcar a visita cria a visita 1
+    A.fecharVisita(id);
+    expect(d().fase).toBe(2); // não fecha: a visita ainda não foi feita
+    expect(d().valida?.grupos).toContain("visitas");
+    A.campo(id, "v1_estado", "Feita");
+    A.novaVisita(id); // uma segunda visita, também com os seus campos
+    preencher(d(), [grupoVisita(2)]);
     A.fecharVisita(id);
     expect(d().fase).toBe(2); // não fecha sem medidas
     expect(d().valida?.grupos).toContain("medidas");

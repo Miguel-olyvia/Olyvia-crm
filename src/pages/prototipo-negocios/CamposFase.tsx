@@ -59,7 +59,7 @@ const BLOCO: Record<string, [LucideIcon, string]> = {
 /** Está a validar este grupo (tentou passar de fase com campos em falta)? */
 export const aValidar = (d: Negocio, id: string) => !!d.valida && d.valida.fase === d.fase && d.valida.grupos.includes(id);
 
-export function Campos({ grupo, d, A, run, ro, simples, cols = 3 }: FxProps & { grupo: Grupo; cols?: 2 | 3 }) {
+export function Campos({ grupo, d, A, run, ro, simples, cols = 3, plano }: FxProps & { grupo: Grupo; cols?: 2 | 3; plano?: boolean }) {
   const seguinte = ro ? null : proximoVazio(grupo, d.f);
   const validar = !ro && aValidar(d, grupo.titulo);
   const visiveis = grupo.campos.filter((c) => visivel(c, d.f));
@@ -95,7 +95,7 @@ export function Campos({ grupo, d, A, run, ro, simples, cols = 3 }: FxProps & { 
                   <button type="button" onClick={() => run(() => A.confirmar(d.id, sug))} className="min-h-9 rounded-lg px-2 font-medium text-primary underline-offset-4 hover:underline">Estão certas</button>
                 </div>
               )}
-              <div className="divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">{cs.map(campo)}</div>
+              <div className={plano ? "divide-y divide-border" : "divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5"}>{cs.map(campo)}</div>
             </section>
           );
         })}

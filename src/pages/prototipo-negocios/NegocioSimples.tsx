@@ -13,6 +13,7 @@ import { OrcamentoSimples } from "./OrcamentoSimples";
 import { DocumentosSimples } from "./FasesSimples";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { ServicosCatalogo } from "./ServicosCatalogo";
+import { VisitasLista } from "./Visitas";
 import { nfmt, type MedKey } from "./motor";
 import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 
@@ -123,6 +124,7 @@ export function NegocioSimples(ctx: Ctx) {
               <p className="text-sm text-muted-foreground">Fase feita · só leitura</p>
               <h2 id="fase-lida" className="mt-1 text-2xl font-semibold">{FASES[ver]}</h2>
               <div className="mt-6 space-y-8">
+                {ver === 2 && <div><h3 className="mb-3 text-base font-semibold">Visitas</h3><VisitasLista ctx={ctx} d={d} simples /></div>}
                 {ver === 2 && (
                   <div>
                     <h3 className="mb-3 text-base font-semibold">Medidas e fotografias</h3>

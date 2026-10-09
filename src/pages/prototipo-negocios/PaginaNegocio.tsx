@@ -9,11 +9,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  FASES, LINHAS, PAPEIS, SLOTS,
+  FASES, LINHAS, PAPEIS, SLOTS, visitaFeita, visitas,
   alertas, bloqueado, conflitos, custoUn, eur, fatorReal, linhaCalc, nfmt, partes, pct, proximo, r2, tot,
   type Estado, type MedKey, type Negocio, type Papel, type SvcId,
 } from "./motor";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, emFalta, type Grupo } from "./campos";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, contagem, emFalta, grupoVisita, type Grupo } from "./campos";
+import { VisitasLista } from "./Visitas";
 import { UsarLocalizacao } from "./Localizacao";
 import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
 import { OrcamentoSimples } from "./OrcamentoSimples";
@@ -257,7 +258,11 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   } else if (d.fase === 2) {
     const medOk = (Object.keys(L.med) as MedKey[]).filter((k) => v.med[k] > 0).length;
     const nMed = Object.keys(L.med).length;
+    const gv = visitas(d).map(grupoVisita), cv = contagem(gv, d.f);
     passos = [
+      { id: "visitas", titulo: "Visitas", icone: CalendarClock, conta: { f: cv.f + (visitaFeita(d) ? 1 : 0), n: cv.n + 1 },
+        resumo: [`${visitas(d).length} ${visitas(d).length === 1 ? "visita" : "visitas"}`, visitaFeita(d) ? "feita" : "por fazer"],
+        corpo: <VisitasLista ctx={ctx} d={d} simples={simples} /> },
       { ...g(EXTERIOR, Building2), corpo: (
         <div className="space-y-6">
           <div className={cn("rounded-xl border border-border p-4", simples ? "bg-muted/40" : "bg-muted/30")}>
@@ -360,6 +365,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false): Passo[] {
   for (const ps of passos) {
     const gr = TODOS.find((x) => x.titulo === ps.id);
     if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta([gr], d.f).length;
+    if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0)).length;
     if (ps.id === "nec" && aValidar(d, "nec") && !orcLinhas(d, S).length) ps.falta = 1;
     if (ps.id === "fotos" && aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") ps.falta = 1;

@@ -3,7 +3,7 @@
 // É a passagem para React de docs/negocios-2026-10-08/prototipo.html.
 
 import { CATALOGO } from "./catalogo";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, grupoVisita, type Grupo } from "./campos";
 
 export const ESTR = 5.06; // €/h de estrutura (exemplo)
 
@@ -145,6 +145,8 @@ export interface Negocio {
   valida?: { fase: number; grupos: string[] } | null;
   /** Campos preenchidos pela Olyvia (sugestões): o ecrã marca-os até alguém os confirmar ou mudar. */
   sug?: Record<string, true>;
+  /** As visitas do negócio (os números; os campos estão em f, com o prefixo v{n}_). */
+  vis?: number[];
   /** off: serviços das medidas que o cliente não quer; extra: serviços juntados à mão, com quantidade. */
   visita: { slot: string; nec: string[]; med: Medidas; off: SvcId[]; extra: Partial<Record<SvcId, number>>; fotos: number; fechada: boolean };
   orc: Orcamento | null;
@@ -192,7 +194,7 @@ function novoDeal(o: NovoNegocio): Negocio {
   };
 }
 
-export const VERSAO = 5;
+export const VERSAO = 6;
 
 export function seed(): Estado {
   const S: Estado = {
@@ -238,6 +240,19 @@ export function seed(): Estado {
     f: EXEMPLO_COMPLETO,
     hist: [] });
   for (const d of S.deals) d.f = { ...exemplo(d), ...d.f };
+  for (const d of S.deals) {
+    if (d.fase < 2 || d.vis) continue;
+    const feita = d.fase >= 3 || d.id === 1035;
+    criarVisita(d, visitaDoSlot(d.visita.slot || "qui 01/10 · 10:00", { estado: feita ? "Feita" : "Marcada", presentes: d.f.presentes || "O cliente",
+      combinado: feita ? "Levantamento feito, com medidas e fotografias." : "" }));
+  }
+  {
+    const j = by0(S, 1050);
+    j.vis = [];
+    criarVisita(j, visitaDoSlot("qua 17/09 · 10:00", { estado: "Feita", presentes: "O casal", combinado: "Medidas e fotos tiradas. O casal quer base de duche e móvel suspenso." }));
+    criarVisita(j, { tipo: "Escolha de materiais", estado: "Feita", data: "2026-09-19", hora: "15:00", quem: "Hugo (técnico)", presentes: "O casal", duracao: "1 h",
+      combinado: "Escolhido o cerâmico 30×60 branco mate e o pavimento a imitar madeira." });
+  }
   Object.assign(by0(S, 1035).f, { andar: "2", tem_elevador: "Sim", n_elevadores: "1", estacionamento: "Pago", zona_estacionamento: "Vermelha" });
   for (const d of S.deals) if (d.fase >= 3) d.orc = criarOrc(d, S);
   const by = (id: number) => S.deals.find((d) => d.id === id)!;
@@ -366,6 +381,23 @@ function exemplo(d: Negocio): Record<string, string> {
   });
   return f;
 }
+
+/* ------------------------------------------------------------------ visitas */
+const MESES_DIA = (slot: string) => {
+  // "qui 15/10 · 10:00" → { data: "2026-10-15", hora: "10:00" }
+  const m = /(\d{1,2})\/(\d{1,2}).*?(\d{1,2}:\d{2})/.exec(slot);
+  return m ? { data: `2026-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`, hora: m[3] } : { data: "", hora: "" };
+};
+export const visitas = (d: Negocio) => d.vis || [];
+export const campoVisita = (d: Negocio, n: number, k: string) => d.f[`v${n}_${k}`] || "";
+export function criarVisita(d: Negocio, dados: Record<string, string>): number {
+  const n = Math.max(0, ...visitas(d)) + 1;
+  d.vis = [...visitas(d), n];
+  for (const k in dados) if (dados[k]) d.f[`v${n}_${k}`] = dados[k];
+  return n;
+}
+export const visitaFeita = (d: Negocio) => visitas(d).some((n) => campoVisita(d, n, "estado") === "Feita");
+const visitaDoSlot = (slot: string, extra: Record<string, string>) => ({ tipo: "Levantamento", quem: "Rúben (comercial)", duracao: "1 h 30", ...MESES_DIA(slot), ...extra });
 
 /* ------------------------------------------------------------------ cálculo */
 export const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -669,6 +701,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
   };
   const extrasVisita = (d: Negocio) => {
     const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
+    if (!visitaFeita(d)) x.push({ id: "visitas", t: "Pelo menos uma visita feita" });
     const semMedida = (Object.keys(L.med) as MedKey[]).filter((k) => !(v.med[k] > 0));
     if (semMedida.length) x.push({ id: "medidas", t: "Medidas: " + semMedida.map((k) => L.med[k]).join(", ") });
     const servicos = L.map.filter(([sid, k]) => v.med[k] > 0 && !v.off.includes(sid)).length + Object.values(v.extra).filter((q) => (q || 0) > 0).length;
@@ -696,10 +729,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
       avisar({ msg: "Negócio criado", sub: n.nome + " · fase Lead", kind: "ok", act: { label: "Abrir", fn: () => run(() => A.abrir(id)) } });
     },
     contactar(id: number) { const d = deal(id); if (!portao(d, LEAD)) return; if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
-    marcarVisita(id: number, slot?: string) { const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0]; log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda do Rúben", kind: "ok" }); },
+    marcarVisita(id: number, slot?: string) { const d = deal(id); if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
+      if (!visitas(d).length) criarVisita(d, visitaDoSlot(d.visita.slot, { estado: "Marcada", presentes: d.f.presentes, duracao: d.f.duracao })); log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda do Rúben", kind: "ok" }); },
     fecharVisita(id: number) {
       const d = deal(id), L = LINHAS[d.linha];
-      if (!portao(d, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], extrasVisita(d))) return;
+      if (!portao(d, [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, AREA, ESCOLHAS], extrasVisita(d))) return;
       d.visita.fechada = true; log(d, "Levantamento fechado"); d.orc = criarOrc(d, S); fase(d, 3);
       avisar({ msg: "Orçamento criado com as medidas da visita", sub: `Modelo "${L.modelo}" · custos do Catálogo`, kind: "auto" });
     },
@@ -806,6 +840,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void) 
     },
     perderNao() { S.confirmPerda = null; },
     nec(id: number, v: string) { const a = deal(id).visita.nec; const i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); },
+    novaVisita(id: number) {
+      const d = deal(id);
+      const n = criarVisita(d, { tipo: "Revisita", estado: "Marcada", quem: "Rúben (comercial)", presentes: d.f.presentes || "O cliente", duracao: "1 h" });
+      log(d, `Visita ${n} criada`);
+      return n;
+    },
+    apagarVisita(id: number, n: number) {
+      const d = deal(id);
+      d.vis = visitas(d).filter((x) => x !== n);
+      for (const k of Object.keys(d.f)) if (k.startsWith(`v${n}_`)) delete d.f[k];
+      log(d, `Visita ${n} apagada`, "w");
+    },
     campo(id: number, k: string, v: string) {
       const d = deal(id); d.f[k] = v;
       if (d.sug) delete d.sug[k]; // mexido por alguém: deixa de ser sugestão

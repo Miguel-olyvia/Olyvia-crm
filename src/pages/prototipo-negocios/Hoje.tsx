@@ -18,10 +18,12 @@ export function agenda(S: Estado, r: Papel): Compromisso[] {
   const L: Compromisso[] = [];
   for (const d of aberto(S)) {
     const loc = d.f.localidade || d.local.split(",").pop()!.trim();
-    if (r === "comercial" && d.fase === 2 && d.visita.slot) {
-      const [dia, hora] = d.visita.slot.split(" · ");
-      const passou = dia.includes("06/10");
-      L.push({ id: "v" + d.id, hora, dia, titulo: (passou ? "Fechar levantamento · " : "Visita · ") + d.servico, quem: d.nome, onde: loc, acao: passou ? "Fechar" : "Preparar", d, atrasado: passou });
+    // as visitas marcadas de cada negócio (pode haver várias)
+    if (r === "comercial") for (const n of d.vis || []) {
+      if (d.f[`v${n}_estado`] !== "Marcada") continue;
+      const iso = d.f[`v${n}_data`] || "", hoje = new Date().toISOString().slice(0, 10), passou = !!iso && iso < hoje;
+      const dia = iso ? new Date(iso + "T12:00:00").toLocaleDateString("pt-PT", { weekday: "short", day: "2-digit", month: "2-digit" }) : "por marcar";
+      L.push({ id: `v${d.id}-${n}`, hora: d.f[`v${n}_hora`] || "—", dia, titulo: `${d.f[`v${n}_tipo`] || "Visita"} · ${d.servico}`, quem: d.nome, onde: loc, acao: passou ? "Registar" : "Preparar", d, atrasado: passou });
     }
     if (r === "operacoes" && d.fase === 5 && d.obra.plano?.estado === "em curso")
       L.push({ id: "o" + d.id, hora: "08:00", titulo: `Obra · dia ${d.obra.plano.dia + 1} de ${Math.max(...d.obra.plano.tasks.map((t) => t.dia + t.dur))}`, quem: d.nome, onde: loc, acao: "Abrir plano", d });

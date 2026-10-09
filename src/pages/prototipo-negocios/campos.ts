@@ -273,3 +273,28 @@ export function emFalta(gs: Grupo[], v: Record<string, string>): Def[] {
   for (const g of gs) for (const c of g.campos) if (visivel(c, v) && obrigatorio(c) && !v[c.k]) r.push(c);
   return r;
 }
+
+/* ------------------------------------------------------------------ visitas */
+// Um negócio pode ter várias visitas (levantamento, medição técnica, escolha de
+// materiais…). Os campos de cada uma guardam-se em d.f com o prefixo v{n}_.
+const VISITA_BASE: Def[] = [
+  { k: "tipo", l: "Tipo de visita", t: "escolha", op: ["Levantamento", "Medição técnica", "Escolha de materiais", "Revisita"] },
+  { k: "estado", l: "Estado", t: "escolha", op: ["Marcada", "Feita", "Cancelada"] },
+  { k: "data", l: "Dia", t: "data" },
+  { k: "hora", l: "Hora", t: "escolha", op: ["09:00", "10:00", "11:00", "14:00", "15:00", "16:00", "17:00"] },
+  { k: "quem", l: "Quem vai", t: "escolha", op: ["Rúben (comercial)", "Hugo (técnico)", "Filipe (Operações)"] },
+  { k: "presentes", l: "Quem vai estar", t: "escolha", op: ["O cliente", "O casal", "A família", "Outra pessoa"] },
+  { k: "duracao", l: "Duração", t: "escolha", op: ["30 min", "1 h", "1 h 30", "2 h"] },
+  { k: "motivo", l: "Porque se cancelou", t: "escolha", op: ["O cliente pediu", "Imprevisto nosso", "Não estava ninguém"], se: { k: "estado", v: ["Cancelada"] } },
+  { k: "combinado", l: "O que ficou combinado", t: "texto_longo", ph: "Ex.: o cliente escolhe o pavimento até sexta" },
+];
+export const CAMPOS_VISITA = VISITA_BASE.map((c) => c.k);
+
+/** O grupo de campos da visita n (as chaves e as condições com o prefixo v{n}_). */
+export function grupoVisita(n: number): Grupo {
+  const p = (k: string) => `v${n}_${k}`;
+  return {
+    titulo: `Visita ${n}`,
+    campos: VISITA_BASE.map((c) => ({ ...c, k: p(c.k), se: c.se ? { k: p(c.se.k), v: c.se.v } : undefined })),
+  };
+}
