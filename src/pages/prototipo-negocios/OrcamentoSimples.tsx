@@ -8,12 +8,13 @@ import { cn } from "@/lib/utils";
 import { alertas, bloqueado, custoUn, eur, linhaCalc, nfmt, partes, pct, r2, tot, type Negocio } from "./motor";
 import { numero, type Ctx } from "./pecas";
 import { CustoServico } from "./CustoServico";
+import { totais } from "./DocsCliente";
 
 const DESCONTOS = [0, 3, 5, 10];
 
 export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
   const { S, A, go, run, d } = ctx;
-  const o = d.orc!, T = tot(d, S), fechado = !!o.enviada;
+  const o = d.orc!, T = tot(d, S), TI = totais(d, S), fechado = !!o.enviada;
   const min = S.cfg.min / 100, alvo = S.cfg.alvo / 100;
   const [aberta, setAberta] = useState<number | null>(null);
   const [verCusto, setVerCusto] = useState(false);
@@ -34,6 +35,7 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
           <div>
             <p className="text-sm text-muted-foreground">Total sem IVA</p>
             <p className="text-4xl font-semibold tracking-tight tabular-nums">{eur(T.pf)} €</p>
+            <p className="mt-1 text-sm text-muted-foreground">com IVA: <b className="font-semibold text-foreground tabular-nums">{eur(TI.total)} €</b> · 6% na mão de obra ({eur(TI.mo)} €), 23% nos materiais ({eur(TI.mat)} €)</p>
           </div>
           <div className="text-right">
             <p className="text-sm text-muted-foreground">Margem</p>

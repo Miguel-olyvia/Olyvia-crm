@@ -10,10 +10,39 @@ import type { Ctx } from "./pecas";
 
 const EMPRESA = { nome: "Mudelar", sub: "Remodelações de casas de banho e cozinhas", nif: "500 000 000", morada: "Lisboa" };
 
-export const taxaIva = (d: Negocio) => (d.f.iva?.startsWith("6") ? 0.06 : 0.23);
+// IVA na proposta: a mão de obra (os serviços) a 6% e os materiais a 23%.
+export const IVA_MO = 0.06, IVA_MAT = 0.23;
 export function totais(d: Negocio, S: Estado) {
-  const base = d.orc ? tot(d, S).pf : 0, iva = base * taxaIva(d);
-  return { base, iva, total: base + iva };
+  if (!d.orc) return { mo: 0, mat: 0, ivaMo: 0, ivaMat: 0, base: 0, iva: 0, total: 0 };
+  const k = 1 - (d.orc.desconto || 0) / 100; // o desconto reparte-se pelas duas partes
+  let mo = 0, mat = 0;
+  for (const l of d.orc.linhas) { const p = linhaCalc(l, S).preco * k; if (l.t === "mat") mat += p; else mo += p; }
+  const ivaMo = mo * IVA_MO, ivaMat = mat * IVA_MAT;
+  return { mo, mat, ivaMo, ivaMat, base: mo + mat, iva: ivaMo + ivaMat, total: mo + mat + ivaMo + ivaMat };
+}
+/** As linhas de IVA de um valor (o total ou uma tranche), na proporção do orçamento. */
+function linhasIva(T: ReturnType<typeof totais>, parte = 1) {
+  return [
+    { l: "Mão de obra", base: T.mo * parte, taxa: IVA_MO, iva: T.ivaMo * parte },
+    { l: "Materiais", base: T.mat * parte, taxa: IVA_MAT, iva: T.ivaMat * parte },
+  ].filter((x) => x.base > 0);
+}
+function QuadroIva({ T, parte = 1, rotulo = "Total" }: { T: ReturnType<typeof totais>; parte?: number; rotulo?: string }) {
+  const ls = linhasIva(T, parte);
+  return (
+    <div className="ml-auto w-full max-w-md">
+      <table className="w-full text-right text-[15px]">
+        <thead><tr className="text-xs uppercase tracking-wider text-slate-500"><th className="pb-1 text-left font-normal" /><th className="pb-1 font-normal">Sem IVA</th><th className="pb-1 font-normal">IVA</th></tr></thead>
+        <tbody>
+          {ls.map((x) => (
+            <tr key={x.l}><td className="py-1 text-left text-slate-600">{x.l}</td><td className="py-1 tabular-nums">{eur(x.base)} €</td><td className="py-1 tabular-nums text-slate-600">{Math.round(x.taxa * 100)}% · {eur(x.iva)} €</td></tr>
+          ))}
+          <tr className="border-t border-slate-200"><td className="pt-2 text-left text-slate-600">Subtotal</td><td className="pt-2 tabular-nums">{eur(T.base * parte)} €</td><td className="pt-2 tabular-nums text-slate-600">{eur(T.iva * parte)} €</td></tr>
+        </tbody>
+      </table>
+      <p className="mt-2 flex justify-between border-t border-slate-200 pt-2 text-lg font-semibold"><span>{rotulo}</span><span className="tabular-nums">{eur(T.total * parte)} €</span></p>
+    </div>
+  );
 }
 export function tranches(d: Negocio, total: number): { l: string; p: number; v: number }[] {
   const pg = d.f.pagamento || "50% + 50% no fim";
@@ -56,14 +85,7 @@ const Cliente = ({ d }: { d: Negocio }) => (
   </section>
 );
 function Totais({ d, S }: { d: Negocio; S: Estado }) {
-  const T = totais(d, S);
-  return (
-    <dl className="ml-auto grid w-full max-w-xs grid-cols-2 gap-y-1.5 text-right">
-      <dt className="text-left text-slate-600">Total sem IVA</dt><dd className="tabular-nums">{eur(T.base)} €</dd>
-      <dt className="text-left text-slate-600">IVA {Math.round(taxaIva(d) * 100)}%</dt><dd className="tabular-nums">{eur(T.iva)} €</dd>
-      <dt className="border-t border-slate-200 pt-2 text-left font-semibold">Total</dt><dd className="border-t border-slate-200 pt-2 text-lg font-semibold tabular-nums">{eur(T.total)} €</dd>
-    </dl>
-  );
+  return <QuadroIva T={totais(d, S)} />;
 }
 
 /* ------------------------------------------------------------------ proposta */
@@ -118,7 +140,7 @@ export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
         Entre <b>{EMPRESA.nome}</b>, NIF {EMPRESA.nif}, com sede em {EMPRESA.morada}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrado este contrato, que segue a proposta PR 2026/{d.id}.
       </p>
       {n(1, "Objeto", <>Os trabalhos de {d.servico.toLowerCase()} em {d.f.morada || d.local}{d.f.localidade ? `, ${d.f.localidade}` : ""}: {o.linhas.filter((l) => l.t === "svc").map((l) => linhaCalc(l, S).s!.n.toLowerCase()).join(", ")}, e os materiais do modelo escolhido.</>)}
-      {n(2, "Preço", <>{eur(T.base)} € sem IVA, mais IVA à taxa de {Math.round(taxaIva(d) * 100)}%, num total de <b>{eur(T.total)} €</b>.</>)}
+      {n(2, "Preço", <>{eur(T.base)} € sem IVA: {eur(T.mo)} € de mão de obra, com IVA a 6% ({eur(T.ivaMo)} €), e {eur(T.mat)} € de materiais, com IVA a 23% ({eur(T.ivaMat)} €). Total com IVA: <b>{eur(T.total)} €</b>.</>)}
       {n(3, "Pagamento", <ul className="list-disc pl-5">{tr.map((t) => <li key={t.l}>{t.l}: {Math.round(t.p * 100)}%, {eur(t.v)} €</li>)}</ul>)}
       {n(4, "Prazo", <>Início {d.f.inicio_prev ? `a ${data(d.f.inicio_prev)}` : "por marcar"}, com {d.f.prazo_exec || "—"} dias úteis de execução: fim previsto a {fimPrevisto(d.f.inicio_prev, d.f.prazo_exec)}.{d.f.multa === "Sim" ? " O atraso imputável à empresa dá lugar a penalização, nos termos das condições gerais." : ""}</>)}
       {n(5, "Garantia", <>{d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção. Os materiais têm a garantia do fabricante.</>)}
@@ -139,21 +161,18 @@ export function ContratoDoc({ S, d }: { S: Estado; d: Negocio }) {
 /* ------------------------------------------------------------------ fatura */
 export function FaturaDoc({ S, d }: { S: Estado; d: Negocio }) {
   const T = totais(d, S), tr = tranches(d, T.total), t0 = tr[0], ft = d.fin.fatura;
-  const base = t0.v / (1 + taxaIva(d)), iva = t0.v - base;
   return (
     <Folha titulo="Fatura" numero={ft ? ft.n : "por emitir"} data={ft ? `emitida ${ft.q}` : "rascunho"} carimbo={d.fin.recibo ? `Paga · ${d.fin.recibo.n}` : undefined}>
       <Cliente d={d} />
       <ul className="divide-y divide-slate-200 border-y border-slate-200">
-        <li className="flex items-baseline justify-between gap-4 py-2.5">
-          <span>{d.servico}, conforme contrato CT 2026/{d.id}<span className="block text-sm text-slate-500">{d.f.tranche || "1.ª tranche"}: {Math.round(t0.p * 100)}% de {eur(T.total)} €</span></span>
-          <span className="tabular-nums">{eur(base)} €</span>
-        </li>
+        {linhasIva(T, t0.p).map((x) => (
+          <li key={x.l} className="flex items-baseline justify-between gap-4 py-2.5">
+            <span>{x.l} · {d.servico}, conforme contrato CT 2026/{d.id}<span className="block text-sm text-slate-500">{d.f.tranche || "1.ª tranche"}: {Math.round(t0.p * 100)}% · IVA {Math.round(x.taxa * 100)}%</span></span>
+            <span className="tabular-nums">{eur(x.base)} €</span>
+          </li>
+        ))}
       </ul>
-      <dl className="ml-auto grid w-full max-w-xs grid-cols-2 gap-y-1.5 text-right">
-        <dt className="text-left text-slate-600">Base</dt><dd className="tabular-nums">{eur(base)} €</dd>
-        <dt className="text-left text-slate-600">IVA {Math.round(taxaIva(d) * 100)}%</dt><dd className="tabular-nums">{eur(iva)} €</dd>
-        <dt className="border-t border-slate-200 pt-2 text-left font-semibold">A pagar</dt><dd className="border-t border-slate-200 pt-2 text-lg font-semibold tabular-nums">{eur(t0.v)} €</dd>
-      </dl>
+      <QuadroIva T={T} parte={t0.p} rotulo="A pagar" />
       <p className="text-sm text-slate-600">Vencimento: {d.f.vencimento || "15 dias"} · {d.f.metodo || "Transferência"} · série {d.f.serie || "FT 2026"}</p>
     </Folha>
   );

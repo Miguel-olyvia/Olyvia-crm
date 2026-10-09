@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { acoes, alertas, bloqueado, conflitos, protecoesSugeridas, seed, tot, type Negocio } from "./motor";
+import { totais } from "./DocsCliente";
 import { RECEITAS, amortUn, consUn, custoAnoTecnico } from "./receitas";
 import { grupoVisita, AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
 
@@ -170,5 +171,17 @@ describe("protótipo de Negócios", () => {
     }
     const ano = custoAnoTecnico();
     expect(ano.total / ano.horas).toBeCloseTo(25, 0);
+  });
+
+  it("IVA na proposta: 6% na mão de obra e 23% nos materiais", () => {
+    const S = seed();
+    const d = S.deals.find((x) => x.id === 1031)!; // Carla Nunes, com orçamento
+    const T = totais(d, S);
+    const mat = d.orc!.linhas.filter((l) => l.t === "mat").reduce((a, l) => a + (l.t === "mat" ? l.preco : 0), 0);
+    expect(T.mat).toBeCloseTo(mat, 2);
+    expect(T.mo + T.mat).toBeCloseTo(tot(d, S).pf, 2);
+    expect(T.ivaMo).toBeCloseTo(T.mo * 0.06, 2);
+    expect(T.ivaMat).toBeCloseTo(T.mat * 0.23, 2);
+    expect(T.total).toBeCloseTo(T.mo * 1.06 + T.mat * 1.23, 2);
   });
 });

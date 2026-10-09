@@ -174,7 +174,6 @@ export const PROPOSTA: Grupo[] = [
       { k: "prazo_exec", l: "Prazo de execução", t: "contador", min: 1, max: 60, un: "dias úteis" },
       { k: "inicio_prev", l: "Início previsto", t: "data" },
       { k: "pagamento", l: "Condições de pagamento", t: "escolha", op: ["100% na adjudicação", "50% + 50% no fim", "30% + 40% + 30%"], papel: "fatura" },
-      { k: "iva", l: "Taxa de IVA", t: "escolha", op: ["23%", "6% (reabilitação)"], papel: "fatura" },
       { k: "garantia", l: "Garantia", t: "escolha", op: ["1 ano", "2 anos", "5 anos"] },
       { k: "notas_cliente", l: "Notas para o cliente", t: "texto_longo" },
     ],

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, conflitos, eur, fatorReal, nfmt, pct, r2, tot, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { FaturaDoc, Partilhar } from "./DocsCliente";
+import { FaturaDoc, Partilhar, totais } from "./DocsCliente";
 
 function Passo({ feito, titulo, texto }: { feito: boolean; titulo: string; texto: string }) {
   return (
@@ -25,13 +25,15 @@ function Passo({ feito, titulo, texto }: { feito: boolean; titulo: string; texto
 
 export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
   const { S, d } = ctx;
-  const T = d.orc ? tot(d, S) : null, ft = d.fin.fatura, rc = d.fin.recibo;
+  const T = d.orc ? tot(d, S) : null, TI = totais(d, S), ft = d.fin.fatura, rc = d.fin.recibo;
   return (
     <div className="max-w-2xl space-y-8">
       <section aria-label="Valor" className="rounded-2xl border border-border bg-card p-5">
-        <p className="text-sm text-muted-foreground">A faturar, sem IVA</p>
-        <p className="text-3xl font-semibold tabular-nums">{T ? eur(T.pf) : "—"} €</p>
-        <p className="mt-1 text-[15px] text-muted-foreground">{d.f.pagamento || "Condições de pagamento por definir"}{d.f.iva ? ` · IVA ${d.f.iva}` : ""}</p>
+        <p className="text-sm text-muted-foreground">A faturar, com IVA</p>
+        <p className="text-3xl font-semibold tabular-nums">{T ? eur(TI.total) : "—"} €</p>
+        <p className="mt-1 text-[15px] text-muted-foreground">
+          {eur(TI.base)} € sem IVA · IVA de {eur(TI.iva)} € (6% na mão de obra, 23% nos materiais) · {d.f.pagamento || "condições de pagamento por definir"}
+        </p>
       </section>
       <section aria-labelledby="fin-t">
         <h3 id="fin-t" className="text-base font-semibold">O que acontece</h3>

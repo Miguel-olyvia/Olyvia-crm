@@ -330,7 +330,7 @@ const EXEMPLO_COMPLETO: Record<string, string> = {
   // Visita · escolhas
   gama: "Média", materiais_cliente: "Não", cor_estilo: "Branco mate e madeira clara", diag_cliente_recusou_fotos: "Não",
   // Negócio
-  validade: "30 dias", prazo_exec: "8", inicio_prev: "2026-09-29", pagamento: "50% + 50% no fim", iva: "23%", garantia: "2 anos",
+  validade: "30 dias", prazo_exec: "8", inicio_prev: "2026-09-29", pagamento: "50% + 50% no fim", garantia: "2 anos",
   notas_cliente: "Inclui a remoção do entulho e a limpeza final.",
   modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben", multa: "Não",
   // Financeiro
@@ -367,7 +367,7 @@ function exemplo(d: Negocio): Record<string, string> {
     amianto: "Não", habitada_durante_obra: "Sim", animais: "Não", diag_pe_direito_m: "2,6 m", diag_altura_revestimento: "Ao teto", diag_pontos_eletricos: "4",
     diag_gas: "Não há", diag_toalheiro: "Sim", diag_janela: "Sim", diag_local_cortes: "Varanda", diag_distancia_entrada: "Média (5–15 m)", diag_mobilada: "Médio",
     diag_portas_proteger: "3", gama: "Média", materiais_cliente: "Não",
-    validade: "30 dias", prazo_exec: "8", pagamento: "50% + 50% no fim", iva: "23%", garantia: "2 anos",
+    validade: "30 dias", prazo_exec: "8", pagamento: "50% + 50% no fim", garantia: "2 anos",
     modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben",
   });
   if (d.fase >= 4) Object.assign(f, {
@@ -672,7 +672,7 @@ function preencher(d: Negocio, n: number) {
   }
   if (n === 3) {
     const h = d.orc ? d.orc.linhas.reduce((a, l) => a + (l.t === "svc" ? (SVC0[l.sid]?.h || 0) * l.q : 0), 0) : 0;
-    def({ validade: "30 dias", prazo_exec: String(Math.max(3, Math.ceil(h / 7))), garantia: "2 anos", iva: "23%", pagamento: "50% + 50% no fim",
+    def({ validade: "30 dias", prazo_exec: String(Math.max(3, Math.ceil(h / 7))), garantia: "2 anos", pagamento: "50% + 50% no fim",
       modelo_contrato: "Empreitada de remodelação", assinatura: "Digital, no portal", representante: "Rúben" });
   }
   if (n === 4) def({ nome_fiscal: d.nome, nif_fat: f.nif || "", morada_fiscal_igual: "Sim", email_fat: f.email || "", serie: "FT 2026",
