@@ -17,6 +17,7 @@ import { HojeSimples } from "./HojeSimples";
 import { NegocioSimples } from "./NegocioSimples";
 import { NegociosSimples } from "./NegociosSimples";
 import { InventarioSimples, OperacoesSimples } from "./OperacoesSimples";
+import { CatalogoSimples, ClientesSimples, DefinicoesSimples, MarketingSimples } from "./OutrosSimples";
 import { PaginaNegocio } from "./PaginaNegocio";
 import { Banner, Btn, Campo, numero, type Ctx } from "./pecas";
 
@@ -107,10 +108,10 @@ export default function PrototipoNegocios() {
     case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : simples ? <NegociosSimples {...ctx} /> : <Negocios {...ctx} />; break;
     case "operacoes": corpo = simples ? <OperacoesSimples {...ctx} /> : <Operacoes {...ctx} />; break;
     case "inventario": corpo = simples ? <InventarioSimples {...ctx} /> : <Inventario {...ctx} />; break;
-    case "catalogo": corpo = <Catalogo {...ctx} />; break;
-    case "clientes": corpo = <Clientes {...ctx} />; break;
-    case "marketing": corpo = <Marketing />; break;
-    case "definicoes": corpo = <Definicoes {...ctx} />; break;
+    case "catalogo": corpo = simples ? <CatalogoSimples {...ctx} /> : <Catalogo {...ctx} />; break;
+    case "clientes": corpo = simples ? <ClientesSimples {...ctx} /> : <Clientes {...ctx} />; break;
+    case "marketing": corpo = simples ? <MarketingSimples /> : <Marketing />; break;
+    case "definicoes": corpo = simples ? <DefinicoesSimples {...ctx} /> : <Definicoes {...ctx} />; break;
     default: corpo = simples ? <NegociosSimples {...ctx} /> : <Negocios {...ctx} />;
   }
 
@@ -163,7 +164,7 @@ export default function PrototipoNegocios() {
         </select>
       </label>
     );
-    const listaNova = S.view === "negocios" || (S.view === "negocio" && !S.deals.some((d) => d.id === S.deal)) || !["catalogo", "clientes", "marketing", "definicoes"].includes(S.view);
+    const listaNova = true; // na proposta simples todos os ecrãs são novos
     return (
       <div className={cn("pn calma fixed inset-0 flex bg-background text-foreground", S.leitura && "leitura")}>
         <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-card px-3 py-5 md:flex">
