@@ -29,7 +29,7 @@ export function OperacoesSimples(ctx: Ctx) {
     <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
       <h1 className="text-3xl font-semibold tracking-tight">Operações</h1>
       <p className="mt-2 text-lg text-muted-foreground">As obras chegam aqui sozinhas quando o Financeiro emite o recibo.</p>
-      <ul className="mt-8 divide-y divide-border border-y border-border">
+      <ul className="mt-8 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
         {obras.map((o) => {
           const p = o.obra.plano!, nc = conflitos(p).length;
           return (
@@ -160,7 +160,7 @@ export function InventarioSimples(ctx: Ctx) {
             <section key={d.id} aria-labelledby={`inv-${d.id}`}>
               <h2 id={`inv-${d.id}`} className="text-lg font-semibold">{d.nome} · {d.servico}</h2>
               <p className="mt-1 text-[15px] text-muted-foreground">{!e ? "Tudo em stock e reservado." : e.estado === "recebida" ? `Encomenda ${e.n} recebida.` : `Encomenda ${e.n} ${e.estado}.`}</p>
-              <ul className="mt-3 divide-y divide-border border-y border-border">
+              <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
                 {d.obra.mats!.map((x) => (
                   <li key={x.n} className="flex min-h-12 flex-wrap items-center justify-between gap-2 py-2.5 text-[15px]">
                     <span>{x.n}</span>

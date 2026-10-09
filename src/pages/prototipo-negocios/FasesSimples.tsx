@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, conflitos, eur, fatorReal, nfmt, pct, r2, tot, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
+import { FaturaDoc, Partilhar } from "./DocsCliente";
 
 function Passo({ feito, titulo, texto }: { feito: boolean; titulo: string; texto: string }) {
   return (
@@ -22,7 +23,8 @@ function Passo({ feito, titulo, texto }: { feito: boolean; titulo: string; texto
   );
 }
 
-export function DocumentosSimples({ S, d }: Ctx & { d: Negocio }) {
+export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
+  const { S, d } = ctx;
   const T = d.orc ? tot(d, S) : null, ft = d.fin.fatura, rc = d.fin.recibo;
   return (
     <div className="max-w-2xl space-y-8">
@@ -44,6 +46,9 @@ export function DocumentosSimples({ S, d }: Ctx & { d: Negocio }) {
           <li className={cn(rc && "text-foreground")}>{rc ? "✓" : "·"} O cliente recebe o recibo no portal</li>
         </ul>
       </section>
+      <Partilhar ctx={ctx} d={d} tipo="fatura" estado={rc ? `paga · ${rc.n}` : ft ? `emitida ${ft.q} · por pagar` : "rascunho: ainda não emitida"}>
+        <FaturaDoc S={S} d={d} />
+      </Partilhar>
     </div>
   );
 }
@@ -61,7 +66,7 @@ export function ObraSimples({ S, A, go, d }: Ctx & { d: Negocio }) {
           <Button variant="ghost" onClick={go(() => A.abrirPlano(d.id))}>Abrir nas Operações<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
         </div>
         <p className="mt-1 text-[15px]">{estado} <span className="text-muted-foreground">{pl.tasks.length} fases · {nfmt(horas)} h de equipa{nc ? ` · ${nc} conflito por resolver` : ""}</span></p>
-        <ol className="mt-3 divide-y divide-border border-y border-border">
+        <ol className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
           {pl.tasks.map((t, i) => {
             const tec = TECS.find((x) => x.id === t.tec);
             const feita = pl.estado === "concluída" || (pl.estado === "em curso" && t.dia + t.dur <= pl.dia);
@@ -81,7 +86,7 @@ export function ObraSimples({ S, A, go, d }: Ctx & { d: Negocio }) {
           <Button variant="ghost" onClick={go(() => A.abrirInv())}>Abrir no Inventário<ArrowRight className="ml-1.5 h-4 w-4" /></Button>
         </div>
         <p className="mt-1 text-[15px]">{!e ? "Tudo em stock e reservado." : e.estado === "recebida" ? `Encomenda ${e.n} recebida: tudo reservado.` : `Encomenda ${e.n} ${e.estado}.`}</p>
-        <ul className="mt-3 divide-y divide-border border-y border-border">
+        <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
           {(d.obra.mats || []).map((x) => (
             <li key={x.n} className="flex min-h-12 items-center justify-between gap-3 py-2 text-[15px]">
               <span>{x.n}</span>

@@ -7,7 +7,7 @@ import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PAPEIS, aberto, eur, minhas, pct, tot } from "./motor";
 import { agenda } from "./Hoje";
-import { Progresso, fazer, type Ctx } from "./pecas";
+import { IconeFase, Progresso, fazer, type Ctx } from "./pecas";
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 
@@ -39,17 +39,22 @@ export function HojeSimples({ S, A, go }: Ctx) {
       )}
 
       {primeiro && (
-        <section aria-labelledby="comecar" className="mt-10 rounded-2xl border border-border bg-card p-6 shadow-[var(--shadow-sm)] animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
+        <section aria-labelledby="comecar" className="mt-10 rounded-2xl border border-primary/25 bg-card p-6 shadow-[var(--shadow-md)] animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
           <div className="flex items-center justify-between gap-4">
-            <h2 id="comecar" className="text-sm font-medium text-muted-foreground">Comece por aqui</h2>
+            <h2 id="comecar" className="text-sm font-medium text-primary">Comece por aqui</h2>
             <Progresso fase={primeiro.d.fase} className="w-28" />
           </div>
-          <p className="mt-2 text-xl font-semibold text-foreground">{primeiro.dir ? "Aprovar a exceção à margem" : primeiro.p.t}</p>
+          <div className="mt-3 flex items-start gap-4">
+          <IconeFase fase={primeiro.d.fase} tam="lg" />
+          <div className="min-w-0">
+          <p className="text-xl font-semibold text-foreground">{primeiro.dir ? "Aprovar a exceção à margem" : primeiro.p.t}</p>
           <p className="mt-1 text-base text-muted-foreground">
             {primeiro.d.nome} · {primeiro.d.servico}
             {primeiro.d.atraso && primeiro.d.fase === 0 && <span className="text-destructive"> · atrasado 2 dias</span>}
           </p>
           {primeiro.p.sub && <p className="mt-1 text-base text-muted-foreground">{primeiro.p.sub}</p>}
+          </div>
+          </div>
           <div className="mt-6 flex flex-wrap items-center gap-3">
             {primeiro.dir
               ? <><Button size="lg" onClick={go(() => A.aprovar(primeiro.d.id))}>Aprovar</Button><Button size="lg" variant="outline" onClick={go(() => A.recusarAprov(primeiro.d.id))}>Recusar</Button></>
@@ -62,11 +67,12 @@ export function HojeSimples({ S, A, go }: Ctx) {
       {resto.length > 0 && (
         <section aria-labelledby="depois" className="mt-12">
           <h2 id="depois" className="text-lg font-semibold">Depois</h2>
-          <ul className="mt-3 divide-y divide-border border-y border-border">
+          <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
             {resto.map(({ d, p, dir }) => (
               <li key={d.id}>
                 <button type="button" onClick={go(() => A.abrir(d.id))}
                   className="group flex min-h-16 w-full items-center gap-4 py-3 text-left transition-colors hover:bg-muted/50 sm:px-2">
+                  <IconeFase fase={d.fase} />
                   <span className="min-w-0 flex-1">
                     <span className="block text-base font-medium text-foreground">{dir ? "Aprovar a exceção à margem" : p.t}</span>
                     <span className="block text-[15px] text-muted-foreground">{d.nome} · {d.servico}</span>
@@ -84,11 +90,12 @@ export function HojeSimples({ S, A, go }: Ctx) {
         {ag.length === 0
           ? <p className="mt-3 text-[15px] text-muted-foreground">Nada marcado.</p>
           : (
-            <ul className="mt-3 divide-y divide-border border-y border-border">
+            <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
               {ag.map((c) => (
                 <li key={c.id}>
                   <button type="button" onClick={go(() => A.abrir(c.d.id))}
                     className="group flex min-h-16 w-full items-center gap-4 py-3 text-left transition-colors hover:bg-muted/50 sm:px-2">
+                    <IconeFase fase={c.d.fase} />
                     <span className="w-20 shrink-0 tabular-nums">
                       <span className="block text-base font-medium">{c.hora}</span>
                       {c.dia && <span className={c.atrasado ? "block text-sm text-destructive" : "block text-sm text-muted-foreground"}>{c.dia}</span>}

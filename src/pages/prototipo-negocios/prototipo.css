@@ -281,3 +281,9 @@
 .leitura main *{letter-spacing:.02em;word-spacing:.1em}
 .leitura main p,.leitura main li,.leitura main label{line-height:1.7}
 .leitura em,.leitura i{font-style:normal}
+
+/* Proposta simples, 2.ª versão (09/10): menos "preto no branco". Fundo suave
+   e cartões brancos para agrupar; a cor só nos ícones de cada fase e bloco. */
+.calma{--background:240 24% 96.5%;--muted:240 20% 94.5%;--border:235 16% 87%;--card:0 0% 100%;
+  --shadow-sm:0 1px 2px rgb(30 30 60 / .05), 0 1px 1px rgb(30 30 60 / .03);--shadow-md:0 4px 14px rgb(30 30 60 / .08)}
+.leitura{--background:42 45% 95%;--muted:40 22% 91%}

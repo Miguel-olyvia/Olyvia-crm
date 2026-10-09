@@ -2,11 +2,11 @@
 // O passo aberto mostra os campos e acende o próximo por preencher; quando
 // os campos do passo ficam todos preenchidos, abre sozinho o passo seguinte.
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { AlertCircle, Check, ChevronDown, Minus, Plus, Sparkles, type LucideIcon } from "lucide-react";
+import { AlertCircle, Building2, Car, Check, ChevronDown, HardHat, Home, Minus, Plug, Plus, Ruler, ShieldAlert, Sparkles, Zap, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PAPEL_ROT, contagem, obrigatorio, visivel, type Def, type Grupo, type Papel } from "./campos";
 import type { Negocio } from "./motor";
-import type { Ctx } from "./pecas";
+import { Chip, type Ctx } from "./pecas";
 
 export const INPUT =
   "h-9 w-full min-w-0 rounded-lg border border-input bg-background px-3 text-sm text-foreground outline-none transition placeholder:text-muted-foreground/60 focus:border-primary focus:ring-2 focus:ring-primary/20";
@@ -48,6 +48,14 @@ export function proximoVazio(g: Grupo, f: Record<string, string>): string | null
   return c ? c.k : null;
 }
 
+// O ícone e a cor de cada bloco dos formulários (ajuda a encontrar o sítio de relance).
+const BLOCO: Record<string, [LucideIcon, string]> = {
+  "Acesso e estacionamento": [Car, "bg-sky-100 text-sky-700"], "O prédio": [Building2, "bg-indigo-100 text-indigo-700"],
+  "A casa": [Home, "bg-amber-100 text-amber-800"], "Instalações": [Zap, "bg-yellow-100 text-yellow-800"],
+  "Durante a obra": [ShieldAlert, "bg-rose-100 text-rose-700"], "A divisão": [Ruler, "bg-violet-100 text-violet-700"],
+  "Instalações da divisão": [Plug, "bg-teal-100 text-teal-700"], "Trabalho e proteções": [HardHat, "bg-orange-100 text-orange-700"],
+};
+
 /** Está a validar este grupo (tentou passar de fase com campos em falta)? */
 export const aValidar = (d: Negocio, id: string) => !!d.valida && d.valida.fase === d.fase && d.valida.grupos.includes(id);
 
@@ -75,8 +83,9 @@ export function Campos({ grupo, d, A, run, ro, simples, cols = 3 }: FxProps & { 
           return (
             <section key={b || "_"} aria-label={b || undefined}>
               {b && (
-                <div className="mb-1 flex items-baseline justify-between gap-3">
-                  <h3 className="text-base font-semibold text-foreground">{b}</h3>
+                <div className="mb-3 flex items-center gap-3">
+                  {BLOCO[b] && <Chip icone={BLOCO[b][0]} cor={BLOCO[b][1]} />}
+                  <h3 className="flex-1 text-base font-semibold text-foreground">{b}</h3>
                   {ob.length > 0 && <span className={cn("text-sm tabular-nums", feitos === ob.length ? "text-success" : "text-muted-foreground")}>{feitos === ob.length ? "Completo" : `${feitos} de ${ob.length}`}</span>}
                 </div>
               )}
@@ -86,7 +95,7 @@ export function Campos({ grupo, d, A, run, ro, simples, cols = 3 }: FxProps & { 
                   <button type="button" onClick={() => run(() => A.confirmar(d.id, sug))} className="min-h-9 rounded-lg px-2 font-medium text-primary underline-offset-4 hover:underline">Estão certas</button>
                 </div>
               )}
-              <div className="divide-y divide-border border-y border-border">{cs.map(campo)}</div>
+              <div className="divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">{cs.map(campo)}</div>
             </section>
           );
         })}

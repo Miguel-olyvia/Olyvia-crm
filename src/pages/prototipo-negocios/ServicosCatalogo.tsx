@@ -72,7 +72,7 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
           <h3 id={`pac-${d.id}`} className={titulo}>Do pacote "{L.modelo}"</h3>
           <span className="text-sm text-muted-foreground">quantidades das medidas</span>
         </div>
-        <ul className="mt-2 divide-y divide-border border-y border-border">
+        <ul className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
           {pacote.map(({ sid, s, qt, on }) => (
             <li key={sid} className={linha}>
               <input id={`pac-${sid}-${d.id}`} type="checkbox" checked={on} disabled={ro || !(qt > 0)} className="h-5 w-5 shrink-0 accent-[hsl(var(--primary))]"
@@ -93,7 +93,7 @@ export function ServicosCatalogo({ S, A, run, d, simples }: Ctx & { d: Negocio; 
           <span className="text-sm text-muted-foreground">{juntados.length ? `${juntados.length} juntado${juntados.length > 1 ? "s" : ""}` : "nenhum ainda"}</span>
         </div>
         {juntados.length > 0 ? (
-          <ul className="mt-2 divide-y divide-border border-y border-border">
+          <ul className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
             {juntados.map(({ sid, s, qt }) => s && (
               <li key={sid} className={cn(linha, "animate-in fade-in-0 slide-in-from-top-1 duration-300")}>
                 <span className="min-w-0 flex-1">

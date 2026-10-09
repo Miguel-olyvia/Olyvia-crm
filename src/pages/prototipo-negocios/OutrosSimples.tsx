@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { CATALOGO, OFICIOS, normal } from "./catalogo";
 import { ESTR, custoUn, eur, nfmt, pct, type Servico } from "./motor";
 import { numero, type Ctx } from "./pecas";
+import { CustoServico } from "./CustoServico";
 
 const Interruptor = ({ on, onClick, titulo, texto }: { on: boolean; onClick: () => void; titulo: string; texto: string }) => (
   <button type="button" role="switch" aria-checked={on} onClick={onClick} className="flex w-full items-center justify-between gap-4 py-4 text-left">
@@ -33,6 +34,7 @@ function Numero({ id, rot, v, un, onSet }: { id: string; rot: string; v: number;
 
 export function CatalogoSimples({ S, run }: Ctx) {
   const [aberto, setAberto] = useState<string | null>(null);
+  const [custo, setCusto] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [of, setOf] = useState<string | null>(null);
   const min = S.cfg.min / 100, alvo = S.cfg.alvo / 100;
@@ -48,7 +50,7 @@ export function CatalogoSimples({ S, run }: Ctx) {
 
       <h2 className="mt-10 text-lg font-semibold">Serviços em uso</h2>
       <p className="mt-1 text-[15px] text-muted-foreground">Mudar a receita avisa os orçamentos ainda não enviados ("O Catálogo mudou").</p>
-      <ul className="mt-3 divide-y divide-border border-y border-border">
+      <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
         {(Object.entries(S.svc) as [string, Servico][]).map(([k, s]) => {
           const c = custoUn(s, S), m = (s.preco - c) / s.preco, ab = aberto === k;
           const mc = m < min ? "text-destructive" : m < alvo - 0.005 ? "text-warning" : "text-muted-foreground";
@@ -75,6 +77,7 @@ export function CatalogoSimples({ S, run }: Ctx) {
                   <Numero id={`eh-${k}`} rot="Técnico" v={s.eh} un="€/h" onSet={(n) => run(() => { s.eh = n; s.semCusto = false; })} />
                   <Numero id={`c-${k}`} rot="Consumíveis" v={s.cons} un={`€/${s.un}`} onSet={(n) => run(() => { s.cons = n; s.stale = null; })} />
                   <Numero id={`p-${k}`} rot="Preço de tabela" v={s.preco} un={`€/${s.un}`} onSet={(n) => run(() => { s.preco = n; })} />
+                  <button type="button" onClick={() => setCusto(k)} className="col-span-full justify-self-start text-[15px] font-medium text-primary underline-offset-4 hover:underline">Ver o custo em detalhe (técnico, equipamentos, consumíveis)</button>
                   <p className="col-span-full text-sm text-muted-foreground">
                     Custo = {nfmt(s.h)} h × {eur(s.eh)} € + {eur(s.eq)} € de equipamento + {eur(s.cons)} € de consumíveis{S.cfg.estrutura ? ` + ${nfmt(s.h)} h × ${eur(ESTR)} € de estrutura` : ""} = {eur(c)} €/{s.un}.
                   </p>
@@ -84,6 +87,8 @@ export function CatalogoSimples({ S, run }: Ctx) {
           );
         })}
       </ul>
+
+      {custo && S.svc[custo] && <CustoServico S={S} sid={custo} s={S.svc[custo]} onClose={() => setCusto(null)} />}
 
       <h2 className="mt-12 text-lg font-semibold">Catálogo da Mudelar</h2>
       <p className="mt-1 text-[15px] text-muted-foreground">Os serviços vendidos à parte dos pacotes, com as horas validadas. Entram em uso quando se juntam numa visita.</p>
@@ -99,7 +104,7 @@ export function CatalogoSimples({ S, run }: Ctx) {
             className={cn("min-h-9 rounded-full border px-3 text-sm", of === o ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card")}>{o || "Todos"}</button>
         ))}
       </div>
-      <ul className="mt-3 divide-y divide-border border-y border-border">
+      <ul className="mt-3 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
         {outros.map((c) => (
           <li key={c.id} className="flex min-h-14 items-center justify-between gap-3 py-2.5">
             <span className="min-w-0"><span className="block text-[15px]">{c.n}</span><span className="block text-sm text-muted-foreground">{c.cat} · {nfmt(c.hu)} h/{c.un}{c.hf ? ` + ${nfmt(c.hf)} h fixas` : ""}</span></span>
@@ -117,7 +122,7 @@ export function ClientesSimples({ S, A, go }: Ctx) {
     <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
       <h1 className="text-3xl font-semibold tracking-tight">Clientes</h1>
       <p className="mt-2 text-lg text-muted-foreground">O cliente é criado sozinho quando o contrato é assinado ou a venda direta é aceite.</p>
-      <ul className="mt-8 divide-y divide-border border-y border-border">
+      <ul className="mt-8 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
         {S.clientes.map((c) => (
           <li key={c.deal}>
             <button type="button" onClick={go(() => A.abrir(c.deal))} className="group flex min-h-16 w-full items-center gap-4 py-3 text-left hover:bg-muted/50 sm:px-2">
@@ -137,7 +142,7 @@ export function MarketingSimples() {
     <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
       <h1 className="text-3xl font-semibold tracking-tight">Marketing</h1>
       <p className="mt-2 text-lg text-muted-foreground">De onde vêm as leads e quantas viram negócio. Os formulários vivem dentro de cada campanha.</p>
-      <ul className="mt-8 divide-y divide-border border-y border-border">
+      <ul className="mt-8 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
         {C.map(([n, s, l, g]) => (
           <li key={n} className="grid gap-2 py-4">
             <span className="flex items-baseline justify-between gap-3"><span className="text-base font-medium">{n}</span><span className="text-[15px] tabular-nums">{g} de {l} ganhos · {pct(g / l)}</span></span>
@@ -170,7 +175,7 @@ export function DefinicoesSimples({ S, A, go, run, repor }: Ctx) {
       <p className="mt-2 text-lg text-muted-foreground">Só as regras que mexem no orçamento e no aspeto deste protótipo.</p>
 
       <h2 className="mt-10 text-lg font-semibold">Margens</h2>
-      <div className="mt-2 divide-y divide-border border-y border-border">
+      <div className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
         <Contador rot="Margem mínima" v={S.cfg.min} onSet={(n) => run(() => { S.cfg.min = Math.min(n, S.cfg.alvo); })} />
         <Contador rot="Margem-alvo" v={S.cfg.alvo} onSet={(n) => run(() => { S.cfg.alvo = Math.max(n, S.cfg.min); })} />
         <Interruptor on={S.cfg.estrutura} onClick={() => run(() => { S.cfg.estrutura = !S.cfg.estrutura; })} titulo={`Somar ${eur(ESTR)} €/h de estrutura ao custo`}
@@ -179,7 +184,7 @@ export function DefinicoesSimples({ S, A, go, run, repor }: Ctx) {
       <p className="mt-2 text-[15px] text-muted-foreground">Abaixo do mínimo, a proposta só sai com aprovação da Direção.</p>
 
       <h2 className="mt-10 text-lg font-semibold">Aspeto</h2>
-      <div className="mt-2 divide-y divide-border border-y border-border">
+      <div className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
         <Interruptor on={!!S.leitura} onClick={() => run(() => A.leitura(!S.leitura))} titulo="Leitura fácil" texto="Letra maior, mais espaço entre letras e linhas, fundo creme." />
         <Interruptor on={false} onClick={go(() => A.aspeto("atual"))} titulo="Ver o aspeto atual da Olyvia" texto="Para comparar com esta proposta." />
       </div>

@@ -5,7 +5,7 @@ import { ArrowRight, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES, aberto, eur, proximo, tot, type LinhaId, type Negocio } from "./motor";
-import { Progresso, type Ctx } from "./pecas";
+import { IconeFase, Progresso, type Ctx } from "./pecas";
 
 const FILTROS: [string, string][] = [["meus", "Os meus"], ["todos", "Todos"], ["atraso", "Com atraso"], ["wc", "Casa de banho"], ["coz", "Cozinha"]];
 
@@ -42,8 +42,8 @@ export function NegociosSimples({ S, A, go, run, q, setQ }: Ctx) {
     const cs = ds.filter((d) => d.fase === i);
     return (
       <section key={i} aria-labelledby={`col-${i}`} className="min-w-0">
-        <h2 id={`col-${i}`} className="flex items-baseline justify-between px-1 text-[15px] font-semibold">
-          {FASES[i]}<span className="text-sm font-normal tabular-nums text-muted-foreground">{cs.length}</span>
+        <h2 id={`col-${i}`} className="flex items-center gap-2 px-1 text-[15px] font-semibold">
+          <IconeFase fase={i} tam="sm" /><span className="flex-1">{FASES[i]}</span><span className="text-sm font-normal tabular-nums text-muted-foreground">{cs.length}</span>
         </h2>
         <ul className="mt-3 space-y-3">
           {i === 0 && S.novo && <NovoSimples S={S} A={A} run={run} />}

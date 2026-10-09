@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { acoes, alertas, bloqueado, conflitos, protecoesSugeridas, seed, tot, type Negocio } from "./motor";
+import { RECEITAS, amortUn, consUn, custoAnoTecnico } from "./receitas";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, emFalta, type Grupo } from "./campos";
 
 // Preenche os obrigatórios que faltam (os condicionais podem aparecer depois de preencher outros).
@@ -151,5 +152,16 @@ describe("protótipo de Negócios", () => {
     expect(d.sug?.area_util_m2).toBeUndefined();
     A.campo(d.id, "fracao", "R/C Dto.");
     expect(d.f.andar).toBe("1"); // já tinha valor: a sugestão não o apaga
+  });
+
+  it("o detalhe do custo bate certo com o custo do orçamento", () => {
+    const S = seed();
+    for (const [sid, R] of Object.entries(RECEITAS)) {
+      const s = S.svc[sid];
+      expect(R.equip.reduce((a, e) => a + amortUn(e), 0)).toBeCloseTo(s.eq, 2);
+      expect(R.cons.reduce((a, c) => a + consUn(c), 0)).toBeCloseTo(s.cons, 2);
+    }
+    const ano = custoAnoTecnico();
+    expect(ano.total / ano.horas).toBeCloseTo(25, 0);
   });
 });

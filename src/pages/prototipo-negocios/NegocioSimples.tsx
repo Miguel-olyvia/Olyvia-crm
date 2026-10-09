@@ -2,7 +2,7 @@
 // Uma coisa de cada vez: o passo atual ocupa o ecrã, os outros ficam numa
 // lista à esquerda. Um só botão primário. Texto a 15–16 px, contraste AA.
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, Square, Volume2 } from "lucide-react";
+import { ArrowLeft, Check, Euro, MapPin, Phone, Square, TrendingUp, Volume2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES, LINHAS, PAPEIS, eur, pct, proximo, tot, type Negocio } from "./motor";
@@ -11,9 +11,10 @@ import { Campos, type Passo } from "./CamposFase";
 import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
 import { OrcamentoSimples } from "./OrcamentoSimples";
 import { DocumentosSimples } from "./FasesSimples";
+import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { ServicosCatalogo } from "./ServicosCatalogo";
 import { nfmt, type MedKey } from "./motor";
-import type { Ctx } from "./pecas";
+import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 // nomes curtos para a lista dos passos
@@ -50,18 +51,50 @@ export function NegocioSimples(ctx: Ctx) {
         <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Negócios
       </button>
 
-      <header className="mt-2 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-3xl font-semibold tracking-tight text-foreground">{d.nome}</h1>
-          <p className="mt-1 text-base text-muted-foreground">
-            {d.servico}{local ? ` · ${local}` : ""} · {d.tel}{T ? ` · ${eur(T.pf)} € · margem ${pct(T.m)}` : ""}
-          </p>
+      <header className="mt-2 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] sm:p-6">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <IconeFase fase={d.fase} tam="lg" />
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">{d.nome}</h1>
+              <p className="text-base text-muted-foreground">{d.servico}</p>
+            </div>
+          </div>
+          {d.fase < 4 && !d.perdido && (
+            <button type="button" onClick={go(() => A.perder(d.id))} className="min-h-11 self-start rounded-lg px-1 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+              Marcar como perdido
+            </button>
+          )}
         </div>
-        {d.fase < 4 && !d.perdido && (
-          <button type="button" onClick={go(() => A.perder(d.id))} className="min-h-11 self-start rounded-lg px-1 text-[15px] text-muted-foreground underline-offset-4 hover:text-foreground hover:underline sm:self-auto">
-            Marcar como perdido
-          </button>
+        <dl className="mt-5 flex flex-wrap gap-x-6 gap-y-2 text-[15px]">
+          <div className="inline-flex items-center gap-2"><dt><Phone className="h-4 w-4 text-muted-foreground" aria-label="Telefone" /></dt><dd>{d.tel}</dd></div>
+          {local && <div className="inline-flex items-center gap-2"><dt><MapPin className="h-4 w-4 text-muted-foreground" aria-label="Local" /></dt><dd>{local}</dd></div>}
+          {T && <div className="inline-flex items-center gap-2"><dt><Euro className="h-4 w-4 text-muted-foreground" aria-label="Total" /></dt><dd className="font-semibold tabular-nums">{eur(T.pf)} €</dd></div>}
+          {T && <div className="inline-flex items-center gap-2"><dt><TrendingUp className="h-4 w-4 text-muted-foreground" aria-label="Margem" /></dt><dd className={cn("tabular-nums", T.m < S.cfg.min / 100 ? "text-destructive" : T.m < S.cfg.alvo / 100 - 0.005 ? "text-warning" : "text-success")}>margem {pct(T.m)}</dd></div>}
+        </dl>
+        <div className="mt-6">
+          <ol className="grid grid-cols-6 gap-1.5" aria-label="Fases do negócio">
+            {FASES.map((f, i) => (
+              <li key={f} aria-current={i === d.fase ? "step" : undefined}>
+                <span className={cn("block h-2 rounded-full transition-colors duration-500", i < d.fase ? "bg-primary" : i === d.fase ? "bg-primary/50" : "bg-muted")} />
+                <span className={cn("mt-1.5 hidden truncate text-xs sm:block", i === d.fase ? "font-semibold text-foreground" : i < d.fase ? "text-foreground/70" : "text-muted-foreground")}>{f}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="mt-3 text-[15px] text-muted-foreground sm:hidden" aria-live="polite">
+            Fase {d.fase + 1} de 6: <span className="font-semibold text-foreground">{FASES[d.fase]}</span>{d.fase < 5 && <> · depois: {FASES[d.fase + 1]}</>}
+          </p>
+        {d.fase > 0 && (
+          <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden" aria-label="Fases feitas">
+            {FASES.slice(0, d.fase).map((f, i) => (
+              <button key={f} type="button" onClick={() => setVer(ver === i ? null : i)} aria-pressed={ver === i}
+                className={cn("inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm", ver === i ? "border-foreground bg-foreground text-background" : "border-input text-foreground")}>
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />{f}
+              </button>
+            ))}
+          </div>
         )}
+        </div>
       </header>
       {S.confirmPerda === d.id && (
         <div role="alertdialog" aria-label="Confirmar" className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4 animate-in fade-in-0">
@@ -78,28 +111,6 @@ export function NegocioSimples(ctx: Ctx) {
         </div>
       )}
 
-      {/* As fases: uma linha fina e o nome da fase em texto */}
-      <div className="mt-8">
-        <div className="flex gap-1.5" aria-hidden="true">
-          {FASES.map((f, i) => (
-            <span key={f} className={cn("h-1.5 flex-1 rounded-full transition-colors duration-500", i < d.fase ? "bg-primary" : i === d.fase ? "bg-primary/45" : "bg-border")} />
-          ))}
-        </div>
-        <p className="mt-3 text-[15px] text-muted-foreground" aria-live="polite">
-          Fase {d.fase + 1} de 6: <span className="font-semibold text-foreground">{FASES[d.fase]}</span>
-          {d.fase < 5 && <> · depois: {FASES[d.fase + 1]}</>}
-        </p>
-        {d.fase > 0 && (
-          <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] lg:hidden [&::-webkit-scrollbar]:hidden" aria-label="Fases feitas">
-            {FASES.slice(0, d.fase).map((f, i) => (
-              <button key={f} type="button" onClick={() => setVer(ver === i ? null : i)} aria-pressed={ver === i}
-                className={cn("inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-sm", ver === i ? "border-foreground bg-foreground text-background" : "border-input text-foreground")}>
-                <Check className="h-3.5 w-3.5" aria-hidden="true" />{f}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
 
       <div className="mt-8 grid items-start gap-10 lg:grid-cols-[260px_minmax(0,1fr)] 2xl:grid-cols-[260px_minmax(0,1fr)_240px]">
         {ver === null
@@ -123,6 +134,8 @@ export function NegocioSimples(ctx: Ctx) {
                 )}
                 {ver === 2 && <div><h3 className="mb-3 text-base font-semibold">Serviços necessários</h3><ServicosCatalogo {...ctx} d={d} simples /></div>}
                 {ver === 3 && d.orc && <div><h3 className="mb-3 text-base font-semibold">Orçamento</h3><OrcamentoSimples {...ctx} d={d} /></div>}
+                {ver === 3 && d.orc && <div><h3 className="mb-3 text-base font-semibold">Proposta</h3><Partilhar ctx={ctx} d={d} tipo="proposta" estado={d.orc.aceite ? `aceite ${d.orc.aceite}` : "enviada"}><PropostaDoc S={S} d={d} /></Partilhar></div>}
+                {ver === 3 && d.orc && !d.orc.vendaDireta && <div><h3 className="mb-3 text-base font-semibold">Contrato</h3><Partilhar ctx={ctx} d={d} tipo="contrato" estado={d.orc.contrato === "assinado" ? "assinado" : "enviado"}><ContratoDoc S={S} d={d} /></Partilhar></div>}
                 {ver === 4 && <div><h3 className="mb-3 text-base font-semibold">Fatura e recibo</h3><DocumentosSimples {...ctx} d={d} /></div>}
                 {(ver === 3 && d.orc?.vendaDireta ? PROPOSTA.slice(0, 1) : GRUPOS_FASE[ver]).map((g) => (
                   <div key={g.titulo}>
@@ -137,7 +150,7 @@ export function NegocioSimples(ctx: Ctx) {
             </section>
           </>}
 
-        <aside className="hidden 2xl:block" aria-label="Cliente">
+        <aside className="hidden rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)] 2xl:block" aria-label="Cliente">
           <h2 className="text-base font-semibold">Cliente</h2>
           <dl className="mt-3 space-y-3 text-[15px]">
             <div><dt className="text-sm text-muted-foreground">Telefone</dt><dd>{d.tel}</dd></div>
@@ -198,7 +211,7 @@ type Lat = (passos: Passo[], ativo: number, setAtivo: (i: number) => void) => Re
 
 function Lateral({ d, passos, ativo, setAtivo, verFase, vendo }: { d: Negocio; passos: Passo[]; ativo: number; setAtivo: (i: number) => void; verFase: (i: number | null) => void; vendo?: number }) {
   return (
-    <nav aria-label="Passos desta fase" className="hidden lg:sticky lg:top-6 lg:block">
+    <nav aria-label="Passos desta fase" className="hidden rounded-2xl border border-border bg-card p-3 shadow-[var(--shadow-sm)] lg:sticky lg:top-6 lg:block">
       {passos.length > 0 && (
         <>
           <h2 className="px-3 text-sm font-medium text-muted-foreground">{FASES[d.fase]}</h2>
@@ -226,7 +239,7 @@ function Lateral({ d, passos, ativo, setAtivo, verFase, vendo }: { d: Negocio; p
       )}
       {d.fase > 0 && (
         <>
-          <h2 className={cn("px-3 text-sm font-medium text-muted-foreground", passos.length > 0 && "mt-8")}>Fases feitas</h2>
+          <h2 className={cn("px-3 text-sm font-medium text-muted-foreground", passos.length > 0 && "mt-6 border-t border-border pt-4")}>Fases feitas</h2>
           <ul className="mt-2 space-y-0.5">
             {FASES.slice(0, d.fase).map((f, i) => (
               <li key={f}>
@@ -319,7 +332,10 @@ function FaseSimples({ ctx, d, lateral }: { ctx: Ctx; d: Negocio; lateral: Lat }
                 <p className="text-sm text-muted-foreground">Passo {ativo + 1} de {passos.length} · {tempo(atual)}</p>
                 <Ouvir />
               </div>
-              <h2 id="passo-titulo" ref={titulo} tabIndex={-1} className="mt-1 text-2xl font-semibold tracking-tight outline-none">{curto(atual)}</h2>
+              <div className="mt-2 flex items-center gap-3">
+                <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-xl [&_svg]:h-5 [&_svg]:w-5", FASE_COR[d.fase])} aria-hidden="true"><atual.icone /></span>
+                <h2 id="passo-titulo" ref={titulo} tabIndex={-1} className="text-2xl font-semibold tracking-tight outline-none">{curto(atual)}</h2>
+              </div>
               <div id="passo-corpo" className="mt-6">{atual.corpo}</div>
             </>
           ) : (

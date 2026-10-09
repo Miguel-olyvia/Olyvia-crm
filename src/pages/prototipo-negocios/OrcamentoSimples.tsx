@@ -2,11 +2,12 @@
 // numa lista (toca-se numa para a mudar), e o que falta resolver antes de
 // enviar, cada coisa com o botão que a resolve. Nada de tabelas largas.
 import { useState } from "react";
-import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, Minus, Plus } from "lucide-react";
+import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { alertas, bloqueado, custoUn, eur, linhaCalc, nfmt, partes, pct, r2, tot, type Negocio } from "./motor";
 import { numero, type Ctx } from "./pecas";
+import { CustoServico } from "./CustoServico";
 
 const DESCONTOS = [0, 3, 5, 10];
 
@@ -107,9 +108,9 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
       <section aria-labelledby="linhas-t">
         <div className="flex items-baseline justify-between gap-3">
           <h3 id="linhas-t" className="text-base font-semibold">Linhas</h3>
-          <span className="text-sm text-muted-foreground">{fechado ? `enviado ${o.enviada}` : "toque numa linha para a mudar"}</span>
+          <span className="text-sm text-muted-foreground">toque numa linha para ver o custo</span>
         </div>
-        <ul className="mt-2 divide-y divide-border border-y border-border">
+        <ul className="mt-2 divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5">
           {o.linhas.map((l, i) => {
             const x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
             const mc = m < min ? "text-destructive" : m < alvo - 0.005 ? "text-warning" : "text-muted-foreground";
@@ -119,11 +120,11 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
                 <span className="text-right"><span className="block text-[15px] tabular-nums">{eur(x.preco)} €</span><span className={cn("block text-sm", mc)}>margem {pct(m)}</span></span>
               </li>
             );
-            const s = x.s!, aberto = aberta === i && !fechado, novo = r2(custoUn(s, S)), mud = !fechado && Math.abs(novo - l.cu) > 0.004;
+            const s = x.s!, aberto = aberta === i, novo = r2(custoUn(s, S)), mud = !fechado && Math.abs(novo - l.cu) > 0.004;
             return (
               <li key={i}>
-                <button type="button" disabled={fechado} onClick={() => setAberta(aberto ? null : i)} aria-expanded={aberto}
-                  className="flex min-h-16 w-full items-center gap-4 py-3 text-left disabled:cursor-default">
+                <button type="button" onClick={() => setAberta(i)} aria-haspopup="dialog"
+                  className="flex min-h-16 w-full items-center gap-4 rounded-lg py-3 text-left transition-colors hover:bg-muted/50 sm:px-2">
                   <span className="min-w-0 flex-1">
                     <span className="block text-[15px]">{s.n}</span>
                     <span className="block text-sm text-muted-foreground">{nfmt(l.q)} {s.un} × {eur(l.pu)} €</span>
@@ -132,10 +133,12 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
                     <span className="block text-[15px] tabular-nums">{eur(x.preco)} €</span>
                     <span className={cn("block text-sm", mc)}>margem {pct(m)}{m < min ? " · abaixo do mínimo" : ""}</span>
                   </span>
-                  {!fechado && <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", aberto && "rotate-180")} aria-hidden="true" />}
+                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                 </button>
                 {aberto && (
-                  <div className="mb-3 grid gap-4 rounded-xl bg-muted/50 p-4 sm:grid-cols-2 animate-in fade-in-0 slide-in-from-top-1">
+                  <CustoServico S={S} sid={l.sid} s={s} q={l.q} pu={l.pu} onClose={() => setAberta(null)}>
+                  {!fechado && <section className="grid gap-4 rounded-2xl border border-border bg-card p-4 sm:grid-cols-2">
+                    <h3 className="text-[15px] font-semibold sm:col-span-2">Mudar nesta linha</h3>
                     <div className="grid gap-2">
                       <span className="text-sm font-medium" id={`q-${i}`}>Quantidade ({s.un})</span>
                       <div role="group" aria-labelledby={`q-${i}`} className="inline-flex w-fit items-center rounded-lg border border-input bg-card p-0.5">
@@ -162,7 +165,8 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
                       <Button variant="outline" onClick={() => run(() => { l.pu = r2(l.cu / (1 - alvo)); mudou(); })}>Usar o preço do alvo</Button>
                       {mud && <Button variant="outline" onClick={go(() => A.recalc(d.id, i))}>O Catálogo mudou: usar {eur(novo)} €</Button>}
                     </div>
-                  </div>
+                  </section>}
+                  </CustoServico>
                 )}
               </li>
             );
