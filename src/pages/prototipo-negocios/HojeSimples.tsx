@@ -7,7 +7,7 @@ import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PAPEIS, aberto, eur, minhas, pct, tot } from "./motor";
 import { agenda } from "./Hoje";
-import { fazer, type Ctx } from "./pecas";
+import { Progresso, fazer, type Ctx } from "./pecas";
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 
@@ -40,7 +40,10 @@ export function HojeSimples({ S, A, go }: Ctx) {
 
       {primeiro && (
         <section aria-labelledby="comecar" className="mt-10 rounded-2xl border border-border bg-card p-6 shadow-[var(--shadow-sm)] animate-in fade-in-0 slide-in-from-bottom-2 duration-300">
-          <h2 id="comecar" className="text-sm font-medium text-muted-foreground">Comece por aqui</h2>
+          <div className="flex items-center justify-between gap-4">
+            <h2 id="comecar" className="text-sm font-medium text-muted-foreground">Comece por aqui</h2>
+            <Progresso fase={primeiro.d.fase} className="w-28" />
+          </div>
           <p className="mt-2 text-xl font-semibold text-foreground">{primeiro.dir ? "Aprovar a exceção à margem" : primeiro.p.t}</p>
           <p className="mt-1 text-base text-muted-foreground">
             {primeiro.d.nome} · {primeiro.d.servico}

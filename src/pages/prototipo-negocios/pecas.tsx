@@ -40,6 +40,17 @@ export function Banner({ A, go, texto }: { A: Ctx["A"]; go: Ctx["go"]; texto: st
   );
 }
 
+/** Seis segmentos finos: em que fase está o negócio, de relance. */
+export function Progresso({ fase, className = "" }: { fase: number; className?: string }) {
+  return (
+    <span className={"flex gap-1 " + className} role="img" aria-label={`Fase ${fase + 1} de 6`}>
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <span key={i} className={"h-1 flex-1 rounded-full " + (i < fase ? "bg-primary" : i === fase ? "bg-primary/40" : "bg-border")} />
+      ))}
+    </span>
+  );
+}
+
 // Os botões de "próximo passo" chamam a ação pelo nome.
 export function fazer(A: Ctx["A"], act: string, id: number) {
   const f = (A as unknown as Record<string, (id: number) => void>)[act];

@@ -5,7 +5,7 @@ import { ArrowRight, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { FASES, aberto, eur, proximo, tot, type LinhaId, type Negocio } from "./motor";
-import type { Ctx } from "./pecas";
+import { Progresso, type Ctx } from "./pecas";
 
 const FILTROS: [string, string][] = [["meus", "Os meus"], ["todos", "Todos"], ["atraso", "Com atraso"], ["wc", "Casa de banho"], ["coz", "Cozinha"]];
 
@@ -26,6 +26,7 @@ export function NegociosSimples({ S, A, go, run, q, setQ }: Ctx) {
         <button type="button" onClick={go(() => A.abrir(d.id))}
           className={cn("group block w-full rounded-xl border bg-card p-4 text-left transition-all hover:-translate-y-0.5 hover:shadow-[var(--shadow-md)]",
             d.fresh ? "border-primary animate-in fade-in-0 zoom-in-95" : "border-border")}>
+          <Progresso fase={d.fase} className="mb-3" />
           <span className="block text-base font-semibold text-foreground">{d.nome}</span>
           <span className="mt-0.5 block text-sm text-muted-foreground">{d.servico}{loc ? " · " + loc : ""}{d.orc ? ` · ${eur(tot(d, S).pf)} €` : ""}</span>
           <span className={cn("mt-2 block text-sm font-medium", late ? "text-destructive" : p.wait || p.done ? "text-muted-foreground" : "text-primary")}>
