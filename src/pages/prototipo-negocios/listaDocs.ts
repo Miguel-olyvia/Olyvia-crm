@@ -1,6 +1,7 @@
 // Peças puras da lista de Pessoas e da ficha em painel: a pessoa vizinha, a posição "3 de 8", o texto do último contacto,
 // a etapa e o valor de cada coluna, e o negócio escolhido por defeito. Nada aqui muda o Estado.
 import type { Estado } from "./motor";
+import type { FaseNegocio, NegocioApp } from "./negociosApp";
 import { etapaDe, tempoDesde } from "./leadsDocs";
 import { dadosCliente, valorPessoa, type PessoaApp } from "./pessoasDocs";
 import { LIMITE_SEM_CONTACTO, estadoCurto } from "./perfilDocs";
@@ -42,8 +43,25 @@ export function valorColuna(S: Estado, p: PessoaApp): number | null {
   return v > 0 ? v : null;
 }
 
-/** O negócio aberto no separador Negócios: o que a pessoa escolheu, se ainda existe; com um só negócio, esse (para não haver espaço vazio). */
-export function negocioPorDefeito(chaves: string[], escolhido: string | null): string | null {
-  if (escolhido !== null && chaves.includes(escolhido)) return escolhido;
-  return chaves.length === 1 ? chaves[0] : null;
+type NegocioEscolhivel = Pick<NegocioApp, "id" | "fase" | "perdido">;
+
+/** Do mais avançado ao menos avançado, só entre os negócios em curso (o Concluído, `obra`, não está em curso). */
+const ORDEM_AVANCO: readonly FaseNegocio[] = ["financeiro", "contrato", "proposta", "orcamento", "levantamento"];
+
+/** O negócio mais avançado ainda em curso e não perdido (em empate, o primeiro da lista); se todos forem perdidos ou concluídos, o primeiro; sem negócios, `null`. */
+export function negocioMaisAvancado(negocios: readonly NegocioEscolhivel[]): string | null {
+  let melhor: NegocioEscolhivel | null = null, posMelhor = ORDEM_AVANCO.length;
+  for (const n of negocios) {
+    const pos = n.perdido !== null ? -1 : ORDEM_AVANCO.indexOf(n.fase);
+    if (pos >= 0 && pos < posMelhor) { melhor = n; posMelhor = pos; }
+  }
+  return (melhor ?? negocios[0])?.id ?? null;
+}
+
+/** O negócio aberto no separador Negócios: o que a pessoa escolheu, se ainda existe; com um só negócio, esse.
+ *  Com vários, ao lado da lista abre o mais avançado (para o detalhe não ficar vazio); com o detalhe por baixo (`porBaixo`) não abre nenhum, para não empurrar a lista. */
+export function negocioPorDefeito(negocios: readonly NegocioEscolhivel[], escolhido: string | null, porBaixo = false): string | null {
+  if (escolhido !== null && negocios.some((n) => n.id === escolhido)) return escolhido;
+  if (negocios.length === 1) return negocios[0].id;
+  return porBaixo ? null : negocioMaisAvancado(negocios);
 }

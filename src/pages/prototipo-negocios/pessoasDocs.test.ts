@@ -3,6 +3,7 @@ import { seed, tot, type Estado, type Papel } from "./motor";
 import { leadsDe } from "./leadsDocs";
 import { EXEMPLOS } from "./exemplosDocs";
 import { estadoDe } from "./perfilDocs";
+import { valorColuna } from "./listaDocs";
 import {
   SEM_FILTROS, chipsDe, clientesApp, comerciaisDe, contagens, dadosCliente, documentosDe, filtrarPessoas, filtrarTexto, filtrosEfetivos, leadsApp,
   listaVisivel, ordenarPessoas, origensDe, pessoasDoSeparador, separadorPorDefeito, todosApp, valorPessoa,
@@ -17,6 +18,18 @@ const clone = (S: Estado, id: number, novoId: number, mudar: Record<string, unkn
 };
 /** Um cliente sem negócios de exemplo: o negócio 1027 (ganho, Financeiro) com outro nome. */
 const NOVO_CLIENTE = { nome: "Bruno Cliente", tel: "910 000 099" };
+
+describe("pessoas · lead com um negócio perdido (Rita Sousa)", () => {
+  it("continua lead, com dois negócios, e o perdido não conta para o valor", () => {
+    const S = seed();
+    const rita = leadsApp(S).find((p) => p.nome === "Rita Sousa")!;
+    expect(rita.papel).toBe("lead");
+    expect(rita.todos).toHaveLength(2);
+    expect(rita.todos.filter((n) => n.perdido !== null).map((n) => n.titulo)).toEqual(["WC social"]);
+    expect(valorColuna(S, rita)).toBeNull();
+    expect(valorPessoa(S, rita)).toBe(0);
+  });
+});
 
 describe("pessoas · quem é lead e quem é cliente", () => {
   it("com a seed: 8 leads e 3 clientes, os mesmos da página de Leads", () => {

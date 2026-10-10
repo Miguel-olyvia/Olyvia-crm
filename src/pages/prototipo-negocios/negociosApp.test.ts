@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { seed, type Estado } from "./motor";
 import { EXEMPLOS } from "./exemplosDocs";
-import { documentosDoNegocio, negociosDe, textoOrcamentos, valorNegocio, type NegocioApp } from "./negociosApp";
+import { documentosDoNegocio, negociosDe, resumoDoc, textoOrcamentos, valorNegocio, type NegocioApp } from "./negociosApp";
 import { COLUNAS_V2, cartoesV2, negociosPorPessoa } from "./negociosDocs";
 import { clientesApp, documentosDe, ehGanho, leadsApp, todosApp } from "./pessoasDocs";
 import { leadsDe } from "./leadsDocs";
@@ -104,6 +104,30 @@ describe("matriz de exemplos · o negócio e os seus orçamentos", () => {
     expect(percursoDe(de(S, "Carla Nunes", "Varanda fechada").deal)).toHaveLength(4);
     expect(percursoDe(de(S, "Joana Ribeiro", "WC de serviço e lavandaria").deal)).toHaveLength(5);
   });
+  it("a proposta diz quantos orçamentos inclui: 'inclui 2 orçamentos' e, com um só, 'inclui 1 orçamento'", () => {
+    const proposta = (n: NegocioApp) => resumoDoc(documentosDoNegocio(n).find((d) => d.tipo === "Proposta")!);
+    expect(proposta(de(S, "Carla Nunes", "Varanda fechada"))).toBe("Enviada · inclui 2 orçamentos · 7.740,00 € · 08/10");
+    expect(proposta(de(S, "Carla Nunes", "Cozinha"))).toMatch(/^Enviada · inclui 1 orçamento · /);
+    const orcamento = documentosDoNegocio(de(S, "Carla Nunes", "Varanda fechada")).find((d) => d.tipo === "Orçamento")!;
+    expect(resumoDoc(orcamento)).not.toMatch(/inclui/);
+  });
+  it("as datas dos exemplos são as de cada um, coerentes com o estado e com hoje (10/10)", () => {
+    const dia = (s: string): number => { const [d, m] = s.split("/").map(Number); return m * 100 + d; };
+    for (const ex of Object.values(EXEMPLOS).flat()) {
+      const { quando, enviada, aceite, proposta } = ex;
+      expect(!!enviada, `${ex.id} enviada`).toBe(proposta !== "por gerar");
+      expect(!!aceite, `${ex.id} aceite`).toBe(proposta === "aceite");
+      if (enviada) expect(dia(enviada), `${ex.id} enviada >= entrada`).toBeGreaterThanOrEqual(dia(quando));
+      if (enviada && aceite) expect(dia(aceite), `${ex.id} aceite >= enviada`).toBeGreaterThanOrEqual(dia(enviada));
+      expect(dia(aceite ?? enviada ?? quando), `${ex.id} não é depois de hoje`).toBeLessThanOrEqual(dia("10/10"));
+    }
+    const tiago = de(S, "Tiago Almeida", "Climatização e isolamento").deal.orc!;
+    expect([tiago.enviada, tiago.aceite]).toEqual(["05/10", "08/10"]);
+    const joana = de(S, "Joana Ribeiro", "WC de serviço e lavandaria");
+    expect(joana.deal.orc!.aceite).toBe("09/10");
+    // Sem histórico no exemplo, a data do contrato é a da proposta aceite.
+    expect(documentosDoNegocio(joana).find((d) => d.tipo === "Contrato")!.data).toBe("09/10");
+  });
   it("um negócio perdido tem motivo e nunca está ganho, nem entra nas colunas", () => {
     const perdidos = todos(S).filter((n) => n.perdido !== null);
     expect(perdidos.map((n) => [n.nome, n.titulo, n.perdido])).toEqual([["Rita Sousa", "WC social", "adiou"], ["Marta Lima", "Pavimento exterior", "preço"]]);
@@ -167,7 +191,7 @@ describe("matriz de exemplos · ninguém muda de papel", () => {
   });
   it("nenhum negócio de exemplo de uma lead está ganho: só os da seed decidem o papel", () => {
     const exemplos = leadsApp(seed()).flatMap((p) => p.todos.filter((n) => n.demo));
-    expect(exemplos.length).toBeGreaterThan(0);
+    expect(exemplos).toHaveLength(4); // Carla (2), Sérgio (1) e Rita Sousa (1, perdido)
     expect(exemplos.every((n) => !ehGanho(n.deal))).toBe(true);
   });
 });

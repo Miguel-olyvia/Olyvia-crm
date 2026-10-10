@@ -100,16 +100,15 @@ function deSeed(d: Negocio, S: Estado): NegocioApp {
 
 /* ---------------------------------------------------------------- os negócios de exemplo */
 
-const DATA_ENVIO = "08/10";
-const DATA_ACEITE = "09/10";
-
-/** O negócio de exemplo no formato do motor: uma cópia do negócio base com a fase e o estado da proposta e do contrato do exemplo. */
+/** O negócio de exemplo no formato do motor: uma cópia do negócio base com a fase, o estado da proposta e do contrato e as datas do exemplo.
+ *  As datas vêm de exemplosDocs.ts (cada exemplo tem as suas, coerentes com o estado); `hist` fica vazio porque o exemplo não tem histórico, e por isso a data do contrato
+ *  em `documentosDoNegocio` cai na da proposta aceite (um exemplo só tem contrato depois de a proposta ser aceite). */
 function dealDeExemplo(base: Negocio, ex: ExemploNegocio): Negocio {
   const aceite = ex.proposta === "aceite";
   const ganho = aceite && (ex.contrato === null || ex.contrato === "assinado");
   const orc: Orcamento = {
     modelo: base.orc?.modelo ?? "", linhas: [], desconto: 0, vendaDireta: ex.contrato === null, verif: ex.proposta !== "por gerar", aprov: null,
-    enviada: ex.proposta === "por gerar" ? null : DATA_ENVIO, aceite: aceite ? DATA_ACEITE : null,
+    enviada: ex.proposta === "por gerar" ? null : ex.enviada ?? ex.quando, aceite: aceite ? ex.aceite ?? ex.enviada ?? ex.quando : null,
     contrato: ex.contrato === "enviado" || ex.contrato === "assinado" ? ex.contrato : null, avisosVistos: {},
   };
   return {

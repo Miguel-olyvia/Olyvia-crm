@@ -4,8 +4,8 @@ import { useState, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowRight, Euro, FileCheck2, FileSignature, FileText, Search, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { aberto, eur, type LinhaId, type Negocio } from "./motor";
-import { COLUNAS_V2, cartoesV2, docFase, negociosPorPessoa, pessoasAntes, type CartaoV2, type DocFase } from "./negociosDocs";
+import { eur, type LinhaId } from "./motor";
+import { COLUNAS_V2, cartoesV2, negociosPorPessoa, pessoasAntes, type CartaoV2, type DocFase } from "./negociosDocs";
 import { Chip, FASE_COR, type Ctx } from "./pecas";
 
 const FILTROS: [string, string][] = [["meus", "Os meus"], ["todos", "Todos"], ["atraso", "Com atraso"], ["wc", "Casa de banho"], ["coz", "Cozinha"]];
@@ -24,9 +24,9 @@ export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: Rea
   const f = S.filtro, ql = q.toLowerCase();
   const todos = cartoesV2(S);
   const porPessoa = negociosPorPessoa(todos);
-  const deal = (c: CartaoV2): Negocio => S.deals.find((d) => d.id === c.negocioId)!;
+  // O dono, o telefone e o atraso são os do próprio cartão (c.deal): nos exemplos, a cópia do negócio base (mesmo dono e telefone, e sem atraso).
   const visiveis = todos.filter((c) => {
-    const d = deal(c);
+    const d = c.deal;
     if (ql && !(c.nome + " " + d.tel + " " + c.servico + " " + c.local).toLowerCase().includes(ql)) return false;
     if (f === "meus") return d.dono === "comercial";
     if (f === "wc" || f === "coz") return c.linhasFiltro.includes(f as LinhaId);
@@ -35,7 +35,7 @@ export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: Rea
   });
   const emProposta = todos.filter((c) => c.doc === "proposta").reduce((a, c) => a + (c.valor || 0), 0);
   const antes = pessoasAntes(S);
-  const decorrer = aberto(S).filter((d) => docFase(d)).length;
+  const decorrer = todos.length; // todos os negócios em curso (os de exemplo incluídos), antes da pesquisa e dos filtros
 
   const cartao = (c: CartaoV2) => {
     const I = ICONE[c.doc].i;
@@ -46,7 +46,7 @@ export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: Rea
           className="group block min-h-11 w-full rounded-xl p-4 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40">
           <span className="mb-2 flex items-center gap-2 text-[15px] text-muted-foreground">
             <Chip icone={I} cor={ICONE[c.doc].cor} className={CHIP_PEQ} />
-            <span>{c.conjunta ? "Proposta conjunta" : NOME_DOC[c.doc]}</span>
+            <span>{NOME_DOC[c.doc]}</span>
             {c.demo && <span className="ml-auto text-xs text-muted-foreground">exemplo</span>}
           </span>
           <span className="block text-base font-semibold text-foreground">{c.nome}</span>
@@ -58,7 +58,7 @@ export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: Rea
               ))}
             </ul>
           )}
-          {c.valor !== null && <span className="mt-2 block text-base font-medium tabular-nums text-foreground">{c.conjunta ? "Total " : ""}{eur(c.valor)} €</span>}
+          {c.valor !== null && <span className="mt-2 block text-base font-medium tabular-nums text-foreground">{eur(c.valor)} €</span>}
           <span className="mt-2 block text-[15px] font-medium text-foreground">
             {c.proximo}
             <ArrowRight className="ml-1 inline h-3.5 w-3.5 align-[-2px] transition-transform group-hover:translate-x-0.5" aria-hidden="true" />

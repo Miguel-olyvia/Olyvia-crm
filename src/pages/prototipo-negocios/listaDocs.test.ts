@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import { seed } from "./motor";
 import { clientesApp, leadsApp, todosApp } from "./pessoasDocs";
 import { perfilDe } from "./perfilDocs";
-import { contactoTexto, etapaTexto, negocioPorDefeito, posicaoTexto, valorColuna, vizinhasDe } from "./listaDocs";
+import { contactoTexto, etapaTexto, negocioMaisAvancado, negocioPorDefeito, posicaoTexto, valorColuna, vizinhasDe } from "./listaDocs";
+import type { FaseNegocio } from "./negociosApp";
 
 const NOMES = ["Ana", "Bruno", "Carla", "Duarte"];
 
@@ -66,16 +67,43 @@ describe("lista · etapa e valor por papel", () => {
 });
 
 describe("negócios · o escolhido por defeito", () => {
-  it("com um só negócio vem escolhido, para não haver espaço vazio", () => {
-    expect(negocioPorDefeito(["n1"], null)).toBe("n1");
+  const neg = (id: string, fase: FaseNegocio, perdido: string | null = null) => ({ id, fase, perdido });
+  it("com um só negócio vem escolhido, ao lado ou por baixo, para não haver espaço vazio", () => {
+    expect(negocioPorDefeito([neg("n1", "orcamento")], null)).toBe("n1");
+    expect(negocioPorDefeito([neg("n1", "orcamento")], null, true)).toBe("n1");
   });
-  it("com vários, só fica escolhido o que a pessoa escolheu (e se ainda existe)", () => {
-    expect(negocioPorDefeito(["n1", "n2"], null)).toBeNull();
-    expect(negocioPorDefeito(["n1", "n2"], "n2")).toBe("n2");
-    expect(negocioPorDefeito(["n1", "n2"], "n9")).toBeNull();
+  it("com vários, ao lado abre o mais avançado em curso (Financeiro, Contrato, Proposta, Orçamento, Em preparação)", () => {
+    const todos = [neg("a", "levantamento"), neg("b", "orcamento"), neg("c", "proposta"), neg("d", "contrato"), neg("e", "financeiro")];
+    expect(negocioPorDefeito(todos, null)).toBe("e");
+    expect(negocioPorDefeito(todos.slice(0, 4), null)).toBe("d");
+    expect(negocioPorDefeito(todos.slice(0, 3), null)).toBe("c");
+    expect(negocioPorDefeito(todos.slice(0, 2), null)).toBe("b");
+  });
+  it("os perdidos e os concluídos não contam enquanto houver um em curso", () => {
+    expect(negocioPorDefeito([neg("p", "financeiro", "preço"), neg("o", "obra"), neg("c", "levantamento")], null)).toBe("c");
+    expect(negocioPorDefeito([neg("p", "proposta", "adiou"), neg("b", "orcamento")], null)).toBe("b");
+  });
+  it("todos perdidos ou concluídos: o primeiro", () => {
+    expect(negocioPorDefeito([neg("p1", "proposta", "preço"), neg("o", "obra"), neg("p2", "contrato", "adiou")], null)).toBe("p1");
+    expect(negocioPorDefeito([neg("o", "obra"), neg("p", "proposta", "preço")], null)).toBe("o");
+  });
+  it("em empate ganha o primeiro da lista", () => {
+    expect(negocioPorDefeito([neg("x", "proposta"), neg("y", "proposta"), neg("z", "orcamento")], null)).toBe("x");
+    expect(negocioMaisAvancado([neg("x", "orcamento"), neg("y", "orcamento")])).toBe("x");
+  });
+  it("com o detalhe por baixo da lista não abre nenhum (um de cada vez, para não empurrar a lista)", () => {
+    expect(negocioPorDefeito([neg("a", "proposta"), neg("b", "orcamento")], null, true)).toBeNull();
+  });
+  it("o que a pessoa escolheu ganha, se ainda existe, ao lado ou por baixo", () => {
+    const dois = [neg("a", "financeiro"), neg("b", "orcamento")];
+    expect(negocioPorDefeito(dois, "b")).toBe("b");
+    expect(negocioPorDefeito(dois, "b", true)).toBe("b");
+    expect(negocioPorDefeito(dois, "n9")).toBe("a");
+    expect(negocioPorDefeito(dois, "n9", true)).toBeNull();
   });
   it("com um só, uma escolha que já não existe volta ao único; sem nenhum, nada", () => {
-    expect(negocioPorDefeito(["n1"], "n9")).toBe("n1");
+    expect(negocioPorDefeito([neg("n1", "orcamento")], "n9")).toBe("n1");
     expect(negocioPorDefeito([], null)).toBeNull();
+    expect(negocioMaisAvancado([])).toBeNull();
   });
 });

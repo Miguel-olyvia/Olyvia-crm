@@ -14,6 +14,10 @@ export interface ExemploNegocio {
   linhas: LinhaId[];
   /** Quando entrou ("dd/mm"). */
   quando: string;
+  /** Quando a proposta foi enviada ("dd/mm"): só nas que já foram enviadas (enviada ou aceite). Nunca antes de `quando` nem depois de hoje (10/10). */
+  enviada?: string;
+  /** Quando a proposta foi aceite ("dd/mm"): só nas aceites, nunca antes de `enviada`. */
+  aceite?: string;
   orcamentos: { titulo: string; valor: number }[];
   proposta: EstadoProposta;
   /** `null`: o negócio não exige contrato (venda direta); o ganho é a proposta aceite. */
@@ -27,7 +31,7 @@ export const EXEMPLOS: Readonly<Record<string, readonly ExemploNegocio[]>> = {
   "Carla Nunes": [
     { id: 90101, titulo: "Casa de banho e pintura", linhas: ["wc"], quando: "04/10", proposta: "por gerar", contrato: "por gerar",
       orcamentos: [{ titulo: "Casa de banho completa", valor: 4850 }, { titulo: "Pintura e tetos", valor: 1920 }] },
-    { id: 90102, titulo: "Varanda fechada", linhas: [], quando: "07/10", proposta: "enviada", contrato: null,
+    { id: 90102, titulo: "Varanda fechada", linhas: [], quando: "07/10", enviada: "08/10", proposta: "enviada", contrato: null,
       orcamentos: [{ titulo: "Caixilharia em alumínio", valor: 3480 }, { titulo: "Caixilharia com corte térmico", valor: 4260 }] },
   ],
   "Sérgio Pinto": [
@@ -35,23 +39,23 @@ export const EXEMPLOS: Readonly<Record<string, readonly ExemploNegocio[]>> = {
       orcamentos: [{ titulo: "Pintura de três divisões", valor: 1380 }] },
   ],
   "Tiago Almeida": [
-    { id: 90104, titulo: "Climatização e isolamento", linhas: [], quando: "02/10", proposta: "aceite", contrato: null,
+    { id: 90104, titulo: "Climatização e isolamento", linhas: [], quando: "02/10", enviada: "05/10", aceite: "08/10", proposta: "aceite", contrato: null,
       orcamentos: [{ titulo: "Ar condicionado (três unidades)", valor: 4200 }, { titulo: "Isolamento do teto", valor: 2350 }] },
     { id: 90105, titulo: "Pintura exterior", linhas: [], quando: "09/10", proposta: "por gerar", contrato: "por gerar",
       orcamentos: [{ titulo: "Pintura da fachada", valor: 5600 }] },
   ],
   "Joana Ribeiro": [
-    { id: 90106, titulo: "WC de serviço e lavandaria", linhas: ["wc"], quando: "06/10", proposta: "aceite", contrato: "enviado",
+    { id: 90106, titulo: "WC de serviço e lavandaria", linhas: ["wc"], quando: "06/10", enviada: "07/10", aceite: "09/10", proposta: "aceite", contrato: "enviado",
       orcamentos: [{ titulo: "WC de serviço", valor: 3150 }, { titulo: "Lavandaria", valor: 2080 }] },
   ],
   "Marta Lima": [
     { id: 90107, titulo: "Cozinha nova", linhas: ["coz"], quando: "08/10", proposta: "por gerar", contrato: "por gerar",
       orcamentos: [{ titulo: "Cozinha completa", valor: 7450 }] },
-    { id: 90108, titulo: "Pavimento exterior", linhas: [], quando: "20/09", proposta: "enviada", contrato: "por gerar", perdido: "preço",
+    { id: 90108, titulo: "Pavimento exterior", linhas: [], quando: "20/09", enviada: "25/09", proposta: "enviada", contrato: "por gerar", perdido: "preço",
       orcamentos: [{ titulo: "Pavimento em pedra", valor: 2640 }] },
   ],
   "Rita Sousa": [
-    { id: 90109, titulo: "WC social", linhas: ["wc"], quando: "26/09", proposta: "enviada", contrato: "por gerar", perdido: "adiou",
+    { id: 90109, titulo: "WC social", linhas: ["wc"], quando: "26/09", enviada: "30/09", proposta: "enviada", contrato: "por gerar", perdido: "adiou",
       orcamentos: [{ titulo: "WC social", valor: 2950 }] },
   ],
 };

@@ -140,19 +140,20 @@ describe("Pessoas · a memória ao abrir um negócio e voltar", () => {
     fireEvent.mouseDown(screen.getByRole("tab", { name: /Clientes/ }), { button: 0 });
     fireEvent.click(await screen.findByRole("button", { name: /Marta Lima/ }));
     separador(await screen.findByRole("dialog"), "Negócios");
-    fireEvent.click(await screen.findByRole("button", { name: /Cozinha nova/ }));
+    const escolher = async (): Promise<HTMLElement> => within(await screen.findByRole("list", { name: "Negócios desta pessoa" })).findByRole("button", { name: /Pavimento exterior/ });
+    fireEvent.click(await escolher()); // o por defeito seria a Cozinha nova
     primeira.unmount();
     pagina();
     const painel = await screen.findByRole("dialog");
     const lista = await within(painel).findByRole("list", { name: "Negócios desta pessoa" });
-    expect(within(lista).getByRole("button", { name: /Cozinha nova/ })).toHaveAttribute("aria-pressed", "true");
+    expect(within(lista).getByRole("button", { name: /Pavimento exterior/ })).toHaveAttribute("aria-pressed", "true");
     cleanup();
     esquecerPessoas();
     pagina();
     fireEvent.mouseDown(screen.getByRole("tab", { name: /Clientes/ }), { button: 0 });
     fireEvent.click(await screen.findByRole("button", { name: /Marta Lima/ }));
     separador(await screen.findByRole("dialog"), "Negócios");
-    expect(await screen.findByRole("button", { name: /Cozinha nova/ })).toHaveAttribute("aria-pressed", "false");
+    expect(await escolher()).toHaveAttribute("aria-pressed", "false");
   });
 });
 
@@ -172,7 +173,7 @@ describe("Pessoas · o separador Negócios da ficha", () => {
     expect(within(detalhe).getByText("Documentos")).toBeInTheDocument();
     expect(within(detalhe).getByText("Levantamento")).toBeInTheDocument();
   });
-  it("com vários negócios nenhum vem escolhido; ao clicar num, a informação dele aparece ao lado", async () => {
+  it("com vários negócios abre o mais avançado em curso; ao clicar noutro, a informação dele aparece ao lado (Marta Lima)", async () => {
     pagina();
     fireEvent.mouseDown(screen.getByRole("tab", { name: /Clientes/ }), { button: 0 });
     fireEvent.click(await screen.findByRole("button", { name: /Marta Lima/ }));
@@ -180,8 +181,10 @@ describe("Pessoas · o separador Negócios da ficha", () => {
     fireEvent.mouseDown(within(painel).getByRole("tab", { name: "Negócios" }), { button: 0 });
     const linhas = within(await within(painel).findByRole("list", { name: "Negócios desta pessoa" })).getAllByRole("button");
     expect(linhas).toHaveLength(3);
-    expect(linhas.every((l) => l.getAttribute("aria-pressed") === "false")).toBe(true);
-    expect(within(painel).queryByRole("region", { name: /^Negócio: / })).toBeNull();
+    // O perdido (Pavimento exterior) e o concluído da seed não contam: sobra a Cozinha nova, em curso.
+    expect(linhas.filter((l) => l.getAttribute("aria-pressed") === "true")).toHaveLength(1);
+    expect(within(painel).getByRole("region", { name: "Negócio: Cozinha nova" })).toBeInTheDocument();
+    expect(within(painel).queryByText("Escolhe um negócio")).toBeNull();
     const cozinha = linhas.find((l) => /Cozinha nova/.test(l.textContent ?? ""))!;
     fireEvent.click(cozinha);
     expect(cozinha).toHaveAttribute("aria-pressed", "true");
@@ -196,12 +199,7 @@ describe("Pessoas · o separador Negócios da ficha", () => {
     expect(screen.queryByRole("list", { name: "Negócios desta pessoa" })).toBeNull();
   });
   it("com o detalhe por baixo da lista o botão usa aria-expanded e aria-controls (e leva o foco ao detalhe); ao lado usa só aria-pressed", async () => {
-    const rect = (top: number, height: number): DOMRect => ({ top, bottom: top + height, height, left: 0, right: 0, width: 0, x: 0, y: top, toJSON: () => ({}) });
-    const medida = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
-      if (this.matches('ul[aria-label="Negócios desta pessoa"]')) return rect(0, 100);
-      if (this.matches('[role="region"]')) return rect(120, 300);
-      return rect(0, 0);
-    });
+    const medida = estreito();
     try {
       pagina();
       fireEvent.mouseDown(screen.getByRole("tab", { name: /Clientes/ }), { button: 0 });
@@ -209,7 +207,8 @@ describe("Pessoas · o separador Negócios da ficha", () => {
       const painel = await screen.findByRole("dialog");
       separador(painel, "Negócios");
       const cozinha = await within(painel).findByRole("button", { name: /Cozinha nova/ });
-      expect(cozinha).toHaveAttribute("aria-pressed", "false");
+      expect(cozinha).toHaveAttribute("aria-expanded", "false"); // por baixo da lista não abre nenhum por defeito
+      expect(cozinha).not.toHaveAttribute("aria-pressed");
       fireEvent.click(cozinha);
       const detalhe = await within(painel).findByRole("region", { name: "Negócio: Cozinha nova" });
       await waitFor(() => expect(cozinha).toHaveAttribute("aria-expanded", "true"));
@@ -218,6 +217,13 @@ describe("Pessoas · o separador Negócios da ficha", () => {
       await waitFor(() => expect(document.activeElement).toBe(detalhe));
     } finally { medida.mockRestore(); }
   });
+  /** Simula o separador Negócios estreito (400 px, abaixo dos 640 px da container query): o detalhe fica por baixo da lista. */
+  function estreito() {
+    const rect = (largura: number): DOMRect => ({ top: 0, bottom: 0, height: 0, left: 0, right: largura, width: largura, x: 0, y: 0, toJSON: () => ({}) });
+    return vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return rect(this.matches(".negocios-cx") ? 400 : 0);
+    });
+  }
   /** Abre a ficha de uma pessoa (no separador certo da lista) e o separador Negócios; devolve o painel e a lista dos negócios. */
   async function negociosDe(nome: string, cliente = false): Promise<{ painel: HTMLElement; lista: HTMLElement }> {
     pagina();
@@ -227,13 +233,12 @@ describe("Pessoas · o separador Negócios da ficha", () => {
     separador(painel, "Negócios");
     return { painel, lista: await within(painel).findByRole("list", { name: "Negócios desta pessoa" }) };
   }
-  it("a Carla Nunes tem 3 negócios (não 5), nenhum escolhido por defeito, e cada linha diz o estado e o valor total", async () => {
+  it("a Carla Nunes tem 3 negócios (não 5), o mais avançado (a Cozinha, em Proposta) aberto por defeito, e cada linha diz o estado e o valor total", async () => {
     const { painel, lista } = await negociosDe("Carla Nunes");
     const linhas = within(lista).getAllByRole("button");
     expect(linhas).toHaveLength(3);
-    expect(linhas.every((l) => l.getAttribute("aria-pressed") === "false")).toBe(true);
-    expect(within(painel).getByText("Escolhe um negócio")).toBeInTheDocument();
-    expect(linhas[0]).toHaveTextContent("Cozinha");
+    expect(linhas.map((l) => l.getAttribute("aria-pressed"))).toEqual(["true", "false", "false"]);
+    expect(within(painel).queryByText("Escolhe um negócio")).toBeNull();
     expect(linhas[0]).toHaveTextContent("Proposta");
     expect(linhas[0]).toHaveTextContent("8.126,60 €");
     expect(linhas[0]).not.toHaveTextContent("orçamentos");
@@ -243,7 +248,7 @@ describe("Pessoas · o separador Negócios da ficha", () => {
     expect(linhas[2]).toHaveTextContent("Varanda fechada");
     expect(linhas[2]).toHaveTextContent("Proposta · 2 orçamentos");
     expect(linhas[2]).toHaveTextContent("7.740,00 €");
-    expect(within(painel).queryByRole("region", { name: /^Negócio: / })).toBeNull();
+    expect(within(painel).getByRole("region", { name: "Negócio: Cozinha" })).toBeInTheDocument();
   });
   it("o detalhe de um negócio com 2 orçamentos mostra os documentos reais: os dois orçamentos e a proposta que os junta, e nenhum contrato", async () => {
     const { painel, lista } = await negociosDe("Carla Nunes");
@@ -289,6 +294,27 @@ describe("Pessoas · o separador Negócios da ficha", () => {
     expect(within(detalhe).queryByText("Próximo passo")).toBeNull();
     expect(within(detalhe).queryByRole("list", { name: "Percurso do negócio" })).toBeNull();
     expect(within(detalhe).queryByText(/Probabilidade/)).toBeNull();
+  });
+  it("com o detalhe por baixo da lista não abre nenhum negócio por defeito (Carla Nunes), e a lista fica sem espaço vazio visível", async () => {
+    const medida = estreito();
+    try {
+      const { painel, lista } = await negociosDe("Carla Nunes");
+      const linhas = within(lista).getAllByRole("button");
+      expect(linhas.every((l) => l.getAttribute("aria-expanded") === "false")).toBe(true);
+      expect(within(painel).queryByRole("region", { name: /^Negócio: / })).toBeNull();
+    } finally { medida.mockRestore(); }
+  });
+  it("um negócio perdido por baixo da lista: abre, mostra o motivo e leva o foco ao detalhe (Marta Lima)", async () => {
+    const medida = estreito();
+    try {
+      const { painel, lista } = await negociosDe("Marta Lima", true);
+      fireEvent.click(within(lista).getByRole("button", { name: /Pavimento exterior/ }));
+      const detalhe = await within(painel).findByRole("region", { name: "Negócio: Pavimento exterior" });
+      expect(within(detalhe).getByText("Motivo").nextSibling).toHaveTextContent("preço");
+      expect(within(detalhe).queryByRole("list", { name: "Percurso do negócio" })).toBeNull();
+      expect(within(detalhe).queryByText("Próximo passo")).toBeNull();
+      await waitFor(() => expect(document.activeElement).toBe(detalhe));
+    } finally { medida.mockRestore(); }
   });
   it("uma lead sem orçamentos diz que os documentos aparecem quando existirem (Rita Sousa, e o WC social perdido)", async () => {
     const { painel, lista } = await negociosDe("Rita Sousa");

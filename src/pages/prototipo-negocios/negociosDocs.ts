@@ -1,7 +1,7 @@
 // V2 da página de Negócios: só negócios a decorrer, UM CARTÃO POR NEGÓCIO, na coluna da fase dele
 // (Orçamento, Proposta, Contrato, Financeiro). Os negócios vêm de negociosDe (negociosApp.ts): o da seed e os de exemplo.
 // Funções puras: nada aqui muda o Estado.
-import { aberto, proximo, type Estado, type LinhaId } from "./motor";
+import { aberto, proximo, type Estado, type LinhaId, type Negocio } from "./motor";
 import { docFase, negociosDe, textoOrcamentos, valorNegocio, type DocFase, type NegocioApp } from "./negociosApp";
 
 export { docFase, type DocFase } from "./negociosApp";
@@ -36,11 +36,13 @@ export interface CartaoV2 {
   /** A soma dos orçamentos do negócio. */
   valor: number | null;
   proximo: string;
+  /** O negócio no formato do motor (nos exemplos, a cópia do negócio base com o estado do exemplo): dele vêm o dono, o telefone e o atraso do próprio cartão. */
+  deal: Negocio;
   /** Exemplo acrescentado só nesta camada; não existe no Estado. */
   demo: boolean;
   /** Os orçamentos do negócio, quando são mais de um. */
   linhas?: LinhaCartaoV2[];
-  /** Já não existe "proposta conjunta" (é a proposta de um negócio com vários orçamentos), mas a V2 e a página de Leads ainda leem o campo: fica sempre por definir. */
+  /** Usado só pela página de Leads V1 (leadsDocs.ts e LeadsSimples.tsx ainda o leem): já não existe "proposta conjunta" (é a proposta de um negócio com vários orçamentos), por isso nunca é preenchido, e a V2 de Negócios (NegociosV2.tsx) já não o usa. */
   conjunta?: boolean;
 }
 
@@ -52,7 +54,7 @@ function localDe(n: NegocioApp): string {
 function cartao(n: NegocioApp, doc: DocFase, S: Estado): CartaoV2 {
   return {
     id: n.id, doc, negocioId: n.negocioId, nome: n.nome, titulo: n.titulo, orcamentos: n.orcamentos.length, local: localDe(n),
-    servico: [n.titulo, textoOrcamentos(n)].filter(Boolean).join(" · "), linhasFiltro: n.linhas, valor: valorNegocio(n), proximo: proximo(n.deal, S).t, demo: n.demo,
+    servico: [n.titulo, textoOrcamentos(n)].filter(Boolean).join(" · "), linhasFiltro: n.linhas, valor: valorNegocio(n), proximo: proximo(n.deal, S).t, demo: n.demo, deal: n.deal,
     ...(n.orcamentos.length > 1 ? { linhas: n.orcamentos.map((o) => ({ rotulo: o.titulo, valor: o.valor })) } : {}),
   };
 }

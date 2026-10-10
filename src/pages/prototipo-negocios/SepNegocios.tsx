@@ -1,6 +1,6 @@
 // O separador Negócios da ficha, em mestre-detalhe pequeno: à esquerda a lista simples dos negócios da pessoa (UM item por negócio: ícone, título, estado, "2 orçamentos" e valor total);
 // ao clicar num, a informação dele aparece ao lado (a partir de 640 px de largura, por container query) ou por baixo da lista (um de cada vez).
-// Com um só negócio, vem escolhido por defeito. As linhas são botões: aria-pressed com o detalhe ao lado, aria-expanded (e aria-controls) com o detalhe por baixo.
+// Com um só negócio, vem escolhido por defeito; com vários, ao lado abre o mais avançado ainda em curso e, por baixo, nenhum. As linhas são botões: aria-pressed com o detalhe ao lado, aria-expanded (e aria-controls) com o detalhe por baixo.
 // O negócio escolhido fica lembrado por pessoa, para sobreviver a mudar de pessoa e a abrir um negócio e voltar.
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
@@ -18,6 +18,8 @@ type Abrir = (id: number) => () => void;
 
 /** O negócio escolhido de cada pessoa (pelo nome): vive fora do componente porque o separador desmonta ao mudar de pessoa ou ao abrir um negócio. */
 const escolhas = new Map<string, string>();
+/** A largura (px) da caixa a partir da qual o detalhe fica ao lado da lista; é a da container query `.negocios-md` em prototipo.css. */
+const LARGURA_LADO = 640;
 /** Esquece os negócios escolhidos (quando a demonstração é reposta). */
 export function esquecerNegocios(): void { escolhas.clear(); }
 
@@ -46,11 +48,12 @@ export function SepNegocios({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir: A
   const negocios = p.todos;
   const [escolhido, setEscolhidoEstado] = useState<string | null>(escolhas.get(p.nome) ?? null);
   const [porBaixo, setPorBaixo] = useState(false);
-  const idDetalhe = useId(), lista = useRef<HTMLUListElement>(null), detalhe = useRef<HTMLDivElement>(null);
-  // O detalhe está por baixo quando começa depois do fim da lista (sem layout, como num teste, conta como ao lado).
+  const idDetalhe = useId(), caixa = useRef<HTMLDivElement>(null), detalhe = useRef<HTMLDivElement>(null);
+  // O detalhe está por baixo quando a caixa é mais estreita do que o limite da container query do CSS (sem layout, como num teste, conta como ao lado).
+  // Mede a caixa e não o detalhe, para a medida não mudar consoante o detalhe esteja aberto ou não.
   const medir = useCallback((): boolean => {
-    const l = lista.current, d = detalhe.current;
-    return !!l && !!d && l.getBoundingClientRect().height > 0 && d.getBoundingClientRect().top >= l.getBoundingClientRect().bottom - 1;
+    const largura = caixa.current?.getBoundingClientRect().width ?? 0;
+    return largura > 0 && largura < LARGURA_LADO;
   }, []);
   // Volta a medir quando muda o que se vê (negócio escolhido, número de negócios) e quando a janela muda de tamanho.
   useLayoutEffect(() => { setPorBaixo(medir()); }, [medir, escolhido, negocios.length]);
@@ -60,7 +63,7 @@ export function SepNegocios({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir: A
     return () => window.removeEventListener("resize", aoRedimensionar);
   }, [medir]);
   if (!negocios.length) return <Vazio texto="Esta pessoa ainda não tem negócios." />;
-  const ativo = negocioPorDefeito(negocios.map((x) => x.id), escolhido);
+  const ativo = negocioPorDefeito(negocios, escolhido, porBaixo);
   const n = negocios.find((x) => x.id === ativo);
   // Lado a lado o foco fica no botão; quando o detalhe aparece por baixo da lista, passa para ele (senão quem usa teclado ou leitor não o encontra).
   const escolher = (chave: string) => {
@@ -69,9 +72,9 @@ export function SepNegocios({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir: A
     requestAnimationFrame(() => { if (medir()) detalhe.current?.focus(); });
   };
   return (
-    <div className="negocios-cx">
+    <div ref={caixa} className="negocios-cx">
       <div className="negocios-md">
-        <ul ref={lista} className="grid min-w-0 content-start gap-2" aria-label="Negócios desta pessoa">
+        <ul className="grid min-w-0 content-start gap-2" aria-label="Negócios desta pessoa">
           {negocios.map((x) => <LinhaNegocio key={x.id} n={x} ativo={x.id === ativo} controla={idDetalhe} porBaixo={porBaixo} escolher={() => escolher(x.id)} />)}
         </ul>
         {n
