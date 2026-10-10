@@ -34,6 +34,9 @@ export interface DocPessoa {
   data: string | null;
 }
 
+/** As etapas de uma pessoa que ainda não tem documentos. */
+export const ETAPAS_PREPARACAO: readonly string[] = ["Lead", "Contacto", "Visita"];
+
 export const SEPARADORES_LISTA: { id: SeparadorLista; nome: string }[] = [
   { id: "leads", nome: "Leads" }, { id: "clientes", nome: "Clientes" }, { id: "todos", nome: "Todos" },
 ];
@@ -222,6 +225,25 @@ export function listaVisivel(S: Estado, aba: SeparadorLista, f: FiltrosPessoa, o
 /** A pessoa que o painel mostra quando ninguém foi escolhido (no computador): a primeira da lista, a mais urgente. Sem resultados não há nenhuma. */
 export function primeiraDaLista(S: Estado, aba: SeparadorLista, f: FiltrosPessoa, ordem: Ordem): PessoaApp | undefined {
   return listaVisivel(S, aba, f, ordem)[0];
+}
+
+/** Um negócio da pessoa com os documentos dele. `negocio` fica por definir quando os itens apontam para um negócio que a pessoa não tem. */
+export interface GrupoNegocio { chave: string; negocio: Negocio | undefined; principal: ItemNegocio; docs: ItemNegocio[] }
+
+/** Agrupa os itens por negócio, pela ordem em que cada negócio aparece. Os cartões de exemplo da V2 (proposta conjunta, segundo orçamento)
+ *  apontam para o negócio base da pessoa e juntam-se a ele. `docs` são só os documentos (sem as etapas de preparação); `principal` é o primeiro, ou a etapa quando ainda não há. */
+export function negociosAgrupados(p: PessoaApp, itens: ItemNegocio[]): GrupoNegocio[] {
+  const grupos = new Map<string, { negocio: Negocio | undefined; itens: ItemNegocio[] }>();
+  for (const it of itens) {
+    const d = negocioDoItem(p, it) ?? p.negocios.find((x) => x.id === it.negocioId);
+    const chave = d ? `n${d.id}` : `x${it.negocioId}`;
+    const g = grupos.get(chave);
+    if (g) g.itens.push(it); else grupos.set(chave, { negocio: d, itens: [it] });
+  }
+  return [...grupos].map(([chave, g]) => {
+    const docs = g.itens.filter((it) => !ETAPAS_PREPARACAO.includes(it.tipo));
+    return { chave, negocio: g.negocio, principal: docs[0] ?? g.itens[0], docs };
+  });
 }
 
 /** O negócio a que um item do separador Negócios se refere (o de exemplo vem de `extra`). */

@@ -44,7 +44,6 @@ export interface Perfil {
   ultimoContacto: string;
   diasSemContacto: number;
   saude: Saude;
-  tags: string[];
   visita: VisitaPessoa | null;
   notas: Nota[];
   interacoes: Interacao[];
@@ -130,7 +129,7 @@ function notasDe(p: PessoaApp, base: string, comercial: string): Nota[] {
   return porRecente([...reais, ...exemplos]);
 }
 
-/* ---------------------------------------------------------------- morada, visita, etiquetas, prazo, saúde */
+/* ---------------------------------------------------------------- morada, visita, prazo, saúde */
 
 function moradaDe(d: Negocio): Morada {
   const f = d.f, cp = f.cp ?? "", localidade = localDe(d);
@@ -145,12 +144,6 @@ function visitaDe(p: PessoaApp, morada: string): VisitaPessoa | null {
   const [data, hora = ""] = d.visita.slot.split(" · ");
   const quem = campoVisita(d, n, "quem");
   return { data, hora, quem: quem || "Rúben (comercial)", quemExemplo: !quem, estado: campoVisita(d, n, "estado") || "Marcada", morada };
-}
-
-function etiquetasDe(p: PessoaApp): string[] {
-  const f = p.principal.f;
-  const l = [p.principal.linha === "coz" ? "Cozinha" : "Casa de banho", f.tipo_cliente || "Particular (exemplo)", f.posse, f.pref ? `Prefere ${f.pref.toLowerCase()}` : "", p.novoNegocio ? "Novo negócio" : ""];
-  return [...new Set(l.filter(Boolean))].slice(0, 4);
 }
 
 function prazoDe(p: PessoaApp, ultimo: string, s: number): Prazo {
@@ -200,7 +193,7 @@ export function perfilDe(p: PessoaApp, S: Estado): Perfil {
     emailExemplo: !d.f.email,
     email: d.f.email || `${p.nome.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ /g, ".")}@exemplo.pt`,
     telefone: p.tel, morada, nif, nifExemplo: nif !== null && !d.f.nif, comercial: comercialDe(p), criada: base, criadaHa: tempoDesde(base), ultimoContacto: ultimo, diasSemContacto: dias,
-    saude: saudeDe(p, dias, conflito, visita, pagamentoDe(S, p)), tags: etiquetasDe(p), visita, notas: notasDe(p, base, PAPEIS[d.dono].nome), interacoes,
+    saude: saudeDe(p, dias, conflito, visita, pagamentoDe(S, p)), visita, notas: notasDe(p, base, PAPEIS[d.dono].nome), interacoes,
     origem: primeiro?.origem ?? d.origem, canal: primeiro?.canal ?? canalDe(d.origem), campanha: primeiro?.campanha ?? (primeiro?.porMapear ? "por mapear" : null),
     conflito, prazo: prazoDe(p, ultimo, s),
   };
@@ -281,7 +274,9 @@ export const PASSOS_PERCURSO = ["Levantamento", "Orçamento", "Proposta", "Contr
 export type EstadoPasso = "feito" | "atual" | "seguinte";
 export interface PassoPercurso { nome: string; estado: EstadoPasso }
 
-/** O passo em que o negócio está (0 a 3); 4 quando o percurso está completo (contrato, ou venda direta aceite). */
+/** O passo em que o negócio está (0 a 3); 4 quando o percurso está completo (contrato, ou venda direta aceite).
+ *  A venda direta também envia uma proposta ao cliente (o motor diz "Enviar a proposta", e só dispensa o contrato depois de aceite),
+ *  por isso enquanto está enviada e por aceitar o passo é "Proposta" e o estado "Proposta enviada", como nos outros negócios. */
 function passoAtual(d: Negocio): number {
   const o = d.orc;
   if (d.fase >= 4) return 4;
@@ -301,9 +296,6 @@ export function percursoDe(d: Negocio): PassoPercurso[] {
 export function estadoNegocio(d: Negocio): string {
   return ["Em preparação", "Orçamento por enviar", "Proposta enviada", "Contrato por assinar", "Em contrato"][passoAtual(d)];
 }
-
-/** O valor com IVA, se já há orçamento; senão não há valor. */
-export const valorNegocio = (S: Estado, d: Negocio): number | null => (d.orc ? tot(d, S).pf : null);
 
 export interface Falta { titulo: string; passos: string[]; campos: string[] }
 const PASSOS_LEVANTAMENTO = ["Registar a chamada", "Marcar a visita", "Fechar o levantamento"];
@@ -340,16 +332,16 @@ export function factosDe(p: PessoaApp, f: Perfil): Facto[] {
 
 const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
 
-/** O resumo do separador numa só linha. `exemplo`: a linha inclui um valor de exemplo (o que está por receber). */
-export function resumoLinha(S: Estado, aba: SeparadorLista): { texto: string; exemplo: boolean } {
+/** O resumo do separador em uma ou duas linhas curtas (cabem a 340 px). `exemplo`: a última linha inclui um valor de exemplo (o que está por receber). */
+export function resumoLinha(S: Estado, aba: SeparadorLista): { linhas: string[]; exemplo: boolean } {
   if (aba === "leads") {
     const r = resumoLeads(S);
-    return { texto: `${plural(r.leads, "lead", "leads")} · ${r.porContactar} por contactar · ${plural(r.atrasadas, "atrasada", "atrasadas")} · ${eur(r.valorEmJogo)} € em orçamentos`, exemplo: false };
+    return { linhas: [`${plural(r.leads, "lead", "leads")} · ${r.porContactar} por contactar · ${plural(r.atrasadas, "atrasada", "atrasadas")}`, `${eur(r.valorEmJogo)} € em orçamentos`], exemplo: false };
   }
   if (aba === "clientes") {
     const r = resumoClientes(S);
-    return { texto: `${plural(r.clientes, "cliente", "clientes")} · ${eur(r.valorContratado)} € contratado · ${plural(r.obrasEmCurso, "obra em curso", "obras em curso")} · ${eur(r.aReceber)} € a receber`, exemplo: true };
+    return { linhas: [`${plural(r.clientes, "cliente", "clientes")} · ${eur(r.valorContratado)} € contratado`, `${plural(r.obrasEmCurso, "obra", "obras")} · ${eur(r.aReceber)} € a receber`], exemplo: true };
   }
   const r = resumoTodos(S);
-  return { texto: `${plural(r.pessoas, "pessoa", "pessoas")} · ${plural(r.leads, "lead", "leads")} · ${plural(r.clientes, "cliente", "clientes")}`, exemplo: false };
+  return { linhas: [`${plural(r.pessoas, "pessoa", "pessoas")} · ${plural(r.leads, "lead", "leads")} · ${plural(r.clientes, "cliente", "clientes")}`], exemplo: false };
 }

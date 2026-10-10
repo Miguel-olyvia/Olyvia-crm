@@ -71,8 +71,8 @@ function Filtros({ S, aba, f, setF, ordem, setOrdem, todas, leitura }: Pick<List
   const contar = (filtro: FiltrosPessoa["filtro"]) => filtrarPessoas(S, todas, { ...f, filtro }).length;
   return (
     <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 px-4 pt-2">
-      {/* Uma só fila; se não couber, tem scroll dentro do contentor e a página não se mexe. */}
-      <div className="-mx-1 flex flex-nowrap gap-2 overflow-x-auto px-1 py-0.5" role="group" aria-label="Mostrar">
+      {/* Os chips quebram linha quando não cabem: ficam todos à vista, sem scroll escondido (a 340 px são duas filas). */}
+      <div className="flex flex-wrap gap-2" role="group" aria-label="Mostrar">
         {chipsDe(aba).map(({ id, nome }) => (
           <button key={id} type="button" aria-pressed={f.filtro === id} onClick={() => setF({ filtro: id })} className={CHIP(f.filtro === id)}>
             {nome} <span className="tabular-nums opacity-70">{contar(id)}</span>
@@ -143,14 +143,9 @@ export function PessoaLista(props: ListaProps) {
   const limpar = () => { setF({ ...SEM_FILTROS }); pesquisa.current?.focus(); };
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* Só a pesquisa e os separadores ficam fixos; o título, o resumo e os filtros rolam com a lista. */}
       <div className="shrink-0 border-b border-border bg-background px-4 pb-3 pt-5 lg:pt-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold tracking-tight">Pessoas</h1>
-          <Button size="lg" variant="outline" className={cn("min-h-11 cursor-pointer", BORDA_CTRL)} onClick={novaLead}>
-            <Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova lead
-          </Button>
-        </div>
-        <label className="relative mt-2 block">
+        <label className="relative block">
           <span className="sr-only">Procurar por nome, telefone, serviço ou localidade</span>
           <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <input ref={pesquisa} type="search" placeholder="Procurar nome, telefone ou serviço" value={f.q} onChange={(e) => setF({ q: e.target.value })}
@@ -167,7 +162,13 @@ export function PessoaLista(props: ListaProps) {
         </div>
       </div>
       <div className="pb-24 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pb-6">
-        <div className="px-4 pt-3"><LinhaResumo S={S} aba={aba} /></div>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4">
+          <h1 className="text-2xl font-semibold tracking-tight">Pessoas</h1>
+          <Button size="lg" variant="outline" className={cn("min-h-11 cursor-pointer", BORDA_CTRL)} onClick={novaLead}>
+            <Plus className="mr-2 h-4 w-4" aria-hidden="true" />Nova lead
+          </Button>
+        </div>
+        <div className="px-4 pt-2"><LinhaResumo S={S} aba={aba} /></div>
         <Filtros S={S} aba={aba} f={ef} setF={setF} ordem={ordem} setOrdem={props.setOrdem} todas={todas} leitura={leitura} />
         <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">{contagemTexto(visiveis.length)}</p>
         <div className="mt-2" role="region" aria-label="Resultados">

@@ -2,15 +2,14 @@
 // quem tem vários vê a lista, cada negócio com o mesmo desenho em compacto.
 import { ArrowRight, Circle } from "lucide-react";
 import { eur, type Estado, type Negocio } from "./motor";
-import { itensPessoa, negocioDoItem, type PessoaApp } from "./pessoasDocs";
+import { ETAPAS_PREPARACAO, itensPessoa, negociosAgrupados, type PessoaApp } from "./pessoasDocs";
 import type { ItemNegocio } from "./leadsDocs";
 import { faltaParaOrcamento } from "./perfilDocs";
 import { Chip } from "./pecas";
 import { CHIP_PEQ, LINHA, SETA, Vazio, icone } from "./FichaListas";
-import { BlocoNegocio, Percurso } from "./NegocioBloco";
+import { BlocoNegocio, NegocioAgrupado, Percurso } from "./NegocioBloco";
 
 type Abrir = (id: number) => () => void;
-const ETAPAS = ["Lead", "Contacto", "Visita"];
 const MAX_CAMPOS = 4;
 
 function Secao({ titulo, children }: { titulo: string; children: React.ReactNode }) {
@@ -62,11 +61,13 @@ function Documentos({ docs, abrir }: { docs: ItemNegocio[]; abrir: Abrir }) {
 }
 
 function Detalhe({ S, p, itens, abrir }: { S: Estado; p: PessoaApp; itens: ItemNegocio[]; abrir: Abrir }) {
-  const d = p.principal, docs = itens.filter((it) => !ETAPAS.includes(it.tipo));
+  const d = p.principal, docs = itens.filter((it) => !ETAPAS_PREPARACAO.includes(it.tipo));
   return (
-    <div className="grid min-w-0 gap-x-10 gap-y-6 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <div className="grid min-w-0 content-start gap-6"><BlocoNegocio it={itens[0]} d={d} abrir={abrir} /><Secao titulo="Percurso do negócio"><Percurso d={d} /></Secao></div>
-      <div className="grid min-w-0 content-start gap-6"><Falta S={S} d={d} /><Documentos docs={docs} abrir={abrir} /></div>
+    <div className="detalhe-cx">
+      <div className="detalhe">
+        <div className="grid min-w-0 content-start gap-6"><BlocoNegocio it={itens[0]} d={d} abrir={abrir} /><Secao titulo="Percurso do negócio"><Percurso d={d} /></Secao></div>
+        <div className="grid min-w-0 content-start gap-6"><Falta S={S} d={d} /><Documentos docs={docs} abrir={abrir} /></div>
+      </div>
     </div>
   );
 }
@@ -77,10 +78,13 @@ export function SepNegocios({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir: A
   if (p.papel === "lead" && p.negocios.length === 1) return <Detalhe S={S} p={p} itens={itens} abrir={abrir} />;
   return (
     <ul className="divide-y divide-border border-y border-border" aria-label="Negócios desta pessoa">
-      {itens.map((it) => {
-        const d = negocioDoItem(p, it);
-        return d && <li key={it.id} className="grid min-w-0 gap-4 px-1 py-5"><BlocoNegocio it={it} d={d} abrir={abrir} /><Percurso d={d} /></li>;
-      })}
+      {negociosAgrupados(p, itens).map((g) => (
+        <li key={g.chave} className="grid min-w-0 gap-4 px-1 py-5">
+          {g.negocio
+            ? <NegocioAgrupado g={g} d={g.negocio} abrir={abrir} />
+            : <p role="alert" className="text-[15px] text-muted-foreground">Negócio não encontrado nos dados de exemplo ({g.principal.servico}).</p>}
+        </li>
+      ))}
     </ul>
   );
 }

@@ -301,6 +301,9 @@
 .etapas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem .5rem;margin:0;padding:0;list-style:none}
 @container (min-width:420px){.etapas{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @container (min-width:760px){.etapas{grid-template-columns:repeat(6,minmax(0,1fr))}}
+.detalhe-cx{container-type:inline-size;min-width:0}
+.detalhe{display:grid;grid-template-columns:minmax(0,1fr);gap:1.5rem 2.5rem}
+@container (min-width:900px){.detalhe{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .percurso{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem;margin:0;padding:0;list-style:none}
 .percurso>li{border-left-width:2px;padding-left:.75rem}
 @container (min-width:520px){.percurso{grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}.percurso>li{border-left-width:0;border-top-width:2px;padding-left:0;padding-top:.5rem}}

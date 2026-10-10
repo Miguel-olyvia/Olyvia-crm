@@ -7,10 +7,14 @@ import { resumoLinha } from "./perfilDocs";
 import type { SeparadorLista } from "./pessoasDocs";
 import { BORDA_CTRL } from "./PessoaLinha";
 
-/** "8 leads · 3 por contactar · 1 atrasada · 11.432,82 € em orçamentos": uma linha de texto, com "exemplo" quando há um valor de exemplo. */
+/** O resumo do separador em duas linhas curtas (cabem a 340 px), com "exemplo" quando a última tem um valor de exemplo. */
 export function LinhaResumo({ S, aba }: { S: Estado; aba: SeparadorLista }) {
-  const r = resumoLinha(S, aba);
-  return <p className="text-[15px] text-foreground">{r.texto}{r.exemplo && <span className="ml-1.5 text-muted-foreground">exemplo</span>}</p>;
+  const r = resumoLinha(S, aba), ultima = r.linhas.length - 1;
+  return (
+    <p className="text-[15px] text-foreground">
+      {r.linhas.map((l, i) => <span key={l} className="block">{l}{i === ultima && r.exemplo && <span className="ml-1.5 text-muted-foreground">exemplo</span>}</span>)}
+    </p>
+  );
 }
 
 interface VazioProps {

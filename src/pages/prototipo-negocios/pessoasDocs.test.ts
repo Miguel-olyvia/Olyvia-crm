@@ -3,7 +3,7 @@ import { seed, tot, type Estado, type Papel } from "./motor";
 import { leadsDe } from "./leadsDocs";
 import {
   SEM_FILTROS, chipsDe, clientesApp, comerciaisDe, contagens, dadosCliente, documentosDe, filtrarPessoas, filtrarTexto, filtrosEfetivos, itensPessoa, leadsApp,
-  listaVisivel, negocioDoItem, negociosDemo, ordenarPessoas, primeiraDaLista, origensDe, pessoasDoSeparador, separadorPorDefeito, todosApp, valorPessoa,
+  listaVisivel, negocioDoItem, negociosAgrupados, negociosDemo, ordenarPessoas, primeiraDaLista, origensDe, pessoasDoSeparador, separadorPorDefeito, todosApp, valorPessoa,
 } from "./pessoasDocs";
 import { resumoClientes, resumoLeads, resumoTodos } from "./perfilDocs";
 
@@ -308,8 +308,8 @@ describe("pessoas · a escolha automática da primeira da lista", () => {
   const S = seed();
   it("sem escolha, a primeira da lista ordenada por urgência é a mais urgente (a atrasada)", () => {
     expect(primeiraDaLista(S, "leads", SEM_FILTROS, "urgencia")?.nome).toBe("Pedro Lopes");
-    expect(primeiraDaLista(S, "clientes", SEM_FILTROS, "urgencia")?.nome).toBe(nomes(clientesApp(S))[0]);
-    expect(primeiraDaLista(S, "todos", SEM_FILTROS, "urgencia")?.nome).toBe(nomes(todosApp(S))[0]);
+    expect(primeiraDaLista(S, "clientes", SEM_FILTROS, "urgencia")?.nome).toBe("Marta Lima");
+    expect(primeiraDaLista(S, "todos", SEM_FILTROS, "urgencia")?.nome).toBe("Pedro Lopes");
   });
   it("segue a ordem e os filtros escolhidos", () => {
     const porValor = nomes(ordenarPessoas(S, leadsApp(S), "valor"));
@@ -343,5 +343,55 @@ describe("pessoas · o negócio de cada item do separador Negócios", () => {
     const marta = clientesApp(S).find((p) => p.nome === "Marta Lima")!;
     const demo = itensPessoa(S, marta).find((it) => it.demo)!;
     expect(negocioDoItem(marta, demo)?.id).toBe(marta.extra[0].id);
+  });
+});
+
+describe("pessoas · um bloco por negócio no separador Negócios", () => {
+  const S = seed();
+  const de = (n: string) => todosApp(S).find((p) => p.nome === n)!;
+  const grupos = (n: string) => negociosAgrupados(de(n), itensPessoa(S, de(n)));
+  it("uma lead com um negócio e sem documentos: um grupo, sem documentos, com a etapa como principal", () => {
+    const g = grupos("Pedro Lopes");
+    expect(g).toHaveLength(1);
+    expect(g[0].negocio?.id).toBe(1044);
+    expect(g[0].docs).toEqual([]);
+    expect(g[0].principal.tipo).toBe("Lead");
+  });
+  it("um cliente com um negócio: um grupo com o documento dele", () => {
+    const g = grupos("Tiago Almeida");
+    expect(g).toHaveLength(1);
+    expect(g[0].negocio?.id).toBe(1027);
+    expect(g[0].docs.map((d) => d.tipo)).toEqual(["Financeiro"]);
+  });
+  it("vários documentos do mesmo negócio ficam num só grupo (a proposta e o orçamento de exemplo)", () => {
+    const g = grupos("Carla Nunes");
+    expect(g).toHaveLength(1);
+    expect(g[0].negocio?.id).toBe(1031);
+    expect(g[0].docs.map((d) => d.tipo)).toEqual(["Proposta", "Orçamento"]);
+  });
+  it("a proposta conjunta mantém as suas linhas dentro do grupo", () => {
+    const g = grupos("Sérgio Pinto");
+    expect(g).toHaveLength(1);
+    expect(g[0].docs.map((d) => d.tipo)).toEqual(["Proposta conjunta"]);
+    expect(g[0].docs[0].linhas).toHaveLength(2);
+  });
+  it("uma pessoa com vários negócios tem um grupo por negócio, o de exemplo primeiro", () => {
+    const g = grupos("Marta Lima");
+    expect(g.map((x) => x.negocio?.id)).toEqual([de("Marta Lima").extra[0].id, 1022]);
+    expect(g.map((x) => x.docs.map((d) => d.tipo))).toEqual([["Orçamento"], ["Obra"]]);
+  });
+  it("um item que aponta para um negócio que a pessoa não tem fica num grupo sem negócio (o ecrã mostra o aviso) e não se perde", () => {
+    const p = de("Pedro Lopes");
+    const orfao = { ...itensPessoa(S, p)[0], id: "x-1", negocioId: 99999 };
+    const g = negociosAgrupados(p, [...itensPessoa(S, p), orfao]);
+    expect(g).toHaveLength(2);
+    expect(g[1].negocio).toBeUndefined();
+    expect(g[1].principal.id).toBe("x-1");
+  });
+  it("não muda os itens nem o Estado", () => {
+    const antes = JSON.stringify(S), itens = itensPessoa(S, de("Carla Nunes")), copia = JSON.stringify(itens);
+    negociosAgrupados(de("Carla Nunes"), itens);
+    expect(JSON.stringify(itens)).toBe(copia);
+    expect(JSON.stringify(S)).toBe(antes);
   });
 });

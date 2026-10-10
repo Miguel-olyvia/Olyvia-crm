@@ -3,7 +3,7 @@ import { VERSAO, seed, tot } from "./motor";
 import { clientesApp, leadsApp, todosApp } from "./pessoasDocs";
 import {
   atividadeDe, camposContacto, estadoNegocio, factosDe, faltaParaOrcamento, minutosAtras, pagamentoDe, percursoDe, perfilDe, probabilidade, resumoClientes,
-  resumoLeads, resumoLinha, resumoTodos, valorNegocio,
+  resumoLeads, resumoLinha, resumoTodos,
 } from "./perfilDocs";
 
 const LEADS = ["Ana Martins", "Pedro Lopes", "Rita Sousa", "Manuel Costa", "Luísa Freitas", "Hugo Matos", "Carla Nunes", "Sérgio Pinto"];
@@ -57,11 +57,9 @@ describe("perfil · o que cada pessoa da seed tem", () => {
     for (const p of leadsApp(S)) expect(perfilDe(p, S).nif, p.nome).toBeNull();
     for (const p of clientesApp(S)) expect(perfilDe(p, S).nif, p.nome).toMatch(/^\d{9}$/);
   });
-  it("tem de 1 a 4 etiquetas e de 2 a 3 notas, cada nota com autor e data", () => {
+  it("tem de 2 a 3 notas, cada nota com autor e data", () => {
     for (const p of todas) {
       const f = perfilDe(p, S);
-      expect(f.tags.length, p.nome).toBeGreaterThanOrEqual(1);
-      expect(f.tags.length, p.nome).toBeLessThanOrEqual(4);
       expect(f.notas.length, p.nome).toBeGreaterThanOrEqual(2);
       expect(f.notas.length, p.nome).toBeLessThanOrEqual(3);
       for (const n of f.notas) { expect(n.autor).not.toBe(""); expect(n.q).toMatch(/^\d{2}\/\d{2}/); }
@@ -252,17 +250,24 @@ describe("percurso do negócio", () => {
   });
 });
 
-describe("estado e valor do negócio", () => {
+describe("estado do negócio", () => {
   const S = seed();
   const neg = (id: number) => S.deals.find((d) => d.id === id)!;
-  it("uma lead sem documentos está Em preparação e ainda sem valor", () => {
+  it("uma lead sem documentos está Em preparação", () => {
     expect(estadoNegocio(neg(1044))).toBe("Em preparação");
-    expect(valorNegocio(S, neg(1044))).toBeNull();
   });
-  it("com orçamento tem valor (com IVA) e um estado que diz onde está", () => {
-    expect(valorNegocio(S, neg(1031))).toBe(tot(neg(1031), S).pf);
+  it("com orçamento tem um estado que diz onde está", () => {
     expect(estadoNegocio(neg(1031))).toBe("Proposta enviada");
     expect(estadoNegocio(neg(1027))).toBe("Em contrato");
+  });
+  it("venda direta enviada e por aceitar: também tem proposta (o motor envia-a), por isso é Proposta enviada; só depois de aceite fica completa", () => {
+    const d = structuredClone(neg(1030));
+    expect(d.orc?.vendaDireta).toBe(true);
+    expect(estadoNegocio(d)).toBe("Proposta enviada");
+    expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "feito", "atual", "seguinte"]);
+    d.orc!.aceite = "08/10";
+    expect(estadoNegocio(d)).toBe("Em contrato");
+    expect(percursoDe(d).every((x) => x.estado === "feito")).toBe(true);
   });
 });
 
@@ -285,6 +290,11 @@ describe("o que falta para o orçamento", () => {
     expect(vazio.campos.length).toBeGreaterThan(0);
     expect(new Set(vazio.campos).size).toBe(vazio.campos.length);
   });
+  it("não muda o Estado nem o negócio", () => {
+    const antes = JSON.stringify(S);
+    for (const d of S.deals) faltaParaOrcamento(S, d);
+    expect(JSON.stringify(S)).toBe(antes);
+  });
   it("de orçamento em diante o título muda e o passo é o próximo passo do motor; fechado não falta nada", () => {
     const f = faltaParaOrcamento(S, neg(1031));
     expect(f.titulo).toBe("O que falta para o contrato");
@@ -303,28 +313,36 @@ describe("faixa de factos da ficha", () => {
     expect(fac.every((x) => x.valor.trim() !== "")).toBe(true);
   });
   it("o tipo de cliente por omissão leva a marca de exemplo; o que veio dos dados, não", () => {
-    const { p, fac } = f("Pedro Lopes");
-    const tipo = fac.find((x) => x.rotulo === "Tipo de cliente")!;
-    expect(tipo.exemplo).toBe(!p.principal.f.tipo_cliente);
-    expect(tipo.valor).toBe(p.principal.f.tipo_cliente || "Particular");
+    const { fac } = f("Pedro Lopes");
+    expect(fac.find((x) => x.rotulo === "Tipo de cliente")).toEqual({ rotulo: "Tipo de cliente", valor: "Particular", exemplo: false });
+    const T = seed();
+    delete T.deals.find((d) => d.id === 1044)!.f.tipo_cliente;
+    const p = todosApp(T).find((x) => x.nome === "Pedro Lopes")!;
+    expect(factosDe(p, perfilDe(p, T)).find((x) => x.rotulo === "Tipo de cliente")).toEqual({ rotulo: "Tipo de cliente", valor: "Particular", exemplo: true });
   });
   it("o contacto preferido só aparece quando existe, em minúsculas", () => {
-    const { p, fac } = f("Pedro Lopes");
-    const pref = fac.find((x) => x.rotulo === "Contacto preferido");
-    expect(pref?.valor).toBe(p.principal.f.pref ? p.principal.f.pref.toLowerCase() : undefined);
+    expect(f("Pedro Lopes").fac.find((x) => x.rotulo === "Contacto preferido")?.valor).toBe("telefone");
+    expect(f("Joana Ribeiro").fac.find((x) => x.rotulo === "Contacto preferido")?.valor).toBe("whatsapp");
+    const T = seed();
+    delete T.deals.find((d) => d.id === 1044)!.f.pref;
+    const p = todosApp(T).find((x) => x.nome === "Pedro Lopes")!;
+    expect(factosDe(p, perfilDe(p, T)).some((x) => x.rotulo === "Contacto preferido")).toBe(false);
   });
 });
 
 describe("resumo numa linha", () => {
   const S = seed();
-  it("leads", () => { expect(resumoLinha(S, "leads")).toEqual({ texto: "8 leads · 3 por contactar · 1 atrasada · 11.432,82 € em orçamentos", exemplo: false }); });
-  it("clientes: o que está por receber é de exemplo", () => {
-    expect(resumoLinha(S, "clientes")).toEqual({ texto: "3 clientes · 16.225,82 € contratado · 1 obra em curso · 8.784,10 € a receber", exemplo: true });
+  it("leads: duas linhas curtas", () => { expect(resumoLinha(S, "leads")).toEqual({ linhas: ["8 leads · 3 por contactar · 1 atrasada", "11.432,82 € em orçamentos"], exemplo: false }); });
+  it("clientes: duas linhas curtas, e o que está por receber é de exemplo", () => {
+    expect(resumoLinha(S, "clientes")).toEqual({ linhas: ["3 clientes · 16.225,82 € contratado", "1 obra · 8.784,10 € a receber"], exemplo: true });
   });
-  it("todos", () => { expect(resumoLinha(S, "todos")).toEqual({ texto: "11 pessoas · 8 leads · 3 clientes", exemplo: false }); });
+  it("nenhuma linha passa dos 42 caracteres (cabem a 340 px)", () => {
+    for (const aba of ["leads", "clientes", "todos"] as const) for (const l of resumoLinha(S, aba).linhas) expect(l.length, l).toBeLessThanOrEqual(42);
+  });
+  it("todos", () => { expect(resumoLinha(S, "todos")).toEqual({ linhas: ["11 pessoas · 8 leads · 3 clientes"], exemplo: false }); });
   it("singular e plural", () => {
     const T = seed();
     for (const d of T.deals) if (d.id !== 1044) d.perdido = true;
-    expect(resumoLinha(T, "leads").texto.startsWith("1 lead · 1 por contactar · 1 atrasada")).toBe(true);
+    expect(resumoLinha(T, "leads").linhas[0]).toBe("1 lead · 1 por contactar · 1 atrasada");
   });
 });

@@ -61,11 +61,16 @@ export function PessoasSimples({ S, A, go, abrirEm }: Ctx & { abrirEm?: Separado
     setFocar(null);
   }, [focar, sel]);
 
-  // Mudar de pessoa na lista cancela uma confirmação de "perdida" que tivesse ficado aberta na ficha anterior.
-  const abrir = (nome: string) => {
-    if (S.confirmPerda !== null && nome !== escolhida?.nome) go(() => A.perderNao())();
-    setSel(nome);
-  };
+  // Sempre que a pessoa mostrada muda (escolha na lista, ou a automática quando a pesquisa e os filtros mudam a primeira da lista),
+  // cancela-se uma confirmação de "perdida" que tivesse ficado aberta na ficha anterior.
+  const nomeEscolhido = escolhida?.nome ?? null;
+  const nomeAnterior = useRef(nomeEscolhido);
+  useEffect(() => {
+    if (nomeAnterior.current === nomeEscolhido) return;
+    nomeAnterior.current = nomeEscolhido;
+    if (S.confirmPerda !== null) go(() => A.perderNao())();
+  }, [nomeEscolhido, S.confirmPerda, go, A]);
+  const abrir = (nome: string) => setSel(nome);
   const leitura = !!S.leitura;
 
   return (
