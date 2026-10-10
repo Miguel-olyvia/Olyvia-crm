@@ -1,15 +1,14 @@
 // V2 da página de Negócios: só negócios a decorrer, por fase de documento
-// (Orçamento, Proposta, Contrato, Financeiro, Obra). Funções puras: nada aqui muda o Estado.
+// (Orçamento, Proposta, Contrato, Financeiro). Funções puras: nada aqui muda o Estado.
 import { criarOrc, aberto, proximo, tot, type Estado, type LinhaId, type Negocio } from "./motor";
 
-export type DocFase = "orcamento" | "proposta" | "contrato" | "financeiro" | "obra";
+export type DocFase = "orcamento" | "proposta" | "contrato" | "financeiro";
 
 export const COLUNAS_V2: { id: DocFase; nome: string }[] = [
   { id: "orcamento", nome: "Orçamento" },
   { id: "proposta", nome: "Proposta" },
   { id: "contrato", nome: "Contrato" },
   { id: "financeiro", nome: "Financeiro" },
-  { id: "obra", nome: "Obra" },
 ];
 
 export interface LinhaCartaoV2 {
@@ -40,7 +39,7 @@ export interface CartaoV2 {
 export function docFase(d: Negocio): DocFase | null {
   if (d.perdido || d.fase < 3) return null;
   if (d.fase === 4) return "financeiro";
-  if (d.fase === 5) return "obra";
+  if (d.fase === 5) return null; // a obra vê-se em Operações
   const o = d.orc;
   if (!o || !o.enviada) return "orcamento";
   if (!o.aceite) return "proposta";

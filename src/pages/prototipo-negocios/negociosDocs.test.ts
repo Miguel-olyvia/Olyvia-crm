@@ -23,9 +23,11 @@ describe("negociosV2 · fase de documento", () => {
     d.orc!.contrato = "assinado";
     expect(docFase(d)).toBe("contrato"); // fase 3 mantém-se até o motor avançar
   });
-  it("fase 4 é financeiro e fase 5 é obra", () => {
+  it("fase 4 é financeiro e fase 5 (obra) fica fora, vê-se em Operações", () => {
     expect(docFase(base(1027))).toBe("financeiro");
-    expect(docFase(base(1022))).toBe("obra");
+    expect(docFase(base(1022))).toBeNull();
+    const S = seed();
+    expect(cartoesV2(S).some((c) => c.negocioId === 1022)).toBe(false);
   });
   it("fase abaixo de 3 ou perdido fica fora", () => {
     for (const id of [1043, 1038, 1036]) expect(docFase(base(id))).toBeNull();

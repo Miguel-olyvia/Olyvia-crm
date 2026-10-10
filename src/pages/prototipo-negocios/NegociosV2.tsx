@@ -1,7 +1,7 @@
 // V2 da página de Negócios: só negócios a decorrer, por fase de documento.
 // Lead, contacto e visita são fases da pessoa e ficam em Clientes.
 import { useState, type KeyboardEvent, type ReactNode } from "react";
-import { ArrowRight, Euro, FileCheck2, FileSignature, FileText, Hammer, Search, Users, type LucideIcon } from "lucide-react";
+import { ArrowRight, Euro, FileCheck2, FileSignature, FileText, Search, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { aberto, eur, type LinhaId, type Negocio } from "./motor";
@@ -14,9 +14,8 @@ const ICONE: Record<DocFase, { i: LucideIcon; cor: string }> = {
   proposta: { i: FileCheck2, cor: FASE_COR[3] },
   contrato: { i: FileSignature, cor: FASE_COR[2] },
   financeiro: { i: Euro, cor: FASE_COR[4] },
-  obra: { i: Hammer, cor: FASE_COR[5] },
 };
-const NOME_DOC: Record<DocFase, string> = { orcamento: "Orçamento", proposta: "Proposta", contrato: "Contrato", financeiro: "Financeiro", obra: "Obra" };
+const NOME_DOC: Record<DocFase, string> = { orcamento: "Orçamento", proposta: "Proposta", contrato: "Contrato", financeiro: "Financeiro" };
 const eur0 = (x: number) => eur(x).replace(/,00$/, "");
 const CHIP_PEQ = "h-7 w-7 rounded-lg [&_svg]:h-4 [&_svg]:w-4";
 
@@ -154,12 +153,14 @@ export function NegociosV2({ S, A, go, q, setQ, seletor }: Ctx & { seletor?: Rea
         <div id="v2-painel" role="tabpanel" aria-labelledby={`v2-tab-${colMovel}`} className="mt-4">{coluna(colMovel, "m")}</div>
       </div>
 
-      {/* Computador: as cinco colunas lado a lado */}
-      <div className="mt-8 hidden gap-5 lg:grid lg:grid-cols-5">{COLUNAS_V2.map(({ id }) => coluna(id, "d"))}</div>
+      {/* Computador: as quatro colunas lado a lado */}
+      <div className="mt-8 hidden gap-5 lg:grid lg:grid-cols-4">{COLUNAS_V2.map(({ id }) => coluna(id, "d"))}</div>
 
       <div className="mt-8 flex flex-wrap items-center gap-3 border-t border-border pt-5">
         <p className="text-[15px] text-muted-foreground">{antes} {antes === 1 ? "pessoa ainda em" : "pessoas ainda em"} lead, contacto ou visita.</p>
         <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("clientes"))}>Ver em Clientes</Button>
+        <p className="text-[15px] text-muted-foreground">Os negócios já em obra veem-se em Operações.</p>
+        <Button type="button" variant="outline" className="min-h-11" onClick={go(() => A.nav("operacoes"))}>Ver em Operações</Button>
       </div>
     </div>
   );
