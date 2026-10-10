@@ -1,11 +1,12 @@
 // O perfil de cada pessoa (lead ou cliente) para as páginas de Pessoas: contactos, saúde, notas, chamadas e emails.
 // Funções puras e determinísticas: nada aqui muda o Estado nem existe no Estado. O que não vem da seed é de exemplo e
 // calcula-se a partir do nome, das fases e das datas dos negócios, com regras fixas.
-import { PAPEIS, campoVisita, proximo, tot, visitas, type Estado, type Evento, type Negocio } from "./motor";
+import { PAPEIS, campoVisita, proximo, visitas, type Estado, type Evento, type Negocio } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, INTERIOR, LEAD, efetivo, emFalta, grupoVisita, type Grupo } from "./campos";
 import { atrasada, idade, localDe, somarDias, tempoDesde } from "./leadsDocs";
 import { canalDe, infoOrigem, toquesDe, utmTexto } from "./toquesDocs";
 import { comercialDe, ehGanho, proximoNegocio, type PessoaApp } from "./pessoasDocs";
+import { valorNegocio, type NegocioApp } from "./negociosApp";
 
 /** "Hoje" do protótipo (o mesmo de leadsDocs). */
 const HOJE = "10/10";
@@ -171,9 +172,9 @@ function saudeDe(p: PessoaApp, dias: number, conflito: boolean, visita: VisitaPe
 
 /** Pagamento (de exemplo) dos negócios ganhos da pessoa: pago quando a fatura foi paga (ou o negócio já está concluído), senão por receber. */
 export function pagamentoDe(S: Estado, p: PessoaApp): Pagamento {
-  const contratos = p.negocios.filter((d) => d.orc && ehGanho(d));
-  const total = contratos.reduce((a, d) => a + tot(d, S).pf, 0);
-  const pago = contratos.reduce((a, d) => a + (d.fin.pago || d.fase >= 5 ? tot(d, S).pf : 0), 0);
+  const contratos = p.todos.filter((n) => n.perdido === null && n.orcamentos.length > 0 && ehGanho(n.deal));
+  const total = contratos.reduce((a, n) => a + (valorNegocio(n) ?? 0), 0);
+  const pago = contratos.reduce((a, n) => a + (n.deal.fin.pago || n.deal.fase >= 5 ? valorNegocio(n) ?? 0 : 0), 0);
   return { total, pago, falta: total - pago };
 }
 
@@ -231,6 +232,12 @@ const PROBABILIDADE: Record<string, number> = {
 /** A probabilidade (de exemplo, em %) de fechar, por tipo de documento ou etapa. */
 export const probabilidade = (tipo: string): number => PROBABILIDADE[tipo] ?? 30;
 
+/** A probabilidade (de exemplo, em %) de fechar um negócio: pela etapa da pessoa antes do orçamento, depois pelo estado do negócio (a obra conta como Financeiro). */
+export function probabilidadeDe(d: Negocio): number {
+  const etapas = ["Lead", "Contacto", "Visita"];
+  return probabilidade(d.fase < 3 ? etapas[d.fase] : d.fase >= 5 ? "Financeiro" : estadoCurto(d));
+}
+
 /** A UTM em bruto do primeiro toque, ou vazio. */
 export function utmDe(S: Estado, p: PessoaApp): string {
   return utmTexto(toquesDe(S, p.nome)[0]?.utm ?? null);
@@ -287,6 +294,9 @@ export function estadoNegocio(d: Negocio): string {
 export function estadoCurto(d: Negocio): string {
   return NOME_PASSO[passosDe(d)[passoAtual(d)]]?.curto ?? CONCLUIDO;
 }
+
+/** O estado do negócio em palavras, para as listas: o do percurso, ou "Perdido". */
+export const estadoDe = (n: NegocioApp): string => (n.perdido !== null ? "Perdido" : estadoCurto(n.deal));
 
 export interface Falta { titulo: string; passos: string[]; campos: string[] }
 const PASSOS_LEVANTAMENTO = ["Registar a chamada", "Marcar a visita", "Fechar o levantamento"];

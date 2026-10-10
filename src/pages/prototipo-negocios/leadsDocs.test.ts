@@ -48,14 +48,15 @@ describe("leads · filtros", () => {
 });
 
 describe("leads · negócios da pessoa", () => {
-  it("incluem os de exemplo e a proposta conjunta", () => {
+  it("incluem um item por negócio, os de exemplo também (a Carla tem 3 e o Sérgio 2)", () => {
     const S = seed();
     const ls = leadsDe(S);
     const carla = itensNegocios(S, ls.find((p) => p.nome === "Carla Nunes")!);
-    expect(carla.length).toBe(2);
-    expect(carla.some((i) => i.demo)).toBe(true);
+    expect(carla.length).toBe(3);
+    expect(carla.filter((i) => i.demo)).toHaveLength(2);
     const sergio = itensNegocios(S, ls.find((p) => p.nome === "Sérgio Pinto")!);
-    expect(sergio.some((i) => i.conjunta && i.demo)).toBe(true);
+    expect(sergio.map((i) => [i.servico, i.demo])).toEqual([["WC", false], ["Pintura interior", true]]);
+    expect(sergio.some((i) => i.conjunta)).toBe(false);
   });
   it("sem orçamento mostra a etapa da pessoa", () => {
     const S = seed();

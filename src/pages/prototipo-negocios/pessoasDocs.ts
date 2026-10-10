@@ -1,9 +1,12 @@
 // Página de Pessoas: uma lista única de leads e clientes. A pessoa é uma só; lead e cliente são papéis dela.
-// Funções puras: nada aqui muda o Estado. O negócio de exemplo do cliente (negociosDemo) vive só nesta camada.
+// Funções puras: nada aqui muda o Estado. Os negócios de cada pessoa (o da seed e os de exemplo) vêm de negociosDe (negociosApp.ts).
 // Quem é lead e quem é cliente decide-se aqui (a página de Leads V1 mantém a regra antiga, em leadsDocs.ts): cliente é quem tem um negócio GANHO.
-import { PAPEIS, criarOrc, proximo, tot, type Estado, type Negocio, type Papel, type Proximo } from "./motor";
-import { FILTROS_LEAD, atrasada, filtrarLeads, idade, itensNegocios, pessoasDe, type FiltroLead, type ItemNegocio, type Pessoa } from "./leadsDocs";
+import { PAPEIS, proximo, type Estado, type Negocio, type Papel, type Proximo } from "./motor";
+import { FILTROS_LEAD, atrasada, filtrarLeads, idade, pessoasDe, type FiltroLead, type Pessoa } from "./leadsDocs";
 import { toquesDe } from "./toquesDocs";
+import { documentosDoNegocio, ehGanho, negociosDe, valorNegocio, type DocNegocio, type NegocioApp } from "./negociosApp";
+
+export { ehGanho } from "./negociosApp";
 
 export type PapelPessoa = "lead" | "cliente";
 export type SeparadorLista = "leads" | "clientes" | "todos";
@@ -12,12 +15,12 @@ export interface PessoaApp extends Pessoa {
   papel: PapelPessoa;
   /** Cliente com um negócio aberto que ainda não está ganho: não vira lead, fica em Clientes com "Novo negócio em curso". */
   novoNegocio: boolean;
-  /** Negócios de exemplo juntos só nesta camada (não existem no Estado). */
-  extra: Negocio[];
+  /** Todos os negócios da pessoa: o da seed e os de exemplo (que só existem nesta camada). Só os da seed decidem o papel. */
+  todos: NegocioApp[];
 }
 
 export interface DadosCliente {
-  /** Soma dos negócios ganhos (contrato assinado, ou proposta aceite quando não há contrato), com o IVA do orçamento. */
+  /** Soma dos orçamentos dos negócios ganhos (contrato assinado, ou proposta aceite quando não há contrato), com o IVA. */
   valorTotal: number;
   /** Quantos negócios ganhos tem. */
   contratos: number;
@@ -25,18 +28,8 @@ export interface DadosCliente {
   ultimo: { servico: string; quando: string } | null;
 }
 
-export interface DocPessoa {
-  id: string;
-  negocioId: number;
-  tipo: "Contrato" | "Fatura" | "Recibo";
-  servico: string;
-  estado: string;
-  referencia: string | null;
-  data: string | null;
-}
-
-/** As etapas de uma pessoa que ainda não tem documentos. */
-export const ETAPAS_PREPARACAO: readonly string[] = ["Lead", "Contacto", "Visita"];
+/** Um documento de um negócio da pessoa: orçamento, proposta, contrato, fatura ou recibo. */
+export type DocPessoa = DocNegocio;
 
 export const SEPARADORES_LISTA: { id: SeparadorLista; nome: string }[] = [
   { id: "leads", nome: "Leads" }, { id: "clientes", nome: "Clientes" }, { id: "todos", nome: "Todos" },
@@ -47,49 +40,18 @@ export function separadorPorDefeito(role: Papel): SeparadorLista {
   return role === "comercial" ? "leads" : "clientes";
 }
 
-/* ---------------------------------------------------------------- o negócio de exemplo */
-
-const ID_DEMO = 90022;
-const BASE_DEMO = 1022; // a Marta Lima, cliente
-const MEDIDAS_DEMO = 1031; // medidas de uma cozinha da seed, para o orçamento do negócio novo
-
-/** Um negócio novo, aberto e em fase de orçamento, para um dos clientes da seed. Trabalha numa cópia: o Estado não muda. */
-export function negociosDemo(S: Estado): Negocio[] {
-  const base = S.deals.find((d) => d.id === BASE_DEMO && !d.perdido);
-  const fonte = S.deals.find((d) => d.id === MEDIDAS_DEMO);
-  if (!base || !fonte) return [];
-  const d: Negocio = {
-    ...structuredClone(base), id: ID_DEMO, linha: "coz", servico: "Cozinha nova", fase: 3, quando: "08/10", atraso: false, valida: null,
-    visita: { ...structuredClone(fonte.visita), extra: {}, off: [] },
-    fin: { fatura: null, pago: false, recibo: null },
-    obra: { plano: null, enc: null, mats: null, real: null, aprendido: false },
-    hist: [],
-  };
-  d.orc = criarOrc(d, S);
-  return [d];
-}
-
 /* ---------------------------------------------------------------- quem é quem */
-
-/** Negócio GANHO: o contrato assinado; ou, quando o negócio não exige contrato (venda direta, só proposta), a proposta aceite.
- *  Financeiro e Obra (fases 4 e 5) já passaram pelo ganho. Um negócio perdido nunca está ganho. A pessoa vira cliente com o primeiro. */
-export function ehGanho(d: Negocio): boolean {
-  if (d.perdido) return false;
-  const o = d.orc;
-  return d.fase >= 4 || o?.contrato === "assinado" || (!!o?.vendaDireta && !!o.aceite);
-}
 
 /** O próximo passo de um negócio nesta página: o do motor, menos a obra (fase 5), que aqui é só "Concluído". */
 export function proximoNegocio(d: Negocio, S: Estado): Proximo {
   return d.fase >= 5 ? { t: "Concluído", sub: "O negócio está pago e fechado.", done: true } : proximo(d, S);
 }
 
+/** O papel vem só dos negócios da seed: um negócio de exemplo nunca muda ninguém de lead para cliente. */
 function todasAsPessoas(S: Estado): PessoaApp[] {
-  const demo = negociosDemo(S);
   return pessoasDe(S).map((p): PessoaApp => {
-    const cliente = p.negocios.some(ehGanho);
-    const extra = cliente ? demo.filter((d) => d.nome === p.nome) : [];
-    return { ...p, papel: cliente ? "cliente" : "lead", extra, novoNegocio: cliente && [...p.negocios, ...extra].some((d) => !ehGanho(d)) };
+    const cliente = p.negocios.some(ehGanho), todos = negociosDe(S, p.nome);
+    return { ...p, papel: cliente ? "cliente" : "lead", todos, novoNegocio: cliente && todos.some((n) => n.perdido === null && !ehGanho(n.deal)) };
   });
 }
 
@@ -135,47 +97,28 @@ export function contagens(S: Estado, q: string): Record<SeparadorLista, number> 
 /* ---------------------------------------------------------------- o cliente */
 
 export function dadosCliente(S: Estado, p: PessoaApp): DadosCliente {
-  const contratos = p.negocios.filter((d) => d.orc && ehGanho(d));
-  const ultimo = [...p.extra, ...p.negocios].reduce<Negocio | null>((a, d) => (!a || idade(d.quando) < idade(a.quando) ? d : a), null);
+  const ganhos = p.todos.filter((n) => n.perdido === null && n.orcamentos.length > 0 && ehGanho(n.deal));
+  const ultimo = p.todos.filter((n) => n.perdido === null).reduce<NegocioApp | null>((a, n) => (!a || idade(n.deal.quando) < idade(a.deal.quando) ? n : a), null);
   return {
-    valorTotal: contratos.reduce((a, d) => a + tot(d, S).pf, 0),
-    contratos: contratos.length,
-    ultimo: ultimo ? { servico: ultimo.servico, quando: ultimo.quando } : null,
+    valorTotal: ganhos.reduce((a, n) => a + (valorNegocio(n) ?? 0), 0),
+    contratos: ganhos.length,
+    ultimo: ultimo ? { servico: ultimo.titulo, quando: ultimo.deal.quando } : null,
   };
 }
 
-/** Contrato, fatura e recibo de cada negócio do cliente, só em leitura e derivados dos dados. */
+/** Os documentos dos negócios abertos da pessoa, só em leitura e derivados dos dados: os mesmos do separador Negócios (orçamentos, proposta, contrato)
+ *  e, nos negócios da seed, a fatura e o recibo. Um negócio perdido não conta. */
 export function documentosDe(p: PessoaApp): DocPessoa[] {
-  return p.negocios.flatMap((d): DocPessoa[] => {
-    const o = d.orc, linhas: DocPessoa[] = [];
-    const linha = (tipo: DocPessoa["tipo"], estado: string, referencia: string | null, data: string | null): void => {
-      linhas.push({ id: `doc-${d.id}-${tipo}`, negocioId: d.id, tipo, servico: d.servico, estado, referencia, data });
-    };
-    if (o?.contrato) {
-      const assinado = o.contrato === "assinado";
-      const quando = d.hist.find((e) => /^contrato/i.test(e.t))?.q ?? o.aceite;
-      linha("Contrato", assinado ? "Assinado" : "Enviado ao cliente", null, quando);
-    }
-    if (d.fin.fatura) linha("Fatura", d.fin.pago ? "Paga" : "Emitida", d.fin.fatura.n, d.fin.fatura.q);
-    if (d.fin.recibo) linha("Recibo", "Emitido", d.fin.recibo.n, d.fin.recibo.q);
-    return linhas;
+  return p.todos.filter((n) => n.perdido === null).flatMap((n): DocPessoa[] => {
+    const fin = n.deal.fin, extra = (tipo: "Fatura" | "Recibo", estado: string, e: { n: string; q: string }): DocPessoa => ({
+      id: `doc-${n.id}-${tipo}`, negocioId: n.negocioId, tipo, titulo: n.titulo, servico: n.titulo, estado, valor: null, referencia: e.n, data: e.q, inclui: null,
+    });
+    return [
+      ...documentosDoNegocio(n),
+      ...(fin.fatura ? [extra("Fatura", fin.pago ? "Paga" : "Emitida", fin.fatura)] : []),
+      ...(fin.recibo ? [extra("Recibo", "Emitido", fin.recibo)] : []),
+    ];
   });
-}
-
-/** A página de Leads dá ao negócio da fase 5 o tipo "Obra" e nenhum valor; aqui é um Financeiro já fechado, com o seu valor. */
-function semObra(S: Estado, p: PessoaApp, it: ItemNegocio): ItemNegocio {
-  const d = p.negocios.find((x) => x.id === it.negocioId);
-  if (it.tipo !== "Obra" || !d) return it;
-  return { ...it, tipo: "Financeiro", valor: d.orc ? tot(d, S).pf : null, proximo: proximoNegocio(d, S).t };
-}
-
-/** Os negócios da pessoa para o separador Negócios: o de exemplo primeiro, depois os da página de Leads. */
-export function itensPessoa(S: Estado, p: PessoaApp): ItemNegocio[] {
-  const demo = p.extra.map((d): ItemNegocio => ({
-    id: `demo-${d.id}`, negocioId: p.principal.id, tipo: "Orçamento", servico: d.servico, valor: tot(d, S).pf, proximo: proximo(d, S).t,
-    demo: true, conjunta: false, linhas: [],
-  }));
-  return [...demo, ...itensNegocios(S, p).map((it) => semObra(S, p, it))];
 }
 
 /* ---------------------------------------------------------------- ordenar e filtrar a lista */
@@ -189,9 +132,9 @@ export const ORDENS: { id: Ordem; nome: string }[] = [
 export interface FiltrosPessoa { filtro: FiltroLead; soMinhas: boolean; q: string; origem: string; comercial: string }
 export const SEM_FILTROS: FiltrosPessoa = { filtro: "todas", soMinhas: false, q: "", origem: "", comercial: "" };
 
-/** Soma dos orçamentos da pessoa (com o IVA), o negócio de exemplo incluído. */
+/** Soma dos orçamentos dos negócios abertos da pessoa (com o IVA), os de exemplo incluídos. */
 export function valorPessoa(S: Estado, p: PessoaApp): number {
-  return [...p.negocios, ...p.extra].filter((d) => d.orc).reduce((a, d) => a + tot(d, S).pf, 0);
+  return p.todos.filter((n) => n.perdido === null).reduce((a, n) => a + (valorNegocio(n) ?? 0), 0);
 }
 
 /** Dias desde que a pessoa chegou: o do negócio mais antigo. */
@@ -239,28 +182,4 @@ export function filtrosEfetivos(aba: SeparadorLista, f: FiltrosPessoa): FiltrosP
 /** A lista como se vê: o separador, a pesquisa e os filtros, pela ordem escolhida. */
 export function listaVisivel(S: Estado, aba: SeparadorLista, f: FiltrosPessoa, ordem: Ordem): PessoaApp[] {
   return ordenarPessoas(S, filtrarPessoas(S, pessoasDoSeparador(S, aba), filtrosEfetivos(aba, f)), ordem);
-}
-
-/** Um negócio da pessoa com os documentos dele. `negocio` fica por definir quando os itens apontam para um negócio que a pessoa não tem. */
-export interface GrupoNegocio { chave: string; negocio: Negocio | undefined; principal: ItemNegocio; docs: ItemNegocio[] }
-
-/** Agrupa os itens por negócio, pela ordem em que cada negócio aparece. Os cartões de exemplo da V2 (proposta conjunta, segundo orçamento)
- *  apontam para o negócio base da pessoa e juntam-se a ele. `docs` são só os documentos (sem as etapas de preparação); `principal` é o primeiro, ou a etapa quando ainda não há. */
-export function negociosAgrupados(p: PessoaApp, itens: ItemNegocio[]): GrupoNegocio[] {
-  const grupos = new Map<string, { negocio: Negocio | undefined; itens: ItemNegocio[] }>();
-  for (const it of itens) {
-    const d = negocioDoItem(p, it) ?? p.negocios.find((x) => x.id === it.negocioId);
-    const chave = d ? `n${d.id}` : `x${it.negocioId}`;
-    const g = grupos.get(chave);
-    if (g) g.itens.push(it); else grupos.set(chave, { negocio: d, itens: [it] });
-  }
-  return [...grupos].map(([chave, g]) => {
-    const docs = g.itens.filter((it) => !ETAPAS_PREPARACAO.includes(it.tipo));
-    return { chave, negocio: g.negocio, principal: docs[0] ?? g.itens[0], docs };
-  });
-}
-
-/** O negócio a que um item do separador Negócios se refere (o de exemplo vem de `extra`). */
-export function negocioDoItem(p: PessoaApp, it: ItemNegocio): Negocio | undefined {
-  return it.demo ? p.extra.find((d) => `demo-${d.id}` === it.id) : p.negocios.find((d) => d.id === it.negocioId);
 }

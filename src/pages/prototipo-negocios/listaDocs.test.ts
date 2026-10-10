@@ -55,10 +55,13 @@ describe("lista · etapa e valor por papel", () => {
   it("leads: o valor em orçamento, ou null quando não há (mostra-se '—')", () => {
     const v = Object.fromEntries(leadsApp(S).map((p) => [p.nome, valorColuna(S, p)]));
     expect(v["Pedro Lopes"]).toBeNull();
-    expect(Object.values(v).reduce<number>((a, x) => a + (x ?? 0), 0)).toBeCloseTo(11432.82, 2);
+    // Carla (8.126,60 + 4.850 + 1.920 + 3.480 + 4.260) e Sérgio (3.306,22 + 1.380): os orçamentos de todos os negócios abertos.
+    expect(Object.values(v).reduce<number>((a, x) => a + (x ?? 0), 0)).toBeCloseTo(8126.6 + 6770 + 7740 + 3306.22 + 1380, 2);
+    expect(v["Rita Sousa"]).toBeNull(); // o WC social perdido não conta
   });
   it("clientes: o valor contratado", () => {
-    expect(clientesApp(S).reduce((a, p) => a + (valorColuna(S, p) ?? 0), 0)).toBeCloseTo(16225.82, 2);
+    // Os três contratos da seed (16.225,82) mais a venda direta aceite do Tiago (4.200 + 2.350); o resto está em curso, à espera de assinatura ou perdido.
+    expect(clientesApp(S).reduce((a, p) => a + (valorColuna(S, p) ?? 0), 0)).toBeCloseTo(16225.82 + 6550, 2);
   });
 });
 

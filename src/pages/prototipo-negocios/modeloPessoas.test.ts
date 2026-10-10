@@ -2,9 +2,10 @@
 // e as cinco etapas da pessoa (Lead, Contacto, Visita, Negócio, Cliente). A obra não entra em nada disto.
 import { describe, expect, it } from "vitest";
 import { seed, type Estado, type Negocio } from "./motor";
-import { clientesApp, dadosCliente, documentosDe, ehGanho, itensPessoa, leadsApp, proximoNegocio, todosApp } from "./pessoasDocs";
+import { clientesApp, dadosCliente, documentosDe, ehGanho, leadsApp, proximoNegocio, todosApp } from "./pessoasDocs";
 import { ETAPAS_PESSOA, etapaPessoa, etapaTexto } from "./listaDocs";
-import { estadoCurto, estadoNegocio, faltaParaOrcamento, pagamentoDe, percursoDe, proximoTexto } from "./perfilDocs";
+import { estadoCurto, estadoDe, estadoNegocio, faltaParaOrcamento, pagamentoDe, percursoDe, proximoTexto } from "./perfilDocs";
+import { valorNegocio } from "./negociosApp";
 
 const base = (id: number): Negocio => structuredClone(seed().deals.find((d) => d.id === id)!);
 const nomes = (l: { nome: string }[]): string[] => l.map((p) => p.nome);
@@ -145,17 +146,19 @@ describe("a obra não é um passo nem um próximo passo da pessoa", () => {
   it("na lista o próximo passo dos clientes nunca fala de obra", () => {
     for (const p of clientesApp(S)) expect(proximoTexto(p, S), p.nome).not.toMatch(/obra/i);
   });
-  it("os documentos do cliente são contrato, fatura e recibo, e os dados não contam obras", () => {
+  it("os documentos do cliente são orçamento, proposta, contrato, fatura e recibo, e os dados não contam obras", () => {
     for (const p of clientesApp(S)) {
-      expect(documentosDe(p).every((d) => ["Contrato", "Fatura", "Recibo"].includes(d.tipo)), p.nome).toBe(true);
+      expect(documentosDe(p).every((d) => ["Orçamento", "Proposta", "Contrato", "Fatura", "Recibo"].includes(d.tipo)), p.nome).toBe(true);
       expect(Object.keys(dadosCliente(S, p)), p.nome).toEqual(["valorTotal", "contratos", "ultimo"]);
     }
   });
-  it("o negócio da fase 5 aparece como Financeiro, com valor e Concluído, no separador Negócios", () => {
+  it("o negócio da fase 5 aparece como Concluído, com valor, e sem próximo passo, no separador Negócios", () => {
     const joana = clientesApp(S).find((p) => p.nome === "Joana Ribeiro")!;
-    const [it] = itensPessoa(S, joana);
-    expect(it).toMatchObject({ tipo: "Financeiro", proximo: "Concluído" });
-    expect(it.valor).toBeGreaterThan(0);
+    const [n] = joana.todos;
+    expect(n).toMatchObject({ id: "neg-1050", fase: "obra" });
+    expect(estadoDe(n)).toBe("Concluído");
+    expect(proximoNegocio(n.deal, S).t).toBe("Concluído");
+    expect(valorNegocio(n)).toBeGreaterThan(0);
   });
   it("o cliente mostra o valor contratado e o que falta receber; tudo pago na fase 5, nada pago em Financeiro por pagar", () => {
     const por = (n: string) => clientesApp(S).find((p) => p.nome === n)!;
@@ -226,8 +229,10 @@ describe("lead e cliente · quem é quem", () => {
   });
   it("um cliente cujo negócio novo também ganhou deixa de ter o aviso", () => {
     const S = seed();
-    juntar(S, 1027, 2301, { fase: 4 });
-    expect(clientesApp(S).find((p) => p.nome === "Tiago Almeida")!.novoNegocio).toBe(false);
+    const novo = { nome: "Bruno Cliente", tel: "910 000 099" };
+    juntar(S, 1027, 2300, novo);
+    juntar(S, 1027, 2301, { ...novo, fase: 4 });
+    expect(clientesApp(S).find((p) => p.nome === "Bruno Cliente")!.novoNegocio).toBe(false);
   });
 });
 

@@ -144,7 +144,8 @@ describe("Pessoas · a memória ao abrir um negócio e voltar", () => {
     primeira.unmount();
     pagina();
     const painel = await screen.findByRole("dialog");
-    expect(await within(painel).findByRole("button", { name: /Cozinha nova/ })).toHaveAttribute("aria-pressed", "true");
+    const lista = await within(painel).findByRole("list", { name: "Negócios desta pessoa" });
+    expect(within(lista).getByRole("button", { name: /Cozinha nova/ })).toHaveAttribute("aria-pressed", "true");
     cleanup();
     esquecerPessoas();
     pagina();
@@ -178,7 +179,7 @@ describe("Pessoas · o separador Negócios da ficha", () => {
     const painel = await screen.findByRole("dialog");
     fireEvent.mouseDown(within(painel).getByRole("tab", { name: "Negócios" }), { button: 0 });
     const linhas = within(await within(painel).findByRole("list", { name: "Negócios desta pessoa" })).getAllByRole("button");
-    expect(linhas).toHaveLength(2);
+    expect(linhas).toHaveLength(3);
     expect(linhas.every((l) => l.getAttribute("aria-pressed") === "false")).toBe(true);
     expect(within(painel).queryByRole("region", { name: /^Negócio: / })).toBeNull();
     const cozinha = linhas.find((l) => /Cozinha nova/.test(l.textContent ?? ""))!;
@@ -189,7 +190,7 @@ describe("Pessoas · o separador Negócios da ficha", () => {
   });
   it("uma pessoa sem negócios diz-o, em vez de uma lista vazia", () => {
     const S = seed();
-    const p = { ...todosApp(S)[0], negocios: [], extra: [] };
+    const p = { ...todosApp(S)[0], negocios: [], todos: [] };
     render(<SepNegocios S={S} p={p} abrir={() => () => undefined} />);
     expect(screen.getByText("Esta pessoa ainda não tem negócios.")).toBeInTheDocument();
     expect(screen.queryByRole("list", { name: "Negócios desta pessoa" })).toBeNull();
@@ -217,15 +218,83 @@ describe("Pessoas · o separador Negócios da ficha", () => {
       await waitFor(() => expect(document.activeElement).toBe(detalhe));
     } finally { medida.mockRestore(); }
   });
-  it("a proposta conjunta é um documento dentro do negócio, com as suas linhas, e não um negócio novo", async () => {
+  /** Abre a ficha de uma pessoa (no separador certo da lista) e o separador Negócios; devolve o painel e a lista dos negócios. */
+  async function negociosDe(nome: string, cliente = false): Promise<{ painel: HTMLElement; lista: HTMLElement }> {
     pagina();
-    fireEvent.click(screen.getByRole("button", { name: /Sérgio Pinto/ }));
+    if (cliente) fireEvent.mouseDown(screen.getByRole("tab", { name: /Clientes/ }), { button: 0 });
+    fireEvent.click(await screen.findByRole("button", { name: new RegExp(nome) }));
     const painel = await screen.findByRole("dialog");
-    fireEvent.mouseDown(within(painel).getByRole("tab", { name: "Negócios" }), { button: 0 });
-    expect(within(await within(painel).findByRole("list", { name: "Negócios desta pessoa" })).getAllByRole("button")).toHaveLength(1);
-    const docs = within(painel).getByRole("list", { name: "Documentos do negócio" });
-    expect(docs).toHaveTextContent("Proposta conjunta");
-    expect(within(docs).getByRole("list", { name: "Linhas do documento" })).toBeInTheDocument();
+    separador(painel, "Negócios");
+    return { painel, lista: await within(painel).findByRole("list", { name: "Negócios desta pessoa" }) };
+  }
+  it("a Carla Nunes tem 3 negócios (não 5), nenhum escolhido por defeito, e cada linha diz o estado e o valor total", async () => {
+    const { painel, lista } = await negociosDe("Carla Nunes");
+    const linhas = within(lista).getAllByRole("button");
+    expect(linhas).toHaveLength(3);
+    expect(linhas.every((l) => l.getAttribute("aria-pressed") === "false")).toBe(true);
+    expect(within(painel).getByText("Escolhe um negócio")).toBeInTheDocument();
+    expect(linhas[0]).toHaveTextContent("Cozinha");
+    expect(linhas[0]).toHaveTextContent("Proposta");
+    expect(linhas[0]).toHaveTextContent("8.126,60 €");
+    expect(linhas[0]).not.toHaveTextContent("orçamentos");
+    expect(linhas[1]).toHaveTextContent("Casa de banho e pintura");
+    expect(linhas[1]).toHaveTextContent("Orçamento · 2 orçamentos");
+    expect(linhas[1]).toHaveTextContent("6.770,00 €");
+    expect(linhas[2]).toHaveTextContent("Varanda fechada");
+    expect(linhas[2]).toHaveTextContent("Proposta · 2 orçamentos");
+    expect(linhas[2]).toHaveTextContent("7.740,00 €");
+    expect(within(painel).queryByRole("region", { name: /^Negócio: / })).toBeNull();
+  });
+  it("o detalhe de um negócio com 2 orçamentos mostra os documentos reais: os dois orçamentos e a proposta que os junta, e nenhum contrato", async () => {
+    const { painel, lista } = await negociosDe("Carla Nunes");
+    fireEvent.click(within(lista).getByRole("button", { name: /Varanda fechada/ }));
+    const detalhe = within(painel).getByRole("region", { name: "Negócio: Varanda fechada" });
+    expect(within(detalhe).getByText("Valor total").nextSibling).toHaveTextContent("7.740,00 €");
+    const docs = within(within(detalhe).getByRole("list", { name: "Documentos do negócio" })).getAllByRole("listitem");
+    expect(docs).toHaveLength(3);
+    expect(docs[0]).toHaveTextContent(/Orçamento.*Caixilharia em alumínio.*3\.480,00 €/);
+    expect(docs[1]).toHaveTextContent(/Orçamento.*Caixilharia com corte térmico.*4\.260,00 €/);
+    expect(docs[2]).toHaveTextContent(/Proposta.*Enviada.*inclui 2 orçamentos.*7\.740,00 €/);
+    expect(within(detalhe).queryByText("Contrato")).toBeNull();
+    const passos = within(within(detalhe).getByRole("list", { name: "Percurso do negócio" })).getAllByRole("listitem");
+    expect(passos.map((x) => x.textContent)).toEqual([expect.stringContaining("Levantamento"), expect.stringContaining("(2 orçamentos)"), expect.stringContaining("Proposta"), expect.stringContaining("Financeiro")]);
+    expect(within(detalhe).getAllByText("exemplo").length).toBeGreaterThanOrEqual(1);
+  });
+  it("um negócio com contrato mostra o contrato, com o seu estado, e o percurso de cinco passos (Joana Ribeiro)", async () => {
+    const { painel, lista } = await negociosDe("Joana Ribeiro", true);
+    fireEvent.click(within(lista).getByRole("button", { name: /WC de serviço e lavandaria/ }));
+    const detalhe = within(painel).getByRole("region", { name: "Negócio: WC de serviço e lavandaria" });
+    const docs = within(within(detalhe).getByRole("list", { name: "Documentos do negócio" })).getAllByRole("listitem");
+    expect(docs.map((x) => /^(Orçamento|Proposta|Contrato)/.exec(x.textContent ?? "")?.[1])).toEqual(["Orçamento", "Orçamento", "Proposta", "Contrato"]);
+    expect(docs[3]).toHaveTextContent("Enviado ao cliente");
+    expect(within(within(detalhe).getByRole("list", { name: "Percurso do negócio" })).getAllByRole("listitem")).toHaveLength(5);
+  });
+  it("um negócio com um só orçamento não diz '2 orçamentos' (Sérgio Pinto, Pintura interior)", async () => {
+    const { painel, lista } = await negociosDe("Sérgio Pinto");
+    expect(within(lista).getAllByRole("button")).toHaveLength(2);
+    fireEvent.click(within(lista).getByRole("button", { name: /Pintura interior/ }));
+    const detalhe = within(painel).getByRole("region", { name: "Negócio: Pintura interior" });
+    expect(detalhe).not.toHaveTextContent("orçamentos");
+    expect(within(within(detalhe).getByRole("list", { name: "Documentos do negócio" })).getAllByRole("listitem")).toHaveLength(2);
+  });
+  it("um negócio perdido aparece a cinzento, com 'Perdido' e o motivo, sem próximo passo nem percurso (Marta Lima)", async () => {
+    const { painel, lista } = await negociosDe("Marta Lima", true);
+    const linha = within(lista).getByRole("button", { name: /Pavimento exterior/ });
+    expect(linha).toHaveTextContent("Perdido · preço");
+    expect(within(linha).getByText("Pavimento exterior")).toHaveClass("text-muted-foreground");
+    fireEvent.click(linha);
+    const detalhe = within(painel).getByRole("region", { name: "Negócio: Pavimento exterior" });
+    expect(within(detalhe).getByText("Estado").nextSibling).toHaveTextContent("Perdido");
+    expect(within(detalhe).getByText("Motivo").nextSibling).toHaveTextContent("preço");
+    expect(within(detalhe).queryByText("Próximo passo")).toBeNull();
+    expect(within(detalhe).queryByRole("list", { name: "Percurso do negócio" })).toBeNull();
+    expect(within(detalhe).queryByText(/Probabilidade/)).toBeNull();
+  });
+  it("uma lead sem orçamentos diz que os documentos aparecem quando existirem (Rita Sousa, e o WC social perdido)", async () => {
+    const { painel, lista } = await negociosDe("Rita Sousa");
+    expect(within(lista).getAllByRole("button")).toHaveLength(2);
+    fireEvent.click(within(lista).getByRole("button", { name: /Cozinha nova/ }));
+    expect(within(painel).getByText("Orçamento, proposta e contrato aparecem aqui quando existirem.")).toBeInTheDocument();
   });
 });
 

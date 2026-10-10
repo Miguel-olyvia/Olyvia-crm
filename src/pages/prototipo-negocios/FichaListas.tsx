@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { eur, type Estado } from "./motor";
 import type { CampoRotulado } from "./leadsDocs";
 import { documentosDe, type PessoaApp } from "./pessoasDocs";
+import { resumoDoc } from "./negociosApp";
 import { ESTADO_TOQUE, campanhaDe, toquesDe, utmTexto } from "./toquesDocs";
 import { atividadeDe, pagamentoDe, type ItemAtividade, type Perfil } from "./perfilDocs";
 import { FASE_COR, FASE_ICONE, Chip } from "./pecas";
@@ -101,7 +102,7 @@ export function SepDocumentos({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir:
       <ListaCampos campos={[
         { rotulo: "Valor contratado", valor: `${eur(pg.total)} €` }, { rotulo: "Já recebido", valor: `${eur(pg.pago)} €` }, { rotulo: "Falta receber", valor: `${eur(pg.falta)} €` },
       ]} />
-      <p className="-mt-3 text-[15px] text-muted-foreground">Pagamentos de exemplo, calculados a partir do valor contratado. Só para ler: cada linha abre o negócio.</p>
+      <p className="-mt-3 text-[15px] text-muted-foreground">Pagamentos de exemplo, calculados a partir do valor contratado. Só para ler: cada linha abre o negócio. Os negócios de exemplo abrem o negócio base da pessoa.</p>
       <ul className="divide-y divide-border border-y border-border" aria-label="Contratos e documentos">
         {docs.map((d) => {
           const ic = icone(d.tipo);
@@ -109,8 +110,9 @@ export function SepDocumentos({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir:
             <li key={d.id}>
               <button type="button" onClick={abrir(d.negocioId)} className={LINHA}>
                 <span className="flex items-center gap-2 text-[15px] text-muted-foreground"><Chip icone={ic.i} cor={ic.cor} className={CHIP_PEQ} />{d.tipo}</span>
-                <span className="text-base font-semibold">{d.servico}</span>
-                <span className="text-[15px] text-muted-foreground">{[d.estado, d.referencia, d.data].filter(Boolean).join(" · ")}</span>
+                <span className="text-base font-semibold">{d.titulo}</span>
+                {d.titulo !== d.servico && <span className="text-[15px] text-muted-foreground">Negócio: {d.servico}</span>}
+                <span className="text-[15px] text-muted-foreground">{resumoDoc(d)}</span>
                 <span className="text-[15px] font-medium">Abrir o negócio<ArrowRight className={SETA} aria-hidden="true" /></span>
               </button>
             </li>
