@@ -103,7 +103,7 @@ export function FichaResumo({ S, A, go, p, f, voltar }: ResumoProps) {
   const perder = () => { for (const x of p.negocios) A.perderSim(x.id); A.nav("pessoas"); voltar(); };
   const contacto = camposContacto(f);
   return (
-    <div className="grid gap-x-10 gap-y-6 2xl:grid-cols-2">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-x-10 gap-y-6 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
       <Secao titulo="Próximo passo e prazo">
         <p className="text-base font-medium">{nx.t}</p>
         {nx.sub && <p className="text-[15px] text-muted-foreground">{nx.sub}</p>}

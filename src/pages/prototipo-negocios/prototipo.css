@@ -293,3 +293,14 @@
 .calma{--background:240 24% 96.5%;--muted:240 20% 94.5%;--border:235 16% 87%;--card:0 0% 100%;
   --shadow-sm:0 1px 2px rgb(30 30 60 / .05), 0 1px 1px rgb(30 30 60 / .03);--shadow-md:0 4px 14px rgb(30 30 60 / .08)}
 .leitura{--background:42 45% 95%;--muted:40 22% 91%}
+
+/* Ficha da pessoa: as seis etapas e o percurso do negócio ajustam-se à largura do próprio bloco (e não à do ecrã), porque a ficha
+   ocupa só o que sobra ao lado da lista. Etapas: 2 colunas, 3 a partir de 420 px, 6 a partir de 760 px.
+   Percurso: lista vertical, e em quatro passos lado a lado a partir de 520 px. */
+.etapas-cx,.percurso-cx{container-type:inline-size;min-width:0}
+.etapas{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.75rem .5rem;margin:0;padding:0;list-style:none}
+@container (min-width:420px){.etapas{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@container (min-width:760px){.etapas{grid-template-columns:repeat(6,minmax(0,1fr))}}
+.percurso{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem;margin:0;padding:0;list-style:none}
+.percurso>li{border-left-width:2px;padding-left:.75rem}
+@container (min-width:520px){.percurso{grid-template-columns:repeat(4,minmax(0,1fr));gap:.75rem}.percurso>li{border-left-width:0;border-top-width:2px;padding-left:0;padding-top:.5rem}}

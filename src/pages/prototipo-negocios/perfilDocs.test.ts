@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { VERSAO, seed, tot } from "./motor";
 import { clientesApp, leadsApp, todosApp } from "./pessoasDocs";
 import {
-  atividadeDe, camposContacto, minutosAtras, pagamentoDe, perfilDe, probabilidade, resumoClientes, resumoLeads, resumoTodos,
+  atividadeDe, camposContacto, estadoNegocio, factosDe, faltaParaOrcamento, minutosAtras, pagamentoDe, percursoDe, perfilDe, probabilidade, resumoClientes,
+  resumoLeads, resumoLinha, resumoTodos, valorNegocio,
 } from "./perfilDocs";
 
 const LEADS = ["Ana Martins", "Pedro Lopes", "Rita Sousa", "Manuel Costa", "Luísa Freitas", "Hugo Matos", "Carla Nunes", "Sérgio Pinto"];
@@ -218,5 +219,112 @@ describe("perfil · nada muda o Estado", () => {
     } finally {
       get.mockRestore(); set.mockRestore(); rem.mockRestore();
     }
+  });
+});
+
+describe("percurso do negócio", () => {
+  const S = seed();
+  const neg = (id: number) => S.deals.find((d) => d.id === id)!;
+  const estados = (id: number): string[] => percursoDe(neg(id)).map((x) => x.estado);
+  it("tem sempre os quatro passos, pela mesma ordem", () => {
+    expect(percursoDe(neg(1044)).map((x) => x.nome)).toEqual(["Levantamento", "Orçamento", "Proposta", "Contrato"]);
+  });
+  it("uma lead (fase 0, 1 ou 2) está no Levantamento e os seguintes ficam por chegar", () => {
+    for (const id of [1044, 1038, 1036]) expect(estados(id), String(id)).toEqual(["atual", "seguinte", "seguinte", "seguinte"]);
+  });
+  it("com orçamento feito e por enviar: Levantamento feito, Orçamento atual", () => {
+    const d = structuredClone(neg(1031));
+    d.orc!.enviada = null as never;
+    expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "atual", "seguinte", "seguinte"]);
+  });
+  it("proposta enviada e por aceitar: Proposta atual", () => {
+    expect(estados(1031)).toEqual(["feito", "feito", "atual", "seguinte"]);
+  });
+  it("aceite e sem contrato assinado: Contrato atual; venda direta aceite não tem contrato por assinar", () => {
+    const d = structuredClone(neg(1031));
+    d.orc!.aceite = "06/10";
+    expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "feito", "feito", "atual"]);
+    d.orc!.vendaDireta = true;
+    expect(percursoDe(d).every((x) => x.estado === "feito")).toBe(true);
+  });
+  it("já em contrato (fase 4 ou 5, ou assinado): o percurso completo marcado", () => {
+    for (const id of [1027, 1022, 1050]) expect(estados(id), String(id)).toEqual(["feito", "feito", "feito", "feito"]);
+  });
+});
+
+describe("estado e valor do negócio", () => {
+  const S = seed();
+  const neg = (id: number) => S.deals.find((d) => d.id === id)!;
+  it("uma lead sem documentos está Em preparação e ainda sem valor", () => {
+    expect(estadoNegocio(neg(1044))).toBe("Em preparação");
+    expect(valorNegocio(S, neg(1044))).toBeNull();
+  });
+  it("com orçamento tem valor (com IVA) e um estado que diz onde está", () => {
+    expect(valorNegocio(S, neg(1031))).toBe(tot(neg(1031), S).pf);
+    expect(estadoNegocio(neg(1031))).toBe("Proposta enviada");
+    expect(estadoNegocio(neg(1027))).toBe("Em contrato");
+  });
+});
+
+describe("o que falta para o orçamento", () => {
+  const S = seed();
+  const neg = (id: number) => S.deals.find((d) => d.id === id)!;
+  it("lead por contactar: três passos, pela ordem, e o primeiro é o próximo passo do motor", () => {
+    const f = faltaParaOrcamento(S, neg(1044));
+    expect(f.titulo).toBe("O que falta para o orçamento");
+    expect(f.passos).toEqual(["Registar a chamada", "Marcar a visita", "Fechar o levantamento"]);
+  });
+  it("contactada: sem o passo da chamada; com visita: só falta fechar o levantamento", () => {
+    expect(faltaParaOrcamento(S, neg(1038)).passos).toEqual(["Marcar a visita", "Fechar o levantamento"]);
+    expect(faltaParaOrcamento(S, neg(1036)).passos).toEqual(["Fechar o levantamento"]);
+  });
+  it("diz que campos obrigatórios do passo atual ainda estão vazios (os mesmos que travam o motor)", () => {
+    const d = structuredClone(neg(1044));
+    d.f = {};
+    const vazio = faltaParaOrcamento(S, d);
+    expect(vazio.campos.length).toBeGreaterThan(0);
+    expect(new Set(vazio.campos).size).toBe(vazio.campos.length);
+  });
+  it("de orçamento em diante o título muda e o passo é o próximo passo do motor; fechado não falta nada", () => {
+    const f = faltaParaOrcamento(S, neg(1031));
+    expect(f.titulo).toBe("O que falta para o contrato");
+    expect(f.passos).toEqual(["À espera do cliente"]);
+    expect(faltaParaOrcamento(S, neg(1027)).passos).toEqual([]);
+  });
+});
+
+describe("faixa de factos da ficha", () => {
+  const S = seed();
+  const f = (nome: string) => { const p = todosApp(S).find((x) => x.nome === nome)!; return { p, fac: factosDe(p, perfilDe(p, S)) }; };
+  it("traz origem, comercial, criada, serviço e tipo de cliente, em pares rótulo e valor", () => {
+    const { fac } = f("Pedro Lopes");
+    expect(fac.map((x) => x.rotulo)).toEqual(expect.arrayContaining(["Origem", "Comercial", "Criada", "Serviço", "Tipo de cliente"]));
+    expect(fac.find((x) => x.rotulo === "Serviço")?.valor).toBe("WC social");
+    expect(fac.every((x) => x.valor.trim() !== "")).toBe(true);
+  });
+  it("o tipo de cliente por omissão leva a marca de exemplo; o que veio dos dados, não", () => {
+    const { p, fac } = f("Pedro Lopes");
+    const tipo = fac.find((x) => x.rotulo === "Tipo de cliente")!;
+    expect(tipo.exemplo).toBe(!p.principal.f.tipo_cliente);
+    expect(tipo.valor).toBe(p.principal.f.tipo_cliente || "Particular");
+  });
+  it("o contacto preferido só aparece quando existe, em minúsculas", () => {
+    const { p, fac } = f("Pedro Lopes");
+    const pref = fac.find((x) => x.rotulo === "Contacto preferido");
+    expect(pref?.valor).toBe(p.principal.f.pref ? p.principal.f.pref.toLowerCase() : undefined);
+  });
+});
+
+describe("resumo numa linha", () => {
+  const S = seed();
+  it("leads", () => { expect(resumoLinha(S, "leads")).toEqual({ texto: "8 leads · 3 por contactar · 1 atrasada · 11.432,82 € em orçamentos", exemplo: false }); });
+  it("clientes: o que está por receber é de exemplo", () => {
+    expect(resumoLinha(S, "clientes")).toEqual({ texto: "3 clientes · 16.225,82 € contratado · 1 obra em curso · 8.784,10 € a receber", exemplo: true });
+  });
+  it("todos", () => { expect(resumoLinha(S, "todos")).toEqual({ texto: "11 pessoas · 8 leads · 3 clientes", exemplo: false }); });
+  it("singular e plural", () => {
+    const T = seed();
+    for (const d of T.deals) if (d.id !== 1044) d.perdido = true;
+    expect(resumoLinha(T, "leads").texto.startsWith("1 lead · 1 por contactar · 1 atrasada")).toBe(true);
   });
 });

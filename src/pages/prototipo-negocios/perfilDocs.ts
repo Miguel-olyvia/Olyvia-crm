@@ -1,11 +1,12 @@
 // O perfil de cada pessoa (lead ou cliente) para as páginas de Pessoas: contactos, saúde, notas, chamadas e emails.
 // Funções puras e determinísticas: nada aqui muda o Estado nem existe no Estado. O que não vem da seed é de exemplo e
 // calcula-se a partir do nome, das fases e das datas dos negócios, com regras fixas.
-import { PAPEIS, campoVisita, tot, visitas, type Estado, type Evento, type Negocio } from "./motor";
+import { PAPEIS, campoVisita, eur, proximo, tot, visitas, type Estado, type Evento, type Negocio } from "./motor";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, INTERIOR, LEAD, efetivo, emFalta, grupoVisita, type Grupo } from "./campos";
 import { atrasada, idade, localDe, proximoDe, somarDias, tempoDesde } from "./leadsDocs";
 import { canalDe, infoOrigem, toquesDe, utmTexto } from "./toquesDocs";
 import {
-  clientesApp, comercialDe, dadosCliente, ehContrato, leadsApp, valorPessoa, type PessoaApp,
+  clientesApp, comercialDe, dadosCliente, ehContrato, leadsApp, valorPessoa, type PessoaApp, type SeparadorLista,
 } from "./pessoasDocs";
 
 /** "Hoje" do protótipo (o mesmo de leadsDocs). */
@@ -273,3 +274,82 @@ export function resumoTodos(S: Estado): ResumoTodos {
 
 /** O texto do próximo passo da pessoa (para as linhas). */
 export const proximoTexto = (p: PessoaApp, S: Estado): string => proximoDe(p, S).t;
+
+/* ---------------------------------------------------------------- o percurso do negócio */
+
+export const PASSOS_PERCURSO = ["Levantamento", "Orçamento", "Proposta", "Contrato"] as const;
+export type EstadoPasso = "feito" | "atual" | "seguinte";
+export interface PassoPercurso { nome: string; estado: EstadoPasso }
+
+/** O passo em que o negócio está (0 a 3); 4 quando o percurso está completo (contrato, ou venda direta aceite). */
+function passoAtual(d: Negocio): number {
+  const o = d.orc;
+  if (d.fase >= 4) return 4;
+  if (d.fase < 3) return 0;
+  if (!o?.enviada) return 1;
+  if (!o.aceite) return 2;
+  return !o.vendaDireta && o.contrato !== "assinado" ? 3 : 4;
+}
+
+/** Levantamento, Orçamento, Proposta e Contrato: o que já está feito, o passo atual e os que faltam. */
+export function percursoDe(d: Negocio): PassoPercurso[] {
+  const a = passoAtual(d);
+  return PASSOS_PERCURSO.map((nome, i): PassoPercurso => ({ nome, estado: i < a ? "feito" : i === a ? "atual" : "seguinte" }));
+}
+
+/** O rótulo do negócio: onde está, em palavras (uma lead ainda sem documentos está "Em preparação"). */
+export function estadoNegocio(d: Negocio): string {
+  return ["Em preparação", "Orçamento por enviar", "Proposta enviada", "Contrato por assinar", "Em contrato"][passoAtual(d)];
+}
+
+/** O valor com IVA, se já há orçamento; senão não há valor. */
+export const valorNegocio = (S: Estado, d: Negocio): number | null => (d.orc ? tot(d, S).pf : null);
+
+export interface Falta { titulo: string; passos: string[]; campos: string[] }
+const PASSOS_LEVANTAMENTO = ["Registar a chamada", "Marcar a visita", "Fechar o levantamento"];
+
+/** Os grupos de campos que travam o passo seguinte (os mesmos do motor, sem os extras da visita). */
+function gruposDoPasso(d: Negocio): Grupo[] {
+  return d.fase === 0 ? LEAD : d.fase === 1 ? CONTACTO : [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, AREA, ESCOLHAS];
+}
+
+/** O que falta para o orçamento (leads) ou para o contrato (de orçamento em diante), derivado da fase e do motor. */
+export function faltaParaOrcamento(S: Estado, d: Negocio): Falta {
+  if (d.fase >= 3) {
+    const p = proximo(d, S);
+    return { titulo: "O que falta para o contrato", passos: passoAtual(d) >= 4 || p.done ? [] : [p.t], campos: [] };
+  }
+  const gs = gruposDoPasso(d).map((g) => efetivo(S.campos, g)).filter((g) => !g.oculto);
+  return { titulo: "O que falta para o orçamento", passos: PASSOS_LEVANTAMENTO.slice(d.fase), campos: [...new Set(emFalta(gs, d.f).map((c) => c.l))] };
+}
+
+/* ---------------------------------------------------------------- faixa de factos e resumo numa linha */
+
+export interface Facto { rotulo: string; valor: string; exemplo?: boolean }
+
+/** Os pares rótulo e valor da faixa de factos da ficha (a saúde tem o seu bloco). */
+export function factosDe(p: PessoaApp, f: Perfil): Facto[] {
+  const d = p.principal;
+  return [
+    { rotulo: "Origem", valor: f.origem }, { rotulo: "Comercial", valor: f.comercial }, { rotulo: "Criada", valor: f.criadaHa || f.criada }, { rotulo: "Serviço", valor: d.servico },
+    { rotulo: "Tipo de cliente", valor: d.f.tipo_cliente || "Particular", exemplo: !d.f.tipo_cliente },
+    ...(d.f.pref ? [{ rotulo: "Contacto preferido", valor: d.f.pref.toLowerCase() }] : []),
+    ...(d.f.posse ? [{ rotulo: "Situação", valor: d.f.posse }] : []),
+  ];
+}
+
+const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
+
+/** O resumo do separador numa só linha. `exemplo`: a linha inclui um valor de exemplo (o que está por receber). */
+export function resumoLinha(S: Estado, aba: SeparadorLista): { texto: string; exemplo: boolean } {
+  if (aba === "leads") {
+    const r = resumoLeads(S);
+    return { texto: `${plural(r.leads, "lead", "leads")} · ${r.porContactar} por contactar · ${plural(r.atrasadas, "atrasada", "atrasadas")} · ${eur(r.valorEmJogo)} € em orçamentos`, exemplo: false };
+  }
+  if (aba === "clientes") {
+    const r = resumoClientes(S);
+    return { texto: `${plural(r.clientes, "cliente", "clientes")} · ${eur(r.valorContratado)} € contratado · ${plural(r.obrasEmCurso, "obra em curso", "obras em curso")} · ${eur(r.aReceber)} € a receber`, exemplo: true };
+  }
+  const r = resumoTodos(S);
+  return { texto: `${plural(r.pessoas, "pessoa", "pessoas")} · ${plural(r.leads, "lead", "leads")} · ${plural(r.clientes, "cliente", "clientes")}`, exemplo: false };
+}

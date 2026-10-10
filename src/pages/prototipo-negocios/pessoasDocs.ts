@@ -1,7 +1,7 @@
 // Página de Pessoas: uma lista única de leads e clientes. A pessoa é uma só; lead e cliente são papéis dela.
 // Funções puras: nada aqui muda o Estado. O negócio de exemplo do cliente (negociosDemo) vive só nesta camada.
 import { PAPEIS, criarOrc, proximo, tot, type Estado, type Negocio, type Papel } from "./motor";
-import { ehLead, filtrarLeads, idade, itensNegocios, leadsDe, pessoasDe, type FiltroLead, type ItemNegocio, type Pessoa } from "./leadsDocs";
+import { FILTROS_LEAD, ehLead, filtrarLeads, idade, itensNegocios, leadsDe, pessoasDe, type FiltroLead, type ItemNegocio, type Pessoa } from "./leadsDocs";
 import { toquesDe } from "./toquesDocs";
 
 export type PapelPessoa = "lead" | "cliente";
@@ -201,4 +201,30 @@ export function filtrarPessoas(S: Estado, ps: PessoaApp[], f: FiltrosPessoa): Pe
   return filtrarLeads(ps, f.filtro, f.soMinhas, f.q)
     .filter((p) => !f.origem || origemDe(S, p) === f.origem)
     .filter((p) => !f.comercial || comercialDe(p) === f.comercial);
+}
+
+/** Os chips sempre à vista: nos clientes não há "por contactar". "Com visita" vive em Mais filtros (ver `filtrosEfetivos`). */
+export function chipsDe(aba: SeparadorLista): { id: FiltroLead; nome: string }[] {
+  return FILTROS_LEAD.filter((c) => c.id === "todas" || c.id === "atrasadas" || (c.id === "por_contactar" && aba !== "clientes"));
+}
+
+/** Os filtros que de facto se aplicam: um filtro que o separador não tem (nos clientes, "por contactar" e "com visita") volta a "Todas". */
+export function filtrosEfetivos(aba: SeparadorLista, f: FiltrosPessoa): FiltrosPessoa {
+  const vale = chipsDe(aba).some((c) => c.id === f.filtro) || (f.filtro === "visita" && aba !== "clientes");
+  return vale ? f : { ...f, filtro: "todas" };
+}
+
+/** A lista como se vê: o separador, a pesquisa e os filtros, pela ordem escolhida. */
+export function listaVisivel(S: Estado, aba: SeparadorLista, f: FiltrosPessoa, ordem: Ordem): PessoaApp[] {
+  return ordenarPessoas(S, filtrarPessoas(S, pessoasDoSeparador(S, aba), filtrosEfetivos(aba, f)), ordem);
+}
+
+/** A pessoa que o painel mostra quando ninguém foi escolhido (no computador): a primeira da lista, a mais urgente. Sem resultados não há nenhuma. */
+export function primeiraDaLista(S: Estado, aba: SeparadorLista, f: FiltrosPessoa, ordem: Ordem): PessoaApp | undefined {
+  return listaVisivel(S, aba, f, ordem)[0];
+}
+
+/** O negócio a que um item do separador Negócios se refere (o de exemplo vem de `extra`). */
+export function negocioDoItem(p: PessoaApp, it: ItemNegocio): Negocio | undefined {
+  return it.demo ? p.extra.find((d) => `demo-${d.id}` === it.id) : p.negocios.find((d) => d.id === it.negocioId);
 }

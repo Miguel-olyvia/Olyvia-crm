@@ -6,14 +6,14 @@ import {
 import { cn } from "@/lib/utils";
 import { eur, type Estado } from "./motor";
 import type { CampoRotulado } from "./leadsDocs";
-import { documentosDe, itensPessoa, type PessoaApp } from "./pessoasDocs";
+import { documentosDe, type PessoaApp } from "./pessoasDocs";
 import { ESTADO_TOQUE, campanhaDe, toquesDe, utmTexto } from "./toquesDocs";
-import { atividadeDe, pagamentoDe, probabilidade, type ItemAtividade, type Perfil } from "./perfilDocs";
+import { atividadeDe, pagamentoDe, type ItemAtividade, type Perfil } from "./perfilDocs";
 import { FASE_COR, FASE_ICONE, Chip } from "./pecas";
 
-const CHIP_PEQ = "h-7 w-7 rounded-lg [&_svg]:h-4 [&_svg]:w-4";
-const LINHA = "group flex min-h-11 w-full cursor-pointer flex-col gap-0.5 px-1 py-3 text-left transition-colors duration-150 hover:bg-muted/60 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary";
-const SETA = "ml-1 inline h-4 w-4 align-[-3px] transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transform-none";
+export const CHIP_PEQ = "h-7 w-7 rounded-lg [&_svg]:h-4 [&_svg]:w-4";
+export const LINHA = "group flex min-h-11 w-full cursor-pointer flex-col gap-0.5 px-1 py-3 text-left transition-colors duration-150 hover:bg-muted/60 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary";
+export const SETA = "ml-1 inline h-4 w-4 align-[-3px] transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transform-none";
 
 const ICONE_TIPO: Record<string, { i: LucideIcon; cor: string }> = {
   Lead: { i: FASE_ICONE[0], cor: FASE_COR[0] }, Contacto: { i: FASE_ICONE[1], cor: FASE_COR[1] }, Visita: { i: FASE_ICONE[2], cor: FASE_COR[2] },
@@ -21,51 +21,21 @@ const ICONE_TIPO: Record<string, { i: LucideIcon; cor: string }> = {
   Contrato: { i: FileSignature, cor: FASE_COR[2] }, Financeiro: { i: FASE_ICONE[4], cor: FASE_COR[4] },
   Fatura: { i: FileText, cor: FASE_COR[4] }, Recibo: { i: Receipt, cor: FASE_COR[4] }, Obra: { i: FASE_ICONE[5], cor: FASE_COR[5] },
 };
-const icone = (tipo: string): { i: LucideIcon; cor: string } => ICONE_TIPO[tipo] ?? ICONE_TIPO.Lead;
+export const icone = (tipo: string): { i: LucideIcon; cor: string } => ICONE_TIPO[tipo] ?? ICONE_TIPO.Lead;
 
-const Vazio = ({ texto }: { texto: string }) => <p className="border-t border-border pt-4 text-[15px] text-muted-foreground">{texto}</p>;
-const Exemplo = () => <span className="ml-2 text-[15px] font-normal text-muted-foreground">exemplo</span>;
+export const Vazio = ({ texto }: { texto: string }) => <p className="border-t border-border pt-4 text-[15px] text-muted-foreground">{texto}</p>;
+export const Exemplo = () => <span className="ml-2 text-[15px] font-normal text-muted-foreground">exemplo</span>;
 
 /** Etiqueta e valor em lista de definições. */
 export function ListaCampos({ campos, larg = "9rem" }: { campos: CampoRotulado[]; larg?: string }) {
   return (
-    <dl className="grid gap-x-6 gap-y-1.5 text-[15px] sm:grid-cols-[var(--larg)_1fr]" style={{ "--larg": larg } as React.CSSProperties}>
+    <dl className="grid gap-x-6 gap-y-1.5 text-[15px] sm:grid-cols-[var(--larg)_minmax(0,1fr)]" style={{ "--larg": larg } as React.CSSProperties}>
       {campos.map((c) => <div key={c.rotulo} className="contents"><dt className="text-muted-foreground">{c.rotulo}</dt><dd className="break-words text-foreground">{c.valor}</dd></div>)}
     </dl>
   );
 }
 
 type Abrir = (id: number) => () => void;
-
-export function SepNegocios({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir: Abrir }) {
-  const itens = itensPessoa(S, p);
-  if (!itens.length) return <Vazio texto="Esta pessoa ainda não tem negócios." />;
-  return (
-    <ul className="divide-y divide-border border-y border-border" aria-label="Negócios desta pessoa">
-      {itens.map((it) => {
-        const ic = icone(it.tipo);
-        return (
-          <li key={it.id}>
-            <button type="button" onClick={abrir(it.negocioId)} className={LINHA}>
-              <span className="flex items-center gap-2 text-[15px] text-muted-foreground">
-                <Chip icone={ic.i} cor={ic.cor} className={CHIP_PEQ} />{it.tipo}{it.demo && <Exemplo />}
-                <span className="ml-auto tabular-nums">{probabilidade(it.tipo)} % de fechar<Exemplo /></span>
-              </span>
-              <span className="text-base font-semibold text-foreground">{it.servico}</span>
-              {it.linhas.length > 0 && (
-                <span className="my-1 block divide-y divide-border border-y border-border text-[15px]">
-                  {it.linhas.map((l) => <span key={l.rotulo} className="flex justify-between gap-2 py-1"><span>{l.rotulo}</span><span className="tabular-nums">{eur(l.valor)} €</span></span>)}
-                </span>
-              )}
-              {it.valor !== null && <span className="text-base font-medium tabular-nums text-foreground">{it.conjunta ? "Total " : ""}{eur(it.valor)} €</span>}
-              <span className="text-[15px] font-medium text-foreground">{it.proximo}<ArrowRight className={SETA} aria-hidden="true" /></span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
 
 export function SepEntradas({ S, p }: { S: Estado; p: PessoaApp }) {
   const toques = [...toquesDe(S, p.nome)].reverse();
