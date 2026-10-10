@@ -23,6 +23,15 @@ describe("negociosV2 · fase de documento", () => {
     d.orc!.contrato = "assinado";
     expect(docFase(d)).toBe("contrato"); // fase 3 mantém-se até o motor avançar
   });
+  it("sem contrato exigido (venda direta), a proposta aceite vai para financeiro e não para contrato; só enviada, continua proposta", () => {
+    const d = base(1030);
+    expect(d.orc!.vendaDireta).toBe(true);
+    expect(docFase(d)).toBe("proposta");
+    d.orc!.aceite = "08/10";
+    expect(docFase(d)).toBe("financeiro");
+    d.orc!.vendaDireta = false;
+    expect(docFase(d)).toBe("contrato");
+  });
   it("fase 4 é financeiro e fase 5 (obra) fica fora, vê-se em Operações", () => {
     expect(docFase(base(1027))).toBe("financeiro");
     expect(docFase(base(1022))).toBeNull();

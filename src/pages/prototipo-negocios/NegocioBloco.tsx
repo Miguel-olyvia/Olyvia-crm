@@ -1,8 +1,8 @@
 // O detalhe de um negócio no separador Negócios da ficha (o lado direito do mestre-detalhe): estado, valor, probabilidade de fechar,
-// próximo passo, o percurso numa linha fina de quatro passos, "O que falta" e os documentos. O orçamento, a proposta e a proposta conjunta
+// próximo passo, o percurso numa linha fina de quatro ou cinco passos (com a marca "Ganho"), "O que falta" e os documentos. O orçamento, a proposta e a proposta conjunta
 // (com as suas linhas) são documentos dentro do detalhe, não negócios novos.
 import { forwardRef, type ReactNode } from "react";
-import { ArrowRight, Check, Circle, CircleDot } from "lucide-react";
+import { ArrowRight, BadgeCheck, Check, Circle, CircleDot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, type Estado, type Negocio } from "./motor";
@@ -26,17 +26,19 @@ const PASSO: Record<EstadoPasso, { texto: string; icone: typeof Check; classe: s
 /** O valor em texto: o do documento principal do negócio, ou "Sem valor ainda". */
 export const valorTexto = (it: ItemNegocio): string => (it.valor === null ? "Sem valor ainda" : `${it.conjunta ? "Total " : ""}${eur(it.valor)} €`);
 
-/** Levantamento, Orçamento, Proposta e Contrato: o passo atual marcado em ícone e em texto. Em fila fina quando há largura, em lista quando não. */
+/** Levantamento, Orçamento, Proposta, Contrato (só se exigido) e Financeiro: o passo atual marcado em ícone e em texto, e a marca "Ganho"
+ *  no passo em que a pessoa passa a cliente. Em fila fina quando há largura, em lista quando não. */
 export function Percurso({ d }: { d: Negocio }) {
   return (
     <div className="percurso-cx">
       <ol aria-label="Percurso do negócio" className="percurso text-[15px]">
-        {percursoDe(d).map(({ nome, estado }) => {
+        {percursoDe(d).map(({ nome, estado, ganho }) => {
           const p = PASSO[estado], I = p.icone;
           return (
             <li key={nome} aria-current={estado === "atual" ? "step" : undefined} className={cn("grid gap-0.5", p.classe)}>
               <span className="flex items-center gap-1.5"><I className="h-4 w-4 shrink-0" aria-hidden="true" /><span className="break-words font-medium text-foreground">{nome}</span></span>
               <span>{p.texto}</span>
+              {ganho && <span className="flex items-center gap-1 font-medium text-foreground"><BadgeCheck className="h-4 w-4 shrink-0" aria-hidden="true" />Ganho<span className="sr-only">: a pessoa passa a cliente a seguir a este passo</span></span>}
             </li>
           );
         })}

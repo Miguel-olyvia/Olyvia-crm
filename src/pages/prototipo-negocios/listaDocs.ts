@@ -1,9 +1,9 @@
 // Peças puras da lista de Pessoas e da ficha em painel: a pessoa vizinha, a posição "3 de 8", o texto do último contacto,
 // a etapa e o valor de cada coluna, e o negócio escolhido por defeito. Nada aqui muda o Estado.
-import { FASES, type Estado } from "./motor";
+import type { Estado } from "./motor";
 import { etapaDe, tempoDesde } from "./leadsDocs";
 import { dadosCliente, valorPessoa, type PessoaApp } from "./pessoasDocs";
-import { LIMITE_SEM_CONTACTO } from "./perfilDocs";
+import { LIMITE_SEM_CONTACTO, estadoCurto } from "./perfilDocs";
 
 export interface Vizinhas { anterior: string | null; seguinte: string | null; posicao: number; total: number }
 
@@ -23,8 +23,18 @@ export function contactoTexto(f: { diasSemContacto: number; ultimoContacto: stri
   return { sem, texto: sem ? `sem contacto há ${f.diasSemContacto} dias` : tempoDesde(f.ultimoContacto) || "hoje" };
 }
 
-/** A etapa em palavras: as leads dizem onde vão no contacto; os clientes, a fase do negócio mais adiantado (Financeiro, Obra). */
-export const etapaTexto = (p: PessoaApp): string => (p.papel === "lead" ? etapaDe(p) : FASES[p.principal.fase]);
+/** As cinco etapas da pessoa. Só se é Cliente com um negócio ganho; depois de cliente, um negócio novo não faz voltar ao passo Negócio. */
+export const ETAPAS_PESSOA = ["Lead", "Contacto", "Visita", "Negócio", "Cliente"] as const;
+const ETAPA_CLIENTE = ETAPAS_PESSOA.length - 1;
+
+/** A etapa da pessoa (0 a 4): o Cliente se tem um negócio ganho; senão a fase do negócio mais adiantado (Lead, Contacto, Visita ou Negócio em curso). */
+export const etapaPessoa = (p: PessoaApp): number => (p.papel === "cliente" ? ETAPA_CLIENTE : Math.min(p.principal.fase, ETAPA_CLIENTE - 1));
+
+/** A etapa em palavras: Por contactar, Contactada, Com visita, "Negócio · proposta" (o estado do negócio) e Cliente. */
+export function etapaTexto(p: PessoaApp): string {
+  const e = etapaPessoa(p);
+  return e === ETAPA_CLIENTE - 1 ? `Negócio · ${estadoCurto(p.principal).toLowerCase()}` : e === ETAPA_CLIENTE ? "Cliente" : etapaDe(p);
+}
 
 /** O valor da coluna: nas leads o que está em orçamento, nos clientes o contratado. `null` quando não há valor (mostra-se "—"). */
 export function valorColuna(S: Estado, p: PessoaApp): number | null {

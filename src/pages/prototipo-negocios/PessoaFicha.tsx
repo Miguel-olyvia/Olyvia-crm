@@ -2,8 +2,7 @@
 // e, nos clientes, Contratos e documentos. O cabeçalho e os separadores ficam fixos; o conteúdo do separador rola.
 import type { ReactNode } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { proximoDe } from "./leadsDocs";
-import type { PessoaApp } from "./pessoasDocs";
+import { proximoNegocio, type PessoaApp } from "./pessoasDocs";
 import { perfilDe } from "./perfilDocs";
 import { FichaCabecalho } from "./FichaCabecalho";
 import { FichaResumo } from "./FichaResumo";
@@ -30,7 +29,7 @@ export interface FichaProps extends Pick<Ctx, "S" | "A" | "go"> {
 }
 
 export function PessoaFicha({ S, A, go, p, fechar, sep, aoMudarSep, topo }: FichaProps) {
-  const f = perfilDe(p, S), d = p.principal, nx = proximoDe(p, S);
+  const f = perfilDe(p, S), d = p.principal, nx = proximoNegocio(d, S);
   const separadores = separadoresDe(p.papel), ativo = separadores.some((s) => s.id === sep) ? sep : "resumo";
   const abrir = (id: number) => go(() => A.abrir(id));
   return (

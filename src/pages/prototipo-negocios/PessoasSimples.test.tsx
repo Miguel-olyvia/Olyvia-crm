@@ -73,6 +73,16 @@ describe("Pessoas · lista primeiro", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect((document.activeElement as HTMLElement)?.dataset.pessoa).toBe("Ana Martins"));
   });
+  it("ao carregar em Seguinte ou Anterior o foco fica na seta usada; se ela deixa de poder usar-se (primeira ou última pessoa), passa ao nome", async () => {
+    pagina();
+    fireEvent.click(linha("Pedro Lopes"));
+    const painel = await screen.findByRole("dialog");
+    fireEvent.click(within(painel).getByRole("button", { name: /^Seguinte: Ana Martins/ }));
+    await waitFor(() => expect(document.activeElement).toBe(within(painel).getByRole("button", { name: /^Seguinte: Rita Sousa/ })));
+    fireEvent.click(within(painel).getByRole("button", { name: /^Anterior: Pedro Lopes/ }));
+    await waitFor(() => expect(within(painel).getByRole("heading", { name: "Pedro Lopes" })).toBeInTheDocument());
+    await waitFor(() => expect(document.activeElement).toBe(within(painel).getByRole("heading", { name: "Pedro Lopes" })));
+  });
   it("o botão Fechar fecha o painel", async () => {
     pagina();
     fireEvent.click(screen.getByRole("button", { name: /Pedro Lopes/ }));

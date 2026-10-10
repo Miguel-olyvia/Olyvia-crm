@@ -141,7 +141,7 @@ describe("perfil · atividade e pagamentos", () => {
     expect(pagamentoDe(S, leadsApp(S)[0])).toEqual({ total: 0, pago: 0, falta: 0 });
   });
   it("a probabilidade cresce com a etapa", () => {
-    const ordem = ["Lead", "Contacto", "Visita", "Orçamento", "Proposta", "Contrato", "Financeiro", "Obra"];
+    const ordem = ["Lead", "Contacto", "Visita", "Orçamento", "Proposta", "Contrato", "Financeiro"];
     const v = ordem.map(probabilidade);
     for (let i = 1; i < v.length; i++) expect(v[i]).toBeGreaterThanOrEqual(v[i - 1]);
     expect(probabilidade("Proposta conjunta")).toBe(probabilidade("Proposta"));
@@ -198,29 +198,30 @@ describe("percurso do negócio", () => {
   const S = seed();
   const neg = (id: number) => S.deals.find((d) => d.id === id)!;
   const estados = (id: number): string[] => percursoDe(neg(id)).map((x) => x.estado);
-  it("tem sempre os quatro passos, pela mesma ordem", () => {
-    expect(percursoDe(neg(1044)).map((x) => x.nome)).toEqual(["Levantamento", "Orçamento", "Proposta", "Contrato"]);
+  it("com contrato tem cinco passos, pela mesma ordem (sem contrato são quatro: ver modeloPessoas.test.ts)", () => {
+    expect(percursoDe(neg(1044)).map((x) => x.nome)).toEqual(["Levantamento", "Orçamento", "Proposta", "Contrato", "Financeiro"]);
   });
   it("uma lead (fase 0, 1 ou 2) está no Levantamento e os seguintes ficam por chegar", () => {
-    for (const id of [1044, 1038, 1036]) expect(estados(id), String(id)).toEqual(["atual", "seguinte", "seguinte", "seguinte"]);
+    for (const id of [1044, 1038, 1036]) expect(estados(id), String(id)).toEqual(["atual", "seguinte", "seguinte", "seguinte", "seguinte"]);
   });
   it("com orçamento feito e por enviar: Levantamento feito, Orçamento atual", () => {
     const d = structuredClone(neg(1031));
     d.orc!.enviada = null as never;
-    expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "atual", "seguinte", "seguinte"]);
+    expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "atual", "seguinte", "seguinte", "seguinte"]);
   });
   it("proposta enviada e por aceitar: Proposta atual", () => {
-    expect(estados(1031)).toEqual(["feito", "feito", "atual", "seguinte"]);
+    expect(estados(1031)).toEqual(["feito", "feito", "atual", "seguinte", "seguinte"]);
   });
-  it("aceite e sem contrato assinado: Contrato atual; venda direta aceite não tem contrato por assinar", () => {
+  it("aceite e sem contrato assinado: Contrato atual; venda direta aceite não tem contrato: passa ao Financeiro", () => {
     const d = structuredClone(neg(1031));
     d.orc!.aceite = "06/10";
-    expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "feito", "feito", "atual"]);
+    expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "feito", "feito", "atual", "seguinte"]);
     d.orc!.vendaDireta = true;
-    expect(percursoDe(d).every((x) => x.estado === "feito")).toBe(true);
+    expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "feito", "feito", "atual"]);
   });
-  it("já em contrato (fase 4 ou 5, ou assinado): o percurso completo marcado", () => {
-    for (const id of [1027, 1022, 1050]) expect(estados(id), String(id)).toEqual(["feito", "feito", "feito", "feito"]);
+  it("já ganho: em Financeiro (fase 4) o Financeiro é o atual; na fase 5 está tudo feito", () => {
+    expect(estados(1027)).toEqual(["feito", "feito", "feito", "feito", "atual"]);
+    for (const id of [1022, 1050]) expect(estados(id).every((e) => e === "feito"), String(id)).toBe(true);
   });
 });
 
@@ -232,7 +233,7 @@ describe("estado do negócio", () => {
   });
   it("com orçamento tem um estado que diz onde está", () => {
     expect(estadoNegocio(neg(1031))).toBe("Proposta enviada");
-    expect(estadoNegocio(neg(1027))).toBe("Em contrato");
+    expect(estadoNegocio(neg(1027))).toBe("Financeiro");
   });
   it("venda direta enviada e por aceitar: também tem proposta (o motor envia-a), por isso é Proposta enviada; só depois de aceite fica completa", () => {
     const d = structuredClone(neg(1030));
@@ -240,8 +241,8 @@ describe("estado do negócio", () => {
     expect(estadoNegocio(d)).toBe("Proposta enviada");
     expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "feito", "atual", "seguinte"]);
     d.orc!.aceite = "08/10";
-    expect(estadoNegocio(d)).toBe("Em contrato");
-    expect(percursoDe(d).every((x) => x.estado === "feito")).toBe(true);
+    expect(estadoNegocio(d)).toBe("Financeiro");
+    expect(percursoDe(d).map((x) => x.estado)).toEqual(["feito", "feito", "feito", "atual"]);
   });
 });
 
@@ -269,11 +270,12 @@ describe("o que falta para o orçamento", () => {
     for (const d of S.deals) faltaParaOrcamento(S, d);
     expect(JSON.stringify(S)).toBe(antes);
   });
-  it("de orçamento em diante o título muda e o passo é o próximo passo do motor; fechado não falta nada", () => {
+  it("de orçamento em diante o título muda e o passo é o próximo passo do motor; concluído não falta nada", () => {
     const f = faltaParaOrcamento(S, neg(1031));
     expect(f.titulo).toBe("O que falta para o contrato");
     expect(f.passos).toEqual(["À espera do cliente"]);
-    expect(faltaParaOrcamento(S, neg(1027)).passos).toEqual([]);
+    expect(faltaParaOrcamento(S, neg(1027)).passos).toEqual(["Emitir a fatura"]);
+    expect(faltaParaOrcamento(S, neg(1050)).passos).toEqual([]);
   });
 });
 
@@ -319,17 +321,17 @@ describe("estado curto do negócio (a lista do separador Negócios)", () => {
     d.orc!.aceite = "08/10"; d.orc!.vendaDireta = false;
     expect(estadoCurto(d)).toBe("Contrato");
     d.orc!.contrato = "assinado";
-    expect(estadoCurto(d)).toBe("Contrato");
+    expect(estadoCurto(d)).toBe("Financeiro");
   });
-  it("em Financeiro e em Obra diz a fase", () => {
+  it("em Financeiro diz Financeiro e na fase 5 (a da obra, que aqui não aparece) diz Concluído", () => {
     const d = structuredClone(neg(1031));
     d.fase = 4;
     expect(estadoCurto(d)).toBe("Financeiro");
     d.fase = 5;
-    expect(estadoCurto(d)).toBe("Obra");
+    expect(estadoCurto(d)).toBe("Concluído");
   });
   it("só usa as palavras da lista", () => {
-    const ok = ["Em preparação", "Orçamento", "Proposta", "Contrato", "Financeiro", "Obra"];
+    const ok = ["Em preparação", "Orçamento", "Proposta", "Contrato", "Financeiro", "Concluído"];
     expect(S.deals.every((d) => ok.includes(estadoCurto(d)))).toBe(true);
   });
 });

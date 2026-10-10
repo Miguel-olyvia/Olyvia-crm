@@ -1,6 +1,6 @@
 // Uma pessoa na lista de Pessoas: uma linha da tabela (computador) ou um cartão de três linhas (abaixo de lg).
 // Só o essencial. O elemento acessível é UM botão com o nome; a linha toda também é clicável. A cor fica nos ícones.
-import { AlertCircle, Clock } from "lucide-react";
+import { AlertCircle, Clock, UserCheck } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
@@ -8,8 +8,8 @@ import { eur, type Estado } from "./motor";
 import { atrasada, localDe } from "./leadsDocs";
 import type { PessoaApp } from "./pessoasDocs";
 import { perfilDe, proximoTexto } from "./perfilDocs";
-import { contactoTexto, etapaTexto, valorColuna } from "./listaDocs";
-import { IconeFase } from "./pecas";
+import { contactoTexto, etapaPessoa, etapaTexto, valorColuna } from "./listaDocs";
+import { FASE_COR, IconeFase } from "./pecas";
 
 /** Contorno dos controlos da página Pessoas: cerca de 5:1 sobre branco e 4,6:1 sobre o fundo (mínimo pedido: 3:1). */
 export const BORDA_CTRL = "border-[hsl(220_10%_45%)]";
@@ -35,6 +35,13 @@ export function Atrasada({ className }: { className?: string }) {
   );
 }
 
+/** O ícone de cada etapa da pessoa: o da fase (Lead, Contacto, Visita, Negócio) ou o de Cliente. Tamanhos como em IconeFase. */
+const TAMANHO = { sm: "h-7 w-7 rounded-lg [&_svg]:h-4 [&_svg]:w-4", md: "h-10 w-10 rounded-xl [&_svg]:h-5 [&_svg]:w-5" } as const;
+export function IconeEtapa({ etapa, tam = "md" }: { etapa: number; tam?: keyof typeof TAMANHO }) {
+  if (etapa < 4) return <IconeFase fase={etapa} tam={tam} />;
+  return <span className={cn("grid shrink-0 place-items-center", TAMANHO[tam], FASE_COR[4])} aria-hidden="true"><UserCheck /></span>;
+}
+
 const papel = (p: PessoaApp): string => (p.papel === "lead" ? "Lead" : "Cliente");
 const localidade = (p: PessoaApp): string => { const l = localDe(p.principal); return p.principal.servico + (l ? " · " + l : ""); };
 
@@ -54,7 +61,7 @@ export function LinhaTabela({ p, S, abrir }: LinhaProps) {
       </TableCell>
       <TableCell className={celula}>{localidade(p)}</TableCell>
       <TableCell className={celula}>
-        <span className="flex items-center gap-2"><IconeFase fase={p.principal.fase} tam="sm" /><span>{etapaTexto(p)}</span></span>
+        <span className="flex items-center gap-2"><IconeEtapa etapa={etapaPessoa(p)} tam="sm" /><span>{etapaTexto(p)}</span></span>
       </TableCell>
       <TableCell className={celula}>{f.origem}</TableCell>
       <TableCell className={celula}>

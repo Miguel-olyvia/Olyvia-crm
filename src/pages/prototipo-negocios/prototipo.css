@@ -293,16 +293,16 @@
   --shadow-sm:0 1px 2px rgb(30 30 60 / .05), 0 1px 1px rgb(30 30 60 / .03);--shadow-md:0 4px 14px rgb(30 30 60 / .08)}
 .leitura{--background:42 45% 95%;--muted:40 22% 91%}
 
-/* Ficha da pessoa, no painel lateral. As seis etapas ajustam-se à largura do próprio bloco: com 560 px ou mais cada uma mostra o nome,
-   senão ficam só os ícones e o nome da atual por baixo (.etapa-atual). O percurso do negócio (quatro passos) é uma lista vertical e,
-   a partir de 440 px de largura do bloco, uma linha fina. O separador Negócios é um mestre-detalhe: lista e detalhe lado a lado a partir de 640 px. */
+/* Ficha da pessoa, no painel lateral. As cinco etapas ajustam-se à largura do próprio bloco: com 560 px ou mais cada uma mostra o nome,
+   senão ficam só os ícones e o nome da atual por baixo (.etapa-atual). O percurso do negócio (quatro ou cinco passos) é uma lista vertical e,
+   a partir de 560 px de largura do bloco, uma linha fina. O separador Negócios é um mestre-detalhe: lista e detalhe lado a lado a partir de 640 px. */
 .etapas-cx,.percurso-cx,.negocios-cx{container-type:inline-size;min-width:0}
-.etapas{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.5rem;margin:0;padding:0;list-style:none}
+.etapas{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.5rem;margin:0;padding:0;list-style:none}
 .etapa-nome{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @container (min-width:560px){.etapa-nome{position:static;width:auto;height:auto;overflow:visible;clip:auto}.etapa-atual{display:none}}
 .percurso{display:grid;grid-template-columns:minmax(0,1fr);gap:.5rem;margin:0;padding:0;list-style:none}
 .percurso>li{border-left-width:2px;padding-left:.75rem}
-@container (min-width:440px){.percurso{grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem}.percurso>li{border-left-width:0;border-top-width:2px;padding-left:0;padding-top:.5rem}}
+@container (min-width:560px){.percurso{grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:.5rem}.percurso>li{border-left-width:0;border-top-width:2px;padding-left:0;padding-top:.5rem}}
 .negocios-md{display:grid;grid-template-columns:minmax(0,1fr);gap:1.5rem}
 .negocios-vazio{display:none}
 @container (min-width:640px){.negocios-md{grid-template-columns:minmax(13rem,15rem) minmax(0,1fr)}.negocios-vazio{display:block}}

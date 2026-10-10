@@ -47,9 +47,10 @@ describe("lista · o último contacto em texto curto", () => {
 
 describe("lista · etapa e valor por papel", () => {
   const S = seed();
-  it("a lead diz a etapa do contacto; o cliente, a fase do negócio mais adiantado", () => {
+  it("a lead diz a etapa do contacto (ou o estado do negócio); o cliente diz só Cliente", () => {
     expect(etapaTexto(leadsApp(S).find((p) => p.nome === "Pedro Lopes")!)).toBe("Por contactar");
-    expect(clientesApp(S).map(etapaTexto).every((t) => ["Financeiro", "Obra"].includes(t))).toBe(true);
+    expect(etapaTexto(leadsApp(S).find((p) => p.nome === "Carla Nunes")!)).toBe("Negócio · proposta");
+    expect(clientesApp(S).map(etapaTexto)).toEqual(["Cliente", "Cliente", "Cliente"]);
   });
   it("leads: o valor em orçamento, ou null quando não há (mostra-se '—')", () => {
     const v = Object.fromEntries(leadsApp(S).map((p) => [p.nome, valorColuna(S, p)]));

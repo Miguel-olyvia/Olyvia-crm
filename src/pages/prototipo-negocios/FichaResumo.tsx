@@ -5,8 +5,8 @@ import { AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { Estado } from "./motor";
-import { atrasada, proximoDe } from "./leadsDocs";
-import type { PessoaApp } from "./pessoasDocs";
+import { atrasada } from "./leadsDocs";
+import { proximoNegocio, type PessoaApp } from "./pessoasDocs";
 import { LIMITE_SEM_CONTACTO, camposContacto, factosResumo, infoOrigemDe, type Perfil } from "./perfilDocs";
 import { ListaCampos } from "./FichaListas";
 import type { Ctx } from "./pecas";
@@ -31,7 +31,7 @@ const Aviso = ({ children }: { children: ReactNode }) => (
 function avisosDe(S: Estado, p: PessoaApp, f: Perfil): ReactNode[] {
   const o = infoOrigemDe(S, p).aviso, l: ReactNode[] = [];
   if (o) l.push(<Aviso key="o">{o.tipo === "conflito" ? "Conflito de contacto: " : "Possível duplicado evitado: "}{o.texto}</Aviso>);
-  if (p.novoNegocio) l.push(<Aviso key="n">Cliente com um novo negócio em curso, ainda sem contrato.</Aviso>);
+  if (p.novoNegocio) l.push(<Aviso key="n">Novo negócio em curso: o cliente tem um negócio por fechar.</Aviso>);
   if (atrasada(p)) l.push(<Aviso key="a">Há uma tarefa atrasada nesta pessoa.</Aviso>);
   if (f.diasSemContacto >= LIMITE_SEM_CONTACTO) l.push(<Aviso key="c">Sem contacto há {f.diasSemContacto} dias.</Aviso>);
   return l;
@@ -103,7 +103,7 @@ function Factos({ p, f }: { p: PessoaApp; f: Perfil }) {
 }
 
 export function FichaResumo({ S, A, go, p, f, voltar }: ResumoProps) {
-  const d = p.principal, nx = proximoDe(p, S);
+  const d = p.principal, nx = proximoNegocio(d, S);
   const avisos = avisosDe(S, p, f), origem = infoOrigemDe(S, p).origem.filter((c) => CAMPOS_ORIGEM.includes(c.rotulo));
   const perder = () => { for (const x of p.negocios) A.perderSim(x.id); A.nav("pessoas"); voltar(); };
   return (

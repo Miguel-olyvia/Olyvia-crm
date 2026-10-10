@@ -1,6 +1,6 @@
 // O painel lateral com a ficha da pessoa (shadcn Sheet): desliza da direita, tem largura min(760px, 100vw) (ecrã inteiro no telemóvel),
 // fecha com Esc ou com o botão Fechar e devolve o foco à linha da pessoa. As setas passam à pessoa vizinha da lista sem fechar.
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -35,6 +35,17 @@ export function PessoaPainel({ S, A, go, p, nomes, leitura, sep, aoMudarSep, abr
   if (p) ultima.current = p;
   const mostrada = p ?? ultima.current;
   const v = vizinhasDe(nomes, mostrada?.nome ?? ""), pos = posicaoTexto(v);
+  // A ficha é recriada a cada pessoa (key={nome}) e as setas com ela: sem isto o foco cairia para o corpo da página.
+  // Guarda-se qual seta foi usada e, quando a pessoa nova está montada, devolve-se o foco a essa seta (ou ao nome, se ela já não pode ser usada).
+  const setaUsada = useRef<"anterior" | "seguinte" | null>(null);
+  const ir = (qual: "anterior" | "seguinte", nome: string) => { setaUsada.current = qual; abrir(nome); };
+  const nomeMostrado = mostrada?.nome;
+  useEffect(() => {
+    const qual = setaUsada.current;
+    if (!qual) return;
+    setaUsada.current = null;
+    (conteudo.current?.querySelector<HTMLElement>(`button[data-seta="${qual}"]:not(:disabled)`) ?? conteudo.current?.querySelector<HTMLElement>("h2[tabindex='-1']"))?.focus();
+  }, [nomeMostrado]);
   const voltarFoco = (e: Event) => {
     e.preventDefault();
     const nome = ultima.current?.nome;
@@ -49,11 +60,11 @@ export function PessoaPainel({ S, A, go, p, nomes, leitura, sep, aoMudarSep, abr
   };
   const topo = (
     <div className="flex shrink-0 items-center gap-1">
-      <Button type="button" variant="outline" className={SETA} disabled={!v.anterior} aria-label={v.anterior ? `Anterior: ${v.anterior}` : "Anterior"} onClick={() => v.anterior && abrir(v.anterior)}>
+      <Button type="button" variant="outline" className={SETA} data-seta="anterior" disabled={!v.anterior} aria-label={v.anterior ? `Anterior: ${v.anterior}` : "Anterior"} onClick={() => v.anterior && ir("anterior", v.anterior)}>
         <ChevronLeft className="h-5 w-5" aria-hidden="true" />
       </Button>
       <span className="min-w-14 text-center text-[15px] tabular-nums text-muted-foreground">{pos}</span>
-      <Button type="button" variant="outline" className={SETA} disabled={!v.seguinte} aria-label={v.seguinte ? `Seguinte: ${v.seguinte}` : "Seguinte"} onClick={() => v.seguinte && abrir(v.seguinte)}>
+      <Button type="button" variant="outline" className={SETA} data-seta="seguinte" disabled={!v.seguinte} aria-label={v.seguinte ? `Seguinte: ${v.seguinte}` : "Seguinte"} onClick={() => v.seguinte && ir("seguinte", v.seguinte)}>
         <ChevronRight className="h-5 w-5" aria-hidden="true" />
       </Button>
       <Button type="button" variant="outline" className={cn("ml-1 min-h-11 cursor-pointer text-[15px]", BORDA_CTRL)} onClick={fechar}>

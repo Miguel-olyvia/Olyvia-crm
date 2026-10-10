@@ -23,7 +23,7 @@ describe("pessoas · quem é lead e quem é cliente", () => {
     expect(leadsApp(S).every((p) => p.papel === "lead")).toBe(true);
     expect(clientesApp(S).every((p) => p.papel === "cliente")).toBe(true);
   });
-  it("negócio em fase 4 ou 5, ou contrato assinado, faz da pessoa um cliente", () => {
+  it("negócio em fase 4 ou 5, ou contrato assinado, faz da pessoa um cliente (mais casos em modeloPessoas.test.ts)", () => {
     const S = seed();
     S.deals.find((d) => d.id === 1031)!.orc!.contrato = "assinado";
     expect(nomes(clientesApp(S))).toContain("Carla Nunes");
@@ -143,13 +143,13 @@ describe("pessoas · Todos", () => {
 });
 
 describe("pessoas · dados do cliente", () => {
-  it("valor total dos contratos assinados, n.º de contratos e obras em curso a partir da seed", () => {
+  it("valor total dos negócios ganhos e n.º de contratos a partir da seed", () => {
     const S = seed();
     const por = (n: string) => clientesApp(S).find((p) => p.nome === n)!;
     const pf = (id: number) => tot(S.deals.find((d) => d.id === id)!, S).pf;
-    expect(dadosCliente(S, por("Tiago Almeida"))).toMatchObject({ valorTotal: pf(1027), contratos: 1, obrasEmCurso: 0 });
-    expect(dadosCliente(S, por("Marta Lima"))).toMatchObject({ valorTotal: pf(1022), contratos: 1, obrasEmCurso: 1 });
-    expect(dadosCliente(S, por("Joana Ribeiro"))).toMatchObject({ valorTotal: pf(1050), contratos: 1, obrasEmCurso: 0 });
+    expect(dadosCliente(S, por("Tiago Almeida"))).toMatchObject({ valorTotal: pf(1027), contratos: 1 });
+    expect(dadosCliente(S, por("Marta Lima"))).toMatchObject({ valorTotal: pf(1022), contratos: 1 });
+    expect(dadosCliente(S, por("Joana Ribeiro"))).toMatchObject({ valorTotal: pf(1050), contratos: 1 });
   });
   it("o negócio de exemplo não entra no valor dos contratos", () => {
     const S = seed();
@@ -162,25 +162,24 @@ describe("pessoas · dados do cliente", () => {
     expect(dadosCliente(S, por("Marta Lima")).ultimo).toMatchObject({ servico: "Cozinha nova", quando: "08/10" });
     expect(dadosCliente(S, por("Tiago Almeida")).ultimo).toMatchObject({ servico: "Cozinha", quando: "15/09" });
   });
-  it("uma obra por aprovar também conta como em curso, e a concluída não", () => {
+  it("uma venda direta com a proposta aceite conta como negócio ganho, com o seu valor, sem contrato", () => {
     const S = seed();
-    const j = S.deals.find((d) => d.id === 1050)!;
-    j.obra.plano!.estado = "por aprovar";
-    expect(dadosCliente(S, clientesApp(S).find((p) => p.nome === "Joana Ribeiro")!).obrasEmCurso).toBe(1);
+    S.deals.find((d) => d.id === 1030)!.orc!.aceite = "08/10";
+    const sergio = clientesApp(S).find((p) => p.nome === "Sérgio Pinto")!;
+    expect(dadosCliente(S, sergio)).toMatchObject({ contratos: 1, valorTotal: tot(S.deals.find((d) => d.id === 1030)!, S).pf });
+    expect(documentosDe(sergio)).toEqual([]);
   });
-  it("contratos e documentos: contrato, fatura, recibo e obra, derivados dos dados", () => {
+  it("contratos e documentos: contrato, fatura e recibo, derivados dos dados", () => {
     const S = seed();
     const joana = documentosDe(clientesApp(S).find((p) => p.nome === "Joana Ribeiro")!);
-    expect(joana.map((d) => d.tipo)).toEqual(["Contrato", "Fatura", "Recibo", "Obra"]);
+    expect(joana.map((d) => d.tipo)).toEqual(["Contrato", "Fatura", "Recibo"]);
     expect(joana[0]).toMatchObject({ estado: "Assinado", data: "21/09", negocioId: 1050 });
     expect(joana[1]).toMatchObject({ referencia: "FT 2026/380", data: "22/09" });
     expect(joana[2]).toMatchObject({ referencia: "RC 2026/270", data: "24/09" });
-    expect(joana[3].estado).toBe("Concluída");
     const tiago = documentosDe(clientesApp(S).find((p) => p.nome === "Tiago Almeida")!);
     expect(tiago.map((d) => d.tipo)).toEqual(["Contrato"]);
     const marta = documentosDe(clientesApp(S).find((p) => p.nome === "Marta Lima")!);
-    expect(marta.map((d) => d.tipo)).toEqual(["Contrato", "Fatura", "Recibo", "Obra"]);
-    expect(marta[3].estado).toBe("Em curso");
+    expect(marta.map((d) => d.tipo)).toEqual(["Contrato", "Fatura", "Recibo"]);
     expect(marta.every((d) => d.negocioId === 1022)).toBe(true);
   });
   it("um contrato só enviado aparece como enviado", () => {
@@ -355,7 +354,7 @@ describe("pessoas · um bloco por negócio no separador Negócios", () => {
   it("uma pessoa com vários negócios tem um grupo por negócio, o de exemplo primeiro", () => {
     const g = grupos("Marta Lima");
     expect(g.map((x) => x.negocio?.id)).toEqual([de("Marta Lima").extra[0].id, 1022]);
-    expect(g.map((x) => x.docs.map((d) => d.tipo))).toEqual([["Orçamento"], ["Obra"]]);
+    expect(g.map((x) => x.docs.map((d) => d.tipo))).toEqual([["Orçamento"], ["Financeiro"]]);
   });
   it("um item que aponta para um negócio que a pessoa não tem fica num grupo sem negócio (o ecrã mostra o aviso) e não se perde", () => {
     const p = de("Pedro Lopes");

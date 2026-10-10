@@ -1,7 +1,8 @@
 // Página de Pessoas: uma lista única de leads e clientes. A pessoa é uma só; lead e cliente são papéis dela.
 // Funções puras: nada aqui muda o Estado. O negócio de exemplo do cliente (negociosDemo) vive só nesta camada.
-import { PAPEIS, criarOrc, proximo, tot, type Estado, type Negocio, type Papel } from "./motor";
-import { FILTROS_LEAD, ehLead, filtrarLeads, idade, itensNegocios, leadsDe, pessoasDe, type FiltroLead, type ItemNegocio, type Pessoa } from "./leadsDocs";
+// Quem é lead e quem é cliente decide-se aqui (a página de Leads V1 mantém a regra antiga, em leadsDocs.ts): cliente é quem tem um negócio GANHO.
+import { PAPEIS, criarOrc, proximo, tot, type Estado, type Negocio, type Papel, type Proximo } from "./motor";
+import { FILTROS_LEAD, atrasada, filtrarLeads, idade, itensNegocios, pessoasDe, type FiltroLead, type ItemNegocio, type Pessoa } from "./leadsDocs";
 import { toquesDe } from "./toquesDocs";
 
 export type PapelPessoa = "lead" | "cliente";
@@ -9,17 +10,17 @@ export type SeparadorLista = "leads" | "clientes" | "todos";
 
 export interface PessoaApp extends Pessoa {
   papel: PapelPessoa;
-  /** Cliente com um negócio aberto que ainda não é contrato: não vira lead, fica em Clientes com esta marca. */
+  /** Cliente com um negócio aberto que ainda não está ganho: não vira lead, fica em Clientes com "Novo negócio em curso". */
   novoNegocio: boolean;
   /** Negócios de exemplo juntos só nesta camada (não existem no Estado). */
   extra: Negocio[];
 }
 
 export interface DadosCliente {
-  /** Soma dos contratos (o que está assinado ou já em Financeiro ou Obra), com o IVA do orçamento. */
+  /** Soma dos negócios ganhos (contrato assinado, ou proposta aceite quando não há contrato), com o IVA do orçamento. */
   valorTotal: number;
+  /** Quantos negócios ganhos tem. */
   contratos: number;
-  obrasEmCurso: number;
   /** O negócio mais recente, o de exemplo incluído. */
   ultimo: { servico: string; quando: string } | null;
 }
@@ -27,7 +28,7 @@ export interface DadosCliente {
 export interface DocPessoa {
   id: string;
   negocioId: number;
-  tipo: "Contrato" | "Fatura" | "Recibo" | "Obra";
+  tipo: "Contrato" | "Fatura" | "Recibo";
   servico: string;
   estado: string;
   referencia: string | null;
@@ -49,7 +50,7 @@ export function separadorPorDefeito(role: Papel): SeparadorLista {
 /* ---------------------------------------------------------------- o negócio de exemplo */
 
 const ID_DEMO = 90022;
-const BASE_DEMO = 1022; // a Marta Lima, cliente (obra em curso)
+const BASE_DEMO = 1022; // a Marta Lima, cliente
 const MEDIDAS_DEMO = 1031; // medidas de uma cozinha da seed, para o orçamento do negócio novo
 
 /** Um negócio novo, aberto e em fase de orçamento, para um dos clientes da seed. Trabalha numa cópia: o Estado não muda. */
@@ -70,22 +71,37 @@ export function negociosDemo(S: Estado): Negocio[] {
 
 /* ---------------------------------------------------------------- quem é quem */
 
-/** Já é contrato: negócio em Financeiro ou Obra, ou contrato assinado. */
-export const ehContrato = (d: Negocio): boolean => d.fase >= 4 || d.orc?.contrato === "assinado";
+/** Negócio GANHO: o contrato assinado; ou, quando o negócio não exige contrato (venda direta, só proposta), a proposta aceite.
+ *  Financeiro e Obra (fases 4 e 5) já passaram pelo ganho. Um negócio perdido nunca está ganho. A pessoa vira cliente com o primeiro. */
+export function ehGanho(d: Negocio): boolean {
+  if (d.perdido) return false;
+  const o = d.orc;
+  return d.fase >= 4 || o?.contrato === "assinado" || (!!o?.vendaDireta && !!o.aceite);
+}
+
+/** O próximo passo de um negócio nesta página: o do motor, menos a obra (fase 5), que aqui é só "Concluído". */
+export function proximoNegocio(d: Negocio, S: Estado): Proximo {
+  return d.fase >= 5 ? { t: "Concluído", sub: "O negócio está pago e fechado.", done: true } : proximo(d, S);
+}
 
 function todasAsPessoas(S: Estado): PessoaApp[] {
   const demo = negociosDemo(S);
   return pessoasDe(S).map((p): PessoaApp => {
-    const cliente = !ehLead(p);
+    const cliente = p.negocios.some(ehGanho);
     const extra = cliente ? demo.filter((d) => d.nome === p.nome) : [];
-    return { ...p, papel: cliente ? "cliente" : "lead", extra, novoNegocio: cliente && [...p.negocios, ...extra].some((d) => !ehContrato(d)) };
+    return { ...p, papel: cliente ? "cliente" : "lead", extra, novoNegocio: cliente && [...p.negocios, ...extra].some((d) => !ehGanho(d)) };
   });
 }
 
-/** As leads por urgência (a mesma ordem da página de Leads). */
+/** As leads por urgência: atrasadas primeiro, depois as mais atrás no processo, depois as mais antigas (a mesma ordem da página de Leads). */
 export function leadsApp(S: Estado): PessoaApp[] {
-  const todas = todasAsPessoas(S);
-  return leadsDe(S).map((p) => todas.find((x) => x.nome === p.nome)!);
+  return todasAsPessoas(S).filter((p) => p.papel === "lead").map((p, i) => ({ p, i }))
+    .sort((a, b) =>
+      Number(atrasada(b.p)) - Number(atrasada(a.p))
+      || a.p.principal.fase - b.p.principal.fase
+      || idade(b.p.principal.quando) - idade(a.p.principal.quando)
+      || a.i - b.i)
+    .map((x) => x.p);
 }
 
 /** Os clientes: os que pedem algo novo primeiro, depois por valor dos contratos. */
@@ -119,19 +135,16 @@ export function contagens(S: Estado, q: string): Record<SeparadorLista, number> 
 /* ---------------------------------------------------------------- o cliente */
 
 export function dadosCliente(S: Estado, p: PessoaApp): DadosCliente {
-  const contratos = p.negocios.filter((d) => d.orc && ehContrato(d));
+  const contratos = p.negocios.filter((d) => d.orc && ehGanho(d));
   const ultimo = [...p.extra, ...p.negocios].reduce<Negocio | null>((a, d) => (!a || idade(d.quando) < idade(a.quando) ? d : a), null);
   return {
     valorTotal: contratos.reduce((a, d) => a + tot(d, S).pf, 0),
     contratos: contratos.length,
-    obrasEmCurso: p.negocios.filter((d) => d.fase === 5 && d.obra.plano?.estado !== "concluída").length,
     ultimo: ultimo ? { servico: ultimo.servico, quando: ultimo.quando } : null,
   };
 }
 
-const maiuscula = (t: string): string => t.charAt(0).toUpperCase() + t.slice(1);
-
-/** Contrato, fatura, recibo e estado da obra de cada negócio do cliente, só em leitura e derivados dos dados. */
+/** Contrato, fatura e recibo de cada negócio do cliente, só em leitura e derivados dos dados. */
 export function documentosDe(p: PessoaApp): DocPessoa[] {
   return p.negocios.flatMap((d): DocPessoa[] => {
     const o = d.orc, linhas: DocPessoa[] = [];
@@ -145,9 +158,15 @@ export function documentosDe(p: PessoaApp): DocPessoa[] {
     }
     if (d.fin.fatura) linha("Fatura", d.fin.pago ? "Paga" : "Emitida", d.fin.fatura.n, d.fin.fatura.q);
     if (d.fin.recibo) linha("Recibo", "Emitido", d.fin.recibo.n, d.fin.recibo.q);
-    if (d.obra.plano) linha("Obra", maiuscula(d.obra.plano.estado), null, null);
     return linhas;
   });
+}
+
+/** A página de Leads dá ao negócio da fase 5 o tipo "Obra" e nenhum valor; aqui é um Financeiro já fechado, com o seu valor. */
+function semObra(S: Estado, p: PessoaApp, it: ItemNegocio): ItemNegocio {
+  const d = p.negocios.find((x) => x.id === it.negocioId);
+  if (it.tipo !== "Obra" || !d) return it;
+  return { ...it, tipo: "Financeiro", valor: d.orc ? tot(d, S).pf : null, proximo: proximoNegocio(d, S).t };
 }
 
 /** Os negócios da pessoa para o separador Negócios: o de exemplo primeiro, depois os da página de Leads. */
@@ -156,7 +175,7 @@ export function itensPessoa(S: Estado, p: PessoaApp): ItemNegocio[] {
     id: `demo-${d.id}`, negocioId: p.principal.id, tipo: "Orçamento", servico: d.servico, valor: tot(d, S).pf, proximo: proximo(d, S).t,
     demo: true, conjunta: false, linhas: [],
   }));
-  return [...demo, ...itensNegocios(S, p)];
+  return [...demo, ...itensNegocios(S, p).map((it) => semObra(S, p, it))];
 }
 
 /* ---------------------------------------------------------------- ordenar e filtrar a lista */

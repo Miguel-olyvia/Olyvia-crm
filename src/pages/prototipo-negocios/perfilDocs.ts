@@ -3,16 +3,16 @@
 // calcula-se a partir do nome, das fases e das datas dos negócios, com regras fixas.
 import { PAPEIS, campoVisita, proximo, tot, visitas, type Estado, type Evento, type Negocio } from "./motor";
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, INTERIOR, LEAD, efetivo, emFalta, grupoVisita, type Grupo } from "./campos";
-import { atrasada, idade, localDe, proximoDe, somarDias, tempoDesde } from "./leadsDocs";
+import { atrasada, idade, localDe, somarDias, tempoDesde } from "./leadsDocs";
 import { canalDe, infoOrigem, toquesDe, utmTexto } from "./toquesDocs";
-import { comercialDe, ehContrato, type PessoaApp } from "./pessoasDocs";
+import { comercialDe, ehGanho, proximoNegocio, type PessoaApp } from "./pessoasDocs";
 
 /** "Hoje" do protótipo (o mesmo de leadsDocs). */
 const HOJE = "10/10";
 /** A partir de quantos dias sem falar com a pessoa se diz que está sem contacto. */
 export const LIMITE_SEM_CONTACTO = 7;
-/** Dias que se dá a cada etapa (Lead … Obra) para o próximo passo. */
-const PRAZO_DIAS = [1, 2, 3, 5, 3, 7];
+/** Dias que se dá a cada fase do negócio (Lead, Contacto, Visita, Negócio, Financeiro) para o próximo passo. */
+const PRAZO_DIAS = [1, 2, 3, 5, 3];
 
 export interface Morada { linha: string; cp: string; localidade: string; completa: string }
 /** `maus[i]` diz se o motivo i é um alerta (e não um ponto a favor). */
@@ -115,7 +115,7 @@ function interacoesDe(p: PessoaApp, base: string): Interacao[] {
 
 const NOTAS: readonly string[] = [
   "Prefere ser contactada ao fim do dia.", "Pediu para confirmar o acesso ao prédio antes da visita.", "Quer comparar com outro orçamento.",
-  "Perguntou por financiamento.", "Decide em conjunto com a família.", "Tem pressa: quer a obra antes do Natal.",
+  "Perguntou por financiamento.", "Decide em conjunto com a família.", "Tem pressa: quer tudo pronto antes do Natal.",
 ];
 
 function notasDe(p: PessoaApp, base: string, comercial: string): Nota[] {
@@ -169,11 +169,11 @@ function saudeDe(p: PessoaApp, dias: number, conflito: boolean, visita: VisitaPe
   return { score, motivos: dois.map(([, t]) => t), maus: dois.map(([v]) => v < 0) };
 }
 
-/** Pagamento (de exemplo) dos contratos da pessoa: sinal de metade quando a obra arranca e tudo quando a fatura é paga. */
+/** Pagamento (de exemplo) dos negócios ganhos da pessoa: pago quando a fatura foi paga (ou o negócio já está concluído), senão por receber. */
 export function pagamentoDe(S: Estado, p: PessoaApp): Pagamento {
-  const contratos = p.negocios.filter((d) => d.orc && ehContrato(d));
+  const contratos = p.negocios.filter((d) => d.orc && ehGanho(d));
   const total = contratos.reduce((a, d) => a + tot(d, S).pf, 0);
-  const pago = contratos.reduce((a, d) => a + (d.fin.pago ? tot(d, S).pf : d.fase >= 5 ? tot(d, S).pf / 2 : 0), 0);
+  const pago = contratos.reduce((a, d) => a + (d.fin.pago || d.fase >= 5 ? tot(d, S).pf : 0), 0);
   return { total, pago, falta: total - pago };
 }
 
@@ -209,8 +209,11 @@ export function camposContacto(f: Perfil): { rotulo: string; valor: string }[] {
 
 /* ---------------------------------------------------------------- atividade, negócios e UTM */
 
+/** O que se passa depois de a pessoa ser cliente (obra, plano, inventário, operações) não é desta página. */
+const POSTERIOR = /obra|vistoria|plano|invent[aá]rio|encomenda|opera[cç][õo]es/i;
+
 const doHistorico = (p: PessoaApp): ItemAtividade[] =>
-  p.negocios.flatMap((d) => d.hist).map((e: Evento, i): ItemAtividade => ({ id: `hist-${p.principal.id}-${i}`, tipo: "historico", titulo: e.t, detalhe: "", q: e.q, exemplo: false }));
+  p.negocios.flatMap((d) => d.hist).filter((e) => !POSTERIOR.test(e.t)).map((e: Evento, i): ItemAtividade => ({ id: `hist-${p.principal.id}-${i}`, tipo: "historico", titulo: e.t, detalhe: "", q: e.q, exemplo: false }));
 
 /** Uma só linha do tempo: histórico dos negócios, chamadas, emails e notas, do mais recente para o mais antigo. */
 /** `f` é o perfil já calculado (a ficha tem-no); sem ele calcula-se aqui. */
@@ -223,7 +226,7 @@ export function atividadeDe(p: PessoaApp, S: Estado, f: Perfil = perfilDe(p, S))
 }
 
 const PROBABILIDADE: Record<string, number> = {
-  Lead: 10, Contacto: 20, Visita: 40, Orçamento: 50, Proposta: 70, "Proposta conjunta": 70, Contrato: 90, Financeiro: 95, Obra: 100,
+  Lead: 10, Contacto: 20, Visita: 40, Orçamento: 50, Proposta: 70, "Proposta conjunta": 70, Contrato: 90, Financeiro: 95,
 };
 /** A probabilidade (de exemplo, em %) de fechar, por tipo de documento ou etapa. */
 export const probabilidade = (tipo: string): number => PROBABILIDADE[tipo] ?? 30;
@@ -237,42 +240,52 @@ export function utmDe(S: Estado, p: PessoaApp): string {
 export const infoOrigemDe = (S: Estado, p: PessoaApp): ReturnType<typeof infoOrigem> => infoOrigem(toquesDe(S, p.nome));
 
 /** O texto do próximo passo da pessoa (para as linhas). */
-export const proximoTexto = (p: PessoaApp, S: Estado): string => proximoDe(p, S).t;
+export const proximoTexto = (p: PessoaApp, S: Estado): string => proximoNegocio(p.principal, S).t;
 
 /* ---------------------------------------------------------------- o percurso do negócio */
 
-export const PASSOS_PERCURSO = ["Levantamento", "Orçamento", "Proposta", "Contrato"] as const;
+/** O percurso comercial: com contrato são cinco passos; sem contrato (venda direta, só proposta) são quatro. */
+const PASSOS_COM_CONTRATO = ["Levantamento", "Orçamento", "Proposta", "Contrato", "Financeiro"] as const;
+const PASSOS_SEM_CONTRATO = ["Levantamento", "Orçamento", "Proposta", "Financeiro"] as const;
 export type EstadoPasso = "feito" | "atual" | "seguinte";
-export interface PassoPercurso { nome: string; estado: EstadoPasso }
+/** `ganho`: o negócio fica ganho (e a pessoa passa a cliente) quando este passo acaba: o Contrato, ou a Proposta quando não há contrato. */
+export interface PassoPercurso { nome: string; estado: EstadoPasso; ganho: boolean }
 
-/** O passo em que o negócio está (0 a 3); 4 quando o percurso está completo (contrato, ou venda direta aceite).
+const passosDe = (d: Negocio): readonly string[] => (d.orc?.vendaDireta ? PASSOS_SEM_CONTRATO : PASSOS_COM_CONTRATO);
+
+/** O passo em que o negócio está (índice no percurso dele); o número de passos quando está tudo feito (Concluído, fase 5).
  *  A venda direta também envia uma proposta ao cliente (o motor diz "Enviar a proposta", e só dispensa o contrato depois de aceite),
- *  por isso enquanto está enviada e por aceitar o passo é "Proposta" e o estado "Proposta enviada", como nos outros negócios. */
+ *  por isso enquanto está enviada e por aceitar o passo é "Proposta", como nos outros negócios. Depois do ganho o passo é o Financeiro. */
 function passoAtual(d: Negocio): number {
-  const o = d.orc;
-  if (d.fase >= 4) return 4;
+  const o = d.orc, n = passosDe(d).length, financeiro = n - 1;
+  if (d.fase >= 5) return n;
+  if (d.fase === 4) return financeiro;
   if (d.fase < 3) return 0;
   if (!o?.enviada) return 1;
   if (!o.aceite) return 2;
-  return !o.vendaDireta && o.contrato !== "assinado" ? 3 : 4;
+  return ehGanho(d) ? financeiro : 3;
 }
 
-/** Levantamento, Orçamento, Proposta e Contrato: o que já está feito, o passo atual e os que faltam. */
+/** Os passos do negócio: o que já está feito, o atual, os que faltam e onde fica o ganho. */
 export function percursoDe(d: Negocio): PassoPercurso[] {
-  const a = passoAtual(d);
-  return PASSOS_PERCURSO.map((nome, i): PassoPercurso => ({ nome, estado: i < a ? "feito" : i === a ? "atual" : "seguinte" }));
+  const a = passoAtual(d), nomes = passosDe(d);
+  return nomes.map((nome, i): PassoPercurso => ({ nome, estado: i < a ? "feito" : i === a ? "atual" : "seguinte", ganho: i === nomes.length - 2 }));
 }
 
-/** O rótulo do negócio: onde está, em palavras (uma lead ainda sem documentos está "Em preparação"). */
+const NOME_PASSO: Record<string, { longo: string; curto: string }> = {
+  Levantamento: { longo: "Em preparação", curto: "Em preparação" }, Orçamento: { longo: "Orçamento por enviar", curto: "Orçamento" },
+  Proposta: { longo: "Proposta enviada", curto: "Proposta" }, Contrato: { longo: "Contrato por assinar", curto: "Contrato" }, Financeiro: { longo: "Financeiro", curto: "Financeiro" },
+};
+const CONCLUIDO = "Concluído";
+
+/** O rótulo do negócio: onde está, em palavras (uma lead ainda sem documentos está "Em preparação"; a fase 5 está "Concluído"). */
 export function estadoNegocio(d: Negocio): string {
-  return ["Em preparação", "Orçamento por enviar", "Proposta enviada", "Contrato por assinar", "Em contrato"][passoAtual(d)];
+  return NOME_PASSO[passosDe(d)[passoAtual(d)]]?.longo ?? CONCLUIDO;
 }
 
-/** O estado numa só palavra, para a lista de negócios: Em preparação, Orçamento, Proposta, Contrato, e depois Financeiro ou Obra. */
+/** O estado numa só palavra, para a lista de negócios: Em preparação, Orçamento, Proposta, Contrato, Financeiro e Concluído. */
 export function estadoCurto(d: Negocio): string {
-  if (d.fase >= 5) return "Obra";
-  if (d.fase === 4) return "Financeiro";
-  return ["Em preparação", "Orçamento", "Proposta", "Contrato", "Contrato"][passoAtual(d)];
+  return NOME_PASSO[passosDe(d)[passoAtual(d)]]?.curto ?? CONCLUIDO;
 }
 
 export interface Falta { titulo: string; passos: string[]; campos: string[] }
@@ -283,11 +296,12 @@ function gruposDoPasso(d: Negocio): Grupo[] {
   return d.fase === 0 ? LEAD : d.fase === 1 ? CONTACTO : [...visitas(d).map(grupoVisita), EXTERIOR, INTERIOR, AREA, ESCOLHAS];
 }
 
-/** O que falta para o orçamento (leads) ou para o contrato (de orçamento em diante), derivado da fase e do motor. */
+/** O que falta para o orçamento (leads), para o contrato (de orçamento ao ganho) ou para o pagamento (depois do ganho), derivado da fase e do motor. */
 export function faltaParaOrcamento(S: Estado, d: Negocio): Falta {
   if (d.fase >= 3) {
-    const p = proximo(d, S);
-    return { titulo: "O que falta para o contrato", passos: passoAtual(d) >= 4 || p.done ? [] : [p.t], campos: [] };
+    if (!ehGanho(d)) return { titulo: d.orc?.vendaDireta ? "O que falta para fechar a venda" : "O que falta para o contrato", passos: [proximo(d, S).t], campos: [] };
+    const p = proximoNegocio(d, S);
+    return { titulo: "O que falta para o pagamento", passos: d.fase >= 5 || p.done ? [] : [d.fase < 4 ? "Emitir a fatura" : p.t], campos: [] };
   }
   const gs = gruposDoPasso(d).map((g) => efetivo(S.campos, g)).filter((g) => !g.oculto);
   return { titulo: "O que falta para o orçamento", passos: PASSOS_LEVANTAMENTO.slice(d.fase), campos: [...new Set(emFalta(gs, d.f).map((c) => c.l))] };

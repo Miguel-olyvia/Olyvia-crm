@@ -43,7 +43,7 @@ export function docFase(d: Negocio): DocFase | null {
   const o = d.orc;
   if (!o || !o.enviada) return "orcamento";
   if (!o.aceite) return "proposta";
-  return "contrato";
+  return o.vendaDireta ? "financeiro" : "contrato"; // sem contrato exigido, a proposta aceite passa direta ao Financeiro
 }
 
 const NOME_LINHA: Record<LinhaId, string> = { wc: "Casa de banho", coz: "Cozinha" };

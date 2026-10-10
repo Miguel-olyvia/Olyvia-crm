@@ -1,29 +1,32 @@
 // O cabeçalho da ficha de uma pessoa, em três faixas: (1) quem é, com as setas e Fechar; (2) as ações (Ligar, WhatsApp, Email e o próximo passo);
-// (3) as seis etapas numa linha compacta. Os factos e os avisos vivem no Resumo. Tudo com min-w-0 e quebra para baixo quando falta largura.
+// (3) as cinco etapas (Lead, Contacto, Visita, Negócio, Cliente) numa linha compacta. Os factos e os avisos vivem no Resumo. Tudo com min-w-0 e quebra para baixo quando falta largura.
 import type { ReactNode } from "react";
-import { ArrowRight, Check, Mail, MessageCircle, Phone, type LucideIcon } from "lucide-react";
+import { ArrowRight, Check, Mail, MessageCircle, Phone, UserCheck, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { FASES, type Proximo } from "./motor";
+import type { Proximo } from "./motor";
 import { atrasada } from "./leadsDocs";
 import type { PessoaApp } from "./pessoasDocs";
 import type { Perfil } from "./perfilDocs";
-import { etapaTexto } from "./listaDocs";
+import { ETAPAS_PESSOA, etapaPessoa, etapaTexto } from "./listaDocs";
 import { Atrasada, AvatarPessoa, BORDA_CTRL } from "./PessoaLinha";
 import { FASE_COR, FASE_ICONE } from "./pecas";
 
 const soDigitos = (t: string): string => t.replace(/\D/g, "");
 const BOTAO = "min-h-11 min-w-11 text-[15px]";
 
-/** As seis etapas numa linha. Com largura mostram o nome de cada uma; sem ela só os ícones, e o nome da atual por baixo (ver .etapas em prototipo.css). */
+/** O ícone de cada etapa: o da fase (Lead, Contacto, Visita, Negócio) e, para Cliente, o UserCheck. */
+const ICONE_ETAPA: LucideIcon[] = [...FASE_ICONE.slice(0, 4), UserCheck];
+
+/** As cinco etapas numa linha. Com largura mostram o nome de cada uma; sem ela só os ícones, e o nome da atual por baixo (ver .etapas em prototipo.css). */
 function Etapas({ fase }: { fase: number }) {
   return (
     <div className="etapas-cx">
       <ol aria-label="Etapa da pessoa" className="etapas">
-        {FASES.map((nome, i) => {
-          const I = i < fase ? Check : FASE_ICONE[i], atual = i === fase;
+        {ETAPAS_PESSOA.map((nome, i) => {
+          const I = i < fase ? Check : ICONE_ETAPA[i], atual = i === fase;
           return (
             <li key={nome} aria-current={atual ? "step" : undefined} className={cn("border-t-2 pt-1.5 text-[15px]", atual ? "border-primary font-semibold text-foreground" : i < fase ? "border-foreground text-foreground" : cn(BORDA_CTRL, "text-muted-foreground"))}>
               <span className="flex flex-col items-start gap-0.5">
@@ -34,7 +37,7 @@ function Etapas({ fase }: { fase: number }) {
           );
         })}
       </ol>
-      <p className="etapa-atual mt-1 text-[15px]" aria-hidden="true">Etapa atual: <span className="font-semibold">{FASES[fase]}</span></p>
+      <p className="etapa-atual mt-1 text-[15px]" aria-hidden="true">Etapa atual: <span className="font-semibold">{ETAPAS_PESSOA[fase]}</span></p>
     </div>
   );
 }
@@ -76,7 +79,9 @@ interface CabecalhoProps {
 }
 
 export function FichaCabecalho({ p, f, nx, aoProximo, topo }: CabecalhoProps) {
-  const subtitulo = [p.papel === "lead" ? "Lead" : "Cliente", etapaTexto(p), f.morada.localidade].filter(Boolean).join(" · ");
+  // O cliente já diz "Cliente" no início: a etapa só acrescenta algo às leads; no cliente, o que importa é um negócio novo em curso.
+  const etapa = p.papel === "lead" ? etapaTexto(p) : p.novoNegocio ? "Novo negócio em curso" : "";
+  const subtitulo = [p.papel === "lead" ? "Lead" : "Cliente", etapa, f.morada.localidade].filter(Boolean).join(" · ");
   return (
     <header className="grid min-w-0 gap-3">
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -98,7 +103,7 @@ export function FichaCabecalho({ p, f, nx, aoProximo, topo }: CabecalhoProps) {
           {nx.btn || "Abrir negócio"}<ArrowRight className="ml-2 h-4 w-4 shrink-0" aria-hidden="true" />
         </Button>
       </div>
-      <Etapas fase={p.principal.fase} />
+      <Etapas fase={etapaPessoa(p)} />
     </header>
   );
 }

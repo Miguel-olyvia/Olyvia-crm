@@ -19,7 +19,7 @@ const ICONE_TIPO: Record<string, { i: LucideIcon; cor: string }> = {
   Lead: { i: FASE_ICONE[0], cor: FASE_COR[0] }, Contacto: { i: FASE_ICONE[1], cor: FASE_COR[1] }, Visita: { i: FASE_ICONE[2], cor: FASE_COR[2] },
   Orçamento: { i: FileText, cor: FASE_COR[0] }, Proposta: { i: FileCheck2, cor: FASE_COR[3] }, "Proposta conjunta": { i: FileCheck2, cor: FASE_COR[3] },
   Contrato: { i: FileSignature, cor: FASE_COR[2] }, Financeiro: { i: FASE_ICONE[4], cor: FASE_COR[4] },
-  Fatura: { i: FileText, cor: FASE_COR[4] }, Recibo: { i: Receipt, cor: FASE_COR[4] }, Obra: { i: FASE_ICONE[5], cor: FASE_COR[5] },
+  Fatura: { i: FileText, cor: FASE_COR[4] }, Recibo: { i: Receipt, cor: FASE_COR[4] },
 };
 export const icone = (tipo: string): { i: LucideIcon; cor: string } => ICONE_TIPO[tipo] ?? ICONE_TIPO.Lead;
 
@@ -99,9 +99,9 @@ export function SepDocumentos({ S, p, abrir }: { S: Estado; p: PessoaApp; abrir:
   return (
     <div className="grid gap-5">
       <ListaCampos campos={[
-        { rotulo: "Valor dos contratos", valor: `${eur(pg.total)} €` }, { rotulo: "Já pago", valor: `${eur(pg.pago)} €` }, { rotulo: "Falta pagar", valor: `${eur(pg.falta)} €` },
+        { rotulo: "Valor contratado", valor: `${eur(pg.total)} €` }, { rotulo: "Já recebido", valor: `${eur(pg.pago)} €` }, { rotulo: "Falta receber", valor: `${eur(pg.falta)} €` },
       ]} />
-      <p className="-mt-3 text-[15px] text-muted-foreground">Pagamentos de exemplo, calculados a partir do valor dos contratos. Só para ler: cada linha abre o negócio.</p>
+      <p className="-mt-3 text-[15px] text-muted-foreground">Pagamentos de exemplo, calculados a partir do valor contratado. Só para ler: cada linha abre o negócio.</p>
       <ul className="divide-y divide-border border-y border-border" aria-label="Contratos e documentos">
         {docs.map((d) => {
           const ic = icone(d.tipo);
