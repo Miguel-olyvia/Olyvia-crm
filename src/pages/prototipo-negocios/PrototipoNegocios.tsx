@@ -2,7 +2,7 @@
 // screens a funcionar com dados de exemplo. Rota pública, fora do CRM: não usa a sessão nem a base de dados.
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import {
-  Bell, Building, Building2, ChevronDown, Handshake, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Wrench, type LucideIcon,
+  Bell, Building, Building2, ChevronDown, Handshake, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
 } from "lucide-react";
 import mascote from "@/assets/olyvia-mascot.png";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,7 @@ import {
 } from "./motor";
 import { Hoje } from "./Hoje";
 import { HojeSimples } from "./HojeSimples";
+import { LeadsSimples, esquecerLeads } from "./LeadsSimples";
 import { NegocioSimples } from "./NegocioSimples";
 import { NegociosSimples } from "./NegociosSimples";
 import { InventarioSimples, OperacoesSimples } from "./OperacoesSimples";
@@ -90,6 +91,7 @@ export default function PrototipoNegocios() {
   const repor = () => run(() => {
     try { localStorage.removeItem(CHAVE); } catch { /* ignora */ }
     ref.current = seed();
+    esquecerLeads();
     avisar({ msg: "Demonstração reposta", sub: "Todos os negócios voltaram ao início", kind: "ok" });
   });
 
@@ -108,6 +110,7 @@ export default function PrototipoNegocios() {
   switch (S.view) {
     case "hoje": corpo = simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
     case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : simples ? <NegociosSimples {...ctx} /> : <Negocios {...ctx} />; break;
+    case "leads": corpo = simples ? <LeadsSimples {...ctx} /> : <Negocios {...ctx} />; break;
     case "operacoes": corpo = simples ? <OperacoesSimples {...ctx} /> : <Operacoes {...ctx} />; break;
     case "inventario": corpo = simples ? <InventarioSimples {...ctx} /> : <Inventario {...ctx} />; break;
     case "catalogo": corpo = simples ? <CatalogoSimples {...ctx} /> : <Catalogo {...ctx} />; break;
@@ -120,9 +123,10 @@ export default function PrototipoNegocios() {
 
   const n = minhas(S, S.role).length;
   const itens: [Vista, string, LucideIcon, number?][] = [
-    ["hoje", "Hoje", Sun, n], ["negocios", "Negócios", Handshake], ["clientes", "Clientes", Building], ["operacoes", "Operações", Wrench],
+    ["hoje", "Hoje", Sun, n], ["negocios", "Negócios", Handshake], ["leads", "Leads", Users], ["clientes", "Clientes", Building], ["operacoes", "Operações", Wrench],
     ["inventario", "Inventário", ShoppingCart], ["catalogo", "Catálogo e custos", Package], ["marketing", "Marketing", Megaphone],
   ];
+  const itensAtual = itens.filter(([v]) => v !== "leads"); // o aspeto atual não tem a página de Leads
   const cur = S.view === "negocio" ? "negocios" : S.view;
   const antigo = !(S.view === "hoje" || (S.view === "negocio" && S.deals.some((d) => d.id === S.deal)));
 
@@ -213,7 +217,7 @@ export default function PrototipoNegocios() {
               <div role="dialog" aria-label="Mais" className="absolute inset-x-0 bottom-16 rounded-t-2xl border-t border-border bg-card p-4 pb-6 shadow-lg animate-in slide-in-from-bottom-4"
                 onClick={(e) => e.stopPropagation()}>
                 <nav className="grid gap-0.5" aria-label="Mais" onClick={() => setMais(false)}>
-                  {[itens[2], itens[5], itens[6]].map(([v, l, Ic, c]) => item(v, l, Ic, c))}
+                  {[itens[2], itens[3], itens[6], itens[7]].map(([v, l, Ic, c]) => item(v, l, Ic, c))}
                   {item("definicoes", "Definições", Settings)}
                 </nav>
                 <button type="button" role="switch" aria-checked={!!S.leitura} onClick={go(() => A.leitura(!S.leitura))}
@@ -227,7 +231,7 @@ export default function PrototipoNegocios() {
             </div>
           )}
           <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-16 items-stretch justify-around border-t border-border bg-card md:hidden" aria-label="Menu">
-            {[itens[0], itens[1], itens[3], itens[4]].map(([v, l, Ic, c]) => (
+            {[itens[0], itens[1], itens[4], itens[5]].map(([v, l, Ic, c]) => (
               <button key={v} type="button" onClick={go(() => { setMais(false); A.nav(v); })} aria-current={cur === v ? "page" : undefined}
                 className={cn("relative flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", cur === v ? "font-semibold text-primary" : "text-muted-foreground")}>
                 <Ic className="h-5 w-5" aria-hidden="true" />{l}
@@ -235,7 +239,7 @@ export default function PrototipoNegocios() {
               </button>
             ))}
             <button type="button" onClick={() => setMais(!mais)} aria-expanded={mais}
-              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || ["clientes", "catalogo", "marketing", "definicoes"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
+              className={cn("flex flex-1 flex-col items-center justify-center gap-0.5 text-[12px]", mais || ["leads", "clientes", "catalogo", "marketing", "definicoes"].includes(cur) ? "font-semibold text-primary" : "text-muted-foreground")}>
               <MoreHorizontal className="h-5 w-5" aria-hidden="true" />Mais
             </button>
           </nav>
@@ -252,7 +256,7 @@ export default function PrototipoNegocios() {
         <div className="flex shrink-0 items-center justify-center border-b border-sidebar-border px-2 py-2">
           <img src={mascote} alt="Olyvia" className="h-10 w-10 object-contain" />
         </div>
-        <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Menu">{itens.map(([v, l, Ic, c]) => icone(v, l, Ic, c))}</nav>
+        <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Menu">{itensAtual.map(([v, l, Ic, c]) => icone(v, l, Ic, c))}</nav>
         <div className="flex flex-col gap-1 border-t border-sidebar-border p-2">
           <button type="button" onClick={go(() => A.aspeto("simples"))} aria-label="Ver a proposta simples"
             className="group relative flex w-full items-center justify-center rounded-xl p-3 text-sidebar-foreground/80 transition hover:bg-sidebar-accent hover:text-sidebar-foreground">
@@ -303,7 +307,7 @@ export default function PrototipoNegocios() {
 
       {/* No telemóvel, os ícones vão para baixo */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex h-14 items-center justify-around border-t border-sidebar-border bg-sidebar px-1 md:hidden" aria-label="Menu">
-        {itens.slice(0, 5).map(([v, l, Ic, c]) => (
+        {itensAtual.slice(0, 5).map(([v, l, Ic, c]) => (
           <button key={v} type="button" onClick={go(() => A.nav(v))} aria-label={l}
             className={cn("relative grid place-items-center rounded-xl p-2.5 transition", cur === v ? "bg-primary text-primary-foreground" : "text-sidebar-foreground/80")}>
             <Ic className="h-5 w-5" />
