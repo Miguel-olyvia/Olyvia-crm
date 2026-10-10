@@ -5,9 +5,7 @@ import { PAPEIS, campoVisita, proximo, tot, visitas, type Estado, type Evento, t
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, INTERIOR, LEAD, efetivo, emFalta, grupoVisita, type Grupo } from "./campos";
 import { atrasada, idade, localDe, proximoDe, somarDias, tempoDesde } from "./leadsDocs";
 import { canalDe, infoOrigem, toquesDe, utmTexto } from "./toquesDocs";
-import {
-  clientesApp, comercialDe, dadosCliente, ehContrato, leadsApp, valorPessoa, type PessoaApp,
-} from "./pessoasDocs";
+import { comercialDe, ehContrato, type PessoaApp } from "./pessoasDocs";
 
 /** "Hoje" do protótipo (o mesmo de leadsDocs). */
 const HOJE = "10/10";
@@ -237,33 +235,6 @@ export function utmDe(S: Estado, p: PessoaApp): string {
 
 /** Os campos de origem e atribuição (via, origem, canal, campanha, formulário, primeiro e último toque) e o aviso. */
 export const infoOrigemDe = (S: Estado, p: PessoaApp): ReturnType<typeof infoOrigem> => infoOrigem(toquesDe(S, p.nome));
-
-/* ---------------------------------------------------------------- resumos por separador */
-
-export interface ResumoLeads { leads: number; porContactar: number; atrasadas: number; valorEmJogo: number }
-export interface ResumoClientes { clientes: number; valorContratado: number; obrasEmCurso: number; aReceber: number }
-export interface ResumoTodos { pessoas: number; leads: number; clientes: number }
-
-export function resumoLeads(S: Estado): ResumoLeads {
-  const ls = leadsApp(S);
-  return {
-    leads: ls.length, porContactar: ls.filter((p) => p.principal.fase === 0).length, atrasadas: ls.filter(atrasada).length,
-    valorEmJogo: ls.reduce((a, p) => a + valorPessoa(S, p), 0),
-  };
-}
-
-export function resumoClientes(S: Estado): ResumoClientes {
-  const cs = clientesApp(S);
-  return {
-    clientes: cs.length, valorContratado: cs.reduce((a, p) => a + dadosCliente(S, p).valorTotal, 0),
-    obrasEmCurso: cs.reduce((a, p) => a + dadosCliente(S, p).obrasEmCurso, 0), aReceber: cs.reduce((a, p) => a + pagamentoDe(S, p).falta, 0),
-  };
-}
-
-export function resumoTodos(S: Estado): ResumoTodos {
-  const l = leadsApp(S).length, c = clientesApp(S).length;
-  return { pessoas: l + c, leads: l, clientes: c };
-}
 
 /** O texto do próximo passo da pessoa (para as linhas). */
 export const proximoTexto = (p: PessoaApp, S: Estado): string => proximoDe(p, S).t;

@@ -5,7 +5,6 @@ import {
   SEM_FILTROS, chipsDe, clientesApp, comerciaisDe, contagens, dadosCliente, documentosDe, filtrarPessoas, filtrarTexto, filtrosEfetivos, itensPessoa, leadsApp,
   listaVisivel, negocioDoItem, negociosAgrupados, negociosDemo, ordenarPessoas, origensDe, pessoasDoSeparador, separadorPorDefeito, todosApp, valorPessoa,
 } from "./pessoasDocs";
-import { resumoClientes, resumoLeads, resumoTodos } from "./perfilDocs";
 
 const LEADS = ["Ana Martins", "Pedro Lopes", "Rita Sousa", "Manuel Costa", "Luísa Freitas", "Hugo Matos", "Carla Nunes", "Sérgio Pinto"];
 const CLIENTES = ["Tiago Almeida", "Marta Lima", "Joana Ribeiro"];
@@ -207,28 +206,6 @@ describe("pessoas · não mutam o Estado", () => {
     for (const p of todosApp(S)) { itensPessoa(S, p); documentosDe(p); if (p.papel === "cliente") dadosCliente(S, p); }
     contagens(S, "a"); filtrarTexto(todosApp(S), "a");
     expect(JSON.stringify(S)).toBe(antes);
-  });
-});
-
-describe("pessoas · resumos por separador face à seed", () => {
-  it("o resumo bate com as listas de cada separador", () => {
-    const S = seed();
-    const l = resumoLeads(S), c = resumoClientes(S), t = resumoTodos(S);
-    expect(l.leads).toBe(leadsApp(S).length);
-    expect(c.clientes).toBe(clientesApp(S).length);
-    expect(t).toEqual({ pessoas: 11, leads: l.leads, clientes: c.clientes });
-    expect(l.porContactar).toBe(leadsApp(S).filter((p) => p.principal.fase === 0).length);
-    expect(c.valorContratado).toBeCloseTo(clientesApp(S).reduce((a, p) => a + dadosCliente(S, p).valorTotal, 0), 2);
-  });
-  it("uma lead nova por contactar sobe os números certos", () => {
-    const S = seed();
-    const antes = resumoLeads(S);
-    clone(S, 1043, 2501, { nome: "Nova Pessoa", tel: "910 000 000", atraso: true });
-    const depois = resumoLeads(S);
-    expect(depois.leads).toBe(antes.leads + 1);
-    expect(depois.porContactar).toBe(antes.porContactar + 1);
-    expect(depois.atrasadas).toBe(antes.atrasadas + 1);
-    expect(resumoTodos(S).pessoas).toBe(12);
   });
 });
 

@@ -1,5 +1,6 @@
 // Protótipo de Negócios (08/10/2026, com o aspeto da Olyvia desde 09/10): as 12
 // screens a funcionar com dados de exemplo. Rota pública, fora do CRM: não usa a sessão nem a base de dados.
+import { createPortal } from "react-dom";
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from "react";
 import {
   Bell, Building, Building2, ChevronDown, LayoutTemplate, Megaphone, Package, Search, Settings, MoreHorizontal, ShoppingCart, Sparkles, Sun, Users, Wrench, type LucideIcon,
@@ -55,6 +56,8 @@ export default function PrototipoNegocios() {
   const S = ref.current;
   const [, redesenhar] = useReducer((x: number) => x + 1, 0);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  // Com o painel de uma pessoa aberto, o Radix esconde o resto da página (aria-hidden): os avisos passam para dentro do painel enquanto ele estiver aberto.
+  const [alvoAvisos, setAlvoAvisos] = useState<HTMLElement | null>(null);
   const [q, setQ] = useState("");
   const [mais, setMais] = useState(false); // telemóvel: o menu "Mais"
   const [v2On, setV2On] = useState<boolean>(lerV2);
@@ -149,12 +152,12 @@ export default function PrototipoNegocios() {
   switch (S.view) {
     case "hoje": corpo = simples ? <HojeSimples {...ctx} /> : <Hoje {...ctx} />; break;
     case "negocio": corpo = S.deal && S.deals.some((d) => d.id === S.deal) ? (simples ? <NegocioSimples {...ctx} /> : <PaginaNegocio {...ctx} />) : listaNegocios; break;
-    case "leads": corpo = simples ? (v2 ? <PessoasSimples {...ctx} abrirEm="leads" /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
-    case "pessoas": corpo = simples ? (v2 ? <PessoasSimples {...ctx} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
+    case "leads": corpo = simples ? (v2 ? <PessoasSimples {...ctx} abrirEm="leads" alvoAvisos={setAlvoAvisos} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
+    case "pessoas": corpo = simples ? (v2 ? <PessoasSimples {...ctx} alvoAvisos={setAlvoAvisos} /> : <LeadsSimples {...ctx} />) : <Negocios {...ctx} />; break;
     case "operacoes": corpo = simples ? <OperacoesSimples {...ctx} /> : <Operacoes {...ctx} />; break;
     case "inventario": corpo = simples ? <InventarioSimples {...ctx} /> : <Inventario {...ctx} />; break;
     case "catalogo": corpo = simples ? <CatalogoSimples {...ctx} /> : <Catalogo {...ctx} />; break;
-    case "clientes": corpo = simples ? (v2 ? <PessoasSimples {...ctx} abrirEm="clientes" /> : <ClientesSimples {...ctx} />) : <Clientes {...ctx} />; break;
+    case "clientes": corpo = simples ? (v2 ? <PessoasSimples {...ctx} abrirEm="clientes" alvoAvisos={setAlvoAvisos} /> : <ClientesSimples {...ctx} />) : <Clientes {...ctx} />; break;
     case "marketing": corpo = simples ? <MarketingSimples /> : <Marketing />; break;
     case "definicoes": corpo = simples ? <DefinicoesSimples {...ctx} /> : <Definicoes {...ctx} />; break;
     case "campos": corpo = <CamposEditor {...ctx} />; break;
@@ -189,7 +192,7 @@ export default function PrototipoNegocios() {
     </button>
   );
 
-  const toastsEl = (
+  const toastsBase = (
     <div className="toasts" aria-live="polite">
       {toasts.map((t) => (
         <div key={t.id} className={"toast " + (t.kind || "")} role="status">
@@ -200,6 +203,7 @@ export default function PrototipoNegocios() {
       ))}
     </div>
   );
+  const toastsEl = alvoAvisos ? createPortal(toastsBase, alvoAvisos) : toastsBase;
 
   if (simples) {
     const item = (v: Vista, l: string, Ic: LucideIcon, c?: number) => (

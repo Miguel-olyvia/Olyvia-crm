@@ -22,11 +22,14 @@ export interface PainelProps extends Pick<FichaProps, "S" | "A" | "go"> {
   aoMudarSep: (s: SepFicha) => void;
   abrir: (nome: string) => void;
   fechar: () => void;
+  /** Recebe o elemento do painel onde ficam os avisos enquanto ele está aberto (e `null` quando fecha). */
+  alvoAvisos?: (el: HTMLElement | null) => void;
 }
 
 const SETA = cn("min-h-11 min-w-11 cursor-pointer px-0", BORDA_CTRL);
 
-export function PessoaPainel({ S, A, go, p, nomes, leitura, sep, aoMudarSep, abrir, fechar }: PainelProps) {
+export function PessoaPainel({ S, A, go, p, nomes, leitura, sep, aoMudarSep, abrir, fechar, alvoAvisos }: PainelProps) {
+  const conteudo = useRef<HTMLDivElement>(null);
   // Durante a animação de saída o conteúdo mantém-se: guarda-se a última pessoa mostrada.
   const ultima = useRef<PessoaApp | undefined>(p);
   if (p) ultima.current = p;
@@ -36,6 +39,13 @@ export function PessoaPainel({ S, A, go, p, nomes, leitura, sep, aoMudarSep, abr
     e.preventDefault();
     const nome = ultima.current?.nome;
     [...document.querySelectorAll<HTMLElement>("[data-pessoa]")].find((el) => el.dataset.pessoa === nome)?.focus();
+  };
+  // O foco entra no nome da pessoa (o título do painel) e não no primeiro botão: o leitor de ecrã começa por aí.
+  const focarTitulo = (e: Event) => {
+    const titulo = conteudo.current?.querySelector<HTMLElement>("h2[tabindex='-1']");
+    if (!titulo) return;
+    e.preventDefault();
+    titulo.focus();
   };
   const topo = (
     <div className="flex shrink-0 items-center gap-1">
@@ -53,10 +63,11 @@ export function PessoaPainel({ S, A, go, p, nomes, leitura, sep, aoMudarSep, abr
   );
   return (
     <Sheet open={!!p} onOpenChange={(aberto) => { if (!aberto) fechar(); }}>
-      <SheetContent side="right" onCloseAutoFocus={voltarFoco}
+      <SheetContent ref={conteudo} side="right" onOpenAutoFocus={focarTitulo} onCloseAutoFocus={voltarFoco}
         className={cn("flex w-[min(760px,100vw)] flex-col gap-0 p-0 text-foreground sm:max-w-none motion-reduce:!animate-none [&>button.absolute]:hidden", classePortal(leitura))}>
         <TooltipProvider>
-          <p className="sr-only" role="status" aria-live="polite">{mostrada ? `Ficha de ${mostrada.nome}${pos ? `, ${pos}` : ""}` : ""}</p>
+          <p className="sr-only" aria-live="polite">{mostrada ? `Ficha de ${mostrada.nome}${pos ? `, ${pos}` : ""}` : ""}</p>
+          <div ref={alvoAvisos} className="pn" />
           {mostrada && <PessoaFicha key={mostrada.nome} S={S} A={A} go={go} p={mostrada} sep={sep} aoMudarSep={aoMudarSep} fechar={fechar} topo={topo} />}
         </TooltipProvider>
       </SheetContent>

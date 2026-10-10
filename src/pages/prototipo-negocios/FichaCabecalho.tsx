@@ -84,7 +84,7 @@ export function FichaCabecalho({ p, f, nx, aoProximo, topo }: CabecalhoProps) {
           <AvatarPessoa nome={p.nome} className="h-12 w-12 shrink-0 text-lg" />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <SheetTitle className="break-words text-xl font-semibold tracking-tight">{p.nome}</SheetTitle>
+              <SheetTitle tabIndex={-1} className="break-words text-xl font-semibold tracking-tight">{p.nome}</SheetTitle>
               {atrasada(p) && <Atrasada />}
             </div>
             <SheetDescription className="break-words text-base text-muted-foreground">{subtitulo}</SheetDescription>

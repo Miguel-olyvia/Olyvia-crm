@@ -7,6 +7,7 @@ import { SEM_FILTROS, listaVisivel, separadorPorDefeito, todosApp, type FiltrosP
 import { PessoaLista } from "./PessoaLista";
 import { PessoaPainel } from "./PessoaPainel";
 import type { SepFicha } from "./PessoaFicha";
+import { esquecerNegocios } from "./SepNegocios";
 import type { Ctx } from "./pecas";
 
 /** O que a página lembra quando se abre um negócio e se volta: vive fora do componente porque a página desmonta. */
@@ -15,9 +16,10 @@ const MEMORIA_VAZIA: Memoria = { lista: null, sel: null, sep: "resumo", f: SEM_F
 let memoria: Memoria = MEMORIA_VAZIA;
 const lembrar = (m: Partial<Memoria>): void => { memoria = { ...memoria, ...m }; };
 /** Esquece tudo (por exemplo quando a demonstração é reposta). */
-export function esquecerPessoas(): void { memoria = MEMORIA_VAZIA; }
+export function esquecerPessoas(): void { memoria = MEMORIA_VAZIA; esquecerNegocios(); }
 
-export function PessoasSimples({ S, A, go, abrirEm }: Ctx & { abrirEm?: SeparadorLista }) {
+/** `alvoAvisos` recebe o elemento do painel onde os avisos (toasts) devem aparecer enquanto ele está aberto, e `null` quando fecha. */
+export function PessoasSimples({ S, A, go, abrirEm, alvoAvisos }: Ctx & { abrirEm?: SeparadorLista; alvoAvisos?: (el: HTMLElement | null) => void }) {
   // Abrir por um separador diferente do que ficou guardado (por exemplo pelo menu) começa limpo; o mesmo separador recupera a escolha.
   const [lista, setListaEstado] = useState<SeparadorLista | null>(() => {
     if (abrirEm && abrirEm !== memoria.lista) lembrar({ lista: abrirEm, sel: null, sep: "resumo" });
@@ -63,7 +65,7 @@ export function PessoasSimples({ S, A, go, abrirEm }: Ctx & { abrirEm?: Separado
   return (
     <div className={cn("mx-auto w-full max-w-[1600px]", leitura && "pessoas-leitura")}>
       <PessoaLista S={S} aba={aba} setAba={setLista} f={f} setF={setF} ordem={ordem} setOrdem={setOrdem} leitura={leitura} abrir={setSel} novaLead={go(() => A.novo())} />
-      <PessoaPainel S={S} A={A} go={go} p={escolhida} nomes={nomes} leitura={leitura} sep={sep} aoMudarSep={setSep} abrir={setSel} fechar={() => setSel(null)} />
+      <PessoaPainel S={S} A={A} go={go} p={escolhida} nomes={nomes} leitura={leitura} sep={sep} aoMudarSep={setSep} abrir={setSel} fechar={() => setSel(null)} alvoAvisos={alvoAvisos} />
     </div>
   );
 }

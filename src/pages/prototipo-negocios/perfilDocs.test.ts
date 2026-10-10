@@ -2,8 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { VERSAO, seed, tot } from "./motor";
 import { clientesApp, leadsApp, todosApp } from "./pessoasDocs";
 import {
-  atividadeDe, camposContacto, estadoCurto, estadoNegocio, factosDe, factosResumo, faltaParaOrcamento, minutosAtras, pagamentoDe, percursoDe, perfilDe, probabilidade, resumoClientes,
-  resumoLeads, resumoTodos,
+  atividadeDe, camposContacto, estadoCurto, estadoNegocio, factosDe, factosResumo, faltaParaOrcamento, minutosAtras, pagamentoDe, percursoDe, perfilDe, probabilidade,
 } from "./perfilDocs";
 
 const LEADS = ["Ana Martins", "Pedro Lopes", "Rita Sousa", "Manuel Costa", "Luísa Freitas", "Hugo Matos", "Carla Nunes", "Sérgio Pinto"];
@@ -170,35 +169,11 @@ describe("perfil · bloco Contacto da ficha", () => {
   });
 });
 
-describe("perfil · resumos por separador (números da seed)", () => {
-  const S = seed();
-  const pf = (id: number): number => tot(S.deals.find((d) => d.id === id)!, S).pf;
-  it("leads: 8, 3 por contactar, 1 atrasada e o valor dos orçamentos da Carla e do Sérgio", () => {
-    const r = resumoLeads(S);
-    expect(r.leads).toBe(8);
-    expect(r.porContactar).toBe(3);
-    expect(r.atrasadas).toBe(1);
-    expect(r.valorEmJogo).toBeCloseTo(pf(1031) + pf(1030), 2);
-  });
-  it("clientes: 3, o valor dos contratos, as obras em curso e o que falta receber", () => {
-    const r = resumoClientes(S);
-    expect(r.clientes).toBe(3);
-    expect(r.valorContratado).toBeCloseTo(pf(1027) + pf(1022) + pf(1050), 2);
-    expect(r.obrasEmCurso).toBeGreaterThanOrEqual(1);
-    expect(r.aReceber).toBeGreaterThan(0);
-    expect(r.aReceber).toBeLessThanOrEqual(r.valorContratado);
-  });
-  it("todos: 11 pessoas, 8 leads e 3 clientes", () => {
-    expect(resumoTodos(S)).toEqual({ pessoas: 11, leads: 8, clientes: 3 });
-  });
-});
-
 describe("perfil · nada muda o Estado", () => {
   it("chamar tudo não altera o JSON do Estado", () => {
     const S = seed();
     const antes = JSON.stringify(S);
     for (const p of todosApp(S)) { perfilDe(p, S); atividadeDe(p, S); pagamentoDe(S, p); }
-    resumoLeads(S); resumoClientes(S); resumoTodos(S);
     expect(JSON.stringify(S)).toBe(antes);
   });
   it("não toca no localStorage, na versão do Estado nem na seed", () => {
@@ -207,8 +182,7 @@ describe("perfil · nada muda o Estado", () => {
       const versao = VERSAO, seedAntes = JSON.stringify(seed());
       const S = seed();
       for (const p of todosApp(S)) { perfilDe(p, S); atividadeDe(p, S); pagamentoDe(S, p); camposContacto(perfilDe(p, S)); }
-      resumoLeads(S); resumoClientes(S); resumoTodos(S);
-      expect(S.v).toBe(versao);
+        expect(S.v).toBe(versao);
       expect(VERSAO).toBe(versao);
       expect(JSON.stringify(seed())).toBe(seedAntes);
       expect(get).not.toHaveBeenCalled();

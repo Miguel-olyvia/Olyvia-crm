@@ -27,9 +27,9 @@ export function AvatarPessoa({ nome, className }: { nome: string; className?: st
 }
 
 /** O alerta de atraso: ícone e texto, nunca só a cor. */
-export function Atrasada() {
+export function Atrasada({ className }: { className?: string }) {
   return (
-    <span className="mr-1.5 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 align-middle text-[15px] font-medium text-foreground">
+    <span className={cn("mr-1.5 inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 align-middle text-[15px] font-medium text-foreground", className)}>
       <AlertCircle className="h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />Atrasada
     </span>
   );
@@ -45,11 +45,11 @@ export function LinhaTabela({ p, S, abrir }: LinhaProps) {
   const f = perfilDe(p, S), c = contactoTexto(f), v = valorColuna(S, p);
   const celula = "px-2 py-1.5 align-middle text-[15px]";
   return (
-    <TableRow onClick={abrir} className="min-h-14 cursor-pointer hover:bg-muted/60 focus-within:bg-muted/60 motion-reduce:transition-none">
+    <TableRow onClick={abrir} className="cursor-pointer hover:bg-muted/60 focus-within:bg-muted/60 motion-reduce:transition-none">
       <TableCell className={celula}>
         <button type="button" data-pessoa={p.nome} aria-haspopup="dialog" className={cn("flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-md text-left", FOCO)}>
           <AvatarPessoa nome={p.nome} className="h-9 w-9" />
-          <span className="min-w-0"><span className="block break-words font-semibold text-foreground">{p.nome}</span><span className="block text-muted-foreground">{papel(p)}</span></span>
+          <span className="min-w-0"><span className="block break-words font-semibold text-foreground">{p.nome}</span><span className="block text-muted-foreground">{papel(p)}{atrasada(p) && <Atrasada className="ml-2 mr-0 py-0" />}</span></span>
         </button>
       </TableCell>
       <TableCell className={celula}>{localidade(p)}</TableCell>
@@ -60,7 +60,7 @@ export function LinhaTabela({ p, S, abrir }: LinhaProps) {
       <TableCell className={celula}>
         <span className="flex items-start gap-1.5 text-muted-foreground"><Clock className={cn("mt-1 h-4 w-4 shrink-0", c.sem && "text-destructive")} aria-hidden="true" />{c.texto}</span>
       </TableCell>
-      <TableCell className={cn(celula, "font-medium")}>{atrasada(p) && <Atrasada />}{proximoTexto(p, S)}</TableCell>
+      <TableCell className={cn(celula, "font-medium")}><span className="line-clamp-2" title={proximoTexto(p, S)}>{proximoTexto(p, S)}</span></TableCell>
       <TableCell className={cn(celula, "whitespace-nowrap text-right tabular-nums")}>
         {v === null ? <><span aria-hidden="true">—</span><span className="sr-only">Sem valor</span></> : `${eur(v)} €`}
       </TableCell>
